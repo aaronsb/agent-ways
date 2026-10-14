@@ -161,6 +161,10 @@ pub struct ChatPane {
     /// id ([`Signal::same_file`]), and when: the watcher's copy of one is
     /// dropped, however many messages come between.
     echoed: Vec<((String, String), Instant)>,
+    /// The copies of a send to several trays that [`ChatPane::hold`] left
+    /// out as the same send, by the file of the copy held: when a mark
+    /// withdraws that copy, another takes its place.
+    copies: std::collections::HashMap<(String, String), Vec<Signal>>,
     palette: Palette,
     clock: Clock,
     world: Option<World>,
@@ -266,6 +270,7 @@ impl ChatPane {
             feed_rows: 0,
             rx,
             echoed: Vec::new(),
+            copies: Default::default(),
             palette,
             clock: Clock::Live,
             world: None,
@@ -331,7 +336,7 @@ impl ChatPane {
     /// comes ([`ChatPane::drain`]).
     pub fn push(&mut self, sig: Signal) {
         if !sig.tray.is_empty() {
-            self.echoed.push(((sig.tray.clone(), sig.id.clone()), Instant::now()));
+            self.echoed.push((file_of(&sig), Instant::now()));
         }
         let at = self.signals.len();
         self.hold(sig, at);
@@ -342,8 +347,9 @@ impl ChatPane {
     /// block — goes through here, so the cap and the copies have a single
     /// home.
     ///
-    /// - A file read twice ([`Signal::same_file`]), or a copy of a send
-    ///   already held from another tray ([`Signal::same_send`]), is dropped.
+    /// - A file read twice ([`Signal::same_file`]) is dropped, and so is a
+    ///   copy of a send already held from another tray
+    ///   ([`Signal::same_send`]), kept aside in `copies`.
     /// - The person's direct message sent beside a channel post of the same
     ///   send is marked so, whichever copy arrives first
     ///   ([`Signal::is_beside`]): the operator view shows the post alone.
@@ -352,7 +358,14 @@ impl ChatPane {
     ///   the person was party to.
     fn hold(&mut self, mut sig: Signal, at: usize) {
         let near = at.saturating_sub(DEDUPE_WINDOW)..(at + DEDUPE_WINDOW).min(self.signals.len());
-        if self.signals[near.clone()].iter().any(|s| s.same_file(&sig) || s.same_send(&sig)) {
+        if self.signals[near.clone()].iter().any(|s| s.same_file(&sig)) {
+            return;
+        }
+        if let Some(held) = self.signals[near.clone()].iter().find(|s| s.same_send(&sig)) {
+            let aside = self.copies.entry(file_of(held)).or_default();
+            if !aside.iter().any(|c| c.same_file(&sig)) {
+                aside.push(sig);
+            }
             return;
         }
         for s in &mut self.signals[near] {
@@ -366,7 +379,8 @@ impl ChatPane {
         self.signals.insert(at, sig);
         while self.signals.len() > MAX_SIGNALS {
             let oldest = self.signals.iter().position(|s| matches!(s.channel, crate::signal::Channel::Elsewhere(_))).unwrap_or(0);
-            self.signals.remove(oldest);
+            let gone = self.signals.remove(oldest);
+            self.copies.remove(&file_of(&gone));
         }
         self.invalidate();
     }
@@ -379,6 +393,45 @@ impl ChatPane {
         self.signals.iter().rposition(|s| key(s) <= at).map_or(0, |i| i + 1)
     }
 
+    /// Take the files `gone` out of the buffer, and so out of every view.
+    /// A copy held for a send to several trays gives its place to the first
+    /// other copy still shown; a direct message held back from the operator
+    /// view beside a channel post shows again once no post is left beside it.
+    fn withdraw(&mut self, gone: &std::collections::HashSet<(String, String)>) {
+        let is_gone = |s: &Signal| !s.tray.is_empty() && gone.contains(&file_of(s));
+        let mut kept = Vec::with_capacity(self.signals.len());
+        let mut moved = Vec::new();
+        for s in std::mem::take(&mut self.signals) {
+            if !is_gone(&s) {
+                kept.push(s);
+                continue;
+            }
+            let Some(mut aside) = self.copies.remove(&file_of(&s)) else { continue };
+            aside.retain(|c| !is_gone(c));
+            if aside.is_empty() {
+                continue;
+            }
+            let next = aside.remove(0);
+            if !aside.is_empty() {
+                self.copies.insert(file_of(&next), aside);
+            }
+            moved.push(kept.len());
+            kept.push(next);
+        }
+        self.signals = kept;
+        for aside in self.copies.values_mut() {
+            aside.retain(|c| !is_gone(c));
+        }
+        self.copies.retain(|_, aside| !aside.is_empty());
+        let flagged: Vec<usize> = (0..self.signals.len()).filter(|&i| self.signals[i].beside_post || moved.contains(&i)).collect();
+        for i in flagged {
+            let near = i.saturating_sub(DEDUPE_WINDOW)..(i + DEDUPE_WINDOW + 1).min(self.signals.len());
+            let beside = self.signals[near].iter().any(|p| self.signals[i].is_beside(p));
+            self.signals[i].beside_post = beside;
+        }
+        self.invalidate();
+    }
+
     /// Take what the watcher has sent. True when anything changed.
     pub fn drain(&mut self) -> bool {
         let Some(rx) = &self.rx else { return false };
@@ -387,7 +440,7 @@ impl ChatPane {
         for d in got {
             match d {
                 Delivery::Arrived(s) => {
-                    let key = (s.tray.clone(), s.id.clone());
+                    let key = file_of(&s);
                     if let Some(i) = self.echoed.iter().position(|(k, _)| *k == key) {
                         self.echoed.swap_remove(i);
                         continue;
@@ -399,10 +452,7 @@ impl ChatPane {
                     let at = self.place(&s);
                     self.hold(s, at);
                 }
-                Delivery::Withdrawn(files) => {
-                    self.signals.retain(|s| !files.iter().any(|(tray, id)| !s.tray.is_empty() && s.tray == *tray && s.id == *id));
-                    self.invalidate();
-                }
+                Delivery::Withdrawn(files) => self.withdraw(&files.into_iter().collect()),
             }
         }
         // After the copies drained, so a copy that waited in the channel
@@ -433,7 +483,7 @@ impl ChatPane {
             let rows = all_channels(depth);
             let in_channel = |id: &str| rows.iter().any(|r| r.known.membership.members.iter().any(|m| m == id));
             let seen = seen_identities(&self.signals, &discover_sessions(), depth, alive, human, in_channel, &instances);
-            let earlier = earlier_ids(&seen);
+            let earlier = earlier_ids(&seen, &instances);
             let seen = settle(seen, &earlier, &tombstoned(), in_channel);
             let live_members = rows.iter().map(|r| r.known.membership.members.iter().filter(|m| alive(m)).count()).collect();
             self.world = Some(World::new(tab_channels(&rows), seen, rows, live_members, instances, &self.foreground, &self.views));
@@ -1041,12 +1091,17 @@ impl Pane for ChatPane {
 pub const UPDATED_ON_DISK: &str =
     "attend-chat was updated on disk: restart it to read new messages and direct replies correctly";
 
+/// A signal's file: its tray and its id ([`Signal::same_file`]).
+fn file_of(sig: &Signal) -> (String, String) {
+    (sig.tray.clone(), sig.id.clone())
+}
+
 /// Each id a live session had before a `/clear`, with that session: from
 /// the enrollment that carried it (`attend_presence::enrollment::carry`),
-/// and from the instance registry's alias of a dead sighting's id.
-fn earlier_ids(seen: &[Seen]) -> std::collections::HashMap<String, String> {
+/// and from the instance registry's alias of a dead sighting's id, read
+/// through the world's registry snapshot.
+fn earlier_ids(seen: &[Seen], registry: &SnapshotCache) -> std::collections::HashMap<String, String> {
     let mut earlier = std::collections::HashMap::new();
-    let registry = attend_instances::Registry::new();
     for s in seen.iter().filter(|s| s.identity.is_claude) {
         if s.live {
             for id in attend_presence::enrollment::previous_ids(&s.member) {
@@ -1454,8 +1509,84 @@ mod delivery_tests {
     fn an_echo_entry_is_dropped_after_its_time() {
         let (mut c, _tx) = fed();
         c.push(sig("mine", 5, Channel::Open));
-        c.echoed[0].1 -= ECHO_KEPT;
+        c.echoed[0].1 = c.echoed[0].1.checked_sub(ECHO_KEPT).expect("the clock runs past the keeping time");
         c.drain();
         assert!(c.echoed.is_empty());
+    }
+
+    /// A drain with nothing for an entry keeps it, and the copy that comes
+    /// later still finds it.
+    #[test]
+    fn an_echo_entry_outlasts_a_drain_without_its_copy() {
+        let (mut c, tx) = fed();
+        let mine = sig("mine", 5, Channel::Open);
+        c.push(mine.clone());
+        c.drain();
+        assert_eq!(c.echoed.len(), 1, "nothing came for it");
+        tx.send(mine.into()).unwrap();
+        c.drain();
+        assert_eq!(ids(&c), ["mine"]);
+    }
+
+    /// The person's send to agents in two projects: one copy in each tray.
+    fn sent_to_two(tray: &str) -> Signal {
+        Signal {
+            id: format!("aaron-{tray}"),
+            from: "external:aaron@kitty".into(),
+            tray: tray.into(),
+            channel: Channel::Sent("s1,s2".into()),
+            ..sig("x", 40, Channel::Open)
+        }
+    }
+
+    /// A mark on the copy held of a send to several trays leaves the send
+    /// shown by another copy, until every copy is marked.
+    #[test]
+    fn a_withdrawn_copy_of_a_send_gives_its_place_to_another() {
+        let (mut c, tx) = fed();
+        for s in [sig("a", 10, Channel::Open), sent_to_two("-work-one"), sent_to_two("-work-two"), sig("c", 50, Channel::Open)] {
+            tx.send(s.into()).unwrap();
+        }
+        c.drain();
+        assert_eq!(ids(&c), ["a", "aaron--work-one", "c"], "one copy is held");
+        tx.send(Delivery::Withdrawn(vec![("-work-one".into(), "aaron--work-one".into())])).unwrap();
+        c.drain();
+        assert_eq!(ids(&c), ["a", "aaron--work-two", "c"], "the other copy takes its place");
+        tx.send(Delivery::Withdrawn(vec![("-work-two".into(), "aaron--work-two".into())])).unwrap();
+        c.drain();
+        assert_eq!(ids(&c), ["a", "c"]);
+        assert!(c.copies.is_empty());
+    }
+
+    /// The copies kept aside go with the copy held when the cap evicts it.
+    #[test]
+    fn the_copies_aside_go_with_their_held_copy() {
+        let (mut c, tx) = fed();
+        tx.send(sent_to_two("-work-one").into()).unwrap();
+        tx.send(sent_to_two("-work-two").into()).unwrap();
+        c.drain();
+        assert_eq!(c.copies.len(), 1);
+        for i in 0..MAX_SIGNALS {
+            tx.send(sig(&format!("n-{i}"), 60, Channel::Open).into()).unwrap();
+        }
+        c.drain();
+        assert!(c.copies.is_empty());
+    }
+
+    /// The direct message sent beside a channel post shows in the operator
+    /// view again once a mark withdraws the post.
+    #[test]
+    fn a_withdrawn_post_lets_its_beside_message_show() {
+        let (mut c, tx) = fed();
+        let post = Signal { id: "post".into(), tray: "_broadcast".into(), channel: Channel::Open, ..sent_to_two("_broadcast") };
+        let dm = sent_to_two("-work-one");
+        tx.send(post.into()).unwrap();
+        tx.send(dm.into()).unwrap();
+        c.drain();
+        let shown = |c: &ChatPane| c.signals.iter().filter(|s| tabs::shows(s, &Tab::Merged)).map(|s| s.id.clone()).collect::<Vec<_>>();
+        assert_eq!(shown(&c), ["post"], "the post alone");
+        tx.send(Delivery::Withdrawn(vec![("_broadcast".into(), "post".into())])).unwrap();
+        c.drain();
+        assert_eq!(shown(&c), ["aaron--work-one"]);
     }
 }

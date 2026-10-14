@@ -417,6 +417,13 @@ impl SnapshotCache {
             .or_insert_with(|| self.registry.snapshot(cwd));
         snap.get(session_id).map(|e| e.instance.clone())
     }
+
+    /// [`Registry::successor`], from the cached snapshot of `cwd`.
+    pub fn successor(&self, cwd: &str, session_id: &str) -> Option<String> {
+        let mut cache = self.cache.borrow_mut();
+        let snap = cache.entry(cwd.to_string()).or_insert_with(|| self.registry.snapshot(cwd));
+        chain_end(snap, session_id)
+    }
 }
 
 impl Default for SnapshotCache {
@@ -988,6 +995,24 @@ sess-a:
         // the per-cwd snapshot the entry-API populated on first call.
         assert_eq!(cache.lookup("/cwd", "no-such-session"), None);
 
+        fs::remove_dir_all(&base).ok();
+    }
+
+    /// The cache follows an alias as the registry does, from the snapshot
+    /// it read once: a rename after that read is not seen.
+    #[test]
+    fn snapshot_cache_follows_an_alias_from_its_snapshot() {
+        let _g = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let base = fresh_base();
+        let reg = Registry::with_base(base.clone());
+        reg.register("/cwd", "sess-a").unwrap();
+        reg.rename("/cwd", "sess-a", "sess-b").unwrap();
+        let cache = SnapshotCache::with_registry(Registry::with_base(base.clone()));
+        assert_eq!(cache.successor("/cwd", "sess-a").as_deref(), Some("sess-b"));
+        assert_eq!(cache.successor("/cwd", "sess-b"), None);
+        reg.rename("/cwd", "sess-b", "sess-c").unwrap();
+        assert_eq!(cache.successor("/cwd", "sess-a").as_deref(), Some("sess-b"), "read once");
+        assert_eq!(reg.successor("/cwd", "sess-a").as_deref(), Some("sess-c"));
         fs::remove_dir_all(&base).ok();
     }
 
