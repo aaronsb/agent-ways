@@ -521,8 +521,30 @@ fn a_count_that_lands_under_another_question_never_answers_it() {
     assert_eq!(said, "counted 3 read messages in #slow: choose Delete read messages again to delete them", "the count was held and said");
     channel_menu(&mut c, "#slow");
     pick(&mut c, "Delete read messages");
-    assert!(screen(&mut c).contains("delete 3 read messages in #slow?"), "asked from the held count: {}", screen(&mut c));
+    assert_eq!(items(&mut c), ["Current sessions", "Today (local midnight)", "All", "Custom…"], "the ages, as ever: {}", screen(&mut c));
+    pick(&mut c, "All");
+    assert!(screen(&mut c).contains("delete 3 read messages in #slow?"), "the same age asks from the held count: {}", screen(&mut c));
     assert_eq!(calls().len(), 1, "not counted again");
+}
+
+/// A held count answers only the delete it counted: choosing the same
+/// scope with another age counts afresh.
+#[test]
+fn a_held_count_answers_only_its_own_age() {
+    let _g = fixture();
+    let mut c = chat();
+    channel_menu(&mut c, "#open");
+    pick(&mut c, "Delete read messages");
+    pick(&mut c, "All");
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    press_now(&mut c, KeyCode::Char('x'));
+    assert!(c.status().starts_with("counted 12 read messages in #open:"), "held: {}", c.status());
+    channel_menu(&mut c, "#open");
+    pick(&mut c, "Delete read messages");
+    assert_eq!(items(&mut c), ["Current sessions", "Today (local midnight)", "All", "Custom…"], "the ages, as ever: {}", screen(&mut c));
+    pick(&mut c, "Today");
+    assert_eq!(calls(), ["message delete --open --older-than all --dry-run --json", "message delete --open --older-than today --dry-run --json"], "another age is counted afresh");
+    assert!(screen(&mut c).contains("delete 12 read messages in #open from before today?"), "{}", screen(&mut c));
 }
 
 /// A count that lands while the operator types in the compose box does not

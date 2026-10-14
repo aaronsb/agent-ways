@@ -223,7 +223,7 @@ impl ChatPane {
     /// Delete read messages for everyone…: Delete older than, docked beside
     /// the item; refused while a delete or a tombstone runs.
     pub(super) fn delete_menu(&mut self, scope: &Scope) {
-        if self.refused_while_removing() || self.ask_held(|a| a.scope == *scope) {
+        if self.refused_while_removing() {
             return;
         }
         let mut items: Vec<Item> = attend_cli::OLDER_THAN.iter().map(|(label, _)| Item::new(*label)).collect();
@@ -274,8 +274,9 @@ impl ChatPane {
         self.ask_attend(args, Job::DryRun { scope, older: older.to_string(), draft });
     }
 
-    /// Ask from the count held for a delete `matches` picks, if one landed
-    /// in the last [`HOLD`]; true when it asked.
+    /// Ask from the count held for a delete `matches` picks (the same scope
+    /// and the same age), if one landed in the last [`HOLD`]; true when it
+    /// asked.
     fn ask_held(&mut self, matches: impl Fn(&Asked) -> bool) -> bool {
         let Some((asked, _)) = self.held.take_if(|(a, at)| at.elapsed() < HOLD && matches(a)) else { return false };
         self.ask(Step::DeleteRead(asked));
