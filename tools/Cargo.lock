@@ -2081,7 +2081,7 @@ dependencies = [
 
 [[package]]
 name = "ways-audit"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "agent-fmt",
  "agent-theme",
