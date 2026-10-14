@@ -66,7 +66,7 @@ impl App {
                     _ => self.mode = Mode::ThemeMenu { sel },
                 }
             }
-            m @ (Mode::Name { .. } | Mode::ItemDelete { .. }) => self.prompt_key(m, k),
+            Mode::Name { op, buf } => self.name_key(op, buf, k),
             Mode::Filter => match k.code {
                 KeyCode::Esc => self.clear_filter(),
                 KeyCode::Enter => {}
@@ -151,18 +151,7 @@ impl App {
                 }
                 _ => self.mode = Mode::Secret { path, action, buf },
             },
-            Mode::Confirm { queued } => match k.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => self.enqueue(queued),
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => self.msg = "not queued".into(),
-                _ => self.mode = Mode::Confirm { queued },
-            },
-            Mode::Review { tab, run, discard } => self.review_key(k, tab, run, discard),
-            Mode::DiscardTab { tab } => match k.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => self.discard_tab(tab),
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {}
-                _ => self.mode = Mode::DiscardTab { tab },
-            },
-            Mode::Ask(a) => return self.ask_key(a, k),
+            Mode::Review { tab, run, discard: false } => self.review_key(k, tab, run),
             Mode::Entry(e) => return self.entry_key(*e, k),
             Mode::Browse if self.pane.is_some() => return self.pane_key(k),
             Mode::Browse if self.on_theme_tab() => return self.theme_key(k),
@@ -175,21 +164,9 @@ impl App {
 
     /// Review's keys. Moving and opening groups work; nothing edits or queues.
     /// A run in flight takes no keys.
-    pub(super) fn review_key(&mut self, k: KeyEvent, tab: usize, run: Option<Run>, mut discard: bool) {
-        self.mode = Mode::Review { tab, run, discard };
+    pub(super) fn review_key(&mut self, k: KeyEvent, tab: usize, run: Option<Run>) {
+        self.mode = Mode::Review { tab, run, discard: false };
         if matches!(self.mode, Mode::Review { run: Some(_), .. }) {
-            return;
-        }
-        if discard {
-            match k.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => {
-                    self.discard_tab(tab);
-                    return self.advance(tab);
-                }
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => discard = false,
-                _ => {}
-            }
-            self.mode = Mode::Review { tab, run: None, discard };
             return;
         }
         let rows = self.review_view(tab);
@@ -353,8 +330,8 @@ impl App {
 
     /// Handle one mouse event against the last frame's hits. A click reaches
     /// the same paths a key does, so the confirm and secret rules hold.
-    /// During text, secret or filter entry and a confirm, only the confirm's
-    /// answers respond.
+    /// During text, secret or filter entry nothing responds, and while a
+    /// modal or a question is open it takes the mouse ([`App::modal_mouse`]).
     ///
     /// Over a pane, every overlay closes on a click outside it, as on Esc,
     /// and a click that closes one on the tab bar or on a part of the pane
@@ -442,29 +419,8 @@ impl App {
                     }
                 }
             }
-            // A pane's question: a left click on an answer gives it; any
-            // other press, of any button anywhere, answers no and, on the
-            // tab bar or the column, acts. The wheel scrolls what is under
-            // it, as with nothing asked.
-            Mode::Ask(a) => {
-                if wheel.is_some() {
-                    self.pane_mouse(m);
-                } else if matches!(m.kind, MouseEventKind::Down(_)) {
-                    let a = a.clone();
-                    let answer = self.hits.answers.iter().find(|(r, _)| click && r.contains(at)).map(|&(_, yes)| yes);
-                    self.answer(a, answer == Some(true));
-                    if answer.is_none() {
-                        self.click_through(m);
-                    }
-                }
-            }
             Mode::Review { run: Some(_), .. } => {}
-            Mode::Confirm { .. } | Mode::DiscardTab { .. } | Mode::ItemDelete { .. } | Mode::Review { discard: true, .. } if click => {
-                if let Some(&(_, yes)) = self.hits.answers.iter().find(|(r, _)| r.contains(at)) {
-                    self.key(press(KeyCode::Char(if yes { 'y' } else { 'n' })));
-                }
-            }
-            Mode::Review { discard: false, .. } => {
+            Mode::Review { .. } => {
                 if let Some(k) = wheel {
                     self.key(press(k));
                 } else if click {

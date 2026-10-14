@@ -221,8 +221,8 @@ pub enum Open {
     Pick { id: String, title: String, items: Vec<Item>, multi: bool, anchor: Anchor },
     /// A question on the bottom bar, answered with `y` or `n`, or a click
     /// on either answer, which the bar draws as lozenges: `yes` and `no`
-    /// name what each does ("clear", "keep"). Esc, a click elsewhere, or
-    /// any other key answers no; a character the pane would type, and a
+    /// name what each does ("clear", "keep"). Esc, Enter, a click
+    /// elsewhere, or any other key answers no; a character the pane would type, and a
     /// key the shell takes, then go on as typed. The answer comes back
     /// through [`Pane::picked`] under `id`, as `["y"]` or `["n"]`.
     Ask { id: String, question: String, yes: String, no: String },

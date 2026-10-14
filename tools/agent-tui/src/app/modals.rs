@@ -1,14 +1,15 @@
-//! The boxed modals over the shell, each a [`Dialog`] behind a [`Modal`]:
-//! the exit guard, "close the editor", the key help and the response modal.
-//! Whichever is open draws here, and its keys and clicks come back as an
-//! [`Answer`] that its [`Modal::answer`] acts on. The response modal's text
-//! is wrapped in `response`.
+//! The modals over the shell, each a [`Dialog`] behind a [`Modal`]: the
+//! boxed ones here, the exit guard, "close the editor", the key help and
+//! the response modal, and the questions on the bottom bar in `questions`.
+//! Whichever is open draws through here, and its keys and clicks come back
+//! as an [`Answer`] that its [`Modal::answer`] acts on. The response
+//! modal's text is wrapped in `response`.
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::Frame;
 
-use super::dialog::{Answer, Button, Dialog, Drawn};
+use super::dialog::{Answer, Button, Dialog, Drawn, Placement};
 use super::pane::Overlay;
 use super::theme::{self, Ground, Seg};
 use super::*;
@@ -71,7 +72,7 @@ pub(super) trait Modal: Sync {
     }
 
     /// What a pane is told is open over it.
-    fn overlay(&self) -> Overlay {
+    fn overlay(&self, _: &App) -> Overlay {
         Overlay::Report
     }
 }
@@ -131,7 +132,7 @@ impl Modal for Guard {
         Some(spans)
     }
 
-    fn overlay(&self) -> Overlay {
+    fn overlay(&self, _: &App) -> Overlay {
         Overlay::Guard
     }
 }
@@ -202,7 +203,7 @@ impl Modal for Help {
         true
     }
 
-    fn overlay(&self) -> Overlay {
+    fn overlay(&self, _: &App) -> Overlay {
         Overlay::Help
     }
 }
@@ -260,6 +261,11 @@ impl App {
             Mode::ThemeUnsaved => &Unsaved,
             Mode::Help { .. } => &Help,
             Mode::Response(_) => &Response,
+            Mode::Confirm { .. } => &questions::Confirm,
+            Mode::DiscardTab { .. } => &questions::DiscardTab,
+            Mode::Review { discard: true, .. } => &questions::ReviewDiscard,
+            Mode::ItemDelete { .. } => &questions::ItemDelete,
+            Mode::Ask(_) => &questions::Ask,
             _ => return None,
         })
     }
@@ -270,13 +276,15 @@ impl App {
         self.hits.dialog.as_ref().filter(|(of, _)| *of == std::mem::discriminant(&self.mode)).map(|(_, d)| d)
     }
 
-    /// Draw the open modal over `area`, recording where it landed and the
-    /// scroll the frame holds it at.
-    pub(super) fn draw_modal(&mut self, f: &mut Frame, area: Rect) {
-        let Some(m) = self.modal() else { return };
+    /// Draw the open modal over `area` when it is placed `on` it, recording
+    /// where it landed and the scroll the frame holds it at. Whether it
+    /// was drawn.
+    pub(super) fn draw_modal(&mut self, f: &mut Frame, area: Rect, on: Placement) -> bool {
+        let Some(m) = self.modal().filter(|m| m.dialog(self, false).placement() == on) else { return false };
         let drawn = m.draw(self, f, area);
         m.set_scroll(self, drawn.scroll);
         self.hits.dialog = Some((std::mem::discriminant(&self.mode), drawn));
+        true
     }
 
     /// A key while a modal is open: it owns every key. False ends the session.
@@ -293,10 +301,12 @@ impl App {
     /// it ([`Modal::wheel_outside`]); outside any other it does nothing. A
     /// press that `closes`, of the left button or beside a pane the right,
     /// goes to the dialog; one that closes it from outside then goes on, as
-    /// [`App::click_through`] lets it.
+    /// [`App::click_through`] lets it. A dialog that any press closes takes
+    /// a press of any button.
     pub(super) fn modal_mouse(&mut self, m: MouseEvent, closes: bool) {
         let Some(modal) = self.modal() else { return };
         let mut d = modal.dialog(self, false);
+        let closes = closes || (d.any_press() && matches!(m.kind, MouseEventKind::Down(_)));
         // Not drawn since it opened: nothing of it is under the pointer.
         let drawn = self.drawn_dialog().cloned().unwrap_or_default();
         let at = Position::new(m.column, m.row);

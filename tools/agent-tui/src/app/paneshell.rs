@@ -9,6 +9,7 @@ use ratatui::text::Span;
 use ratatui::Frame;
 
 use super::pane::{footer_spans, Binding, Ctx, Keyed, Open, Overlay, Tone};
+use super::dialog::Placement;
 use super::pick::Pick;
 use super::response::Shown;
 use super::theme::{self, Seg};
@@ -16,28 +17,7 @@ use super::*;
 use crate::adapter::Printed;
 use crate::wrap::str_width;
 
-fn width(spans: &[Span]) -> u16 {
-    spans.iter().map(|s| s.width() as u16).sum()
-}
-
-/// `text` cut to `room` columns, ending in `…` when it was cut.
-fn clip(text: &str, room: usize) -> String {
-    if str_width(text) <= room {
-        return text.to_string();
-    }
-    let mut out = String::new();
-    let mut w = 0;
-    for c in text.chars() {
-        let cw = str_width(c.encode_utf8(&mut [0; 4]));
-        if w + cw + 1 > room {
-            break;
-        }
-        out.push(c);
-        w += cw;
-    }
-    out.push('…');
-    out
-}
+use super::render::{clip, width};
 
 /// The id of the shell's own question before a plain `q` quits.
 pub(crate) const QUIT_ASK: &str = "\u{0}quit";
@@ -207,7 +187,9 @@ impl App {
                 let e = e.clone();
                 self.draw_entry(f, main, &e);
             }
-            _ => self.draw_modal(f, main),
+            _ => {
+                self.draw_modal(f, main, Placement::Center);
+            }
         }
         self.draw_status(f, status);
     }
@@ -217,10 +199,9 @@ impl App {
     fn overlays(&self) -> Vec<Overlay> {
         let top = match &self.mode {
             Mode::Browse => None,
-            _ if self.modal().is_some() => self.modal().map(|m| m.overlay()),
+            _ if self.modal().is_some() => self.modal().map(|m| m.overlay(self)),
             Mode::Pick(p) => Some(Overlay::Menu { id: p.pane.as_ref().map(|(id, _)| id.clone()).unwrap_or_default(), by_esc: p.by_esc }),
             Mode::Entry(e) => Some(Overlay::Entry { id: e.id.clone() }),
-            Mode::Ask(a) => Some(Overlay::Ask { id: a.id.clone() }),
             _ => Some(Overlay::Report),
         };
         let held = matches!(self.mode, Mode::Guard).then(|| self.entry_held.as_ref().map(|e| Overlay::Entry { id: e.id.clone() })).flatten();
@@ -503,26 +484,19 @@ impl App {
         self.take_pane_open();
     }
 
-    /// A key while the pane's question waits. `y` answers yes; `n` and Esc
-    /// answer no; any other key answers no, and then a character the pane
-    /// types, or a key the shell takes, goes on as if nothing were asked.
-    /// Enter and the other editing keys only answer, so an Enter meant for
-    /// the question never sends a draft. False ends the session.
-    pub(super) fn ask_key(&mut self, a: Asked, k: KeyEvent) -> bool {
+    /// A key that is no answer to the pane's question: it answers no, and
+    /// then a character the pane types, or a key the shell takes, goes on as
+    /// if nothing were asked. Enter and the other editing keys only answer,
+    /// so an Enter meant for the question never sends a draft. False ends
+    /// the session.
+    pub(super) fn answer_then(&mut self, a: Asked, k: KeyEvent) -> bool {
         let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
-        match k.code {
-            KeyCode::Char('y' | 'Y') if plain => self.answer(a, true),
-            KeyCode::Char('n' | 'N') if plain => self.answer(a, false),
-            KeyCode::Esc => self.answer(a, false),
-            _ => {
-                // A pane that owns the focus types a character wherever its focus is.
-                let typed = plain && matches!(k.code, KeyCode::Char(_)) && (self.ctx().text || self.ctx().owns_bar);
-                let goes_on = typed || self.shell_key(k).is_some();
-                self.answer(a, false);
-                if goes_on && matches!(self.mode, Mode::Browse) {
-                    return self.pane_key(k);
-                }
-            }
+        // A pane that owns the focus types a character wherever its focus is.
+        let typed = plain && matches!(k.code, KeyCode::Char(_)) && (self.ctx().text || self.ctx().owns_bar);
+        let goes_on = typed || self.shell_key(k).is_some();
+        self.answer(a, false);
+        if goes_on && matches!(self.mode, Mode::Browse) {
+            return self.pane_key(k);
         }
         true
     }
@@ -539,28 +513,6 @@ impl App {
             return;
         }
         self.pane_picked(&a.id, vec![if yes { "y" } else { "n" }.to_string()]);
-    }
-
-    /// The bottom bar while the pane's question waits: the question, cut
-    /// to leave room for its answers, then the answers as lozenges, each a
-    /// click target, as the shell's own confirms draw theirs.
-    pub(super) fn ask_status(&mut self, area: Rect, a: &Asked) -> Vec<Span<'static>> {
-        let sh = self.shape;
-        let yes = format!(" y {} ", a.yes);
-        let no = format!(" n {} ", a.no);
-        let answers = width(&sh.lozenge(&[Seg::on(yes.clone(), theme::Ground::Err)])) + width(&sh.lozenge(&[Seg::on(no.clone(), theme::Ground::Ok)])) + 2;
-        let lozenge = sh.lozenge(&[Seg::on(" confirm ", theme::Ground::Warn).bold()]);
-        let mut spans = Vec::new();
-        // The answers are the click targets: the lozenge, then the
-        // question, give way before they do.
-        let room = |used: u16| (area.width.saturating_sub(used + answers + 3)) as usize;
-        if str_width(&a.question) <= room(width(&lozenge)) {
-            spans.extend(lozenge);
-        }
-        let question = clip(&a.question, room(width(&spans)));
-        spans.push(Span::raw(format!(" {question}  ")));
-        super::render::answer_lozenges(sh, area, &mut spans, &mut self.hits.answers, [(true, &yes, theme::Ground::Err), (false, &no, theme::Ground::Ok)]);
-        spans
     }
 
     /// The pane's picker set `values`. The pick is input to the pane, so
@@ -902,14 +854,18 @@ mod tests {
         Open::Ask { id: "q".into(), question: "drop it?".into(), yes: "drop".into(), no: "keep".into() }
     }
 
-    /// A pane's question shows on the bar with its answers as lozenges; `y`,
-    /// `n`, Esc and a click on either answer all reach the pane by one path.
+    /// A pane's question shows on the bar with its answers as lozenges; `y`
+    /// and `n` in either case, Esc, Enter and a click on either answer all
+    /// reach the pane by one path.
     #[test]
     fn a_panes_question_is_answered_by_key_or_by_a_click_on_its_answer() {
-        let answers: [(&str, Answer); 5] = [
+        let answers: [(&str, Answer); 8] = [
             ("y", |a: &mut App| assert!(a.key(k(KeyCode::Char('y'), KeyModifiers::NONE)))),
+            ("y", |a: &mut App| assert!(a.key(k(KeyCode::Char('Y'), KeyModifiers::NONE)))),
             ("n", |a: &mut App| assert!(a.key(k(KeyCode::Char('n'), KeyModifiers::NONE)))),
+            ("n", |a: &mut App| assert!(a.key(k(KeyCode::Char('N'), KeyModifiers::NONE)))),
             ("n", |a: &mut App| assert!(a.key(k(KeyCode::Esc, KeyModifiers::NONE)))),
+            ("n", |a: &mut App| assert!(a.key(k(KeyCode::Enter, KeyModifiers::NONE)))),
             ("y", |a: &mut App| click_text(a, " y drop ")),
             ("n", |a: &mut App| click_text(a, " n keep ")),
         ];
@@ -1738,6 +1694,33 @@ mod tests {
         assert_eq!(own.keys, [KeyCode::Char('2')], "a digit the pane does not take is its key");
         let footer = testkit::rows(&testkit::render(&mut a, 160, 6)).pop().expect("a bar");
         assert!(footer.contains("0-9 channels"), "{footer}");
+    }
+
+    /// The shell's own "quit?", asked by a plain `q` beside a pane that owns
+    /// the bar, answers by key, hotkey and click alike: quit ends the
+    /// session with nothing unsaved, stay keeps it.
+    #[test]
+    fn the_shells_quit_question_answers_alike_by_key_hotkey_and_click() {
+        let ways: [(bool, Answer); 8] = [
+            (true, |a: &mut App| assert!(!a.key(k(KeyCode::Char('y'), KeyModifiers::NONE)))),
+            (true, |a: &mut App| assert!(!a.key(k(KeyCode::Char('Y'), KeyModifiers::NONE)))),
+            (true, |a: &mut App| click_text(a, " y quit ")),
+            (false, |a: &mut App| assert!(a.key(k(KeyCode::Char('n'), KeyModifiers::NONE)))),
+            (false, |a: &mut App| assert!(a.key(k(KeyCode::Char('N'), KeyModifiers::NONE)))),
+            (false, |a: &mut App| assert!(a.key(k(KeyCode::Esc, KeyModifiers::NONE)))),
+            (false, |a: &mut App| assert!(a.key(k(KeyCode::Enter, KeyModifiers::NONE)))),
+            (false, |a: &mut App| click_text(a, " n stay ")),
+        ];
+        for (i, (quits, answer)) in ways.into_iter().enumerate() {
+            let mut a = App::with_pane("own", Own::default());
+            assert!(a.key(k(KeyCode::Char('q'), KeyModifiers::NONE)));
+            let bar = testkit::rows(&testkit::render(&mut a, 80, 6)).pop().expect("a bar");
+            assert!(bar.contains("quit?") && bar.contains(" y quit ") && bar.contains(" n stay "), "{bar}");
+            answer(&mut a);
+            assert_eq!(a.ended(), quits, "way {i}");
+            assert!(matches!(a.mode, Mode::Browse), "way {i}: nothing left asking");
+            assert!(a.pane_ref::<Own>().expect("the pane").keys.is_empty(), "way {i}: the answer typed nothing");
+        }
     }
 
     /// Text a pane copies goes to the terminal once, as OSC 52 in base64.

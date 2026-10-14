@@ -9,18 +9,19 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
-use super::theme::{self, Ground, Seg, Shape};
 use super::apply::Outcome;
+use super::dialog::Placement;
+use super::theme::{self, Ground, Seg, Shape};
 use super::{App, Btn, Mode};
 use crate::tree::{self, Arg, Kind, Row};
-use crate::wrap::pad_to;
+use crate::wrap::{pad_to, str_width};
 
 /// A bordered pane in the theme: rule-coloured border, accent title.
 pub(super) fn pane(title: impl Into<Line<'static>>) -> Block<'static> {
     Block::default().borders(Borders::ALL).border_style(theme::rule()).title(title).title_style(theme::title())
 }
 
-fn width(spans: &[Span]) -> u16 {
+pub(super) fn width(spans: &[Span]) -> u16 {
     spans.iter().map(|s| s.width() as u16).sum()
 }
 
@@ -34,13 +35,8 @@ pub(super) fn button_row(sh: Shape, at: Rect, focus: Option<Btn>, buttons: &[(Bt
     let destructive = buttons.iter().any(|(_, _, g)| *g == Ground::Err);
     let mut spans = vec![Span::raw(" ")];
     for (b, label, ground) in buttons {
-        let ground = match ground {
-            Ground::Keep if destructive => Ground::Ok,
-            Ground::Keep => Ground::AccentDim,
-            g => *g,
-        };
         let on = focus == Some(*b);
-        let seg = Seg::on(format!(" {} {label} ", if on { "›" } else { " " }), ground);
+        let seg = Seg::on(format!(" {} {label} ", if on { "›" } else { " " }), ground.on_row(destructive));
         let target = sh.lozenge(&[if on { seg.bold() } else { seg }]);
         let x = at.x + width(&spans);
         hits.push((Rect { x, y: at.y, width: width(&target), height: 1 }.intersection(at), *b));
@@ -50,15 +46,23 @@ pub(super) fn button_row(sh: Shape, at: Rect, focus: Option<Btn>, buttons: &[(Bt
     Line::from(spans)
 }
 
-/// A confirm's two answers as lozenges, each recorded as a click target.
-pub(super) fn answer_lozenges(sh: Shape, area: Rect, spans: &mut Vec<Span<'static>>, hits: &mut Vec<(Rect, bool)>, answers: [(bool, &str, Ground); 2]) {
-    for (yes, text, g) in answers {
-        let target = sh.lozenge(&[Seg::on(text.to_string(), g).bold()]);
-        let x = area.x + width(spans);
-        hits.push((Rect { x, y: area.y, width: width(&target), height: 1 }.intersection(area), yes));
-        spans.extend(target);
-        spans.push(Span::raw(" "));
+/// `text` cut to `room` columns, ending in `…` when it was cut.
+pub(super) fn clip(text: &str, room: usize) -> String {
+    if str_width(text) <= room {
+        return text.to_string();
     }
+    let mut out = String::new();
+    let mut w = 0;
+    for c in text.chars() {
+        let cw = str_width(c.encode_utf8(&mut [0; 4]));
+        if w + cw + 1 > room {
+            break;
+        }
+        out.push(c);
+        w += cw;
+    }
+    out.push('…');
+    out
 }
 
 /// `text` cut in the middle with `…` to fit `room` columns, keeping the end,
@@ -115,7 +119,6 @@ impl App {
         let [left, right] = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)]).areas(main);
         self.hits.menu = None;
         self.hits.dialog = None;
-        self.hits.answers.clear();
         self.hits.buttons.clear();
         self.hits.cta = Rect::default();
         self.hits.discard_tabs.clear();
@@ -136,7 +139,7 @@ impl App {
             self.draw_tabs(f, bar, tab, true);
             self.draw_review_tree(f, left, tab);
             self.draw_review_detail(f, right, tab);
-            self.draw_modal(f, main);
+            self.draw_modal(f, main, Placement::Center);
             return self.draw_status(f, status);
         }
         if self.on_theme_tab() {
@@ -149,7 +152,9 @@ impl App {
                     let title = format!("actions: theme {}", self.themes.under_cursor().0.name);
                     self.draw_menu_items(f, main, title, items, sel);
                 }
-                _ => self.draw_modal(f, main),
+                _ => {
+                self.draw_modal(f, main, Placement::Center);
+            }
             }
             return self.draw_status(f, status);
         }
@@ -189,7 +194,9 @@ impl App {
                 let p = p.clone();
                 self.draw_pick(f, main, &p);
             }
-            _ => self.draw_modal(f, main),
+            _ => {
+                self.draw_modal(f, main, Placement::Center);
+            }
         }
         self.draw_status(f, status);
     }
@@ -507,9 +514,12 @@ impl App {
     }
 
     /// The bottom line, built like the status line's first line: a mode
-    /// lozenge, then flat parts between thin rules. A confirm draws its
-    /// answers as lozenges and records them as click targets.
+    /// lozenge, then flat parts between thin rules. A question on the bar
+    /// is drawn in its place ([`Placement::Bar`]).
     pub(super) fn draw_status(&mut self, f: &mut Frame, area: Rect) {
+        if self.draw_modal(f, area, Placement::Bar) {
+            return;
+        }
         let sh = self.shape;
         let mode = |label: &str, g: Ground| sh.lozenge(&[Seg::on(format!(" {label} "), g).bold()]);
         let input = |text: String| Span::raw(format!(" {text}▏ "));
@@ -552,16 +562,6 @@ impl App {
                 spans.extend(mode("secret", Ground::Hot));
                 spans.extend([input(mask(buf.len())), hint(" Enter queue (goes to stdin, never shown) · Esc cancel")]);
             }
-            Mode::Confirm { queued } => {
-                spans.extend(mode("confirm", Ground::Warn));
-                spans.push(Span::raw(format!(" {}  ", queued.command)));
-                answer_lozenges(sh, area, &mut spans, &mut self.hits.answers, [(true, " y queue ", Ground::Ok), (false, " n cancel ", Ground::Err)]);
-            }
-            Mode::Review { tab: t, discard: true, .. } | Mode::DiscardTab { tab: t } => {
-                spans.extend(mode("confirm", Ground::Warn));
-                spans.push(Span::raw(format!(" discard {} pending in {}?  ", self.pending_in(*t), self.roots[*t].name)));
-                answer_lozenges(sh, area, &mut spans, &mut self.hits.answers, [(true, " y discard ", Ground::Err), (false, " n keep ", Ground::Ok)]);
-            }
             Mode::Review { run: Some(run), .. } => {
                 let (label, text) = match run.outcome {
                     Outcome::Stopped(_) => ("stopped", "  the failed step and the rest stay pending"),
@@ -598,18 +598,9 @@ impl App {
                 spans.extend(mode(&op.prompt(), Ground::Accent));
                 spans.extend([input(buf.clone()), hint(" Enter · Esc cancel"), msg]);
             }
-            Mode::ItemDelete { name, noun } => {
-                spans.extend(mode("confirm", Ground::Warn));
-                spans.push(Span::raw(format!(" delete {noun} {name}?  ")));
-                answer_lozenges(sh, area, &mut spans, &mut self.hits.answers, [(true, " y delete ", Ground::Err), (false, " n keep ", Ground::Ok)]);
-            }
             Mode::ThemeMenu { .. } => {
                 spans.extend(mode("action", Ground::Accent));
                 spans.push(hint("  ↑↓ choose · Enter or click picks · Esc closes"));
-            }
-            Mode::Ask(a) => {
-                let a = a.clone();
-                spans.extend(self.ask_status(area, &a));
             }
             Mode::Entry(_) => {
                 spans.extend(mode("entry", Ground::Accent));

@@ -144,6 +144,17 @@ pub enum Ground {
 }
 
 impl Ground {
+    /// The ground drawn on a row of answers: [`Ground::Keep`] is green on
+    /// a row that holds an answer on [`Ground::Err`] (`destructive`), as
+    /// the keep answer beside a drop, and the dim accent elsewhere.
+    pub fn on_row(self, destructive: bool) -> Ground {
+        match self {
+            Ground::Keep if destructive => Ground::Ok,
+            Ground::Keep => Ground::AccentDim,
+            g => g,
+        }
+    }
+
     fn rgb(self, r: &Roles) -> Rgb {
         match self {
             Ground::Accent => r.accent,

@@ -1,20 +1,22 @@
-//! One dialog for the boxes the shell draws (ADR-504, the note on one
-//! `Dialog`): a title, a body of lines scrolled when it outgrows the frame,
-//! and a row of buttons. Drawing it records its rect and each button's, and
-//! its keys and clicks come back as an [`Answer`], so the code that opened
-//! it acts on what was answered and never on a synthesised key.
+//! One dialog for the boxes and the bar questions the shell draws (ADR-504,
+//! the note on one `Dialog`): a title, a body of lines scrolled when it
+//! outgrows the frame, and a row of buttons, in a box or on the bottom bar.
+//! Drawing it records its rect and each button's, and its keys and clicks
+//! come back as an [`Answer`], so the code that opened it acts on what was
+//! answered and never on a synthesised key.
 
 use std::borrow::Cow;
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
 use ratatui::layout::{Position, Rect};
 use ratatui::style::Style;
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Padding, Paragraph};
 use ratatui::Frame;
 
-use super::render::{button_row, modal_rect, pane};
-use super::theme::{self, Ground, Shape};
+use super::render::{button_row, clip, modal_rect, pane, width};
+use super::theme::{self, Ground, Seg, Shape};
+use crate::wrap::str_width;
 use super::Btn;
 
 /// The rows a page key scrolls.
@@ -82,6 +84,16 @@ impl Button {
     }
 }
 
+/// Where a dialog is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Placement {
+    /// A box in the middle of the area, as [`modal_rect`] places one.
+    Center,
+    /// The bottom bar: the title is the question, after a `confirm`
+    /// lozenge, and the buttons are answer lozenges after it.
+    Bar,
+}
+
 /// Why a dialog was refused where it was built.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Refused {
@@ -100,6 +112,7 @@ pub(super) struct DialogBuilder<'a>(Dialog<'a>);
 
 /// A dialog ready to draw and to answer keys and clicks.
 pub(super) struct Dialog<'a> {
+    placement: Placement,
     title: String,
     body: Cow<'a, [Line<'static>]>,
     buttons: Vec<Button>,
@@ -117,6 +130,9 @@ pub(super) struct Dialog<'a> {
     keys_only: bool,
     /// Plain keys that close it.
     close_keys: &'static [char],
+    /// A press of any mouse button that lands on no button closes it, inside
+    /// it or outside.
+    any_press: bool,
     /// Home, End, `g` and `G` jump to the top and the last page.
     jumps: bool,
     forward: Option<fn(&KeyEvent) -> bool>,
@@ -145,6 +161,7 @@ impl<'a> Dialog<'a> {
     #[allow(clippy::new_ret_no_self)]
     pub(super) fn new(title: impl Into<String>, width: u16) -> DialogBuilder<'a> {
         DialogBuilder(Dialog {
+            placement: Placement::Center,
             title: title.into(),
             body: Cow::Owned(Vec::new()),
             buttons: Vec::new(),
@@ -158,9 +175,21 @@ impl<'a> Dialog<'a> {
             close_outside: false,
             keys_only: false,
             close_keys: &[],
+            any_press: false,
             jumps: false,
             forward: None,
         })
+    }
+
+    /// A question on the bottom bar: its answers are the buttons.
+    pub(super) fn bar(question: impl Into<String>) -> DialogBuilder<'a> {
+        let mut d = Dialog::new(question, 0);
+        d.0.placement = Placement::Bar;
+        d
+    }
+
+    pub(super) fn placement(&self) -> Placement {
+        self.placement
     }
 
     /// The first body row in view.
@@ -170,7 +199,12 @@ impl<'a> Dialog<'a> {
 
     /// Whether a press outside it closes it.
     pub(super) fn closes_outside(&self) -> bool {
-        self.close_outside
+        self.close_outside || self.any_press
+    }
+
+    /// Whether a press of any mouse button that lands on no button closes it.
+    pub(super) fn any_press(&self) -> bool {
+        self.any_press
     }
 
     /// The button Enter presses, which has the focus.
@@ -232,8 +266,9 @@ impl<'a> Dialog<'a> {
     /// A press or the wheel at `at`, against where the dialog was last
     /// `drawn`. A left click on a button answers with it. The wheel over the
     /// dialog scrolls it. A press inside it closes a close-on-any-key dialog,
-    /// and one outside closes a dialog that a click outside closes; every
-    /// other press stays. The wheel outside is the caller's to route.
+    /// one outside closes a dialog that a click outside closes, and any
+    /// press closes one that [`DialogBuilder::any_press`]; every other
+    /// press stays. The wheel outside is the caller's to route.
     pub(super) fn mouse(&mut self, kind: MouseEventKind, at: Position, drawn: &Drawn) -> Answer {
         let inside = drawn.contains(at);
         match kind {
@@ -243,7 +278,7 @@ impl<'a> Dialog<'a> {
                 if let Some(&(_, id)) = drawn.buttons.iter().find(|(r, _)| button == MouseButton::Left && r.contains(at)) {
                     return Answer::Button(id);
                 }
-                let closes = if inside { self.close_on_any_key } else { self.close_outside };
+                let closes = self.any_press || if inside { self.close_on_any_key } else { self.close_outside };
                 if closes {
                     Answer::Close
                 } else {
@@ -263,9 +298,13 @@ impl<'a> Dialog<'a> {
         modal_rect(area, self.width, h)
     }
 
-    /// Draw it over `area`: the body in view, then the buttons on the last
-    /// row inside the border, the default focused.
+    /// Draw it over `area`: in a box, the body in view, then the buttons on
+    /// the last row inside the border, the default focused; on the bar, the
+    /// question and its answers along `area`'s first row.
     pub(super) fn draw(&self, f: &mut Frame, area: Rect, sh: Shape) -> Drawn {
+        if self.placement == Placement::Bar {
+            return self.draw_bar(f, Rect { height: area.height.min(1), ..area }, sh);
+        }
         let r = self.rect(area);
         let border = self.border.unwrap_or_else(theme::modal_border);
         let mut block = pane(self.title.clone()).border_style(border).padding(Padding::horizontal(self.padding));
@@ -288,6 +327,37 @@ impl<'a> Dialog<'a> {
             f.render_widget(Paragraph::new(button_row(sh, at, focus, &row, &mut buttons)), at);
         }
         Drawn { rect: r, buttons, scroll, max }
+    }
+}
+
+impl Dialog<'_> {
+    /// The bar: a `confirm` lozenge, the question, then the answers as
+    /// lozenges, each a click target. The question is cut to leave the
+    /// answers on screen, and the lozenge goes first when the question
+    /// would not fit beside it. No answer is drawn focused.
+    fn draw_bar(&self, f: &mut Frame, area: Rect, sh: Shape) -> Drawn {
+        let destructive = self.buttons.iter().any(|b| b.ground == Ground::Err);
+        let answers: Vec<(Btn, Vec<Span<'static>>)> =
+            self.buttons.iter().map(|b| (b.id, sh.lozenge(&[Seg::on(format!(" {} ", b.label), b.ground.on_row(destructive)).bold()]))).collect();
+        // Each answer is followed by a space.
+        let after = answers.iter().map(|(_, a)| width(a) + 1).sum::<u16>();
+        let lozenge = sh.lozenge(&[Seg::on(" confirm ", Ground::Warn).bold()]);
+        let room = |used: u16| usize::from(area.width.saturating_sub(used + after + 3));
+        let mut spans = Vec::new();
+        if str_width(&self.title) <= room(width(&lozenge)) {
+            spans.extend(lozenge);
+        }
+        let question = clip(&self.title, room(width(&spans)));
+        spans.push(Span::raw(format!(" {question}  ")));
+        let mut buttons = Vec::new();
+        for (id, target) in answers {
+            let x = area.x + width(&spans);
+            buttons.push((Rect { x, y: area.y, width: width(&target), height: 1 }.intersection(area), id));
+            spans.extend(target);
+            spans.push(Span::raw(" "));
+        }
+        f.render_widget(Paragraph::new(Line::from(spans)), area);
+        Drawn { rect: area, buttons, scroll: 0, max: 0 }
     }
 }
 
@@ -351,7 +421,6 @@ impl<'a> DialogBuilder<'a> {
     }
 
     /// Keys `f` picks go back to the code that opened it.
-    #[allow(dead_code)] // the bar's questions forward their keys next
     pub(super) fn forward(mut self, f: fn(&KeyEvent) -> bool) -> Self {
         self.0.forward = Some(f);
         self
@@ -360,6 +429,13 @@ impl<'a> DialogBuilder<'a> {
     /// Plain keys that close it, beside Esc and Enter.
     pub(super) fn close_keys(mut self, keys: &'static [char]) -> Self {
         self.0.close_keys = keys;
+        self
+    }
+
+    /// A press of any mouse button that lands on no button closes it,
+    /// inside it or outside.
+    pub(super) fn any_press(mut self) -> Self {
+        self.0.any_press = true;
         self
     }
 
@@ -549,6 +625,49 @@ mod tests {
             .unwrap();
         assert_eq!(ground_of(&calm, Btn::Back), Ground::AccentDim.bg(), "Back beside nothing destructive");
         assert_eq!(ground_of(&d, Btn::Quit), Ground::Err.bg());
+    }
+
+    /// A drop question on the bar: drop on the error ground, keep beside it.
+    fn bar(q: &str) -> Dialog<'static> {
+        Dialog::bar(q)
+            .button(Button::new(Btn::Yes, "y drop", Ground::Err).key('y'))
+            .button(Button::new(Btn::No, "n keep", Ground::Keep).key('n').cancel().default())
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn a_bar_question_draws_on_the_first_row_and_keeps_its_answers_on_screen() {
+        theme::set(theme::Palette::default());
+        let mut out = Drawn::default();
+        let buf = draw_with(60, 3, |f| out = bar("drop it?").draw(f, Rect { y: 2, height: 1, ..f.area() }, Shape::PLAIN));
+        let rows = testkit::rows(&buf);
+        assert!(rows[2].starts_with(" confirm  drop it?   y drop   n keep "), "{}", rows[2]);
+        assert_eq!(out.rect, Rect::new(0, 2, 60, 1));
+        let (yes, no) = (out.buttons[0], out.buttons[1]);
+        assert_eq!((yes.1, no.1), (Btn::Yes, Btn::No));
+        assert_eq!((buf[(yes.0.x + 1, 2)].bg, buf[(no.0.x + 1, 2)].bg), (Ground::Err.bg(), Ground::Ok.bg()), "keep is green beside drop");
+        let mut d = bar("drop it?");
+        assert_eq!(click(&mut d, &out, no.0.x, 2), Answer::Button(Btn::No));
+        assert_eq!(d.key(press(KeyCode::Enter)), Answer::Button(Btn::No), "Enter gives the default");
+        // Too narrow for the question: the lozenge goes, then the question is cut.
+        let long = "drop every message in this channel and its history for good?";
+        let buf = draw_with(40, 1, |f| out = bar(long).draw(f, f.area(), Shape::PLAIN));
+        let row = &testkit::rows(&buf)[0];
+        assert!(!row.contains("confirm") && row.contains('…') && row.contains(" y drop ") && row.contains(" n keep "), "{row}");
+        assert!(out.buttons.iter().all(|(r, _)| r.right() <= 40 && r.width > 0), "the answers stay on screen");
+    }
+
+    #[test]
+    fn a_dialog_that_any_press_closes_closes_on_any_button_off_its_answers() {
+        let mut d = Dialog::bar("q").button(Button::new(Btn::No, "n", Ground::Keep).cancel().default()).any_press().forward(|_| true).build().unwrap();
+        let drawn = Drawn { rect: Rect::new(0, 9, 40, 1), buttons: vec![(Rect::new(10, 9, 3, 1), Btn::No)], scroll: 0, max: 0 };
+        assert!(d.closes_outside() && d.any_press());
+        for (button, x, y) in [(MouseButton::Left, 0, 0), (MouseButton::Right, 1, 9), (MouseButton::Middle, 11, 9)] {
+            assert_eq!(d.mouse(MouseEventKind::Down(button), Position::new(x, y), &drawn), Answer::Close, "{button:?} at {x},{y}");
+        }
+        let x = press(KeyCode::Char('x'));
+        assert_eq!(d.key(x), Answer::Forward(x), "every key that is no answer goes back");
     }
 
     #[test]

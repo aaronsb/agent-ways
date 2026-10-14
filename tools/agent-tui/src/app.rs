@@ -16,6 +16,7 @@ mod paneshell;
 mod panetabs;
 pub use panetabs::{Jump, TabKeys};
 mod pick;
+mod questions;
 mod render;
 mod response;
 mod review;
@@ -110,6 +111,9 @@ enum Btn {
     /// The theme editor's save, and "close the editor"'s save and discard.
     Save,
     Drop,
+    /// A bar question's two answers.
+    Yes,
+    No,
 }
 
 impl Btn {
@@ -125,6 +129,8 @@ impl Btn {
             Btn::Cancel => KeyCode::Char('q'),
             Btn::Save => KeyCode::Char('s'),
             Btn::Drop => KeyCode::Char('d'),
+            Btn::Yes => KeyCode::Char('y'),
+            Btn::No => KeyCode::Char('n'),
         }
     }
 }
@@ -154,8 +160,6 @@ struct Hits {
     /// The open dialog and its buttons, with the kind of mode that drew it
     /// ([`App::drawn_dialog`]).
     dialog: Option<(std::mem::Discriminant<Mode>, dialog::Drawn)>,
-    /// A confirm's answers: yes or no.
-    answers: Vec<(Rect, bool)>,
     /// Review's bar targets, a flow's buttons and the theme editor's Save.
     buttons: Vec<(Rect, Btn)>,
     /// The call to action on the bottom bar.

@@ -305,6 +305,47 @@ fn new_copy_rename_and_delete_write_the_themes_dir() {
     assert!(app.msg.contains("it was the active theme, so terminal is active now"), "{}", app.msg);
 }
 
+/// The delete's y/n answers alike by its hotkey in either case, Esc and
+/// Enter for keep, and a click on either answer.
+#[test]
+fn an_item_delete_answers_alike_by_key_hotkey_and_click() {
+    let click = |app: &mut App, text: &str| {
+        let buf = draw(app, 100, 30);
+        let (x, y) = crate::testkit::find(&buf, text).unwrap_or_else(|| panic!("{text} not drawn"));
+        app.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x + 1, row: y, modifiers: KeyModifiers::NONE });
+    };
+    let ways: [(bool, Option<KeyCode>, &str); 8] = [
+        (true, Some(KeyCode::Char('y')), ""),
+        (true, Some(KeyCode::Char('Y')), ""),
+        (true, None, "y delete"),
+        (false, Some(KeyCode::Char('n')), ""),
+        (false, Some(KeyCode::Char('N')), ""),
+        (false, Some(KeyCode::Esc), ""),
+        (false, Some(KeyCode::Enter), ""),
+        (false, None, "n keep"),
+    ];
+    for (i, (yes, key, label)) in ways.into_iter().enumerate() {
+        let d = dir(&format!("delete-{i}"));
+        let mut app = app_in(&d, ColorDepth::TrueColor);
+        keys(&mut app, &[KeyCode::Char('3')]);
+        act(&mut app, "new");
+        type_str(&mut app, "mine");
+        keys(&mut app, &[KeyCode::Enter]);
+        app.item_act(ItemAct::Delete, "mine".into());
+        assert!(matches!(app.mode, Mode::ItemDelete { .. }));
+        assert!(text(&draw(&mut app, 100, 30)).contains("delete theme mine?"));
+        match key {
+            Some(k) => keys(&mut app, &[k]),
+            None => click(&mut app, label),
+        }
+        assert!(matches!(app.mode, Mode::Browse), "{key:?} {label}");
+        assert_eq!(d.join("mine.theme").exists(), !yes, "{key:?} {label}");
+        if !yes {
+            assert_eq!(app.msg, "kept");
+        }
+    }
+}
+
 #[test]
 fn a_bundled_theme_is_never_renamed_or_deleted() {
     let d = dir("bundled");

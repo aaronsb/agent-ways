@@ -83,6 +83,7 @@ ask-no       | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:y_cle
 ask-feed     | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:y_clear click:signing wait:kept
 ask-row      | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:y_clear side:#infra wait:kept
 ask-long     | base  | wait:#open click:#open click:#open wait:Clear_history Down Enter wait:y_clear
+quit-ask     | base  | wait:Agents F2 q wait:quit?
 menu-row     | base  | wait:Agents side:#infra side:#infra wait:pick side:#deploy gone:pick
 menu-tab     | base  | wait:Agents side:#infra side:#infra wait:pick click:#open gone:pick
 prompt-click | base  | wait:Agents text:draft C-n wait:new_channel text:abc click:Agents gone:new_channel

@@ -42,6 +42,10 @@ quit-guard | ways settings matching --project $PS           | Down Down e C-u te
 key-help   | ways settings matching --project $PS           | text:?
 close-editor | ways settings theme --project $PS            | e text:mine Enter Escape
 response   | ways settings install --project $PS            | p text:/nonexistent/claude Enter
+confirm    | ways settings install --project $PS            | Down Down r
+discard-tab | ways settings matching --project $PS          | Down Down e C-u text:0.2 Enter X
+review-discard | ways settings matching --project $PS       | Down Down e C-u text:0.2 Enter w X
+item-delete | ways settings theme --project $PS             | a Enter text:scratch Enter Escape End a Down Down Down Enter
 "
 
 python3 "$TOOLS/fixture.py" "$WORK" >/dev/null
