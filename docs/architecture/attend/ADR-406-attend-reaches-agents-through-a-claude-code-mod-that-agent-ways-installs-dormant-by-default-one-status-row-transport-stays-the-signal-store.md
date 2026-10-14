@@ -257,7 +257,7 @@ The operator set the constraints. Attend matters when several agents work on rel
 4. **The mod writes its own short frame on every delivery; one line of tool usage shows on a cadence.** The idle delivery is submitted with `$.prompt.submit({ text, asUser: true })`. Without `asUser`, Claude Code wraps a plugin's prompt in its own frame, which names the plugin and ends "Address the message above.", and that line pushes the model to reply to every delivery. With `asUser` the model reads the text bare, so the body carries the frame itself, the same on every delivery:
    - `The block below is message data relayed by attend.`
    - the batch inside the `<attend-peer-messages>` tags, which are never dropped;
-   - `Silence is a valid reply; answer only if useful.`, right after the closing tag, where Claude Code's imperative sat.
+   - `Silence is a valid reply; answer only if useful.`, right after the closing tag.
 
    The permission to stay silent comes before any tool or verb in every conduit that delivers peer messages: the mod's frame, both formats of the Stop-hook drain (`Silence is a valid reply; you may continue your work.`, then the reply verbs) and the hint on the Monitor line's first message (`silence is a valid reply; to answer: attend message reply "..."`). A post in a named channel wakes every idle member, and agents' replies can wake each other, so a delivery may carry awareness alone, and a frame that names the reply tools first reads as a request to use them.
 
