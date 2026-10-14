@@ -476,4 +476,100 @@ fn the_policy_check_keeps_its_settings_read() {
     let calls = std::fs::read_to_string(w.f.home.join("ways-calls.log")).unwrap_or_default();
     assert_eq!(calls.lines().filter(|l| *l == "settings").count(), 1, "{calls}");
 }
+
+/// `attend keepwarm wrapped --save` with `reply` on stdin.
+fn save(w: &Warm, outcome: &str, path: &std::path::Path, detail: &str) -> std::process::Output {
+    use std::io::Write;
+    let mut path_env = OsString::from(&w.bin);
+    path_env.push(":");
+    path_env.push(std::env::var_os("PATH").unwrap_or_default());
+    let mut cmd = w.f.command();
+    cmd.env("PATH", path_env).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+    cmd.args(["keepwarm", "wrapped", outcome, "--detail", detail, "--path", &path.to_string_lossy(), "--save"]);
+    let mut child = cmd.spawn().unwrap();
+    child.stdin.take().unwrap().write_all(b"Continuation prompt.").unwrap();
+    child.wait_with_output().unwrap()
+}
+
+fn card_text(w: &Warm) -> String {
+    String::from_utf8_lossy(&w.run(&["keepwarm", "status"]).stdout).into_owned()
+}
+
+/// attend writes the wrap's reply itself, checking the path again: under
+/// the state root's wrap/, the session in its name, through no symlink.
+#[test]
+fn wrapped_save_writes_the_reply_under_the_state_root_and_refuses_a_link() {
+    let w = Warm::new("ka-save");
+    std::fs::write(
+        w.f.home.join("settings.json"),
+        r#"{"view":"effective","keys":{"attend_mod.keepalive.enabled":{"value":true},"attend_mod.keepalive.max_keepalives":{"value":0}}}"#,
+    )
+    .unwrap();
+    w.reading(&[(50 * MIN, 200_000, 500)]);
+    assert_eq!(policy(&w, "off")["action"], "wrap");
+    let wrap = w.f.home.join("state").join("agent-ways").join("wrap");
+    let file = wrap.join(format!("{}.md", w.f.sid));
+    let out = save(&w, "file", &file, "");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "Continuation prompt.");
+    assert!(card_text(&w).contains(&format!("the reply is saved to {}", file.display())));
+    // A refused send falls back to the file; the card names both.
+    std::fs::remove_file(&file).unwrap();
+    let out = save(&w, "refused", &file, "Chaucer-beta: no live session");
+    assert!(out.status.success());
+    assert!(card_text(&w).contains(&format!("handoff refused: Chaucer-beta: no live session; saved to {}", file.display())));
+    // A link planted at the path is refused, and nothing is written through it.
+    std::fs::remove_file(&file).unwrap();
+    let victim = w.f.home.join("victim");
+    std::fs::write(&victim, "keep").unwrap();
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&victim, &file).unwrap();
+        let out = save(&w, "file", &file, "");
+        assert_eq!(out.status.code(), Some(1));
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep");
+        assert!(card_text(&w).contains("the wrap did not finish (could not write"), "{}", card_text(&w));
+    }
+    // Outside the wrap directory: refused.
+    let out = save(&w, "file", &w.f.home.join(format!("{}.md", w.f.sid)), "");
+    assert_eq!(out.status.code(), Some(1));
+}
+
+/// The kept settings read is dropped when a settings file it reads from
+/// is written, created or deleted.
+#[test]
+fn the_kept_settings_read_follows_its_files() {
+    let w = Warm::new("ka-settings-files");
+    w.reading(&[(30 * MIN, 200_000, 500)]);
+    let reads = |w: &Warm| std::fs::read_to_string(w.f.home.join("ways-calls.log")).unwrap_or_default().lines().filter(|l| *l == "settings").count();
+    policy(&w, "off");
+    policy(&w, "off");
+    assert_eq!(reads(&w), 1);
+    let user = w.f.home.join("config").join("agent-ways").join("config.yaml");
+    std::fs::create_dir_all(user.parent().unwrap()).unwrap();
+    std::fs::write(&user, "attend_mod:\n  keepwarm: on\n").unwrap();
+    policy(&w, "off");
+    assert_eq!(reads(&w), 2, "a created user file is a change");
+    policy(&w, "off");
+    assert_eq!(reads(&w), 2);
+    std::fs::remove_file(&user).unwrap();
+    policy(&w, "off");
+    assert_eq!(reads(&w), 3, "a deleted one is too");
+}
+
+/// A check removes other sessions' kept settings reads and lock files once
+/// their ledger is gone or stale, and keeps a live session's.
+#[test]
+fn a_check_prunes_other_sessions_stale_files() {
+    let w = Warm::new("ka-prune");
+    w.reading(&[(30 * MIN, 200_000, 500)]);
+    let dir = w.f.cache().join("keepwarm");
+    std::fs::create_dir_all(&dir).unwrap();
+    for f in ["gone.settings.json", "gone.lock", "live.settings.json", "live.lock", "live.ledger.json"] {
+        std::fs::write(dir.join(f), "{}").unwrap();
+    }
+    policy(&w, "off");
+    assert!(!dir.join("gone.settings.json").exists() && !dir.join("gone.lock").exists());
+    assert!(dir.join("live.settings.json").exists() && dir.join("live.lock").exists());
+}
 }

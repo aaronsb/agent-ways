@@ -616,6 +616,8 @@ Record where the keepalive policy's wrap reply went, for the status card. The at
 * `--detail <DETAIL>` — The file written, the recipient, or attend's reason for a refusal
 
   Default value: ``
+* `--path <PATH>` — With --save: the wrap file to write the reply to, checked again under the ways state root's wrap/ directory
+* `--save` — Write the reply read on stdin to --path (outcome file or refused), through a temp file renamed over it
 
 
 

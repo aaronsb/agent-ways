@@ -590,6 +590,14 @@ pub enum KeepwarmCmd {
         /// The file written, the recipient, or attend's reason for a refusal
         #[arg(long, default_value = "")]
         detail: String,
+        /// With --save: the wrap file to write the reply to, checked again
+        /// under the ways state root's wrap/ directory
+        #[arg(long, requires = "save")]
+        path: Option<String>,
+        /// Write the reply read on stdin to --path (outcome file or
+        /// refused), through a temp file renamed over it
+        #[arg(long, requires = "path")]
+        save: bool,
     },
 }
 

@@ -10,7 +10,7 @@ use sensor_keepwarm::{
     card, card_state, check_once, fmt_duration, lock_session, parse_duration, read_arm, read_context, read_ledger, settle, write_arm,
     write_ledger, ArmFile, State, DEFAULT_WINDOW_SECS, PING_AFTER_SECS,
 };
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// When a policy check that could not read the transcript asks to be run
 /// again.
@@ -75,12 +75,20 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
             }
             println!("keepalive count reset");
         }
-        KeepwarmCmd::Wrapped { outcome, detail } => {
+        KeepwarmCmd::Wrapped { outcome, detail, path, save } => {
             let Some(o) = WrapOutcome::parse(&outcome) else {
                 eprintln!("keepwarm wrapped takes transcript, file, sent, refused or unfinished");
                 std::process::exit(2);
             };
-            if !update_policy(&dir, sid, |p| p.wrap_outcome = Some(o.describe(&detail))) {
+            let (line, wrote) = match (save, path) {
+                (true, Some(path)) => saved_outcome(o, &detail, &path, sid),
+                _ => (o.describe(&detail), Ok(())),
+            };
+            if !update_policy(&dir, sid, |p| p.wrap_outcome = Some(line)) {
+                std::process::exit(1);
+            }
+            if let Err(e) = wrote {
+                eprintln!("keepwarm: {e}");
                 std::process::exit(1);
             }
         }
@@ -113,6 +121,28 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
             }
         }
     }
+}
+
+/// Writes the wrap's reply, read on stdin, to `path` (ADR-414 item 6): the
+/// mod hands it over rather than writing it, so the path is checked again
+/// now, after a turn in which the model knew it, and written through a
+/// temp file renamed over it. The card's line for the outcome, and whether
+/// the write held.
+fn saved_outcome(o: WrapOutcome, detail: &str, path: &str, sid: &str) -> (String, Result<(), String>) {
+    use std::io::Read;
+    let mut reply = String::new();
+    let wrote = std::io::stdin()
+        .read_to_string(&mut reply)
+        .map_err(|e| e.to_string())
+        .and_then(|_| policy::write_wrap(&ways_core::paths::state_root(), sid, Path::new(path), &reply))
+        .map_err(|e| format!("could not write {path}: {e}"));
+    let line = match (o, &wrote) {
+        (WrapOutcome::File, Ok(())) => o.describe(path),
+        (WrapOutcome::File, Err(e)) => WrapOutcome::Unfinished.describe(e),
+        (_, Ok(())) => o.describe(&format!("{detail}; saved to {path}")),
+        (_, Err(e)) => o.describe(&format!("{detail}; the file could not be written either: {e}")),
+    };
+    (line, wrote)
 }
 
 /// Apply `f` to the policy's marks in `sid`'s ledger, a fresh ledger where
@@ -211,27 +241,70 @@ fn site(ident: &attend_presence::session::SessionIdentity) -> Site {
 /// settings file changed since. `None` when ways cannot answer.
 fn policy_settings(dir: &Path, sid: &str, project: &str, now: u64) -> Option<String> {
     let path = dir.join(format!("{sid}.settings.json"));
-    let ms = |t: std::time::SystemTime| t.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
-    let changed_after = |t_ms: u64| {
-        let files = [ways_core::paths::user_config(), Path::new(project).join(".claude").join("ways.yaml")];
-        files.iter().any(|f| std::fs::metadata(f).and_then(|m| m.modified()).is_ok_and(|m| ms(m) > t_ms))
-    };
+    let stamps = settings_stamps(project);
     if let Some(kept) = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) {
         let at = kept.get("at").and_then(|v| v.as_u64()).unwrap_or(0);
-        let at_ms = kept.get("at_ms").and_then(|v| v.as_u64()).unwrap_or(0);
-        let same = kept.get("project").and_then(|v| v.as_str()) == Some(project);
-        if same && now.saturating_sub(at) < SETTINGS_KEPT_SECS && !changed_after(at_ms) {
+        let same = kept.get("project").and_then(|v| v.as_str()) == Some(project) && kept.get("files") == Some(&stamps);
+        if same && now.saturating_sub(at) < SETTINGS_KEPT_SECS {
             if let Some(doc) = kept.get("doc").and_then(|v| v.as_str()) {
                 return Some(doc.to_string());
             }
         }
     }
-    let read_at_ms = ms(std::time::SystemTime::now());
     let doc = mod_settings(project)?;
-    let kept = serde_json::json!({ "at": now, "at_ms": read_at_ms, "project": project, "doc": doc });
+    let kept = serde_json::json!({ "at": now, "project": project, "files": stamps, "doc": doc });
     std::fs::create_dir_all(dir).ok();
     std::fs::write(&path, kept.to_string()).ok();
     Some(doc)
+}
+
+/// Each settings file the attend_mod section resolves through (the user's,
+/// the active target's, the project's) with its modification time in
+/// milliseconds, or null where it is absent: a kept read is reused only
+/// while these are unchanged, so a file written, created or deleted since
+/// is seen at once. Taken before ways reads them.
+fn settings_stamps(project: &str) -> serde_json::Value {
+    let current = ways_core::paths::current_config_dir();
+    let target = ways_core::paths::target_config_root(&current).join("config.yaml");
+    let root = ways_core::settings::project_root(Path::new(project)).unwrap_or_else(|| PathBuf::from(project));
+    let mut files = vec![ways_core::paths::user_config(), target, ways_core::settings::project_file(&root)];
+    files.extend(ways_core::settings::layers(&root).into_iter().filter_map(|l| l.path));
+    files.sort();
+    files.dedup();
+    let stamp = |f: &PathBuf| {
+        std::fs::metadata(f)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as u64)
+    };
+    serde_json::Value::Array(files.iter().map(|f| serde_json::json!([f.to_string_lossy(), stamp(f)])).collect())
+}
+
+/// How long a session's kept settings read and lock file outlive its
+/// ledger's last write before a check removes them.
+const STALE_SECS: u64 = 7 * 24 * 3600;
+
+/// Removes other sessions' kept settings reads and lock files whose ledger
+/// is gone or has not been written for [`STALE_SECS`]: each session leaves
+/// two small files, and nothing else removes them.
+fn prune_stale(dir: &Path, sid: &str, now: u64) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let Some(other) = name.strip_suffix(".settings.json").or_else(|| name.strip_suffix(".lock")) else { continue };
+        if other == sid {
+            continue;
+        }
+        let written = std::fs::metadata(sensor_keepwarm::ledger_path(dir, other))
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs());
+        if written.is_none_or(|t| now.saturating_sub(t) > STALE_SECS) {
+            std::fs::remove_file(e.path()).ok();
+        }
+    }
 }
 
 /// `attend keepwarm check`: the sensor's judgment, once. Prints the
@@ -295,6 +368,7 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
         return;
     };
     let site = site(ident);
+    prune_stale(&dir, sid, now);
     // One read-step-write at a time per session: two processes on one
     // session id never both send a keepalive or a wrap.
     let _lock = lock_session(&dir, sid).ok();

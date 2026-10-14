@@ -295,38 +295,28 @@ impl Site {
         self.state_root.join("wrap").join(format!("{}.md", self.session_id))
     }
 
-    /// `wrap_file` expanded ([`Site::wrap_file`]) and confined: it must name
-    /// `{session}`, so two sessions never write one file, and land under
-    /// `{state}/wrap/` through no symlink, since a project's checked-in
-    /// config can set it and the mod writes wherever it points. Anything
-    /// else falls back to the default file, with why.
+    /// `wrap_file` expanded ([`Site::wrap_file`]) and confined
+    /// ([`check_wrap_path`]): a project's checked-in config can set it, and
+    /// the reply is written wherever it points. A refused path falls back to
+    /// the default file, checked the same way; when that fails too, the
+    /// path is empty and nothing is written. The note says why.
     pub fn confined_wrap_file(&self, template: &str, windows: &Windows, now: u64) -> (String, Option<String>) {
-        let base = self.state_root.join("wrap");
         let default = self.default_wrap_file();
-        let refuse = |why: &str| {
-            let note = format!("wrap_file \"{template}\" refused: {why}; the reply goes to {}", default.display());
-            (default.to_string_lossy().into_owned(), Some(note))
+        let fallback = |why: String| match check_wrap_path(&self.state_root, &self.session_id, &default) {
+            Ok(()) => {
+                let note = format!("wrap_file \"{template}\" refused: {why}; the reply goes to {}", default.display());
+                (default.to_string_lossy().into_owned(), Some(note))
+            }
+            Err(also) => (String::new(), Some(format!("wrap_file \"{template}\" refused: {why}; the default {} is refused too: {also}", default.display()))),
         };
         if !template.contains("{session}") {
-            return refuse("it names no {session}, so sessions would overwrite one another's wrap");
+            return fallback("it names no {session}, so sessions would overwrite one another's wrap".into());
         }
-        let Some(path) = normalize(Path::new(&self.wrap_file(template, windows, now))) else {
-            return refuse("it climbs above the root");
-        };
-        let Ok(rest) = path.strip_prefix(&base) else {
-            return refuse("it is outside {state}/wrap/");
-        };
-        if rest.as_os_str().is_empty() {
-            return refuse("it names the wrap directory itself");
+        let path = PathBuf::from(self.wrap_file(template, windows, now));
+        match check_wrap_path(&self.state_root, &self.session_id, &path) {
+            Ok(()) => (normalize(&path).unwrap_or(path).to_string_lossy().into_owned(), None),
+            Err(why) => fallback(why),
         }
-        let mut at = base.clone();
-        for part in rest.components() {
-            at.push(part);
-            if std::fs::symlink_metadata(&at).is_ok_and(|m| m.file_type().is_symlink()) {
-                return refuse("it passes through a symlink");
-            }
-        }
-        (path.to_string_lossy().into_owned(), None)
     }
 
     /// `wrap_file` with `{state}`, `{project}`, `{session}` and `{date}`
@@ -364,6 +354,64 @@ fn normalize(path: &Path) -> Option<PathBuf> {
         }
     }
     Some(out)
+}
+
+/// Whether `path` is a safe place for session `session_id`'s wrap reply:
+/// under `{state}/wrap/` once `.` and `..` are resolved, its file name
+/// naming the session, and no component from the wrap directory down a
+/// symlink. Checked when the route is made and again when the reply is
+/// written ([`write_wrap`]).
+pub fn check_wrap_path(state_root: &Path, session_id: &str, path: &Path) -> Result<(), String> {
+    let base = normalize(&state_root.join("wrap")).ok_or("the state root climbs above the root")?;
+    let path = normalize(path).ok_or("it climbs above the root")?;
+    let rest = path.strip_prefix(&base).map_err(|_| "it is outside {state}/wrap/".to_string())?;
+    if rest.as_os_str().is_empty() {
+        return Err("it names the wrap directory itself".into());
+    }
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    if session_id.is_empty() || !name.contains(session_id) {
+        return Err("its file name does not name the session".into());
+    }
+    let is_link = |p: &Path| std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink());
+    if is_link(&base) {
+        return Err(format!("{} is a symlink", base.display()));
+    }
+    let mut at = base.clone();
+    for part in rest.components() {
+        at.push(part);
+        if is_link(&at) {
+            return Err(format!("{} is a symlink", at.display()));
+        }
+    }
+    Ok(())
+}
+
+/// Writes `reply` to `path` for session `session_id`, checking the path
+/// again first ([`check_wrap_path`]): through a temp file created new
+/// beside it and renamed over it, so a symlink planted at the path is
+/// replaced, not followed.
+pub fn write_wrap(state_root: &Path, session_id: &str, path: &Path, reply: &str) -> Result<(), String> {
+    check_wrap_path(state_root, session_id, path)?;
+    let dir = path.parent().ok_or("it has no directory")?;
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    // A directory made just now could have been swapped for a link.
+    check_wrap_path(state_root, session_id, path)?;
+    replace_file(dir, path, reply)
+}
+
+/// Writes `reply` to a temp file created new in `dir` and renames it over
+/// `path`: whatever sits at `path`, a link included, is replaced, never
+/// written through.
+fn replace_file(dir: &Path, path: &Path, reply: &str) -> Result<(), String> {
+    use std::io::Write;
+    let tmp = dir.join(format!(".{}.tmp.{}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), std::process::id()));
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp).map_err(|e| e.to_string())?;
+    let done = f.write_all(reply.as_bytes()).and_then(|()| f.sync_all()).and_then(|()| std::fs::rename(&tmp, path));
+    if let Err(e) = done {
+        std::fs::remove_file(&tmp).ok();
+        return Err(e.to_string());
+    }
+    Ok(())
 }
 
 /// Whether `to` names the `#open` channel, which reaches every listening

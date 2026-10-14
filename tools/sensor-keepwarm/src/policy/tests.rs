@@ -580,9 +580,66 @@ fn wrap_file_is_confined_to_the_wrap_directory() {
     #[cfg(unix)]
     {
         assert_eq!(file, root.join("agent-ways/wrap/sid-1.md").to_string_lossy());
-        assert!(note.as_deref().unwrap_or_default().contains("passes through a symlink"));
+        assert!(note.as_deref().unwrap_or_default().contains("out is a symlink"));
     }
     let _ = (file, note);
+}
+
+/// The session must be in the resolved file's name, not anywhere in the
+/// template; the wrap directory itself and the default file are checked
+/// too, and a default that fails leaves no file at all.
+#[cfg(unix)]
+#[test]
+fn the_resolved_name_the_wrap_directory_and_the_default_are_checked() {
+    let w = Windows::default().with_zone(TimeZone::UTC);
+    let (file, note) = site().confined_wrap_file("{state}/wrap/{session}/../shared.md", &w, MONDAY);
+    assert_eq!(file, "/state/agent-ways/wrap/sid-1.md");
+    assert!(note.unwrap_or_default().contains("does not name the session"));
+
+    let root = std::env::temp_dir().join(format!("keepwarm-wrapdir-test-{}", std::process::id()));
+    let outside = root.join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::create_dir_all(root.join("a")).unwrap();
+    // The wrap directory itself a link out.
+    std::os::unix::fs::symlink(&outside, root.join("a/wrap")).unwrap();
+    let s1 = Site { state_root: root.join("a"), ..site() };
+    let (file, note) = s1.confined_wrap_file("{state}/wrap/{session}.md", &w, MONDAY);
+    assert_eq!(file, "", "no safe file");
+    assert!(note.unwrap_or_default().contains("is refused too"));
+    // The default file itself a planted link: refused, nothing to fall back on.
+    std::fs::create_dir_all(root.join("b/wrap")).unwrap();
+    std::os::unix::fs::symlink(outside.join("x"), root.join("b/wrap/sid-1.md")).unwrap();
+    let s2 = Site { state_root: root.join("b"), ..site() };
+    assert_eq!(s2.confined_wrap_file("~/x/{session}", &w, MONDAY).0, "");
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// The reply is written by attend, which checks again and renames a temp
+/// file over the path: a link planted there after the check is replaced,
+/// never followed.
+#[cfg(unix)]
+#[test]
+fn write_wrap_replaces_a_planted_link_and_refuses_a_linked_directory() {
+    let root = std::env::temp_dir().join(format!("keepwarm-write-test-{}", std::process::id()));
+    let state = root.join("state");
+    let wrap = state.join("wrap");
+    std::fs::create_dir_all(&wrap).unwrap();
+    let victim = root.join("victim");
+    std::fs::write(&victim, "keep me").unwrap();
+    let path = wrap.join("sid-1.md");
+    // Planted between the route and the write: check_wrap_path refuses it.
+    std::os::unix::fs::symlink(&victim, &path).unwrap();
+    assert!(write_wrap(&state, "sid-1", &path, "reply").is_err());
+    assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep me");
+    std::fs::remove_file(&path).unwrap();
+    write_wrap(&state, "sid-1", &path, "reply").unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "reply");
+    assert!(!std::fs::symlink_metadata(&path).unwrap().file_type().is_symlink());
+    assert!(write_wrap(&state, "other", &wrap.join("sid-1-x.md"), "r").is_err(), "the name must carry the writer's session");
+    std::fs::remove_dir_all(&wrap).unwrap();
+    std::os::unix::fs::symlink(&root, &wrap).unwrap();
+    assert!(write_wrap(&state, "sid-1", &wrap.join("sid-1.md"), "r").is_err());
+    std::fs::remove_dir_all(&root).ok();
 }
 
 /// wrap_to #open would broadcast to every listening session: refused, and
@@ -602,4 +659,25 @@ fn wrap_to_open_is_refused() {
     c.wrap_to = "#deploy".into();
     let mut s = Session::new(MONDAY, 200_000);
     assert!(s.check(&c, Gate::Off, MONDAY + 50 * MIN).wrap.unwrap().notes.is_empty());
+}
+
+/// The last step of the write renames over the path: a link planted after
+/// the check is replaced, and its target keeps what it held.
+#[cfg(unix)]
+#[test]
+fn the_write_renames_over_a_link_and_never_follows_it() {
+    let root = std::env::temp_dir().join(format!("keepwarm-rename-test-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let victim = root.join("victim");
+    std::fs::write(&victim, "keep me").unwrap();
+    let path = root.join("sid-1.md");
+    std::os::unix::fs::symlink(&victim, &path).unwrap();
+    super::replace_file(&root, &path, "reply").unwrap();
+    let kept = std::fs::read_to_string(&victim).unwrap();
+    let is_link = std::fs::symlink_metadata(&path).unwrap().file_type().is_symlink();
+    let wrote = std::fs::read_to_string(&path).unwrap();
+    std::fs::remove_dir_all(&root).ok();
+    assert_eq!(kept, "keep me");
+    assert!(!is_link);
+    assert_eq!(wrote, "reply");
 }

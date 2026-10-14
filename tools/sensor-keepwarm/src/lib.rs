@@ -767,6 +767,22 @@ impl KeepwarmSensor {
     }
 }
 
+impl KeepwarmSensor {
+    /// One poll on `reading`, under the session's lock. The sensor never
+    /// judges the keepalive policy, so the policy's part of the ledger is
+    /// read back from disk before the step and written as it was: an
+    /// `attend run` beside a mod that runs the policy cannot wipe its count,
+    /// its wrap or its stop.
+    pub fn poll_with(&mut self, reading: &Reading, now: u64) -> Vec<(f64, String)> {
+        let _lock = lock_session(&self.dir, &self.session_id).ok();
+        self.state.policy = read_ledger(&self.dir, &self.session_id).map(|l| l.policy).unwrap_or_default();
+        let arm = read_arm(&self.dir, &self.session_id);
+        let out = self.state.step(reading, arm.as_ref(), now);
+        settle(&self.dir, &self.session_id, &self.state, arm.as_ref(), &out, now);
+        out.observations
+    }
+}
+
 impl Sensor for KeepwarmSensor {
     fn name(&self) -> &str {
         "keepwarm"
@@ -778,11 +794,7 @@ impl Sensor for KeepwarmSensor {
         let Some(reading) = read_context(&self.session_id, &focus.working_dir) else {
             return Vec::new();
         };
-        let now = sensor_trait::epoch_secs();
-        let arm = read_arm(&self.dir, &self.session_id);
-        let out = self.state.step(&reading, arm.as_ref(), now);
-        settle(&self.dir, &self.session_id, &self.state, arm.as_ref(), &out, now);
-        out.observations
+        self.poll_with(&reading, sensor_trait::epoch_secs())
     }
 
     fn emission_threshold(&self) -> f64 {
@@ -1148,6 +1160,28 @@ mod tests {
         assert_eq!(read_ledger(&dir, "sid"), Some(ledger));
         assert_eq!(read_arm(&dir, "other"), None);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// An `attend run` beside a mod: the sensor's poll keeps the policy's
+    /// marks the mod wrote since the sensor loaded the ledger.
+    #[test]
+    fn the_sensor_keeps_the_policy_written_beside_it() {
+        let dir = std::env::temp_dir().join(format!("keepwarm-sensor-test-{}", std::process::id()));
+        let mut sensor = KeepwarmSensor::new("sid".into(), dir.clone());
+        let r = reading(vec![entry(1000, 200_000, 500)]);
+        sensor.poll_with(&r, 1000);
+        // The mod's policy check counts and wraps meanwhile.
+        let mut ledger = read_ledger(&dir, "sid").unwrap_or_default();
+        ledger.policy.count = 8;
+        ledger.policy.wrapped_at = Some(1500);
+        write_ledger(&dir, "sid", &ledger).unwrap();
+        // A cold write makes the sensor's step rewrite the ledger.
+        let r2 = reading(vec![entry(1000, 200_000, 500), entry(1600, 0, 200_500)]);
+        sensor.poll_with(&r2, 1700);
+        let after = read_ledger(&dir, "sid").unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(after.misses.len(), 1, "the step ran and wrote");
+        assert_eq!((after.policy.count, after.policy.wrapped_at), (8, Some(1500)));
     }
 
     #[test]
