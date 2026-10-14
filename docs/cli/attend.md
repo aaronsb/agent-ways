@@ -11,6 +11,14 @@ This document contains the help content for the `attend` command-line program.
 * [`attend listen off`↴](#attend-listen-off)
 * [`attend listen status`↴](#attend-listen-status)
 * [`attend listen beat`↴](#attend-listen-beat)
+* [`attend message`↴](#attend-message)
+* [`attend message send`↴](#attend-message-send)
+* [`attend message reply`↴](#attend-message-reply)
+* [`attend message inbox`↴](#attend-message-inbox)
+* [`attend message unread`↴](#attend-message-unread)
+* [`attend message cleanup`↴](#attend-message-cleanup)
+* [`attend message delete`↴](#attend-message-delete)
+* [`attend message tombstone`↴](#attend-message-tombstone)
 * [`attend channel`↴](#attend-channel)
 * [`attend channel list`↴](#attend-channel-list)
 * [`attend channel join`↴](#attend-channel-join)
@@ -41,14 +49,6 @@ This document contains the help content for the `attend` command-line program.
 * [`attend config path`↴](#attend-config-path)
 * [`attend config lint`↴](#attend-config-lint)
 * [`attend config tune`↴](#attend-config-tune)
-* [`attend message`↴](#attend-message)
-* [`attend message send`↴](#attend-message-send)
-* [`attend message reply`↴](#attend-message-reply)
-* [`attend message inbox`↴](#attend-message-inbox)
-* [`attend message unread`↴](#attend-message-unread)
-* [`attend message tombstone`↴](#attend-message-tombstone)
-* [`attend message delete`↴](#attend-message-delete)
-* [`attend message cleanup`↴](#attend-message-cleanup)
 
 ## `attend`
 
@@ -62,13 +62,13 @@ In a session with the attend mod, the attend_* tools send, reply, join and list 
 
 * `run` — Start the sensor loop (use with Monitor for async delivery)
 * `listen` — Turn listening on or off for this session without joining a channel, or show it (default: status)
+* `message` — Send, reply to, read, count and delete messages, and tombstone a session (default: inbox)
 * `channel` — Join, leave, list and manage channels and scenes (default: list)
 * `peer` — List sessions, show this session's identity and the running loops (default: list)
 * `keepwarm` — Keep the prompt cache warm across idle stretches (ADR-182; default: status)
 * `chat` — Launch the interactive chat TUI (ADR-120)
 * `sensor` — List sensors and audit their permissions (default: list)
 * `config` — Manage configuration (default: show)
-* `message` — Send, reply to, read, count and delete messages, and tombstone a session (default: inbox)
 
 
 
@@ -141,6 +141,175 @@ Print `listening` or `not listening` (default)
 Mark a listening session alive: touch its heartbeat, deliver nothing. After a /clear it first takes over the enrollment the session's earlier id made, as the drain does. The attend mod runs it on a timer, through turns too, so the session stays within the liveness grace while it lives. A session that does not listen is written nothing
 
 **Usage:** `attend listen beat`
+
+
+
+## `attend message`
+
+Send, reply to, read, count and delete messages, and tombstone a session (default: inbox)
+
+**Usage:** `attend message [OPTIONS]
+       message <COMMAND>`
+
+###### **Subcommands:**
+
+* `send` — Send a message: a direct message with --to, a channel post with --channel, else to #open
+* `reply` — Reply to the most recent peer message: a direct message to its sender, or in its named channel
+* `inbox` — Read pending messages from peers
+* `unread` — Count this session's unread messages by room, marking none of them read
+* `cleanup` — Reap signal files whose owning project is gone, and prune empty project dirs. Lifetime is bound to project liveness (ADR-136); the one removal by age is of a message `attend message delete` marked, 7 days after the mark, or for a message in a project tray once that project has started 3 Claude Code sessions since, each /clear counting as one (ADR-404 D3e).
+* `delete` — Mark for deletion the messages no live session still has to read
+* `tombstone` — Tombstone a session that has exited, so every reader skips its messages
+
+###### **Options:**
+
+* `--limit <LIMIT>` — Max messages per page, newest first
+
+  Default value: `25`
+* `--page <PAGE>` — Page number; 1 = newest. Higher numbers walk back into history
+
+  Default value: `1`
+* `--before <TS>` — Cursor: only show messages older than this unix timestamp
+* `--drain` — Atomically deliver pending messages and record their consumption (ADR-172). The Stop-hook fast path: a silent no-op under an unresolved identity or for a session not enrolled by attend run or a channel join (#720). On a cold start (no seen-set) it delivers addressed mail and fresh messages and counts the older backlog it does not show
+* `--wake` — With --drain: deliver and mark nothing unless a pending message would wake this session, one addressed to it, sent to its project, a reply to a message it sent, or any post in one of its named channels; then deliver all that is pending. Other `#open` posts alone wait for the next turn (ADR-406 item 2). Once the session's prompt cache has lapsed (its tier's TTL less two minutes after its last turn, or no transcript readable in five seconds), nothing wakes it: the drain delivers nothing and reports `cache_lapsed`. The attend mod polls with it while idle
+* `--format <FMT>` — Output format for --drain: `plain` (human/agent readable), `hook` (Claude Code Stop-hook JSON; reads the hook's stdin payload for `stop_hook_active`) or `json` (the same as --json)
+
+  Default value: `plain`
+* `--json` — Print the listing, the message, or with --drain the drained messages, held-back count, note and name, as one JSON document
+
+
+
+## `attend message send`
+
+Send a message: a direct message with --to, a channel post with --channel, else to #open
+
+**Usage:** `attend message send [OPTIONS] [MESSAGE]...`
+
+###### **Arguments:**
+
+* `<MESSAGE>` — Message body (must follow all flags)
+
+###### **Options:**
+
+* `--to <WHO>` — Send a direct message: to a session's name or id, a person's member id, or a project path for every live session there
+* `--channel <NAME>` — Post to a named channel; `open` or `#open` posts to #open. With --to as well, the post stays in the channel, addressed to them
+* `--json` — Print the written signal as one JSON document
+
+
+
+## `attend message reply`
+
+Reply to the most recent peer message: a direct message to its sender, or in its named channel
+
+**Usage:** `attend message reply [OPTIONS] [MESSAGE]...`
+
+###### **Arguments:**
+
+* `<MESSAGE>` — Message body (must follow all flags)
+
+###### **Options:**
+
+* `--re <ID>` — Reply to this message id instead of the newest one delivered. The reply goes to its sender, or into its named channel, as without --re
+* `--to <WHO>` — Send the reply as a direct message to this session, person or project path instead of to the parent's sender
+* `--channel <NAME>` — Post the reply to this channel instead; `open` posts to #open
+* `--json` — Print the written signal as one JSON document
+
+
+
+## `attend message inbox`
+
+Read pending messages from peers
+
+**Usage:** `attend message inbox [OPTIONS] [MSG_ID]`
+
+###### **Arguments:**
+
+* `<MSG_ID>` — Specific message id to read in detail (omit to list inbox)
+
+###### **Options:**
+
+* `--limit <LIMIT>` — Max messages per page, newest first
+
+  Default value: `25`
+* `--page <PAGE>` — Page number; 1 = newest. Higher numbers walk back into history
+
+  Default value: `1`
+* `--before <TS>` — Cursor: only show messages older than this unix timestamp
+* `--drain` — Atomically deliver pending messages and record their consumption (ADR-172). The Stop-hook fast path: a silent no-op under an unresolved identity or for a session not enrolled by attend run or a channel join (#720). On a cold start (no seen-set) it delivers addressed mail and fresh messages and counts the older backlog it does not show
+* `--wake` — With --drain: deliver and mark nothing unless a pending message would wake this session, one addressed to it, sent to its project, a reply to a message it sent, or any post in one of its named channels; then deliver all that is pending. Other `#open` posts alone wait for the next turn (ADR-406 item 2). Once the session's prompt cache has lapsed (its tier's TTL less two minutes after its last turn, or no transcript readable in five seconds), nothing wakes it: the drain delivers nothing and reports `cache_lapsed`. The attend mod polls with it while idle
+* `--format <FMT>` — Output format for --drain: `plain` (human/agent readable), `hook` (Claude Code Stop-hook JSON; reads the hook's stdin payload for `stop_hook_active`) or `json` (the same as --json)
+
+  Default value: `plain`
+* `--json` — Print the listing, the message, or with --drain the drained messages, held-back count, note and name, as one JSON document
+
+
+
+## `attend message unread`
+
+Count this session's unread messages by room, marking none of them read
+
+**Usage:** `attend message unread [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Print the result as one JSON document
+
+
+
+## `attend message cleanup`
+
+Reap signal files whose owning project is gone, and prune empty project dirs. Lifetime is bound to project liveness (ADR-136); the one removal by age is of a message `attend message delete` marked, 7 days after the mark, or for a message in a project tray once that project has started 3 Claude Code sessions since, each /clear counting as one (ADR-404 D3e).
+
+**Usage:** `attend message cleanup [OPTIONS]`
+
+###### **Options:**
+
+* `-n`, `--dry-run` — List what would be removed without deleting
+* `--all` — Remove every signal file regardless of project liveness
+
+
+
+## `attend message delete`
+
+Mark for deletion the messages no live session still has to read
+
+A message is marked when it is in the scope, older than --older-than, older than 90 seconds, and no session that may still read the bus would be delivered it: a session keeps what `attend message unread` counts for it, its cold start included, and one this host cannot judge keeps its mail. A person in attend-chat holds nothing. Every reader skips a marked message, and `attend message cleanup` removes it 7 days after the mark, or for a message in a project tray once that project has started 3 Claude Code sessions since, each /clear counting as one (ADR-404 D3e). --undo takes a delete back, and its messages are delivered again, while cleanup has not yet removed them.
+
+**Usage:** `attend message delete [OPTIONS]`
+
+###### **Options:**
+
+* `--open` — Delete in #open
+* `--channel <NAME>` — Delete in this channel
+* `--dm <SESSION-ID>` — Delete in the direct-message thread between you and this session: what it sent you and what you sent it. You are the session this runs in, under its current id and the ids it had before /clear, or outside a session the person at this terminal
+* `--everywhere` — Delete in every room: #open, each channel, each project tray and each person's tray
+* `--from <SESSION-ID>` — Only messages this session sent
+* `--older-than <WHEN>` — How old a message must be: `current` (before the earliest start of any live session), `today` (before local midnight), `all`, a duration such as 90m, 2h30m, 3d or 1w, or a local date YYYY-MM-DD
+
+  Default value: `all`
+* `-n`, `--dry-run` — Report what would be marked and mark nothing
+* `--undo <BATCH>` — Remove the marks of the newest delete, or of the batch named
+* `--json` — Print the result as one JSON document
+
+
+
+## `attend message tombstone`
+
+Tombstone a session that has exited, so every reader skips its messages
+
+The drain, the mod, `attend message unread`, the Monitor poller and `attend message inbox` all skip what a tombstoned session sent, and the drain records it read, up to when it was tombstoned; what the session sends later, back under --resume, shows. Only an agent's session that this host saw exit is tombstoned: a person's id, a session that may still read the bus, an id such a session had before /clear and this session's own are refused. Its messages stay on disk; `attend message delete --everywhere --from <id>` marks them for deletion (ADR-404 D3e).
+
+**Usage:** `attend message tombstone [OPTIONS] [SESSION-ID]`
+
+###### **Arguments:**
+
+* `<SESSION-ID>` — The session to tombstone
+
+###### **Options:**
+
+* `--undo` — Remove the session's tombstone. What a drain recorded read while it stood stays read
+* `--list` — List the tombstoned sessions
+* `--json` — Print the result as one JSON document
 
 
 
@@ -503,175 +672,6 @@ Survey session history and derive engagement config
 ###### **Options:**
 
 * `--apply` — Write the derived absolute_refractory, decay_per_minute and peer_activity_window to the user config, changing nothing else
-
-
-
-## `attend message`
-
-Send, reply to, read, count and delete messages, and tombstone a session (default: inbox)
-
-**Usage:** `attend message [OPTIONS]
-       message <COMMAND>`
-
-###### **Subcommands:**
-
-* `send` — Send a message: a direct message with --to, a channel post with --channel, else to #open
-* `reply` — Reply to the most recent peer message: a direct message to its sender, or in its named channel
-* `inbox` — Read pending messages from peers
-* `unread` — Count this session's unread messages by room, marking none of them read
-* `tombstone` — Tombstone a session that has exited, so every reader skips its messages
-* `delete` — Mark for deletion the messages no live session still has to read
-* `cleanup` — Reap signal files whose owning project is gone, and prune empty project dirs. Lifetime is bound to project liveness (ADR-136); the one removal by age is of a message `attend message delete` marked, 7 days after the mark, or for a message in a project tray once that project has started 3 Claude Code sessions since, each /clear counting as one (ADR-404 D3e).
-
-###### **Options:**
-
-* `--limit <LIMIT>` — Max messages per page, newest first
-
-  Default value: `25`
-* `--page <PAGE>` — Page number; 1 = newest. Higher numbers walk back into history
-
-  Default value: `1`
-* `--before <TS>` — Cursor: only show messages older than this unix timestamp
-* `--drain` — Atomically deliver pending messages and record their consumption (ADR-172). The Stop-hook fast path: a silent no-op under an unresolved identity or for a session not enrolled by attend run or a channel join (#720). On a cold start (no seen-set) it delivers addressed mail and fresh messages and counts the older backlog it does not show
-* `--wake` — With --drain: deliver and mark nothing unless a pending message would wake this session, one addressed to it, sent to its project, a reply to a message it sent, or any post in one of its named channels; then deliver all that is pending. Other `#open` posts alone wait for the next turn (ADR-406 item 2). Once the session's prompt cache has lapsed (its tier's TTL less two minutes after its last turn, or no transcript readable in five seconds), nothing wakes it: the drain delivers nothing and reports `cache_lapsed`. The attend mod polls with it while idle
-* `--format <FMT>` — Output format for --drain: `plain` (human/agent readable), `hook` (Claude Code Stop-hook JSON; reads the hook's stdin payload for `stop_hook_active`) or `json` (the same as --json)
-
-  Default value: `plain`
-* `--json` — Print the listing, the message, or with --drain the drained messages, held-back count, note and name, as one JSON document
-
-
-
-## `attend message send`
-
-Send a message: a direct message with --to, a channel post with --channel, else to #open
-
-**Usage:** `attend message send [OPTIONS] [MESSAGE]...`
-
-###### **Arguments:**
-
-* `<MESSAGE>` — Message body (must follow all flags)
-
-###### **Options:**
-
-* `--to <WHO>` — Send a direct message: to a session's name or id, a person's member id, or a project path for every live session there
-* `--channel <NAME>` — Post to a named channel; `open` or `#open` posts to #open. With --to as well, the post stays in the channel, addressed to them
-* `--json` — Print the written signal as one JSON document
-
-
-
-## `attend message reply`
-
-Reply to the most recent peer message: a direct message to its sender, or in its named channel
-
-**Usage:** `attend message reply [OPTIONS] [MESSAGE]...`
-
-###### **Arguments:**
-
-* `<MESSAGE>` — Message body (must follow all flags)
-
-###### **Options:**
-
-* `--re <ID>` — Reply to this message id instead of the newest one delivered. The reply goes to its sender, or into its named channel, as without --re
-* `--to <WHO>` — Send the reply as a direct message to this session, person or project path instead of to the parent's sender
-* `--channel <NAME>` — Post the reply to this channel instead; `open` posts to #open
-* `--json` — Print the written signal as one JSON document
-
-
-
-## `attend message inbox`
-
-Read pending messages from peers
-
-**Usage:** `attend message inbox [OPTIONS] [MSG_ID]`
-
-###### **Arguments:**
-
-* `<MSG_ID>` — Specific message id to read in detail (omit to list inbox)
-
-###### **Options:**
-
-* `--limit <LIMIT>` — Max messages per page, newest first
-
-  Default value: `25`
-* `--page <PAGE>` — Page number; 1 = newest. Higher numbers walk back into history
-
-  Default value: `1`
-* `--before <TS>` — Cursor: only show messages older than this unix timestamp
-* `--drain` — Atomically deliver pending messages and record their consumption (ADR-172). The Stop-hook fast path: a silent no-op under an unresolved identity or for a session not enrolled by attend run or a channel join (#720). On a cold start (no seen-set) it delivers addressed mail and fresh messages and counts the older backlog it does not show
-* `--wake` — With --drain: deliver and mark nothing unless a pending message would wake this session, one addressed to it, sent to its project, a reply to a message it sent, or any post in one of its named channels; then deliver all that is pending. Other `#open` posts alone wait for the next turn (ADR-406 item 2). Once the session's prompt cache has lapsed (its tier's TTL less two minutes after its last turn, or no transcript readable in five seconds), nothing wakes it: the drain delivers nothing and reports `cache_lapsed`. The attend mod polls with it while idle
-* `--format <FMT>` — Output format for --drain: `plain` (human/agent readable), `hook` (Claude Code Stop-hook JSON; reads the hook's stdin payload for `stop_hook_active`) or `json` (the same as --json)
-
-  Default value: `plain`
-* `--json` — Print the listing, the message, or with --drain the drained messages, held-back count, note and name, as one JSON document
-
-
-
-## `attend message unread`
-
-Count this session's unread messages by room, marking none of them read
-
-**Usage:** `attend message unread [OPTIONS]`
-
-###### **Options:**
-
-* `--json` — Print the result as one JSON document
-
-
-
-## `attend message tombstone`
-
-Tombstone a session that has exited, so every reader skips its messages
-
-The drain, the mod, `attend message unread`, the Monitor poller and `attend message inbox` all skip what a tombstoned session sent, and the drain records it read, up to when it was tombstoned; what the session sends later, back under --resume, shows. Only an agent's session that this host saw exit is tombstoned: a person's id, a session that may still read the bus, an id such a session had before /clear and this session's own are refused. Its messages stay on disk; `attend message delete --everywhere --from <id>` marks them for deletion (ADR-404 D3e).
-
-**Usage:** `attend message tombstone [OPTIONS] [SESSION-ID]`
-
-###### **Arguments:**
-
-* `<SESSION-ID>` — The session to tombstone
-
-###### **Options:**
-
-* `--undo` — Remove the session's tombstone. What a drain recorded read while it stood stays read
-* `--list` — List the tombstoned sessions
-* `--json` — Print the result as one JSON document
-
-
-
-## `attend message delete`
-
-Mark for deletion the messages no live session still has to read
-
-A message is marked when it is in the scope, older than --older-than, older than 90 seconds, and no session that may still read the bus would be delivered it: a session keeps what `attend message unread` counts for it, its cold start included, and one this host cannot judge keeps its mail. A person in attend-chat holds nothing. Every reader skips a marked message, and `attend message cleanup` removes it 7 days after the mark, or for a message in a project tray once that project has started 3 Claude Code sessions since, each /clear counting as one (ADR-404 D3e). --undo takes a delete back, and its messages are delivered again, while cleanup has not yet removed them.
-
-**Usage:** `attend message delete [OPTIONS]`
-
-###### **Options:**
-
-* `--open` — Delete in #open
-* `--channel <NAME>` — Delete in this channel
-* `--dm <SESSION-ID>` — Delete in the direct-message thread between you and this session: what it sent you and what you sent it. You are the session this runs in, under its current id and the ids it had before /clear, or outside a session the person at this terminal
-* `--everywhere` — Delete in every room: #open, each channel, each project tray and each person's tray
-* `--from <SESSION-ID>` — Only messages this session sent
-* `--older-than <WHEN>` — How old a message must be: `current` (before the earliest start of any live session), `today` (before local midnight), `all`, a duration such as 90m, 2h30m, 3d or 1w, or a local date YYYY-MM-DD
-
-  Default value: `all`
-* `-n`, `--dry-run` — Report what would be marked and mark nothing
-* `--undo <BATCH>` — Remove the marks of the newest delete, or of the batch named
-* `--json` — Print the result as one JSON document
-
-
-
-## `attend message cleanup`
-
-Reap signal files whose owning project is gone, and prune empty project dirs. Lifetime is bound to project liveness (ADR-136); the one removal by age is of a message `attend message delete` marked, 7 days after the mark, or for a message in a project tray once that project has started 3 Claude Code sessions since, each /clear counting as one (ADR-404 D3e).
-
-**Usage:** `attend message cleanup [OPTIONS]`
-
-###### **Options:**
-
-* `-n`, `--dry-run` — List what would be removed without deleting
-* `--all` — Remove every signal file regardless of project liveness
 
 
 

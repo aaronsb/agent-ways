@@ -200,9 +200,17 @@ pub(crate) fn with_limits(cmd: clap::Command) -> clap::Command {
          project liveness (ADR-136); the one removal by age is of a message `attend message delete` marked, \
          {reap} (ADR-404 D3e)."
     );
-    cmd.mut_subcommand("message", |m| {
-        m.mut_subcommand("delete", |d| d.about(delete.lines().next().unwrap_or_default().to_string()).long_about(delete))
-            .mut_subcommand("cleanup", |c| c.about(cleanup))
+    // `mut_subcommands` edits each in place; `mut_subcommand` would move the
+    // edited one to the end and reorder the help and the generated docs.
+    cmd.mut_subcommands(|top| {
+        if top.get_name() != "message" {
+            return top;
+        }
+        top.mut_subcommands(|verb| match verb.get_name() {
+            "delete" => verb.about(delete.lines().next().unwrap_or_default().to_string()).long_about(delete.clone()),
+            "cleanup" => verb.about(cleanup.clone()),
+            _ => verb,
+        })
     })
 }
 
@@ -689,6 +697,15 @@ mod tests {
         assert!(cleanup.contains(&format!("{} days", crate::cmd::cleanup::MARK_REAP_DAYS)), "{cleanup}");
         let tombstone = at(&cli, "message tombstone").get_long_about().unwrap().to_string();
         assert!(tombstone.contains("attend message delete --everywhere --from <id>"), "{tombstone}");
+    }
+
+    /// Writing the limits into the help keeps every verb where it is declared.
+    #[test]
+    fn the_limits_keep_the_declared_order() {
+        let names = |c: &clap::Command| c.get_subcommands().map(|s| s.get_name().to_string()).collect::<Vec<_>>();
+        let (declared, written) = (Cli::command(), crate::cli_command());
+        assert_eq!(names(&written), names(&declared));
+        assert_eq!(names(&at(&written, "message")), ["send", "reply", "inbox", "unread", "cleanup", "delete", "tombstone"]);
     }
 
     #[test]
