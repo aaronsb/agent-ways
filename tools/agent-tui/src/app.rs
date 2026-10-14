@@ -94,8 +94,8 @@ pub(crate) enum Mode {
     Entry(Box<entry::Entry>),
 }
 
-/// The click targets of review's bar, a flow's and the editor's buttons, and
-/// what a dialog's buttons answer.
+/// The click targets of review's bar and the editor's Save, and what a
+/// dialog's buttons answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Btn {
     Apply,
@@ -117,24 +117,6 @@ enum Btn {
     No,
 }
 
-impl Btn {
-    /// The key a click or Enter on the button stands for.
-    fn key(self) -> KeyCode {
-        match self {
-            Btn::Apply => KeyCode::Char('a'),
-            Btn::Discard => KeyCode::Char('X'),
-            Btn::Quit => KeyCode::Char('D'),
-            Btn::Back => KeyCode::Esc,
-            Btn::Review => KeyCode::Char('r'),
-            Btn::Next | Btn::Finish => KeyCode::Right,
-            Btn::Cancel => KeyCode::Char('q'),
-            Btn::Save => KeyCode::Char('s'),
-            Btn::Drop => KeyCode::Char('d'),
-            Btn::Yes => KeyCode::Char('y'),
-            Btn::No => KeyCode::Char('n'),
-        }
-    }
-}
 
 /// What a reload keeps of each node, by dotted key: whether it was open,
 /// and a pending value as (loaded, value).
@@ -156,12 +138,10 @@ struct Hits {
     tabs: Vec<(Rect, usize)>,
     /// The tree list inside its border; row `i` is at `y + i - offset`.
     list: Rect,
-    /// The entry dialog's box.
-    entry: Option<Rect>,
     /// The open dialog and its buttons, with the kind of mode that drew it
     /// ([`App::drawn_dialog`]).
     dialog: Option<(std::mem::Discriminant<Mode>, dialog::Drawn)>,
-    /// Review's bar targets, a flow's buttons and the theme editor's Save.
+    /// Review's bar targets and the theme editor's Save.
     buttons: Vec<(Rect, Btn)>,
     /// The call to action on the bottom bar.
     cta: Rect,

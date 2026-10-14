@@ -50,6 +50,8 @@ review-discard | ways settings matching --project $PS       | Down Down e C-u te
 item-delete | ways settings theme --project $PS             | a Enter text:scratch Enter a Down Down Down Enter | y
 action-menu | ways settings install --project $PS           | a Down
 theme-menu | ways settings theme --project $PS              | a Down
+flow-pick  | ways settings install --project $PS            | t
+flow-other | ways settings install --project $PS            | t Down Enter text:~/work Enter
 "
 
 python3 "$TOOLS/fixture.py" "$WORK" >/dev/null

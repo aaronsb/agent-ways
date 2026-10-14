@@ -339,7 +339,7 @@ impl App {
         if self.modal().is_some() {
             return self.modal_mouse(m, closes);
         }
-        let in_entry = self.hits.entry.is_some_and(|r| r.contains(at));
+        let in_entry = self.drawn_dialog().is_some_and(|d| d.contains(at));
         match &mut self.mode {
             Mode::Browse if self.pane.is_some() => self.pane_mouse(m),
             Mode::Browse if self.tab == self.roots.len() => self.theme_mouse(m),
@@ -394,9 +394,14 @@ impl App {
             }
             return self.review_to(Some(t));
         }
-        // A bar target presses its key.
+        // A bar target presses the key it names: a apply, X discard, Esc back.
         if let Some(&(_, b)) = self.hits.buttons.iter().find(|(r, _)| r.contains(at)) {
-            self.key(KeyEvent::new(b.key(), KeyModifiers::NONE));
+            let k = match b {
+                Btn::Apply => KeyCode::Char('a'),
+                Btn::Discard => KeyCode::Char('X'),
+                _ => KeyCode::Esc,
+            };
+            self.key(KeyEvent::new(k, KeyModifiers::NONE));
             return;
         }
         let list = self.hits.list;
