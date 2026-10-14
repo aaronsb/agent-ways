@@ -79,6 +79,11 @@ basis:
     level: guided
     said: we probably need to be able to tombstone an agent's messages so they don't come back into chat again
     via: Claude Code session 2026-10-13
+  - operator: aaronsb
+    level: guided
+    said: "build the capabilities that are missing and make sure the ones implemented don't have inconsistent implementation"
+    via: "issue #931, quoting the operator's goal for the attend-chat UX audit; its build item B7 is editable settings"
+  - precedent: ADR-503
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -191,3 +196,13 @@ The operator asked for a way to clear direct messages from the column: "we shoul
 - **Tombstone… on a dead agent's row.** A claude whose session is not live has Tombstone… on its menu, asked with a `y`. It runs `attend message tombstone <session-id>`; the agent's messages leave every tab and its row leaves Agents. A live agent's row never offers it. A dead sighting whose id is among a live session's ids before `/clear` is folded into that session's row, so it has no row of its own.
 - **Through the attend CLI.** attend-chat runs both verbs as child processes with `--json` and shows the report on the status line. When the installed attend lacks a verb, the status line names the verb and says attend needs updating. `/purge` stays for one release as an alias of Delete read messages for everyone… → All on the shown channel.
 - Item (b)'s rule holds: every item that drops something asks for `y` first, and the list now reads Hide messages here, Delete read messages for everyone…, Leave, Delete channel, Remove and Tombstone….
+
+## Amendment (2026-10-13): Settings ▸ sets the chat's and the attend mod's settings where the operator picks
+
+Item (b)'s note that the `≡` menu's Settings item "shows the `/config` listing and sets nothing" no longer holds. Issue #931 lists editable settings as build item B7.
+
+- **The list.** `≡` → Settings ▸ lists `attend_mod.listening` and `attend_mod.keepwarm`, then the chat's `attend.chat.*` keys, one row each as `name = value (layer)`. The value is the one in effect for the project enclosing the chat's working directory, or for the user when no project encloses it. The layer is `default`, `user`, `target` or `project`.
+- **The place.** An attend mod key is a ways key that a project can set (ADR-406), so picking it asks where to write it. The choices are the user file, the project enclosing the chat's directory, the project of each live agent, and Another project…, a directory typed in an entry dialog. Each choice names what its file holds now. A directory that no project encloses is refused inside the dialog. A chat key is held in the user file alone, so picking it goes straight to its values.
+- **The value.** The picker lists the key's values and marks the one in effect at that place. Unset here is offered where the place's file holds the key, and it removes the key from that file.
+- **The write.** A pick is written as `ways settings set <key> <value> [--project <root>]` writes it. The file, the header of a new file and the edit are the same, and the write goes through the agent-settings writer under its lock. A project is found by the rule `ways settings` uses: the nearest enclosing project root, else the nearest git checkout, and never the home directory. That rule now lives in `ways-core`, and attend-chat depends on `ways-core` for the ways schema, layers and paths. The bottom bar says what was written and where, and names a layer that still overrides it for the chat's project. The chat's own keys apply at once. The picker closes after the write, as Theme ▸ and Keybinding set ▸ do.
+- `/config` still lists and sets the chat's own keys.
