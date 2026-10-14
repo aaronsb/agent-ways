@@ -116,7 +116,6 @@ impl App {
     fn draw_frame(&mut self, f: &mut Frame) {
         let [bar, main, status] = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
         let [left, right] = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)]).areas(main);
-        self.hits.entry = None;
         self.hits.dialog = None;
         self.hits.buttons.clear();
         self.hits.cta = Rect::default();

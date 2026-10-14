@@ -364,6 +364,36 @@ fn the_tab_discard_answers_alike_by_key_hotkey_and_click_from_the_tree_and_from_
     }
 }
 
+/// The wheel outside the action menu moves its cursor: the tree has
+/// nothing under the menu to scroll.
+#[test]
+fn the_wheel_outside_the_action_menu_moves_its_cursor() {
+    let mut app = App::new("t", action_tree());
+    keys(&mut app, &[KeyCode::Down, KeyCode::Char('a')]);
+    mouse_at(&mut app, MouseEventKind::ScrollDown, (1, 21));
+    assert!(matches!(app.mode, Mode::Menu { sel: 1, .. }));
+    mouse_at(&mut app, MouseEventKind::ScrollUp, (1, 21));
+    assert!(matches!(app.mode, Mode::Menu { sel: 0, .. }));
+}
+
+/// Two clicks on a list's rows with no frame between mark both: a mark
+/// keeps the picker and its drawing.
+#[test]
+fn two_clicks_on_a_list_mark_two_rows_with_no_frame_between() {
+    let options = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+    let list = Node::leaf("list", "", Setting::new(Kind::Choice { options, multi: true }, "", "user"));
+    let mut app = App::new("t", vec![Node::group("g", "", vec![list]).opened()]);
+    keys(&mut app, &[KeyCode::Down, KeyCode::Enter]);
+    assert!(matches!(app.mode, Mode::Pick(_)));
+    let _ = frame(&mut app, 110, 24);
+    let rows = app.drawn_dialog().expect("the picker records its rows").rows.clone();
+    for i in [0, 2] {
+        app.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: rows[i].x + 2, row: rows[i].y, modifiers: KeyModifiers::NONE });
+    }
+    let Mode::Pick(p) = &app.mode else { panic!("the second click closed the picker") };
+    assert_eq!(p.marked, [true, false, true]);
+}
+
 /// The action menu picks an action alike by Enter on its row, by its
 /// letter, and by a click on it.
 #[test]

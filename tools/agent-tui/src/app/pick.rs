@@ -201,9 +201,17 @@ pub(super) fn docked(area: Rect, dock: Dock, title: &str, items: &[(String, Stri
     // Borders, the item's lead space, its mark and a space, and a column
     // of padding: the rows a menu's dialog draws.
     let widest = items.iter().map(|(l, t)| 1 + str_width(l).max(10) + str_width(t) + 1).max().unwrap_or(0);
-    let want = (widest.max(str_width(title) + 2) + 2).max(24);
+    docked_box(area, dock, title, widest, items.len())
+}
+
+/// Where a docked box goes in `area`, as [`docked`] places a menu: `inside`
+/// columns and `rows` rows within its borders, and wide enough for its
+/// title.
+pub(super) fn docked_box(area: Rect, dock: Dock, title: &str, inside: usize, rows: usize) -> Rect {
+    use crate::wrap::str_width;
+    let want = (inside.max(str_width(title) + 2) + 2).max(24);
     let w = (want.min(usize::from(u16::MAX)) as u16).min(area.width);
-    let h = (items.len() as u16 + 2).min(area.height);
+    let h = (rows.min(usize::from(u16::MAX - 2)) as u16 + 2).min(area.height);
     let row = match dock {
         Dock::Under(row) => row,
         Dock::Beside { menu, row } => {

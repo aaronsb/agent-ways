@@ -367,10 +367,11 @@ impl App {
     }
 
     /// Act on what modal `m` was answered. Once answered, its drawing is
-    /// no target for the next press. False ends the session.
+    /// no target for the next press; a mark keeps the list open, and its
+    /// drawing with it. False ends the session.
     fn modal_answer(&mut self, m: &dyn Modal, a: Answer) -> bool {
         let on = m.answer(self, a);
-        if a != Answer::Stay {
+        if !matches!(a, Answer::Stay | Answer::Mark(_)) {
             self.hits.dialog = None;
         }
         on

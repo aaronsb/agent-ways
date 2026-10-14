@@ -136,7 +136,7 @@ guard-draft  | base  | wait:Agents text:agg C-c wait:Quit_and_discard
 guard-typed  | base  | wait:Agents text:agg C-c wait:Quit_and_discard text:xyz C-c
 guard-back   | base  | wait:Agents text:agg C-c wait:Quit_and_discard Escape gone:Quit_and_discard wait:>_agg
 rclick-row   | base  | wait:Agents rside:#infra wait:pick_one:_#infra
-rclick-agent | base  | wait:Agents rside:● wait:Address
+rclick-agent | base  | wait:Agents rside:beta wait:Address
 rclick-name  | base  | wait:signing rfeed:gamma wait:Address
 flag-click   | base  | wait:Agents M-2 wait:rollout_is_green last:#deploy wait:pick_one:_#deploy
 flag-merged  | base  | wait:Agents last:#open wait:pick_one:_#open
@@ -164,8 +164,8 @@ enter-row    | base  | wait:Agents F2 Down End Up Enter wait:pick_one:_#infra
 enter-agent  | base  | wait:Agents F2 Down Enter wait:Add_agent_to_chat
 enter-feed   | base  | wait:Agents BTab Enter wait:message_from
 enter-plus   | base  | wait:Agents F2 Left Left Enter wait:new_channel_name
-add-menu     | base  | wait:Agents rside:● wait:Add_agent_to_chat
-add-pick     | base  | wait:Agents rside:● wait:Add_agent_to_chat click:Add_agent_to_chat wait:add_to_channel
+add-menu     | base  | wait:Agents rside:beta wait:Add_agent_to_chat
+add-pick     | base  | wait:Agents rside:beta wait:Add_agent_to_chat click:Add_agent_to_chat wait:add_to_channel
 add-done     | base  | wait:Agents rside:● wait:Add_agent_to_chat click:Add_agent_to_chat wait:add_to_channel Enter wait:invite
 narrow-bar   | many  | wait:Agents resize:60 wait:⋯all
 arrow-empty  | base  | wait:Agents Up text:1x wait:>_1x

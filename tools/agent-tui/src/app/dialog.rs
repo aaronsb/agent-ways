@@ -14,7 +14,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Padding, Paragraph};
 use ratatui::Frame;
 
-use super::pick::{docked, Dock};
+use super::pick::{docked, docked_box, Dock};
 use super::render::{button_row, clip, modal_rect, pane, width};
 use crate::wrap::pad_to;
 use super::theme::{self, Ground, Seg, Shape};
@@ -292,6 +292,9 @@ pub(super) struct Dialog<'a> {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(super) struct Drawn {
     pub(super) rect: Rect,
+    /// Inside the border, above the button row: where a body the caller
+    /// draws goes.
+    pub(super) body: Rect,
     pub(super) buttons: Vec<(Rect, Btn)>,
     /// A menu's rows, in order.
     pub(super) rows: Vec<Rect>,
@@ -464,13 +467,15 @@ impl<'a> Dialog<'a> {
     /// as its body and button row with the borders, unless it was given a
     /// height.
     pub(super) fn rect(&self, area: Rect) -> Rect {
-        if let (Placement::Dock(dock), Some(m)) = (self.placement, &self.menu) {
-            return docked(area, dock, &self.title, &m.items);
-        }
         let row = u16::from(!self.buttons.is_empty());
         let lines = self.menu.as_ref().map_or(self.body.len(), |m| m.items.len());
         let h = self.height.unwrap_or_else(|| (lines.min(usize::from(u16::MAX - 3)) as u16) + 2 + row);
-        modal_rect(area, self.width, h)
+        match (self.placement, &self.menu) {
+            (Placement::Dock(dock), Some(m)) => docked(area, dock, &self.title, &m.items),
+            // As wide inside as it is wide less its borders.
+            (Placement::Dock(dock), None) => docked_box(area, dock, &self.title, usize::from(self.width.saturating_sub(2)), usize::from(h.saturating_sub(2))),
+            _ => modal_rect(area, self.width, h),
+        }
     }
 
     /// Draw it over `area`: in a box, the body in view, then the buttons on
@@ -489,12 +494,13 @@ impl<'a> Dialog<'a> {
         let inner = block.inner(r);
         let row = u16::from(!self.buttons.is_empty() && inner.height > 0);
         let room = usize::from(inner.height - row);
+        let body = Rect { height: inner.height - row, ..inner };
         if let Some(m) = &self.menu {
             let lines = m.lines(r.width);
             let rows = (0..lines.len() as u16).map(|i| Rect { y: inner.y + i, height: 1, ..inner }.intersection(inner)).collect();
             f.render_widget(Clear, r);
             f.render_widget(Paragraph::new(lines).block(block), r);
-            return Drawn { rect: r, rows, ..Drawn::default() };
+            return Drawn { rect: r, body, rows, ..Drawn::default() };
         }
         let max = self.body.len().saturating_sub(room);
         let scroll = self.scroll.min(max);
@@ -508,7 +514,7 @@ impl<'a> Dialog<'a> {
             let focus = self.default_button().map(|b| b.id);
             f.render_widget(Paragraph::new(button_row(sh, at, focus, &row, &mut buttons)), at);
         }
-        Drawn { rect: r, buttons, rows: Vec::new(), scroll, max }
+        Drawn { rect: r, body, buttons, rows: Vec::new(), scroll, max }
     }
 }
 

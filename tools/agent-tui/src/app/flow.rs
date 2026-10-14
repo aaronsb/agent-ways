@@ -10,10 +10,11 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Clear, HighlightSpacing, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{HighlightSpacing, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 
-use super::render::{button_row, elide, modal_rect, pane};
+use super::dialog::{Button, Dialog};
+use super::render::elide;
 use super::theme::{self, Ground, Shape};
 use super::Btn;
 
@@ -264,7 +265,7 @@ impl Flow {
             KeyCode::Char('q') => return FlowEvent::Cancel,
             KeyCode::Esc if self.step == 0 && self.filter.is_empty() => return FlowEvent::Cancel,
             KeyCode::Esc if self.step == 0 => self.filter.clear(),
-            KeyCode::Esc | KeyCode::Char('b') | KeyCode::Left if self.step > 0 => self.step -= 1,
+            KeyCode::Esc | KeyCode::Char('b') | KeyCode::Left if self.step > 0 => self.back(),
             KeyCode::Enter => return self.enter(),
             KeyCode::Right | KeyCode::Char('n') => return self.next(),
             KeyCode::Up | KeyCode::Char('k') => self.go(-1, last),
@@ -278,6 +279,11 @@ impl Flow {
             _ => {}
         }
         FlowEvent::Stay
+    }
+
+    /// Back a step.
+    fn back(&mut self) {
+        self.step = self.step.saturating_sub(1);
     }
 
     /// Move the cursor, the preview's scroll or the options' cursor by `by`.
@@ -410,14 +416,21 @@ impl Flow {
         }
     }
 
-    /// A click: a button, a row of the picker, or an option.
+    /// A click: a button, a row of the picker, or an option. Next and
+    /// Finish answer as Enter does and Back as Esc does after the first
+    /// step; while a line is typed only Cancel answers.
     pub fn click(&mut self, at: Position) -> FlowEvent {
         let typing = self.step == 0 && !matches!(self.entry, Entry::Off);
         if let Some(&(_, b)) = self.hits.buttons.iter().find(|(r, _)| r.contains(at)) {
+            self.note.clear();
             return match b {
                 Btn::Cancel => FlowEvent::Cancel,
                 _ if typing => FlowEvent::Stay,
-                _ => self.key(KeyEvent::new(b.key(), KeyModifiers::NONE)),
+                Btn::Back => {
+                    self.back();
+                    FlowEvent::Stay
+                }
+                _ => self.enter(),
             };
         }
         if typing {
@@ -455,14 +468,18 @@ impl Flow {
         }
     }
 
+    /// The flow in a dialog's frame and button row: Back after the first
+    /// step, Next or Finish focused, and Cancel. Its body is its own.
     pub(super) fn draw(&mut self, f: &mut Frame, area: Rect, sh: Shape) {
-        let r = modal_rect(area, 100, 26);
-        f.render_widget(Clear, r);
-        let block = pane(self.title.clone()).border_style(theme::modal_border());
-        let inner = block.inner(r);
-        f.render_widget(block, r);
-        let [head, sub, body, foot, btns] =
-            Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Min(1), Constraint::Length(1), Constraint::Length(1)]).areas(inner);
+        let go = if self.step == 2 { Button::new(Btn::Finish, "Finish (Enter)", Ground::Ok) } else { Button::new(Btn::Next, "Next (Enter)", Ground::Accent) };
+        let mut d = Dialog::new(self.title.clone(), 100).height(26);
+        if self.step > 0 {
+            d = d.button(Button::new(Btn::Back, "Back (Esc)", Ground::Keep));
+        }
+        let d = d.button(go.default()).button(Button::new(Btn::Cancel, "Cancel (q)", Ground::Rule).cancel()).build().expect("Cancel is the cancel and Next or Finish the default");
+        let drawn = d.draw(f, area, sh);
+        self.hits.buttons = drawn.buttons;
+        let [head, sub, body, foot] = Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Min(1), Constraint::Length(1)]).areas(drawn.body);
         f.render_widget(Paragraph::new(self.header()), head);
         f.render_widget(Paragraph::new(Line::styled(format!(" {}", self.notes[self.step]), theme::hint())), sub);
         self.hits.list = Rect::default();
@@ -473,14 +490,6 @@ impl Flow {
             _ => self.draw_confirm(f, body),
         }
         f.render_widget(Paragraph::new(self.footer()), foot);
-        let go = if self.step == 2 { (Btn::Finish, "Finish (Enter)", Ground::Ok) } else { (Btn::Next, "Next (Enter)", Ground::Accent) };
-        let mut row = Vec::new();
-        if self.step > 0 {
-            row.push((Btn::Back, "Back (Esc)".to_string(), Ground::Keep));
-        }
-        row.extend([(go.0, go.1.to_string(), go.2), (Btn::Cancel, "Cancel (q)".to_string(), Ground::Rule)]);
-        self.hits.buttons.clear();
-        f.render_widget(Paragraph::new(button_row(sh, btns, Some(go.0), &row, &mut self.hits.buttons)), btns);
     }
 
     /// `1 pick · 2 preview · 3 confirm`, the current step on the accent.
@@ -673,6 +682,40 @@ mod tests {
         for c in s.chars() {
             fl.key(press(KeyCode::Char(c)));
         }
+    }
+
+    /// Draw `f` and click the first cell of `text`.
+    fn click_on(f: &mut Flow, text: &str) -> FlowEvent {
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        term.draw(|fr| f.draw(fr, fr.area(), crate::theme::Shape::PLAIN)).unwrap();
+        let (x, y) = crate::testkit::find(term.backend().buffer(), text).unwrap_or_else(|| panic!("{text} not drawn"));
+        f.click(Position::new(x + 1, y))
+    }
+
+    /// Next and Finish answer as Enter does, as their labels say: on the
+    /// first step with nothing picked, Next picks the row under the cursor
+    /// and goes on, and on "Other…" it opens the path entry.
+    #[test]
+    fn next_and_finish_do_what_enter_does() {
+        let mut by_click = flow(false);
+        let mut by_enter = flow(false);
+        assert_eq!(click_on(&mut by_click, "Next (Enter)"), FlowEvent::Stay);
+        assert_eq!(by_enter.key(press(KeyCode::Enter)), FlowEvent::Stay);
+        assert_eq!((by_click.step(), by_click.picked_ids()), (1, vec!["/a".to_string()]), "picked the row and went on");
+        assert_eq!((by_click.step(), by_click.picked_ids()), (by_enter.step(), by_enter.picked_ids()));
+        assert_eq!(click_on(&mut by_click, "Next (Enter)"), FlowEvent::Stay);
+        assert_eq!(by_click.step(), 2);
+        assert_eq!(click_on(&mut by_click, "Finish (Enter)"), FlowEvent::Finish { key: String::new(), outs: vec![Out::new("do", "do /a", false)] });
+        // On "Other…", Next opens the path entry, as Enter does.
+        let mut other = flow(false);
+        keys(&mut other, &[KeyCode::End]);
+        assert_eq!(click_on(&mut other, "Next (Enter)"), FlowEvent::Stay);
+        assert!(other.hint().contains("type a path"), "{}", other.hint());
+        // Back goes back a step, as Esc does there.
+        let mut back = flow(false);
+        keys(&mut back, &[KeyCode::Enter]);
+        click_on(&mut back, "Back (Esc)");
+        assert_eq!(back.step(), 0);
     }
 
     #[test]
