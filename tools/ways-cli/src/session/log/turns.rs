@@ -206,11 +206,10 @@ mod tests {
     const DAY: u64 = 86_400;
     const KEEP: u64 = 10;
 
-    fn state(tag: &str) -> (std::path::PathBuf, std::path::PathBuf) {
-        let d = std::env::temp_dir().join(format!("ways-turns-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        (d.clone(), d.join(DECISIONS.live_name()))
+    fn state(tag: &str) -> (crate::test_dir::TestDir, std::path::PathBuf) {
+        let d = crate::test_dir::TestDir::at(std::env::temp_dir().join(format!("ways-turns-{tag}-{}", std::process::id())));
+        let log = d.join(DECISIONS.live_name());
+        (d, log)
     }
 
     fn ts() -> String {

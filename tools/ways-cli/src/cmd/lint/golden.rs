@@ -180,11 +180,8 @@ fn check_lines(path: &Path, rel: &str, none: bool, out: &mut Vec<(String, String
 mod tests {
     use super::*;
 
-    fn scratch(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ways-lint-golden-{}-{tag}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+    fn scratch(tag: &str) -> crate::test_dir::TestDir {
+        crate::test_dir::TestDir::at(std::env::temp_dir().join(format!("ways-lint-golden-{}-{tag}", std::process::id())))
     }
 
     fn way(root: &Path, id: &str, fm: &str) {

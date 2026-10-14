@@ -9,6 +9,8 @@ pub use ways_core::{agents, config, frontmatter, paths, scanner, util};
 
 mod cmd;
 pub mod session;
+#[cfg(test)]
+mod test_dir;
 
 /// Full version string for `--version`: the semver plus the baked `git describe`
 /// build provenance (ADR-150), e.g. `1.0.0 (ways-v1.0.0-78-gc595437)`. This makes

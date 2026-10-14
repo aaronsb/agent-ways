@@ -4,11 +4,36 @@
 //! run in parallel threads of one process, which share `HOME` and the XDG
 //! variables.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// Create and return an empty directory under the temp dir, named for `tag`.
-pub(crate) fn unique(tag: &str) -> PathBuf {
+/// A test directory that removes itself, contents and all, when dropped.
+/// Bind it to a name that lives as long as the test, and as long as anything
+/// that was handed the path: `let _ = unique(..)` drops it on the spot.
+pub(crate) struct TestDir(PathBuf);
+
+impl std::ops::Deref for TestDir {
+    type Target = Path;
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for TestDir {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Create an empty directory under the temp dir, named for `tag`, removed when
+/// the returned guard drops.
+pub(crate) fn unique(tag: &str) -> TestDir {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
     let p = std::env::temp_dir().join(format!(
@@ -17,7 +42,7 @@ pub(crate) fn unique(tag: &str) -> PathBuf {
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
     std::fs::create_dir_all(&p).unwrap();
-    p
+    TestDir(p)
 }
 
 /// Hold for the whole body of a test that sets `HOME` or an `XDG_*`

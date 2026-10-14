@@ -284,7 +284,7 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    fn tempdir_like() -> std::path::PathBuf {
+    fn tempdir_like() -> crate::test_dir::TestDir {
         crate::test_dir::unique("groups")
     }
 
@@ -436,7 +436,7 @@ mod tests {
         // the real cache.
         let _env = crate::test_dir::env_lock();
         let home = tempdir_like();
-        std::env::set_var("HOME", &home);
+        std::env::set_var("HOME", &*home);
         let dir = resolve_group_dir("open").expect("open must resolve");
         assert_eq!(dir, crate::signal::broadcast_dir());
     }

@@ -560,7 +560,6 @@ mod tests {
         assert_eq!(sent(&rx), ["restored b"]);
         feed.reread_marks();
         assert!(sent(&rx).is_empty(), "each once");
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// A tombstoned session's messages up to the tombstone are withheld;
@@ -585,7 +584,6 @@ mod tests {
         tombstones::unmark_session(&base, dead).unwrap();
         feed.reread_marks();
         assert_eq!(sent(&rx), ["restored before"]);
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// A burst of changes to the mark store is read once it ends, however
@@ -605,7 +603,6 @@ mod tests {
         }
         thread::sleep(MARKS_SETTLE * 3);
         assert_eq!(sent(&rx), ["withdrawn _broadcast/a"]);
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// The watcher withholds marks at backfill, and a mark or an undo
@@ -618,7 +615,7 @@ mod tests {
         write(&tray, "gone");
         tombstones::mark_messages(&base, &keys(&["gone"])).unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
-        spawn_watcher(base.clone(), String::new(), String::new(), tx).unwrap();
+        spawn_watcher(base.to_path_buf(), String::new(), String::new(), tx).unwrap();
         assert_eq!(sent(&rx), ["kept"], "the backfill withholds the mark");
 
         let wait = |want: &str| {
@@ -634,7 +631,6 @@ mod tests {
         assert_eq!(wait("restored gone"), ["restored gone"]);
         tombstones::mark_messages(&base, &keys(&["kept"])).unwrap();
         assert_eq!(wait("withdrawn _broadcast/kept"), ["withdrawn _broadcast/kept"]);
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// A file delivered once is not delivered again; gone, it leaves the
@@ -652,7 +648,6 @@ mod tests {
         feed.forget(&a);
         feed.forget(&base.join("-home-b"));
         assert!(feed.seen().read.is_empty());
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// `_people/` made after the chat started, with a person's tray made in
@@ -664,7 +659,6 @@ mod tests {
         write(&base.join("_people").join("bob"), "to-bob");
         feed.read_dir_tree(&base.join("_people"));
         assert_eq!(sent(&rx), ["to-bob"]);
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// The backfill walks what the filter accepts: `#open`, channels,
@@ -679,6 +673,5 @@ mod tests {
         let mut got: Vec<String> = scan_targets(&base).iter().map(|p| p.strip_prefix(&base).unwrap().to_string_lossy().to_string()).collect();
         got.sort();
         assert_eq!(got, ["-home-me", "-home-other", "@deploy", "_broadcast", "_people/aaron", "_people/bob"]);
-        let _ = std::fs::remove_dir_all(&base);
     }
 }

@@ -176,11 +176,11 @@ mod tests {
     use super::*;
     use crate::paths::SCHEMA_FILE;
 
-    fn scratch(tag: &str) -> PathBuf {
+    use crate::test_dir::TestDir;
+
+    fn scratch(tag: &str) -> TestDir {
         let dir = std::env::temp_dir().join(format!("ways-lint-corpus-{}-{tag}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        canonical(&dir)
+        TestDir::at(dir).resolved()
     }
 
     fn way(root: &Path, rel: &str, see_also: &str) {
@@ -190,8 +190,8 @@ mod tests {
         std::fs::write(path, body).unwrap();
     }
 
-    fn core_root(tag: &str) -> PathBuf {
-        let root = scratch(tag).join("hooks/ways");
+    fn core_root(tag: &str) -> TestDir {
+        let root = scratch(tag).under("hooks/ways");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join(SCHEMA_FILE), "x: 1\n").unwrap();
         root
@@ -247,7 +247,7 @@ mod tests {
     fn a_project_way_may_name_a_way_that_exists_only_in_the_shipped_root() {
         let shipped = scratch("xroot-shipped");
         way(&shipped, "softwaredev/code/quality/quality.md", "");
-        let project = scratch("xroot-project").join(".claude/ways");
+        let project = scratch("xroot-project").under(".claude/ways");
         way(&project, "mine/thing/thing.md", "- code/quality(softwaredev) — core\n- code/gone(softwaredev) — nowhere");
 
         let found = findings(&project, &project, &[project.clone(), shipped.clone()]);
@@ -315,7 +315,7 @@ mod tests {
     fn a_linked_root_is_not_a_finding() {
         let real = scratch("linkedroot-real");
         way(&real, "a/real/real.md", "");
-        let link = scratch("linkedroot-link").join("ways");
+        let link = scratch("linkedroot-link").under("ways");
         std::os::unix::fs::symlink(&real, &link).unwrap();
         assert!(symlinks(&link, &link).is_empty());
     }
@@ -359,7 +359,7 @@ mod tests {
         lint_corpus(&core.join("a"), None, &mut e, &mut w);
         assert_eq!((e, w), (1, 0));
 
-        let user = scratch("sev-user").join("proj/.claude/ways");
+        let user = scratch("sev-user").under("proj/.claude/ways");
         way(&user, "a/one/one.md", "- gone(a) — broken");
         let (mut e, mut w) = (0, 0);
         lint_corpus(&user, None, &mut e, &mut w);
@@ -368,7 +368,7 @@ mod tests {
 
     #[test]
     fn an_unrelated_hooks_ways_dir_is_skipped_not_core() {
-        let dir = scratch("unrelated").join("hooks/ways");
+        let dir = scratch("unrelated").under("hooks/ways");
         way(&dir, "a/one/one.md", "- gone(a) — broken");
         let (mut e, mut w) = (0, 0);
         lint_corpus(&dir, None, &mut e, &mut w);
