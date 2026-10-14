@@ -155,7 +155,7 @@ D9 is amended as follows.
 ### Neutral
 
 - `attend.chat.sidebar_key` joins attend's schema beside the other `attend.chat.*` keys (ADR-404 D8).
-- attend-chat depends on `ways-core` for the ways schema, layers and project rule that item (c) writes through. This reverses an alternative ADR-504 rejected, putting the Claude locator in `ways-core`, which it turned down because attend's crates would take on `ways-core`'s dependencies. Measured on 2026-10-13, the attend-chat binary grows by 75,888 bytes (3.9%), because the crates ADR-504 named were already in its dependency tree.
+- attend-chat depends on `ways-core` for the ways schema, layers and project rule that item (c) writes through. This reverses an alternative ADR-504 rejected, putting the Claude locator in `ways-core`, which it turned down because attend's crates would take on `ways-core`'s dependencies. Measured on 2026-10-13, the attend-chat binary grows by only 75,888 bytes (3.9%, including the feature's own code), since the crates ADR-504 named were already in its dependency tree.
 - agent-tui gains a pane hook for opening a tab's menu on the first click, and a way for a pane to hand the keyboard back to the tab bar. Other panes keep the second-click rule.
 
 ## Alternatives Considered

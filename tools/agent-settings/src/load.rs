@@ -765,6 +765,46 @@ mod tests {
         assert!(f.to_string().starts_with("/user.yaml:2: [matching] prob: 1.5 is outside"), "{f}");
     }
 
+    /// After a write of `matching.prob`: nothing when the written file
+    /// decides it or no file sets it; the higher file that sets it; or the
+    /// finding that makes the written file's section fall back.
+    #[test]
+    fn overridden_names_a_fallback_a_higher_file_or_nothing() {
+        let (user, project) = (Path::new("/user.yaml"), Path::new("/project.yaml"));
+        let prob = &KEYS[1];
+        let layers = vec![layer("user", LayerScope::User, "prob: 0.4\n"), layer("project", LayerScope::Project, "")];
+        assert_eq!(overridden(prob, &[], &layers, user), None, "the written file decides");
+        assert_eq!(overridden(prob, &[], &[layer("project", LayerScope::Project, "")], project), None, "no file sets it");
+
+        let layers = vec![layer("user", LayerScope::User, "prob: 0.4\n"), layer("project", LayerScope::Project, "prob: 0.9\n")];
+        assert_eq!(
+            overridden(prob, &[], &layers, user),
+            Some(Overridden::By { path: PathBuf::from("/project.yaml"), name: "matching.prob".into(), value: Some(serde_yaml::from_str("0.9").unwrap()) })
+        );
+
+        let layers = vec![layer("user", LayerScope::User, "prob: 0.4\n"), layer("project", LayerScope::Project, "prob: 0.9\npresets:\n  normal: 7\n")];
+        match overridden(prob, &[], &layers, project) {
+            Some(Overridden::Fallback(f)) => {
+                assert_eq!((f.section.as_deref(), f.fallback, f.file.as_deref()), (Some("matching"), true, Some(project)), "{f}");
+                assert!(f.message.contains('7'), "{f}");
+            }
+            other => panic!("the project's matching section falls back: {other:?}"),
+        }
+    }
+
+    /// A file later in the layers is higher; a file the layers do not read
+    /// is below every one they do.
+    #[test]
+    fn is_higher_follows_the_layer_order_and_puts_an_unread_file_lowest() {
+        let layers = vec![layer("user", LayerScope::User, ""), layer("project", LayerScope::Project, "")];
+        let (user, project, elsewhere) = (Path::new("/user.yaml"), Path::new("/project.yaml"), Path::new("/elsewhere.yaml"));
+        assert!(is_higher(&layers, project, user));
+        assert!(!is_higher(&layers, user, project));
+        assert!(!is_higher(&layers, user, user));
+        assert!(is_higher(&layers, user, elsewhere));
+        assert!(!is_higher(&layers, elsewhere, user));
+    }
+
     #[test]
     fn unknown_keys_fail_their_section_and_retired_ones_only_report() {
         let l = layer("user", LayerScope::User, "presets:\n  normal: 0.2\n  typo: x\nold_key: 1\nmystery: 2\n");

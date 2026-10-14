@@ -288,11 +288,13 @@ fn read_at(place: &Place, dir: &Path) -> Place {
 /// at `at` ([`overridden`], as `ways settings set` reports it): the file's
 /// section falling back to its defaults, or another file that sets it. With
 /// `higher_only` (an unset, which leaves the key to the layers below) only
-/// a file above `file` counts.
+/// a file above `file` counts, and no fallback.
 fn with_override(mut said: String, key: &Key, at: &Place, file: &Path, higher_only: bool) -> Done {
     let layers = key.layers(at);
     let note = match overridden(key.spec(), &[], &layers, file) {
-        Some(Overridden::Fallback(f)) => {
+        // An unset leaves the key to the layers below; its file's section
+        // failing there says nothing of it, as `ways settings unset` says.
+        Some(Overridden::Fallback(f)) if !higher_only => {
             let what = f.key.as_ref().map_or_else(|| f.message.clone(), |k| format!("{k}: {}", f.message));
             Some(format!("not in effect: {} falls back to its defaults in {}, {what}", key.spec().section, short(file)))
         }
@@ -425,6 +427,19 @@ mod tests {
         assert_eq!(in_effect("attend_mod.listening", &here), "dormant", "and not in effect");
         assert!(done.overridden, "{done:?}");
         assert!(done.said.contains("attend_mod falls back") && done.said.contains("bogus"), "{}", done.said);
+    }
+
+    /// An unset reports no fallback, as `ways settings unset` does: the key
+    /// is gone from the file, so its section failing there says nothing of it.
+    #[test]
+    fn an_unset_in_a_file_whose_section_falls_back_says_no_fallback() {
+        let _env = crate::test_dir::env_lock();
+        let (_, proj) = home();
+        let here = Place::Project(proj.clone());
+        write(&proj.join(".claude/ways.yaml"), "attend_mod:\n  listening: active\n  keepwarm: bogus\n");
+        let done = unset_at("attend_mod.listening", &here, &proj).unwrap();
+        assert!(!read(&proj.join(".claude/ways.yaml")).contains("listening"));
+        assert!(!done.overridden && !done.said.contains("not in effect"), "{done:?}");
     }
 
     /// Unset in the user file is read where the chat runs: the project
