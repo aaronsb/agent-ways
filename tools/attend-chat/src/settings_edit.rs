@@ -328,6 +328,22 @@ mod tests {
         (root, proj)
     }
 
+    /// Every test holds [`home`]'s directory guard to its end: a guard
+    /// matched by `_` drops on the spot, the directory goes, and what the
+    /// test writes after recreates it outside any guard, left in the temp
+    /// dir for good.
+    #[test]
+    fn every_test_holds_its_home_to_its_end() {
+        let source = include_str!("settings_edit.rs");
+        let dropped = ["let (_, ", "home();"].concat();
+        let held = source.lines().filter(|l| l.contains("= home();")).count();
+        assert!(held > 0, "the tests are read");
+        assert!(!source.lines().any(|l| l.trim_start().starts_with("let (_, ") && l.ends_with("home();")), "a guard matched by `_`: {dropped}");
+        let _env = crate::test_dir::env_lock();
+        let (_root, proj) = home();
+        assert!(proj.join(".git").is_dir(), "the directory stands while the guard is held");
+    }
+
     fn write(path: &Path, text: &str) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, text).unwrap();
@@ -365,7 +381,7 @@ mod tests {
     #[test]
     fn a_write_lands_in_the_file_of_the_place_chosen() {
         let _env = crate::test_dir::env_lock();
-        let (_, proj) = home();
+        let (_root, proj) = home();
         let here = Place::Project(proj.clone());
         let user = ways_core::paths::user_config();
         let said = set_at("attend_mod.listening", "active", &here, &proj).unwrap().said;
@@ -394,7 +410,7 @@ mod tests {
     #[test]
     fn the_chat_keys_are_the_user_files_alone_and_a_bad_value_writes_nothing() {
         let _env = crate::test_dir::env_lock();
-        let (_, proj) = home();
+        let (_root, proj) = home();
         let said = set_at("attend.chat.mouse", "false", &Place::User, &proj).unwrap().said;
         assert!(said.contains("mouse = false"), "{said}");
         assert!(read(&attend_config::user_path()).contains("mouse: false"), "{}", read(&attend_config::user_path()));
@@ -419,7 +435,7 @@ mod tests {
     #[test]
     fn a_write_the_files_fallback_hides_is_said_not_claimed() {
         let _env = crate::test_dir::env_lock();
-        let (_, proj) = home();
+        let (_root, proj) = home();
         let here = Place::Project(proj.clone());
         write(&proj.join(".claude/ways.yaml"), "attend_mod:\n  keepwarm: bogus\n");
         let done = set_at("attend_mod.listening", "active", &here, &proj).unwrap();
@@ -434,7 +450,7 @@ mod tests {
     #[test]
     fn an_unset_in_a_file_whose_section_falls_back_says_no_fallback() {
         let _env = crate::test_dir::env_lock();
-        let (_, proj) = home();
+        let (_root, proj) = home();
         let here = Place::Project(proj.clone());
         write(&proj.join(".claude/ways.yaml"), "attend_mod:\n  listening: active\n  keepwarm: bogus\n");
         let done = unset_at("attend_mod.listening", &here, &proj).unwrap();
@@ -447,7 +463,7 @@ mod tests {
     #[test]
     fn an_unset_says_what_the_chats_project_reads() {
         let _env = crate::test_dir::env_lock();
-        let (_, proj) = home();
+        let (_root, proj) = home();
         write(&ways_core::paths::user_config(), "attend_mod:\n  listening: dormant\n");
         write(&proj.join(".claude/ways.yaml"), "attend_mod:\n  listening: active\n");
         let done = unset_at("attend_mod.listening", &Place::User, &proj.join("src")).unwrap();
@@ -466,7 +482,7 @@ mod tests {
     #[test]
     fn a_held_lock_refuses_the_write_after_a_bounded_wait() {
         let _env = crate::test_dir::env_lock();
-        let (_, proj) = home();
+        let (_root, proj) = home();
         let here = Place::Project(proj.clone());
         let file = proj.join(".claude/ways.yaml");
         let held = agent_settings::writer::Lock::acquire(&file).unwrap();
@@ -489,7 +505,7 @@ mod tests {
     #[test]
     fn a_place_names_its_file_with_the_home_as_tilde() {
         let _env = crate::test_dir::env_lock();
-        let (_, proj) = home();
+        let (_root, proj) = home();
         assert_eq!(Place::Project(proj.clone()).label(Some("active")), "project ~/work/proj: active");
         assert_eq!(Place::User.label(None), "user: not set");
         assert_eq!(untilde("~/work/proj"), proj);
