@@ -87,6 +87,11 @@ impl Asked {
     pub(crate) fn left(&self) -> Option<u64> {
         self.deadline.map(|d| d.saturating_duration_since(std::time::Instant::now()).as_millis().div_ceil(1000) as u64)
     }
+
+    /// Its deadline has passed, whether or not a tick has closed it yet.
+    pub(crate) fn expired(&self) -> bool {
+        self.left() == Some(0)
+    }
 }
 
 /// How often the shell ticks while a question is on the clock
@@ -572,6 +577,11 @@ impl App {
 
     /// Give the pane its question's answer, through [`Pane::picked`].
     pub(super) fn answer(&mut self, a: Asked, yes: bool) {
+        // An answer that comes after the deadline, before a tick closed the
+        // question, is too late: the question expired.
+        if a.expired() {
+            return self.answer_expired(a);
+        }
         self.mode = Mode::Browse;
         // The shell's own question: yes quits, through the exit guard over
         // anything unsaved.
@@ -729,12 +739,17 @@ impl App {
     /// check, so a pane that never ticks still sees its question expire.
     pub(crate) fn expire_question(&mut self) {
         let Mode::Ask(a) = &self.mode else { return };
-        if a.left() != Some(0) {
-            return;
+        if a.expired() {
+            let a = a.clone();
+            self.answer_expired(a);
         }
-        let (id, yes) = (a.q.id.clone(), a.q.expiry.as_ref().is_some_and(|e| e.answer));
+    }
+
+    /// `a` closed by its expiry: its expiry's answer, marked [`EXPIRED`].
+    fn answer_expired(&mut self, a: Asked) {
+        let yes = a.q.expiry.as_ref().is_some_and(|e| e.answer);
         self.mode = Mode::Browse;
-        self.pane_picked(&id, vec![if yes { "y" } else { "n" }.to_string(), EXPIRED.to_string()]);
+        self.pane_picked(&a.q.id, vec![if yes { "y" } else { "n" }.to_string(), EXPIRED.to_string()]);
     }
 
     /// How long a question's yes stays set back once it is ready to answer,
@@ -1250,6 +1265,25 @@ mod tests {
         expire_now(&mut a);
         a.tick();
         assert_eq!(two(&a).picked, ["q=n", "q=expired"]);
+    }
+
+    /// A `y`, or a click on yes, that comes after the deadline and before a
+    /// tick closed the question answers nothing it asked: the question
+    /// expired, and the pane hears so.
+    #[test]
+    fn an_answer_after_the_deadline_is_an_expiry() {
+        use super::super::pane::Expiry;
+        let ask = || Question::new("q", "drop it?", "drop", "keep").expires(Expiry::new(std::time::Duration::from_secs(60)));
+        let late: [Answer; 2] = [|a: &mut App| assert!(a.key(k(KeyCode::Char('y'), KeyModifiers::NONE))), |a: &mut App| click_text(a, " y drop ")];
+        for (i, answer) in late.into_iter().enumerate() {
+            let mut a = app(true);
+            ask_now(&mut a, ask());
+            testkit::render(&mut a, 80, 6);
+            expire_now(&mut a);
+            answer(&mut a);
+            assert_eq!(two(&a).picked, ["q=n", "q=expired"], "way {i}: expired, not yes");
+            assert!(matches!(a.mode, Mode::Browse));
+        }
     }
 
     /// A question the pane asks while another is open cannot open, and the
