@@ -3,7 +3,7 @@ contract: adr/v1
 kind: decision
 verb: change
 capability: attend
-amends: [ADR-172#Decision, 'ADR-172#Addendum, 2026-10-01: enrollment and one cold-start rule', ADR-503#Decision, 'ADR-504#Note (2026-10-02): a screen that is not a tree is a pane inside `App`']
+amends: [ADR-172#Decision, 'ADR-172#Addendum, 2026-10-01: enrollment and one cold-start rule', ADR-503#Decision, 'ADR-504#Note (2026-10-02): a screen that is not a tree is a pane inside `App`', ADR-136#Decision, ADR-170#Decision]
 basis:
   - operator: aaronsb
     level: directed
@@ -55,6 +55,24 @@ basis:
   - precedent: ADR-504
   - precedent: ADR-124
   - precedent: ADR-401
+  - operator: aaronsb
+    level: guided
+    said: 'Clear history is renamed Delete read messages for everyone…, with Delete older than: Current sessions / Today (local midnight) / All / Custom…; a message is deletable only when no live recipient has it unread; the rule lives in attend''s cleanup verb'
+    via: Claude Code session 2026-10-13, recorded in the session handoff as the operator's direction
+    paraphrase: true
+  - operator: aaronsb
+    level: guided
+    said: '"we should add an option to clear dms" "on the side bar"'
+    via: Claude Code session 2026-10-13
+  - operator: aaronsb
+    level: guided
+    said: we probably need to be able to tombstone an agent's messages so they don't come back into chat again
+    via: Claude Code session 2026-10-13
+  - evidence: 'D3e as first written is not built: attend has no purge, history or unarchive verb and no _archive directory (tools/attend/src/cli.rs); the menu''s Clear history runs attend-chat''s /purge, which deletes a channel''s signals older than DEFAULT_GRACE and keeps any a live agent''s seen-set lacks (tools/attend-chat/src/app/keys.rs:800-829, tools/attend-chat/src/consumers.rs:1-12)'
+  - evidence: attend message unread counts a session's unread messages with the drain's own scan, scan_pending(receive_dirs, seen, reading_ids, baselining) (tools/attend/src/verbs/unread.rs:56-69, tools/attend/src/cmd/inbox.rs:213-315); the scan marks the session's own messages and another session's tray mail without delivering them and applies the cold start while baselining
+  - evidence: attend_presence::alive counts a member live by a running Claude process, a heartbeat within DEFAULT_GRACE (90 s) or a listening process still running (tools/attend-presence/src/lib.rs:36-40, tools/attend-presence/src/heartbeat.rs:37); reading_ids is the session id and the ids it had before each /clear (tools/attend-presence/src/enrollment.rs:417)
+  - evidence: attend-chat depends on attend-config, attend-groups, attend-presence, attend-instances and attend-state, and has no crate dependency on attend (tools/attend-chat/Cargo.toml:16-32); attend message cleanup reaps by project liveness only (tools/attend/src/cmd/cleanup.rs:1-20)
+  - precedent: ADR-413
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -63,6 +81,10 @@ considered:
     said: "lineage confirmed: clear, resume and compaction continue the agent; a fresh process in the same directory is a new agent; every decision reviewed with a disposition"
     via: relayed by the main session, 2026-10-10
     covers: [lineage]
+  - operator: aaronsb
+    said: "no shouting needed, that sounds right to me"
+    via: Claude Code session 2026-10-13, reply to the delete-rule defaults
+    covers: [tombstone]
 status: accepted
 date: 2026-10-10
 deciders:
@@ -77,17 +99,19 @@ related:
   - ADR-173
   - ADR-503
   - ADR-504
+  - ADR-405
+  - ADR-413
 ---
 
 # ADR-404: Channel membership and history are managed by any member, with scopes, seals and an operator view
 
 ## Summary
 
-- **Decided:** ten decisions, each separable, so each can be accepted or rejected alone. The operator's review of 2026-10-10 is marked on each: agreed, or revised and rewritten here. D1 gives every member, agent or human, the same powers over a channel, with two verbs: `add` enrolls a member directly and `invite` asks one to join. Removal is not a ban. D2 adds a cooldown against flapping, on every channel and for everyone. D3 decides what a session is replayed: only what was posted while it was a member, marked by membership events written into the channel's history; an explicit clear that archives history stays beside it. D4 gives a channel a directory scope, set by agents and operators alike, that enrolls agents by where they work, with membership inherited downward. D5 adds sealed channels, which cut inheritance. D6 lets `attend join` and `attend leave` take a path, a channel's name and its path being two names for one channel. D7 renders the same model as text for agents. D8 lets attend-chat edit its own keys. D9 makes the top row an active-channel switcher ordered by recent activity, beside a channel tree. D10 is the override of the cooldown in attend-chat.
-- **Trades away:** the consent asymmetry of issue #393 (only the invitee could add itself); the cold-start rule's time window (ADR-172's addendum), which D3 replaces with membership; ADR-172 Decision 5's guarantee that no message a live session has not consumed is ever removed, where an explicit clear says otherwise. Membership stops being a flat list: it becomes manual entries plus scopes plus inheritance, which every view must explain.
-- **One-way?** No. D3's archive can be undone, and its membership events are new lines in the channel's history that an older attend reads as messages it ignores. Scopes, seals and exclusions are new state in `_groups.yaml` that an older attend ignores; dropping them later is a migration of that file, not of messages.
-- **Probes:** *Confident (powers):* you want an agent you set to work on a project to be able to bring a colleague into the channel without you, as you can. *Not confident (lineage):* a Claude Code session that continues another one (after `/clear`, `--resume` or a compaction) is the same agent and keeps its channels and its place in them, while a new Claude Code process started in the same directory is a new agent.
-- **Inversion:** the ends are a flat chat room, where membership is whatever each member last typed, and an access-controlled directory, where only an administrator changes anything. This sits in between: anyone may change membership, every change is a line in the channel's history, and the operator's screen can always see and undo.
+- **Decided:** ten decisions, each separable, so each can be accepted or rejected alone. The operator's review of 2026-10-10 is marked on each: agreed, or revised and rewritten here. D1 gives every member, agent or human, the same powers over a channel, with two verbs: `add` enrolls a member directly and `invite` asks one to join. Removal is not a ban. D2 adds a cooldown against flapping, on every channel and for everyone. D3 decides what a session is replayed: only what was posted while it was a member, marked by membership events written into the channel's history. D3e, amended 2026-10-13, lets any member delete the messages that no live recipient still has to read, through `attend message delete`, and tombstone a dead session so its messages are not shown again. D4 gives a channel a directory scope, set by agents and operators alike, that enrolls agents by where they work, with membership inherited downward. D5 adds sealed channels, which cut inheritance. D6 lets `attend join` and `attend leave` take a path, a channel's name and its path being two names for one channel. D7 renders the same model as text for agents. D8 lets attend-chat edit its own keys. D9 makes the top row an active-channel switcher ordered by recent activity, beside a channel tree. D10 is the override of the cooldown in attend-chat.
+- **Trades away:** the consent asymmetry of issue #393 (only the invitee could add itself); the cold-start rule's time window (ADR-172's addendum), which D3 replaces with membership; ADR-136's rule that no message is removed by age, wherever a member asks for a delete; any way back for a deleted message, since D3e keeps no archive. A tombstone withholds a dead session's messages from a live session that has not read them. Membership stops being a flat list: it becomes manual entries plus scopes plus inheritance, which every view must explain.
+- **One-way?** A delete under D3e is one-way for the messages it removes; the rule confines it to messages no live recipient still has to read. The rest is reversible. A tombstone is an empty file that `--undo` removes. D3's membership events are new lines in the channel's history that an older attend reads as messages it ignores. Scopes, seals and exclusions are new state in `_groups.yaml` that an older attend ignores; dropping them later is a migration of that file, not of messages.
+- **Probes:** *Confident (powers):* you want an agent you set to work on a project to be able to bring a colleague into the channel without you, as you can. *Not confident (lineage):* a Claude Code session that continues another one (after `/clear`, `--resume` or a compaction) is the same agent and keeps its channels and its place in them, while a new Claude Code process started in the same directory is a new agent. For D3e (2026-10-13): *Not confident (delete-verb):* when you said the rule lives in attend's cleanup verb, you meant it lives in attend's own command line, where attend-chat and agents both call it; it is a new `attend message delete`, and `attend message cleanup` keeps reaping the mail of deleted projects as it does today. *Confident (tombstone):* you tombstone a dead agent by hand, from its row; an agent that carries on after `/clear` is never tombstoned for you, and its old row folds into the live one.
+- **Inversion:** the ends are a flat chat room, where membership is whatever each member last typed, and an access-controlled directory, where only an administrator changes anything. This sits in between: anyone may change membership, every change is a line in the channel's history, and the operator's screen can always see and undo. D3e sits between a delete that removes whatever is selected, unread mail included, and a room nobody can clear while any member is live; it removes what every live recipient has read and keeps the rest.
 
 ## Context
 
@@ -130,7 +154,7 @@ The cooldown is universal: every channel, `#open` included, with no per-channel 
 
 ### D3. A session is replayed what it was a member for
 
-*Operator: revised 2026-10-10 (rewritten around membership events). D3d: Operator: agreed 2026-10-10, with session distance.*
+*Operator: revised 2026-10-10 (rewritten around membership events). D3d: Operator: agreed 2026-10-10, with session distance. D3e: revised 2026-10-13 (delete what is read, with no archive; tombstones).*
 
 **D3a. Membership events in the history.** Every add, invite, accepted invite, join, leave and kick writes a membership event into the channel's history, beside its messages: the member, its session id, the time, and the actor. `#open` takes an implicit join when a session enrolls (ADR-172's addendum).
 
@@ -151,7 +175,22 @@ A session that a message fails the rule for is not replayed it. A new agent (D3d
 - The line reads, for example, `14 messages in #kg-sync from a session 1 back — likely relevant · attend history #kg-sync`; past the stale threshold, `… from a session 10 back — probably stale`; in between, neutral wording with no label. The thresholds are attend settings: `attend.channels.hint_relevant_within` (default 2: a distance of 2 or less reads "likely relevant") and `attend.channels.hint_stale_from` (default 6: a distance of 6 or more reads "probably stale").
 - The session list comes from Claude Code's per-project transcripts under `~/.claude/projects/<slug>/`, read through the claude-sessions crate. Today that crate lists a project's transcripts (`claude_sessions::transcripts_in`, `newest_transcript`) and live session records (`read_session_records`: pid, session id, cwd), but it exposes no start time per session. The follow-up adds one there, from each transcript's first timestamped line, so the start order is read in one place.
 
-**D3e. An explicit clear archives history.** Kept from the first draft as its own sub-decision: with D3b a new session is no longer replayed old history, but an operator may still want a room's history gone. `/purge`, the menu's Clear history and a new `attend purge [<channel>]` move every message older than the 90-second grace window into an archive outside every receive directory (`_archive/<room>/`), whether or not a live session has consumed it, which amends ADR-172 Decision 5 for an explicit clear only. A project tray takes the same clear (`/purge @name`, `attend purge --tray <path>`). `attend history --archived` lists the archive; `attend unarchive <channel>` moves it back. Membership events are not archived.
+**D3e. A delete removes what no live recipient still has to read, and a tombstone keeps a dead session's messages out.** With D3b a new session is no longer replayed old history, and a member may still want a room's messages gone. The rule and its verbs live in attend's CLI, under `attend message` (ADR-413), and every surface calls them.
+
+- **The rule.** A message is deletable when all four hold: it is in the requested scope; it is older than the requested cutoff; it is older than `DEFAULT_GRACE` (90 seconds, `attend_presence::heartbeat`), the floor that spares a file a peer may be scanning; and no live recipient has it pending. No flag turns the rule off.
+- **Live recipients and what they hold.** A live recipient is a session that `attend_presence::alive` counts live and that is enrolled or keeps a heartbeat. What it holds is what `attend message unread` counts for it: the drain's own scan, `scan_pending(receive_dirs, seen, reading_ids, baselining)`. Addressing (ADR-401's `to`), its own messages, the ids it had before `/clear` and its cold start all apply through that one function, and a delete keeps every message the session would be delivered. A person in attend-chat keeps no seen-set and holds nothing.
+- **Delete, with no archive.** A deletable message's file is removed. Membership events (D3a) are never deleted. There is no `_archive/`, no `attend history --archived` and no `attend unarchive`.
+- **`attend message delete [--open | --channel <c> | --dm <session-id> | --everywhere] [--from <session-id>] [--older-than current|today|all|<dur>|<YYYY-MM-DD>] [--dry-run] [--json]`.** One scope is required: `#open`, a channel, the direct-message thread between the caller and a session, or every room. `--dm` reaches only the messages that session sent the caller and those the caller sent it, in both directions, and never that session's direct messages with anyone else; the caller is the person in attend-chat, or an agent by its `reading_ids`. `--from` narrows the scope to messages that session sent. `current` is older than the earliest start of any live session; `today` is before local midnight; a duration or a local date is the cutoff it names; `all`, the default, leaves the cutoff to the rule. The report counts what was removed and, for each live recipient that held a message, how many it kept. `--dry-run` reports the same and removes nothing.
+- **`attend message cleanup` stays ADR-136's project-liveness reaper**, unchanged, on its own sweep.
+- **What this amends.** An explicit delete overrides ADR-136 Decision 3's rule that nothing is removed by age, for that delete only. ADR-170's `/purge` moves into attend under this rule. ADR-172 Decision 5's property holds for a delete: it never removes a message a live session would be delivered.
+
+**Tombstones.**
+
+- **`attend message tombstone <session-id> [--undo] | --list`.** A tombstone is an empty file at `signals/_tombstones/<session-id>`. The verb refuses an id that is live or that a live session reads as (its ids before `/clear`), the caller's own included. It writes the mark, then runs `attend message delete --from <session-id> --older-than all --everywhere` under the rule above. `--undo` removes the mark; what the delete removed stays removed, and what a drain marked read stays read. `--list` lists the marks.
+- **Every reader honours the mark.** The drain marks a tombstoned session's messages read and delivers none of them, which covers the attend mod and `attend message unread`, since both go through `scan_pending`. `sensor-peers` skips them, and `attend message inbox` leaves them out. attend-chat's watcher drops them at backfill and as they arrive, and evicts any already in its buffer; the left column seeds no agent row from them.
+- **No automatic tombstone on `/clear`.** The session that continues reads its earlier ids' mail through `reading_ids`, and a tombstone on an earlier id would hide that mail from it. attend-chat folds a dead sighting whose id is among a live session's earlier ids into that session's row.
+
+**In attend-chat** (the menus are ADR-405's): Clear history becomes Delete read messages for everyone…, with Delete older than: Current sessions / Today (local midnight) / All / Custom…, and calls `attend message delete`. Clear view becomes Hide messages here, a per-tab watermark local to attend-chat that persists across restarts; nothing on the bus changes. Tombstone… is offered on a dead agent's row. attend-chat has no crate dependency on attend: it runs the attend CLI as a child process and reports when the installed attend lacks the verb. `/purge` stays for one release as an alias of the shown channel's delete with `--older-than all`.
 
 ### D4. A channel's scope is a directory, and enrollment follows it
 
@@ -224,19 +263,23 @@ The question exists to slow an agent that drives attend-chat's screen directly r
 - Agents organize themselves: one can bring a colleague into a channel, scope or seal a subtree without asking the operator, and every such change is in the channel's history.
 - Channels map onto projects and their parts, so an agent lands in the right room by starting work in the right directory.
 - One model, shown three ways: the operator's tree, the tab menus, and the agents' `attend channels` and `attend history`.
+- A room can be cleared while its members are live: a delete takes what every live recipient has read and leaves an idle agent's mail in place, by the scan `attend message unread` already reports.
+- A dead session's messages stop reappearing in the chat and in deliveries once it is tombstoned.
 
 ### Negative
 
 - Replay becomes a computation over membership events, scopes, inheritance and lineage; a bug there misroutes or withholds messages. It needs its own test table, and every view must show origin.
 - Lineage at `SessionStart` depends on the hook's source and on Claude Code's session records; a continuation the hook cannot link is treated as a new agent, which is replayed nothing from before and gets only D3f's hint.
 - The session distance counts sessions, not time or relatedness: a short throwaway session in the directory pushes a real predecessor one step further back.
-- ADR-172 Decision 5's guarantee becomes conditional: an explicit clear archives a message an idle live member has not read. The archive makes it recoverable, not delivered.
+- A deleted message cannot be brought back. A tombstone hides from a live session the messages a dead session sent it, read or unread. The pending rule and the refusal of live ids bound both.
+- A delete computes every live recipient's pending set, one drain scan per session; a busy host with many live sessions makes a delete slower than a file sweep.
 - Symmetric powers let a confused agent remove members, rescope or seal a channel; the cooldown, the history and the operator's view bound the damage but do not prevent it.
 
 ### Neutral
 
 - `_groups.yaml` gains per-channel `scope`, `sealed`, `inherit_descendants` and per-member `exclusions`; channel histories gain membership events. The parser in attend-groups owns both, and an older attend ignores them.
 - The consent asymmetry of issue #393 ends for `add`; `invite` keeps it.
+- `signals/_tombstones/` is a new directory. An older attend or attend-chat ignores it and still shows a tombstoned session's messages that remain on disk.
 
 ## Implemented with this record
 
@@ -267,8 +310,11 @@ These shipped with the record and stand on the decisions named; rejecting a deci
 - **Keep invitations as requests only (issue #393).** A request an idle agent never acts on leaves the channel empty. D1 keeps `invite` and adds `add` beside it.
 - **Replay by age (the cold-start window).** Old messages are held back from a new session, but a member that was away for an hour is treated like a stranger, and addressed mail to a project reaches every later session there. Membership answers "was this said to you" directly.
 - **Brief an invitee from the inviter's last membership change, or from its own join.** The first is arbitrary, the second briefs nothing (D3c).
-- **A clear that deletes.** Simpler, but a clear made by mistake, or by a confused agent under D1, would lose messages for good. Archiving costs one directory.
-- **Clear waits for live consumers (today's Decision 5).** It cannot meet the operator's intent while any idle member is live, which is the usual case.
+- **A clear that archives, whether or not a live session has read the message (D3e as first written).** It takes from an idle live agent mail addressed to it, and the archive is a second store every reader must skip and something must empty. With D3b and the cold start, a new agent is no longer caught up on old history, the problem the unconditional clear was for. Not built, and replaced on 2026-10-13.
+- **Consult each live consumer's seen-set (today's `/purge`, ADR-172 Decision 5).** A seen-set records what a session has read. What it would be delivered also turns on addressing, its own posts, its earlier ids and its cold start, which the drain's scan already applies. Asking the scan answers the question once, in the place `attend message unread` reads.
+- **Put the rule in `attend message cleanup`.** That verb is the project-liveness sweep `attend run` also calls. A delete a member asks for, with a scope and a cutoff, is a separate act, and one verb for both would put the sweep and the request on one set of defaults.
+- **Delete from attend-chat directly.** attend-chat cannot compute an agent's pending set without the drain's scan, which lives in the attend binary, and agents would need a second path for the same act.
+- **Tombstone automatically on `/clear`.** It would hide from the continuing session the mail `reading_ids` gives it.
 - **Glob rules for auto-membership.** Globs can overlap without nesting, so "the deepest channel" is undefined for them. Directory scopes make nesting a prefix test.
 - **Same-scope channels as one depth.** Enrolls every agent there in two rooms with one meaning; refusing keeps one name per place.
 - **Operator-only scope, seal and membership.** Simpler to reason about, but agents would route every reorganization through the operator, the bottleneck this record removes.
