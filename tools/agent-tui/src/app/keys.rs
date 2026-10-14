@@ -362,6 +362,7 @@ impl App {
             // on the tab bar or the column goes on; one inside keeps it.
             Mode::Entry(_) if closes && !in_entry => {
                 self.mode = Mode::Browse;
+                self.hits.dialog = None;
                 self.click_through(m);
             }
             _ => {}
@@ -399,7 +400,8 @@ impl App {
             let k = match b {
                 Btn::Apply => KeyCode::Char('a'),
                 Btn::Discard => KeyCode::Char('X'),
-                _ => KeyCode::Esc,
+                Btn::Back => KeyCode::Esc,
+                _ => return,
             };
             self.key(KeyEvent::new(k, KeyModifiers::NONE));
             return;

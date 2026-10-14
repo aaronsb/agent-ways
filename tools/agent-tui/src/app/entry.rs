@@ -33,12 +33,14 @@ pub(crate) struct Entry {
 const WIDTH: u16 = 44;
 
 impl App {
-    /// A key while the entry dialog is open. False ends the session.
+    /// A key while the entry dialog is open. Closed, its drawing is no
+    /// target for the next press. False ends the session.
     pub(super) fn entry_key(&mut self, mut e: Entry, k: KeyEvent) -> bool {
         let m = k.modifiers;
         match k.code {
-            KeyCode::Esc => {}
+            KeyCode::Esc => self.hits.dialog = None,
             KeyCode::Enter if !m.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) => {
+                self.hits.dialog = None;
                 let text = e.input.text().to_string();
                 self.pane_picked(&e.id, vec![text]);
             }
