@@ -110,8 +110,12 @@ pub struct Held {
 #[derive(Debug, Clone, Serialize)]
 pub struct Undone {
     pub batch: String,
+    /// How long ago the delete was made, in seconds.
+    pub age_secs: u64,
     /// How many marks it removed.
     pub unmarked: usize,
+    /// How many of the delete's messages cleanup had already removed.
+    pub already_removed: usize,
 }
 
 /// Why a delete marked nothing.
@@ -122,6 +126,10 @@ pub enum DeleteError {
     NoChannel { name: String },
     /// `--undo` found no such batch.
     NoBatch { batch: Option<String> },
+    /// Cleanup removed every message the batch marked, on this date. With
+    /// no batch named it is the newest delete, and an older one is undone
+    /// only when named.
+    Reaped { batch: String, named: bool, on: String },
     /// The mark store could not be written.
     Write { error: String },
 }
@@ -132,6 +140,13 @@ impl std::fmt::Display for DeleteError {
             DeleteError::NoChannel { name } => write!(f, "no channel named #{name}"),
             DeleteError::NoBatch { batch: Some(b) } => write!(f, "no delete batch {b} to undo"),
             DeleteError::NoBatch { batch: None } => write!(f, "no delete to undo"),
+            DeleteError::Reaped { batch, named: true, on } => {
+                write!(f, "cleanup removed the messages of delete {batch} on {on}; there is nothing to restore")
+            }
+            DeleteError::Reaped { batch, named: false, on } => write!(
+                f,
+                "cleanup removed the messages of the newest delete, {batch}, on {on}; name an older batch to undo it"
+            ),
             DeleteError::Write { error } => write!(f, "could not write the marks: {error}"),
         }
     }
@@ -182,9 +197,20 @@ impl Filter<'_> {
 
 /// Remove the marks of batch `batch`, or of the newest batch.
 pub fn undo(batch: Option<&str>) -> Result<Undone, DeleteError> {
+    let date = |t: SystemTime| agent_fmt::when::utc_date(t.duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
     match tombstones::undo(&signals_base(), batch) {
-        Ok(Some(u)) => Ok(Undone { batch: u.batch, unmarked: u.unmarked.len() }),
-        Ok(None) => Err(DeleteError::NoBatch { batch: batch.map(str::to_string) }),
+        Ok(tombstones::Undo::Undone(u)) => Ok(Undone {
+            age_secs: tombstones::batch_time(&u.batch)
+                .and_then(|t| SystemTime::now().duration_since(t).ok())
+                .map_or(0, |d| d.as_secs()),
+            batch: u.batch,
+            unmarked: u.unmarked.len(),
+            already_removed: u.already_removed,
+        }),
+        Ok(tombstones::Undo::Reaped { batch: b, at }) => {
+            Err(DeleteError::Reaped { batch: b, named: batch.is_some(), on: date(at) })
+        }
+        Ok(tombstones::Undo::NoBatch) => Err(DeleteError::NoBatch { batch: batch.map(str::to_string) }),
         Err(e) => Err(DeleteError::Write { error: e.to_string() }),
     }
 }

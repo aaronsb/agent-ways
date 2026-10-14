@@ -475,3 +475,35 @@ fn the_callers_own_unread_mail_is_kept() {
     assert_eq!(marked(&v), Vec::<String>::new());
     assert_eq!(kept(&v, &f.sid), 1);
 }
+
+/// Once cleanup has removed a delete's messages, its undo says so and
+/// undoes no older delete in its place.
+#[test]
+fn undo_after_cleanup_says_what_became_of_the_delete() {
+    let f = Fixture::new("del-reaped");
+    std::fs::create_dir_all(f.home.join(".claude/projects").join(claude_sessions::project_slug(&f.origin))).unwrap();
+    let tray = f.project_tray();
+    post(&f, &tray, "older-1", "an older delete", 10 * MINUTE);
+    f.without_session(|| delete(&f, &["--everywhere"]));
+    std::thread::sleep(Duration::from_millis(5));
+    post(&f, &tray, "newer-1", "the newest delete", 10 * MINUTE);
+    let newest = f.without_session(|| delete(&f, &["--everywhere"]));
+    let batch = newest["batch"].as_str().unwrap().to_string();
+
+    // Its mark is eight days old and its record past the grace window.
+    let marks = f.signals().join("_tombstones");
+    age_file(&marks.join("messages/newer-1.signal"), 8 * 24 * 60 * MINUTE);
+    age_file(&marks.join("batches").join(&batch), 60 * MINUTE);
+    f.ok(&["message", "cleanup"]);
+    assert!(!f.signals().join(&tray).join("newer-1.signal").exists());
+
+    let out = f.attend(&["message", "delete", "--undo"]);
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains(&format!("the newest delete, {batch}")), "{err}");
+    assert!(f.signals().join(&tray).join("older-1.signal").exists());
+    assert!(!f.ok(&["message", "inbox"]).contains("an older delete"), "the older delete stands");
+
+    let out = f.attend(&["message", "delete", "--undo", &batch]);
+    assert!(String::from_utf8_lossy(&out.stderr).contains("nothing to restore"));
+}

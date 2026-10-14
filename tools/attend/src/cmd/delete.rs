@@ -10,7 +10,18 @@ pub(crate) fn cmd_delete(a: DeleteArgs) {
         let batch = (!batch.is_empty()).then_some(batch);
         match delete::undo(batch.as_deref()) {
             Ok(u) if a.json => crate::cmd::print_json(&u),
-            Ok(u) => println!("unmarked {} message(s) from delete {}", u.unmarked, u.batch),
+            Ok(u) => {
+                let removed = match u.already_removed {
+                    0 => String::new(),
+                    n => format!("; cleanup had already removed {n}"),
+                };
+                println!(
+                    "unmarked {} message(s) from delete {}, made {}{removed}",
+                    u.unmarked,
+                    u.batch,
+                    agent_fmt::when::ago(u.age_secs)
+                );
+            }
             Err(e) => refuse(&e, a.json),
         }
         return;

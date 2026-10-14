@@ -27,7 +27,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 /// The mark store's directory under the signals base.
 pub const TOMBSTONES_DIR: &str = "_tombstones";
@@ -123,7 +123,7 @@ pub fn sessions(base: &Path) -> Vec<String> {
 
 /// Whether `key` can name a mark file: a plain filename.
 fn valid_key(key: &str) -> bool {
-    !key.is_empty() && !key.starts_with('.') && !key.contains(['/', '\\', '\0'])
+    !key.is_empty() && !key.starts_with(['.', '#']) && !key.contains(['/', '\\', '\0', ' '])
 }
 
 /// Whether `id` is in the form [`mark_messages`] gives a batch.
@@ -131,11 +131,33 @@ pub fn valid_batch_id(id: &str) -> bool {
     !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit() || b == b'-')
 }
 
+/// When batch `id` was written, from the milliseconds that lead it.
+pub fn batch_time(id: &str) -> Option<SystemTime> {
+    let millis: u64 = id.split('-').next()?.parse().ok()?;
+    Some(SystemTime::UNIX_EPOCH + Duration::from_millis(millis))
+}
+
+/// How long a batch record stays as a stub once cleanup has removed every
+/// message it marked, so `--undo` can say what became of it.
+pub const STUB_KEPT: Duration = Duration::from_secs(30 * 86_400);
+
+/// The first line of a stub: `reaped <unix seconds>`.
+const STUB_PREFIX: &str = "reaped ";
+
+/// When cleanup removed the last message of the batch whose record is
+/// `list`, if the record is a stub.
+fn stub_time(list: &str) -> Option<SystemTime> {
+    let secs: u64 = list.lines().next()?.strip_prefix(STUB_PREFIX)?.trim().parse().ok()?;
+    Some(SystemTime::UNIX_EPOCH + Duration::from_secs(secs))
+}
+
 /// Mark the messages with seen-set keys `keys`, as one batch. Keys already
 /// marked keep their mark and are left out of the batch. Returns the batch
 /// id and the keys it marked; with nothing new to mark it writes nothing
 /// and returns `None`. The batch's list is written before its marks, so an
-/// interrupted write leaves no mark that `--undo` cannot find.
+/// interrupted write leaves no mark that `--undo` cannot find. Each mark
+/// is written whole under a temporary name and linked into place, so a
+/// reader never finds a mark without its batch id.
 pub fn mark_messages(base: &Path, keys: &[String]) -> io::Result<Option<(String, Vec<String>)>> {
     let marks = messages_dir(base);
     let mut fresh: Vec<String> = keys.iter().filter(|k| valid_key(k) && !marks.join(k).exists()).cloned().collect();
@@ -149,20 +171,26 @@ pub fn mark_messages(base: &Path, keys: &[String]) -> io::Result<Option<(String,
     fs::create_dir_all(&marks)?;
     let list: String = fresh.iter().map(|k| format!("{k}\n")).collect();
     agent_settings::writer::write_atomic(&batches_dir(base).join(&batch), list)?;
+    let staged = marks.join(format!(".{batch}.tmp"));
+    fs::write(&staged, &batch)?;
     let mut marked = Vec::new();
+    let mut failed = None;
     for key in fresh {
-        match fs::OpenOptions::new().write(true).create_new(true).open(marks.join(&key)) {
-            Ok(mut f) => {
-                use io::Write;
-                f.write_all(batch.as_bytes())?;
-                marked.push(key);
-            }
+        match fs::hard_link(&staged, marks.join(&key)) {
+            Ok(()) => marked.push(key),
             // Another delete marked it in between: its mark stands.
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(e) => return Err(e),
+            Err(e) => {
+                failed = Some(e);
+                break;
+            }
         }
     }
-    Ok(Some((batch, marked)))
+    fs::remove_file(&staged).ok();
+    match failed {
+        Some(e) => Err(e),
+        None => Ok(Some((batch, marked))),
+    }
 }
 
 /// Every message mark, with its mark time.
@@ -176,9 +204,16 @@ pub fn message_marks(base: &Path) -> HashMap<String, SystemTime> {
         .collect()
 }
 
+/// Whether the mark for `key` belongs to `batch`.
+fn owns(base: &Path, batch: &str, key: &str) -> bool {
+    fs::read_to_string(messages_dir(base).join(key)).is_ok_and(|owner| owner.trim() == batch)
+}
+
 /// Remove the marks of messages not in `present`, the keys of every signal
-/// file on disk, and the batch records left with no mark of their own.
-/// Returns how many marks it removed.
+/// file on disk. A batch record left with no mark of its own becomes a stub
+/// that says when, kept for [`STUB_KEPT`]; a record younger than
+/// `attend_presence::heartbeat::DEFAULT_GRACE` is left alone, since its
+/// marks may still be being written. Returns how many marks it removed.
 pub fn prune(base: &Path, present: &HashSet<String>) -> usize {
     let marks = messages_dir(base);
     let mut removed = 0;
@@ -187,21 +222,31 @@ pub fn prune(base: &Path, present: &HashSet<String>) -> usize {
             removed += 1;
         }
     }
+    let now = SystemTime::now();
     for batch in batches(base) {
         let record = batches_dir(base).join(&batch);
+        let young = fs::metadata(&record)
+            .and_then(|m| m.modified())
+            .is_ok_and(|at| now.duration_since(at).unwrap_or_default() < attend_presence::heartbeat::DEFAULT_GRACE);
         let Ok(list) = fs::read_to_string(&record) else { continue };
-        let owns_a_mark = list
-            .lines()
-            .filter(|k| valid_key(k))
-            .any(|k| fs::read_to_string(marks.join(k)).is_ok_and(|owner| owner.trim() == batch));
-        if !owns_a_mark {
-            fs::remove_file(&record).ok();
+        if young {
+            continue;
+        }
+        if let Some(at) = stub_time(&list) {
+            if now.duration_since(at).unwrap_or_default() >= STUB_KEPT {
+                fs::remove_file(&record).ok();
+            }
+            continue;
+        }
+        if !list.lines().filter(|k| valid_key(k)).any(|k| owns(base, &batch, k)) {
+            let secs = now.duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            agent_settings::writer::write_atomic(&record, format!("{STUB_PREFIX}{secs}\n{list}")).ok();
         }
     }
     removed
 }
 
-/// The batches on record, oldest first.
+/// The batches on record, stubs included, oldest first.
 pub fn batches(base: &Path) -> Vec<String> {
     let mut ids: Vec<String> = file_names(&batches_dir(base)).filter(|n| valid_batch_id(n)).collect();
     ids.sort();
@@ -214,35 +259,56 @@ pub struct Undone {
     pub batch: String,
     /// The keys whose marks it removed.
     pub unmarked: Vec<String>,
+    /// The keys whose messages cleanup had already removed.
+    pub already_removed: usize,
+}
+
+/// What an undo found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Undo {
+    Undone(Undone),
+    /// Cleanup removed every message the batch marked, at this time.
+    Reaped { batch: String, at: SystemTime },
+    /// No batch by that id, or none at all.
+    NoBatch,
 }
 
 /// Remove the marks batch `batch` wrote, or the newest batch's when
-/// `None`, and the batch's record. A mark another batch wrote stays.
-/// `Ok(None)` when there is no such batch.
-pub fn undo(base: &Path, batch: Option<&str>) -> io::Result<Option<Undone>> {
+/// `None`, and the batch's record. A mark another batch wrote stays. With
+/// no batch named and the newest record a stub, nothing is undone: an
+/// older delete is taken back only when it is named.
+pub fn undo(base: &Path, batch: Option<&str>) -> io::Result<Undo> {
     let batch = match batch {
         Some(b) if valid_batch_id(b) => b.to_string(),
-        Some(_) => return Ok(None),
+        Some(_) => return Ok(Undo::NoBatch),
         None => match batches(base).pop() {
             Some(b) => b,
-            None => return Ok(None),
+            None => return Ok(Undo::NoBatch),
         },
     };
     let record = batches_dir(base).join(&batch);
     let list = match fs::read_to_string(&record) {
         Ok(list) => list,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Undo::NoBatch),
         Err(e) => return Err(e),
     };
+    if let Some(at) = stub_time(&list) {
+        return Ok(Undo::Reaped { batch, at });
+    }
     let mut unmarked = Vec::new();
+    let mut already_removed = 0;
     for key in list.lines().filter(|k| valid_key(k)) {
         let mark = messages_dir(base).join(key);
-        if fs::read_to_string(&mark).is_ok_and(|owner| owner.trim() == batch) && fs::remove_file(&mark).is_ok() {
-            unmarked.push(key.to_string());
+        if owns(base, &batch, key) {
+            if fs::remove_file(&mark).is_ok() {
+                unmarked.push(key.to_string());
+            }
+        } else if !mark.exists() {
+            already_removed += 1;
         }
     }
     fs::remove_file(&record)?;
-    Ok(Some(Undone { batch, unmarked }))
+    Ok(Undo::Undone(Undone { batch, unmarked, already_removed }))
 }
 
 #[cfg(test)]
@@ -260,6 +326,21 @@ mod tests {
         names.iter().map(|s| s.to_string()).collect()
     }
 
+    fn undone(u: Undo) -> Undone {
+        match u {
+            Undo::Undone(u) => u,
+            other => panic!("expected an undo, got {other:?}"),
+        }
+    }
+
+    /// Date batch `batch`'s record `ago` back.
+    fn age_record(b: &Path, batch: &str, ago: Duration) {
+        let f = fs::File::options().write(true).open(batches_dir(b).join(batch)).unwrap();
+        f.set_modified(SystemTime::now() - ago).unwrap();
+    }
+
+    const OLD: Duration = Duration::from_secs(3_600);
+
     #[test]
     fn a_batch_marks_what_is_unmarked_and_undo_takes_back_only_its_own() {
         let b = base("undo");
@@ -270,14 +351,14 @@ mod tests {
         assert_eq!(marked, keys(&["c.signal"]), "b keeps its first mark");
         assert_eq!(batches(&b), vec![first.clone(), second.clone()]);
 
-        let undone = undo(&b, None).unwrap().unwrap();
-        assert_eq!(undone, Undone { batch: second, unmarked: keys(&["c.signal"]) });
+        let u = undone(undo(&b, None).unwrap());
+        assert_eq!(u, Undone { batch: second, unmarked: keys(&["c.signal"]), already_removed: 0 });
         let marks = Marks::load(&b);
         assert!(marks.hides("a.signal") && marks.hides("b.signal") && !marks.hides("c.signal"));
 
-        assert_eq!(undo(&b, Some(&first)).unwrap().unwrap().unmarked, keys(&["a.signal", "b.signal"]));
+        assert_eq!(undone(undo(&b, Some(&first)).unwrap()).unmarked, keys(&["a.signal", "b.signal"]));
         assert!(!Marks::load(&b).hides("b.signal"));
-        assert_eq!(undo(&b, None).unwrap(), None, "nothing left to undo");
+        assert_eq!(undo(&b, None).unwrap(), Undo::NoBatch, "nothing left to undo");
         fs::remove_dir_all(&b).ok();
     }
 
@@ -288,9 +369,10 @@ mod tests {
         let b = base("race");
         let (winner, _) = mark_messages(&b, &keys(&["x.signal"])).unwrap().unwrap();
         fs::write(batches_dir(&b).join("000000000000001-1"), "x.signal\n").unwrap();
-        assert_eq!(undo(&b, Some("000000000000001-1")).unwrap().unwrap().unmarked, Vec::<String>::new());
+        let lost = undone(undo(&b, Some("000000000000001-1")).unwrap());
+        assert_eq!((lost.unmarked, lost.already_removed), (Vec::<String>::new(), 0));
         assert!(Marks::load(&b).hides("x.signal"));
-        assert_eq!(undo(&b, Some(&winner)).unwrap().unwrap().unmarked, keys(&["x.signal"]));
+        assert_eq!(undone(undo(&b, Some(&winner)).unwrap()).unmarked, keys(&["x.signal"]));
         fs::remove_dir_all(&b).ok();
     }
 
@@ -316,16 +398,59 @@ mod tests {
         fs::remove_dir_all(&b).ok();
     }
 
+    /// Cleanup removed every message of one batch and one of another's: the
+    /// first becomes a stub that says so, the second undoes in part.
     #[test]
-    fn prune_drops_the_marks_of_messages_gone_and_their_empty_batches() {
+    fn prune_drops_the_marks_of_messages_gone_and_stubs_their_batches() {
         let b = base("prune");
         let (gone, _) = mark_messages(&b, &keys(&["gone.signal"])).unwrap().unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(2));
+        std::thread::sleep(Duration::from_millis(2));
         let (half, _) = mark_messages(&b, &keys(&["here.signal", "also-gone.signal"])).unwrap().unwrap();
+        age_record(&b, &gone, OLD);
+        age_record(&b, &half, OLD);
         let present: HashSet<String> = keys(&["here.signal", "unmarked.signal"]).into_iter().collect();
         assert_eq!(prune(&b, &present), 2);
         assert_eq!(message_marks(&b).into_keys().collect::<Vec<_>>(), keys(&["here.signal"]));
-        assert_eq!(batches(&b), vec![half], "the batch {gone} owns no mark now");
+        assert_eq!(batches(&b), vec![gone.clone(), half.clone()], "the reaped batch stays as a stub");
+
+        assert!(matches!(undo(&b, Some(&gone)).unwrap(), Undo::Reaped { .. }));
+        let partial = undone(undo(&b, None).unwrap());
+        assert_eq!((partial.unmarked, partial.already_removed), (keys(&["here.signal"]), 1));
+        assert!(matches!(undo(&b, None).unwrap(), Undo::Reaped { .. }), "the newest left is the stub: refused");
+        fs::remove_dir_all(&b).ok();
+    }
+
+    /// A record younger than the grace window may still be writing its marks.
+    #[test]
+    fn prune_leaves_a_young_batch_alone() {
+        let b = base("young");
+        let (batch, _) = mark_messages(&b, &keys(&["a.signal"])).unwrap().unwrap();
+        fs::remove_file(messages_dir(&b).join("a.signal")).unwrap();
+        prune(&b, &HashSet::new());
+        assert_eq!(fs::read_to_string(batches_dir(&b).join(&batch)).unwrap(), "a.signal\n", "no stub yet");
+        fs::remove_dir_all(&b).ok();
+    }
+
+    #[test]
+    fn a_stub_goes_after_its_keeping_time() {
+        let b = base("stub");
+        fs::create_dir_all(batches_dir(&b)).unwrap();
+        let old = SystemTime::now() - STUB_KEPT - OLD;
+        let secs = old.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+        fs::write(batches_dir(&b).join("000000000000001-1"), format!("reaped {secs}\na.signal\n")).unwrap();
+        age_record(&b, "000000000000001-1", OLD);
+        prune(&b, &HashSet::new());
+        assert!(batches(&b).is_empty());
+        fs::remove_dir_all(&b).ok();
+    }
+
+    #[test]
+    fn a_mark_holds_its_batch_and_no_staging_file_stays() {
+        let b = base("staged");
+        let (batch, _) = mark_messages(&b, &keys(&["a.signal", "b.signal"])).unwrap().unwrap();
+        assert_eq!(fs::read_to_string(messages_dir(&b).join("b.signal")).unwrap(), batch);
+        let names: Vec<_> = fs::read_dir(messages_dir(&b)).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(names.len(), 2, "{names:?}");
         fs::remove_dir_all(&b).ok();
     }
 
