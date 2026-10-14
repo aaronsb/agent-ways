@@ -97,6 +97,11 @@ basis:
     level: directed
     said: button colors green back in modals with destructive options
     via: "the operator's answer in the head session, 2026-10-13, to the #994 review's question on button colours"
+  - evidence: 'every dialog the shell draws in tools/agent-tui/src/app is a Mode variant (app.rs:48-90) with its own draw function and its own arm in App::key (keys.rs:47-198); what they share is helpers and no type: pane (render.rs:19), button_row (:32), answer_lozenges (:56), modal_rect (:81), draw_menu_items and draw_menu_items_in (:530, :537), docked (pick.rs:267)'
+  - evidence: 'copies: the exit guard (render.rs:469-503) and close the editor (:760-772) build one frame twice; the key help is written for the tree (render.rs:816-839) and for a pane (paneshell.rs:331-354), and only the pane''s records its rect in hits.menu, so keys.rs:520-536 takes a click or the wheel on the tree''s as one outside it; the bar''s y/n questions answer in five arms (keys.rs:160, :166, :221-230, items.rs:114, paneshell.rs:546); the action menu, the theme menu and the picker answer in three; modal_rect, Clear and pane are put together by hand in eight places (entry.rs:76, flow.rs:459, response.rs:355, paneshell.rs:347, render.rs:491, :531, :764, :830); ways-cli screen_host.rs:92-95 copies pane'
+  - evidence: 'a guided flow labels its buttons Next (Enter) and Finish (Enter) (flow.rs:476), and a click on either sends KeyCode::Right (Btn::key, app.rs:121); on the picker step Enter picks the row under the cursor when none is picked or opens Other… on its row (flow.rs:311), and Right does neither'
+  - evidence: 'attend-chat''s Esc cycle reads Overlay::Menu { by_esc: true } (attend-chat ix.rs:333); the shell reports overlays to a pane from paneshell.rs:226-237'
+  - precedent: ADR-408
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -123,11 +128,14 @@ observable:
   - 'run: hook latency for ways scan prompt, scan command, scan file and attend inbox --drain stays within the budget of §11 against the commit before the change'
   - 'run: ways projects list, search, show, stats, cleanup --dry-run and relocate --dry-run report the same projects, sessions and sizes claude-projects reported on the same ~/.claude, and git ls-files shows no tools/claude-projects'
   - 'run: cargo test -p agent-theme fails on a raw SGR literal planted in a crate outside agent-theme, and passes once it is removed'
+  - 'try: a click on the settings screens'' key help closes it and reaches nothing under it, and the wheel over it scrolls it'
+  - 'try: on a guided flow''s first step, a click on Next does what Enter does'
+  - 'run: grep finds render_widget(Clear, in tools/agent-tui/src/app only in the Dialog''s draw'
 status: accepted
 date: 2026-10-01
 deciders:
   - aaronsb
-related: [ADR-503, ADR-153, ADR-189, ADR-501, ADR-502, ADR-184, ADR-505]
+related: [ADR-503, ADR-153, ADR-189, ADR-501, ADR-502, ADR-184, ADR-505, ADR-408, ADR-409]
 ---
 
 # ADR-504: One TUI engine on ratatui and one theme for every interactive surface
@@ -326,3 +334,35 @@ A modal that offers its answers as buttons is answered by them, and only by them
 - Quit, Discard and Drop are drawn on the error ground the bar gives an answer that drops the work. On a button row that holds one of them, Back is drawn on the green the bar gives the answer that keeps it. On a row with nothing destructive, such as a guided flow's, Back keeps the dim accent, so it never shares green with Save or Finish for want of a contrast. The rule belongs to the button row and names no modal, so every dialog built on the row follows it.
 
 A confirm with no modal, such as a pane's question (ADR-408) or the settings shell's y/n before a tab's items are discarded, stays on the bottom bar with its two answers as lozenges.
+
+## Note (2026-10-13): one `Dialog` for every box, question and menu the shell draws
+
+Every dialog the shell draws is a `Mode` variant with its own draw function and its own arm in `App::key`. They share helpers and no type, and the copies have drifted. The exit guard and the theme editor's "close the editor" build one frame twice. The key help is written once for the tree and once for a pane, and the tree's records no rect, so a click or the wheel on it is taken as one outside it. The bar's y/n questions answer in five places, the menus in three, and eight boxes put their frame together by hand. A click on a flow's Next or Finish sends `Right` where the label names Enter, and the two differ on the flow's first step.
+
+`agent-tui` draws every such dialog from one `Dialog` value:
+
+- **Title and body.** The body is lines, scrolled when they outgrow the frame.
+- **Buttons.** Each is `(id, label, hotkey, Ground)`. Exactly one is the cancel, which Esc presses, and exactly one the default, which has the focus and Enter presses. A dialog with no cancel or default, or with two of either, is refused where it is built.
+- **Placement.** `Center` is a box over the area, as `modal_rect` places one. `Dock` sits beside the row that opened it, as `docked` places a menu. `Bar` is the bottom bar, with the buttons as answer lozenges after the question.
+- **Border.** The modal border, unless the dialog names another.
+- **Close on any key.** A key the dialog has no use for closes it, as the key help does. Without this, such a key leaves the dialog open and reaches nothing under it, as the note above on a modal's own buttons requires.
+
+Drawing a dialog records its rect and each button's rect as hit regions. Its key and click handling return an `Answer`:
+
+- `Button(id)`: a button's hotkey, Enter on the default, Esc for the cancel, or a click on a button. A click and the hotkey a label names give the same `id`, and no button stands for a synthesised key.
+- `Close`: a key that closes a close-on-any-key dialog, or a click outside a dialog that ADR-408 lets such a click close.
+- `Stay`: a key the dialog used itself, such as a scroll or a focus move, or one that is no answer. Nothing under the dialog receives it.
+- `Forward(key)`: a key the dialog hands to the code that opened it, such as a menu item's letter. Nothing under the dialog receives it either.
+
+The colour rule of the note above belongs to the dialog. A destructive button is on the error ground. A button may take the keep ground, which the dialog resolves to green when it holds a button on the error ground and to the dim accent otherwise; Back takes it. The caller gives every other button its ground.
+
+The overlays a pane is told of keep their kinds: `Menu { id, by_esc }`, `Entry`, `Ask`, `Help`, `Guard` and `Report`. The code that opens a dialog decides which kind it reports, and attend-chat's Esc cycle goes on reading `Overlay::Menu { by_esc }`. attend-chat and ways-cli open dialogs through `Open` and the tree's `Action`, whose shapes stay, so no step below changes either. ways-cli's `screen_host` keeps its copy of `pane` until a change touches that file and can take an exported frame in its place.
+
+The move is four changes, one PR each. Each keeps its frames as they were drawn unless it names the change, and a golden it re-records names the frames and the reason (§12).
+
+1. **Boxed modals:** the exit guard, "close the editor", the response modal, and the key help as one dialog fed by the tree's keys or the pane's bindings. From this step the tree's key help records its rect, so a click on it closes it without reaching what is under it and the wheel over it scrolls it.
+2. **Questions on the bar,** placed `Bar`: the confirm before an action is queued, the discard of a tab's items from the tree and from review, the delete of a named item, a pane's question (ADR-408), and the shell's own "quit?".
+3. **Menus:** the action menu, the theme menu and the picker, placed `Center` or `Dock`. One `MenuKeys` sets what a menu's keys do beyond moving and Enter: an item's letter picks it, Space marks a row of a list, and a row that cannot be picked is drawn set back and takes neither Space nor Enter.
+4. **The guided flow and the entry dialog** (ADR-409) draw in the dialog's frame and button row and keep their own bodies and keys.
+
+By step 4 at the latest, a flow's Next and Finish give the answer Enter gives, as their labels say. On the first step a click on either sends `Right` (`Btn::key`), which reports that nothing is picked where Enter picks the row under the cursor or opens "Other…" on its row.
