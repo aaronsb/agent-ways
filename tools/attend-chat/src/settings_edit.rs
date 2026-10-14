@@ -359,6 +359,20 @@ mod tests {
         }
     }
 
+    /// A path read off a home that is never bound (`proj()` called on the
+    /// call's result itself) outlives its guard: the directory goes
+    /// at the end of the statement and what the test writes after recreates
+    /// it outside any guard. No pattern can strip [`fixture::Home`] of its
+    /// guard; this catches the one expression that can.
+    #[test]
+    fn no_test_reads_a_path_off_a_home_it_drops() {
+        let source = include_str!("settings_edit.rs");
+        let call = ["home()", "."].concat();
+        assert!(source.lines().filter(|l| l.contains("= home();")).count() > 5, "the tests that bind a home are read");
+        let dropped: Vec<&str> = source.lines().filter(|l| l.contains(&call)).collect();
+        assert!(dropped.is_empty(), "a home dropped at once: {dropped:?}");
+    }
+
     fn write(path: &Path, text: &str) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, text).unwrap();
