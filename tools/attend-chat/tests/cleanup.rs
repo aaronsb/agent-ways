@@ -35,13 +35,15 @@ static SERIAL: Mutex<()> = Mutex::new(());
 /// twelve to mark and three kept by two sessions; a delete marks twelve in
 /// batch [`BATCH`]; an undo restores them; a delete in `#legacy` is refused
 /// as an attend without the verb refuses it; a tombstone of delta is refused
-/// as attend refuses one that has not exited. `#slow` answers in a second,
+/// as attend refuses one that has not exited. `#empty` has nothing to
+/// delete. `#slow` answers in a second,
 /// and a delete in `#long` (not its dry run) in eleven, past the ten the
 /// chat once gave attend.
 const FAKE: &str = r##"#!/bin/sh
 echo "$*" >> "$FAKE_ATTEND_LOG"
 case "$*" in
   *"--channel legacy"*) echo "error: unrecognized subcommand 'delete'" >&2; exit 2 ;;
+  *"--channel empty"*) echo '{"scope":"#empty","dry_run":true,"marked":0,"batch":null,"ids":[],"held":[]}' ;;
   *"--channel slow"*) sleep 1; echo '{"scope":"#slow","dry_run":true,"marked":3,"batch":null,"ids":[],"held":[]}' ;;
   *"--channel long"*"--dry-run"*) echo '{"scope":"#long","dry_run":true,"marked":3,"batch":null,"ids":[],"held":[]}' ;;
   *"--channel long"*) sleep 11; echo '{"scope":"#long","dry_run":false,"marked":3,"batch":"001784732645123-4243","ids":[],"held":[]}' ;;
@@ -67,6 +69,7 @@ fn fixture() -> std::sync::MutexGuard<'static, ()> {
         beat.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3600)).unwrap();
         std::fs::create_dir_all(base.join("@deploy")).unwrap();
         std::fs::create_dir_all(base.join("@legacy")).unwrap();
+        std::fs::create_dir_all(base.join("@empty")).unwrap();
         std::fs::create_dir_all(base.join("@slow")).unwrap();
         std::fs::create_dir_all(base.join("@long")).unwrap();
     });
@@ -551,6 +554,20 @@ fn a_count_that_lands_while_typing_does_not_ask() {
     assert_eq!(c.status(), "counted 3 read messages in #slow: choose Delete read messages again to delete them");
     assert_eq!(c.input().text(), "yes I am here");
     assert_eq!(calls().len(), 1);
+}
+
+/// A count of nothing says so, asks nothing and holds nothing: the same
+/// pick again counts again.
+#[test]
+fn a_count_of_nothing_holds_nothing() {
+    let _g = fixture();
+    let mut c = chat();
+    delete_read(&mut c, "#empty", "All");
+    assert_eq!(c.status(), "nothing read to delete in #empty");
+    assert!(!screen(&mut c).contains("delete 0 read"), "no question: {}", screen(&mut c));
+    delete_read(&mut c, "#empty", "All");
+    assert_eq!(calls(), ["message delete --channel empty --older-than all --dry-run --json"; 2], "counted again");
+    assert_eq!(c.status(), "nothing read to delete in #empty");
 }
 
 /// A count never opens a question, even with the operator still, nothing

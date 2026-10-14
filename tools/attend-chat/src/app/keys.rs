@@ -60,8 +60,9 @@ pub enum EnterAction {
     /// input + cursor.
     HideHere,
     /// `/purge`, for one release the alias of Delete read messages for
-    /// everyone… → All on this channel (ADR-405): the screen asks with what
-    /// a dry run of `attend message delete` reports.
+    /// everyone… → All on this channel (ADR-405): the first counts, with a
+    /// dry run of `attend message delete`, and says what it found; `/purge`
+    /// again within a minute asks with that count.
     DeleteRead(String),
     /// Success path that also moves the foreground tab — `/dissolve`
     /// closing the tab under the cursor advances focus (#393).

@@ -261,8 +261,8 @@ pub struct ChatPane {
     /// The delete or tombstone attend is working on, one at a time, with
     /// no time limit ([`cleanup`]).
     removing: Option<cleanup::Removal>,
-    /// A delete's count that landed when its question could not be asked,
-    /// and when; choosing the delete again soon asks from it ([`cleanup`]).
+    /// Every delete's count, for its scope and its age, and when it landed:
+    /// the same pick again within `HOLD` asks with it ([`cleanup`]).
     held: Option<(cleanup::Asked, Instant)>,
 }
 

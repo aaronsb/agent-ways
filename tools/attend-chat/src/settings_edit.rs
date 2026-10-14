@@ -359,17 +359,23 @@ mod tests {
         }
     }
 
-    /// A path read off a home that is never bound (`proj()` called on the
-    /// call's result itself) outlives its guard: the directory goes
-    /// at the end of the statement and what the test writes after recreates
-    /// it outside any guard. No pattern can strip [`fixture::Home`] of its
-    /// guard; this catches the one expression that can.
+    /// A home that is never bound outlives nothing: a path read off the
+    /// call's result itself, or the home given to `_`, drops the guard at
+    /// the end of the statement, the directory goes, and what the test
+    /// writes after recreates it outside any guard. No pattern can strip
+    /// [`fixture::Home`] of a field; this catches the expressions that drop
+    /// it whole. The patterns are built from parts, so this test's own
+    /// lines do not match them.
     #[test]
-    fn no_test_reads_a_path_off_a_home_it_drops() {
+    fn no_test_drops_its_home() {
         let source = include_str!("settings_edit.rs");
-        let call = ["home()", "."].concat();
-        assert!(source.lines().filter(|l| l.contains("= home();")).count() > 5, "the tests that bind a home are read");
-        let dropped: Vec<&str> = source.lines().filter(|l| l.contains(&call)).collect();
+        let dropping = [["home()", "."].concat(), ["Home::new()", "."].concat(), ["let _ = ", "home()"].concat()];
+        let binds = |l: &&str| {
+            let l = l.trim_start();
+            l.strip_prefix("let ").and_then(|r| r.strip_suffix(" = home();")).is_some_and(|name| name != "_" && name.chars().all(|c| c.is_alphanumeric() || c == '_'))
+        };
+        assert!(source.lines().filter(binds).count() > 5, "the tests that bind a home by name are read");
+        let dropped: Vec<&str> = source.lines().filter(|l| dropping.iter().any(|d| l.contains(d.as_str()))).collect();
         assert!(dropped.is_empty(), "a home dropped at once: {dropped:?}");
     }
 
