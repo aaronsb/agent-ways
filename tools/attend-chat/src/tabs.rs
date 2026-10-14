@@ -154,7 +154,8 @@ pub fn advance_after_dissolve(dissolved: &str, names_before: &[String]) -> Tab {
 
 /// Does `sig` render in `tab`'s transcript? Merged shows everything the
 /// person was party to: every channel, and every direct message to them,
-/// to their project's tray, or from them. A channel tab shows only its own
+/// to their project's tray, or from them, but for the copy of a send that
+/// went beside a channel post, whose post it shows instead. A channel tab shows only its own
 /// traffic plus local `Info` blocks (command feedback must be visible
 /// wherever the command was typed) and what reached the person directly
 /// (ADR-401, `to`). Directed messages to a cwd inbox, and those the person
@@ -165,7 +166,7 @@ pub fn advance_after_dissolve(dissolved: &str, names_before: &[String]) -> Tab {
 /// agent sent or received, with anyone, and the local blocks.
 pub fn shows(sig: &Signal, tab: &Tab) -> bool {
     match tab {
-        Tab::Merged => !matches!(sig.channel, Channel::Elsewhere(_)),
+        Tab::Merged => !matches!(sig.channel, Channel::Elsewhere(_)) && !sig.beside_post,
         Tab::Channel(g) => match &sig.channel {
             Channel::Info | Channel::Person => true,
             Channel::Open => g == BASE_CHANNEL_NAME,
@@ -246,7 +247,7 @@ mod tests {
 
     /// A signal on `channel`, from the session `from`.
     fn on(channel: Channel, from: &str) -> Signal {
-        Signal { id: "s".into(), from: format!("claude:{from}"), project: String::new(), cwd: String::new(), reply_to: None, message: String::new(), ts: 0, channel }
+        Signal { id: "s".into(), from: format!("claude:{from}"), project: String::new(), cwd: String::new(), reply_to: None, message: String::new(), ts: 0, channel, tray: String::new(), beside_post: false }
     }
 
     fn visible_in(channel: &Channel, tab: &Tab) -> bool {

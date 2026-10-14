@@ -50,6 +50,8 @@ fn signal(i: usize, sid: &str, cwd: &str, channel: Channel) -> Signal {
         message: format!("message {i} in the feed"),
         ts: NOW - 1000 + i as u64,
         channel,
+        tray: String::new(),
+        beside_post: false,
     }
 }
 
@@ -152,7 +154,7 @@ fn keys() -> Vec<KeyEvent> {
 }
 
 /// The digest of twenty seeds of 200 steps ([`pinned_run`]).
-const PINNED: &str = "d12a0dc97057c3e4";
+const PINNED: &str = "86a5bd6f08b0d6c5";
 
 /// FNV-1a over `bytes`, from `h`: a digest stable on every machine.
 fn fnv(h: u64, bytes: &[u8]) -> u64 {

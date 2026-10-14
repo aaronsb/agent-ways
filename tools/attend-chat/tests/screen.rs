@@ -84,6 +84,8 @@ fn sig(from: &str, cwd: &str, ago: u64, channel: Channel, message: &str) -> Sign
         message: message.into(),
         ts: NOW - ago,
         channel,
+        tray: String::new(),
+        beside_post: false,
     }
 }
 

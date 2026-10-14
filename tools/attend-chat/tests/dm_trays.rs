@@ -159,6 +159,50 @@ fn a_dm_sent_beside_a_channel_post_reaches_the_agents_view() {
     arrived(&mut c, body);
     assert_eq!(shown_in(&c, &Tab::Dm(ALPHA_SID.into()), body), 1, "in alpha's view once: {:#?}", c.signals());
     assert_eq!(shown_in(&c, &Tab::Channel("deploy".into()), body), 1, "in #deploy once");
+    assert_eq!(shown_in(&c, &Tab::Merged, body), 1, "the operator view shows the post alone: {:#?}", c.signals());
+    assert_eq!(shown_in(&c, &Tab::Review(ALPHA_SID.into()), body), 1, "alpha's own view lists the DM");
+}
+
+/// What a send writes shows at once, read back from where it went, before
+/// the watcher's event; the watcher's copy of the same file adds nothing.
+#[test]
+fn a_send_shows_at_once_and_once() {
+    let mut c = live_chat();
+    arrived(&mut c, EARLIER);
+    let body = "read back at once";
+    typed(&mut c, &format!("@{} {body}", nick(BETA_CWD)));
+    press(&mut c, KeyCode::Enter);
+    assert_eq!(shown_in(&c, &Tab::Dm(BETA_SID.into()), body), 1, "before any drain: {}", c.status());
+    arrived(&mut c, body);
+    assert_eq!(shown_in(&c, &Tab::Dm(BETA_SID.into()), body), 1, "the watcher's copy is the same file");
+}
+
+/// Past the buffer's cap, others' DMs go first: they never push out what
+/// the operator was party to.
+#[test]
+fn others_dms_go_first_past_the_cap() {
+    base();
+    let mut c = Chat::new(None, Palette::default(), Shape::PLAIN).heartbeat(false);
+    let mk = |i: usize, channel: Channel, message: &str| Signal {
+        id: format!("cap-{i}"),
+        from: format!("claude:{BETA_SID}"),
+        project: "beta".into(),
+        cwd: BETA_CWD.into(),
+        reply_to: None,
+        message: message.into(),
+        ts: 1_790_000_000 + i as u64,
+        channel,
+        tray: format!("-tray-{i}"),
+        beside_post: false,
+    };
+    c.push(mk(0, Channel::Open, "the operator's oldest"));
+    for i in 1..=6000 {
+        c.push(mk(i, Channel::Elsewhere(ALPHA_SID.into()), &format!("aside {i}")));
+    }
+    c.push(mk(6001, Channel::Open, "the operator's newest"));
+    let msgs: Vec<&str> = c.signals().iter().map(|s| s.message.as_str()).collect();
+    assert!(msgs.contains(&"the operator's oldest") && msgs.contains(&"the operator's newest"), "the operator's history stays");
+    assert!(!msgs.contains(&"aside 1") && msgs.contains(&"aside 6000"), "the oldest asides went");
 }
 
 /// One message addressed to two agents in two projects is written to both

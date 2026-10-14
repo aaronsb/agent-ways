@@ -118,16 +118,27 @@ pub fn spawn_watcher(base: PathBuf, own_tray: String, person: String, tx: Sender
     let own = Own { tray: own_tray, person };
     let mut backfill_paths = HashSet::new();
     for (_, path) in backfill {
+        // As `Feed::deliver` keeps it: only what was read, so a file that
+        // did not parse is tried again when it changes.
         if let Some(sig) = parse_file(&path, &own) {
             let _ = tx.send(sig);
+            backfill_paths.insert(path);
         }
-        backfill_paths.insert(path);
     }
 
     let feed = Feed { base: base.clone(), own, tx: tx.clone(), delivered: Arc::new(Mutex::new(backfill_paths)) };
     let mut watcher = RecommendedWatcher::new(
         move |res: notify::Result<Event>| {
             let Ok(event) = res else { return };
+            // A file or dir gone (swept, purged, renamed away) leaves the
+            // record of what was delivered, so it stays as large as the
+            // signals on disk.
+            if matches!(event.kind, EventKind::Remove(_) | EventKind::Modify(ModifyKind::Name(RenameMode::From))) {
+                for path in &event.paths {
+                    feed.forget(path);
+                }
+                return;
+            }
             // Atomic rename fires two events — `Name(To)` and
             // `Name(Both)` — both referencing the final filename. We
             // accept `Create(_)` (platforms that emit it, notably
@@ -167,9 +178,9 @@ pub fn spawn_watcher(base: PathBuf, own_tray: String, person: String, tx: Sender
 }
 
 /// Where the watcher delivers: the signals base, the chat's own trays, the
-/// sender the chat drains, and every path delivered, so a file the watch reports
-/// twice, or one both a new dir's scan and its own event find, is
-/// delivered once.
+/// sender the chat drains, and every path delivered and still on disk, so a
+/// file the watch reports twice, or one both a new dir's scan and its own
+/// event find, is delivered once.
 #[derive(Clone)]
 struct Feed {
     base: PathBuf,
@@ -199,22 +210,40 @@ impl Feed {
         }
     }
 
-    /// A dir made under the base: a new tray or channel. notify reports it
-    /// before it adds the watch on it, so a signal written into it at once
-    /// (the first direct message to a project: `mkdir`, then the write)
-    /// raises no event of its own. Read what it holds now, and again once
-    /// the watch is in place.
+    /// `path` is gone: a file leaves the record, a dir takes what was
+    /// under it.
+    fn forget(&self, path: &Path) {
+        let mut delivered = self.delivered.lock().unwrap_or_else(|e| e.into_inner());
+        delivered.retain(|p| !p.starts_with(path));
+    }
+
+    /// A dir made under the base: a new tray or channel, or `_people/`
+    /// itself with a person's tray already in it. notify reports it before
+    /// it adds the watch on it, so a signal written into it at once (the
+    /// first direct message to a project: `mkdir`, then the write) raises
+    /// no event of its own, nor does a dir made in it at once. Read what it
+    /// and the dirs in it hold now, and again once the watch is in place.
     fn new_dir(&self, dir: PathBuf) {
-        for file in signal_files(&dir) {
-            self.deliver(file);
-        }
+        self.read_dir_tree(&dir);
         let feed = self.clone();
         thread::spawn(move || {
             thread::sleep(NEW_DIR_SETTLE);
-            for file in signal_files(&dir) {
-                feed.deliver(file);
-            }
+            feed.read_dir_tree(&dir);
         });
+    }
+
+    /// Deliver the signals in `dir` and in the dirs directly under it, the
+    /// depth a tray sits below the base.
+    fn read_dir_tree(&self, dir: &Path) {
+        let mut dirs = vec![dir.to_path_buf()];
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            dirs.extend(entries.filter_map(|e| e.ok()).filter(|e| e.file_type().is_ok_and(|t| t.is_dir())).map(|e| e.path()));
+        }
+        for d in dirs {
+            for file in signal_files(&d) {
+                self.deliver(file);
+            }
+        }
     }
 }
 
@@ -306,6 +335,48 @@ mod tests {
         // ParentDir component, which `is_tray` refuses.
         assert!(!accepts(&["..", "outside", "x.signal"]));
         assert!(!accepts(&["..", "x.signal"]));
+    }
+
+    fn feed_at(base: &Path) -> (Feed, std::sync::mpsc::Receiver<Signal>) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        (Feed { base: base.to_path_buf(), own: Own::default(), tx, delivered: Default::default() }, rx)
+    }
+
+    fn write(dir: &Path, name: &str) -> PathBuf {
+        std::fs::create_dir_all(dir).unwrap();
+        let p = dir.join(format!("{name}.signal"));
+        std::fs::write(&p, "claude:abc|proj|/home/x|hi\n").unwrap();
+        p
+    }
+
+    /// A file delivered once is not delivered again; gone, it leaves the
+    /// record, and a dir gone takes what was under it.
+    #[test]
+    fn the_record_of_what_was_delivered_follows_the_disk() {
+        let base = crate::test_dir::unique("feed");
+        let (feed, rx) = feed_at(&base);
+        let a = write(&base.join("-home-a"), "a");
+        let b = write(&base.join("-home-b"), "b");
+        feed.deliver(a.clone());
+        feed.deliver(a.clone());
+        feed.deliver(b.clone());
+        assert_eq!(rx.try_iter().count(), 2, "each once");
+        feed.forget(&a);
+        feed.forget(&base.join("-home-b"));
+        assert!(feed.delivered.lock().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// `_people/` made after the chat started, with a person's tray made in
+    /// it before its watch is in place: the new dir's read reaches the tray.
+    #[test]
+    fn a_new_people_dir_is_read_with_the_trays_in_it() {
+        let base = crate::test_dir::unique("feed");
+        let (feed, rx) = feed_at(&base);
+        write(&base.join("_people").join("bob"), "to-bob");
+        feed.read_dir_tree(&base.join("_people"));
+        assert_eq!(rx.try_iter().map(|s| s.id).collect::<Vec<_>>(), ["to-bob"]);
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// The backfill walks what the filter accepts: `#open`, channels,

@@ -250,11 +250,12 @@ pub(super) fn items(channel: Option<&str>, joined: bool) -> Vec<Item> {
 /// The items of a message's menu: reply where it was said, quote it,
 /// address its sender `name`, copy it. A local notice has no channel to
 /// reply in, and a message with no sender the column knows has no one to
-/// address.
-pub(super) fn message_items(name: Option<&str>, notice: bool) -> Vec<Item> {
+/// address. A view with no compose box (`composes` false: an agent's own
+/// DMs) has nowhere to quote into.
+pub(super) fn message_items(name: Option<&str>, notice: bool, composes: bool) -> Vec<Item> {
     vec![
         if notice { Item::disabled(REPLY, "a notice of the chat's") } else { Item::new(REPLY) },
-        Item::new(QUOTE),
+        if composes { Item::new(QUOTE) } else { Item::disabled(QUOTE, "read only: no compose box here") },
         match name {
             Some(n) => Item::new(format!("{ADDRESS} @{n}")),
             None => Item::disabled(ADDRESS, "no sender to address"),
@@ -526,7 +527,7 @@ impl ChatPane {
         let feed = self.hits.feed;
         let anchor = self.feed.header_row(i).map_or(Anchor::Center, |r| Anchor::Row(Rect { x: feed.x, y: feed.y + r, width: feed.width, height: 1 }));
         let title = name.as_ref().map_or("message".to_string(), |n| format!("message from @{n}"));
-        let items = message_items(name.as_deref(), sig.channel == crate::signal::Channel::Info);
+        let items = message_items(name.as_deref(), sig.channel == crate::signal::Channel::Info, shown.composes());
         self.to_open = Some(Open::Pick { id: format!("message:{}", sig.id), title, items, multi: false, anchor });
     }
 
@@ -536,12 +537,16 @@ impl ChatPane {
         let Some((sig, name)) = self.feed_message(id) else {
             return self.say("that message is not in the feed any more", true);
         };
-        let address = |c: &mut ChatPane, n: &str| c.complete(super::Chip::Agent(n.to_string()));
+        let sender = sig.sender_member();
+        let address = |c: &mut ChatPane, n: &str| {
+            c.show_a_box(sender.as_deref());
+            c.complete(super::Chip::Agent(n.to_string()))
+        };
         match item {
             REPLY => match (&sig.channel, name.as_deref()) {
                 (crate::signal::Channel::Group(g), _) => self.set_tab(Tab::Channel(g.clone())),
                 (crate::signal::Channel::Open, _) => self.set_tab(Tab::Channel(BASE_CHANNEL_NAME.into())),
-                (crate::signal::Channel::Direct(_) | crate::signal::Channel::Person, Some(n)) => address(self, n),
+                (crate::signal::Channel::Direct(_) | crate::signal::Channel::Person | crate::signal::Channel::Elsewhere(_), Some(n)) => address(self, n),
                 (crate::signal::Channel::Sent(to), _) => match to.split(',').find(|m| self.has_dms(m)).map(str::to_string) {
                     Some(m) => self.open_dm(m),
                     None => return self.say("no DM view to reply in", true),
@@ -569,6 +574,19 @@ impl ChatPane {
         self.dispatch(super::ix::Ev::Compose);
     }
 
+    /// Before an item writes into the compose box: in a view with none, an
+    /// agent's own DMs, show the operator's DMs with `member` when it has
+    /// them, else the operator view, so the text lands in a box shown.
+    fn show_a_box(&mut self, member: Option<&str>) {
+        if self.foreground.composes() {
+            return;
+        }
+        match member.filter(|m| self.has_dms(m)) {
+            Some(m) => self.open_dm(m.to_string()),
+            None => self.set_tab(Tab::Merged),
+        }
+    }
+
     fn agent_item(&mut self, member: &str, item: &str) {
         if item == SHOW_DMS {
             self.open_view(Kind::Dm, member.to_string());
@@ -580,7 +598,10 @@ impl ChatPane {
             self.hide_view(Kind::Review, member);
         } else if item.starts_with(ADDRESS) {
             match self.seen_member(member) {
-                Some(s) => self.complete(super::Chip::Agent(s.identity.nickname)),
+                Some(s) => {
+                    self.show_a_box(Some(member));
+                    self.complete(super::Chip::Agent(s.identity.nickname))
+                }
                 None => self.say("that agent is not in the column any more", true),
             }
         } else if item == WHO {
@@ -836,7 +857,9 @@ impl ChatPane {
             }
             EnterAction::ClearWithStatusAndEcho { status, echo } => {
                 self.say(status, false);
-                self.push(echo);
+                for s in echo {
+                    self.push(s);
+                }
                 true
             }
             EnterAction::StatusOnly(s) => {

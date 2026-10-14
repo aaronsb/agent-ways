@@ -84,6 +84,8 @@ fn a_direct_message_shows_in_every_view_labelled() {
         message: "a reply for you".into(),
         ts: 1_790_949_000,
         channel: Channel::Person,
+        tray: String::new(),
+        beside_post: false,
     });
     for tab in [Tab::Merged, Tab::Channel("open".into()), Tab::Dm(PEER_SID.into())] {
         assert!(attend_chat::tabs::shows(&c.signals()[0], &tab), "{tab:?}");

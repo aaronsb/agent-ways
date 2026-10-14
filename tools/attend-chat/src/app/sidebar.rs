@@ -185,10 +185,10 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
                 let shown = fg == tab;
                 let n = chat.signals.iter().filter(|x| crate::tabs::shows(x, &tab) && x.channel != crate::signal::Channel::Info).count();
                 let label = match tab {
-                    Tab::Review(_) => format!("{} DMs", s.identity.nickname),
+                    Tab::Review(_) => format!("{REVIEW_MARK}{} DMs", s.identity.nickname),
                     _ => "DMs".to_string(),
                 };
-                let mut line = dm_line(chat, &label, view_ground(&tab), n, shown, w, focused);
+                let mut line = dm_line(chat, &label, n, shown, w, focused);
                 if shown && !focused {
                     line.spans[0] = Span::styled(theme::SELECTED_MARK, theme::accent());
                 }
@@ -361,19 +361,14 @@ pub(super) fn identity_styles(depth: agent_theme::ColorDepth, palette: agent_ide
     }
 }
 
-/// The ground a DM view's row is drawn on: the info ground the destination
-/// flag wears for the operator's DMs with an agent, and a ground of its own
-/// for the agent's own DMs, so the two read apart.
-pub(super) fn view_ground(tab: &Tab) -> Ground {
-    match tab {
-        Tab::Review(_) => Ground::Hot,
-        _ => Ground::Info,
-    }
-}
+/// What leads an agent's own DM view's row and tab, so it reads apart from
+/// the operator's DMs with the agent, on the same ground, in any palette.
+pub(super) const REVIEW_MARK: &str = "◈ ";
 
-/// A DM view's row, under its agent's: indented, `label` on `ground`, then
-/// the count of the DMs it holds. Bold while shown.
-fn dm_line(chat: &ChatPane, label: &str, ground: Ground, count: usize, shown: bool, w: usize, focused: bool) -> Line<'static> {
+/// A DM view's row, under its agent's: indented, `label` on the info ground
+/// the destination flag wears, then the count of the DMs it holds. Bold
+/// while shown.
+fn dm_line(chat: &ChatPane, label: &str, count: usize, shown: bool, w: usize, focused: bool) -> Line<'static> {
     const INDENT: &str = "  ";
     let bare = theme::colourless();
     let [name, pad, last] = sized(chat.shape, bare, [label, "", &count.to_string()], w.saturating_sub(INDENT.len()));
@@ -382,7 +377,7 @@ fn dm_line(chat: &ChatPane, label: &str, ground: Ground, count: usize, shown: bo
     // long for three is laid out in two already.
     let join = usize::from(!bare && !chat.shape.join.is_empty() && !pad.is_empty());
     let name = format!("{name}{pad}{}", " ".repeat(join));
-    let lead = Seg::on("", ground).style;
+    let lead = Seg::on("", Ground::Info).style;
     let styles = focused_styles([if shown { lead.add_modifier(Modifier::BOLD) } else { lead }, Style::new(), Seg::on("", Ground::Rule).style], focused);
     let mut spans = vec![Span::raw(" "), Span::raw(INDENT)];
     spans.extend(chat.shape.lozenge(&segs([name, String::new(), last], styles)));
@@ -622,16 +617,12 @@ mod tests {
         for shape in [Shape::PLAIN, Shape::ROUND] {
             c.shape = shape;
             for label in ["DMs", "Shannon-alphabet-omnibus DMs"] {
-                let line = dm_line(&c, label, Ground::Hot, 3, false, 28, false);
+                let line = dm_line(&c, label, 3, false, 28, false);
                 assert_eq!(line.width(), 1 + 28, "{shape:?}: {line:?}");
             }
         }
     }
 
-    #[test]
-    fn the_two_dm_views_are_drawn_on_grounds_apart() {
-        assert_ne!(view_ground(&Tab::Dm("a".into())), view_ground(&Tab::Review("a".into())));
-    }
 
     #[test]
     fn an_age_is_its_largest_whole_unit() {

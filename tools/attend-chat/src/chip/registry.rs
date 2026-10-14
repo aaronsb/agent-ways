@@ -102,7 +102,9 @@ pub struct Seen {
 }
 
 /// Every identity the chat has seen, live or not: the senders of the
-/// buffered signals, newest first, then the seeded sessions. A claude is
+/// buffered signals the operator view shows, newest first, then the seeded
+/// sessions. A direct message between others names no one: its sender is
+/// listed only when a session or another message lists it. A claude is
 /// live when `claude_live` holds for its session id; a human when
 /// `human_live` holds for its username. Each live claude session is an
 /// entry of its own, whatever name it shares, so a direct message reaches
@@ -143,7 +145,7 @@ where
             out.push(Seen { identity, live, member });
         }
     };
-    for sig in signals.iter().rev() {
+    for sig in signals.iter().rev().filter(|s| crate::tabs::shows(s, &crate::tabs::Tab::Merged)) {
         let (primary_label, is_claude, id, live, member) = if let Some(sid) = sig.from.strip_prefix("claude:") {
             let id = Identity::for_cwd(&sig.cwd, caps);
             // Instance suffix: `@Tamsin-alpha` is the addressable name
@@ -243,7 +245,20 @@ mod tests {
             message: "msg".into(),
             ts: 0,
             channel: crate::signal::Channel::Open,
+            tray: String::new(),
+            beside_post: false,
         }
+    }
+
+    /// The sender of a direct message between others, read from another
+    /// tray, adds no identity: only what the operator view shows does.
+    #[test]
+    fn a_dm_between_others_adds_no_identity() {
+        let mut aside = sig("claude:c", "/home/z");
+        aside.channel = crate::signal::Channel::Elsewhere("b".into());
+        let buf = vec![sig("claude:a", "/home/x"), aside];
+        let seen = seen_identities(&buf, &[], ColorDepth::TrueColor, |_| true, |_| false, |_| false, &empty_cache());
+        assert_eq!(seen.iter().map(|s| s.member.as_str()).collect::<Vec<_>>(), ["a"]);
     }
 
     #[test]

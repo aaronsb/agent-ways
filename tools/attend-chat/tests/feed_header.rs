@@ -23,7 +23,7 @@ const NOW: u64 = 1_790_949_600;
 const ALPHA_CWD: &str = "/work/the-alpha-project-with-a-very-long-name";
 
 fn sig(id: &str, from: &str, cwd: &str, ago: u64, channel: Channel, message: &str) -> Signal {
-    Signal { id: id.into(), from: from.into(), project: String::new(), cwd: cwd.into(), reply_to: None, message: message.into(), ts: NOW - ago, channel }
+    Signal { id: id.into(), from: from.into(), project: String::new(), cwd: cwd.into(), reply_to: None, message: message.into(), ts: NOW - ago, channel, tray: String::new(), beside_post: false }
 }
 
 /// A chat at truecolor in the nord theme, so a band's colours can be read.

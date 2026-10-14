@@ -59,7 +59,7 @@ const MAX_SIGNALS: usize = 5000;
 
 /// How many of the newest messages a send's copy is looked for among: the
 /// copies arrive together, so a send's others are never far back.
-const DEDUPE_WINDOW: usize = 64;
+const DEDUPE_WINDOW: usize = 256;
 
 /// How often the peers, channels and the human's heartbeat are
 /// refreshed without any input (ADR-129, ADR-170). A peer that boots
@@ -302,19 +302,35 @@ impl ChatPane {
         self.dirty = true;
     }
 
-    /// Append `sig`, dropping from the head past [`MAX_SIGNALS`]. Both
-    /// writers into the buffer — the watcher drain and a command's local
-    /// block — go through here so the cap has a single home. A copy of a
-    /// send already held, read from another tray it went to, is dropped
-    /// ([`Signal::same_send`]).
-    pub fn push(&mut self, sig: Signal) {
-        if self.signals.iter().rev().take(DEDUPE_WINDOW).any(|s| s.same_send(&sig)) {
+    /// Append `sig`. Every writer into the buffer — the watcher drain, a
+    /// send reading back what it wrote, a command's local block — goes
+    /// through here, so the cap and the copies have a single home.
+    ///
+    /// - A file read twice ([`Signal::same_file`]), or a copy of a send
+    ///   already held from another tray ([`Signal::same_send`]), is dropped.
+    /// - The person's direct message sent beside a channel post of the same
+    ///   send is marked so, whichever copy arrives first
+    ///   ([`Signal::is_beside`]): the operator view shows the post alone.
+    /// - Past [`MAX_SIGNALS`] the oldest direct message between others goes
+    ///   first, then the oldest message, so others' DMs never push out what
+    ///   the person was party to.
+    pub fn push(&mut self, mut sig: Signal) {
+        let recent = self.signals.len().saturating_sub(DEDUPE_WINDOW);
+        if self.signals[recent..].iter().any(|s| s.same_file(&sig) || s.same_send(&sig)) {
             return;
         }
+        for s in &mut self.signals[recent..] {
+            if sig.is_beside(s) {
+                sig.beside_post = true;
+            }
+            if s.is_beside(&sig) {
+                s.beside_post = true;
+            }
+        }
         self.signals.push(sig);
-        if self.signals.len() > MAX_SIGNALS {
-            let drop_n = self.signals.len() - MAX_SIGNALS;
-            self.signals.drain(0..drop_n);
+        while self.signals.len() > MAX_SIGNALS {
+            let oldest = self.signals.iter().position(|s| matches!(s.channel, crate::signal::Channel::Elsewhere(_))).unwrap_or(0);
+            self.signals.remove(oldest);
         }
         self.invalidate();
     }
@@ -431,7 +447,9 @@ impl ChatPane {
                 self.say(status, false);
                 self.input.clear();
                 self.show_newest();
-                self.push(echo);
+                for s in echo {
+                    self.push(s);
+                }
             }
             EnterAction::StatusOnly(s) => self.say(s, true),
             EnterAction::Quiet(name) => {
@@ -732,8 +750,13 @@ impl Pane for ChatPane {
     /// waiting question the shell answers no first, as a typed character
     /// answers it, so a `y` in the paste never does. Control characters other
     /// than newline and tab are left out: an escape sequence in the
-    /// clipboard is not drawn into the box or sent.
+    /// clipboard is not drawn into the box or sent. An agent's own DMs take
+    /// no paste.
     fn paste(&mut self, text: &str) {
+        // A view with nothing to send has no box to paste into.
+        if !self.foreground.composes() {
+            return self.say("read only: nothing pasted", false);
+        }
         let text = text.replace("\r\n", "\n").replace('\r', "\n");
         self.dispatch(ix::Ev::Paste);
         let kept: String = text.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t')).collect();

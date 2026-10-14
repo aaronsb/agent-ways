@@ -40,6 +40,8 @@ fn sig(id: &str, from: &str, cwd: &str, message: &str, channel: Channel) -> Sign
         message: message.into(),
         ts: 1_790_949_000,
         channel,
+        tray: String::new(),
+        beside_post: false,
     }
 }
 
@@ -444,23 +446,20 @@ fn the_agents_own_view_has_no_compose_box() {
     assert!(seen.iter().any(|f| f == "mode feed"), "the feed is: {seen:?}");
 }
 
-/// The agent's own view's row is drawn in a colour of its own, apart from
-/// the operator's DM view's row.
+/// The agent's own view's row and tab carry a mark of their own, apart
+/// from the operator's DM view's row, on the same info ground.
 #[test]
-fn the_agents_own_view_has_a_colour_of_its_own() {
+fn the_agents_own_view_is_marked_apart() {
     let mut c = chat();
     side_click(&mut c, "alpha");
     review(&mut c);
-    let buf = testkit::render_screen(&mut c, W, H);
-    let rows = testkit::rows(&buf);
+    let rows = rows(&mut c);
     let name = nick(ALPHA_CWD);
-    let bg_of = |text: &str, skip: &str| {
-        let (y, r) = rows.iter().enumerate().skip(1).find(|(_, r)| r.split('│').next().is_some_and(|col| col.contains(text) && !col.contains(skip))).unwrap();
-        let x = r.split('│').next().unwrap().find(text).unwrap();
-        let x = r[..x].chars().count() as u16;
-        buf.cell((x, y as u16)).unwrap().bg
-    };
-    assert_ne!(bg_of(&format!("{name} DMs"), "\u{0}"), bg_of("DMs", &name), "{rows:#?}");
+    assert!(rows[0].contains('◈') && rows[0].contains(&format!("{name} DMs")), "the tab: {}", rows[0]);
+    let col = column(&mut c);
+    let review = col.iter().find(|r| r.contains(&format!("{name} DMs"))).unwrap();
+    let dms = col.iter().find(|r| r.contains("DMs") && !r.contains(&name)).unwrap();
+    assert!(review.contains('◈') && !dms.contains('◈'), "{col:#?}");
 }
 
 /// Hiding the agent's own view takes its row off the column and deletes
@@ -479,4 +478,49 @@ fn hiding_the_agents_own_view_keeps_its_messages() {
     assert_eq!(c.signals().len(), before, "nothing deleted");
     review(&mut c);
     assert!(feed(&mut c).contains("alpha to beta"));
+}
+
+/// A paste in the agent's own view has no box to land in: nothing is
+/// pasted, and the status says so.
+#[test]
+fn a_paste_in_the_agents_own_view_pastes_nothing() {
+    let mut c = chat();
+    review(&mut c);
+    agent_tui::screen::Screen::paste(&mut c, "a pasted line");
+    assert!(c.input().is_empty(), "{}", screen(&mut c));
+    assert_eq!(c.status(), "read only: nothing pasted");
+}
+
+/// Address on the agent's menu, from its own view, shows the operator's
+/// DMs with it first, so the address lands in a box that is shown.
+#[test]
+fn address_from_the_agents_own_view_goes_to_its_dms() {
+    let mut c = chat();
+    review(&mut c);
+    let rows = rows(&mut c);
+    let (x, y) = rows.iter().enumerate().skip(1).find_map(|(y, r)| r.split('│').next()?.find("alpha").map(|b| (b as u16, y as u16))).unwrap();
+    c.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Right), column: x, row: y, modifiers: KeyModifiers::NONE });
+    pick(&mut c, "Address");
+    assert_eq!(c.foreground(), &Tab::Dm(ALPHA_SID.into()));
+    assert_eq!(c.input().text(), format!("@{} ", nick(ALPHA_CWD)));
+}
+
+/// The message menu in the agent's own view: Quote is set back, and Reply
+/// and Address on a DM go to the operator's DMs with its sender first.
+#[test]
+fn the_message_menu_in_the_agents_own_view_writes_only_where_a_box_is() {
+    for (item, want) in [("Reply", true), ("Address", true)] {
+        let mut c = chat();
+        review(&mut c);
+        // The keyboard is on the feed: select the newest message, beta's DM
+        // to alpha, and open its menu.
+        press(&mut c, KeyCode::Up);
+        press(&mut c, KeyCode::Enter);
+        let menu_items = items(&mut c);
+        assert!(menu_items.iter().any(|i| i.starts_with("Quote") && i.contains("read only")), "Quote set back: {menu_items:?}");
+        pick(&mut c, item);
+        let s = screen(&mut c);
+        assert_eq!(c.foreground(), &Tab::Dm(BETA_SID.into()), "{item}: {s}");
+        assert_eq!(c.input().text().starts_with(&format!("@{}", nick(BETA_CWD))), want, "{item}: {:?}", c.input().text());
+    }
 }

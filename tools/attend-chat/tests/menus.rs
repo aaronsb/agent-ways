@@ -40,6 +40,8 @@ fn chat_with(palette: Palette) -> Chat {
         message: "a message in the feed".into(),
         ts: 1_790_949_000,
         channel: Channel::Open,
+        tray: String::new(),
+        beside_post: false,
     });
     c
 }

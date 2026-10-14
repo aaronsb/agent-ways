@@ -105,8 +105,8 @@ pub(super) const VIEW_LABEL: &str = "⋯all";
 
 /// The tab bar the shell draws, in the order [`tabs::bar`] gives: the common
 /// menu's `≡` slot, the created channel shown with what it is for or the
-/// DM view shown (`@Name DMs`, or `Name DMs` for an agent's own led by a
-/// mark in its row's colour, shaded as a view), the `+` slot, then the
+/// DM view shown (`@Name DMs`, or `Name DMs` for an agent's own, led by
+/// the mark its row carries, shaded as a view), the `+` slot, then the
 /// reserved tabs pinned right, `#open` and the operator view
 /// ([`VIEW_LABEL`]), shaded as a view. The left column numbers the
 /// channels for Ctrl+digit, and 0 is the operator view ([`ChatPane::jump`]);
@@ -130,10 +130,9 @@ pub(super) fn tabs(chat: &mut ChatPane) -> Vec<PaneTab> {
             Slot::New => PaneTab::new("+").action(),
             Slot::Tab(Tab::Merged) => PaneTab::new(VIEW_LABEL).reserved().view(),
             Slot::Tab(Tab::Dm(member)) => PaneTab::new(format!("@{} DMs", chat.dm_name(&member))).view(),
-            // The agent's own DMs, led by a mark in the colour its row wears.
+            // The agent's own DMs, led by the mark its row carries.
             Slot::Tab(Tab::Review(member)) => {
-                let ground = super::sidebar::view_ground(&Tab::Review(member.clone()));
-                let mark = Span::styled("◈ ", Style::new().fg(theme::badge(ground).bg.unwrap_or_default()));
+                let mark = Span::styled(super::sidebar::REVIEW_MARK, Style::new().fg(theme::badge(Ground::Info).bg.unwrap_or_default()));
                 PaneTab::new(format!("{} DMs", chat.dm_name(&member))).lead(vec![mark]).view()
             }
             Slot::Tab(Tab::Channel(name)) => {

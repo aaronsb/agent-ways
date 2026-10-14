@@ -686,7 +686,6 @@ impl<'a> Step<'a> {
     /// a list that may have shrunk. A focused tab whose channel is gone moves
     /// to the tab shown, which falls back to `#open` the same way.
     fn refocus(&mut self) -> R {
-
         if let (Some(i), Some(hit)) = (self.ix.side_focus(), self.ix.row_hit.clone()) {
             let rows = &self.world()?.rows;
             let owner = match &hit {

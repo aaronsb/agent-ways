@@ -24,6 +24,13 @@ pub struct Signal {
     /// dir it was read from, never from the body (wire format
     /// unchanged). Drives the per-tab transcript filter (#393).
     pub channel: Channel,
+    /// The tray it was read from, by its directory's name; empty for a
+    /// local block. With `id`, which file it is.
+    pub tray: String,
+    /// A direct message the person sent beside a channel post of the same
+    /// send (`@Name #channel`): the post shows it in the operator view, so
+    /// this copy shows only in the DM views.
+    pub beside_post: bool,
 }
 
 impl Signal {
@@ -61,16 +68,32 @@ impl Signal {
         self.sender_member().as_deref() == Some(member) || to.split(',').any(|t| t == member)
     }
 
+    /// Whether this is the same file as `other`, read twice: once just
+    /// after the chat wrote it, once through the watcher.
+    pub fn same_file(&self, other: &Signal) -> bool {
+        !self.tray.is_empty() && self.tray == other.tray && self.id == other.id
+    }
+
+    /// Whether this and `other` are copies of one send by the person, the
+    /// one written together with the other (their times a second apart at
+    /// most) to a different tray.
+    fn copies(&self, other: &Signal) -> bool {
+        !self.tray.is_empty() && !other.tray.is_empty() && self.tray != other.tray && self.from == other.from && self.message == other.message && self.ts.abs_diff(other.ts) <= 1
+    }
+
     /// Whether this is the same send as `other`, read from another tray: a
     /// message the person addressed to agents in several projects is
     /// written once to each project's tray, every copy with the whole `to`.
-    /// Copies are written together, so their times differ by a second at
-    /// most.
+    /// The same words sent again go to the same trays, so a copy in the
+    /// same tray is another send.
     pub fn same_send(&self, other: &Signal) -> bool {
-        matches!((&self.channel, &other.channel), (Channel::Sent(a), Channel::Sent(b)) if a == b)
-            && self.from == other.from
-            && self.message == other.message
-            && self.ts.abs_diff(other.ts) <= 1
+        matches!((&self.channel, &other.channel), (Channel::Sent(a), Channel::Sent(b)) if a == b) && self.copies(other)
+    }
+
+    /// Whether this direct message the person sent went beside `post`, the
+    /// channel post of the same send (`@Name #channel`).
+    pub fn is_beside(&self, post: &Signal) -> bool {
+        matches!(self.channel, Channel::Sent(_)) && matches!(post.channel, Channel::Open | Channel::Group(_)) && self.copies(post)
     }
 }
 
@@ -132,6 +155,16 @@ pub struct Own {
     pub person: String,
 }
 
+impl Own {
+    /// The chat's own trays here: the tray of the working directory, and
+    /// the person tray of the person at the keyboard. `main` hands the
+    /// watcher these, and a send reads back what it wrote against them.
+    pub fn here() -> Own {
+        let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+        Own { tray: encode_cwd(&cwd), person: human_member_id() }
+    }
+}
+
 /// Parse a `.signal` file through the shared ADR-120 parser
 /// (`agent_identity::parse_signal`), so a `re:` prefix that is not a signal
 /// id reads as legacy prose here exactly as it does in the attend CLI, and
@@ -157,7 +190,10 @@ pub fn parse_file(path: &Path, own: &Own) -> Option<Signal> {
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    let mine = !own.person.is_empty() && parsed.from_kind == Some("human") && parsed.from_id == Some(own.person.as_str());
+    // The person's own: a human envelope with their id, from a human
+    // sender. A claude's line that claims a human envelope is not theirs.
+    let mine = !own.person.is_empty() && parsed.from.starts_with("external:") && parsed.from_kind == Some("human") && parsed.from_id == Some(own.person.as_str());
+    let tray = path.parent().and_then(|d| d.file_name()).and_then(|n| n.to_str()).unwrap_or("").to_string();
     Some(Signal {
         id,
         from: parsed.from.to_string(),
@@ -167,6 +203,8 @@ pub fn parse_file(path: &Path, own: &Own) -> Option<Signal> {
         message: parsed.message.to_string(),
         ts,
         channel: channel_for_path(path, own, mine, parsed.to.unwrap_or("")),
+        tray,
+        beside_post: false,
     })
 }
 
@@ -258,6 +296,8 @@ pub fn compose_status_block(kind: &str, body: &str) -> Signal {
         message: body.to_string(),
         ts,
         channel: Channel::Info,
+        tray: String::new(),
+        beside_post: false,
     }
 }
 
@@ -431,7 +471,7 @@ mod tests {
     /// person's among them, and no channel post.
     #[test]
     fn an_agents_dms_are_those_it_sent_or_received() {
-        let on = |from: &str, channel: Channel| Signal { id: "s".into(), from: format!("claude:{from}"), project: String::new(), cwd: String::new(), reply_to: None, message: String::new(), ts: 0, channel };
+        let on = |from: &str, channel: Channel| Signal { id: "s".into(), from: format!("claude:{from}"), project: String::new(), cwd: String::new(), reply_to: None, message: String::new(), ts: 0, channel, tray: String::new(), beside_post: false };
         let me = |channel: Channel| Signal { from: "external:aaron@pts".into(), ..on("x", channel) };
         assert!(on("a1", Channel::Person).is_dm_of("a1"), "to the person");
         assert!(me(Channel::Sent("a2,a1".into())).is_dm_of("a1"), "from the person");
@@ -447,16 +487,38 @@ mod tests {
     }
 
     /// The copies of one send, read from the trays it went to, are one
-    /// send; the same words sent again later, or to others, are not.
+    /// send; the same words sent again later, or to others, or again to the
+    /// same tray, are not. The same file read twice is one file. A copy
+    /// beside a channel post of the same send is marked by the post.
     #[test]
     fn the_copies_of_one_send_are_one_send() {
-        let sent = |to: &str, ts: u64| Signal { id: format!("{to}-{ts}"), from: "external:aaron@pts".into(), project: String::new(), cwd: String::new(), reply_to: None, message: "hi".into(), ts, channel: Channel::Sent(to.into()) };
-        assert!(sent("s1,s2", 100).same_send(&sent("s1,s2", 101)));
-        assert!(!sent("s1,s2", 100).same_send(&sent("s1,s2", 160)), "sent again later");
-        assert!(!sent("s1,s2", 100).same_send(&sent("s1", 100)), "to others");
-        let mut direct = sent("s1,s2", 100);
+        let sent = |tray: &str, to: &str, ts: u64| Signal { id: format!("{tray}-{ts}"), from: "external:aaron@pts".into(), project: String::new(), cwd: String::new(), reply_to: None, message: "hi".into(), ts, channel: Channel::Sent(to.into()), tray: tray.into(), beside_post: false };
+        assert!(sent("-a", "s1,s2", 100).same_send(&sent("-b", "s1,s2", 101)), "two trays, one send");
+        assert!(!sent("-a", "s1,s2", 100).same_send(&sent("-a", "s1,s2", 101)), "the same tray again: a resend");
+        assert!(!sent("-a", "s1,s2", 100).same_send(&sent("-b", "s1,s2", 160)), "sent again later");
+        assert!(!sent("-a", "s1,s2", 100).same_send(&sent("-b", "s1", 100)), "to others");
+        let mut direct = sent("-b", "s1,s2", 100);
         direct.channel = Channel::Direct("s1,s2".into());
-        assert!(!direct.same_send(&sent("s1,s2", 100)), "only the person's own sends");
+        assert!(!direct.same_send(&sent("-a", "s1,s2", 100)), "only the person's own sends");
+        assert!(sent("-a", "s1", 100).same_file(&sent("-a", "s1", 100)), "one file read twice");
+        assert!(!sent("-a", "s1", 100).same_file(&sent("-a", "s1", 101)));
+        let mut post = sent("@deploy", "#deploy", 100);
+        post.channel = Channel::Group("deploy".into());
+        assert!(sent("-a", "s1", 101).is_beside(&post) && !post.is_beside(&sent("-a", "s1", 101)), "the DM goes beside the post");
+        assert!(!sent("-a", "s1", 130).is_beside(&post), "a later send");
+    }
+
+    /// A claude's line that claims a human envelope with the person's id is
+    /// not the person's own send: the sender must be a human.
+    #[test]
+    fn a_claude_with_a_human_envelope_is_not_the_person() {
+        let d = tempdir_like().join("-work-alpha");
+        fs::create_dir_all(&d).unwrap();
+        let env = agent_identity::Envelope { from_kind: Some("human"), from_id: Some(&human_member_id()), on_behalf_of: None, to: Some("s1") };
+        let line = agent_identity::signal::format_tagged("claude:abc", "alpha", "/work/alpha", &env, None, "hello");
+        let sig = parse_file(&tmp_signal(&d, "forged", &line), &own()).unwrap();
+        assert_eq!(sig.channel, Channel::Elsewhere("s1".into()));
+        assert_eq!(sig.tray, "-work-alpha", "the tray it was read from");
     }
 
     #[test]
