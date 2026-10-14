@@ -110,7 +110,7 @@ paste        | base  | wait:Agents text:see: paste:line_one\\nline_two\\nline_th
 rawpaste     | base  | wait:Agents rawpaste:one\\ntwo
 plain        | plain | wait:Agents
 own-row      | own   | wait:operator click:#deploy click:#deploy wait:pick Escape gone:pick side:operator wait:Leave_#deploy
-quiet-send   | base  | wait:Agents rside:○ wait:Address Down Enter text:are_you_there Enter wait:no_heartbeat
+quiet-send   | base  | wait:Agents rside:○ wait:Address click:Address_@ text:are_you_there Enter wait:no_heartbeat
 paste-asked  | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:hide_the_messages_in_⋯all? paste:yes_please\\nsecond_line wait:kept
 ask          | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide
 ask-yes      | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide click:y_hide wait:the_bus_keeps_them
@@ -123,10 +123,10 @@ delete-done  | base  | wait:#open click:#open click:#open wait:Delete_read Down 
 delete-undo  | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:y_delete click:y_delete wait:Undo_delete_on_its_menu click:#open wait:Undo_delete click:Undo_delete wait:restored
 delete-custom | base | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:Custom… wait:older_than: text:soon Enter wait:not_a_duration
 dm-delete    | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs rside:DMs wait:Delete_read click:Delete_read wait:delete_older_than
-tomb-menu    | base  | wait:Agents rside:○ wait:Tombstone…
-tomb-ask     | base  | wait:Agents rside:○ wait:Tombstone… click:Tombstone… wait:y_tombstone
-tomb-said    | base  | wait:Agents rside:○ wait:Tombstone… click:Tombstone… wait:y_tombstone click:y_tombstone wait:tombstoned
-review-tomb  | base  | wait:Agents rside:○ wait:Review_DMs click:Review_DMs wait:read_only rside:DMs wait:Tombstone…
+tomb-menu    | gone  | wait:Agents rside:○ wait:Tombstone…
+tomb-ask     | gone  | wait:Agents rside:○ wait:Tombstone… click:Tombstone… wait:y_tombstone
+tomb-said    | gone  | wait:Agents rside:○ wait:Tombstone… click:Tombstone… wait:y_tombstone click:y_tombstone wait:tombstoned
+review-tomb  | gone  | wait:Agents rside:○ wait:Review_DMs click:Review_DMs wait:read_only rside:DMs wait:Tombstone…
 quit-ask     | base  | wait:Agents F2 q wait:quit?
 menu-row     | base  | wait:Agents side:#infra side:#infra wait:pick side:#deploy gone:pick
 menu-tab     | base  | wait:Agents side:#infra side:#infra wait:pick click:#open gone:pick
@@ -229,8 +229,9 @@ review-both  | trays | wait:Agents_3/4 side:alpha wait:DMs rside:alpha wait:Revi
 # #deploy, with a message there; `many` adds #ch01 to #ch24; `plain` the
 # plain shape; `dm` a direct message from alpha to the operator; `trays`
 # that, a direct message the operator sent beta in an earlier session, in
-# beta's tray, and direct messages between the agents in their trays. No
-# attend config is written: the mouse is on by default.
+# beta's tray, and direct messages between the agents in their trays;
+# `gone` has gamma exited rather than quiet. No attend config is written:
+# the mouse is on by default.
 fixture() { # kind
   rm -rf "$F"
   local cache=$F/cache/attend sig=$F/cache/attend/signals now shape=round
@@ -257,11 +258,12 @@ fixture() { # kind
   if [ "$1" = many ]; then
     for n in $(seq -w 1 24); do mkdir -p "$sig/@ch$n"; done
   fi
-  # gamma's record names a pid no process holds: it has exited, so its
-  # row offers Tombstone… and attend accepts it.
+  # In `gone`, gamma's record names a pid no process holds: it has
+  # exited, so its row offers Tombstone… and attend accepts it. Elsewhere
+  # it is quiet, and a send to it is refused as one to a quiet agent.
   for s in "${sessions[@]}"; do
     local pid=$i
-    [ "${s%%:*}" = "$C" ] && pid=4194301
+    [ "$1" = gone ] && [ "${s%%:*}" = "$C" ] && pid=4194301
     printf '{"pid":%d,"sessionId":"%s","cwd":"%s"}\n' "$pid" "${s%%:*}" "${s#*:}" > "$F/home/.claude/sessions/$i.json"
     i=$((i + 1))
   done
