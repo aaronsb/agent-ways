@@ -17,6 +17,14 @@
 # Each step waits on the screen, not on the clock: after a key or a click
 # the script polls the pane's text until two captures agree, and wait:TEXT
 # polls until TEXT is on the screen. A wait that runs out fails the run.
+#
+# The harness's tmux server is shared by every harness root on the machine,
+# so a session name is global. Each run names its sessions ac-<pid>-<scenario>:
+# two runs, in one checkout or two, never share a name, and a run never
+# downs or launches onto another's. The run downs its own session on every
+# exit (a failed wait, an error, ^C, a TERM), and at the start downs the
+# leftovers of earlier runs of this root whose pid is gone (a KILL or a
+# power cut leaves one). Nothing else on the server is touched.
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$HERE/../../.." && pwd)
@@ -26,12 +34,32 @@ WORK=${SHOTS_DIR:-$REPO/target/tui-verify/attend-chat}
 # (`.claude/worktrees/`) normalizes to the worktree's origin, and every
 # fixture agent would collapse into that one identity.
 F=$(mktemp -d "${TMPDIR:-/tmp}/attend-chat-shots.XXXXXX")
-trap 'rm -rf "$F"' EXIT
+SESSION=
+cleanup() {
+  [ -z "$SESSION" ] || $TH down "$SESSION" >/dev/null 2>&1 || true
+  rm -rf "$F"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 FONT=${FONT:-JetBrains Mono}
 SIZES=${SIZES:-80x25 120x35}
 REALHOME=$HOME
 TH="$BIN/tui-harness --dir $WORK/th"
 mkdir -p "$WORK"
+
+# Down the sessions of earlier runs of this root that no process owns now.
+sweep() {
+  local d name pid
+  for d in "$WORK"/th/sessions/ac-[0-9]*-*; do
+    [ -d "$d" ] || continue
+    name=${d##*/}
+    pid=${name#ac-}
+    pid=${pid%%-*}
+    kill -0 "$pid" 2>/dev/null || $TH down "$name" >/dev/null 2>&1 || true
+  done
+}
+sweep
 
 # The scenarios: name | fixture | steps. A step is a tmux key name, or
 #   text:CHARS     typed literally
@@ -240,7 +268,6 @@ YAML
 }
 
 launch() { # name cols rows
-  $TH down "$1" >/dev/null 2>&1 || true
   (cd "$F/work/alpha" && env -u CLAUDE_CONFIG_DIR -u CLAUDE_PROJECT_DIR -u CLAUDE_CODE_SESSION_ID HOME="$F/home" USER=operator \
     XDG_CACHE_HOME="$F/cache" XDG_CONFIG_HOME="$F/config" XDG_STATE_HOME="$F/state" XDG_DATA_HOME="$F/data" \
     TERM=xterm-256color COLORTERM=truecolor \
@@ -297,7 +324,7 @@ else:
 # The harness has no resize verb: its private tmux server resizes the window.
 resize() { # name cols
   local s
-  s=$(tmux -L agent-ways-tui list-sessions -F '#S' | grep -F "$1" | head -1)
+  s=$(tmux -L agent-ways-tui list-sessions -F '#S' | grep -Fx "tui-$1" | head -1)
   tmux -L agent-ways-tui resize-window -t "$s" -x "$2"
 }
 
@@ -345,7 +372,8 @@ while IFS='|' read -r name kind steps; do
     c=${size%x*} r=${size#*x}
     out=$WORK/$size
     mkdir -p "$out"
-    s=ac-$name
+    s=ac-$$-$name
+    SESSION=$s
     launch "$s" "$c" "$r"
     for k in $steps; do
       step "$s" "$k"
@@ -353,6 +381,7 @@ while IFS='|' read -r name kind steps; do
     $TH text "$s" >"$out/$name.txt"
     HOME=$REALHOME $TH shot "$s" --out "$out/$name.png" >/dev/null
     $TH down "$s" >/dev/null
+    SESSION=
     echo "$out/$name.png"
     n=$((n + 1))
   done
