@@ -9,7 +9,6 @@ use ratatui::text::Span;
 use ratatui::Frame;
 
 use super::pane::{footer_spans, Binding, Ctx, Keyed, Open, Overlay, Tone};
-use super::dialog::Placement;
 use super::pick::Pick;
 use super::response::Shown;
 use super::theme::{self, Seg};
@@ -179,16 +178,12 @@ impl App {
             p.draw(f, main);
         }
         match &self.mode {
-            Mode::Pick(p) => {
-                let p = p.clone();
-                self.draw_pick(f, main, &p);
-            }
             Mode::Entry(e) => {
                 let e = e.clone();
                 self.draw_entry(f, main, &e);
             }
             _ => {
-                self.draw_modal(f, main, Placement::Center);
+                self.draw_modal(f, main, false);
             }
         }
         self.draw_status(f, status);
@@ -200,7 +195,6 @@ impl App {
         let top = match &self.mode {
             Mode::Browse => None,
             _ if self.modal().is_some() => self.modal().map(|m| m.overlay(self)),
-            Mode::Pick(p) => Some(Overlay::Menu { id: p.pane.as_ref().map(|(id, _)| id.clone()).unwrap_or_default(), by_esc: p.by_esc }),
             Mode::Entry(e) => Some(Overlay::Entry { id: e.id.clone() }),
             _ => Some(Overlay::Report),
         };

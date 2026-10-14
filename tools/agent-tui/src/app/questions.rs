@@ -46,7 +46,7 @@ fn discard(app: &App, tab: usize) -> Dialog<'static> {
 }
 
 impl Modal for Confirm {
-    fn placement(&self) -> Placement {
+    fn placement(&self, _: &App) -> Placement {
         Placement::Bar
     }
 
@@ -69,7 +69,7 @@ impl Modal for Confirm {
 }
 
 impl Modal for DiscardTab {
-    fn placement(&self) -> Placement {
+    fn placement(&self, _: &App) -> Placement {
         Placement::Bar
     }
 
@@ -90,7 +90,7 @@ impl Modal for DiscardTab {
 }
 
 impl Modal for ReviewDiscard {
-    fn placement(&self) -> Placement {
+    fn placement(&self, _: &App) -> Placement {
         Placement::Bar
     }
 
@@ -115,7 +115,7 @@ impl Modal for ReviewDiscard {
 }
 
 impl Modal for ItemDelete {
-    fn placement(&self) -> Placement {
+    fn placement(&self, _: &App) -> Placement {
         Placement::Bar
     }
 
@@ -137,7 +137,7 @@ impl Modal for ItemDelete {
 }
 
 impl Modal for Ask {
-    fn placement(&self) -> Placement {
+    fn placement(&self, _: &App) -> Placement {
         Placement::Bar
     }
 

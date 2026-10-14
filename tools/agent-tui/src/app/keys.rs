@@ -56,16 +56,6 @@ impl App {
                     return self.flow_event(ev);
                 }
             }
-            Mode::ThemeMenu { sel } => {
-                let acts = self.theme_acts();
-                match k.code {
-                    KeyCode::Enter => self.theme_act(acts[sel.min(acts.len() - 1)]),
-                    KeyCode::Up | KeyCode::Char('k') => self.mode = Mode::ThemeMenu { sel: sel.saturating_sub(1) },
-                    KeyCode::Down | KeyCode::Char('j') => self.mode = Mode::ThemeMenu { sel: (sel + 1).min(acts.len() - 1) },
-                    KeyCode::Esc | KeyCode::Char('q' | 'a') => {}
-                    _ => self.mode = Mode::ThemeMenu { sel },
-                }
-            }
             Mode::Name { op, buf } => self.name_key(op, buf, k),
             Mode::Filter => match k.code {
                 KeyCode::Esc => self.clear_filter(),
@@ -101,21 +91,6 @@ impl App {
                 }
                 _ => self.mode = Mode::Edit(buf),
             },
-            Mode::Pick(p) => self.pick_key(p, k),
-            Mode::Menu { path, sel } => {
-                let len = tree::get(&self.roots, &path).actions.len();
-                match k.code {
-                    KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('a') => {}
-                    KeyCode::Enter => self.pick(path, sel),
-                    KeyCode::Up | KeyCode::Char('k') => self.mode = Mode::Menu { path, sel: sel.saturating_sub(1) },
-                    KeyCode::Down | KeyCode::Char('j') => self.mode = Mode::Menu { path, sel: (sel + 1).min(len - 1) },
-                    KeyCode::Char(c) if !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => match self.action_for_key(&path, c) {
-                        Some(i) => self.pick(path, i),
-                        None => self.mode = Mode::Menu { path, sel },
-                    },
-                    _ => self.mode = Mode::Menu { path, sel },
-                }
-            }
             Mode::Arg { path, action, mut buf } => match k.code {
                 KeyCode::Esc => self.msg = "cancelled".into(),
                 KeyCode::Enter if buf.trim().is_empty() => self.mode = Mode::Arg { path, action, buf },
@@ -364,7 +339,7 @@ impl App {
         if self.modal().is_some() {
             return self.modal_mouse(m, closes);
         }
-        let in_menu = self.hits.menu.as_ref().is_some_and(|(r, _)| r.contains(at));
+        let in_entry = self.hits.entry.is_some_and(|r| r.contains(at));
         match &mut self.mode {
             Mode::Browse if self.pane.is_some() => self.pane_mouse(m),
             Mode::Browse if self.tab == self.roots.len() => self.theme_mouse(m),
@@ -373,50 +348,6 @@ impl App {
                     self.browse(press(k));
                 } else if click {
                     self.click_browse(at);
-                }
-            }
-            Mode::Menu { sel, .. } | Mode::ThemeMenu { sel } => {
-                if let Some(k) = wheel {
-                    self.key(press(k));
-                } else if click {
-                    let Some((menu, items)) = &self.hits.menu else { return };
-                    if let Some(i) = items.iter().position(|r| r.contains(at)) {
-                        *sel = i;
-                        self.key(press(KeyCode::Enter));
-                    } else if !menu.contains(at) {
-                        self.key(press(KeyCode::Esc));
-                    }
-                }
-            }
-            Mode::Pick(p) => {
-                if let Some(k) = wheel {
-                    // The wheel over the menu moves its highlight; elsewhere
-                    // it scrolls what is under it.
-                    if in_menu {
-                        self.key(press(k));
-                    } else {
-                        self.pane_wheel(m);
-                    }
-                } else if click && in_menu {
-                    let Some((_, items)) = &self.hits.menu else { return };
-                    // A click picks the row: on a list it marks it, as Space
-                    // does. A row that cannot be picked yet takes no click.
-                    if let Some(i) = items.iter().position(|r| r.contains(at)).filter(|i| p.open(*i)) {
-                        p.sel = i;
-                        let k = if p.multi { KeyCode::Char(' ') } else { KeyCode::Enter };
-                        self.key(press(k));
-                    }
-                } else if closes && !in_menu {
-                    // A click on what would open this same menu (its tab, or
-                    // its row) only closes it, wherever it docked.
-                    let id = p.pane.as_ref().map(|(id, _)| id.clone());
-                    self.key(press(KeyCode::Esc));
-                    self.click_through(m);
-                    if let Mode::Pick(q) = &self.mode {
-                        if id.is_some() && q.pane.as_ref().map(|(id, _)| id) == id.as_ref() {
-                            self.mode = Mode::Browse;
-                        }
-                    }
                 }
             }
             Mode::Review { run: Some(_), .. } => {}
@@ -429,7 +360,7 @@ impl App {
             }
             // The entry dialog: a click outside closes it with nothing, and
             // on the tab bar or the column goes on; one inside keeps it.
-            Mode::Entry(_) if closes && !in_menu => {
+            Mode::Entry(_) if closes && !in_entry => {
                 self.mode = Mode::Browse;
                 self.click_through(m);
             }

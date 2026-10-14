@@ -364,6 +364,31 @@ fn the_tab_discard_answers_alike_by_key_hotkey_and_click_from_the_tree_and_from_
     }
 }
 
+/// The action menu picks an action alike by Enter on its row, by its
+/// letter, and by a click on it.
+#[test]
+fn the_action_menu_picks_alike_by_enter_letter_and_click() {
+    let picked = |how: &dyn Fn(&mut App)| {
+        let mut app = App::new("t", action_tree());
+        keys(&mut app, &[KeyCode::Down, KeyCode::Char('a')]);
+        assert!(matches!(app.mode, Mode::Menu { .. }));
+        how(&mut app);
+        let queued: Vec<String> = app.queue.items().iter().map(|q| q.command.clone()).collect();
+        (queued, matches!(app.mode, Mode::Browse))
+    };
+    let check = "ways agent key check --provider anthropic".to_string();
+    let key = tree::action_keys(&action_tree()[0].children[0].actions)[2].expect("check has a letter");
+    let by_enter = picked(&|a: &mut App| keys(a, &[KeyCode::Down, KeyCode::Down, KeyCode::Enter]));
+    let by_letter = picked(&|a: &mut App| keys(a, &[KeyCode::Char(key)]));
+    let by_click = picked(&|a: &mut App| {
+        let at = find(a, " check");
+        click(a, at);
+    });
+    assert_eq!(by_enter, (vec![check], true));
+    assert_eq!(by_letter, by_enter);
+    assert_eq!(by_click, by_enter);
+}
+
 #[test]
 fn mouse_answers_a_confirm_on_its_targets_only() {
     let mut app = App::new("t", action_tree());

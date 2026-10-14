@@ -10,6 +10,7 @@ mod entry;
 pub mod flow;
 mod items;
 mod keys;
+mod menus;
 mod modals;
 pub mod pane;
 mod paneshell;
@@ -155,8 +156,8 @@ struct Hits {
     tabs: Vec<(Rect, usize)>,
     /// The tree list inside its border; row `i` is at `y + i - offset`.
     list: Rect,
-    /// The open menu and one rect per item.
-    menu: Option<(Rect, Vec<Rect>)>,
+    /// The entry dialog's box.
+    entry: Option<Rect>,
     /// The open dialog and its buttons, with the kind of mode that drew it
     /// ([`App::drawn_dialog`]).
     dialog: Option<(std::mem::Discriminant<Mode>, dialog::Drawn)>,

@@ -50,19 +50,22 @@ pub(super) trait Modal: Sync {
     fn dialog(&self, app: &App, full: bool) -> Dialog<'static>;
 
     /// Where its dialog is drawn, as [`Modal::dialog`] places it.
-    fn placement(&self) -> Placement {
+    fn placement(&self, _: &App) -> Placement {
         Placement::Center
     }
 
     /// Draw it over `area`.
     fn draw(&self, app: &mut App, f: &mut Frame, area: Rect) -> Drawn {
         let d = self.dialog(app, true);
-        debug_assert_eq!(d.placement(), self.placement(), "a modal names where its dialog is placed");
+        debug_assert_eq!(d.placement(), self.placement(app), "a modal names where its dialog is placed");
         d.draw(f, area, app.shape)
     }
 
     /// Hold its scroll at `to`, where its mode keeps one.
     fn set_scroll(&self, _: &mut App, _: usize) {}
+
+    /// Hold a menu's cursor at `to`, where its mode keeps one.
+    fn set_sel(&self, _: &mut App, _: usize) {}
 
     /// Act on what it was answered. False ends the session.
     fn answer(&self, app: &mut App, a: Answer) -> bool;
@@ -82,6 +85,13 @@ pub(super) trait Modal: Sync {
     fn overlay(&self, _: &App) -> Overlay {
         Overlay::Report
     }
+
+    /// What makes it this one and no other of its kind, where a press
+    /// outside it can land on what opens it again: that press only closes
+    /// it.
+    fn identity(&self, _: &App) -> Option<String> {
+        None
+    }
 }
 
 /// The exit guard ([`Mode::Guard`]).
@@ -94,7 +104,7 @@ struct Help;
 struct Response;
 
 /// A mode lozenge on the bottom bar.
-fn mode_lozenge(app: &App, label: &str, g: Ground) -> Vec<Span<'static>> {
+pub(super) fn mode_lozenge(app: &App, label: &str, g: Ground) -> Vec<Span<'static>> {
     app.shape.lozenge(&[Seg::on(format!(" {label} "), g).bold()])
 }
 
@@ -273,6 +283,9 @@ impl App {
             Mode::Review { discard: true, .. } => &questions::ReviewDiscard,
             Mode::ItemDelete { .. } => &questions::ItemDelete,
             Mode::Ask(_) => &questions::Ask,
+            Mode::Menu { .. } => &menus::ActionMenu,
+            Mode::ThemeMenu { .. } => &menus::ThemeMenu,
+            Mode::Pick(_) => &menus::PickMenu,
             _ => return None,
         })
     }
@@ -283,11 +296,12 @@ impl App {
         self.hits.dialog.as_ref().filter(|(of, _)| *of == std::mem::discriminant(&self.mode)).map(|(_, d)| d)
     }
 
-    /// Draw the open modal over `area` when it is placed `on` it, recording
+    /// Draw the open modal over `area`, the bottom bar for one placed on it
+    /// (`bar`) and the screen between the bars for any other, recording
     /// where it landed and the scroll the frame holds it at. Whether it
     /// was drawn.
-    pub(super) fn draw_modal(&mut self, f: &mut Frame, area: Rect, on: Placement) -> bool {
-        let Some(m) = self.modal().filter(|m| m.placement() == on) else { return false };
+    pub(super) fn draw_modal(&mut self, f: &mut Frame, area: Rect, bar: bool) -> bool {
+        let Some(m) = self.modal().filter(|m| (m.placement(self) == Placement::Bar) == bar) else { return false };
         let drawn = m.draw(self, f, area);
         m.set_scroll(self, drawn.scroll);
         self.hits.dialog = Some((std::mem::discriminant(&self.mode), drawn));
@@ -299,7 +313,7 @@ impl App {
         let Some(m) = self.modal() else { return true };
         let mut d = m.dialog(self, false);
         let a = d.key(k);
-        m.set_scroll(self, d.scroll());
+        self.hold(m, &d);
         self.modal_answer(m, a)
     }
 
@@ -329,23 +343,37 @@ impl App {
             return;
         }
         let a = d.mouse(m.kind, at, &drawn);
-        modal.set_scroll(self, d.scroll());
+        self.hold(modal, &d);
+        let id = modal.identity(self);
         if !self.modal_answer(modal, a) {
             // A click has no return value to end the session with.
             self.ending = true;
         }
         if a == Answer::Close && !inside {
             self.click_through(m);
+            // On what opens it again: the press only closed it.
+            if id.is_some() && self.modal().and_then(|m| m.identity(self)) == id {
+                self.mode = Mode::Browse;
+            }
+        }
+    }
+
+    /// Hold the open modal's scroll and cursor where dialog `d` left them.
+    fn hold(&mut self, m: &dyn Modal, d: &Dialog) {
+        m.set_scroll(self, d.scroll());
+        if let Some(sel) = d.sel() {
+            m.set_sel(self, sel);
         }
     }
 
     /// Act on what modal `m` was answered. Once answered, its drawing is
     /// no target for the next press. False ends the session.
     fn modal_answer(&mut self, m: &dyn Modal, a: Answer) -> bool {
+        let on = m.answer(self, a);
         if a != Answer::Stay {
             self.hits.dialog = None;
         }
-        m.answer(self, a)
+        on
     }
 
     /// The exit guard: every tab with pending items and its count, then the

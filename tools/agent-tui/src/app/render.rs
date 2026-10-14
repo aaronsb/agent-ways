@@ -6,15 +6,14 @@
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
 use super::apply::Outcome;
-use super::dialog::Placement;
 use super::theme::{self, Ground, Seg, Shape};
 use super::{App, Btn, Mode};
 use crate::tree::{self, Arg, Kind, Row};
-use crate::wrap::{pad_to, str_width};
+use crate::wrap::str_width;
 
 /// A bordered pane in the theme: rule-coloured border, accent title.
 pub(super) fn pane(title: impl Into<Line<'static>>) -> Block<'static> {
@@ -117,7 +116,7 @@ impl App {
     fn draw_frame(&mut self, f: &mut Frame) {
         let [bar, main, status] = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
         let [left, right] = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)]).areas(main);
-        self.hits.menu = None;
+        self.hits.entry = None;
         self.hits.dialog = None;
         self.hits.buttons.clear();
         self.hits.cta = Rect::default();
@@ -139,23 +138,13 @@ impl App {
             self.draw_tabs(f, bar, tab, true);
             self.draw_review_tree(f, left, tab);
             self.draw_review_detail(f, right, tab);
-            self.draw_modal(f, main, Placement::Center);
+            self.draw_modal(f, main, false);
             return self.draw_status(f, status);
         }
         if self.on_theme_tab() {
             self.draw_tabs(f, bar, self.tab, false);
             self.draw_theme_tab(f, left, right);
-            match &self.mode {
-                Mode::ThemeMenu { sel } => {
-                    let sel = *sel;
-                    let items = self.theme_acts().iter().map(|a| (a.label().to_string(), self.theme_act_tag(*a))).collect();
-                    let title = format!("actions: theme {}", self.themes.under_cursor().0.name);
-                    self.draw_menu_items(f, main, title, items, sel);
-                }
-                _ => {
-                self.draw_modal(f, main, Placement::Center);
-            }
-            }
+            self.draw_modal(f, main, false);
             return self.draw_status(f, status);
         }
         let rows = self.rows();
@@ -185,19 +174,7 @@ impl App {
         if let Mode::Flow(flow) = &mut self.mode {
             flow.draw(f, main, self.shape);
         }
-        match &self.mode {
-            Mode::Menu { path, sel } => {
-                let (path, sel) = (path.clone(), *sel);
-                self.draw_menu(f, main, &path, sel);
-            }
-            Mode::Pick(p) => {
-                let p = p.clone();
-                self.draw_pick(f, main, &p);
-            }
-            _ => {
-                self.draw_modal(f, main, Placement::Center);
-            }
-        }
+        self.draw_modal(f, main, false);
         self.draw_status(f, status);
     }
 
@@ -459,65 +436,11 @@ impl App {
         f.render_widget(p, area);
     }
 
-    fn draw_menu(&mut self, f: &mut Frame, area: Rect, path: &[usize], sel: usize) {
-        let n = tree::get(&self.roots, path);
-        let items = n
-            .actions
-            .iter()
-            .zip(tree::action_keys(&n.actions))
-            .map(|(a, k)| {
-                let tag = match (&a.arg, a.confirm) {
-                    (Arg::Secret, _) => "  masked".to_string(),
-                    (Arg::Flow(_), _) => "  guided".to_string(),
-                    (Arg::View(_), _) => "  view".to_string(),
-                    (Arg::Text(p), true) => format!("  {p}, asks first"),
-                    (Arg::Text(p), false) => format!("  {p}"),
-                    (Arg::None, true) => "  asks first".to_string(),
-                    (Arg::None, false) => String::new(),
-                };
-                (format!("{} {}", k.unwrap_or(' '), a.label), tag)
-            })
-            .collect();
-        let title = format!("actions: {}", tree::label(&self.roots, path));
-        self.draw_menu_items(f, area, title, items, sel);
-    }
-
-    /// A menu of (label, tag) items, the one at `sel` highlighted, each
-    /// recorded as a click target.
-    pub(super) fn draw_menu_items(&mut self, f: &mut Frame, area: Rect, title: String, items: Vec<(String, String)>, sel: usize) {
-        let r = modal_rect(area, 50, items.len() as u16 + 2);
-        self.draw_menu_items_in(f, r, title, items, sel, &[]);
-    }
-
-    /// The menu's items in the popup `r`, each row a click target. An item
-    /// `waits` marks, one that cannot be picked yet, is drawn set back.
-    pub(super) fn draw_menu_items_in(&mut self, f: &mut Frame, r: Rect, title: String, items: Vec<(String, String)>, sel: usize, waits: &[bool]) {
-        let w = r.width;
-        let lines: Vec<Line> = items
-            .iter()
-            .enumerate()
-            .map(|(i, (label, tag))| {
-                let style = match (i == sel, waits.get(i).copied().unwrap_or(false)) {
-                    (true, _) => theme::picked(),
-                    (false, true) => theme::muted(),
-                    (false, false) => Style::new(),
-                };
-                // Padded to the popup's inside, so the selection fills the row.
-                Line::styled(pad_to(&format!(" {}{tag}", pad_to(label, 10)), w.saturating_sub(2) as usize), style)
-            })
-            .collect();
-        let inner = r.inner(ratatui::layout::Margin::new(1, 1));
-        let hits = (0..lines.len() as u16).map(|i| Rect { y: inner.y + i, height: 1, ..inner }.intersection(inner)).collect();
-        self.hits.menu = Some((r, hits));
-        f.render_widget(Clear, r);
-        f.render_widget(Paragraph::new(lines).block(pane(title).border_style(theme::modal_border())), r);
-    }
-
     /// The bottom line, built like the status line's first line: a mode
     /// lozenge, then flat parts between thin rules. A question on the bar
-    /// is drawn in its place ([`Placement::Bar`]).
+    /// is drawn in its place ([`super::dialog::Placement::Bar`]).
     pub(super) fn draw_status(&mut self, f: &mut Frame, area: Rect) {
-        if self.draw_modal(f, area, Placement::Bar) {
+        if self.draw_modal(f, area, true) {
             return;
         }
         let sh = self.shape;
@@ -537,18 +460,6 @@ impl App {
             Mode::Filter => {
                 spans.extend(mode("/", Ground::Accent));
                 spans.extend([input(self.filter.clone()), hint(" Enter keep · Esc clear")]);
-            }
-            Mode::Menu { .. } => {
-                spans.extend(mode("action", Ground::Accent));
-                spans.push(hint("  ↑↓ choose · Enter or click picks · Esc closes"));
-            }
-            Mode::Pick(p) if p.multi => {
-                spans.extend(mode("pick", Ground::Accent));
-                spans.extend([hint("  ↑↓ move · Space or click marks · Enter sets · Esc closes"), msg]);
-            }
-            Mode::Pick(_) => {
-                spans.extend(mode("pick", Ground::Accent));
-                spans.extend([hint("  ↑↓ choose · Enter or click sets · Esc closes"), msg]);
             }
             Mode::Arg { path, action, buf } => {
                 let prompt = match &tree::get(&self.roots, path).actions[*action].arg {
@@ -597,10 +508,6 @@ impl App {
             Mode::Name { op, buf } => {
                 spans.extend(mode(&op.prompt(), Ground::Accent));
                 spans.extend([input(buf.clone()), hint(" Enter · Esc cancel"), msg]);
-            }
-            Mode::ThemeMenu { .. } => {
-                spans.extend(mode("action", Ground::Accent));
-                spans.push(hint("  ↑↓ choose · Enter or click picks · Esc closes"));
             }
             Mode::Entry(_) => {
                 spans.extend(mode("entry", Ground::Accent));

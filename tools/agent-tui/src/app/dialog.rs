@@ -14,7 +14,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Padding, Paragraph};
 use ratatui::Frame;
 
+use super::pick::{docked, Dock};
 use super::render::{button_row, clip, modal_rect, pane, width};
+use crate::wrap::pad_to;
 use super::theme::{self, Ground, Seg, Shape};
 use crate::wrap::str_width;
 use super::Btn;
@@ -37,6 +39,149 @@ pub(super) enum Answer {
     /// A key the dialog hands to the code that opened it. Nothing under the
     /// dialog receives it either.
     Forward(KeyEvent),
+    /// A menu's row picked: Enter on it, its letter, Space on a menu whose
+    /// Space picks, or a click on it.
+    Item(usize),
+    /// A list's row marked or unmarked: Space on it, or a click on it.
+    Mark(usize),
+}
+
+/// What Space does in a menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Space {
+    /// Nothing beyond what a letter would.
+    Letter,
+    /// Picks the row, as Enter does.
+    Picks,
+    /// Marks the row of a list; Enter then sets the marks.
+    Marks,
+}
+
+/// What a menu's keys do beyond moving and Enter: an item's letter picks
+/// it, Space picks or marks, and a row that cannot be picked is drawn set
+/// back, passed over, and takes neither Space nor, unless the menu marks,
+/// Enter.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct MenuKeys {
+    /// Each row's letter, if it has one.
+    pub(super) letters: Vec<Option<char>>,
+    pub(super) space: Space,
+    /// Per row: it cannot be picked yet.
+    pub(super) waits: Vec<bool>,
+}
+
+impl Default for MenuKeys {
+    fn default() -> Self {
+        MenuKeys { letters: Vec::new(), space: Space::Letter, waits: Vec::new() }
+    }
+}
+
+/// A dialog's body as a menu of (label, tag) rows, one under the cursor.
+#[derive(Debug, Clone, PartialEq)]
+struct Menu {
+    items: Vec<(String, String)>,
+    sel: usize,
+    keys: MenuKeys,
+}
+
+impl Menu {
+    /// Whether row `i` can be picked.
+    fn open(&self, i: usize) -> bool {
+        !self.keys.waits.get(i).copied().unwrap_or(false)
+    }
+
+    /// The row a move from `from` lands on: the next one that can be
+    /// picked that way, or `from` when there is none.
+    fn step(&self, from: usize, down: bool) -> usize {
+        let mut i = from;
+        loop {
+            i = match (down, i) {
+                (true, i) if i + 1 < self.items.len() => i + 1,
+                (false, i) if i > 0 => i - 1,
+                _ => return from,
+            };
+            if self.open(i) {
+                return i;
+            }
+        }
+    }
+
+    /// The first row that can be picked, from the top or the bottom.
+    fn end(&self, top: bool) -> usize {
+        let n = self.items.len();
+        let found = if top { (0..n).find(|i| self.open(*i)) } else { (0..n).rev().find(|i| self.open(*i)) };
+        found.unwrap_or(self.sel)
+    }
+
+    /// Enter, or Space where it picks, on the row under the cursor.
+    fn pick(&self) -> Answer {
+        match self.open(self.sel) || self.keys.space == Space::Marks {
+            true => Answer::Item(self.sel),
+            false => Answer::Stay,
+        }
+    }
+
+    /// One key. Esc and the dialog's close keys close it, with any
+    /// modifier held, as the menus always took them. The arrows and `k j`
+    /// move over the rows that can be picked, and so do Home, End and `g G`
+    /// in a menu that jumps. Any other plain character is a row's letter.
+    fn key(&mut self, k: KeyEvent, close: &[char], jumps: bool) -> Answer {
+        let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+        match k.code {
+            KeyCode::Esc => return Answer::Close,
+            KeyCode::Char(c) if close.contains(&c) => return Answer::Close,
+            KeyCode::Up | KeyCode::Char('k') => self.sel = self.step(self.sel, false),
+            KeyCode::Down | KeyCode::Char('j') => self.sel = self.step(self.sel, true),
+            KeyCode::Home | KeyCode::Char('g') if jumps => self.sel = self.end(true),
+            KeyCode::End | KeyCode::Char('G') if jumps => self.sel = self.end(false),
+            KeyCode::Enter => return self.pick(),
+            KeyCode::Char(' ') if self.keys.space != Space::Letter => {
+                return match self.keys.space {
+                    _ if !self.open(self.sel) => Answer::Stay,
+                    Space::Marks => Answer::Mark(self.sel),
+                    _ => Answer::Item(self.sel),
+                };
+            }
+            KeyCode::Char(c) if plain => {
+                if let Some(i) = self.keys.letters.iter().position(|l| *l == Some(c)) {
+                    return Answer::Item(i);
+                }
+            }
+            _ => {}
+        }
+        Answer::Stay
+    }
+
+    /// A left click on row `i`: one that can be picked is marked on a list
+    /// and picked elsewhere; one that cannot takes nothing.
+    fn click(&mut self, i: usize) -> Answer {
+        if !self.open(i) {
+            return Answer::Stay;
+        }
+        self.sel = i;
+        if self.keys.space == Space::Marks {
+            Answer::Mark(i)
+        } else {
+            Answer::Item(i)
+        }
+    }
+
+    /// The rows, each padded to the inside of a box `w` wide so the
+    /// selection fills its row; one that cannot be picked is set back.
+    fn lines(&self, w: u16) -> Vec<Line<'static>> {
+        self.items
+            .iter()
+            .enumerate()
+            .map(|(i, (label, tag))| {
+                let style = match (i == self.sel, !self.open(i)) {
+                    (true, _) => theme::picked(),
+                    (false, true) => theme::muted(),
+                    (false, false) => Style::new(),
+                };
+                Line::styled(pad_to(&format!(" {}{tag}", pad_to(label, 10)), w.saturating_sub(2) as usize), style)
+            })
+            .collect()
+    }
 }
 
 /// One button: what it answers, its label, the keys that press it (the one
@@ -89,6 +234,8 @@ impl Button {
 pub(super) enum Placement {
     /// A box in the middle of the area, as [`modal_rect`] places one.
     Center,
+    /// A box beside the row that opened it, as [`docked`] places a menu.
+    Dock(Dock),
     /// The bottom bar: the title is the question, after a `confirm`
     /// lozenge, and the buttons are answer lozenges after it.
     Bar,
@@ -126,6 +273,8 @@ pub(super) struct Dialog<'a> {
     scroll: usize,
     close_on_any_key: bool,
     close_outside: bool,
+    /// Its body as a menu of rows instead of lines.
+    menu: Option<Menu>,
     /// Answered by its keys alone, with no buttons: Esc and Enter close it.
     keys_only: bool,
     /// Plain keys that close it.
@@ -144,6 +293,8 @@ pub(super) struct Dialog<'a> {
 pub(super) struct Drawn {
     pub(super) rect: Rect,
     pub(super) buttons: Vec<(Rect, Btn)>,
+    /// A menu's rows, in order.
+    pub(super) rows: Vec<Rect>,
     pub(super) scroll: usize,
     /// The last scroll that still fills the frame.
     pub(super) max: usize,
@@ -173,6 +324,7 @@ impl<'a> Dialog<'a> {
             scroll: 0,
             close_on_any_key: false,
             close_outside: false,
+            menu: None,
             keys_only: false,
             close_keys: &[],
             any_press: false,
@@ -195,6 +347,11 @@ impl<'a> Dialog<'a> {
     /// The first body row in view.
     pub(super) fn scroll(&self) -> usize {
         self.scroll
+    }
+
+    /// A menu's row under the cursor.
+    pub(super) fn sel(&self) -> Option<usize> {
+        self.menu.as_ref().map(|m| m.sel)
     }
 
     /// Whether a press outside it closes it.
@@ -222,6 +379,9 @@ impl<'a> Dialog<'a> {
     /// [`DialogBuilder::jumps`]. Any other key closes a close-on-any-key
     /// dialog and stays on any other.
     pub(super) fn key(&mut self, k: KeyEvent) -> Answer {
+        if let Some(m) = &mut self.menu {
+            return m.key(k, self.close_keys, self.jumps);
+        }
         let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
         if let KeyCode::Char(c) = k.code {
             let chord = |b: &&Button| b.chords.iter().any(|&(held, at)| held == k.modifiers && at == c);
@@ -261,9 +421,11 @@ impl<'a> Dialog<'a> {
     }
 
     /// Scroll the body `by` rows, down when positive; a bar question has
-    /// none to scroll.
+    /// none to scroll, and the wheel over a menu moves its cursor.
     fn scroll_by(&mut self, by: isize) -> Answer {
-        if self.placement != Placement::Bar {
+        if let Some(m) = &mut self.menu {
+            m.sel = m.step(m.sel, by > 0);
+        } else if self.placement != Placement::Bar {
             self.scroll = self.scroll.saturating_add_signed(by);
         }
         Answer::Stay
@@ -284,6 +446,9 @@ impl<'a> Dialog<'a> {
                 if let Some(&(_, id)) = drawn.buttons.iter().find(|(r, _)| button == MouseButton::Left && r.contains(at)) {
                     return Answer::Button(id);
                 }
+                if let (Some(m), Some(i)) = (&mut self.menu, drawn.rows.iter().position(|r| button == MouseButton::Left && r.contains(at))) {
+                    return m.click(i);
+                }
                 let closes = self.any_press || if inside { self.close_on_any_key } else { self.close_outside };
                 if closes {
                     Answer::Close
@@ -299,8 +464,12 @@ impl<'a> Dialog<'a> {
     /// as its body and button row with the borders, unless it was given a
     /// height.
     pub(super) fn rect(&self, area: Rect) -> Rect {
+        if let (Placement::Dock(dock), Some(m)) = (self.placement, &self.menu) {
+            return docked(area, dock, &self.title, &m.items);
+        }
         let row = u16::from(!self.buttons.is_empty());
-        let h = self.height.unwrap_or_else(|| (self.body.len().min(usize::from(u16::MAX - 3)) as u16) + 2 + row);
+        let lines = self.menu.as_ref().map_or(self.body.len(), |m| m.items.len());
+        let h = self.height.unwrap_or_else(|| (lines.min(usize::from(u16::MAX - 3)) as u16) + 2 + row);
         modal_rect(area, self.width, h)
     }
 
@@ -320,6 +489,13 @@ impl<'a> Dialog<'a> {
         let inner = block.inner(r);
         let row = u16::from(!self.buttons.is_empty() && inner.height > 0);
         let room = usize::from(inner.height - row);
+        if let Some(m) = &self.menu {
+            let lines = m.lines(r.width);
+            let rows = (0..lines.len() as u16).map(|i| Rect { y: inner.y + i, height: 1, ..inner }.intersection(inner)).collect();
+            f.render_widget(Clear, r);
+            f.render_widget(Paragraph::new(lines).block(block), r);
+            return Drawn { rect: r, rows, ..Drawn::default() };
+        }
         let max = self.body.len().saturating_sub(room);
         let scroll = self.scroll.min(max);
         let shown = self.body[scroll..self.body.len().min(scroll + room)].to_vec();
@@ -332,7 +508,7 @@ impl<'a> Dialog<'a> {
             let focus = self.default_button().map(|b| b.id);
             f.render_widget(Paragraph::new(button_row(sh, at, focus, &row, &mut buttons)), at);
         }
-        Drawn { rect: r, buttons, scroll, max }
+        Drawn { rect: r, buttons, rows: Vec::new(), scroll, max }
     }
 }
 
@@ -363,7 +539,7 @@ impl Dialog<'_> {
             spans.push(Span::raw(" "));
         }
         f.render_widget(Paragraph::new(Line::from(spans)), area);
-        Drawn { rect: area, buttons, scroll: 0, max: 0 }
+        Drawn { rect: area, buttons, ..Drawn::default() }
     }
 }
 
@@ -432,6 +608,21 @@ impl<'a> DialogBuilder<'a> {
         self
     }
 
+    /// A menu of (label, tag) rows as its body, `sel` under the cursor, its
+    /// keys set by `keys`. A menu is answered by its keys and clicks.
+    pub(super) fn menu(mut self, items: Vec<(String, String)>, sel: usize, keys: MenuKeys) -> Self {
+        self.0.menu = Some(Menu { items, sel, keys });
+        self
+    }
+
+    /// Placed beside the row that opened it, or in the middle with none.
+    pub(super) fn dock(mut self, dock: Option<Dock>) -> Self {
+        if let Some(dock) = dock {
+            self.0.placement = Placement::Dock(dock);
+        }
+        self
+    }
+
     /// Plain keys that close it, beside Esc and Enter.
     pub(super) fn close_keys(mut self, keys: &'static [char]) -> Self {
         self.0.close_keys = keys;
@@ -458,7 +649,7 @@ impl<'a> DialogBuilder<'a> {
     /// alone.
     pub(super) fn build(self) -> Result<Dialog<'a>, Refused> {
         let d = self.0;
-        if d.buttons.is_empty() && !d.keys_only {
+        if d.buttons.is_empty() && !d.keys_only && d.menu.is_none() {
             return Err(Refused::NoButtons);
         }
         if !d.buttons.is_empty() {
@@ -667,7 +858,7 @@ mod tests {
     #[test]
     fn a_dialog_that_any_press_closes_closes_on_any_button_off_its_answers() {
         let mut d = Dialog::bar("q").button(Button::new(Btn::No, "n", Ground::Keep).cancel().default()).any_press().forward(|_| true).build().unwrap();
-        let drawn = Drawn { rect: Rect::new(0, 9, 40, 1), buttons: vec![(Rect::new(10, 9, 3, 1), Btn::No)], scroll: 0, max: 0 };
+        let drawn = Drawn { rect: Rect::new(0, 9, 40, 1), buttons: vec![(Rect::new(10, 9, 3, 1), Btn::No)], ..Drawn::default() };
         assert!(d.closes_outside() && d.any_press());
         for (button, x, y) in [(MouseButton::Left, 0, 0), (MouseButton::Right, 1, 9), (MouseButton::Middle, 11, 9)] {
             assert_eq!(d.mouse(MouseEventKind::Down(button), Position::new(x, y), &drawn), Answer::Close, "{button:?} at {x},{y}");
@@ -681,6 +872,73 @@ mod tests {
         for kind in [MouseEventKind::ScrollUp, MouseEventKind::ScrollDown] {
             assert_eq!(d.mouse(kind, Position::new(1, 9), &drawn), Answer::Stay, "{kind:?}");
         }
+    }
+
+    /// Four rows, the second waiting, `b` the third's letter.
+    fn menu(space: Space) -> Dialog<'static> {
+        let items = ["one", "two", "three", "four"].map(|l| (l.to_string(), String::new())).to_vec();
+        let keys = MenuKeys { letters: vec![None, None, Some('b'), None], space, waits: vec![false, true, false, false] };
+        Dialog::new("menu", 30).menu(items, 0, keys).close_keys(&['q']).jumps().close_outside().build().expect("a menu is answered by its keys")
+    }
+
+    #[test]
+    fn a_menu_moves_over_rows_that_wait_and_picks_by_enter_letter_and_click() {
+        let mut d = menu(Space::Picks);
+        assert_eq!(d.key(press(KeyCode::Down)), Answer::Stay);
+        assert_eq!(d.sel(), Some(2), "the waiting row is passed over");
+        assert_eq!(d.key(press(KeyCode::Up)), Answer::Stay);
+        assert_eq!(d.sel(), Some(0));
+        assert_eq!(d.key(press(KeyCode::End)), Answer::Stay);
+        assert_eq!(d.sel(), Some(3));
+        assert_eq!(d.key(press(KeyCode::Enter)), Answer::Item(3));
+        assert_eq!(d.key(press(KeyCode::Char(' '))), Answer::Item(3), "Space picks where it picks");
+        assert_eq!(d.key(press(KeyCode::Char('b'))), Answer::Item(2), "a row's letter picks it");
+        assert_eq!(d.key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::ALT)), Answer::Stay, "a letter is plain");
+        assert_eq!(d.key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL)), Answer::Close, "a close key with any modifier");
+        assert_eq!(d.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::ALT)), Answer::Close);
+        let (at, rows) = drawn(&d, 80, 20);
+        assert_eq!(at.rows.len(), 4);
+        assert!(rows[at.rows[0].y as usize].contains(" one"));
+        let row = |i: usize| at.rows[i];
+        assert_eq!(click(&mut d, &at, row(2).x + 1, row(2).y), Answer::Item(2));
+        assert_eq!(d.sel(), Some(2));
+        assert_eq!(click(&mut d, &at, row(1).x + 1, row(1).y), Answer::Stay, "a waiting row takes no click");
+        assert_eq!(d.sel(), Some(2));
+        assert_eq!(d.mouse(MouseEventKind::ScrollDown, Position::new(row(0).x, row(0).y), &at), Answer::Stay);
+        assert_eq!(d.sel(), Some(3), "the wheel over it moves the cursor");
+        assert_eq!(click(&mut d, &at, 0, 0), Answer::Close, "a click outside closes it");
+    }
+
+    #[test]
+    fn a_list_marks_by_space_and_click_and_a_waiting_row_takes_neither() {
+        let mut d = menu(Space::Marks);
+        assert_eq!(d.key(press(KeyCode::Char(' '))), Answer::Mark(0));
+        let (at, _) = drawn(&d, 80, 20);
+        assert_eq!(click(&mut d, &at, at.rows[3].x + 1, at.rows[3].y), Answer::Mark(3));
+        assert_eq!(d.key(press(KeyCode::Enter)), Answer::Item(3), "Enter sets the marks");
+        // Land on the waiting row as the picker can open on it.
+        let items = ["one", "two"].map(|l| (l.to_string(), String::new())).to_vec();
+        let waits = MenuKeys { letters: Vec::new(), space: Space::Marks, waits: vec![false, true] };
+        let mut list = Dialog::new("m", 30).menu(items.clone(), 1, waits).build().unwrap();
+        assert_eq!(list.key(press(KeyCode::Char(' '))), Answer::Stay, "no Space on a waiting row");
+        assert_eq!(list.key(press(KeyCode::Enter)), Answer::Item(1), "a list's Enter sets the marks as they are");
+        let one = MenuKeys { letters: Vec::new(), space: Space::Picks, waits: vec![false, true] };
+        let mut one = Dialog::new("m", 30).menu(items, 1, one).build().unwrap();
+        assert_eq!((one.key(press(KeyCode::Enter)), one.key(press(KeyCode::Char(' ')))), (Answer::Stay, Answer::Stay), "one choice: a waiting row picks nothing");
+        let mut letter = menu(Space::Letter);
+        assert_eq!(letter.key(press(KeyCode::Char(' '))), Answer::Stay, "Space is no letter here");
+    }
+
+    #[test]
+    fn a_docked_menu_sits_where_docked_places_it() {
+        let items: Vec<(String, String)> = (0..3).map(|i| (format!("  item {i}"), String::new())).collect();
+        let dock = Dock::Under(Rect::new(4, 2, 10, 1));
+        let d = Dialog::new("pick one: x", 50).menu(items.clone(), 0, MenuKeys::default()).dock(Some(dock)).build().unwrap();
+        assert_eq!(d.placement(), Placement::Dock(dock));
+        let area = Rect::new(0, 1, 80, 20);
+        assert_eq!(d.rect(area), docked(area, dock, "pick one: x", &items));
+        let centred = Dialog::new("pick one: x", 50).menu(items, 0, MenuKeys::default()).dock(None).build().unwrap();
+        assert_eq!((centred.placement(), centred.rect(area)), (Placement::Center, modal_rect(area, 50, 5)));
     }
 
     #[test]
