@@ -155,8 +155,10 @@ pub(crate) enum MessageCmd {
     Unread(JsonArgs),
 
     /// Reap signal files whose owning project is gone, and prune empty
-    /// project dirs. Messages are never removed by age — lifetime is bound
-    /// to project liveness (ADR-136).
+    /// project dirs. Lifetime is bound to project liveness (ADR-136); the
+    /// one removal by age is of a message `attend message delete` marked,
+    /// 7 days after the mark, or for a project tray's message once that
+    /// project has started 3 sessions since (ADR-404 D3e).
     Cleanup(CleanupArgs),
 
     /// Mark for deletion the messages no live session still has to read

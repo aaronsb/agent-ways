@@ -21,7 +21,7 @@
 //! it as a shared room and reads only `.signal` files in it, of which it
 //! holds none.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -161,6 +161,42 @@ pub fn mark_messages(base: &Path, keys: &[String]) -> io::Result<Option<(String,
     Ok(Some((batch, marked)))
 }
 
+/// Every message mark, with its mark time.
+pub fn message_marks(base: &Path) -> HashMap<String, SystemTime> {
+    let marks = messages_dir(base);
+    file_names(&marks)
+        .filter_map(|key| {
+            let at = fs::metadata(marks.join(&key)).and_then(|m| m.modified()).ok()?;
+            Some((key, at))
+        })
+        .collect()
+}
+
+/// Remove the marks of messages not in `present`, the keys of every signal
+/// file on disk, and the batch records left with no mark of their own.
+/// Returns how many marks it removed.
+pub fn prune(base: &Path, present: &HashSet<String>) -> usize {
+    let marks = messages_dir(base);
+    let mut removed = 0;
+    for key in file_names(&marks) {
+        if !present.contains(&key) && fs::remove_file(marks.join(&key)).is_ok() {
+            removed += 1;
+        }
+    }
+    for batch in batches(base) {
+        let record = batches_dir(base).join(&batch);
+        let Ok(list) = fs::read_to_string(&record) else { continue };
+        let owns_a_mark = list
+            .lines()
+            .filter(|k| valid_key(k))
+            .any(|k| fs::read_to_string(marks.join(k)).is_ok_and(|owner| owner.trim() == batch));
+        if !owns_a_mark {
+            fs::remove_file(&record).ok();
+        }
+    }
+    removed
+}
+
 /// The batches on record, oldest first.
 pub fn batches(base: &Path) -> Vec<String> {
     let mut ids: Vec<String> = file_names(&batches_dir(base)).filter(|n| valid_batch_id(n)).collect();
@@ -268,6 +304,19 @@ mod tests {
         assert!(unmark_session(&b, "dead-session").unwrap());
         assert!(!unmark_session(&b, "dead-session").unwrap());
         assert!(!Marks::load(&b).hides_sender("dead-session"));
+        fs::remove_dir_all(&b).ok();
+    }
+
+    #[test]
+    fn prune_drops_the_marks_of_messages_gone_and_their_empty_batches() {
+        let b = base("prune");
+        let (gone, _) = mark_messages(&b, &keys(&["gone.signal"])).unwrap().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let (half, _) = mark_messages(&b, &keys(&["here.signal", "also-gone.signal"])).unwrap().unwrap();
+        let present: HashSet<String> = keys(&["here.signal", "unmarked.signal"]).into_iter().collect();
+        assert_eq!(prune(&b, &present), 2);
+        assert_eq!(message_marks(&b).into_keys().collect::<Vec<_>>(), keys(&["here.signal"]));
+        assert_eq!(batches(&b), vec![half], "the batch {gone} owns no mark now");
         fs::remove_dir_all(&b).ok();
     }
 
