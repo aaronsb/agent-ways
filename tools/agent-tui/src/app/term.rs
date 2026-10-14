@@ -432,7 +432,10 @@ impl App {
                 let mut out = io::stdout();
                 let _ = out.write_all(osc.as_bytes()).and_then(|_| out.flush());
             }
-            let wait = schedule.wait(self.pane_tick_every(), self.applying(), Instant::now());
+            let mut wait = schedule.wait(self.pane_tick_every(), self.applying(), Instant::now());
+            if self.question_on_the_clock() {
+                wait = wait.min(super::paneshell::QUESTION_TICK);
+            }
             // A terminal that can no longer be drawn on or read from has hung
             // up: end as on SIGHUP.
             let event = match term.draw(|f| self.draw(f)).and_then(|_| event::poll(wait)) {
@@ -468,7 +471,9 @@ impl App {
             if due.pane {
                 self.tick_pane();
             }
-            if due.shell {
+            // A question on the clock is checked whether or not anything
+            // is due: a pane that never ticks still sees it expire.
+            if due.shell || self.question_on_the_clock() {
                 self.tick();
             }
             if due.watch {

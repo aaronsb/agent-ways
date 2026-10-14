@@ -1376,7 +1376,7 @@ impl Screen for Chat {
     }
 
     fn tick_every(&self) -> Option<Duration> {
-        self.app.pane_tick_every()
+        self.app.tick_every()
     }
 
     fn tick(&mut self) {

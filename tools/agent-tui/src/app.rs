@@ -453,9 +453,11 @@ impl App {
         tree::pending(&self.roots[tab], &self.queue)
     }
 
-    /// One tick of a running apply. A finished run is closed out on the tick
+    /// One tick of the shell: a question whose expiry ran out closes, and a
+    /// running apply goes on. A finished run is closed out on the tick
     /// after its last state, so the last glyph is seen.
     pub fn tick(&mut self) {
+        self.expire_question();
         self.tick_reading();
         self.open_held();
         let Mode::Review { run: Some(run), .. } = &mut self.mode else { return };

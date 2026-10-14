@@ -76,12 +76,23 @@ impl Asked {
         self.armed_at.is_some_and(|t| std::time::Instant::now() >= t)
     }
 
+    /// Whether the screen changes on the clock: yes is arming, or the
+    /// seconds left are counting down.
+    fn on_the_clock(&self) -> bool {
+        self.deadline.is_some() || self.armed_at.is_some_and(|t| std::time::Instant::now() < t)
+    }
+
 
     /// The whole seconds left before it expires, rounded up.
     pub(crate) fn left(&self) -> Option<u64> {
         self.deadline.map(|d| d.saturating_duration_since(std::time::Instant::now()).as_millis().div_ceil(1000) as u64)
     }
 }
+
+/// How often the shell ticks while a question is on the clock
+/// ([`App::tick_every`]): often enough that its seconds left change when
+/// they should, it expires on time, and an armed yes is drawn so at once.
+pub(crate) const QUESTION_TICK: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// A key the shell takes before the pane, read by [`App::shell_key`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -714,8 +725,9 @@ impl App {
     }
 
     /// A question whose expiry ran out answers its expiry's answer, marked
-    /// [`EXPIRED`].
-    fn expire_question(&mut self) {
+    /// [`EXPIRED`]. The pane's tick and the shell's ([`App::tick`]) both
+    /// check, so a pane that never ticks still sees its question expire.
+    pub(crate) fn expire_question(&mut self) {
         let Mode::Ask(a) = &self.mode else { return };
         if a.left() != Some(0) {
             return;
@@ -735,6 +747,22 @@ impl App {
     /// How often the pane wants its tick.
     pub fn pane_tick_every(&self) -> Option<std::time::Duration> {
         self.pane.as_ref().and_then(|p| p.tick_every())
+    }
+
+    /// Whether a question is open on the clock: arming, or counting down.
+    pub(crate) fn question_on_the_clock(&self) -> bool {
+        matches!(&self.mode, Mode::Ask(a) if a.on_the_clock())
+    }
+
+    /// How often the screen wants its tick: the pane's, and while a
+    /// question is on the clock at least every [`QUESTION_TICK`], whether
+    /// the pane ticks or not.
+    pub fn tick_every(&self) -> Option<std::time::Duration> {
+        let pane = self.pane_tick_every();
+        if !self.question_on_the_clock() {
+            return pane;
+        }
+        Some(pane.map_or(QUESTION_TICK, |p| p.min(QUESTION_TICK)))
     }
 
     /// The palette a pane screen draws in.
@@ -769,11 +797,15 @@ impl crate::screen::Screen for App {
     }
 
     fn tick_every(&self) -> Option<std::time::Duration> {
-        self.pane_tick_every()
+        App::tick_every(self)
     }
 
+    /// The pane's tick only for a pane that ticks: a question on the clock
+    /// ticks the shell alone.
     fn tick(&mut self) {
-        self.tick_pane();
+        if self.pane_tick_every().is_some() {
+            self.tick_pane();
+        }
         App::tick(self);
     }
 }
@@ -1187,6 +1219,37 @@ mod tests {
         std::thread::sleep(Duration::from_millis(80));
         a.tick_pane();
         assert_eq!(two(&a).picked, ["q=y", "q=expired"], "an expiry may answer yes");
+    }
+
+    /// Runs the deadline of the question open out now.
+    fn expire_now(a: &mut App) {
+        if let Mode::Ask(q) = &mut a.mode {
+            q.deadline = q.deadline.map(|_| std::time::Instant::now());
+        }
+    }
+
+    /// A pane that never ticks still sees its question count down and
+    /// expire: while the question is on the clock the screen ticks, and the
+    /// shell's tick closes it, without ticking the pane.
+    #[test]
+    fn a_question_expires_over_a_pane_that_never_ticks() {
+        use super::super::pane::Expiry;
+        use crate::screen::Screen;
+        let mut a = app(true);
+        assert_eq!(Screen::tick_every(&a), None, "the pane never ticks");
+        ask_now(&mut a, Question::new("q", "drop it?", "drop", "keep").expires(Expiry::new(std::time::Duration::from_secs(60))));
+        let every = Screen::tick_every(&a).expect("a question on the clock ticks the screen");
+        assert!(every <= std::time::Duration::from_secs(1), "{every:?}");
+        expire_now(&mut a);
+        Screen::tick(&mut a);
+        assert_eq!(two(&a).picked, ["q=n", "q=expired"], "closed as a no, marked expired");
+        assert_eq!(Screen::tick_every(&a), None, "nothing on the clock");
+        // Under the terminal's loop the shell's tick does it alone.
+        let mut a = app(true);
+        ask_now(&mut a, Question::new("q", "drop it?", "drop", "keep").expires(Expiry::new(std::time::Duration::from_secs(60))));
+        expire_now(&mut a);
+        a.tick();
+        assert_eq!(two(&a).picked, ["q=n", "q=expired"]);
     }
 
     /// A question the pane asks while another is open cannot open, and the
