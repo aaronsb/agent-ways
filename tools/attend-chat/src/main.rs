@@ -61,6 +61,9 @@ usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
                             A DM view's row and tab and a claude's row carry the
                             pair for the DMs with it, and a dead claude's row
                             Tombstone…. Each asks first: y goes ahead
+  Ctrl+X Ctrl+S             send now, to a quiet agent too, in any terminal
+                            (Claude Code's chord; Ctrl+Enter does the same where
+                            the terminal reports it)
   Shift-Enter / Alt-Enter   insert newline
   Left / Right / Home / End move cursor
   Backspace / Delete        edit

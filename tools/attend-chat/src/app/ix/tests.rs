@@ -113,6 +113,25 @@ fn check_all(cells: Vec<Cell>) {
     }
 }
 
+/// Ctrl+X Ctrl+S in the box sends now, as Claude Code's chord does. The
+/// first key edits nothing and holds for the next event only.
+#[test]
+fn ctrl_x_ctrl_s_in_the_box_sends_now() {
+    use Effect::*;
+    let ctrl = |c: char| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+    let compose = at(Focus::Compose);
+    let held = Ix { chord: true, ..at(Focus::Compose) };
+    check_all(vec![
+        cell("Ctrl+X holds the chord and edits nothing", compose.clone(), Ev::Key(ctrl('x')), drafted(), held.clone(), vec![]),
+        cell("then Ctrl+S sends now", held.clone(), Ev::Key(ctrl('s')), drafted(), compose.clone(), vec![SendNow]),
+        cell("Ctrl+S alone is no send", compose.clone(), Ev::Key(ctrl('s')), drafted(), compose.clone(), vec![Type(ctrl('s'))]),
+        cell("a character after Ctrl+X drops the chord and is typed", held.clone(), Ev::Key(ch('a')), drafted(), compose.clone(), vec![Type(ch('a'))]),
+        cell("Enter after Ctrl+X sends as Enter does", held.clone(), Ev::Key(key(KeyCode::Enter)), drafted(), compose.clone(), vec![Send]),
+        cell("Ctrl+Enter still sends now", compose.clone(), Ev::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)), drafted(), compose.clone(), vec![SendNow]),
+        cell("a paste after Ctrl+X drops the chord", held.clone(), Ev::Paste, drafted(), compose.clone(), vec![Redraw]),
+    ]);
+}
+
 #[test]
 fn the_compose_box_types_every_key_but_its_ways_out() {
     use Effect::*;
