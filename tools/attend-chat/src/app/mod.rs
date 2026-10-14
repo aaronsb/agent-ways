@@ -210,6 +210,11 @@ pub struct ChatPane {
     /// were asked, which numbers their ids.
     asked: Option<(String, menu::Step)>,
     asks: u64,
+    /// When the operator last gave the chat input: a key, a click, a paste,
+    /// a menu's pick. A question the chat asks on its own waits until the
+    /// operator has been still for `idle_before_asking`.
+    last_input: Option<Instant>,
+    idle_before_asking: Duration,
     /// The terminal reports Ctrl+digits as themselves. Without it Ctrl+3
     /// arrives as Esc, which closes and clears and never quits (ADR-409),
     /// and a setting that asks for Ctrl+digits says they do not arrive.
@@ -264,6 +269,10 @@ pub struct ChatPane {
     /// A delete's count that landed when its question could not be asked,
     /// and when; choosing the delete again soon asks from it ([`cleanup`]).
     held: Option<(cleanup::Asked, Instant)>,
+    /// A count landed and waiting for the operator to be still before its
+    /// question opens: what it counted, the compose box's text when the
+    /// delete was chosen, and when it landed.
+    count_due: Option<(cleanup::Asked, String, Instant)>,
 }
 
 impl ChatPane {
@@ -301,6 +310,8 @@ impl ChatPane {
             theme: "terminal".into(),
             asked: None,
             asks: 0,
+            last_input: None,
+            idle_before_asking: cleanup::IDLE_BEFORE_ASKING,
             enhanced: false,
             send_anyway: None,
             config: crate::settings::load(&std::env::current_dir().unwrap_or_default()),
@@ -320,6 +331,7 @@ impl ChatPane {
             undo: None,
             removing: None,
             held: None,
+            count_due: None,
         }
     }
 
@@ -1049,6 +1061,11 @@ impl Pane for ChatPane {
     }
 
     fn picked(&mut self, id: &str, values: Vec<String>) {
+        // A key too soon after a question the chat asked on its own: no
+        // answer the operator chose.
+        if values.get(1).is_some_and(|v| v == agent_tui::TOO_SOON) {
+            return self.answered_too_soon(id);
+        }
         if let Some(v) = values.first() {
             self.menu_picked(id, v);
         }
@@ -1092,6 +1109,7 @@ impl Pane for ChatPane {
     fn tick(&mut self) {
         self.drain();
         self.attend_answered();
+        self.ask_count_due();
         self.new_day();
         if self.refreshed.is_none_or(|t| t.elapsed() >= REFRESH) {
             // Human presence (ADR-170): while the chat is open, keep
@@ -1297,6 +1315,19 @@ impl Chat {
     /// runs.
     pub fn removing(&self) -> Option<String> {
         self.pane().removing_now()
+    }
+
+    /// Whether a count has landed and waits for the operator to be still
+    /// before its question opens.
+    pub fn count_due(&self) -> bool {
+        self.pane().count_due.is_some()
+    }
+
+    /// How long the operator must be still before the chat asks a question
+    /// on its own, rather than [`cleanup::IDLE_BEFORE_ASKING`].
+    pub fn idle_before_asking(mut self, idle: Duration) -> Chat {
+        self.pane_mut().idle_before_asking = idle;
+        self
     }
 
     /// Stop the delete or tombstone running, as `≡` ▸ Stop does.

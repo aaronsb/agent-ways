@@ -175,6 +175,16 @@ pub(super) enum Ev {
     OverlayClosed(Overlay),
 }
 
+impl Ev {
+    /// Whether the operator gave it: a key, a click, a paste, a menu's text
+    /// into the box, the tab bar's toggle, a jump or a tab's activation. A
+    /// refresh, the column hidden for want of width and an overlay's coming
+    /// and going are not.
+    pub(super) fn is_input(&self) -> bool {
+        matches!(self, Ev::Key(_) | Ev::Click(_) | Ev::Paste | Ev::Compose | Ev::ToggleBar | Ev::Jump(_) | Ev::Numbered { .. } | Ev::TabActivated { .. })
+    }
+}
+
 /// A left click.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Click {
@@ -291,8 +301,7 @@ impl<'a> Step<'a> {
         // The chord's first key holds for the operator's next input only: a
         // refresh, the column hidden for width or an overlay's coming and
         // going leave it held.
-        let input = matches!(ev, Ev::Key(_) | Ev::Click(_) | Ev::Paste | Ev::Compose | Ev::ToggleBar | Ev::Jump(_) | Ev::Numbered { .. } | Ev::TabActivated { .. });
-        let chord = input && std::mem::take(&mut self.ix.chord);
+        let chord = ev.is_input() && std::mem::take(&mut self.ix.chord);
         match ev {
             Ev::Key(k) if self.ix.owns_text() => self.compose_key(k, chord),
             Ev::Key(k) => self.nav_key(k),

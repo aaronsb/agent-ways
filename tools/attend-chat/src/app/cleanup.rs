@@ -52,6 +52,10 @@ pub(super) const CUSTOM: &str = "Custom…";
 /// How long a count held for a delete stays good to ask from.
 const HOLD: Duration = Duration::from_secs(60);
 
+/// How long the operator must have been still before a count's question
+/// opens on its own: a keystroke begun before it showed must not land on it.
+pub(super) const IDLE_BEFORE_ASKING: Duration = Duration::from_millis(1500);
+
 /// The menu ids of Delete older than and of its Custom… dialog, before the
 /// scope's key ([`Scope::key`]).
 const OLDER: &str = "older:";
@@ -397,7 +401,7 @@ impl ChatPane {
         // The answer replaces `deleting…`, whatever it leads to.
         self.say("", false);
         match job {
-            Job::DryRun { scope, older, draft } => self.dry_ran(scope, older, &draft, answer),
+            Job::DryRun { scope, older, draft } => self.dry_ran(scope, older, draft, answer),
             Job::Delete(asked) => self.deleted(asked, answer),
             Job::Undo(last) => self.undid(last, answer),
             Job::Tombstone { member, name } => match answer {
@@ -409,12 +413,10 @@ impl ChatPane {
     }
 
     /// A dry run's report: ask with its counts, or say there is nothing.
-    /// The count can land at any time, so it asks only over nothing: while
-    /// the shell holds a question, a menu or a dialog open, or the operator
-    /// has typed in the compose box since asking, a `y` meant for that
-    /// would answer this. Then the count is held and said, and choosing the
-    /// delete again asks from it.
-    fn dry_ran(&mut self, scope: Scope, older: String, draft: &str, answer: Result<serde_json::Value, Failure>) {
+    /// The count can land at any time, so its question is the chat's own
+    /// ([`ChatPane::ask_unprompted`]), and opens only once the operator has
+    /// been still for `idle_before_asking` ([`ChatPane::ask_count_due`]).
+    fn dry_ran(&mut self, scope: Scope, older: String, draft: String, answer: Result<serde_json::Value, Failure>) {
         let report = match answer.and_then(|doc| attend_cli::report(&doc)) {
             Ok(r) => r,
             Err(e) => return self.say(e.to_string(), true),
@@ -423,10 +425,31 @@ impl ChatPane {
         if report.marked == 0 {
             return self.say(format!("nothing read to delete in {label}{}{}", attend_cli::older_words(&older), report.kept_words()), false);
         }
-        let asked = Asked { scope, older, label, report };
-        if self.can_ask_unprompted(draft) {
-            return self.ask(Step::DeleteRead(asked));
+        self.count_due = Some((Asked { scope, older, label, report }, draft, Instant::now()));
+        self.ask_count_due();
+    }
+
+    /// The count that landed, asked once the operator has been still long
+    /// enough, or held when it cannot be asked: something is open over the
+    /// chat or about to be, the compose box changed since the delete was
+    /// chosen, or the operator gave input after the count landed (they have
+    /// moved on).
+    pub(super) fn ask_count_due(&mut self) {
+        let Some((_, draft, landed)) = &self.count_due else { return };
+        let moved_on = self.last_input.is_some_and(|t| t > *landed);
+        if moved_on || !self.can_ask_unprompted(draft) {
+            let (asked, ..) = self.count_due.take().expect("just seen");
+            return self.hold_count(asked);
         }
+        if self.last_input.is_none_or(|t| t.elapsed() >= self.idle_before_asking) {
+            let (asked, ..) = self.count_due.take().expect("just seen");
+            self.ask_unprompted(Step::DeleteRead(asked));
+        }
+    }
+
+    /// Hold `asked`'s count, and say so: choosing the delete again soon
+    /// asks from it.
+    pub(super) fn hold_count(&mut self, asked: Asked) {
         let n = asked.report.marked;
         self.say(format!("counted {n} read message{} in {}{}: choose Delete read messages again to delete them", if n == 1 { "" } else { "s" }, asked.label, attend_cli::older_words(&asked.older)), false);
         self.held = Some((asked, Instant::now()));
@@ -480,7 +503,7 @@ mod tests {
 
     fn landed(c: &mut ChatPane) {
         let doc = serde_json::json!({"scope": "#slow", "dry_run": true, "marked": 3, "batch": null, "ids": [], "held": []});
-        c.dry_ran(Scope::Channel("slow".into()), "all".into(), "", Ok(doc));
+        c.dry_ran(Scope::Channel("slow".into()), "all".into(), String::new(), Ok(doc));
     }
 
     /// A count lands between the frame that opened a question and the next
@@ -499,6 +522,31 @@ mod tests {
         assert!(c.held.is_some() && c.status.starts_with("counted 3 read messages in #slow"), "{}", c.status);
         c.asked = None;
         landed(&mut c);
-        assert!(matches!(&c.to_open, Some(Open::Ask { question, .. }) if question.starts_with("delete 3 read messages in #slow")), "over nothing it asks");
+        assert!(matches!(&c.to_open, Some(Open::Ask { question, unprompted: true, .. }) if question.starts_with("delete 3 read messages in #slow")), "over nothing it asks, on its own");
+    }
+
+    /// A count asks only once the operator has been still: input a moment
+    /// before it landed defers the question, and input after it landed holds
+    /// the count instead.
+    #[test]
+    fn a_count_waits_for_the_operator_to_be_still() {
+        let mut c = ChatPane::new(None, Default::default());
+        c.dry_run = true;
+        c.last_input = Some(Instant::now());
+        landed(&mut c);
+        assert!(c.to_open.is_none() && c.count_due.is_some(), "input a moment ago: not yet");
+        c.ask_count_due();
+        assert!(c.to_open.is_none(), "still too soon");
+        c.last_input = Some(Instant::now());
+        c.ask_count_due();
+        assert!(c.count_due.is_none() && c.to_open.is_none(), "input after it landed: held, not asked");
+        assert!(c.held.is_some() && c.status.starts_with("counted 3 read messages in #slow"), "{}", c.status);
+        c.held = None;
+        c.idle_before_asking = Duration::from_millis(50);
+        c.last_input = Some(Instant::now());
+        landed(&mut c);
+        std::thread::sleep(Duration::from_millis(80));
+        c.ask_count_due();
+        assert!(matches!(&c.to_open, Some(Open::Ask { unprompted: true, .. })), "still long enough: it asks");
     }
 }

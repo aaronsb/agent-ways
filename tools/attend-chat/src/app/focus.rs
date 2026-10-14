@@ -36,6 +36,8 @@
 //! state ([`ix::Ix`]); [`ChatPane::dispatch`] is where every input that can
 //! move the focus goes, and carries out what the step asks.
 
+use std::time::Instant;
+
 use agent_tui::{Anchor, Binding, Open};
 
 use super::ix::{self, Effect, Ev, View};
@@ -139,6 +141,9 @@ impl ChatPane {
     /// it, which refocuses, then steps once more, with the world in the
     /// view. The only writer of the interaction state.
     pub(super) fn dispatch(&mut self, ev: Ev) {
+        if ev.is_input() {
+            self.last_input = Some(Instant::now());
+        }
         let effects = match self.ix.step(ev.clone(), &self.ix_view()) {
             Ok(fx) => fx,
             Err(ix::NeedWorld) => {

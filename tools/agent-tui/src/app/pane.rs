@@ -225,7 +225,14 @@ pub enum Open {
     /// elsewhere, or any other key answers no; a character the pane would type, and a
     /// key the shell takes, then go on as typed. The answer comes back
     /// through [`Pane::picked`] under `id`, as `["y"]` or `["n"]`.
-    Ask { id: String, question: String, yes: String, no: String },
+    /// `unprompted`: the pane asks on its own, not in answer to what the
+    /// operator just did (work that finished in the background). For
+    /// [`UNPROMPTED_GRACE`] after it opens no key answers it: the key
+    /// answers no and goes on to the pane as if nothing were asked, so a
+    /// keystroke begun before the question showed can never confirm it. That
+    /// no comes back as `["n", TOO_SOON]`, so the pane can tell it from one
+    /// the operator chose.
+    Ask { id: String, question: String, yes: String, no: String, unprompted: bool },
     /// A line typed in a small dialog docked at `anchor`, as a menu docks:
     /// a name, a description. `value` is the text it opens with and `error`
     /// what was wrong with the last one entered, said inside the dialog.
@@ -272,6 +279,14 @@ impl Default for Ctx {
         Ctx { text: false, digits: true, owns_bar: false, esc_quits: true }
     }
 }
+
+/// How long after an unprompted question opens ([`Open::Ask`]) a key goes
+/// on to the pane instead of answering it: about a person's reaction time.
+pub const UNPROMPTED_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// The second value of the no a key too soon after an unprompted question
+/// gives ([`Open::Ask`]).
+pub const TOO_SOON: &str = "too soon";
 
 /// What the shell holds open over a pane ([`Pane::overlay_opened`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
