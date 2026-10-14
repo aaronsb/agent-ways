@@ -556,10 +556,19 @@ mod tests {
         assert_eq!((q.question.as_str(), q.yes.clone()), ("`attend message delete` is missing: needs a newer attend", None));
     }
 
-    /// A count never touches a question but its own: with another question
-    /// pending, or its own gone, it changes nothing.
+    /// A count never touches a question but its own: not another delete's
+    /// question, counting too, which only the id tells apart, nor a
+    /// question of another kind.
     #[test]
     fn a_count_never_touches_another_question() {
+        let (mut c, id) = counting();
+        let other = c.ask(Step::DeleteRead(DeleteAsk { scope: Scope::Channel("deploy".into()), older: "all".into(), label: "#deploy".into(), count: Count::Counting }));
+        assert_ne!(other, id);
+        let pending = c.asked.clone();
+        c.to_open = None;
+        c.dry_ran(&id, count(3));
+        assert_eq!(c.asked, pending, "the other delete's question still counts");
+        assert!(c.to_open.is_none(), "nothing opened or updated");
         let (mut c, id) = counting();
         c.ask(Step::Leave("deploy".into()));
         let pending = c.asked.clone();
