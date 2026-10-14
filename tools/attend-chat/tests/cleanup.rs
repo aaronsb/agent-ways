@@ -350,6 +350,26 @@ fn tombstone_is_offered_on_a_dead_agents_row_only_and_shows_a_refusal() {
     assert_eq!(c.status(), format!("tombstone: {DELTA_SID} has not exited"), "attend's own words, after the verb");
 }
 
+/// Tombstone… acts for everyone: its question counts down, and unanswered
+/// closes as a no. Nothing runs, and the status line says it expired.
+#[test]
+fn an_unanswered_tombstone_question_expires_as_a_cancel() {
+    let _g = fixture();
+    let mut c = chat().delete_question_life(std::time::Duration::from_millis(1500));
+    let gamma = nick("/work/gamma");
+    side(&mut c, &gamma, MouseButton::Right);
+    pick(&mut c, "Tombstone…");
+    let asks = |c: &mut Chat| rows(c).last().cloned().unwrap_or_default();
+    assert!(asks(&mut c).contains(&format!("tombstone @{gamma}?")) && asks(&mut c).contains(" 2 s"), "{}", asks(&mut c));
+    let start = std::time::Instant::now();
+    while asks(&mut c).contains("tombstone @") && start.elapsed() < std::time::Duration::from_secs(10) {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        Screen::tick(&mut c);
+    }
+    assert_eq!(c.status(), format!("tombstone @{gamma} question expired"));
+    assert!(calls().is_empty(), "nothing tombstoned: {:?}", calls());
+}
+
 /// A dead row whose id a live session still reads as, its id before a
 /// `/clear`, is not offered Tombstone…: attend refuses it as read by that
 /// session, even when the session has no row of its own to fold it into.

@@ -261,8 +261,9 @@ pub struct ChatPane {
     /// The delete or tombstone attend is working on, one at a time, with
     /// no time limit ([`cleanup`]).
     removing: Option<cleanup::Removal>,
-    /// How long a delete's question stays open once its count is shown
-    /// ([`cleanup::DELETE_QUESTION_LIFE`]).
+    /// How long a question that removes something for everyone stays open
+    /// ([`cleanup::DELETE_QUESTION_LIFE`]): a delete's once its count is
+    /// shown, Delete channel's, Tombstone…'s and Remove agent's at once.
     delete_question_life: Duration,
 }
 
@@ -1313,8 +1314,9 @@ impl Chat {
         self.pane().removing_now()
     }
 
-    /// How long a delete's question stays open once its count is shown,
-    /// rather than [`cleanup::DELETE_QUESTION_LIFE`].
+    /// How long a question that removes something for everyone stays open
+    /// (a delete's once its count is shown), rather than
+    /// [`cleanup::DELETE_QUESTION_LIFE`].
     pub fn delete_question_life(mut self, life: Duration) -> Chat {
         self.pane_mut().delete_question_life = life;
         self

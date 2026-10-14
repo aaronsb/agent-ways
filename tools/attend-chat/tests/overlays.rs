@@ -293,6 +293,35 @@ fn keys_and_clicks_answer_every_question_alike() {
     }
 }
 
+/// Ticks `c` as the loop does until `question` is off the bar, at most ten
+/// seconds.
+fn ticked_until_gone(c: &mut Chat, question: &str) {
+    let start = std::time::Instant::now();
+    while bar(c).contains(question) && start.elapsed() < std::time::Duration::from_secs(10) {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        agent_tui::screen::Screen::tick(c);
+    }
+}
+
+/// Delete channel and Remove agent, which act for everyone, count their
+/// seconds down from the start, and unanswered close as a no: nothing runs,
+/// and the status line names the question that expired. Leave, which acts
+/// for the operator alone, does not expire.
+#[test]
+fn a_question_that_acts_for_everyone_expires_as_a_cancel() {
+    for (item, question, said) in [("Delete channel", "delete #deploy and its history?", "delete #deploy question expired"), ("Remove agent", "from #deploy?", "from #deploy question expired")] {
+        let mut c = chat().delete_question_life(std::time::Duration::from_millis(1500));
+        ask_by_keys(&mut c, '2', item);
+        assert!(bar(&mut c).contains(question) && bar(&mut c).contains(" 2 s"), "{item} counts down: {}", bar(&mut c));
+        ticked_until_gone(&mut c, question);
+        assert!(c.status().ends_with(said), "{item}: {}", c.status());
+        assert!(!c.status().starts_with("dry run"), "{item}: nothing ran: {}", c.status());
+    }
+    let mut c = chat().delete_question_life(std::time::Duration::from_millis(1500));
+    ask_by_keys(&mut c, '2', "Leave");
+    assert!(bar(&mut c).contains("leave #deploy?") && !bar(&mut c).contains(" 2 s"), "{}", bar(&mut c));
+}
+
 /// A click on what a menu docks under closes it and does not open it
 /// again: on a channel's row in the column, and on a tab.
 #[test]

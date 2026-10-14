@@ -55,8 +55,9 @@ pub(super) const UNDO_DELETE: &str = "Undo delete";
 pub(super) const TOMBSTONE: &str = "Tombstone…";
 pub(super) const CUSTOM: &str = "Custom…";
 
-/// How long a delete's question stays open once its count has landed,
-/// before it closes as a no.
+/// How long a question that removes something for everyone stays open,
+/// before it closes as a no: a delete's once its count has landed, and
+/// Delete channel's, Tombstone…'s and Remove agent's from when they open.
 pub(super) const DELETE_QUESTION_LIFE: Duration = Duration::from_secs(60);
 
 /// The menu ids of Delete older than and of its Custom… dialog, before the
@@ -136,8 +137,11 @@ pub(super) enum Count {
     Counting,
     /// What the dry run found to delete: yes deletes it.
     Found(Report),
-    /// Nothing to delete, or why attend did not count: only no.
-    Said(String),
+    /// Nothing to delete: only no.
+    Nothing(String),
+    /// Why attend did not count: only no, and dismissed, it stays on the
+    /// status line as the error it is.
+    Refused(String),
 }
 
 impl DeleteAsk {
@@ -152,7 +156,7 @@ impl DeleteAsk {
                 let text = format!("delete {n} read message{} in {}{older} for everyone?{}", if n == 1 { "" } else { "s" }, self.label, r.kept_words());
                 Question::new(id, text, "delete", "keep").expires(Expiry::new(life))
             }
-            Count::Said(why) => Question::new(id, why.clone(), "delete", "close").dismiss_only(),
+            Count::Nothing(why) | Count::Refused(why) => Question::new(id, why.clone(), "delete", "close").dismiss_only(),
         }
     }
 
@@ -465,9 +469,9 @@ impl ChatPane {
             return;
         }
         d.count = match answer.and_then(|doc| attend_cli::report(&doc)) {
-            Ok(r) if r.marked == 0 => Count::Said(format!("nothing read to delete in {}{}{}", d.label, attend_cli::older_words(&d.older), r.kept_words())),
+            Ok(r) if r.marked == 0 => Count::Nothing(format!("nothing read to delete in {}{}{}", d.label, attend_cli::older_words(&d.older), r.kept_words())),
             Ok(r) => Count::Found(r),
-            Err(e) => Count::Said(e.to_string()),
+            Err(e) => Count::Refused(e.to_string()),
         };
         self.to_open = Some(Open::Ask(d.question(id.clone(), self.delete_question_life)));
     }
@@ -554,6 +558,21 @@ mod tests {
         c.dry_ran(&id, Err(Failure::TooOld { verb: "message delete".into() }));
         let q = opened(&mut c);
         assert_eq!((q.question.as_str(), q.yes.clone()), ("`attend message delete` is missing: needs a newer attend", None));
+    }
+
+    /// No to a question that says attend refused leaves the refusal on the
+    /// status line, as an error; no to one that found nothing leaves what it
+    /// found.
+    #[test]
+    fn a_dismissed_refusal_stays_on_the_status_line_as_an_error() {
+        let (mut c, id) = counting();
+        c.dry_ran(&id, Err(Failure::TooOld { verb: "message delete".into() }));
+        c.answered(&id, false);
+        assert_eq!((c.status.as_str(), c.status_is_error), ("`attend message delete` is missing: needs a newer attend", true));
+        let (mut c, id) = counting();
+        c.dry_ran(&id, count(0));
+        c.answered(&id, false);
+        assert_eq!((c.status.as_str(), c.status_is_error), ("nothing read to delete in #slow", false));
     }
 
     /// A count never touches a question but its own: not another delete's

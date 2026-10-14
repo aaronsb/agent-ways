@@ -74,7 +74,7 @@ use agent_tui::{Anchor, Item, Open, Question};
 use crate::chip::Seen;
 use crate::peers::Peer;
 
-use super::cleanup::{DeleteAsk, DELETE_READ, HIDE_HERE, SHOW_HIDDEN, TOMBSTONE, UNDO_DELETE};
+use super::cleanup::{Count, DeleteAsk, DELETE_READ, HIDE_HERE, SHOW_HIDDEN, TOMBSTONE, UNDO_DELETE};
 use super::dm::{Kind, HIDE_DMS, HIDE_REVIEW, REVIEW_DMS, SHOW_DMS};
 use crate::attend_cli::Scope;
 use super::keys::{self, EnterAction};
@@ -145,7 +145,8 @@ pub(super) enum Step {
 
 impl Step {
     /// The question under `id`: what it asks, and what yes and no do, as
-    /// the answers name them.
+    /// the answers name them. A question that removes something for
+    /// everyone expires `life` after it is ready, as a no.
     fn question(&self, id: String, life: std::time::Duration) -> Question {
         let (text, yes, no) = match self {
             Step::HideHere(_, label) => (format!("hide the messages in {label}? the bus keeps every message"), "hide", "keep"),
@@ -155,7 +156,22 @@ impl Step {
             Step::Delete(c) => (format!("delete #{c} and its history?"), "delete", "keep"),
             Step::Remove(c, m) => (format!("remove @{} from #{c}?", m.label), "remove", "keep"),
         };
-        Question::new(id, text, yes, no)
+        let q = Question::new(id, text, yes, no);
+        match self {
+            Step::Tombstone(..) | Step::Delete(_) | Step::Remove(..) => q.expires(agent_tui::Expiry::new(life)),
+            _ => q,
+        }
+    }
+
+    /// What the status line says when its question expired unanswered.
+    fn expired(&self) -> Option<String> {
+        match self {
+            Step::DeleteRead(_) => Some("delete question expired".into()),
+            Step::Tombstone(_, name) => Some(format!("tombstone @{name} question expired")),
+            Step::Delete(c) => Some(format!("delete #{c} question expired")),
+            Step::Remove(c, m) => Some(format!("remove @{} from #{c} question expired", m.label)),
+            Step::HideHere(..) | Step::Leave(_) => None,
+        }
     }
 }
 
@@ -859,7 +875,13 @@ impl ChatPane {
         if !yes {
             // No to a delete's question stops its count if it still runs.
             self.stop_count(id);
-            return self.say("kept", false);
+            // Dismissed, a refusal stays on the status line as the error it
+            // is, and a count of nothing as what it found.
+            return match step {
+                Step::DeleteRead(DeleteAsk { count: Count::Refused(why), .. }) => self.say(why, true),
+                Step::DeleteRead(DeleteAsk { count: Count::Nothing(said), .. }) => self.say(said, false),
+                _ => self.say("kept", false),
+            };
         }
         match step {
             Step::HideHere(tab, _) => self.hide_here(&tab),
@@ -887,12 +909,12 @@ impl ChatPane {
     }
 
     /// The question `id` expired unanswered ([`agent_tui::Expiry`]): the
-    /// shell closed it as a no, and the status line says so.
+    /// shell closed it as a no, nothing ran, and the status line says so.
     pub(super) fn answered_expired(&mut self, id: &str) {
         let Some(step) = self.asked.take_if(|(pending, _)| pending == id).map(|(_, step)| step) else { return };
         self.dirty = true;
-        if let Step::DeleteRead(_) = step {
-            self.say("delete question expired", false);
+        if let Some(said) = step.expired() {
+            self.say(said, false);
         }
     }
 
