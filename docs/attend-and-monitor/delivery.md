@@ -115,6 +115,8 @@ The enrollment record names the Claude Code process (its pid and start time). A 
 
 The registry slot that gives a session its instance suffix (`Jovan-alpha`, `Jovan-beta`) is separate from enrollment and outlives `attend run`. It is removed only when another session registers in the same project after the slot has been idle for 7 days. A session resumed after that gap gets a new name; one that never stopped keeps its name.
 
+After `/clear` the old id stays in the registry as an alias of the new one, with the same suffix, so a message sent before the clear carries the live session's name and a reply to it reaches the live session. An alias holds no letter. A session resumed under the old id gets a name of its own.
+
 ## Related
 
 - [`signals.md`](signals.md) — the files both conduits read

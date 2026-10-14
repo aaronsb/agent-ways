@@ -311,6 +311,26 @@ mod tests {
         assert_eq!(rows, [(live, true)]);
     }
 
+    /// A message sent before `/clear` replaced the session's id reads as the
+    /// live session's name, so the dead sighting merges into its row.
+    #[test]
+    fn a_sighting_from_the_id_before_a_clear_is_the_live_sessions_row() {
+        let base = std::env::temp_dir().join(format!("attend-chat-alias-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let registry = attend_instances::Registry::with_base(base.clone());
+        registry.register("/home/x", "other").unwrap();
+        registry.register("/home/x", "old").unwrap();
+        registry.rename("/home/x", "old", "new").unwrap();
+        let cache = SnapshotCache::with_registry(attend_instances::Registry::with_base(base.clone()));
+        let buf = vec![sig("claude:old", "/home/x")];
+        let seeds = vec![DiscoveredSession { cwd: "/home/x".into(), session_id: "new".into() }];
+        let seen = seen_identities(&buf, &seeds, ColorDepth::TrueColor, |sid| sid == "new", |_| false, |_| false, &cache);
+        std::fs::remove_dir_all(&base).ok();
+        let nickname = Identity::for_cwd("/home/x", ColorDepth::TrueColor).nickname;
+        let rows: Vec<(&str, &str, bool)> = seen.iter().map(|s| (s.identity.nickname.as_str(), s.member.as_str(), s.live)).collect();
+        assert_eq!(rows, [(format!("{nickname}-beta").as_str(), "new", true)]);
+    }
+
     /// Two live sessions at one cwd with one name are two entries.
     #[test]
     fn two_live_sessions_of_one_name_are_two_entries() {
