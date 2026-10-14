@@ -211,27 +211,25 @@ fn site(ident: &attend_presence::session::SessionIdentity) -> Site {
 /// settings file changed since. `None` when ways cannot answer.
 fn policy_settings(dir: &Path, sid: &str, project: &str, now: u64) -> Option<String> {
     let path = dir.join(format!("{sid}.settings.json"));
-    let changed_after = |t: u64| {
+    let ms = |t: std::time::SystemTime| t.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+    let changed_after = |t_ms: u64| {
         let files = [ways_core::paths::user_config(), Path::new(project).join(".claude").join("ways.yaml")];
-        files.iter().any(|f| {
-            std::fs::metadata(f)
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
-                .is_some_and(|m| m.as_secs() >= t)
-        })
+        files.iter().any(|f| std::fs::metadata(f).and_then(|m| m.modified()).is_ok_and(|m| ms(m) > t_ms))
     };
     if let Some(kept) = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) {
         let at = kept.get("at").and_then(|v| v.as_u64()).unwrap_or(0);
+        let at_ms = kept.get("at_ms").and_then(|v| v.as_u64()).unwrap_or(0);
         let same = kept.get("project").and_then(|v| v.as_str()) == Some(project);
-        if same && now.saturating_sub(at) < SETTINGS_KEPT_SECS && !changed_after(at) {
+        if same && now.saturating_sub(at) < SETTINGS_KEPT_SECS && !changed_after(at_ms) {
             if let Some(doc) = kept.get("doc").and_then(|v| v.as_str()) {
                 return Some(doc.to_string());
             }
         }
     }
+    let read_at_ms = ms(std::time::SystemTime::now());
     let doc = mod_settings(project)?;
-    let kept = serde_json::json!({ "at": now, "project": project, "doc": doc });
+    let kept = serde_json::json!({ "at": now, "at_ms": read_at_ms, "project": project, "doc": doc });
+    std::fs::create_dir_all(dir).ok();
     std::fs::write(&path, kept.to_string()).ok();
     Some(doc)
 }

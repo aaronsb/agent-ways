@@ -62,7 +62,8 @@ impl Warm {
         std::fs::write(
             &ways,
             format!(
-                "#!/bin/sh\nif [ \"$1\" = settings ]; then cat '{}'; else cat '{}'; fi\n",
+                "#!/bin/sh\necho \"$1\" >> '{}'\nif [ \"$1\" = settings ]; then cat '{}'; else cat '{}'; fi\n",
+                f.home.join("ways-calls.log").display(),
                 settings.display(),
                 reading.display()
             ),
@@ -192,6 +193,10 @@ fn a_paid_cold_write_arms_keepwarm() {
     assert_eq!(w.check(), "");
     let status = w.status_line();
     assert!(status.starts_with("keepwarm    armed, 3h00m left") || status.starts_with("keepwarm    armed, 2h59m left"), "{status}");
+    // The sensor's own arm is marked, so the keepalive policy ignores it.
+    let arm = w.f.cache().join("keepwarm").join(format!("{}.arm.json", w.f.sid));
+    let arm: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(arm).unwrap()).unwrap();
+    assert_eq!(arm["auto"], true, "{arm}");
 }
 
 /// The sensor's own switch in attend's config turns the check off too.
@@ -457,5 +462,18 @@ fn reset_at_records_a_held_prompt() {
     assert!(w.run(&["keepwarm", "reset", "--at", &at.to_string()]).status.success());
     let ledger: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(w.ledger()).unwrap()).unwrap();
     assert_eq!(ledger["policy"]["operator_at"].as_u64(), Some(at));
+}
+
+/// The policy check keeps its settings read a few minutes, so a session
+/// that asks every minute does not run ways settings every minute.
+#[test]
+fn the_policy_check_keeps_its_settings_read() {
+    let w = Warm::new("ka-settings-kept");
+    w.reading(&[(30 * MIN, 200_000, 500)]);
+    for _ in 0..3 {
+        policy(&w, "on");
+    }
+    let calls = std::fs::read_to_string(w.f.home.join("ways-calls.log")).unwrap_or_default();
+    assert_eq!(calls.lines().filter(|l| *l == "settings").count(), 1, "{calls}");
 }
 }
