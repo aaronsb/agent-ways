@@ -262,8 +262,12 @@ pub(crate) fn scan_pending(
                 Err(_) => continue,
             };
             let Some(sig) = parse_signal(wire_line(&content)) else { continue };
+            let mtime = std::fs::metadata(&path)
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .unwrap_or(std::time::UNIX_EPOCH);
             // A tombstoned session's messages are read and never shown.
-            if marks.hides_sender(&sig.sender_id()) {
+            if marks.hides_sender(&sig.sender_id(), mtime) {
                 mark.push(key);
                 continue;
             }
@@ -278,10 +282,6 @@ pub(crate) fn scan_pending(
                 mark.push(key);
                 continue;
             }
-            let mtime = std::fs::metadata(&path)
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .unwrap_or(std::time::UNIX_EPOCH);
             found.push(Found { room, key, path, mtime, content });
         }
     }

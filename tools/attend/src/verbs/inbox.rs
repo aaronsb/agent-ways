@@ -107,7 +107,7 @@ pub fn list_with(query: InboxQuery, instances: &SnapshotCache) -> InboxPage {
                 .unwrap_or(std::time::UNIX_EPOCH);
             let Ok(content) = agent_identity::signal::read_signal_file(&path) else { continue };
             let Some(sig) = parse_signal(wire_line(&content)) else { continue };
-            if marks.hides_sender(&sig.sender_id()) {
+            if marks.hides_sender(&sig.sender_id(), mtime) {
                 continue;
             }
             // Skip own messages, under this id or an earlier one.

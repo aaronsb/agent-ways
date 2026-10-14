@@ -5,9 +5,11 @@
 //! file, and its mark, once the mark has aged past its limits.
 //!
 //! Layout:
-//! - `<session-id>`: a session tombstone, an empty file. Every reader
-//!   skips what that session sent. `attend message tombstone` writes it
-//!   for a session that has exited, and `--undo` removes it.
+//! - `<session-id>`: a session tombstone, an empty file whose mtime is
+//!   when it was written. Every reader skips what that session sent up to
+//!   then; what it sends later, back under `--resume`, shows. `attend
+//!   message tombstone` writes it for a session that has exited, and
+//!   `--undo` removes it.
 //! - `messages/<key>`: one mark per message. The key is the message's
 //!   seen-set key, its filename, which is unique across rooms. The file's
 //!   mtime is the mark time and its content the id of the batch that wrote
@@ -58,13 +60,17 @@ fn file_names(dir: &Path) -> impl Iterator<Item = String> {
 #[derive(Debug, Default, Clone)]
 pub struct Marks {
     messages: HashSet<String>,
-    sessions: HashSet<String>,
+    /// Each tombstoned session, with when it was tombstoned.
+    sessions: HashMap<String, SystemTime>,
 }
 
 impl Marks {
     /// The marks under signals base `base`. Empty when there is no store.
     pub fn load(base: &Path) -> Self {
-        Marks { messages: file_names(&messages_dir(base)).collect(), sessions: file_names(&dir(base)).collect() }
+        let sessions = file_names(&dir(base))
+            .filter_map(|id| Some((id.clone(), fs::metadata(dir(base).join(&id)).and_then(|m| m.modified()).ok()?)))
+            .collect();
+        Marks { messages: file_names(&messages_dir(base)).collect(), sessions }
     }
 
     /// Whether a reader skips the message with seen-set key `key`.
@@ -72,21 +78,19 @@ impl Marks {
         self.messages.contains(key)
     }
 
-    /// Whether a reader skips every message `sender` sent: the sender's
-    /// canonical id is tombstoned.
-    pub fn hides_sender(&self, sender: &str) -> bool {
-        self.sessions.contains(sender)
+    /// Whether a reader skips a message `sender` sent at `sent`: the
+    /// sender's canonical id is tombstoned, and the message is no newer
+    /// than the tombstone.
+    pub fn hides_sender(&self, sender: &str, sent: SystemTime) -> bool {
+        self.sessions.get(sender).is_some_and(|at| sent <= *at)
     }
 }
 
-/// Whether `id` can be tombstoned: a plain id, which a session id and a
-/// member id both are, and not one of the store's own directories.
+/// Whether `id` can be tombstoned: an agent's session id
+/// ([`crate::is_agent_member`]). A person's member id cannot be, so no
+/// delete of an agent's can silence the operator.
 pub fn valid_session_id(id: &str) -> bool {
-    !id.is_empty()
-        && !id.starts_with('.')
-        && id != MESSAGES
-        && id != BATCHES
-        && id.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.@".contains(&b))
+    crate::is_agent_member(id)
 }
 
 /// Tombstone session `id`. Idempotent.
@@ -294,16 +298,21 @@ mod tests {
     fn a_session_mark_sits_beside_the_message_marks() {
         let b = base("session");
         mark_messages(&b, &keys(&["a.signal"])).unwrap();
-        mark_session(&b, "dead-session").unwrap();
-        mark_session(&b, "dead-session").unwrap();
-        assert!(mark_session(&b, "messages").is_err());
-        assert!(mark_session(&b, "../x").is_err());
-        assert_eq!(sessions(&b), keys(&["dead-session"]));
+        let dead = "22222222-2222-4222-8222-222222222222";
+        mark_session(&b, dead).unwrap();
+        mark_session(&b, dead).unwrap();
+        for bad in ["messages", "../x", "aaron"] {
+            assert!(mark_session(&b, bad).is_err(), "{bad}");
+        }
+        assert_eq!(sessions(&b), keys(&[dead]));
         let marks = Marks::load(&b);
-        assert!(marks.hides_sender("dead-session") && !marks.hides_sender("a.signal") && marks.hides("a.signal"));
-        assert!(unmark_session(&b, "dead-session").unwrap());
-        assert!(!unmark_session(&b, "dead-session").unwrap());
-        assert!(!Marks::load(&b).hides_sender("dead-session"));
+        let before = SystemTime::now() - std::time::Duration::from_secs(60);
+        let after = SystemTime::now() + std::time::Duration::from_secs(60);
+        assert!(marks.hides_sender(dead, before) && !marks.hides_sender(dead, after), "the tombstone's time cuts");
+        assert!(!marks.hides_sender("a.signal", before) && marks.hides("a.signal"));
+        assert!(unmark_session(&b, dead).unwrap());
+        assert!(!unmark_session(&b, dead).unwrap());
+        assert!(!Marks::load(&b).hides_sender(dead, before));
         fs::remove_dir_all(&b).ok();
     }
 

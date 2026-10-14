@@ -355,7 +355,10 @@ impl PeerSensor {
                     self.seen_signals.insert(key);
                     continue;
                 };
-                if marks.hides_sender(&sig.sender_id()) {
+                let mtime = fs::metadata(&path)
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::UNIX_EPOCH);
+                if marks.hides_sender(&sig.sender_id(), mtime) {
                     self.seen_signals.insert(key);
                     continue;
                 }
@@ -371,9 +374,6 @@ impl PeerSensor {
                     self.seen_signals.insert(key);
                     continue;
                 }
-                let mtime = fs::metadata(&path)
-                    .and_then(|m| m.modified())
-                    .unwrap_or(std::time::UNIX_EPOCH);
                 let age = mtime.elapsed().unwrap_or_default();
                 // The signal's id is its filename stem, the value `re:<id>`
                 // replies reference (ADR-120).

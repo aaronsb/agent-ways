@@ -2,10 +2,12 @@
 //! messages (ADR-404 D3e).
 //!
 //! The mark is an empty file in the mark store
-//! (`attend_groups::tombstones`). It refuses a session that is live, and
-//! one a live session reads as, its ids before `/clear`, the caller's own
-//! included: those messages are still that session's to read. No message
-//! is marked or removed; `attend message delete` does that.
+//! (`attend_groups::tombstones`), and it hides what the session sent up to
+//! the mark. Only an agent's session id is tombstoned, and only one this
+//! host saw exit (`attend_presence::has_exited`) that no session that may
+//! still read the bus reads as, its ids before `/clear` and the caller's
+//! own included: those messages are still that session's to read. No
+//! message is marked or removed; `attend message delete` does that.
 
 use serde::Serialize;
 
@@ -31,8 +33,8 @@ pub struct Tombstones {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TombstoneError {
-    /// The session is live.
-    Live { session: String },
+    /// Nothing says the session has exited.
+    NotExited { session: String },
     /// A live session, or the caller, reads as this id.
     ReadAs { session: String, by: String },
     /// Not in the form of a session id.
@@ -46,12 +48,14 @@ pub enum TombstoneError {
 impl std::fmt::Display for TombstoneError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TombstoneError::Live { session } => write!(f, "{session} is live; only a session that has exited is tombstoned"),
+            TombstoneError::NotExited { session } => {
+                write!(f, "{session} has not exited; only a session this host saw exit is tombstoned")
+            }
             TombstoneError::ReadAs { session, by } if session == by => write!(f, "{session} is this session"),
             TombstoneError::ReadAs { session, by } => {
                 write!(f, "{session} is an earlier id of live session {by}, which still reads its mail")
             }
-            TombstoneError::InvalidId { session } => write!(f, "`{session}` is not a session id"),
+            TombstoneError::InvalidId { session } => write!(f, "`{session}` is not a session id; only an agent's session is tombstoned"),
             TombstoneError::NotTombstoned { session } => write!(f, "{session} is not tombstoned"),
             TombstoneError::Write { error } => write!(f, "could not write the tombstone: {error}"),
         }
@@ -67,13 +71,16 @@ pub fn tombstone(session: &str) -> Result<Tombstoned, TombstoneError> {
     if caller.iter().any(|id| id == session) {
         return Err(TombstoneError::ReadAs { session: session.to_string(), by: caller[0].clone() });
     }
-    if attend_presence::alive(session, &Default::default()) {
-        return Err(TombstoneError::Live { session: session.to_string() });
-    }
     for (live, _) in live_sessions() {
+        if live == session {
+            return Err(TombstoneError::NotExited { session: session.to_string() });
+        }
         if reading_ids_of(&live).iter().any(|id| id == session) {
             return Err(TombstoneError::ReadAs { session: session.to_string(), by: live });
         }
+    }
+    if !attend_presence::has_exited(session) {
+        return Err(TombstoneError::NotExited { session: session.to_string() });
     }
     tombstones::mark_session(&signals_base(), session).map_err(|e| TombstoneError::Write { error: e.to_string() })?;
     Ok(Tombstoned { session: session.to_string(), tombstoned: true })
