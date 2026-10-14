@@ -303,7 +303,7 @@ impl ChatPane {
             dm_names: Default::default(),
             hidden: crate::hidden::Hidden::load(&crate::hidden::default_path()),
             hidden_path: crate::hidden::default_path(),
-            attend: crate::attend_cli::ATTEND.into(),
+            attend: crate::attend_cli::program(),
             undo: None,
         }
     }

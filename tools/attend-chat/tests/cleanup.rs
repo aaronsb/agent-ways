@@ -301,7 +301,7 @@ fn tombstone_is_offered_on_a_dead_agents_row_only_and_shows_a_refusal() {
     side(&mut c, &nick("/work/delta"), MouseButton::Right);
     pick(&mut c, "Tombstone…");
     press(&mut c, KeyCode::Char('y'));
-    assert_eq!(c.status(), format!("{DELTA_SID} has not exited"), "attend's own words");
+    assert_eq!(c.status(), format!("tombstone: {DELTA_SID} has not exited"), "attend's own words, after the verb");
 }
 
 #[test]

@@ -10,8 +10,15 @@ use std::path::Path;
 use crate::groups::BASE_CHANNEL_NAME;
 use crate::tabs::Tab;
 
-/// The program the verbs run: `attend`, found on `PATH`.
-pub const ATTEND: &str = "attend";
+/// The attend the verbs run: the one installed beside this program, as the
+/// suite installs them together, else `attend` on `PATH`.
+pub fn program() -> std::path::PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|d| d.join("attend")))
+        .filter(|p| p.is_file())
+        .unwrap_or_else(|| "attend".into())
+}
 
 /// Which messages a delete reaches: `#open`, a channel, or the direct
 /// messages between the person and one agent.
@@ -168,7 +175,7 @@ pub enum Failure {
     /// The installed attend lacks the verb or a flag of it.
     TooOld { verb: String },
     /// attend refused, in its own words.
-    Refused(String),
+    Refused { verb: String, why: String },
     /// attend ended with no report the chat can read.
     Broken { verb: String, why: String },
 }
@@ -178,7 +185,7 @@ impl std::fmt::Display for Failure {
         match self {
             Failure::NoAttend { verb } => write!(f, "`attend {verb}` needs attend on PATH"),
             Failure::TooOld { verb } => write!(f, "`attend {verb}` is missing: needs a newer attend"),
-            Failure::Refused(why) => f.write_str(why),
+            Failure::Refused { verb, why } => write!(f, "{}: {why}", verb.rsplit(' ').next().unwrap_or(verb)),
             Failure::Broken { verb, why } => write!(f, "attend {verb}: {why}"),
         }
     }
@@ -189,7 +196,7 @@ impl std::fmt::Display for Failure {
 /// argument parser did not know the verb or a flag, means it is too old.
 pub fn run(program: &Path, args: &[String]) -> Result<serde_json::Value, Failure> {
     let verb = args.iter().take(2).cloned().collect::<Vec<_>>().join(" ");
-    let out = match std::process::Command::new(program).args(args).stdin(std::process::Stdio::null()).output() {
+    let out = match output(program, args) {
         Ok(out) => out,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(Failure::NoAttend { verb }),
         Err(e) => return Err(Failure::Broken { verb, why: e.to_string() }),
@@ -199,7 +206,7 @@ pub fn run(program: &Path, args: &[String]) -> Result<serde_json::Value, Failure
     match serde_json::from_str::<serde_json::Value>(stdout.trim()) {
         Ok(doc) if doc.get("error").is_some() => {
             let why = doc.get("message").and_then(|m| m.as_str()).unwrap_or("refused").to_string();
-            Err(Failure::Refused(why))
+            Err(Failure::Refused { verb, why })
         }
         Ok(doc) if out.status.success() => Ok(doc),
         _ if ["unrecognized subcommand", "unexpected argument"].iter().any(|w| stderr.contains(w)) => Err(Failure::TooOld { verb }),
@@ -210,8 +217,26 @@ pub fn run(program: &Path, args: &[String]) -> Result<serde_json::Value, Failure
     }
 }
 
-fn count(doc: &serde_json::Value, field: &str) -> usize {
-    doc.get(field).and_then(|v| v.as_u64()).unwrap_or(0) as usize
+/// Run `program` with `args` to its end. A program file still held open
+/// for writing (`ExecutableFileBusy`: an attend being installed, or a test's
+/// fake while another thread forks) is tried again shortly.
+fn output(program: &Path, args: &[String]) -> std::io::Result<std::process::Output> {
+    let mut tries = 0;
+    loop {
+        match std::process::Command::new(program).args(args).stdin(std::process::Stdio::null()).output() {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && tries < 50 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            other => return other,
+        }
+    }
+}
+
+/// The count `field` of a report, which every report of the verb carries:
+/// one without it is not a report the chat can read.
+fn count(doc: &serde_json::Value, field: &str, verb: &str) -> Result<usize, Failure> {
+    doc.get(field).and_then(|v| v.as_u64()).map(|n| n as usize).ok_or_else(|| Failure::Broken { verb: verb.into(), why: format!("its report has no `{field}`") })
 }
 
 /// `attend message delete` for `scope` and `older`, or its dry run.
@@ -222,16 +247,16 @@ pub fn delete(program: &Path, scope: &Scope, older: &str, dry_run: bool) -> Resu
         .and_then(|h| h.as_array())
         .into_iter()
         .flatten()
-        .map(|h| (h.get("name").and_then(|n| n.as_str()).unwrap_or("?").to_string(), count(h, "kept")))
-        .collect();
+        .map(|h| Ok((h.get("name").and_then(|n| n.as_str()).unwrap_or("?").to_string(), count(h, "kept", "message delete")?)))
+        .collect::<Result<_, Failure>>()?;
     let batch = doc.get("batch").and_then(|b| b.as_str()).map(str::to_string);
-    Ok(Report { marked: count(&doc, "marked"), batch, held })
+    Ok(Report { marked: count(&doc, "marked", "message delete")?, batch, held })
 }
 
 /// `attend message delete --undo <batch>`.
 pub fn undo(program: &Path, batch: &str) -> Result<Undone, Failure> {
     let doc = run(program, &undo_argv(batch))?;
-    Ok(Undone { unmarked: count(&doc, "unmarked"), already_removed: count(&doc, "already_removed") })
+    Ok(Undone { unmarked: count(&doc, "unmarked", "message delete")?, already_removed: count(&doc, "already_removed", "message delete")? })
 }
 
 /// `attend message tombstone <session>`.
@@ -300,7 +325,9 @@ mod tests {
         assert_eq!(r, Report { marked: 12, batch: None, held: vec![("Ada-x".into(), 2), ("Bo-y".into(), 1)] });
         assert_eq!(r.kept_words(), " · 3 stay unread by 2 sessions");
         let refused = fake(&dir, "refused", r#"{"error":{"kind":"not_exited","session":"s9"},"message":"s9 has not exited"}"#, "attend message tombstone: s9 has not exited", 1);
-        assert_eq!(tombstone(&refused, "s9"), Err(Failure::Refused("s9 has not exited".into())));
+        assert_eq!(tombstone(&refused, "s9").unwrap_err().to_string(), "tombstone: s9 has not exited", "attend's words, after the verb");
+        let unread = fake(&dir, "unread", r##"{"scope":"#open","dry_run":true}"##, "", 0);
+        assert_eq!(delete(&unread, &Scope::Open, "all", true).unwrap_err().to_string(), "attend message delete: its report has no `marked`", "no count is no zero");
         let old = fake(&dir, "old", "", "error: unrecognized subcommand 'delete'", 2);
         let e = delete(&old, &Scope::Open, "all", true).unwrap_err();
         assert_eq!(e.to_string(), "`attend message delete` is missing: needs a newer attend");
