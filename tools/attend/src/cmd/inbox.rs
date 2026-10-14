@@ -205,8 +205,8 @@ fn room_label(room: &Room) -> String {
 /// `/clear` ([`attend_presence::enrollment::reading_ids`]): a message to
 /// or from any of them is the session's own.
 ///
-/// Own messages, and the messages a delete marked (`marks`, ADR-404 D3e),
-/// are marked read without delivering. Under
+/// Own messages, the messages a delete marked and those a tombstoned
+/// session sent (`marks`, ADR-404 D3e) are marked read without delivering. Under
 /// `baselining` (no seen-set yet) the messages from others go through
 /// `attend_state::cold_start`, the rule the peers sensor applies too:
 /// addressed mail sent since the session's process started and `#open` and
@@ -260,6 +260,11 @@ pub(crate) fn scan_pending(
                 Err(_) => continue,
             };
             let Some(sig) = parse_signal(wire_line(&content)) else { continue };
+            // A tombstoned session's messages are read and never shown.
+            if marks.hides_sender(&sig.sender_id()) {
+                mark.push(key);
+                continue;
+            }
             // Own messages: mark (dedup bookkeeping) but never deliver.
             if sig.from.split_once(':').is_some_and(|(_, identity)| ids.contains(&identity)) {
                 mark.push(key);

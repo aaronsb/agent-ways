@@ -287,3 +287,66 @@ fn a_dm_scope_reads_the_callers_earlier_ids() {
     signal(&f, &f.project_tray(), "old-1", &line(R1, "sess-before-clear", "R1 to my earlier id"), 10 * MINUTE);
     assert_eq!(marked(&delete(&f, &["--dm", R1])), ["old-1"]);
 }
+
+fn tombstone(f: &Fixture, args: &[&str]) -> std::process::Output {
+    let mut argv = vec!["message", "tombstone"];
+    argv.extend_from_slice(args);
+    f.attend(&argv)
+}
+
+#[test]
+fn a_tombstone_refuses_a_live_session_and_its_earlier_ids() {
+    let f = Fixture::new("tomb-live");
+    listener(&f, R1, "/srv/r1");
+    std::fs::write(f.marker(R1), "listen\nprevious 44444444-4444-4444-8444-444444444444\n").unwrap();
+    let out = tombstone(&f, &[R1]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("is live"), "{}", String::from_utf8_lossy(&out.stderr));
+    let out = tombstone(&f, &["44444444-4444-4444-8444-444444444444"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("earlier id of live session"));
+    let out = tombstone(&f, &[&f.sid]);
+    assert_eq!(out.status.code(), Some(1), "the caller's own id");
+    assert_eq!(f.ok(&["message", "tombstone", "--list"]).trim(), "no tombstones");
+}
+
+/// The drain reads a tombstoned session's messages without delivering
+/// them, the listing leaves them out, and once the tombstone is removed
+/// what that session sends is delivered again.
+#[test]
+fn a_tombstoned_sessions_messages_are_read_and_not_shown_until_undone() {
+    let f = Fixture::new("tomb-drain");
+    let tray = f.project_tray();
+    f.ok(&["message", "tombstone", R2]);
+    assert_eq!(f.ok(&["message", "tombstone", "--list"]).trim(), R2);
+    signal(&f, &tray, "dead-1", &format!("claude:{R2}|p|/srv/p|from the tombstoned session"), Duration::from_secs(100));
+    post(&f, &tray, "live-1", "from someone else", Duration::from_secs(100));
+    f.ok(&["channel", "join", "side"]);
+
+    assert!(!f.ok(&["message", "inbox"]).contains("from the tombstoned session"));
+    let drained = f.drain("plain");
+    assert!(drained.contains("from someone else"), "{drained}");
+    assert!(!drained.contains("from the tombstoned session"), "{drained}");
+    let state = std::fs::read_to_string(f.state_file(&f.sid)).unwrap();
+    assert!(state.contains("seen_signal: dead-1.signal"), "read without being shown: {state}");
+
+    f.ok(&["message", "tombstone", R2, "--undo"]);
+    signal(&f, &tray, "dead-2", &format!("claude:{R2}|p|/srv/p|after the undo"), Duration::ZERO);
+    let drained = f.drain("plain");
+    assert!(drained.contains("after the undo"), "{drained}");
+    assert!(!drained.contains("from the tombstoned session"), "what was read stays read: {drained}");
+}
+
+/// The Monitor conduit skips a tombstoned session too.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn the_peers_sensor_skips_a_tombstoned_session() {
+    let f = Fixture::new("tomb-sensor");
+    let tray = f.project_tray();
+    f.ok(&["message", "tombstone", R2]);
+    signal(&f, &tray, "dead-1", &format!("claude:{R2}|p|/srv/p|from the tombstoned session"), Duration::from_secs(100));
+    post(&f, &tray, "live-1", "from someone else", Duration::from_secs(100));
+    let run = f.run();
+    run.wait_for("the other message", Duration::from_secs(20), |r| r.output().contains("from someone else"));
+    assert!(!run.output().contains("from the tombstoned session"), "{}", run.output());
+}

@@ -18,6 +18,7 @@ This document contains the help content for the `attend` command-line program.
 * [`attend message unread`↴](#attend-message-unread)
 * [`attend message cleanup`↴](#attend-message-cleanup)
 * [`attend message delete`↴](#attend-message-delete)
+* [`attend message tombstone`↴](#attend-message-tombstone)
 * [`attend channel`↴](#attend-channel)
 * [`attend channel list`↴](#attend-channel-list)
 * [`attend channel join`↴](#attend-channel-join)
@@ -61,7 +62,7 @@ In a session with the attend mod, the attend_* tools send, reply, join and list 
 
 * `run` — Start the sensor loop (use with Monitor for async delivery)
 * `listen` — Turn listening on or off for this session without joining a channel, or show it (default: status)
-* `message` — Send, reply to, read, count and delete messages (default: inbox)
+* `message` — Send, reply to, read, count and delete messages, and tombstone a session (default: inbox)
 * `channel` — Join, leave, list and manage channels and scenes (default: list)
 * `peer` — List sessions, show this session's identity and the running loops (default: list)
 * `keepwarm` — Keep the prompt cache warm across idle stretches (ADR-182; default: status)
@@ -145,7 +146,7 @@ Mark a listening session alive: touch its heartbeat, deliver nothing. After a /c
 
 ## `attend message`
 
-Send, reply to, read, count and delete messages (default: inbox)
+Send, reply to, read, count and delete messages, and tombstone a session (default: inbox)
 
 **Usage:** `attend message [OPTIONS]
        message <COMMAND>`
@@ -158,6 +159,7 @@ Send, reply to, read, count and delete messages (default: inbox)
 * `unread` — Count this session's unread messages by room, marking none of them read
 * `cleanup` — Reap signal files whose owning project is gone, and prune empty project dirs. Messages are never removed by age — lifetime is bound to project liveness (ADR-136)
 * `delete` — Mark for deletion the messages no live session still has to read
+* `tombstone` — Tombstone a session that has exited, so every reader skips its messages
 
 ###### **Options:**
 
@@ -287,6 +289,26 @@ A message is marked when it is in the scope, older than --older-than, older than
   Default value: `all`
 * `-n`, `--dry-run` — Report what would be marked and mark nothing
 * `--undo <BATCH>` — Remove the marks of the newest delete, or of the batch named
+* `--json` — Print the result as one JSON document
+
+
+
+## `attend message tombstone`
+
+Tombstone a session that has exited, so every reader skips its messages
+
+The drain, the mod, `attend message unread`, the Monitor poller and `attend message inbox` all skip what a tombstoned session sent, and the drain records it read. A live session is refused, as is an id a live session had before /clear, this session's own included. Its messages stay on disk; `attend message delete --from <id>` marks them for deletion (ADR-404 D3e).
+
+**Usage:** `attend message tombstone [OPTIONS] [SESSION-ID]`
+
+###### **Arguments:**
+
+* `<SESSION-ID>` — The session to tombstone
+
+###### **Options:**
+
+* `--undo` — Remove the session's tombstone. What a drain recorded read while it stood stays read
+* `--list` — List the tombstoned sessions
 * `--json` — Print the result as one JSON document
 
 

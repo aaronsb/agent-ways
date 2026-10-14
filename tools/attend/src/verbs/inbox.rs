@@ -82,7 +82,8 @@ pub fn list_with(query: InboxQuery, instances: &SnapshotCache) -> InboxPage {
     let ids = attend_presence::enrollment::reading_ids(&me);
     let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
     let mut messages: Vec<Message> = Vec::new();
-    // A message a delete marked is gone from every listing (ADR-404 D3e).
+    // A message a delete marked, or a tombstoned session sent, is gone from
+    // every listing (ADR-404 D3e).
     let marks = attend_groups::tombstones::Marks::load(&crate::util::signals_base());
 
     for dir in &groups_for(&me).receive_dirs(&me.origin_path) {
@@ -106,6 +107,9 @@ pub fn list_with(query: InboxQuery, instances: &SnapshotCache) -> InboxPage {
                 .unwrap_or(std::time::UNIX_EPOCH);
             let Ok(content) = agent_identity::signal::read_signal_file(&path) else { continue };
             let Some(sig) = parse_signal(wire_line(&content)) else { continue };
+            if marks.hides_sender(&sig.sender_id()) {
+                continue;
+            }
             // Skip own messages, under this id or an earlier one.
             if sig.from.split_once(':').is_some_and(|(_, identity)| ids.contains(&identity)) {
                 continue;

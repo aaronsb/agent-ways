@@ -91,6 +91,7 @@ pub fn cli_main() {
             Some(MessageCmd::Unread(a)) => cmd::listen::cmd_unread(a.json),
             Some(MessageCmd::Cleanup(a)) => cmd::cleanup::cmd_cleanup(a.dry_run, a.all),
             Some(MessageCmd::Delete(a)) => cmd::delete::cmd_delete(a),
+            Some(MessageCmd::Tombstone(a)) => cmd::tombstone::cmd_tombstone(a),
         },
         Commands::Channel(g) => channel(g),
         Commands::Peer { list, sub } => match sub {

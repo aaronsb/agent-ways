@@ -47,7 +47,7 @@ pub(crate) enum Commands {
         json: bool,
     },
 
-    /// Send, reply to, read, count and delete messages (default: inbox)
+    /// Send, reply to, read, count and delete messages, and tombstone a session (default: inbox)
     #[command(args_conflicts_with_subcommands = true)]
     Message {
         #[command(flatten)]
@@ -170,6 +170,16 @@ pub(crate) enum MessageCmd {
     /// project has started 3 sessions since (ADR-404 D3e). --undo takes a
     /// delete back while cleanup has not yet removed its messages.
     Delete(DeleteArgs),
+
+    /// Tombstone a session that has exited, so every reader skips its messages
+    ///
+    /// The drain, the mod, `attend message unread`, the Monitor poller and
+    /// `attend message inbox` all skip what a tombstoned session sent, and
+    /// the drain records it read. A live session is refused, as is an id a
+    /// live session had before /clear, this session's own included. Its
+    /// messages stay on disk; `attend message delete --from <id>` marks
+    /// them for deletion (ADR-404 D3e).
+    Tombstone(TombstoneArgs),
 }
 
 /// Subcommands for `attend channel`. With no subcommand, defaults to `list`.
@@ -479,6 +489,26 @@ pub(crate) struct DeleteArgs {
     /// Remove the marks of the newest delete, or of the batch named
     #[arg(long, value_name = "BATCH", num_args = 0..=1, default_missing_value = "", conflicts_with_all = ["scope", "from", "older_than", "dry_run"])]
     pub(crate) undo: Option<String>,
+
+    /// Print the result as one JSON document
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Args)]
+pub(crate) struct TombstoneArgs {
+    /// The session to tombstone
+    #[arg(value_name = "SESSION-ID", required_unless_present = "list")]
+    pub(crate) session: Option<String>,
+
+    /// Remove the session's tombstone. What a drain recorded read while it
+    /// stood stays read
+    #[arg(long, requires = "session")]
+    pub(crate) undo: bool,
+
+    /// List the tombstoned sessions
+    #[arg(long, conflicts_with_all = ["session", "undo"])]
+    pub(crate) list: bool,
 
     /// Print the result as one JSON document
     #[arg(long)]

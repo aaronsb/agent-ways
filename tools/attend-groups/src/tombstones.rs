@@ -5,6 +5,9 @@
 //! file, and its mark, once the mark has aged past its limits.
 //!
 //! Layout:
+//! - `<session-id>`: a session tombstone, an empty file. Every reader
+//!   skips what that session sent. `attend message tombstone` writes it
+//!   for a session that has exited, and `--undo` removes it.
 //! - `messages/<key>`: one mark per message. The key is the message's
 //!   seen-set key, its filename, which is unique across rooms. The file's
 //!   mtime is the mark time and its content the id of the batch that wrote
@@ -55,18 +58,63 @@ fn file_names(dir: &Path) -> impl Iterator<Item = String> {
 #[derive(Debug, Default, Clone)]
 pub struct Marks {
     messages: HashSet<String>,
+    sessions: HashSet<String>,
 }
 
 impl Marks {
     /// The marks under signals base `base`. Empty when there is no store.
     pub fn load(base: &Path) -> Self {
-        Marks { messages: file_names(&messages_dir(base)).collect() }
+        Marks { messages: file_names(&messages_dir(base)).collect(), sessions: file_names(&dir(base)).collect() }
     }
 
     /// Whether a reader skips the message with seen-set key `key`.
     pub fn hides(&self, key: &str) -> bool {
         self.messages.contains(key)
     }
+
+    /// Whether a reader skips every message `sender` sent: the sender's
+    /// canonical id is tombstoned.
+    pub fn hides_sender(&self, sender: &str) -> bool {
+        self.sessions.contains(sender)
+    }
+}
+
+/// Whether `id` can be tombstoned: a plain id, which a session id and a
+/// member id both are, and not one of the store's own directories.
+pub fn valid_session_id(id: &str) -> bool {
+    !id.is_empty()
+        && !id.starts_with('.')
+        && id != MESSAGES
+        && id != BATCHES
+        && id.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.@".contains(&b))
+}
+
+/// Tombstone session `id`. Idempotent.
+pub fn mark_session(base: &Path, id: &str) -> io::Result<()> {
+    if !valid_session_id(id) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("`{id}` is not a session id")));
+    }
+    fs::create_dir_all(dir(base))?;
+    fs::OpenOptions::new().write(true).create(true).truncate(false).open(dir(base).join(id)).map(|_| ())
+}
+
+/// Remove session `id`'s tombstone. Returns whether there was one.
+pub fn unmark_session(base: &Path, id: &str) -> io::Result<bool> {
+    if !valid_session_id(id) {
+        return Ok(false);
+    }
+    match fs::remove_file(dir(base).join(id)) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// The tombstoned sessions, sorted.
+pub fn sessions(base: &Path) -> Vec<String> {
+    let mut ids: Vec<String> = file_names(&dir(base)).collect();
+    ids.sort();
+    ids
 }
 
 /// Whether `key` can name a mark file: a plain filename.
@@ -203,6 +251,23 @@ mod tests {
         assert_eq!(undo(&b, Some("000000000000001-1")).unwrap().unwrap().unmarked, Vec::<String>::new());
         assert!(Marks::load(&b).hides("x.signal"));
         assert_eq!(undo(&b, Some(&winner)).unwrap().unwrap().unmarked, keys(&["x.signal"]));
+        fs::remove_dir_all(&b).ok();
+    }
+
+    #[test]
+    fn a_session_mark_sits_beside_the_message_marks() {
+        let b = base("session");
+        mark_messages(&b, &keys(&["a.signal"])).unwrap();
+        mark_session(&b, "dead-session").unwrap();
+        mark_session(&b, "dead-session").unwrap();
+        assert!(mark_session(&b, "messages").is_err());
+        assert!(mark_session(&b, "../x").is_err());
+        assert_eq!(sessions(&b), keys(&["dead-session"]));
+        let marks = Marks::load(&b);
+        assert!(marks.hides_sender("dead-session") && !marks.hides_sender("a.signal") && marks.hides("a.signal"));
+        assert!(unmark_session(&b, "dead-session").unwrap());
+        assert!(!unmark_session(&b, "dead-session").unwrap());
+        assert!(!Marks::load(&b).hides_sender("dead-session"));
         fs::remove_dir_all(&b).ok();
     }
 

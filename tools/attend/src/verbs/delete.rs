@@ -180,7 +180,7 @@ pub fn delete(req: &DeleteRequest) -> Result<Deleted, DeleteError> {
 /// The ids the caller reads as: a Claude Code session's id and the ids it
 /// had before each `/clear`, or outside a session the member id of the
 /// person at the terminal.
-fn caller_ids() -> Vec<String> {
+pub(crate) fn caller_ids() -> Vec<String> {
     let me = crate::util::current_session();
     if me.resolved() {
         attend_presence::enrollment::reading_ids(&me)
@@ -242,11 +242,11 @@ pub(crate) struct Recipient {
     pub(crate) pending: HashSet<String>,
 }
 
-/// Every live recipient, with what it holds. Candidates are the sessions
-/// with a heartbeat or an enrollment record; a heartbeat with no record
-/// counts only for an agent's id, since a person in attend-chat
-/// heartbeats under their member id and holds nothing.
-pub(crate) fn live_recipients(base: &Path) -> Vec<Recipient> {
+/// Every live agent session, and whether it is enrolled. Candidates are
+/// the sessions with a heartbeat or an enrollment record; a heartbeat with
+/// no record counts only for an agent's id, since a person in attend-chat
+/// heartbeats under their member id.
+pub(crate) fn live_sessions() -> Vec<(String, bool)> {
     use attend_presence::enrollment;
     let enrolled: HashSet<String> =
         enrollment::recorded_ids().into_iter().filter(|id| !enrollment::sources(id).is_empty()).collect();
@@ -258,12 +258,41 @@ pub(crate) fn live_recipients(base: &Path) -> Vec<Recipient> {
         .filter(|id| !id.starts_with('.') && !id.ends_with(".lock") && attend_groups::is_agent_member(id));
     let mut ids: Vec<String> = enrolled.iter().cloned().chain(beating).collect::<HashSet<_>>().into_iter().collect();
     ids.sort();
-    let marks = Marks::load(base);
     ids.into_iter()
         .filter(|id| attend_presence::alive(id, &HashSet::new()))
         .map(|id| {
-            let pending = pending_for(base, &id, enrolled.contains(&id), &marks);
-            let started = attend_presence::session::started_at(&id).or_else(|| enrollment::listening_since(&id));
+            let listening = enrolled.contains(&id);
+            (id, listening)
+        })
+        .collect()
+}
+
+/// The ids live session `id` reads as: its own and those it had before
+/// each `/clear`.
+pub(crate) fn reading_ids_of(id: &str) -> Vec<String> {
+    attend_presence::enrollment::reading_ids(&identity_of(id, attend_presence::session::origin_path(id)))
+}
+
+/// A resolved identity for another session.
+fn identity_of(id: &str, origin: Option<String>) -> attend_presence::session::SessionIdentity {
+    attend_presence::session::SessionIdentity {
+        session_id: id.to_string(),
+        origin_path: origin.unwrap_or_default(),
+        session_resolved: true,
+        origin_resolved: true,
+        claude_pid: None,
+    }
+}
+
+/// Every live recipient, with what it holds.
+pub(crate) fn live_recipients(base: &Path) -> Vec<Recipient> {
+    let marks = Marks::load(base);
+    live_sessions()
+        .into_iter()
+        .map(|(id, enrolled)| {
+            let pending = pending_for(base, &id, enrolled, &marks);
+            let started = attend_presence::session::started_at(&id)
+                .or_else(|| attend_presence::enrollment::listening_since(&id));
             Recipient { id, started, pending }
         })
         .collect()
@@ -288,14 +317,7 @@ fn pending_for(base: &Path, id: &str, enrolled: bool, marks: &Marks) -> HashSet<
     let snapshot = attend_state::StateStore::new(Some(id.to_string())).load();
     let baselining = !enrolled || !snapshot.as_ref().is_some_and(|s| s.baselined);
     let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
-    let ident = attend_presence::session::SessionIdentity {
-        session_id: id.to_string(),
-        origin_path: origin.unwrap_or_default(),
-        session_resolved: true,
-        origin_resolved: true,
-        claude_pid: None,
-    };
-    let ids = attend_presence::enrollment::reading_ids(&ident);
+    let ids = attend_presence::enrollment::reading_ids(&identity_of(id, origin));
     let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
     crate::cmd::inbox::scan_pending(&dirs, &seen, &ids, baselining, marks).delivered.into_iter().map(|d| d.key).collect()
 }
@@ -442,13 +464,7 @@ pub(crate) fn delete_in(
 /// project.
 fn display_name(id: &str) -> String {
     match attend_presence::session::origin_path(id) {
-        Some(origin) => crate::util::display_name(&attend_presence::session::SessionIdentity {
-            session_id: id.to_string(),
-            origin_path: origin,
-            session_resolved: true,
-            origin_resolved: true,
-            claude_pid: None,
-        }),
+        Some(origin) => crate::util::display_name(&identity_of(id, Some(origin))),
         None => id.to_string(),
     }
 }

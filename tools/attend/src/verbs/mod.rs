@@ -26,6 +26,7 @@ pub mod listen;
 pub mod peers;
 pub mod send;
 pub mod status;
+pub mod tombstone;
 pub mod unread;
 
 #[cfg(feature = "sensor-peers")]

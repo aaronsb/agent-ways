@@ -317,7 +317,8 @@ impl PeerSensor {
             age: Duration,
         }
         let mut found: Vec<Found> = Vec::new();
-        // What a delete marked is read without being shown (ADR-404 D3e).
+        // What a delete marked, and what a tombstoned session sent, is read
+        // without being shown (ADR-404 D3e).
         let marks = attend_groups::tombstones::Marks::load(&attend_presence::cache::signals_dir());
         for (room, dir) in scan_dirs.iter().enumerate() {
             let Ok(entries) = fs::read_dir(&dir.path) else { continue };
@@ -354,6 +355,10 @@ impl PeerSensor {
                     self.seen_signals.insert(key);
                     continue;
                 };
+                if marks.hides_sender(&sig.sender_id()) {
+                    self.seen_signals.insert(key);
+                    continue;
+                }
                 // Skip our own signals — check the from field, not filename.
                 // from is "claude:session-id" or "external:user@terminal"
                 if sig.from.split_once(':').is_some_and(|(_, identity)| ids.contains(&identity)) {
