@@ -71,6 +71,14 @@ basis:
     level: directed
     said: "by 'read only' it's only basically we don't have a function in attend-chat to write to that"
     via: "the operator's chat message to the head session, 2026-10-13, saying what the line above means"
+  - operator: aaronsb
+    level: guided
+    said: '"we should add an option to clear dms" "on the side bar"'
+    via: Claude Code session 2026-10-13
+  - operator: aaronsb
+    level: guided
+    said: we probably need to be able to tombstone an agent's messages so they don't come back into chat again
+    via: Claude Code session 2026-10-13
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -85,6 +93,7 @@ deciders:
 related:
   - ADR-404
   - ADR-504
+  - ADR-409
 ---
 
 # ADR-405: One click on a channel selects it and opens its menu, and the chat's left column lists agents and channels
@@ -171,3 +180,13 @@ The operator described the column's DM views (`basis`, the entry of 2026-10-13):
 - **Sending from the view.** The compose box sends an unaddressed message to the agent as a direct message, `to` set to its session, never to `#open`. The destination flag reads `@Name`, marked `(quiet)` when the agent has no heartbeat, and a send to a quiet agent is refused with the draft kept. A message that starts with `@Name` or `#channel` goes as it would from the operator view (ADR-406 item 7). `@Name` in `#open` stays an addressed `#open` post, which wakes the agent; the operator confirmed it: "I think the open behavior is great as it is - if I @ message you on open, you get notified which is fine." Slash commands scope as they do in the operator view.
 - **In the nav.** The DM row is indented under its agent's row and drawn on the info ground the destination flag wears, with the count of messages it holds; the shown view is marked as the channel shown is. The shown view's tab, `@Name DMs`, holds the left of the tab bar where the created channel shown would, on the shaded ground of a view. Hide DMs, on the agent's menu or on the DM row's own menu, takes the row off the column; when the hidden view was shown, the operator view takes its place, and the same DMs show there among everything else. A click on the agent's row lists the view again with its messages.
 
+
+## Amendment (2026-10-13): delete read messages for everyone, hide messages here, and tombstone
+
+The operator asked for a way to clear direct messages from the column: "we should add an option to clear dms" "on the side bar", and "we probably need to be able to tombstone an agent's messages so they don't come back into chat again". ADR-404 D3e, amended the same day, holds the rule and the verbs. This amendment places them in the menus.
+
+- **Two items where Clear view and Clear history were.** Hide messages here hides, in the tab it is chosen on, every message the tab holds at that moment: a watermark per tab, kept in attend-chat's own state across restarts. Nothing on the bus changes, and other tabs and other people still see those messages. Delete read messages for everyone… opens a submenu, Delete older than: Current sessions / Today (local midnight) / All / Custom…; Custom… takes a duration or a local date in the entry dialog (ADR-409). The pick runs `attend message delete` with the tab's scope (`--open` for `#open`, `--channel <c>` for a channel) and the matching `--older-than`. The `y` question before it carries what `--dry-run` reports: how many messages go, and how many stay because a live agent has them unread. The operator view offers Hide messages here alone.
+- **The DM row, the DM tab and the agent row.** A DM view's row and its tab, and a claude's row in Agents, carry the same pair. Hide messages here acts on the agent's DM view. Delete read messages for everyone… runs the verb with `--dm <session-id>`, which reaches the thread between the operator and that agent, the messages the first DM view shows. The agent's direct messages with other agents are out of its reach: attend-chat has no function that writes into another agent's conversations, and its delete follows the same line.
+- **Tombstone… on a dead agent's row.** A claude whose session is not live has Tombstone… on its menu, asked with a `y`. It runs `attend message tombstone <session-id>`; the agent's messages leave every tab and its row leaves Agents. A live agent's row never offers it. A dead sighting whose id is among a live session's ids before `/clear` is folded into that session's row, so it has no row of its own.
+- **Through the attend CLI.** attend-chat runs both verbs as child processes with `--json` and shows the report on the status line. When the installed attend lacks a verb, the status line names the verb and says attend needs updating. `/purge` stays for one release as an alias of Delete read messages for everyone… → All on the shown channel.
+- Item (b)'s rule holds: every item that drops something asks for `y` first, and the list now reads Hide messages here, Delete read messages for everyone…, Leave, Delete channel, Remove and Tombstone….

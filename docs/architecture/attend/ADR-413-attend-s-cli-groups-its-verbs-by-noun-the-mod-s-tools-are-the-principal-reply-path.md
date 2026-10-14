@@ -45,7 +45,7 @@ status: accepted
 date: 2026-10-12
 deciders:
   - aaronsb
-related: [ADR-509, ADR-507, ADR-506, ADR-406, ADR-411, ADR-173, ADR-172, ADR-182, ADR-501, ADR-136]
+related: [ADR-509, ADR-507, ADR-506, ADR-406, ADR-411, ADR-173, ADR-172, ADR-182, ADR-501, ADR-136, ADR-404]
 ---
 
 # ADR-413: Attend's CLI groups its verbs by noun; the mod's tools are the principal reply path
@@ -116,6 +116,8 @@ The riskiest callers are the ones that run on every turn or that another release
    | `attend inbox [ID] [--drain]` | `attend message inbox [ID] [--drain]` |
    | `attend unread` | `attend message unread` |
    | `attend cleanup` | `attend message cleanup` |
+   | none (ADR-404 D3e) | `attend message delete` |
+   | none (ADR-404 D3e) | `attend message tombstone` |
    | `attend join <g>` | `attend channel join <g>` |
    | `attend leave <g>` | `attend channel leave <g>` |
    | `attend channels [list] [--joined]` | `attend channel [list] [--joined]` |
@@ -130,6 +132,8 @@ The riskiest callers are the ones that run on every turn or that another release
    | `attend permissions [audit]` | `attend sensor permissions` |
 
    Group names are singular nouns followed by a verb, the shape of `gh pr list` and `git remote add`. Each verb keeps its flags, arguments, output and exit codes. `--json` stays on every verb that has it, and `describe.rs` keeps one description per message verb, keyed by its new path (ADR-501 item 4).
+
+   The two rows with no old name were added on 2026-10-13: the `message` verbs ADR-404 D3e decides, which never had a flat name and carry no alias.
 
 2. **`run` stays a fixed top-level name.** Monitor commands in running sessions, the loop's own re-exec and the macro's process match all use `attend run`, and it is the one command a host without the mod is told to start.
 
