@@ -698,11 +698,10 @@ mod compaction_tests {
         format!("{{\"ts\":\"{}\",\"event\":\"{event}\",\"tag\":\"{tag}\"}}\n", agent_fmt::when::utc_iso(NOW - age_days * DAY))
     }
 
-    fn tmp(tag: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("ways-rot-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d.join("events.jsonl")
+    /// The events file in a fresh directory, which is removed, contents and
+    /// all, when the guard drops. Bind it for the whole test.
+    fn tmp(tag: &str) -> crate::test_dir::TestDir {
+        crate::test_dir::TestDir::at(std::env::temp_dir().join(format!("ways-rot-{tag}-{}", std::process::id()))).under("events.jsonl")
     }
 
     #[test]
@@ -1015,11 +1014,10 @@ mod archive_tests {
         format!("{{\"ts\":\"{}\",\"event\":\"{event}\",\"tag\":\"{tag}\"}}\n", agent_fmt::when::utc_iso(NOW - age_days * DAY))
     }
 
-    fn state(tag: &str) -> (std::path::PathBuf, std::path::PathBuf) {
-        let d = std::env::temp_dir().join(format!("ways-arch-sess-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        (d.clone(), d.join("events.jsonl"))
+    fn state(tag: &str) -> (crate::test_dir::TestDir, std::path::PathBuf) {
+        let d = crate::test_dir::TestDir::at(std::env::temp_dir().join(format!("ways-arch-sess-{tag}-{}", std::process::id())));
+        let log = d.join("events.jsonl");
+        (d, log)
     }
 
     #[test]

@@ -8,7 +8,16 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-fn fixture(tag: &str) -> (PathBuf, PathBuf) {
+/// Removes the fixture's root when the test ends.
+struct Root(PathBuf);
+
+impl Drop for Root {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn fixture(tag: &str) -> (PathBuf, PathBuf, Root) {
     let root = std::env::temp_dir().join(format!("ways-piped-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     let home = root.join("home");
@@ -21,7 +30,7 @@ fn fixture(tag: &str) -> (PathBuf, PathBuf) {
     std::fs::create_dir_all(&dir).unwrap();
     let line = r#"{"type":"assistant","message":{"model":"claude-opus-5-5","usage":{"input_tokens":394000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#;
     std::fs::write(dir.join("piped-0001.jsonl"), format!("{line}\n")).unwrap();
-    (home, project)
+    (home, project, Root(root))
 }
 
 /// `ways context` for the fixture project, stdout piped, under a terminal
@@ -55,7 +64,7 @@ fn context(home: &Path, project: &Path, extra: &[(&str, &str)]) -> Vec<u8> {
 
 #[test]
 fn piped_context_carries_no_escape_sequences() {
-    let (home, project) = fixture("plain");
+    let (home, project, _root) = fixture("plain");
     let out = context(&home, &project, &[]);
     let text = String::from_utf8_lossy(&out);
     assert!(text.contains("tokens used"), "the gauge rendered: {text:?}");
@@ -64,7 +73,7 @@ fn piped_context_carries_no_escape_sequences() {
 
 #[test]
 fn force_colour_restores_escapes_on_a_pipe() {
-    let (home, project) = fixture("forced");
+    let (home, project, _root) = fixture("forced");
     for var in ["CLICOLOR_FORCE", "FORCE_COLOR"] {
         let out = context(&home, &project, &[(var, "1")]);
         assert!(out.contains(&0x1b), "{var}=1 should colour a pipe: {:?}", String::from_utf8_lossy(&out));
