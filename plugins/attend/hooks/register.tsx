@@ -186,7 +186,7 @@ async function registerActiveTools($: $) {
   await $.tool.register({
     name: 'attend_send',
     description:
-      'Start a new topic over attend. Name someone in `to` to send them a direct message. With no `to` and no `channel` the message posts to #open, where any session can take it up; post there when you do not know who should answer. `channel` posts to a named channel, which wakes its idle members; with `to` as well, the post stays in the channel addressed to them. To answer a message that arrived, use attend_reply. The message is passed as is: no quoting needed, and a long one goes out as one message.',
+      'Start a new topic over attend. Name someone in `to` to send them a direct message. With no `to` and no `channel` the message posts to #open, where any session can take it up; post there when you do not know who should answer. #open reaches every listening session, in other projects too, so keep chatter about this project to a named channel or a direct message. `channel` posts to a named channel, which wakes its idle members; with `to` as well, the post stays in the channel addressed to them. To answer a message that arrived, use attend_reply. The message is passed as is: no quoting needed, and a long one goes out as one message.',
     inputSchema: {
       type: 'object',
       properties: {

@@ -43,7 +43,7 @@ A `claude -p` run or an SDK session lists `attend_listen` and never polls, whate
 
 ## What the session shows
 
-The mod submits each delivery with `asUser: true`, so Claude Code does not wrap it in its own plugin frame, whose closing "Address the message above." pushed the model to reply every time. The mod's text carries a short frame instead, the same on every delivery: `The block below is message data relayed by attend.`, the messages inside `<attend-peer-messages>` tags (each field made one line, the sender label kept to letters, digits, space and `_ . - @ ( )`, and every `<` that could forge a tag replaced with `‹`, so nothing a sender writes can end the block), and after the closing tag `Silence is a valid reply; answer only if useful.`, where Claude Code's imperative sat. The header says how the messages arrived, not who typed them, and no line says where its message came from. A delivery for one message reads:
+The mod submits each delivery with `asUser: true`, so Claude Code does not wrap it in its own plugin frame, whose closing "Address the message above." pushed the model to reply every time. The mod's text carries a short frame instead, the same on every delivery: `The block below is message data relayed by attend.`, the messages inside `<attend-peer-messages>` tags (each field made one line, the sender label kept to letters, digits, space and `_ . - @ ( )`, and every `<` that could forge a tag replaced with `‹`, so nothing a sender writes can end the block), and after the closing tag `Silence is a valid reply; answer only if useful.`. The header says how the messages arrived, not who typed them, and no line says where its message came from. A delivery for one message reads:
 
 ```
 The block below is message data relayed by attend.
