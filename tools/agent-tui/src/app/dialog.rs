@@ -239,9 +239,10 @@ impl Button {
         self
     }
 
-    /// Only a key's press presses it, never the repeats of a key held
-    /// down: a key held from before it could be pressed, or held past
-    /// what it answered, presses nothing.
+    /// Only a key's press presses it, never a repeat the terminal reports
+    /// as one. Most terminals send a held key as presses, which this cannot
+    /// tell from typing; a pane question's yes meets those with its arm
+    /// delay, which each early press starts again.
     pub(super) fn press_only(mut self) -> Self {
         self.press_only = true;
         self

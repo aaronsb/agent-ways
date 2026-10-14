@@ -304,6 +304,7 @@ impl App {
         let Some(m) = self.modal().filter(|m| (m.placement(self) == Placement::Bar) == bar) else { return false };
         let drawn = m.draw(self, f, area);
         m.set_scroll(self, drawn.scroll);
+        self.question_drawn_on(drawn.rect.width);
         self.hits.dialog = Some((std::mem::discriminant(&self.mode), drawn));
         true
     }
@@ -341,6 +342,11 @@ impl App {
         }
         if !wheel && !closes {
             return;
+        }
+        // A click on a question's yes before it has armed holds it back the
+        // longer, as its key does.
+        if m.kind == MouseEventKind::Down(MouseButton::Left) && drawn.buttons.iter().any(|&(r, b)| b == Btn::Yes && r.contains(at)) {
+            self.yes_too_soon();
         }
         let a = d.mouse(m.kind, at, &drawn);
         self.hold(modal, &d);

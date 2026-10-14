@@ -21,6 +21,10 @@ use super::render::{clip, width};
 /// The id of the shell's own question before a plain `q` quits.
 pub(crate) const QUIT_ASK: &str = "\u{0}quit";
 
+/// The arm delay of the shell's own "quit?": none, since the `q` that
+/// asked it was the operator's own key, and `q` then `y` quits at once.
+const QUIT_ARM: std::time::Duration = std::time::Duration::ZERO;
+
 /// How long a question's yes stays set back after the question is ready to
 /// answer, or after what it asks changed: a key or a click meant for what
 /// was there a moment before, or typed ahead, lands on nothing.
@@ -35,35 +39,41 @@ pub(crate) struct Asked {
     pub q: Question,
     pub armed_at: Option<std::time::Instant>,
     pub deadline: Option<std::time::Instant>,
+    /// The width of the bar it was last drawn on: the answers sit at its
+    /// right end, so a new width moves them.
+    pub bar_width: Option<u16>,
+    /// Its arm delay ([`ARM`], none for the shell's own "quit?").
+    pub arm: std::time::Duration,
 }
 
 impl Asked {
-    /// `q`, open now, its yes arming `arm` from now if it is ready.
+    /// `q`, open now, its yes arming `arm` from now if it is ready, and
+    /// `arm` after each change that arms it again.
     pub(crate) fn open(q: Question, arm: std::time::Duration) -> Asked {
-        let mut a = Asked { q, armed_at: None, deadline: None };
-        a.ready(false, arm);
+        let mut a = Asked { q, armed_at: None, deadline: None, bar_width: None, arm };
+        a.ready(false);
         a
     }
 
     /// `q` in place of the question open under its id: its text and its
     /// answers, the expiry kept running once it has started. Yes arms again
     /// when the question becomes ready, or changes what it asks.
-    pub(crate) fn update(&mut self, q: Question, arm: std::time::Duration) {
+    pub(crate) fn update(&mut self, q: Question) {
         let changed = (&self.q.question, &self.q.yes, &self.q.no) != (&q.question, &q.yes, &q.no);
         self.q = q;
-        self.ready(changed, arm);
+        self.ready(changed);
     }
 
     /// Start yes's arm delay and the expiry once the question can be
     /// answered yes; `rearm` restarts a delay already started.
-    fn ready(&mut self, rearm: bool, arm: std::time::Duration) {
+    fn ready(&mut self, rearm: bool) {
         if self.q.pending || self.q.yes.is_none() {
             self.armed_at = None;
             return;
         }
         let now = std::time::Instant::now();
         if rearm || self.armed_at.is_none() {
-            self.armed_at = Some(now + arm);
+            self.armed_at = Some(now + self.arm);
         }
         if self.deadline.is_none() {
             self.deadline = self.q.expiry.as_ref().map(|e| now + e.after);
@@ -74,6 +84,26 @@ impl Asked {
     /// arm delay has passed.
     pub(crate) fn armed(&self) -> bool {
         self.armed_at.is_some_and(|t| std::time::Instant::now() >= t)
+    }
+
+    /// A press of yes's key, or a click on it, while yes is not armed:
+    /// its arm delay starts again, so a key held down, which most
+    /// terminals send as presses, arms nothing until it has been let go
+    /// for the whole delay.
+    pub(crate) fn yes_too_soon(&mut self) {
+        if self.armed_at.is_some() && !self.armed() {
+            self.armed_at = Some(std::time::Instant::now() + self.arm);
+        }
+    }
+
+    /// It was drawn on a bar `width` wide. A width other than the last
+    /// moves the answers, which sit at the bar's right end, so yes arms
+    /// again: a click aimed at what was there lands on nothing.
+    pub(crate) fn drawn_on(&mut self, width: u16) {
+        if self.bar_width.is_some_and(|w| w != width) && self.armed_at.is_some() {
+            self.armed_at = Some(std::time::Instant::now() + self.arm);
+        }
+        self.bar_width = Some(width);
     }
 
     /// Whether the screen changes on the clock: yes is arming, or the
@@ -456,7 +486,7 @@ impl App {
             // A plain `q` beside a pane that owns the focus asks first,
             // whatever is unsaved: it is one keystroke from typing.
             ShellKey::Quit if k.code == KeyCode::Char('q') && self.ctx().owns_bar => {
-                self.mode = Mode::Ask(Asked::open(Question::new(QUIT_ASK, "quit?", "quit", "stay"), self.question_arm));
+                self.mode = Mode::Ask(Asked::open(Question::new(QUIT_ASK, "quit?", "quit", "stay"), QUIT_ARM));
             }
             ShellKey::Quit => return self.quit(),
             ShellKey::Mouse => {
@@ -504,9 +534,8 @@ impl App {
                 self.mode = Mode::Pick(pick);
             }
             Open::Ask(q) if matches!(&self.mode, Mode::Ask(a) if a.q.id == q.id) => {
-                let arm = self.question_arm;
                 if let Mode::Ask(a) = &mut self.mode {
-                    a.update(q, arm);
+                    a.update(q);
                 }
             }
             Open::Ask(q) if matches!(self.mode, Mode::Browse) => self.mode = Mode::Ask(Asked::open(q, self.question_arm)),
@@ -750,6 +779,22 @@ impl App {
         let yes = a.q.expiry.as_ref().is_some_and(Expiry::answers_yes);
         self.mode = Mode::Browse;
         self.pane_picked(&a.q.id, vec![if yes { "y" } else { "n" }.to_string(), EXPIRED.to_string()]);
+    }
+
+    /// A key or a click on the open question's yes before it has armed
+    /// starts its arm delay again ([`Asked::yes_too_soon`]).
+    pub(crate) fn yes_too_soon(&mut self) {
+        if let Mode::Ask(a) = &mut self.mode {
+            a.yes_too_soon();
+        }
+    }
+
+    /// The open question was drawn on a bar `width` wide
+    /// ([`Asked::drawn_on`]).
+    pub(crate) fn question_drawn_on(&mut self, width: u16) {
+        if let Mode::Ask(a) = &mut self.mode {
+            a.drawn_on(width);
+        }
     }
 
     /// How long a question's yes stays set back once it is ready to answer,
@@ -1175,6 +1220,85 @@ mod tests {
         assert_eq!(two(&a).keys, 1, "and typed nothing");
         a.key(k(KeyCode::Char('y'), KeyModifiers::NONE));
         assert_eq!(two(&a).picked, ["q=y"], "a press answers");
+    }
+
+    /// A y held down, which a terminal without the kitty protocol's event
+    /// types sends as a press every key-repeat interval, never answers yes:
+    /// each press before yes has armed starts the arm delay again, from
+    /// before the question is ready until long after. Let go for the whole
+    /// delay, one y answers.
+    #[test]
+    fn a_y_held_as_presses_never_answers_yes() {
+        use std::time::{Duration, Instant};
+        let arm = Duration::from_millis(300);
+        let mut a = app(true);
+        a.set_question_arm(arm);
+        ask_now(&mut a, Question::new("q", "counting…", "drop", "keep").pending());
+        let y = k(KeyCode::Char('y'), KeyModifiers::NONE);
+        let start = Instant::now();
+        let mut ready: Option<Instant> = None;
+        while ready.is_none_or(|r| r.elapsed() < Duration::from_millis(1200)) {
+            if ready.is_none() && start.elapsed() >= Duration::from_millis(150) {
+                update(&mut a, Question::new("q", "drop 3?", "drop", "keep"));
+                ready = Some(Instant::now());
+            }
+            testkit::render(&mut a, 80, 6);
+            a.key(y);
+            std::thread::sleep(Duration::from_millis(30));
+        }
+        assert!(matches!(a.mode, Mode::Ask(_)) && two(&a).picked.is_empty(), "held, it never answered: {:?}", two(&a).picked);
+        assert_eq!(two(&a).keys, 1, "and typed nothing");
+        std::thread::sleep(arm + Duration::from_millis(100));
+        a.key(y);
+        assert_eq!(two(&a).picked, ["q=y"], "let go, then one y answers");
+    }
+
+    /// The answers sit at the bar's right end, so a wider terminal moves
+    /// them: yes arms again, and a click on where no was drawn before the
+    /// resize, which yes now covers, answers nothing.
+    #[test]
+    fn a_resize_moves_no_answer_under_a_click() {
+        let mut a = app(true);
+        a.set_question_arm(std::time::Duration::from_secs(60));
+        ask_now(&mut a, Question::new("q", "drop it?", "delete", "keep"));
+        testkit::render(&mut a, 80, 6);
+        arm_now(&mut a);
+        let no = testkit::find(&testkit::render(&mut a, 80, 6), " n keep ").expect("no is drawn");
+        let wider = testkit::render(&mut a, 91, 6);
+        let yes = testkit::find(&wider, " y delete ").expect("yes is drawn");
+        assert!((yes.0..yes.0 + 10).contains(&(no.0 + 1)), "the old place of no is under yes now: {no:?} {yes:?}");
+        click_at(&mut a, no);
+        assert!(!two(&a).picked.iter().any(|p| p == "q=y"), "never yes: {:?}", two(&a).picked);
+    }
+
+    /// The shell's own "quit?" has no arm delay: `q` was the operator's own
+    /// key, so `q` and then `y` at once quits, through the exit guard.
+    #[test]
+    fn q_then_y_at_once_quits() {
+        let mut a = App::with_pane("own", Own::default());
+        assert!(a.key(k(KeyCode::Char('q'), KeyModifiers::NONE)));
+        assert!(matches!(&a.mode, Mode::Ask(q) if q.q.id == QUIT_ASK));
+        assert!(!a.key(k(KeyCode::Char('y'), KeyModifiers::NONE)), "y quits at once");
+        assert!(a.ended());
+    }
+
+    /// The terminal loop's schedule ticks the shell while a question is on
+    /// the clock, so over a pane that never ticks it expires: the jobs the
+    /// loop runs ([`App::run_due`]) close it.
+    #[test]
+    fn the_run_loop_expires_a_question_over_a_pane_that_never_ticks() {
+        use super::super::pane::Expiry;
+        use super::super::term::Schedule;
+        use std::time::{Duration, Instant};
+        let mut a = app(true);
+        ask_now(&mut a, Question::new("q", "drop it?", "drop", "keep").expires(Expiry::new(Duration::from_secs(60))));
+        let t0 = Instant::now();
+        let mut s = Schedule::new(t0);
+        expire_now(&mut a);
+        a.run_due(&mut s, t0 + Duration::from_millis(100));
+        assert!(two(&a).picked.is_empty(), "not due yet");
+        a.run_due(&mut s, t0 + QUESTION_TICK);
+        assert_eq!(two(&a).picked, ["q=n", "q=expired"]);
     }
 
     /// A question that waits still takes no at once.
@@ -2179,7 +2303,6 @@ mod tests {
         ];
         for (i, (quits, answer)) in ways.into_iter().enumerate() {
             let mut a = App::with_pane("own", Own::default());
-            a.set_question_arm(std::time::Duration::ZERO);
             assert!(a.key(k(KeyCode::Char('q'), KeyModifiers::NONE)));
             let bar = testkit::rows(&testkit::render(&mut a, 80, 6)).pop().expect("a bar");
             assert!(bar.contains("quit?") && bar.contains(" y quit ") && bar.contains(" n stay "), "{bar}");

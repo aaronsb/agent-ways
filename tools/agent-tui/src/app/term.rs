@@ -12,6 +12,7 @@ use std::time::Instant;
 use ratatui::crossterm::cursor::Show;
 
 use super::*;
+use super::paneshell::QUESTION_TICK;
 
 /// How long the loop waits for input before it looks at the tick, the watch
 /// and the signals again.
@@ -347,8 +348,9 @@ impl Clock {
 }
 
 /// The run loop's three periodic jobs, each on its own clock: the pane's
-/// tick, the shell's tick while an apply or a reading runs, and the watch
-/// for files changed on disk while none does. One never waits on another.
+/// tick, the shell's tick while an apply or a reading runs or a question
+/// is on the clock, and the watch for files changed on disk while nothing
+/// applies. One never waits on another.
 pub(crate) struct Schedule {
     pane: Clock,
     shell: Clock,
@@ -369,18 +371,30 @@ impl Schedule {
     }
 
     /// How long to wait for input before the next job is due, at most
-    /// [`POLL`], so a signal is seen in time.
-    pub(crate) fn wait(&self, pane: Option<Duration>, busy: bool, now: Instant) -> Duration {
+    /// [`POLL`], so a signal is seen in time. POLL is shorter than
+    /// [`QUESTION_TICK`], so a question on the clock never shortens the
+    /// wait past it; it is counted all the same, so the wait stays right
+    /// if POLL grows.
+    pub(crate) fn wait(&self, pane: Option<Duration>, busy: bool, question: bool, now: Instant) -> Duration {
         let mut wait = POLL;
         if let Some(every) = pane {
             wait = wait.min(self.pane.left(every, now));
         }
-        wait.min(if busy { self.shell.left(TICK, now) } else { self.watch.left(WATCH, now) })
+        if busy {
+            return wait.min(self.shell.left(TICK, now));
+        }
+        if question {
+            wait = wait.min(self.shell.left(QUESTION_TICK, now));
+        }
+        wait.min(self.watch.left(WATCH, now))
     }
 
     /// The jobs due at `now`, taken. `pane` is how often the pane ticks,
-    /// `None` never; `busy` whether an apply or a reading runs.
-    pub(crate) fn due(&mut self, pane: Option<Duration>, busy: bool, now: Instant) -> Due {
+    /// `None` never; `busy` whether an apply or a reading runs; `question`
+    /// whether a question is on the clock ([`App::question_on_the_clock`]),
+    /// which ticks the shell every [`QUESTION_TICK`] whether or not the
+    /// pane ticks.
+    pub(crate) fn due(&mut self, pane: Option<Duration>, busy: bool, question: bool, now: Instant) -> Due {
         let pane = match pane {
             Some(every) => self.pane.take(every, now),
             None => {
@@ -391,11 +405,35 @@ impl Schedule {
         let (shell, watch) = if busy {
             self.watch.idle(now);
             (self.shell.take(TICK, now), false)
+        } else if question {
+            (self.shell.take(QUESTION_TICK, now), self.watch.take(WATCH, now))
         } else {
             self.shell.idle(now);
             (false, self.watch.take(WATCH, now))
         };
         Due { pane, shell, watch }
+    }
+}
+
+impl App {
+    /// How long the run loop waits for input, by `schedule`.
+    pub(crate) fn schedule_wait(&self, schedule: &Schedule, now: Instant) -> Duration {
+        schedule.wait(self.pane_tick_every(), self.applying(), self.question_on_the_clock(), now)
+    }
+
+    /// The jobs due at `now` by `schedule`, run: the pane's tick, the
+    /// shell's (which closes an expired question), the watch.
+    pub(crate) fn run_due(&mut self, schedule: &mut Schedule, now: Instant) {
+        let due = schedule.due(self.pane_tick_every(), self.applying(), self.question_on_the_clock(), now);
+        if due.pane {
+            self.tick_pane();
+        }
+        if due.shell {
+            self.tick();
+        }
+        if due.watch {
+            self.watch();
+        }
     }
 }
 
@@ -432,10 +470,7 @@ impl App {
                 let mut out = io::stdout();
                 let _ = out.write_all(osc.as_bytes()).and_then(|_| out.flush());
             }
-            let mut wait = schedule.wait(self.pane_tick_every(), self.applying(), Instant::now());
-            if self.question_on_the_clock() {
-                wait = wait.min(super::paneshell::QUESTION_TICK);
-            }
+            let wait = self.schedule_wait(&schedule, Instant::now());
             // A terminal that can no longer be drawn on or read from has hung
             // up: end as on SIGHUP.
             let event = match term.draw(|f| self.draw(f)).and_then(|_| event::poll(wait)) {
@@ -467,18 +502,7 @@ impl App {
             }
             // Timed, not on an idle poll: input arriving all the time would
             // otherwise starve them.
-            let due = schedule.due(self.pane_tick_every(), self.applying(), Instant::now());
-            if due.pane {
-                self.tick_pane();
-            }
-            // A question on the clock is checked whether or not anything
-            // is due: a pane that never ticks still sees it expire.
-            if due.shell || self.question_on_the_clock() {
-                self.tick();
-            }
-            if due.watch {
-                self.watch();
-            }
+            self.run_due(&mut schedule, Instant::now());
         }
     }
 
@@ -502,9 +526,9 @@ mod schedule_tests {
         let t0 = Instant::now();
         let mut s = Schedule::new(t0);
         let pane = Some(ms(100));
-        assert_eq!(s.due(pane, true, t0 + ms(100)), Due { pane: true, shell: false, watch: false });
-        assert_eq!(s.due(pane, true, t0 + ms(150)), Due { pane: false, shell: true, watch: false });
-        assert_eq!(s.due(pane, true, t0 + ms(200)), Due { pane: true, shell: false, watch: false });
+        assert_eq!(s.due(pane, true, false, t0 + ms(100)), Due { pane: true, shell: false, watch: false });
+        assert_eq!(s.due(pane, true, false, t0 + ms(150)), Due { pane: false, shell: true, watch: false });
+        assert_eq!(s.due(pane, true, false, t0 + ms(200)), Due { pane: true, shell: false, watch: false });
     }
 
     /// The watch runs while a pane ticks and nothing is applying.
@@ -514,7 +538,7 @@ mod schedule_tests {
         let mut s = Schedule::new(t0);
         let (mut ticked, mut watched) = (0, 0);
         for i in 1..=12 {
-            let d = s.due(Some(ms(100)), false, t0 + ms(100 * i));
+            let d = s.due(Some(ms(100)), false, false, t0 + ms(100 * i));
             ticked += usize::from(d.pane);
             watched += usize::from(d.watch);
         }
@@ -527,7 +551,7 @@ mod schedule_tests {
         let t0 = Instant::now();
         let mut s = Schedule::new(t0);
         for i in 1..=20 {
-            assert!(!s.due(None, true, t0 + ms(50 * i)).pane);
+            assert!(!s.due(None, true, false, t0 + ms(50 * i)).pane);
         }
     }
 
@@ -537,8 +561,23 @@ mod schedule_tests {
     fn the_wait_is_until_the_soonest_job() {
         let t0 = Instant::now();
         let s = Schedule::new(t0);
-        assert_eq!(s.wait(Some(ms(40)), false, t0 + ms(10)), ms(30));
-        assert_eq!(s.wait(None, true, t0 + ms(100)), ms(50));
-        assert_eq!(s.wait(None, false, t0), POLL);
+        assert_eq!(s.wait(Some(ms(40)), false, false, t0 + ms(10)), ms(30));
+        assert_eq!(s.wait(None, true, false, t0 + ms(100)), ms(50));
+        assert_eq!(s.wait(None, false, false, t0), POLL);
+    }
+
+    /// A question on the clock ticks the shell every QUESTION_TICK, with
+    /// no pane tick and nothing applying, and the watch goes on beside it;
+    /// with none, the shell is never due.
+    #[test]
+    fn a_question_on_the_clock_ticks_the_shell() {
+        let t0 = Instant::now();
+        let mut s = Schedule::new(t0);
+        assert_eq!(s.due(None, false, true, t0 + ms(100)), Due { pane: false, shell: false, watch: false });
+        assert_eq!(s.due(None, false, true, t0 + QUESTION_TICK), Due { pane: false, shell: true, watch: false });
+        assert_eq!(s.wait(None, false, true, t0 + QUESTION_TICK + ms(200)), ms(50));
+        assert_eq!(s.due(None, false, true, t0 + ms(1000)), Due { pane: false, shell: true, watch: true });
+        let mut s = Schedule::new(t0);
+        assert!((1..=20).all(|i| !s.due(None, false, false, t0 + ms(100 * i)).shell), "no question, no shell tick");
     }
 }
