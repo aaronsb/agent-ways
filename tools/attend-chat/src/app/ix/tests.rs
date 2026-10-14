@@ -132,6 +132,7 @@ fn ctrl_x_ctrl_s_in_the_box_sends_now() {
         cell("a refresh between keeps the chord", held.clone(), Ev::WorldChanged, drafted(), held.clone(), vec![]),
         cell("the column hidden for width keeps it too", held.clone(), Ev::ColumnHidden, drafted(), held.clone(), vec![]),
         cell("a click drops it", held.clone(), Ev::Click(Click::Shell), drafted(), compose.clone(), vec![]),
+        cell("a key the shell took drops it", held.clone(), Ev::KeyTaken, drafted(), compose.clone(), vec![]),
     ]);
 }
 

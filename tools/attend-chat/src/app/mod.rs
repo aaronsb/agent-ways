@@ -833,6 +833,7 @@ impl Pane for ChatPane {
     fn key(&mut self, k: KeyEvent) -> Keyed {
         self.dirty = true;
         if self.is_sidebar_key(&k) {
+            self.dispatch(ix::Ev::KeyTaken);
             self.toggle_sidebar();
             return Keyed::Done;
         }
@@ -1058,6 +1059,12 @@ impl Pane for ChatPane {
 
     fn take_open(&mut self) -> Option<Open> {
         self.to_open.take()
+    }
+
+    /// The shell took a key of the operator's (the key help, the mouse,
+    /// quitting, a tab, a new channel).
+    fn shell_key_taken(&mut self) {
+        self.dispatch(ix::Ev::KeyTaken);
     }
 
     fn open_dropped(&mut self, open: Open) {

@@ -552,6 +552,11 @@ pub trait Pane: Any {
     /// The picker opened under `id` set `values`.
     fn picked(&mut self, _id: &str, _values: Vec<String>) {}
 
+    /// The shell took a key of its own (the key help, the mouse, a tab,
+    /// quitting, a new item): the operator pressed a key the pane never
+    /// sees.
+    fn shell_key_taken(&mut self) {}
+
     /// The shell could not open `open` (a menu, a question or an entry
     /// dialog) because something else was open: what it asked for will
     /// never be picked or answered.

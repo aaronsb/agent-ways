@@ -356,6 +356,9 @@ impl App {
             self.strip_blur();
         }
         if let Some(s) = taken {
+            if let Some(p) = &mut self.pane {
+                p.shell_key_taken();
+            }
             // A pane that owns the focus keeps it across the shell's keys.
             if !self.ctx().owns_bar {
                 self.interrupt_pane();
@@ -765,6 +768,8 @@ mod tests {
         tab_keys: TabKeys,
         /// `Some`: the pane takes Ctrl+N, counting its uses.
         news: Option<usize>,
+        /// How many keys the shell took for itself.
+        taken: usize,
     }
 
     impl Pane for Two {
@@ -776,6 +781,9 @@ mod tests {
         }
         fn picked(&mut self, id: &str, values: Vec<String>) {
             self.picked = values.into_iter().map(|v| format!("{id}={v}")).collect();
+        }
+        fn shell_key_taken(&mut self) {
+            self.taken += 1;
         }
         fn open_dropped(&mut self, open: Open) {
             if let Open::Ask { id, .. } | Open::Pick { id, .. } | Open::Entry { id, .. } = open {
@@ -837,7 +845,7 @@ mod tests {
     }
 
     fn app(text: bool) -> App {
-        App::with_pane("two", Two { tab: 0, keys: 0, wheel: 0, dirty: false, text, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None })
+        App::with_pane("two", Two { tab: 0, keys: 0, wheel: 0, dirty: false, text, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None, taken: 0 })
     }
 
     #[test]
@@ -1164,6 +1172,7 @@ mod tests {
         let mut a = app(false);
         assert!(a.key(k(KeyCode::Char('2'), KeyModifiers::NONE)));
         assert_eq!(two(&a).tab, 1);
+        assert_eq!(two(&a).taken, 1, "the pane is told the shell took a key");
         assert!(a.key(k(KeyCode::Char('9'), KeyModifiers::NONE)), "no ninth tab: nothing");
         assert_eq!(two(&a).tab, 1);
         a.key(k(KeyCode::Char('m'), KeyModifiers::NONE));
@@ -1454,7 +1463,7 @@ mod tests {
                 true
             }
         }
-        let two = Two { tab: 0, keys: 0, wheel: 0, dirty: false, text: true, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None };
+        let two = Two { tab: 0, keys: 0, wheel: 0, dirty: false, text: true, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None, taken: 0 };
         let mut a = App::with_pane("asks", Asks(two));
         a.key(k(KeyCode::F(1), KeyModifiers::NONE));
         let off = testkit::text(&testkit::render(&mut a, 140, 24));
@@ -1496,7 +1505,7 @@ mod tests {
 
     #[test]
     fn a_pane_without_tab_menus_gets_no_tab_bar_focus_and_names_none() {
-        let two = Two { tab: 0, keys: 0, wheel: 0, dirty: false, text: false, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None };
+        let two = Two { tab: 0, keys: 0, wheel: 0, dirty: false, text: false, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None, taken: 0 };
         let mut a = App::with_pane("plain", Plain(two));
         a.key(k(KeyCode::F(2), KeyModifiers::NONE));
         assert!(!a.strip_focused(), "F2 is the pane's");
@@ -1900,7 +1909,7 @@ mod tests {
     }
 
     fn described() -> App {
-        let two = Two { tab: 3, keys: 0, wheel: 0, dirty: false, text: true, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None };
+        let two = Two { tab: 3, keys: 0, wheel: 0, dirty: false, text: true, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None, taken: 0 };
         App::with_pane("described", Described(two))
     }
 

@@ -186,6 +186,25 @@ fn ctrl_x_ctrl_s_sends_now_in_any_terminal() {
     assert!(!in_tray(QUIET_CWD, "broken chord"), "Ctrl+S alone sends nothing");
 }
 
+/// The chord's first key is dropped by any key the operator presses
+/// between, those the shell or the column key take included: F1 and the
+/// key that closes the help, or the column hidden and shown.
+#[test]
+fn a_key_the_shell_takes_drops_the_chord() {
+    let mut c = chat(false);
+    let quiet = nick(QUIET_CWD);
+    typed(&mut c, &format!("@{quiet} not yet"));
+    for between in [vec![KeyCode::F(1), KeyCode::Esc], vec![KeyCode::F(3), KeyCode::F(3)]] {
+        key(&mut c, KeyCode::Char('x'), KeyModifiers::CONTROL);
+        for code in between.clone() {
+            press(&mut c, code);
+        }
+        key(&mut c, KeyCode::Char('s'), KeyModifiers::CONTROL);
+        assert!(!in_tray(QUIET_CWD, "not yet"), "{between:?} between: Ctrl+S alone sends nothing");
+        assert_eq!(c.input().text(), format!("@{quiet} not yet"), "{between:?}: the draft stays");
+    }
+}
+
 #[test]
 fn enter_again_sends_a_refused_dm() {
     let mut c = chat(false);
