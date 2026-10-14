@@ -2,6 +2,8 @@
 // attend and ways CLIs print, framing a delivery, and the timing rules. No `$`
 // here, so the tests exercise them directly.
 
+import type { KeepaliveRow } from '../types/index.d.ts'
+
 export const ATTEND = 'attend'
 export const WAYS = 'ways'
 
@@ -54,6 +56,27 @@ export const UNREAD_ARGV = [ATTEND, 'message', 'unread', '--json'] as const
 export const BEAT_ARGV = [ATTEND, 'listen', 'beat'] as const
 export const PEERS_ARGV = [ATTEND, 'peer', 'list'] as const
 export const KEEPWARM_CHECK_ARGV = [ATTEND, 'keepwarm', 'check'] as const
+/** The operator prompted: the keepalive count starts again (ADR-414 item 4). */
+export const KEEPWARM_RESET_ARGV = [ATTEND, 'keepwarm', 'reset'] as const
+
+/** The keepalive policy's judgment, once, with the autocompact gate the mod
+ *  read (ADR-414 item 7). */
+export function policyArgv(gate: Gate): string[] {
+  return [ATTEND, 'keepwarm', 'check', '--policy', '--json', '--autocompact', gate]
+}
+
+/** Where the wrap's reply went, for the status card. */
+export function wrappedArgv(outcome: WrapOutcome, detail: string): string[] {
+  return [ATTEND, 'keepwarm', 'wrapped', outcome, '--detail', oneLine(detail)]
+}
+
+/** The wrap's reply sent over attend: one message, its first line the
+ *  handoff line attend wrote, to `#name` as a channel post and to anything
+ *  else as a direct message (ADR-414 item 6). */
+export function wrapSendArgv(route: WrapRoute, reply: string): string[] {
+  const body = `${oneLine(route.handoff)}\n${reply}`
+  return route.to.startsWith('#') ? sendArgv(body, route.to) : sendArgv(body, undefined, route.to)
+}
 
 /** The resolved `attend_mod` section, through the ways config layers: the
  *  user file, the target's file, then the project's `.claude/ways.yaml`. */
@@ -80,6 +103,12 @@ export type ModConfig = {
   preambleEveryTurns: number
   /** Whether a `-p` run or an SDK session may poll. */
   headlessPoll: boolean
+  /** `attend_mod.keepalive.enabled`: the keepalive policy may run (ADR-414). */
+  keepalive: boolean
+  /** `attend_mod.keepalive.margin_minutes`: a keepalive is due this long
+   *  before the cache lapses. attend judges; the mod uses it only to set a
+   *  dormant session's timer. */
+  marginMinutes: number
 }
 
 export const DEFAULT_CONFIG: ModConfig = {
@@ -91,6 +120,8 @@ export const DEFAULT_CONFIG: ModConfig = {
   quietMinutes: 20,
   preambleEveryTurns: 20,
   headlessPoll: false,
+  keepalive: true,
+  marginMinutes: 10,
 }
 
 /** Reads `ways settings list attend_mod --json --effective`. A key that is
@@ -122,6 +153,8 @@ export function parseConfig(stdout: string): ModConfig {
     quietMinutes: num('quiet_minutes', DEFAULT_CONFIG.quietMinutes),
     preambleEveryTurns: num('preamble_every_turns', DEFAULT_CONFIG.preambleEveryTurns),
     headlessPoll: bool('headless_poll', DEFAULT_CONFIG.headlessPoll),
+    keepalive: bool('keepalive.enabled', DEFAULT_CONFIG.keepalive),
+    marginMinutes: num('keepalive.margin_minutes', DEFAULT_CONFIG.marginMinutes),
   }
 }
 
@@ -138,6 +171,147 @@ export function pollInterval(c: ModConfig, idleMs: number, isTurnRunning: boolea
  *  the first once `every` turns have passed since it last showed. */
 export function isFullPreamble(deliveries: number, afterCompaction: boolean, turnsSinceFull: number, every: number): boolean {
   return deliveries === 0 || afterCompaction || turnsSinceFull >= every
+}
+
+/** Whether the keepalive policy may run in a session started with
+ *  `isInteractive` under `c` (ADR-414 item 1): never a -p run or an SDK
+ *  session, whatever `headless_poll` says; autocompact is judged at each
+ *  check. Where it applies, keepalive.tsx drives every cache wake. */
+export function keepaliveApplies(c: ModConfig, isInteractive: boolean): boolean {
+  return isInteractive && c.install && c.keepwarm === 'on' && c.keepalive
+}
+
+/** When the policy's timer asks attend first after a main-loop turn's end: the margin before the hour tier's cache lapses, or ADR-182's
+ *  50 minutes when that comes sooner, which an armed window wakes at. attend
+ *  answers with the due point it judged. */
+export function firstCheckMs(c: ModConfig): number {
+  return Math.min(60 - c.marginMinutes, 50) * 60_000
+}
+
+// ── the keepalive policy (ADR-414) ───────────────────────────────────────
+
+/** The autocompact gate: `off` lets the policy run; `unknown` counts as on,
+ *  the side that starts no turn the operator did not type. */
+export type Gate = 'on' | 'off' | 'unknown'
+
+/** The gate from `$.session.usage({ breakdown: 'summary' })`, else from
+ *  `autoCompactEnabled` in `$.settings.read()`, where only an explicit false
+ *  is off and an absent key is Claude Code's default, on. Either read is
+ *  undefined when it failed. */
+export function gateFrom(usage: unknown, settings: unknown): Gate {
+  const b = (usage as { context?: { breakdown?: { isAutoCompactEnabled?: unknown } } } | undefined)?.context?.breakdown
+  if (typeof b?.isAutoCompactEnabled === 'boolean') return b.isAutoCompactEnabled ? 'on' : 'off'
+  if (typeof settings !== 'object' || settings === null) return 'unknown'
+  return (settings as { autoCompactEnabled?: unknown }).autoCompactEnabled === false ? 'off' : 'on'
+}
+
+/** Where the wrap's reply goes, as attend resolved it. */
+export type WrapRoute = {
+  dest: 'transcript' | 'file' | 'send' | 'off'
+  /** The expanded `wrap_file`: `file`'s destination and a refused send's fallback. */
+  file: string
+  /** `send`'s recipient; `#name` is a channel. */
+  to: string
+  after: 'lapse' | 'compact'
+  handoff: string
+}
+
+/** What `attend keepwarm check --policy --json` decided. */
+export type Decision = {
+  action: 'none' | 'keepalive' | 'wrap'
+  text: string | null
+  /** When to ask again, in epoch seconds. */
+  nextAt: number | null
+  count: number
+  max: number
+  wrapsAt: string | null
+  wrappedAt: string | null
+  /** Whether the policy runs; false is ADR-182's armed windows alone. */
+  policy: boolean
+  state: 'running' | 'wrapped' | 'stopped' | 'off'
+  reason: string
+  wrap: WrapRoute | null
+}
+
+export type WrapOutcome = 'transcript' | 'file' | 'sent' | 'refused' | 'unfinished'
+
+/** The decision; undefined where the output is not one (an attend without
+ *  `--policy`, a build without the sensor). */
+export function parseDecision(stdout: string): Decision | undefined {
+  let d: Record<string, unknown>
+  try {
+    const doc = JSON.parse(stdout) as unknown
+    if (typeof doc !== 'object' || doc === null) return undefined
+    d = doc as Record<string, unknown>
+  } catch {
+    return undefined
+  }
+  const action = d.action
+  if (action !== 'none' && action !== 'keepalive' && action !== 'wrap') return undefined
+  const str = (v: unknown) => (typeof v === 'string' ? v : null)
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+  const states = ['running', 'wrapped', 'stopped', 'off'] as const
+  const state = states.find(x => x === d.state) ?? 'off'
+  const w = d.wrap as Record<string, unknown> | null | undefined
+  const dests = ['transcript', 'file', 'send', 'off'] as const
+  const dest = dests.find(x => x === w?.dest)
+  const wrap: WrapRoute | null =
+    w && dest && typeof w.file === 'string' && typeof w.to === 'string'
+      ? { dest, file: w.file, to: w.to, after: w.after === 'compact' ? 'compact' : 'lapse', handoff: str(w.handoff) ?? 'handoff:' }
+      : null
+  return {
+    action,
+    text: str(d.text),
+    nextAt: num(d.next_at),
+    count: num(d.count) ?? 0,
+    max: num(d.max) ?? 0,
+    wrapsAt: str(d.wraps_at_hm),
+    wrappedAt: str(d.wrapped_at_hm),
+    policy: d.policy === true,
+    state,
+    reason: str(d.reason) ?? '',
+    wrap,
+  }
+}
+
+/** The focus a compaction after the wrap keeps: the wrap's closing
+ *  `/compact <focus>` line, else the continuation prompt and the task list. */
+export const DEFAULT_COMPACT_FOCUS = 'keep the continuation prompt and the task list'
+
+export function compactFocus(reply: string): string {
+  const lines = reply.split('\n').map(l => l.trim().replace(/^`+|`+$/g, ''))
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = /^\/compact\s+(.+)$/.exec(lines[i] ?? '')
+    if (m?.[1]) return m[1].trim()
+  }
+  return DEFAULT_COMPACT_FOCUS
+}
+
+
+/** The row's segment after a decision; null where the policy does not run.
+ *  A dormant session shows it from the first turn the policy submits. */
+export function keepaliveRowOf(d: Decision, was: KeepaliveRow | null): KeepaliveRow | null {
+  if (!d.policy || d.state === 'off') return null
+  return {
+    state: d.state,
+    count: d.count,
+    max: d.max,
+    nextAt: d.state === 'running' ? d.nextAt : null,
+    wrapsAt: d.wrapsAt,
+    wrappedAt: d.wrappedAt,
+    isRefused: d.state === 'wrapped' && (was?.isRefused ?? false),
+    isShown: (was?.isShown ?? false) || d.action !== 'none',
+  }
+}
+
+/** `⟳ 2/8 · next 41m · wrap ~21:40`, `⟳ wrapped 21:40`, `⟳ stopped`. */
+export function keepaliveSegment(k: KeepaliveRow, nowMs: number): string {
+  if (k.state === 'wrapped') return `⟳ wrapped ${k.wrappedAt ?? ''}`.trimEnd() + (k.isRefused ? ' · handoff refused' : '')
+  if (k.state === 'stopped') return '⟳ stopped'
+  const parts = [`⟳ ${k.count}/${k.max}`]
+  if (k.nextAt !== null) parts.push(`next ${Math.max(0, Math.round((k.nextAt * 1000 - nowMs) / 60_000))}m`)
+  if (k.wrapsAt !== null) parts.push(`wrap ~${k.wrapsAt}`)
+  return parts.join(' · ')
 }
 
 // ── parsing ──────────────────────────────────────────────────────────────

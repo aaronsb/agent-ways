@@ -1,11 +1,20 @@
 // attend's agent-facing driver in Claude Code (ADR-406).
 //
-// Dormant is plain Claude Code: one tool, `attend_listen`, and nothing else.
-// A session is active from session start when its project resolves
-// `attend_mod.listening: active` through the ways config, or from the
-// agent's attend_listen call; it stays active until Claude Code exits. While
-// active the mod polls attend, delivers peer messages as framed turns, serves
-// the send/reply/join/peers tools, draws one status row and drives keepwarm.
+// Dormant is plain Claude Code: one tool, `attend_listen`, and no polling,
+// delivery or row of this module's. A session is active from session start
+// when its project resolves `attend_mod.listening: active` through the ways
+// config, or from the agent's attend_listen call; it stays active until
+// Claude Code exits. While active the mod polls attend, delivers peer
+// messages as framed turns, serves the send/reply/join/peers tools, draws one
+// status row and drives keepwarm.
+//
+// The keepalive policy (ADR-414) runs in every interactive session with the
+// mod, dormant ones included, while autocompact is off: attend judges, and
+// this module supplies the operator's prompts and the autocompact gate,
+// submits the keepalive and wrap turns, and routes the wrap's reply. A
+// dormant session polls nothing, delivers nothing and joins nothing for it:
+// one timer, set again at each main-loop turn's end. Where the policy
+// applies, it drives every cache wake, ADR-182's armed windows included.
 //
 // Every message travels through attend's signal store by the attend CLI, as
 // an argv array with no shell. The mod never uses $.session.send.
@@ -13,7 +22,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ProcessRunResult, PromptSubmitInput, PromptSubmitResult, Register, Timer } from 'claude-code'
 
-import type { AttendStatus } from '../types/index.d.ts'
+import type { AttendStatus, KeepaliveRow } from '../types/index.d.ts'
 import {
   DEFAULT_CONFIG,
   BEAT_ARGV,
@@ -27,8 +36,19 @@ import {
   configArgv,
   formatMessage,
   frameInbound,
+  KEEPWARM_RESET_ARGV,
+  compactFocus,
+  firstCheckMs,
+  gateFrom,
   isFullPreamble,
   joinArgv,
+  keepaliveApplies,
+  keepaliveRowOf,
+  keepaliveSegment,
+  parseDecision,
+  policyArgv,
+  wrapSendArgv,
+  wrappedArgv,
   keepwarmLine,
   oneLine,
   parseConfig,
@@ -41,13 +61,10 @@ import {
   sendArgv,
   shortId,
 } from './lib.ts'
-import type { Listed, ModConfig } from './lib.ts'
+import type { Decision, Gate, Listed, ModConfig, WrapOutcome, WrapRoute } from './lib.ts'
+
 
 type $ = EngineInterface
-
-// Tools are listed as mcp__attend__<name>; the matchers below spell them out,
-// so the validator can read them.
-const PLUGIN = 'attend'
 
 const DEFAULTS = {
   mode: 'dormant',
@@ -60,9 +77,15 @@ const DEFAULTS = {
   turnsSinceFull: 0,
   awaitingOperator: false,
   cacheLapsed: false,
+  keepalive: null,
 } satisfies AttendStatus
 
 const status = atom({ plugin: 'attend', key: 'status' } as const, DEFAULTS)
+
+// Tools are listed as mcp__attend__<name>; the matchers below spell them out,
+// so the validator can read them.
+const PLUGIN = 'attend'
+
 
 // A drain that finds messages waits this long and drains again, so a burst
 // arrives as one turn.
@@ -82,6 +105,15 @@ const LISTENED = 'listened'
 const LISTENED_KEPT = 50
 // A /clear or a /resume tells attend the id that goes on after this long.
 const RELISTEN_MS = 1_000
+// The keepalive policy: a gate read as on or unknown is read again after
+// this long, one read as off before every check, since a turn may follow
+// it; the check reads the transcript and the settings through ways; the
+// first check waits until session start has set the session listening or
+// dormant; a check that could not run asks again.
+const GATE_KEPT_MS = 5 * 60_000
+const POLICY_TIMEOUT_MS = 30_000
+const POLICY_START_MS = 1_000
+const POLICY_RETRY_MS = 60_000
 
 // agent-ways theme (tools/agent-theme/themes/agent-ways.theme).
 const SUBTLE = '#3a3a3c'
@@ -95,6 +127,7 @@ type Mod = {
   config: ModConfig
   /** Whether this session may poll: interactive, or allowed by config. */
   canPoll: boolean
+  isInteractive: boolean
   cwd: string
   /** The main loop's turns running now. The poll holds while one runs: the
    *  Stop-hook drain owns delivery at a turn's boundary. */
@@ -137,6 +170,23 @@ type Mod = {
    *  counts it meanwhile. The first prompt ends the hold, and so does a
    *  resume to another conversation. */
   isAwaitingOperator: boolean
+  /** The keepalive policy's state (ADR-414). */
+  ka: Keepalive
+}
+
+type Keepalive = {
+  /** keepaliveApplies: an interactive session, keepwarm on, the policy
+   *  enabled. Never a -p run or an SDK session. */
+  applies: boolean
+  gate: Gate
+  gateAtMs: number
+  /** The one timer: the next check. */
+  timer: Timer | undefined
+  /** The reset and the check run one at a time, so a prompt's reset is never
+   *  overwritten by a check that read the ledger before it. */
+  chain: Promise<unknown>
+  /** A wrap submitted, and the main-loop turn that carries it. */
+  wrap: { route: WrapRoute; turnId: string | undefined } | undefined
 }
 
 async function readStatus($: $): Promise<AttendStatus> {
@@ -342,7 +392,9 @@ async function tick($: $, mod: Mod, force: boolean) {
     if (!isTurnRunning && !mod.isRelistening && !mod.isAwaitingOperator) await poll($, mod)
     await refreshUnread($, mod)
     if (force || now - mod.lastPeersMs >= PEERS_EVERY_MS) await refreshPeers($, mod)
-    if (mod.config.keepwarm === 'on' && mod.running.size === 0 && now - mod.lastKeepwarmMs >= KEEPWARM_EVERY_MS) {
+    // Where the keepalive policy applies, its own timer drives every wake.
+    const isPlain = !keepaliveApplies(mod.config, mod.isInteractive)
+    if (isPlain && mod.config.keepwarm === 'on' && mod.running.size === 0 && now - mod.lastKeepwarmMs >= KEEPWARM_EVERY_MS) {
       mod.lastKeepwarmMs = now
       await keepwarm($)
     }
@@ -528,10 +580,168 @@ function input<T>(e: unknown): Partial<T> {
   return e as Partial<T>
 }
 
+// ── the keepalive policy (ADR-414) ──────────────────────────────────────
+
+function serial<T>(ka: Keepalive, f: () => Promise<T>): Promise<T> {
+  const next = ka.chain.then(f, f)
+  ka.chain = next.catch(() => undefined)
+  return next
+}
+
+async function setKeepaliveRow($: $, f: (k: KeepaliveRow | null) => KeepaliveRow | null) {
+  await updateStatus($, s => ({ ...s, keepalive: f(s.keepalive) }))
+}
+
+/** The autocompact gate (ADR-414 item 2): the usage breakdown, estimated
+ *  locally with no request, else `autoCompactEnabled` in the merged
+ *  settings, else unknown, which counts as on. */
+async function readGate($: $, ka: Keepalive): Promise<Gate> {
+  const now = await $.clock.now()
+  if (ka.gate !== 'off' && now - ka.gateAtMs < GATE_KEPT_MS) return ka.gate
+  let usage: unknown
+  try {
+    usage = await $.session.usage({ breakdown: 'summary' })
+  } catch {
+    usage = undefined
+  }
+  let settings: unknown
+  if (gateFrom(usage, undefined) === 'unknown') {
+    try {
+      settings = await $.settings.read()
+    } catch {
+      settings = undefined
+    }
+  }
+  ka.gate = gateFrom(usage, settings)
+  ka.gateAtMs = now
+  return ka.gate
+}
+
+/** The policy's timer: a check at `atMs`. */
+async function armKeepalive($: $, mod: Mod, atMs: number) {
+  mod.ka.timer?.cancel()
+  const wait = Math.max(0, atMs - (await $.clock.now()))
+  mod.ka.timer = $.clock.after(wait, () => {
+    mod.ka.timer = undefined
+    void checkKeepalive($, mod)
+  }) as unknown as Timer
+}
+
+/** One check: read the gate, ask attend, submit what it returns, and set the
+ *  timer for when attend says to ask again. Nothing is due while a main-loop
+ *  turn runs. A dormant session with autocompact on stays plain Claude Code
+ *  and asks nothing; a dormant session submits only the policy's own turns,
+ *  never an armed window's wake, which stays a listening session's (ADR-406
+ *  item 13). */
+async function checkKeepalive($: $, mod: Mod) {
+  const ka = mod.ka
+  if (!ka.applies || mod.running.size > 0 || mod.config.keepwarm !== 'on') return
+  await serial(ka, async () => {
+    const gate = await readGate($, ka)
+    const isListening = await isOn($, mod)
+    if (!isListening && gate !== 'off') return
+    const r = await run($, policyArgv(gate), POLICY_TIMEOUT_MS)
+    const d: Decision | undefined = r.exitCode === 0 ? parseDecision(r.stdout) : undefined
+    if (!d) {
+      if (isListening) await armKeepalive($, mod, (await $.clock.now()) + POLICY_RETRY_MS)
+      return
+    }
+    await setKeepaliveRow($, k => keepaliveRowOf(d, k))
+    if (d.action === 'keepalive' && d.text && (isListening || d.policy)) {
+      await $.prompt.submit({ text: d.text }).catch(() => undefined)
+    } else if (d.action === 'wrap' && d.text && d.wrap) {
+      ka.wrap = { route: d.wrap, turnId: undefined }
+      const isEntered = await $.prompt
+        .submit({ text: d.text })
+        .then(x => x.drop === undefined)
+        .catch(() => false)
+      if (!isEntered) {
+        ka.wrap = undefined
+        await run($, wrappedArgv('unfinished', 'the wrap prompt did not enter'))
+      }
+    }
+    // A listening session keeps ADR-182's plain cadence where the policy
+    // does not run; a dormant one waits for its next turn's end.
+    if (d.nextAt !== null && (d.policy || isListening)) await armKeepalive($, mod, d.nextAt * 1000)
+  })
+}
+
+/** The operator is present: attend starts the count again, and clears a
+ *  sent wrap and a stop (ADR-414 item 4). */
+async function keepaliveOperator($: $, mod: Mod) {
+  if (!mod.ka.applies) return
+  mod.ka.wrap = undefined
+  void serial(mod.ka, () => run($, KEEPWARM_RESET_ARGV))
+  await setKeepaliveRow($, k => k && { ...k, state: 'running', count: 0, wrappedAt: null, isRefused: false, isShown: false })
+}
+
+/** A main-loop turn ended, which restarts the clock: the timer is set for
+ *  the first point a check could be due, and attend names the due point
+ *  there. The wrap's turn routes its reply first. */
+async function keepaliveTurnEnded($: $, mod: Mod, e: { turnId: string; reason: string; answer?: string }) {
+  if (!mod.ka.applies) return
+  await routeWrap($, mod.ka, e.turnId, e.reason, e.answer ?? '')
+  if (mod.running.size > 0) return
+  const at = (await $.clock.now()) + firstCheckMs(mod.config)
+  await armKeepalive($, mod, at)
+  await setKeepaliveRow($, k => (k?.state === 'running' ? { ...k, nextAt: Math.round(at / 1000) } : k))
+}
+
+/** The wrap's turn ended: its final reply goes where `wrap` says, and attend
+ *  records where it went (ADR-414 item 6). A turn that ended other than
+ *  with an answer is written nowhere. */
+async function routeWrap($: $, ka: Keepalive, turnId: string, reason: string, reply: string) {
+  const w = ka.wrap
+  if (!w || w.turnId !== turnId) return
+  ka.wrap = undefined
+  const report = (o: WrapOutcome, detail = '') => run($, wrappedArgv(o, detail))
+  if (reason !== 'answer' || reply.trim() === '') {
+    await report('unfinished', reason === 'answer' ? 'the reply was empty' : `the turn ended: ${reason}`)
+    return
+  }
+  if (w.route.dest === 'transcript') {
+    await report('transcript')
+  } else if (w.route.dest === 'file') {
+    const failed = await saveWrap($, w.route, reply)
+    await report(failed ? 'unfinished' : 'file', failed ? `could not write ${w.route.file}: ${failed}` : w.route.file)
+  } else if (w.route.dest === 'send') {
+    const r = await run($, wrapSendArgv(w.route, reply))
+    if (r.exitCode === 0) {
+      await report('sent', w.route.to)
+    } else {
+      // Refused (no live session by that name, a channel it cannot post
+      // to) or timed out: the reply goes to the file instead.
+      const why = (r.stderr.trim() || r.stdout.trim() || `attend exited ${r.exitCode}`).split('\n')[0] ?? ''
+      const failed = await saveWrap($, w.route, reply)
+      const kept = failed ? `; the file could not be written either: ${failed}` : `; saved to ${w.route.file}`
+      await report('refused', `${w.route.to}: ${why}${kept}`)
+      await setKeepaliveRow($, k => k && { ...k, isRefused: true })
+    }
+  }
+  if (w.route.after === 'compact') {
+    const instructions = compactFocus(reply)
+    // Between turns: a compaction rejects while a turn runs.
+    $.clock.after(1_000, () => {
+      void $.session.compact({ instructions }).catch(err => $.ui.log(`attend: the compaction after the wrap failed: ${String(err)}`))
+    })
+  }
+}
+
+/** Writes the wrap's reply to its file; why it could not, or undefined. */
+async function saveWrap($: $, route: WrapRoute, reply: string): Promise<string | undefined> {
+  try {
+    await $.fs.write(route.file, reply)
+    return undefined
+  } catch (err) {
+    return String(err)
+  }
+}
+
 export const register: Register = on => {
   const mod: Mod = {
     config: { ...DEFAULT_CONFIG },
     canPoll: false,
+    isInteractive: false,
     cwd: '.',
     running: new Set(),
     isPolling: false,
@@ -552,6 +762,7 @@ export const register: Register = on => {
     startSource: undefined,
     isRelistening: false,
     isAwaitingOperator: false,
+    ka: { applies: false, gate: 'unknown', gateAtMs: -Infinity, timer: undefined, chain: Promise.resolve(), wrap: undefined },
   }
 
   on('session.start', async ($, e, next) => {
@@ -560,6 +771,11 @@ export const register: Register = on => {
     // attend_mod.install false: the mod is unavailable, nothing is listed.
     if (!mod.config.install) return next(e)
     mod.canPoll = e.isInteractive || mod.config.headlessPoll
+    mod.isInteractive = e.isInteractive
+    mod.ka.applies = keepaliveApplies(mod.config, e.isInteractive)
+    // The first check reads where the transcript stands (a resumed session
+    // may be warm) and records the gate for the status card.
+    if (mod.ka.applies) await armKeepalive($, mod, (await $.clock.now()) + POLICY_START_MS)
     await registerListen($)
     mod.isStarted = true
     // A reload finds the mode in $.state; a new process (`claude --resume`)
@@ -649,6 +865,7 @@ export const register: Register = on => {
   // the operator never asked for.
   on('prompt.submit', async ($, e, next) => {
     if (!OPERATOR_ORIGINS.has(e.origin.kind)) return next(e)
+    await keepaliveOperator($, mod)
     const isHeldCold = (await readStatus($)).cacheLapsed || mod.isPendingCold
     if (!mod.isAwaitingOperator && !isHeldCold) return next(e)
     await setAwaiting($, mod, false)
@@ -663,6 +880,11 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     if (e.agentId !== undefined) return next(e)
     mod.running.add(e.turnId)
+    // Nothing is due while a main-loop turn runs; the first after a wrap
+    // was submitted is the wrap's.
+    mod.ka.timer?.cancel()
+    mod.ka.timer = undefined
+    if (mod.ka.wrap && mod.ka.wrap.turnId === undefined) mod.ka.wrap.turnId = e.turnId
     mod.lastActivityMs = await $.clock.now()
     if (await isOn($, mod)) await updateStatus($, s => ({ ...s, turnsSinceFull: s.turnsSinceFull + 1 }))
     return next(e)
@@ -673,6 +895,7 @@ export const register: Register = on => {
     if (e.agentId !== undefined) return done
     mod.running.delete(e.turnId)
     mod.lastActivityMs = await $.clock.now()
+    await keepaliveTurnEnded($, mod, e)
     // Whatever the Stop hook left (or all of it, where no Stop hook runs).
     if (mod.canPoll) $.clock.after(250, () => void tick($, mod, true))
     return done
@@ -743,24 +966,42 @@ export const register: Register = on => {
   })
 
   // One row while active, in the shape of the operator's statusline: peers,
-  // unread (or waiting, while the cache is cold), channels. Name and project are the statusline's. Dormant draws
-  // nothing.
+  // unread (or waiting, while the cache is cold), channels, and the keepalive
+  // policy's segment while it runs. Name and project are the statusline's.
+  // Dormant draws the keepalive segment alone while it shows, else nothing.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const s = await readStatus($)
-    if (!isActive(s)) return next(e)
+    if (!isActive(s)) {
+      // A dormant session draws the keepalive segment alone, from its first
+      // keepalive until the operator's next prompt (ADR-414 item 9).
+      if (!s.keepalive?.isShown) return next(e)
+      const { Box, Text } = $.ui.resolve(e)
+      return (
+        <Box flexDirection="row">
+          <Text color={SUBTLE}>{''}</Text>
+          <Text color={FG} backgroundColor={SUBTLE}>
+            {' '}
+            {keepaliveSegment(s.keepalive, await $.clock.now())}{' '}
+          </Text>
+          <Text color={SUBTLE}>{''}</Text>
+        </Box>
+      )
+    }
     const { Box, Text } = $.ui.resolve(e)
     // A message held on a lapsed cache waits for the operator's prompt.
     const mail = s.cacheLapsed && s.unread > 0 ? `${s.unread} waiting · cold` : `${s.unread} unread`
     const state = s.listening === false ? '○ attend not listening' : `● ${s.peers} peers ✉ ${mail}`
     const channels = s.channels.length > 0 ? ` ${s.channels.join(' ')}` : ''
+    const keepalive = s.keepalive ? ` ${keepaliveSegment(s.keepalive, await $.clock.now())}` : ''
     return (
       <Box flexDirection="row">
         <Text color={SUBTLE}>{''}</Text>
         <Text color={FG} backgroundColor={SUBTLE}>
           {' '}
           {state}
-          {channels}{' '}
+          {channels}
+          {keepalive}{' '}
         </Text>
         <Text color={SUBTLE}>{''}</Text>
       </Box>
