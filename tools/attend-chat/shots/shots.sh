@@ -106,7 +106,7 @@ agent-menu   | base  | wait:Agents side:○ wait:DMs side:○ wait:Address
 crowd        | crowd | wait:Agents F2 Down Up Up Up Up Up Up Up Up Up Up Up Up
 common       | base  | wait:Agents click:≡ wait:Hide_column
 hide-here    | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:hide_the_messages_in_⋯all?
-hide-done    | base  | wait:#open click:#open click:#open wait:Hide_messages_here Enter wait:y_hide click:y_hide wait:the_bus_keeps_them
+hide-done    | base  | wait:#open click:#open click:#open wait:Hide_messages_here Enter wait:y_hide pause:1.2 click:y_hide wait:the_bus_keeps_them
 hide-chan    | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Hide_messages_here wait:hide_the_messages_in_#deploy?
 paste        | base  | wait:Agents text:see: paste:line_one\\nline_two\\nline_three
 rawpaste     | base  | wait:Agents rawpaste:one\\ntwo
@@ -115,7 +115,7 @@ own-row      | own   | wait:operator click:#deploy click:#deploy wait:pick Escap
 quiet-send   | base  | wait:Agents rside:○ wait:Address click:Address_@ text:are_you_there Enter wait:no_heartbeat
 paste-asked  | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:hide_the_messages_in_⋯all? paste:yes_please\\nsecond_line wait:kept
 ask          | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide
-ask-yes      | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide click:y_hide wait:the_bus_keeps_them
+ask-yes      | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide pause:1.2 click:y_hide wait:the_bus_keeps_them
 ask-no       | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide click:n_keep wait:kept
 ask-feed     | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide click:signing wait:kept
 ask-row      | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide side:#infra wait:kept
@@ -129,7 +129,7 @@ delete-custom | base | wait:#open click:#open click:#open wait:Delete_read Down 
 dm-delete    | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs rside:DMs wait:Delete_read click:Delete_read wait:delete_older_than
 tomb-menu    | gone  | wait:Agents rside:○ wait:Tombstone…
 tomb-ask     | gone  | wait:Agents rside:○ wait:Tombstone… click:Tombstone… wait:y_tombstone
-tomb-said    | gone  | wait:Agents rside:○ wait:Tombstone… click:Tombstone… wait:y_tombstone click:y_tombstone wait:tombstoned
+tomb-said    | gone  | wait:Agents rside:○ wait:Tombstone… click:Tombstone… wait:y_tombstone pause:1.2 click:y_tombstone wait:tombstoned
 review-tomb  | gone  | wait:Agents rside:○ wait:Review_DMs click:Review_DMs wait:read_only rside:DMs wait:Tombstone…
 quit-ask     | base  | wait:Agents F2 q wait:quit?
 menu-row     | base  | wait:Agents side:#infra side:#infra wait:pick side:#deploy gone:pick
