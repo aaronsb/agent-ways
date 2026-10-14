@@ -7,7 +7,7 @@
 
 use std::borrow::Cow;
 
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
 use ratatui::layout::{Position, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -198,11 +198,13 @@ pub(super) struct Button {
     default: bool,
     /// Drawn set back; neither its keys nor a click press it.
     waiting: bool,
+    /// A held key's repeats do not press it, only a press does.
+    press_only: bool,
 }
 
 impl Button {
     pub(super) fn new(id: Btn, label: impl Into<String>, ground: Ground) -> Self {
-        Button { id, label: label.into(), keys: Vec::new(), chords: Vec::new(), ground, cancel: false, default: false, waiting: false }
+        Button { id, label: label.into(), keys: Vec::new(), chords: Vec::new(), ground, cancel: false, default: false, waiting: false, press_only: false }
     }
 
     /// A key that presses it, with no Ctrl or Alt held.
@@ -234,6 +236,14 @@ impl Button {
     /// nothing.
     pub(super) fn waiting(mut self) -> Self {
         self.waiting = true;
+        self
+    }
+
+    /// Only a key's press presses it, never the repeats of a key held
+    /// down: a key held from before it could be pressed, or held past
+    /// what it answered, presses nothing.
+    pub(super) fn press_only(mut self) -> Self {
+        self.press_only = true;
         self
     }
 
@@ -411,7 +421,8 @@ impl<'a> Dialog<'a> {
         if let KeyCode::Char(c) = k.code {
             let chord = |b: &&Button| b.chords.iter().any(|&(held, at)| held == k.modifiers && at == c);
             if let Some(b) = self.buttons.iter().find(|b| (plain && b.keys.contains(&c)) || chord(b)) {
-                return if b.waiting { Answer::Stay } else { Answer::Button(b.id) };
+                let repeat = b.press_only && k.kind == KeyEventKind::Repeat;
+                return if b.waiting || repeat { Answer::Stay } else { Answer::Button(b.id) };
             }
             if plain && self.close_keys.contains(&c) {
                 return Answer::Close;

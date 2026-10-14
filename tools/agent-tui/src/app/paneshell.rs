@@ -1106,6 +1106,30 @@ mod tests {
         assert_eq!(two(&a).picked, ["q=y"]);
     }
 
+    /// A `y` held down, or typed ahead, across the moment the question is
+    /// ready answers nothing: its repeats never press yes, the arm delay
+    /// takes the presses just after, and only a fresh press once armed
+    /// answers.
+    #[test]
+    fn a_held_or_typed_ahead_y_never_answers_yes() {
+        use ratatui::crossterm::event::{KeyEventKind, KeyEventState};
+        let held = KeyEvent { code: KeyCode::Char('y'), modifiers: KeyModifiers::NONE, kind: KeyEventKind::Repeat, state: KeyEventState::NONE };
+        let mut a = app(true);
+        a.set_question_arm(std::time::Duration::from_secs(60));
+        ask_now(&mut a, Question::new("q", "counting…", "drop", "keep").pending());
+        a.key(held);
+        update(&mut a, Question::new("q", "drop 3?", "drop", "keep"));
+        a.key(held);
+        a.key(k(KeyCode::Char('y'), KeyModifiers::NONE));
+        assert!(matches!(a.mode, Mode::Ask(_)) && two(&a).picked.is_empty(), "typed ahead, it lands in the arm delay: {:?}", two(&a).picked);
+        arm_now(&mut a);
+        a.key(held);
+        assert!(matches!(a.mode, Mode::Ask(_)) && two(&a).picked.is_empty(), "armed, a repeat still answers nothing: {:?}", two(&a).picked);
+        assert_eq!(two(&a).keys, 1, "and typed nothing");
+        a.key(k(KeyCode::Char('y'), KeyModifiers::NONE));
+        assert_eq!(two(&a).picked, ["q=y"], "a press answers");
+    }
+
     /// A question that waits still takes no at once.
     #[test]
     fn a_pending_question_takes_no_at_once() {

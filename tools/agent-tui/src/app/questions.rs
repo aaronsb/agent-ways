@@ -152,7 +152,7 @@ impl Modal for Ask {
         let q = &a.q;
         let mut d = Dialog::bar(q.question.clone());
         if let Some(yes) = &q.yes {
-            let button = Button::new(Btn::Yes, format!("y {yes}"), Ground::Err).key('y').key('Y');
+            let button = Button::new(Btn::Yes, format!("y {yes}"), Ground::Err).key('y').key('Y').press_only();
             // Set back while it waits, and for its arm delay once ready.
             d = d.button(if a.armed() { button } else { button.waiting() });
         }
