@@ -205,8 +205,9 @@ fn room_label(room: &Room) -> String {
 /// `/clear` ([`attend_presence::enrollment::reading_ids`]): a message to
 /// or from any of them is the session's own.
 ///
-/// Own messages, the messages a delete marked and those a tombstoned
-/// session sent (`marks`, ADR-404 D3e) are marked read without delivering. Under
+/// Own messages and those a tombstoned session sent are marked read
+/// without delivering; a message a delete marked is passed over unrecorded
+/// (`marks`, ADR-404 D3e). Under
 /// `baselining` (no seen-set yet) the messages from others go through
 /// `attend_state::cold_start`, the rule the peers sensor applies too:
 /// addressed mail sent since the session's process started and `#open` and
@@ -244,8 +245,9 @@ pub(crate) fn scan_pending(
             if seen.contains(&key) {
                 continue;
             }
+            // A marked message is passed over and not recorded read, so
+            // undoing the delete brings it back.
             if marks.hides(&key) {
-                mark.push(key);
                 continue;
             }
             let content = match agent_identity::signal::read_signal_file(&path) {

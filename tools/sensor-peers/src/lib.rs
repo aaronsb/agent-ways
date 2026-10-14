@@ -334,8 +334,8 @@ impl PeerSensor {
                 if self.seen_signals.contains(&key) {
                     continue;
                 }
+                // Passed over unrecorded, so undoing the delete brings it back.
                 if marks.hides(&key) {
-                    self.seen_signals.insert(key);
                     continue;
                 }
                 // Read and parse: `from|project|cwd|message` (legacy) or

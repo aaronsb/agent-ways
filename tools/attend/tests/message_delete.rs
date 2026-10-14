@@ -203,9 +203,10 @@ fn undo_takes_the_newest_delete_back() {
     assert_eq!(out.status.code(), Some(1), "nothing left to undo");
 }
 
-/// The drain marks a marked message read and delivers it to no one.
+/// The drain passes over a marked message without delivering it or
+/// recording it read, so an undo brings it back to the next drain.
 #[test]
-fn the_drain_reads_a_marked_message_without_delivering_it() {
+fn the_drain_skips_a_marked_message_until_it_is_undone() {
     let f = Fixture::new("del-drain");
     post(&f, "_broadcast", "gone-1", "marked before the join", Duration::from_secs(100));
     // Deleted while this session was not running, so it held nothing.
@@ -219,7 +220,11 @@ fn the_drain_reads_a_marked_message_without_delivering_it() {
     assert!(drained.contains("posted after the delete"), "{drained}");
     assert!(!drained.contains("marked before the join"), "{drained}");
     let state = std::fs::read_to_string(f.state_file(&f.sid)).unwrap();
-    assert!(state.contains("seen_signal: gone-1.signal"), "the drain records it read: {state}");
+    assert!(!state.contains("gone-1.signal"), "a marked message is not recorded read: {state}");
+
+    f.ok(&["message", "delete", "--undo"]);
+    let drained = f.drain("plain");
+    assert!(drained.contains("marked before the join"), "undo restores delivery: {drained}");
 }
 
 /// The Monitor conduit skips a marked message too.
@@ -234,6 +239,8 @@ fn the_peers_sensor_skips_a_marked_message() {
     let run = f.run();
     run.wait_for("the unmarked message", Duration::from_secs(20), |r| r.output().contains("posted after the delete"));
     assert!(!run.output().contains("marked before the run"), "{}", run.output());
+    f.ok(&["message", "delete", "--undo"]);
+    run.wait_for("the message the undo restored", Duration::from_secs(20), |r| r.output().contains("marked before the run"));
 }
 
 /// `--dm` takes both halves of the thread between the caller and a session
