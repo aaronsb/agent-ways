@@ -165,7 +165,11 @@ fn stub_time(list: &str) -> Option<SystemTime> {
 /// and returns `None`. The batch's list is written before its marks, so an
 /// interrupted write leaves no mark that `--undo` cannot find. Each mark
 /// is written whole under a temporary name and linked into place, so a
-/// reader never finds a mark without its batch id.
+/// reader never finds a mark without its batch id; a new staged file
+/// serves each [`LINKS_PER_STAGE`] marks, under any filesystem's cap on
+/// links to one file. When a mark cannot be written, the marks already
+/// linked and the batch record are removed before the error returns, so
+/// no record lists marks that were never there.
 pub fn mark_messages(base: &Path, keys: &[String]) -> io::Result<Option<(String, Vec<String>)>> {
     let marks = messages_dir(base);
     let mut fresh: Vec<String> = keys.iter().filter(|k| valid_key(k) && !marks.join(k).exists()).cloned().collect();
@@ -179,27 +183,40 @@ pub fn mark_messages(base: &Path, keys: &[String]) -> io::Result<Option<(String,
     fs::create_dir_all(&marks)?;
     let list: String = fresh.iter().map(|k| format!("{k}\n")).collect();
     agent_settings::writer::write_atomic(&batches_dir(base).join(&batch), list)?;
-    let staged = marks.join(format!(".{batch}.tmp"));
-    fs::write(&staged, &batch)?;
     let mut marked = Vec::new();
-    let mut failed = None;
-    for key in fresh {
-        match fs::hard_link(&staged, marks.join(&key)) {
-            Ok(()) => marked.push(key),
-            // Another delete marked it in between: its mark stands.
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(e) => {
-                failed = Some(e);
-                break;
+    let linked = (|| {
+        for (n, chunk) in fresh.chunks(LINKS_PER_STAGE).enumerate() {
+            let staged = marks.join(format!(".{batch}.{n}.tmp"));
+            fs::write(&staged, &batch)?;
+            let mut result = Ok(());
+            for key in chunk {
+                match fs::hard_link(&staged, marks.join(key)) {
+                    Ok(()) => marked.push(key.clone()),
+                    // Another delete marked it in between: its mark stands.
+                    Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+                    Err(e) => {
+                        result = Err(e);
+                        break;
+                    }
+                }
             }
+            fs::remove_file(&staged).ok();
+            result?;
         }
+        Ok(())
+    })();
+    if let Err(e) = linked {
+        for key in &marked {
+            fs::remove_file(marks.join(key)).ok();
+        }
+        fs::remove_file(batches_dir(base).join(&batch)).ok();
+        return Err(e);
     }
-    fs::remove_file(&staged).ok();
-    match failed {
-        Some(e) => Err(e),
-        None => Ok(Some((batch, marked))),
-    }
+    Ok(Some((batch, marked)))
 }
+
+/// How many marks share one staged file before a new one is written.
+const LINKS_PER_STAGE: usize = 1_000;
 
 /// Every message mark, with its mark time.
 pub fn message_marks(base: &Path) -> HashMap<String, SystemTime> {
@@ -463,6 +480,33 @@ mod tests {
         age_record(&b, "000000000000001-1", OLD);
         prune(&b, &HashSet::new());
         assert!(batches(&b).is_empty());
+        fs::remove_dir_all(&b).ok();
+    }
+
+    /// A mark that cannot be written takes back the marks before it and the
+    /// batch record, so no undo reports a reap that never happened.
+    #[test]
+    fn a_failed_mark_leaves_no_batch_behind() {
+        let b = base("fail");
+        let too_long = format!("{}.signal", "x".repeat(300));
+        assert!(mark_messages(&b, &[String::from("a.signal"), too_long]).is_err());
+        assert!(message_marks(&b).is_empty(), "the mark already linked is taken back");
+        assert!(batches(&b).is_empty(), "and the batch record");
+        fs::remove_dir_all(&b).ok();
+    }
+
+    /// Past the stage size the marks are links to more than one file.
+    #[cfg(unix)]
+    #[test]
+    fn many_marks_spread_over_staged_files() {
+        use std::os::unix::fs::MetadataExt;
+        let b = base("many");
+        let many: Vec<String> = (0..LINKS_PER_STAGE + 1).map(|i| format!("m-{i:05}.signal")).collect();
+        let (batch, marked) = mark_messages(&b, &many).unwrap().unwrap();
+        assert_eq!(marked.len(), many.len());
+        let inode = |k: &str| fs::metadata(messages_dir(&b).join(k)).unwrap().ino();
+        assert_ne!(inode(&many[0]), inode(&many[LINKS_PER_STAGE]));
+        assert_eq!(fs::read_to_string(messages_dir(&b).join(&many[LINKS_PER_STAGE])).unwrap(), batch);
         fs::remove_dir_all(&b).ok();
     }
 
