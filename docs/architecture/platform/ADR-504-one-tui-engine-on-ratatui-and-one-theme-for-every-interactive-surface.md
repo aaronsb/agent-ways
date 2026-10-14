@@ -342,7 +342,7 @@ Every dialog the shell draws is a `Mode` variant with its own draw function and 
 `agent-tui` draws every such dialog from one `Dialog` value:
 
 - **Title and body.** The body is lines, scrolled when they outgrow the frame.
-- **Buttons.** Each is `(id, label, hotkey, Ground)`. Exactly one is the cancel, which Esc presses, and exactly one the default, which has the focus and Enter presses. A dialog with no cancel or default, or with two of either, is refused where it is built.
+- **Buttons.** Each is `(id, label, hotkey, Ground)`. Exactly one is the cancel, which Esc presses, and exactly one the default, which has the focus and Enter presses. A dialog with no cancel or default, or with two of either, is refused where it is built. A dialog with no buttons is refused too, unless it is built to be answered by its keys alone, as the key help is; Esc and Enter then close it. A button may also name a chord, such as Ctrl-S for Save, and no other chord presses it.
 - **Placement.** `Center` is a box over the area, as `modal_rect` places one. `Dock` sits beside the row that opened it, as `docked` places a menu. `Bar` is the bottom bar, with the buttons as answer lozenges after the question.
 - **Border.** The modal border, unless the dialog names another.
 - **Close on any key.** A key the dialog has no use for closes it, as the key help does. Without this, such a key leaves the dialog open and reaches nothing under it, as the note above on a modal's own buttons requires.

@@ -151,11 +151,12 @@ struct Hits {
     list: Rect,
     /// The open menu and one rect per item.
     menu: Option<(Rect, Vec<Rect>)>,
-    /// The open dialog and its buttons.
-    dialog: Option<dialog::Drawn>,
+    /// The open dialog and its buttons, with the kind of mode that drew it
+    /// ([`App::drawn_dialog`]).
+    dialog: Option<(std::mem::Discriminant<Mode>, dialog::Drawn)>,
     /// A confirm's answers: yes or no.
     answers: Vec<(Rect, bool)>,
-    /// Review's bar targets.
+    /// Review's bar targets, a flow's buttons and the theme editor's Save.
     buttons: Vec<(Rect, Btn)>,
     /// The call to action on the bottom bar.
     cta: Rect,

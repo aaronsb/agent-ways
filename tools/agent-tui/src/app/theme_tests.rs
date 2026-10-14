@@ -529,6 +529,36 @@ fn esc_with_unsaved_edits_asks_save_discard_or_back() {
 }
 
 #[test]
+fn ctrl_s_saves_over_close_the_editor_and_ctrl_d_discards_nothing() {
+    let (mut app, _d) = editing_err("unsaved-chord");
+    keys(&mut app, &[KeyCode::Char('#')]);
+    type_str(&mut app, "123456");
+    keys(&mut app, &[KeyCode::Enter, KeyCode::Esc]);
+    assert!(matches!(app.mode, Mode::ThemeUnsaved));
+    app.key(ctrl('d'));
+    assert!(matches!(app.mode, Mode::ThemeUnsaved) && app.theme_dirty(), "^D is no answer");
+    app.key(ctrl('s'));
+    assert!(app.themes.editor.is_none(), "^S saved and closed the editor");
+    assert_eq!(app.themes.set.get("ed").unwrap().slots.err, Rgb(0x12, 0x34, 0x56));
+}
+
+/// A dialog's drawing is no target once another dialog opens in its place
+/// before the next frame.
+#[test]
+fn a_click_on_where_a_closed_dialog_drew_its_button_answers_nothing_else() {
+    let (mut app, _d) = editing_err("stale");
+    keys(&mut app, &[KeyCode::Char('#')]);
+    type_str(&mut app, "123456");
+    keys(&mut app, &[KeyCode::Enter, KeyCode::Esc]);
+    let buf = draw(&mut app, 100, 30);
+    let (x, y) = crate::testkit::find(&buf, "Back (Esc)").expect("Back is drawn");
+    keys(&mut app, &[KeyCode::Char('b')]);
+    assert!(app.key(ctrl('c')) && app.guarding(), "the guard over the unsaved edits, not drawn yet");
+    app.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x + 1, row: y, modifiers: KeyModifiers::NONE });
+    assert!(app.guarding(), "the click reached no Back of the guard's");
+}
+
+#[test]
 fn the_exit_guard_lists_unsaved_theme_edits_and_review_opens_the_editor() {
     let (mut app, _d) = editing_err("guard");
     keys(&mut app, &[KeyCode::Char('#')]);

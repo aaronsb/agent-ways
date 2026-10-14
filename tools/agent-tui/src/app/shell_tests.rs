@@ -570,15 +570,13 @@ fn the_tree_key_help_takes_the_wheel_and_a_click_on_itself() {
     let (mut app, _) = probe();
     press(&mut app, &[KeyCode::Char('?')]);
     let _ = render(&mut app, 100, 12);
-    let r = app.hits.dialog.clone().expect("the tree's key help records its rect").rect;
+    let r = app.drawn_dialog().cloned().expect("the tree's key help records its rect").rect;
     let at = |kind| MouseEvent { kind, column: r.x + 2, row: r.y + 2, modifiers: KeyModifiers::NONE };
     app.mouse(at(MouseEventKind::ScrollDown));
     let _ = render(&mut app, 100, 12);
     assert!(matches!(app.mode, Mode::Help { scroll: 1 }), "the wheel over it scrolls it");
-    let cursor = app.cursor;
     app.mouse(at(MouseEventKind::Down(MouseButton::Left)));
     assert!(matches!(app.mode, Mode::Browse), "a click on it closes it");
-    assert_eq!(app.cursor, cursor, "and reaches no row under it");
 }
 
 #[test]

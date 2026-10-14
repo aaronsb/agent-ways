@@ -217,8 +217,7 @@ impl App {
     fn overlays(&self) -> Vec<Overlay> {
         let top = match &self.mode {
             Mode::Browse => None,
-            Mode::Help { .. } => Some(Overlay::Help),
-            Mode::Guard => Some(Overlay::Guard),
+            _ if self.modal().is_some() => self.modal().map(|m| m.overlay()),
             Mode::Pick(p) => Some(Overlay::Menu { id: p.pane.as_ref().map(|(id, _)| id.clone()).unwrap_or_default(), by_esc: p.by_esc }),
             Mode::Entry(e) => Some(Overlay::Entry { id: e.id.clone() }),
             Mode::Ask(a) => Some(Overlay::Ask { id: a.id.clone() }),
@@ -1317,7 +1316,7 @@ mod tests {
             let mut a = App::with_pane("t", Through::default());
             a.key(k(KeyCode::F(1), KeyModifiers::NONE));
             let _ = testkit::render(&mut a, 100, 30);
-            let r = a.hits.dialog.clone().expect("the key help records its rect").rect;
+            let r = a.drawn_dialog().cloned().expect("the key help records its rect").rect;
             let (column, row) = (r.x + 2, r.y + 2);
             assert!(a.hits.pane.contains(Position::new(column, row)), "the press lands over the pane");
             a.mouse(MouseEvent { kind: MouseEventKind::Down(button), column, row, modifiers: KeyModifiers::NONE });
@@ -1326,7 +1325,7 @@ mod tests {
             // Outside it, the press closes it and goes on to the pane.
             a.key(k(KeyCode::F(1), KeyModifiers::NONE));
             let _ = testkit::render(&mut a, 100, 30);
-            let r = a.hits.dialog.clone().expect("the key help records its rect").rect;
+            let r = a.drawn_dialog().cloned().expect("the key help records its rect").rect;
             let row = r.bottom();
             assert!(a.hits.pane.contains(Position::new(column, row)), "below the help, over the pane");
             a.mouse(MouseEvent { kind: MouseEventKind::Down(button), column, row, modifiers: KeyModifiers::NONE });

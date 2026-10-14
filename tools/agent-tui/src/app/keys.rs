@@ -44,6 +44,9 @@ impl App {
             }
             return self.quit();
         }
+        if self.modal().is_some() {
+            return self.modal_key(k);
+        }
         match std::mem::replace(&mut self.mode, Mode::Browse) {
             Mode::Flow(mut flow) => {
                 let ev = flow.key(k);
@@ -64,10 +67,6 @@ impl App {
                 }
             }
             m @ (Mode::Name { .. } | Mode::ItemDelete { .. }) => self.prompt_key(m, k),
-            m @ (Mode::Guard | Mode::ThemeUnsaved | Mode::Help { .. } | Mode::Response(_)) => {
-                self.mode = m;
-                return self.modal_key(k);
-            }
             Mode::Filter => match k.code {
                 KeyCode::Esc => self.clear_filter(),
                 KeyCode::Enter => {}
@@ -168,6 +167,8 @@ impl App {
             Mode::Browse if self.pane.is_some() => return self.pane_key(k),
             Mode::Browse if self.on_theme_tab() => return self.theme_key(k),
             Mode::Browse => return self.browse(k),
+            // A modal took the key above.
+            m => self.mode = m,
         }
         true
     }
@@ -383,6 +384,9 @@ impl App {
             self.flow_event(ev);
             return;
         }
+        if self.modal().is_some() {
+            return self.modal_mouse(m, closes);
+        }
         let in_menu = self.hits.menu.as_ref().is_some_and(|(r, _)| r.contains(at));
         match &mut self.mode {
             Mode::Browse if self.pane.is_some() => self.pane_mouse(m),
@@ -469,13 +473,10 @@ impl App {
             }
             // The entry dialog: a click outside closes it with nothing, and
             // on the tab bar or the column goes on; one inside keeps it.
-            Mode::Entry(_) => {
-                if closes && !in_menu {
-                    self.mode = Mode::Browse;
-                    self.click_through(m);
-                }
+            Mode::Entry(_) if closes && !in_menu => {
+                self.mode = Mode::Browse;
+                self.click_through(m);
             }
-            Mode::Guard | Mode::ThemeUnsaved | Mode::Help { .. } | Mode::Response(_) => self.modal_mouse(m, closes),
             _ => {}
         }
     }

@@ -514,13 +514,12 @@ impl App {
         let mode = |label: &str, g: Ground| sh.lozenge(&[Seg::on(format!(" {label} "), g).bold()]);
         let input = |text: String| Span::raw(format!(" {text}▏ "));
         let hint = |text: &str| Span::styled(text.to_string(), theme::hint());
-        let msg = Span::styled(
-            format!("  {}", self.msg),
-            if self.msg.starts_with("rejected") { theme::err().add_modifier(Modifier::BOLD) } else { Style::new() },
-        );
+        let msg = self.msg_span();
         let mut spans: Vec<Span> = Vec::new();
         let mut cta = None;
+        let mut modal = self.modal().and_then(|m| m.status(self));
         match &self.mode {
+            _ if modal.is_some() => spans.extend(modal.take().into_iter().flatten()),
             Mode::Edit(buf) => {
                 spans.extend(mode("edit", Ground::Accent));
                 spans.extend([input(buf.clone()), hint(" Enter set · Esc cancel"), msg]);
@@ -540,10 +539,6 @@ impl App {
             Mode::Pick(_) => {
                 spans.extend(mode("pick", Ground::Accent));
                 spans.extend([hint("  ↑↓ choose · Enter or click sets · Esc closes"), msg]);
-            }
-            Mode::Response(s) => {
-                spans.extend(mode(s.verdict.word(), s.verdict.ground()));
-                spans.extend([hint("  ↑↓ PgUp PgDn scroll · Esc Enter q close"), msg]);
             }
             Mode::Arg { path, action, buf } => {
                 let prompt = match &tree::get(&self.roots, path).actions[*action].arg {
@@ -612,10 +607,6 @@ impl App {
                 spans.extend(mode("action", Ground::Accent));
                 spans.push(hint("  ↑↓ choose · Enter or click picks · Esc closes"));
             }
-            Mode::ThemeUnsaved => {
-                spans.extend(mode("unsaved", Ground::Warn));
-                spans.push(hint("  s save · d discard · Esc back to the editor"));
-            }
             Mode::Ask(a) => {
                 let a = a.clone();
                 spans.extend(self.ask_status(area, &a));
@@ -632,13 +623,6 @@ impl App {
             Mode::Flow(flow) => {
                 spans.extend(mode("flow", Ground::Accent));
                 spans.push(hint(flow.hint()));
-            }
-            // The modal's buttons answer it; the bar only names their keys.
-            Mode::Guard => {
-                spans.extend(mode("quit", Ground::Warn));
-                // A pane's work alone has nothing to review.
-                let review = self.pending() > 0 || self.theme_dirty();
-                spans.push(hint(if review { "  Esc back · r review · D quit and discard all" } else { "  Esc back · D quit and discard all" }));
             }
             _ => {
                 spans.extend(mode(if self.filter.is_empty() { "browse" } else { "filter" }, Ground::Accent));
@@ -691,6 +675,13 @@ impl App {
             None => area,
         };
         f.render_widget(Paragraph::new(Line::from(spans)), left);
+    }
+
+    /// The message on the bottom bar, after two columns; a rejection is
+    /// bold on the error colour.
+    pub(super) fn msg_span(&self) -> Span<'static> {
+        let style = if self.msg.starts_with("rejected") { theme::err().add_modifier(Modifier::BOLD) } else { Style::new() };
+        Span::styled(format!("  {}", self.msg), style)
     }
 
     /// The selected row's actions as `key label` pairs, from their

@@ -5,13 +5,12 @@
 //! opens it too, as an error. The text is the command's own output, so the
 //! screen stays a view over the command.
 
-use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::Frame;
 
-use super::dialog::{Dialog, DialogBuilder};
+use super::dialog::{Dialog, DialogBuilder, Drawn};
 use super::theme::{self, Ground};
 use super::{App, Mode};
 use crate::adapter::Printed;
@@ -165,7 +164,8 @@ impl Shown {
             .scroll(self.scroll)
             .jumps()
             .close_outside()
-            .forward(|k| k.code == KeyCode::Char('q'))
+            .close_keys(&['q'])
+            .keys_only()
     }
 
     fn title(&self) -> String {
@@ -328,20 +328,18 @@ impl App {
 
     /// The open modal, drawn over `area`: the command line, then what it
     /// printed, wrapped to the modal and scrolled, the scroll held to the
-    /// last page. Its rect is recorded so a click outside it closes it.
-    pub(super) fn draw_response(&mut self, f: &mut Frame, area: Rect) {
-        let Mode::Response(s) = &mut self.mode else { return };
+    /// last page.
+    pub(super) fn draw_response(&mut self, f: &mut Frame, area: Rect) -> Drawn {
+        let Mode::Response(s) = &mut self.mode else { return Drawn::default() };
         let widest = s.text().iter().map(Line::width).max().unwrap_or(0);
         // Borders and a column of padding each side.
         let w = (widest + 4).clamp(64, (area.width as usize).saturating_sub(4).max(64)).min(u16::MAX as usize) as u16;
         let i = s.wrap(w.saturating_sub(4) as usize);
         let h = s.wrapped[i].1.len().saturating_add(2).min(u16::MAX as usize) as u16;
         // Wrapped again at the width the modal takes, which a short screen widens.
-        let r = s.dialog(&[], w).height(h).build().expect("a response has no buttons").rect(area);
+        let r = s.dialog(&[], w).height(h).build().expect("a response is answered by its keys").rect(area);
         let i = s.wrap(r.width.saturating_sub(4) as usize);
-        let drawn = s.dialog(&s.wrapped[i].1, w).height(h).build().expect("a response has no buttons").draw(f, area, self.shape);
-        s.scroll = drawn.scroll;
-        self.hits.dialog = Some(drawn);
+        s.dialog(&s.wrapped[i].1, w).height(h).build().expect("a response is answered by its keys").draw(f, area, self.shape)
     }
 }
 
@@ -349,7 +347,7 @@ impl App {
 mod tests {
     use super::*;
     use crate::tree::Response;
-    use ratatui::crossterm::event::{KeyEvent, KeyModifiers};
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     /// ESC, spelled so no escape literal sits in the source.
     const E: char = '\u{1b}';
@@ -575,7 +573,7 @@ mod tests {
         let mut a = app(60);
         a.pick(vec![0], 0);
         let _ = screen(&mut a, 100, 30);
-        let r = a.hits.dialog.clone().expect("the modal records its rect").rect;
+        let r = a.drawn_dialog().cloned().expect("the modal records its rect").rect;
         let at = |kind, column, row| MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE };
         a.mouse(at(MouseEventKind::ScrollDown, r.x + 2, r.y + 2));
         a.mouse(at(MouseEventKind::ScrollDown, r.x + 2, r.y + 2));

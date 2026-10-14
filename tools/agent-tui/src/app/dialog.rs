@@ -44,6 +44,8 @@ pub(super) struct Button {
     pub(super) id: Btn,
     pub(super) label: String,
     pub(super) keys: Vec<char>,
+    /// Chords that press it, each with exactly its modifiers held.
+    chords: Vec<(KeyModifiers, char)>,
     pub(super) ground: Ground,
     cancel: bool,
     default: bool,
@@ -51,12 +53,19 @@ pub(super) struct Button {
 
 impl Button {
     pub(super) fn new(id: Btn, label: impl Into<String>, ground: Ground) -> Self {
-        Button { id, label: label.into(), keys: Vec::new(), ground, cancel: false, default: false }
+        Button { id, label: label.into(), keys: Vec::new(), chords: Vec::new(), ground, cancel: false, default: false }
     }
 
     /// A key that presses it, with no Ctrl or Alt held.
     pub(super) fn key(mut self, c: char) -> Self {
         self.keys.push(c);
+        self
+    }
+
+    /// A chord that presses it: `c` with exactly `held`. A chord no button
+    /// names presses nothing.
+    pub(super) fn chord(mut self, held: KeyModifiers, c: char) -> Self {
+        self.chords.push((held, c));
         self
     }
 
@@ -80,6 +89,9 @@ pub(super) enum Refused {
     Cancel(usize),
     /// Buttons with no default, or with more than one: how many.
     Default(usize),
+    /// No buttons, on a dialog not built to be answered by its keys alone
+    /// ([`DialogBuilder::keys_only`]).
+    NoButtons,
 }
 
 /// A dialog being built ([`Dialog::new`]); [`DialogBuilder::build`] checks
@@ -101,6 +113,10 @@ pub(super) struct Dialog<'a> {
     scroll: usize,
     close_on_any_key: bool,
     close_outside: bool,
+    /// Answered by its keys alone, with no buttons: Esc and Enter close it.
+    keys_only: bool,
+    /// Plain keys that close it.
+    close_keys: &'static [char],
     /// Home, End, `g` and `G` jump to the top and the last page.
     jumps: bool,
     forward: Option<fn(&KeyEvent) -> bool>,
@@ -140,6 +156,8 @@ impl<'a> Dialog<'a> {
             scroll: 0,
             close_on_any_key: false,
             close_outside: false,
+            keys_only: false,
+            close_keys: &[],
             jumps: false,
             forward: None,
         })
@@ -161,16 +179,22 @@ impl<'a> Dialog<'a> {
     }
 
     /// One key. A button's key, Enter on the default and Esc for the cancel
-    /// answer it, with no Ctrl or Alt held; a dialog with no buttons closes
-    /// on Esc and Enter. A key the dialog forwards comes back as it came.
-    /// The arrows, the page keys and `k j` scroll the body, and so do Home,
-    /// End and `g G` in a dialog that [`DialogBuilder::jumps`]. Any other
-    /// key closes a close-on-any-key dialog and stays on any other.
+    /// answer it, with no Ctrl or Alt held, and so does a chord the button
+    /// names; a dialog answered by its keys alone closes on Esc and Enter,
+    /// and any dialog on one of its close keys. A key the dialog forwards
+    /// comes back as it came. The arrows, the page keys and `k j` scroll
+    /// the body, and so do Home, End and `g G` in a dialog that
+    /// [`DialogBuilder::jumps`]. Any other key closes a close-on-any-key
+    /// dialog and stays on any other.
     pub(super) fn key(&mut self, k: KeyEvent) -> Answer {
         let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
         if let KeyCode::Char(c) = k.code {
-            if let Some(b) = self.buttons.iter().find(|b| plain && b.keys.contains(&c)) {
+            let chord = |b: &&Button| b.chords.iter().any(|&(held, at)| held == k.modifiers && at == c);
+            if let Some(b) = self.buttons.iter().find(|b| (plain && b.keys.contains(&c)) || chord(b)) {
                 return Answer::Button(b.id);
+            }
+            if plain && self.close_keys.contains(&c) {
+                return Answer::Close;
             }
         }
         match k.code {
@@ -327,16 +351,34 @@ impl<'a> DialogBuilder<'a> {
     }
 
     /// Keys `f` picks go back to the code that opened it.
+    #[allow(dead_code)] // the bar's questions forward their keys next
     pub(super) fn forward(mut self, f: fn(&KeyEvent) -> bool) -> Self {
         self.0.forward = Some(f);
         self
     }
 
+    /// Plain keys that close it, beside Esc and Enter.
+    pub(super) fn close_keys(mut self, keys: &'static [char]) -> Self {
+        self.0.close_keys = keys;
+        self
+    }
+
+    /// It has no buttons and is answered by its keys alone: Esc and Enter
+    /// close it.
+    pub(super) fn keys_only(mut self) -> Self {
+        self.0.keys_only = true;
+        self
+    }
+
     /// The dialog, or why it is refused: a dialog with buttons has exactly
     /// one cancel and exactly one default, which may be one button. A
-    /// dialog with none is answered by its keys alone.
+    /// dialog with none is refused unless it is built answered by its keys
+    /// alone.
     pub(super) fn build(self) -> Result<Dialog<'a>, Refused> {
         let d = self.0;
+        if d.buttons.is_empty() && !d.keys_only {
+            return Err(Refused::NoButtons);
+        }
         if !d.buttons.is_empty() {
             let cancels = d.buttons.iter().filter(|b| b.cancel).count();
             if cancels != 1 {
@@ -404,7 +446,9 @@ mod tests {
         let two_defaults = Dialog::new("t", 40).button(b(Btn::Back).cancel().default()).button(b(Btn::Save).default()).build();
         assert_eq!(two_defaults.err(), Some(Refused::Default(2)));
         assert!(Dialog::new("t", 40).button(b(Btn::Back).cancel()).button(b(Btn::Save).default()).build().is_ok());
-        assert!(Dialog::new("t", 40).build().is_ok(), "a dialog with no buttons is answered by its keys");
+        assert_eq!(Dialog::new("t", 40).build().err(), Some(Refused::NoButtons), "no buttons, and not built to be answered by its keys");
+        let mut keys = Dialog::new("t", 40).keys_only().build().expect("answered by its keys alone");
+        assert_eq!((keys.key(press(KeyCode::Esc)), keys.key(press(KeyCode::Enter))), (Answer::Close, Answer::Close));
     }
 
     #[test]
@@ -436,7 +480,7 @@ mod tests {
     #[test]
     fn a_close_on_any_key_dialog_closes_on_a_key_and_on_a_press_inside_and_scrolls_on_its_own() {
         let lines: Vec<Line<'static>> = (0..40).map(|i| Line::raw(format!("line {i}"))).collect();
-        let build = |scroll| Dialog::new("keys", 30).body(lines.clone()).scroll(scroll).jumps().close_on_any_key().close_outside().build().unwrap();
+        let build = |scroll| Dialog::new("keys", 30).body(lines.clone()).scroll(scroll).jumps().close_on_any_key().close_outside().keys_only().build().unwrap();
         let (at, rows) = drawn(&build(0), 80, 12);
         assert_eq!(at.max, 40 - 10, "40 lines in the 10 rows inside the border");
         assert!(rows.iter().any(|r| r.contains("line 0")) && !rows.iter().any(|r| r.contains("line 10")));
@@ -453,10 +497,10 @@ mod tests {
         assert_eq!(d.key(press(KeyCode::Char('x'))), Answer::Close);
         assert_eq!(d.key(press(KeyCode::Esc)), Answer::Close);
         assert_eq!(click(&mut d, &at, at.rect.x + 1, at.rect.y + 1), Answer::Close, "a press inside closes it");
-        let mut plain = Dialog::new("keys", 30).body(lines.clone()).close_on_any_key().build().unwrap();
+        let mut plain = Dialog::new("keys", 30).body(lines.clone()).close_on_any_key().keys_only().build().unwrap();
         assert_eq!(plain.key(press(KeyCode::End)), Answer::Close, "End closes a dialog that does not jump");
         // A body that fits leaves room outside the box.
-        let mut d = Dialog::new("keys", 30).body(lines[..3].to_vec()).close_on_any_key().close_outside().build().unwrap();
+        let mut d = Dialog::new("keys", 30).body(lines[..3].to_vec()).close_on_any_key().close_outside().keys_only().build().unwrap();
         let (at, _) = drawn(&d, 80, 12);
         assert!(!at.contains(Position::new(0, 0)));
         assert_eq!(d.mouse(MouseEventKind::ScrollDown, Position::new(0, 0), &at), Answer::Stay);
@@ -465,11 +509,26 @@ mod tests {
     }
 
     #[test]
-    fn a_forwarded_key_goes_back_to_the_caller() {
-        let mut d = Dialog::new("r", 30).forward(|k| k.code == KeyCode::Char('q')).build().unwrap();
-        let q = press(KeyCode::Char('q'));
-        assert_eq!(d.key(q), Answer::Forward(q));
+    fn a_forwarded_key_goes_back_to_the_caller_and_a_close_key_closes() {
+        let mut d = Dialog::new("r", 30).forward(|k| k.code == KeyCode::Char('f')).close_keys(&['q']).keys_only().build().unwrap();
+        let f = press(KeyCode::Char('f'));
+        assert_eq!(d.key(f), Answer::Forward(f));
+        assert_eq!(d.key(press(KeyCode::Char('q'))), Answer::Close);
+        assert_eq!(d.key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::ALT)), Answer::Stay, "a close key is plain");
         assert_eq!(d.key(press(KeyCode::Char('x'))), Answer::Stay);
+    }
+
+    #[test]
+    fn a_chord_presses_only_the_button_that_names_it() {
+        let mut d = Dialog::new("close", 60)
+            .button(Button::new(Btn::Save, "Save (s)", Ground::Ok).key('s').chord(KeyModifiers::CONTROL, 's'))
+            .button(Button::new(Btn::Drop, "Discard (d)", Ground::Err).key('d'))
+            .button(Button::new(Btn::Back, "Back (Esc)", Ground::Keep).cancel().default())
+            .build()
+            .unwrap();
+        assert_eq!(d.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)), Answer::Button(Btn::Save));
+        assert_eq!(d.key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL)), Answer::Stay, "no button names ^D");
+        assert_eq!(d.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL | KeyModifiers::ALT)), Answer::Stay, "exactly the chord's modifiers");
     }
 
     #[test]
