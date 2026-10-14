@@ -40,7 +40,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use attend_groups::tombstones::{self, Marks};
 use std::sync::mpsc::Sender;
@@ -77,16 +77,12 @@ impl Delivery {
     }
 }
 
-/// Whether `marks` hide the signal at `path` that `sender` sent: its file
-/// is marked, or the sender's session is tombstoned and the file is no
-/// newer than the tombstone.
-fn hidden(marks: &Marks, path: &Path, sender: Option<&str>) -> bool {
+/// Whether `marks` hide the signal at `path` that `sender` sent at `sent`
+/// (its mtime): its file is marked, or the sender's session is tombstoned
+/// and the file is no newer than the tombstone.
+fn hidden(marks: &Marks, path: &Path, sender: Option<&str>, sent: SystemTime) -> bool {
     let key = path.file_name().and_then(|n| n.to_str()).map(attend_state::seen_key);
-    if key.is_some_and(|k| marks.hides(&k)) {
-        return true;
-    }
-    let sent = || path.metadata().and_then(|m| m.modified()).unwrap_or(SystemTime::UNIX_EPOCH);
-    sender.is_some_and(|sender| marks.hides_sender(sender, sent()))
+    key.is_some_and(|k| marks.hides(&k)) || sender.is_some_and(|sender| marks.hides_sender(sender, sent))
 }
 
 /// Whether `path` is in the mark store under `base`.
@@ -162,8 +158,10 @@ pub fn spawn_watcher(base: PathBuf, own_tray: String, person: String, tx: Sender
         feed.deliver(path);
     }
 
+    let events = feed.clone();
     let mut watcher = RecommendedWatcher::new(
         move |res: notify::Result<Event>| {
+            let feed = &events;
             let Ok(event) = res else { return };
             // The mark store changed: a mark written or removed, a session
             // tombstoned or its tombstone moved or taken back.
@@ -206,6 +204,9 @@ pub fn spawn_watcher(base: PathBuf, own_tray: String, person: String, tx: Sender
         Config::default().with_poll_interval(Duration::from_millis(250)),
     )?;
     watcher.watch(&base, RecursiveMode::Recursive)?;
+    // A mark written between the backfill's read of the store and the watch
+    // raised no event: read the store once more now the watch is in place.
+    feed.marks_changed();
 
     // Park the watcher on a dedicated thread so its handle (and its
     // inotify descriptor on Linux) lives for the rest of the process.
@@ -231,8 +232,10 @@ struct Feed {
     own: Own,
     tx: Sender<Delivery>,
     seen: Arc<Mutex<Seen>>,
-    /// Set while a read of the changed mark store is waiting to run.
+    /// Set while a read of the changed mark store is waiting to run, and
+    /// when the store last changed.
     rereading: Arc<AtomicBool>,
+    marks_touched: Arc<Mutex<Instant>>,
 }
 
 /// What the feed has read, under one lock: the marks decide which files
@@ -243,12 +246,14 @@ struct Seen {
     read: HashMap<PathBuf, Read>,
 }
 
-/// A file the feed read: which signal it is, who sent it, and whether the
-/// chat was sent it or a mark withholds it.
+/// A file the feed read: which signal it is, who sent it and when (a
+/// signal is written once), and whether the chat was sent it or a mark
+/// withholds it.
 struct Read {
     tray: String,
     id: String,
     sender: Option<String>,
+    sent: SystemTime,
     shown: bool,
 }
 
@@ -256,16 +261,23 @@ struct Read {
 /// watch on it is in place.
 const NEW_DIR_SETTLE: Duration = Duration::from_millis(250);
 
-/// How long after the mark store changes it is read again. A delete links
-/// its marks one by one, so the events of one batch come as a burst, read
-/// once.
+/// How long the mark store must go unchanged before it is read again. A
+/// delete links its marks one by one, so the events of one batch come as
+/// a burst, read once when it ends.
 const MARKS_SETTLE: Duration = Duration::from_millis(100);
 
 impl Feed {
     /// A feed for signals base `base`, with the marks it holds now.
     fn new(base: &Path, own: Own, tx: Sender<Delivery>) -> Feed {
         let seen = Seen { marks: Marks::load(base), ..Default::default() };
-        Feed { base: base.to_path_buf(), own, tx, seen: Arc::new(Mutex::new(seen)), rereading: Default::default() }
+        Feed {
+            base: base.to_path_buf(),
+            own,
+            tx,
+            seen: Arc::new(Mutex::new(seen)),
+            rereading: Default::default(),
+            marks_touched: Arc::new(Mutex::new(Instant::now())),
+        }
     }
 
     fn seen(&self) -> std::sync::MutexGuard<'_, Seen> {
@@ -286,8 +298,9 @@ impl Feed {
         // tried again when it changes.
         let Some(sig) = parse_file(&path, &self.own) else { return };
         let sender = sig.sender_member();
-        let shown = !hidden(&seen.marks, &path, sender.as_deref());
-        seen.read.insert(path, Read { tray: sig.tray.clone(), id: sig.id.clone(), sender, shown });
+        let sent = path.metadata().and_then(|m| m.modified()).unwrap_or(SystemTime::UNIX_EPOCH);
+        let shown = !hidden(&seen.marks, &path, sender.as_deref(), sent);
+        seen.read.insert(path, Read { tray: sig.tray.clone(), id: sig.id.clone(), sender, sent, shown });
         if shown {
             let _ = self.tx.send(Delivery::Arrived(sig));
         }
@@ -299,14 +312,22 @@ impl Feed {
         self.seen().read.retain(|p, _| !p.starts_with(path));
     }
 
-    /// The mark store changed: read it again once the burst has settled.
+    /// The mark store changed: read it again once it has gone
+    /// [`MARKS_SETTLE`] without a change.
     fn marks_changed(&self) {
+        *self.marks_touched.lock().unwrap_or_else(|e| e.into_inner()) = Instant::now();
         if self.rereading.swap(true, Ordering::SeqCst) {
             return;
         }
         let feed = self.clone();
         thread::spawn(move || {
-            thread::sleep(MARKS_SETTLE);
+            loop {
+                let quiet = feed.marks_touched.lock().unwrap_or_else(|e| e.into_inner()).elapsed();
+                if quiet >= MARKS_SETTLE {
+                    break;
+                }
+                thread::sleep(MARKS_SETTLE - quiet);
+            }
             feed.rereading.store(false, Ordering::SeqCst);
             feed.reread_marks();
         });
@@ -321,7 +342,7 @@ impl Feed {
         let mut withdrawn = Vec::new();
         let mut unhidden = Vec::new();
         for (path, r) in seen.read.iter_mut() {
-            match (r.shown, hidden(&marks, path, r.sender.as_deref())) {
+            match (r.shown, hidden(&marks, path, r.sender.as_deref(), r.sent)) {
                 (true, true) => {
                     r.shown = false;
                     withdrawn.push((r.tray.clone(), r.id.clone()));
@@ -564,6 +585,26 @@ mod tests {
         tombstones::unmark_session(&base, dead).unwrap();
         feed.reread_marks();
         assert_eq!(sent(&rx), ["restored before"]);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A burst of changes to the mark store is read once it ends, however
+    /// long it runs.
+    #[test]
+    fn the_mark_store_is_read_once_its_changes_stop() {
+        let base = crate::test_dir::unique("settle");
+        write(&base.join("_broadcast"), "a");
+        let (feed, rx) = feed_at(&base);
+        feed.deliver(base.join("_broadcast").join("a.signal"));
+        assert_eq!(sent(&rx), ["a"]);
+        tombstones::mark_messages(&base, &keys(&["a"])).unwrap();
+        for _ in 0..10 {
+            feed.marks_changed();
+            thread::sleep(MARKS_SETTLE / 5);
+            assert!(sent(&rx).is_empty(), "read during the burst");
+        }
+        thread::sleep(MARKS_SETTLE * 3);
+        assert_eq!(sent(&rx), ["withdrawn _broadcast/a"]);
         let _ = std::fs::remove_dir_all(&base);
     }
 
