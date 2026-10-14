@@ -1654,6 +1654,22 @@ mod tests {
         assert_eq!(told(&mut a), ["-Help"]);
     }
 
+    /// A click inside the entry dialog keeps it open with what was typed.
+    #[test]
+    fn a_click_inside_the_entry_dialog_keeps_it_and_its_text() {
+        let mut a = App::with_pane("rec", Rec::default());
+        open_from(&mut a, Open::Entry { id: "e".into(), title: "name".into(), value: String::new(), error: None, anchor: Anchor::Center });
+        for c in "abc".chars() {
+            a.key(k(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        let buf = testkit::render(&mut a, 60, 12);
+        // On the typed line, under the box's title.
+        let (x, y) = testkit::find(&buf, "name").expect("the entry is drawn");
+        a.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x + 1, row: y + 1, modifiers: KeyModifiers::NONE });
+        let Mode::Entry(e) = &a.mode else { panic!("a click inside closed the entry") };
+        assert_eq!(e.input.text(), "abc");
+    }
+
     /// A pane that numbers its own list ([`Pane::own_numbers`]): it logs each
     /// jump and each key it is given, and takes the digits while `digits`.
     #[derive(Default)]
