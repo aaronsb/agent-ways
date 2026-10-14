@@ -124,10 +124,28 @@ pub fn day_start_with_offset(t: SystemTime, offset_secs: i64) -> SystemTime {
     from_unix_secs(local.div_euclid(86_400) * 86_400 - offset_secs)
 }
 
-/// Local midnight at the start of the date `y`-`m`-`d`, by this process's
-/// current UTC offset. `None` for a month or day out of range.
+/// Local midnight at the start of the date `y`-`m`-`d`, by the UTC offset
+/// in force that day, so a date across a daylight-saving change is not an
+/// hour off. Where `date` cannot say, the current offset stands in. `None`
+/// for a month or day out of range.
 pub fn local_date_start(y: i64, m: u32, d: u32) -> Option<SystemTime> {
-    date_start_with_offset(y, m, d, local_offset_secs())
+    date_start_with_offset(y, m, d, offset_on(None, y, m, d).unwrap_or_else(local_offset_secs))
+}
+
+/// The UTC offset in force at midnight starting `y`-`m`-`d`, in zone `tz`
+/// or the process's own, asked of `date`: GNU's `-d`, then BSD's `-j -f`.
+fn offset_on(tz: Option<&str>, y: i64, m: u32, d: u32) -> Option<i64> {
+    let at = format!("{y:04}-{m:02}-{d:02} 00:00:00");
+    let attempts: [&[&str]; 2] = [&["-d", &at, "+%z"], &["-j", "-f", "%Y-%m-%d %H:%M:%S", &at, "+%z"]];
+    attempts.iter().find_map(|args| {
+        let mut cmd = std::process::Command::new("date");
+        cmd.args(*args).stderr(std::process::Stdio::null());
+        if let Some(tz) = tz {
+            cmd.env("TZ", tz);
+        }
+        let out = cmd.output().ok().filter(|o| o.status.success())?;
+        parse_utc_offset(String::from_utf8(out.stdout).ok()?.trim())
+    })
 }
 
 /// [`local_date_start`] with the offset given.
@@ -295,6 +313,18 @@ mod tests {
         assert_eq!(date_start_with_offset(2026, 7, 22, 7_200), Some(at(1_784_678_400 - 7_200)));
         assert_eq!(date_start_with_offset(2026, 2, 30, 0), None);
         assert_eq!(date_start_with_offset(2026, 13, 1, 0), None);
+    }
+
+    /// A date's midnight takes the offset of that date, standard or summer.
+    #[test]
+    fn a_dates_offset_is_the_one_in_force_that_day() {
+        let (Some(winter), Some(summer)) =
+            (offset_on(Some("America/New_York"), 2026, 1, 15), offset_on(Some("America/New_York"), 2026, 7, 15))
+        else {
+            eprintln!("skipped: `date` has no zone data for America/New_York");
+            return;
+        };
+        assert_eq!((winter, summer), (-18_000, -14_400));
     }
 
     #[test]
