@@ -597,30 +597,38 @@ export const register: Register = on => {
   // compaction, so the next delivery carries the preamble line. At process
   // start this event comes before session.start, which handles that case.
   on('classic.SessionStart', async ($, e, next) => {
+    // Read before the chain runs, so session.start cannot overtake it.
+    const isAtStart = !mod.isStarted
+    if (isAtStart) mod.startSource = e.source
     const done = await next(e)
-    if (!mod.isStarted) mod.startSource = e.source
-    if (!mod.isStarted || (e.source !== 'clear' && e.source !== 'resume')) return done
+    if (isAtStart || (e.source !== 'clear' && e.source !== 'resume')) return done
     const id = e.session_id || (await $.session.id())
     const goesOn = (await isOn($, mod)) || (e.source === 'resume' && (await readListened($)).includes(id))
     if (!goesOn) return done
     mod.isRelistening = true
-    // The operator chose a conversation to go on with, as a first prompt
-    // would: the hold for one ends.
-    if (e.source === 'resume') mod.isAwaitingOperator = false
-    await updateStatus($, s => ({
-      ...s,
-      mode: 'active' as const,
-      afterCompaction: true,
-      turnsSinceFull: 0,
-      awaitingOperator: mod.isAwaitingOperator,
-    }))
-    await rememberListening($, mod, id)
-    if (mod.active) {
-      $.clock.after(RELISTEN_MS, () => void listenOn($).finally(() => (mod.isRelistening = false)))
-    } else {
-      mod.active = true
-      await registerActiveTools($)
-      $.clock.after(RELISTEN_MS, () => void activate($, mod, id))
+    try {
+      // The operator chose a conversation to go on with, as a first prompt
+      // would: the hold for one ends.
+      if (e.source === 'resume') mod.isAwaitingOperator = false
+      await updateStatus($, s => ({
+        ...s,
+        mode: 'active' as const,
+        afterCompaction: true,
+        turnsSinceFull: 0,
+        awaitingOperator: mod.isAwaitingOperator,
+      }))
+      await rememberListening($, mod, id)
+      if (mod.active) {
+        $.clock.after(RELISTEN_MS, () => void listenOn($).finally(() => (mod.isRelistening = false)))
+      } else {
+        mod.active = true
+        await registerActiveTools($)
+        $.clock.after(RELISTEN_MS, () => void activate($, mod, id))
+      }
+    } catch (err) {
+      // No timer will lower the guard, so the poll would stay held.
+      mod.isRelistening = false
+      throw err
     }
     return done
   })

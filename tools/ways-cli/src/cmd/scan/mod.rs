@@ -246,7 +246,7 @@ pub(super) fn is_system_envelope(s: &str) -> bool {
         || t.starts_with("<persisted-output")
         || t.starts_with("[attend")
         // Every attend delivery, the drain's and the mod's, opens with this.
-        || t.starts_with("silence is a valid reply")
+        || t.starts_with("silence is a valid reply to the messages below;")
         // A skill invocation arrives as the skill's own body. The operator
         // chose the skill; the body's vocabulary is the author's, and it fired
         // unrelated ways in four sibling sessions of one measured month.
@@ -1852,6 +1852,7 @@ mod queued_tests {
     #[test]
     fn operator_prose_is_scanned() {
         assert!(!is_system_envelope("set up ssh to the bastion"));
+        assert!(!is_system_envelope("Silence is a valid reply should also go on the Monitor hint"));
         assert!(!is_system_envelope("reply to the attend message from zoe"));
     }
 

@@ -1212,6 +1212,20 @@ describe('a resume', () => {
     expect(h.submitted).toEqual([])
   })
 
+  test('a reload after a /clear stays held', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', drains })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await clear($, h, 's2')
+    await clock.advance(2_000)
+    await $.session.start(INTERACTIVE)
+    drains.push(one(1), DRAIN_EMPTY)
+    await clock.advance(30_000)
+    expect(h.submitted).toEqual([])
+  })
+
   test('a reload after a resume from the picker stays unheld', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const drains: string[] = []
