@@ -42,10 +42,18 @@ fn sig(id: &str, from: &str, cwd: &str, message: &str, channel: Channel) -> Sign
 }
 
 /// A chat whose feed holds DMs with alpha both ways, a DM with beta both
-/// ways, and posts on #open and #deploy. `send` lets Enter write.
+/// ways, and posts on #open and #deploy. `send` lets Enter write, and feeds
+/// the chat from a watcher of the fixture's trays, as `main` does, so what
+/// is sent comes back.
 fn chat_with(send: bool) -> Chat {
     fixture();
-    let mut c = Chat::new(None, Palette::default(), Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(true).dry_run(!send);
+    let rx = send.then(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<Signal>();
+        let here = std::env::current_dir().unwrap().to_string_lossy().to_string();
+        attend_chat::watcher::spawn_watcher(signal::signals_base(), signal::encode_cwd(&here), signal::human_member_id(), tx).unwrap();
+        rx
+    });
+    let mut c = Chat::new(rx, Palette::default(), Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(true).dry_run(!send);
     let alpha = format!("claude:{ALPHA_SID}");
     let beta = format!("claude:{BETA_SID}");
     let me = "external:aaron@pts-1";
@@ -216,6 +224,12 @@ fn compose_in_the_dm_view_sends_a_direct_message_to_the_agent() {
     assert_eq!((wire.to, wire.from_kind), (Some(ALPHA_SID), Some("human")), "{raw}");
     let open = std::fs::read_dir(signal::broadcast_dir()).into_iter().flatten().flatten().any(|e| std::fs::read_to_string(e.path()).is_ok_and(|r| r.contains(body)));
     assert!(!open, "nothing on #open");
+    // Read back from alpha's tray, another project's, by the watcher.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline && !c.signals().iter().any(|s| s.message == body) {
+        c.drain();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
     assert!(feed(&mut c).contains(body), "the view shows what was sent: {}", screen(&mut c));
     assert_eq!(c.foreground(), &Tab::Dm(ALPHA_SID.into()));
 }

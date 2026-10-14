@@ -12,18 +12,24 @@
 //!   3. parks the watcher on a dedicated thread so its lifetime is
 //!      tied to the process, not to any caller scope.
 //!
-//! The watcher is recursive because focus-group dirs (`@name/`) and
-//! the directed-send inbox for this host's own cwd both live as
-//! sibling directories under the base. A non-recursive watcher would
-//! miss both — and would also miss *new* groups created after the
-//! TUI started, which is the common case (another agent runs
-//! `attend channel join deploy` during the session).
+//! The watcher is recursive because channel dirs (`@name/`), every
+//! project's tray and every person's tray live as sibling directories
+//! under the base. A non-recursive watcher would miss them, and would
+//! also miss *new* ones made after the TUI started, which is the common
+//! case (another agent runs `attend channel join deploy` during the
+//! session). Every tray is read, not only the chat's own: the person's
+//! direct messages to another project are on disk only in that
+//! project's tray, and an agent's own DM view holds what it sent and
+//! received with anyone (ADR-405, issue #995). Which of them a view of
+//! the person's shows is [`crate::signal::Channel`]'s classification.
 //!
 //! `notify`'s callback runs on its own thread and sends into an
 //! unbounded [`std::sync::mpsc`] channel, which the screen drains
 //! between frames. Unbounded means a slow renderer can't back-pressure
 //! the filesystem listener into dropping events.
 
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
@@ -32,62 +38,58 @@ use std::sync::mpsc::Sender;
 use notify::event::{ModifyKind, RenameMode};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
-use crate::signal::{parse_file, Signal};
+use crate::signal::{parse_file, Own, Signal};
 
 /// Decide whether a filesystem path under the signals base is a
 /// signal we want to stream into the TUI.
 ///
-/// Accepts three shapes:
-/// - `<base>/_broadcast/<name>.signal` — everyone
-/// - `<base>/@<group>/<name>.signal` — any focus group (we render
-///   them all; filtering by *subscribed* groups happens later in
-///   the component as the membership model lands)
-/// - `<base>/<own tray>/<name>.signal` — direct sends targeting
-///   this host's cwd (produced by PR 2's `@nickname` routing)
-/// - `<base>/_people/<person>/<name>.signal` — replies and direct
-///   messages to the person at this chat (ADR-401, `to`)
+/// Accepts four shapes:
+/// - `<base>/_broadcast/<name>.signal` — `#open`
+/// - `<base>/@<group>/<name>.signal` — any channel
+/// - `<base>/<tray>/<name>.signal` — a direct message in any project's
+///   tray, the chat's own or another's
+/// - `<base>/_people/<person>/<name>.signal` — a direct message to any
+///   person (ADR-401, `to`)
 ///
-/// Rejects:
-/// - Directed sends to *other* cwds (noise — not addressed to us)
-/// - Non-`.signal` files (state files like `_groups.yaml`, tmp files)
-pub fn accept_path(base: &Path, own_tray: &str, person: &str, path: &Path) -> bool {
+/// Rejects non-`.signal` files (`_groups.yaml`, tmp files), a file at the
+/// base itself or deeper in a tray than its own level, and any other
+/// `_`-named dir, which attend keeps for its own state.
+pub fn accept_path(base: &Path, path: &Path) -> bool {
     if path.extension().and_then(|s| s.to_str()) != Some("signal") {
         return false;
     }
     let Ok(rel) = path.strip_prefix(base) else {
         return false;
     };
-    let mut comps = rel.components();
-    let Some(first) = comps.next() else {
+    let comps: Vec<_> = rel.components().map(|c| c.as_os_str().to_string_lossy()).collect();
+    let Some(first) = comps.first() else {
         return false;
     };
-    let name = first.as_os_str().to_string_lossy();
-    if name == attend_groups::BROADCAST_DIR {
+    if first == attend_groups::BROADCAST_DIR || first.starts_with('@') {
         return true;
     }
-    if name.starts_with('@') {
-        return true;
+    if first == attend_groups::PEOPLE_DIR {
+        return comps.len() == 3;
     }
-    if name == attend_groups::PEOPLE_DIR {
-        return !person.is_empty() && comps.next().is_some_and(|c| c.as_os_str() == person) && comps.clone().count() == 1;
-    }
-    !own_tray.is_empty() && own_tray == name
+    comps.len() == 2 && is_tray(first)
 }
 
-/// `person` is the member id of the person at the chat (ADR-170), whose
-/// person tray it streams; empty for none.
+/// Whether a dir under the base named `name` is a project's tray: neither
+/// a channel nor one of attend's own `_` dirs, nor a step out of the base.
+fn is_tray(name: &str) -> bool {
+    !name.is_empty() && !name.starts_with('_') && !name.starts_with('@') && !name.starts_with('.')
+}
+
+/// `own_tray` is the chat's project tray by its encoded name, and `person`
+/// the member id of the person at the chat (ADR-170); either is empty for
+/// none. They classify what is read ([`crate::signal::Own`]).
 pub fn spawn_watcher(base: PathBuf, own_tray: String, person: String, tx: Sender<Signal>) -> notify::Result<()> {
     std::fs::create_dir_all(&base).ok();
-    // Pre-create the broadcast + own-cwd subdirs so notify's
-    // recursive watch installs sub-watchers on them before any
-    // signal is written. Without this, a write that races with
-    // create_dir inside `write_signal` can fire its filesystem
-    // event before the recursive watcher has observed the parent —
-    // the signal arrives on disk but the watcher callback never
-    // sees it. Group dirs don't need the same treatment: they're
-    // rare, and any missed "first signal in a new group" is
-    // indistinguishable from backlog a later signal will force the
-    // UI to re-scan for.
+    // Pre-create the broadcast, own-cwd and person subdirs so notify's
+    // recursive watch installs sub-watchers on them before any signal is
+    // written. A dir made later gets its sub-watcher only after it is made,
+    // so a write that follows its `create_dir` at once raises no event; the
+    // callback reads such a dir when it sees the dir made.
     std::fs::create_dir_all(base.join(attend_groups::BROADCAST_DIR)).ok();
     if !own_tray.is_empty() {
         std::fs::create_dir_all(base.join(&own_tray)).ok();
@@ -96,22 +98,14 @@ pub fn spawn_watcher(base: PathBuf, own_tray: String, person: String, tx: Sender
         std::fs::create_dir_all(attend_groups::person_dir(&base, &person)).ok();
     }
 
-    // Backfill existing signals from the three accepted shapes so
-    // the stream isn't empty on launch. Ordered by mtime across all
+    // Backfill existing signals from the accepted shapes so the stream
+    // isn't empty on launch. Ordered by mtime across all
     // source dirs so replay matches wall-clock arrival order.
     let mut backfill: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
-    let dirs_to_scan = scan_targets(&base, &own_tray, &person);
-    for dir in &dirs_to_scan {
-        let Ok(entries) = std::fs::read_dir(dir) else { continue };
-        for entry in entries.filter_map(|e| e.ok()) {
-            let p = entry.path();
-            if p.extension().and_then(|s| s.to_str()) != Some("signal") {
-                continue;
-            }
-            if let Ok(meta) = entry.metadata() {
-                if let Ok(ts) = meta.modified() {
-                    backfill.push((ts, p));
-                }
+    for dir in scan_targets(&base) {
+        for p in signal_files(&dir) {
+            if let Ok(ts) = p.metadata().and_then(|m| m.modified()) {
+                backfill.push((ts, p));
             }
         }
     }
@@ -121,16 +115,16 @@ pub fn spawn_watcher(base: PathBuf, own_tray: String, person: String, tx: Sender
         let id = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
         (*t, agent_identity::signal_send_order(id), p.clone())
     });
+    let own = Own { tray: own_tray, person };
+    let mut backfill_paths = HashSet::new();
     for (_, path) in backfill {
-        if let Some(sig) = parse_file(&path) {
+        if let Some(sig) = parse_file(&path, &own) {
             let _ = tx.send(sig);
         }
+        backfill_paths.insert(path);
     }
 
-    let tx_cb = tx.clone();
-    let base_for_cb = base.clone();
-    let own_for_cb = own_tray.clone();
-    let person_for_cb = person.clone();
+    let feed = Feed { base: base.clone(), own, tx: tx.clone(), delivered: Arc::new(Mutex::new(backfill_paths)) };
     let mut watcher = RecommendedWatcher::new(
         move |res: notify::Result<Event>| {
             let Ok(event) = res else { return };
@@ -148,11 +142,10 @@ pub fn spawn_watcher(base: PathBuf, own_tray: String, person: String, tx: Sender
                 return;
             }
             for path in event.paths {
-                if !accept_path(&base_for_cb, &own_for_cb, &person_for_cb, &path) {
-                    continue;
-                }
-                if let Some(sig) = parse_file(&path) {
-                    let _ = tx_cb.send(sig);
+                if path.is_dir() {
+                    feed.new_dir(path);
+                } else {
+                    feed.deliver(path);
                 }
             }
         },
@@ -173,27 +166,86 @@ pub fn spawn_watcher(base: PathBuf, own_tray: String, person: String, tx: Sender
     Ok(())
 }
 
-/// Enumerate the directories whose existing signals we should
-/// backfill on startup. Kept separate from the event filter because
-/// backfill walks the fs once up front — the filter runs per event.
-fn scan_targets(base: &Path, own_tray: &str, person: &str) -> Vec<PathBuf> {
-    let mut dirs = vec![base.join(attend_groups::BROADCAST_DIR)];
-    if !person.is_empty() {
-        dirs.push(attend_groups::person_dir(base, person));
+/// Where the watcher delivers: the signals base, the chat's own trays, the
+/// sender the chat drains, and every path delivered, so a file the watch reports
+/// twice, or one both a new dir's scan and its own event find, is
+/// delivered once.
+#[derive(Clone)]
+struct Feed {
+    base: PathBuf,
+    own: Own,
+    tx: Sender<Signal>,
+    delivered: Arc<Mutex<HashSet<PathBuf>>>,
+}
+
+/// How long after a dir is made its contents are read again, by when the
+/// watch on it is in place.
+const NEW_DIR_SETTLE: Duration = Duration::from_millis(250);
+
+impl Feed {
+    /// Send the signal at `path` on, unless it is not one the chat reads or
+    /// was sent before.
+    fn deliver(&self, path: PathBuf) {
+        if !accept_path(&self.base, &path) {
+            return;
+        }
+        let mut delivered = self.delivered.lock().unwrap_or_else(|e| e.into_inner());
+        if delivered.contains(&path) {
+            return;
+        }
+        if let Some(sig) = parse_file(&path, &self.own) {
+            delivered.insert(path);
+            let _ = self.tx.send(sig);
+        }
     }
-    // Mirror the guard in `spawn_watcher`: when `env::current_dir()`
-    // fails, the tray name is empty and `base.join("")` degenerates
-    // to `base` — we'd then walk the whole top level for no good
-    // reason. Skip that dir when there's nothing to watch.
-    if !own_tray.is_empty() {
-        dirs.push(base.join(own_tray));
-    }
-    if let Ok(entries) = std::fs::read_dir(base) {
-        for entry in entries.filter_map(|e| e.ok()) {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with('@') {
-                dirs.push(entry.path());
+
+    /// A dir made under the base: a new tray or channel. notify reports it
+    /// before it adds the watch on it, so a signal written into it at once
+    /// (the first direct message to a project: `mkdir`, then the write)
+    /// raises no event of its own. Read what it holds now, and again once
+    /// the watch is in place.
+    fn new_dir(&self, dir: PathBuf) {
+        for file in signal_files(&dir) {
+            self.deliver(file);
+        }
+        let feed = self.clone();
+        thread::spawn(move || {
+            thread::sleep(NEW_DIR_SETTLE);
+            for file in signal_files(&dir) {
+                feed.deliver(file);
             }
+        });
+    }
+}
+
+/// The `.signal` files in `dir`, oldest first, ties by the send time the
+/// id carries.
+fn signal_files(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut files: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("signal"))
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .collect();
+    files.sort_by_cached_key(|(t, p)| (*t, agent_identity::signal_send_order(p.file_name().and_then(|n| n.to_str()).unwrap_or("")), p.clone()));
+    files.into_iter().map(|(_, p)| p).collect()
+}
+
+/// Enumerate the directories whose existing signals we should
+/// backfill on startup: `#open`, every channel, every project's tray and
+/// every person's tray. Kept separate from the event filter because
+/// backfill walks the fs once up front — the filter runs per event.
+fn scan_targets(base: &Path) -> Vec<PathBuf> {
+    let mut dirs = vec![base.join(attend_groups::BROADCAST_DIR)];
+    let subdirs = |dir: &Path| -> Vec<(String, PathBuf)> {
+        let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+        entries.filter_map(|e| e.ok()).filter(|e| e.file_type().is_ok_and(|t| t.is_dir())).map(|e| (e.file_name().to_string_lossy().to_string(), e.path())).collect()
+    };
+    for (name, path) in subdirs(base) {
+        if name == attend_groups::PEOPLE_DIR {
+            dirs.extend(subdirs(&path).into_iter().map(|(_, p)| p));
+        } else if name.starts_with('@') || is_tray(&name) {
+            dirs.push(path);
         }
     }
     dirs
@@ -207,66 +259,67 @@ mod tests {
         PathBuf::from("/tmp/fake-base")
     }
 
-    #[test]
-    fn accepts_broadcast_signal() {
-        let p = base().join("_broadcast").join("x.signal");
-        assert!(accept_path(&base(), "-home-me", "aaron", &p));
+    fn accepts(rel: &[&str]) -> bool {
+        accept_path(&base(), &rel.iter().fold(base(), |p, c| p.join(c)))
     }
 
     #[test]
-    fn accepts_group_signal() {
-        let p = base().join("@deploy").join("x.signal");
-        assert!(accept_path(&base(), "-home-me", "aaron", &p));
+    fn accepts_broadcast_and_channel_signals() {
+        assert!(accepts(&["_broadcast", "x.signal"]));
+        assert!(accepts(&["@deploy", "x.signal"]));
+    }
+
+    /// Every project's tray, the chat's own and any other: the person's
+    /// direct messages to another project are on disk only there (#995).
+    #[test]
+    fn accepts_every_projects_tray() {
+        assert!(accepts(&["-home-me", "x.signal"]));
+        assert!(accepts(&["-home-someone-else", "x.signal"]));
+        assert!(!accepts(&["-home-me", "nested", "x.signal"]), "a tray is flat");
     }
 
     #[test]
-    fn accepts_own_cwd_signal() {
-        let p = base().join("-home-me").join("x.signal");
-        assert!(accept_path(&base(), "-home-me", "aaron", &p));
+    fn accepts_every_persons_tray() {
+        assert!(accepts(&["_people", "aaron", "x.signal"]));
+        assert!(accepts(&["_people", "bob", "x.signal"]));
+        assert!(!accepts(&["_people", "x.signal"]), "no person");
     }
 
     #[test]
-    fn rejects_other_cwd_signal() {
-        // Directed to a different agent's cwd — not for us.
-        let p = base().join("-home-someone-else").join("x.signal");
-        assert!(!accept_path(&base(), "-home-me", "aaron", &p));
-    }
-
-    #[test]
-    fn accepts_the_persons_own_tray_only() {
-        assert!(accept_path(&base(), "-home-me", "aaron", &base().join("_people").join("aaron").join("x.signal")));
-        assert!(!accept_path(&base(), "-home-me", "aaron", &base().join("_people").join("bob").join("x.signal")));
-        assert!(!accept_path(&base(), "-home-me", "", &base().join("_people").join("aaron").join("x.signal")));
-        assert!(!accept_path(&base(), "-home-me", "aaron", &base().join("_people").join("x.signal")));
-    }
-
-    #[test]
-    fn rejects_non_signal_file() {
-        let p = base().join("_broadcast").join("readme.txt");
-        assert!(!accept_path(&base(), "-home-me", "aaron", &p));
-    }
-
-    #[test]
-    fn rejects_groups_yaml() {
-        let p = base().join("_groups.yaml");
-        assert!(!accept_path(&base(), "-home-me", "aaron", &p));
+    fn rejects_attends_own_dirs_and_files() {
+        assert!(!accepts(&["_tombstones", "x.signal"]), "attend's own state");
+        assert!(!accepts(&["x.signal"]), "at the base itself");
+        assert!(!accepts(&["_broadcast", "readme.txt"]), "not a signal");
+        assert!(!accepts(&["_groups.yaml"]));
     }
 
     #[test]
     fn rejects_path_outside_base() {
-        let p = PathBuf::from("/etc/passwd");
-        assert!(!accept_path(&base(), "-home-me", "aaron", &p));
+        assert!(!accept_path(&base(), &PathBuf::from("/etc/passwd")));
     }
 
     #[test]
     fn rejects_traversal_style_paths() {
-        // Defence-in-depth: the filter sees full paths from notify,
-        // but a `.signal`-suffixed traversal segment inside the base
-        // must not appear to be broadcast/group/own. We rely on
-        // `strip_prefix` + `Components` for safety, which normalizes
-        // `..` as a ParentDir component that can't equal `_broadcast`,
-        // `@<name>`, or our own_encoded.
-        let p = base().join("..").join("outside").join("x.signal");
-        assert!(!accept_path(&base(), "-home-me", "aaron", &p));
+        // Defence-in-depth: the filter sees full paths from notify, but a
+        // `.signal`-suffixed traversal segment inside the base must not
+        // read as a tray. `strip_prefix` + `Components` keep `..` as a
+        // ParentDir component, which `is_tray` refuses.
+        assert!(!accepts(&["..", "outside", "x.signal"]));
+        assert!(!accepts(&["..", "x.signal"]));
+    }
+
+    /// The backfill walks what the filter accepts: `#open`, channels,
+    /// project trays and person trays, never attend's own `_` dirs.
+    #[test]
+    fn the_backfill_scans_every_tray() {
+        let base = crate::test_dir::unique("scan");
+        for d in ["_broadcast", "@deploy", "-home-me", "-home-other", "_people/aaron", "_people/bob", "_tombstones"] {
+            std::fs::create_dir_all(base.join(d)).unwrap();
+        }
+        std::fs::write(base.join("_groups.yaml"), "").unwrap();
+        let mut got: Vec<String> = scan_targets(&base).iter().map(|p| p.strip_prefix(&base).unwrap().to_string_lossy().to_string()).collect();
+        got.sort();
+        assert_eq!(got, ["-home-me", "-home-other", "@deploy", "_broadcast", "_people/aaron", "_people/bob"]);
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

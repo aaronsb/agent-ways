@@ -139,21 +139,24 @@ pub fn advance_after_dissolve(dissolved: &str, names_before: &[String]) -> Tab {
     }
 }
 
-/// Does `sig` render in `tab`'s transcript? Merged shows everything; a
-/// channel tab shows only its own traffic plus local `Info` blocks (command
-/// feedback must be visible wherever the command was typed) and what
-/// reached the person directly (ADR-401, `to`). Directed messages to a cwd
-/// inbox, and those the chat sent, surface in merged only — the strict
-/// per-channel filter. A DM view shows the direct messages between the
-/// person and its agent, both ways, and the local blocks (ADR-405).
+/// Does `sig` render in `tab`'s transcript? Merged shows everything the
+/// person was party to: every channel, and every direct message to them,
+/// to their project's tray, or from them. A channel tab shows only its own
+/// traffic plus local `Info` blocks (command feedback must be visible
+/// wherever the command was typed) and what reached the person directly
+/// (ADR-401, `to`). Directed messages to a cwd inbox, and those the person
+/// sent, surface in merged only — the strict per-channel filter. A DM view
+/// shows the direct messages between the person and its agent, both ways,
+/// and the local blocks (ADR-405). A direct message between others shows
+/// in none of these.
 pub fn shows(sig: &Signal, tab: &Tab) -> bool {
     match tab {
-        Tab::Merged => true,
+        Tab::Merged => !matches!(sig.channel, Channel::Elsewhere(_)),
         Tab::Channel(g) => match &sig.channel {
             Channel::Info | Channel::Person => true,
             Channel::Open => g == BASE_CHANNEL_NAME,
             Channel::Group(name) => name == g,
-            Channel::Direct | Channel::Sent(_) => false,
+            Channel::Direct(_) | Channel::Sent(_) | Channel::Elsewhere(_) => false,
         },
         Tab::Dm(member) => sig.channel == Channel::Info || sig.is_dm_with(member),
     }
@@ -236,16 +239,18 @@ mod tests {
     }
 
     #[test]
-    fn merged_shows_everything() {
+    fn merged_shows_everything_the_person_was_party_to() {
         for c in [
             Channel::Open,
             Channel::Group("g".into()),
-            Channel::Direct,
+            Channel::Direct("a2".into()),
             Channel::Sent("a1".into()),
+            Channel::Person,
             Channel::Info,
         ] {
             assert!(visible_in(&c, &Tab::Merged), "{c:?} must show in merged");
         }
+        assert!(!visible_in(&Channel::Elsewhere("a2".into()), &Tab::Merged), "a DM between others");
     }
 
     #[test]
@@ -255,8 +260,9 @@ mod tests {
         assert!(!visible_in(&Channel::Group("infra".into()), &tab));
         assert!(!visible_in(&Channel::Open, &tab));
         // Directed traffic is merged-only.
-        assert!(!visible_in(&Channel::Direct, &tab));
+        assert!(!visible_in(&Channel::Direct("a2".into()), &tab));
         assert!(!visible_in(&Channel::Sent("a1".into()), &tab));
+        assert!(!visible_in(&Channel::Elsewhere("a2".into()), &tab));
         // Command feedback follows the operator everywhere.
         assert!(visible_in(&Channel::Info, &tab));
     }
@@ -266,7 +272,7 @@ mod tests {
         let tab = chan("open");
         assert!(visible_in(&Channel::Open, &tab));
         assert!(!visible_in(&Channel::Group("deploy".into()), &tab));
-        assert!(!visible_in(&Channel::Direct, &tab));
+        assert!(!visible_in(&Channel::Direct("a2".into()), &tab));
     }
 
     #[test]
@@ -277,9 +283,10 @@ mod tests {
         assert!(shows(&on(Channel::Info, "attend"), &tab), "command feedback");
         assert!(!shows(&on(Channel::Person, "a2"), &tab), "another agent's DM");
         assert!(!shows(&on(Channel::Sent("a2".into()), "me"), &tab));
-        for c in [Channel::Open, Channel::Group("g".into()), Channel::Direct] {
-            assert!(!shows(&on(c.clone(), "a1"), &tab), "{c:?} from a1 is no DM");
+        for c in [Channel::Open, Channel::Group("g".into()), Channel::Direct("me".into()), Channel::Elsewhere("a2".into())] {
+            assert!(!shows(&on(c.clone(), "a1"), &tab), "{c:?} from a1 is no DM with the person");
         }
+        assert!(!shows(&on(Channel::Elsewhere("a1".into()), "a2"), &tab), "nor one to a1 from another");
     }
 
     #[test]

@@ -57,6 +57,10 @@ const STATUS_ASSERT: Duration = Duration::from_secs(6);
 /// from the head so the newest history stays visible.
 const MAX_SIGNALS: usize = 5000;
 
+/// How many of the newest messages a send's copy is looked for among: the
+/// copies arrive together, so a send's others are never far back.
+const DEDUPE_WINDOW: usize = 64;
+
 /// How often the peers, channels and the human's heartbeat are
 /// refreshed without any input (ADR-129, ADR-170). A peer that boots
 /// without sending appears in the legend within one refresh; one whose
@@ -299,9 +303,14 @@ impl ChatPane {
     }
 
     /// Append `sig`, dropping from the head past [`MAX_SIGNALS`]. Both
-    /// writers into the buffer — the watcher drain and the directed-send
-    /// echo — go through here so the cap has a single home.
+    /// writers into the buffer — the watcher drain and a command's local
+    /// block — go through here so the cap has a single home. A copy of a
+    /// send already held, read from another tray it went to, is dropped
+    /// ([`Signal::same_send`]).
     pub fn push(&mut self, sig: Signal) {
+        if self.signals.iter().rev().take(DEDUPE_WINDOW).any(|s| s.same_send(&sig)) {
+            return;
+        }
         self.signals.push(sig);
         if self.signals.len() > MAX_SIGNALS {
             let drop_n = self.signals.len() - MAX_SIGNALS;
@@ -422,8 +431,6 @@ impl ChatPane {
                 self.say(status, false);
                 self.input.clear();
                 self.show_newest();
-                // A directed send lands in the recipient's inbox, which
-                // this chat does not watch: echo it into the transcript.
                 self.push(echo);
             }
             EnterAction::StatusOnly(s) => self.say(s, true),

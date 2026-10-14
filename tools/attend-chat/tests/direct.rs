@@ -32,7 +32,8 @@ fn base() -> &'static Path {
 }
 
 /// The person tray's signals reach the chat through the watcher, as
-/// `Channel::Person`; another person's tray does not.
+/// `Channel::Person`; another person's tray is read too, as a direct
+/// message between others, which no view of the person's shows (#995).
 #[test]
 fn the_person_tray_streams_into_the_chat() {
     let base = base();
@@ -62,9 +63,11 @@ fn the_person_tray_streams_into_the_chat() {
     got.extend(rx.try_iter());
     // Other tests in this binary post to #open and the project tray at the
     // same time; only person-tray signals are this test's.
-    let bodies: Vec<(&str, &Channel)> =
+    let mut bodies: Vec<(&str, &Channel)> =
         got.iter().filter(|s| s.message.contains("for you") || s.message.contains("not yours")).map(|s| (s.message.as_str(), &s.channel)).collect();
-    assert_eq!(bodies, [("a reply for you", &Channel::Person)]);
+    bodies.sort_by_key(|(m, _)| *m);
+    assert_eq!(bodies, [("a reply for you", &Channel::Person), ("not yours", &Channel::Elsewhere("someone-else".into()))]);
+    assert!(!attend_chat::tabs::shows(got.iter().find(|s| s.message == "not yours").unwrap(), &Tab::Merged));
 }
 
 /// A direct message to the person shows in every view, labelled `→ you`.

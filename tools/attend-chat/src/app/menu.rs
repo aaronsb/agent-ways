@@ -536,7 +536,7 @@ impl ChatPane {
             REPLY => match (&sig.channel, name.as_deref()) {
                 (crate::signal::Channel::Group(g), _) => self.set_tab(Tab::Channel(g.clone())),
                 (crate::signal::Channel::Open, _) => self.set_tab(Tab::Channel(BASE_CHANNEL_NAME.into())),
-                (crate::signal::Channel::Direct | crate::signal::Channel::Person, Some(n)) => address(self, n),
+                (crate::signal::Channel::Direct(_) | crate::signal::Channel::Person, Some(n)) => address(self, n),
                 (crate::signal::Channel::Sent(to), _) => match to.split(',').find(|m| self.has_dms(m)).map(str::to_string) {
                     Some(m) => self.open_dm(m),
                     None => return self.say("no DM view to reply in", true),
