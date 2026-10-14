@@ -367,36 +367,24 @@ pub(super) fn write_failed(e: agent_settings::writer::WriteError) -> Failure {
     }
 }
 
-/// After a write to `written`, whether `b` resolves from somewhere else.
+/// After a write to `written`, whether `b` resolves from somewhere else
+/// ([`agent_settings::load::overridden`]).
 pub(super) fn overridden(b: &Bound, written: &Path, project: Option<&Path>) -> Option<String> {
+    use agent_settings::load::Overridden;
     let layers = live_layers(project_dir(project).as_deref());
-    let r = resolve(b.spec, &b.bound, &layers);
-    let from = r.layer.and_then(|i| layers[i].path.clone());
-    if from.as_deref() == Some(written) {
-        return None;
-    }
-    let written_layer = layers.iter().find(|l| l.path.as_deref() == Some(written));
-    if let Some(f) = written_layer.and_then(|l| l.findings.iter().find(|f| f.section.as_deref() == Some(b.spec.section) && f.fallback)) {
-        return Some(format!(
+    Some(match agent_settings::load::overridden(b.spec, &b.bound, &layers, written)? {
+        Overridden::Fallback(f) => format!(
             "{} falls back to canonical in {}: {f}; `ways settings lint` lists the findings",
             b.spec.section,
             written.display()
-        ));
-    }
-    match from {
-        Some(p) => Some(format!("{} sets {}; `ways settings get {} --json` shows the value in effect", p.display(), r.name, r.name)),
-        None => None,
-    }
+        ),
+        Overridden::By { path, name, .. } => format!("{} sets {name}; `ways settings get {name} --json` shows the value in effect", path.display()),
+    })
 }
 
 /// Whether the layer at `a` sits above the one at `b`.
 pub(super) fn is_higher(layers: &[Layer], a: &Path, b: &Path) -> bool {
-    let pos = |p: &Path| layers.iter().position(|l| l.path.as_deref() == Some(p));
-    match (pos(a), pos(b)) {
-        (Some(x), Some(y)) => x > y,
-        (Some(_), None) => true,
-        _ => false,
-    }
+    agent_settings::load::is_higher(layers, a, b)
 }
 
 pub(super) fn insert_path(root: &mut serde_json::Value, path: &[String], v: serde_json::Value) {
