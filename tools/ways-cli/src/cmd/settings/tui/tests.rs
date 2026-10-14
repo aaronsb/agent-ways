@@ -284,6 +284,10 @@ fn clicks_pick_a_row_open_other_press_next_and_back() {
     click_text(&mut app, "Next (Enter)");
     assert_eq!(flow(&app).step(), 0, "buttons other than Cancel wait while typing");
     press(&mut app, &[KeyCode::Esc]);
+    // Next does what Enter does: on Other… it opens the path entry again.
+    click_text(&mut app, "Next (Enter)");
+    assert!(text(&mut app).contains("path ▏"), "Next on Other… opens the path entry");
+    press(&mut app, &[KeyCode::Esc, KeyCode::Up]);
     click_text(&mut app, "Next (Enter)");
     assert_eq!(flow(&app).step(), 1);
     click_text(&mut app, "Back (Esc)");

@@ -44,6 +44,8 @@ fn chat() -> Chat {
             message: format!("message {i} in the feed"),
             ts: 1_790_949_000 + i as u64,
             channel: Channel::Open,
+            tray: String::new(),
+            beside_post: false,
         });
     }
     c
@@ -412,7 +414,7 @@ fn outside_the_chat_every_single_key_the_help_names_works() {
     // PgUp scrolls the feed.
     let mut c = chat();
     for i in 0..30 {
-        c.push(Signal { id: format!("x-{i}"), from: format!("claude:{ALPHA_SID}"), project: "alpha".into(), cwd: "/work/alpha".into(), reply_to: None, message: format!("filler {i}"), ts: 1_790_949_100 + i, channel: Channel::Open });
+        c.push(Signal { id: format!("x-{i}"), from: format!("claude:{ALPHA_SID}"), project: "alpha".into(), cwd: "/work/alpha".into(), reply_to: None, message: format!("filler {i}"), ts: 1_790_949_100 + i, channel: Channel::Open, tray: String::new(), beside_post: false });
     }
     to_column(&mut c);
     press(&mut c, KeyCode::PageUp);
@@ -796,7 +798,7 @@ fn the_compose_border_is_subdued_unless_the_box_has_the_focus() {
 fn the_wheel_scrolls_what_is_under_it() {
     let mut c = chat();
     for i in 0..30 {
-        c.push(Signal { id: format!("w-{i}"), from: format!("claude:{ALPHA_SID}"), project: "alpha".into(), cwd: "/work/alpha".into(), reply_to: None, message: format!("filler {i}"), ts: 1_790_949_100 + i, channel: Channel::Open });
+        c.push(Signal { id: format!("w-{i}"), from: format!("claude:{ALPHA_SID}"), project: "alpha".into(), cwd: "/work/alpha".into(), reply_to: None, message: format!("filler {i}"), ts: 1_790_949_100 + i, channel: Channel::Open, tray: String::new(), beside_post: false });
     }
     let rows = rows(&mut c);
     let compose = rows.iter().rposition(|r| r.contains("> ")).unwrap() as u16;
@@ -1087,14 +1089,14 @@ fn the_message_menu_acts_on_its_message_or_on_nothing() {
     // 5,000 messages in all, the most the feed keeps: message 0 is the
     // oldest, message 1 the next.
     for i in 0..4998 {
-        c.push(Signal { id: format!("f-{i}"), from: format!("claude:{ALPHA_SID}"), project: "alpha".into(), cwd: "/work/alpha".into(), reply_to: None, message: format!("filler {i}"), ts: 1_790_949_100 + i, channel: Channel::Open });
+        c.push(Signal { id: format!("f-{i}"), from: format!("claude:{ALPHA_SID}"), project: "alpha".into(), cwd: "/work/alpha".into(), reply_to: None, message: format!("filler {i}"), ts: 1_790_949_100 + i, channel: Channel::Open, tray: String::new(), beside_post: false });
     }
     press(&mut c, KeyCode::BackTab);
     press(&mut c, KeyCode::Home);
     press(&mut c, KeyCode::Enter);
     assert!(menu(&mut c).is_some_and(|m| m.starts_with("message from @")), "{}", screen(&mut c));
     // One more message: the feed drops message 0, the one the menu is for.
-    c.push(Signal { id: "f-last".into(), from: format!("claude:{BETA_SID}"), project: "beta".into(), cwd: "/work/beta".into(), reply_to: None, message: "the last".into(), ts: 1_790_960_000, channel: Channel::Open });
+    c.push(Signal { id: "f-last".into(), from: format!("claude:{BETA_SID}"), project: "beta".into(), cwd: "/work/beta".into(), reply_to: None, message: "the last".into(), ts: 1_790_960_000, channel: Channel::Open, tray: String::new(), beside_post: false });
     let buf = testkit::render_screen(&mut c, W, H);
     let (x, y) = testkit::find(&buf, "Copy").expect("the menu's item");
     c.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x, row: y, modifiers: KeyModifiers::NONE });

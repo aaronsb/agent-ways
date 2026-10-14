@@ -23,8 +23,10 @@ P=$FX_USER_HOME/shop
 # HOME is the link `~` (env.sh). The tilde is literal, not expanded.
 PS='~/shop'
 
-# The scenarios: name | command | keys. Keys are tmux key names, and
-# text:<chars> types literally. A new screen state adds a line here.
+# The scenarios: name | command | keys [| after]. Keys are tmux key names,
+# and text:<chars> types literally. The keys after the shot, if any, put
+# back what the scenario changed in the fixture, so the scenarios after it
+# see it as it was. A new screen state adds a line here.
 SCENARIOS="
 sessions   | ways session replay --project $P               | Down
 timeline   | ways session replay --project $P --session $A  | End f
@@ -39,6 +41,17 @@ matching   | ways settings matching --project $PS           | Down Down e C-u te
 picker     | ways settings gate --project $PS               | Down Down Down Right Down Right Down Down Enter
 mod        | ways settings mod --project $PS                |
 quit-guard | ways settings matching --project $PS           | Down Down e C-u text:0.2 Enter q
+key-help   | ways settings matching --project $PS           | text:?
+close-editor | ways settings theme --project $PS            | e text:mine Enter Escape
+response   | ways settings install --project $PS            | p text:/nonexistent/claude Enter
+confirm    | ways settings install --project $PS            | Down Down r
+discard-tab | ways settings matching --project $PS          | Down Down e C-u text:0.2 Enter X
+review-discard | ways settings matching --project $PS       | Down Down e C-u text:0.2 Enter w X
+item-delete | ways settings theme --project $PS             | a Enter text:scratch Enter a Down Down Down Enter | y
+action-menu | ways settings install --project $PS           | a Down
+theme-menu | ways settings theme --project $PS              | a Down
+flow-pick  | ways settings install --project $PS            | t
+flow-other | ways settings install --project $PS            | t Down Enter text:~/work Enter
 "
 
 python3 "$TOOLS/fixture.py" "$WORK" >/dev/null
@@ -48,7 +61,19 @@ want() { [ $# -eq 1 ] || [[ " ${*:2} " == *" $1 "* ]]; }
 trim() { local s=$1; s=${s#"${s%%[![:space:]]*}"}; printf '%s' "${s%"${s##*[![:space:]]}"}"; }
 
 n=0
-while IFS='|' read -r name cmd keys; do
+# Send each of a scenario's keys to session $1.
+send_keys() {
+  local s=$1 k
+  for k in "${@:2}"; do
+    case $k in
+      text:*) $TH send "$s" -l "${k#text:}" ;;
+      *) $TH send "$s" "$k" ;;
+    esac
+    sleep 0.6
+  done
+}
+
+while IFS='|' read -r name cmd keys after; do
   name=$(trim "$name")
   [ -n "$name" ] || continue
   want "$name" "$@" || continue
@@ -61,16 +86,11 @@ while IFS='|' read -r name cmd keys; do
     $TH down "$s" >/dev/null 2>&1 || true
     $TH launch "$s" --cols "$c" --rows "$r" --font "$FONT" -- "${argv[@]}" >/dev/null
     sleep 2
-    for k in $keys; do
-      case $k in
-        text:*) $TH send "$s" -l "${k#text:}" ;;
-        *) $TH send "$s" "$k" ;;
-      esac
-      sleep 0.6
-    done
+    send_keys "$s" $keys
     sleep 1
     $TH text "$s" >"$out/$name.txt"
     HOME=$REALHOME $TH shot "$s" --out "$out/$name.png" >/dev/null
+    send_keys "$s" $after
     $TH down "$s" >/dev/null
     echo "$out/$name.png"
     n=$((n + 1))

@@ -12,7 +12,23 @@ use std::time::{Duration, Instant, SystemTime};
 
 use attend_chat::{signal, watcher};
 
-fn tmp_home() -> PathBuf {
+/// A fresh home, removed when the test ends.
+struct TmpHome(PathBuf);
+
+impl std::ops::Deref for TmpHome {
+    type Target = PathBuf;
+    fn deref(&self) -> &PathBuf {
+        &self.0
+    }
+}
+
+impl Drop for TmpHome {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn tmp_home() -> TmpHome {
     let p = std::env::temp_dir().join(format!(
         "attend-chat-it-{}-{}",
         std::process::id(),
@@ -22,17 +38,21 @@ fn tmp_home() -> PathBuf {
             .as_nanos()
     ));
     fs::create_dir_all(&p).unwrap();
-    p
+    TmpHome(p)
 }
 
 fn recv_with_timeout(
-    rx: &std::sync::mpsc::Receiver<signal::Signal>,
+    rx: &std::sync::mpsc::Receiver<watcher::Delivery>,
     timeout: Duration,
 ) -> Option<signal::Signal> {
     let deadline = Instant::now() + timeout;
     loop {
         match rx.try_recv() {
-            Ok(sig) => return Some(sig),
+            Ok(d) => {
+                if let Some(sig) = d.signal() {
+                    return Some(sig);
+                }
+            }
             Err(std::sync::mpsc::TryRecvError::Empty) => {
                 if Instant::now() >= deadline {
                     return None;
@@ -49,12 +69,12 @@ fn write_broadcast_arrives_through_watcher() {
     let home = tmp_home();
     // Using `set_var` is !Send on some platforms; cargo runs
     // integration tests per file, and we only flip `HOME` here.
-    std::env::set_var("HOME", &home);
+    std::env::set_var("HOME", &*home);
     // The attend cache follows XDG_CACHE_HOME first: point it into the
     // temp home too, so a runner's own setting never reaches here.
     std::env::set_var("XDG_CACHE_HOME", home.join(".cache"));
 
-    let (tx, rx) = std::sync::mpsc::channel::<signal::Signal>();
+    let (tx, rx) = std::sync::mpsc::channel::<watcher::Delivery>();
     // PR 3 made the watcher recursive over the whole signals base so
     // it picks up focus-group dirs + the directed-send inbox. The
     // integration path stays the same for broadcast, but we now pass

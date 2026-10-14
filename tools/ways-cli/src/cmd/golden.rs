@@ -326,13 +326,11 @@ pub fn sample_joined(rows: &[Row]) -> Vec<Probe> {
 mod tests {
     use super::*;
 
-    fn scratch(tag: &str) -> PathBuf {
+    fn scratch(tag: &str) -> crate::test_dir::TestDir {
         static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!("ways-golden-export-{}-{tag}-{n}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+        crate::test_dir::TestDir::at(dir)
     }
 
     fn put(root: &Path, rel: &str, body: &str) {
@@ -394,7 +392,7 @@ mod tests {
         assert!(e.contains("a.golden.jsonl line 2") && e.contains("empty"), "{e}");
     }
 
-    fn fixture() -> PathBuf {
+    fn fixture() -> crate::test_dir::TestDir {
         let root = scratch("probes");
         let g = |w: &str| format!("{{\"kind\":\"direct\",\"prompt\":\"{w} direct request\"}}\n{{\"kind\":\"situational\",\"prompt\":\"{w} situational note\"}}\n");
         // `grp` has no sidecar of its own: a non-semantic top-level directory.

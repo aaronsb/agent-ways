@@ -17,6 +17,8 @@ This document contains the help content for the `attend` command-line program.
 * [`attend message inbox`↴](#attend-message-inbox)
 * [`attend message unread`↴](#attend-message-unread)
 * [`attend message cleanup`↴](#attend-message-cleanup)
+* [`attend message delete`↴](#attend-message-delete)
+* [`attend message tombstone`↴](#attend-message-tombstone)
 * [`attend channel`↴](#attend-channel)
 * [`attend channel list`↴](#attend-channel-list)
 * [`attend channel join`↴](#attend-channel-join)
@@ -60,7 +62,7 @@ In a session with the attend mod, the attend_* tools send, reply, join and list 
 
 * `run` — Start the sensor loop (use with Monitor for async delivery)
 * `listen` — Turn listening on or off for this session without joining a channel, or show it (default: status)
-* `message` — Send, reply to, read and count messages (default: inbox)
+* `message` — Send, reply to, read, count and delete messages, and tombstone a session (default: inbox)
 * `channel` — Join, leave, list and manage channels and scenes (default: list)
 * `peer` — List sessions, show this session's identity and the running loops (default: list)
 * `keepwarm` — Keep the prompt cache warm across idle stretches (ADR-182; default: status)
@@ -144,7 +146,7 @@ Mark a listening session alive: touch its heartbeat, deliver nothing. After a /c
 
 ## `attend message`
 
-Send, reply to, read and count messages (default: inbox)
+Send, reply to, read, count and delete messages, and tombstone a session (default: inbox)
 
 **Usage:** `attend message [OPTIONS]
        message <COMMAND>`
@@ -155,7 +157,9 @@ Send, reply to, read and count messages (default: inbox)
 * `reply` — Reply to the most recent peer message: a direct message to its sender, or in its named channel
 * `inbox` — Read pending messages from peers
 * `unread` — Count this session's unread messages by room, marking none of them read
-* `cleanup` — Reap signal files whose owning project is gone, and prune empty project dirs. Messages are never removed by age — lifetime is bound to project liveness (ADR-136)
+* `cleanup` — Reap signal files whose owning project is gone, and prune empty project dirs. Lifetime is bound to project liveness (ADR-136); the one removal by age is of a message `attend message delete` marked, 7 days after the mark, or for a message in a project tray once that project has started 3 Claude Code sessions since, each /clear counting as one (ADR-404 D3e).
+* `delete` — Mark for deletion the messages no live session still has to read
+* `tombstone` — Tombstone a session that has exited, so every reader skips its messages
 
 ###### **Options:**
 
@@ -254,7 +258,7 @@ Count this session's unread messages by room, marking none of them read
 
 ## `attend message cleanup`
 
-Reap signal files whose owning project is gone, and prune empty project dirs. Messages are never removed by age — lifetime is bound to project liveness (ADR-136)
+Reap signal files whose owning project is gone, and prune empty project dirs. Lifetime is bound to project liveness (ADR-136); the one removal by age is of a message `attend message delete` marked, 7 days after the mark, or for a message in a project tray once that project has started 3 Claude Code sessions since, each /clear counting as one (ADR-404 D3e).
 
 **Usage:** `attend message cleanup [OPTIONS]`
 
@@ -262,6 +266,50 @@ Reap signal files whose owning project is gone, and prune empty project dirs. Me
 
 * `-n`, `--dry-run` — List what would be removed without deleting
 * `--all` — Remove every signal file regardless of project liveness
+
+
+
+## `attend message delete`
+
+Mark for deletion the messages no live session still has to read
+
+A message is marked when it is in the scope, older than --older-than, older than 90 seconds, and no session that may still read the bus would be delivered it: a session keeps what `attend message unread` counts for it, its cold start included, and one this host cannot judge keeps its mail while its last heartbeat is under 7 days old. A person in attend-chat holds nothing. Every reader skips a marked message, and `attend message cleanup` removes it 7 days after the mark, or for a message in a project tray once that project has started 3 Claude Code sessions since, each /clear counting as one (ADR-404 D3e). --undo takes a delete back, and its messages are delivered again, while cleanup has not yet removed them.
+
+**Usage:** `attend message delete [OPTIONS]`
+
+###### **Options:**
+
+* `--open` — Delete in #open
+* `--channel <NAME>` — Delete in this channel
+* `--dm <SESSION-ID>` — Delete in the direct-message thread between you and this session: what it sent you and what you sent it. You are the session this runs in, under its current id and the ids it had before /clear, or outside a session the person at this terminal
+* `--everywhere` — Delete in every room: #open, each channel, each project tray and each person's tray
+* `--from <SESSION-ID>` — Only messages this session sent
+* `--older-than <WHEN>` — How old a message must be: `current` (before the earliest start of any live session), `today` (before local midnight), `all`, a duration such as 90m, 2h30m, 3d or 1w, or a local date YYYY-MM-DD
+
+  Default value: `all`
+* `-n`, `--dry-run` — Report what would be marked and mark nothing
+* `--undo <BATCH>` — Remove the marks of the newest delete, or of the batch named
+* `--json` — Print the result as one JSON document
+
+
+
+## `attend message tombstone`
+
+Tombstone a session that has exited, so every reader skips its messages
+
+The drain, the mod, `attend message unread`, the Monitor poller and `attend message inbox` all skip what a tombstoned session sent, and the drain records it read, up to when it was tombstoned; what the session sends later, back under --resume, shows. Only an agent's session that this host saw exit is tombstoned: a person's id, a session that may still read the bus, an id such a session had before /clear and this session's own are refused. Its messages stay on disk; `attend message delete --everywhere --from <id>` marks them for deletion (ADR-404 D3e).
+
+**Usage:** `attend message tombstone [OPTIONS] [SESSION-ID]`
+
+###### **Arguments:**
+
+* `<SESSION-ID>` — The session to tombstone
+
+###### **Options:**
+
+* `--undo` — Remove the session's tombstone. What a drain recorded read while it stood stays read
+* `--list` — List the tombstoned sessions
+* `--json` — Print the result as one JSON document
 
 
 

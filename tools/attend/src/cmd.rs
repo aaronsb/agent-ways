@@ -9,6 +9,7 @@
 
 pub(crate) mod cleanup;
 pub(crate) mod config_cmd;
+pub(crate) mod delete;
 pub(crate) mod channels;
 pub(crate) mod inbox;
 #[cfg(feature = "sensor-keepwarm")]
@@ -21,6 +22,7 @@ pub(crate) mod scene;
 pub(crate) mod send;
 pub(crate) mod sensors;
 pub(crate) mod status;
+pub(crate) mod tombstone;
 pub(crate) mod tune;
 pub(crate) mod whoami;
 

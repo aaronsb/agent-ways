@@ -11,11 +11,11 @@
 
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph};
+use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-use super::pick::{docked, Dock};
-use super::render::pane as bordered;
+use super::dialog::Dialog;
+use super::pick::Dock;
 use super::*;
 use crate::input::Input;
 
@@ -33,12 +33,14 @@ pub(crate) struct Entry {
 const WIDTH: u16 = 44;
 
 impl App {
-    /// A key while the entry dialog is open. False ends the session.
+    /// A key while the entry dialog is open. Closed, its drawing is no
+    /// target for the next press. False ends the session.
     pub(super) fn entry_key(&mut self, mut e: Entry, k: KeyEvent) -> bool {
         let m = k.modifiers;
         match k.code {
-            KeyCode::Esc => {}
+            KeyCode::Esc => self.hits.dialog = None,
             KeyCode::Enter if !m.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) => {
+                self.hits.dialog = None;
                 let text = e.input.text().to_string();
                 self.pane_picked(&e.id, vec![text]);
             }
@@ -62,29 +64,25 @@ impl App {
         }
     }
 
-    /// The dialog over `area`, docked where it was opened from, else in the
-    /// middle: its title, the line with its cursor, then what was wrong
-    /// with the last text entered or how to answer.
+    /// The dialog over `area` in a dialog's frame, docked where it was
+    /// opened from, else in the middle: its title, the line with its
+    /// cursor, then what was wrong with the last text entered or how to
+    /// answer. Where it landed is recorded, so a click outside it closes it.
     pub(super) fn draw_entry(&mut self, f: &mut Frame, area: Rect, e: &Entry) {
-        let hint = match &e.error {
+        let mut hint = match &e.error {
             Some(err) => Line::styled(err.clone(), theme::err()),
             None => Line::styled("Enter sets · Esc cancels", theme::hint()),
         };
-        let fake: Vec<(String, String)> = vec![("x".repeat(WIDTH as usize), String::new()); 2];
-        let r = match e.dock {
-            Some(dock) => docked(area, dock, &e.title, &fake),
-            None => super::render::modal_rect(area, WIDTH + 4, 4),
-        };
-        let inner = r.inner(ratatui::layout::Margin::new(1, 1));
-        let width = inner.width.saturating_sub(1).max(1);
+        // Two lines inside the border, and room for a name and a short line.
+        let frame = Dialog::new(e.title.clone(), WIDTH + 4).height(4).dock(e.dock).keys_only().build().expect("the entry is answered by its keys");
+        let drawn = frame.draw(f, area, self.shape);
+        let width = drawn.body.width.saturating_sub(1).max(1);
         let rows = e.input.rows(width, theme::body());
         let row = rows.iter().position(|l| l.spans.iter().any(|s| s.style.add_modifier.contains(ratatui::style::Modifier::REVERSED))).unwrap_or(0);
         let mut line = rows.get(row).cloned().unwrap_or_default();
         line.spans.insert(0, Span::raw(" "));
-        self.hits.menu = Some((r, Vec::new()));
-        f.render_widget(Clear, r);
-        let mut hint = hint;
         hint.spans.insert(0, Span::raw(" "));
-        f.render_widget(Paragraph::new(vec![line, hint]).block(bordered(e.title.clone()).border_style(theme::modal_border())), r);
+        f.render_widget(Paragraph::new(vec![line, hint]), drawn.body);
+        self.hits.dialog = Some((std::mem::discriminant(&self.mode), drawn));
     }
 }

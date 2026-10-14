@@ -32,11 +32,12 @@ fn base() -> &'static Path {
 }
 
 /// The person tray's signals reach the chat through the watcher, as
-/// `Channel::Person`; another person's tray does not.
+/// `Channel::Person`; another person's tray is read too, as a direct
+/// message between others, which no view of the person's shows (#995).
 #[test]
 fn the_person_tray_streams_into_the_chat() {
     let base = base();
-    let (tx, rx) = std::sync::mpsc::channel::<Signal>();
+    let (tx, rx) = std::sync::mpsc::channel::<attend_chat::watcher::Delivery>();
     watcher::spawn_watcher(base.to_path_buf(), String::new(), "aaron".to_string(), tx).unwrap();
     std::thread::sleep(Duration::from_millis(300));
     for (member, body) in [("someone-else", "not yours"), ("aaron", "a reply for you")] {
@@ -55,16 +56,18 @@ fn the_person_tray_streams_into_the_chat() {
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut got = Vec::new();
     while Instant::now() < deadline && got.is_empty() {
-        got.extend(rx.try_iter());
+        got.extend(rx.try_iter().filter_map(watcher::Delivery::signal));
         std::thread::sleep(Duration::from_millis(20));
     }
     std::thread::sleep(Duration::from_millis(300));
-    got.extend(rx.try_iter());
+    got.extend(rx.try_iter().filter_map(watcher::Delivery::signal));
     // Other tests in this binary post to #open and the project tray at the
     // same time; only person-tray signals are this test's.
-    let bodies: Vec<(&str, &Channel)> =
+    let mut bodies: Vec<(&str, &Channel)> =
         got.iter().filter(|s| s.message.contains("for you") || s.message.contains("not yours")).map(|s| (s.message.as_str(), &s.channel)).collect();
-    assert_eq!(bodies, [("a reply for you", &Channel::Person)]);
+    bodies.sort_by_key(|(m, _)| *m);
+    assert_eq!(bodies, [("a reply for you", &Channel::Person), ("not yours", &Channel::Elsewhere("someone-else".into()))]);
+    assert!(!attend_chat::tabs::shows(got.iter().find(|s| s.message == "not yours").unwrap(), &Tab::Merged));
 }
 
 /// A direct message to the person shows in every view, labelled `→ you`.
@@ -81,6 +84,8 @@ fn a_direct_message_shows_in_every_view_labelled() {
         message: "a reply for you".into(),
         ts: 1_790_949_000,
         channel: Channel::Person,
+        tray: String::new(),
+        beside_post: false,
     });
     for tab in [Tab::Merged, Tab::Channel("open".into()), Tab::Dm(PEER_SID.into())] {
         assert!(attend_chat::tabs::shows(&c.signals()[0], &tab), "{tab:?}");

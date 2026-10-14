@@ -82,6 +82,9 @@ pub fn list_with(query: InboxQuery, instances: &SnapshotCache) -> InboxPage {
     let ids = attend_presence::enrollment::reading_ids(&me);
     let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
     let mut messages: Vec<Message> = Vec::new();
+    // A message a delete marked, or a tombstoned session sent, is gone from
+    // every listing (ADR-404 D3e).
+    let marks = attend_groups::tombstones::Marks::load(&crate::util::signals_base());
 
     for dir in &groups_for(&me).receive_dirs(&me.origin_path) {
         let Ok(dir_entries) = std::fs::read_dir(&dir.path) else { continue };
@@ -95,12 +98,18 @@ pub fn list_with(query: InboxQuery, instances: &SnapshotCache) -> InboxPage {
             if path.extension().and_then(|e| e.to_str()) != Some("signal") {
                 continue;
             }
+            if path.file_name().and_then(|n| n.to_str()).is_some_and(|n| marks.hides(&attend_state::seen_key(n))) {
+                continue;
+            }
             let mtime = std::fs::metadata(&path)
                 .ok()
                 .and_then(|m| m.modified().ok())
                 .unwrap_or(std::time::UNIX_EPOCH);
             let Ok(content) = agent_identity::signal::read_signal_file(&path) else { continue };
             let Some(sig) = parse_signal(wire_line(&content)) else { continue };
+            if marks.hides_sender(&sig.sender_id(), mtime) {
+                continue;
+            }
             // Skip own messages, under this id or an earlier one.
             if sig.from.split_once(':').is_some_and(|(_, identity)| ids.contains(&identity)) {
                 continue;
@@ -161,6 +170,10 @@ pub enum ReadError {
     Unreadable { error: String },
     /// The file exists and its wire format is corrupt.
     Corrupt,
+    /// A delete marked it (ADR-404 D3e).
+    Deleted { id: String, batch: String },
+    /// A tombstoned session sent it.
+    Tombstoned { id: String, session: String },
 }
 
 impl std::fmt::Display for ReadError {
@@ -169,6 +182,10 @@ impl std::fmt::Display for ReadError {
             Self::NotFound => write!(f, "no message by that id — already consumed or expired"),
             Self::Unreadable { error } => write!(f, "the message exists but could not be read: {error}"),
             Self::Corrupt => write!(f, "the message exists but its wire format is corrupt"),
+            Self::Deleted { id, batch } => write!(f, "{id} was deleted; attend message delete --undo {batch} restores it"),
+            Self::Tombstoned { id, session } => {
+                write!(f, "{id} was sent by tombstoned session {session}; attend message tombstone {session} --undo restores it")
+            }
         }
     }
 }
@@ -201,6 +218,14 @@ pub fn read(id: &str) -> Result<Message, ReadError> {
             return Err(ReadError::NotFound);
         }
         let mtime = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok()).unwrap_or(std::time::UNIX_EPOCH);
+        let base = crate::util::signals_base();
+        if let Some(batch) = attend_groups::tombstones::batch_of(&base, &target) {
+            return Err(ReadError::Deleted { id: id.to_string(), batch });
+        }
+        let sender = sig.sender_id();
+        if attend_groups::tombstones::Marks::load(&base).hides_sender(&sender, mtime) {
+            return Err(ReadError::Tombstoned { id: id.to_string(), session: sender });
+        }
         let scope = match dir.room {
             Room::Open => "#open",
             Room::Project => "project",

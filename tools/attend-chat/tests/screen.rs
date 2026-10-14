@@ -56,6 +56,7 @@ fn fixture() -> &'static Fixture {
         std::env::set_var("XDG_STATE_HOME", root.join("state"));
         std::env::set_var("XDG_DATA_HOME", root.join("data"));
         std::env::set_var("USER", "aaron");
+        remove_at_exit(&root);
         let base = attend_chat::signal::signals_base();
         std::fs::create_dir_all(&base).unwrap();
         let g = attend_groups::Groups::new(&base, BETA_SID);
@@ -74,6 +75,27 @@ fn fixture() -> &'static Fixture {
     })
 }
 
+/// Remove the fixture's directory when the process exits: the fixture is a
+/// static, which is never dropped.
+#[cfg(unix)]
+fn remove_at_exit(root: &Path) {
+    static ROOT: OnceLock<PathBuf> = OnceLock::new();
+    extern "C" fn remove() {
+        if let Some(root) = ROOT.get() {
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+    let _ = ROOT.set(root.to_path_buf());
+    // SAFETY: `remove` is a plain function with no arguments, as atexit
+    // takes; it touches only the static set above.
+    unsafe {
+        libc::atexit(remove);
+    }
+}
+
+#[cfg(not(unix))]
+fn remove_at_exit(_root: &Path) {}
+
 fn sig(from: &str, cwd: &str, ago: u64, channel: Channel, message: &str) -> Signal {
     Signal {
         id: format!("t-{ago}"),
@@ -84,6 +106,8 @@ fn sig(from: &str, cwd: &str, ago: u64, channel: Channel, message: &str) -> Sign
         message: message.into(),
         ts: NOW - ago,
         channel,
+        tray: String::new(),
+        beside_post: false,
     }
 }
 
@@ -380,7 +404,7 @@ fn the_watcher_feeds_the_screen_on_tick() {
     let (tx, rx) = std::sync::mpsc::channel();
     fixture();
     let mut c = Chat::new(Some(rx), Palette::default(), Shape::PLAIN).heartbeat(false);
-    tx.send(sig("external:aaron@kitty", "/home/aaron", 0, Channel::Open, "arrived")).unwrap();
+    tx.send(sig("external:aaron@kitty", "/home/aaron", 0, Channel::Open, "arrived").into()).unwrap();
     c.tick();
     assert_eq!(c.signals().len(), 1);
     assert!(testkit::text(&testkit::render_screen(&mut c, 80, 25)).contains("arrived"));
@@ -405,7 +429,7 @@ fn an_unchanged_screen_is_copied_not_drawn_again() {
     c.tick();
     testkit::render_screen(&mut c, 80, 25);
     let before = c.draws();
-    tx.send(sig("external:aaron@kitty", "/home/aaron", 0, Channel::Open, "new")).unwrap();
+    tx.send(sig("external:aaron@kitty", "/home/aaron", 0, Channel::Open, "new").into()).unwrap();
     c.tick();
     testkit::render_screen(&mut c, 80, 25);
     assert_eq!(c.draws(), before + 1, "a new message draws afresh");
@@ -1272,16 +1296,16 @@ fn the_common_menu_leads_the_bar_and_the_operator_view_is_zero() {
     assert!(text(&mut c, 80, 25).contains("▸≡"), "{}", text(&mut c, 80, 25));
     press(&mut c, key(KeyCode::Enter));
     let menu = text(&mut c, 80, 25);
-    for item in ["pick one: attend-chat", "Theme ▸", "Keybinding set ▸", "Mouse off at start", "Settings…", "Quit"] {
+    for item in ["pick one: attend-chat", "Theme ▸", "Keybinding set ▸", "Mouse off at start", "Settings ▸", "Quit"] {
         assert!(menu.contains(item), "{item}: {menu}");
     }
     g.check("common-menu-80x25", &testkit::render_screen(&mut c, 80, 25));
-    // Settings… is the item above Quit, the last.
+    // Settings ▸ is the item above Quit, the last.
     press(&mut c, key(KeyCode::End));
     press(&mut c, key(KeyCode::Up));
     press(&mut c, key(KeyCode::Enter));
     let shown = text(&mut c, 80, 25);
-    assert!(shown.contains("mouse = ") && shown.contains("/config <key> <value> sets one"), "Settings… shows /config's listing: {shown}");
+    assert!(shown.contains("attend.chat.mouse = ") && shown.contains("attend_mod.listening = "), "Settings ▸ lists the settings: {shown}");
     g.finish();
 }
 
@@ -1316,6 +1340,30 @@ fn chat_side() -> Chat {
     let mut c = chat().sidebar(true);
     c.push(sig(&format!("claude:{GAMMA_SID}"), GAMMA, 900, Channel::Open, "signing off"));
     c
+}
+
+/// An agent's own DMs (ADR-405, Review DMs), opened from its menu: the row
+/// under the agent's in a colour of its own, the tab led by a mark in that
+/// colour, every DM the agent sent or received in the feed, and no compose
+/// box, the feed's border saying it is read only.
+#[test]
+fn golden_an_agents_own_dms_are_read_only() {
+    let mut g = goldens();
+    let mut c = chat_side();
+    c.push(sig(&format!("claude:{ALPHA_SID}"), ALPHA, 200, Channel::Elsewhere(BETA_SID.into()), "the legend moved; can you check the tab bar?"));
+    c.push(sig(&format!("claude:{BETA_SID}"), BETA, 100, Channel::Elsewhere(ALPHA_SID.into()), "checked: the bar holds"));
+    c.push(sig(&format!("claude:{BETA_SID}"), BETA, 90, Channel::Elsewhere(GAMMA_SID.into()), "not alpha's"));
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let at = testkit::find(&buf, "alpha").expect("alpha's row");
+    right(&mut c, at);
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let item = testkit::find(&buf, "Review DMs").unwrap_or_else(|| panic!("{}", testkit::text(&buf)));
+    left(&mut c, item);
+    let shown = text(&mut c, 80, 25);
+    assert!(shown.contains("the legend moved") && shown.contains("checked: the bar holds") && !shown.contains("not alpha's"), "{shown}");
+    assert!(shown.contains("read only") && !shown.contains("> "), "no compose box: {shown}");
+    shoot(&mut g, "review-dms", &mut c);
+    g.finish();
 }
 
 #[test]
@@ -1388,13 +1436,15 @@ fn a_click_on_an_agent_row_opens_its_menu_and_on_a_channel_row_the_channels() {
     assert!(!text(&mut c, 80, 25).contains("pick one"), "the first click shows its DMs");
     left(&mut c, (x, y));
     let menu = text(&mut c, 80, 25);
-    assert!(menu.contains("pick one: @Lyra") && menu.contains("Hide DMs") && menu.contains("Address @Lyra") && menu.contains("Who is this"), "{menu}");
+    assert!(menu.contains("pick one: @Lyra") && menu.contains("Hide DMs") && menu.contains("Review DMs") && menu.contains("Address @Lyra") && menu.contains("Who is this"), "{menu}");
     assert!(!menu.contains("Remove from"), "a DM view shows no channel to remove from: {menu}");
     press(&mut c, key(KeyCode::Down));
+    press(&mut c, key(KeyCode::Down));
     press(&mut c, key(KeyCode::Enter));
-    assert_eq!(c.input().text(), "@Lyra ", "the item after Hide DMs addresses it");
+    assert_eq!(c.input().text(), "@Lyra ", "the item after Hide DMs and Review DMs addresses it");
     // Who is this, for a quiet claude /whois cannot resolve.
     left(&mut c, (x, y));
+    press(&mut c, key(KeyCode::Down));
     press(&mut c, key(KeyCode::Down));
     press(&mut c, key(KeyCode::Down));
     press(&mut c, key(KeyCode::Enter));
@@ -1500,8 +1550,9 @@ fn golden_the_keyboard_walks_the_column() {
     press(&mut c, key(KeyCode::Enter));
     assert!(text(&mut c, 80, 25).contains("pick one: @Laszlo"), "Enter on an agent opens its menu");
     press(&mut c, key(KeyCode::Down));
+    press(&mut c, key(KeyCode::Down));
     press(&mut c, key(KeyCode::Enter));
-    assert!(c.input().text().starts_with("@Laszlo"), "the item after Show DMs addresses it: {:?}", c.input().text());
+    assert!(c.input().text().starts_with("@Laszlo"), "the item after Show DMs and Review DMs addresses it: {:?}", c.input().text());
     g.finish();
 }
 

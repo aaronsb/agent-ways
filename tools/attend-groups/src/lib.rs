@@ -18,6 +18,8 @@
 //! yaml does not distinguish them — liveness was always
 //! heartbeat-shaped, not UUID-shaped.
 
+pub mod tombstones;
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};

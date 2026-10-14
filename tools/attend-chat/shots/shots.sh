@@ -17,6 +17,14 @@
 # Each step waits on the screen, not on the clock: after a key or a click
 # the script polls the pane's text until two captures agree, and wait:TEXT
 # polls until TEXT is on the screen. A wait that runs out fails the run.
+#
+# The harness's tmux server is shared by every harness root on the machine,
+# so a session name is global. Each run names its sessions ac-<pid>-<scenario>:
+# two runs, in one checkout or two, never share a name, and a run never
+# downs or launches onto another's. The run downs its own session on every
+# exit (a failed wait, an error, ^C, a TERM), and at the start downs the
+# leftovers of earlier runs of this root whose pid is gone (a KILL or a
+# power cut leaves one). Nothing else on the server is touched.
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$HERE/../../.." && pwd)
@@ -26,12 +34,32 @@ WORK=${SHOTS_DIR:-$REPO/target/tui-verify/attend-chat}
 # (`.claude/worktrees/`) normalizes to the worktree's origin, and every
 # fixture agent would collapse into that one identity.
 F=$(mktemp -d "${TMPDIR:-/tmp}/attend-chat-shots.XXXXXX")
-trap 'rm -rf "$F"' EXIT
+SESSION=
+cleanup() {
+  [ -z "$SESSION" ] || $TH down "$SESSION" >/dev/null 2>&1 || true
+  rm -rf "$F"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 FONT=${FONT:-JetBrains Mono}
 SIZES=${SIZES:-80x25 120x35}
 REALHOME=$HOME
 TH="$BIN/tui-harness --dir $WORK/th"
 mkdir -p "$WORK"
+
+# Down the sessions of earlier runs of this root that no process owns now.
+sweep() {
+  local d name pid
+  for d in "$WORK"/th/sessions/ac-[0-9]*-*; do
+    [ -d "$d" ] || continue
+    name=${d##*/}
+    pid=${name#ac-}
+    pid=${pid%%-*}
+    kill -0 "$pid" 2>/dev/null || $TH down "$name" >/dev/null 2>&1 || true
+  done
+}
+sweep
 
 # The scenarios: name | fixture | steps. A step is a tmux key name, or
 #   text:CHARS     typed literally
@@ -49,7 +77,12 @@ mkdir -p "$WORK"
 # The fixture is base, crowd (fifteen more agents), many (24 more channels,
 # so the last channel row sits at the foot), own (the operator in
 # #deploy), long (a fourth agent whose project name outruns any row),
-# dm (a direct message from alpha to the operator) or plain (no Nerd Font). An agent's name comes from the temp
+# dm (a direct message from alpha to the operator), trays (direct messages
+# in every project's tray: one the operator sent beta in an earlier
+# session, and the agents' DMs with each other), proj (alpha, where the
+# chat runs, a project whose .claude/ways.yaml sets
+# attend_mod.listening: active, and beta a git checkout) or plain (no
+# Nerd Font). An agent's name comes from the temp
 # path, and a long one cuts its project, so the quiet agent is clicked by
 # the column's first `○`, its row being the agents' last.
 SCENARIOS="
@@ -83,6 +116,7 @@ ask-no       | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:y_cle
 ask-feed     | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:y_clear click:signing wait:kept
 ask-row      | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:y_clear side:#infra wait:kept
 ask-long     | base  | wait:#open click:#open click:#open wait:Clear_history Down Enter wait:y_clear
+quit-ask     | base  | wait:Agents F2 q wait:quit?
 menu-row     | base  | wait:Agents side:#infra side:#infra wait:pick side:#deploy gone:pick
 menu-tab     | base  | wait:Agents side:#infra side:#infra wait:pick click:#open gone:pick
 prompt-click | base  | wait:Agents text:draft C-n wait:new_channel text:abc click:Agents gone:new_channel
@@ -98,14 +132,18 @@ menu-waits   | base  | wait:Agents side:#deploy side:#deploy wait:needs_ADR-404_
 theme-sub    | base  | wait:Agents click:≡ wait:Theme click:Theme wait:theme_for
 keys-sub     | base  | wait:Agents click:≡ wait:Keybinding click:Keybinding wait:keybinding_set
 remove-sub   | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Remove_agent wait:remove_from
-settings     | base  | wait:Agents click:≡ wait:Settings click:Settings wait:sets_one
+settings     | base  | wait:Agents click:≡ wait:Settings click:Settings wait:listening_=
+settings-layer | proj | wait:Agents click:≡ wait:Settings click:Settings wait:listening_= click:listening_= wait:write_to
+settings-value | proj | wait:Agents click:≡ wait:Settings click:Settings wait:listening_= click:listening_= wait:write_to click:project_ wait:current
+settings-set | proj  | wait:Agents click:≡ wait:Settings click:Settings wait:listening_= click:listening_= wait:write_to click:project_ wait:current click:dormant wait:dormant_·_alpha/.claude/ways.yaml
+settings-chat | base | wait:Agents click:≡ wait:Settings click:Settings wait:listening_= click:mouse_= wait:current
 tab-closes   | base  | wait:Agents M-2 M-2 wait:pick click:rollout gone:pick
 guard-name   | base  | wait:Agents C-n wait:new_channel_name text:abc C-c wait:being_typed
 guard-draft  | base  | wait:Agents text:agg C-c wait:Quit_and_discard
 guard-typed  | base  | wait:Agents text:agg C-c wait:Quit_and_discard text:xyz C-c
 guard-back   | base  | wait:Agents text:agg C-c wait:Quit_and_discard Escape gone:Quit_and_discard wait:>_agg
 rclick-row   | base  | wait:Agents rside:#infra wait:pick_one:_#infra
-rclick-agent | base  | wait:Agents rside:● wait:Address
+rclick-agent | base  | wait:Agents rside:beta wait:Address
 rclick-name  | base  | wait:signing rfeed:gamma wait:Address
 flag-click   | base  | wait:Agents M-2 wait:rollout_is_green last:#deploy wait:pick_one:_#deploy
 flag-merged  | base  | wait:Agents last:#open wait:pick_one:_#open
@@ -133,8 +171,8 @@ enter-row    | base  | wait:Agents F2 Down End Up Enter wait:pick_one:_#infra
 enter-agent  | base  | wait:Agents F2 Down Enter wait:Add_agent_to_chat
 enter-feed   | base  | wait:Agents BTab Enter wait:message_from
 enter-plus   | base  | wait:Agents F2 Left Left Enter wait:new_channel_name
-add-menu     | base  | wait:Agents rside:● wait:Add_agent_to_chat
-add-pick     | base  | wait:Agents rside:● wait:Add_agent_to_chat click:Add_agent_to_chat wait:add_to_channel
+add-menu     | base  | wait:Agents rside:beta wait:Add_agent_to_chat
+add-pick     | base  | wait:Agents rside:beta wait:Add_agent_to_chat click:Add_agent_to_chat wait:add_to_channel
 add-done     | base  | wait:Agents rside:● wait:Add_agent_to_chat click:Add_agent_to_chat wait:add_to_channel Enter wait:invite
 narrow-bar   | many  | wait:Agents resize:60 wait:⋯all
 arrow-empty  | base  | wait:Agents Up text:1x wait:>_1x
@@ -166,6 +204,11 @@ dm-compose   | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs t
 dm-menu      | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs rfeed:→_you wait:Hide_DMs
 dm-hide      | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs side:DMs wait:Hide_DMs click:Hide_DMs gone:pick_one
 dm-quiet     | base  | wait:Agents side:○ wait:DMs text:are_you_there Enter wait:no_heartbeat
+dm-earlier   | trays | wait:Agents_3/4 side:beta wait:sent_before_this_chat
+review-open  | trays | wait:Agents_3/4 rside:alpha wait:Review_DMs click:Review_DMs wait:read_only
+review-type  | trays | wait:Agents_3/4 rside:alpha wait:Review_DMs click:Review_DMs wait:read_only text:hello BTab
+review-menu  | trays | wait:Agents_3/4 rside:alpha wait:Review_DMs click:Review_DMs wait:read_only side:DMs wait:Hide_review
+review-both  | trays | wait:Agents_3/4 side:alpha wait:DMs rside:alpha wait:Review_DMs click:Review_DMs wait:read_only
 "
 
 # The fixture: three claudes (alpha and beta live, gamma quiet), #deploy
@@ -173,7 +216,10 @@ dm-quiet     | base  | wait:Agents side:○ wait:DMs text:are_you_there Enter wa
 # names after its directory was swept. The human is `operator`. `crowd`
 # adds fifteen agents, every other one live; `own` puts the operator in
 # #deploy, with a message there; `many` adds #ch01 to #ch24; `plain` the
-# plain shape; `dm` a direct message from alpha to the operator. No attend config is written: the mouse is on by default.
+# plain shape; `dm` a direct message from alpha to the operator; `trays`
+# that, a direct message the operator sent beta in an earlier session, in
+# beta's tray, and direct messages between the agents in their trays. No
+# attend config is written: the mouse is on by default.
 fixture() { # kind
   rm -rf "$F"
   local cache=$F/cache/attend sig=$F/cache/attend/signals now shape=round
@@ -227,20 +273,57 @@ YAML
     printf '%s|%s|%s|%s\n' "$4" "$(basename "$5")" "$5" "$6" > "$1/$2.signal"
     touch -d "@$((now - $3))" "$1/$2.signal"
   }
+  dm() { # dir id age from cwd kind sender-id to text: a direct message, with its envelope
+    printf '%s|%s|%s|from_kind:%s|from_id:%s|to:%s|%s\n' "$4" "$(basename "$5")" "$5" "$6" "$7" "$8" "$9" > "$1/$2.signal"
+    touch -d "@$((now - $3))" "$1/$2.signal"
+  }
   msg "$sig/_broadcast" s1 900 "claude:$C" "$F/work/gamma" "signing off for today"
   msg "$sig/_broadcast" s2 600 "claude:$A" "$F/work/alpha" "starting the theme port; the legend moves first"
   msg "$sig/@deploy" s3 300 "claude:$B" "$F/work/beta" "rollout is green on staging"
   [ "$1" = own ] && msg "$sig/@deploy" s4 120 "external:operator@kitty" "$F/work/alpha" "watching the rollout"
-  if [ "$1" = dm ]; then
+  if [ "$1" = dm ] || [ "$1" = trays ]; then
     mkdir -p "$sig/_people/operator"
     msg "$sig/_people/operator" s6 450 "claude:$A" "$F/work/alpha" "the legend moved; want a look before I push?"
   fi
+  if [ "$1" = trays ]; then
+    local ta tb
+    ta=$sig/$(tray "$F/work/alpha") tb=$sig/$(tray "$F/work/beta")
+    mkdir -p "$ta" "$tb"
+    dm "$tb" s7 800 "external:operator@kitty" "$F/work/alpha" human operator "$B" "sent before this chat: is staging green?"
+    dm "$tb" s8 400 "claude:$A" "$F/work/alpha" agent "$A" "$B" "the legend moved; can you check the tab bar?"
+    dm "$ta" s9 350 "claude:$B" "$F/work/beta" agent "$B" "$A" "checked: the bar holds"
+    dm "$tb" s10 300 "claude:$C" "$F/work/gamma" agent "$C" "$B" "gamma to beta, not alpha's"
+  fi
   [ "$1" = long ] && msg "$sig/_broadcast" s5 60 "claude:eeeeeeee-0000-4000-8000-000000000005" "$F/work/the-delta-project-with-a-name-far-too-long-for-a-row" "a project name longer than any row: the band cuts it and keeps the time"
   printf 'theme:\n  active: nord\n  shape: %s\n' "$shape" > "$F/config/agent-ways/config.yaml"
+  if [ "$1" = proj ]; then
+    mkdir -p "$F/work/alpha/.claude" "$F/work/beta/.git"
+    printf 'attend_mod:\n  listening: active\n' > "$F/work/alpha/.claude/ways.yaml"
+  fi
+}
+
+# The tray of the project at PATH: its attend key, `claude_sessions::attend_key`.
+tray() { # path
+  python3 -I -c '
+import sys
+p = sys.argv[1]
+h = 0
+for u in p.encode("utf-16-le").decode("utf-16-le"):
+    for unit in [ord(u)] if ord(u) < 0x10000 else [0xD800 + ((ord(u) - 0x10000) >> 10), 0xDC00 + ((ord(u) - 0x10000) & 0x3FF)]:
+        h = ((h << 5) - h + unit) & 0xFFFFFFFF
+if h >= 1 << 31:
+    h -= 1 << 32
+n, d = abs(h), "0123456789abcdefghijklmnopqrstuvwxyz"
+b = d[0] if n == 0 else ""
+while n:
+    b, n = d[n % 36] + b, n // 36
+slug = "".join(c if c.isascii() and c.isalnum() else "-" * (2 if ord(c) >= 0x10000 else 1) for c in p)
+assert len(slug) <= 200, "a fixture path this long needs the slug cut"
+print(f"{slug}-{b}")
+' "$1"
 }
 
 launch() { # name cols rows
-  $TH down "$1" >/dev/null 2>&1 || true
   (cd "$F/work/alpha" && env -u CLAUDE_CONFIG_DIR -u CLAUDE_PROJECT_DIR -u CLAUDE_CODE_SESSION_ID HOME="$F/home" USER=operator \
     XDG_CACHE_HOME="$F/cache" XDG_CONFIG_HOME="$F/config" XDG_STATE_HOME="$F/state" XDG_DATA_HOME="$F/data" \
     TERM=xterm-256color COLORTERM=truecolor \
@@ -297,7 +380,7 @@ else:
 # The harness has no resize verb: its private tmux server resizes the window.
 resize() { # name cols
   local s
-  s=$(tmux -L agent-ways-tui list-sessions -F '#S' | grep -F "$1" | head -1)
+  s=$(tmux -L agent-ways-tui list-sessions -F '#S' | grep -Fx "tui-$1" | head -1)
   tmux -L agent-ways-tui resize-window -t "$s" -x "$2"
 }
 
@@ -345,7 +428,8 @@ while IFS='|' read -r name kind steps; do
     c=${size%x*} r=${size#*x}
     out=$WORK/$size
     mkdir -p "$out"
-    s=ac-$name
+    s=ac-$$-$name
+    SESSION=$s
     launch "$s" "$c" "$r"
     for k in $steps; do
       step "$s" "$k"
@@ -353,6 +437,7 @@ while IFS='|' read -r name kind steps; do
     $TH text "$s" >"$out/$name.txt"
     HOME=$REALHOME $TH shot "$s" --out "$out/$name.png" >/dev/null
     $TH down "$s" >/dev/null
+    SESSION=
     echo "$out/$name.png"
     n=$((n + 1))
   done

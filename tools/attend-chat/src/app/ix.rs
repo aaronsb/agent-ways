@@ -234,6 +234,10 @@ pub(super) struct View {
     pub(super) feed_selected: Option<usize>,
     /// `attend.chat.tabs.menu_on_repeat`.
     pub(super) menu_on_repeat: bool,
+    /// The view shown has no compose box: an agent's own DMs, which offer
+    /// nothing to send. The ring leaves the box out, and the focus that
+    /// would go to it goes to the feed.
+    pub(super) read_only: bool,
 }
 
 /// The tab bar and the column as the world lays them out.
@@ -272,6 +276,14 @@ impl<'a> Step<'a> {
     }
 
     fn ev(&mut self, ev: Ev) -> R {
+        // A view with no compose box holds no focus there, however the view
+        // came to be shown under it. An overlay's coming or going moves no
+        // focus; the next input does.
+        let overlay = matches!(ev, Ev::OverlayOpened(_) | Ev::OverlayClosed(_));
+        if self.v.read_only && self.ix.focus == Focus::Compose && !overlay {
+            self.set(Focus::Feed);
+            self.fx.push(Effect::Redraw);
+        }
         match ev {
             Ev::Key(k) if self.ix.owns_text() => self.compose_key(k),
             Ev::Key(k) => self.nav_key(k),
@@ -340,8 +352,10 @@ impl<'a> Step<'a> {
 
     /// The focus is `f`, and nothing else is done: what is no longer true
     /// of the state goes with the old focus. A tab is remembered for the
-    /// Esc cycle.
+    /// Esc cycle. In a view with no compose box, the box's focus is the
+    /// feed's.
     fn set(&mut self, f: Focus) {
+        let f = if f == Focus::Compose && self.v.read_only { Focus::Feed } else { f };
         if !matches!(f, Focus::Row(_)) {
             self.ix.row_hit = None;
         }
@@ -415,7 +429,7 @@ impl<'a> Step<'a> {
                 let w = self.world()?;
                 let mut channels = w.rows.iter().enumerate().filter_map(|(i, h)| match h {
                     SideHit::Channel(c) => Some((i, c.clone())),
-                    SideHit::Agent(_) | SideHit::Dm(_) => None,
+                    SideHit::Agent(_) | SideHit::Dm(_) | SideHit::Review(_) => None,
                 });
                 let Some((i, name)) = channels.nth(n - 1) else { return Ok(()) };
                 if self.ix.side_focus().is_some() {
@@ -440,14 +454,18 @@ impl<'a> Step<'a> {
     }
 
     /// The ring of focusable elements, in order: the tab bar's slots, the
-    /// column's rows while it is drawn, the feed, the compose box.
+    /// column's rows while it is drawn, the feed, the compose box where the
+    /// view has one.
     fn ring(&self) -> Result<Vec<Focus>, NeedWorld> {
         let w = self.world()?;
         let mut out: Vec<Focus> = w.bar.iter().cloned().map(Focus::Tab).collect();
         if self.v.side_drawn {
             out.extend((0..w.rows.len()).map(Focus::Row));
         }
-        out.extend([Focus::Feed, Focus::Compose]);
+        out.push(Focus::Feed);
+        if !self.v.read_only {
+            out.push(Focus::Compose);
+        }
         Ok(out)
     }
 
@@ -517,7 +535,9 @@ impl<'a> Step<'a> {
                 Ok(())
             }
             // A character is typing: it goes to the compose box. Backspace
-            // and Delete only go back to the box, the draft untouched.
+            // and Delete only go back to the box, the draft untouched. A
+            // view with no box takes no text.
+            KeyCode::Char(_) if plain && self.v.read_only => Ok(()),
             KeyCode::Char(_) if plain => {
                 self.go(Focus::Compose)?;
                 self.fx.push(Effect::Type(k));
@@ -545,6 +565,7 @@ impl<'a> Step<'a> {
                 let row = match slot {
                     Slot::Tab(Tab::Channel(c)) => rows.iter().position(|h| *h == SideHit::Channel(c.clone())),
                     Slot::Tab(Tab::Dm(m)) => rows.iter().position(|h| *h == SideHit::Dm(m.clone())),
+                    Slot::Tab(Tab::Review(m)) => rows.iter().position(|h| *h == SideHit::Review(m.clone())),
                     _ => None,
                 };
                 self.go(Focus::Row(row.unwrap_or(0)))
@@ -668,7 +689,7 @@ impl<'a> Step<'a> {
         if let (Some(i), Some(hit)) = (self.ix.side_focus(), self.ix.row_hit.clone()) {
             let rows = &self.world()?.rows;
             let owner = match &hit {
-                SideHit::Dm(m) => rows.iter().position(|h| *h == SideHit::Agent(m.clone())),
+                SideHit::Dm(m) | SideHit::Review(m) => rows.iter().position(|h| *h == SideHit::Agent(m.clone())),
                 _ => None,
             };
             match rows.iter().position(|h| *h == hit) {

@@ -5,15 +5,19 @@
 //! does the writes and commands an apply asks for.
 
 mod apply;
+mod dialog;
 mod entry;
 pub mod flow;
 mod items;
 mod keys;
+mod menus;
+mod modals;
 pub mod pane;
 mod paneshell;
 mod panetabs;
 pub use panetabs::{Jump, TabKeys};
 mod pick;
+mod questions;
 mod render;
 mod response;
 mod review;
@@ -50,7 +54,7 @@ pub(crate) enum Mode {
     Edit(String),
     Filter,
     /// The keys and the tab's help text, scrolled this many lines.
-    Help { scroll: u16 },
+    Help { scroll: usize },
     /// Choosing among the actions of the node at `path`.
     Menu { path: Vec<usize>, sel: usize },
     /// Choosing a choice's value from its options.
@@ -90,41 +94,29 @@ pub(crate) enum Mode {
     Entry(Box<entry::Entry>),
 }
 
-/// The click targets of review's bar and the quit prompt, and a flow's buttons.
-#[derive(Clone, Copy, PartialEq)]
+/// The click targets of review's bar and the editor's Save, and what a
+/// dialog's buttons answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Btn {
     Apply,
     Discard,
     Back,
-    /// The quit prompt's jump to the first tab with pending items.
+    /// The exit guard's jump to the first tab with pending items.
     Review,
-    /// The quit prompt's quit-and-discard.
+    /// The exit guard's quit-and-discard.
     Quit,
     /// A flow's buttons: on to the next step, finish on the last, or drop it.
     Next,
     Finish,
     Cancel,
-    /// The theme editor's save, and the unsaved prompt's save and discard.
+    /// The theme editor's save, and "close the editor"'s save and discard.
     Save,
     Drop,
+    /// A bar question's two answers.
+    Yes,
+    No,
 }
 
-impl Btn {
-    /// The key a click or Enter on the button stands for.
-    fn key(self) -> KeyCode {
-        match self {
-            Btn::Apply => KeyCode::Char('a'),
-            Btn::Discard => KeyCode::Char('X'),
-            Btn::Quit => KeyCode::Char('D'),
-            Btn::Back => KeyCode::Esc,
-            Btn::Review => KeyCode::Char('r'),
-            Btn::Next | Btn::Finish => KeyCode::Right,
-            Btn::Cancel => KeyCode::Char('q'),
-            Btn::Save => KeyCode::Char('s'),
-            Btn::Drop => KeyCode::Char('d'),
-        }
-    }
-}
 
 /// What a reload keeps of each node, by dotted key: whether it was open,
 /// and a pending value as (loaded, value).
@@ -146,11 +138,10 @@ struct Hits {
     tabs: Vec<(Rect, usize)>,
     /// The tree list inside its border; row `i` is at `y + i - offset`.
     list: Rect,
-    /// The open menu and one rect per item.
-    menu: Option<(Rect, Vec<Rect>)>,
-    /// A confirm's answers: yes or no.
-    answers: Vec<(Rect, bool)>,
-    /// Review's bar targets and the quit prompt's buttons.
+    /// The open dialog and its buttons, with the kind of mode that drew it
+    /// ([`App::drawn_dialog`]).
+    dialog: Option<(std::mem::Discriminant<Mode>, dialog::Drawn)>,
+    /// Review's bar targets and the theme editor's Save.
     buttons: Vec<(Rect, Btn)>,
     /// The call to action on the bottom bar.
     cta: Rect,

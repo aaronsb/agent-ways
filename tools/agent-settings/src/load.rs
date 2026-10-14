@@ -597,6 +597,48 @@ pub fn resolve(spec: &KeySpec, bound: &[String], layers: &[Layer]) -> Resolved {
     Resolved { name, path, value, default, layer: from }
 }
 
+/// Why a key does not read back from a file it was just written to.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Overridden {
+    /// The written file's section for the key failed the schema, so the
+    /// whole section falls back to canonical there: the finding that
+    /// dropped it.
+    Fallback(Finding),
+    /// Another layer, the file at `path`, decides the key, as `name`, with
+    /// `value`.
+    By { path: PathBuf, name: String, value: Option<Value> },
+}
+
+/// After a write of `spec` (bound to `bound`) to the file at `written`,
+/// read through `layers`, why the value in effect does not come from that
+/// file: its section falls back there, or another file sets the key.
+/// `None` when the written file decides it, or when no file sets it.
+/// `ways settings set` and attend-chat's Settings menu say the same thing
+/// from this.
+pub fn overridden(spec: &KeySpec, bound: &[String], layers: &[Layer], written: &Path) -> Option<Overridden> {
+    let r = resolve(spec, bound, layers);
+    let from = r.layer.and_then(|i| layers[i].path.clone());
+    if from.as_deref() == Some(written) {
+        return None;
+    }
+    let written_layer = layers.iter().find(|l| l.path.as_deref() == Some(written));
+    if let Some(f) = written_layer.and_then(|l| l.findings.iter().find(|f| f.section.as_deref() == Some(spec.section) && f.fallback)) {
+        return Some(Overridden::Fallback(f.clone()));
+    }
+    from.map(|path| Overridden::By { path, name: r.name, value: r.value })
+}
+
+/// Whether the layer at `a` sits above the one at `b` in `layers`; a file
+/// `layers` does not read counts as below every file it does.
+pub fn is_higher(layers: &[Layer], a: &Path, b: &Path) -> bool {
+    let pos = |p: &Path| layers.iter().position(|l| l.path.as_deref() == Some(p));
+    match (pos(a), pos(b)) {
+        (Some(x), Some(y)) => x > y,
+        (Some(_), None) => true,
+        _ => false,
+    }
+}
+
 /// Check each stored value of a computed choice against its list over all
 /// `layers`, adding a finding to the layer that holds a value the list
 /// lacks. A load checks one file on its own, so it cannot; `lint` and the
@@ -721,6 +763,46 @@ mod tests {
         let f = &l.findings[0];
         assert_eq!((f.line, f.section.as_deref(), f.key.as_deref(), f.fallback), (Some(2), Some("matching"), Some("prob"), true));
         assert!(f.to_string().starts_with("/user.yaml:2: [matching] prob: 1.5 is outside"), "{f}");
+    }
+
+    /// After a write of `matching.prob`: nothing when the written file
+    /// decides it or no file sets it; the higher file that sets it; or the
+    /// finding that makes the written file's section fall back.
+    #[test]
+    fn overridden_names_a_fallback_a_higher_file_or_nothing() {
+        let (user, project) = (Path::new("/user.yaml"), Path::new("/project.yaml"));
+        let prob = &KEYS[1];
+        let layers = vec![layer("user", LayerScope::User, "prob: 0.4\n"), layer("project", LayerScope::Project, "")];
+        assert_eq!(overridden(prob, &[], &layers, user), None, "the written file decides");
+        assert_eq!(overridden(prob, &[], &[layer("project", LayerScope::Project, "")], project), None, "no file sets it");
+
+        let layers = vec![layer("user", LayerScope::User, "prob: 0.4\n"), layer("project", LayerScope::Project, "prob: 0.9\n")];
+        assert_eq!(
+            overridden(prob, &[], &layers, user),
+            Some(Overridden::By { path: PathBuf::from("/project.yaml"), name: "matching.prob".into(), value: Some(serde_yaml::from_str("0.9").unwrap()) })
+        );
+
+        let layers = vec![layer("user", LayerScope::User, "prob: 0.4\n"), layer("project", LayerScope::Project, "prob: 0.9\npresets:\n  normal: 7\n")];
+        match overridden(prob, &[], &layers, project) {
+            Some(Overridden::Fallback(f)) => {
+                assert_eq!((f.section.as_deref(), f.fallback, f.file.as_deref()), (Some("matching"), true, Some(project)), "{f}");
+                assert!(f.message.contains('7'), "{f}");
+            }
+            other => panic!("the project's matching section falls back: {other:?}"),
+        }
+    }
+
+    /// A file later in the layers is higher; a file the layers do not read
+    /// is below every one they do.
+    #[test]
+    fn is_higher_follows_the_layer_order_and_puts_an_unread_file_lowest() {
+        let layers = vec![layer("user", LayerScope::User, ""), layer("project", LayerScope::Project, "")];
+        let (user, project, elsewhere) = (Path::new("/user.yaml"), Path::new("/project.yaml"), Path::new("/elsewhere.yaml"));
+        assert!(is_higher(&layers, project, user));
+        assert!(!is_higher(&layers, user, project));
+        assert!(!is_higher(&layers, user, user));
+        assert!(is_higher(&layers, user, elsewhere));
+        assert!(!is_higher(&layers, elsewhere, user));
     }
 
     #[test]

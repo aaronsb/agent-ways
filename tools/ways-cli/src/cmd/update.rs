@@ -1045,10 +1045,8 @@ mod tests {
 
     static SEQ: AtomicU32 = AtomicU32::new(0);
 
-    fn tmp() -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("ways-update-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::SeqCst)));
-        std::fs::create_dir_all(&d).unwrap();
-        d
+    fn tmp() -> crate::test_dir::TestDir {
+        crate::test_dir::TestDir::at(std::env::temp_dir().join(format!("ways-update-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::SeqCst))))
     }
 
     #[test]
@@ -1228,7 +1226,7 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn stale_app(release_version: &str) -> std::path::PathBuf {
+    fn stale_app(release_version: &str) -> crate::test_dir::TestDir {
         use std::os::unix::fs::PermissionsExt;
         let app = tmp();
         let exec = |p: &Path, body: &str| {

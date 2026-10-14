@@ -24,6 +24,13 @@ pub struct Signal {
     /// dir it was read from, never from the body (wire format
     /// unchanged). Drives the per-tab transcript filter (#393).
     pub channel: Channel,
+    /// The tray it was read from, by its directory's name; empty for a
+    /// local block. With `id`, which file it is.
+    pub tray: String,
+    /// A direct message the person sent beside a channel post of the same
+    /// send (`@Name #channel`): the post shows it in the operator view, so
+    /// this copy shows only in the DM views.
+    pub beside_post: bool,
 }
 
 impl Signal {
@@ -39,13 +46,54 @@ impl Signal {
 
     /// Whether this is a direct message between the person at the chat and
     /// `member`, either way: one `member` sent to the person's tray, or one
-    /// this chat sent with `member` among its recipients.
+    /// the person sent with `member` among its recipients.
     pub fn is_dm_with(&self, member: &str) -> bool {
         match &self.channel {
             Channel::Person => self.sender_member().as_deref() == Some(member),
             Channel::Sent(to) => to.split(',').any(|t| t == member),
             _ => false,
         }
+    }
+
+    /// Whether this is a direct message `member` sent or received, with
+    /// anyone: what the agent's own DM view holds (ADR-405, Review DMs).
+    /// One to the person is sent by it; any other names its recipients in
+    /// `to`.
+    pub fn is_dm_of(&self, member: &str) -> bool {
+        let to = match &self.channel {
+            Channel::Person => "",
+            Channel::Direct(to) | Channel::Sent(to) | Channel::Elsewhere(to) => to,
+            Channel::Open | Channel::Group(_) | Channel::Info => return false,
+        };
+        self.sender_member().as_deref() == Some(member) || to.split(',').any(|t| t == member)
+    }
+
+    /// Whether this is the same file as `other`, read twice: once just
+    /// after the chat wrote it, once through the watcher.
+    pub fn same_file(&self, other: &Signal) -> bool {
+        !self.tray.is_empty() && self.tray == other.tray && self.id == other.id
+    }
+
+    /// Whether this and `other` are copies of one send by the person, the
+    /// one written together with the other (their times a second apart at
+    /// most) to a different tray.
+    fn copies(&self, other: &Signal) -> bool {
+        !self.tray.is_empty() && !other.tray.is_empty() && self.tray != other.tray && self.from == other.from && self.message == other.message && self.ts.abs_diff(other.ts) <= 1
+    }
+
+    /// Whether this is the same send as `other`, read from another tray: a
+    /// message the person addressed to agents in several projects is
+    /// written once to each project's tray, every copy with the whole `to`.
+    /// The same words sent again go to the same trays, so a copy in the
+    /// same tray is another send.
+    pub fn same_send(&self, other: &Signal) -> bool {
+        matches!((&self.channel, &other.channel), (Channel::Sent(a), Channel::Sent(b)) if a == b) && self.copies(other)
+    }
+
+    /// Whether this direct message the person sent went beside `post`, the
+    /// channel post of the same send (`@Name #channel`).
+    pub fn is_beside(&self, post: &Signal) -> bool {
+        matches!(self.channel, Channel::Sent(_)) && matches!(post.channel, Channel::Open | Channel::Group(_)) && self.copies(post)
     }
 }
 
@@ -56,15 +104,21 @@ pub enum Channel {
     Open,
     /// `@<name>/` — a named channel.
     Group(String),
-    /// A cwd inbox (directed send).
-    Direct,
-    /// A direct message this chat sent, echoed locally: its `to`, the
-    /// comma-separated session ids it went to (ADR-401, `to`).
+    /// A direct message to the chat's own project tray, from someone else:
+    /// its `to`, the comma-separated session ids it went to (ADR-401, `to`),
+    /// empty on a line with no envelope.
+    Direct(String),
+    /// A direct message the person at the chat sent, read back from the
+    /// tray it went to, whichever project's: its `to`, as above.
     Sent(String),
     /// The person tray of the person at this chat, `_people/<member-id>/`:
     /// a reply or a direct message to them (ADR-401, `to`). Shown in every
     /// view.
     Person,
+    /// A direct message between others, read from a tray that is not the
+    /// chat's: another project's, or another person's. Its `to`, as above,
+    /// or the person's member id. No view of the person's shows it.
+    Elsewhere(String),
     /// Local-only status blocks (`/peers` output) — never on the bus,
     /// rendered in every tab so command feedback can't hide.
     Info,
@@ -92,11 +146,31 @@ pub fn cwd_dir(cwd: &str) -> PathBuf {
     signals_base().join(encode_cwd(cwd))
 }
 
+/// The trays the chat reads as its own: its project's tray, by its encoded
+/// name, and the person tray of the person at the chat, by member id.
+/// Either is empty for none.
+#[derive(Clone, Debug, Default)]
+pub struct Own {
+    pub tray: String,
+    pub person: String,
+}
+
+impl Own {
+    /// The chat's own trays here: the tray of the working directory, and
+    /// the person tray of the person at the keyboard. `main` hands the
+    /// watcher these, and a send reads back what it wrote against them.
+    pub fn here() -> Own {
+        let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+        Own { tray: encode_cwd(&cwd), person: human_member_id() }
+    }
+}
+
 /// Parse a `.signal` file through the shared ADR-120 parser
 /// (`agent_identity::parse_signal`), so a `re:` prefix that is not a signal
-/// id reads as legacy prose here exactly as it does in the attend CLI.
+/// id reads as legacy prose here exactly as it does in the attend CLI, and
+/// classify it by the tray it sits in against `own` ([`Channel`]).
 /// Returns `None` for anything that doesn't look like a signal we can render.
-pub fn parse_file(path: &Path) -> Option<Signal> {
+pub fn parse_file(path: &Path, own: &Own) -> Option<Signal> {
     if path.extension().and_then(|s| s.to_str()) != Some("signal") {
         return None;
     }
@@ -116,14 +190,10 @@ pub fn parse_file(path: &Path) -> Option<Signal> {
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    // A direct message the person at this chat sent, in a cwd tray (its
-    // own, which the chat watches), is what it sent, to whom.
-    let mut channel = channel_for_path(path);
-    if let (Channel::Direct, Some("human"), Some(to)) = (&channel, parsed.from_kind, parsed.to) {
-        if parsed.from_id == Some(human_member_id().as_str()) {
-            channel = Channel::Sent(to.to_string());
-        }
-    }
+    // The person's own: a human envelope with their id, from a human
+    // sender. A claude's line that claims a human envelope is not theirs.
+    let mine = !own.person.is_empty() && parsed.from.starts_with("external:") && parsed.from_kind == Some("human") && parsed.from_id == Some(own.person.as_str());
+    let tray = path.parent().and_then(|d| d.file_name()).and_then(|n| n.to_str()).unwrap_or("").to_string();
     Some(Signal {
         id,
         from: parsed.from.to_string(),
@@ -132,14 +202,19 @@ pub fn parse_file(path: &Path) -> Option<Signal> {
         reply_to: parsed.reply_to.map(str::to_string),
         message: parsed.message.to_string(),
         ts,
-        channel,
+        channel: channel_for_path(path, own, mine, parsed.to.unwrap_or("")),
+        tray,
+        beside_post: false,
     })
 }
 
-/// Classify a signal file's channel by the inbox dir it sits in —
-/// the same first-component logic `watcher::accept_path` admits by,
-/// so everything the watcher streams gets a definite channel.
-fn channel_for_path(path: &Path) -> Channel {
+/// Classify a signal file's channel by the tray it sits in, the same
+/// first-component logic `watcher::accept_path` admits by. `#open` and a
+/// channel are what they are. A direct message is the person's own when
+/// `mine`, read back from whichever tray it went to; else it reaches the
+/// person (their person tray), the chat's project (its tray), or neither.
+/// `to` is the envelope's.
+fn channel_for_path(path: &Path, own: &Own, mine: bool, to: &str) -> Channel {
     let dir = path
         .parent()
         .and_then(|d| d.file_name())
@@ -147,13 +222,23 @@ fn channel_for_path(path: &Path) -> Channel {
         .unwrap_or("");
     let tray_parent = path.parent().and_then(Path::parent).and_then(|d| d.file_name()).and_then(|n| n.to_str());
     if tray_parent == Some(attend_groups::PEOPLE_DIR) {
-        Channel::Person
+        if dir == own.person {
+            Channel::Person
+        } else if mine {
+            Channel::Sent(to.to_string())
+        } else {
+            Channel::Elsewhere(if to.is_empty() { dir } else { to }.to_string())
+        }
     } else if dir == attend_groups::BROADCAST_DIR {
         Channel::Open
     } else if let Some(g) = dir.strip_prefix('@') {
         Channel::Group(g.to_string())
+    } else if mine {
+        Channel::Sent(to.to_string())
+    } else if !own.tray.is_empty() && dir == own.tray {
+        Channel::Direct(to.to_string())
     } else {
-        Channel::Direct
+        Channel::Elsewhere(to.to_string())
     }
 }
 
@@ -191,43 +276,6 @@ pub fn write_signal(dest: &Path, message: &str, to: &str) -> io::Result<String> 
     Ok(filename)
 }
 
-/// Compose the in-memory `Signal` for a message THIS session just sent,
-/// so the sender's own transcript can echo it.
-///
-/// Why this exists: a broadcast rides `_broadcast/`, which the sender's
-/// own watcher surfaces (`watcher::accept_path`), so it self-echoes for
-/// free. A directed (`@name`) send is written to the *recipient's* cwd
-/// inbox, which the sender does not watch — so without this it would
-/// vanish from the sender's view even though it was delivered. This
-/// builds the same identity fields the wire signal carries (`from`,
-/// `project`, `cwd`) so the echoed row renders with the sender's chip,
-/// identical to how their own broadcast already appears. It writes
-/// nothing — echo is a display concern, not a bus event.
-///
-/// `to` is the session ids the message went to, comma-separated, as its
-/// envelope carries them: the DM view of each shows the echo.
-pub fn compose_self_echo(message: &str, to: &str) -> Signal {
-    let (_sender_id, from, project, cwd) = sender_identity();
-    let ts = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    Signal {
-        // Not a bus id — this row never came off disk. Marked so it is
-        // never mistaken for a real signal stem should that ever matter.
-        id: format!("local-echo-{ts}"),
-        from,
-        project,
-        cwd,
-        reply_to: None,
-        message: message.to_string(),
-        ts,
-        // Echoes exist only for directed sends the watcher can't
-        // round-trip: a direct message, to `to`.
-        channel: Channel::Sent(to.to_string()),
-    }
-}
-
 /// Compose a local-only transcript status block (`/peers` output and
 /// kin). Rendered like any message cell but never written to the bus.
 /// `from` carries no wire prefix on purpose: `known_identities` skips
@@ -248,14 +296,13 @@ pub fn compose_status_block(kind: &str, body: &str) -> Signal {
         message: body.to_string(),
         ts,
         channel: Channel::Info,
+        tray: String::new(),
+        beside_post: false,
     }
 }
 
-/// Derive this session's wire identity fields once: `(sender_id, from,
-/// project, cwd)`. Shared by `write_signal` (the delivered signal) and
-/// `compose_self_echo` (the local echo) so the echoed row's chip is
-/// always derived identically to the delivered signal's — if this logic
-/// changes, both move together instead of drifting.
+/// Derive this session's wire identity fields: `(sender_id, from,
+/// project, cwd)`, as `write_signal` writes them.
 ///
 /// The sender is `agent_identity::signal::identify_sender` with no
 /// session: attend-chat is the human's coordination surface, so it is
@@ -297,7 +344,7 @@ mod tests {
     fn parses_legacy_format() {
         let d = tempdir_like();
         let p = tmp_signal(&d, "sig-1", "claude:abc|proj|/home/x|hello world");
-        let s = parse_file(&p).unwrap();
+        let s = parse_file(&p, &own()).unwrap();
         assert_eq!(s.from, "claude:abc");
         assert_eq!(s.project, "proj");
         assert_eq!(s.cwd, "/home/x");
@@ -309,7 +356,7 @@ mod tests {
     fn parses_threaded_format() {
         let d = tempdir_like();
         let p = tmp_signal(&d, "sig-2", "claude:abc|proj|/home/x|re:abc123|reply body");
-        let s = parse_file(&p).unwrap();
+        let s = parse_file(&p, &own()).unwrap();
         assert_eq!(s.reply_to.as_deref(), Some("abc123"));
         assert_eq!(s.message, "reply body");
     }
@@ -318,7 +365,7 @@ mod tests {
     fn preserves_pipes_in_legacy_body() {
         let d = tempdir_like();
         let p = tmp_signal(&d, "sig-3", "claude:abc|proj|/home/x|a | b");
-        let s = parse_file(&p).unwrap();
+        let s = parse_file(&p, &own()).unwrap();
         assert_eq!(s.message, "a | b");
         assert!(s.reply_to.is_none());
     }
@@ -329,49 +376,67 @@ mod tests {
         // reads this as a legacy message; the TUI must read it the same way.
         let d = tempdir_like();
         let p = tmp_signal(&d, "sig-4", "claude:abc|proj|/home/x|re: prose|x");
-        let s = parse_file(&p).unwrap();
+        let s = parse_file(&p, &own()).unwrap();
         assert!(s.reply_to.is_none());
         assert_eq!(s.message, "re: prose|x");
     }
 
+    /// The chat's own trays, as the tests below name them.
+    fn own() -> Own {
+        Own { tray: "-home-me-proj".into(), person: human_member_id() }
+    }
+
     #[test]
     fn parse_classifies_channel_by_inbox_dir() {
-        // Provenance drives the per-tab filter (#393): broadcast →
-        // Open, `@g/` → Group, anything else (cwd inbox) → Direct.
+        // Provenance drives the per-tab filter (#393): broadcast → Open,
+        // `@g/` → Group, the chat's own cwd tray → Direct, the person's own
+        // tray → Person, any other tray → Elsewhere.
         let d = tempdir_like();
         let bdir = d.join("_broadcast");
         let gdir = d.join("@deploy");
         let cdir = d.join("-home-me-proj");
-        for dir in [&bdir, &gdir, &cdir] {
+        let odir = d.join("-home-someone-else");
+        let pdir = d.join("_people").join(human_member_id());
+        let qdir = d.join("_people").join("bob");
+        for dir in [&bdir, &gdir, &cdir, &odir, &pdir, &qdir] {
             fs::create_dir_all(dir).unwrap();
         }
         let body = "claude:abc|proj|/home/x|hi";
-        assert_eq!(parse_file(&tmp_signal(&bdir, "s", body)).unwrap().channel, Channel::Open);
-        assert_eq!(
-            parse_file(&tmp_signal(&gdir, "s", body)).unwrap().channel,
-            Channel::Group("deploy".into())
-        );
-        assert_eq!(parse_file(&tmp_signal(&cdir, "s", body)).unwrap().channel, Channel::Direct);
-        let pdir = d.join("_people").join("aaron");
-        fs::create_dir_all(&pdir).unwrap();
-        assert_eq!(parse_file(&tmp_signal(&pdir, "s", body)).unwrap().channel, Channel::Person);
+        let channel = |dir: &Path| parse_file(&tmp_signal(dir, "s", body), &own()).unwrap().channel;
+        assert_eq!(channel(&bdir), Channel::Open);
+        assert_eq!(channel(&gdir), Channel::Group("deploy".into()));
+        assert_eq!(channel(&cdir), Channel::Direct(String::new()));
+        assert_eq!(channel(&odir), Channel::Elsewhere(String::new()));
+        assert_eq!(channel(&pdir), Channel::Person);
+        assert_eq!(channel(&qdir), Channel::Elsewhere("bob".into()), "another person's tray, to that person");
+        let none = Own::default();
+        assert_eq!(parse_file(&tmp_signal(&cdir, "s", body), &none).unwrap().channel, Channel::Elsewhere(String::new()), "no tray of its own");
     }
 
-    /// A direct message the person at this chat sent, read back from a cwd
-    /// tray (the chat's own, which it watches), is what it sent, to whom:
-    /// the DM view of its recipient shows it. Anyone else's is direct.
+    /// A direct message the person at this chat sent, read back from any
+    /// tray, the chat's own or another project's or person's, is what it
+    /// sent, to whom: the DM view of its recipient shows it. Anyone else's
+    /// is direct in the chat's own tray and elsewhere in any other, with
+    /// its `to`.
     #[test]
-    fn a_dm_the_person_sent_reads_back_as_sent() {
+    fn a_dm_the_person_sent_reads_back_as_sent_from_any_tray() {
         let d = tempdir_like();
-        let tray = d.join("-work-alpha");
-        fs::create_dir_all(&tray).unwrap();
         let me = human_member_id();
-        let line = |id: &str| {
-            let env = agent_identity::Envelope { from_kind: Some("human"), from_id: Some(id), on_behalf_of: None, to: Some("s1") };
+        let line = |kind: &str, id: &str| {
+            let env = agent_identity::Envelope { from_kind: Some(kind), from_id: Some(id), on_behalf_of: None, to: Some("s1") };
             agent_identity::signal::format_tagged("external:x@pts", "alpha", "/work/alpha", &env, None, "hello")
         };
-        assert_eq!(parse_file(&tmp_signal(&tray, "mine", &line(&me))).unwrap().channel, Channel::Sent("s1".into()));
-        assert_eq!(parse_file(&tmp_signal(&tray, "theirs", &line("someone-else"))).unwrap().channel, Channel::Direct);
+        for (tray, theirs) in [("-home-me-proj", Channel::Direct("s1".into())), ("-work-alpha", Channel::Elsewhere("s1".into()))] {
+            let dir = d.join(tray);
+            fs::create_dir_all(&dir).unwrap();
+            let channel = |name: &str, body: &str| parse_file(&tmp_signal(&dir, name, body), &own()).unwrap().channel;
+            assert_eq!(channel("mine", &line("human", &me)), Channel::Sent("s1".into()), "{tray}");
+            assert_eq!(channel("theirs", &line("human", "someone-else")), theirs, "{tray}");
+            assert_eq!(channel("agent", &line("agent", &me)), theirs, "{tray}: an agent with the person's id is not the person");
+        }
+        let bob = d.join("_people").join("bob");
+        fs::create_dir_all(&bob).unwrap();
+        assert_eq!(parse_file(&tmp_signal(&bob, "mine", &line("human", &me)), &own()).unwrap().channel, Channel::Sent("s1".into()), "to another person");
     }
 
     #[test]
@@ -384,7 +449,7 @@ mod tests {
         let home = tempdir_like();
         // `set_var` is !Send on some platforms but this test is
         // single-threaded; Cargo isolates by default.
-        std::env::set_var("HOME", &home);
+        std::env::set_var("HOME", &*home);
         // The attend cache follows XDG_CACHE_HOME first: point it into the
         // temp home too, or a runner's own setting sends the write to the
         // real cache.
@@ -393,7 +458,7 @@ mod tests {
         let filename = write_broadcast("round-trip body").unwrap();
         let path = broadcast_dir().join(&filename);
         assert!(path.starts_with(&home), "the write stays in the temp home: {}", path.display());
-        let sig = parse_file(&path).expect("written signal must parse");
+        let sig = parse_file(&path, &own()).expect("written signal must parse");
         assert_eq!(sig.message, "round-trip body");
         assert!(sig.from.starts_with("external:"));
         let raw = std::fs::read_to_string(&path).unwrap();
@@ -402,21 +467,59 @@ mod tests {
         assert!(sig.reply_to.is_none());
     }
 
+    /// An agent's own DMs: every direct message it sent or received, the
+    /// person's among them, and no channel post.
     #[test]
-    fn compose_self_echo_carries_message_and_self_identity() {
-        // The echo must render as coming from THIS session (so it shows
-        // the sender's own chip) and carry the message verbatim. It is a
-        // display object, never written to disk.
-        let echo = compose_self_echo("hello @peer", "s1,s2");
-        assert_eq!(echo.message, "hello @peer");
-        assert!(
-            echo.from.starts_with("claude:") || echo.from.starts_with("external:"),
-            "echo.from should be a real sender identity, got {:?}",
-            echo.from
-        );
-        assert!(echo.reply_to.is_none());
-        assert!(echo.id.starts_with("local-echo-"), "echo id marks it non-bus");
-        assert!(echo.is_dm_with("s1") && echo.is_dm_with("s2") && !echo.is_dm_with("s3"), "a DM with each recipient");
+    fn an_agents_dms_are_those_it_sent_or_received() {
+        let on = |from: &str, channel: Channel| Signal { id: "s".into(), from: format!("claude:{from}"), project: String::new(), cwd: String::new(), reply_to: None, message: String::new(), ts: 0, channel, tray: String::new(), beside_post: false };
+        let me = |channel: Channel| Signal { from: "external:aaron@pts".into(), ..on("x", channel) };
+        assert!(on("a1", Channel::Person).is_dm_of("a1"), "to the person");
+        assert!(me(Channel::Sent("a2,a1".into())).is_dm_of("a1"), "from the person");
+        assert!(on("a2", Channel::Direct("a1".into())).is_dm_of("a1"), "to it, in the chat's tray");
+        assert!(on("a2", Channel::Elsewhere("a1".into())).is_dm_of("a1"), "to it, elsewhere");
+        assert!(on("a1", Channel::Elsewhere("a2".into())).is_dm_of("a1"), "from it, elsewhere");
+        assert!(on("a1", Channel::Elsewhere("bob".into())).is_dm_of("a1"), "from it, to another person");
+        assert!(!on("a2", Channel::Elsewhere("a3".into())).is_dm_of("a1"), "between others");
+        assert!(!on("a2", Channel::Person).is_dm_of("a1"));
+        for c in [Channel::Open, Channel::Group("g".into()), Channel::Info] {
+            assert!(!on("a1", c.clone()).is_dm_of("a1"), "{c:?}");
+        }
+    }
+
+    /// The copies of one send, read from the trays it went to, are one
+    /// send; the same words sent again later, or to others, or again to the
+    /// same tray, are not. The same file read twice is one file. A copy
+    /// beside a channel post of the same send is marked by the post.
+    #[test]
+    fn the_copies_of_one_send_are_one_send() {
+        let sent = |tray: &str, to: &str, ts: u64| Signal { id: format!("{tray}-{ts}"), from: "external:aaron@pts".into(), project: String::new(), cwd: String::new(), reply_to: None, message: "hi".into(), ts, channel: Channel::Sent(to.into()), tray: tray.into(), beside_post: false };
+        assert!(sent("-a", "s1,s2", 100).same_send(&sent("-b", "s1,s2", 101)), "two trays, one send");
+        assert!(!sent("-a", "s1,s2", 100).same_send(&sent("-a", "s1,s2", 101)), "the same tray again: a resend");
+        assert!(!sent("-a", "s1,s2", 100).same_send(&sent("-b", "s1,s2", 160)), "sent again later");
+        assert!(!sent("-a", "s1,s2", 100).same_send(&sent("-b", "s1", 100)), "to others");
+        let mut direct = sent("-b", "s1,s2", 100);
+        direct.channel = Channel::Direct("s1,s2".into());
+        assert!(!direct.same_send(&sent("-a", "s1,s2", 100)), "only the person's own sends");
+        assert!(sent("-a", "s1", 100).same_file(&sent("-a", "s1", 100)), "one file read twice");
+        assert!(!sent("-a", "s1", 100).same_file(&sent("-a", "s1", 101)));
+        let mut post = sent("@deploy", "#deploy", 100);
+        post.channel = Channel::Group("deploy".into());
+        assert!(sent("-a", "s1", 101).is_beside(&post) && !post.is_beside(&sent("-a", "s1", 101)), "the DM goes beside the post");
+        assert!(!sent("-a", "s1", 130).is_beside(&post), "a later send");
+    }
+
+    /// A claude's line that claims a human envelope with the person's id is
+    /// not the person's own send: the sender must be a human.
+    #[test]
+    fn a_claude_with_a_human_envelope_is_not_the_person() {
+        let root = tempdir_like();
+        let d = root.join("-work-alpha");
+        fs::create_dir_all(&d).unwrap();
+        let env = agent_identity::Envelope { from_kind: Some("human"), from_id: Some(&human_member_id()), on_behalf_of: None, to: Some("s1") };
+        let line = agent_identity::signal::format_tagged("claude:abc", "alpha", "/work/alpha", &env, None, "hello");
+        let sig = parse_file(&tmp_signal(&d, "forged", &line), &own()).unwrap();
+        assert_eq!(sig.channel, Channel::Elsewhere("s1".into()));
+        assert_eq!(sig.tray, "-work-alpha", "the tray it was read from");
     }
 
     #[test]
@@ -432,7 +535,7 @@ mod tests {
         // Point $HOME at a temp dir so signals_base resolves there.
         let _env = crate::test_dir::env_lock();
         let home = tempdir_like();
-        std::env::set_var("HOME", &home);
+        std::env::set_var("HOME", &*home);
         let d = cwd_dir("/home/aaron/proj");
         assert!(
             d.starts_with(signals_base()),
@@ -445,7 +548,7 @@ mod tests {
         );
     }
 
-    fn tempdir_like() -> std::path::PathBuf {
+    fn tempdir_like() -> crate::test_dir::TestDir {
         crate::test_dir::unique("signal")
     }
 
@@ -461,6 +564,5 @@ mod tests {
         assert!(!dir.exists() || fs::read_dir(&dir).unwrap().next().is_none(), "nothing written");
         write_signal(&dir, &"x".repeat(max), "*").unwrap();
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
-        let _ = fs::remove_dir_all(&dir);
     }
 }

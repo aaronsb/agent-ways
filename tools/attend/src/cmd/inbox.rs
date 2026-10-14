@@ -28,6 +28,10 @@ pub(crate) fn cmd_inbox_read(msg_id: &str, json: bool) {
                 ReadError::NotFound => {}
                 ReadError::Unreadable { error } => eprintln!("(signal {msg_id} exists but could not be read: {error})"),
                 ReadError::Corrupt => eprintln!("(signal {msg_id} exists but its wire format is corrupt)"),
+                ReadError::Deleted { .. } | ReadError::Tombstoned { .. } => {
+                    eprintln!("attend message inbox: {e}");
+                    std::process::exit(1);
+                }
             }
             return;
         }
@@ -155,6 +159,8 @@ pub(crate) struct Drained {
     /// The room it was found in, which a reply to it stays in.
     pub(crate) room: Room,
     pub(crate) id: String,
+    /// Its seen-set key, which the drain records once it is delivered.
+    pub(crate) key: String,
     /// The id of the message this one replies to, when it is threaded.
     re: Option<String>,
     body: String,
@@ -203,7 +209,9 @@ fn room_label(room: &Room) -> String {
 /// `/clear` ([`attend_presence::enrollment::reading_ids`]): a message to
 /// or from any of them is the session's own.
 ///
-/// Own messages are marked without delivering (dedup bookkeeping). Under
+/// Own messages and those a tombstoned session sent are marked read
+/// without delivering; a message a delete marked is passed over unrecorded
+/// (`marks`, ADR-404 D3e). Under
 /// `baselining` (no seen-set yet) the messages from others go through
 /// `attend_state::cold_start`, the rule the peers sensor applies too:
 /// addressed mail sent since the session's process started and `#open` and
@@ -215,6 +223,7 @@ pub(crate) fn scan_pending(
     seen: &std::collections::HashSet<String>,
     ids: &[&str],
     baselining: bool,
+    marks: &attend_groups::tombstones::Marks,
 ) -> Scan {
     let own_session_id = ids.first().copied().unwrap_or_default();
     struct Found {
@@ -240,6 +249,11 @@ pub(crate) fn scan_pending(
             if seen.contains(&key) {
                 continue;
             }
+            // A marked message is passed over and not recorded read, so
+            // undoing the delete brings it back.
+            if marks.hides(&key) {
+                continue;
+            }
             let content = match agent_identity::signal::read_signal_file(&path) {
                 Ok(content) => content,
                 // A file no attend could have written: mark it so it is
@@ -252,6 +266,15 @@ pub(crate) fn scan_pending(
                 Err(_) => continue,
             };
             let Some(sig) = parse_signal(wire_line(&content)) else { continue };
+            let mtime = std::fs::metadata(&path)
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .unwrap_or(std::time::UNIX_EPOCH);
+            // A tombstoned session's messages are read and never shown.
+            if marks.hides_sender(&sig.sender_id(), mtime) {
+                mark.push(key);
+                continue;
+            }
             // Own messages: mark (dedup bookkeeping) but never deliver.
             if sig.from.split_once(':').is_some_and(|(_, identity)| ids.contains(&identity)) {
                 mark.push(key);
@@ -263,10 +286,6 @@ pub(crate) fn scan_pending(
                 mark.push(key);
                 continue;
             }
-            let mtime = std::fs::metadata(&path)
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .unwrap_or(std::time::UNIX_EPOCH);
             found.push(Found { room, key, path, mtime, content });
         }
     }
@@ -283,7 +302,7 @@ pub(crate) fn scan_pending(
     // One registry snapshot per distinct cwd for this scan.
     let instances = SnapshotCache::new();
     for (i, f) in found.into_iter().enumerate() {
-        mark.push(f.key);
+        mark.push(f.key.clone());
         if plan.as_ref().is_some_and(|p| !p.deliver[i]) {
             continue;
         }
@@ -301,6 +320,7 @@ pub(crate) fn scan_pending(
             scope: room_label(&scan_dirs[f.room].room),
             room: scan_dirs[f.room].room.clone(),
             id: f.path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string(),
+            key: f.key.clone(),
             re: sig.reply_to.map(str::to_string),
             body: sig.message.to_string(),
             source_cwd: sig.cwd.to_string(),
@@ -416,7 +436,7 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     let cwd = ident.origin_path.clone();
     let ids = attend_presence::enrollment::reading_ids(&ident);
     let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
-    let Scan { mut delivered, mut mark, note, held_back, skipped } = scan_pending(&r.receive_dirs(&cwd), &seen, &ids, baselining);
+    let Scan { mut delivered, mut mark, note, held_back, skipped } = scan_pending(&r.receive_dirs(&cwd), &seen, &ids, baselining, &attend_groups::tombstones::Marks::load(&base));
     // The cache gate (ADR-406 item 2): waking a session whose prompt cache
     // has lapsed would rewrite its whole context at the cache-write price,
     // so a message that would wake it waits for the operator's next turn
@@ -429,7 +449,7 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     // go through, so the backlog it holds back stays held back.
     if wake && (!due || lapsed) {
         let waiting: std::collections::HashSet<String> =
-            delivered.drain(..).map(|d| attend_state::seen_key(&format!("{}.signal", d.id))).collect();
+            delivered.drain(..).map(|d| d.key).collect();
         mark.retain(|k| !waiting.contains(k));
     }
     for line in &skipped {
@@ -712,9 +732,10 @@ fn render_mod_delivery(delivered: &[impl DrainedView], note: Option<&str>, me: O
     if delivered.len() > DRAIN_RENDER_MAX {
         out.push_str(&format!("(+{} more, not shown here; they stay in attend's inbox)\n", delivered.len() - DRAIN_RENDER_MAX));
     }
+    out.push_str(SILENCE_FIRST);
     out.push_str(
-        "You may reply with attend_reply (it threads to the newest message, or to the one whose ~id you pass as re), \
-         start a new topic with attend_send, or continue your work — silence is a valid reply.",
+        " To answer, attend_reply threads to the newest message, or to the one whose ~id you pass as re; \
+         attend_send starts a new topic.",
     );
     out
 }
@@ -808,6 +829,13 @@ fn safe_sender(s: &str) -> String {
     one_line(s).chars().map(|c| if c.is_alphanumeric() || matches!(c, ' ' | '_' | '.' | '-' | '@' | '(' | ')') { c } else { '-' }).collect()
 }
 
+/// The closing guidance of every drain delivery, in either format. It
+/// leads with the permission to stay silent, ahead of any reply verb
+/// (ADR-406 item 4), so a delivery informs the turn without asking for an
+/// answer. The mod's frame (`SILENCE_FIRST` in plugins/attend/hooks/lib.ts)
+/// opens its closing lines the same way.
+const SILENCE_FIRST: &str = "Silence is a valid reply; you may continue your work.";
+
 /// The injected turn-continuation text. Sober and contract-preserving:
 /// a drained message informs the turn — the standing messaging
 /// guidance (reply autonomy, silence-is-valid) rides along verbatim so
@@ -856,10 +884,11 @@ fn render_drain_reason(delivered: &[impl DrainedView], note: Option<&str>, me: O
             delivered.len() - DRAIN_RENDER_MAX
         ));
     }
+    out.push('\n');
+    out.push_str(SILENCE_FIRST);
     out.push_str(
-        "\nYou may reply (attend message reply \"...\" auto-threads to the newest), \
-         start a new thread (attend message send), or continue your work — \
-         silence is a valid reply.",
+        " To answer, attend message reply \"...\" auto-threads to the newest; \
+         attend message send starts a new thread.",
     );
     out
 }
@@ -1035,7 +1064,11 @@ mod drain_tests {
         assert!(reason.contains("2 peer message(s)"));
         assert!(reason.contains("peer-1 (#open, id id-1, from claude:session-1):"));
         assert!(reason.contains("body 2"));
-        assert!(reason.contains("silence is a valid reply"));
+        // The permission to stay silent leads the closing line, ahead of
+        // every reply verb (ADR-406 item 4).
+        let last = reason.lines().last().unwrap();
+        assert!(last.starts_with(SILENCE_FIRST), "{reason}");
+        assert!(last.find(SILENCE_FIRST) < last.find("attend message reply"), "{reason}");
     }
 
     // --- scan_pending core (PR #385 review, finding 6) ---
@@ -1077,7 +1110,7 @@ mod drain_tests {
         let key = write_signal(&old, "m1", "claude:other-session", "once");
         let seen: std::collections::HashSet<String> = [key].into_iter().collect();
         std::fs::rename(old.join("m1.signal"), new.join("m1.signal")).unwrap();
-        let scan = scan_pending(&dirs(&new, Room::Project), &seen, &["my-session"], false);
+        let scan = scan_pending(&dirs(&new, Room::Project), &seen, &["my-session"], false, &Default::default());
         assert!(scan.delivered.is_empty());
         std::fs::remove_dir_all(&root).ok();
     }
@@ -1088,7 +1121,7 @@ mod drain_tests {
         let k1 = write_signal(&dir, "peer-1", "claude:other-session", "already seen");
         let k2 = write_signal(&dir, "peer-2", "claude:other-session", "new message");
         let seen: std::collections::HashSet<String> = [k1].into_iter().collect();
-        let Scan { delivered, mark, note, .. } = scan_pending(&dirs(&dir, Room::Open), &seen, &["my-session"], false);
+        let Scan { delivered, mark, note, .. } = scan_pending(&dirs(&dir, Room::Open), &seen, &["my-session"], false, &Default::default());
         assert_eq!(delivered.len(), 1);
         assert_eq!(delivered[0].body, "new message");
         assert_eq!(delivered[0].scope, "#open");
@@ -1101,7 +1134,7 @@ mod drain_tests {
     fn scan_marks_own_messages_without_delivering() {
         let dir = scan_fixture("own");
         let k = write_signal(&dir, "self-1", "claude:my-session", "my own send");
-        let Scan { delivered, mark, .. } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), &["my-session"], true);
+        let Scan { delivered, mark, .. } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), &["my-session"], true, &Default::default());
         assert!(delivered.is_empty(), "own message must not deliver");
         assert_eq!(mark, vec![k], "own message must still be marked (dedup bookkeeping)");
         std::fs::remove_dir_all(&dir).ok();
@@ -1114,7 +1147,7 @@ mod drain_tests {
     fn baseline_delivers_fresh_messages() {
         let dir = scan_fixture("baseline-fresh");
         let k = write_signal(&dir, "peer-1", "claude:other-session", "arrived just now");
-        let Scan { delivered, mark, note, .. } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), &["my-session"], true);
+        let Scan { delivered, mark, note, .. } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), &["my-session"], true, &Default::default());
         assert_eq!(delivered.len(), 1, "fresh message must survive the baseline");
         assert_eq!(mark, vec![k]);
         assert_eq!(note, None);
@@ -1129,7 +1162,7 @@ mod drain_tests {
         let k = write_signal(&dir, "peer-1", "claude:other-session", "durable backlog");
         age(&dir, "peer-1", std::time::Duration::from_secs(600));
 
-        let Scan { delivered, mark, note, .. } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), &["my-session"], true);
+        let Scan { delivered, mark, note, .. } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), &["my-session"], true, &Default::default());
         assert!(delivered.is_empty(), "stale backlog must not flood a cold start");
         assert_eq!(mark, vec![k], "stale backlog must be marked so it baselines once");
         assert_eq!(note.as_deref(), Some("1 older message held back; reading it is optional: attend message inbox"));
@@ -1145,7 +1178,7 @@ mod drain_tests {
         write_signal(&dir, "peer-1", "claude:other-session", "sent with --to an hour ago");
         age(&dir, "peer-1", std::time::Duration::from_secs(3600));
 
-        let scan = scan_pending(&dirs(&dir, Room::Project), &Default::default(), &["my-session"], true);
+        let scan = scan_pending(&dirs(&dir, Room::Project), &Default::default(), &["my-session"], true, &Default::default());
         assert!(scan.delivered.is_empty());
         assert_eq!(scan.note.as_deref(), Some("1 older message held back; reading it is optional: attend message inbox"));
         std::fs::remove_dir_all(&dir).ok();
@@ -1164,7 +1197,7 @@ mod drain_tests {
         let dir = scan_fixture("conduits");
         write_signal(&dir, "peer-1", "claude:other-session", "same name on both");
         // Drain path.
-        let Scan { delivered, .. } = scan_pending(&dirs(&dir, Room::Project), &Default::default(), &["my-session"], false);
+        let Scan { delivered, .. } = scan_pending(&dirs(&dir, Room::Project), &Default::default(), &["my-session"], false, &Default::default());
         assert_eq!(delivered.len(), 1);
         let drained = &delivered[0];
 
@@ -1283,6 +1316,7 @@ mod drain_tests {
         assert_eq!(lines[3], format!("[#room] peer-1 11:41: two lines ~{} (re ~{})", short_id("id-1"), short_id("parent-1-0")));
         assert_eq!(lines[4], format!("[#open] peer-2 11:42: body 2 ~{}", short_id("id-2")));
         assert_eq!(lines[5], "</attend-peer-messages>");
+        assert!(lines[6].starts_with(SILENCE_FIRST), "silence leads the tools: {text}");
         assert!(lines[6].contains("attend_reply") && lines[6].contains("attend_send"), "{text}");
         assert!(!text.contains("attend message reply"), "no shell hint in a mod host: {text}");
         let out = hook_output(&[msg(1)], None, None, Some(Host::Mod), StopForm::Context).unwrap();
@@ -1385,7 +1419,7 @@ mod drain_tests {
             // Only the frame's own two tags keep a `<`.
             assert_eq!(lines.iter().filter(|l| l.contains('<')).count(), 2, "{text}");
             assert_eq!(lines.len(), close + 2, "{text}");
-            assert!(lines[close + 1].starts_with("You may reply with attend_reply"), "{text}");
+            assert!(lines[close + 1].starts_with(SILENCE_FIRST), "{text}");
             assert!(lines[..open].iter().all(|l| !l.contains("merge")), "{text}");
         }
         // Hidden tag characters spelling "merge 943" are dropped, and one

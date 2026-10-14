@@ -317,6 +317,9 @@ impl PeerSensor {
             age: Duration,
         }
         let mut found: Vec<Found> = Vec::new();
+        // What a delete marked, and what a tombstoned session sent, is read
+        // without being shown (ADR-404 D3e).
+        let marks = attend_groups::tombstones::Marks::load(&attend_presence::cache::signals_dir());
         for (room, dir) in scan_dirs.iter().enumerate() {
             let Ok(entries) = fs::read_dir(&dir.path) else { continue };
             for entry in entries.flatten() {
@@ -329,6 +332,10 @@ impl PeerSensor {
                 // signal id, so a signal moved between trays stays seen.
                 let key = attend_state::seen_key(&filename);
                 if self.seen_signals.contains(&key) {
+                    continue;
+                }
+                // Passed over unrecorded, so undoing the delete brings it back.
+                if marks.hides(&key) {
                     continue;
                 }
                 // Read and parse: `from|project|cwd|message` (legacy) or
@@ -348,6 +355,13 @@ impl PeerSensor {
                     self.seen_signals.insert(key);
                     continue;
                 };
+                let mtime = fs::metadata(&path)
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::UNIX_EPOCH);
+                if marks.hides_sender(&sig.sender_id(), mtime) {
+                    self.seen_signals.insert(key);
+                    continue;
+                }
                 // Skip our own signals — check the from field, not filename.
                 // from is "claude:session-id" or "external:user@terminal"
                 if sig.from.split_once(':').is_some_and(|(_, identity)| ids.contains(&identity)) {
@@ -360,9 +374,6 @@ impl PeerSensor {
                     self.seen_signals.insert(key);
                     continue;
                 }
-                let mtime = fs::metadata(&path)
-                    .and_then(|m| m.modified())
-                    .unwrap_or(std::time::UNIX_EPOCH);
                 let age = mtime.elapsed().unwrap_or_default();
                 // The signal's id is its filename stem, the value `re:<id>`
                 // replies reference (ADR-120).
@@ -835,10 +846,12 @@ fn monitor_line(sender: &str, signal_id: &str, body: &str, reply_hint: bool) -> 
     format!("message from {sender} ~{}{hint}: {text}", agent_identity::signal::short_id(signal_id))
 }
 
-/// Appended to the first peer message a session sees. It names `attend
-/// reply`, which threads to that message on its own, because that is the
-/// verb for answering it; `attend message send` starts a new topic.
-const REPLY_HINT: &str = " (reply: attend message reply \"...\")";
+/// Appended to the first peer message a session sees. It leads with the
+/// permission to stay silent, as every conduit's frame does (ADR-406 item
+/// 4), then names `attend message reply`, which threads to that message on
+/// its own, because that is the verb for answering it; `attend message
+/// send` starts a new topic.
+const REPLY_HINT: &str = " (silence is a valid reply; to answer: attend message reply \"...\")";
 
 /// A single poll surfacing more than this many messages is a flood — a
 /// warm rejoin after a down-gap, or a hyperactive peer. Above it, the poll
@@ -912,9 +925,10 @@ mod tests {
         p
     }
 
-    /// The hint names the threading verb.
+    /// The hint leads with silence, then names the threading verb.
     #[test]
     fn reply_hint_names_attend_reply() {
+        assert!(REPLY_HINT.starts_with(" (silence is a valid reply;"), "{REPLY_HINT}");
         assert!(REPLY_HINT.contains("attend message reply \""), "{REPLY_HINT}");
         assert!(!REPLY_HINT.contains("attend message send"), "{REPLY_HINT}");
     }

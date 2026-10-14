@@ -70,7 +70,9 @@ usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
 
   The colours follow the agent-ways theme (`ways settings theme`). Which keys
   reach the tabs, and whether the mouse starts on, are attend.chat.* settings:
-  /config lists and sets them, as does `ways settings`.
+  /config lists and sets them, as does `ways settings`. ≡ → Settings lists
+  them with attend_mod.listening and attend_mod.keepwarm, and sets each one
+  where you pick: the user file, or a project's .claude/ways.yaml.
 
   --snap WxH     print one frame at W by H in agent-tui's frame format, headless
   --keys KEYS    keys for --snap, space separated (`text:hi enter tab esc alt-1 ctrl-3 f2` …),
@@ -153,10 +155,10 @@ fn main() {
         usage("needs a terminal; `attend message inbox` prints messages, `attend message send` sends one");
     }
 
-    let (tx, rx) = std::sync::mpsc::channel::<signal::Signal>();
+    let (tx, rx) = std::sync::mpsc::channel::<watcher::Delivery>();
     let base = signal::signals_base();
-    let own_cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-    if let Err(e) = watcher::spawn_watcher(base.clone(), signal::encode_cwd(&own_cwd), signal::human_member_id(), tx) {
+    let own = signal::Own::here();
+    if let Err(e) = watcher::spawn_watcher(base.clone(), own.tray, own.person, tx) {
         eprintln!("attend-chat: failed to start signal watcher: {e}");
         eprintln!("  signals base: {}", base.display());
         eprintln!("  (no point opening the TUI — nothing would stream in.)");

@@ -238,6 +238,21 @@ mod tests {
         }
     }
 
+    /// The three synchronized messaging sources say alike that `#open`
+    /// reaches every listening session, other projects included, and send
+    /// project chatter to a named channel or a direct message.
+    #[test]
+    fn the_synced_sources_say_open_reaches_every_project() {
+        const LINE: &str = "`#open` reaches every listening session, in other projects too, so keep chatter about this project to a named channel or a direct message.";
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let read = |rel: &str| std::fs::read_to_string(repo.join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"));
+        let skill = read("skills/attend/SKILL.md");
+        let way = read("hooks/ways/softwaredev/environment/attend/attend.md");
+        for (name, text) in [("messaging.md", Component::Messaging.body()), ("SKILL.md", skill.as_str()), ("attend.md", way.as_str())] {
+            assert_eq!(text.matches(LINE).count(), 1, "{name} lacks the #open line");
+        }
+    }
+
     #[test]
     fn format_observation_contains_tag_and_body() {
         let sensor = DisclosureSensor::new();

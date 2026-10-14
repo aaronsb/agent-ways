@@ -13,11 +13,9 @@ use crate::legend::{
 };
 use crate::sessions::discover as discover_sessions;
 use crate::signal::{
-    broadcast_dir, compose_self_echo, compose_status_block, cwd_dir, encode_cwd, signals_base, write_broadcast,
-    write_signal, Signal,
+    broadcast_dir, compose_status_block, cwd_dir, parse_file, signals_base, write_broadcast, write_signal, Own, Signal,
 };
 use crate::tabs::{self, Tab};
-use crate::watcher::accept_path;
 use crate::slash;
 
 /// Tab-completion cycle state.
@@ -45,13 +43,12 @@ pub enum EnterAction {
     None,
     /// Success path: set status, clear input + cursor.
     ClearWithStatus(String),
-    /// Directed-send success: like [`EnterAction::ClearWithStatus`], but
-    /// also append `echo` to the transcript. Directed (`@name`) sends
-    /// land in the recipient's cwd inbox, which the sender does not
-    /// watch, so — unlike broadcasts — they never round-trip back into
-    /// the sender's own view. The screen appends `echo` so the sender
-    /// sees their own message land.
-    ClearWithStatusAndEcho { status: String, echo: Signal },
+    /// Like [`EnterAction::ClearWithStatus`], but also append `echo` to the
+    /// transcript: a local block never on the bus (`/peers` output), or
+    /// what a send wrote, read back from where it went. The watcher reads
+    /// those files too; the chat keeps one of each ([`Signal::same_file`]),
+    /// so a send shows even when the watcher misses its event.
+    ClearWithStatusAndEcho { status: String, echo: Vec<Signal> },
     /// Failure path: set status, leave input + cursor intact so the
     /// user can edit and retry.
     StatusOnly(String),
@@ -166,6 +163,13 @@ fn send_message(msg: &str, signals: &[Signal], foreground: &Tab, person: Option<
     // otherwise, with the destination flag (#392) showing the
     // resolution before Enter is pressed.
     let recipients = parse_addressed(&msg);
+    // An agent's own DMs offer nothing to send: attend-chat has no send
+    // into another agent's conversations. The view draws no compose box,
+    // so this is a guard, not a path.
+    if let Tab::Review(member) = foreground {
+        let name = seen.iter().find(|s| s.member == *member).map_or_else(|| member.split('-').next().unwrap_or(member).to_string(), |s| s.identity.nickname.clone());
+        return EnterAction::StatusOnly(format!("{name}'s own DMs are read only here; nothing sent"));
+    }
     // In an agent's DM view an unaddressed message is a direct message to
     // that agent; an addressed one goes as it would from the operator view.
     if let (Tab::Dm(member), true) = (foreground, recipients.is_empty()) {
@@ -174,11 +178,8 @@ fn send_message(msg: &str, signals: &[Signal], foreground: &Tab, person: Option<
     if recipients.is_empty() {
         let scope = tabs::send_scope(foreground);
         if scope == BASE_CHANNEL_NAME {
-            // Broadcast rides `_broadcast/`, which the sender's own
-            // watcher surfaces — so it self-echoes through the normal
-            // signal path and needs no synthetic echo here.
             match write_broadcast(&msg) {
-                Ok(n) => EnterAction::ClearWithStatus(format!("sent: {n}")),
+                Ok(n) => sent(format!("sent: {n}"), read_back(&broadcast_dir(), &n).into_iter().collect()),
                 Err(e) => EnterAction::StatusOnly(format!("send failed: {e}")),
             }
         } else {
@@ -213,7 +214,7 @@ fn send_message(msg: &str, signals: &[Signal], foreground: &Tab, person: Option<
         let names = recipient_labels(&recipients).join(" ");
         if channel == BASE_CHANNEL_NAME {
             match write_signal(&broadcast_dir(), &msg, &to) {
-                Ok(_) => EnterAction::ClearWithStatus(format!("sent → #{BASE_CHANNEL_NAME} {names}")),
+                Ok(n) => sent(format!("sent → #{BASE_CHANNEL_NAME} {names}"), read_back(&broadcast_dir(), &n).into_iter().collect()),
                 Err(e) => EnterAction::StatusOnly(format!("send failed: {e}")),
             }
         } else {
@@ -239,14 +240,7 @@ fn send_dm(msg: &str, member: &str, seen: &[Seen]) -> EnterAction {
     }
     let dir = cwd_dir(&s.identity.cwd);
     match write_signal(&dir, msg, member) {
-        Ok(_) => {
-            let status = format!("sent → @{name}");
-            if sender_watches(&dir) {
-                EnterAction::ClearWithStatus(status)
-            } else {
-                EnterAction::ClearWithStatusAndEcho { status, echo: compose_self_echo(msg, member) }
-            }
-        }
+        Ok(n) => sent(format!("sent → @{name}"), read_back(&dir, &n).into_iter().collect()),
         Err(e) => EnterAction::StatusOnly(format!("send failed: {e}")),
     }
 }
@@ -346,32 +340,19 @@ fn send_to_recipients(
         }
     }
     // A channel post that names agents carries their ids in `to`.
-    let sent = dests.iter().try_for_each(|(dir, to)| write_signal(dir, msg, addressed.unwrap_or(to)).map(|_| ())).map(|()| dests);
-    match sent {
-        Ok(dests) => {
+    // Each copy written is read back: the channel's post, and each
+    // project's direct message, which the chat takes as one send
+    // ([`Signal::same_send`]).
+    let written: Result<Vec<Option<Signal>>, _> = dests.iter().map(|(dir, to)| write_signal(dir, msg, addressed.unwrap_or(to)).map(|n| read_back(dir, &n))).collect();
+    match written.map(|read| read.into_iter().flatten().collect::<Vec<_>>()) {
+        Ok(read) => {
             let mut status = format!("sent → {}", recipient_labels(recipients).join(" "));
             // One channel needs no name in its note; several do.
             let named = recipients.iter().filter(|r| matches!(r, Addressed::Group(_))).count() > 1;
             for (name, e) in not_joined {
                 status += &if named { format!(" (not joined #{name}: {e})") } else { format!(" (not joined: {e})") };
             }
-            // Echo only when the message reaches NO inbox the sender's
-            // own watcher already surfaces — otherwise it round-trips
-            // and a synthetic echo would double-render it. `#open`
-            // lands in `_broadcast/` and `#group` in `@group/` (both
-            // watched); an `@agent` in our *own* cwd lands in
-            // `own_encoded` (watched). Only `@agent` sends to *other*
-            // cwds are invisible without an echo.
-            if dests.iter().any(|(d, _)| sender_watches(d)) {
-                EnterAction::ClearWithStatus(status)
-            } else {
-                // Every tray here took the same `to`: the sessions addressed.
-                let to = dests.first().map_or("", |(_, to)| to.as_str());
-                EnterAction::ClearWithStatusAndEcho {
-                    status,
-                    echo: compose_self_echo(msg, to),
-                }
-            }
+            sent(status, read)
         }
         Err(e) => EnterAction::StatusOnly(format!("send failed: {e}")),
     }
@@ -640,7 +621,7 @@ fn run_peers() -> EnterAction {
     let n = roster.len();
     EnterAction::ClearWithStatusAndEcho {
         status: format!("{n} live peer{}", if n == 1 { "" } else { "s" }),
-        echo: compose_status_block("peers", &lines.join("\n")),
+        echo: vec![compose_status_block("peers", &lines.join("\n"))],
     }
 }
 
@@ -698,21 +679,12 @@ pub fn invite_peer(g: &str, peer: &crate::peers::Peer) -> EnterAction {
     let dest = cwd_dir(&peer.root);
     let body = invite_body(&g, &dir);
     match write_signal(&dest, &body, &peer.session_id) {
-        Ok(_) => {
+        Ok(n) => {
             // The invitee's join answers this: it keeps the room's recent
             // history to read rather than holding it back (ADR-404).
             let _ = attend_groups::Groups::new(&signals_base(), "").invite(&g, &peer.session_id);
-            let status = format!("invited @{} to #{g}", peer.display);
-            // Same echo rule as directed sends: synthesize only when
-            // the destination isn't a dir our own watcher surfaces.
-            if sender_watches(&dest) {
-                EnterAction::ClearWithStatus(status)
-            } else {
-                EnterAction::ClearWithStatusAndEcho {
-                    status,
-                    echo: compose_self_echo(&body, &peer.session_id),
-                }
-            }
+            // The invitation shows as a direct message the person sent.
+            sent(format!("invited @{} to #{g}", peer.display), read_back(&dest, &n).into_iter().collect())
         }
         Err(e) => EnterAction::StatusOnly(format!("/invite failed: {e}")),
     }
@@ -929,19 +901,15 @@ pub fn dm_destination_label(input: &str, name: &str, quiet: bool, quiet_names: &
     destination_label(input, BASE_CHANNEL_NAME, false, quiet_names, swept)
 }
 
-/// Does the sender's own chat watcher already surface signals written to
-/// `dest`? Reuses [`accept_path`] — the single source of truth for what
-/// the transcript shows — so a directed send that round-trips (a
-/// `#group` / `#open` landing in a watched dir, or an `@agent` in our own
-/// cwd) is not *also* echoed synthetically and rendered twice.
-fn sender_watches(dest: &std::path::Path) -> bool {
-    let base = signals_base();
-    let own_cwd = std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
-    // `accept_path` classifies by the first path component (the inbox dir
-    // name); hand it a probe file inside `dest` so it judges that dir.
-    accept_path(&base, &encode_cwd(&own_cwd), &crate::signal::human_member_id(), &dest.join("probe.signal"))
+/// A send's success: `status`, and what it wrote, `read` back.
+fn sent(status: String, read: Vec<Signal>) -> EnterAction {
+    EnterAction::ClearWithStatusAndEcho { status, echo: read }
+}
+
+/// The signal just written to `dir` as `file`, read back as the watcher
+/// would read it, against the chat's own trays.
+fn read_back(dir: &std::path::Path, file: &str) -> Option<Signal> {
+    parse_file(&dir.join(file), &Own::here())
 }
 
 /// Render the addressed recipients back as their `@name` / `#group`
@@ -1226,7 +1194,8 @@ mod tests {
     /// read only when the channel holds a message.
     #[test]
     fn an_invitation_mentions_history_only_when_the_channel_has_some() {
-        let dir = tempdir_like().join("@empty");
+        let root = tempdir_like();
+        let dir = root.join("@empty");
         std::fs::create_dir_all(&dir).unwrap();
         assert_eq!(invite_body("empty", &dir), "you're invited to #empty — join with attend_join, or: attend channel join empty");
         std::fs::write(dir.join("notes.txt"), "not a message").unwrap();
@@ -1239,30 +1208,7 @@ mod tests {
         assert!(!invite_body("gone", &dir.join("missing")).contains("history"), "a channel with no directory yet has none");
     }
 
-    #[test]
-    fn sender_watches_matches_the_watchers_accept_set() {
-        // Regression guard for the double-render bug: a directed send is
-        // echoed synthetically ONLY when it reaches no inbox the sender's
-        // own watcher surfaces. `sender_watches` must agree with
-        // `accept_path` about which destination dirs those are.
-        use crate::signal::{broadcast_dir, cwd_dir, signals_base};
-        // Every path below derives from the environment other tests set.
-        let _env = crate::test_dir::env_lock();
-
-        // `#open` → _broadcast/ : watched (would round-trip, so NO echo).
-        assert!(sender_watches(&broadcast_dir()));
-        // `#group` → @group/ : watched.
-        assert!(sender_watches(&signals_base().join("@deploy")));
-        // `@agent` in our own cwd → own_encoded : watched.
-        let own = std::env::current_dir()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default();
-        assert!(sender_watches(&cwd_dir(&own)));
-        // `@agent` in some other cwd : NOT watched (invisible → echo).
-        assert!(!sender_watches(&signals_base().join("some-other-cwd-abc123")));
-    }
-
-    fn tempdir_like() -> std::path::PathBuf {
+    fn tempdir_like() -> crate::test_dir::TestDir {
         crate::test_dir::unique("keys")
     }
 

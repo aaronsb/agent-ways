@@ -40,6 +40,8 @@ fn chat_with(palette: Palette) -> Chat {
         message: "a message in the feed".into(),
         ts: 1_790_949_000,
         channel: Channel::Open,
+        tray: String::new(),
+        beside_post: false,
     });
     c
 }
@@ -263,17 +265,20 @@ fn invite_agent_docks_beside_the_channel_menu() {
     assert!(shown.iter().any(|r| r.contains("Laszlo") || r.contains("alpha") || !r.trim().is_empty()));
 }
 
-/// Settings… shows every chat setting, a line each, in the response
-/// modal, not cut on the bottom bar.
+/// Settings ▸ lists every setting the chat and the attend mod read, a row
+/// each with its value and layer, in a menu docked beside its row, not cut
+/// on the bottom bar.
 #[test]
-fn settings_opens_the_listing_in_a_modal() {
+fn settings_lists_each_setting_beside_its_row() {
     let mut c = chat();
     let slot = at(&mut c, "≡");
     click(&mut c, slot);
-    let s = at(&mut c, "Settings");
+    let ((px, _), _) = menu(&mut c).expect("the ≡ menu");
+    let s = at(&mut c, "Settings ▸");
     click(&mut c, s);
-    let shown = rows(&mut c);
-    for k in ["mouse = ", "sidebar_key = ", "tabs.jump = "] {
+    let ((x, _), shown) = menu(&mut c).expect("the settings list");
+    assert!(x > px, "beside the ≡ menu: {:#?}", rows(&mut c));
+    for k in ["attend_mod.listening = ", "attend_mod.keepwarm = ", "attend.chat.mouse = ", "attend.chat.sidebar_key = ", "attend.chat.tabs.jump = "] {
         assert!(shown.iter().any(|r| r.contains(k)), "{k}: {shown:#?}");
     }
     assert!(!bar(&mut c).contains("mouse = "), "not on the bar: {}", bar(&mut c));

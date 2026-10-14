@@ -5,9 +5,12 @@
 //! The ring is the one ordered list the key handler walks and the renderer
 //! marks: the tab bar in the order drawn (`≡`, the created channel or DM
 //! view shown, `+`, then the reserved `#open` and the operator view), the
-//! column's rows (every agent, each followed by its DM view's row while
+//! column's rows (every agent, each followed by its DM views' rows while
 //! listed, then every channel), the feed, then the compose box, and round
-//! again. Tab walks it forward and Shift+Tab back, exact mirrors.
+//! again. Tab walks it forward and Shift+Tab back, exact mirrors. A view
+//! with nothing to send, an agent's own DMs, has no compose box: the ring
+//! leaves it out, the focus that would go to it goes to the feed, and a
+//! character typed there goes nowhere.
 //!
 //! - In the compose box every key edits: Enter sends, the arrows move the
 //!   cursor, and Tab completes a word that can be completed. Tab with no
@@ -81,12 +84,12 @@ impl ChatPane {
             Focus::Tab(slot) => match slot {
                 Slot::Common => Kind::Common,
                 Slot::New => Kind::New,
-                Slot::Tab(Tab::Merged | Tab::Dm(_)) => Kind::View,
+                Slot::Tab(Tab::Merged | Tab::Dm(_) | Tab::Review(_)) => Kind::View,
                 Slot::Tab(_) => Kind::ChannelTab,
             },
             Focus::Row(i) => match world.and_then(|w| w.laid.rows.get(i)) {
                 Some(SideHit::Agent(_)) => Kind::AgentRow,
-                Some(SideHit::Dm(_)) => Kind::DmRow,
+                Some(SideHit::Dm(_) | SideHit::Review(_)) => Kind::DmRow,
                 _ => Kind::ChannelRow,
             },
             Focus::Feed => Kind::Feed,
@@ -127,6 +130,7 @@ impl ChatPane {
             feed_len: self.feed.len(),
             feed_selected: self.feed.selected,
             menu_on_repeat: self.config.menu_on_repeat,
+            read_only: !self.foreground.composes(),
         }
     }
 
