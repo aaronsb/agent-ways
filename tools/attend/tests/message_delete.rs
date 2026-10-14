@@ -256,9 +256,10 @@ fn a_dm_scope_takes_both_halves_of_the_thread_and_no_third_partys() {
     signal(&f, &theirs, "out-1", &line(&me, R1, "me to R1"), 10 * MINUTE);
     signal(&f, &theirs, "third-1", &line(R2, R1, "R2 to R1"), 10 * MINUTE);
     signal(&f, &theirs, "other-1", &line(R1, R2, "R1 to R2"), 10 * MINUTE);
+    signal(&f, &mine, "shared-1", &line(R1, &format!("{me},{R2}"), "R1 to me and R2"), 10 * MINUTE);
     post(&f, "_broadcast", "open-1", "an #open post", 10 * MINUTE);
     // The caller runs, and has read what was sent to it.
-    read(&f, &me, &["in-1"]);
+    read(&f, &me, &["in-1", "shared-1"]);
 
     let v = delete(&f, &["--dm", R1]);
     assert_eq!(marked(&v), ["in-1", "out-1"]);

@@ -186,10 +186,14 @@ impl Filter<'_> {
         }
         match self.thread {
             None => true,
+            // A message addressed to a third party as well is shared with
+            // them and outside the thread.
             Some((other, caller)) => {
-                let to_caller = caller.iter().any(|c| sig.addressed_to(c));
-                let by_caller = caller.contains(&sender);
-                (sender == other && to_caller) || (by_caller && sig.addressed_to(other))
+                let to: Vec<&str> = sig.to.map(|t| t.split(',').collect()).unwrap_or_default();
+                let only = |ok: &dyn Fn(&str) -> bool| !to.is_empty() && to.iter().all(|t| ok(t));
+                let to_caller = only(&|t| caller.iter().any(|c| c == t));
+                let to_other = only(&|t| t == other);
+                (sender == other && to_caller) || (caller.contains(&sender) && to_other)
             }
         }
     }
