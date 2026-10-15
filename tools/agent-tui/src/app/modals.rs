@@ -304,7 +304,7 @@ impl App {
         let Some(m) = self.modal().filter(|m| (m.placement(self) == Placement::Bar) == bar) else { return false };
         let drawn = m.draw(self, f, area);
         m.set_scroll(self, drawn.scroll);
-        self.question_drawn_on(drawn.rect.width);
+        self.question_drawn_on(drawn.rect);
         self.hits.dialog = Some((std::mem::discriminant(&self.mode), drawn));
         true
     }

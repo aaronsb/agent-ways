@@ -39,9 +39,9 @@ pub(crate) struct Asked {
     pub q: Question,
     pub armed_at: Option<std::time::Instant>,
     pub deadline: Option<std::time::Instant>,
-    /// The width of the bar it was last drawn on: the answers sit at its
-    /// right end, so a new width moves them.
-    pub bar_width: Option<u16>,
+    /// Where the bar it was last drawn on sat: the answers sit at its
+    /// right end on its row, so a new place or size moves them.
+    pub bar: Option<Rect>,
     /// Its arm delay ([`ARM`], none for the shell's own "quit?").
     pub arm: std::time::Duration,
 }
@@ -50,7 +50,7 @@ impl Asked {
     /// `q`, open now, its yes arming `arm` from now if it is ready, and
     /// `arm` after each change that arms it again.
     pub(crate) fn open(q: Question, arm: std::time::Duration) -> Asked {
-        let mut a = Asked { q, armed_at: None, deadline: None, bar_width: None, arm };
+        let mut a = Asked { q, armed_at: None, deadline: None, bar: None, arm };
         a.ready(false);
         a
     }
@@ -96,14 +96,15 @@ impl Asked {
         }
     }
 
-    /// It was drawn on a bar `width` wide. A width other than the last
-    /// moves the answers, which sit at the bar's right end, so yes arms
-    /// again: a click aimed at what was there lands on nothing.
-    pub(crate) fn drawn_on(&mut self, width: u16) {
-        if self.bar_width.is_some_and(|w| w != width) && self.armed_at.is_some() {
+    /// It was drawn on the bar at `bar`. A place or size other than the
+    /// last moves the answers, which sit at the bar's right end on its
+    /// row, so yes arms again: a click aimed at what was there lands on
+    /// nothing.
+    pub(crate) fn drawn_on(&mut self, bar: Rect) {
+        if self.bar.is_some_and(|b| b != bar) && self.armed_at.is_some() {
             self.armed_at = Some(std::time::Instant::now() + self.arm);
         }
-        self.bar_width = Some(width);
+        self.bar = Some(bar);
     }
 
     /// Whether the screen changes on the clock: yes is arming, or the
@@ -789,11 +790,11 @@ impl App {
         }
     }
 
-    /// The open question was drawn on a bar `width` wide
+    /// The open question was drawn on the bar at `bar`
     /// ([`Asked::drawn_on`]).
-    pub(crate) fn question_drawn_on(&mut self, width: u16) {
+    pub(crate) fn question_drawn_on(&mut self, bar: Rect) {
         if let Mode::Ask(a) = &mut self.mode {
-            a.drawn_on(width);
+            a.drawn_on(bar);
         }
     }
 
@@ -1268,6 +1269,24 @@ mod tests {
         let yes = testkit::find(&wider, " y delete ").expect("yes is drawn");
         assert!((yes.0..yes.0 + 10).contains(&(no.0 + 1)), "the old place of no is under yes now: {no:?} {yes:?}");
         click_at(&mut a, no);
+        assert!(!two(&a).picked.iter().any(|p| p == "q=y"), "never yes: {:?}", two(&a).picked);
+    }
+
+    /// The bar is the bottom row, so a shorter terminal moves it up onto a
+    /// row the pane drew: yes arms again, and a click aimed at that pane
+    /// row, which yes now covers, answers nothing.
+    #[test]
+    fn a_height_change_moves_no_answer_under_a_click() {
+        let mut a = app(true);
+        a.set_question_arm(std::time::Duration::from_secs(60));
+        ask_now(&mut a, Question::new("q", "drop it?", "delete", "keep"));
+        testkit::render(&mut a, 80, 9);
+        arm_now(&mut a);
+        let before = testkit::find(&testkit::render(&mut a, 80, 9), " y delete ").expect("yes is drawn");
+        let shorter = testkit::render(&mut a, 80, 6);
+        let yes = testkit::find(&shorter, " y delete ").expect("yes is drawn");
+        assert!(yes.0 == before.0 && yes.1 < before.1, "yes moved up a row the pane drew: {before:?} {yes:?}");
+        click_at(&mut a, yes);
         assert!(!two(&a).picked.iter().any(|p| p == "q=y"), "never yes: {:?}", two(&a).picked);
     }
 
