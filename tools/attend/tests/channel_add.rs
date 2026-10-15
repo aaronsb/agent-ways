@@ -166,6 +166,24 @@ fn the_sweep_prunes_an_invitation_to_a_session_that_has_gone() {
     assert!(groups.invites("topic").is_empty(), "the invitation is pruned");
 }
 
+/// An invitee that listened, turned listening off and then exited has no
+/// session record here and a heartbeat younger than the hold. Its
+/// enrollment record keeps its Claude Code process through the opt-out, so
+/// the sweep sees that process has exited and prunes its invitation.
+#[test]
+fn the_sweep_prunes_an_invitation_to_a_session_that_stopped_listening_and_exited() {
+    let f = with_topic("invite-off-gone");
+    let gone = "sess-off-gone";
+    f.attend_in_process(gone, Some(common::DAY), &["listen", "on"]);
+    f.attend_in_process(gone, Some(common::DAY), &["message", "inbox", "--drain", "--format", "plain"]);
+    f.attend_in_process(gone, Some(common::DAY), &["listen", "off"]);
+    common::age_file(&f.heartbeat(gone), 2 * MINUTE);
+    let groups = attend_groups::Groups::new(&f.signals(), "aaron");
+    groups.invite("topic", gone).unwrap();
+    f.ok(&["channel", "list"]);
+    assert!(groups.invites("topic").is_empty(), "the invitation is pruned");
+}
+
 /// An added session whose only channel is dissolved stops listening.
 #[test]
 fn an_added_session_whose_only_channel_is_dissolved_stops_listening() {

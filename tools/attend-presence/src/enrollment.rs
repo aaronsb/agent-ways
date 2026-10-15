@@ -31,9 +31,12 @@
 //!   `#open` (ADR-404 D3a), so its cold start replays what was posted there
 //!   since (D3b).
 //!
-//! The session is enrolled while the record holds a way. Every edit is a
-//! read-modify-write under one lock (`agent_settings::writer::Lock`), and
-//! every file is written atomically (`write_atomic`).
+//! The session is enrolled while the record holds a way. A record whose
+//! last way goes keeps only its `claude` line, so whether the session has
+//! exited can still be judged ([`process_has_exited`]); a record with no
+//! process to keep is removed. Every edit is a read-modify-write under one
+//! lock (`agent_settings::writer::Lock`), and every file is written
+//! atomically (`write_atomic`).
 
 use std::fs;
 use std::io;
@@ -185,16 +188,20 @@ fn read_in(dir: &Path, session_id: &str) -> Option<Record> {
     fs::read_to_string(dir.join(session_id)).ok().map(|t| Record::parse(&t))
 }
 
-/// Write `record` for `session_id` under `dir`, or remove it when it holds
-/// no way. The process's index entry names `session_id` afterwards, unless
-/// it names an earlier id of the same process that is still enrolled and
-/// was not carried here ([`indexes_another`]).
+/// Write `record` for `session_id` under `dir`. A record that holds no way
+/// is written as its process alone, or removed when it names none. While
+/// the record holds a way, the process's index entry names `session_id`
+/// afterwards, unless it names an earlier id of the same process that is
+/// still enrolled and was not carried here ([`indexes_another`]).
 fn write_in(dir: &Path, session_id: &str, record: &Record) -> io::Result<()> {
     let p = dir.join(session_id);
     if record.sources.is_empty() {
-        return match fs::remove_file(&p) {
-            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
-            _ => Ok(()),
+        return match &record.claude {
+            Some(key) => agent_settings::writer::write_atomic(&p, Record { claude: Some(key.clone()), ..Record::default() }.render()),
+            None => match fs::remove_file(&p) {
+                Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+                _ => Ok(()),
+            },
         };
     }
     agent_settings::writer::write_atomic(&p, record.render())?;
@@ -278,9 +285,10 @@ pub fn process_is_live(session_id: &str) -> bool {
 }
 
 /// Whether `session_id`'s enrollment record names a Claude Code process
-/// of this host that is no longer running. False with no record, a record
-/// that names no process, or a key from another host or with no host:
-/// nothing here says the session has gone.
+/// of this host that is no longer running, enrolled or not: a session that
+/// stopped listening keeps its process in the record. False with no
+/// record, a record that names no process, or a key from another host or
+/// with no host: nothing here says the session has gone.
 pub fn process_has_exited(session_id: &str) -> bool {
     read(session_id).and_then(|r| r.claude).map(|key| process_fact(&key)) == Some(Fact::Exited)
 }
@@ -418,7 +426,8 @@ pub fn withdraw(session_id: &str, source: Source) -> io::Result<()> {
 /// `attend channel scene private` and `attend listen off`: the explicit opt-out.
 /// Withdraws the join and the listen, and the run too unless an `attend
 /// run` holds the session; then the run's enrollment ends once it no longer
-/// does ([`is_enrolled`] applies it).
+/// does ([`is_enrolled`] applies it). The record keeps the session's
+/// process ([`process_has_exited`]).
 pub fn opt_out(session_id: &str) -> io::Result<()> {
     let live = crate::heartbeat::run_is_live(session_id);
     edit(session_id, |r| {
@@ -496,8 +505,8 @@ pub fn reading_ids(ident: &crate::session::SessionIdentity) -> Vec<String> {
     ids
 }
 
-/// Every session id with an enrollment record, enrolled or holding only a
-/// pending opt-out. Read-only.
+/// Every session id with an enrollment record: enrolled, holding a pending
+/// opt-out, or holding only its process. Read-only.
 pub fn recorded_ids() -> Vec<String> {
     fs::read_dir(dir())
         .into_iter()
@@ -576,9 +585,43 @@ mod tests {
         assert!(r.since.is_some(), "the session starts listening at the add");
         assert_eq!(fs::read_to_string(dir.join("by-claude").join("4242-1700000000")).unwrap(), "s");
         withdraw_in(&dir, "s", Source::Add).unwrap();
-        let gone = !dir.join("s").exists();
+        let kept = fs::read_to_string(dir.join("s"));
+        enroll_added_in(&dir, "t", None).unwrap();
+        withdraw_in(&dir, "t", Source::Add).unwrap();
+        let gone = !dir.join("t").exists();
         fs::remove_dir_all(&dir).ok();
-        assert!(gone, "a record with no way left is removed");
+        assert_eq!(kept.unwrap(), format!("claude {key}\n"), "a record with no way left keeps only its process");
+        assert!(gone, "and one with no process is removed");
+    }
+
+    /// A session that stopped listening keeps its process in its record:
+    /// it is neither enrolled nor alive by that process, its record is no
+    /// earlier id to adopt, and once the process exits it has exited.
+    #[test]
+    fn an_opted_out_record_keeps_only_its_process() {
+        with_cache(|| {
+            let none = std::collections::HashSet::new();
+            enroll_in("off", &own_key());
+            edit("off", |r| {
+                r.sources.push(Source::Join);
+                r.host = Some(HostRecord { host: Host::Mod, claude: Some(own_key()) });
+                r.since = Some(1);
+            })
+            .unwrap();
+            opt_out("off").unwrap();
+            assert_eq!(read("off"), Some(Record { claude: Some(own_key()), ..Record::default() }));
+            assert!(!is_enrolled("off") && !is_enrolled_in(&records_dir(), "off"));
+            assert!(sources("off").is_empty() && listening_since("off").is_none() && host("off").is_none());
+            assert!(!crate::alive("off", &none) && !crate::has_exited("off"), "its process runs, and it does not listen");
+            assert_eq!(previous_id(&own_key(), "after-clear"), None, "no enrollment to adopt");
+            super::enroll_in(&records_dir(), "off", Source::Listen, None, None).unwrap();
+            assert_eq!(read("off").map(|r| (r.host, r.since.is_some_and(|s| s > 1))), Some((None, true)), "listening again starts a fresh record");
+
+            let gone = format!("{}-1@{}", gone_pid(), crate::process::host_name());
+            enroll_in("exited", &gone);
+            opt_out("exited").unwrap();
+            assert!(crate::has_exited("exited"), "its process has exited");
+        });
     }
 
     /// This test process, keyed as a Claude Code process is.

@@ -55,7 +55,7 @@ fn leaving_the_last_channel_un_enrolls_a_join_only_session() {
     f.ok(&["channel", "leave", "a"]);
     assert!(f.marker(&f.sid).exists(), "still in #b");
     f.ok(&["channel", "leave", "b"]);
-    assert!(!f.marker(&f.sid).exists(), "leaving the last channel opts out");
+    assert!(!f.enrolled(&f.sid), "leaving the last channel opts out");
 
     f.put("_broadcast", "other-1-x", "not for a session that left", Duration::ZERO);
     assert_eq!(f.drain("plain"), "");
@@ -67,7 +67,7 @@ fn scene_private_un_enrolls_when_attend_run_is_not_running() {
     f.ok(&["channel", "join", "a"]);
     assert!(f.marker(&f.sid).exists());
     f.ok(&["channel", "scene", "private"]);
-    assert!(!f.marker(&f.sid).exists());
+    assert!(!f.enrolled(&f.sid));
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn scene_private_under_a_live_run_sticks() {
     }
     f.put("_broadcast", "other-1-x", "after opting out", Duration::ZERO);
     assert_eq!(f.drain("plain"), "", "the opt-out holds once the run is gone");
-    assert!(!f.marker(&f.sid).exists());
+    assert!(!f.enrolled(&f.sid));
 }
 
 /// A fresh `attend run` or `attend channel join` after `scene private` enrolls the

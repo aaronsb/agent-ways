@@ -190,6 +190,12 @@ impl Fixture {
         self.cache().join("enrolled").join(sid)
     }
 
+    /// Whether session `sid`'s enrollment record holds a way. A record
+    /// whose last way went keeps only its process, and enrolls nothing.
+    pub fn enrolled(&self, sid: &str) -> bool {
+        std::fs::read_to_string(self.marker(sid)).is_ok_and(|r| r.lines().any(|l| ["run", "join", "listen", "add"].contains(&l)))
+    }
+
     pub fn command(&self) -> Command {
         self.command_from(Path::new(env!("CARGO_BIN_EXE_attend")))
     }
