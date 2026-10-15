@@ -150,10 +150,10 @@ impl DeleteAsk {
     pub(super) fn question(&self, id: String, life: Duration) -> Question {
         let older = attend_cli::older_words(&self.older);
         match &self.count {
-            Count::Counting => Question::new(id, format!("counting read messages in {}{older}…", self.label), "delete", "keep").pending(),
+            Count::Counting => Question::new(id, format!("counting read messages{older} in {}…", self.label), "delete", "keep").pending(),
             Count::Found(r) => {
                 let n = r.marked;
-                let text = format!("delete {n} read message{} in {}{older} for everyone?{}", if n == 1 { "" } else { "s" }, self.label, r.kept_words());
+                let text = format!("delete {n} read message{}{older} in {} for everyone?{}", if n == 1 { "" } else { "s" }, self.label, r.kept_words());
                 Question::new(id, text, "delete", "keep").expires(Expiry::new(life))
             }
             Count::Nothing(why) | Count::Refused(why) => Question::new(id, why.clone(), "delete", "close").dismiss_only(),
@@ -469,7 +469,7 @@ impl ChatPane {
             return;
         }
         d.count = match answer.and_then(|doc| attend_cli::report(&doc)) {
-            Ok(r) if r.marked == 0 => Count::Nothing(format!("nothing read to delete in {}{}{}", d.label, attend_cli::older_words(&d.older), r.kept_words())),
+            Ok(r) if r.marked == 0 => Count::Nothing(format!("no read messages{} in {}{}", attend_cli::older_words(&d.older), d.label, r.kept_words())),
             Ok(r) => Count::Found(r),
             Err(e) => Count::Refused(e.to_string()),
         };
@@ -552,7 +552,7 @@ mod tests {
         c.to_open = None;
         c.dry_ran(&id, count(0));
         let q = opened(&mut c);
-        assert_eq!((q.question.as_str(), q.yes.clone()), ("nothing read to delete in #slow", None));
+        assert_eq!((q.question.as_str(), q.yes.clone()), ("no read messages in #slow", None));
         let (mut c, id) = counting();
         c.to_open = None;
         c.dry_ran(&id, Err(Failure::TooOld { verb: "message delete".into() }));
@@ -572,7 +572,7 @@ mod tests {
         let (mut c, id) = counting();
         c.dry_ran(&id, count(0));
         c.answered(&id, false);
-        assert_eq!((c.status.as_str(), c.status_is_error), ("nothing read to delete in #slow", false));
+        assert_eq!((c.status.as_str(), c.status_is_error), ("no read messages in #slow", false));
     }
 
     /// A count never touches a question but its own: not another delete's
@@ -604,7 +604,7 @@ mod tests {
         c.dry_ran(&id, count(3));
         c.answered_expired(&id);
         assert!(c.asked.is_none());
-        assert_eq!(c.status, "delete question expired");
+        assert_eq!(c.status, "delete cancelled: no answer in 60 s");
     }
 
     /// A question the shell drops leaves nothing waiting on its answer.

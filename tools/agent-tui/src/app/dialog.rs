@@ -558,7 +558,7 @@ impl<'a> Dialog<'a> {
 }
 
 impl Dialog<'_> {
-    /// The bar: a `confirm` lozenge and the question on the left, the
+    /// The bar: a `confirm` lozenge (`notice` for a question with no yes) and the question on the left, the
     /// answers as lozenges at the bar's right end, each a click target. The
     /// answers' place depends on the bar's width and their own labels only,
     /// so a question updated in place with a longer or shorter text never
@@ -571,7 +571,9 @@ impl Dialog<'_> {
             self.buttons.iter().map(|b| (b.id, sh.lozenge(&[Seg::on(format!(" {} ", b.label), b.drawn_ground().on_row(destructive)).bold()]))).collect();
         // Each answer is followed by a space.
         let after = answers.iter().map(|(_, a)| width(a) + 1).sum::<u16>();
-        let lozenge = sh.lozenge(&[Seg::on(" confirm ", Ground::Warn).bold()]);
+        // A question with no yes only says something: a notice, not a confirm.
+        let word = if self.buttons.iter().any(|b| b.id == Btn::Yes) { " confirm " } else { " notice " };
+        let lozenge = sh.lozenge(&[Seg::on(word, Ground::Warn).bold()]);
         let room = |used: u16| usize::from(area.width.saturating_sub(used + after + 3));
         // The countdown keeps its place before the question is cut: the long
         // form where the whole question fits beside it and the `confirm`
@@ -901,6 +903,18 @@ mod tests {
             .button(Button::new(Btn::No, "n keep", Ground::Keep).key('n').cancel().default())
             .build()
             .unwrap()
+    }
+
+    /// A question with no yes is a notice, not a confirm.
+    #[test]
+    fn a_bar_question_with_no_yes_wears_the_notice_lozenge() {
+        theme::set(theme::Palette::default());
+        let d = Dialog::bar("nothing to do").button(Button::new(Btn::No, "n close", Ground::Keep).key('n').cancel().default()).build().unwrap();
+        let buf = draw_with(60, 1, |f| {
+            d.draw(f, f.area(), Shape::PLAIN);
+        });
+        let row = &testkit::rows(&buf)[0];
+        assert!(row.starts_with(" notice  nothing to do") && !row.contains("confirm"), "{row}");
     }
 
     #[test]

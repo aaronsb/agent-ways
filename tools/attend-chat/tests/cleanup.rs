@@ -242,14 +242,14 @@ fn delete_on_open_counts_in_its_question_then_deletes_and_offers_undo() {
     assert_eq!(calls(), ["message delete --open --older-than today --dry-run --json"]);
     let s = screen(&mut c);
     // Too long to fit whole at 120 columns: the short countdown.
-    assert!(s.contains("delete 12 read messages in #open from before today for everyone? · 3 stay") && s.contains("… · 60 s ") && !s.contains("closes in"), "the count, in the question: {s}");
+    assert!(s.contains("delete 12 read messages from before today in #open for everyone? · 3 unread are kept") && s.contains("kept · 60 s ") && !s.contains("closes in"), "the count, in the question: {s}");
     press(&mut c, KeyCode::Char('n'));
     assert_eq!(c.status(), "kept");
     assert_eq!(calls().len(), 1, "no runs nothing");
     delete_read(&mut c, "#open", "Today");
     press(&mut c, KeyCode::Char('y'));
     assert_eq!(calls().last().unwrap(), "message delete --open --older-than today --json");
-    assert!(c.status().starts_with("deleted 12 messages in #open · 3 stay unread by 2 sessions") && c.status().ends_with(&format!("· Undo delete on its menu · batch {BATCH}")), "{}", c.status());
+    assert!(c.status().starts_with("deleted 12 messages in #open · 3 unread are kept") && c.status().ends_with(&format!("· Undo delete on its menu · batch {BATCH}")), "{}", c.status());
     channel_menu(&mut c, "#open");
     assert_eq!(items(&mut c), ["Hide messages here", "Delete read messages for everyone…", "Undo delete"]);
     pick(&mut c, "Undo delete");
@@ -280,7 +280,7 @@ fn each_scope_and_age_builds_its_argv() {
     }
     typed(&mut c, "3d");
     press(&mut c, KeyCode::Enter);
-    assert!(screen(&mut c).contains("in your DMs with @") && screen(&mut c).contains("older than 3d for everyone?"), "{}", screen(&mut c));
+    assert!(screen(&mut c).contains("older than 3d in your DMs with @") && screen(&mut c).contains("for everyone?"), "{}", screen(&mut c));
     press(&mut c, KeyCode::Esc);
     // The DM view's row: the same thread.
     side(&mut c, &nick("/work/alpha"), MouseButton::Left);
@@ -311,7 +311,7 @@ fn purge_is_an_alias_of_delete_all_on_the_channel_shown() {
     let s = screen(&mut c);
     assert_eq!(c.foreground(), &Tab::Channel("deploy".into()), "{s} {}", c.status());
     assert_eq!(calls(), ["message delete --channel deploy --older-than all --dry-run --json"], "{} | {}", c.status(), c.input().text());
-    assert!(screen(&mut c).contains("delete 12 read messages in #deploy for everyone? · 3 stay"), "/purge asks with the count: {}", screen(&mut c));
+    assert!(screen(&mut c).contains("delete 12 read messages in #deploy for everyone? · 3 unread are kept"), "/purge asks with the count: {}", screen(&mut c));
 }
 
 #[test]
@@ -339,7 +339,7 @@ fn tombstone_is_offered_on_a_dead_agents_row_only_and_shows_a_refusal() {
     side(&mut c, &gamma, MouseButton::Right);
     assert_eq!(items(&mut c).last().map(String::as_str), Some("Tombstone…"), "{}", screen(&mut c));
     pick(&mut c, "Tombstone…");
-    assert!(screen(&mut c).contains(&format!("tombstone @{gamma}? its messages leave every tab")), "{}", screen(&mut c));
+    assert!(screen(&mut c).contains(&format!("tombstone @{gamma}? its messages and its Agents row go away")), "{}", screen(&mut c));
     assert!(calls().is_empty(), "asked first");
     press(&mut c, KeyCode::Char('y'));
     assert_eq!(calls(), [format!("message tombstone {GAMMA_SID} --json")]);
@@ -366,7 +366,7 @@ fn an_unanswered_tombstone_question_expires_as_a_cancel() {
         std::thread::sleep(std::time::Duration::from_millis(20));
         Screen::tick(&mut c);
     }
-    assert_eq!(c.status(), format!("tombstone @{gamma} question expired"));
+    assert_eq!(c.status(), format!("tombstone @{gamma} cancelled: no answer in 1 s"));
     assert!(calls().is_empty(), "nothing tombstoned: {:?}", calls());
 }
 
@@ -414,7 +414,7 @@ fn hide_messages_here_hides_in_its_tab_only_and_holds_across_a_restart() {
     assert!(feed(&mut c).contains("alpha on open"), "{}", feed(&mut c));
     channel_menu(&mut c, "#open");
     pick(&mut c, "Hide messages here");
-    assert!(screen(&mut c).contains("hide the messages in #open? the bus keeps every message"), "{}", screen(&mut c));
+    assert!(screen(&mut c).contains("hide the messages so far in #open? nothing is deleted"), "{}", screen(&mut c));
     press(&mut c, KeyCode::Char('y'));
     assert_eq!(c.status(), "hid 5 messages in #open; the bus keeps them");
     assert!(!feed(&mut c).contains("on open"), "{}", feed(&mut c));
@@ -455,7 +455,7 @@ fn a_named_channel_hides_its_messages_here_too() {
     let menu = items(&mut c);
     assert_eq!(menu.iter().position(|i| i == "Hide messages here"), Some(3), "after Describe…, before the delete: {menu:?}");
     pick(&mut c, "Hide messages here");
-    assert!(screen(&mut c).contains("hide the messages in #deploy? the bus keeps every message"), "{}", screen(&mut c));
+    assert!(screen(&mut c).contains("hide the messages so far in #deploy? nothing is deleted"), "{}", screen(&mut c));
     press(&mut c, KeyCode::Char('y'));
     assert!(c.status().starts_with("hid ") && c.status().ends_with(" in #deploy; the bus keeps them"), "{}", c.status());
     assert!(!feed(&mut c).contains("alpha in deploy"), "{}", feed(&mut c));
@@ -481,7 +481,7 @@ fn a_notice_does_not_carry_the_mark_and_clear_asks_first() {
     mouse(&mut c, MouseButton::Left, W - 5, H - 4);
     typed(&mut c, "/clear");
     press(&mut c, KeyCode::Enter);
-    assert!(screen(&mut c).contains("hide the messages in #open? the bus keeps every message"), "asks first: {}", screen(&mut c));
+    assert!(screen(&mut c).contains("hide the messages so far in #open? nothing is deleted"), "asks first: {}", screen(&mut c));
     assert!(feed(&mut c).contains("alpha on open"), "nothing hidden before the y");
     press(&mut c, KeyCode::Char('y'));
     assert_eq!(c.status(), "hid 5 messages in #open; the bus keeps them", "the notice is not counted");
@@ -537,7 +537,7 @@ fn no_while_counting_stops_the_count_and_holds_nothing() {
     std::thread::sleep(std::time::Duration::from_millis(1200));
     testkit::render_screen(&mut c, W, H);
     Screen::tick(&mut c);
-    assert!(screen(&mut c).contains("hide the messages in #deploy?"), "the hide's question, untouched: {}", screen(&mut c));
+    assert!(screen(&mut c).contains("hide the messages so far in #deploy?"), "the hide's question, untouched: {}", screen(&mut c));
     press(&mut c, KeyCode::Char('y'));
     assert!(c.status().starts_with("hid ") && c.status().ends_with(" in #deploy; the bus keeps them"), "the y answers the hide: {}", c.status());
     assert_eq!(calls(), ["message delete --channel slow --older-than all --dry-run --json"], "nothing deleted for everyone");
@@ -551,7 +551,7 @@ fn a_count_of_nothing_offers_only_no() {
     let mut c = chat();
     delete_read(&mut c, "#empty", "All");
     let s = screen(&mut c);
-    assert!(s.contains("nothing read to delete in #empty") && s.contains(" n close ") && !s.contains(" y delete "), "{s}");
+    assert!(s.contains(" notice ") && !s.contains(" confirm ") && s.contains("no read messages in #empty") && s.contains(" n close ") && !s.contains(" y delete "), "{s}");
     press(&mut c, KeyCode::Esc);
     delete_read(&mut c, "#empty", "All");
     assert_eq!(calls(), ["message delete --channel empty --older-than all --dry-run --json"; 2], "counted again");
@@ -579,7 +579,7 @@ fn an_unanswered_delete_question_counts_down_and_expires() {
     }
     assert!(opened.elapsed() >= Duration::from_millis(3000), "not before its time: {:?}", opened.elapsed());
     assert!(!screen(&mut c).contains("for everyone?"), "closed: {}", screen(&mut c));
-    assert_eq!(c.status(), "delete question expired");
+    assert_eq!(c.status(), "delete cancelled: no answer in 3 s");
     assert_eq!(calls(), ["message delete --channel deploy --older-than all --dry-run --json"], "nothing deleted");
 }
 

@@ -369,7 +369,7 @@ fn enter_runs_a_command_and_clear_hides_the_messages_here() {
     assert!(c.status().starts_with("available:"), "{}", c.status());
     typed(&mut c, "/clear");
     press(&mut c, key(KeyCode::Enter));
-    assert!(bar(&mut c).contains("hide the messages in ⋯all?"), "asks first: {}", bar(&mut c));
+    assert!(bar(&mut c).contains("hide the messages so far in ⋯all?"), "asks first: {}", bar(&mut c));
     press(&mut c, key(KeyCode::Char('y')));
     assert!(c.status().starts_with("hid ") && c.status().ends_with(" in ⋯all; the bus keeps them"), "{}", c.status());
     assert!(!c.signals().is_empty(), "the chat holds them still");
@@ -919,7 +919,7 @@ fn the_items_that_drop_something_ask_first_and_y_runs_them() {
         press(c, key(KeyCode::Enter));
     };
     open_hide(&mut c);
-    assert!(bar(&mut c).contains("hide the messages in #open? the bus keeps every message"), "{}", bar(&mut c));
+    assert!(bar(&mut c).contains("hide the messages so far in #open? nothing is deleted"), "{}", bar(&mut c));
     g.check("tab-menu-confirm-120x40", &testkit::render_screen(&mut c, 120, 40));
     assert!(press(&mut c, key(KeyCode::Esc)), "Esc keeps the messages and the chat");
     assert_eq!(c.status(), "kept");
@@ -942,7 +942,7 @@ fn the_items_that_drop_something_ask_first_and_y_runs_them() {
     press(&mut c, ctrl('2'));
     press(&mut c, key(KeyCode::End));
     press(&mut c, key(KeyCode::Enter));
-    assert!(bar(&mut c).contains("delete #deploy and its history?"), "{}", bar(&mut c));
+    assert!(bar(&mut c).contains("delete #deploy and its history for everyone?"), "{}", bar(&mut c));
     press(&mut c, key(KeyCode::Char('n')));
     assert_eq!((c.status(), c.input().text()), ("kept", ""));
     press(&mut c, ctrl('2'));
@@ -962,7 +962,7 @@ fn a_click_then_enter_on_merged_asks_before_hiding_the_messages() {
     let (x, y) = testkit::find(&buf, "⋯all").expect("the operator view's tab");
     left(&mut c, (x, y));
     press(&mut c, key(KeyCode::Enter));
-    assert!(bar(&mut c).contains("hide the messages in ⋯all? the bus keeps every message"), "{}", bar(&mut c));
+    assert!(bar(&mut c).contains("hide the messages so far in ⋯all? nothing is deleted"), "{}", bar(&mut c));
     assert!(text(&mut c, 80, 25).contains("rollout is green"), "nothing hidden before the y");
     press(&mut c, key(KeyCode::Esc));
     assert_eq!((c.status(), c.signals().is_empty()), ("kept", false));
@@ -1785,7 +1785,7 @@ fn a_question_after_a_menu_closed_unchanged_is_shown_by_keys() {
     keys.push(key(KeyCode::Enter));
     drawn(&mut c, &keys, 80, 25);
     let shown = bar(&mut c);
-    assert!(shown.contains("delete #deploy and its history?") && shown.contains(" y delete "), "{shown}");
+    assert!(shown.contains("delete #deploy and its history for everyone?") && shown.contains(" y delete "), "{shown}");
 }
 
 /// The same by the mouse: a menu closed unchanged, then Remove from an

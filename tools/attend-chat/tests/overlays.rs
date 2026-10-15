@@ -121,10 +121,10 @@ struct Step {
 }
 
 const STEPS: &[Step] = &[
-    Step { key: '0', tab: "⋯all", item: "Hide messages here", question: "hide the messages in ⋯all?", yes: " y hide ", no: " n keep ", ran: "dry run: nothing hidden" },
-    Step { key: '-', tab: "#open", item: "Hide messages here", question: "hide the messages in #open?", yes: " y hide ", no: " n keep ", ran: "dry run: nothing hidden" },
+    Step { key: '0', tab: "⋯all", item: "Hide messages here", question: "hide the messages so far in ⋯all?", yes: " y hide ", no: " n keep ", ran: "dry run: nothing hidden" },
+    Step { key: '-', tab: "#open", item: "Hide messages here", question: "hide the messages so far in #open?", yes: " y hide ", no: " n keep ", ran: "dry run: nothing hidden" },
     Step { key: '2', tab: "#deploy", item: "Leave", question: "leave #deploy?", yes: " y leave ", no: " n stay ", ran: "dry run: /leave not run" },
-    Step { key: '2', tab: "#deploy", item: "Delete channel", question: "delete #deploy and its history?", yes: " y delete ", no: " n keep ", ran: "dry run: /dissolve not run" },
+    Step { key: '2', tab: "#deploy", item: "Delete channel", question: "delete #deploy and its history for everyone?", yes: " y delete ", no: " n keep ", ran: "dry run: /dissolve not run" },
     Step { key: '2', tab: "#deploy", item: "Remove agent", question: "from #deploy?", yes: " y remove ", no: " n keep ", ran: "dry run: /kick not run" },
 ];
 
@@ -194,7 +194,7 @@ fn a_question_draws_its_answers_as_lozenges() {
     let mut c = chat();
     ask_by_clicks(&mut c, "⋯all", "Hide messages here");
     let shown = bar(&mut c);
-    assert!(shown.contains("hide the messages in ⋯all?") && shown.contains(" y hide ") && shown.contains(" n keep "), "{shown}");
+    assert!(shown.contains("hide the messages so far in ⋯all?") && shown.contains(" y hide ") && shown.contains(" n keep "), "{shown}");
     assert!(!c.signals().is_empty(), "nothing hidden before the answer");
 }
 
@@ -217,7 +217,7 @@ fn a_middle_or_right_click_on_the_yes_answer_answers_no() {
         let yes = at(&mut c, " y hide ");
         button(&mut c, yes, b);
         assert_eq!(c.status(), "kept", "{b:?} on yes ran nothing");
-        assert!(!bar(&mut c).contains("hide the messages in ⋯all?"), "{b:?}: nothing left asking");
+        assert!(!bar(&mut c).contains("hide the messages so far in ⋯all?"), "{b:?}: nothing left asking");
     }
 }
 
@@ -229,7 +229,7 @@ fn a_click_on_the_no_answer_keeps_things() {
     click(&mut c, no);
     assert_eq!(c.status(), "kept");
     assert!(!c.signals().is_empty());
-    assert!(!bar(&mut c).contains("hide the messages in ⋯all?"));
+    assert!(!bar(&mut c).contains("hide the messages so far in ⋯all?"));
 }
 
 /// A click in the feed answers no, so a later `y` types and answers nothing.
@@ -255,7 +255,7 @@ fn ctrl_c_over_a_question_answers_it_no_before_the_guard_asks() {
         key(&mut c, KeyCode::Char(ch));
     }
     ask_by_clicks(&mut c, "⋯all", "Hide messages here");
-    assert!(bar(&mut c).contains("hide the messages in ⋯all?"));
+    assert!(bar(&mut c).contains("hide the messages so far in ⋯all?"));
     assert!(press(&mut c, KeyCode::Char('c'), KeyModifiers::CONTROL), "a draft keeps the chat open");
     assert!(c.app().guarding());
     key(&mut c, KeyCode::Esc);
@@ -309,7 +309,7 @@ fn ticked_until_gone(c: &mut Chat, question: &str) {
 /// for the operator alone, does not expire.
 #[test]
 fn a_question_that_acts_for_everyone_expires_as_a_cancel() {
-    for (item, question, said) in [("Delete channel", "delete #deploy and its history?", "delete #deploy question expired"), ("Remove agent", "from #deploy?", "from #deploy question expired")] {
+    for (item, question, said) in [("Delete channel", "delete #deploy and its history for everyone?", "delete #deploy cancelled: no answer in 1 s"), ("Remove agent", "from #deploy?", "from #deploy cancelled: no answer in 1 s")] {
         let mut c = chat().delete_question_life(std::time::Duration::from_millis(1500));
         ask_by_keys(&mut c, '2', item);
         assert!(bar(&mut c).contains(question) && bar(&mut c).contains(" 2 s"), "{item} counts down: {}", bar(&mut c));

@@ -105,15 +105,15 @@ focus-resize | base  | wait:Agents F2 Down Down wait:↑_↓_move resize:70 gone
 agent-menu   | base  | wait:Agents side:○ wait:DMs side:○ wait:Address
 crowd        | crowd | wait:Agents F2 Down Up Up Up Up Up Up Up Up Up Up Up Up
 common       | base  | wait:Agents click:≡ wait:Hide_column
-hide-here    | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:hide_the_messages_in_⋯all?
+hide-here    | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:hide_the_messages_so_far_in_⋯all?
 hide-done    | base  | wait:#open click:#open click:#open wait:Hide_messages_here Enter wait:y_hide pause:1.2 click:y_hide wait:the_bus_keeps_them
-hide-chan    | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Hide_messages_here wait:hide_the_messages_in_#deploy?
+hide-chan    | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Hide_messages_here wait:hide_the_messages_so_far_in_#deploy?
 paste        | base  | wait:Agents text:see: paste:line_one\\nline_two\\nline_three
 rawpaste     | base  | wait:Agents rawpaste:one\\ntwo
 plain        | plain | wait:Agents
 own-row      | own   | wait:operator click:#deploy click:#deploy wait:pick Escape gone:pick side:operator wait:Leave_#deploy
 quiet-send   | base  | wait:Agents rside:○ wait:Address click:Address_@ text:are_you_there Enter wait:no_heartbeat
-paste-asked  | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:hide_the_messages_in_⋯all? paste:yes_please\\nsecond_line wait:kept
+paste-asked  | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:hide_the_messages_so_far_in_⋯all? paste:yes_please\\nsecond_line wait:kept
 ask          | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide
 ask-yes      | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide pause:1.2 click:y_hide wait:the_bus_keeps_them
 ask-no       | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide click:n_keep wait:kept

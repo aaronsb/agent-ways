@@ -149,11 +149,11 @@ impl Step {
     /// everyone expires `life` after it is ready, as a no.
     fn question(&self, id: String, life: std::time::Duration) -> Question {
         let (text, yes, no) = match self {
-            Step::HideHere(_, label) => (format!("hide the messages in {label}? the bus keeps every message"), "hide", "keep"),
+            Step::HideHere(_, label) => (format!("hide the messages so far in {label}? nothing is deleted"), "hide", "keep"),
             Step::Leave(c) => (format!("leave #{c}?"), "leave", "stay"),
             Step::DeleteRead(d) => return d.question(id, life),
-            Step::Tombstone(_, name) => (format!("tombstone @{name}? its messages leave every tab and its row leaves Agents"), "tombstone", "keep"),
-            Step::Delete(c) => (format!("delete #{c} and its history?"), "delete", "keep"),
+            Step::Tombstone(_, name) => (format!("tombstone @{name}? its messages and its Agents row go away"), "tombstone", "keep"),
+            Step::Delete(c) => (format!("delete #{c} and its history for everyone?"), "delete", "keep"),
             Step::Remove(c, m) => (format!("remove @{} from #{c}?", m.label), "remove", "keep"),
         };
         let q = Question::new(id, text, yes, no);
@@ -163,15 +163,17 @@ impl Step {
         }
     }
 
-    /// What the status line says when its question expired unanswered.
-    fn expired(&self) -> Option<String> {
-        match self {
-            Step::DeleteRead(_) => Some("delete question expired".into()),
-            Step::Tombstone(_, name) => Some(format!("tombstone @{name} question expired")),
-            Step::Delete(c) => Some(format!("delete #{c} question expired")),
-            Step::Remove(c, m) => Some(format!("remove @{} from #{c} question expired", m.label)),
-            Step::HideHere(..) | Step::Leave(_) => None,
-        }
+    /// What the status line says when its question, which lived `life`,
+    /// expired unanswered.
+    fn expired(&self, life: std::time::Duration) -> Option<String> {
+        let action = match self {
+            Step::DeleteRead(_) => "delete".to_string(),
+            Step::Tombstone(_, name) => format!("tombstone @{name}"),
+            Step::Delete(c) => format!("delete #{c}"),
+            Step::Remove(c, m) => format!("remove @{} from #{c}", m.label),
+            Step::HideHere(..) | Step::Leave(_) => return None,
+        };
+        Some(format!("{action} cancelled: no answer in {} s", life.as_secs()))
     }
 }
 
@@ -913,7 +915,7 @@ impl ChatPane {
     pub(super) fn answered_expired(&mut self, id: &str) {
         let Some(step) = self.asked.take_if(|(pending, _)| pending == id).map(|(_, step)| step) else { return };
         self.dirty = true;
-        if let Some(said) = step.expired() {
+        if let Some(said) = step.expired(self.delete_question_life) {
             self.say(said, false);
         }
     }
@@ -1048,7 +1050,7 @@ mod tests {
         let mut c = ChatPane::new(None, Default::default());
         c.dry_run = true;
         let id = |c: &ChatPane| c.asked.as_ref().map(|(id, _)| id.clone()).expect("a question pending");
-        for (item, ask) in [(HIDE_HERE, "hide the messages in #deploy?"), (LEAVE, "leave #deploy?"), (DELETE, "delete #deploy")] {
+        for (item, ask) in [(HIDE_HERE, "hide the messages so far in #deploy?"), (LEAVE, "leave #deploy?"), (DELETE, "delete #deploy")] {
             c.item("deploy", item);
             assert!(matches!(c.to_open.take(), Some(Open::Ask(Question { question, .. })) if question.contains(ask)), "{item} asks the shell");
             assert_eq!(c.status, "", "{item} ran nothing yet");

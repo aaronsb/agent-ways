@@ -157,11 +157,12 @@ impl Report {
         (self.held.iter().map(|(_, n)| n).sum(), self.held.len())
     }
 
-    /// `· 3 stay unread by 2 sessions`, or nothing when none stay.
+    /// `· 3 unread are kept`, or nothing when none are.
     pub fn kept_words(&self) -> String {
         match self.kept() {
             (0, _) => String::new(),
-            (n, s) => format!(" · {n} stay unread by {s} session{}", if s == 1 { "" } else { "s" }),
+            (1, _) => " · 1 unread is kept".into(),
+            (n, _) => format!(" · {n} unread are kept"),
         }
     }
 }
@@ -451,7 +452,7 @@ mod tests {
         let call = |p: &Path, args: Vec<String>| start(p.to_path_buf(), args, None).wait();
         let r = report(&call(&ok, delete_argv(&Scope::Open, "all", true)).unwrap()).unwrap();
         assert_eq!(r, Report { marked: 12, batch: None, held: vec![("Ada-x".into(), 2), ("Bo-y".into(), 1)] });
-        assert_eq!(r.kept_words(), " · 3 stay unread by 2 sessions");
+        assert_eq!(r.kept_words(), " · 3 unread are kept");
         assert_eq!(call(&refused, tombstone_argv("s9")).unwrap_err().to_string(), "tombstone: s9 has not exited", "attend's words, after the verb");
         assert_eq!(call(&unread, delete_argv(&Scope::Open, "all", true)).and_then(|d| report(&d)).unwrap_err().to_string(), "attend message delete: its report has no `marked`", "no count is no zero");
         let e = call(&old, delete_argv(&Scope::Open, "all", true)).unwrap_err();
