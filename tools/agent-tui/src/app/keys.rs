@@ -45,6 +45,10 @@ impl App {
             return self.quit();
         }
         if self.modal().is_some() {
+            // Yes's key before yes has armed holds it back the longer.
+            if matches!(k.code, KeyCode::Char('y' | 'Y')) && !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) {
+                self.yes_too_soon();
+            }
             return self.modal_key(k);
         }
         match std::mem::replace(&mut self.mode, Mode::Browse) {

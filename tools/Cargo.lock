@@ -169,7 +169,6 @@ dependencies = [
  "agent-identity",
  "agent-settings",
  "agent-theme",
- "attend-chat",
  "attend-config",
  "attend-groups",
  "attend-instances",
@@ -204,6 +203,7 @@ dependencies = [
  "claude-sessions",
  "libc",
  "notify",
+ "serde_json",
  "serde_yaml",
  "ways-core",
 ]

@@ -7,7 +7,7 @@
 
 use std::borrow::Cow;
 
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
 use ratatui::layout::{Position, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -196,11 +196,15 @@ pub(super) struct Button {
     pub(super) ground: Ground,
     cancel: bool,
     default: bool,
+    /// Drawn set back; neither its keys nor a click press it.
+    waiting: bool,
+    /// A held key's repeats do not press it, only a press does.
+    press_only: bool,
 }
 
 impl Button {
     pub(super) fn new(id: Btn, label: impl Into<String>, ground: Ground) -> Self {
-        Button { id, label: label.into(), keys: Vec::new(), chords: Vec::new(), ground, cancel: false, default: false }
+        Button { id, label: label.into(), keys: Vec::new(), chords: Vec::new(), ground, cancel: false, default: false, waiting: false, press_only: false }
     }
 
     /// A key that presses it, with no Ctrl or Alt held.
@@ -226,6 +230,31 @@ impl Button {
     pub(super) fn default(mut self) -> Self {
         self.default = true;
         self
+    }
+
+    /// It waits: drawn set back, and its keys and a click on it do
+    /// nothing.
+    pub(super) fn waiting(mut self) -> Self {
+        self.waiting = true;
+        self
+    }
+
+    /// Only a key's press presses it, never a repeat the terminal reports
+    /// as one. Most terminals send a held key as presses, which this cannot
+    /// tell from typing; a pane question's yes meets those with its arm
+    /// delay, which each early press starts again.
+    pub(super) fn press_only(mut self) -> Self {
+        self.press_only = true;
+        self
+    }
+
+    /// The ground it is drawn on: set back while it waits.
+    fn drawn_ground(&self) -> Ground {
+        if self.waiting {
+            Ground::Rule
+        } else {
+            self.ground
+        }
     }
 }
 
@@ -285,6 +314,9 @@ pub(super) struct Dialog<'a> {
     /// Home, End, `g` and `G` jump to the top and the last page.
     jumps: bool,
     forward: Option<fn(&KeyEvent) -> bool>,
+    /// The time left before it closes on its own, drawn after the title:
+    /// the long form where it fits, the short one where it does not.
+    countdown: Option<(String, String)>,
 }
 
 /// Where a dialog was drawn: its rect, each button's, and its scroll held
@@ -333,6 +365,7 @@ impl<'a> Dialog<'a> {
             any_press: false,
             jumps: false,
             forward: None,
+            countdown: None,
         })
     }
 
@@ -389,7 +422,8 @@ impl<'a> Dialog<'a> {
         if let KeyCode::Char(c) = k.code {
             let chord = |b: &&Button| b.chords.iter().any(|&(held, at)| held == k.modifiers && at == c);
             if let Some(b) = self.buttons.iter().find(|b| (plain && b.keys.contains(&c)) || chord(b)) {
-                return Answer::Button(b.id);
+                let repeat = b.press_only && k.kind == KeyEventKind::Repeat;
+                return if b.waiting || repeat { Answer::Stay } else { Answer::Button(b.id) };
             }
             if plain && self.close_keys.contains(&c) {
                 return Answer::Close;
@@ -447,7 +481,8 @@ impl<'a> Dialog<'a> {
             MouseEventKind::ScrollDown if inside => self.scroll_by(1),
             MouseEventKind::Down(button) => {
                 if let Some(&(_, id)) = drawn.buttons.iter().find(|(r, _)| button == MouseButton::Left && r.contains(at)) {
-                    return Answer::Button(id);
+                    let waiting = self.buttons.iter().any(|b| b.id == id && b.waiting);
+                    return if waiting { Answer::Stay } else { Answer::Button(id) };
                 }
                 if let (Some(m), Some(i)) = (&mut self.menu, drawn.rows.iter().position(|r| button == MouseButton::Left && r.contains(at))) {
                     return m.click(i);
@@ -487,7 +522,11 @@ impl<'a> Dialog<'a> {
         }
         let r = self.rect(area);
         let border = self.border.unwrap_or_else(theme::modal_border);
-        let mut block = pane(self.title.clone()).border_style(border).padding(Padding::horizontal(self.padding));
+        let title = match &self.countdown {
+            Some((long, _)) => format!("{} · {long}", self.title),
+            None => self.title.clone(),
+        };
+        let mut block = pane(title).border_style(border).padding(Padding::horizontal(self.padding));
         if let Some(s) = self.title_style {
             block = block.title_style(s);
         }
@@ -510,7 +549,7 @@ impl<'a> Dialog<'a> {
         let mut buttons = Vec::new();
         if row == 1 {
             let at = Rect { y: inner.bottom() - 1, height: 1, ..inner };
-            let row: Vec<(Btn, String, Ground)> = self.buttons.iter().map(|b| (b.id, b.label.clone(), b.ground)).collect();
+            let row: Vec<(Btn, String, Ground)> = self.buttons.iter().map(|b| (b.id, b.label.clone(), b.drawn_ground())).collect();
             let focus = self.default_button().map(|b| b.id);
             f.render_widget(Paragraph::new(button_row(sh, at, focus, &row, &mut buttons)), at);
         }
@@ -519,24 +558,44 @@ impl<'a> Dialog<'a> {
 }
 
 impl Dialog<'_> {
-    /// The bar: a `confirm` lozenge, the question, then the answers as
-    /// lozenges, each a click target. The question is cut to leave the
-    /// answers on screen, and the lozenge goes first when the question
-    /// would not fit beside it. No answer is drawn focused.
+    /// The bar: a `confirm` lozenge (`notice` for a question with no yes) and the question on the left, the
+    /// answers as lozenges at the bar's right end, each a click target. The
+    /// answers' place depends on the bar's width and their own labels only,
+    /// so a question updated in place with a longer or shorter text never
+    /// moves one under a click aimed at another. The question is cut to
+    /// leave the answers on screen, and the lozenge goes first when the
+    /// question would not fit beside it. No answer is drawn focused.
     fn draw_bar(&self, f: &mut Frame, area: Rect, sh: Shape) -> Drawn {
         let destructive = self.buttons.iter().any(|b| b.ground == Ground::Err);
         let answers: Vec<(Btn, Vec<Span<'static>>)> =
-            self.buttons.iter().map(|b| (b.id, sh.lozenge(&[Seg::on(format!(" {} ", b.label), b.ground.on_row(destructive)).bold()]))).collect();
+            self.buttons.iter().map(|b| (b.id, sh.lozenge(&[Seg::on(format!(" {} ", b.label), b.drawn_ground().on_row(destructive)).bold()]))).collect();
         // Each answer is followed by a space.
         let after = answers.iter().map(|(_, a)| width(a) + 1).sum::<u16>();
-        let lozenge = sh.lozenge(&[Seg::on(" confirm ", Ground::Warn).bold()]);
+        // A question with no yes only says something: a notice, not a confirm.
+        let word = if self.buttons.iter().any(|b| b.id == Btn::Yes) { " confirm " } else { " notice " };
+        let lozenge = sh.lozenge(&[Seg::on(word, Ground::Warn).bold()]);
         let room = |used: u16| usize::from(area.width.saturating_sub(used + after + 3));
+        // The countdown keeps its place before the question is cut: the long
+        // form where the whole question fits beside it and the `confirm`
+        // lozenge, else the short one, so the long form never cuts what is
+        // asked nor pushes the lozenge out.
+        let left = match &self.countdown {
+            Some((long, short)) => format!(" · {}", if room(width(&lozenge)) >= str_width(&self.title) + 3 + str_width(long) { long } else { short }),
+            None => String::new(),
+        };
+        let room = |used: u16| room(used).saturating_sub(str_width(&left));
         let mut spans = Vec::new();
         if str_width(&self.title) <= room(width(&lozenge)) {
             spans.extend(lozenge);
         }
         let question = clip(&self.title, room(width(&spans)));
-        spans.push(Span::raw(format!(" {question}  ")));
+        spans.push(Span::raw(format!(" {question}{left}  ")));
+        // Padded out to the answers' fixed place, where the bar has room
+        // for it; on a bar too narrow for the question's least, after it.
+        let fixed = area.width.saturating_sub(after);
+        if let Some(pad) = fixed.checked_sub(width(&spans)).filter(|n| *n > 0) {
+            spans.push(Span::raw(" ".repeat(usize::from(pad))));
+        }
         let mut buttons = Vec::new();
         for (id, target) in answers {
             let x = area.x + width(&spans);
@@ -639,6 +698,13 @@ impl<'a> DialogBuilder<'a> {
     /// inside it or outside.
     pub(super) fn any_press(mut self) -> Self {
         self.0.any_press = true;
+        self
+    }
+
+    /// The time left before it closes on its own, drawn after the title:
+    /// `long` where it fits, `short` where it does not.
+    pub(super) fn countdown(mut self, long: String, short: String) -> Self {
+        self.0.countdown = Some((long, short));
         self
     }
 
@@ -839,16 +905,29 @@ mod tests {
             .unwrap()
     }
 
+    /// A question with no yes is a notice, not a confirm.
+    #[test]
+    fn a_bar_question_with_no_yes_wears_the_notice_lozenge() {
+        theme::set(theme::Palette::default());
+        let d = Dialog::bar("nothing to do").button(Button::new(Btn::No, "n close", Ground::Keep).key('n').cancel().default()).build().unwrap();
+        let buf = draw_with(60, 1, |f| {
+            d.draw(f, f.area(), Shape::PLAIN);
+        });
+        let row = &testkit::rows(&buf)[0];
+        assert!(row.starts_with(" notice  nothing to do") && !row.contains("confirm"), "{row}");
+    }
+
     #[test]
     fn a_bar_question_draws_on_the_first_row_and_keeps_its_answers_on_screen() {
         theme::set(theme::Palette::default());
         let mut out = Drawn::default();
         let buf = draw_with(60, 3, |f| out = bar("drop it?").draw(f, Rect { y: 2, height: 1, ..f.area() }, Shape::PLAIN));
         let rows = testkit::rows(&buf);
-        assert!(rows[2].starts_with(" confirm  drop it?   y drop   n keep "), "{}", rows[2]);
+        assert!(rows[2].starts_with(" confirm  drop it?  ") && rows[2].trim_end().ends_with("drop it?                         y drop   n keep"), "{}", rows[2]);
         assert_eq!(out.rect, Rect::new(0, 2, 60, 1));
         let (yes, no) = (out.buttons[0], out.buttons[1]);
         assert_eq!((yes.1, no.1), (Btn::Yes, Btn::No));
+        assert_eq!((yes.0.right() + 1, no.0.right() + 1), (no.0.x, 60), "the answers at the bar's right end, a space after each");
         assert_eq!((buf[(yes.0.x + 1, 2)].bg, buf[(no.0.x + 1, 2)].bg), (Ground::Err.bg(), Ground::Ok.bg()), "keep is green beside drop");
         let mut d = bar("drop it?");
         assert_eq!(click(&mut d, &out, no.0.x, 2), Answer::Button(Btn::No));
@@ -859,6 +938,30 @@ mod tests {
         let row = &testkit::rows(&buf)[0];
         assert!(!row.contains("confirm") && row.contains('…') && row.contains(" y drop ") && row.contains(" n keep "), "{row}");
         assert!(out.buttons.iter().all(|(r, _)| r.right() <= 40 && r.width > 0), "the answers stay on screen");
+    }
+
+    /// The long countdown never pushes out the `confirm` lozenge: where the
+    /// question and the long form fit only without it, the short form is
+    /// drawn and the lozenge stays.
+    #[test]
+    fn the_long_countdown_never_pushes_out_the_lozenge() {
+        theme::set(theme::Palette::default());
+        let timed = || {
+            Dialog::bar("drop it?")
+                .button(Button::new(Btn::Yes, "y drop", Ground::Err).key('y'))
+                .button(Button::new(Btn::No, "n keep", Ground::Keep).key('n').cancel().default())
+                .countdown("closes in 58 s".into(), "58 s".into())
+                .build()
+                .unwrap()
+        };
+        let row = |w: u16| testkit::rows(&draw_with(w, 1, |f| {
+            timed().draw(f, f.area(), Shape::PLAIN);
+        }))
+        .remove(0);
+        let narrow = row(50);
+        assert!(narrow.contains("confirm") && narrow.contains("drop it? · 58 s") && !narrow.contains("closes in"), "{narrow}");
+        let wide = row(70);
+        assert!(wide.contains("confirm") && wide.contains("drop it? · closes in 58 s"), "{wide}");
     }
 
     #[test]

@@ -34,7 +34,7 @@ use std::time::{Duration, SystemTime};
 use crate::util::{projects_base, signals_base};
 
 /// Days after which cleanup removes a marked message.
-pub(crate) const MARK_REAP_DAYS: u64 = 7;
+pub(crate) use attend_presence::MARK_REAP_DAYS;
 
 /// Claude Code sessions started in a project after which cleanup removes a
 /// marked message in that project's tray.

@@ -54,6 +54,9 @@ pub(super) struct Ix {
     /// its entry dialog and its questions, the key help, the exit guard.
     /// The one record of what is open.
     overlays: Vec<Overlay>,
+    /// Ctrl+X was the box's last key: the first half of Ctrl+X Ctrl+S,
+    /// send now. The operator's next input, whatever it is, ends it.
+    chord: bool,
 }
 
 impl Ix {
@@ -165,11 +168,26 @@ pub(super) enum Ev {
     WorldChanged,
     /// The column is hidden, by its key or for want of width.
     ColumnHidden,
+    /// A key of the operator's that the shell, or the chat's own column
+    /// key, took before the interaction state saw it: the key help, the
+    /// mouse, quitting, a new channel, the column shown or hidden.
+    KeyTaken,
     /// The shell opened an overlay over the pane, on top of the rest
     /// (`Pane::overlay_opened`).
     OverlayOpened(Overlay),
     /// The shell closed the overlay on top (`Pane::overlay_closed`).
     OverlayClosed(Overlay),
+}
+
+impl Ev {
+    /// Whether the operator gave it: a key (one the shell took too), a
+    /// click, a paste, a menu's text into the box, the tab bar's toggle, a
+    /// jump or a tab's activation. A refresh, the column hidden for want of
+    /// width and an overlay's coming and going are not. Only the operator's
+    /// input ends the send-now chord.
+    pub(super) fn is_input(&self) -> bool {
+        matches!(self, Ev::Key(_) | Ev::KeyTaken | Ev::Click(_) | Ev::Paste | Ev::Compose | Ev::ToggleBar | Ev::Jump(_) | Ev::Numbered { .. } | Ev::TabActivated { .. })
+    }
 }
 
 /// A left click.
@@ -191,8 +209,9 @@ pub(super) enum Effect {
     Caret { up: bool },
     /// Enter in the box: send, or run the command.
     Send,
-    /// Ctrl+Enter in the box, where the terminal reports it: send now, to
-    /// an agent that is quiet too, as Claude Code's `chat:sendNow`.
+    /// Ctrl+Enter in the box, where the terminal reports it, or Ctrl+X
+    /// Ctrl+S in any terminal: send now, to an agent that is quiet too, as
+    /// Claude Code's `chat:sendNow` and its chord do.
     SendNow,
     /// Tab in the box on a word to complete: complete it.
     Complete,
@@ -284,8 +303,12 @@ impl<'a> Step<'a> {
             self.set(Focus::Feed);
             self.fx.push(Effect::Redraw);
         }
+        // The chord's first key holds for the operator's next input only: a
+        // refresh, the column hidden for width or an overlay's coming and
+        // going leave it held.
+        let chord = ev.is_input() && std::mem::take(&mut self.ix.chord);
         match ev {
-            Ev::Key(k) if self.ix.owns_text() => self.compose_key(k),
+            Ev::Key(k) if self.ix.owns_text() => self.compose_key(k, chord),
             Ev::Key(k) => self.nav_key(k),
             Ev::Click(Click::Pane { column, feed, row }) => self.click(column, feed, row),
             Ev::Click(Click::Shell) => {
@@ -320,6 +343,7 @@ impl<'a> Step<'a> {
                 Ok(())
             }
             Ev::WorldChanged => self.refocus(),
+            Ev::KeyTaken => Ok(()),
             Ev::ColumnHidden => {
                 if self.ix.side_focus().is_some() {
                     self.set(Focus::Compose);
@@ -490,9 +514,23 @@ impl<'a> Step<'a> {
     /// otherwise leaves forward, as Shift+Tab leaves backward. ↑ at the very
     /// top and ↓ at the very end leave a box that holds text; in an empty
     /// box they do nothing (ADR-409). Esc goes to the feed, the draft kept:
-    /// the first step of the Esc cycle.
-    fn compose_key(&mut self, k: KeyEvent) -> R {
+    /// the first step of the Esc cycle. Ctrl+X Ctrl+S sends now; after
+    /// Ctrl+X (`chord`) any other key drops the chord and does what it does.
+    fn compose_key(&mut self, k: KeyEvent, chord: bool) -> R {
         let v = self.v;
+        if k.modifiers == KeyModifiers::CONTROL {
+            match k.code {
+                KeyCode::Char('x') => {
+                    self.ix.chord = true;
+                    return Ok(());
+                }
+                KeyCode::Char('s') if chord => {
+                    self.fx.push(Effect::SendNow);
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
         match k.code {
             KeyCode::Esc => {
                 self.fx.push(Effect::Clear);

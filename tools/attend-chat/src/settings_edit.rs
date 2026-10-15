@@ -316,16 +316,67 @@ mod tests {
 
     /// A fresh home for one test, under the environment lock the caller
     /// holds: `HOME` and `XDG_CONFIG_HOME` in a temp directory, and a
-    /// project in it, a git checkout at `home/work/proj`.
-    fn home() -> (crate::test_dir::TestDir, PathBuf) {
-        let root = crate::test_dir::unique("settings-edit");
-        std::env::set_var("HOME", root.join("home"));
-        std::env::set_var("XDG_CONFIG_HOME", root.join("config"));
-        std::env::remove_var("CLAUDE_CONFIG_DIR");
-        let proj = root.join("home/work/proj");
-        fs::create_dir_all(proj.join(".git")).unwrap();
-        fs::create_dir_all(proj.join("src")).unwrap();
-        (root, proj)
+    /// project in it, a git checkout at `home/work/proj`. Bind it to a name
+    /// and it removes the directory when the test ends.
+    fn home() -> fixture::Home {
+        fixture::Home::new()
+    }
+
+    mod fixture {
+        use super::*;
+
+        /// A test's home directory. Every field is private, the guard that
+        /// removes it among them, and the paths are read through methods, so
+        /// no pattern (`_` or `..`) can take a path and drop the guard.
+        pub(super) struct Home {
+            _dir: crate::test_dir::TestDir,
+            root: PathBuf,
+            proj: PathBuf,
+        }
+
+        impl Home {
+            /// The temp directory the home is in.
+            pub(super) fn root(&self) -> &Path {
+                &self.root
+            }
+
+            /// The project, a git checkout at `home/work/proj`.
+            pub(super) fn proj(&self) -> &Path {
+                &self.proj
+            }
+
+            pub(super) fn new() -> Home {
+                let dir = crate::test_dir::unique("settings-edit");
+                std::env::set_var("HOME", dir.join("home"));
+                std::env::set_var("XDG_CONFIG_HOME", dir.join("config"));
+                std::env::remove_var("CLAUDE_CONFIG_DIR");
+                let root = dir.to_path_buf();
+                let proj = root.join("home/work/proj");
+                fs::create_dir_all(proj.join(".git")).unwrap();
+                fs::create_dir_all(proj.join("src")).unwrap();
+                Home { _dir: dir, root, proj }
+            }
+        }
+    }
+
+    /// A home that is never bound outlives nothing: a path read off the
+    /// call's result itself, or the home given to `_`, drops the guard at
+    /// the end of the statement, the directory goes, and what the test
+    /// writes after recreates it outside any guard. No pattern can strip
+    /// [`fixture::Home`] of a field; this catches the expressions that drop
+    /// it whole. The patterns are built from parts, so this test's own
+    /// lines do not match them.
+    #[test]
+    fn no_test_drops_its_home() {
+        let source = include_str!("settings_edit.rs");
+        let dropping = [["home()", "."].concat(), ["Home::new()", "."].concat(), ["let _ = ", "home()"].concat()];
+        let binds = |l: &&str| {
+            let l = l.trim_start();
+            l.strip_prefix("let ").and_then(|r| r.strip_suffix(" = home();")).is_some_and(|name| name != "_" && name.chars().all(|c| c.is_alphanumeric() || c == '_'))
+        };
+        assert!(source.lines().filter(binds).count() > 5, "the tests that bind a home by name are read");
+        let dropped: Vec<&str> = source.lines().filter(|l| dropping.iter().any(|d| l.contains(d.as_str()))).collect();
+        assert!(dropped.is_empty(), "a home dropped at once: {dropped:?}");
     }
 
     fn write(path: &Path, text: &str) {
@@ -340,7 +391,8 @@ mod tests {
     #[test]
     fn the_list_names_each_setting_with_its_value_and_the_layer_it_comes_from() {
         let _env = crate::test_dir::env_lock();
-        let (root, proj) = home();
+        let home = home();
+        let (root, proj) = (home.root().to_path_buf(), home.proj().to_path_buf());
         write(&ways_core::paths::user_config(), "attend_mod:\n  keepwarm: off\n");
         write(&proj.join(".claude/ways.yaml"), "attend_mod:\n  listening: active\n");
         let lines: Vec<String> = settings(&proj.join("src")).iter().map(Setting::line).collect();
@@ -365,7 +417,8 @@ mod tests {
     #[test]
     fn a_write_lands_in_the_file_of_the_place_chosen() {
         let _env = crate::test_dir::env_lock();
-        let (_, proj) = home();
+        let home = home();
+        let proj = home.proj().to_path_buf();
         let here = Place::Project(proj.clone());
         let user = ways_core::paths::user_config();
         let said = set_at("attend_mod.listening", "active", &here, &proj).unwrap().said;
@@ -394,7 +447,8 @@ mod tests {
     #[test]
     fn the_chat_keys_are_the_user_files_alone_and_a_bad_value_writes_nothing() {
         let _env = crate::test_dir::env_lock();
-        let (_, proj) = home();
+        let home = home();
+        let proj = home.proj().to_path_buf();
         let said = set_at("attend.chat.mouse", "false", &Place::User, &proj).unwrap().said;
         assert!(said.contains("mouse = false"), "{said}");
         assert!(read(&attend_config::user_path()).contains("mouse: false"), "{}", read(&attend_config::user_path()));
@@ -419,7 +473,8 @@ mod tests {
     #[test]
     fn a_write_the_files_fallback_hides_is_said_not_claimed() {
         let _env = crate::test_dir::env_lock();
-        let (_, proj) = home();
+        let home = home();
+        let proj = home.proj().to_path_buf();
         let here = Place::Project(proj.clone());
         write(&proj.join(".claude/ways.yaml"), "attend_mod:\n  keepwarm: bogus\n");
         let done = set_at("attend_mod.listening", "active", &here, &proj).unwrap();
@@ -434,7 +489,8 @@ mod tests {
     #[test]
     fn an_unset_in_a_file_whose_section_falls_back_says_no_fallback() {
         let _env = crate::test_dir::env_lock();
-        let (_, proj) = home();
+        let home = home();
+        let proj = home.proj().to_path_buf();
         let here = Place::Project(proj.clone());
         write(&proj.join(".claude/ways.yaml"), "attend_mod:\n  listening: active\n  keepwarm: bogus\n");
         let done = unset_at("attend_mod.listening", &here, &proj).unwrap();
@@ -447,7 +503,8 @@ mod tests {
     #[test]
     fn an_unset_says_what_the_chats_project_reads() {
         let _env = crate::test_dir::env_lock();
-        let (_, proj) = home();
+        let home = home();
+        let proj = home.proj().to_path_buf();
         write(&ways_core::paths::user_config(), "attend_mod:\n  listening: dormant\n");
         write(&proj.join(".claude/ways.yaml"), "attend_mod:\n  listening: active\n");
         let done = unset_at("attend_mod.listening", &Place::User, &proj.join("src")).unwrap();
@@ -466,7 +523,8 @@ mod tests {
     #[test]
     fn a_held_lock_refuses_the_write_after_a_bounded_wait() {
         let _env = crate::test_dir::env_lock();
-        let (_, proj) = home();
+        let home = home();
+        let proj = home.proj().to_path_buf();
         let here = Place::Project(proj.clone());
         let file = proj.join(".claude/ways.yaml");
         let held = agent_settings::writer::Lock::acquire(&file).unwrap();
@@ -489,7 +547,8 @@ mod tests {
     #[test]
     fn a_place_names_its_file_with_the_home_as_tilde() {
         let _env = crate::test_dir::env_lock();
-        let (_, proj) = home();
+        let home = home();
+        let proj = home.proj().to_path_buf();
         assert_eq!(Place::Project(proj.clone()).label(Some("active")), "project ~/work/proj: active");
         assert_eq!(Place::User.label(None), "user: not set");
         assert_eq!(untilde("~/work/proj"), proj);
@@ -498,7 +557,8 @@ mod tests {
     #[test]
     fn the_projects_offered_are_the_chats_then_each_live_agents_once() {
         let _env = crate::test_dir::env_lock();
-        let (root, proj) = home();
+        let home = home();
+        let (root, proj) = (home.root().to_path_buf(), home.proj().to_path_buf());
         let other = root.join("home/work/other");
         write(&other.join(".claude/ways.yaml"), "");
         let roots = [other.join("deep").display().to_string(), proj.display().to_string(), root.join("home/loose").display().to_string()];

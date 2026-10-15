@@ -23,7 +23,7 @@ use attend_groups::{Groups, ReceiveDir, Room};
 use serde::Serialize;
 
 use crate::util::signals_base;
-use crate::verbs::recipients::{caller_ids, identity_of, live_sessions};
+use crate::verbs::recipients::{caller_ids, identity_of, live_sessions, person_ids};
 
 /// Which messages a delete looks at.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,6 +78,9 @@ pub struct DeleteRequest {
     pub older_than: OlderThan,
     /// Report what would be marked and mark nothing.
     pub dry_run: bool,
+    /// The caller is the person at the terminal, whatever session this
+    /// process runs under ([`person_ids`]).
+    pub as_person: bool,
 }
 
 /// What a delete did.
@@ -156,7 +159,8 @@ impl std::fmt::Display for DeleteError {
 pub fn delete(req: &DeleteRequest) -> Result<Deleted, DeleteError> {
     let base = signals_base();
     let recipients = live_recipients(&base);
-    delete_in(&base, req, &caller_ids(), &recipients, SystemTime::now())
+    let caller = if req.as_person { person_ids() } else { caller_ids() };
+    delete_in(&base, req, &caller, &recipients, SystemTime::now())
 }
 
 /// Which messages in the scope's rooms a delete may take, by sender and

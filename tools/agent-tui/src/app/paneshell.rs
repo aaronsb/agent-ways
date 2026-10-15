@@ -8,7 +8,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::Span;
 use ratatui::Frame;
 
-use super::pane::{footer_spans, Binding, Ctx, Keyed, Open, Overlay, Tone};
+use super::pane::{footer_spans, Binding, Ctx, Expiry, Keyed, Open, Overlay, Question, Tone, EXPIRED};
 use super::pick::Pick;
 use super::response::Shown;
 use super::theme::{self, Seg};
@@ -21,14 +21,114 @@ use super::render::{clip, width};
 /// The id of the shell's own question before a plain `q` quits.
 pub(crate) const QUIT_ASK: &str = "\u{0}quit";
 
-/// A pane's question on the bottom bar ([`Open::Ask`]).
+/// The arm delay of the shell's own "quit?": none, since the `q` that
+/// asked it was the operator's own key, and `q` then `y` quits at once.
+const QUIT_ARM: std::time::Duration = std::time::Duration::ZERO;
+
+/// How long a question's yes stays set back after the question is ready to
+/// answer, or after what it asks changed: a key or a click meant for what
+/// was there a moment before, or typed ahead, lands on nothing.
+pub(crate) const ARM: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// A pane's question on the bottom bar ([`Open::Ask`]); when its yes arms,
+/// [`ARM`] after it was ready to answer or last changed while ready; and
+/// when it expires, its [`Expiry`](super::pane::Expiry) counted from when
+/// it was first ready.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Asked {
-    pub id: String,
-    pub question: String,
-    pub yes: String,
-    pub no: String,
+    pub q: Question,
+    pub armed_at: Option<std::time::Instant>,
+    pub deadline: Option<std::time::Instant>,
+    /// Where the bar it was last drawn on sat: the answers sit at its
+    /// right end on its row, so a new place or size moves them.
+    pub bar: Option<Rect>,
+    /// Its arm delay ([`ARM`], none for the shell's own "quit?").
+    pub arm: std::time::Duration,
 }
+
+impl Asked {
+    /// `q`, open now, its yes arming `arm` from now if it is ready, and
+    /// `arm` after each change that arms it again.
+    pub(crate) fn open(q: Question, arm: std::time::Duration) -> Asked {
+        let mut a = Asked { q, armed_at: None, deadline: None, bar: None, arm };
+        a.ready(false);
+        a
+    }
+
+    /// `q` in place of the question open under its id: its text and its
+    /// answers, the expiry kept running once it has started. Yes arms again
+    /// when the question becomes ready, or changes what it asks.
+    pub(crate) fn update(&mut self, q: Question) {
+        let changed = (&self.q.question, &self.q.yes, &self.q.no) != (&q.question, &q.yes, &q.no);
+        self.q = q;
+        self.ready(changed);
+    }
+
+    /// Start yes's arm delay and the expiry once the question can be
+    /// answered yes; `rearm` restarts a delay already started.
+    fn ready(&mut self, rearm: bool) {
+        if self.q.pending || self.q.yes.is_none() {
+            self.armed_at = None;
+            return;
+        }
+        let now = std::time::Instant::now();
+        if rearm || self.armed_at.is_none() {
+            self.armed_at = Some(now + self.arm);
+        }
+        if self.deadline.is_none() {
+            self.deadline = self.q.expiry.as_ref().map(|e| now + e.after);
+        }
+    }
+
+    /// Whether yes takes its key and a click: the question is ready and its
+    /// arm delay has passed.
+    pub(crate) fn armed(&self) -> bool {
+        self.armed_at.is_some_and(|t| std::time::Instant::now() >= t)
+    }
+
+    /// A press of yes's key, or a click on it, while yes is not armed:
+    /// its arm delay starts again, so a key held down, which most
+    /// terminals send as presses, arms nothing until it has been let go
+    /// for the whole delay.
+    pub(crate) fn yes_too_soon(&mut self) {
+        if self.armed_at.is_some() && !self.armed() {
+            self.armed_at = Some(std::time::Instant::now() + self.arm);
+        }
+    }
+
+    /// It was drawn on the bar at `bar`. A place or size other than the
+    /// last moves the answers, which sit at the bar's right end on its
+    /// row, so yes arms again: a click aimed at what was there lands on
+    /// nothing.
+    pub(crate) fn drawn_on(&mut self, bar: Rect) {
+        if self.bar.is_some_and(|b| b != bar) && self.armed_at.is_some() {
+            self.armed_at = Some(std::time::Instant::now() + self.arm);
+        }
+        self.bar = Some(bar);
+    }
+
+    /// Whether the screen changes on the clock: yes is arming, or the
+    /// seconds left are counting down.
+    fn on_the_clock(&self) -> bool {
+        self.deadline.is_some() || self.armed_at.is_some_and(|t| std::time::Instant::now() < t)
+    }
+
+
+    /// The whole seconds left before it expires, rounded up.
+    pub(crate) fn left(&self) -> Option<u64> {
+        self.deadline.map(|d| d.saturating_duration_since(std::time::Instant::now()).as_millis().div_ceil(1000) as u64)
+    }
+
+    /// Its deadline has passed, whether or not a tick has closed it yet.
+    pub(crate) fn expired(&self) -> bool {
+        self.left() == Some(0)
+    }
+}
+
+/// How often the shell ticks while a question is on the clock
+/// ([`App::tick_every`]): often enough that its seconds left change when
+/// they should, it expires on time, and an armed yes is drawn so at once.
+pub(crate) const QUESTION_TICK: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// A key the shell takes before the pane, read by [`App::shell_key`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -340,6 +440,9 @@ impl App {
             self.strip_blur();
         }
         if let Some(s) = taken {
+            if let Some(p) = &mut self.pane {
+                p.shell_key_taken();
+            }
             // A pane that owns the focus keeps it across the shell's keys.
             if !self.ctx().owns_bar {
                 self.interrupt_pane();
@@ -384,7 +487,7 @@ impl App {
             // A plain `q` beside a pane that owns the focus asks first,
             // whatever is unsaved: it is one keystroke from typing.
             ShellKey::Quit if k.code == KeyCode::Char('q') && self.ctx().owns_bar => {
-                self.mode = Mode::Ask(Asked { id: QUIT_ASK.into(), question: "quit?".into(), yes: "quit".into(), no: "stay".into() });
+                self.mode = Mode::Ask(Asked::open(Question::new(QUIT_ASK, "quit?", "quit", "stay"), QUIT_ARM));
             }
             ShellKey::Quit => return self.quit(),
             ShellKey::Mouse => {
@@ -431,11 +534,12 @@ impl App {
                 pick.by_esc = by_esc;
                 self.mode = Mode::Pick(pick);
             }
-            Open::Pick { .. } => {}
-            Open::Ask { id, question, yes, no } if matches!(self.mode, Mode::Browse) => {
-                self.mode = Mode::Ask(Asked { id, question, yes, no });
+            Open::Ask(q) if matches!(&self.mode, Mode::Ask(a) if a.q.id == q.id) => {
+                if let Mode::Ask(a) = &mut self.mode {
+                    a.update(q);
+                }
             }
-            Open::Ask { .. } => {}
+            Open::Ask(q) if matches!(self.mode, Mode::Browse) => self.mode = Mode::Ask(Asked::open(q, self.question_arm)),
             Open::Entry { id, title, value, error, anchor } if matches!(self.mode, Mode::Browse) => {
                 let mut input = crate::input::Input::new();
                 let n = value.chars().count();
@@ -443,7 +547,13 @@ impl App {
                 let dock = self.dock(anchor);
                 self.mode = Mode::Entry(Box::new(super::entry::Entry { id, title, input, error, dock }));
             }
-            Open::Entry { .. } => {}
+            // Something else is open: the menu, question or entry cannot
+            // be, and the pane hears so rather than wait on it.
+            dropped @ (Open::Pick { .. } | Open::Ask(_) | Open::Entry { .. }) => {
+                if let Some(p) = &mut self.pane {
+                    p.open_dropped(dropped);
+                }
+            }
             Open::Quit => {
                 if !self.quit() {
                     self.ending = true;
@@ -497,16 +607,21 @@ impl App {
 
     /// Give the pane its question's answer, through [`Pane::picked`].
     pub(super) fn answer(&mut self, a: Asked, yes: bool) {
+        // An answer that comes after the deadline, before a tick closed the
+        // question, is too late: the question expired.
+        if a.expired() {
+            return self.answer_expired(a);
+        }
         self.mode = Mode::Browse;
         // The shell's own question: yes quits, through the exit guard over
         // anything unsaved.
-        if a.id == QUIT_ASK {
+        if a.q.id == QUIT_ASK {
             if yes && !self.quit() {
                 self.ending = true;
             }
             return;
         }
-        self.pane_picked(&a.id, vec![if yes { "y" } else { "n" }.to_string()]);
+        self.pane_picked(&a.q.id, vec![if yes { "y" } else { "n" }.to_string()]);
     }
 
     /// The pane's picker set `values`. The pick is input to the pane, so
@@ -645,12 +760,70 @@ impl App {
             p.tick();
         }
         self.take_pane_open();
+        self.expire_question();
         self.open_held();
+    }
+
+    /// A question whose expiry ran out answers its expiry's answer, marked
+    /// [`EXPIRED`]. The pane's tick and the shell's ([`App::tick`]) both
+    /// check, so a pane that never ticks still sees its question expire.
+    pub(crate) fn expire_question(&mut self) {
+        let Mode::Ask(a) = &self.mode else { return };
+        if a.expired() {
+            let a = a.clone();
+            self.answer_expired(a);
+        }
+    }
+
+    /// `a` closed by its expiry: its expiry's answer, marked [`EXPIRED`].
+    fn answer_expired(&mut self, a: Asked) {
+        let yes = a.q.expiry.as_ref().is_some_and(Expiry::answers_yes);
+        self.mode = Mode::Browse;
+        self.pane_picked(&a.q.id, vec![if yes { "y" } else { "n" }.to_string(), EXPIRED.to_string()]);
+    }
+
+    /// A key or a click on the open question's yes before it has armed
+    /// starts its arm delay again ([`Asked::yes_too_soon`]).
+    pub(crate) fn yes_too_soon(&mut self) {
+        if let Mode::Ask(a) = &mut self.mode {
+            a.yes_too_soon();
+        }
+    }
+
+    /// The open question was drawn on the bar at `bar`
+    /// ([`Asked::drawn_on`]).
+    pub(crate) fn question_drawn_on(&mut self, bar: Rect) {
+        if let Mode::Ask(a) = &mut self.mode {
+            a.drawn_on(bar);
+        }
+    }
+
+    /// How long a question's yes stays set back once it is ready to answer,
+    /// or after what it asks changed ([`ARM`] unless set). A test that is
+    /// not about the delay sets none.
+    pub fn set_question_arm(&mut self, arm: std::time::Duration) {
+        self.question_arm = arm;
     }
 
     /// How often the pane wants its tick.
     pub fn pane_tick_every(&self) -> Option<std::time::Duration> {
         self.pane.as_ref().and_then(|p| p.tick_every())
+    }
+
+    /// Whether a question is open on the clock: arming, or counting down.
+    pub(crate) fn question_on_the_clock(&self) -> bool {
+        matches!(&self.mode, Mode::Ask(a) if a.on_the_clock())
+    }
+
+    /// How often the screen wants its tick: the pane's, and while a
+    /// question is on the clock at least every [`QUESTION_TICK`], whether
+    /// the pane ticks or not.
+    pub fn tick_every(&self) -> Option<std::time::Duration> {
+        let pane = self.pane_tick_every();
+        if !self.question_on_the_clock() {
+            return pane;
+        }
+        Some(pane.map_or(QUESTION_TICK, |p| p.min(QUESTION_TICK)))
     }
 
     /// The palette a pane screen draws in.
@@ -685,11 +858,15 @@ impl crate::screen::Screen for App {
     }
 
     fn tick_every(&self) -> Option<std::time::Duration> {
-        self.pane_tick_every()
+        App::tick_every(self)
     }
 
+    /// The pane's tick only for a pane that ticks: a question on the clock
+    /// ticks the shell alone.
     fn tick(&mut self) {
-        self.tick_pane();
+        if self.pane_tick_every().is_some() {
+            self.tick_pane();
+        }
         App::tick(self);
     }
 }
@@ -732,6 +909,8 @@ mod tests {
         tab_keys: TabKeys,
         /// `Some`: the pane takes Ctrl+N, counting its uses.
         news: Option<usize>,
+        /// How many keys the shell took for itself.
+        taken: usize,
     }
 
     impl Pane for Two {
@@ -743,6 +922,15 @@ mod tests {
         }
         fn picked(&mut self, id: &str, values: Vec<String>) {
             self.picked = values.into_iter().map(|v| format!("{id}={v}")).collect();
+        }
+        fn shell_key_taken(&mut self) {
+            self.taken += 1;
+        }
+        fn open_dropped(&mut self, open: Open) {
+            match open {
+                Open::Ask(Question { id, .. }) | Open::Pick { id, .. } | Open::Entry { id, .. } => self.picked.push(format!("dropped {id}")),
+                _ => {}
+            }
         }
         fn palette(&self) -> theme::Palette {
             theme::Palette::default()
@@ -798,8 +986,12 @@ mod tests {
         }
     }
 
+    /// The shell over [`Two`]. A question's yes arms at once: the arm
+    /// delay has tests of its own.
     fn app(text: bool) -> App {
-        App::with_pane("two", Two { tab: 0, keys: 0, wheel: 0, dirty: false, text, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None })
+        let mut a = App::with_pane("two", Two { tab: 0, keys: 0, wheel: 0, dirty: false, text, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None, taken: 0 });
+        a.set_question_arm(std::time::Duration::ZERO);
+        a
     }
 
     #[test]
@@ -845,7 +1037,7 @@ mod tests {
     type Answer = fn(&mut App);
 
     fn ask() -> Open {
-        Open::Ask { id: "q".into(), question: "drop it?".into(), yes: "drop".into(), no: "keep".into() }
+        Open::Ask(Question::new("q", "drop it?", "drop", "keep"))
     }
 
     /// A pane's question shows on the bar with its answers as lozenges; `y`
@@ -895,6 +1087,383 @@ mod tests {
         a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
         a.key(k(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(two(&a).keys, 3, "Enter only answered");
+    }
+
+
+    fn bar_of(a: &mut App, w: u16) -> String {
+        testkit::rows(&testkit::render(a, w, 6)).pop().expect("a bar")
+    }
+
+    /// A question that waits draws its yes set back, and neither `y` nor a
+    /// click on yes answers it; opened again under its id, ready, it updates
+    /// in place, and then `y` answers.
+    #[test]
+    fn a_pending_question_takes_no_yes_until_it_is_updated_ready() {
+        let mut a = app(true);
+        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask(Question::new("q", "counting…", "drop", "keep").pending()));
+        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+        assert!(bar_of(&mut a, 80).contains("counting…"), "{}", bar_of(&mut a, 80));
+        a.key(k(KeyCode::Char('y'), KeyModifiers::NONE));
+        click_text(&mut a, " y drop ");
+        assert!(matches!(a.mode, Mode::Ask(_)) && two(&a).picked.is_empty(), "yes waits: {:?}", two(&a).picked);
+        assert_eq!(two(&a).keys, 1, "the y typed nothing either");
+        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask(Question::new("q", "drop 3?", "drop", "keep")));
+        a.tick_pane();
+        assert!(matches!(&a.mode, Mode::Ask(q) if q.q.question == "drop 3?"), "updated in place");
+        assert!(bar_of(&mut a, 80).contains("drop 3?"));
+        a.key(k(KeyCode::Char('y'), KeyModifiers::NONE));
+        assert_eq!(two(&a).picked, ["q=y"], "ready, y answers");
+    }
+
+    /// Where `text` is first drawn on a frame of 80 by 6.
+    fn drawn_at(a: &mut App, text: &str) -> (u16, u16) {
+        testkit::find(&testkit::render(a, 80, 6), text).unwrap_or_else(|| panic!("no {text}: {}", bar_of(a, 80)))
+    }
+
+    fn click_at(a: &mut App, (x, y): (u16, u16)) {
+        a.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x + 1, row: y, modifiers: KeyModifiers::NONE });
+    }
+
+    /// The pane opens `q` on the next key.
+    fn ask_now(a: &mut App, q: Question) {
+        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask(q));
+        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+    }
+
+    /// The pane opens `q` again, in place, on its tick.
+    fn update(a: &mut App, q: Question) {
+        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask(q));
+        a.tick_pane();
+    }
+
+    /// An update in place moves no answer: a click aimed at no as a longer
+    /// text lands, on the place no was drawn, answers no.
+    #[test]
+    fn an_update_in_place_keeps_each_answer_where_it_was_drawn() {
+        let mut a = app(true);
+        ask_now(&mut a, Question::new("q", "counting…", "drop", "keep").pending());
+        let (yes, no) = (drawn_at(&mut a, " y drop "), drawn_at(&mut a, " n keep "));
+        update(&mut a, Question::new("q", "drop 3 read messages in this channel for everyone?", "drop", "keep"));
+        assert_eq!((drawn_at(&mut a, " y drop "), drawn_at(&mut a, " n keep ")), (yes, no), "drawn where they were: {}", bar_of(&mut a, 80));
+        click_at(&mut a, no);
+        assert_eq!(two(&a).picked, ["q=n"], "the click aimed at no answers no");
+    }
+
+    /// The ground yes is drawn on.
+    fn yes_ground(a: &mut App) -> ratatui::style::Color {
+        let buf = testkit::render(a, 80, 6);
+        let (x, y) = testkit::find(&buf, " y drop ").expect("yes is drawn");
+        buf[(x + 1, y)].bg
+    }
+
+    /// Lets the arm delay of the question open run out now.
+    fn arm_now(a: &mut App) {
+        if let Mode::Ask(q) = &mut a.mode {
+            q.armed_at = q.armed_at.map(|_| std::time::Instant::now());
+        }
+    }
+
+    /// For a moment after a question is ready to answer (opened ready, or
+    /// updated so), and after what it asks changes while ready, yes is drawn
+    /// set back and neither its key nor a click on it answers; then both do.
+    #[test]
+    fn yes_takes_no_key_or_click_until_its_arm_delay_has_passed() {
+        let y = k(KeyCode::Char('y'), KeyModifiers::NONE);
+        // Updated ready from waiting.
+        let mut a = app(true);
+        a.set_question_arm(std::time::Duration::from_secs(60));
+        ask_now(&mut a, Question::new("q", "counting…", "drop", "keep").pending());
+        update(&mut a, Question::new("q", "drop 3?", "drop", "keep"));
+        let arming = yes_ground(&mut a);
+        a.key(y);
+        click_text(&mut a, " y drop ");
+        assert!(matches!(a.mode, Mode::Ask(_)) && two(&a).picked.is_empty(), "yes arms first: {:?}", two(&a).picked);
+        assert_eq!(two(&a).keys, 1, "the y typed nothing either");
+        arm_now(&mut a);
+        assert_ne!(yes_ground(&mut a), arming, "drawn set back while it arms");
+        click_text(&mut a, " y drop ");
+        assert_eq!(two(&a).picked, ["q=y"], "armed, a click answers");
+        // Opened ready.
+        let mut a = app(true);
+        a.set_question_arm(std::time::Duration::from_secs(60));
+        ask_now(&mut a, Question::new("q", "drop it?", "drop", "keep"));
+        a.key(y);
+        assert!(matches!(a.mode, Mode::Ask(_)), "opened ready, it arms first");
+        // Changed while ready: it arms again.
+        arm_now(&mut a);
+        update(&mut a, Question::new("q", "drop all 40?", "drop", "keep"));
+        a.key(y);
+        assert!(matches!(a.mode, Mode::Ask(_)), "a change arms it again");
+        arm_now(&mut a);
+        a.key(y);
+        assert_eq!(two(&a).picked, ["q=y"]);
+    }
+
+    /// A `y` held down, or typed ahead, across the moment the question is
+    /// ready answers nothing: its repeats never press yes, the arm delay
+    /// takes the presses just after, and only a fresh press once armed
+    /// answers.
+    #[test]
+    fn a_held_or_typed_ahead_y_never_answers_yes() {
+        use ratatui::crossterm::event::{KeyEventKind, KeyEventState};
+        let held = KeyEvent { code: KeyCode::Char('y'), modifiers: KeyModifiers::NONE, kind: KeyEventKind::Repeat, state: KeyEventState::NONE };
+        let mut a = app(true);
+        a.set_question_arm(std::time::Duration::from_secs(60));
+        ask_now(&mut a, Question::new("q", "counting…", "drop", "keep").pending());
+        a.key(held);
+        update(&mut a, Question::new("q", "drop 3?", "drop", "keep"));
+        a.key(held);
+        a.key(k(KeyCode::Char('y'), KeyModifiers::NONE));
+        assert!(matches!(a.mode, Mode::Ask(_)) && two(&a).picked.is_empty(), "typed ahead, it lands in the arm delay: {:?}", two(&a).picked);
+        arm_now(&mut a);
+        a.key(held);
+        assert!(matches!(a.mode, Mode::Ask(_)) && two(&a).picked.is_empty(), "armed, a repeat still answers nothing: {:?}", two(&a).picked);
+        assert_eq!(two(&a).keys, 1, "and typed nothing");
+        a.key(k(KeyCode::Char('y'), KeyModifiers::NONE));
+        assert_eq!(two(&a).picked, ["q=y"], "a press answers");
+    }
+
+    /// A y held down, which a terminal without the kitty protocol's event
+    /// types sends as a press every key-repeat interval, never answers yes:
+    /// each press before yes has armed starts the arm delay again, from
+    /// before the question is ready until long after. Let go for the whole
+    /// delay, one y answers.
+    #[test]
+    fn a_y_held_as_presses_never_answers_yes() {
+        use std::time::{Duration, Instant};
+        let arm = Duration::from_millis(300);
+        let mut a = app(true);
+        a.set_question_arm(arm);
+        ask_now(&mut a, Question::new("q", "counting…", "drop", "keep").pending());
+        let y = k(KeyCode::Char('y'), KeyModifiers::NONE);
+        let start = Instant::now();
+        let mut ready: Option<Instant> = None;
+        while ready.is_none_or(|r| r.elapsed() < Duration::from_millis(1200)) {
+            if ready.is_none() && start.elapsed() >= Duration::from_millis(150) {
+                update(&mut a, Question::new("q", "drop 3?", "drop", "keep"));
+                ready = Some(Instant::now());
+            }
+            testkit::render(&mut a, 80, 6);
+            a.key(y);
+            std::thread::sleep(Duration::from_millis(30));
+        }
+        assert!(matches!(a.mode, Mode::Ask(_)) && two(&a).picked.is_empty(), "held, it never answered: {:?}", two(&a).picked);
+        assert_eq!(two(&a).keys, 1, "and typed nothing");
+        std::thread::sleep(arm + Duration::from_millis(100));
+        a.key(y);
+        assert_eq!(two(&a).picked, ["q=y"], "let go, then one y answers");
+    }
+
+    /// The answers sit at the bar's right end, so a wider terminal moves
+    /// them: yes arms again, and a click on where no was drawn before the
+    /// resize, which yes now covers, answers nothing.
+    #[test]
+    fn a_resize_moves_no_answer_under_a_click() {
+        let mut a = app(true);
+        a.set_question_arm(std::time::Duration::from_secs(60));
+        ask_now(&mut a, Question::new("q", "drop it?", "delete", "keep"));
+        testkit::render(&mut a, 80, 6);
+        arm_now(&mut a);
+        let no = testkit::find(&testkit::render(&mut a, 80, 6), " n keep ").expect("no is drawn");
+        let wider = testkit::render(&mut a, 91, 6);
+        let yes = testkit::find(&wider, " y delete ").expect("yes is drawn");
+        assert!((yes.0..yes.0 + 10).contains(&(no.0 + 1)), "the old place of no is under yes now: {no:?} {yes:?}");
+        click_at(&mut a, no);
+        assert!(!two(&a).picked.iter().any(|p| p == "q=y"), "never yes: {:?}", two(&a).picked);
+    }
+
+    /// The bar is the bottom row, so a shorter terminal moves it up onto a
+    /// row the pane drew: yes arms again, and a click aimed at that pane
+    /// row, which yes now covers, answers nothing.
+    #[test]
+    fn a_height_change_moves_no_answer_under_a_click() {
+        let mut a = app(true);
+        a.set_question_arm(std::time::Duration::from_secs(60));
+        ask_now(&mut a, Question::new("q", "drop it?", "delete", "keep"));
+        testkit::render(&mut a, 80, 9);
+        arm_now(&mut a);
+        let before = testkit::find(&testkit::render(&mut a, 80, 9), " y delete ").expect("yes is drawn");
+        let shorter = testkit::render(&mut a, 80, 6);
+        let yes = testkit::find(&shorter, " y delete ").expect("yes is drawn");
+        assert!(yes.0 == before.0 && yes.1 < before.1, "yes moved up a row the pane drew: {before:?} {yes:?}");
+        click_at(&mut a, yes);
+        assert!(!two(&a).picked.iter().any(|p| p == "q=y"), "never yes: {:?}", two(&a).picked);
+    }
+
+    /// The shell's own "quit?" has no arm delay: `q` was the operator's own
+    /// key, so `q` and then `y` at once quits, through the exit guard.
+    #[test]
+    fn q_then_y_at_once_quits() {
+        let mut a = App::with_pane("own", Own::default());
+        assert!(a.key(k(KeyCode::Char('q'), KeyModifiers::NONE)));
+        assert!(matches!(&a.mode, Mode::Ask(q) if q.q.id == QUIT_ASK));
+        assert!(!a.key(k(KeyCode::Char('y'), KeyModifiers::NONE)), "y quits at once");
+        assert!(a.ended());
+    }
+
+    /// The terminal loop's schedule ticks the shell while a question is on
+    /// the clock, so over a pane that never ticks it expires: the jobs the
+    /// loop runs ([`App::run_due`]) close it.
+    #[test]
+    fn the_run_loop_expires_a_question_over_a_pane_that_never_ticks() {
+        use super::super::pane::Expiry;
+        use super::super::term::Schedule;
+        use std::time::{Duration, Instant};
+        let mut a = app(true);
+        ask_now(&mut a, Question::new("q", "drop it?", "drop", "keep").expires(Expiry::new(Duration::from_secs(60))));
+        let t0 = Instant::now();
+        let mut s = Schedule::new(t0);
+        expire_now(&mut a);
+        a.run_due(&mut s, t0 + Duration::from_millis(100));
+        assert!(two(&a).picked.is_empty(), "not due yet");
+        a.run_due(&mut s, t0 + QUESTION_TICK);
+        assert_eq!(two(&a).picked, ["q=n", "q=expired"]);
+    }
+
+    /// A question that waits still takes no at once.
+    #[test]
+    fn a_pending_question_takes_no_at_once() {
+        for code in [KeyCode::Char('n'), KeyCode::Esc] {
+            let mut a = app(true);
+            a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask(Question::new("q", "counting…", "drop", "keep").pending()));
+            a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+            a.key(k(code, KeyModifiers::NONE));
+            assert_eq!(two(&a).picked, ["q=n"], "{code:?}");
+        }
+    }
+
+    /// A question with no yes is dismissed by no alone, and draws no yes.
+    #[test]
+    fn a_dismiss_only_question_offers_no_alone() {
+        let mut a = app(true);
+        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask(Question::new("q", "nothing to drop", "drop", "close").dismiss_only()));
+        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+        let bar = bar_of(&mut a, 80);
+        assert!(bar.contains(" n close ") && !bar.contains(" y drop "), "{bar}");
+        a.key(k(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(two(&a).picked, ["q=n"]);
+    }
+
+    /// An expiring question draws its seconds left, counting down on the
+    /// tick, the short form where the bar is narrow, and at none answers its
+    /// expiry's answer, marked expired. A pending one starts counting only
+    /// once it is ready. The clock is the question's deadline, set here half
+    /// a second inside each whole second, so no reading sits on a boundary.
+    #[test]
+    fn an_expiring_question_counts_down_and_answers_when_it_runs_out() {
+        use super::super::pane::Expiry;
+        use std::time::Duration;
+        let mut a = app(true);
+        let q = || Question::new("q", "drop it?", "drop", "keep").expires(Expiry::new(Duration::from_secs(60)));
+        ask_now(&mut a, q().pending());
+        assert!(!bar_of(&mut a, 80).contains("closes in"), "no count while it waits: {}", bar_of(&mut a, 80));
+        assert!(matches!(&a.mode, Mode::Ask(q) if q.deadline.is_none()), "no deadline while it waits");
+        update(&mut a, q());
+        assert!(bar_of(&mut a, 80).contains("drop it? · closes in 60 s"), "counted from when it is ready: {}", bar_of(&mut a, 80));
+        deadline_in(&mut a, Duration::from_millis(2500));
+        a.tick_pane();
+        assert!(bar_of(&mut a, 80).contains("drop it? · closes in 3 s"), "{}", bar_of(&mut a, 80));
+        assert!(bar_of(&mut a, 40).contains("· 3 s") && !bar_of(&mut a, 40).contains("closes in"), "short where narrow: {}", bar_of(&mut a, 40));
+        deadline_in(&mut a, Duration::from_millis(1500));
+        a.tick_pane();
+        assert!(bar_of(&mut a, 80).contains("closes in 2 s"), "counts down: {}", bar_of(&mut a, 80));
+        assert!(two(&a).picked.is_empty());
+        expire_now(&mut a);
+        a.tick_pane();
+        assert_eq!(two(&a).picked, ["q=n", "q=expired"], "answered no, marked expired");
+        assert!(matches!(a.mode, Mode::Browse));
+        let mut a = app(true);
+        let yes = Expiry::yes_unattended(Duration::from_secs(60));
+        ask_now(&mut a, Question::new("q", "go on?", "go", "stop").expires(yes));
+        expire_now(&mut a);
+        a.tick_pane();
+        assert_eq!(two(&a).picked, ["q=y", "q=expired"], "an expiry may answer yes");
+    }
+
+    /// Sets the deadline of the question open `left` from now.
+    fn deadline_in(a: &mut App, left: std::time::Duration) {
+        if let Mode::Ask(q) = &mut a.mode {
+            q.deadline = q.deadline.map(|_| std::time::Instant::now() + left);
+        }
+    }
+
+    /// Runs the deadline of the question open out now.
+    fn expire_now(a: &mut App) {
+        if let Mode::Ask(q) = &mut a.mode {
+            q.deadline = q.deadline.map(|_| std::time::Instant::now());
+        }
+    }
+
+    /// A pane that never ticks still sees its question count down and
+    /// expire: while the question is on the clock the screen ticks, and the
+    /// shell's tick closes it, without ticking the pane.
+    #[test]
+    fn a_question_expires_over_a_pane_that_never_ticks() {
+        use super::super::pane::Expiry;
+        use crate::screen::Screen;
+        let mut a = app(true);
+        assert_eq!(Screen::tick_every(&a), None, "the pane never ticks");
+        ask_now(&mut a, Question::new("q", "drop it?", "drop", "keep").expires(Expiry::new(std::time::Duration::from_secs(60))));
+        let every = Screen::tick_every(&a).expect("a question on the clock ticks the screen");
+        assert!(every <= std::time::Duration::from_secs(1), "{every:?}");
+        expire_now(&mut a);
+        Screen::tick(&mut a);
+        assert_eq!(two(&a).picked, ["q=n", "q=expired"], "closed as a no, marked expired");
+        assert_eq!(Screen::tick_every(&a), None, "nothing on the clock");
+        // Under the terminal's loop the shell's tick does it alone.
+        let mut a = app(true);
+        ask_now(&mut a, Question::new("q", "drop it?", "drop", "keep").expires(Expiry::new(std::time::Duration::from_secs(60))));
+        expire_now(&mut a);
+        a.tick();
+        assert_eq!(two(&a).picked, ["q=n", "q=expired"]);
+    }
+
+    /// A `y`, or a click on yes, that comes after the deadline and before a
+    /// tick closed the question answers nothing it asked: the question
+    /// expired, and the pane hears so.
+    #[test]
+    fn an_answer_after_the_deadline_is_an_expiry() {
+        use super::super::pane::Expiry;
+        let ask = || Question::new("q", "drop it?", "drop", "keep").expires(Expiry::new(std::time::Duration::from_secs(60)));
+        let late: [Answer; 2] = [|a: &mut App| assert!(a.key(k(KeyCode::Char('y'), KeyModifiers::NONE))), |a: &mut App| click_text(a, " y drop ")];
+        for (i, answer) in late.into_iter().enumerate() {
+            let mut a = app(true);
+            ask_now(&mut a, ask());
+            testkit::render(&mut a, 80, 6);
+            expire_now(&mut a);
+            answer(&mut a);
+            assert_eq!(two(&a).picked, ["q=n", "q=expired"], "way {i}: expired, not yes");
+            assert!(matches!(a.mode, Mode::Browse));
+        }
+    }
+
+    /// The long countdown is drawn only where the whole question fits
+    /// beside it: at 80 columns a question that would be cut by it shows
+    /// whole, with the short form.
+    #[test]
+    fn the_long_countdown_never_cuts_the_question() {
+        use super::super::pane::Expiry;
+        let mut a = app(true);
+        let text = "delete 2 read messages in #open for everyone?";
+        ask_now(&mut a, Question::new("q", text, "delete", "keep").expires(Expiry::new(std::time::Duration::from_secs(60))));
+        let bar = bar_of(&mut a, 80);
+        assert!(bar.contains(&format!("{text} · 60 s")) && !bar.contains("closes in"), "whole, the short form: {bar}");
+        let bar = bar_of(&mut a, 120);
+        assert!(bar.contains(&format!("{text} · closes in 60 s")), "the long form where all of it fits: {bar}");
+    }
+
+    /// A question the pane asks while another is open cannot open, and the
+    /// pane hears that it was dropped rather than wait on an answer.
+    #[test]
+    fn a_question_that_cannot_open_is_told_to_the_pane() {
+        let mut a = app(true);
+        a.pane_mut::<Two>().expect("the pane").open = Some(ask());
+        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+        assert!(matches!(a.mode, Mode::Ask(_)), "the first question is open");
+        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask(Question::new("r", "and this?", "y", "n")));
+        a.tick_pane();
+        assert_eq!(two(&a).picked, ["dropped r"], "the second was dropped, and said so");
+        assert!(matches!(&a.mode, Mode::Ask(q) if q.q.id == "q"), "the first still waits");
     }
 
     /// The wheel over the bottom bar while a question waits answers nothing:
@@ -1088,6 +1657,7 @@ mod tests {
         let mut a = app(false);
         assert!(a.key(k(KeyCode::Char('2'), KeyModifiers::NONE)));
         assert_eq!(two(&a).tab, 1);
+        assert_eq!(two(&a).taken, 1, "the pane is told the shell took a key");
         assert!(a.key(k(KeyCode::Char('9'), KeyModifiers::NONE)), "no ninth tab: nothing");
         assert_eq!(two(&a).tab, 1);
         a.key(k(KeyCode::Char('m'), KeyModifiers::NONE));
@@ -1378,7 +1948,7 @@ mod tests {
                 true
             }
         }
-        let two = Two { tab: 0, keys: 0, wheel: 0, dirty: false, text: true, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None };
+        let two = Two { tab: 0, keys: 0, wheel: 0, dirty: false, text: true, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None, taken: 0 };
         let mut a = App::with_pane("asks", Asks(two));
         a.key(k(KeyCode::F(1), KeyModifiers::NONE));
         let off = testkit::text(&testkit::render(&mut a, 140, 24));
@@ -1420,7 +1990,7 @@ mod tests {
 
     #[test]
     fn a_pane_without_tab_menus_gets_no_tab_bar_focus_and_names_none() {
-        let two = Two { tab: 0, keys: 0, wheel: 0, dirty: false, text: false, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None };
+        let two = Two { tab: 0, keys: 0, wheel: 0, dirty: false, text: false, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None, taken: 0 };
         let mut a = App::with_pane("plain", Plain(two));
         a.key(k(KeyCode::F(2), KeyModifiers::NONE));
         assert!(!a.strip_focused(), "F2 is the pane's");
@@ -1628,7 +2198,7 @@ mod tests {
         assert_eq!(told(&mut a), [r#"-Menu { id: "m", by_esc: true }"#]);
 
         // A menu replaced by the question its pick asks, within one frame.
-        a.pane_mut::<Rec>().expect("the pane").next = Some(Open::Ask { id: "q".into(), question: "sure?".into(), yes: "yes".into(), no: "no".into() });
+        a.pane_mut::<Rec>().expect("the pane").next = Some(Open::Ask(Question::new("q", "sure?", "yes", "no")));
         open_from(&mut a, pick());
         told(&mut a);
         press(&mut a, KeyCode::Enter, KeyModifiers::NONE);
@@ -1824,7 +2394,7 @@ mod tests {
     }
 
     fn described() -> App {
-        let two = Two { tab: 3, keys: 0, wheel: 0, dirty: false, text: true, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None };
+        let two = Two { tab: 3, keys: 0, wheel: 0, dirty: false, text: true, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None, taken: 0 };
         App::with_pane("described", Described(two))
     }
 

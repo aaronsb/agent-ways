@@ -33,7 +33,8 @@ fn chat() -> Chat {
         attend_groups::Groups::new(base, &attend_chat::signal::human_member_id()).join("deploy", true).unwrap();
         attend_groups::Groups::new(base, "").create("infra", None).unwrap();
     });
-    let mut c = Chat::new(None, Palette::default(), Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(true).dry_run(true);
+    // A question's yes arms at once: the delay has tests of its own.
+    let mut c = Chat::new(None, Palette::default(), Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(true).dry_run(true).question_arm(std::time::Duration::ZERO);
     for (i, (sid, cwd)) in [(ALPHA_SID, "/work/alpha"), (BETA_SID, "/work/beta")].into_iter().enumerate() {
         c.push(Signal {
             id: format!("t-{i}"),
@@ -368,8 +369,8 @@ fn the_operator_view_is_no_channel_and_the_reserved_tabs_sit_right() {
     focus_to(&mut c, "tab ⋯all");
     press(&mut c, KeyCode::Enter);
     let s = screen(&mut c);
-    assert!(s.contains("Clear view"), "{s}");
-    for item in ["Leave", "Seal", "Delete", "Describe", "Invite", "Clear history", "Join"] {
+    assert!(s.contains("Hide messages here"), "{s}");
+    for item in ["Leave", "Seal", "Delete", "Describe", "Invite", "Delete read", "Join"] {
         assert!(!s.contains(item), "the operator view offers no channel's {item}: {s}");
     }
     // At a width that cannot hold the channel's line, the reserved tabs and

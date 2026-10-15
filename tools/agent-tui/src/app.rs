@@ -283,6 +283,9 @@ pub struct App {
     /// Text the pane asked to copy ([`pane::Open::Copy`]): the last, and
     /// whether the terminal has yet to be sent it.
     copied: Option<(String, bool)>,
+    /// How long a pane question's yes stays set back once it is ready
+    /// ([`paneshell::ARM`] unless set).
+    question_arm: std::time::Duration,
 }
 
 impl App {
@@ -324,6 +327,7 @@ impl App {
             enhanced: false,
             ending: false,
             copied: None,
+            question_arm: paneshell::ARM,
         }
     }
 
@@ -449,9 +453,11 @@ impl App {
         tree::pending(&self.roots[tab], &self.queue)
     }
 
-    /// One tick of a running apply. A finished run is closed out on the tick
+    /// One tick of the shell: a question whose expiry ran out closes, and a
+    /// running apply goes on. A finished run is closed out on the tick
     /// after its last state, so the last glyph is seen.
     pub fn tick(&mut self) {
+        self.expire_question();
         self.tick_reading();
         self.open_held();
         let Mode::Review { run: Some(run), .. } = &mut self.mode else { return };

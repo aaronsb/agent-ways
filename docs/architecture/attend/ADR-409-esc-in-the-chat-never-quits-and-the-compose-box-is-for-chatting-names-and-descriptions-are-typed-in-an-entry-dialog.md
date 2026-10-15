@@ -32,6 +32,10 @@ basis:
     said: 'we could also add on "use ctrl+enter to send anyway" / or something like that / this is the exact same convention that claude code has to force message you (interrupting your turn) / terminals that don''t take ctrl+enter could be ''press enter again to send'' or something'
     via: the operator's chat message to the head session, 2026-10-13
   - upstream: "Claude Code keybindings reference (code.claude.com/docs/en/keybindings): `chat:sendNow`, default Ctrl+Enter and Ctrl+X Ctrl+S, sends the queued messages and the draft right away; terminals that don't report extended keys deliver Ctrl+Enter as plain Enter"
+  - operator: aaronsb
+    level: directed
+    said: "Bind Ctrl+X Ctrl+S as send-now in attend-chat's composer, matching Claude Code's chord. Enter and Ctrl+Enter keep working exactly as today."
+    via: "the operator's decision of 2026-10-14, relayed by the main session"
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -150,4 +154,12 @@ A send to an agent the chat reads as quiet was refused with no way past it, thou
 - A send refused because its agent is quiet offers the send-now key, key first so an 80-column status line keeps it: `press Enter again to send: @Name is quiet (no heartbeat)`, or `Ctrl+Enter or Enter again to send now: @Name is quiet (no heartbeat)` where the terminal reports Ctrl+Enter (the kitty keyboard protocol). The status line names only a key that arrives.
 - Enter pressed again on the unchanged draft sends it, and so does Ctrl+Enter, which mirrors Claude Code's `chat:sendNow`. Ctrl+Enter sends at once with no refusal first. Any edit to the draft, a completion and Esc withdraw the offer, and the next Enter refuses afresh.
 - An agent whose Claude Code process has exited on this host is refused whatever the key: `@Name has exited and would not read this`. attend-presence tells the two apart (ADR-129, addendum of 2026-10-13).
-- The same holds for an `@Name` send and for a send from an agent's DM view. Claude Code's chord fallback, Ctrl+X Ctrl+S, is not bound: Enter again is the fallback the operator named.
+- The same holds for an `@Name` send and for a send from an agent's DM view. Claude Code's chord fallback, Ctrl+X Ctrl+S, is not bound: Enter again is the fallback the operator named. (Bound since the amendment of 2026-10-14.)
+
+## Amendment (2026-10-14): Ctrl+X Ctrl+S sends now
+
+The operator asked for Claude Code's chord in the compose box.
+
+- Ctrl+X Ctrl+S in the compose box sends now, as Ctrl+Enter does: to a quiet agent too, with no refusal first. Both keys arrive in every terminal, so the chord works where Ctrl+Enter arrives as Enter.
+- Ctrl+X edits nothing and holds for the next key only. Any key but Ctrl+S after it, or a paste or a click, drops the chord, and that key does what it does. Ctrl+S alone sends nothing.
+- Enter and Ctrl+Enter work as before, and the refusal's status line is unchanged. The F1 view names the chord on Enter's line (`send; C-x C-s sends now`), which keeps every key on one screen at 80x25; the footer keeps `Enter send` where it is short of room. `attend-chat --help` lists the chord beside the other send keys.

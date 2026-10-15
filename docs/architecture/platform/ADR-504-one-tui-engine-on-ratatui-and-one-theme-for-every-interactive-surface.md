@@ -102,6 +102,10 @@ basis:
   - evidence: 'a guided flow labels its buttons Next (Enter) and Finish (Enter) (flow.rs:476), and a click on either sends KeyCode::Right (Btn::key, app.rs:121); on the picker step Enter picks the row under the cursor when none is picked or opens Other… on its row (flow.rs:311), and Right does neither'
   - evidence: 'attend-chat''s Esc cycle reads Overlay::Menu { by_esc: true } (attend-chat ix.rs:333); the shell reports overlays to a pane from paneshell.rs:226-237'
   - precedent: ADR-408
+  - operator: aaronsb
+    level: directed
+    said: "let's make sure the countdown is a reusable flow. not just for deletion"
+    via: "the operator in the head session, 2026-10-14"
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -342,8 +346,8 @@ Every dialog the shell draws is a `Mode` variant with its own draw function and 
 `agent-tui` draws every such dialog from one `Dialog` value:
 
 - **Title and body.** The body is lines, scrolled when they outgrow the frame.
-- **Buttons.** Each is `(id, label, hotkey, Ground)`. Exactly one is the cancel, which Esc presses, and exactly one the default, which has the focus and Enter presses. A dialog with no cancel or default, or with two of either, is refused where it is built. A dialog with no buttons is refused too, unless it is built to be answered by its keys alone, as the key help is; Esc and Enter then close it. A button may also name a chord, such as Ctrl-S for Save, and no other chord presses it.
-- **Placement.** `Center` is a box over the area, as `modal_rect` places one. `Dock` sits beside the row that opened it, as `docked` places a menu. `Bar` is the bottom bar, with the buttons as answer lozenges after the question. A bar question draws no answer focused; its default is the answer that keeps things as they are, which Enter gives as Esc does, and the wheel over the bar does nothing.
+- **Buttons.** Each is `(id, label, hotkey, Ground)`. Exactly one is the cancel, which Esc presses, and exactly one the default, which has the focus and Enter presses. A dialog with no cancel or default, or with two of either, is refused where it is built. A dialog with no buttons is refused too, unless it is built to be answered by its keys alone, as the key help is; Esc and Enter then close it. A button may also name a chord, such as Ctrl-S for Save, and no other chord presses it. A button may wait: it is drawn set back, and neither its hotkey nor a click presses it, the dialog answering `Stay`. A button may be press-only: a key repeat the terminal reports as a repeat does not press it, only a press does.
+- **Placement.** `Center` is a box over the area, as `modal_rect` places one. `Dock` sits beside the row that opened it, as `docked` places a menu. `Bar` is the bottom bar, the question on the left and the buttons as answer lozenges at the bar's right end, where a change in the question's text never moves them. A bar question draws no answer focused; its default is the answer that keeps things as they are, which Enter gives as Esc does, and the wheel over the bar does nothing.
 - **Border.** The modal border, unless the dialog names another.
 - **Close on any key.** A key the dialog has no use for closes it, as the key help does. Without this, such a key leaves the dialog open and reaches nothing under it, as the note above on a modal's own buttons requires.
 - **Close keys.** Plain keys besides Esc that close it, such as `q` on the response modal.
@@ -351,7 +355,7 @@ Every dialog the shell draws is a `Mode` variant with its own draw function and 
 
 Drawing a dialog records its rect and each button's rect as hit regions. Its key and click handling return an `Answer`:
 
-- `Button(id)`: a button's hotkey, Enter on the default, Esc with any modifier held for the cancel, or a click on a button. A click and the hotkey a label names give the same `id`, and no button stands for a synthesised key.
+- `Button(id)`: a button's hotkey, Enter on the default, Esc with any modifier held for the cancel, or a click on a button. A click and the hotkey a label names give the same `id`, and no button stands for a synthesised key. A waiting button's hotkey or a click on it, and a repeat of a press-only button's hotkey, give `Stay` instead.
 - `Close`: a key that closes a close-on-any-key dialog, one of its close keys, a click outside a dialog that ADR-408 lets such a click close, or any press off the buttons of a dialog that any press closes.
 - `Stay`: a key the dialog used itself, such as a scroll or a focus move, or one that is no answer. Nothing under the dialog receives it.
 - `Forward(key)`: a key the dialog hands to the code that opened it, such as a menu item's letter. Nothing under the dialog receives it either.
@@ -368,3 +372,17 @@ The move is four changes, one PR each. Each keeps its frames as they were drawn 
 4. **The guided flow and the entry dialog** (ADR-409) draw in the dialog's frame and button row and keep their own bodies and keys.
 
 By step 4 at the latest, a flow's Next and Finish give the answer Enter gives, as their labels say. On the first step a click on either sends `Right` (`Btn::key`), which reports that nothing is picked where Enter picks the row under the cursor or opens "Other…" on its row.
+
+## Note (2026-10-14): a pane's question can wait, offer only no, and expire
+
+A pane's question (`Open::Ask(Question)`) answers something the operator just did. Three things make it carry work that takes a moment, in any pane, for any question:
+
+- **Waiting** (`Question::pending`): yes is drawn set back and neither its key nor a click presses it, while no answers as ever. The pane opens the question again under the same id to update it in place, its text and its answers; opened ready, yes is live.
+- **Only no** (`Question::dismiss_only`): a question that says why there is nothing to do, dismissed by no alone.
+- **Expiry** (`Expiry`): once the question is ready to answer, the shell draws the seconds left after it (`closes in 58 s` where the whole question fits beside it, else `58 s`), counting down on its tick, and at none answers it no, marked `EXPIRED`, so the pane can say it expired. A question left open while the operator was away cannot then take the next key typed on coming back, nor one typed a moment after its deadline: an answer that comes after it is the expiry's. The shell ticks while a question counts down, whether or not its pane ticks. An expiry answers yes only when made with `Expiry::yes_unattended`, and never on a question whose yes deletes or cannot be taken back: the countdown runs out while the operator is away, and yes would then act for them.
+
+Every pane question also arms: for a second after it is ready to answer (opened ready, updated ready, changed what it asks while ready, or drawn on a bar of another position or size, which moves the answers) its yes is drawn set back and inert. Yes's key, or a click on yes, while it is not armed starts the second again, so a key held down never answers: most terminals, and every terminal without the kitty keyboard protocol's event types, send a held key as one press after another, and each keeps yes back until the key has been let go for the whole second. A repeat the terminal does report as one never presses yes either. A key typed ahead, a key held across the moment, or a click aimed at what was there a moment before lands on nothing. The answers sit at the bar's right end, so an update in place never moves one under a click aimed at another. The shell's own "quit?" has no arm delay: the `q` that asked it was the operator's own key, so `q` then `y` quits at once.
+
+The long countdown is drawn only where the whole question and the `confirm` lozenge fit beside it. The countdown, the arm and the waiting yes live in the one `Dialog` and the shell, so any question kind uses them. attend-chat's delete question is the first caller (ADR-405, amendment of 2026-10-14). For part of the same day the shell instead took an unprompted question, one a pane asked on its own, with a half-second grace on keys; that was withdrawn with its only use.
+
+The shell opens a pane's menu, question or entry dialog only over nothing; one asked for while something else is open is dropped, and since 2026-10-14 the pane hears it (`Pane::open_dropped`), so it does not wait on an answer that will not come.

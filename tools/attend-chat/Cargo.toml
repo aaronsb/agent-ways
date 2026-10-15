@@ -30,6 +30,8 @@ agent-settings = { path = "../agent-settings" }
 # reads and writes as `ways settings set` does.
 ways-core = { path = "../ways-core" }
 serde_yaml = "0.9"
+# The attend CLI's `--json` reports, for the cleanup items it runs.
+serde_json = "1"
 attend-groups = { path = "../attend-groups" }
 attend-presence = { path = "../attend-presence" }
 attend-instances = { path = "../attend-instances" }
