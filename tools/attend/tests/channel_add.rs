@@ -67,7 +67,10 @@ fn a_session_added_before_it_listens_reads_the_newest_history() {
 
     f.ok(&["listen", "on"]);
     let drained = f.drain("plain");
-    assert!(drained.contains("aaron added you to #topic. Its recent history is yours to read."), "{drained}");
+    assert!(
+        drained.contains("aaron added you to #topic. Its recent history is yours to read. Leave with attend channel leave topic."),
+        "{drained}"
+    );
     assert!(drained.contains("briefing 59") && drained.contains("briefing 10"), "{drained}");
     assert!(!drained.contains("briefing 09"), "older than the newest 50: {drained}");
     assert!(!drained.contains("old open chatter"), "the rest of the cold start still holds: {drained}");

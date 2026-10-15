@@ -173,10 +173,13 @@ pub fn invite_body(channel: &str, dir: &Path) -> String {
 }
 
 /// The add's text, in the order the member meets it: who added it where,
-/// then the history it may read, when the channel has any.
+/// the history it may read when the channel has any, then how to leave. The
+/// member did not ask to be added, and leaving its last channel stops the
+/// listening the add started. The CLI is named, since a mod host may offer
+/// no tool for leaving.
 pub fn add_body(actor: &str, channel: &str, dir: &Path) -> String {
     let history = if has_history(dir) { " Its recent history is yours to read." } else { "" };
-    format!("{actor} added you to #{channel}.{history}")
+    format!("{actor} added you to #{channel}.{history} Leave with attend channel leave {channel}.")
 }
 
 /// Write `body` to `target`'s project tray as `actor`, addressed to the
@@ -414,7 +417,10 @@ mod tests {
         assert!(record.lines().any(|l| l == "add"), "enrolled by the add: {record}");
         let line = told(&bus);
         assert!(line.contains(&format!("from_kind:human|from_id:aaron|to:{SID}|")), "{line}");
-        assert!(line.ends_with("aaron added you to #topic. Its recent history is yours to read.\n"), "{line}");
+        assert!(
+            line.ends_with("aaron added you to #topic. Its recent history is yours to read. Leave with attend channel leave topic.\n"),
+            "{line}"
+        );
     }
 
     #[test]
@@ -422,7 +428,7 @@ mod tests {
         let (_s, bus) = scratch("add-empty");
         bus.groups("aaron").create("topic", None).unwrap();
         add(&bus, &aaron(), "topic", target()).unwrap();
-        assert!(told(&bus).ends_with("|aaron added you to #topic.\n"));
+        assert!(told(&bus).ends_with("|aaron added you to #topic. Leave with attend channel leave topic.\n"));
     }
 
     /// The briefing is the invitation's: the newest 50 of the room stay to
