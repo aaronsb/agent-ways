@@ -339,24 +339,38 @@ pub fn move_session(bus: &Bus, old: &str, new: &str, origin: &str) {
     attend_presence::heartbeat::clear_in(&bus.heartbeats, old).ok();
 }
 
+/// A removal done ([`remove`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Removed {
+    /// False when the release found the channels lock busy at both tries:
+    /// the member may still be listening by the channel ([`release`]).
+    pub settled: bool,
+}
+
+/// A dissolve done ([`dissolve`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Dissolved {
+    /// The members the channel had.
+    pub members: Vec<String>,
+    /// The members whose release found the channels lock busy at both
+    /// tries: each may still be listening by the channel ([`release`]).
+    pub unsettled: Vec<String>,
+}
+
 /// Remove `member` from `channel` as `by` (the operator's `/kick`,
 /// ADR-173): unilateral, since it only reduces the member's reach. A member
 /// left in no channel stops listening by the channel ([`release`]).
-pub fn remove(bus: &Bus, by: &str, channel: &str, member: &str) -> Result<(), String> {
+pub fn remove(bus: &Bus, by: &str, channel: &str, member: &str) -> Result<Removed, String> {
     bus.groups(by).kick(channel.trim_start_matches('#'), member)?;
-    release(bus, member);
-    Ok(())
+    Ok(Removed { settled: release(bus, member) })
 }
 
-/// Dissolve `channel` as `by`, releasing every member, and return the
-/// members it had. Each member left in no channel stops listening by the
-/// channel ([`release`]).
-pub fn dissolve(bus: &Bus, by: &str, channel: &str) -> Result<Vec<String>, String> {
+/// Dissolve `channel` as `by`, releasing every member. Each member left in
+/// no channel stops listening by the channel ([`release`]).
+pub fn dissolve(bus: &Bus, by: &str, channel: &str) -> Result<Dissolved, String> {
     let members = bus.groups(by).dissolve(channel.trim_start_matches('#'))?;
-    for member in &members {
-        release(bus, member);
-    }
-    Ok(members)
+    let unsettled = members.iter().filter(|m| !release(bus, m)).cloned().collect();
+    Ok(Dissolved { members, unsettled })
 }
 
 /// After `member` lost a channel: once it is in no channel, the enrollment
@@ -364,13 +378,20 @@ pub fn dissolve(bus: &Bus, by: &str, channel: &str) -> Result<Vec<String>, Strin
 /// withdraws it. One that also turned listening on or ran `attend run`
 /// stays enrolled through that. The check and the withdrawal run under the
 /// channels lock, so an add landing at the same time keeps its enrollment.
-pub fn release(bus: &Bus, member: &str) {
+/// A bus that waits a bounded time for the lock tries once more when it is
+/// busy. Returns false when it was busy both times, and nothing was
+/// withdrawn.
+pub fn release(bus: &Bus, member: &str) -> bool {
     use attend_presence::enrollment::{withdraw_in, Source};
-    bus.groups("").when_in_no_channel(member, || {
-        for source in [Source::Join, Source::Add] {
-            withdraw_in(&bus.enrolled, member, source).ok();
-        }
-    });
+    let groups = bus.groups("");
+    let settle = || {
+        groups.when_in_no_channel(member, || {
+            for source in [Source::Join, Source::Add] {
+                withdraw_in(&bus.enrolled, member, source).ok();
+            }
+        })
+    };
+    settle().or_else(settle).is_some()
 }
 
 #[cfg(test)]
@@ -581,6 +602,26 @@ mod tests {
         drop(held);
         assert_eq!(first.join().unwrap(), Err(Refused::AlreadyMember("topic".into())));
         assert!(attend_presence::enrollment::is_enrolled_in(&bus.enrolled, SID), "the second add's enrollment stands");
+    }
+
+    /// A release that finds the channels lock busy tries once more, and
+    /// says it did not settle when the lock is busy both times: the
+    /// enrollment stands. Once the lock is free it withdraws it.
+    #[test]
+    fn a_release_retries_once_and_says_when_the_lock_stayed_busy() {
+        let (_s, bus) = scratch("release-busy");
+        let wait = Duration::from_millis(60);
+        let bus = Bus { lock_wait: Some(wait), ..bus };
+        std::fs::create_dir_all(&bus.enrolled).unwrap();
+        std::fs::write(bus.enrolled.join(SID), "join\n").unwrap();
+        let held = agent_settings::writer::Lock::acquire(&bus.signals.join("_groups.yaml")).unwrap();
+        let start = std::time::Instant::now();
+        assert!(!release(&bus, SID), "the lock was busy at both tries");
+        assert!(start.elapsed() >= 2 * wait, "two bounded waits: {:?}", start.elapsed());
+        assert!(attend_presence::enrollment::is_enrolled_in(&bus.enrolled, SID));
+        drop(held);
+        assert!(release(&bus, SID));
+        assert!(!attend_presence::enrollment::is_enrolled_in(&bus.enrolled, SID));
     }
 
     /// A sweep that lands inside a move, after the enrollment is carried

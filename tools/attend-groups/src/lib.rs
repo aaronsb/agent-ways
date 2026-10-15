@@ -679,15 +679,16 @@ impl Groups {
 
     /// Run `settle` under the channels lock when `member` is in no channel.
     /// An add records its enrollment under the same lock, so none lands
-    /// between the check and `settle`. Returns whether it ran: not for a
-    /// member in a channel, nor when the lock was not taken in time.
-    pub fn when_in_no_channel(&self, member: &str, settle: impl FnOnce()) -> bool {
-        let Ok(_lock) = self.lock_state() else { return false };
+    /// between the check and `settle`. Returns whether it ran, `Some(false)`
+    /// for a member in a channel, or `None` when the lock was not taken in
+    /// time.
+    pub fn when_in_no_channel(&self, member: &str, settle: impl FnOnce()) -> Option<bool> {
+        let Ok(_lock) = self.lock_state() else { return None };
         if self.load_state().values().any(|e| e.members.iter().any(|m| m == member)) {
-            return false;
+            return Some(false);
         }
         settle();
-        true
+        Some(true)
     }
 
     /// [`Groups::cleanup_stale`] with an injectable liveness predicate

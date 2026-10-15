@@ -89,7 +89,7 @@ pub(crate) fn cmd_dissolve(name: &str) {
         std::process::exit(1);
     }
     let members = match attend_membership::dissolve(&attend_membership::Bus::here(), "", name) {
-        Ok(members) => members,
+        Ok(d) => d.members,
         Err(e) => {
             eprintln!("[attend] dissolve: {e}");
             std::process::exit(1);

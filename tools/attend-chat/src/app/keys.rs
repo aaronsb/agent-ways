@@ -525,11 +525,23 @@ fn dissolve_group_in<F: Fn(&str) -> bool>(
             if live == 1 { "" } else { "s" }
         ));
     }
-    match attend_membership::dissolve(bus, "", name) {
-        Ok(_) => EnterAction::ClearWithStatus(format!("dissolved #{name}")),
+    dissolve_status(name, attend_membership::dissolve(bus, "", name))
+}
+
+/// The status a dissolve leaves. A member whose release found the channels
+/// lock busy twice may still be listening, and the status says so.
+fn dissolve_status(name: &str, done: Result<attend_membership::Dissolved, String>) -> EnterAction {
+    match done {
+        Ok(d) => EnterAction::ClearWithStatus(match d.unsettled.len() {
+            0 => format!("dissolved #{name}"),
+            n => format!("dissolved #{name}; {BUSY_NOTE} {n} member{} may still be listening", if n == 1 { "" } else { "s" }),
+        }),
         Err(e) => EnterAction::StatusOnly(format!("/dissolve: {e}")),
     }
 }
+
+/// How a status opens its note of a release that did not settle.
+const BUSY_NOTE: &str = "the channels lock was busy, so";
 
 /// Filesystem-effect core of `/channels create` (#404), parameterized
 /// on the base dir so tests can drive it against a tempdir. The
@@ -769,8 +781,14 @@ fn kick_member_in(
     member_id: &str,
     label: &str,
 ) -> EnterAction {
-    match attend_membership::remove(bus, "", name, member_id) {
-        Ok(()) => EnterAction::ClearWithStatus(format!("kicked @{label} from #{name}")),
+    kick_status(name, label, attend_membership::remove(bus, "", name, member_id))
+}
+
+/// The status a kick leaves, noting a release that did not settle.
+fn kick_status(name: &str, label: &str, done: Result<attend_membership::Removed, String>) -> EnterAction {
+    match done {
+        Ok(r) if r.settled => EnterAction::ClearWithStatus(format!("kicked @{label} from #{name}")),
+        Ok(_) => EnterAction::ClearWithStatus(format!("kicked @{label} from #{name}; {BUSY_NOTE} @{label} may still be listening")),
         Err(e) => EnterAction::StatusOnly(format!("/kick: {e}")),
     }
 }
@@ -1283,6 +1301,27 @@ mod tests {
         // Last member out of an unpinned group dissolves it — same
         // cleanup rule as leave.
         assert!(!base.join("@deploy").exists());
+    }
+
+    /// A kick or a dissolve whose release found the channels lock busy
+    /// twice says the member may still be listening; a settled one says
+    /// nothing more.
+    #[test]
+    fn an_unsettled_release_puts_a_note_in_the_status() {
+        let status = |a: EnterAction| match a {
+            EnterAction::ClearWithStatus(s) => s,
+            _ => panic!("a done kick or dissolve clears the input"),
+        };
+        let kicked = |settled| status(kick_status("deploy", "Cleo", Ok(attend_membership::Removed { settled })));
+        assert_eq!(kicked(true), "kicked @Cleo from #deploy");
+        assert_eq!(kicked(false), "kicked @Cleo from #deploy; the channels lock was busy, so @Cleo may still be listening");
+        let dissolved = |unsettled: &[&str]| {
+            let d = attend_membership::Dissolved { members: vec!["a".into(), "b".into()], unsettled: unsettled.iter().map(|m| m.to_string()).collect() };
+            status(dissolve_status("temp", Ok(d)))
+        };
+        assert_eq!(dissolved(&[]), "dissolved #temp");
+        assert_eq!(dissolved(&["a"]), "dissolved #temp; the channels lock was busy, so 1 member may still be listening");
+        assert_eq!(dissolved(&["a", "b"]), "dissolved #temp; the channels lock was busy, so 2 members may still be listening");
     }
 
     #[test]
