@@ -142,7 +142,11 @@ Print `listening` or `not listening` (default)
 
 Mark a listening session alive: touch its heartbeat, deliver nothing. After a /clear it first takes over the enrollment the session's earlier id made, as the drain does. The attend mod runs it on a timer, through turns too, so the session stays within the liveness grace while it lives. A session that does not listen is written nothing
 
-**Usage:** `attend listen beat`
+**Usage:** `attend listen beat [OPTIONS]`
+
+###### **Options:**
+
+* `--mod <VERSION>` — The attend mod's own version. The mod sends it with every beat; attend records it for the session, and the Stop-hook drain compares it with the installed mod to tell a session that loaded an older one. A mod that sends none is compared by its start time
 
 
 

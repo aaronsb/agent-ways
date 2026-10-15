@@ -250,3 +250,23 @@ fn listen_beat_touches_a_listening_session_only() {
     let out = f.without_session(|| f.attend(&["listen", "beat"]));
     assert_eq!(out.status.code(), Some(1), "no session, no beat");
 }
+
+/// `listen beat --mod <version>` records the version the session's mod runs,
+/// for the drain's stale-mod check; a beat without the flag, as an older mod
+/// sends it, works as before and records nothing.
+#[test]
+fn listen_beat_records_the_mod_version_when_given() {
+    let f = Fixture::new("listen-beat-mod");
+    assert_eq!(f.ok(&["listen", "beat"]), "not listening\n");
+    assert_eq!(f.ok(&["listen", "beat", "--mod", "0.27.1"]), "not listening\n");
+    assert!(!f.state_file(&f.sid).exists(), "a session that does not listen is written nothing");
+    f.ok(&["listen", "on", "--host", "mod"]);
+    assert_eq!(f.ok(&["listen", "beat"]), "listening\n", "an older mod sends no version");
+    assert!(!f.state_file(&f.sid).exists(), "and records none");
+    assert_eq!(f.ok(&["listen", "beat", "--mod", "0.27.1"]), "listening\n");
+    let state = std::fs::read_to_string(f.state_file(&f.sid)).unwrap();
+    assert!(state.contains("mod_version: 0.27.1"), "{state}");
+    f.ok(&["listen", "beat", "--mod", "0.28.0"]);
+    let state = std::fs::read_to_string(f.state_file(&f.sid)).unwrap();
+    assert!(state.contains("mod_version: 0.28.0") && !state.contains("0.27.1"), "{state}");
+}

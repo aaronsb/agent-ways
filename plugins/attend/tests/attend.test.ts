@@ -9,6 +9,8 @@ import {
   gateIsFresh,
   isOpenChannel,
   isWrapTurn,
+  BEAT_ARGV,
+  MOD_VERSION,
   maySubmit,
   parseDecision as parseKeepaliveDecision,
   planCheck,
@@ -348,6 +350,13 @@ describe('argv', () => {
     expect(shortId('')).toBe('tntfp')
     expect(shortId('é-x')).toBe('zer0p')
     expect(shortId('a')).toBe('9wi7g')
+  })
+
+  // A mod cannot read its manifest (a hooks module imports .ts files only), so
+  // scripts/check-plugins.sh holds MOD_VERSION to plugin.json's version.
+  test('the beat carries the mod\'s version', () => {
+    expect(MOD_VERSION).toMatch(/^\d+\.\d+\.\d+$/)
+    expect([...BEAT_ARGV]).toEqual(['attend', 'listen', 'beat', '--mod', MOD_VERSION])
   })
 
   test('the config is read through ways for the session directory', () => {
@@ -820,7 +829,7 @@ describe('active', () => {
     const touches = () =>
       h.argvs.filter(a => {
         const cmd = a.slice(1).join(' ')
-        return cmd.startsWith('message inbox --drain') || cmd.startsWith('listen on') || cmd === 'listen beat'
+        return cmd.startsWith('message inbox --drain') || cmd.startsWith('listen on') || cmd.startsWith('listen beat')
       }).length
     let t = 0
     let last = 0

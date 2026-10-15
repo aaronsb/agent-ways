@@ -33,6 +33,13 @@ AV="$(cargo_version tools/attend/Cargo.toml)"
 [[ "$PV" == "$AV" ]] || fail "the attend plugin is at $PV but attend is at $AV; they release together (scripts/release.sh bump attend moves both)"
 echo "version: attend plugin $PV matches attend $AV"
 
+# The mod sends MOD_VERSION with its beat; it cannot read plugin.json, so the
+# two are held equal here.
+MV="$(grep -oE "^export const MOD_VERSION = '[^']*'" plugins/attend/hooks/lib.ts | sed -E "s/.*'([^']*)'/\\1/")"
+[[ -n "$MV" ]] || fail "plugins/attend/hooks/lib.ts has no MOD_VERSION"
+[[ "$MV" == "$PV" ]] || fail "MOD_VERSION in plugins/attend/hooks/lib.ts is $MV but the plugin is at $PV; scripts/release.sh bump attend moves both"
+echo "version: MOD_VERSION $MV matches the plugin"
+
 command -v claude >/dev/null || fail "claude is not on PATH"
 
 # 2. and 3.

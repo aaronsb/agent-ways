@@ -627,7 +627,7 @@ pub struct KeepwarmCheckArgs {
 }
 
 /// Subcommands for `attend listen`. With no subcommand, defaults to `status`.
-#[derive(Subcommand, Clone, Copy)]
+#[derive(Subcommand, Clone)]
 pub enum ListenCmd {
     /// Listen: the Stop-hook drain delivers to this session. Messages
     /// addressed to its project while it was not listening are delivered by
@@ -651,7 +651,14 @@ pub enum ListenCmd {
     /// on a timer, through turns too, so the session stays within the
     /// liveness grace while it lives. A session that does not listen is
     /// written nothing
-    Beat,
+    Beat {
+        /// The attend mod's own version. The mod sends it with every beat;
+        /// attend records it for the session, and the Stop-hook drain
+        /// compares it with the installed mod to tell a session that loaded
+        /// an older one. A mod that sends none is compared by its start time
+        #[arg(long = "mod", value_name = "VERSION")]
+        mod_version: Option<String>,
+    },
 }
 
 /// A host `attend listen on --host` records.

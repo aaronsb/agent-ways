@@ -100,8 +100,10 @@ pub fn off() -> Result<Listening, ListenError> {
 /// goes on under. The attend mod calls it on its own timer, since its poll
 /// and the Stop-hook drain, which also touch the heartbeat, run only between
 /// turns (ADR-129, addendum of 2026-10-13). A session that does not listen
-/// is written nothing, as the drain writes it nothing.
-pub fn beat() -> Result<Listening, ListenError> {
+/// is written nothing, as the drain writes it nothing. `mod_version` is the
+/// attend mod's own version, recorded for the session so the drain can tell
+/// a session that loaded an older mod than the installed one.
+pub fn beat(mod_version: Option<&str>) -> Result<Listening, ListenError> {
     let me = current_session();
     if !me.resolved() {
         return Err(ListenError::Unresolved);
@@ -109,6 +111,9 @@ pub fn beat() -> Result<Listening, ListenError> {
     let listening = adopt_previous_enrollment(&me);
     if listening {
         attend_presence::heartbeat::touch(&me.session_id).map_err(|e| ListenError::Unwritable { error: e.to_string() })?;
+        if let Some(v) = mod_version.map(str::trim).filter(|v| !v.is_empty()) {
+            attend_state::StateStore::new(Some(me.session_id.clone())).record_mod_version(v);
+        }
     }
     Ok(state(&me, listening))
 }

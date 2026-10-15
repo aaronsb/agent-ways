@@ -55,6 +55,9 @@ lock_version() {
 # so a change under plugins/attend/ with the same version never reaches an
 # install that already has the mod.
 PLUGIN_MANIFEST="plugins/attend/.claude-plugin/plugin.json"
+# The mod cannot read its manifest, so it carries its version as a constant
+# the beat sends to attend; the bump moves both.
+PLUGIN_LIB="plugins/attend/hooks/lib.ts"
 
 plugin_version_of() {
   # The first "version" field, wherever it sits on its line, so a manifest
@@ -154,6 +157,9 @@ case "$MODE" in
       ' "$PLUGIN_MANIFEST" > "$PLUGIN_MANIFEST.tmp" && mv "$PLUGIN_MANIFEST.tmp" "$PLUGIN_MANIFEST"
       [[ "$(plugin_version_of < "$PLUGIN_MANIFEST")" == "$NEXT" ]] || die "could not move $PLUGIN_MANIFEST to $NEXT"
       FILES+=("$PLUGIN_MANIFEST")
+      sed -i.bak -E "s/^(export const MOD_VERSION = ')[^']*(')/\\1${NEXT}\\2/" "$PLUGIN_LIB" && rm -f "$PLUGIN_LIB.bak"
+      grep -qF "export const MOD_VERSION = '${NEXT}'" "$PLUGIN_LIB" || die "could not move MOD_VERSION in $PLUGIN_LIB to $NEXT"
+      FILES+=("$PLUGIN_LIB")
     fi
     git add "${FILES[@]}"
     git commit -q -m "release(${COMPONENT}): bump to ${NEXT}"
