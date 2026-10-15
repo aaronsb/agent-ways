@@ -987,7 +987,6 @@ impl Pane for ChatPane {
         self.config.mouse
     }
 
-    /// What quitting would lose: a draft.
     /// What quitting now would lose: a draft, and a delete or tombstone
     /// still running, which would go on unseen.
     fn unsaved(&self) -> Option<String> {

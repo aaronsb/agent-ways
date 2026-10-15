@@ -393,8 +393,9 @@ impl ChatPane {
     /// running`.
     pub(super) fn running_what(&self) -> Option<&'static str> {
         self.removing.as_ref().map(|r| match r.job {
+            Job::DryRun { .. } => "a count still running",
             Job::Tombstone { .. } => "a tombstone still running",
-            _ => "a delete still running",
+            Job::Delete(_) | Job::Undo(_) => "a delete still running",
         })
     }
 
@@ -410,7 +411,7 @@ impl ChatPane {
         r.running.stop();
         let note = match r.job {
             Job::DryRun { .. } => "stopped counting: nothing was deleted".to_string(),
-            Job::Delete(asked) => format!("stopped deleting in {}: any it marked already come back with `attend message delete --undo`, which takes back the newest delete", asked.label),
+            Job::Delete(asked) => format!("stopped deleting in {}: the ones it already marked come back with `attend message delete --undo`, which takes back the newest delete", asked.label),
             Job::Undo(last) => format!("stopped undoing batch {}: Undo delete on its menu runs it again", last.batch),
             Job::Tombstone { member, name } => format!("stopped tombstoning @{name}: if it went through, `attend message tombstone --undo {member}` takes it back"),
         };

@@ -623,7 +623,7 @@ fn a_running_delete_is_stopped_from_the_common_menu() {
     assert_eq!(items(&mut c).first().map(String::as_str), Some("Stop deleting"), "{}", screen(&mut c));
     pick_now(&mut c, "Stop deleting");
     assert!(c.removing().is_none(), "stopped at once");
-    assert_eq!(c.status(), "stopped deleting in #long: any it marked already come back with `attend message delete --undo`, which takes back the newest delete");
+    assert_eq!(c.status(), "stopped deleting in #long: the ones it already marked come back with `attend message delete --undo`, which takes back the newest delete");
     std::thread::sleep(std::time::Duration::from_millis(200));
     testkit::render_screen(&mut c, W, H);
     Screen::tick(&mut c);
