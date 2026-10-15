@@ -60,7 +60,8 @@ pub struct StateSnapshot {
     /// one beats.
     pub mod_version: Option<String>,
     /// The installed mod version the stale-mod notice announced to this
-    /// session. The notice goes again only when a newer one is installed.
+    /// session. The notice goes again when a different version is installed
+    /// and this session's mod is still older than it.
     pub mod_stale_noted: Option<String>,
 }
 

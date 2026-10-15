@@ -229,6 +229,7 @@ EOF
 
   mod-version)
     # The constant alone, as bump moves it, for the bump's test.
+    [[ "$COMPONENT" == attend ]] || die "mod-version: only attend carries the mod's version, not '$COMPONENT'"
     [[ -n "${3:-}" ]] || die "usage: release.sh mod-version $COMPONENT <version>"
     set_mod_version "$3"
     ;;

@@ -722,7 +722,9 @@ fn installed_mod(config_dir: &std::path::Path, app_manifest: &std::path::Path) -
         .ok()
         .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
         .and_then(|doc| {
-            let entry = doc.get("plugins")?.get("attend@agent-ways")?.as_array()?.first()?.clone();
+            // Repair installs at user scope; prefer that entry when a project scope also lists one.
+            let entries = doc.get("plugins")?.get("attend@agent-ways")?.as_array()?;
+            let entry = entries.iter().find(|e| e.get("scope").and_then(|s| s.as_str()) == Some("user")).or_else(|| entries.first())?.clone();
             let version = entry.get("version")?.as_str()?.to_string();
             let manifest = std::path::Path::new(entry.get("installPath")?.as_str()?).join(".claude-plugin/plugin.json");
             Some(InstalledMod { version: Some(version), written: written(&manifest).or_else(|| written(app_manifest)) })
