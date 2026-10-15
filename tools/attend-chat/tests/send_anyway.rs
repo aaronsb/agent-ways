@@ -166,6 +166,45 @@ fn ctrl_enter_sends_now_where_the_terminal_reports_it() {
     assert!(in_tray(QUIET_CWD, "straight away"), "Ctrl+Enter sends now without a refusal first: {}", c.status());
 }
 
+/// Ctrl+X Ctrl+S in the box sends now, as Claude Code's chord does, in a
+/// terminal that does not report Ctrl+Enter too. The chord's first key
+/// followed by any other key drops it, and that key does what it does.
+#[test]
+fn ctrl_x_ctrl_s_sends_now_in_any_terminal() {
+    let mut c = chat(false);
+    let quiet = nick(QUIET_CWD);
+    typed(&mut c, &format!("@{quiet} chorded"));
+    key(&mut c, KeyCode::Char('x'), KeyModifiers::CONTROL);
+    assert_eq!(c.input().text(), format!("@{quiet} chorded"), "the first key edits nothing");
+    key(&mut c, KeyCode::Char('s'), KeyModifiers::CONTROL);
+    assert!(c.input().is_empty() && in_tray(QUIET_CWD, "chorded"), "sent now, no refusal first: {}", c.status());
+    typed(&mut c, &format!("@{quiet} broken chord"));
+    key(&mut c, KeyCode::Char('x'), KeyModifiers::CONTROL);
+    typed(&mut c, "!");
+    key(&mut c, KeyCode::Char('s'), KeyModifiers::CONTROL);
+    assert_eq!(c.input().text(), format!("@{quiet} broken chord!"), "a key between drops the chord and is typed");
+    assert!(!in_tray(QUIET_CWD, "broken chord"), "Ctrl+S alone sends nothing");
+}
+
+/// The chord's first key is dropped by any key the operator presses
+/// between, those the shell or the column key take included: F1 and the
+/// key that closes the help, or the column hidden and shown.
+#[test]
+fn a_key_the_shell_takes_drops_the_chord() {
+    let mut c = chat(false);
+    let quiet = nick(QUIET_CWD);
+    typed(&mut c, &format!("@{quiet} not yet"));
+    for between in [vec![KeyCode::F(1), KeyCode::Esc], vec![KeyCode::F(3), KeyCode::F(3)]] {
+        key(&mut c, KeyCode::Char('x'), KeyModifiers::CONTROL);
+        for code in between.clone() {
+            press(&mut c, code);
+        }
+        key(&mut c, KeyCode::Char('s'), KeyModifiers::CONTROL);
+        assert!(!in_tray(QUIET_CWD, "not yet"), "{between:?} between: Ctrl+S alone sends nothing");
+        assert_eq!(c.input().text(), format!("@{quiet} not yet"), "{between:?}: the draft stays");
+    }
+}
+
 #[test]
 fn enter_again_sends_a_refused_dm() {
     let mut c = chat(false);

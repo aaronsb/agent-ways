@@ -4,7 +4,7 @@
 # capture of each, against a synthetic attend cache. Needs tmux and
 # fontconfig.
 #
-#   cargo build --manifest-path tools/Cargo.toml -p attend-chat -p tui-harness
+#   cargo build --manifest-path tools/Cargo.toml -p attend-chat -p attend -p tui-harness
 #   tools/attend-chat/shots/shots.sh                 # every scenario
 #   tools/attend-chat/shots/shots.sh side click      # some
 #
@@ -14,7 +14,7 @@
 # SIZES="100x30". FONT overrides the font (default JetBrains Mono, which
 # has the Nerd Font fallback for the round lozenge caps).
 #
-# Each step waits on the screen, not on the clock: after a key or a click
+# Each step waits on the screen, not on the clock, except pause:. After a key or a click
 # the script polls the pane's text until two captures agree, and wait:TEXT
 # polls until TEXT is on the screen. A wait that runs out fails the run.
 #
@@ -71,6 +71,8 @@ sweep
 #   wait:TEXT      until TEXT is on the screen
 #   gone:TEXT      until TEXT is off the screen
 #   resize:COLS    the terminal narrowed (or widened) to COLS columns
+#   pause:SECS     SECS on the clock, for what the screen does not show:
+#                  a question's yes arms a second after it is ready
 #   paste:TEXT     a bracketed paste of TEXT, \n for a newline
 #   rawpaste:TEXT  TEXT sent as typed, newlines and all, with no brackets
 #   bigpaste:N     a bracketed paste of N x characters
@@ -103,19 +105,32 @@ focus-resize | base  | wait:Agents F2 Down Down wait:↑_↓_move resize:70 gone
 agent-menu   | base  | wait:Agents side:○ wait:DMs side:○ wait:Address
 crowd        | crowd | wait:Agents F2 Down Up Up Up Up Up Up Up Up Up Up Up Up
 common       | base  | wait:Agents click:≡ wait:Hide_column
-clear-view   | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:clear_the_view?
+hide-here    | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:hide_the_messages_so_far_in_⋯all?
+hide-done    | base  | wait:#open click:#open click:#open wait:Hide_messages_here Enter wait:y_hide pause:1.2 click:y_hide wait:the_bus_keeps_them
+hide-chan    | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Hide_messages_here wait:hide_the_messages_so_far_in_#deploy?
 paste        | base  | wait:Agents text:see: paste:line_one\\nline_two\\nline_three
 rawpaste     | base  | wait:Agents rawpaste:one\\ntwo
 plain        | plain | wait:Agents
 own-row      | own   | wait:operator click:#deploy click:#deploy wait:pick Escape gone:pick side:operator wait:Leave_#deploy
-quiet-send   | base  | wait:Agents rside:○ wait:Address Down Enter text:are_you_there Enter wait:no_heartbeat
-paste-asked  | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:clear_the_view? paste:yes_please\\nsecond_line wait:kept
-ask          | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:y_clear
-ask-yes      | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:y_clear click:y_clear wait:cleared
-ask-no       | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:y_clear click:n_keep wait:kept
-ask-feed     | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:y_clear click:signing wait:kept
-ask-row      | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:y_clear side:#infra wait:kept
-ask-long     | base  | wait:#open click:#open click:#open wait:Clear_history Down Enter wait:y_clear
+quiet-send   | base  | wait:Agents rside:○ wait:Address click:Address_@ text:are_you_there Enter wait:no_heartbeat
+paste-asked  | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:hide_the_messages_so_far_in_⋯all? paste:yes_please\\nsecond_line wait:kept
+ask          | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide
+ask-yes      | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide pause:1.2 click:y_hide wait:the_bus_keeps_them
+ask-no       | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide click:n_keep wait:kept
+ask-feed     | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide click:signing wait:kept
+ask-row      | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide side:#infra wait:kept
+delete-older | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than
+delete-count | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:read_messages gone:counting
+delete-counting | base | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:read_messages
+ask-long     | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:read_messages gone:counting
+delete-done  | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:read_messages gone:counting pause:1.2 click:y_delete wait:Undo_delete_on_its_menu
+delete-undo  | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:read_messages gone:counting pause:1.2 click:y_delete wait:Undo_delete_on_its_menu click:#open wait:Undo_delete click:Undo_delete wait:restored
+delete-custom | base | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:Custom… wait:older_than: text:soon Enter wait:not_a_duration
+dm-delete    | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs rside:DMs wait:Delete_read click:Delete_read wait:delete_older_than
+tomb-menu    | gone  | wait:Agents rside:○ wait:Tombstone…
+tomb-ask     | gone  | wait:Agents rside:○ wait:Tombstone… click:Tombstone… wait:y_tombstone
+tomb-said    | gone  | wait:Agents rside:○ wait:Tombstone… click:Tombstone… wait:y_tombstone pause:1.2 click:y_tombstone wait:tombstoned
+review-tomb  | gone  | wait:Agents rside:○ wait:Review_DMs click:Review_DMs wait:read_only rside:DMs wait:Tombstone…
 quit-ask     | base  | wait:Agents F2 q wait:quit?
 menu-row     | base  | wait:Agents side:#infra side:#infra wait:pick side:#deploy gone:pick
 menu-tab     | base  | wait:Agents side:#infra side:#infra wait:pick click:#open gone:pick
@@ -218,8 +233,9 @@ review-both  | trays | wait:Agents_3/4 side:alpha wait:DMs rside:alpha wait:Revi
 # #deploy, with a message there; `many` adds #ch01 to #ch24; `plain` the
 # plain shape; `dm` a direct message from alpha to the operator; `trays`
 # that, a direct message the operator sent beta in an earlier session, in
-# beta's tray, and direct messages between the agents in their trays. No
-# attend config is written: the mouse is on by default.
+# beta's tray, and direct messages between the agents in their trays;
+# `gone` has gamma exited rather than quiet. No attend config is written:
+# the mouse is on by default.
 fixture() { # kind
   rm -rf "$F"
   local cache=$F/cache/attend sig=$F/cache/attend/signals now shape=round
@@ -246,8 +262,13 @@ fixture() { # kind
   if [ "$1" = many ]; then
     for n in $(seq -w 1 24); do mkdir -p "$sig/@ch$n"; done
   fi
+  # In `gone`, gamma's record names a pid no process holds: it has
+  # exited, so its row offers Tombstone… and attend accepts it. Elsewhere
+  # it is quiet, and a send to it is refused as one to a quiet agent.
   for s in "${sessions[@]}"; do
-    printf '{"pid":%d,"sessionId":"%s","cwd":"%s"}\n' "$i" "${s%%:*}" "${s#*:}" > "$F/home/.claude/sessions/$i.json"
+    local pid=$i
+    [ "$1" = gone ] && [ "${s%%:*}" = "$C" ] && pid=4194301
+    printf '{"pid":%d,"sessionId":"%s","cwd":"%s"}\n' "$pid" "${s%%:*}" "${s#*:}" > "$F/home/.claude/sessions/$i.json"
     i=$((i + 1))
   done
   touch "$cache/heartbeat/$A" "$cache/heartbeat/$B"
@@ -323,9 +344,12 @@ print(f"{slug}-{b}")
 ' "$1"
 }
 
+# The build's own attend leads PATH, so the cleanup items (Delete read
+# messages for everyone…, Tombstone…) run the verbs this checkout has.
 launch() { # name cols rows
   (cd "$F/work/alpha" && env -u CLAUDE_CONFIG_DIR -u CLAUDE_PROJECT_DIR -u CLAUDE_CODE_SESSION_ID HOME="$F/home" USER=operator \
     XDG_CACHE_HOME="$F/cache" XDG_CONFIG_HOME="$F/config" XDG_STATE_HOME="$F/state" XDG_DATA_HOME="$F/data" \
+    PATH="$BIN:$PATH" \
     TERM=xterm-256color COLORTERM=truecolor \
     $TH launch "$1" --cols "$2" --rows "$3" --font "$FONT" -- "$BIN/attend-chat" >/dev/null)
 }
@@ -398,6 +422,7 @@ step() { # name step
     wait:*) poll "$n" "'$arg'" has "$arg"; return ;;
     gone:*) poll "$n" "'$arg' to go" lacks "$arg"; return ;;
     resize:*) resize "$n" "$arg" ;;
+    pause:*) sleep "$arg"; return ;;
     paste:*) $TH send "$n" -l $'\e[200~'"$(printf '%b' "$arg")"$'\e[201~' ;;
     rawpaste:*) $TH send "$n" -l "$(printf '%b' "$arg")" ;;
     bigpaste:*) # in pieces: tmux refuses one send-keys this long

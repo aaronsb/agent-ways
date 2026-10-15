@@ -5,7 +5,8 @@
 //!   (issue #378, ADR-171).
 //! - [`heartbeat`]: the per-session liveness file (ADR-129) and the
 //!   duplicate-attend lock.
-//! - [`alive`]: the one predicate for "is this member live".
+//! - [`alive`]: the one predicate for "is this member live", and [`gone`]
+//!   for "has this session gone for good".
 //! - [`enrollment`]: whether a session enrolled in attend (#720).
 //! - [`cache`]: attend's cache root, under `XDG_CACHE_HOME`.
 //! - [`process`]: a pid's parent and command line.
@@ -100,6 +101,38 @@ pub fn has_exited(member_id: &str) -> bool {
     enrollment::process_has_exited(member_id)
 }
 
+/// Days a delete's mark stands before cleanup removes the message it marks
+/// (ADR-404 D3e), and for as long, after its last heartbeat, a session this
+/// host cannot judge holds its mail ([`gone`]).
+pub const MARK_REAP_DAYS: u64 = 7;
+
+/// How long a session this host cannot judge, with no session record here,
+/// holds its mail after its last heartbeat. Its process may run on another
+/// host, or under a host name this one no longer has, so only its
+/// heartbeat speaks for it (ADR-406 item 12); the window is the one after
+/// which cleanup removes a marked message.
+pub const UNJUDGED_HOLD: std::time::Duration = std::time::Duration::from_secs(MARK_REAP_DAYS * 86_400);
+
+/// Whether session `id` has gone: this host saw its process exit
+/// ([`has_exited`]), or no session record here names it and its last
+/// heartbeat, if any, is older than [`UNJUDGED_HOLD`]. attend's tombstone
+/// accepts only a session that has gone, and attend-chat offers Tombstone…
+/// for the same sessions (ADR-404 D3e).
+pub fn gone(id: &str) -> bool {
+    if has_exited(id) {
+        return true;
+    }
+    if alive(id, &std::collections::HashSet::new()) || recorded_here(id) {
+        return false;
+    }
+    heartbeat::last_seen(id).is_none_or(|t| std::time::SystemTime::now().duration_since(t).unwrap_or_default() >= UNJUDGED_HOLD)
+}
+
+/// Whether a Claude Code session record on this host names `id`.
+fn recorded_here(id: &str) -> bool {
+    session::sessions_dirs().iter().any(|d| claude_sessions::read_session_records(d).iter().any(|r| r.session_id == id))
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
@@ -143,6 +176,26 @@ mod tests {
             assert!(crate::has_exited("reused"), "the record's process started a day ago; this pid's process is later");
             record(home, "c", pid, "undated", None);
             assert!(!crate::has_exited("undated"), "a record with no start time is judged by its pid");
+        });
+    }
+
+    /// A session has gone when this host saw it exit, or when nothing here
+    /// records it and its heartbeat, if any, is past the hold.
+    #[test]
+    fn a_session_has_gone_when_it_exited_or_nothing_here_speaks_for_it() {
+        with_home(|home| {
+            let pid = std::process::id();
+            record(home, "a", pid, "running", Some(SystemTime::now()));
+            assert!(!crate::gone("running"), "its process runs");
+            record(home, "b", pid, "exited", Some(SystemTime::now() - Duration::from_secs(24 * 3600)));
+            assert!(crate::gone("exited"), "its record's process exited");
+            assert!(crate::gone("never-seen"), "no record, no heartbeat");
+            crate::heartbeat::touch("away").unwrap();
+            let file = std::fs::File::options().write(true).open(crate::heartbeat::heartbeat_path("away")).unwrap();
+            file.set_modified(SystemTime::now() - Duration::from_secs(3600)).unwrap();
+            assert!(!crate::gone("away"), "no record here, heartbeat within the hold: another host may hold it");
+            file.set_modified(SystemTime::now() - crate::UNJUDGED_HOLD - Duration::from_secs(60)).unwrap();
+            assert!(crate::gone("away"), "heartbeat past the hold");
         });
     }
 }

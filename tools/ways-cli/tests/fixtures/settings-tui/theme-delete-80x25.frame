@@ -23,7 +23,7 @@ agent-tui frame 80x25
 |│                                          ││distinct  ok, err/warn ΔE 0.084   │|
 |│                                          ││                                  │|
 |└──────────────────────────────────────────┘└──────────────────────────────────┘|
-| confirm  delete theme mine?   y delete   n keep                                |
+| confirm  delete theme mine?                                 y delete   n keep  |
 styles
   0   0-7   White Blue -
   0   9-18  White Blue -
@@ -191,5 +191,5 @@ styles
  22  79-79  - - DIM
  23   0-79  - - DIM
  24   0-8   Black Yellow BOLD
- 24  30-39  White Red BOLD
- 24  41-48  Black Green BOLD
+ 24  60-69  White Red BOLD
+ 24  71-78  Black Green BOLD

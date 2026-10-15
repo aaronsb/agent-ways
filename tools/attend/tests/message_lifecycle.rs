@@ -1,6 +1,7 @@
 //! One message through its whole life: sent, delivered once by the
 //! Stop-hook drain, recorded in the session's seen-set, never delivered
-//! again, and then released to `/purge` by the consumer consult.
+//! again, and then deletable for everyone by `attend message delete`, since
+//! the one session that received it has read it (ADR-404 D3e).
 //!
 //! Written before the #701 restructuring and kept green through it: the
 //! delivery semantics it pins are the ones the consolidation must not move.
@@ -62,7 +63,7 @@ fn signal_files(dir: &Path) -> Vec<String> {
 }
 
 #[test]
-fn send_deliver_once_seen_then_purgeable() {
+fn send_deliver_once_seen_then_deletable() {
     let home = fixture();
     let cache = home.join(".cache").join("attend");
     let broadcast = cache.join("signals").join("_broadcast");
@@ -97,18 +98,66 @@ fn send_deliver_once_seen_then_purgeable() {
     assert!(!out.contains("lifecycle hello"), "second drain must not redeliver: {out}");
     assert!(out.contains("no pending messages"), "{out}");
 
-    // Purge consult: every live consumer of #open has seen it, so `/purge`
-    // may remove it. The consult reads the same cache this process points at.
-    std::env::set_var("HOME", &home);
-    std::env::set_var("XDG_CACHE_HOME", home.join(".cache"));
-    let consumers = attend_chat::consumers::live_consumer_seen_sets(&cache.join("signals"), None);
-    assert!(!consumers.is_empty(), "the draining session is a live consumer");
-    assert!(
-        consumers.iter().all(|seen| seen.contains(&key)),
-        "every live consumer has consumed {key}"
-    );
+    // Deletable: the session has read it, so a delete would mark it once it
+    // is past the grace floor; the dry run marks nothing.
+    let aged = std::time::SystemTime::now() - std::time::Duration::from_secs(600);
+    std::fs::File::options().write(true).open(broadcast.join(&key)).unwrap().set_modified(aged).unwrap();
+    let dry = attend(&home, &["message", "delete", "--open", "--dry-run", "--json"]);
+    ok(&dry);
+    let report = stdout(&dry);
+    assert!(report.contains(r#""marked":1"#) && report.contains(r#""held":[]"#), "read by every live session, so deletable: {report}");
     // The signal itself is durable: reading never deletes it.
     assert_eq!(signal_files(&broadcast), vec![key]);
 
+    std::fs::remove_dir_all(&home).ok();
+}
+
+/// `--as-person` makes the caller the person at the terminal even when the
+/// process runs under a Claude Code session: a `--dm` delete then reaches
+/// the person's thread with the agent, not the session's (attend-chat may
+/// be started from a session's shell).
+#[test]
+fn as_person_reaches_the_persons_dm_thread_under_a_session() {
+    let home = std::env::temp_dir().join(format!("attend-as-person-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(home.join(".claude").join("sessions")).unwrap();
+    become_session(&home);
+    let agent = "aaaaaaaa-0000-4000-8000-00000000000a";
+    let tray = home.join(".cache/attend/signals/_people/lifecycle-human");
+    std::fs::create_dir_all(&tray).unwrap();
+    let dm = tray.join("m-1784732645000000000-1.signal");
+    std::fs::write(&dm, format!("claude:{agent}|other|/work/other|from_kind:agent|from_id:{agent}|to:lifecycle-human|for the person\n")).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&dm)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(600))
+        .unwrap();
+    let as_session = attend(&home, &["message", "delete", "--dm", agent, "--dry-run", "--json"]);
+    ok(&as_session);
+    assert!(stdout(&as_session).contains(r#""marked":0"#), "the session's thread holds nothing: {}", stdout(&as_session));
+    let as_person = attend(&home, &["message", "delete", "--dm", agent, "--as-person", "--dry-run", "--json"]);
+    ok(&as_person);
+    assert!(stdout(&as_person).contains(r#""marked":1"#), "the person's thread holds the DM: {}", stdout(&as_person));
+    std::fs::remove_dir_all(&home).ok();
+}
+
+/// `--as-person` names whose thread `--dm` reaches, and nothing else: it is
+/// refused without `--dm`, where it would otherwise be ignored, and the help
+/// leaves it out, as attend-chat's convenience rather than an option to
+/// reach for.
+#[test]
+fn as_person_is_refused_without_dm_and_hidden_from_the_help() {
+    let home = std::env::temp_dir().join(format!("attend-as-person-bare-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).unwrap();
+    let bare = attend(&home, &["message", "delete", "--open", "--as-person", "--dry-run", "--json"]);
+    assert!(!bare.status.success(), "refused: {}", stdout(&bare));
+    let err = String::from_utf8_lossy(&bare.stderr);
+    assert!(err.contains("--dm"), "the refusal names what it needs: {err}");
+    let help = attend(&home, &["message", "delete", "--help"]);
+    ok(&help);
+    assert!(!stdout(&help).contains("--as-person"), "hidden: {}", stdout(&help));
+    assert!(stdout(&help).contains("--dm"), "the help itself is read: {}", stdout(&help));
     std::fs::remove_dir_all(&home).ok();
 }

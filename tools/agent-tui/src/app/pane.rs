@@ -219,13 +219,16 @@ pub enum Open {
     /// is picked comes back through [`Pane::picked`] under `id`. Esc or a
     /// click outside closes it with nothing.
     Pick { id: String, title: String, items: Vec<Item>, multi: bool, anchor: Anchor },
-    /// A question on the bottom bar, answered with `y` or `n`, or a click
-    /// on either answer, which the bar draws as lozenges: `yes` and `no`
-    /// name what each does ("clear", "keep"). Esc, Enter, a click
-    /// elsewhere, or any other key answers no; a character the pane would type, and a
-    /// key the shell takes, then go on as typed. The answer comes back
-    /// through [`Pane::picked`] under `id`, as `["y"]` or `["n"]`.
-    Ask { id: String, question: String, yes: String, no: String },
+    /// A question on the bottom bar ([`Question`]), answered with `y` or
+    /// `n`, or a click on either answer, which the bar draws as lozenges.
+    /// Esc, Enter, a click elsewhere, or any other key answers no; a
+    /// character the pane would type, and a key the shell takes, then go on
+    /// as typed. The answer comes back through [`Pane::picked`] under its
+    /// id, as `["y"]` or `["n"]`, and as `[answer, EXPIRED]` when its
+    /// [`Expiry`] ran out. Opened again under the id of the question that is
+    /// open, it updates that question in place: its text, its answers, and
+    /// whether yes waits.
+    Ask(Question),
     /// A line typed in a small dialog docked at `anchor`, as a menu docks:
     /// a name, a description. `value` is the text it opens with and `error`
     /// what was wrong with the last one entered, said inside the dialog.
@@ -272,6 +275,108 @@ impl Default for Ctx {
         Ctx { text: false, digits: true, owns_bar: false, esc_quits: true }
     }
 }
+
+/// A pane's question ([`Open::Ask`]).
+///
+/// A question can wait (`pending`): yes is drawn set back and neither its
+/// key nor a click presses it, while no answers as ever, until the pane
+/// opens the question again, under the same id, with `pending` false. The
+/// work the question is about can be under way meanwhile, and its text say
+/// so; the update is drawn in place.
+///
+/// A question can expire ([`Expiry`]): once it is ready to answer, the
+/// shell draws the seconds left beside it, counting down on its tick, and
+/// at none answers it with the expiry's answer, no unless made otherwise,
+/// marked [`EXPIRED`], so the pane can say so. A question that sat
+/// unanswered while the operator was away cannot be answered by the next
+/// key typed on coming back, nor by one typed a moment after its deadline.
+///
+/// However a question is made, its yes is set back and inert for a moment
+/// after it is ready to answer, and after what it asks changes while
+/// ready; a held key's repeats never press it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Question {
+    pub id: String,
+    pub question: String,
+    /// What yes does ("delete"), or `None` for a question only no
+    /// dismisses: one that says why there is nothing to do.
+    pub yes: Option<String>,
+    /// What no does ("keep").
+    pub no: String,
+    /// Yes waits: nothing presses it.
+    pub pending: bool,
+    pub expiry: Option<Expiry>,
+}
+
+impl Question {
+    /// A question answered at once, by `y` doing `yes` or `n` doing `no`.
+    pub fn new(id: impl Into<String>, question: impl Into<String>, yes: impl Into<String>, no: impl Into<String>) -> Question {
+        Question { id: id.into(), question: question.into(), yes: Some(yes.into()), no: no.into(), pending: false, expiry: None }
+    }
+
+    /// Yes waits until the question is opened again ready.
+    pub fn pending(self) -> Question {
+        Question { pending: true, ..self }
+    }
+
+    /// No yes: only no dismisses it.
+    pub fn dismiss_only(self) -> Question {
+        Question { yes: None, ..self }
+    }
+
+    /// It expires as `expiry` says, counted from when it is ready.
+    pub fn expires(self, expiry: Expiry) -> Question {
+        Question { expiry: Some(expiry), ..self }
+    }
+}
+
+/// When a question ([`Question`]) closes on its own, and how: `after` it is
+/// ready to answer, it answers no, marked [`EXPIRED`], unless it was made
+/// with [`Expiry::yes_unattended`]. `label` and `short` say the seconds
+/// left, `{s}` standing for them; the bar draws `label` where the whole
+/// question fits beside it and `short` where it does not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Expiry {
+    pub after: std::time::Duration,
+    /// Yes, not no, at expiry: set only by [`Expiry::yes_unattended`].
+    pub(crate) answer: bool,
+    pub label: String,
+    pub short: String,
+}
+
+impl Expiry {
+    /// Answers no after `after`, saying "closes in 58 s", or "58 s" where
+    /// the bar is short of room.
+    pub fn new(after: std::time::Duration) -> Expiry {
+        Expiry { after, answer: false, label: "closes in {s} s".into(), short: "{s} s".into() }
+    }
+
+    /// Answers yes after `after`, with no one there to answer it.
+    ///
+    /// Never for a question whose yes deletes, sends, or does anything
+    /// that cannot be taken back: its countdown runs out while the
+    /// operator is away, and yes then acts for them. It suits a question
+    /// whose yes is the safe course, such as going on with something
+    /// already under way.
+    ///
+    /// Nothing else makes an expiry answer yes: a struct literal cannot set
+    /// it.
+    ///
+    /// ```compile_fail,E0451
+    /// let _ = agent_tui::Expiry { answer: true, ..agent_tui::Expiry::new(std::time::Duration::from_secs(1)) };
+    /// ```
+    pub fn yes_unattended(after: std::time::Duration) -> Expiry {
+        Expiry { answer: true, ..Expiry::new(after) }
+    }
+
+    /// Whether it answers yes at expiry.
+    pub fn answers_yes(&self) -> bool {
+        self.answer
+    }
+}
+
+/// The second value of an answer an [`Expiry`] gave.
+pub const EXPIRED: &str = "expired";
 
 /// What the shell holds open over a pane ([`Pane::overlay_opened`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -536,6 +641,16 @@ pub trait Pane: Any {
 
     /// The picker opened under `id` set `values`.
     fn picked(&mut self, _id: &str, _values: Vec<String>) {}
+
+    /// The shell took a key of its own (the key help, the mouse, a tab,
+    /// quitting, a new item): the operator pressed a key the pane never
+    /// sees.
+    fn shell_key_taken(&mut self) {}
+
+    /// The shell could not open `open` (a menu, a question or an entry
+    /// dialog) because something else was open: what it asked for will
+    /// never be picked or answered.
+    fn open_dropped(&mut self, _open: Open) {}
 
     /// Work that quitting would lose, named for the exit guard.
     fn unsaved(&self) -> Option<String> {

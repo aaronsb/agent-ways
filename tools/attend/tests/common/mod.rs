@@ -272,20 +272,29 @@ impl Fixture {
         self.run_from(Path::new(env!("CARGO_BIN_EXE_attend")), env)
     }
 
-    /// `attend run` from the binary at `bin`.
+    /// `attend run` from the binary at `bin`. A spawn that meets the file
+    /// still held open for writing (`ExecutableFileBusy`: a binary just
+    /// copied, while another test's fork inherited the writer) is tried
+    /// again shortly.
     pub fn run_from(&self, bin: &Path, env: &[(&str, &str)]) -> Run {
         let log = self.home.join(format!("run-{}.out", self.sid));
-        let mut cmd = self.command_from(bin);
-        for (k, v) in env {
-            cmd.env(k, v);
+        for _ in 0..50 {
+            let mut cmd = self.command_from(bin);
+            for (k, v) in env {
+                cmd.env(k, v);
+            }
+            let spawned = cmd
+                .arg("run")
+                .stdout(Stdio::from(std::fs::File::create(&log).unwrap()))
+                .stderr(Stdio::from(std::fs::File::create(self.home.join("run.err")).unwrap()))
+                .spawn();
+            match spawned {
+                Ok(child) => return Run { child, log },
+                Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy => std::thread::sleep(Duration::from_millis(20)),
+                Err(e) => panic!("spawn attend run: {e}"),
+            }
         }
-        let child = cmd
-            .arg("run")
-            .stdout(Stdio::from(std::fs::File::create(&log).unwrap()))
-            .stderr(Stdio::from(std::fs::File::create(self.home.join("run.err")).unwrap()))
-            .spawn()
-            .expect("spawn attend run");
-        Run { child, log }
+        panic!("spawn attend run: the binary stayed busy");
     }
 }
 

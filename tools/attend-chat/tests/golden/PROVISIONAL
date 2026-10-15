@@ -20,7 +20,7 @@ channel-deploy-120x40
 channel-deploy-80x25
 channel-infra-80x25
 clicked-feed-compose-80x25
-clicked-infra-80x25
+clicked-infra-80x25  # stale: still shows Clear history, which Delete read messages for everyone… replaced (ADR-405, 2026-10-13); bless it when the layout is accepted
 common-menu-80x25
 compose-deploy-80x25
 compose-multiline-80x25
@@ -53,7 +53,7 @@ tab-bar-focused-80x25
 tab-bar-focused-common-80x25
 tab-bar-focused-plus-80x25
 tab-menu-confirm-120x40
-tab-menu-deploy-80x25
+tab-menu-deploy-80x25  # stale: still shows Clear history, which Delete read messages for everyone… replaced (ADR-405, 2026-10-13); bless it when the layout is accepted
 theme-nord-256-80x25
 theme-nord-truecolor-120x40
 theme-nord-truecolor-80x25

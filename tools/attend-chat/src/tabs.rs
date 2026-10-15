@@ -15,6 +15,7 @@
 //! `crate::view`.
 
 use crate::groups::{KnownGroup, BASE_CHANNEL_NAME};
+use crate::hidden::Hidden;
 use crate::signal::{Channel, Signal};
 
 /// The foreground tab. `Merged` is not a channel — it has no send
@@ -152,18 +153,19 @@ pub fn advance_after_dissolve(dissolved: &str, names_before: &[String]) -> Tab {
     }
 }
 
-/// Does `sig` render in `tab`'s transcript? Merged shows everything the
-/// person was party to: every channel, and every direct message to them,
-/// to their project's tray, or from them, but for the copy of a send that
-/// went beside a channel post, whose post it shows instead. A channel tab shows only its own
-/// traffic plus local `Info` blocks (command feedback must be visible
-/// wherever the command was typed) and what reached the person directly
-/// (ADR-401, `to`). Directed messages to a cwd inbox, and those the person
-/// sent, surface in merged only — the strict per-channel filter. A DM view
-/// shows the direct messages between the person and its agent, both ways,
-/// and the local blocks (ADR-405). A direct message between others shows
-/// in none of these; an agent's own DM view shows every direct message the
-/// agent sent or received, with anyone, and the local blocks.
+/// Does `sig` belong in `tab`'s transcript? Merged holds everything
+/// the person was party to: every channel, and every direct message to
+/// them, to their project's tray, or from them, but for the copy of a send
+/// that went beside a channel post, whose post it holds instead. A channel
+/// tab holds only its own traffic plus local `Info` blocks (command
+/// feedback must be visible wherever the command was typed) and what
+/// reached the person directly (ADR-401, `to`). Directed messages to a cwd
+/// inbox, and those the person sent, belong to merged only — the strict
+/// per-channel filter. A DM view holds the direct messages between the
+/// person and its agent, both ways, and the local blocks (ADR-405). A
+/// direct message between others belongs to none of these; an agent's own
+/// DM view holds every direct message the agent sent or received, with
+/// anyone, and the local blocks.
 pub fn shows(sig: &Signal, tab: &Tab) -> bool {
     match tab {
         Tab::Merged => !matches!(sig.channel, Channel::Elsewhere(_)) && !sig.beside_post,
@@ -176,6 +178,13 @@ pub fn shows(sig: &Signal, tab: &Tab) -> bool {
         Tab::Dm(member) => sig.channel == Channel::Info || sig.is_dm_with(member),
         Tab::Review(member) => sig.channel == Channel::Info || sig.is_dm_of(member),
     }
+}
+
+/// Whether `sig` is drawn in `tab`'s feed: it [`shows`] there and is newer
+/// than the tab's watermark in `hidden`, which Hide messages here sets
+/// (ADR-405).
+pub fn visible(sig: &Signal, tab: &Tab, hidden: &Hidden) -> bool {
+    shows(sig, tab) && !hidden.hides(tab, sig)
 }
 
 #[cfg(test)]
@@ -327,5 +336,19 @@ mod tests {
         assert_eq!(bar(&n, &dm), [Slot::Common, Slot::Tab(dm.clone()), Slot::New, Slot::Tab(chan("open")), Slot::Tab(Tab::Merged)]);
         assert_eq!(normalize(dm.clone(), &n), dm);
         assert_eq!(send_scope(&dm), "open", "its commands scope as merged's");
+    }
+
+    #[test]
+    fn a_tab_shows_what_belongs_there_past_its_own_watermark() {
+        let open = chan("open");
+        let mut old = on(Channel::Open, "a1");
+        old.ts = 10;
+        let mut new = old.clone();
+        new.ts = 11;
+        let mut hidden = Hidden::default();
+        hidden.hide(&open, crate::hidden::order(&old));
+        assert!(!visible(&old, &open, &hidden) && visible(&new, &open, &hidden), "#open hides up to its watermark");
+        assert!(visible(&old, &Tab::Merged, &hidden), "the operator view keeps it");
+        assert!(!visible(&on(Channel::Group("g".into()), "a1"), &open, &Hidden::default()), "what does not belong never shows");
     }
 }

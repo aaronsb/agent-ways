@@ -1,6 +1,6 @@
 [package]
 name = "attend"
-version = "0.27.0"
+version = "0.27.1"
 edition = "2021"
 description = "Active awareness module — adaptive sensing and disclosure for Claude Code sessions"
 license = "AGPL-3.0-or-later"
@@ -45,6 +45,3 @@ sensor-processes = { path = "../sensor-processes", optional = true }
 # build (ADR-406 item 2). The feature gates only the sensor and its verbs.
 sensor-keepwarm = { path = "../sensor-keepwarm" }
 
-[dev-dependencies]
-# The message-lifecycle test consults `/purge`'s live-consumer seen-sets.
-attend-chat = { path = "../attend-chat" }

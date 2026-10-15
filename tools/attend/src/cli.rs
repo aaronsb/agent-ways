@@ -509,6 +509,14 @@ pub(crate) struct DeleteArgs {
     #[arg(long, value_name = "SESSION-ID")]
     pub(crate) from: Option<String>,
 
+    /// Act as the person at this terminal, never as a Claude Code session
+    /// this process runs under: `--dm` then reaches the person's thread.
+    /// attend-chat passes it, since it may be started from a session's
+    /// shell. A convenience for attend-chat, not an authorization check,
+    /// so it is left out of the help; it takes `--dm`
+    #[arg(long, hide = true)]
+    pub(crate) as_person: bool,
+
     /// How old a message must be: `current` (before the earliest start of
     /// any live session), `today` (before local midnight), `all`, a
     /// duration such as 90m, 2h30m, 3d or 1w, or a local date YYYY-MM-DD
@@ -520,7 +528,7 @@ pub(crate) struct DeleteArgs {
     pub(crate) dry_run: bool,
 
     /// Remove the marks of the newest delete, or of the batch named
-    #[arg(long, value_name = "BATCH", num_args = 0..=1, default_missing_value = "", conflicts_with_all = ["scope", "from", "older_than", "dry_run"])]
+    #[arg(long, value_name = "BATCH", num_args = 0..=1, default_missing_value = "", conflicts_with_all = ["scope", "from", "older_than", "dry_run", "as_person"])]
     pub(crate) undo: Option<String>,
 
     /// Print the result as one JSON document

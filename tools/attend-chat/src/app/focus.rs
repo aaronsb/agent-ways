@@ -206,7 +206,10 @@ impl ChatPane {
         let mut out = Vec::new();
         if kind == Kind::Compose {
             out.extend([
-                Binding::new("Enter", "send"),
+                // Claude Code's chord for `chat:sendNow` (Ctrl+X Ctrl+S)
+                // arrives in every terminal; it rides on Enter's line so
+                // every key still fits the help at 80x25.
+                Binding::new("Enter", "send; C-x C-s sends now").short("send"),
                 Binding::new("Tab", "complete, else next").short("complete"),
                 Binding::new("S-Tab", "or ↑ at the top leaves the box").short("or ↑ leaves"),
                 Binding::new("Esc", "the feed"),

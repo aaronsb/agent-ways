@@ -75,6 +75,9 @@ fn chat() -> (Chat, Sender<attend_chat::watcher::Delivery>) {
         .heartbeat(false)
         .enhanced(true)
         .dry_run(true)
+        // A question's yes arms at once: the arm runs on the clock, and the
+        // trace holds no time.
+        .question_arm(std::time::Duration::ZERO)
         .pinned(std::time::UNIX_EPOCH + std::time::Duration::from_secs(NOW), 0);
     for (i, (sid, cwd)) in [(ALPHA_SID, "/work/alpha"), (BETA_SID, "/work/beta"), (ALPHA_SID, "/work/alpha")].into_iter().enumerate() {
         c.push(signal(i, sid, cwd, Channel::Open));
@@ -154,7 +157,7 @@ fn keys() -> Vec<KeyEvent> {
 }
 
 /// The digest of twenty seeds of 200 steps ([`pinned_run`]).
-const PINNED: &str = "cc049c1be38815b1";
+const PINNED: &str = "1e03436e28412928";
 
 /// FNV-1a over `bytes`, from `h`: a digest stable on every machine.
 fn fnv(h: u64, bytes: &[u8]) -> u64 {

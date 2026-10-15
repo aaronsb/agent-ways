@@ -14,6 +14,7 @@
 //! [`keys`] as free functions; the editing keys are the shared input's.
 
 mod activate;
+mod cleanup;
 mod dm;
 mod focus;
 mod ix;
@@ -204,9 +205,11 @@ pub struct ChatPane {
     /// The theme this session shows: its name, or `terminal` for the
     /// terminal's own palette. Marked in the Theme menu.
     theme: String,
-    /// The menu step the shell's question asks about, until it is answered
-    /// ([`ChatPane::answered`]).
-    asked: Option<menu::Step>,
+    /// The id of the shell's question and the menu step it asks about,
+    /// until it is answered ([`ChatPane::answered`]), and how many questions
+    /// were asked, which numbers their ids.
+    asked: Option<(String, menu::Step)>,
+    asks: u64,
     /// The terminal reports Ctrl+digits as themselves. Without it Ctrl+3
     /// arrives as Esc, which closes and clears and never quits (ADR-409),
     /// and a setting that asks for Ctrl+digits says they do not arrive.
@@ -247,6 +250,21 @@ pub struct ChatPane {
     /// listed, by membership id: the view keeps it when the agent leaves
     /// the column ([`dm`]).
     dm_names: std::collections::HashMap<String, String>,
+    /// Each tab's Hide messages here watermark, and the file it is kept in
+    /// across restarts ([`crate::hidden`]).
+    hidden: crate::hidden::Hidden,
+    hidden_path: std::path::PathBuf,
+    /// The attend CLI the cleanup items run ([`cleanup`]), and the last
+    /// delete made, for Undo delete.
+    attend: std::path::PathBuf,
+    undo: Option<cleanup::LastDelete>,
+    /// The delete or tombstone attend is working on, one at a time, with
+    /// no time limit ([`cleanup`]).
+    removing: Option<cleanup::Removal>,
+    /// How long a question that removes something for everyone stays open
+    /// ([`cleanup::DELETE_QUESTION_LIFE`]): a delete's once its count is
+    /// shown, Delete channel's, Tombstone…'s and Remove agent's at once.
+    delete_question_life: Duration,
 }
 
 impl ChatPane {
@@ -283,6 +301,7 @@ impl ChatPane {
             to_open: None,
             theme: "terminal".into(),
             asked: None,
+            asks: 0,
             enhanced: false,
             send_anyway: None,
             config: crate::settings::load(&std::env::current_dir().unwrap_or_default()),
@@ -296,6 +315,12 @@ impl ChatPane {
             setting_places: Vec::new(),
             views: Default::default(),
             dm_names: Default::default(),
+            hidden: crate::hidden::Hidden::load(&crate::hidden::default_path()),
+            hidden_path: crate::hidden::default_path(),
+            attend: crate::attend_cli::program(),
+            undo: None,
+            removing: None,
+            delete_question_life: cleanup::DELETE_QUESTION_LIFE,
         }
     }
 
@@ -574,13 +599,16 @@ impl ChatPane {
                 // the handler advanced it.
                 self.set_tab(focus);
             }
-            EnterAction::ClearTranscript => {
-                // Display-only: nothing on the bus is touched, and fresh
-                // traffic streams back in.
-                self.signals.clear();
-                self.say("transcript cleared", false);
+            EnterAction::HideHere => {
                 self.input.clear();
-                self.show_newest();
+                self.ask_hide(fg);
+            }
+            // Refused while a delete runs, the command stays in the box.
+            EnterAction::DeleteRead(c) => {
+                if !self.refused_while_removing() {
+                    self.input.clear();
+                    self.delete_read(crate::attend_cli::Scope::channel(&c), "all");
+                }
             }
         }
         self.reload_settings();
@@ -794,6 +822,7 @@ impl Pane for ChatPane {
     fn key(&mut self, k: KeyEvent) -> Keyed {
         self.dirty = true;
         if self.is_sidebar_key(&k) {
+            self.dispatch(ix::Ev::KeyTaken);
             self.toggle_sidebar();
             return Keyed::Done;
         }
@@ -935,11 +964,13 @@ impl Pane for ChatPane {
     }
 
     /// The status slot (#398, #400): a fresh result asserts itself, an
-    /// error in the error role; past [`STATUS_ASSERT`] the help of a
-    /// command being typed, or the last result, set back.
+    /// error in the error role; past [`STATUS_ASSERT`] a delete or a
+    /// tombstone still running says so, else the help of a command being
+    /// typed, or the last result, set back.
     fn status(&mut self) -> Option<(String, Tone)> {
         let fresh = self.status_set_at.is_some_and(|t| t.elapsed() < STATUS_ASSERT);
-        let (line, how) = status_slot(fresh, self.status_is_error, crate::slash::contextual_help(self.input.text()), &self.status);
+        let help = crate::slash::contextual_help(self.input.text()).map(|h| (h, self.input.text().starts_with('/')));
+        let (line, how) = status_slot(fresh, self.status_is_error, self.busy_line(), help, &self.status);
         let tone = match how {
             Some(true) => Tone::Err,
             Some(false) => Tone::Said,
@@ -956,9 +987,11 @@ impl Pane for ChatPane {
         self.config.mouse
     }
 
-    /// What quitting would lose: a draft.
+    /// What quitting now would lose: a draft, and a delete or tombstone
+    /// still running, which would go on unseen.
     fn unsaved(&self) -> Option<String> {
-        (!self.input.is_empty()).then(|| "a draft in the compose box".into())
+        let parts: Vec<&str> = [(!self.input.is_empty()).then_some("a draft in the compose box"), self.running_what()].into_iter().flatten().collect();
+        (!parts.is_empty()).then(|| parts.join(" and "))
     }
 
     fn has_tab_menus(&self) -> bool {
@@ -1016,7 +1049,20 @@ impl Pane for ChatPane {
         self.to_open.take()
     }
 
+    /// The shell took a key of the operator's (the key help, the mouse,
+    /// quitting, a tab, a new channel).
+    fn shell_key_taken(&mut self) {
+        self.dispatch(ix::Ev::KeyTaken);
+    }
+
+    fn open_dropped(&mut self, open: Open) {
+        self.question_dropped(open);
+    }
+
     fn picked(&mut self, id: &str, values: Vec<String>) {
+        if values.get(1).is_some_and(|v| v == agent_tui::EXPIRED) {
+            return self.answered_expired(id);
+        }
         if let Some(v) = values.first() {
             self.menu_picked(id, v);
         }
@@ -1059,6 +1105,7 @@ impl Pane for ChatPane {
 
     fn tick(&mut self) {
         self.drain();
+        self.attend_answered();
         self.new_day();
         if self.refreshed.is_none_or(|t| t.elapsed() >= REFRESH) {
             // Human presence (ADR-170): while the chat is open, keep
@@ -1192,6 +1239,16 @@ impl Chat {
         self
     }
 
+    /// Keep Hide messages here's watermarks in `path` rather than
+    /// attend-chat's state file, reading what it holds.
+    pub fn hidden_file(mut self, path: impl Into<std::path::PathBuf>) -> Chat {
+        let pane = self.pane_mut();
+        pane.hidden_path = path.into();
+        pane.hidden = crate::hidden::Hidden::load(&pane.hidden_path);
+        pane.invalidate();
+        self
+    }
+
     /// Keep the human's presence heartbeat, or not.
     pub fn heartbeat(mut self, on: bool) -> Chat {
         self.pane_mut().heartbeat = on;
@@ -1250,6 +1307,32 @@ impl Chat {
         &self.pane().status
     }
 
+    /// What a running delete or tombstone is doing (`deleting…`), while one
+    /// runs.
+    pub fn removing(&self) -> Option<String> {
+        self.pane().removing_now()
+    }
+
+    /// How long a question that removes something for everyone stays open
+    /// (a delete's once its count is shown), rather than
+    /// [`cleanup::DELETE_QUESTION_LIFE`].
+    pub fn delete_question_life(mut self, life: Duration) -> Chat {
+        self.pane_mut().delete_question_life = life;
+        self
+    }
+
+    /// How long a question's yes stays set back once it is ready to answer,
+    /// rather than the shell's second ([`agent_tui::App::set_question_arm`]).
+    pub fn question_arm(mut self, arm: Duration) -> Chat {
+        self.app.set_question_arm(arm);
+        self
+    }
+
+    /// Stop the delete or tombstone running, as `≡` ▸ Stop does.
+    pub fn pane_stop_removing(&mut self) {
+        self.pane_mut().stop_removing();
+    }
+
     pub fn signals(&self) -> &[Signal] {
         &self.pane().signals
     }
@@ -1294,7 +1377,7 @@ impl Screen for Chat {
     }
 
     fn tick_every(&self) -> Option<Duration> {
-        self.app.pane_tick_every()
+        self.app.tick_every()
     }
 
     fn tick(&mut self) {
@@ -1331,14 +1414,20 @@ impl World {
 }
 
 /// The status-slot content under the #398/#400 priority rule: a fresh
-/// result (error or success) > single-match help > the stored result.
-/// The second value is how it reads: `Some(true)` an error, `Some(false)`
-/// a success, `None` set back.
-fn status_slot(fresh: bool, is_error: bool, help: Option<String>, stored: &str) -> (String, Option<bool>) {
+/// result (error or success) > the help of a slash command being typed >
+/// what a running delete or tombstone is doing (`busy`) > other
+/// single-match help > the stored result. `help` carries whether it is a
+/// slash command's. The second value is how it reads: `Some(true)` an
+/// error, `Some(false)` a success or the work running, `None` set back.
+fn status_slot(fresh: bool, is_error: bool, busy: Option<String>, help: Option<(String, bool)>, stored: &str) -> (String, Option<bool>) {
     if fresh {
         return (stored.to_string(), Some(is_error));
     }
-    (help.unwrap_or_else(|| stored.to_string()), None)
+    match (help, busy) {
+        (Some((help, true)), _) => (help, None),
+        (_, Some(busy)) => (busy, Some(false)),
+        (help, None) => (help.map_or_else(|| stored.to_string(), |(h, _)| h), None),
+    }
 }
 
 #[cfg(test)]
@@ -1347,25 +1436,38 @@ mod status_slot_tests {
 
     #[test]
     fn fresh_error_asserts_over_help() {
-        let (text, how) = status_slot(true, true, Some("/dissolve — help".into()), "1 live member — not dissolving");
+        let (text, how) = status_slot(true, true, None, Some(("/dissolve — help".into(), true)), "1 live member — not dissolving");
         assert_eq!(text, "1 live member — not dissolving");
         assert_eq!(how, Some(true));
     }
 
     #[test]
     fn fresh_success_asserts() {
-        let (text, how) = status_slot(true, false, Some("help".into()), "joined #x");
+        let (text, how) = status_slot(true, false, None, Some(("help".into(), false)), "joined #x");
         assert_eq!(text, "joined #x");
         assert_eq!(how, Some(false));
     }
 
     #[test]
     fn expired_window_yields_to_help_then_stored() {
-        let (text, how) = status_slot(false, true, Some("/dissolve — help".into()), "err");
+        let (text, how) = status_slot(false, true, None, Some(("/dissolve — help".into(), true)), "err");
         assert_eq!(text, "/dissolve — help");
         assert_eq!(how, None);
-        let (text, _) = status_slot(false, true, None, "err");
+        let (text, _) = status_slot(false, true, None, None, "err");
         assert_eq!(text, "err");
+    }
+
+    #[test]
+    fn a_running_delete_holds_the_line_past_a_fresh_result() {
+        let busy = || Some("deleting…".to_string());
+        let (text, how) = status_slot(true, true, busy(), None, "still deleting: one delete or tombstone runs at a time");
+        assert_eq!((text.as_str(), how), ("still deleting: one delete or tombstone runs at a time", Some(true)), "a fresh note first");
+        let (text, how) = status_slot(false, false, busy(), Some(("@Ada — an agent".into(), false)), "hid 3 messages");
+        assert_eq!((text.as_str(), how), ("deleting…", Some(false)), "then the running delete, over other help and the last result");
+        let (text, how) = status_slot(false, false, busy(), Some(("/dissolve — help".into(), true)), "hid 3 messages");
+        assert_eq!((text.as_str(), how), ("/dissolve — help", None), "a slash command's help while it is typed");
+        let (text, _) = status_slot(false, false, busy(), None, "hid 3 messages");
+        assert_eq!(text, "deleting…", "typing with no help to show leaves the running line");
     }
 }
 

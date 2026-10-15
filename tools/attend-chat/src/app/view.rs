@@ -255,7 +255,7 @@ fn draw_feed(chat: &mut ChatPane, f: &mut Frame, area: Rect, fg: &Tab) {
             }
         }
         let (entries, members): (Vec<Entry>, Vec<Option<String>>) =
-            chat.signals.iter().filter(|s| tabs::shows(s, fg)).map(|s| entry(chat, s, &memberships)).unzip();
+            chat.in_view(fg).map(|s| entry(chat, s, &memberships)).unzip();
         chat.entries = Some(entries);
         chat.entry_members = members;
     }

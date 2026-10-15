@@ -302,14 +302,20 @@ fn a_click_on_the_tab_of_a_menu_docked_at_its_row_only_closes_it() {
     assert!(menu(&mut c).is_none(), "closed, and not opened again under the tab: {:#?}", rows(&mut c));
 
     // The other way round: docked under the tab, closed by its row. The
-    // menu under the tab covers the column's rows, so the row is found
-    // before it opens.
-    let deploy = row_of(&mut c, "#deploy");
+    // menu under the tab covers the column's rows from the tab's left edge,
+    // so the row is found before it opens and clicked left of the menu.
+    let (_, y) = row_of(&mut c, "#deploy");
+    let deploy = (1, y);
     click(&mut c, tab);
     let ((_, y), _) = menu(&mut c).expect("#deploy's menu");
     assert_eq!(y, 1, "docked under the tab");
     click(&mut c, deploy);
     assert!(menu(&mut c).is_none(), "closed, and not opened again under the row: {:#?}", rows(&mut c));
+    // The positive control: the same cell, with nothing open, is the row,
+    // and opens the menu of the channel it shows, docked under it.
+    click(&mut c, deploy);
+    let ((_, docked), _) = menu(&mut c).unwrap_or_else(|| panic!("the click at the row opens #deploy's menu: {:#?}", rows(&mut c)));
+    assert_eq!(docked, deploy.1 as usize + 1, "docked under the row");
 }
 
 /// The exit guard names what the lent box holds: a channel's name or a
