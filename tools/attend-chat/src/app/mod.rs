@@ -504,7 +504,7 @@ impl ChatPane {
             let earlier = earlier_ids(&seen, &instances);
             let seen = settle(seen, &earlier, &tombstoned(), in_channel);
             let live_members = rows.iter().map(|r| r.known.membership.members.iter().filter(|m| alive(m)).count()).collect();
-            self.world = Some(World::new(tab_channels(&rows), seen, rows, live_members, invites(), instances, &self.foreground, &self.views));
+            self.world = Some(World::new(tab_channels(&rows), seen, rows, live_members, invites(!self.dry_run), instances, &self.foreground, &self.views));
             self.remember_dm_names();
             self.refocus();
         }

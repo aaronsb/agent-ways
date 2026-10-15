@@ -171,7 +171,7 @@ fn a_member_row_opens_its_agents_menu_by_a_click_or_enter() {
 /// so it is not listed as invited.
 #[test]
 fn an_invitation_to_a_session_that_has_gone_is_pruned_and_not_listed() {
-    let mut c = chat(true);
+    let mut c = chat(false);
     let infra = under(&mut c, "infra");
     assert!(!infra.iter().any(|r| r.contains("dddddddd")), "{infra:#?}");
     let invite = attend_chat::signal::signals_base().join(format!("@infra/{GONE_SID}.invite"));
