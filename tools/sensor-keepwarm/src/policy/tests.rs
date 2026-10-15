@@ -301,6 +301,7 @@ fn the_five_minute_tier_and_a_small_context_get_nothing() {
     let d = s.check(&cfg(), Gate::Off, MONDAY + 50 * MIN);
     assert_eq!((d.action, d.next_at), (Action::None, None));
     assert!(d.reason.contains("under 50k"), "{}", d.reason);
+    assert_eq!(d.idle, Some("under 50k"));
 
     let mut s = Session::new(MONDAY, 200_000);
     s.tail.last_mut().unwrap().tier = "5m".into();
@@ -308,7 +309,17 @@ fn the_five_minute_tier_and_a_small_context_get_nothing() {
         let d = s.check(&cfg(), Gate::Off, at);
         assert_eq!(d.action, Action::None);
         assert!(d.reason.contains("five-minute"), "{}", d.reason);
+        assert_eq!(d.idle, Some("5m tier"));
     }
+
+    let mut s = Session::new(MONDAY, 200_000);
+    s.tail.clear();
+    let d = s.check(&cfg(), Gate::Off, MONDAY + MIN);
+    assert_eq!((d.action, d.next_at, d.idle), (Action::None, None, Some("no request yet")));
+
+    // A session with a due point is not idle.
+    let mut s = Session::new(MONDAY, 200_000);
+    assert_eq!(s.check(&cfg(), Gate::Off, MONDAY + MIN).idle, None);
 }
 
 #[test]

@@ -7,6 +7,8 @@ export type KeepaliveRow = {
   nextAt: number | null
   wrapsAt: string | null
   wrappedAt: string | null
+  /** Why a running policy has nothing due, from attend's decision. */
+  idle: string | null
   /** A wrap sent over attend was refused and went to the file instead. */
   isRefused: boolean
   /** A dormant session draws the segment from its first keepalive until

@@ -495,6 +495,9 @@ pub struct Decision {
     /// The judgment could not be made (the transcript was unreadable): ask
     /// again at `next_at`, a bounded number of times.
     pub retry: bool,
+    /// Why a running policy has no due point, in a few words for the mod's
+    /// row: `under 50k`, `5m tier`, `no request yet`.
+    pub idle: Option<&'static str>,
 }
 
 impl Decision {
@@ -513,6 +516,33 @@ impl Decision {
             wrapped_at_hm: p.wrapped_at.map(|t| cfg.windows.hm(t)),
             wrap: None,
             retry: false,
+            idle: None,
+        }
+    }
+}
+
+/// Why a stretch has no due point.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Idle {
+    NoRequest,
+    FiveMinuteTier,
+    SmallContext,
+}
+
+impl Idle {
+    fn reason(self) -> &'static str {
+        match self {
+            Idle::NoRequest => "no request yet in this session",
+            Idle::FiveMinuteTier => "the session is on the five-minute cache tier",
+            Idle::SmallContext => "the context is under 50k tokens, where a cold re-write is cheap",
+        }
+    }
+
+    fn short(self) -> &'static str {
+        match self {
+            Idle::NoRequest => "no request yet",
+            Idle::FiveMinuteTier => "5m tier",
+            Idle::SmallContext => "under 50k",
         }
     }
 }
@@ -520,16 +550,16 @@ impl Decision {
 /// The due point of the stretch `reading` ends with, that stretch's TTL and
 /// its last request, or why there is none: no request yet, the five-minute
 /// tier, a context under the floor.
-fn due_point(state: &State, reading: &Reading, cfg: &Config) -> Result<(u64, u64, u64), &'static str> {
+fn due_point(state: &State, reading: &Reading, cfg: &Config) -> Result<(u64, u64, u64), Idle> {
     let last = match reading.usage_tail.last() {
         Some(l) if l.at_epoch > 0 => l,
-        _ => return Err("no request yet in this session"),
+        _ => return Err(Idle::NoRequest),
     };
     if last.ttl_secs() < TTL_SECS {
-        return Err("the session is on the five-minute cache tier");
+        return Err(Idle::FiveMinuteTier);
     }
     if state.ctx < BIG_TOKENS {
-        return Err("the context is under 50k tokens, where a cold re-write is cheap");
+        return Err(Idle::SmallContext);
     }
     let ttl = last.ttl_secs();
     Ok((last.at_epoch + ttl.saturating_sub(cfg.margin_secs), ttl, last.at_epoch))
@@ -681,7 +711,11 @@ pub fn step(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &C
     }
     let (due, ttl, last_at) = match due_point(state, reading, cfg) {
         Ok(x) => x,
-        Err(why) => return (out, Decision::new(cfg, &p, true, "running", why)),
+        Err(why) => {
+            let mut d = Decision::new(cfg, &p, true, "running", why.reason());
+            d.idle = Some(why.short());
+            return (out, d);
+        }
     };
     if now < due {
         let mut d = Decision::new(cfg, &p, true, "running", format!("next due at {}", cfg.windows.hm(due)));
@@ -819,7 +853,7 @@ pub fn card(state: &State, reading: &Reading, cfg: &Config, site: &Site, now: u6
                     line.push_str(&format!(" · wraps about {}", cfg.windows.hm(w)));
                 }
             }
-            Err(why) => line.push_str(&format!(" · idle: {why}")),
+            Err(why) => line.push_str(&format!(" · idle: {}", why.reason())),
         }
         line.push_str(&format!(" · windows {}", cfg.windows.describe()));
         lines.push(line);

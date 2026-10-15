@@ -357,6 +357,18 @@ fn the_policy_keeps_an_unarmed_session_warm_with_autocompact_off() {
     assert_eq!(policy(&w, "off")["action"], "none", "one keepalive per due point");
 }
 
+/// Under ADR-182's 50k floor the policy runs and nothing is due: the
+/// decision says why in `idle`, which the mod's row shows.
+#[test]
+fn the_policy_check_says_why_it_is_idle() {
+    let w = Warm::new("ka-idle");
+    w.reading(&[(51 * MIN, 20_000, 500)]);
+    let d = policy(&w, "off");
+    assert_eq!((d["action"].as_str(), d["next_at"].as_u64(), d["idle"].as_str()), (Some("none"), None, Some("under 50k")), "{d}");
+    w.reading(&[(30 * MIN, 200_000, 500)]);
+    assert!(policy(&w, "off")["idle"].is_null(), "a due point is not idle");
+}
+
 /// With autocompact on, or a gate the mod could not read, nothing is sent.
 #[test]
 fn the_policy_does_not_run_with_autocompact_on_or_unknown() {

@@ -9,6 +9,7 @@ import {
   gateIsFresh,
   isOpenChannel,
   isWrapTurn,
+  keepaliveRowOf,
   BEAT_ARGV,
   MOD_VERSION,
   maySubmit,
@@ -2292,7 +2293,7 @@ describe('keepalive policy: the pure pieces', () => {
   })
 
   test('the row: the segment alone while dormant and shown, beside the peers while active', () => {
-    const k: KeepaliveRow = { state: 'running', count: 2, max: 8, nextAt: 41 * 60, wrapsAt: '21:40', wrappedAt: null, isRefused: false, isShown: true }
+    const k: KeepaliveRow = { state: 'running', count: 2, max: 8, nextAt: 41 * 60, wrapsAt: '21:40', wrappedAt: null, idle: null, isRefused: false, isShown: true }
     const base: AttendStatus = { mode: 'dormant', listening: null, peers: 3, unread: 1, channels: ['#room'], deliveries: 0, afterCompaction: false, turnsSinceFull: 0, awaitingOperator: false, cacheLapsed: false, keepalive: null }
     expect(rowText({ ...base, keepalive: k }, 0)).toBe('⟳ 2/8 · next 41m · wrap ~21:40')
     expect(rowText({ ...base, keepalive: rowAfterPrompt(k) }, 0)).toBeUndefined()
@@ -2301,5 +2302,17 @@ describe('keepalive policy: the pure pieces', () => {
     expect(rowText({ ...base, mode: 'active', keepalive: null }, 0)).toBe('● 3 peers ✉ 1 unread #room')
     expect(rowAfterTurnEnd(k, 3_000_000)?.nextAt).toBe(3000)
     expect(rowAfterTurnEnd({ ...k, state: 'wrapped' }, 3_000_000)?.nextAt).toBe(41 * 60)
+  })
+
+  test('the row says why the policy is idle: under the 50k floor, the 5m tier, no request yet', () => {
+    const base: AttendStatus = { mode: 'dormant', listening: null, peers: 0, unread: 0, channels: [], deliveries: 0, afterCompaction: false, turnsSinceFull: 0, awaitingOperator: false, cacheLapsed: false, keepalive: null }
+    const idle = (o: Record<string, unknown>) => keepaliveRowOf(parseKeepaliveDecision(decision({ count: 0, max: 1, ...o }))!, { state: 'running', count: 0, max: 1, nextAt: null, wrapsAt: null, wrappedAt: null, idle: null, isRefused: false, isShown: true })
+    expect(rowText({ ...base, keepalive: idle({ idle: 'under 50k' }) }, 0)).toBe('⟳ 0/1 · idle: under 50k')
+    expect(rowText({ ...base, keepalive: idle({ idle: '5m tier' }) }, 0)).toBe('⟳ 0/1 · idle: 5m tier')
+    expect(rowText({ ...base, keepalive: idle({ idle: 'no request yet' }) }, 0)).toBe('⟳ 0/1 · idle: no request yet')
+    // An attend from before the field, or a due point: no idle part.
+    expect(rowText({ ...base, keepalive: idle({}) }, 0)).toBe('⟳ 0/1')
+    expect(rowText({ ...base, keepalive: idle({ next_at: 41 * 60 }) }, 0)).toBe('⟳ 0/1 · next 41m')
+    expect(rowText({ ...base, keepalive: idle({ idle: 7 }) }, 0)).toBe('⟳ 0/1')
   })
 })

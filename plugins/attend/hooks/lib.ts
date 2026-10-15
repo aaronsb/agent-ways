@@ -441,6 +441,8 @@ export type Decision = {
   wrap: WrapRoute | null
   /** attend could not judge (the transcript was unreadable): ask again. */
   retry: boolean
+  /** Why a running policy has nothing due: `under 50k`, `5m tier`. */
+  idle: string | null
 }
 
 export type WrapOutcome = 'transcript' | 'file' | 'sent' | 'refused' | 'unfinished'
@@ -482,6 +484,7 @@ export function parseDecision(stdout: string): Decision | undefined {
     reason: str(d.reason) ?? '',
     wrap,
     retry: d.retry === true,
+    idle: str(d.idle),
   }
 }
 
@@ -510,18 +513,21 @@ export function keepaliveRowOf(d: Decision, was: KeepaliveRow | null): Keepalive
     nextAt: d.state === 'running' ? d.nextAt : null,
     wrapsAt: d.wrapsAt,
     wrappedAt: d.wrappedAt,
+    idle: d.state === 'running' ? d.idle : null,
     isRefused: d.state === 'wrapped' && (was?.isRefused ?? false),
     isShown: (was?.isShown ?? false) || d.action !== 'none',
   }
 }
 
-/** `⟳ 2/8 · next 41m · wrap ~21:40`, `⟳ wrapped 21:40`, `⟳ stopped`. */
+/** `⟳ 2/8 · next 41m · wrap ~21:40`, `⟳ 0/1 · idle: under 50k`,
+ *  `⟳ wrapped 21:40`, `⟳ stopped`. */
 export function keepaliveSegment(k: KeepaliveRow, nowMs: number): string {
   if (k.state === 'wrapped') return `⟳ wrapped ${k.wrappedAt ?? ''}`.trimEnd() + (k.isRefused ? ' · handoff refused' : '')
   if (k.state === 'stopped') return '⟳ stopped'
   const parts = [`⟳ ${k.count}/${k.max}`]
   if (k.nextAt !== null) parts.push(`next ${Math.max(0, Math.round((k.nextAt * 1000 - nowMs) / 60_000))}m`)
   if (k.wrapsAt !== null) parts.push(`wrap ~${k.wrapsAt}`)
+  if (k.idle) parts.push(`idle: ${k.idle}`)
   return parts.join(' · ')
 }
 
@@ -648,7 +654,7 @@ export function rowAfterPrompt(k: KeepaliveRow | null): KeepaliveRow | null {
 
 /** After a main-loop turn's end: the next check's time, while it runs. */
 export function rowAfterTurnEnd(k: KeepaliveRow | null, atMs: number): KeepaliveRow | null {
-  return k?.state === 'running' ? { ...k, nextAt: Math.round(atMs / 1000) } : k
+  return k?.state === 'running' ? { ...k, nextAt: Math.round(atMs / 1000), idle: null } : k
 }
 
 export function rowRefused(k: KeepaliveRow | null): KeepaliveRow | null {

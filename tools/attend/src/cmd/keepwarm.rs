@@ -227,7 +227,7 @@ fn nothing(reason: &str, next_at: Option<u64>) -> serde_json::Value {
     serde_json::json!({
         "action": "none", "text": null, "next_at": next_at, "count": 0, "max": 0,
         "wraps_at": null, "reason": reason, "policy": false, "state": "off",
-        "wraps_at_hm": null, "wrapped_at_hm": null, "wrap": null, "retry": false,
+        "wraps_at_hm": null, "wrapped_at_hm": null, "wrap": null, "retry": false, "idle": null,
     })
 }
 
