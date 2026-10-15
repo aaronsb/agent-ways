@@ -322,14 +322,17 @@ pub fn carried_to_live_in(dir: &Path, id: &str) -> bool {
 /// Remove every record that holds only a process of this host that has
 /// exited, unless `named` says an invitation or a briefing still names the
 /// session: nothing is left to judge by it. The index entry goes with it
-/// when it names the session. Each record is read again under the lock.
+/// when it names the session, and so does the session's heartbeat, which
+/// would otherwise hold it short of [`crate::gone`] for a week. Each record
+/// is read again under the lock.
 pub fn prune_exited(named: impl Fn(&str) -> bool) {
-    prune_exited_in(&dir(), named, |key| process_fact(key) == Fact::Exited);
+    prune_exited_in(&dir(), &crate::heartbeat::heartbeat_dir(), named, |key| process_fact(key) == Fact::Exited);
 }
 
-/// [`prune_exited`] under the records in `dir`, with an injectable
-/// judgement of which process keys have exited.
-fn prune_exited_in(dir: &Path, named: impl Fn(&str) -> bool, exited: impl Fn(&str) -> bool) {
+/// [`prune_exited`] under the records in `dir` and the heartbeats in
+/// `heartbeats`, with an injectable judgement of which process keys have
+/// exited.
+fn prune_exited_in(dir: &Path, heartbeats: &Path, named: impl Fn(&str) -> bool, exited: impl Fn(&str) -> bool) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     let ids: Vec<String> = entries
         .flatten()
@@ -347,6 +350,7 @@ fn prune_exited_in(dir: &Path, named: impl Fn(&str) -> bool, exited: impl Fn(&st
             continue;
         }
         fs::remove_file(dir.join(&sid)).ok();
+        crate::heartbeat::clear_in(heartbeats, &sid).ok();
         let index = dir.join("by-claude").join(process_part(&key));
         if fs::read_to_string(&index).is_ok_and(|s| s.trim() == sid) {
             fs::remove_file(index).ok();
@@ -673,7 +677,7 @@ mod tests {
         // `enrolled` holds the index entry; point it at `gone`, as the
         // entry an exited session leaves.
         agent_settings::writer::write_atomic(&dir.join("by-claude").join("1-1"), "gone").unwrap();
-        prune_exited_in(&dir, |sid| sid == "named", |key| key == gone);
+        prune_exited_in(&dir, &dir.join("heartbeat"), |sid| sid == "named", |key| key == gone);
         let left: Vec<bool> = ["gone", "named", "live", "enrolled"].iter().map(|s| dir.join(s).is_file()).collect();
         let index = dir.join("by-claude").join("1-1").exists();
         fs::remove_dir_all(&dir).ok();

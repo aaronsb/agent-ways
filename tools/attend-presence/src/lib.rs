@@ -223,4 +223,25 @@ mod tests {
             assert!(crate::gone("away"), "heartbeat past the hold");
         });
     }
+
+    /// A session whose record held only its exited process stays gone
+    /// once the sweep prunes that record: the prune takes its heartbeat
+    /// too, so the heartbeat's hold does not speak for it.
+    #[test]
+    fn a_pruned_record_takes_its_heartbeat_and_the_session_stays_gone() {
+        with_home(|_| {
+            let mut child = std::process::Command::new("true").spawn().unwrap();
+            child.wait().unwrap();
+            let dir = crate::enrollment::records_dir();
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("left"), format!("claude {}-1@{}\n", child.id(), crate::process::host_name())).unwrap();
+            crate::heartbeat::touch("left").unwrap();
+            let file = std::fs::File::options().write(true).open(crate::heartbeat::heartbeat_path("left")).unwrap();
+            file.set_modified(SystemTime::now() - Duration::from_secs(3600)).unwrap();
+            assert!(crate::gone("left"), "its process exited");
+            crate::enrollment::prune_exited(|_| false);
+            assert!(!dir.join("left").exists(), "the record is pruned");
+            assert!(crate::gone("left"), "and the session is still gone");
+        });
+    }
 }
