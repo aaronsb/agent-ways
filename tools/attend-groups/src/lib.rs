@@ -650,15 +650,13 @@ impl Groups {
     /// A reserved name (`open`, `broadcast`) can never be a group, so an
     /// `@open/` or `@broadcast/` dir is an orphan and is swept like one.
     ///
-    /// A member dropped from its last channel loses the enrollment a join
-    /// or an add gave it, as leaving its last channel withdraws it.
+    /// A member dropped from its last channel loses the enrollment an add
+    /// gave it (ADR-404 D1). A join's survives the sweep: liveness does not
+    /// undo a session's own enrollment (#720).
     pub fn cleanup_stale(&self) {
-        use attend_presence::enrollment::{withdraw, Source};
         for member in self.cleanup_stale_with(member_alive, attend_presence::heartbeat::DEFAULT_GRACE) {
             self.when_in_no_channel(&member, || {
-                for source in [Source::Join, Source::Add] {
-                    withdraw(&member, source).ok();
-                }
+                attend_presence::enrollment::withdraw(&member, attend_presence::enrollment::Source::Add).ok();
             });
         }
         self.prune_records();

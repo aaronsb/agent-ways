@@ -191,21 +191,6 @@ fn a_session_removed_from_the_only_channel_it_joined_stops_listening() {
     assert!(!drained.contains("after removal"), "{drained}");
 }
 
-/// A session that joined its only channel itself and is swept from it, its
-/// process gone, loses the join's enrollment.
-#[test]
-fn the_sweep_withdraws_the_join_of_a_member_it_drops_from_every_channel() {
-    let f = with_topic("join-then-sweep");
-    let gone = "2f2632d7-3f59-4c24-9aae-00000000dead";
-    attend_groups::Groups::new(&f.signals(), gone).join("topic", false).unwrap();
-    let record = f.cache().join("enrolled").join(gone);
-    std::fs::create_dir_all(record.parent().unwrap()).unwrap();
-    std::fs::write(&record, "join\n").unwrap();
-    f.ok(&["channel", "list"]);
-    assert!(attend_groups::Groups::new(&f.signals(), "x").members("topic").unwrap().is_empty());
-    assert!(!record.exists(), "the join's enrollment is withdrawn");
-}
-
 /// Self-joining after an add changes nothing: the session is a member, and
 /// what it has not read there is still owed to it.
 #[test]

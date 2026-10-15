@@ -7,7 +7,9 @@
 //! session, kept apart from liveness: a stale heartbeat does not un-enroll
 //! a session. An explicit opt-out does, and so does losing the last
 //! channel: the join's and the add's ways are withdrawn when the session
-//! leaves it, is removed from it, is swept from it, or it is dissolved.
+//! leaves it, is removed from it, or it is dissolved. The membership sweep,
+//! which drops a member whose liveness lapsed, withdraws only the add's
+//! way: a session's own join survives it.
 //!
 //! The record is `<cache>/enrolled/<session-id>`, one line each for:
 //! - every way the session enrolled (`run`, `join`, `listen`, `add`);
