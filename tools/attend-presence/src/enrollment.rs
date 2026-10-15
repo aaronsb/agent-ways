@@ -333,6 +333,15 @@ pub fn enroll_added_in(dir: &Path, session_id: &str, claude: Option<String>) -> 
     Ok(!had)
 }
 
+/// Whether `session_id` is enrolled under the records in `dir`
+/// ([`records_dir`]). Reads only: a pending opt-out counts as not enrolled
+/// once no `attend run` holds the session, and the record is left for
+/// [`is_enrolled`] to apply it.
+pub fn is_enrolled_in(dir: &Path, session_id: &str) -> bool {
+    let Some(record) = read_in(dir, session_id).filter(|r| !r.sources.is_empty()) else { return false };
+    !(record.optout && !crate::heartbeat::run_is_live(session_id))
+}
+
 /// Withdraw an add's enrollment under `dir`, for an add whose membership did
 /// not take and whose [`enroll_added_in`] gained the way. The session stays
 /// enrolled while another way remains.

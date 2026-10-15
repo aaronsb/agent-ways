@@ -218,9 +218,10 @@ pub fn invite(bus: &Bus, actor: &Actor, channel: &str, target: Target) -> Result
 /// its Claude Code process runs, listening or not. It is handed the newest
 /// [`ADDRESSED_MAX`] of the room's history to read, as a join answering an
 /// invitation is: the older ones are marked seen before the membership is
-/// written, so no conduit scans the room with them unseen. A member whose
-/// cold start has not run is owed the rest as a briefing its cold start
-/// delivers ([`Groups::brief`]). Any invitation it had there is spent.
+/// written, so no conduit scans the room with them unseen. A session that
+/// was not listening has its cold start reopened, as `attend listen on`
+/// does, and is owed the rest as a briefing its cold start delivers
+/// ([`Groups::brief`]). Any invitation it had there is spent.
 pub fn add(bus: &Bus, actor: &Actor, channel: &str, target: Target) -> Result<Added, Refused> {
     let name = checked(bus, channel, target.session_id)?;
     let groups = bus.groups(&actor.member_id);
@@ -231,7 +232,15 @@ pub fn add(bus: &Bus, actor: &Actor, channel: &str, target: Target) -> Result<Ad
         .unwrap_or(0);
     let store = attend_state::StateStore::new_in(bus.state.clone(), Some(target.session_id.to_string()))
         .with_signals_base(bus.signals.clone());
-    let warm = store.load().is_some_and(|s| s.baselined);
+    // A session that listened and then stopped is still baselined, and its
+    // seen-set ends where it stopped. Enrolled again, it starts cold, as a
+    // session that turns listening back on does, so it is not handed every
+    // message the rooms carried since.
+    let was_enrolled = attend_presence::enrollment::is_enrolled_in(&bus.enrolled, target.session_id);
+    if !was_enrolled {
+        store.reopen_cold_start();
+    }
+    let warm = was_enrolled && store.load().is_some_and(|s| s.baselined);
     let held_n = held.len();
     store.mark_seen(held);
     if !warm {
@@ -316,6 +325,12 @@ mod tests {
         std::fs::read_to_string(files[0].path()).unwrap()
     }
 
+    /// The target enrolled by `attend listen on`.
+    fn listening(bus: &Bus) {
+        std::fs::create_dir_all(&bus.enrolled).unwrap();
+        std::fs::write(bus.enrolled.join(SID), "listen\n").unwrap();
+    }
+
     /// `n` messages in `#<channel>`, the first oldest.
     fn history(bus: &Bus, channel: &str, n: usize) {
         let dir = bus.signals.join(format!("@{channel}"));
@@ -398,7 +413,8 @@ mod tests {
 
     /// The briefing is the invitation's: the newest 50 of the room stay to
     /// read, the older are marked seen. A member whose cold start has not
-    /// run is owed them as a briefing; a warm one reads them as unseen.
+    /// run is owed them as a briefing; a warm one, listening and baselined,
+    /// reads them as unseen.
     #[test]
     fn an_add_hands_over_the_newest_history_warm_or_cold() {
         for warm in [true, false] {
@@ -408,6 +424,7 @@ mod tests {
             let store = attend_state::StateStore::new_in(bus.state.clone(), Some(SID.into())).with_signals_base(bus.signals.clone());
             if warm {
                 store.baseline(Vec::<String>::new());
+                listening(&bus);
             }
             let added = add(&bus, &aaron(), "topic", target()).unwrap();
             assert_eq!((added.to_read, added.held), (ADDRESSED_MAX, 4));

@@ -77,6 +77,27 @@ fn a_warm_session_added_reads_the_newest_history_too() {
     assert!(drained.contains("aaron added you to #topic."), "{drained}");
 }
 
+/// A session that listened and then turned listening off stays baselined
+/// but is no longer enrolled. Added, it starts listening again: its cold
+/// start reopens, so it reads the channel's newest history and is not
+/// handed every `#open` message since it stopped listening (ADR-404 D1).
+#[test]
+fn a_session_added_after_it_stopped_listening_starts_cold() {
+    let f = with_topic("add-after-off");
+    f.ok(&["listen", "on"]);
+    f.drain("plain");
+    f.ok(&["listen", "off"]);
+    f.put("_broadcast", "other-open", "open chatter while away", 30 * MINUTE);
+    history(&f, 60);
+    let added = added_by_aaron(&f);
+    assert_eq!((added.to_read, added.held), (50, 10));
+    let drained = f.drain("plain");
+    assert!(!drained.contains("open chatter while away"), "the #open backlog is held back: {drained}");
+    assert!(drained.contains("briefing 59") && drained.contains("briefing 10"), "{drained}");
+    assert!(!drained.contains("briefing 09"), "{drained}");
+    assert!(drained.contains("aaron added you to #topic."), "{drained}");
+}
+
 /// Self-joining after an add changes nothing: the session is a member, and
 /// what it has not read there is still owed to it.
 #[test]
