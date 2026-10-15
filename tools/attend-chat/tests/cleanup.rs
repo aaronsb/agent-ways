@@ -416,7 +416,7 @@ fn hide_messages_here_hides_in_its_tab_only_and_holds_across_a_restart() {
     pick(&mut c, "Hide messages here");
     assert!(screen(&mut c).contains("hide the messages so far in #open? nothing is deleted"), "{}", screen(&mut c));
     press(&mut c, KeyCode::Char('y'));
-    assert_eq!(c.status(), "hid 5 messages in #open; the bus keeps them");
+    assert_eq!(c.status(), "hid 5 messages in #open; nothing was deleted");
     assert!(!feed(&mut c).contains("on open"), "{}", feed(&mut c));
     assert!(calls().is_empty(), "nothing on the bus");
     c.push(sig("o-9", &format!("claude:{ALPHA_SID}"), "/work/alpha", "alpha later", Channel::Open, 200));
@@ -457,7 +457,7 @@ fn a_named_channel_hides_its_messages_here_too() {
     pick(&mut c, "Hide messages here");
     assert!(screen(&mut c).contains("hide the messages so far in #deploy? nothing is deleted"), "{}", screen(&mut c));
     press(&mut c, KeyCode::Char('y'));
-    assert!(c.status().starts_with("hid ") && c.status().ends_with(" in #deploy; the bus keeps them"), "{}", c.status());
+    assert!(c.status().starts_with("hid ") && c.status().ends_with(" in #deploy; nothing was deleted"), "{}", c.status());
     assert!(!feed(&mut c).contains("alpha in deploy"), "{}", feed(&mut c));
     assert!(calls().is_empty(), "nothing on the bus");
     side(&mut c, "#open", MouseButton::Left);
@@ -484,7 +484,7 @@ fn a_notice_does_not_carry_the_mark_and_clear_asks_first() {
     assert!(screen(&mut c).contains("hide the messages so far in #open? nothing is deleted"), "asks first: {}", screen(&mut c));
     assert!(feed(&mut c).contains("alpha on open"), "nothing hidden before the y");
     press(&mut c, KeyCode::Char('y'));
-    assert_eq!(c.status(), "hid 5 messages in #open; the bus keeps them", "the notice is not counted");
+    assert_eq!(c.status(), "hid 5 messages in #open; nothing was deleted", "the notice is not counted");
     c.push(sig("o-late", &format!("claude:{ALPHA_SID}"), "/work/alpha", "sent before the notice, arrived after the hide", Channel::Open, 300));
     assert!(feed(&mut c).contains("arrived after the hide"), "newer than the last bus message, so shown: {}", feed(&mut c));
 }
@@ -539,7 +539,7 @@ fn no_while_counting_stops_the_count_and_holds_nothing() {
     Screen::tick(&mut c);
     assert!(screen(&mut c).contains("hide the messages so far in #deploy?"), "the hide's question, untouched: {}", screen(&mut c));
     press(&mut c, KeyCode::Char('y'));
-    assert!(c.status().starts_with("hid ") && c.status().ends_with(" in #deploy; the bus keeps them"), "the y answers the hide: {}", c.status());
+    assert!(c.status().starts_with("hid ") && c.status().ends_with(" in #deploy; nothing was deleted"), "the y answers the hide: {}", c.status());
     assert_eq!(calls(), ["message delete --channel slow --older-than all --dry-run --json"], "nothing deleted for everyone");
 }
 

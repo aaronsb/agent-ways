@@ -371,7 +371,7 @@ fn enter_runs_a_command_and_clear_hides_the_messages_here() {
     press(&mut c, key(KeyCode::Enter));
     assert!(bar(&mut c).contains("hide the messages so far in ⋯all?"), "asks first: {}", bar(&mut c));
     press(&mut c, key(KeyCode::Char('y')));
-    assert!(c.status().starts_with("hid ") && c.status().ends_with(" in ⋯all; the bus keeps them"), "{}", c.status());
+    assert!(c.status().starts_with("hid ") && c.status().ends_with(" in ⋯all; nothing was deleted"), "{}", c.status());
     assert!(!c.signals().is_empty(), "the chat holds them still");
     assert!(!text(&mut c, 80, 25).contains("rollout is green"), "the view shows none of them");
 }
@@ -969,7 +969,7 @@ fn a_click_then_enter_on_merged_asks_before_hiding_the_messages() {
     left(&mut c, (x, y));
     press(&mut c, key(KeyCode::Enter));
     press(&mut c, key(KeyCode::Char('y')));
-    assert!(c.status().starts_with("hid ") && c.status().ends_with(" in ⋯all; the bus keeps them"), "{}", c.status());
+    assert!(c.status().starts_with("hid ") && c.status().ends_with(" in ⋯all; nothing was deleted"), "{}", c.status());
     assert!(!text(&mut c, 80, 25).contains("rollout is green"), "the view shows none of them");
 
     // The key help names what a click on a tab does.

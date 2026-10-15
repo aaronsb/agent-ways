@@ -221,7 +221,7 @@ impl ChatPane {
             return self.say("nothing to hide here", false);
         };
         let n = shown.len();
-        let what = format!("hid {n} message{} in {}; the bus keeps them", if n == 1 { "" } else { "s" }, self.tab_label(tab));
+        let what = format!("hid {n} message{} in {}; nothing was deleted", if n == 1 { "" } else { "s" }, self.tab_label(tab));
         match Hidden::hide_in(&self.hidden_path, tab, newest) {
             Ok(now) => {
                 self.hidden = now;
