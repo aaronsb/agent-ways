@@ -88,6 +88,14 @@ fn member_cell(c: &mut Chat, channel: &str, who: &str) -> (u16, u16) {
     (r[..r.find(who).unwrap()].chars().count() as u16, y as u16)
 }
 
+/// `line` typed into the compose box, then Enter.
+fn enter(c: &mut Chat, line: &str) {
+    testkit::render_screen(c, W, H);
+    let mut keys: Vec<KeyEvent> = line.chars().map(|ch| KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE)).collect();
+    keys.push(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    testkit::drive(c, &keys);
+}
+
 fn press(c: &mut Chat, code: KeyCode) {
     testkit::render_screen(c, W, H);
     testkit::drive(c, &[KeyEvent::new(code, KeyModifiers::NONE)]);
@@ -206,6 +214,10 @@ fn invite_then_add_for_real() {
     c.refresh();
     let ops = under(&mut c, "ops");
     assert!(ops.iter().any(|r| r.contains(&alpha) && r.contains("◌ invited")), "{ops:#?}");
+    // Inviting it again renews the invitation, which is no error.
+    enter(&mut c, &format!("/invite @{alpha} #ops"));
+    assert_eq!(c.status(), format!("@{alpha} was invited to #ops already; the invitation now dates from now"));
+    assert!(rows(&mut c).iter().all(|r| !r.contains("/invite")), "the command is done, the compose box cleared");
     // From alpha's own menu: Add agent to chat ▸, then #ops.
     let (x, y) = member_cell(&mut c, "ops", &alpha);
     click(&mut c, (x, y), MouseButton::Left);

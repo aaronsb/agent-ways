@@ -35,11 +35,7 @@ pub(crate) fn cmd_add(member: &str, channel: Option<&str>, json: bool) {
             if json {
                 crate::cmd::print_json(&a);
             } else {
-                let mut note = format!("{} earlier message(s) to read", a.to_read);
-                if a.held > 0 {
-                    note += &format!(", {} older not shown", a.held);
-                }
-                println!("[attend] added {} to #{} ({note})", a.member, a.name);
+                println!("[attend] {}", added_line(&a));
             }
             if let Some(e) = &a.not_told {
                 eprintln!("[attend] add: {} is in #{}, but telling them failed: {e}", a.member, a.name);
@@ -53,6 +49,23 @@ pub(crate) fn cmd_add(member: &str, channel: Option<&str>, json: bool) {
             std::process::exit(1);
         }
     }
+}
+
+/// What an add did, as the actor reads it: who was added where, then what
+/// the member has to read of the channel and how many older messages it was
+/// not handed.
+fn added_line(a: &crate::verbs::channels::Added) -> String {
+    let mut line = format!("added {} to #{}", a.member, a.name);
+    if a.to_read > 0 {
+        let messages = if a.to_read == 1 { "message" } else { "messages" };
+        line += &format!(": {} has {} earlier {messages} to read", a.member, a.to_read);
+    }
+    match a.held {
+        0 => {}
+        1 => line += "; 1 older one is held back",
+        n => line += &format!("; {n} older ones are held back"),
+    }
+    line
 }
 
 pub(crate) fn cmd_leave(name: &str, json: bool) {
@@ -188,5 +201,29 @@ pub(crate) fn cmd_channels(json: bool) {
     // sees who joined before anyone posts. Other channels show their count.
     for c in channels.iter().filter(|c| !c.member_names.is_empty()) {
         println!("  #{}: {}", c.name, c.member_names.join(", "));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::added_line;
+
+    fn added(to_read: usize, held: usize) -> crate::verbs::channels::Added {
+        crate::verbs::channels::Added {
+            name: "topic".into(),
+            member: "Ada".into(),
+            session_id: "s".into(),
+            to_read,
+            held,
+            not_told: None,
+        }
+    }
+
+    #[test]
+    fn the_add_line_says_what_the_member_has_to_read() {
+        assert_eq!(added_line(&added(0, 0)), "added Ada to #topic");
+        assert_eq!(added_line(&added(1, 0)), "added Ada to #topic: Ada has 1 earlier message to read");
+        assert_eq!(added_line(&added(50, 1)), "added Ada to #topic: Ada has 50 earlier messages to read; 1 older one is held back");
+        assert_eq!(added_line(&added(50, 10)), "added Ada to #topic: Ada has 50 earlier messages to read; 10 older ones are held back");
     }
 }

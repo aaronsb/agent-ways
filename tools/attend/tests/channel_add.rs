@@ -193,7 +193,7 @@ mod cli {
         attend_groups::Groups::new(&f.signals(), "aaron").invite("topic", PEER).unwrap();
 
         let out = f.ok(&["channel", "add", PEER, "#topic"]);
-        assert!(out.contains(" to #topic (1 earlier message(s) to read)"), "{out}");
+        assert!(out.contains(" to #topic: ") && out.trim_end().ends_with(" has 1 earlier message to read"), "{out}");
         let groups = attend_groups::Groups::new(&f.signals(), "x");
         assert_eq!(groups.members("topic").unwrap(), vec![PEER]);
         assert!(groups.invites("topic").is_empty(), "the invitation is spent");

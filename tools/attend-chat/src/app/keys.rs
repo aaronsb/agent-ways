@@ -667,8 +667,8 @@ fn run_invite(member: &str, channel: Option<String>, foreground: &Tab) -> EnterA
 
 /// Invite `peer` to channel `g`: the one invitation `/invite` and the
 /// channel menu's Invite agent ▸ both send, through attend-membership as
-/// every surface invites. The peer joins itself, or stays silent. A peer invited already
-/// is not told again.
+/// every surface invites. The peer joins itself, or stays silent. A peer
+/// invited already has its invitation renewed and is not told again.
 pub fn invite_peer(g: &str, peer: &crate::peers::Peer) -> EnterAction {
     let bus = attend_membership::Bus::here().waiting_at_most(GROUPS_LOCK_WAIT);
     let target = attend_membership::Target { session_id: &peer.session_id, root: &peer.root };
@@ -677,9 +677,11 @@ pub fn invite_peer(g: &str, peer: &crate::peers::Peer) -> EnterAction {
         Ok(attend_membership::Invited { told: Some(t) }) => {
             sent(format!("invited @{} to #{g}", peer.display), read_back(&t.dir, &t.filename).into_iter().collect())
         }
-        Ok(attend_membership::Invited { told: None }) => {
-            EnterAction::StatusOnly(format!("@{} is already invited to #{g}", peer.display))
-        }
+        // The invitation is renewed: done, so the command is cleared.
+        Ok(attend_membership::Invited { told: None }) => EnterAction::ClearWithStatus(format!(
+            "@{} was invited to #{g} already; the invitation now dates from now",
+            peer.display
+        )),
         Err(attend_membership::Refused::BaseChannel) => {
             EnterAction::StatusOnly("#open is the base channel — everyone is already there".into())
         }
