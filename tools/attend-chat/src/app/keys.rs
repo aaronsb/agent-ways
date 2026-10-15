@@ -1117,6 +1117,8 @@ mod tests {
             signals: base.to_path_buf(),
             state: base.join("state"),
             enrolled: base.join("enrolled"),
+            instances: base.join("instances"),
+            heartbeats: base.join("heartbeat"),
             lock_wait: Some(GROUPS_LOCK_WAIT),
         }
     }

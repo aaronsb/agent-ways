@@ -177,10 +177,6 @@ pub fn records_dir() -> PathBuf {
     crate::cache::dir().join("enrolled")
 }
 
-fn index_path(claude_key: &str) -> PathBuf {
-    dir().join("by-claude").join(claude_key)
-}
-
 fn read(session_id: &str) -> Option<Record> {
     read_in(&dir(), session_id)
 }
@@ -190,7 +186,9 @@ fn read_in(dir: &Path, session_id: &str) -> Option<Record> {
 }
 
 /// Write `record` for `session_id` under `dir`, or remove it when it holds
-/// no way.
+/// no way. The process's index entry names `session_id` afterwards, unless
+/// it names an earlier id of the same process that is still enrolled and
+/// was not carried here ([`indexes_another`]).
 fn write_in(dir: &Path, session_id: &str, record: &Record) -> io::Result<()> {
     let p = dir.join(session_id);
     if record.sources.is_empty() {
@@ -201,9 +199,29 @@ fn write_in(dir: &Path, session_id: &str, record: &Record) -> io::Result<()> {
     }
     agent_settings::writer::write_atomic(&p, record.render())?;
     if let Some(key) = &record.claude {
-        agent_settings::writer::write_atomic(&dir.join("by-claude").join(process_part(key)), session_id)?;
+        if !indexes_another(dir, key, session_id, record) {
+            agent_settings::writer::write_atomic(&dir.join("by-claude").join(process_part(key)), session_id)?;
+        }
     }
     Ok(())
+}
+
+/// Whether the index entry for process `key` names an id other than
+/// `session_id` that is enrolled under the same process and not among
+/// `record`'s earlier ids: the id the process had before a `/clear` that no
+/// move has carried yet. An add after the `/clear` records the new id under
+/// the process; the entry keeps the earlier id, so the session still reads
+/// as it ([`reading_ids`]) and the next move finds it ([`previous_id`]).
+fn indexes_another(dir: &Path, key: &str, session_id: &str, record: &Record) -> bool {
+    let Ok(indexed) = fs::read_to_string(dir.join("by-claude").join(process_part(key))) else { return false };
+    let indexed = indexed.trim();
+    indexed != session_id && !record.previous.iter().any(|p| p == indexed) && enrolled_under(dir, indexed, key)
+}
+
+/// Whether `session_id` is enrolled under the records in `dir` and its
+/// record names the process `key` does.
+fn enrolled_under(dir: &Path, session_id: &str, key: &str) -> bool {
+    read_in(dir, session_id).is_some_and(|r| !r.sources.is_empty() && r.claude.as_deref().is_some_and(|k| same_process(k, key)))
 }
 
 /// Run `edit` on `session_id`'s record under the enrollment lock and write
@@ -417,8 +435,13 @@ pub fn opt_out(session_id: &str) -> io::Result<()> {
 /// the same process (`/clear`). Keeps any way `new` already had, and records
 /// `old` and the ids before it as `new`'s earlier ids ([`previous_ids`]).
 pub fn carry(old: &str, new: &str) -> io::Result<()> {
-    let Some(from) = read(old) else { return Ok(()) };
-    edit(new, |r| {
+    carry_in(&dir(), old, new)
+}
+
+/// [`carry`] under the records in `dir` ([`records_dir`]).
+pub fn carry_in(dir: &Path, old: &str, new: &str) -> io::Result<()> {
+    let Some(from) = read_in(dir, old) else { return Ok(()) };
+    edit_in(dir, new, |r| {
         for sid in from.previous.iter().map(String::as_str).chain([old]) {
             if sid != new && !r.previous.iter().any(|p| p == sid) {
                 r.previous.push(sid.to_string());
@@ -442,7 +465,7 @@ pub fn carry(old: &str, new: &str) -> io::Result<()> {
             r.since = from.since;
         }
     })?;
-    edit(old, |r| *r = Record::default())
+    edit_in(dir, old, |r| *r = Record::default())
 }
 
 /// The ids `session_id` had before each `/clear` that carried its
@@ -497,10 +520,14 @@ pub fn any_indexed() -> bool {
 /// The index is kept under the key's process part, so a renamed host, or an
 /// entry written before keys carried a host, still finds it.
 pub fn previous_id(claude_key: &str, current: &str) -> Option<String> {
-    let sid = fs::read_to_string(index_path(process_part(claude_key))).ok()?;
+    previous_id_in(&dir(), claude_key, current)
+}
+
+/// [`previous_id`] under the records in `dir` ([`records_dir`]).
+pub fn previous_id_in(dir: &Path, claude_key: &str, current: &str) -> Option<String> {
+    let sid = fs::read_to_string(dir.join("by-claude").join(process_part(claude_key))).ok()?;
     let sid = sid.trim();
-    let same = |r: Record| r.claude.as_deref().is_some_and(|k| same_process(k, claude_key));
-    (sid != current && read(sid).is_some_and(same)).then(|| sid.to_string())
+    (sid != current && enrolled_under(dir, sid, claude_key)).then(|| sid.to_string())
 }
 
 #[cfg(test)]
@@ -634,6 +661,30 @@ mod tests {
             assert_eq!(previous_id("123-456@host-b", "after"), Some("before".to_string()), "a /clear after the rename still adopts");
             assert!(same_process("123-456@host-a", "123-456@host-b"), "the own-process match ignores the host");
             assert!(!same_process("123-457@host-a", "123-456@host-a"), "another process is still another");
+        });
+    }
+
+    /// An add after `/clear` records the new id under the same Claude Code
+    /// process. Until a move carries the earlier id, the index keeps naming
+    /// it, so the session still reads as it and adoption still finds it.
+    #[test]
+    fn an_add_under_the_same_process_leaves_the_earlier_id_findable() {
+        with_cache(|| {
+            let key = own_key();
+            enroll_in("old", &key);
+            enroll_added_in(&records_dir(), "new", Some(key.clone())).unwrap();
+            assert_eq!(previous_id(&key, "new"), Some("old".to_string()));
+            let ident = crate::session::SessionIdentity {
+                session_id: "new".into(),
+                origin_path: "/w".into(),
+                session_resolved: true,
+                origin_resolved: true,
+                claude_pid: Some(std::process::id()),
+            };
+            assert_eq!(reading_ids(&ident), ["new", "old"]);
+            carry("old", "new").unwrap();
+            assert_eq!(previous_id(&key, "new"), None, "carried: the index names the new id");
+            assert_eq!(reading_ids(&ident), ["new", "old"]);
         });
     }
 

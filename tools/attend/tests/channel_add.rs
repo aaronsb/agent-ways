@@ -30,6 +30,8 @@ fn bus(f: &Fixture) -> attend_membership::Bus {
         signals: f.signals(),
         state: f.cache().join("state"),
         enrolled: f.cache().join("enrolled"),
+        instances: f.cache().join("instances"),
+        heartbeats: f.cache().join("heartbeat"),
         lock_wait: None,
     }
 }
@@ -280,6 +282,51 @@ mod cli {
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(err.contains("is a project path"), "{err}");
         assert!(attend_groups::Groups::new(&f.signals(), "x").members("topic").unwrap().is_empty());
+    }
+
+    /// An add that lands between a session's `/clear` and its next drain
+    /// moves the earlier id's state to the new id first, as the drain's
+    /// adoption would have: its channels, its seen-set, its enrollment and
+    /// the mail addressed to the earlier id. The add records the session's
+    /// Claude Code process, so the earlier id must be found before the add's
+    /// enrollment names the new id under that process.
+    #[test]
+    fn an_add_between_a_clear_and_the_next_drain_carries_the_earlier_id() {
+        const OLD: &str = "sess-before-clear";
+        const NEW: &str = "sess-after-clear";
+        let f = with_topic("add-after-clear");
+        let mut claude = common::Claude::start(&f, OLD);
+        claude.attend(&["channel", "join", "other"]);
+        claude.attend(&["message", "inbox", "--drain", "--format", "plain"]);
+        f.put(&f.project_tray(), "other-read", "READ-BEFORE-CLEAR", Duration::ZERO);
+        assert!(claude.attend(&["message", "inbox", "--drain", "--format", "plain"]).contains("READ-BEFORE-CLEAR"));
+        std::fs::write(
+            f.signals().join(f.project_tray()).join("other-to-old.signal"),
+            format!("claude:other-session|elsewhere|/tmp/elsewhere|to:{OLD}|TO-THE-OLD-ID\n"),
+        )
+        .unwrap();
+
+        claude.clear(&f, NEW);
+        f.ok(&["channel", "add", NEW, "topic"]);
+        f.put("@other", "other-after", "OTHER-AFTER-CLEAR", Duration::ZERO);
+        let drained = claude.attend(&["message", "inbox", "--drain", "--format", "plain"]);
+        for body in ["OTHER-AFTER-CLEAR", "TO-THE-OLD-ID", " added you to #topic."] {
+            assert_eq!(drained.matches(body).count(), 1, "{body} once: {drained}");
+        }
+        assert!(!drained.contains("READ-BEFORE-CLEAR"), "nothing read before the clear is delivered again: {drained}");
+        assert!(claude.attend(&["message", "inbox", "--drain", "--format", "plain"]).contains("no pending messages"));
+
+        let groups = attend_groups::load_groups(&f.signals());
+        for (name, entry) in &groups {
+            assert!(!entry.members.iter().any(|m| m == OLD), "#{name} still lists the earlier id: {:?}", entry.members);
+        }
+        assert_eq!(groups["other"].members, vec![NEW]);
+        assert_eq!(groups["topic"].members, vec![NEW]);
+        assert!(!f.marker(OLD).exists(), "the earlier id's enrollment is carried");
+        let record = std::fs::read_to_string(f.marker(NEW)).unwrap();
+        assert!(record.lines().any(|l| l == "join") && record.lines().any(|l| l == "add"), "{record}");
+        assert!(record.lines().any(|l| l == format!("previous {OLD}")), "{record}");
+        assert!(!f.state_file(OLD).exists(), "the earlier id's seen-set is carried");
     }
 
     #[test]

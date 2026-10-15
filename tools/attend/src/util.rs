@@ -78,28 +78,6 @@ pub(crate) fn own_origin_cwd() -> String {
     current_session().origin_path
 }
 
-/// Move everything attend keeps under session id `old` to `new`, for a
-/// session whose id changed under the same Claude Code process (`/clear`):
-/// the seen-set and cold-start mark, the enrollment record, the registry
-/// slot with its instance name, channel memberships, the last-inbound
-/// record and the banner stamp. The old heartbeat is cleared. Idempotent:
-/// a move already done, or done in part, completes.
-pub(crate) fn move_session(old: &str, new: &str, origin: &str) {
-    let old_store = attend_state::StateStore::new(Some(old.to_string()));
-    if let Some(snapshot) = old_store.load() {
-        attend_state::StateStore::new(Some(new.to_string())).checkpoint(&snapshot);
-        old_store.clear();
-    }
-    attend_presence::enrollment::carry(old, new).ok();
-    attend_instances::Registry::new().rename(origin, old, new).ok();
-    groups::Groups::new(&signals_base(), new).rename_member(old, new);
-    let state_dir = attend_presence::cache::state_dir();
-    for ext in ["last-inbound", "banner"] {
-        std::fs::rename(state_dir.join(format!("{old}.{ext}")), state_dir.join(format!("{new}.{ext}"))).ok();
-    }
-    attend_presence::heartbeat::clear(old).ok();
-}
-
 /// When session `ident` is not enrolled but its Claude Code process enrolled
 /// under an earlier id (`/clear` gives the process a new one), move that
 /// enrollment here with its seen-set and channels, as `attend run` would.
@@ -116,7 +94,7 @@ pub(crate) fn adopt_previous_enrollment(ident: &Session) -> bool {
         .flatten()
         .and_then(|key| enrollment::previous_id(&key, &ident.session_id));
     let Some(old) = previous else { return false };
-    move_session(&old, &ident.session_id, &ident.origin_path);
+    attend_membership::move_session(&attend_membership::Bus::here(), &old, &ident.session_id, &ident.origin_path);
     // The record moved with any pending opt-out; this applies it.
     enrollment::is_enrolled(&ident.session_id)
 }

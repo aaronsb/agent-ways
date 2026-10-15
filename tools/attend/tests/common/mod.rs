@@ -129,7 +129,7 @@ impl Fixture {
 
     /// A session record's JSON, as Claude Code writes it; `started` is its
     /// `startedAt`, left out when `None`.
-    fn record(&self, pid: &str, sid: &str, started: Option<SystemTime>) -> String {
+    pub fn record(&self, pid: &str, sid: &str, started: Option<SystemTime>) -> String {
         let started = started
             .map(|t| format!(r#","startedAt":{}"#, t.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()))
             .unwrap_or_default();
@@ -194,7 +194,7 @@ impl Fixture {
         self.command_from(Path::new(env!("CARGO_BIN_EXE_attend")))
     }
 
-    fn command_from(&self, bin: &Path) -> Command {
+    pub fn command_from(&self, bin: &Path) -> Command {
         let mut path = std::ffi::OsString::from(self.home.join("bin"));
         path.push(":");
         path.push(std::env::var_os("PATH").unwrap_or_default());
@@ -382,6 +382,75 @@ impl Peer {
 }
 
 impl Drop for Peer {
+    fn drop(&mut self) {
+        self.child.kill().ok();
+        self.child.wait().ok();
+    }
+}
+
+/// A Claude Code process of its own in the fixture's project, which runs
+/// attend as its child: a shell whose argv names claude, with a session
+/// record. An add records its process key as the session's own, and
+/// `/clear` ([`Claude::clear`]) gives it a new id under the same process.
+/// Killed on drop.
+pub struct Claude {
+    child: Child,
+    stdin: std::process::ChildStdin,
+    stdout: std::io::BufReader<std::process::ChildStdout>,
+    record: PathBuf,
+    out: PathBuf,
+    started: SystemTime,
+}
+
+impl Claude {
+    /// Start it as session `sid`, and return once the process scan sees it.
+    pub fn start(f: &Fixture, sid: &str) -> Claude {
+        let mut child = f
+            .command_from(Path::new("sh"))
+            .args(["-c", r#"while IFS= read -r line; do eval "$line"; echo "$?"; done"#, "claude"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !attend_presence::process::is_claude(child.id()) {
+            assert!(Instant::now() < deadline, "the claude process {} never showed its command line", child.id());
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let record = f.home.join(".claude").join("sessions").join(format!("{}.json", child.id()));
+        let (stdin, stdout) = (child.stdin.take().unwrap(), std::io::BufReader::new(child.stdout.take().unwrap()));
+        let out = f.home.join(format!("claude-{}.out", child.id()));
+        let c = Claude { child, stdin, stdout, record, out, started: SystemTime::now() };
+        c.clear(f, sid);
+        c
+    }
+
+    /// Rewrite its session record under `sid`, as Claude Code does on
+    /// `/clear`.
+    pub fn clear(&self, f: &Fixture, sid: &str) {
+        std::fs::write(&self.record, f.record(&self.child.id().to_string(), sid, Some(self.started))).unwrap();
+    }
+
+    /// Run attend with `args` as this session, and return its stdout.
+    pub fn attend(&mut self, args: &[&str]) -> String {
+        use std::io::{BufRead, Write};
+        let quote = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
+        let mut line = quote(env!("CARGO_BIN_EXE_attend"));
+        for a in args {
+            line += &format!(" {}", quote(a));
+        }
+        line += &format!(" >{} 2>&1 </dev/null\n", quote(&self.out.to_string_lossy()));
+        self.stdin.write_all(line.as_bytes()).unwrap();
+        self.stdin.flush().unwrap();
+        let mut status = String::new();
+        self.stdout.read_line(&mut status).unwrap();
+        let out = std::fs::read_to_string(&self.out).unwrap_or_default();
+        assert_eq!(status.trim(), "0", "attend {args:?}: {out}");
+        out
+    }
+}
+
+impl Drop for Claude {
     fn drop(&mut self) {
         self.child.kill().ok();
         self.child.wait().ok();

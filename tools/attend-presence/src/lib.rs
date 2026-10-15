@@ -174,6 +174,20 @@ mod tests {
         });
     }
 
+    /// Another session's earlier id is found by the process its record
+    /// names, Claude Code or not, as the session finds it from inside.
+    #[test]
+    fn a_sessions_process_key_is_its_records_whatever_the_process_runs() {
+        with_home(|home| {
+            let pid = std::process::id();
+            record(home, "a", pid, "this-test", Some(SystemTime::now()));
+            let key = format!("{pid}-{}@{}", crate::process::start_time(pid).unwrap(), crate::process::host_name());
+            assert_eq!(crate::session::process_key_of("this-test"), Some(key));
+            assert_eq!(crate::session::claude_key_of("this-test"), None, "this test is no Claude Code process");
+            assert_eq!(crate::session::process_key_of("nobody"), None);
+        });
+    }
+
     // Review of #998, finding 3: a session record's pid is judged with the
     // record's start time, so a pid given to a later process does not keep
     // an exited session alive.

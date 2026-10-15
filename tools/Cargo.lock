@@ -248,6 +248,7 @@ dependencies = [
  "agent-identity",
  "agent-settings",
  "attend-groups",
+ "attend-instances",
  "attend-presence",
  "attend-state",
  "claude-sessions",

@@ -7,6 +7,11 @@
 //! member is owed (attend-state), an add's enrollment (attend-presence), and
 //! the direct message that tells the member, to its project tray, under the
 //! actor's identity.
+//!
+//! The move of a session's state to its new id after `/clear`
+//! ([`move_session`]) lives here too: attend runs it when the session next
+//! drains or starts `attend run`, and an add runs it for the session it
+//! adds, before it enrolls the new id.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -23,6 +28,10 @@ pub struct Bus {
     pub state: PathBuf,
     /// The enrollment records ([`attend_presence::enrollment::records_dir`]).
     pub enrolled: PathBuf,
+    /// The instance registries, which give each session its name.
+    pub instances: PathBuf,
+    /// The heartbeats ([`attend_presence::heartbeat::heartbeat_dir`]).
+    pub heartbeats: PathBuf,
     /// How long a write waits for another writer's lock on `_groups.yaml`;
     /// `None` waits as long as it is held ([`Groups::waiting_at_most`]).
     pub lock_wait: Option<Duration>,
@@ -35,6 +44,8 @@ impl Bus {
             signals: attend_presence::cache::signals_dir(),
             state: attend_presence::cache::state_dir(),
             enrolled: attend_presence::enrollment::records_dir(),
+            instances: attend_presence::cache::dir().join("instances"),
+            heartbeats: attend_presence::heartbeat::heartbeat_dir(),
             lock_wait: None,
         }
     }
@@ -43,6 +54,10 @@ impl Bus {
     pub fn waiting_at_most(mut self, limit: Duration) -> Self {
         self.lock_wait = Some(limit);
         self
+    }
+
+    fn store(&self, session_id: &str) -> attend_state::StateStore {
+        attend_state::StateStore::new_in(self.state.clone(), Some(session_id.to_string())).with_signals_base(self.signals.clone())
     }
 
     fn groups(&self, member: &str) -> Groups {
@@ -234,13 +249,24 @@ pub fn invite(bus: &Bus, actor: &Actor, channel: &str, target: Target) -> Result
 /// was not listening has its cold start reopened, as `attend listen on`
 /// does, and is owed the rest as a briefing its cold start delivers
 /// ([`Groups::brief`]). Any invitation it had there is spent.
+///
+/// A session whose id changed under its Claude Code process (`/clear`) and
+/// has not drained since has its earlier id's state moved to the new id
+/// first ([`move_session`]), as its next drain would: the add then reads
+/// the carried seen-set and enrollment, and its own enrollment cannot hide
+/// the earlier id. A move that makes the session a member already refuses
+/// the add, the move kept.
 pub fn add(bus: &Bus, actor: &Actor, channel: &str, target: Target) -> Result<Added, Refused> {
-    let name = checked(bus, channel, target.session_id)?;
+    let mut name = checked(bus, channel, target.session_id)?;
     let sid = target.session_id;
+    if let Some(old) = earlier_id(bus, sid) {
+        move_session(bus, &old, sid, target.root);
+        name = checked(bus, channel, sid)?;
+    }
     let groups = bus.groups(&actor.member_id);
     let dir = groups.group_dir(name);
     let split = split_room(&dir, ADDRESSED_MAX);
-    let store = attend_state::StateStore::new_in(bus.state.clone(), Some(sid.to_string())).with_signals_base(bus.signals.clone());
+    let store = bus.store(sid);
     // A session that listened and then stopped is still baselined, and its
     // seen-set ends where it stopped. Enrolled again, it starts cold, as a
     // session that turns listening back on does, so it is not handed every
@@ -276,6 +302,40 @@ pub fn add(bus: &Bus, actor: &Actor, channel: &str, target: Target) -> Result<Ad
     })?;
     let told = tell(bus, actor, target, &add_body(&actor.name, name, &dir));
     Ok(Added { told, to_read: split.kept, held })
+}
+
+/// The id session `session_id`'s Claude Code process had before a `/clear`
+/// that no move has carried yet, found as the session would find it
+/// ([`attend_presence::enrollment::previous_id_in`]), by the process its
+/// session record names ([`attend_presence::session::process_key_of`]).
+fn earlier_id(bus: &Bus, session_id: &str) -> Option<String> {
+    let key = attend_presence::session::process_key_of(session_id)?;
+    attend_presence::enrollment::previous_id_in(&bus.enrolled, &key, session_id)
+}
+
+/// Move everything attend keeps under session id `old` to `new`, for a
+/// session whose id changed under the same Claude Code process (`/clear`):
+/// the seen-set and cold-start mark, the enrollment record, which records
+/// `old` as an earlier id, the registry slot with its instance name under
+/// project root `origin`, channel memberships with any invitation or
+/// briefing, the last-inbound record and the banner stamp. The old
+/// heartbeat is cleared. Idempotent: a move already done, or done in part,
+/// completes. Each step takes its own lock and releases it before the next,
+/// so the move holds no seen-set or enrollment lock across the channels
+/// lock.
+pub fn move_session(bus: &Bus, old: &str, new: &str, origin: &str) {
+    let old_store = bus.store(old);
+    if let Some(snapshot) = old_store.load() {
+        bus.store(new).checkpoint(&snapshot);
+        old_store.clear();
+    }
+    attend_presence::enrollment::carry_in(&bus.enrolled, old, new).ok();
+    attend_instances::Registry::with_base(bus.instances.clone()).rename(origin, old, new).ok();
+    bus.groups(new).rename_member(old, new);
+    for ext in ["last-inbound", "banner"] {
+        std::fs::rename(bus.state.join(format!("{old}.{ext}")), bus.state.join(format!("{new}.{ext}"))).ok();
+    }
+    attend_presence::heartbeat::clear_in(&bus.heartbeats, old).ok();
 }
 
 /// Remove `member` from `channel` as `by` (the operator's `/kick`,
@@ -338,7 +398,14 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
-        let bus = Bus { signals: root.join("signals"), state: root.join("state"), enrolled: root.join("enrolled"), lock_wait: None };
+        let bus = Bus {
+            signals: root.join("signals"),
+            state: root.join("state"),
+            enrolled: root.join("enrolled"),
+            instances: root.join("instances"),
+            heartbeats: root.join("heartbeat"),
+            lock_wait: None,
+        };
         (Scratch(root), bus)
     }
 
@@ -471,7 +538,7 @@ mod tests {
             let (_s, bus) = scratch(if warm { "add-warm" } else { "add-cold" });
             bus.groups("aaron").create("topic", None).unwrap();
             history(&bus, "topic", ADDRESSED_MAX + 4);
-            let store = attend_state::StateStore::new_in(bus.state.clone(), Some(SID.into())).with_signals_base(bus.signals.clone());
+            let store = bus.store(SID);
             if warm {
                 store.baseline(Vec::<String>::new());
                 listening(&bus);
@@ -513,6 +580,44 @@ mod tests {
         drop(held);
         assert_eq!(first.join().unwrap(), Err(Refused::AlreadyMember("topic".into())));
         assert!(attend_presence::enrollment::is_enrolled_in(&bus.enrolled, SID), "the second add's enrollment stands");
+    }
+
+    /// A move carries every piece of the earlier id's state to the new id:
+    /// the seen-set, the enrollment with the earlier id recorded, the
+    /// registry slot, channel memberships with invitations, the per-session
+    /// files, and clears the earlier heartbeat. A second move changes
+    /// nothing.
+    #[test]
+    fn a_move_carries_the_earlier_ids_state() {
+        let (_s, bus) = scratch("move");
+        const OLD: &str = "2f2632d7-3f59-4c24-9aae-0000000000aa";
+        history(&bus, "other", 1);
+        bus.store(OLD).baseline(["peer-000.signal".to_string()]);
+        std::fs::create_dir_all(&bus.enrolled).unwrap();
+        std::fs::write(bus.enrolled.join(OLD), "join\n").unwrap();
+        attend_instances::Registry::with_base(bus.instances.clone()).register(ROOT, OLD).unwrap();
+        Groups::new(&bus.signals, OLD).join("other", false).unwrap();
+        bus.groups("aaron").create("topic", None).unwrap();
+        bus.groups("aaron").invite("topic", OLD).unwrap();
+        std::fs::write(bus.state.join(format!("{OLD}.banner")), "").unwrap();
+        std::fs::create_dir_all(&bus.heartbeats).unwrap();
+        std::fs::write(bus.heartbeats.join(OLD), "").unwrap();
+
+        for _ in 0..2 {
+            move_session(&bus, OLD, SID, ROOT);
+            assert!(bus.store(SID).load().is_some_and(|s| s.baselined && s.seen_signals.contains("peer-000.signal")));
+            assert!(bus.store(OLD).load().is_none());
+            assert!(attend_presence::enrollment::is_enrolled_in(&bus.enrolled, SID));
+            assert!(!bus.enrolled.join(OLD).exists());
+            let record = std::fs::read_to_string(bus.enrolled.join(SID)).unwrap();
+            assert!(record.lines().any(|l| l == format!("previous {OLD}")), "{record}");
+            let slots = attend_instances::Registry::with_base(bus.instances.clone()).snapshot(ROOT);
+            assert!(slots.get(SID).is_some_and(|e| e.alias_of.is_none()), "{slots:?}");
+            assert_eq!(bus.groups("x").members("other").unwrap(), vec![SID]);
+            assert_eq!(bus.groups("x").invites("topic")[0].member, SID);
+            assert!(bus.state.join(format!("{SID}.banner")).exists());
+            assert!(!bus.heartbeats.join(OLD).exists());
+        }
     }
 
     /// An add that fails after it began leaves no briefing behind.
