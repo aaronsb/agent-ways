@@ -8,11 +8,11 @@ agent-tui frame 120x40
 | Channels 4                  ││  ▽ 13:55  Wells  beta                                                                  │|
 |  1 ◆ #open                ● ││ ────────────────────────────────────────────────────────────────────────────────────── │|
 |  2 ▽ #deploy  1👤          ● ││ rollout is green on staging                                                            │|
-|  3 ♦ #infra  0👤           ○ ││ production at 15:00                                                                    │|
-|  4 ♦ #archive  1👤         ○ ││                                                                                        │|
-|                             ││  13:58  aaron  aaron                                                                   │|
-|                             ││ ────────────────────────────────────────────────────────────────────────────────────── │|
-|                             ││ the shell this ran under: /bin/sh                                                      │|
+|    Wells                  ● ││ production at 15:00                                                                    │|
+|    Lyra  4m     ◌ invited ○ ││                                                                                        │|
+|  3 ♦ #infra  0👤           ○ ││  13:58  aaron  aaron                                                                   │|
+|  4 ♦ #archive  1👤         ○ ││ ────────────────────────────────────────────────────────────────────────────────────── │|
+|    Laszlo                 ● ││ the shell this ran under: /bin/sh                                                      │|
 |                             ││  file: sh                                                                              │|
 |                             ││                                                                                        │|
 |                             ││  13:59  Laszlo  alpha                                                                  │|
@@ -85,20 +85,25 @@ styles
   8  26-28  White DarkGray -
   8  29-30  - - DIM
   8 119-119 - - DIM
-  9   1-15  White DarkGray DIM
-  9  17-28  White DarkGray DIM
+  9   3-25  Black LightCyan -
+  9  26-28  White DarkGray -
   9  29-30  - - DIM
   9 119-119 - - DIM
- 10   1-17  White DarkGray DIM
- 10  19-28  White DarkGray DIM
+ 10   3-28  White DarkGray DIM
  10  29-30  - - DIM
  10 119-119 - - DIM
+ 11   1-15  White DarkGray DIM
+ 11  17-28  White DarkGray DIM
  11  29-30  - - DIM
  11  32-117 White DarkGray DIM
  11 119-119 - - DIM
+ 12   1-17  White DarkGray DIM
+ 12  19-28  White DarkGray DIM
  12  29-30  - - DIM
  12  32-117 - - DIM
  12 119-119 - - DIM
+ 13   3-25  Black Cyan -
+ 13  26-28  White DarkGray -
  13  29-30  - - DIM
  13 119-119 - - DIM
  14  29-30  - - DIM

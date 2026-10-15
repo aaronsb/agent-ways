@@ -13,9 +13,10 @@
 //!   here. It is not a channel, so it offers no channel's items (ADR-405).
 //! - `#open`: Hide messages here, Delete read messages for everyone…
 //!   ([`super::cleanup`]), and Undo delete after a delete there.
-//! - a named channel: Add agent ▸ (invites a live peer, which joins
-//!   itself, as the agent menu's Add agent to chat does), Remove agent ▸,
-//!   Describe…, Hide messages here (and Show hidden messages while it has
+//! - a named channel: Add agent ▸ (adds a live peer that is not in it, an
+//!   invited one among them, as the agent menu's Add agent to chat does),
+//!   Invite agent ▸ (invites a live peer that is neither in it nor invited
+//!   there; it joins itself), Remove agent ▸, Describe…, Hide messages here (and Show hidden messages while it has
 //!   a mark), Delete read messages for everyone… (and Undo delete), Leave
 //!   (Join for a channel the human is not in), Seal, Delete channel.
 //! - the `+` slot and Ctrl+N: no menu, straight to the name of a new
@@ -23,15 +24,17 @@
 //!   line in the same dialog, docked beside its item. The compose box is
 //!   for chatting and is never borrowed (ADR-409): its draft stays as it
 //!   is. A name the dialog refuses is said inside it, the text kept.
-//! - an agent's row in the left column: for a claude first Show DMs, or
-//!   Hide DMs while its DM view is listed ([`super::dm`]), then Address
-//!   @Name (puts `@Name ` in the compose box), Who is this (what `/whois`
-//!   says of the session the row is, or what the chat knows of one the
-//!   roster lacks), Add agent to chat ▸ (a picker, `add to channel`, of
-//!   the channels the agent is not in; the pick invites it, as Add agent ▸
-//!   does), then for a claude Hide messages here and Delete read messages for
+//! - an agent's row in the left column, or its row under a channel: for a
+//!   claude first Show DMs, or Hide DMs while its DM view is listed
+//!   ([`super::dm`]), then Address @Name (puts `@Name ` in the compose
+//!   box), Who is this (what `/whois` says of the session the row is, or
+//!   what the chat knows of one the roster lacks, then each invitation it
+//!   has not answered, who sent it and when), Add agent to chat ▸ (a
+//!   picker, `add to channel`, of the channels the agent is not in; the
+//!   pick adds it, as Add agent ▸ does), then for a claude Hide messages here and Delete read messages for
 //!   everyone… on its DMs with the operator, then Remove from #channel
-//!   when the shown channel lists the agent, live or quiet, and last
+//!   when the channel lists the agent, live or quiet: the channel of the
+//!   member row the menu was opened from, else the channel shown; and last
 //!   Tombstone… for a claude that is not live. The operator's own row
 //!   offers Leave #channel in Remove's place: Remove never takes out the
 //!   human at the keyboard, here or in the Remove agent picker.
@@ -59,19 +62,22 @@
 //! Where the lines below cannot hold it, it ends on the line above the row;
 //! where neither side can, it sits at the foot of the pane. A menu an item
 //! leads to (Theme ▸, Add agent ▸) docks beside that item's row. A
-//! picker marks the current value. Add agent asks a live peer to join
-//! (it joins itself, and its join keeps the room's recent history to read).
+//! picker marks the current value. An add and an invitation go through
+//! attend-membership, as `attend channel add` and `/invite` do (ADR-404
+//! D1): an add enrols the agent with no answer from it, tells it, and hands
+//! it the room's recent history to read; an invitation asks it to join,
+//! and its join keeps that history to read.
 //!
 //! One item waits on attend work and is drawn set back with what it waits
 //! on, passed over by the highlight and deaf to a click: Seal (ADR-404 D4),
-//! never the first item. Adding an agent is an invitation it answers by
-//! joining until attend can enrol a member without asking (ADR-404 D1).
+//! never the first item.
 
 use agent_theme::ColorDepth;
 use agent_tui::ratatui::layout::Rect;
 use agent_tui::{Anchor, Item, Open, Question};
 
 use crate::chip::Seen;
+use crate::groups::Invites;
 use crate::peers::Peer;
 
 use super::cleanup::{Count, DeleteAsk, DELETE_READ, HIDE_HERE, SHOW_HIDDEN, TOMBSTONE, UNDO_DELETE};
@@ -84,6 +90,7 @@ use crate::slash::SlashOutcome;
 use crate::tabs::{Slot, Tab};
 
 pub(super) const ADD_AGENT: &str = "Add agent ▸";
+pub(super) const INVITE_AGENT: &str = "Invite agent ▸";
 pub(super) const SEAL: &str = "Seal";
 pub(super) const REMOVE_AGENT: &str = "Remove agent ▸";
 pub(super) const DESCRIBE: &str = "Describe…";
@@ -232,8 +239,8 @@ pub(super) fn removable(members: Vec<Member>, me: &str) -> Vec<Member> {
 /// hidden (`views`: whether the column lists each); address it, who it is,
 /// add it to a channel; for an agent with DM views, the cleanup items
 /// (`cleanup`: hide, show, delete) on its DMs with the operator; then for the
-/// shown channel that lists it (`listed`), Remove, or Leave on the
-/// operator's own row; last, Tombstone… for an agent that is not live
+/// channel that lists it (`listed`: the member row's, else the one shown),
+/// Remove, or Leave on the operator's own row; last, Tombstone… for an agent that is not live
 /// (`dead`). `add` is why the agent cannot be added to a channel, when it
 /// cannot: Add agent to chat is then set back with the reason.
 pub(super) fn agent_items(name: &str, views: Option<(bool, bool)>, listed: Option<&str>, operator: bool, add: Result<(), String>, cleanup: Vec<Item>, dead: bool) -> Vec<Item> {
@@ -260,7 +267,8 @@ pub(super) fn agent_items(name: &str, views: Option<(bool, bool)>, listed: Optio
 }
 
 /// The channels an agent can be added to: those on disk it is not in,
-/// `#open` left out (every agent is already there).
+/// `#open` left out (every agent is already there). A channel it is
+/// invited to is offered: the add spends the invitation.
 pub(super) fn addable(rows: &[crate::groups::ChannelRow], member: &str) -> Vec<String> {
     rows.iter()
         .filter(|r| r.on_disk && !r.known.is_base && !r.known.membership.members.iter().any(|m| m == member))
@@ -283,7 +291,7 @@ pub(super) fn items(channel: Option<&str>, joined: bool, hide: Vec<Item>, delete
         None => hide,
         Some(BASE_CHANNEL_NAME) => hide.into_iter().chain(delete).collect(),
         Some(_) => {
-            let mut out: Vec<Item> = vec![ADD_AGENT.into(), REMOVE_AGENT.into(), DESCRIBE.into()];
+            let mut out: Vec<Item> = vec![ADD_AGENT.into(), INVITE_AGENT.into(), REMOVE_AGENT.into(), DESCRIBE.into()];
             out.extend(hide);
             out.extend(delete);
             out.extend([membership.into(), Item::disabled(SEAL, "needs ADR-404 D4"), DELETE.into()]);
@@ -335,21 +343,56 @@ fn labels(items: &[Item]) -> Vec<&str> {
     items.iter().map(|i| i.label.as_str()).collect()
 }
 
-/// What Who is this says of `s`. A live claude the roster holds under its
-/// session id is told as `/whois` tells it; the id, not the name, finds it,
-/// since twins share a name and `/whois @name` would pick one of them. A
-/// live claude with no sessions record, a quiet one and a human are told
-/// from what the chat itself has seen.
-pub(super) fn who_line(s: &Seen, roster: &[Peer]) -> String {
-    let name = &s.identity.nickname;
-    if !s.identity.is_claude {
-        return format!("@{name} — a human · from {} · {}", s.identity.cwd, if s.live { "here" } else { "away" });
-    }
-    if let Some(p) = roster.iter().find(|p| s.live && p.session_id == s.member) {
-        return format!("@{} — session {} · root {}", p.display, p.session_id, p.root);
-    }
-    let how = if s.live { "live: no sessions record" } else { "quiet: no heartbeat" };
-    format!("@{name} — session {} · root {} · {how}", s.member, attend_presence::session::normalize_origin(&s.identity.cwd))
+/// The live peers Add agent ▸ or Invite agent ▸ offers for a channel with
+/// `members`, by display name: those not in it, and for an invitation not
+/// in `invited` either. Add passes no invitations: it offers an invited
+/// peer, and spends the invitation.
+pub(super) fn outside(roster: &[Peer], members: &[String], invited: &[String]) -> Vec<String> {
+    roster.iter().filter(|p| !members.contains(&p.session_id) && !invited.contains(&p.session_id)).map(|p| p.display.clone()).collect()
+}
+
+/// `member`'s pending invitations as Who is this says them, by channel:
+/// `invited to #infra by aaron 4m ago`, the inviter named as the column
+/// names it, and either part left out when the invitation does not record
+/// it. Empty when it has none.
+pub(super) fn invitations_line(member: &str, invites: &Invites, seen: &[Seen], now: std::time::SystemTime) -> String {
+    let mut mine: Vec<&attend_groups::Invite> = invites.values().flatten().filter(|i| i.member == member).collect();
+    mine.sort_by(|a, b| a.channel.cmp(&b.channel));
+    let name = |id: &str| seen.iter().find(|s| s.member == id).map_or(id.to_string(), |s| s.identity.nickname.clone());
+    let said: Vec<String> = mine
+        .iter()
+        .map(|i| {
+            let by = i.by.as_deref().map(|b| format!(" by {}", name(b))).unwrap_or_default();
+            let ago = i.at.and_then(|t| now.duration_since(t).ok()).map(|d| format!(" {} ago", super::sidebar::age_label(d))).unwrap_or_default();
+            format!("invited to #{}{by}{ago}", i.channel)
+        })
+        .collect();
+    said.join(" · ")
+}
+
+/// What Who is this says of `s`, its pending invitations `invited`
+/// ([`invitations_line`]) first after its name, where the status line
+/// shows them however long its root is. A live claude the roster holds
+/// under its session id is told as `/whois` tells it; the id, not the
+/// name, finds it, since twins share a name and `/whois @name` would pick
+/// one of them. A live claude with no sessions record, a quiet one and a
+/// human are told from what the chat itself has seen; a quiet claude with
+/// how long ago its last heartbeat was, `beat`, when it left one.
+pub(super) fn who_line(s: &Seen, roster: &[Peer], invited: &str, beat: Option<std::time::Duration>) -> String {
+    let (name, rest) = if !s.identity.is_claude {
+        (s.identity.nickname.clone(), format!("a human · from {} · {}", s.identity.cwd, if s.live { "here" } else { "away" }))
+    } else if let Some(p) = roster.iter().find(|p| s.live && p.session_id == s.member) {
+        (p.display.clone(), format!("session {} · root {}", p.session_id, p.root))
+    } else {
+        let how = match (s.live, beat) {
+            (true, _) => "live: no sessions record".to_string(),
+            (false, Some(ago)) => format!("quiet: last heartbeat {} ago", super::sidebar::age_label(ago)),
+            (false, None) => "quiet: no heartbeat".to_string(),
+        };
+        (s.identity.nickname.clone(), format!("session {} · root {} · {how}", s.member, attend_presence::session::normalize_origin(&s.identity.cwd)))
+    };
+    let invited = if invited.is_empty() { String::new() } else { format!("{invited} · ") };
+    format!("@{name} — {invited}{rest}")
 }
 
 impl ChatPane {
@@ -505,10 +548,12 @@ impl ChatPane {
         if let Some(member) = id.strip_prefix("addto:") {
             return self.add_to(member, value.trim_start_matches('#'));
         }
-        // A peer from Add agent or Remove agent: the label's first word is
-        // the display name the commands resolve.
+        // A peer from Add agent, Invite agent or Remove agent: the label's
+        // first word is the display name the commands resolve.
         let peer = value.split_whitespace().next().unwrap_or(value).to_string();
-        if let Some(c) = id.strip_prefix("invite:") {
+        if let Some(c) = id.strip_prefix("add:") {
+            self.add_peer(c, |p| p.display == peer);
+        } else if let Some(c) = id.strip_prefix("invite:") {
             let invited = self.run("invite", SlashOutcome::Invite { member: peer, channel: Some(c.into()) });
             if invited && !self.dry_run {
                 let said = format!("{} — they join themselves", self.status);
@@ -529,17 +574,20 @@ impl ChatPane {
     /// The menu of an agent's row in the left column, the agent named by
     /// its membership id: two agents can share a name, never an id. It
     /// docks under `at` when given (a sender's name), else under the row.
-    pub(super) fn agent_menu(&mut self, member: String, at: Option<Rect>) {
+    /// Remove (or Leave) is for `channel`, the channel of the member row
+    /// the menu was opened from, else for the channel shown.
+    pub(super) fn agent_menu(&mut self, member: String, channel: Option<String>, at: Option<Rect>) {
         self.dirty = true;
         let Some(s) = self.seen_member(&member) else {
             return self.say("that agent is not in the column any more", true);
         };
         let name = s.identity.nickname.clone();
         let me = crate::signal::human_member_id();
-        let listed = match self.normal_tab() {
-            Tab::Channel(c) => self.channel_members(&c).into_iter().find(|m| m.id == member).map(|m| (c, m)),
+        let channel = channel.or_else(|| match self.normal_tab() {
+            Tab::Channel(c) => Some(c),
             Tab::Merged | Tab::Dm(_) | Tab::Review(_) => None,
-        };
+        });
+        let listed = channel.and_then(|c| self.channel_members(&c).into_iter().find(|m| m.id == member).map(|m| (c, m)));
         let add = self.can_add(&s);
         let views = self.has_dms(&member).then(|| (self.lists(Kind::Dm, &member), self.lists(Kind::Review, &member)));
         let mut cleanup = self.hide_items(&Tab::Dm(member.clone()));
@@ -685,7 +733,11 @@ impl ChatPane {
             return self.say("that agent is not in the column any more", true);
         };
         let roster = if s.identity.is_claude && s.live { crate::peers::roster(ColorDepth::detect(), &attend_instances::SnapshotCache::new()) } else { Vec::new() };
-        self.say(who_line(&s, &roster), false);
+        let now = self.now();
+        let w = self.world();
+        let invited = invitations_line(member, &w.invites, &w.seen, now);
+        let beat = attend_presence::heartbeat::last_seen(member).map(|t| now.duration_since(t).unwrap_or_default());
+        self.say(who_line(&s, &roster, &invited, beat), false);
     }
 
     /// The members of `channel`, from its membership: live or not, the
@@ -719,44 +771,51 @@ impl ChatPane {
                 }
             }
             DESCRIBE => self.describe(channel),
-            ADD_AGENT => self.peer_menu(channel, true),
-            REMOVE_AGENT => self.peer_menu(channel, false),
+            ADD_AGENT | INVITE_AGENT | REMOVE_AGENT => self.peer_menu(channel, item),
             _ => {}
         }
     }
 
-    /// The live peers not in `channel` (add), or every member of it but
-    /// the operator, live or quiet (remove): a quiet member is removed by
-    /// its membership id; the operator leaves with Leave.
-    fn peer_menu(&mut self, channel: &str, add: bool) {
-        let options: Vec<String> = if add {
-            let members = attend_groups::load_groups(&crate::signal::signals_base()).get(channel).map(|e| e.members.clone()).unwrap_or_default();
-            let roster = crate::peers::roster(ColorDepth::detect(), &attend_instances::SnapshotCache::new());
-            roster.iter().filter(|p| !members.contains(&p.session_id)).map(|p| p.display.clone()).collect()
-        } else {
+    /// The picker of the channel menu's `item`: Add agent ▸ and Invite
+    /// agent ▸ list the live peers [`outside`] `channel`; Remove agent ▸
+    /// every member of it but the operator, live or quiet: a quiet member is
+    /// removed by its membership id; the operator leaves with Leave.
+    fn peer_menu(&mut self, channel: &str, item: &str) {
+        let options: Vec<String> = if item == REMOVE_AGENT {
             let members = self.channel_members(channel);
             self.removable = removable(members, &crate::signal::human_member_id());
             self.removable.iter().map(Member::option).collect()
+        } else {
+            let base = crate::signal::signals_base();
+            let members = attend_groups::load_groups(&base).get(channel).map(|e| e.members.clone()).unwrap_or_default();
+            let invited: Vec<String> = match item {
+                INVITE_AGENT => attend_groups::load_invites(&base).remove(channel).unwrap_or_default().into_iter().map(|i| i.member).collect(),
+                _ => Vec::new(),
+            };
+            let roster = crate::peers::roster(ColorDepth::detect(), &attend_instances::SnapshotCache::new());
+            outside(&roster, &members, &invited)
+        };
+        let (id, title, none) = match item {
+            ADD_AGENT => ("add", "add to", "no live agent outside"),
+            INVITE_AGENT => ("invite", "invite to", "no live agent to invite to"),
+            _ => ("remove", "remove from", "no member in"),
         };
         if options.is_empty() {
-            let what = if add { "no live agent outside" } else { "no member in" };
-            return self.say(format!("{what} #{channel}"), true);
+            return self.say(format!("{none} #{channel}"), true);
         }
-        let (id, title) = if add { (format!("invite:{channel}"), format!("add to #{channel}")) } else { (format!("remove:{channel}"), format!("remove from #{channel}")) };
         let items = options.into_iter().map(Item::from).collect();
-        self.to_open = Some(Open::Pick { id, title, items, multi: false, anchor: Anchor::Parent });
+        self.to_open = Some(Open::Pick { id: format!("{id}:{channel}"), title: format!("{title} #{channel}"), items, multi: false, anchor: Anchor::Parent });
     }
 
-    /// Whether `s` can be added to a channel from its menu, and if not why.
-    /// Adding is an invitation the agent answers by joining (ADR-404: attend
-    /// has no enrolment without asking yet, D1), so it needs a live claude
-    /// with an inbox, and a channel it is not in.
+    /// Whether `s` can be added to a channel from its menu, and if not why:
+    /// an add tells the agent in its project's tray, so it needs a live
+    /// claude the roster holds, and a channel it is not in.
     fn can_add(&mut self, s: &Seen) -> Result<(), String> {
         if !s.identity.is_claude {
             return Err("a human joins with /join".into());
         }
         if !s.live {
-            return Err("quiet: no live session to invite".into());
+            return Err("quiet: no live session to add".into());
         }
         if addable(&self.world().rows, &s.member).is_empty() {
             return Err("already in every channel".into());
@@ -772,27 +831,35 @@ impl ChatPane {
             return self.say("already in every channel", true);
         }
         let items = channels.into_iter().map(|c| Item::new(format!("#{c}"))).collect();
-        // Under the agent's row, where its menu was; beside the closed menu
-        // only when the row is not drawn.
-        let anchor = self.side_row(&super::sidebar::SideHit::Agent(member.to_string())).map_or(Anchor::Parent, Anchor::Row);
+        // Under the row its menu was opened from, the agent's own or its row
+        // under a channel, which the keyboard is on after the click; beside
+        // the closed menu only when the row is not drawn.
+        let from = match self.ix.row_hit() {
+            Some(hit @ super::sidebar::SideHit::Member(_, m)) if m == member => hit.clone(),
+            _ => super::sidebar::SideHit::Agent(member.to_string()),
+        };
+        let anchor = self.side_row(&from).map_or(Anchor::Parent, Anchor::Row);
         self.to_open = Some(Open::Pick { id: format!("addto:{member}"), title: "add to channel".into(), items, multi: false, anchor });
     }
 
-    /// The channel picked for an agent: it is invited there, by its session,
-    /// as Add agent ▸ invites, and joins itself (ADR-404).
+    /// The channel picked for an agent: it is added there, by its session,
+    /// as Add agent ▸ adds.
     fn add_to(&mut self, member: &str, channel: &str) {
+        self.add_peer(channel, |p| p.session_id == member);
+    }
+
+    /// Add the live peer `which` finds to `channel` ([`keys::add_peer`]).
+    /// A dry run (`--snap`) adds nothing.
+    fn add_peer(&mut self, channel: &str, which: impl Fn(&Peer) -> bool) {
         if self.dry_run {
-            return self.say("dry run: /invite not run", false);
+            return self.say("dry run: nothing added", false);
         }
         let roster = crate::peers::roster(ColorDepth::detect(), &attend_instances::SnapshotCache::new());
-        let Some(peer) = roster.into_iter().find(|p| p.session_id == member) else {
-            return self.say("that agent has no live session to invite", true);
+        let Some(peer) = roster.into_iter().find(which) else {
+            return self.say("that agent has no live session to add", true);
         };
-        let action = keys::invite_peer(channel, &peer);
-        if self.apply(action) {
-            let said = format!("{} — they join themselves", self.status);
-            self.say(said, false);
-        }
+        let action = keys::add_peer(channel, &peer);
+        self.apply(action);
     }
 
     /// Where the new channel's dialog docks: under the `+` slot.
@@ -1013,13 +1080,53 @@ mod tests {
         let hide = || vec![Item::new(HIDE_HERE)];
         assert_eq!(labels(&items(None, false, hide(), del())), [HIDE_HERE], "the operator view hides, and deletes nothing for everyone");
         assert_eq!(labels(&items(Some("open"), true, hide(), del())), [HIDE_HERE, DELETE_READ], "the harmless item first");
-        assert_eq!(labels(&items(Some("deploy"), true, hide(), del())), [ADD_AGENT, REMOVE_AGENT, DESCRIBE, HIDE_HERE, DELETE_READ, LEAVE, SEAL, DELETE]);
-        assert_eq!(labels(&items(Some("deploy"), false, hide(), del())), [ADD_AGENT, REMOVE_AGENT, DESCRIBE, HIDE_HERE, DELETE_READ, JOIN, SEAL, DELETE], "Join to a non-member");
+        assert_eq!(labels(&items(Some("deploy"), true, hide(), del())), [ADD_AGENT, INVITE_AGENT, REMOVE_AGENT, DESCRIBE, HIDE_HERE, DELETE_READ, LEAVE, SEAL, DELETE]);
+        assert_eq!(labels(&items(Some("deploy"), false, hide(), del())), [ADD_AGENT, INVITE_AGENT, REMOVE_AGENT, DESCRIBE, HIDE_HERE, DELETE_READ, JOIN, SEAL, DELETE], "Join to a non-member");
         assert_eq!(labels(&items(Some("open"), true, hide(), vec![Item::new(DELETE_READ), Item::new(UNDO_DELETE)])), [HIDE_HERE, DELETE_READ, UNDO_DELETE], "Undo delete after a delete");
-        assert_eq!(labels(&items(Some("deploy"), true, vec![Item::new(HIDE_HERE), Item::new(SHOW_HIDDEN)], del())), [ADD_AGENT, REMOVE_AGENT, DESCRIBE, HIDE_HERE, SHOW_HIDDEN, DELETE_READ, LEAVE, SEAL, DELETE], "a hidden channel shows again");
+        assert_eq!(labels(&items(Some("deploy"), true, vec![Item::new(HIDE_HERE), Item::new(SHOW_HIDDEN)], del())), [ADD_AGENT, INVITE_AGENT, REMOVE_AGENT, DESCRIBE, HIDE_HERE, SHOW_HIDDEN, DELETE_READ, LEAVE, SEAL, DELETE], "a hidden channel shows again");
         let deploy = items(Some("deploy"), true, hide(), del());
         let waiting: Vec<(&str, Option<&str>)> = deploy.iter().filter(|i| !i.enabled).map(|i| (i.label.as_str(), i.reason.as_deref())).collect();
-        assert_eq!(waiting, [(SEAL, Some("needs ADR-404 D4"))], "what waits on attend says so; Add agent invites, as the agent menu's Add agent to chat does");
+        assert_eq!(waiting, [(SEAL, Some("needs ADR-404 D4"))], "what waits on attend says so; Add agent adds and Invite agent invites");
+    }
+
+    #[test]
+    fn add_offers_every_live_peer_outside_and_invite_leaves_the_invited_out() {
+        let peer = |id: &str| Peer { session_id: id.into(), root: format!("/work/{id}"), display: format!("P{id}") };
+        let roster = [peer("s1"), peer("s2"), peer("s3")];
+        let (members, invited) = (vec!["s1".to_string()], vec!["s2".to_string()]);
+        assert_eq!(outside(&roster, &members, &[]), ["Ps2", "Ps3"], "Add: the invited s2 among them, its invitation spent by the add");
+        assert_eq!(outside(&roster, &members, &invited), ["Ps3"], "Invite: neither a member nor one invited already");
+    }
+
+    #[test]
+    fn add_runs_the_add_and_a_dry_run_writes_nothing() {
+        let mut c = ChatPane::new(None, Default::default());
+        c.dry_run = true;
+        c.menu_picked("add:deploy", "Ada");
+        assert_eq!(c.status, "dry run: nothing added", "Add agent ▸'s pick");
+        c.status.clear();
+        c.menu_picked("addto:s1", "#deploy");
+        assert_eq!(c.status, "dry run: nothing added", "Add agent to chat ▸'s pick");
+        c.status.clear();
+        c.menu_picked("invite:deploy", "Ada");
+        assert_eq!(c.status, "dry run: /invite not run", "Invite agent ▸'s pick still invites");
+    }
+
+    #[test]
+    fn who_is_this_names_each_invitation_its_inviter_and_its_age() {
+        let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(10_000);
+        let inv = |c: &str, by: Option<&str>, ago: Option<u64>| attend_groups::Invite {
+            channel: c.into(),
+            member: "s2".into(),
+            by: by.map(str::to_string),
+            at: ago.map(|a| now - std::time::Duration::from_secs(a)),
+        };
+        let invites: Invites = [("infra".to_string(), vec![inv("infra", Some("s1"), Some(240))]), ("deploy".to_string(), vec![inv("deploy", None, None)])].into();
+        let known = [seen("Ada", "s1", true, true)];
+        let invited = invitations_line("s2", &invites, &known, now);
+        assert_eq!(invited, "invited to #deploy · invited to #infra by Ada 4m ago", "an agent inviter by its name; a record from before by: and at: says neither");
+        assert_eq!(invitations_line("s1", &invites, &known, now), "", "no invitation, nothing said");
+        assert_eq!(who_line(&seen("Bo", "s2", false, true), &[], &invited, None), "@Bo — invited to #deploy · invited to #infra by Ada 4m ago · session s2 · root /work/Bo · quiet: no heartbeat", "first after the name, before a root that can run off the status line");
     }
 
     fn seen(name: &str, member: &str, live: bool, claude: bool) -> Seen {
@@ -1105,7 +1212,7 @@ mod tests {
     fn pane_with(seen: Vec<Seen>) -> ChatPane {
         let mut c = ChatPane::new(None, Default::default());
         c.dry_run = true;
-        c.world = Some(super::super::World::new(Vec::new(), seen, Vec::new(), Vec::new(), attend_instances::SnapshotCache::new(), &c.foreground, &c.views));
+        c.world = Some(super::super::World::new(Vec::new(), seen, Vec::new(), Vec::new(), Default::default(), attend_instances::SnapshotCache::new(), &c.foreground, &c.views));
         c
     }
 
@@ -1116,7 +1223,7 @@ mod tests {
         let everywhere = seen("Ada", "s1", true, true);
         let mut c = pane_with(vec![human.clone(), quiet.clone(), everywhere.clone()]);
         assert_eq!(c.can_add(&human), Err("a human joins with /join".into()));
-        assert_eq!(c.can_add(&quiet), Err("quiet: no live session to invite".into()));
+        assert_eq!(c.can_add(&quiet), Err("quiet: no live session to add".into()));
         assert_eq!(c.can_add(&everywhere), Err("already in every channel".into()), "no channel it is not in");
         let items = agent_items("Ada", None, None, false, c.can_add(&everywhere), Vec::new(), false);
         let add = items.iter().find(|i| i.label == ADD_TO_CHAT).expect("the item is listed");
@@ -1129,24 +1236,37 @@ mod tests {
         // record, so only s2 is on the roster.
         let roster = [Peer { session_id: "s2".into(), root: "/work/Ada".into(), display: "Ada-two".into() }];
         let (one, two) = (seen("Ada", "s1", true, true), seen("Ada", "s2", true, true));
-        assert_eq!(who_line(&two, &roster), "@Ada-two — session s2 · root /work/Ada", "the roster's own line, by id");
-        let first = who_line(&one, &roster);
+        assert_eq!(who_line(&two, &roster, "", None), "@Ada-two — session s2 · root /work/Ada", "the roster's own line, by id");
+        let first = who_line(&one, &roster, "", None);
         assert!(first.starts_with("@Ada — session s1 · root /work/Ada") && first.contains("no sessions record"), "never its twin's line: {first}");
         assert!(!first.contains("quiet"), "a live claude is not called quiet: {first}");
-        assert!(who_line(&seen("Ada", "s2", false, true), &roster).contains("quiet: no heartbeat"), "a quiet one is told from the column");
+        assert!(who_line(&seen("Ada", "s2", false, true), &roster, "", None).contains("quiet: no heartbeat"), "a quiet one is told from the column");
+    }
+
+    /// A quiet claude that left a heartbeat is told how long ago it was,
+    /// not that it has none: an invitee whose last beat is days old reads
+    /// apart from one that beat a minute ago.
+    #[test]
+    fn who_is_a_quiet_claude_says_how_old_its_last_heartbeat_is() {
+        let quiet = seen("Bo", "s2", false, true);
+        let day = std::time::Duration::from_secs(3 * 86_400);
+        assert!(who_line(&quiet, &[], "", Some(day)).ends_with(" · quiet: last heartbeat 3d ago"), "{}", who_line(&quiet, &[], "", Some(day)));
+        assert!(who_line(&quiet, &[], "", None).ends_with(" · quiet: no heartbeat"));
+        let live = seen("Bo", "s2", true, true);
+        assert!(who_line(&live, &[], "", Some(day)).ends_with(" · live: no sessions record"), "a live one is not told its heartbeat");
     }
 
     #[test]
     fn an_agent_row_is_found_by_its_id_when_two_share_a_name() {
         let mut c = pane_with(vec![seen("Ada", "s1", false, true), seen("Ada", "s2", false, true)]);
-        c.agent_menu("s2".into(), None);
+        c.agent_menu("s2".into(), None, None);
         match c.to_open.take() {
             Some(Open::Pick { id, title, .. }) => assert_eq!((id.as_str(), title.as_str()), ("agent:s2", "@Ada")),
             other => panic!("no menu: {other:?}"),
         }
         c.menu_picked("agent:s2", WHO);
         assert!(c.status.contains("session s2"), "who is the row picked, not the first of its name: {}", c.status);
-        c.agent_menu("gone".into(), None);
+        c.agent_menu("gone".into(), None, None);
         assert!(c.to_open.is_none() && c.status_is_error, "a row gone since is said, not guessed");
     }
 }

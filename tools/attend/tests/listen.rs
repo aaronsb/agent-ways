@@ -75,6 +75,25 @@ fn listen_off_stops_delivery_and_listen_on_applies_the_cold_start_again() {
     assert!(f.drain("plain").contains("no pending messages"));
 }
 
+/// `listen off` keeps the session's Claude Code process in its record, so
+/// a sweep can still judge whether the session has exited. The record
+/// alone enrolls nothing: the session does not listen and is not drained.
+#[test]
+fn listen_off_keeps_the_process_and_enrolls_nothing() {
+    let f = Fixture::new("listen-off-key");
+    f.ok(&["listen", "on"]);
+    f.drain("plain");
+    f.ok(&["listen", "off"]);
+    let record = std::fs::read_to_string(f.marker(&f.sid)).expect("the record stays");
+    assert!(record.lines().all(|l| l.starts_with("claude ")) && record.contains("claude "), "only the process: {record}");
+    let state = doc(&f, &["listen", "--json"]);
+    assert_eq!((state["listening"].clone(), state["via"].clone()), (json!(false), json!([])));
+    f.put("_broadcast", "other-1-open", "open after listen off", Duration::ZERO);
+    f.put(&f.project_tray(), "other-1-to", "addressed after listen off", Duration::ZERO);
+    assert_eq!(f.drain("plain"), "");
+    assert_eq!(f.ok(&["listen", "beat"]), "not listening\n");
+}
+
 #[test]
 fn a_joined_session_listens_and_listen_off_keeps_its_channels() {
     let f = Fixture::new("listen-join");

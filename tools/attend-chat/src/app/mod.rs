@@ -39,7 +39,7 @@ use agent_tui::{App, Binding, Keyed, Open, Pane, PaneTab, Tone};
 use attend_instances::SnapshotCache;
 
 use crate::chip::{seen_identities, settle, Seen};
-use crate::groups::{all_channels, tab_channels, ChannelRow, KnownGroup};
+use crate::groups::{all_channels, invites, tab_channels, ChannelRow, Invites, KnownGroup};
 use crate::sessions::discover as discover_sessions;
 use crate::signal::Signal;
 use crate::tabs::{self, Tab};
@@ -100,6 +100,8 @@ struct World {
     /// Every channel, for the left column, and each one's live members.
     rows: Vec<ChannelRow>,
     live_members: Vec<usize>,
+    /// Every channel's pending invitations, listed under it as invited.
+    invites: Invites,
     /// The instance registry, for each chip's `-<instance>` suffix
     /// (ADR-129). Built afresh with the world, never kept across it.
     instances: SnapshotCache,
@@ -502,7 +504,7 @@ impl ChatPane {
             let earlier = earlier_ids(&seen, &instances);
             let seen = settle(seen, &earlier, &tombstoned(), in_channel);
             let live_members = rows.iter().map(|r| r.known.membership.members.iter().filter(|m| alive(m)).count()).collect();
-            self.world = Some(World::new(tab_channels(&rows), seen, rows, live_members, instances, &self.foreground, &self.views));
+            self.world = Some(World::new(tab_channels(&rows), seen, rows, live_members, invites(!self.dry_run), instances, &self.foreground, &self.views));
             self.remember_dm_names();
             self.refocus();
         }
@@ -1387,17 +1389,19 @@ impl Screen for Chat {
 }
 
 impl World {
-    /// A world of these channels and identities, laid out for the tab
-    /// `shown` against its channels, with the DM views `views` lists.
-    fn new(groups: Vec<KnownGroup>, seen: Vec<Seen>, rows: Vec<ChannelRow>, live_members: Vec<usize>, instances: SnapshotCache, shown: &Tab, views: &sidebar::Views) -> World {
+    /// A world of these channels, invitations and identities, laid out for
+    /// the tab `shown` against its channels, with the DM views `views` lists.
+    #[allow(clippy::too_many_arguments)]
+    fn new(groups: Vec<KnownGroup>, seen: Vec<Seen>, rows: Vec<ChannelRow>, live_members: Vec<usize>, invites: Invites, instances: SnapshotCache, shown: &Tab, views: &sidebar::Views) -> World {
         let names = tabs::strip_names(&groups);
         let shown = tabs::normalize(shown.clone(), &names);
-        let laid = ix::Laid { bar: tabs::bar(&names, &shown), rows: sidebar::side_items_of(&seen, &rows, views), shown };
-        World { groups, seen, rows, live_members, instances, laid }
+        let laid = ix::Laid { bar: tabs::bar(&names, &shown), rows: sidebar::side_items_of(&seen, &rows, &invites, views), shown };
+        World { groups, seen, rows, live_members, invites, instances, laid }
     }
 
-    /// What the frame shows of the world: the channels with their members
-    /// and descriptions, and the identities with their instance names.
+    /// What the frame shows of the world: the channels with their members,
+    /// invitations and descriptions, and the identities with their instance
+    /// names.
     fn fingerprint(&self) -> String {
         let mut out = String::new();
         for g in &self.groups {
@@ -1408,6 +1412,11 @@ impl World {
         }
         for (r, live) in self.rows.iter().zip(&self.live_members) {
             out += &format!("={}|{:?}|{}|{live}\n", r.known.group.name, r.last, r.on_disk);
+        }
+        let mut invites: Vec<&attend_groups::Invite> = self.invites.values().flatten().collect();
+        invites.sort_by(|a, b| (&a.channel, &a.member).cmp(&(&b.channel, &b.member)));
+        for i in invites {
+            out += &format!("+{}|{}|{:?}|{:?}\n", i.channel, i.member, i.by, i.at);
         }
         out
     }
@@ -1427,6 +1436,25 @@ fn status_slot(fresh: bool, is_error: bool, busy: Option<String>, help: Option<(
         (Some((help, true)), _) => (help, None),
         (_, Some(busy)) => (busy, Some(false)),
         (help, None) => (help.map_or_else(|| stored.to_string(), |(h, _)| h), None),
+    }
+}
+
+#[cfg(test)]
+mod world_tests {
+    use super::*;
+
+    /// An invitation sent or answered redraws the column at the next
+    /// refresh: the watcher reads only messages, so the refresh's
+    /// fingerprint is what notices it.
+    #[test]
+    fn the_fingerprint_changes_when_an_invitation_comes_or_goes() {
+        let world = |invites: Invites| World::new(Vec::new(), Vec::new(), Vec::new(), Vec::new(), invites, SnapshotCache::new(), &Tab::Merged, &Default::default()).fingerprint();
+        let invite = attend_groups::Invite { channel: "infra".into(), member: "s2".into(), by: Some("aaron".into()), at: None };
+        let none = world(Invites::new());
+        let one = world([("infra".to_string(), vec![invite.clone()])].into());
+        assert_ne!(none, one, "an invitation sent");
+        let renewed = world([("infra".to_string(), vec![attend_groups::Invite { at: Some(std::time::UNIX_EPOCH), ..invite }])].into());
+        assert_ne!(one, renewed, "an invitation sent again rewrites its time");
     }
 }
 

@@ -1,4 +1,4 @@
-//! `join`, `leave` and `channels`: channel membership, the chat-idiom verbs
+//! `join`, `add`, `leave` and `channels`: channel membership, the chat-idiom verbs
 //! (ADR-173).
 //!
 //! Storage is untouched by the vocabulary: channels are still `@name/`
@@ -65,9 +65,86 @@ pub fn join(name: &str, pin: bool) -> Result<Joined, JoinError> {
     match r.join(name, pin) {
         Ok(()) => Ok(Joined { name: name.to_string(), pinned: pin, note, you_are: crate::util::you_are(&me) }),
         Err(message) => {
-            crate::util::settle_join_enrollment(&me, &r);
+            crate::util::settle_channel_enrollment(&me);
             Err(JoinError::WriteFailed { message })
         }
+    }
+}
+
+/// A member added to a channel (ADR-404 D1).
+#[derive(Debug, Clone, Serialize)]
+pub struct Added {
+    /// The channel, without its `#`.
+    pub name: String,
+    /// The member by the name peers see it by.
+    pub member: String,
+    pub session_id: String,
+    /// How many of the channel's messages it has to read.
+    pub to_read: usize,
+    /// How many older ones it was not handed.
+    pub held: usize,
+    /// Why the message that tells the member was not written; `None` when
+    /// it was.
+    pub not_told: Option<String>,
+}
+
+/// Why an add did not take. Nothing was written.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AddError {
+    /// The member names no single live session.
+    NoSession { message: String },
+    /// No channel was named, and this session is not in exactly one.
+    NoChannel { joined: Vec<String> },
+    /// `#open`, an unknown channel, a member already in it, or a failed write.
+    Refused { message: String },
+}
+
+impl std::fmt::Display for AddError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoSession { message } | Self::Refused { message } => f.write_str(message),
+            Self::NoChannel { joined } if joined.is_empty() => f.write_str("name the channel: this session is in none"),
+            Self::NoChannel { joined } => {
+                let names: Vec<String> = joined.iter().map(|n| format!("#{n}")).collect();
+                write!(f, "name the channel: this session is in {}", names.join(", "))
+            }
+        }
+    }
+}
+
+impl std::error::Error for AddError {}
+
+/// Add the session `member` names to `channel` (ADR-404 D1), or to the one
+/// channel this session is in when none is named. It is enrolled with no
+/// answer from it, told by a direct message, and handed the channel's
+/// recent history to read, as a join answering an invitation is.
+pub fn add(member: &str, channel: Option<&str>) -> Result<Added, AddError> {
+    let me = current_session();
+    let (session_id, name, root) =
+        crate::verbs::send::resolve_session(&me, member).map_err(|e| AddError::NoSession { message: e.to_string() })?;
+    let channel = match channel {
+        Some(c) => c.trim_start_matches('#').to_string(),
+        None => match groups_for(&me).joined_group_names().as_slice() {
+            [one] => one.clone(),
+            joined => return Err(AddError::NoChannel { joined: joined.to_vec() }),
+        },
+    };
+    let target = attend_membership::Target { session_id: &session_id, root: &root };
+    let actor = crate::verbs::send::actor(&me);
+    match attend_membership::add(&attend_membership::Bus::here(), &actor, &channel, target) {
+        Ok(added) => Ok(Added {
+            name: channel,
+            member: name,
+            session_id: session_id.clone(),
+            to_read: added.to_read,
+            held: added.held,
+            not_told: added.told.err(),
+        }),
+        Err(attend_membership::Refused::AlreadyMember(c)) => {
+            Err(AddError::Refused { message: format!("{name} is already in #{c}") })
+        }
+        Err(e) => Err(AddError::Refused { message: e.to_string() }),
     }
 }
 
@@ -88,7 +165,7 @@ pub fn leave(name: &str) -> Left {
         return Left { name: name.to_string(), was_member: false };
     }
     r.leave(name).ok();
-    crate::util::settle_join_enrollment(&me, &r);
+    crate::util::settle_channel_enrollment(&me);
     Left { name: name.to_string(), was_member: true }
 }
 

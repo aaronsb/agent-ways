@@ -224,6 +224,14 @@ pub(crate) enum ChannelCmd {
     #[command(about = describe::JOIN)]
     Join(JoinArgs),
 
+    /// Add a session to a channel; it is told, and handed the recent history
+    ///
+    /// The session is enrolled with no answer from it (ADR-404 D1), told
+    /// by a direct message to its project, and handed the newest 50 of the
+    /// channel's messages to read, as a join answering an invitation is.
+    /// Any invitation it had there is spent.
+    Add(AddArgs),
+
     #[command(about = describe::LEAVE)]
     Leave(LeaveArgs),
 
@@ -333,6 +341,18 @@ pub(crate) struct JoinArgs {
     /// Pin so the channel persists across scene changes
     #[arg(long)]
     pub(crate) pin: bool,
+    /// Print the result as one JSON document
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Args)]
+pub(crate) struct AddArgs {
+    /// The session to add: its name or id
+    pub(crate) member: String,
+    /// Channel name (with or without the # prefix); with none, the one
+    /// channel this session is in
+    pub(crate) channel: Option<String>,
     /// Print the result as one JSON document
     #[arg(long)]
     pub(crate) json: bool,

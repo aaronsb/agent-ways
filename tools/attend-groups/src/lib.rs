@@ -58,6 +58,30 @@ const GROUP_PREFIX: &str = "@";
 /// limit for another writer's lock.
 pub const BUSY: &str = "channels are busy; try again";
 
+/// Why [`Groups::add`] refused. Nothing was written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AddError {
+    /// No channel by that name: an add makes no channel.
+    UnknownChannel(String),
+    /// The member is in the channel already.
+    AlreadyMember(String),
+    /// A name or id refused, the lock not taken, or the add's own step
+    /// failed.
+    Failed(String),
+}
+
+impl std::fmt::Display for AddError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AddError::UnknownChannel(name) => write!(f, "#{name}: unknown channel"),
+            AddError::AlreadyMember(name) => write!(f, "already in #{name}"),
+            AddError::Failed(e) => f.write_str(e),
+        }
+    }
+}
+
+impl std::error::Error for AddError {}
+
 /// The directory under the signals base that backs `#open`, the base
 /// channel every enrolled member receives (ADR-124).
 pub const BROADCAST_DIR: &str = "_broadcast";
@@ -76,6 +100,27 @@ pub const PEOPLE_DIR: &str = "_people";
 /// The tray of the person with member id `member` (ADR-170) under `base`.
 pub fn person_dir(base: &Path, member: &str) -> PathBuf {
     base.join(PEOPLE_DIR).join(member)
+}
+
+/// The extension of a pending invitation's record, `@<channel>/<member>.invite`.
+const INVITE: &str = "invite";
+
+/// The extension of the record of a briefing an add owes a member,
+/// `@<channel>/<member>.brief` ([`Groups::brief`]).
+const BRIEF: &str = "brief";
+
+/// A pending invitation to a channel. Its record is `by:` and `at:` lines;
+/// one written before they were recorded is an empty file and reads with
+/// neither.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Invite {
+    pub channel: String,
+    /// The invitee's member id: a session id for an agent.
+    pub member: String,
+    /// The inviter's member id.
+    pub by: Option<String>,
+    /// When the invitation was sent, to the second.
+    pub at: Option<std::time::SystemTime>,
 }
 
 /// Which room a receive directory is.
@@ -145,10 +190,11 @@ impl Groups {
     /// UUID when the caller is attend, a sanitized username when the
     /// caller is attend-chat (ADR-170).
     ///
-    /// Only the member-scoped operations (`join`, `leave`,
-    /// `my_groups`, `joined_group_names`) read it;
-    /// the collection operations (`dissolve`, `cleanup_stale`,
-    /// `all_groups`, `members`, `pin`/`unpin`) act on
+    /// The member-scoped operations (`join`, `leave`, `take_invite`,
+    /// `my_groups`, `joined_group_names`) act for it, and the records
+    /// written for another member (`invite`, `brief`) name it as their
+    /// writer; the collection operations (`dissolve`, `cleanup_stale`,
+    /// `all_groups`, `members`, `pin`/`unpin`, `add`) act on
     /// the group state as a whole and ignore it.
     pub fn new(signals_base: &Path, member_id: &str) -> Self {
         Self {
@@ -229,6 +275,8 @@ impl Groups {
 
         let dir = self.group_dir(name);
         fs::create_dir_all(&dir).map_err(|e| format!("creating group dir: {e}"))?;
+        // A join by any path answers a pending invitation.
+        fs::remove_file(self.record_path(name, &self.member_id, INVITE)).ok();
         Ok(())
     }
 
@@ -297,31 +345,155 @@ impl Groups {
         if changed {
             self.save_state(&state);
         }
-    }
-
-    /// The file that records `member`'s pending invitation to `name`: a
-    /// sibling of the room's signals, which every scanner skips (they read
-    /// `.signal` files only), gone with the room when it is dissolved.
-    fn invite_path(&self, name: &str, member: &str) -> PathBuf {
-        self.group_dir(name).join(format!("{member}.invite"))
-    }
-
-    /// Record that `member` was invited to `name`. The invitee's own
-    /// `attend channel join` answers it ([`Groups::take_invite`]).
-    pub fn invite(&self, name: &str, member: &str) -> Result<(), String> {
-        validate_group_name(name)?;
-        if member.is_empty() || member.contains('/') {
-            return Err(format!("'{member}' is not a member id"));
+        // An invitation or briefing follows its member to the new id.
+        for (_, dir) in channel_dirs(&self.base) {
+            for kind in [INVITE, BRIEF] {
+                let from = dir.join(format!("{old}.{kind}"));
+                if from.is_file() {
+                    fs::rename(&from, dir.join(format!("{new}.{kind}"))).ok();
+                }
+            }
         }
+    }
+
+    /// The record `<member>.<kind>` in channel `name`: a sibling of the
+    /// room's signals, which every scanner skips (they read `.signal` files
+    /// only), gone with the room when it is dissolved.
+    fn record_path(&self, name: &str, member: &str, kind: &str) -> PathBuf {
+        self.group_dir(name).join(format!("{member}.{kind}"))
+    }
+
+    /// Write record `kind` for `member` in channel `name`, naming this
+    /// manager's member as its writer and now as its time. An existing
+    /// record is replaced.
+    fn write_record(&self, name: &str, member: &str, kind: &str) -> Result<(), String> {
+        validate_group_name(name)?;
+        validate_member_id(member)?;
         let dir = self.group_dir(name);
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        fs::write(self.invite_path(name, member), b"").map_err(|e| e.to_string())
+        let mut body = String::new();
+        if !self.member_id.is_empty() {
+            body += &format!("by: {}\n", self.member_id);
+        }
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+        body += &format!("at: {}\n", now.as_secs());
+        agent_settings::writer::write_atomic(&self.record_path(name, member, kind), body).map_err(|e| e.to_string())
+    }
+
+    /// Record that `member` was invited to `name` by this manager's member.
+    /// The invitee's own `attend channel join` answers it
+    /// ([`Groups::take_invite`]); any join of the invitee clears it. A
+    /// second invitation replaces the first.
+    pub fn invite(&self, name: &str, member: &str) -> Result<(), String> {
+        self.write_record(name, member, INVITE)
+    }
+
+    /// Withdraw `member`'s invitation to `name`, for one whose message was
+    /// not sent.
+    pub fn uninvite(&self, name: &str, member: &str) {
+        if validate_group_name(name).is_ok() {
+            fs::remove_file(self.record_path(name, member, INVITE)).ok();
+        }
+    }
+
+    /// Whether `member` has a pending invitation to `name`.
+    pub fn is_invited(&self, name: &str, member: &str) -> bool {
+        validate_group_name(name).is_ok() && self.record_path(name, member, INVITE).is_file()
+    }
+
+    /// The pending invitations to `name`, by invitee.
+    pub fn invites(&self, name: &str) -> Vec<Invite> {
+        if validate_group_name(name).is_err() {
+            return Vec::new();
+        }
+        let mut out = read_records(&self.group_dir(name), name, INVITE);
+        out.sort_by(|a, b| a.member.cmp(&b.member));
+        out
     }
 
     /// Whether this member had a pending invitation to `name`; the
     /// invitation is spent either way.
     pub fn take_invite(&self, name: &str) -> bool {
-        validate_group_name(name).is_ok() && fs::remove_file(self.invite_path(name, &self.member_id)).is_ok()
+        validate_group_name(name).is_ok() && fs::remove_file(self.record_path(name, &self.member_id, INVITE)).is_ok()
+    }
+
+    /// Enroll `member` in channel `name` on its behalf (ADR-404 D1's add),
+    /// and spend any invitation it had there. The channel must exist: an
+    /// add makes no channel. Refused for a member already in it.
+    ///
+    /// `admit` runs under the channels lock once the add is sure to be
+    /// written, before the membership is. The caller records there what the
+    /// member is owed: its enrollment and its briefing. The sweep takes the
+    /// same lock, so it never finds the member without them, and an add
+    /// that is refused has written none of them. An `admit` that fails
+    /// leaves the membership unwritten.
+    pub fn add(&self, name: &str, member: &str, admit: impl FnOnce() -> Result<(), String>) -> Result<(), AddError> {
+        validate_group_name(name).map_err(AddError::Failed)?;
+        validate_member_id(member).map_err(AddError::Failed)?;
+        let _lock = self.lock_state().map_err(AddError::Failed)?;
+        let mut state = self.load_state();
+        let dir = self.group_dir(name);
+        if !state.contains_key(name) && !dir.is_dir() {
+            return Err(AddError::UnknownChannel(name.to_string()));
+        }
+        if state.get(name).is_some_and(|e| e.members.iter().any(|m| m == member)) {
+            return Err(AddError::AlreadyMember(name.to_string()));
+        }
+        fs::create_dir_all(&dir).map_err(|e| AddError::Failed(format!("creating group dir: {e}")))?;
+        admit().map_err(AddError::Failed)?;
+        state.entry(name.to_string()).or_default().members.push(member.to_string());
+        self.save_state(&state);
+        fs::remove_file(self.record_path(name, member, INVITE)).ok();
+        Ok(())
+    }
+
+    /// Record that `member`, added to `name` before its cold start has run,
+    /// is owed the room's history from before the add: its cold start
+    /// delivers it whatever its age ([`briefings`]). The record stays after
+    /// that cold start, until the member leaves or is removed: by then every
+    /// message from before the add is in the member's seen-set, delivered or
+    /// held back, and the seen-set drops a key only when its message is
+    /// gone, so a later cold start finds none of them to deliver.
+    pub fn brief(&self, name: &str, member: &str) -> Result<(), String> {
+        self.write_record(name, member, BRIEF)
+    }
+
+    /// Whether `member` is owed a briefing in `name`.
+    pub fn is_briefed(&self, name: &str, member: &str) -> bool {
+        validate_group_name(name).is_ok() && self.record_path(name, member, BRIEF).is_file()
+    }
+
+    /// Withdraw `member`'s briefing in `name`, for an add that did not take.
+    pub fn unbrief(&self, name: &str, member: &str) {
+        if validate_group_name(name).is_ok() {
+            fs::remove_file(self.record_path(name, member, BRIEF)).ok();
+        }
+    }
+
+    /// Remove every invitation and briefing whose member has gone
+    /// ([`attend_presence::gone`]): it exited on this host, or no session
+    /// record here names it and its heartbeat is absent or long stale. An
+    /// invitee is not a member, so the membership sweep does not see it,
+    /// and Claude Code deletes a session's record when it exits: an invitee
+    /// that exits without ever listening leaves neither a record nor a
+    /// heartbeat. A session that runs and never listened is still a live
+    /// invitee.
+    pub fn prune_records(&self) {
+        self.prune_records_with(attend_presence::gone);
+    }
+
+    /// [`Groups::prune_records`] with an injectable judgement of which
+    /// members have gone.
+    pub fn prune_records_with<F: Fn(&str) -> bool>(&self, has_exited: F) {
+        for (_, dir) in channel_dirs(&self.base) {
+            let Ok(entries) = fs::read_dir(&dir) else { continue };
+            for entry in entries.flatten() {
+                let Some((member, _)) = record_name(&entry.file_name()) else { continue };
+                if has_exited(&member) {
+                    fs::remove_file(entry.path()).ok();
+                }
+            }
+        }
     }
 
     /// Leave a named group.
@@ -331,6 +503,7 @@ impl Groups {
         if let Some(entry) = state.get_mut(name) {
             entry.members.retain(|m| m != &self.member_id);
         }
+        fs::remove_file(self.record_path(name, &self.member_id, BRIEF)).ok();
         // Clean up empty unpinned groups in one write
         if state.get(name).is_some_and(|e| e.members.is_empty() && !e.pinned) {
             let dir = self.group_dir(name);
@@ -368,6 +541,7 @@ impl Groups {
         if entry.members.len() == before {
             return Err(format!("{member} is not a member of #{name}"));
         }
+        fs::remove_file(self.record_path(name, member, BRIEF)).ok();
         if state.get(name).is_some_and(|e| e.members.is_empty() && !e.pinned) {
             let dir = self.group_dir(name);
             if dir.is_dir() {
@@ -475,31 +649,58 @@ impl Groups {
     ///
     /// A reserved name (`open`, `broadcast`) can never be a group, so an
     /// `@open/` or `@broadcast/` dir is an orphan and is swept like one.
+    ///
+    /// A member dropped from its last channel loses the enrollment an add
+    /// gave it (ADR-404 D1). A join's survives the sweep: liveness does not
+    /// undo a session's own enrollment (#720).
     pub fn cleanup_stale(&self) {
-        self.cleanup_stale_with(member_alive, attend_presence::heartbeat::DEFAULT_GRACE);
+        for member in self.cleanup_stale_with(member_alive, attend_presence::heartbeat::DEFAULT_GRACE) {
+            self.when_in_no_channel(&member, || {
+                attend_presence::enrollment::withdraw(&member, attend_presence::enrollment::Source::Add).ok();
+            });
+        }
+        self.prune_records();
+    }
+
+    /// Run `settle` under the channels lock when `member` is in no channel.
+    /// An add records its enrollment under the same lock, so none lands
+    /// between the check and `settle`. Returns whether it ran: not for a
+    /// member in a channel, nor when the lock was not taken in time.
+    pub fn when_in_no_channel(&self, member: &str, settle: impl FnOnce()) -> bool {
+        let Ok(_lock) = self.lock_state() else { return false };
+        if self.load_state().values().any(|e| e.members.iter().any(|m| m == member)) {
+            return false;
+        }
+        settle();
+        true
     }
 
     /// [`Groups::cleanup_stale`] with an injectable liveness predicate
     /// and orphan-age grace, so tests can drive both passes without a
-    /// heartbeat sidecar or mtime manipulation.
+    /// heartbeat sidecar or mtime manipulation. Returns the members it
+    /// dropped from a channel.
     pub fn cleanup_stale_with<F: Fn(&str) -> bool>(
         &self,
         is_live: F,
         orphan_grace: std::time::Duration,
-    ) {
-        let Ok(_lock) = self.lock_state() else { return };
+    ) -> Vec<String> {
+        let Ok(_lock) = self.lock_state() else { return Vec::new() };
         let mut state = self.load_state();
-        let mut changed = false;
+        let mut dropped: Vec<String> = Vec::new();
 
         for entry in state.values_mut() {
-            let before = entry.members.len();
-            entry.members.retain(|sid| is_live(sid));
-            if entry.members.len() != before {
-                changed = true;
-            }
+            entry.members.retain(|sid| {
+                let live = is_live(sid);
+                if !live {
+                    dropped.push(sid.clone());
+                }
+                live
+            });
         }
+        dropped.sort();
+        dropped.dedup();
 
-        if changed {
+        if !dropped.is_empty() {
             self.save_state(&state);
         }
 
@@ -527,7 +728,7 @@ impl Groups {
         // Orphan-dir sweep: on-disk `@name/` dirs the yaml doesn't
         // know about, aged past the grace window.
         let Ok(entries) = fs::read_dir(&self.base) else {
-            return;
+            return dropped;
         };
         for entry in entries.filter_map(|e| e.ok()) {
             let name = entry.file_name().to_string_lossy().to_string();
@@ -551,6 +752,7 @@ impl Groups {
             }
             fs::remove_dir_all(&path).ok();
         }
+        dropped
     }
 
     // ── State persistence ──────────────────────────────────────
@@ -634,6 +836,95 @@ pub fn validate_group_name(name: &str) -> Result<(), String> {
         return Err(format!("'{name}' is reserved"));
     }
     Ok(())
+}
+
+/// A member id a record can be named for: not empty, and no path.
+pub fn validate_member_id(member: &str) -> Result<(), String> {
+    if member.is_empty() || member.contains(['/', '\\']) || member.starts_with('.') {
+        return Err(format!("'{member}' is not a member id"));
+    }
+    Ok(())
+}
+
+/// Every channel directory under `base`, by channel name.
+fn channel_dirs(base: &Path) -> Vec<(String, PathBuf)> {
+    let Ok(entries) = fs::read_dir(base) else { return Vec::new() };
+    entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_str()?.strip_prefix(GROUP_PREFIX)?.to_string();
+            (!name.is_empty() && e.path().is_dir()).then(|| (name, e.path()))
+        })
+        .collect()
+}
+
+/// The member and kind a record's file name gives, for an invitation or a
+/// briefing; `None` for any other file.
+fn record_name(file: &std::ffi::OsStr) -> Option<(String, &'static str)> {
+    let file = file.to_str()?;
+    [INVITE, BRIEF].into_iter().find_map(|kind| {
+        let member = file.strip_suffix(kind)?.strip_suffix('.')?;
+        (!member.is_empty()).then(|| (member.to_string(), kind))
+    })
+}
+
+/// The `by:` and `at:` of a record's body.
+fn parse_record(body: &str) -> (Option<String>, Option<std::time::SystemTime>) {
+    let (mut by, mut at) = (None, None);
+    for line in body.lines() {
+        match line.split_once(':').map(|(k, v)| (k.trim(), v.trim())) {
+            Some(("by", v)) if !v.is_empty() => by = Some(v.to_string()),
+            Some(("at", v)) => {
+                at = v.parse::<u64>().ok().map(|s| std::time::UNIX_EPOCH + Duration::from_secs(s));
+            }
+            _ => {}
+        }
+    }
+    (by, at)
+}
+
+/// The records of `kind` in channel directory `dir`.
+fn read_records(dir: &Path, channel: &str, kind: &str) -> Vec<Invite> {
+    let Ok(entries) = fs::read_dir(dir) else { return Vec::new() };
+    entries
+        .flatten()
+        .filter_map(|e| {
+            let (member, k) = record_name(&e.file_name())?;
+            if k != kind {
+                return None;
+            }
+            let (by, at) = parse_record(&fs::read_to_string(e.path()).unwrap_or_default());
+            Some(Invite { channel: channel.to_string(), member, by, at })
+        })
+        .collect()
+}
+
+/// Every pending invitation under `base`, by channel, each list by invitee.
+/// Read-only, for a surface that shows who was invited where.
+pub fn load_invites(base: &Path) -> HashMap<String, Vec<Invite>> {
+    let mut out = HashMap::new();
+    for (name, dir) in channel_dirs(base) {
+        let mut invites = read_records(&dir, &name, INVITE);
+        if !invites.is_empty() {
+            invites.sort_by(|a, b| a.member.cmp(&b.member));
+            out.insert(name, invites);
+        }
+    }
+    out
+}
+
+/// The briefings `member` is owed, as each channel and the time of the add
+/// that owes it ([`Groups::brief`]). The cold start reads them.
+pub fn briefings(base: &Path, member: &str) -> Vec<(String, std::time::SystemTime)> {
+    let mut out: Vec<(String, std::time::SystemTime)> = channel_dirs(base)
+        .into_iter()
+        .filter_map(|(name, dir)| {
+            let body = fs::read_to_string(dir.join(format!("{member}.{BRIEF}"))).ok()?;
+            Some((name, parse_record(&body).1?))
+        })
+        .collect();
+    out.sort();
+    out
 }
 
 /// Whether a member is still alive for cleanup: [`attend_presence::alive`]
@@ -1242,5 +1533,184 @@ mod invite_tests {
         assert!(Groups::new(&base, "").invite("open", "sess-a").is_err(), "a reserved name");
         assert!(Groups::new(&base, "").invite("topic", "../x").is_err());
         let _ = fs::remove_dir_all(&base);
+    }
+}
+
+/// A test directory under the build's target directory, removed with its
+/// contents when dropped, so test scratch stays out of the system temp dir.
+#[cfg(test)]
+pub(crate) mod scratch {
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    pub(crate) struct Scratch(PathBuf);
+
+    impl std::ops::Deref for Scratch {
+        type Target = Path;
+        fn deref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A fresh directory named for `tag`. The test binary runs from
+    /// `<target>/<profile>/deps/`, so its grandparent is the profile dir.
+    pub(crate) fn dir(tag: &str) -> Scratch {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let exe = std::env::current_exe().unwrap();
+        let profile = exe.parent().and_then(Path::parent).unwrap();
+        let p = profile.join("test-scratch").join(format!(
+            "attend-groups-{tag}-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).unwrap();
+        Scratch(p)
+    }
+}
+
+#[cfg(test)]
+mod record_tests {
+    use super::*;
+    use std::time::SystemTime;
+
+    #[test]
+    fn an_invitation_records_its_inviter_and_time() {
+        let base = scratch::dir("invite-record");
+        Groups::new(&base, "aaron").invite("topic", "sess-a").unwrap();
+        let invites = Groups::new(&base, "x").invites("topic");
+        assert_eq!(invites.len(), 1);
+        let i = &invites[0];
+        assert_eq!((i.channel.as_str(), i.member.as_str(), i.by.as_deref()), ("topic", "sess-a", Some("aaron")));
+        let age = SystemTime::now().duration_since(i.at.expect("a time")).unwrap_or_default();
+        assert!(age < Duration::from_secs(5), "written just now: {age:?}");
+        assert_eq!(load_invites(&base)["topic"], invites, "the read-only listing agrees");
+        assert!(Groups::new(&base, "x").is_invited("topic", "sess-a"));
+        assert!(!Groups::new(&base, "x").is_invited("topic", "sess-b"));
+    }
+
+    #[test]
+    fn an_empty_invitation_file_reads_with_no_inviter_or_time() {
+        let base = scratch::dir("invite-legacy");
+        fs::create_dir_all(base.join("@topic")).unwrap();
+        fs::write(base.join("@topic").join("sess-a.invite"), b"").unwrap();
+        let invites = Groups::new(&base, "x").invites("topic");
+        assert_eq!(invites, vec![Invite { channel: "topic".into(), member: "sess-a".into(), by: None, at: None }]);
+    }
+
+    #[test]
+    fn inviting_again_rewrites_the_one_record() {
+        let base = scratch::dir("invite-again");
+        Groups::new(&base, "aaron").invite("topic", "sess-a").unwrap();
+        Groups::new(&base, "bob").invite("topic", "sess-a").unwrap();
+        let invites = Groups::new(&base, "x").invites("topic");
+        assert_eq!(invites.len(), 1);
+        assert_eq!(invites[0].by.as_deref(), Some("bob"));
+    }
+
+    #[test]
+    fn a_join_by_any_path_clears_the_joiners_invitation() {
+        let base = scratch::dir("invite-join");
+        Groups::new(&base, "aaron").invite("topic", "sess-a").unwrap();
+        Groups::new(&base, "aaron").invite("topic", "sess-b").unwrap();
+        // `Groups::join` is what a scene activation and the chat's /join
+        // call, without `take_invite`.
+        Groups::new(&base, "sess-a").join("topic", false).unwrap();
+        let left: Vec<String> = Groups::new(&base, "x").invites("topic").into_iter().map(|i| i.member).collect();
+        assert_eq!(left, vec!["sess-b"]);
+    }
+
+    #[test]
+    fn the_sweep_drops_the_records_of_sessions_that_exited() {
+        let base = scratch::dir("invite-prune");
+        let g = Groups::new(&base, "aaron");
+        g.create("topic", None).unwrap();
+        g.invite("topic", "sess-gone").unwrap();
+        g.invite("topic", "sess-here").unwrap();
+        g.brief("topic", "sess-gone").unwrap();
+        g.prune_records_with(|m| m == "sess-gone");
+        let left: Vec<String> = g.invites("topic").into_iter().map(|i| i.member).collect();
+        assert_eq!(left, vec!["sess-here"]);
+        assert!(briefings(&base, "sess-gone").is_empty());
+    }
+
+    #[test]
+    fn a_new_session_id_carries_its_invitations_and_briefings() {
+        let base = scratch::dir("invite-rename");
+        let g = Groups::new(&base, "aaron");
+        g.create("topic", None).unwrap();
+        g.create("other", None).unwrap();
+        g.invite("topic", "old").unwrap();
+        g.brief("other", "old").unwrap();
+        g.rename_member("old", "new");
+        let invites = g.invites("topic");
+        assert_eq!(invites.len(), 1);
+        assert_eq!((invites[0].member.as_str(), invites[0].by.as_deref()), ("new", Some("aaron")));
+        assert_eq!(briefings(&base, "new").into_iter().map(|(c, _)| c).collect::<Vec<_>>(), vec!["other"]);
+        assert!(briefings(&base, "old").is_empty());
+    }
+
+    #[test]
+    fn an_add_enrolls_the_member_and_spends_its_invitation() {
+        let base = scratch::dir("add");
+        let g = Groups::new(&base, "aaron");
+        g.create("topic", None).unwrap();
+        g.invite("topic", "sess-a").unwrap();
+        g.add("topic", "sess-a", || Ok(())).unwrap();
+        assert_eq!(g.members("topic").unwrap(), vec!["sess-a"]);
+        assert!(g.invites("topic").is_empty());
+        assert_eq!(g.add("topic", "sess-a", || Ok(())), Err(AddError::AlreadyMember("topic".into())));
+    }
+
+    /// The add's own step runs only for an add that will be written, and
+    /// one that fails writes no membership.
+    #[test]
+    fn an_adds_admit_step_runs_only_when_it_takes() {
+        let base = scratch::dir("add-admit");
+        let g = Groups::new(&base, "aaron");
+        g.create("topic", None).unwrap();
+        let ran = std::cell::Cell::new(0);
+        let admit = || {
+            ran.set(ran.get() + 1);
+            Ok(())
+        };
+        assert_eq!(g.add("ghost", "sess-a", admit), Err(AddError::UnknownChannel("ghost".into())));
+        assert_eq!(ran.get(), 0, "a refused add admits no one");
+        let failed = g.add("topic", "sess-a", || Err("enrolling failed".into()));
+        assert_eq!(failed, Err(AddError::Failed("enrolling failed".into())));
+        assert!(g.members("topic").unwrap().is_empty(), "a failed admit writes no membership");
+        g.add("topic", "sess-a", admit).unwrap();
+        assert_eq!(ran.get(), 1);
+        assert_eq!(g.add("topic", "sess-a", admit), Err(AddError::AlreadyMember("topic".into())));
+        assert_eq!(ran.get(), 1, "a member already in is not admitted again");
+    }
+
+    #[test]
+    fn an_add_refuses_the_base_channel_and_unknown_ones() {
+        let base = scratch::dir("add-refuse");
+        let g = Groups::new(&base, "aaron");
+        assert!(g.add("open", "sess-a", || Ok(())).is_err());
+        assert_eq!(g.add("ghost", "sess-a", || Ok(())), Err(AddError::UnknownChannel("ghost".into())));
+        assert!(g.add("ghost", "../x", || Ok(())).is_err());
+        assert!(load_groups(&base).is_empty(), "a refused add writes nothing");
+        assert!(!base.join("@ghost").exists());
+    }
+
+    #[test]
+    fn leaving_drops_the_members_briefing() {
+        let base = scratch::dir("brief-leave");
+        let g = Groups::new(&base, "aaron");
+        g.create("topic", None).unwrap();
+        g.add("topic", "sess-a", || Ok(())).unwrap();
+        g.brief("topic", "sess-a").unwrap();
+        assert_eq!(briefings(&base, "sess-a").len(), 1);
+        Groups::new(&base, "sess-a").leave("topic").unwrap();
+        assert!(briefings(&base, "sess-a").is_empty());
     }
 }

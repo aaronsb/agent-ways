@@ -469,7 +469,7 @@ fn run_dissolve(channel: Option<String>, foreground: &Tab) -> EnterAction {
     let caps = ColorDepth::detect();
     let names_before = tabs::strip_names(&channels(caps));
     let me = crate::signal::human_member_id();
-    match dissolve_group_in(&signals_base(), &name, &me, attend_groups::member_alive) {
+    match dissolve_group_in(&attend_membership::Bus::here().waiting_at_most(GROUPS_LOCK_WAIT), &name, &me, attend_groups::member_alive) {
         EnterAction::ClearWithStatus(status) => {
             let focus = if *foreground == Tab::Channel(name.clone()) {
                 tabs::advance_after_dissolve(&name, &names_before)
@@ -482,9 +482,10 @@ fn run_dissolve(channel: Option<String>, foreground: &Tab) -> EnterAction {
     }
 }
 
-/// Filesystem-effect core of `/dissolve`, parameterized on the base
-/// dir and a liveness predicate so tests can drive both without a
-/// real heartbeat sidecar.
+/// Filesystem-effect core of `/dissolve`, parameterized on the bus and a
+/// liveness predicate so tests can drive both without a real heartbeat
+/// sidecar. `attend_membership::dissolve` withdraws the channel enrollment
+/// of each member it leaves in no channel.
 ///
 /// The live-member guard is chat-side policy the CLI's
 /// `attend channel dissolve` doesn't have: from the TUI this is a
@@ -500,14 +501,14 @@ fn run_dissolve(channel: Option<String>, foreground: &Tab) -> EnterAction {
 /// the exclusion an operator could not dissolve any channel they had
 /// joined. The empty-group send gate excludes the sender the same way.
 fn dissolve_group_in<F: Fn(&str) -> bool>(
-    base: &std::path::Path,
+    bus: &attend_membership::Bus,
     name: &str,
     self_member: &str,
     is_live: F,
 ) -> EnterAction {
     // Member id is irrelevant for dissolve — it acts on the group,
     // not on this member's entry.
-    let groups = writing_groups(base, "");
+    let groups = writing_groups(&bus.signals, "");
     let members = groups.members(name);
     let dir_exists = groups.group_dir(name).is_dir();
     if members.is_none() && !dir_exists {
@@ -524,7 +525,7 @@ fn dissolve_group_in<F: Fn(&str) -> bool>(
             if live == 1 { "" } else { "s" }
         ));
     }
-    match groups.dissolve(name) {
+    match attend_membership::dissolve(bus, "", name) {
         Ok(_) => EnterAction::ClearWithStatus(format!("dissolved #{name}")),
         Err(e) => EnterAction::StatusOnly(format!("/dissolve: {e}")),
     }
@@ -665,45 +666,55 @@ fn run_invite(member: &str, channel: Option<String>, foreground: &Tab) -> EnterA
     }
 }
 
-/// Invite `peer` to channel `g`: the one invitation `/invite` and a menu's
-/// Add agent to chat both send. The peer joins itself, or stays silent.
+/// Invite `peer` to channel `g`: the one invitation `/invite` and the
+/// channel menu's Invite agent ▸ both send, through attend-membership as
+/// every surface invites. The peer joins itself, or stays silent. A peer
+/// invited already has its invitation renewed and is not told again.
 pub fn invite_peer(g: &str, peer: &crate::peers::Peer) -> EnterAction {
-    let g = g.to_string();
-    if g == BASE_CHANNEL_NAME {
-        return EnterAction::StatusOnly(
-            "#open is the base channel — everyone is already there".into(),
-        );
-    }
-    // Inviting into a channel that doesn't exist would hand the peer
-    // a join command that mints a brand-new group — more likely a
-    // typo than an intent. `/join` it first.
-    let Some(dir) = resolve_group_dir(&g) else {
-        return EnterAction::StatusOnly(format!("#{g}: unknown channel — /join it first"));
-    };
-    let dest = cwd_dir(&peer.root);
-    let body = invite_body(&g, &dir);
-    match write_signal(&dest, &body, &peer.session_id) {
-        Ok(n) => {
-            // The invitee's join answers this: it keeps the room's recent
-            // history to read rather than holding it back (ADR-404).
-            let _ = attend_groups::Groups::new(&signals_base(), "").invite(&g, &peer.session_id);
-            // The invitation shows as a direct message the person sent.
-            sent(format!("invited @{} to #{g}", peer.display), read_back(&dest, &n).into_iter().collect())
+    let bus = attend_membership::Bus::here().waiting_at_most(GROUPS_LOCK_WAIT);
+    let target = attend_membership::Target { session_id: &peer.session_id, root: &peer.root };
+    match attend_membership::invite(&bus, &crate::signal::actor(), g, target) {
+        // The invitation shows as a direct message the person sent.
+        Ok(attend_membership::Invited { told: Some(t) }) => {
+            sent(format!("invited @{} to #{g}", peer.display), read_back(&t.dir, &t.filename).into_iter().collect())
+        }
+        // The invitation is renewed: done, so the command is cleared.
+        Ok(attend_membership::Invited { told: None }) => EnterAction::ClearWithStatus(format!(
+            "@{} was invited to #{g} already; the invitation now dates from now",
+            peer.display
+        )),
+        Err(attend_membership::Refused::BaseChannel) => {
+            EnterAction::StatusOnly("#open is the base channel — everyone is already there".into())
+        }
+        // Inviting into a channel that doesn't exist would hand the peer
+        // a join command that mints a brand-new group — more likely a
+        // typo than an intent. `/join` it first.
+        Err(attend_membership::Refused::UnknownChannel(_)) => {
+            EnterAction::StatusOnly(format!("#{g}: unknown channel — /join it first"))
+        }
+        Err(attend_membership::Refused::AlreadyMember(_)) => {
+            EnterAction::StatusOnly(format!("@{} is already in #{g}", peer.display))
         }
         Err(e) => EnterAction::StatusOnly(format!("/invite failed: {e}")),
     }
 }
 
-/// The invitation's text: how to join, and that the channel's recent history
-/// is the invitee's to read only when the channel has any. A join that
-/// answers an invitation keeps that history to read (ADR-404); in an empty
-/// channel there is none, and saying so would send the invitee looking.
-fn invite_body(g: &str, dir: &std::path::Path) -> String {
-    let has_history = std::fs::read_dir(dir)
-        .map(|entries| entries.flatten().any(|e| e.path().extension().is_some_and(|x| x == "signal")))
-        .unwrap_or(false);
-    let history = if has_history { " (its recent history is yours to read)" } else { "" };
-    format!("you're invited to #{g} — join with attend_join, or: attend channel join {g}{history}")
+/// Add `peer` to channel `g` (ADR-404 D1), as Add agent ▸ and Add agent to
+/// chat ▸ do, through attend-membership as `attend channel add` adds: it is
+/// enrolled with no answer from it, any invitation it had there is spent,
+/// and it is told by a direct message, which shows as one the person sent.
+pub fn add_peer(g: &str, peer: &crate::peers::Peer) -> EnterAction {
+    let bus = attend_membership::Bus::here().waiting_at_most(GROUPS_LOCK_WAIT);
+    let target = attend_membership::Target { session_id: &peer.session_id, root: &peer.root };
+    let who = &peer.display;
+    match attend_membership::add(&bus, &crate::signal::actor(), g, target) {
+        Ok(attend_membership::Added { told: Ok(t), .. }) => sent(format!("added @{who} to #{g}"), read_back(&t.dir, &t.filename).into_iter().collect()),
+        Ok(attend_membership::Added { told: Err(e), .. }) => EnterAction::ClearWithStatus(format!("added @{who} to #{g}, but the message telling it was not written: {e}")),
+        Err(attend_membership::Refused::BaseChannel) => EnterAction::StatusOnly("#open is the base channel — everyone is already there".into()),
+        Err(attend_membership::Refused::UnknownChannel(_)) => EnterAction::StatusOnly(format!("#{g}: unknown channel")),
+        Err(attend_membership::Refused::AlreadyMember(_)) => EnterAction::StatusOnly(format!("@{who} is already in #{g}")),
+        Err(attend_membership::Refused::Failed(e)) => EnterAction::StatusOnly(format!("could not add @{who} to #{g}: {e}")),
+    }
 }
 
 /// `/kick @name [#channel]` — resolve the target, remove them, then
@@ -736,7 +747,7 @@ pub fn kick_member(g: &str, id: &str, label: &str, root: Option<&str>) -> EnterA
     if g == BASE_CHANNEL_NAME {
         return EnterAction::StatusOnly("#open is the base channel — you can't kick from it".into());
     }
-    let action = kick_member_in(&signals_base(), g, id, label);
+    let action = kick_member_in(&attend_membership::Bus::here().waiting_at_most(GROUPS_LOCK_WAIT), g, id, label);
     if let (EnterAction::ClearWithStatus(_), Some(root)) = (&action, root) {
         let notice = format!(
             "you were removed from #{g} by the operator — rejoin with attend_join, or: attend channel join {g}"
@@ -746,19 +757,19 @@ pub fn kick_member(g: &str, id: &str, label: &str, root: Option<&str>) -> EnterA
     action
 }
 
-/// Filesystem-effect core of `/kick`, parameterized on the base dir
-/// so tests can drive it against a tempdir. `Groups::kick` owns the
-/// state change and its precise error strings (unknown group,
-/// non-member); the acting member id is irrelevant — kick targets
-/// someone else's entry. `label` is the target's display name for
-/// the status line (session ids don't belong in the status row).
+/// Filesystem-effect core of `/kick`, parameterized on the bus so tests
+/// can drive it against a tempdir. `attend_membership::remove` owns the
+/// state change, the add's enrollment it withdraws, and the precise error
+/// strings (unknown group, non-member); the acting member id is irrelevant
+/// — kick targets someone else's entry. `label` is the target's display
+/// name for the status line (session ids don't belong in the status row).
 fn kick_member_in(
-    base: &std::path::Path,
+    bus: &attend_membership::Bus,
     name: &str,
     member_id: &str,
     label: &str,
 ) -> EnterAction {
-    match writing_groups(base, "").kick(name, member_id) {
+    match attend_membership::remove(bus, "", name, member_id) {
         Ok(()) => EnterAction::ClearWithStatus(format!("kicked @{label} from #{name}")),
         Err(e) => EnterAction::StatusOnly(format!("/kick: {e}")),
     }
@@ -1096,26 +1107,20 @@ mod tests {
         }
     }
 
-    /// The clean-slate test's finding 4: the invitation mentions history to
-    /// read only when the channel holds a message.
-    #[test]
-    fn an_invitation_mentions_history_only_when_the_channel_has_some() {
-        let root = tempdir_like();
-        let dir = root.join("@empty");
-        std::fs::create_dir_all(&dir).unwrap();
-        assert_eq!(invite_body("empty", &dir), "you're invited to #empty — join with attend_join, or: attend channel join empty");
-        std::fs::write(dir.join("notes.txt"), "not a message").unwrap();
-        assert!(!invite_body("empty", &dir).contains("history"), "only a signal is history");
-        std::fs::write(dir.join("peer-1-1.signal"), "claude:peer|x|/tmp/x|said\n").unwrap();
-        assert_eq!(
-            invite_body("empty", &dir),
-            "you're invited to #empty — join with attend_join, or: attend channel join empty (its recent history is yours to read)"
-        );
-        assert!(!invite_body("gone", &dir.join("missing")).contains("history"), "a channel with no directory yet has none");
-    }
-
     fn tempdir_like() -> crate::test_dir::TestDir {
         crate::test_dir::unique("keys")
+    }
+
+    /// The bus under a test's signals `base`.
+    fn bus_at(base: &std::path::Path) -> attend_membership::Bus {
+        attend_membership::Bus {
+            signals: base.to_path_buf(),
+            state: base.join("state"),
+            enrolled: base.join("enrolled"),
+            instances: base.join("instances"),
+            heartbeats: base.join("heartbeat"),
+            lock_wait: Some(GROUPS_LOCK_WAIT),
+        }
     }
 
     #[test]
@@ -1193,7 +1198,7 @@ mod tests {
     #[test]
     fn dissolve_unknown_group_is_precise() {
         let base = tempdir_like();
-        match dissolve_group_in(&base, "ghost", "aaron", |_| false) {
+        match dissolve_group_in(&bus_at(&base), "ghost", "aaron", |_| false) {
             EnterAction::StatusOnly(s) => assert!(s.contains("unknown group")),
             _ => panic!("unknown group should keep input with status"),
         }
@@ -1206,7 +1211,7 @@ mod tests {
         // channel bar until dissolved.
         let base = tempdir_like();
         std::fs::create_dir_all(base.join("@bg-test")).unwrap();
-        match dissolve_group_in(&base, "bg-test", "aaron", |_| false) {
+        match dissolve_group_in(&bus_at(&base), "bg-test", "aaron", |_| false) {
             EnterAction::ClearWithStatus(s) => assert!(s.contains("dissolved #bg-test")),
             _ => panic!("orphan dissolve should clear input with status"),
         }
@@ -1219,7 +1224,7 @@ mod tests {
         attend_groups::Groups::new(&base, "dead-session")
             .join("temp", false)
             .unwrap();
-        match dissolve_group_in(&base, "temp", "aaron", |_| false) {
+        match dissolve_group_in(&bus_at(&base), "temp", "aaron", |_| false) {
             EnterAction::ClearWithStatus(s) => assert!(s.contains("dissolved #temp")),
             _ => panic!("stale-member dissolve should clear input with status"),
         }
@@ -1233,7 +1238,7 @@ mod tests {
         attend_groups::Groups::new(&base, "live-session")
             .join("deploy", false)
             .unwrap();
-        match dissolve_group_in(&base, "deploy", "aaron", |_| true) {
+        match dissolve_group_in(&bus_at(&base), "deploy", "aaron", |_| true) {
             EnterAction::StatusOnly(s) => assert!(s.contains("1 live member")),
             _ => panic!("live-member dissolve should refuse with status"),
         }
@@ -1248,7 +1253,7 @@ mod tests {
         // channel open against them. A live peer still does.
         let base = tempdir_like();
         join_group_in(&base, "aaron", "kwin-canvas");
-        match dissolve_group_in(&base, "kwin-canvas", "aaron", |_| true) {
+        match dissolve_group_in(&bus_at(&base), "kwin-canvas", "aaron", |_| true) {
             EnterAction::ClearWithStatus(s) => assert!(s.contains("dissolved #kwin-canvas"), "got: {s}"),
             _ => panic!("the operator alone in a channel should dissolve it"),
         }
@@ -1257,7 +1262,7 @@ mod tests {
 
         join_group_in(&base, "aaron", "testing");
         join_group_in(&base, "live-session", "testing");
-        match dissolve_group_in(&base, "testing", "aaron", |_| true) {
+        match dissolve_group_in(&bus_at(&base), "testing", "aaron", |_| true) {
             EnterAction::StatusOnly(s) => assert!(s.contains("1 live member") && s.contains("/kick"), "got: {s}"),
             _ => panic!("a live peer still holds the channel"),
         }
@@ -1269,7 +1274,7 @@ mod tests {
         attend_groups::Groups::new(&base, "sess-a")
             .join("deploy", false)
             .unwrap();
-        match kick_member_in(&base, "deploy", "sess-a", "Tamsin-alpha") {
+        match kick_member_in(&bus_at(&base), "deploy", "sess-a", "Tamsin-alpha") {
             EnterAction::ClearWithStatus(s) => {
                 assert!(s.contains("kicked @Tamsin-alpha from #deploy"), "got: {s}")
             }
@@ -1284,7 +1289,7 @@ mod tests {
     fn kick_unknown_group_and_nonmember_surface_kick_errors() {
         let base = tempdir_like();
         // Unknown group: Groups::kick's own error string passes through.
-        match kick_member_in(&base, "ghost", "sess-a", "Cleo") {
+        match kick_member_in(&bus_at(&base), "ghost", "sess-a", "Cleo") {
             EnterAction::StatusOnly(s) => assert!(s.contains("unknown group"), "got: {s}"),
             _ => panic!("unknown group should keep input with status"),
         }
@@ -1292,7 +1297,7 @@ mod tests {
         attend_groups::Groups::new(&base, "someone-else")
             .join("deploy", false)
             .unwrap();
-        match kick_member_in(&base, "deploy", "sess-a", "Cleo") {
+        match kick_member_in(&bus_at(&base), "deploy", "sess-a", "Cleo") {
             EnterAction::StatusOnly(s) => assert!(s.contains("not a member"), "got: {s}"),
             _ => panic!("non-member kick should keep input with status"),
         }
@@ -1322,7 +1327,7 @@ mod tests {
         attend_groups::Groups::new(&base, "somebody")
             .join("ops", false)
             .unwrap();
-        match kick_member_in(&base, "ops", "somebody", "somebody") {
+        match kick_member_in(&bus_at(&base), "ops", "somebody", "somebody") {
             EnterAction::ClearWithStatus(s) => {
                 assert!(s.contains("kicked @somebody from #ops"), "got: {s}")
             }

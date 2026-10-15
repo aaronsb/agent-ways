@@ -172,6 +172,7 @@ dependencies = [
  "attend-config",
  "attend-groups",
  "attend-instances",
+ "attend-membership",
  "attend-presence",
  "attend-state",
  "clap",
@@ -199,6 +200,7 @@ dependencies = [
  "attend-config",
  "attend-groups",
  "attend-instances",
+ "attend-membership",
  "attend-presence",
  "attend-state",
  "claude-sessions",
@@ -237,6 +239,19 @@ dependencies = [
  "agent-settings",
  "agent-theme",
  "attend-presence",
+ "claude-sessions",
+]
+
+[[package]]
+name = "attend-membership"
+version = "0.1.0"
+dependencies = [
+ "agent-identity",
+ "agent-settings",
+ "attend-groups",
+ "attend-instances",
+ "attend-presence",
+ "attend-state",
  "claude-sessions",
 ]
 

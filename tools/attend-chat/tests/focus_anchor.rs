@@ -1,6 +1,5 @@
 //! The tab bar's focus kept by what it is while channels come and go, and
-//! Add agent to chat's live path: the pick writes the invitation a live
-//! peer reads. In its own file, so its own fixture, which the tests change:
+//! Add agent to chat's live path: the pick adds a live peer and tells it. In its own file, so its own fixture, which the tests change:
 //! a live claude with a sessions record, #deploy and #infra.
 
 mod support;
@@ -77,10 +76,10 @@ fn the_focused_tab_is_kept_by_what_it_is() {
     assert!(rows(&mut c).iter().any(|r| r.contains("pick one: #open")), "Enter acts on it: {:#?}", rows(&mut c));
 }
 
-/// Add agent to chat, live: the pick writes the invitation into the
-/// agent's project tray, as `/invite` does, and says the agent joins itself.
+/// Add agent to chat, live: the pick adds the agent, as `attend channel
+/// add` does, and its row under the channel shows it participating.
 #[test]
-fn add_agent_to_chat_invites_the_agent_for_real() {
+fn add_agent_to_chat_adds_the_agent_for_real() {
     let mut c = chat(false);
     let shown = rows(&mut c);
     let (y, r) = shown.iter().enumerate().find(|(_, r)| r.split('│').next().is_some_and(|l| l.contains("beta"))).unwrap_or_else(|| panic!("beta's row: {shown:#?}"));
@@ -95,7 +94,12 @@ fn add_agent_to_chat_invites_the_agent_for_real() {
     let buf = testkit::render_screen(&mut c, W, H);
     let (x, y) = testkit::find(&buf, "Add agent to chat").expect("the item");
     click(&mut c, x, y);
-    assert!(rows(&mut c).iter().any(|r| r.contains("pick one: add to channel")), "{:#?}", rows(&mut c));
-    press(&mut c, KeyCode::Enter);
-    assert!(c.status().starts_with("invited @") && c.status().ends_with("they join themselves"), "{}", c.status());
+    let shown = rows(&mut c);
+    let top = shown.iter().position(|r| r.contains("pick one: add to channel")).unwrap_or_else(|| panic!("{shown:#?}"));
+    // #deploy by name: the other test here makes #aaa-new, which sorts first.
+    let (y, r) = shown.iter().enumerate().skip(top + 1).find(|(_, r)| r.contains("│   #deploy")).unwrap_or_else(|| panic!("{shown:#?}"));
+    click(&mut c, r[..r.find("#deploy").unwrap()].chars().count() as u16, y as u16);
+    assert!(c.status().starts_with("added @") && c.status().ends_with(" to #deploy"), "{}", c.status());
+    let members = attend_groups::load_groups(&base()).get("deploy").map(|e| e.members.clone()).unwrap_or_default();
+    assert_eq!(members, [BETA_SID], "a member, with no answer from it");
 }

@@ -141,7 +141,7 @@ impl ChatPane {
     /// the focus on its row.
     fn relay(&mut self) {
         if let Some(w) = &mut self.world {
-            w.laid.rows = super::sidebar::side_items_of(&w.seen, &w.rows, &self.views);
+            w.laid.rows = super::sidebar::side_items_of(&w.seen, &w.rows, &w.invites, &self.views);
         }
         self.invalidate();
         if self.world.is_some() {

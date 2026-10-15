@@ -295,7 +295,7 @@ pub(crate) fn scan_pending(
             .iter()
             .map(|f| (&scan_dirs[f.room].room, f.mtime.elapsed().unwrap_or_default()))
             .collect();
-        attend_state::cold_start::plan(&pending, attend_state::cold_start::Window::for_session(own_session_id))
+        attend_state::cold_start::plan(&pending, &attend_state::cold_start::Window::for_session(own_session_id))
     });
 
     let mut delivered: Vec<Drained> = Vec::new();
