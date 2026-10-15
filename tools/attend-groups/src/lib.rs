@@ -650,12 +650,15 @@ impl Groups {
     /// A reserved name (`open`, `broadcast`) can never be a group, so an
     /// `@open/` or `@broadcast/` dir is an orphan and is swept like one.
     ///
-    /// A member dropped from its last channel loses the enrollment an add
-    /// gave it (ADR-404 D1).
+    /// A member dropped from its last channel loses the enrollment a join
+    /// or an add gave it, as leaving its last channel withdraws it.
     pub fn cleanup_stale(&self) {
+        use attend_presence::enrollment::{withdraw, Source};
         for member in self.cleanup_stale_with(member_alive, attend_presence::heartbeat::DEFAULT_GRACE) {
             self.when_in_no_channel(&member, || {
-                attend_presence::enrollment::withdraw(&member, attend_presence::enrollment::Source::Add).ok();
+                for source in [Source::Join, Source::Add] {
+                    withdraw(&member, source).ok();
+                }
             });
         }
         self.prune_records();

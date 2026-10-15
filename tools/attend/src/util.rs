@@ -245,16 +245,12 @@ pub(crate) fn join_display(nickname: &str, instance: Option<&str>) -> String {
 }
 
 /// After this session's channels changed: a session in no channel any more
-/// withdraws the enrollment a join or an add gave it. One that also turned
-/// listening on or ran `attend run` stays enrolled through that.
-pub(crate) fn settle_channel_enrollment(ident: &Session, groups: &groups::Groups) {
-    use attend_presence::enrollment::{withdraw, Source};
+/// withdraws the enrollment a join or an add gave it
+/// ([`attend_membership::release`]). One that also turned listening on or
+/// ran `attend run` stays enrolled through that.
+pub(crate) fn settle_channel_enrollment(ident: &Session) {
     if ident.resolved() {
-        groups.when_in_no_channel(&ident.session_id, || {
-            for source in [Source::Join, Source::Add] {
-                withdraw(&ident.session_id, source).ok();
-            }
-        });
+        attend_membership::release(&attend_membership::Bus::here(), &ident.session_id);
     }
 }
 

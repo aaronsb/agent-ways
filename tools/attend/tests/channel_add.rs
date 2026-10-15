@@ -164,6 +164,48 @@ fn the_sweep_prunes_an_invitation_to_a_session_that_has_gone() {
     assert!(groups.invites("topic").is_empty(), "the invitation is pruned");
 }
 
+/// An added session whose only channel is dissolved stops listening.
+#[test]
+fn an_added_session_whose_only_channel_is_dissolved_stops_listening() {
+    let f = with_topic("add-then-dissolve");
+    added_by_aaron(&f);
+    f.drain("plain");
+    f.ok(&["channel", "dissolve", "topic"]);
+    f.put(&f.project_tray(), "other-project", "project mail after dissolving", MINUTE);
+    f.put("_broadcast", "other-open", "open post after dissolving", MINUTE);
+    let drained = f.drain("plain");
+    assert!(!drained.contains("after dissolving"), "{drained}");
+}
+
+/// A session that joined its only channel itself and is removed from it
+/// stops listening, as one that leaves does.
+#[test]
+fn a_session_removed_from_the_only_channel_it_joined_stops_listening() {
+    let f = with_topic("join-then-remove");
+    f.ok(&["channel", "join", "topic"]);
+    f.drain("plain");
+    attend_membership::remove(&bus(&f), "aaron", "topic", &f.sid).unwrap();
+    f.put(&f.project_tray(), "other-project", "project mail after removal", MINUTE);
+    f.put("_broadcast", "other-open", "open post after removal", MINUTE);
+    let drained = f.drain("plain");
+    assert!(!drained.contains("after removal"), "{drained}");
+}
+
+/// A session that joined its only channel itself and is swept from it, its
+/// process gone, loses the join's enrollment.
+#[test]
+fn the_sweep_withdraws_the_join_of_a_member_it_drops_from_every_channel() {
+    let f = with_topic("join-then-sweep");
+    let gone = "2f2632d7-3f59-4c24-9aae-00000000dead";
+    attend_groups::Groups::new(&f.signals(), gone).join("topic", false).unwrap();
+    let record = f.cache().join("enrolled").join(gone);
+    std::fs::create_dir_all(record.parent().unwrap()).unwrap();
+    std::fs::write(&record, "join\n").unwrap();
+    f.ok(&["channel", "list"]);
+    assert!(attend_groups::Groups::new(&f.signals(), "x").members("topic").unwrap().is_empty());
+    assert!(!record.exists(), "the join's enrollment is withdrawn");
+}
+
 /// Self-joining after an add changes nothing: the session is a member, and
 /// what it has not read there is still owed to it.
 #[test]

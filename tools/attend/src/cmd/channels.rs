@@ -88,8 +88,7 @@ pub(crate) fn cmd_dissolve(name: &str) {
         eprintln!("[attend] dissolve: #open is the base channel — it cannot be dissolved");
         std::process::exit(1);
     }
-    let r = get_groups();
-    let members = match r.dissolve(name) {
+    let members = match attend_membership::dissolve(&attend_membership::Bus::here(), "", name) {
         Ok(members) => members,
         Err(e) => {
             eprintln!("[attend] dissolve: {e}");

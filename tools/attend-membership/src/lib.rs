@@ -280,15 +280,36 @@ pub fn add(bus: &Bus, actor: &Actor, channel: &str, target: Target) -> Result<Ad
 
 /// Remove `member` from `channel` as `by` (the operator's `/kick`,
 /// ADR-173): unilateral, since it only reduces the member's reach. A member
-/// left in no channel loses the enrollment an add gave it, so the drain
-/// stops delivering to a session that only an add made listen.
+/// left in no channel stops listening by the channel ([`release`]).
 pub fn remove(bus: &Bus, by: &str, channel: &str, member: &str) -> Result<(), String> {
-    let groups = bus.groups(by);
-    groups.kick(channel.trim_start_matches('#'), member)?;
-    groups.when_in_no_channel(member, || {
-        attend_presence::enrollment::withdraw_in(&bus.enrolled, member, attend_presence::enrollment::Source::Add).ok();
-    });
+    bus.groups(by).kick(channel.trim_start_matches('#'), member)?;
+    release(bus, member);
     Ok(())
+}
+
+/// Dissolve `channel` as `by`, releasing every member, and return the
+/// members it had. Each member left in no channel stops listening by the
+/// channel ([`release`]).
+pub fn dissolve(bus: &Bus, by: &str, channel: &str) -> Result<Vec<String>, String> {
+    let members = bus.groups(by).dissolve(channel.trim_start_matches('#'))?;
+    for member in &members {
+        release(bus, member);
+    }
+    Ok(members)
+}
+
+/// After `member` lost a channel: once it is in no channel, the enrollment
+/// a join or an add gave it is withdrawn, as leaving its last channel
+/// withdraws it. One that also turned listening on or ran `attend run`
+/// stays enrolled through that. The check and the withdrawal run under the
+/// channels lock, so an add landing at the same time keeps its enrollment.
+pub fn release(bus: &Bus, member: &str) {
+    use attend_presence::enrollment::{withdraw_in, Source};
+    bus.groups("").when_in_no_channel(member, || {
+        for source in [Source::Join, Source::Add] {
+            withdraw_in(&bus.enrolled, member, source).ok();
+        }
+    });
 }
 
 #[cfg(test)]
