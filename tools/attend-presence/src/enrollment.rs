@@ -34,7 +34,9 @@
 //! The session is enrolled while the record holds a way. A record whose
 //! last way goes keeps only its `claude` line, so whether the session has
 //! exited can still be judged ([`process_has_exited`]); a record with no
-//! process to keep is removed. Every edit is a read-modify-write under one
+//! process to keep is removed. Once that process has exited and no
+//! invitation or briefing names the session, the sweep removes the record
+//! ([`prune_exited`]). Every edit is a read-modify-write under one
 //! lock (`agent_settings::writer::Lock`), and every file is written
 //! atomically (`write_atomic`).
 
@@ -291,6 +293,41 @@ pub fn process_is_live(session_id: &str) -> bool {
 /// with no host: nothing here says the session has gone.
 pub fn process_has_exited(session_id: &str) -> bool {
     read(session_id).and_then(|r| r.claude).map(|key| process_fact(&key)) == Some(Fact::Exited)
+}
+
+/// Remove every record that holds only a process of this host that has
+/// exited, unless `named` says an invitation or a briefing still names the
+/// session: nothing is left to judge by it. The index entry goes with it
+/// when it names the session. Each record is read again under the lock.
+pub fn prune_exited(named: impl Fn(&str) -> bool) {
+    prune_exited_in(&dir(), named, |key| process_fact(key) == Fact::Exited);
+}
+
+/// [`prune_exited`] under the records in `dir`, with an injectable
+/// judgement of which process keys have exited.
+fn prune_exited_in(dir: &Path, named: impl Fn(&str) -> bool, exited: impl Fn(&str) -> bool) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    let ids: Vec<String> = entries
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .filter_map(|e| e.file_name().to_str().map(str::to_string))
+        .filter(|name| !name.starts_with('.'))
+        .collect();
+    for sid in ids {
+        if named(&sid) {
+            continue;
+        }
+        let Ok(_lock) = agent_settings::writer::Lock::acquire(&dir.join(".edit")) else { return };
+        let Some(key) = read_in(dir, &sid).filter(|r| r.sources.is_empty()).and_then(|r| r.claude) else { continue };
+        if !exited(&key) {
+            continue;
+        }
+        fs::remove_file(dir.join(&sid)).ok();
+        let index = dir.join("by-claude").join(process_part(&key));
+        if fs::read_to_string(&index).is_ok_and(|s| s.trim() == sid) {
+            fs::remove_file(index).ok();
+        }
+    }
 }
 
 /// What this host can say of the process a key names.
@@ -592,6 +629,32 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
         assert_eq!(kept.unwrap(), format!("claude {key}\n"), "a record with no way left keeps only its process");
         assert!(gone, "and one with no process is removed");
+    }
+
+    /// A record holding only a process that has exited is removed, with
+    /// its index entry, unless an invitation or a briefing names the
+    /// session. A record with a way, or whose process runs, stays.
+    #[test]
+    fn a_record_holding_only_an_exited_process_is_pruned_unless_named() {
+        let exe = std::env::current_exe().unwrap();
+        let dir = exe.parent().and_then(Path::parent).unwrap().join("test-scratch").join(format!("attend-enrol-prune-{}", std::process::id()));
+        fs::remove_dir_all(&dir).ok();
+        let (gone, live) = ("1-1@here".to_string(), "2-2@here".to_string());
+        for (sid, key) in [("gone", &gone), ("named", &gone), ("live", &live), ("enrolled", &gone)] {
+            enroll_added_in(&dir, sid, Some(key.clone())).unwrap();
+            if sid != "enrolled" {
+                withdraw_in(&dir, sid, Source::Add).unwrap();
+            }
+        }
+        // `enrolled` holds the index entry; point it at `gone`, as the
+        // entry an exited session leaves.
+        agent_settings::writer::write_atomic(&dir.join("by-claude").join("1-1"), "gone").unwrap();
+        prune_exited_in(&dir, |sid| sid == "named", |key| key == gone);
+        let left: Vec<bool> = ["gone", "named", "live", "enrolled"].iter().map(|s| dir.join(s).is_file()).collect();
+        let index = dir.join("by-claude").join("1-1").exists();
+        fs::remove_dir_all(&dir).ok();
+        assert_eq!(left, vec![false, true, true, true], "gone, named, live, enrolled");
+        assert!(!index, "the index entry naming the pruned id goes with it");
     }
 
     /// A session that stopped listening keeps its process in its record:

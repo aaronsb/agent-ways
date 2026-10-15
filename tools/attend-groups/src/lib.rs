@@ -478,8 +478,23 @@ impl Groups {
     /// that exits without ever listening leaves neither a record nor a
     /// heartbeat. A session that runs and never listened is still a live
     /// invitee.
+    ///
+    /// An enrollment record left holding only a process that has exited
+    /// goes too, once no invitation or briefing here names its session.
     pub fn prune_records(&self) {
         self.prune_records_with(attend_presence::gone);
+        let named = self.recorded_members();
+        attend_presence::enrollment::prune_exited(|sid| named.contains(sid));
+    }
+
+    /// Every member an invitation or a briefing names, in any channel.
+    pub fn recorded_members(&self) -> std::collections::HashSet<String> {
+        channel_dirs(&self.base)
+            .into_iter()
+            .filter_map(|(_, dir)| fs::read_dir(dir).ok())
+            .flat_map(|entries| entries.flatten())
+            .filter_map(|entry| record_name(&entry.file_name()).map(|(member, _)| member))
+            .collect()
     }
 
     /// [`Groups::prune_records`] with an injectable judgement of which
@@ -1638,6 +1653,12 @@ mod record_tests {
         let left: Vec<String> = g.invites("topic").into_iter().map(|i| i.member).collect();
         assert_eq!(left, vec!["sess-here"]);
         assert!(briefings(&base, "sess-gone").is_empty());
+        g.create("other", None).unwrap();
+        g.brief("other", "sess-briefed").unwrap();
+        // What keeps an exited session's enrollment record from the prune.
+        let mut named: Vec<String> = g.recorded_members().into_iter().collect();
+        named.sort();
+        assert_eq!(named, vec!["sess-briefed", "sess-here"]);
     }
 
     #[test]
