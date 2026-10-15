@@ -9,7 +9,7 @@ agent-tui frame 80x25
 |  1 ◆ #open            ● ││  file: sh                                          │|
 |  2 ▽ #deploy  1👤      ● ││                                                    │|
 |    Wells              ● ││  13:59  Laszlo  alpha                              │|
-|    Lyra  4m   ◌ invited ││ ────────────────────────────────────────────────── │|
+|    Lyra     ◌ invited ○ ││ ────────────────────────────────────────────────── │|
 |  3 ♦ #infra  0👤       ○ ││ a longer message, so the feed shows how a body     │|
 |  4 ♦ #archive  1👤     ○ ││ wraps beside its chip when it runs past the width  │|
 |    Laszlo             ● ││ of the row it is given                             │|

@@ -9,7 +9,7 @@ agent-tui frame 120x40
 |  1 ◆ #open                ● ││ ────────────────────────────────────────────────────────────────────────────────────── │|
 |  2 ▽ #deploy  1👤          ● ││ rollout is green on staging                                                            │|
 |    Wells                  ● ││ production at 15:00                                                                    │|
-|    Lyra  4m       ◌ invited ││                                                                                        │|
+|    Lyra  4m     ◌ invited ○ ││                                                                                        │|
 |  3 ♦ #infra  0👤           ○ ││  13:58  aaron  aaron                                                                   │|
 |  4 ♦ #archive  1👤         ○ ││ ────────────────────────────────────────────────────────────────────────────────────── │|
 |    Laszlo                 ● ││ the shell this ran under: /bin/sh                                                      │|

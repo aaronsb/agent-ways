@@ -1,6 +1,6 @@
 //! Each channel's members under its row in the left column (ADR-405,
 //! amendment of 2026-10-15): participating members drawn as their Agents
-//! rows are, invited ones set back and marked `◌ invited`; a member row
+//! rows are, invited ones set back and marked `◌ invited` with `●` or `○`; a member row
 //! opens its agent's menu; Add agent enrols and Invite agent asks. In its
 //! own file, so its own fixture: three live claudes with sessions records,
 //! #deploy with beta and the operator in it (beta invited there too), #infra
@@ -142,7 +142,7 @@ fn every_channel_lists_its_members_under_its_row_invited_ones_marked_apart() {
     let infra = under(&mut c, "infra");
     assert!(infra.iter().any(|r| r.contains(&beta) && !r.contains("invited")), "beta is in two channels and listed under both: {infra:#?}");
     let invited = infra.iter().find(|r| r.contains(&gamma)).unwrap_or_else(|| panic!("gamma under #infra: {infra:#?}"));
-    assert!(invited.contains("◌ invited") && !invited.contains('●'), "invited, marked apart: {invited}");
+    assert!(invited.contains("◌ invited ●"), "invited, marked apart, and live: {invited}");
     assert!(invited.contains("4m"), "with the invitation's age: {invited}");
     assert!(under(&mut c, "ops").is_empty(), "an empty channel has no rows under it");
     let agents = column(&mut c);

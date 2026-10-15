@@ -431,7 +431,7 @@ pub(super) const REVIEW_MARK: &str = "◈ ";
 /// agent's, a member's under its channel's.
 const INDENT: &str = "  ";
 
-/// What ends an invited member's row, in place of a participant's `●`.
+/// What marks an invited member's row, before its `●` live or `○` not.
 const INVITED: &str = "◌ invited";
 
 /// [`sized`] with no middle text: two segments, the name taking the
@@ -459,20 +459,23 @@ fn dm_line(chat: &ChatPane, label: &str, count: usize, shown: bool, w: usize, fo
 /// participant (`invited` none) is drawn as its Agents row is, its name on
 /// the identity colour and `●` live or `○` not on the darkest step, with no
 /// project. An invitee is set back, `label`, the invitation's age `invited`
-/// where the row has room for it, then [`INVITED`]. `who` is the agent as
-/// the column knows it; one it does not know is set back by its id.
+/// where the row has room for it, then [`INVITED`] and `●` or `○`, so an
+/// invitee that has gone reads apart from one that may still answer. `who`
+/// is the agent as the column knows it; one it does not know is set back by
+/// its id, and is not live.
 fn member_line(chat: &ChatPane, label: &str, who: Option<&Seen>, invited: Option<&str>, w: usize, focused: bool) -> Line<'static> {
     let bare = theme::colourless();
     let w = w.saturating_sub(INDENT.len());
     let faded = Seg::faded("").style;
+    let dot = if who.is_some_and(|s| s.live) { "●" } else { "○" };
     let (texts, styles) = match (invited, who) {
-        (Some(age), _) if !age.is_empty() => (sized(chat.shape, bare, [label, age, INVITED], w), [faded; 3]),
-        (Some(_), _) => (sized_two(chat.shape, bare, [label, INVITED], w), [faded; 3]),
+        (Some(age), _) if !age.is_empty() => (sized(chat.shape, bare, [label, age, &format!("{INVITED} {dot}")], w), [faded; 3]),
+        (Some(_), _) => (sized_two(chat.shape, bare, [label, &format!("{INVITED} {dot}")], w), [faded; 3]),
         (None, Some(s)) => {
             let [name, _, mark] = identity_styles(chat.palette.depth(), s.identity.palette, s.live, s.identity.style.bold);
-            (sized_two(chat.shape, bare, [label, if s.live { "●" } else { "○" }], w), [name, Style::new(), mark])
+            (sized_two(chat.shape, bare, [label, dot], w), [name, Style::new(), mark])
         }
-        (None, None) => (sized_two(chat.shape, bare, [label, "○"], w), [faded; 3]),
+        (None, None) => (sized_two(chat.shape, bare, [label, dot], w), [faded; 3]),
     };
     let mut spans = vec![Span::raw(" "), Span::raw(INDENT)];
     spans.extend(chat.shape.lozenge(&segs(texts, focused_styles(styles, focused))));
@@ -759,7 +762,12 @@ mod tests {
         let invited = member_line(&c, "Ada", Some(&ada), Some("4m"), 24, false);
         let (joined_t, invited_t) = (text(&joined), text(&invited));
         assert!(joined_t.contains('●') && !joined_t.contains(INVITED), "{joined_t:?}");
-        assert!(invited_t.contains(INVITED) && invited_t.contains("4m") && !invited_t.contains('●'), "{invited_t:?}");
+        assert!(invited_t.contains(&format!("{INVITED} ●")) && invited_t.contains("4m"), "a live invitee: {invited_t:?}");
+        let quiet = Seen { live: false, ..seen("Ada") };
+        let gone = text(&member_line(&c, "Ada", Some(&quiet), Some("4m"), 24, false));
+        assert!(gone.contains(&format!("{INVITED} ○")), "a quiet invitee reads apart: {gone:?}");
+        let unknown = text(&member_line(&c, "s9", None, Some(""), 24, false));
+        assert!(unknown.contains(&format!("{INVITED} ○")), "one the column does not know is not live: {unknown:?}");
         assert_eq!((joined.width(), invited.width()), (1 + 24, 1 + 24), "both fill the row");
         let faded = Seg::faded("").style;
         assert!(invited.spans.iter().filter(|s| !s.content.trim().is_empty()).all(|s| s.style == faded), "the invited row is set back whole: {invited:?}");

@@ -376,14 +376,19 @@ pub(super) fn invitations_line(member: &str, invites: &Invites, seen: &[Seen], n
 /// under its session id is told as `/whois` tells it; the id, not the
 /// name, finds it, since twins share a name and `/whois @name` would pick
 /// one of them. A live claude with no sessions record, a quiet one and a
-/// human are told from what the chat itself has seen.
-pub(super) fn who_line(s: &Seen, roster: &[Peer], invited: &str) -> String {
+/// human are told from what the chat itself has seen; a quiet claude with
+/// how long ago its last heartbeat was, `beat`, when it left one.
+pub(super) fn who_line(s: &Seen, roster: &[Peer], invited: &str, beat: Option<std::time::Duration>) -> String {
     let (name, rest) = if !s.identity.is_claude {
         (s.identity.nickname.clone(), format!("a human · from {} · {}", s.identity.cwd, if s.live { "here" } else { "away" }))
     } else if let Some(p) = roster.iter().find(|p| s.live && p.session_id == s.member) {
         (p.display.clone(), format!("session {} · root {}", p.session_id, p.root))
     } else {
-        let how = if s.live { "live: no sessions record" } else { "quiet: no heartbeat" };
+        let how = match (s.live, beat) {
+            (true, _) => "live: no sessions record".to_string(),
+            (false, Some(ago)) => format!("quiet: last heartbeat {} ago", super::sidebar::age_label(ago)),
+            (false, None) => "quiet: no heartbeat".to_string(),
+        };
         (s.identity.nickname.clone(), format!("session {} · root {} · {how}", s.member, attend_presence::session::normalize_origin(&s.identity.cwd)))
     };
     let invited = if invited.is_empty() { String::new() } else { format!("{invited} · ") };
@@ -731,7 +736,8 @@ impl ChatPane {
         let now = self.now();
         let w = self.world();
         let invited = invitations_line(member, &w.invites, &w.seen, now);
-        self.say(who_line(&s, &roster, &invited), false);
+        let beat = attend_presence::heartbeat::last_seen(member).map(|t| now.duration_since(t).unwrap_or_default());
+        self.say(who_line(&s, &roster, &invited, beat), false);
     }
 
     /// The members of `channel`, from its membership: live or not, the
@@ -1120,7 +1126,7 @@ mod tests {
         let invited = invitations_line("s2", &invites, &known, now);
         assert_eq!(invited, "invited to #deploy · invited to #infra by Ada 4m ago", "an agent inviter by its name; a record from before by: and at: says neither");
         assert_eq!(invitations_line("s1", &invites, &known, now), "", "no invitation, nothing said");
-        assert_eq!(who_line(&seen("Bo", "s2", false, true), &[], &invited), "@Bo — invited to #deploy · invited to #infra by Ada 4m ago · session s2 · root /work/Bo · quiet: no heartbeat", "first after the name, before a root that can run off the status line");
+        assert_eq!(who_line(&seen("Bo", "s2", false, true), &[], &invited, None), "@Bo — invited to #deploy · invited to #infra by Ada 4m ago · session s2 · root /work/Bo · quiet: no heartbeat", "first after the name, before a root that can run off the status line");
     }
 
     fn seen(name: &str, member: &str, live: bool, claude: bool) -> Seen {
@@ -1230,11 +1236,24 @@ mod tests {
         // record, so only s2 is on the roster.
         let roster = [Peer { session_id: "s2".into(), root: "/work/Ada".into(), display: "Ada-two".into() }];
         let (one, two) = (seen("Ada", "s1", true, true), seen("Ada", "s2", true, true));
-        assert_eq!(who_line(&two, &roster, ""), "@Ada-two — session s2 · root /work/Ada", "the roster's own line, by id");
-        let first = who_line(&one, &roster, "");
+        assert_eq!(who_line(&two, &roster, "", None), "@Ada-two — session s2 · root /work/Ada", "the roster's own line, by id");
+        let first = who_line(&one, &roster, "", None);
         assert!(first.starts_with("@Ada — session s1 · root /work/Ada") && first.contains("no sessions record"), "never its twin's line: {first}");
         assert!(!first.contains("quiet"), "a live claude is not called quiet: {first}");
-        assert!(who_line(&seen("Ada", "s2", false, true), &roster, "").contains("quiet: no heartbeat"), "a quiet one is told from the column");
+        assert!(who_line(&seen("Ada", "s2", false, true), &roster, "", None).contains("quiet: no heartbeat"), "a quiet one is told from the column");
+    }
+
+    /// A quiet claude that left a heartbeat is told how long ago it was,
+    /// not that it has none: an invitee whose last beat is days old reads
+    /// apart from one that beat a minute ago.
+    #[test]
+    fn who_is_a_quiet_claude_says_how_old_its_last_heartbeat_is() {
+        let quiet = seen("Bo", "s2", false, true);
+        let day = std::time::Duration::from_secs(3 * 86_400);
+        assert!(who_line(&quiet, &[], "", Some(day)).ends_with(" · quiet: last heartbeat 3d ago"), "{}", who_line(&quiet, &[], "", Some(day)));
+        assert!(who_line(&quiet, &[], "", None).ends_with(" · quiet: no heartbeat"));
+        let live = seen("Bo", "s2", true, true);
+        assert!(who_line(&live, &[], "", Some(day)).ends_with(" · live: no sessions record"), "a live one is not told its heartbeat");
     }
 
     #[test]
