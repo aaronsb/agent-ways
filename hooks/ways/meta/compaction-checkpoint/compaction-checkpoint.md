@@ -41,7 +41,7 @@ After the user responds, combine your summary with their steering into a checkpo
 1. If active `TaskCreate` tasks exist, update their descriptions with the user's input
 2. If no task list, put the synthesis on a GitHub issue carrying the `tasklist` label (ADR-180), new or existing
 3. Include the user's priorities and direction — their words, not your paraphrase
-4. **Produce a copy-pastable continuance prompt** — a short block the user can paste into a *fresh* session if this one ends: the goal/intent, what's landed, the immediate next step, and the key files/branches in play. Compaction keeps the session alive; a continuance prompt is the handoff that survives even a hard reset.
+4. **Produce a copy-pastable continuance prompt** — a short block the user can paste into a *fresh* session if this one ends: the goal/intent, what's landed, the immediate next step, and the key files/branches in play. When several tasks remain, add the working mode from the `/wrap` skill: the main session steers, subagents carry implementation and review, and each branch gets its own worktree. Compaction keeps the session alive; a continuance prompt is the handoff that survives even a hard reset.
 
 ## Step 4: Offer Directed Compaction
 

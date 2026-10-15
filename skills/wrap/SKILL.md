@@ -132,6 +132,9 @@ constraints, "X is noise, trust Y", env quirks. Skip if none.>
 TASKS — recreate these with the task list tool before starting; they are the working set.
 <the Step 2 enumeration verbatim — number, status, subject, full description>.
 
+WORKING MODE — <for complex work only: steer from the main session, delegate the heavy
+work to subagents, one worktree per branch. See "Working mode" below. Skip for simple work.>
+
 DO NEXT — <the immediate next step, then 1-3 alternatives, each specific enough to start>.
 
 DECISIONS: <each choice left to the operator, numbered, one line each, so the answer
@@ -158,6 +161,18 @@ step. Fix the prompt for any of the four that fails.
 
 Number every decision left to the operator, in the prompt and in the chat, so the reply
 can be "1 and 3". A decision buried in a paragraph gets paraphrased back or missed.
+
+### Working mode
+
+Write the `WORKING MODE` section when the remaining work has complexity: several open tasks, a change across many files, or review-and-fix rounds still to run. It tells the next session to spend its own context on steering and to delegate the rest, so the session lasts across the whole task list:
+
+- The main session steers. It reads reports, makes the calls, writes briefs, talks with the operator, and merges. It does not read large diffs or run long test suites itself.
+- Implementation, review, and fan-out reads go to subagents. Each brief names the files, the gates with their pass condition, and the shape of the report to return.
+- Each branch of implementation gets its own git worktree, in the location the project uses for worktrees, so parallel agents and the main checkout never share a working tree. List the existing worktrees and what each holds.
+- A fix round after the second goes to a freshly briefed agent. A worker resumed through many rounds can run out of context partway through its gates.
+- Small edits, single-file fixes, and anything the operator is watching live stay in the main session.
+
+Name the subagent types and the worktree location this project uses, so the next session does not have to rediscover them. Work that is one task in one file gets no `WORKING MODE` section.
 
 ## Close-out: what the session taught
 
