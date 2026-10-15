@@ -242,6 +242,19 @@ mod cli {
         assert!(attend_groups::Groups::new(&f.signals(), "x").members("topic").unwrap().is_empty());
     }
 
+    /// A project path names every session working there, so an add, which
+    /// takes one session, refuses it, even where one session works there.
+    #[test]
+    fn add_refuses_a_project_path() {
+        let f = with_topic("add-path");
+        let peer = Peer::start(&f, PEER, "other");
+        let out = f.attend(&["channel", "add", &peer.cwd, "topic"]);
+        assert!(!out.status.success());
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("is a project path"), "{err}");
+        assert!(attend_groups::Groups::new(&f.signals(), "x").members("topic").unwrap().is_empty());
+    }
+
     #[test]
     fn with_no_channel_named_add_takes_the_one_this_session_is_in() {
         let f = with_topic("add-default");

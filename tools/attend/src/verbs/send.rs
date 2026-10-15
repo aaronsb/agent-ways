@@ -86,6 +86,9 @@ pub enum SendError {
     /// The `to` path is this session's own project, and no other session
     /// works there, so nobody would receive the message.
     OwnProject { path: String },
+    /// A project path where one session is wanted: it names every session
+    /// working there.
+    ProjectPath { path: String },
     /// No channel has the `channel` name.
     NoChannel { name: String, channels: Vec<ChannelCount> },
     /// The channel exists but no live peer is in it; `only_self` when the
@@ -136,6 +139,7 @@ impl std::fmt::Display for SendError {
                 f,
                 "{path} is this session's own project and no other session works there, so nobody would receive it; drop --to to reach every peer, or name another project"
             ),
+            Self::ProjectPath { path } => write!(f, "{path} is a project path; name one session there"),
             Self::NoChannel { name, .. } => write!(f, "no channel named '{name}'"),
             Self::NoLivePeers { name, only_self: true, .. } => {
                 write!(f, "no live peers in channel '{name}' (you are the only listener)")
@@ -322,9 +326,14 @@ fn known_people() -> Vec<String> {
 /// Resolve `to`: a project path to every live session there, else a
 /// session's name or id, or a person's member id. A name that matches more
 /// than one, or none, is refused.
+/// Whether recipient `to` is written as a project path, not a name.
+fn is_project_path(to: &str) -> bool {
+    to.contains(['/', '\\']) || to.starts_with(['.', '~'])
+}
+
 fn resolve_recipient(me: &Session, to: &str) -> Result<Dest, SendError> {
     let to = to.trim();
-    if to.contains(['/', '\\']) || to.starts_with(['.', '~']) {
+    if is_project_path(to) {
         return resolve_project(me, to);
     }
     let sessions = live_sessions();
@@ -396,9 +405,13 @@ pub(crate) fn actor(me: &Session) -> attend_membership::Actor {
 
 /// The one live session `to` names, by name or id, as its id, name and
 /// project root. A person, a project path or a name that matches more than
-/// one session is refused, as is one that matches none.
+/// one session is refused, as is one that matches none. A project path is
+/// refused even where one session works there: it names whoever does.
 pub(crate) fn resolve_session(me: &Session, to: &str) -> Result<(String, String, String), SendError> {
     let to = to.trim();
+    if is_project_path(to) {
+        return Err(SendError::ProjectPath { path: to.to_string() });
+    }
     match resolve_recipient(me, to)? {
         Dest::Sessions { cwd, ids } if ids.len() == 1 => {
             let name = live_sessions().into_iter().find(|s| s.id == ids[0]).map_or_else(|| ids[0].clone(), |s| s.name);
