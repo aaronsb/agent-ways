@@ -949,12 +949,16 @@ pub fn briefings(base: &Path, member: &str) -> Vec<(String, std::time::SystemTim
 /// a human's attend-chat touches the username heartbeat on its refresh tick
 /// (ADR-170). So does a listening session whose recorded Claude Code process
 /// still runs on this host (ADR-129, addendum of 2026-10-13), so a member
-/// through a long turn is not pruned.
+/// through a long turn is not pruned. An earlier id that such a session's
+/// record names counts too ([`attend_presence::enrollment::carried_to_live`]):
+/// a `/clear`'s move carries the enrollment before it renames the
+/// memberships, and a sweep between the two would drop the membership the
+/// rename then has nothing to move of.
 ///
 /// A Claude process that never listened is not consulted: with nothing
 /// to deliver to it, for cleanup purposes it is as good as a dead claude.
 pub fn member_alive(member_id: &str) -> bool {
-    attend_presence::alive(member_id, &std::collections::HashSet::new())
+    attend_presence::alive(member_id, &std::collections::HashSet::new()) || attend_presence::enrollment::carried_to_live(member_id)
 }
 
 // ── Minimal YAML parser/serializer ─────────────────────────────
