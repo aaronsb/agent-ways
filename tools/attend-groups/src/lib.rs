@@ -630,32 +630,57 @@ impl Groups {
     ///
     /// A reserved name (`open`, `broadcast`) can never be a group, so an
     /// `@open/` or `@broadcast/` dir is an orphan and is swept like one.
+    ///
+    /// A member dropped from its last channel loses the enrollment an add
+    /// gave it (ADR-404 D1).
     pub fn cleanup_stale(&self) {
-        self.cleanup_stale_with(member_alive, attend_presence::heartbeat::DEFAULT_GRACE);
+        for member in self.cleanup_stale_with(member_alive, attend_presence::heartbeat::DEFAULT_GRACE) {
+            self.when_in_no_channel(&member, || {
+                attend_presence::enrollment::withdraw(&member, attend_presence::enrollment::Source::Add).ok();
+            });
+        }
         self.prune_records_with(attend_presence::has_exited);
+    }
+
+    /// Run `settle` under the channels lock when `member` is in no channel.
+    /// An add records its enrollment under the same lock, so none lands
+    /// between the check and `settle`. Returns whether it ran: not for a
+    /// member in a channel, nor when the lock was not taken in time.
+    pub fn when_in_no_channel(&self, member: &str, settle: impl FnOnce()) -> bool {
+        let Ok(_lock) = self.lock_state() else { return false };
+        if self.load_state().values().any(|e| e.members.iter().any(|m| m == member)) {
+            return false;
+        }
+        settle();
+        true
     }
 
     /// [`Groups::cleanup_stale`] with an injectable liveness predicate
     /// and orphan-age grace, so tests can drive both passes without a
-    /// heartbeat sidecar or mtime manipulation.
+    /// heartbeat sidecar or mtime manipulation. Returns the members it
+    /// dropped from a channel.
     pub fn cleanup_stale_with<F: Fn(&str) -> bool>(
         &self,
         is_live: F,
         orphan_grace: std::time::Duration,
-    ) {
-        let Ok(_lock) = self.lock_state() else { return };
+    ) -> Vec<String> {
+        let Ok(_lock) = self.lock_state() else { return Vec::new() };
         let mut state = self.load_state();
-        let mut changed = false;
+        let mut dropped: Vec<String> = Vec::new();
 
         for entry in state.values_mut() {
-            let before = entry.members.len();
-            entry.members.retain(|sid| is_live(sid));
-            if entry.members.len() != before {
-                changed = true;
-            }
+            entry.members.retain(|sid| {
+                let live = is_live(sid);
+                if !live {
+                    dropped.push(sid.clone());
+                }
+                live
+            });
         }
+        dropped.sort();
+        dropped.dedup();
 
-        if changed {
+        if !dropped.is_empty() {
             self.save_state(&state);
         }
 
@@ -683,7 +708,7 @@ impl Groups {
         // Orphan-dir sweep: on-disk `@name/` dirs the yaml doesn't
         // know about, aged past the grace window.
         let Ok(entries) = fs::read_dir(&self.base) else {
-            return;
+            return dropped;
         };
         for entry in entries.filter_map(|e| e.ok()) {
             let name = entry.file_name().to_string_lossy().to_string();
@@ -707,6 +732,7 @@ impl Groups {
             }
             fs::remove_dir_all(&path).ok();
         }
+        dropped
     }
 
     // ── State persistence ──────────────────────────────────────

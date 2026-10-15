@@ -41,7 +41,7 @@ fn settle_scene_enrollment(ident: &Session, name: &str, groups: &crate::groups::
         crate::util::enroll_by_join(ident);
         return;
     }
-    crate::util::settle_join_enrollment(ident, groups);
+    crate::util::settle_channel_enrollment(ident, groups);
     if name == "private" && ident.resolved() {
         attend_presence::enrollment::opt_out(&ident.session_id).ok();
     }

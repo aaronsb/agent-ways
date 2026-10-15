@@ -65,7 +65,7 @@ pub fn join(name: &str, pin: bool) -> Result<Joined, JoinError> {
     match r.join(name, pin) {
         Ok(()) => Ok(Joined { name: name.to_string(), pinned: pin, note, you_are: crate::util::you_are(&me) }),
         Err(message) => {
-            crate::util::settle_join_enrollment(&me, &r);
+            crate::util::settle_channel_enrollment(&me, &r);
             Err(JoinError::WriteFailed { message })
         }
     }
@@ -165,7 +165,7 @@ pub fn leave(name: &str) -> Left {
         return Left { name: name.to_string(), was_member: false };
     }
     r.leave(name).ok();
-    crate::util::settle_join_enrollment(&me, &r);
+    crate::util::settle_channel_enrollment(&me, &r);
     Left { name: name.to_string(), was_member: true }
 }
 

@@ -744,7 +744,7 @@ pub fn kick_member(g: &str, id: &str, label: &str, root: Option<&str>) -> EnterA
     if g == BASE_CHANNEL_NAME {
         return EnterAction::StatusOnly("#open is the base channel — you can't kick from it".into());
     }
-    let action = kick_member_in(&signals_base(), g, id, label);
+    let action = kick_member_in(&attend_membership::Bus::here().waiting_at_most(GROUPS_LOCK_WAIT), g, id, label);
     if let (EnterAction::ClearWithStatus(_), Some(root)) = (&action, root) {
         let notice = format!(
             "you were removed from #{g} by the operator — rejoin with attend_join, or: attend channel join {g}"
@@ -754,19 +754,19 @@ pub fn kick_member(g: &str, id: &str, label: &str, root: Option<&str>) -> EnterA
     action
 }
 
-/// Filesystem-effect core of `/kick`, parameterized on the base dir
-/// so tests can drive it against a tempdir. `Groups::kick` owns the
-/// state change and its precise error strings (unknown group,
-/// non-member); the acting member id is irrelevant — kick targets
-/// someone else's entry. `label` is the target's display name for
-/// the status line (session ids don't belong in the status row).
+/// Filesystem-effect core of `/kick`, parameterized on the bus so tests
+/// can drive it against a tempdir. `attend_membership::remove` owns the
+/// state change, the add's enrollment it withdraws, and the precise error
+/// strings (unknown group, non-member); the acting member id is irrelevant
+/// — kick targets someone else's entry. `label` is the target's display
+/// name for the status line (session ids don't belong in the status row).
 fn kick_member_in(
-    base: &std::path::Path,
+    bus: &attend_membership::Bus,
     name: &str,
     member_id: &str,
     label: &str,
 ) -> EnterAction {
-    match writing_groups(base, "").kick(name, member_id) {
+    match attend_membership::remove(bus, "", name, member_id) {
         Ok(()) => EnterAction::ClearWithStatus(format!("kicked @{label} from #{name}")),
         Err(e) => EnterAction::StatusOnly(format!("/kick: {e}")),
     }
@@ -1108,6 +1108,16 @@ mod tests {
         crate::test_dir::unique("keys")
     }
 
+    /// The bus under a test's signals `base`.
+    fn bus_at(base: &std::path::Path) -> attend_membership::Bus {
+        attend_membership::Bus {
+            signals: base.to_path_buf(),
+            state: base.join("state"),
+            enrolled: base.join("enrolled"),
+            lock_wait: Some(GROUPS_LOCK_WAIT),
+        }
+    }
+
     #[test]
     fn join_group_creates_membership_and_clears_input() {
         let base = tempdir_like();
@@ -1259,7 +1269,7 @@ mod tests {
         attend_groups::Groups::new(&base, "sess-a")
             .join("deploy", false)
             .unwrap();
-        match kick_member_in(&base, "deploy", "sess-a", "Tamsin-alpha") {
+        match kick_member_in(&bus_at(&base), "deploy", "sess-a", "Tamsin-alpha") {
             EnterAction::ClearWithStatus(s) => {
                 assert!(s.contains("kicked @Tamsin-alpha from #deploy"), "got: {s}")
             }
@@ -1274,7 +1284,7 @@ mod tests {
     fn kick_unknown_group_and_nonmember_surface_kick_errors() {
         let base = tempdir_like();
         // Unknown group: Groups::kick's own error string passes through.
-        match kick_member_in(&base, "ghost", "sess-a", "Cleo") {
+        match kick_member_in(&bus_at(&base), "ghost", "sess-a", "Cleo") {
             EnterAction::StatusOnly(s) => assert!(s.contains("unknown group"), "got: {s}"),
             _ => panic!("unknown group should keep input with status"),
         }
@@ -1282,7 +1292,7 @@ mod tests {
         attend_groups::Groups::new(&base, "someone-else")
             .join("deploy", false)
             .unwrap();
-        match kick_member_in(&base, "deploy", "sess-a", "Cleo") {
+        match kick_member_in(&bus_at(&base), "deploy", "sess-a", "Cleo") {
             EnterAction::StatusOnly(s) => assert!(s.contains("not a member"), "got: {s}"),
             _ => panic!("non-member kick should keep input with status"),
         }
@@ -1312,7 +1322,7 @@ mod tests {
         attend_groups::Groups::new(&base, "somebody")
             .join("ops", false)
             .unwrap();
-        match kick_member_in(&base, "ops", "somebody", "somebody") {
+        match kick_member_in(&bus_at(&base), "ops", "somebody", "somebody") {
             EnterAction::ClearWithStatus(s) => {
                 assert!(s.contains("kicked @somebody from #ops"), "got: {s}")
             }

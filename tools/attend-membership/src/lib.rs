@@ -266,6 +266,19 @@ pub fn add(bus: &Bus, actor: &Actor, channel: &str, target: Target) -> Result<Ad
     Ok(Added { told, to_read: split.kept, held })
 }
 
+/// Remove `member` from `channel` as `by` (the operator's `/kick`,
+/// ADR-173): unilateral, since it only reduces the member's reach. A member
+/// left in no channel loses the enrollment an add gave it, so the drain
+/// stops delivering to a session that only an add made listen.
+pub fn remove(bus: &Bus, by: &str, channel: &str, member: &str) -> Result<(), String> {
+    let groups = bus.groups(by);
+    groups.kick(channel.trim_start_matches('#'), member)?;
+    groups.when_in_no_channel(member, || {
+        attend_presence::enrollment::withdraw_in(&bus.enrolled, member, attend_presence::enrollment::Source::Add).ok();
+    });
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

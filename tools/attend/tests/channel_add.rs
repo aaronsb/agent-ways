@@ -21,12 +21,23 @@ fn history(f: &Fixture, n: usize) {
 /// The fixture's session added to `#topic` by the person `aaron`, as
 /// attend-chat's Add agent does it.
 fn added_by_aaron(f: &Fixture) -> attend_membership::Added {
-    let bus = attend_membership::Bus {
+    added_by_aaron_as(f, &f.sid)
+}
+
+/// The fixture's bus.
+fn bus(f: &Fixture) -> attend_membership::Bus {
+    attend_membership::Bus {
         signals: f.signals(),
         state: f.cache().join("state"),
         enrolled: f.cache().join("enrolled"),
         lock_wait: None,
-    };
+    }
+}
+
+/// Session `sid`, working at the fixture's origin, added to `#topic` by
+/// `aaron`.
+fn added_by_aaron_as(f: &Fixture, sid: &str) -> attend_membership::Added {
+    let bus = bus(f);
     let actor = attend_membership::Actor {
         member_id: "aaron".into(),
         kind: "human",
@@ -36,7 +47,7 @@ fn added_by_aaron(f: &Fixture) -> attend_membership::Added {
         project: "chat".into(),
         cwd: "/home/aaron".into(),
     };
-    let target = attend_membership::Target { session_id: &f.sid, root: &f.origin };
+    let target = attend_membership::Target { session_id: sid, root: &f.origin };
     attend_membership::add(&bus, &actor, "topic", target).expect("added")
 }
 
@@ -96,6 +107,46 @@ fn a_session_added_after_it_stopped_listening_starts_cold() {
     assert!(drained.contains("briefing 59") && drained.contains("briefing 10"), "{drained}");
     assert!(!drained.contains("briefing 09"), "{drained}");
     assert!(drained.contains("aaron added you to #topic."), "{drained}");
+}
+
+/// An added session that leaves its only channel stops listening: the add
+/// was all that enrolled it, so the drain delivers it nothing more.
+#[test]
+fn an_added_session_that_leaves_its_only_channel_stops_listening() {
+    let f = with_topic("add-then-leave");
+    added_by_aaron(&f);
+    f.drain("plain");
+    f.ok(&["channel", "leave", "topic"]);
+    f.put(&f.project_tray(), "other-project", "project mail after leaving", MINUTE);
+    f.put("_broadcast", "other-open", "open post after leaving", MINUTE);
+    let drained = f.drain("plain");
+    assert!(!drained.contains("after leaving"), "{drained}");
+}
+
+/// The same for an added session removed from its only channel.
+#[test]
+fn an_added_session_removed_from_its_only_channel_stops_listening() {
+    let f = with_topic("add-then-remove");
+    added_by_aaron(&f);
+    f.drain("plain");
+    attend_membership::remove(&bus(&f), "aaron", "topic", &f.sid).unwrap();
+    f.put(&f.project_tray(), "other-project", "project mail after removal", MINUTE);
+    f.put("_broadcast", "other-open", "open post after removal", MINUTE);
+    let drained = f.drain("plain");
+    assert!(!drained.contains("after removal"), "{drained}");
+}
+
+/// An added session the sweep drops from its only channel, its process
+/// gone, loses the add's enrollment with it.
+#[test]
+fn the_sweep_withdraws_the_add_of_a_member_it_drops_from_every_channel() {
+    let f = with_topic("add-then-sweep");
+    let gone = "2f2632d7-3f59-4c24-9aae-00000000dead";
+    added_by_aaron_as(&f, gone);
+    assert!(f.cache().join("enrolled").join(gone).exists());
+    f.ok(&["channel", "list"]);
+    assert!(attend_groups::Groups::new(&f.signals(), "x").members("topic").unwrap_or_default().is_empty());
+    assert!(!f.cache().join("enrolled").join(gone).exists(), "the add's enrollment is withdrawn");
 }
 
 /// Self-joining after an add changes nothing: the session is a member, and

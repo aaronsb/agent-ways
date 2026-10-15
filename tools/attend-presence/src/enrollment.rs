@@ -2,10 +2,12 @@
 //!
 //! A session enrolls by running `attend run` (`/attend`), by joining a
 //! channel, by turning listening on (`attend listen on`, ADR-406), or by
-//! another member adding it to a channel (ADR-404 D1). Enrollment is what the Stop-hook drain delivers to, and it is a
-//! durable fact about the session, kept apart from liveness: a stale
-//! heartbeat, or `cleanup_stale` pruning a channel membership, does not
-//! un-enroll a session. Only an explicit opt-out does.
+//! another member adding it to a channel (ADR-404 D1). Enrollment is what
+//! the Stop-hook drain delivers to, and it is a durable fact about the
+//! session, kept apart from liveness: a stale heartbeat does not un-enroll
+//! a session. An explicit opt-out does, and so does losing the last
+//! channel: the join's and the add's ways are withdrawn when the session
+//! leaves it, is removed from it, or is swept from it.
 //!
 //! The record is `<cache>/enrolled/<session-id>`, one line each for:
 //! - every way the session enrolled (`run`, `join`, `listen`, `add`);
