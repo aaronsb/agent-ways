@@ -195,11 +195,10 @@ pub(crate) fn brief_invited_room(ident: &Session, groups: &groups::Groups, name:
         note = scan.note;
     }
     let dir = groups.group_dir(name);
-    let held = attend_state::cold_start::room_beyond_newest(&dir, attend_state::cold_start::ADDRESSED_MAX);
-    let total = std::fs::read_dir(&dir).map(|d| d.flatten().filter(|e| e.file_name().to_string_lossy().ends_with(".signal")).count()).unwrap_or(0);
-    let held_n = held.len();
-    store.mark_seen(held);
-    let mut line = format!(" (invited: {} earlier message(s) to read", total - held_n);
+    let split = attend_state::cold_start::split_room(&dir, attend_state::cold_start::ADDRESSED_MAX);
+    let held_n = split.held.len();
+    store.mark_seen(split.held);
+    let mut line = format!(" (invited: {} earlier message(s) to read", split.kept);
     if held_n > 0 {
         line += &format!(", {held_n} older not shown");
     }

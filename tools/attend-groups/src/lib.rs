@@ -58,6 +58,30 @@ const GROUP_PREFIX: &str = "@";
 /// limit for another writer's lock.
 pub const BUSY: &str = "channels are busy; try again";
 
+/// Why [`Groups::add`] refused. Nothing was written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AddError {
+    /// No channel by that name: an add makes no channel.
+    UnknownChannel(String),
+    /// The member is in the channel already.
+    AlreadyMember(String),
+    /// A name or id refused, the lock not taken, or the add's own step
+    /// failed.
+    Failed(String),
+}
+
+impl std::fmt::Display for AddError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AddError::UnknownChannel(name) => write!(f, "#{name}: unknown channel"),
+            AddError::AlreadyMember(name) => write!(f, "already in #{name}"),
+            AddError::Failed(e) => f.write_str(e),
+        }
+    }
+}
+
+impl std::error::Error for AddError {}
+
 /// The directory under the signals base that backs `#open`, the base
 /// channel every enrolled member receives (ADR-124).
 pub const BROADCAST_DIR: &str = "_broadcast";
@@ -388,31 +412,54 @@ impl Groups {
     /// Enroll `member` in channel `name` on its behalf (ADR-404 D1's add),
     /// and spend any invitation it had there. The channel must exist: an
     /// add makes no channel. Refused for a member already in it.
-    pub fn add(&self, name: &str, member: &str) -> Result<(), String> {
-        validate_group_name(name)?;
-        validate_member_id(member)?;
-        let _lock = self.lock_state()?;
+    ///
+    /// `admit` runs under the channels lock once the add is sure to be
+    /// written, before the membership is. The caller records there what the
+    /// member is owed: its enrollment and its briefing. The sweep takes the
+    /// same lock, so it never finds the member without them, and an add
+    /// that is refused has written none of them. An `admit` that fails
+    /// leaves the membership unwritten.
+    pub fn add(&self, name: &str, member: &str, admit: impl FnOnce() -> Result<(), String>) -> Result<(), AddError> {
+        validate_group_name(name).map_err(AddError::Failed)?;
+        validate_member_id(member).map_err(AddError::Failed)?;
+        let _lock = self.lock_state().map_err(AddError::Failed)?;
         let mut state = self.load_state();
         let dir = self.group_dir(name);
         if !state.contains_key(name) && !dir.is_dir() {
-            return Err(format!("#{name}: unknown channel"));
+            return Err(AddError::UnknownChannel(name.to_string()));
         }
-        let entry = state.entry(name.to_string()).or_default();
-        if entry.members.iter().any(|m| m == member) {
-            return Err(format!("{member} is already in #{name}"));
+        if state.get(name).is_some_and(|e| e.members.iter().any(|m| m == member)) {
+            return Err(AddError::AlreadyMember(name.to_string()));
         }
-        entry.members.push(member.to_string());
+        fs::create_dir_all(&dir).map_err(|e| AddError::Failed(format!("creating group dir: {e}")))?;
+        admit().map_err(AddError::Failed)?;
+        state.entry(name.to_string()).or_default().members.push(member.to_string());
         self.save_state(&state);
-        fs::create_dir_all(&dir).map_err(|e| format!("creating group dir: {e}"))?;
         fs::remove_file(self.record_path(name, member, INVITE)).ok();
         Ok(())
     }
 
     /// Record that `member`, added to `name` before its cold start has run,
     /// is owed the room's history from before the add: its cold start
-    /// delivers it whatever its age ([`briefings`]).
+    /// delivers it whatever its age ([`briefings`]). The record stays after
+    /// that cold start, until the member leaves or is removed: by then every
+    /// message from before the add is in the member's seen-set, delivered or
+    /// held back, and the seen-set drops a key only when its message is
+    /// gone, so a later cold start finds none of them to deliver.
     pub fn brief(&self, name: &str, member: &str) -> Result<(), String> {
         self.write_record(name, member, BRIEF)
+    }
+
+    /// Whether `member` is owed a briefing in `name`.
+    pub fn is_briefed(&self, name: &str, member: &str) -> bool {
+        validate_group_name(name).is_ok() && self.record_path(name, member, BRIEF).is_file()
+    }
+
+    /// Withdraw `member`'s briefing in `name`, for an add that did not take.
+    pub fn unbrief(&self, name: &str, member: &str) {
+        if validate_group_name(name).is_ok() {
+            fs::remove_file(self.record_path(name, member, BRIEF)).ok();
+        }
     }
 
     /// Remove every invitation and briefing whose member `has_exited` says
@@ -1569,19 +1616,42 @@ mod record_tests {
         let g = Groups::new(&base, "aaron");
         g.create("topic", None).unwrap();
         g.invite("topic", "sess-a").unwrap();
-        g.add("topic", "sess-a").unwrap();
+        g.add("topic", "sess-a", || Ok(())).unwrap();
         assert_eq!(g.members("topic").unwrap(), vec!["sess-a"]);
         assert!(g.invites("topic").is_empty());
-        assert!(g.add("topic", "sess-a").unwrap_err().contains("already in #topic"));
+        assert_eq!(g.add("topic", "sess-a", || Ok(())), Err(AddError::AlreadyMember("topic".into())));
+    }
+
+    /// The add's own step runs only for an add that will be written, and
+    /// one that fails writes no membership.
+    #[test]
+    fn an_adds_admit_step_runs_only_when_it_takes() {
+        let base = scratch::dir("add-admit");
+        let g = Groups::new(&base, "aaron");
+        g.create("topic", None).unwrap();
+        let ran = std::cell::Cell::new(0);
+        let admit = || {
+            ran.set(ran.get() + 1);
+            Ok(())
+        };
+        assert_eq!(g.add("ghost", "sess-a", admit), Err(AddError::UnknownChannel("ghost".into())));
+        assert_eq!(ran.get(), 0, "a refused add admits no one");
+        let failed = g.add("topic", "sess-a", || Err("enrolling failed".into()));
+        assert_eq!(failed, Err(AddError::Failed("enrolling failed".into())));
+        assert!(g.members("topic").unwrap().is_empty(), "a failed admit writes no membership");
+        g.add("topic", "sess-a", admit).unwrap();
+        assert_eq!(ran.get(), 1);
+        assert_eq!(g.add("topic", "sess-a", admit), Err(AddError::AlreadyMember("topic".into())));
+        assert_eq!(ran.get(), 1, "a member already in is not admitted again");
     }
 
     #[test]
     fn an_add_refuses_the_base_channel_and_unknown_ones() {
         let base = scratch::dir("add-refuse");
         let g = Groups::new(&base, "aaron");
-        assert!(g.add("open", "sess-a").is_err());
-        assert!(g.add("ghost", "sess-a").unwrap_err().contains("unknown channel"));
-        assert!(g.add("ghost", "../x").is_err());
+        assert!(g.add("open", "sess-a", || Ok(())).is_err());
+        assert_eq!(g.add("ghost", "sess-a", || Ok(())), Err(AddError::UnknownChannel("ghost".into())));
+        assert!(g.add("ghost", "../x", || Ok(())).is_err());
         assert!(load_groups(&base).is_empty(), "a refused add writes nothing");
         assert!(!base.join("@ghost").exists());
     }
@@ -1591,7 +1661,7 @@ mod record_tests {
         let base = scratch::dir("brief-leave");
         let g = Groups::new(&base, "aaron");
         g.create("topic", None).unwrap();
-        g.add("topic", "sess-a").unwrap();
+        g.add("topic", "sess-a", || Ok(())).unwrap();
         g.brief("topic", "sess-a").unwrap();
         assert_eq!(briefings(&base, "sess-a").len(), 1);
         Groups::new(&base, "sess-a").leave("topic").unwrap();

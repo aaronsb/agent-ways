@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use attend_groups::Groups;
-use attend_state::cold_start::{room_beyond_newest, ADDRESSED_MAX};
+use attend_state::cold_start::{split_room, ADDRESSED_MAX};
 
 /// Where the membership and the seen-sets live.
 #[derive(Debug, Clone)]
@@ -224,45 +224,46 @@ pub fn invite(bus: &Bus, actor: &Actor, channel: &str, target: Target) -> Result
 /// ([`Groups::brief`]). Any invitation it had there is spent.
 pub fn add(bus: &Bus, actor: &Actor, channel: &str, target: Target) -> Result<Added, Refused> {
     let name = checked(bus, channel, target.session_id)?;
+    let sid = target.session_id;
     let groups = bus.groups(&actor.member_id);
     let dir = groups.group_dir(name);
-    let held = room_beyond_newest(&dir, ADDRESSED_MAX);
-    let total = std::fs::read_dir(&dir)
-        .map(|d| d.flatten().filter(|e| e.file_name().to_string_lossy().ends_with(".signal")).count())
-        .unwrap_or(0);
-    let store = attend_state::StateStore::new_in(bus.state.clone(), Some(target.session_id.to_string()))
-        .with_signals_base(bus.signals.clone());
+    let split = split_room(&dir, ADDRESSED_MAX);
+    let store = attend_state::StateStore::new_in(bus.state.clone(), Some(sid.to_string())).with_signals_base(bus.signals.clone());
     // A session that listened and then stopped is still baselined, and its
     // seen-set ends where it stopped. Enrolled again, it starts cold, as a
     // session that turns listening back on does, so it is not handed every
     // message the rooms carried since.
-    let was_enrolled = attend_presence::enrollment::is_enrolled_in(&bus.enrolled, target.session_id);
-    if !was_enrolled {
+    let was_enrolled = attend_presence::enrollment::is_enrolled_in(&bus.enrolled, sid);
+    let baselined = store.load().is_some_and(|s| s.baselined);
+    if baselined && !was_enrolled {
         store.reopen_cold_start();
     }
-    let warm = was_enrolled && store.load().is_some_and(|s| s.baselined);
-    let held_n = held.len();
-    store.mark_seen(held);
-    if !warm {
-        groups.brief(name, target.session_id).map_err(Refused::Failed)?;
-    }
-    // Enrolled first, as a join is, so the sweep never finds a member that
-    // is not enrolled; an add that does not take withdraws it.
-    let claude = attend_presence::session::claude_key_of(target.session_id);
-    let gained = attend_presence::enrollment::enroll_added_in(&bus.enrolled, target.session_id, claude)
-        .map_err(|e| Refused::Failed(format!("enrolling {}: {e}", target.session_id)))?;
-    groups.add(name, target.session_id).map_err(|e| {
-        if gained {
-            attend_presence::enrollment::withdraw_added_in(&bus.enrolled, target.session_id).ok();
+    let warm = baselined && was_enrolled;
+    let held = split.held.len();
+    store.mark_seen(split.held);
+    let claude = attend_presence::session::claude_key_of(sid);
+    // Under the channels lock, once the add is sure to be written: the
+    // briefing, then the enrollment, so the sweep never finds the member
+    // without them and a refused add leaves neither.
+    let admit = || {
+        let briefed = !warm && !groups.is_briefed(name, sid);
+        if !warm {
+            groups.brief(name, sid)?;
         }
-        match e {
-            e if e.contains("already in") => Refused::AlreadyMember(name.to_string()),
-            e if e.contains("unknown channel") => Refused::UnknownChannel(name.to_string()),
-            e => Refused::Failed(e),
-        }
+        attend_presence::enrollment::enroll_added_in(&bus.enrolled, sid, claude).map_err(|e| {
+            if briefed {
+                groups.unbrief(name, sid);
+            }
+            format!("enrolling {sid}: {e}")
+        })
+    };
+    groups.add(name, sid, admit).map_err(|e| match e {
+        attend_groups::AddError::UnknownChannel(c) => Refused::UnknownChannel(c),
+        attend_groups::AddError::AlreadyMember(c) => Refused::AlreadyMember(c),
+        attend_groups::AddError::Failed(e) => Refused::Failed(e),
     })?;
     let told = tell(bus, actor, target, &add_body(&actor.name, name, &dir));
-    Ok(Added { told, to_read: total - held_n, held: held_n })
+    Ok(Added { told, to_read: split.kept, held })
 }
 
 #[cfg(test)]
@@ -436,5 +437,44 @@ mod tests {
             assert_eq!(briefed.len(), usize::from(!warm), "warm={warm}: only a cold member is owed a briefing");
             assert_eq!(store.load().unwrap().baselined, warm, "the add runs no cold start");
         }
+    }
+
+    /// Two adds of one session race: the first is under way when the
+    /// second lands, enrollment and membership both, and the first is then
+    /// refused. The refusal leaves the second add's enrollment standing.
+    #[test]
+    fn a_refused_add_leaves_another_adds_enrollment() {
+        let (_s, bus) = scratch("race");
+        bus.groups("aaron").create("topic", None).unwrap();
+        let state_path = bus.signals.join("_groups.yaml");
+        let held = agent_settings::writer::Lock::acquire(&state_path).unwrap();
+        let first = {
+            let bus = bus.clone();
+            std::thread::spawn(move || add(&bus, &aaron(), "topic", target()))
+        };
+        // The first add waits for the lock; let it get as far as it goes.
+        let start = std::time::Instant::now();
+        while !bus.enrolled.join(SID).exists() && start.elapsed() < Duration::from_millis(500) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        attend_presence::enrollment::enroll_added_in(&bus.enrolled, SID, None).unwrap();
+        let mut state = attend_groups::load_groups(&bus.signals);
+        state.get_mut("topic").unwrap().members.push(SID.into());
+        std::fs::write(&state_path, attend_groups::serialize_groups_yaml(&state)).unwrap();
+        drop(held);
+        assert_eq!(first.join().unwrap(), Err(Refused::AlreadyMember("topic".into())));
+        assert!(attend_presence::enrollment::is_enrolled_in(&bus.enrolled, SID), "the second add's enrollment stands");
+    }
+
+    /// An add that fails after it began leaves no briefing behind.
+    #[test]
+    fn a_failed_add_leaves_no_briefing() {
+        let (_s, bus) = scratch("no-brief");
+        bus.groups("aaron").create("topic", None).unwrap();
+        // A file where the enrollment records go: enrolling fails.
+        std::fs::write(&bus.enrolled, "").unwrap();
+        assert!(matches!(add(&bus, &aaron(), "topic", target()), Err(Refused::Failed(_))));
+        assert!(attend_groups::briefings(&bus.signals, SID).is_empty(), "no briefing is left");
+        assert!(bus.groups("x").members("topic").unwrap().is_empty());
     }
 }

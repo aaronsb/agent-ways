@@ -15,3 +15,6 @@ attend-groups = { path = "../attend-groups" }
 attend-presence = { path = "../attend-presence" }
 attend-state = { path = "../attend-state" }
 claude-sessions = { path = "../claude-sessions" }
+
+[dev-dependencies]
+agent-settings = { path = "../agent-settings" }

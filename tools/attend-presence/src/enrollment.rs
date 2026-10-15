@@ -325,12 +325,9 @@ pub fn enroll(session_id: &str, source: Source, host: Option<Host>) -> io::Resul
 /// other than the caller, so the Claude Code process recorded is the
 /// session's own, `claude` ([`crate::session::claude_key_of`]); with none,
 /// the record names no process and the session's liveness rests on its
-/// heartbeat. Returns whether the record gained the way: `false` when an
-/// earlier add had recorded it already.
-pub fn enroll_added_in(dir: &Path, session_id: &str, claude: Option<String>) -> io::Result<bool> {
-    let had = read_in(dir, session_id).is_some_and(|r| r.sources.contains(&Source::Add));
-    enroll_in(dir, session_id, Source::Add, None, claude)?;
-    Ok(!had)
+/// heartbeat.
+pub fn enroll_added_in(dir: &Path, session_id: &str, claude: Option<String>) -> io::Result<()> {
+    enroll_in(dir, session_id, Source::Add, None, claude)
 }
 
 /// Whether `session_id` is enrolled under the records in `dir`
@@ -342,11 +339,9 @@ pub fn is_enrolled_in(dir: &Path, session_id: &str) -> bool {
     !(record.optout && !crate::heartbeat::run_is_live(session_id))
 }
 
-/// Withdraw an add's enrollment under `dir`, for an add whose membership did
-/// not take and whose [`enroll_added_in`] gained the way. The session stays
-/// enrolled while another way remains.
-pub fn withdraw_added_in(dir: &Path, session_id: &str) -> io::Result<()> {
-    edit_in(dir, session_id, |r| r.sources.retain(|s| *s != Source::Add))
+/// [`withdraw`] under the records in `dir` ([`records_dir`]).
+pub fn withdraw_in(dir: &Path, session_id: &str, source: Source) -> io::Result<()> {
+    edit_in(dir, session_id, |r| r.sources.retain(|s| *s != source))
 }
 
 fn enroll_in(dir: &Path, session_id: &str, source: Source, host: Option<Host>, claude: Option<String>) -> io::Result<()> {
@@ -395,7 +390,7 @@ pub fn host(session_id: &str) -> Option<Host> {
 /// Withdraw one way `session_id` enrolled. The session stays enrolled while
 /// another way remains.
 pub fn withdraw(session_id: &str, source: Source) -> io::Result<()> {
-    edit(session_id, |r| r.sources.retain(|s| *s != source))
+    withdraw_in(&dir(), session_id, source)
 }
 
 /// `attend channel scene private` and `attend listen off`: the explicit opt-out.
@@ -536,20 +531,20 @@ mod tests {
     }
 
     /// An add records the added session's own Claude Code process, not the
-    /// caller's, under the directory it is given, and gains the way once.
+    /// caller's, under the directory it is given.
     #[test]
     fn an_add_enrolls_another_session_under_its_own_process() {
         let exe = std::env::current_exe().unwrap();
         let dir = exe.parent().and_then(Path::parent).unwrap().join("test-scratch").join(format!("attend-enrol-add-{}", std::process::id()));
         fs::remove_dir_all(&dir).ok();
         let key = "4242-1700000000@elsewhere".to_string();
-        assert!(enroll_added_in(&dir, "s", Some(key.clone())).unwrap(), "the first add gains the way");
-        assert!(!enroll_added_in(&dir, "s", Some(key.clone())).unwrap(), "a second add finds it");
+        enroll_added_in(&dir, "s", Some(key.clone())).unwrap();
+        enroll_added_in(&dir, "s", Some(key.clone())).unwrap();
         let r = read_in(&dir, "s").unwrap();
         assert_eq!((r.sources, r.claude.as_deref()), (vec![Source::Add], Some(key.as_str())));
         assert!(r.since.is_some(), "the session starts listening at the add");
         assert_eq!(fs::read_to_string(dir.join("by-claude").join("4242-1700000000")).unwrap(), "s");
-        withdraw_added_in(&dir, "s").unwrap();
+        withdraw_in(&dir, "s", Source::Add).unwrap();
         let gone = !dir.join("s").exists();
         fs::remove_dir_all(&dir).ok();
         assert!(gone, "a record with no way left is removed");

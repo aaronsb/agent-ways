@@ -246,6 +246,7 @@ name = "attend-membership"
 version = "0.1.0"
 dependencies = [
  "agent-identity",
+ "agent-settings",
  "attend-groups",
  "attend-presence",
  "attend-state",

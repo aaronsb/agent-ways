@@ -178,11 +178,22 @@ pub fn room_backlog(dir: &Path) -> Vec<String> {
     keys
 }
 
-/// The seen-set keys of a room's signals beyond the newest `keep`, by age:
-/// what an invited session's join holds back of the room's history, so the
-/// briefing it is handed is capped as addressed mail is ([`ADDRESSED_MAX`]).
-pub fn room_beyond_newest(dir: &Path, keep: usize) -> Vec<String> {
-    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+/// A room's history split at its newest messages, from one read of its
+/// directory.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct RoomSplit {
+    /// How many of the newest are kept to read.
+    pub kept: usize,
+    /// The seen-set keys of the rest, sorted.
+    pub held: Vec<String>,
+}
+
+/// A room's signals split by age at the newest `keep`: what an invited or
+/// added session is handed of the room's history to read, and what it holds
+/// back, so the briefing is capped as addressed mail is ([`ADDRESSED_MAX`]).
+/// Empty when the directory cannot be read.
+pub fn split_room(dir: &Path, keep: usize) -> RoomSplit {
+    let Ok(entries) = std::fs::read_dir(dir) else { return RoomSplit::default() };
     let mut aged: Vec<(Duration, String)> = entries
         .flatten()
         .filter_map(|e| {
@@ -196,9 +207,10 @@ pub fn room_beyond_newest(dir: &Path, keep: usize) -> Vec<String> {
         .collect();
     // Newest first; everything after the first `keep` is held back.
     aged.sort();
-    let mut out: Vec<String> = aged.into_iter().skip(keep).map(|(_, k)| k).collect();
-    out.sort();
-    out
+    let kept = aged.len().min(keep);
+    let mut held: Vec<String> = aged.into_iter().skip(keep).map(|(_, k)| k).collect();
+    held.sort();
+    RoomSplit { kept, held }
 }
 
 #[cfg(test)]
@@ -214,8 +226,8 @@ mod tests {
             let f = std::fs::File::create(dir.join(name)).unwrap();
             f.set_modified(now - Duration::from_secs(mins * 60)).unwrap();
         }
-        assert_eq!(room_beyond_newest(&dir, 2), vec!["a.signal".to_string()]);
-        assert!(room_beyond_newest(&dir, 50).is_empty());
+        assert_eq!(split_room(&dir, 2), RoomSplit { kept: 2, held: vec!["a.signal".to_string()] });
+        assert_eq!(split_room(&dir, 50), RoomSplit { kept: 3, held: vec![] });
         std::fs::remove_dir_all(&dir).ok();
     }
 
