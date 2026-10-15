@@ -138,14 +138,14 @@ pub struct Added {
 /// Channel `channel`, as a name an add or an invitation can take: the
 /// leading `#` dropped, `#open` and unknown channels refused, and a member
 /// already in it refused. A `member` that is not a member id is refused
-/// first, before its id names any file.
+/// before its id names any file.
 fn checked<'a>(bus: &Bus, channel: &'a str, member: &str) -> Result<&'a str, Refused> {
-    attend_groups::validate_member_id(member).map_err(Refused::Failed)?;
     let name = channel.trim_start_matches('#');
     if name == attend_groups::BASE_CHANNEL {
         return Err(Refused::BaseChannel);
     }
     attend_groups::validate_group_name(name).map_err(Refused::Failed)?;
+    attend_groups::validate_member_id(member).map_err(Refused::Failed)?;
     let state = attend_groups::load_groups(&bus.signals);
     let Some(entry) = state.get(name).cloned().or_else(|| {
         bus.signals.join(format!("@{name}")).is_dir().then(Default::default)
