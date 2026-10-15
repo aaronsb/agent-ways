@@ -22,6 +22,11 @@
 //!   any case.
 //! - Where a record gives no time, the room is judged by [`FRESH_WINDOW`]
 //!   alone.
+//! - **A briefing**: a channel the session was added to before this cold
+//!   start ran (ADR-404 D1, `attend_groups::Groups::brief`). Its messages
+//!   from before the add are delivered whatever their age, the newest
+//!   [`ADDRESSED_MAX`], as a join answering an invitation keeps them;
+//!   those after the add are judged as any channel's.
 //!
 //! Anything else is backlog: marked seen without being shown, and counted.
 //! The count goes out once, as [`Plan::note`], with the first delivery, so
@@ -52,7 +57,7 @@ pub const ADDRESSED_MAX: usize = 50;
 pub const ROOM_MAX: usize = 50;
 
 /// How far back a cold start replays, from the session's own records.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Window {
     /// How long ago the session's Claude Code process started: addressed
     /// mail no older was addressed to it.
@@ -60,12 +65,15 @@ pub struct Window {
     /// How long ago it started listening: `#open` and channel messages no
     /// older were said while it was a member.
     pub listening: Option<Duration>,
+    /// The channels it was added to and owes a briefing, each with how
+    /// long ago the add was.
+    pub briefings: Vec<(String, Duration)>,
 }
 
 impl Window {
     /// The window for session `session_id`: its process start from its
     /// Claude Code session record, its listening start from its enrollment
-    /// record. A `/clear` or a resume keeps the seen-set (it moves with the
+    /// record, its briefings from the records adds left beside the rooms. A `/clear` or a resume keeps the seen-set (it moves with the
     /// id), so the cold start this serves is a new session's, or one that
     /// turns listening back on.
     pub fn for_session(session_id: &str) -> Self {
@@ -73,11 +81,25 @@ impl Window {
         Window {
             session: attend_presence::session::started_at(session_id).map(ago),
             listening: attend_presence::enrollment::listening_since(session_id).map(ago),
+            briefings: attend_groups::briefings(&attend_presence::cache::signals_dir(), session_id)
+                .into_iter()
+                .map(|(channel, at)| (channel, ago(at)))
+                .collect(),
         }
+    }
+
+    /// Whether a message of `age` in `room` is part of a briefing: posted in
+    /// a channel the session was added to, before the add.
+    fn briefs(&self, room: &Room, age: Duration) -> bool {
+        let Room::Channel(name) = room else { return false };
+        self.briefings.iter().any(|(channel, ago)| channel == name && age >= *ago)
     }
 
     /// Whether a message of `age` in `room` was said to the session.
     fn reaches(&self, room: &Room, age: Duration) -> bool {
+        if self.briefs(room, age) {
+            return true;
+        }
         match (room, self.session, self.listening) {
             (Room::Project, Some(began), _) => age <= began,
             (Room::Project, None, _) | (_, _, None) => age <= FRESH_WINDOW,
@@ -115,12 +137,17 @@ pub fn held_back_note(n: usize) -> Option<String> {
 
 /// Apply the rule to the pending messages from other senders, each given by
 /// its room and age, over the session's `window`.
-pub fn plan(pending: &[(&Room, Duration)], window: Window) -> Plan {
+pub fn plan(pending: &[(&Room, Duration)], window: &Window) -> Plan {
     let mut deliver: Vec<bool> = pending.iter().map(|(room, age)| window.reaches(room, *age)).collect();
-    // Beyond the newest of each kind, a message is counted, not shown.
-    for (addressed, max) in [(true, ADDRESSED_MAX), (false, ROOM_MAX)] {
-        let mut kind: Vec<usize> =
-            (0..pending.len()).filter(|&i| deliver[i] && matches!(pending[i].0, Room::Project) == addressed).collect();
+    // Beyond the newest of each kind, a message is counted, not shown: the
+    // addressed, the briefings, and the rest of the rooms.
+    let kind_of = |(room, age): &(&Room, Duration)| match room {
+        Room::Project => 0,
+        _ if window.briefs(room, *age) => 1,
+        _ => 2,
+    };
+    for (k, max) in [(0, ADDRESSED_MAX), (1, ADDRESSED_MAX), (2, ROOM_MAX)] {
+        let mut kind: Vec<usize> = (0..pending.len()).filter(|&i| deliver[i] && kind_of(&pending[i]) == k).collect();
         kind.sort_by_key(|&i| pending[i].1);
         for &i in kind.iter().skip(max) {
             deliver[i] = false;
@@ -213,13 +240,13 @@ mod tests {
     /// A session whose process started `session` ago and that has listened
     /// since `listening` ago.
     fn window(session: Option<Duration>, listening: Option<Duration>) -> Window {
-        Window { session, listening }
+        Window { session, listening, ..Default::default() }
     }
 
     #[test]
     fn addressed_mail_since_the_session_began_is_delivered_whatever_its_age() {
         let w = window(Some(11 * HOUR), Some(MINUTE));
-        let p = plan(&[(&Room::Project, 10 * HOUR), (&Room::Open, 10 * HOUR), (&Room::Open, Duration::ZERO)], w);
+        let p = plan(&[(&Room::Project, 10 * HOUR), (&Room::Open, 10 * HOUR), (&Room::Open, Duration::ZERO)], &w);
         assert_eq!(p.deliver, vec![true, false, true]);
         assert_eq!(p.note().as_deref(), Some("1 older message held back; reading it is optional: attend message inbox"));
     }
@@ -229,17 +256,17 @@ mod tests {
     #[test]
     fn addressed_mail_from_before_the_session_began_is_backlog() {
         let w = window(Some(2 * HOUR), Some(2 * HOUR));
-        let p = plan(&[(&Room::Project, 10 * HOUR), (&Room::Project, HOUR), (&Room::Project, Duration::ZERO)], w);
+        let p = plan(&[(&Room::Project, 10 * HOUR), (&Room::Project, HOUR), (&Room::Project, Duration::ZERO)], &w);
         assert_eq!(p.deliver, vec![false, true, true]);
-        let fresh = plan(&[(&Room::Project, FRESH_WINDOW / 2)], window(Some(Duration::from_secs(10)), None));
+        let fresh = plan(&[(&Room::Project, FRESH_WINDOW / 2)], &window(Some(Duration::from_secs(10)), None));
         assert_eq!(fresh.deliver, vec![false], "live a moment before the session began is still before it");
     }
 
     #[test]
     fn with_no_known_time_a_room_is_judged_by_age() {
-        let p = plan(&[(&Room::Project, HOUR), (&Room::Project, FRESH_WINDOW / 2)], Window::default());
+        let p = plan(&[(&Room::Project, HOUR), (&Room::Project, FRESH_WINDOW / 2)], &Window::default());
         assert_eq!(p.deliver, vec![false, true]);
-        let p = plan(&[(&Room::Open, HOUR), (&Room::Open, FRESH_WINDOW / 2)], window(Some(10 * HOUR), None));
+        let p = plan(&[(&Room::Open, HOUR), (&Room::Open, FRESH_WINDOW / 2)], &window(Some(10 * HOUR), None));
         assert_eq!(p.deliver, vec![false, true], "the process start does not reach #open");
     }
 
@@ -250,9 +277,9 @@ mod tests {
     fn room_messages_since_listening_began_are_delivered() {
         let ch = Room::Channel("side".into());
         let w = window(Some(10 * HOUR), Some(10 * MINUTE));
-        let p = plan(&[(&Room::Open, HOUR), (&Room::Open, 8 * MINUTE), (&ch, 3 * FRESH_WINDOW), (&ch, HOUR)], w);
+        let p = plan(&[(&Room::Open, HOUR), (&Room::Open, 8 * MINUTE), (&ch, 3 * FRESH_WINDOW), (&ch, HOUR)], &w);
         assert_eq!(p.deliver, vec![false, true, true, false]);
-        let just = plan(&[(&Room::Open, FRESH_WINDOW / 2)], window(None, Some(Duration::ZERO)));
+        let just = plan(&[(&Room::Open, FRESH_WINDOW / 2)], &window(None, Some(Duration::ZERO)));
         assert_eq!(just.deliver, vec![true], "the fresh window holds whenever listening began");
     }
 
@@ -262,7 +289,7 @@ mod tests {
         let w = window(Some(10 * HOUR), Some(10 * HOUR));
         for room in [Room::Project, Room::Open] {
             let pending: Vec<(&Room, Duration)> = ages.iter().rev().map(|a| (&room, *a)).collect();
-            let p = plan(&pending, w);
+            let p = plan(&pending, &w);
             assert_eq!(p.not_shown, 3, "{room:?}");
             // Input runs oldest first, so the three oldest are the ones held back.
             assert_eq!(p.deliver[..3], [false, false, false]);
@@ -271,9 +298,27 @@ mod tests {
         }
     }
 
+    /// An add before the session's cold start: the channel's history from
+    /// before the add is a briefing, delivered whatever its age, the newest
+    /// [`ADDRESSED_MAX`] of it, beside the newest of the other rooms.
+    #[test]
+    fn an_added_channels_history_from_before_the_add_is_delivered() {
+        let ch = Room::Channel("topic".into());
+        let other = Room::Channel("other".into());
+        let w = Window { briefings: vec![("topic".into(), 30 * MINUTE)], ..window(Some(10 * HOUR), None) };
+        let p = plan(&[(&ch, 5 * HOUR), (&ch, 10 * MINUTE), (&other, 5 * HOUR), (&ch, FRESH_WINDOW / 2)], &w);
+        assert_eq!(p.deliver, vec![true, false, false, true], "after the add, the room is judged as any other");
+
+        let mut pending: Vec<(&Room, Duration)> = (0..ADDRESSED_MAX as u32 + 4).map(|i| (&ch, HOUR + MINUTE * i)).collect();
+        pending.extend((0..ROOM_MAX as u32).map(|_| (&Room::Open, FRESH_WINDOW / 2)));
+        let p = plan(&pending, &w);
+        assert_eq!(p.not_shown, 4, "the briefing has its own cap, and #open keeps its own");
+        assert!(p.deliver[..ADDRESSED_MAX].iter().all(|d| *d), "the newest of the briefing are shown");
+    }
+
     #[test]
     fn nothing_held_back_says_nothing() {
-        assert_eq!(plan(&[], Window::default()).note(), None);
+        assert_eq!(plan(&[], &Window::default()).note(), None);
     }
 }
 

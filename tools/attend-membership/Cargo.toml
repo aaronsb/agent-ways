@@ -1,0 +1,17 @@
+[package]
+name = "attend-membership"
+version = "0.1.0"
+edition = "2021"
+description = "The channel membership one member makes for another: add and invite (ADR-404 D1)"
+license = "AGPL-3.0-or-later"
+
+[lib]
+name = "attend_membership"
+path = "src/lib.rs"
+
+[dependencies]
+agent-identity = { path = "../agent-identity" }
+attend-groups = { path = "../attend-groups" }
+attend-presence = { path = "../attend-presence" }
+attend-state = { path = "../attend-state" }
+claude-sessions = { path = "../claude-sessions" }

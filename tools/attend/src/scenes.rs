@@ -230,6 +230,23 @@ custom:
         let _ = fs::remove_dir_all(&base);
     }
 
+    /// A scene's join answers an invitation as any join does: it is spent.
+    #[test]
+    fn a_scene_join_spends_the_members_invitation() {
+        // Under the build's target dir, which the test binary runs inside.
+        let exe = std::env::current_exe().unwrap();
+        let base = exe.parent().and_then(std::path::Path::parent).unwrap().join("test-scratch").join(format!("attend-scenes-invite-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+        let mut scenes = HashMap::new();
+        scenes.insert("work".to_string(), Scene::new(vec!["deploy".to_string()]));
+        Groups::new(&base, "aaron").invite("deploy", "member-1").unwrap();
+        activate_in(&scenes, "work", &Groups::new(&base, "member-1")).unwrap();
+        let left = Groups::new(&base, "x").invites("deploy");
+        let _ = fs::remove_dir_all(&base);
+        assert!(left.is_empty(), "{left:?}");
+    }
+
     #[test]
     fn test_builtins() {
         let scenes = load_scenes();

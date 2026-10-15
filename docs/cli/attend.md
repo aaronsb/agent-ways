@@ -22,6 +22,7 @@ This document contains the help content for the `attend` command-line program.
 * [`attend channel`↴](#attend-channel)
 * [`attend channel list`↴](#attend-channel-list)
 * [`attend channel join`↴](#attend-channel-join)
+* [`attend channel add`↴](#attend-channel-add)
 * [`attend channel leave`↴](#attend-channel-leave)
 * [`attend channel create`↴](#attend-channel-create)
 * [`attend channel describe`↴](#attend-channel-describe)
@@ -323,6 +324,7 @@ Join, leave, list and manage channels and scenes (default: list)
 
 * `list` — List every channel, marking the ones this session is in
 * `join` — Join a channel (creates it if absent)
+* `add` — Add a session to a channel; it is told, and handed the recent history
 * `leave` — Leave a channel
 * `create` — Create a channel without joining it (pinned so it persists empty)
 * `describe` — Set or replace a channel's single-line description
@@ -365,6 +367,25 @@ Join a channel (creates it if absent)
 ###### **Options:**
 
 * `--pin` — Pin so the channel persists across scene changes
+* `--json` — Print the result as one JSON document
+
+
+
+## `attend channel add`
+
+Add a session to a channel; it is told, and handed the recent history
+
+The session is enrolled with no answer from it (ADR-404 D1), told by a direct message to its project, and handed the newest 50 of the channel's messages to read, as a join answering an invitation is. Any invitation it had there is spent.
+
+**Usage:** `attend channel add [OPTIONS] <MEMBER> [CHANNEL]`
+
+###### **Arguments:**
+
+* `<MEMBER>` — The session to add: its name or id
+* `<CHANNEL>` — Channel name (with or without the # prefix); with none, the one channel this session is in
+
+###### **Options:**
+
 * `--json` — Print the result as one JSON document
 
 

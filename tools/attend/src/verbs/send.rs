@@ -375,6 +375,43 @@ fn resolve_project(me: &Session, path: &str) -> Result<Dest, SendError> {
     })
 }
 
+/// Session `me` as it sends, and as it adds a member (attend-membership).
+/// The wire identity rides its origin path (issue #378), the session
+/// record's, so a stray shell `cd` can't relabel what it sends. An
+/// unresolved session sends as the person at the machine.
+pub(crate) fn actor(me: &Session) -> attend_membership::Actor {
+    let self_id = me.session_resolved.then(|| me.session_id.clone());
+    let (sender_id, source_kind) = agent_identity::signal::identify_sender(self_id.clone());
+    let member_id = self_id.unwrap_or_else(|| agent_identity::sanitize_id_component(&agent_identity::signal::user_name()));
+    attend_membership::Actor {
+        name: crate::util::you_are(me).unwrap_or_else(|| member_id.clone()),
+        member_id,
+        kind: if me.session_resolved { "agent" } else { "human" },
+        from: format!("{source_kind}:{sender_id}"),
+        sender_id,
+        project: agent_identity::signal::project_label(&me.origin_path),
+        cwd: me.origin_path.clone(),
+    }
+}
+
+/// The one live session `to` names, by name or id, as its id, name and
+/// project root. A person, a project path or a name that matches more than
+/// one session is refused, as is one that matches none.
+pub(crate) fn resolve_session(me: &Session, to: &str) -> Result<(String, String, String), SendError> {
+    let to = to.trim();
+    match resolve_recipient(me, to)? {
+        Dest::Sessions { cwd, ids } if ids.len() == 1 => {
+            let name = live_sessions().into_iter().find(|s| s.id == ids[0]).map_or_else(|| ids[0].clone(), |s| s.name);
+            Ok((ids[0].clone(), name, cwd))
+        }
+        Dest::Sessions { ids, .. } => Err(SendError::AmbiguousRecipient { name: to.to_string(), candidates: ids }),
+        _ => Err(SendError::NoRecipient {
+            name: to.to_string(),
+            sessions: live_sessions().into_iter().map(|s| s.name).collect(),
+        }),
+    }
+}
+
 /// Write `req.message` to `dest` as session `me`, threaded under `req.re`.
 fn write(me: &Session, dest: &Dest, req: &SendRequest) -> Result<Sent, SendError> {
     let base = signals_base();
@@ -384,19 +421,12 @@ fn write(me: &Session, dest: &Dest, req: &SendRequest) -> Result<Sent, SendError
         Dest::Sessions { cwd, ids } => (base.join(encode_project(cwd)), "directed", ids.join(",")),
         Dest::Person(member) => (attend_groups::person_dir(&base, member), "directed", member.clone()),
     };
-    // Wire identity rides this cwd (issue #378): the session record's
-    // origin path, so a stray shell `cd` can't relabel our sends.
-    let cwd = &me.origin_path;
-    let self_id = me.session_resolved.then(|| me.session_id.clone());
-    let (sender_id, source_kind) = agent_identity::signal::identify_sender(self_id.clone());
-    let from = format!("{}:{}", source_kind, sender_id);
-    let project = agent_identity::signal::project_label(cwd);
+    let actor = actor(me);
     // The envelope (ADR-401): the sender's kind and canonical id, resolved
     // here, never supplied by the caller, and who the message is for.
-    let from_id = self_id.unwrap_or_else(|| agent_identity::sanitize_id_component(&agent_identity::signal::user_name()));
     let envelope = agent_identity::Envelope {
-        from_kind: Some(if me.session_resolved { "agent" } else { "human" }),
-        from_id: Some(&from_id),
+        from_kind: Some(actor.kind),
+        from_id: Some(&actor.member_id),
         on_behalf_of: None,
         to: Some(&to),
     };
@@ -408,10 +438,11 @@ fn write(me: &Session, dest: &Dest, req: &SendRequest) -> Result<Sent, SendError
     // and break `attend message reply` auto-threading, issue #368) and makes the
     // name collision-proof. The `from` field above keeps the un-normalized
     // identity.
-    let filename = agent_identity::signal_filename(&sender_id);
+    let filename = agent_identity::signal_filename(&actor.sender_id);
     // Wire format (ADR-120, ADR-401): `from|project|cwd|<tags>|message`.
     // attend-chat writes through the same `agent_identity::signal` functions.
-    let content = agent_identity::signal::format_tagged(&from, &project, cwd, &envelope, req.re.as_deref(), &req.message);
+    let content =
+        agent_identity::signal::format_tagged(&actor.from, &actor.project, &actor.cwd, &envelope, req.re.as_deref(), &req.message);
     agent_identity::signal::write_signal_file(&dir, &filename, &content)
         .map_err(|e| SendError::NotWritten { error: format!("{}: {e}", dir.display()) })?;
     let id = filename.trim_end_matches(".signal").to_string();

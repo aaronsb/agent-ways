@@ -1,4 +1,4 @@
-//! `attend channel join` / `leave` / `list` / `dissolve` — channel
+//! `attend channel join` / `add` / `leave` / `list` / `dissolve` — channel
 //! membership, the chat-idiom verbs (ADR-173).
 //!
 //! Storage is untouched by the vocabulary: channels are still `@name/`
@@ -24,6 +24,32 @@ pub(crate) fn cmd_join(name: &str, pin: bool, json: bool) {
                 crate::cmd::print_json_error(&e, &e.to_string());
             }
             eprintln!("[attend] join: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+pub(crate) fn cmd_add(member: &str, channel: Option<&str>, json: bool) {
+    match crate::verbs::channels::add(member, channel) {
+        Ok(a) => {
+            if json {
+                crate::cmd::print_json(&a);
+            } else {
+                let mut note = format!("{} earlier message(s) to read", a.to_read);
+                if a.held > 0 {
+                    note += &format!(", {} older not shown", a.held);
+                }
+                println!("[attend] added {} to #{} ({note})", a.member, a.name);
+            }
+            if let Some(e) = &a.not_told {
+                eprintln!("[attend] add: {} is in #{}, but telling them failed: {e}", a.member, a.name);
+            }
+        }
+        Err(e) => {
+            if json {
+                crate::cmd::print_json_error(&e, &e.to_string());
+            }
+            eprintln!("[attend] add: {e}");
             std::process::exit(1);
         }
     }

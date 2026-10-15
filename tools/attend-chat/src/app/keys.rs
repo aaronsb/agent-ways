@@ -666,44 +666,34 @@ fn run_invite(member: &str, channel: Option<String>, foreground: &Tab) -> EnterA
 }
 
 /// Invite `peer` to channel `g`: the one invitation `/invite` and a menu's
-/// Add agent to chat both send. The peer joins itself, or stays silent.
+/// Add agent to chat both send, through attend-membership as every surface
+/// invites. The peer joins itself, or stays silent. A peer invited already
+/// is not told again.
 pub fn invite_peer(g: &str, peer: &crate::peers::Peer) -> EnterAction {
-    let g = g.to_string();
-    if g == BASE_CHANNEL_NAME {
-        return EnterAction::StatusOnly(
-            "#open is the base channel — everyone is already there".into(),
-        );
-    }
-    // Inviting into a channel that doesn't exist would hand the peer
-    // a join command that mints a brand-new group — more likely a
-    // typo than an intent. `/join` it first.
-    let Some(dir) = resolve_group_dir(&g) else {
-        return EnterAction::StatusOnly(format!("#{g}: unknown channel — /join it first"));
-    };
-    let dest = cwd_dir(&peer.root);
-    let body = invite_body(&g, &dir);
-    match write_signal(&dest, &body, &peer.session_id) {
-        Ok(n) => {
-            // The invitee's join answers this: it keeps the room's recent
-            // history to read rather than holding it back (ADR-404).
-            let _ = attend_groups::Groups::new(&signals_base(), "").invite(&g, &peer.session_id);
-            // The invitation shows as a direct message the person sent.
-            sent(format!("invited @{} to #{g}", peer.display), read_back(&dest, &n).into_iter().collect())
+    let bus = attend_membership::Bus::here().waiting_at_most(GROUPS_LOCK_WAIT);
+    let target = attend_membership::Target { session_id: &peer.session_id, root: &peer.root };
+    match attend_membership::invite(&bus, &crate::signal::actor(), g, target) {
+        // The invitation shows as a direct message the person sent.
+        Ok(attend_membership::Invited { told: Some(t) }) => {
+            sent(format!("invited @{} to #{g}", peer.display), read_back(&t.dir, &t.filename).into_iter().collect())
+        }
+        Ok(attend_membership::Invited { told: None }) => {
+            EnterAction::StatusOnly(format!("@{} is already invited to #{g}", peer.display))
+        }
+        Err(attend_membership::Refused::BaseChannel) => {
+            EnterAction::StatusOnly("#open is the base channel — everyone is already there".into())
+        }
+        // Inviting into a channel that doesn't exist would hand the peer
+        // a join command that mints a brand-new group — more likely a
+        // typo than an intent. `/join` it first.
+        Err(attend_membership::Refused::UnknownChannel(_)) => {
+            EnterAction::StatusOnly(format!("#{g}: unknown channel — /join it first"))
+        }
+        Err(attend_membership::Refused::AlreadyMember(_)) => {
+            EnterAction::StatusOnly(format!("@{} is already in #{g}", peer.display))
         }
         Err(e) => EnterAction::StatusOnly(format!("/invite failed: {e}")),
     }
-}
-
-/// The invitation's text: how to join, and that the channel's recent history
-/// is the invitee's to read only when the channel has any. A join that
-/// answers an invitation keeps that history to read (ADR-404); in an empty
-/// channel there is none, and saying so would send the invitee looking.
-fn invite_body(g: &str, dir: &std::path::Path) -> String {
-    let has_history = std::fs::read_dir(dir)
-        .map(|entries| entries.flatten().any(|e| e.path().extension().is_some_and(|x| x == "signal")))
-        .unwrap_or(false);
-    let history = if has_history { " (its recent history is yours to read)" } else { "" };
-    format!("you're invited to #{g} — join with attend_join, or: attend channel join {g}{history}")
 }
 
 /// `/kick @name [#channel]` — resolve the target, remove them, then
@@ -1094,24 +1084,6 @@ mod tests {
                 _ => panic!("scoped /kick on base channel must reject"),
             }
         }
-    }
-
-    /// The clean-slate test's finding 4: the invitation mentions history to
-    /// read only when the channel holds a message.
-    #[test]
-    fn an_invitation_mentions_history_only_when_the_channel_has_some() {
-        let root = tempdir_like();
-        let dir = root.join("@empty");
-        std::fs::create_dir_all(&dir).unwrap();
-        assert_eq!(invite_body("empty", &dir), "you're invited to #empty — join with attend_join, or: attend channel join empty");
-        std::fs::write(dir.join("notes.txt"), "not a message").unwrap();
-        assert!(!invite_body("empty", &dir).contains("history"), "only a signal is history");
-        std::fs::write(dir.join("peer-1-1.signal"), "claude:peer|x|/tmp/x|said\n").unwrap();
-        assert_eq!(
-            invite_body("empty", &dir),
-            "you're invited to #empty — join with attend_join, or: attend channel join empty (its recent history is yours to read)"
-        );
-        assert!(!invite_body("gone", &dir.join("missing")).contains("history"), "a channel with no directory yet has none");
     }
 
     fn tempdir_like() -> crate::test_dir::TestDir {
