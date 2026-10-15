@@ -92,12 +92,12 @@ impl ChatPane {
                 let shown = [Kind::Dm, Kind::Review].iter().any(|k| tab == k.tab(&member));
                 match how {
                     How::Select { .. } if !shown && self.has_dms(&member) => self.open_dm(member),
-                    _ => self.agent_menu(member, at),
+                    _ => self.agent_menu(member, None, at),
                 }
             }
             Target::Member(channel, member) => {
-                let at = at.or_else(|| self.side_row(&SideHit::Member(channel, member.clone())));
-                self.agent_menu(member, at);
+                let at = at.or_else(|| self.side_row(&SideHit::Member(channel.clone(), member.clone())));
+                self.agent_menu(member, Some(channel), at);
             }
             Target::View(kind, member) => {
                 let shown = self.normal_tab() == kind.tab(&member);

@@ -33,7 +33,8 @@
 //!   picker, `add to channel`, of the channels the agent is not in; the
 //!   pick adds it, as Add agent ▸ does), then for a claude Hide messages here and Delete read messages for
 //!   everyone… on its DMs with the operator, then Remove from #channel
-//!   when the shown channel lists the agent, live or quiet, and last
+//!   when the channel lists the agent, live or quiet: the channel of the
+//!   member row the menu was opened from, else the channel shown; and last
 //!   Tombstone… for a claude that is not live. The operator's own row
 //!   offers Leave #channel in Remove's place: Remove never takes out the
 //!   human at the keyboard, here or in the Remove agent picker.
@@ -238,8 +239,8 @@ pub(super) fn removable(members: Vec<Member>, me: &str) -> Vec<Member> {
 /// hidden (`views`: whether the column lists each); address it, who it is,
 /// add it to a channel; for an agent with DM views, the cleanup items
 /// (`cleanup`: hide, show, delete) on its DMs with the operator; then for the
-/// shown channel that lists it (`listed`), Remove, or Leave on the
-/// operator's own row; last, Tombstone… for an agent that is not live
+/// channel that lists it (`listed`: the member row's, else the one shown),
+/// Remove, or Leave on the operator's own row; last, Tombstone… for an agent that is not live
 /// (`dead`). `add` is why the agent cannot be added to a channel, when it
 /// cannot: Add agent to chat is then set back with the reason.
 pub(super) fn agent_items(name: &str, views: Option<(bool, bool)>, listed: Option<&str>, operator: bool, add: Result<(), String>, cleanup: Vec<Item>, dead: bool) -> Vec<Item> {
@@ -568,17 +569,20 @@ impl ChatPane {
     /// The menu of an agent's row in the left column, the agent named by
     /// its membership id: two agents can share a name, never an id. It
     /// docks under `at` when given (a sender's name), else under the row.
-    pub(super) fn agent_menu(&mut self, member: String, at: Option<Rect>) {
+    /// Remove (or Leave) is for `channel`, the channel of the member row
+    /// the menu was opened from, else for the channel shown.
+    pub(super) fn agent_menu(&mut self, member: String, channel: Option<String>, at: Option<Rect>) {
         self.dirty = true;
         let Some(s) = self.seen_member(&member) else {
             return self.say("that agent is not in the column any more", true);
         };
         let name = s.identity.nickname.clone();
         let me = crate::signal::human_member_id();
-        let listed = match self.normal_tab() {
-            Tab::Channel(c) => self.channel_members(&c).into_iter().find(|m| m.id == member).map(|m| (c, m)),
+        let channel = channel.or_else(|| match self.normal_tab() {
+            Tab::Channel(c) => Some(c),
             Tab::Merged | Tab::Dm(_) | Tab::Review(_) => None,
-        };
+        });
+        let listed = channel.and_then(|c| self.channel_members(&c).into_iter().find(|m| m.id == member).map(|m| (c, m)));
         let add = self.can_add(&s);
         let views = self.has_dms(&member).then(|| (self.lists(Kind::Dm, &member), self.lists(Kind::Review, &member)));
         let mut cleanup = self.hide_items(&Tab::Dm(member.clone()));
@@ -1236,14 +1240,14 @@ mod tests {
     #[test]
     fn an_agent_row_is_found_by_its_id_when_two_share_a_name() {
         let mut c = pane_with(vec![seen("Ada", "s1", false, true), seen("Ada", "s2", false, true)]);
-        c.agent_menu("s2".into(), None);
+        c.agent_menu("s2".into(), None, None);
         match c.to_open.take() {
             Some(Open::Pick { id, title, .. }) => assert_eq!((id.as_str(), title.as_str()), ("agent:s2", "@Ada")),
             other => panic!("no menu: {other:?}"),
         }
         c.menu_picked("agent:s2", WHO);
         assert!(c.status.contains("session s2"), "who is the row picked, not the first of its name: {}", c.status);
-        c.agent_menu("gone".into(), None);
+        c.agent_menu("gone".into(), None, None);
         assert!(c.to_open.is_none() && c.status_is_error, "a row gone since is said, not guessed");
     }
 }

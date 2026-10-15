@@ -178,6 +178,22 @@ fn an_invitation_to_a_session_that_has_gone_is_pruned_and_not_listed() {
     assert!(!invite.exists(), "the invitation is pruned");
 }
 
+/// A member row's menu removes the agent from the row's own channel,
+/// whichever channel is shown.
+#[test]
+fn a_member_rows_remove_is_for_its_own_channel() {
+    let mut c = chat(true);
+    let beta = name("beta");
+    testkit::render_screen(&mut c, W, H);
+    testkit::drive(&mut c, &[KeyEvent::new(KeyCode::Char('3'), KeyModifiers::CONTROL)]);
+    assert_eq!(c.foreground(), &attend_chat::tabs::Tab::Channel("infra".into()));
+    let at = member_cell(&mut c, "deploy", &beta);
+    click(&mut c, at, MouseButton::Left);
+    let items = picker(&mut c, &format!("@{beta}"));
+    assert!(items.iter().any(|i| i == "Remove from #deploy"), "{items:#?}");
+    assert!(!items.iter().any(|i| i == "Remove from #infra"), "{items:#?}");
+}
+
 #[test]
 fn add_offers_invited_agents_and_invite_leaves_them_out() {
     let mut c = chat(true);
