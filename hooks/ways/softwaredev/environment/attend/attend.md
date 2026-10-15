@@ -91,6 +91,7 @@ A private channel suits long-running coordinated work (ADR-173). `attend_join` e
 ```bash
 attend channel join deploy                         # join a named channel
 attend message send --channel deploy "message"     # post in that channel only
+attend channel add Chaucer-beta deploy             # add a session to a channel; it is told and handed the recent history
 attend channel leave deploy                        # leave
 attend channel scene private                       # leave all channels
 attend channel                                     # all channels and their members, joined ones marked

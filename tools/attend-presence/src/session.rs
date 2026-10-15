@@ -74,6 +74,18 @@ impl SessionIdentity {
     }
 }
 
+/// The key of the Claude Code process session `session_id` runs in on this
+/// host, from its session record, as [`SessionIdentity::claude_key`] gives
+/// it; `None` when no record names it or its process no longer runs. For a
+/// caller that acts for another session, such as an add (ADR-404 D1).
+pub fn claude_key_of(session_id: &str) -> Option<String> {
+    sessions_dirs()
+        .iter()
+        .flat_map(|d| claude_sessions::read_session_records(d))
+        .filter(|r| r.session_id == session_id && crate::process::is_running(r.pid))
+        .find_map(|r| Some(format!("{}-{}@{}", r.pid, crate::process::start_time(r.pid)?, crate::process::host_name())))
+}
+
 /// Resolve the identity of the current process. Memoized for the
 /// process lifetime — the tuple is stable by definition (a process
 /// cannot change its owning session), and one-shot commands like

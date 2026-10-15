@@ -109,6 +109,7 @@ Named channels for shared signal routing (ADR-173; the old `focus` verbs are rem
 attend channel                               # list all channels and their members, joined ones marked
 attend channel join deploy                   # join the "deploy" channel
 attend channel join infra --pin              # join + pin (persists when empty)
+attend channel add Chaucer-beta deploy       # add a session to a channel; it is told and handed the recent history
 attend channel leave deploy                  # leave a channel
 attend channel dissolve deploy               # remove a channel for every member
 attend channel scene private                 # leave all channels (project only)

@@ -1,13 +1,14 @@
 //! Whether a session enrolled in attend (#720).
 //!
 //! A session enrolls by running `attend run` (`/attend`), by joining a
-//! channel, or by turning listening on (`attend listen on`, ADR-406). Enrollment is what the Stop-hook drain delivers to, and it is a
+//! channel, by turning listening on (`attend listen on`, ADR-406), or by
+//! another member adding it to a channel (ADR-404 D1). Enrollment is what the Stop-hook drain delivers to, and it is a
 //! durable fact about the session, kept apart from liveness: a stale
 //! heartbeat, or `cleanup_stale` pruning a channel membership, does not
 //! un-enroll a session. Only an explicit opt-out does.
 //!
 //! The record is `<cache>/enrolled/<session-id>`, one line each for:
-//! - every way the session enrolled (`run`, `join`, `listen`);
+//! - every way the session enrolled (`run`, `join`, `listen`, `add`);
 //! - `optout`, when `attend channel scene private` or `attend listen off` ran while
 //!   an `attend run` held the session: the run's enrollment ends once no
 //!   run holds it;
@@ -32,7 +33,7 @@
 
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// A way a session enrolled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +44,8 @@ pub enum Source {
     Join,
     /// `attend listen on`: listening without joining a channel.
     Listen,
+    /// Another member added it to a channel (ADR-404 D1).
+    Add,
 }
 
 impl Source {
@@ -53,6 +56,7 @@ impl Source {
             Source::Run => "run",
             Source::Join => "join",
             Source::Listen => "listen",
+            Source::Add => "add",
         }
     }
 }
@@ -114,6 +118,7 @@ impl Record {
                 "run" => r.sources.push(Source::Run),
                 "join" => r.sources.push(Source::Join),
                 "listen" => r.sources.push(Source::Listen),
+                "add" => r.sources.push(Source::Add),
                 "optout" => r.optout = true,
                 _ => {
                     if let Some(key) = line.strip_prefix("claude ") {
@@ -160,11 +165,12 @@ impl Record {
 }
 
 fn dir() -> PathBuf {
-    crate::cache::dir().join("enrolled")
+    records_dir()
 }
 
-fn path(session_id: &str) -> PathBuf {
-    dir().join(session_id)
+/// Where the enrollment records live, under attend's cache.
+pub fn records_dir() -> PathBuf {
+    crate::cache::dir().join("enrolled")
 }
 
 fn index_path(claude_key: &str) -> PathBuf {
@@ -172,12 +178,17 @@ fn index_path(claude_key: &str) -> PathBuf {
 }
 
 fn read(session_id: &str) -> Option<Record> {
-    fs::read_to_string(path(session_id)).ok().map(|t| Record::parse(&t))
+    read_in(&dir(), session_id)
 }
 
-/// Write `record` for `session_id`, or remove it when it holds no way.
-fn write(session_id: &str, record: &Record) -> io::Result<()> {
-    let p = path(session_id);
+fn read_in(dir: &Path, session_id: &str) -> Option<Record> {
+    fs::read_to_string(dir.join(session_id)).ok().map(|t| Record::parse(&t))
+}
+
+/// Write `record` for `session_id` under `dir`, or remove it when it holds
+/// no way.
+fn write_in(dir: &Path, session_id: &str, record: &Record) -> io::Result<()> {
+    let p = dir.join(session_id);
     if record.sources.is_empty() {
         return match fs::remove_file(&p) {
             Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
@@ -186,7 +197,7 @@ fn write(session_id: &str, record: &Record) -> io::Result<()> {
     }
     agent_settings::writer::write_atomic(&p, record.render())?;
     if let Some(key) = &record.claude {
-        agent_settings::writer::write_atomic(&index_path(process_part(key)), session_id)?;
+        agent_settings::writer::write_atomic(&dir.join("by-claude").join(process_part(key)), session_id)?;
     }
     Ok(())
 }
@@ -194,10 +205,15 @@ fn write(session_id: &str, record: &Record) -> io::Result<()> {
 /// Run `edit` on `session_id`'s record under the enrollment lock and write
 /// the result.
 fn edit(session_id: &str, edit: impl FnOnce(&mut Record)) -> io::Result<()> {
-    let _lock = agent_settings::writer::Lock::acquire(&dir().join(".edit"))?;
-    let mut record = read(session_id).unwrap_or_default();
+    edit_in(&dir(), session_id, edit)
+}
+
+/// [`edit`] on the records under `dir`.
+fn edit_in(dir: &Path, session_id: &str, edit: impl FnOnce(&mut Record)) -> io::Result<()> {
+    let _lock = agent_settings::writer::Lock::acquire(&dir.join(".edit"))?;
+    let mut record = read_in(dir, session_id).unwrap_or_default();
     edit(&mut record);
-    write(session_id, &record)
+    write_in(dir, session_id, &record)
 }
 
 /// The key of the Claude Code process this process runs under.
@@ -301,9 +317,32 @@ pub fn sources(session_id: &str) -> Vec<Source> {
 /// mod-hosted. A session that was not enrolled starts listening now
 /// ([`listening_since`]).
 pub fn enroll(session_id: &str, source: Source, host: Option<Host>) -> io::Result<()> {
-    let claude = own_claude_key();
+    enroll_in(&dir(), session_id, source, host, own_claude_key())
+}
+
+/// Record, under the records in `dir` ([`records_dir`]), that another member
+/// added `session_id` to a channel (ADR-404 D1). The add speaks for a session
+/// other than the caller, so the Claude Code process recorded is the
+/// session's own, `claude` ([`crate::session::claude_key_of`]); with none,
+/// the record names no process and the session's liveness rests on its
+/// heartbeat. Returns whether the record gained the way: `false` when an
+/// earlier add had recorded it already.
+pub fn enroll_added_in(dir: &Path, session_id: &str, claude: Option<String>) -> io::Result<bool> {
+    let had = read_in(dir, session_id).is_some_and(|r| r.sources.contains(&Source::Add));
+    enroll_in(dir, session_id, Source::Add, None, claude)?;
+    Ok(!had)
+}
+
+/// Withdraw an add's enrollment under `dir`, for an add whose membership did
+/// not take and whose [`enroll_added_in`] gained the way. The session stays
+/// enrolled while another way remains.
+pub fn withdraw_added_in(dir: &Path, session_id: &str) -> io::Result<()> {
+    edit_in(dir, session_id, |r| r.sources.retain(|s| *s != Source::Add))
+}
+
+fn enroll_in(dir: &Path, session_id: &str, source: Source, host: Option<Host>, claude: Option<String>) -> io::Result<()> {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    edit(session_id, |r| {
+    edit_in(dir, session_id, |r| {
         if r.sources.is_empty() {
             r.since = Some(now);
         }
@@ -487,6 +526,26 @@ mod tests {
         .unwrap();
     }
 
+    /// An add records the added session's own Claude Code process, not the
+    /// caller's, under the directory it is given, and gains the way once.
+    #[test]
+    fn an_add_enrolls_another_session_under_its_own_process() {
+        let exe = std::env::current_exe().unwrap();
+        let dir = exe.parent().and_then(Path::parent).unwrap().join("test-scratch").join(format!("attend-enrol-add-{}", std::process::id()));
+        fs::remove_dir_all(&dir).ok();
+        let key = "4242-1700000000@elsewhere".to_string();
+        assert!(enroll_added_in(&dir, "s", Some(key.clone())).unwrap(), "the first add gains the way");
+        assert!(!enroll_added_in(&dir, "s", Some(key.clone())).unwrap(), "a second add finds it");
+        let r = read_in(&dir, "s").unwrap();
+        assert_eq!((r.sources, r.claude.as_deref()), (vec![Source::Add], Some(key.as_str())));
+        assert!(r.since.is_some(), "the session starts listening at the add");
+        assert_eq!(fs::read_to_string(dir.join("by-claude").join("4242-1700000000")).unwrap(), "s");
+        withdraw_added_in(&dir, "s").unwrap();
+        let gone = !dir.join("s").exists();
+        fs::remove_dir_all(&dir).ok();
+        assert!(gone, "a record with no way left is removed");
+    }
+
     /// This test process, keyed as a Claude Code process is.
     fn own_key() -> String {
         let pid = std::process::id();
@@ -649,7 +708,7 @@ mod tests {
             assert_eq!(listening_since("s"), None);
             enroll("s", Source::Listen, None).unwrap();
             assert!(listening_since("s").is_some(), "set on enrolling");
-            write("s", &Record { since: Some(1), ..read("s").unwrap() }).unwrap();
+            write_in(&dir(), "s", &Record { since: Some(1), ..read("s").unwrap() }).unwrap();
             enroll("s", Source::Join, None).unwrap();
             assert_eq!(listening_since("s"), at(1), "another way keeps it");
             assert_eq!(Record::parse(&read("s").unwrap().render()).since, Some(1));
@@ -700,7 +759,7 @@ mod tests {
             enroll("s", Source::Listen, Some(Host::Mod)).unwrap();
             assert_eq!(host("s"), Some(Host::Mod));
             let other = Record { host: Some(HostRecord { host: Host::Mod, claude: Some("1-999".into()) }), ..read("s").unwrap() };
-            write("s", &other).unwrap();
+            write_in(&dir(), "s", &other).unwrap();
             assert_eq!(Record::parse(&read("s").unwrap().render()), other);
             assert_eq!(host("s"), None, "recorded under another process");
             assert!(is_enrolled("s"), "the enrollment itself still holds");

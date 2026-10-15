@@ -4,8 +4,9 @@
 //! Every surface that adds or invites calls this crate: `attend channel add`,
 //! attend-chat's `/invite` and its menus. Each call writes the record in
 //! `_groups.yaml` or beside the room (attend-groups), the briefing the
-//! member is owed (attend-state), and the direct message that tells the
-//! member, to its project tray, under the actor's identity.
+//! member is owed (attend-state), an add's enrollment (attend-presence), and
+//! the direct message that tells the member, to its project tray, under the
+//! actor's identity.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -20,6 +21,8 @@ pub struct Bus {
     pub signals: PathBuf,
     /// The per-session state files, which hold each seen-set.
     pub state: PathBuf,
+    /// The enrollment records ([`attend_presence::enrollment::records_dir`]).
+    pub enrolled: PathBuf,
     /// How long a write waits for another writer's lock on `_groups.yaml`;
     /// `None` waits as long as it is held ([`Groups::waiting_at_most`]).
     pub lock_wait: Option<Duration>,
@@ -31,6 +34,7 @@ impl Bus {
         Bus {
             signals: attend_presence::cache::signals_dir(),
             state: attend_presence::cache::state_dir(),
+            enrolled: attend_presence::enrollment::records_dir(),
             lock_wait: None,
         }
     }
@@ -209,12 +213,14 @@ pub fn invite(bus: &Bus, actor: &Actor, channel: &str, target: Target) -> Result
 }
 
 /// Add `target` to `channel` (ADR-404 D1): enroll it, with no answer from
-/// it, then tell it. It is handed the newest [`ADDRESSED_MAX`] of the
-/// room's history to read, as a join answering an invitation is: the older
-/// ones are marked seen before the membership is written, so no conduit
-/// scans the room with them unseen. A member whose cold start has not run
-/// is owed the rest as a briefing its cold start delivers
-/// ([`Groups::brief`]). Any invitation it had there is spent.
+/// it, then tell it. The session is enrolled for delivery as well as made a
+/// member: the drain delivers to it, and the membership sweep keeps it while
+/// its Claude Code process runs, listening or not. It is handed the newest
+/// [`ADDRESSED_MAX`] of the room's history to read, as a join answering an
+/// invitation is: the older ones are marked seen before the membership is
+/// written, so no conduit scans the room with them unseen. A member whose
+/// cold start has not run is owed the rest as a briefing its cold start
+/// delivers ([`Groups::brief`]). Any invitation it had there is spent.
 pub fn add(bus: &Bus, actor: &Actor, channel: &str, target: Target) -> Result<Added, Refused> {
     let name = checked(bus, channel, target.session_id)?;
     let groups = bus.groups(&actor.member_id);
@@ -231,10 +237,20 @@ pub fn add(bus: &Bus, actor: &Actor, channel: &str, target: Target) -> Result<Ad
     if !warm {
         groups.brief(name, target.session_id).map_err(Refused::Failed)?;
     }
-    groups.add(name, target.session_id).map_err(|e| match e {
-        e if e.contains("already in") => Refused::AlreadyMember(name.to_string()),
-        e if e.contains("unknown channel") => Refused::UnknownChannel(name.to_string()),
-        e => Refused::Failed(e),
+    // Enrolled first, as a join is, so the sweep never finds a member that
+    // is not enrolled; an add that does not take withdraws it.
+    let claude = attend_presence::session::claude_key_of(target.session_id);
+    let gained = attend_presence::enrollment::enroll_added_in(&bus.enrolled, target.session_id, claude)
+        .map_err(|e| Refused::Failed(format!("enrolling {}: {e}", target.session_id)))?;
+    groups.add(name, target.session_id).map_err(|e| {
+        if gained {
+            attend_presence::enrollment::withdraw_added_in(&bus.enrolled, target.session_id).ok();
+        }
+        match e {
+            e if e.contains("already in") => Refused::AlreadyMember(name.to_string()),
+            e if e.contains("unknown channel") => Refused::UnknownChannel(name.to_string()),
+            e => Refused::Failed(e),
+        }
     })?;
     let told = tell(bus, actor, target, &add_body(&actor.name, name, &dir));
     Ok(Added { told, to_read: total - held_n, held: held_n })
@@ -266,7 +282,7 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
-        let bus = Bus { signals: root.join("signals"), state: root.join("state"), lock_wait: None };
+        let bus = Bus { signals: root.join("signals"), state: root.join("state"), enrolled: root.join("enrolled"), lock_wait: None };
         (Scratch(root), bus)
     }
 
@@ -346,6 +362,7 @@ mod tests {
         assert_eq!(invite(&bus, &aaron(), "ghost", target()), Err(Refused::UnknownChannel("ghost".into())));
         assert_eq!(add(&bus, &aaron(), "ghost", target()), Err(Refused::UnknownChannel("ghost".into())));
         assert!(!tray(&bus).exists(), "a refusal tells no one");
+        assert!(!bus.enrolled.join(SID).exists(), "and enrolls no one");
         assert!(!bus.signals.join("@ghost").exists());
 
         Groups::new(&bus.signals, SID).join("topic", false).unwrap();
@@ -364,6 +381,8 @@ mod tests {
         assert_eq!(added.told.as_ref().map(|t| t.dir.clone()), Ok(tray(&bus)));
         assert_eq!(bus.groups("x").members("topic").unwrap(), vec![SID]);
         assert!(bus.groups("x").invites("topic").is_empty(), "the invitation is spent");
+        let record = std::fs::read_to_string(bus.enrolled.join(SID)).expect("an enrollment record");
+        assert!(record.lines().any(|l| l == "add"), "enrolled by the add: {record}");
         let line = told(&bus);
         assert!(line.contains(&format!("from_kind:human|from_id:aaron|to:{SID}|")), "{line}");
         assert!(line.ends_with("aaron added you to #topic. Its recent history is yours to read.\n"), "{line}");

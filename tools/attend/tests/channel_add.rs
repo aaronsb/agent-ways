@@ -21,7 +21,12 @@ fn history(f: &Fixture, n: usize) {
 /// The fixture's session added to `#topic` by the person `aaron`, as
 /// attend-chat's Add agent does it.
 fn added_by_aaron(f: &Fixture) -> attend_membership::Added {
-    let bus = attend_membership::Bus { signals: f.signals(), state: f.cache().join("state"), lock_wait: None };
+    let bus = attend_membership::Bus {
+        signals: f.signals(),
+        state: f.cache().join("state"),
+        enrolled: f.cache().join("enrolled"),
+        lock_wait: None,
+    };
     let actor = attend_membership::Actor {
         member_id: "aaron".into(),
         kind: "human",
@@ -118,6 +123,21 @@ mod cli {
         let again = f.attend(&["channel", "add", PEER, "topic"]);
         assert!(!again.status.success());
         assert!(String::from_utf8_lossy(&again.stderr).contains("is already in #topic"));
+    }
+
+    /// An added session that never listened is enrolled by the add (ADR-404
+    /// D1), so the membership sweep keeps it while its Claude Code process
+    /// runs, and the drain delivers the add's message to it.
+    #[test]
+    fn an_added_session_that_is_not_listening_stays_a_member_and_is_told() {
+        let f = with_topic("add-dormant");
+        let _peer = Peer::start(&f, PEER, "proj");
+        f.ok(&["channel", "add", PEER, "topic"]);
+        // The listing sweeps members that are not alive.
+        f.ok(&["channel", "list"]);
+        assert_eq!(attend_groups::Groups::new(&f.signals(), "x").members("topic").unwrap(), vec![PEER]);
+        let drained = f.attend_in_process(PEER, Some(common::DAY), &["message", "inbox", "--drain", "--format", "plain"]);
+        assert!(drained.contains(" added you to #topic."), "{drained}");
     }
 
     #[test]
