@@ -2,7 +2,8 @@
 # Gates for the Claude Code mods under plugins/ (ADR-406):
 #
 #   1. the attend plugin carries attend's version (the plugin is released
-#      with attend, since it depends on attend's verbs);
+#      with attend, since it depends on attend's verbs), and the mod's
+#      MOD_VERSION constant in hooks/lib.ts equals the plugin's version;
 #   2. `claude plugin validate` on the marketplace and on each plugin;
 #   3. `claude plugin test` on each plugin;
 #   4. a TypeScript check against Claude Code's declarations, where they can

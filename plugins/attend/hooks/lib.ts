@@ -63,6 +63,9 @@ export const UNREAD_ARGV = [ATTEND, 'message', 'unread', '--json'] as const
  *  only between turns and at the poll's interval, which can be longer than
  *  attend's 90 s liveness grace. */
 export const BEAT_ARGV = [ATTEND, 'listen', 'beat', '--mod', MOD_VERSION] as const
+/** The beat for an attend that predates `--mod` and exits 2 on it (a usage
+ *  error): the heartbeat without the version. */
+export const PLAIN_BEAT_ARGV = [ATTEND, 'listen', 'beat'] as const
 export const PEERS_ARGV = [ATTEND, 'peer', 'list'] as const
 export const KEEPWARM_CHECK_ARGV = [ATTEND, 'keepwarm', 'check'] as const
 /** The operator prompted at `atS` (epoch seconds): the keepalive count
@@ -124,6 +127,8 @@ export type Mod = {
   lastPeersMs: number
   lastKeepwarmMs: number
   lastBeatMs: number
+  /** attend rejected `--mod`, so beats go without it. */
+  isBeatPlain: boolean
   /** The last delivery, send, reply, join or turn. */
   lastActivityMs: number
   /** Short `~id` handles of delivered messages, to their full ids. */

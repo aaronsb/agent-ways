@@ -94,6 +94,8 @@ type World = {
   noListen?: boolean
   /** An attend whose `listen on` has no `--host`. */
   noHostFlag?: boolean
+  /** An attend that predates `listen beat --mod`. */
+  noModFlag?: boolean
   /** Submits that fail before one enters. */
   submitFails?: number
   /** The session id `$.session.id()` reads; `s1` when not given. */
@@ -237,6 +239,7 @@ function host(on: On, world: World) {
     if (argv[0] === 'ways' && world.waysFails) return { ...ok(), exitCode: 1, stderr: 'ways: settings unreadable' }
     if (argv[0] === 'ways') return ok(configJson({ 'keepalive.enabled': true, ...world.config }))
     if (cmd.startsWith('listen') && world.noListen) return { ...ok(), exitCode: 2, stderr: "error: unrecognized subcommand 'listen'" }
+    if (cmd.startsWith('listen beat --mod') && world.noModFlag) return { ...ok(), exitCode: 2, stderr: "error: unexpected argument '--mod' found" }
     if (cmd.includes('--host') && world.noHostFlag) return { ...ok(), exitCode: 2, stderr: "error: unexpected argument '--host' found" }
     if (cmd.startsWith('listen')) return ok(cmd === 'listen off' ? 'not listening\n' : 'listening\n')
     if (cmd === 'peer list') return ok('...\n  3 agent(s), 0 channel(s)\n')
@@ -853,6 +856,30 @@ describe('active', () => {
     await $.turn.complete(done('t1'))
     const quiet = await longestGap(40 * 60_000)
     expect(quiet < 90_000 ? 'fresh' : `stale for ${quiet} ms`).toBe('fresh')
+  })
+
+  test('the beat reports the mod\'s version', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active' } })
+    await $.session.start(INTERACTIVE)
+    await typed($)
+    await clock.advance(100_000)
+    const beats = h.argvs.map(a => a.slice(1).join(' ')).filter(c => c.startsWith('listen beat'))
+    expect(beats.length >= 3).toBe(true)
+    expect(beats.every(c => c === `listen beat --mod ${MOD_VERSION}`)).toBe(true)
+  })
+
+  test('an attend that rejects --mod gets a plain beat at once, and later beats skip the flag', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active' }, noModFlag: true })
+    await $.session.start(INTERACTIVE)
+    await typed($)
+    await clock.advance(100_000)
+    const beats = h.argvs.map(a => a.slice(1).join(' ')).filter(c => c.startsWith('listen beat'))
+    expect(beats[0]).toBe(`listen beat --mod ${MOD_VERSION}`)
+    expect(beats[1]).toBe('listen beat')
+    expect(beats.filter(c => c.includes('--mod')).length).toBe(1)
+    expect(beats.length >= 4).toBe(true)
   })
 
   test('the row shows peers, unread and channels from attend', async ($, on) => {

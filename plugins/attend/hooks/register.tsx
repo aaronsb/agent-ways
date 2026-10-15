@@ -32,6 +32,7 @@ import {
   toolResult,
   LISTEN_TOOL,
   BEAT_ARGV,
+  PLAIN_BEAT_ARGV,
   DRAIN_ARGV,
   KEEPWARM_CHECK_ARGV,
   LISTEN_OFF_ARGV,
@@ -273,7 +274,13 @@ async function tick($: $, mod: Mod, force: boolean) {
     const now = await $.clock.now()
     if (now - mod.lastBeatMs >= BEAT_EVERY_MS) {
       mod.lastBeatMs = now
-      await run($, BEAT_ARGV)
+      if (mod.isBeatPlain) {
+        await run($, PLAIN_BEAT_ARGV)
+      } else if ((await run($, BEAT_ARGV)).exitCode === 2) {
+        // An older attend: a usage error on --mod. Beat without it from now on.
+        mod.isBeatPlain = true
+        await run($, PLAIN_BEAT_ARGV)
+      }
     }
     const isTurnRunning = mod.running.size > 0
     const interval = pollInterval(mod.config, now - mod.lastActivityMs, isTurnRunning)
@@ -671,6 +678,7 @@ export const register: Register = on => {
     lastPeersMs: 0,
     lastKeepwarmMs: 0,
     lastBeatMs: 0,
+    isBeatPlain: false,
     lastActivityMs: 0,
     ids: new Map(),
     active: false,

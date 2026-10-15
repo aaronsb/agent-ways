@@ -13,6 +13,7 @@
 #   scripts/release.sh bump <ways|ways-audit|ways-mcp|ways-agent|attend|attend-chat> <patch|minor|major>
 #   scripts/release.sh tag  <ways|ways-audit|ways-mcp|ways-agent|attend|attend-chat> [--push]
 #   scripts/release.sh check <component>
+#   scripts/release.sh mod-version <component> <version>   # MOD_VERSION alone, as bump moves it
 #
 # Both bump and tag refuse a release whose range, from the component's last tag
 # to HEAD, changed plugins/attend/ without moving the plugin's version; `check`
@@ -68,6 +69,12 @@ plugin_version_of() {
 # True when version $1 sorts before $2 (numeric fields, as sort -V orders them).
 version_lt() {
   [[ "$1" != "$2" && "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" == "$1" ]]
+}
+
+# Move the mod's MOD_VERSION constant to $1, and fail unless it reads $1 after.
+set_mod_version() {
+  sed -i.bak -E "s/^(export const MOD_VERSION = ')[^']*(')/\\1$1\\2/" "$PLUGIN_LIB" && rm -f "$PLUGIN_LIB.bak"
+  grep -qF "export const MOD_VERSION = '$1'" "$PLUGIN_LIB" || die "could not move MOD_VERSION in $PLUGIN_LIB to $1"
 }
 
 # Refuse a release whose range changed plugins/attend/ without moving the
@@ -157,8 +164,7 @@ case "$MODE" in
       ' "$PLUGIN_MANIFEST" > "$PLUGIN_MANIFEST.tmp" && mv "$PLUGIN_MANIFEST.tmp" "$PLUGIN_MANIFEST"
       [[ "$(plugin_version_of < "$PLUGIN_MANIFEST")" == "$NEXT" ]] || die "could not move $PLUGIN_MANIFEST to $NEXT"
       FILES+=("$PLUGIN_MANIFEST")
-      sed -i.bak -E "s/^(export const MOD_VERSION = ')[^']*(')/\\1${NEXT}\\2/" "$PLUGIN_LIB" && rm -f "$PLUGIN_LIB.bak"
-      grep -qF "export const MOD_VERSION = '${NEXT}'" "$PLUGIN_LIB" || die "could not move MOD_VERSION in $PLUGIN_LIB to $NEXT"
+      set_mod_version "$NEXT"
       FILES+=("$PLUGIN_LIB")
     fi
     git add "${FILES[@]}"
@@ -221,5 +227,11 @@ EOF
     echo "release: plugins/attend/ is releasable with ${COMPONENT}"
     ;;
 
-  *) die "unknown mode '$MODE' (bump|tag|check)" ;;
+  mod-version)
+    # The constant alone, as bump moves it, for the bump's test.
+    [[ -n "${3:-}" ]] || die "usage: release.sh mod-version $COMPONENT <version>"
+    set_mod_version "$3"
+    ;;
+
+  *) die "unknown mode '$MODE' (bump|tag|check|mod-version)" ;;
 esac

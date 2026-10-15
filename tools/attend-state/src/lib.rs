@@ -59,8 +59,9 @@ pub struct StateSnapshot {
     /// beat (`attend listen beat --mod`). `None` until a mod that reports
     /// one beats.
     pub mod_version: Option<String>,
-    /// The stale-mod notice went out for this session. It goes once.
-    pub mod_stale_noted: bool,
+    /// The installed mod version the stale-mod notice announced to this
+    /// session. The notice goes again only when a newer one is installed.
+    pub mod_stale_noted: Option<String>,
 }
 
 impl StateSnapshot {
@@ -105,8 +106,8 @@ impl StateSnapshot {
         if let Some(ref v) = self.mod_version {
             lines.push(format!("mod_version: {}", v));
         }
-        if self.mod_stale_noted {
-            lines.push("mod_stale_noted: true".to_string());
+        if let Some(ref v) = self.mod_stale_noted {
+            lines.push(format!("mod_stale_noted: {}", v));
         }
 
         lines.push(format!("version: {}", env!("CARGO_PKG_VERSION")));
@@ -151,7 +152,7 @@ impl StateSnapshot {
                         state.mod_version = Some(value.to_string());
                     }
                     "mod_stale_noted" => {
-                        state.mod_stale_noted = value == "true";
+                        state.mod_stale_noted = Some(value.to_string());
                     }
                     _ => {} // ignore unknown keys for forward compat
                 }
@@ -298,9 +299,10 @@ impl StateStore {
         self.write_merged(&snap, true)
     }
 
-    /// Record that the stale-mod notice went out for this session.
-    pub fn mark_mod_stale_noted(&self) -> bool {
-        let snap = StateSnapshot { mod_stale_noted: true, ..Default::default() };
+    /// Record that the stale-mod notice announced `installed` to this
+    /// session. Returns whether the file now says so.
+    pub fn mark_mod_stale_noted(&self, installed: &str) -> bool {
+        let snap = StateSnapshot { mod_stale_noted: Some(installed.to_string()), ..Default::default() };
         self.write_merged(&snap, true)
     }
 
@@ -347,7 +349,7 @@ impl StateStore {
             // The mod's fields have writers of their own (the beat and the
             // drain), so a sensor checkpoint keeps what the disk holds.
             mod_version: mem.mod_version.clone().or_else(|| disk.mod_version.clone()),
-            mod_stale_noted: disk.mod_stale_noted || mem.mod_stale_noted,
+            mod_stale_noted: mem.mod_stale_noted.clone().or_else(|| disk.mod_stale_noted.clone()),
             ..if fields_from_disk {
                 StateSnapshot {
                     disclosed_thresholds: disk.disclosed_thresholds.clone(),
@@ -485,12 +487,14 @@ mod tests {
         let dir = temp_dir("mod-fields");
         let store = StateStore::new_in(dir.join("state"), Some("s1".into()));
         assert!(store.record_mod_version("0.27.1"));
-        assert!(store.mark_mod_stale_noted());
+        assert!(store.mark_mod_stale_noted("0.28.0"));
         store.mark_seen(["a.signal"]);
         store.checkpoint(&StateSnapshot::default());
         let snap = store.load().unwrap();
         assert_eq!(snap.mod_version.as_deref(), Some("0.27.1"));
-        assert!(snap.mod_stale_noted);
+        assert_eq!(snap.mod_stale_noted.as_deref(), Some("0.28.0"));
+        assert!(store.mark_mod_stale_noted("0.29.0"));
+        assert_eq!(store.load().unwrap().mod_stale_noted.as_deref(), Some("0.29.0"), "a later announcement replaces the earlier");
         assert!(!snap.baselined, "recording a mod version does not warm the session");
         assert!(store.record_mod_version("0.28.0"));
         assert_eq!(store.load().unwrap().mod_version.as_deref(), Some("0.28.0"));

@@ -62,3 +62,12 @@ fn a_session_reporting_an_older_version_is_told_even_on_a_delivery() {
     assert!(doc["hookSpecificOutput"]["additionalContext"].as_str().unwrap().contains("hello"), "{out}");
     assert!(doc["systemMessage"].as_str().unwrap().contains("/reload-plugins"), "{out}");
 }
+
+#[test]
+fn a_session_that_is_not_a_mod_host_is_never_told() {
+    let f = Fixture::new("mod-stale-nonmod");
+    f.ok(&["listen", "on"]);
+    f.drain("plain");
+    install_manifest(&f, "0.28.0");
+    assert_eq!(system_message(&f.drain_hook_with("{}")), None, "no mod was loaded, so there is none to reload");
+}
