@@ -179,6 +179,8 @@ pub struct ChatPane {
     /// Whether to keep `heartbeat/<username>` fresh (ADR-170). Off for a
     /// headless frame, which is no presence.
     heartbeat: bool,
+    /// Releases a kick or a dissolve left unsettled, with the bus they act through.
+    releases: keys::Releases,
     refreshed: Option<Instant>,
     /// Bumped whenever the feed's entries are rebuilt, so the feed keeps
     /// its layout between frames until they change.
@@ -291,6 +293,7 @@ impl ChatPane {
             entries: None,
             entry_members: Vec::new(),
             heartbeat: true,
+            releases: keys::Releases::here(),
             refreshed: None,
             generation: 0,
             last_frame: None,
@@ -571,7 +574,7 @@ impl ChatPane {
         // destination flag, which has degraded to #open.
         let fg = self.normal_tab();
         let sets_jump = self.input.text().trim_start().starts_with("/config tabs.jump");
-        match handle_enter(self.input.text(), &self.signals, &fg, self.person().as_deref(), anyway) {
+        match handle_enter(self.input.text(), &self.signals, &fg, self.person().as_deref(), anyway, &mut self.releases) {
             EnterAction::None => {}
             EnterAction::ClearWithStatus(s) => {
                 self.say(s, false);
@@ -1118,7 +1121,7 @@ impl Pane for ChatPane {
             }
             self.refresh();
             self.refreshed = Some(Instant::now());
-            if let Some((status, warn)) = keys::retry_pending() {
+            if let Some((status, warn)) = self.releases.retry() {
                 self.say(status, warn);
             }
             if self.binary.as_ref().is_some_and(|(path, at)| updated_on_disk(path, *at)) {

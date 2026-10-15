@@ -708,7 +708,11 @@ impl Groups {
     /// [`Groups::cleanup_stale_with`], renaming a member that is not live
     /// to the id `successor` gives it, with its invitations and briefings,
     /// in place of dropping it: a `/clear` move that stopped after carrying
-    /// the enrollment, finished under the lock the sweep holds.
+    /// the enrollment, finished under the lock the sweep holds. In that
+    /// crash case it finishes the memberships, invitations and briefs. The
+    /// registry slot, the last-inbound and banner state and the old
+    /// heartbeat stay under the old id until the session's own next
+    /// adoption.
     pub fn cleanup_stale_moving<F: Fn(&str) -> bool, S: Fn(&str) -> Option<String>>(
         &self,
         is_live: F,

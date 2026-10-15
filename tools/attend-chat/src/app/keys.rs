@@ -77,7 +77,7 @@ pub enum EnterAction {
 /// test's. `anyway` sends to an agent that is quiet but has not exited,
 /// as the send-now key asks. Returns an `EnterAction` describing how the
 /// screen should update its state.
-pub fn handle_enter(input_value: &str, signals: &[Signal], foreground: &Tab, person: Option<&str>, anyway: bool) -> EnterAction {
+pub fn handle_enter(input_value: &str, signals: &[Signal], foreground: &Tab, person: Option<&str>, anyway: bool, releases: &mut Releases) -> EnterAction {
     let msg = input_value.trim_end().to_string();
     if msg.is_empty() {
         return EnterAction::None;
@@ -87,21 +87,21 @@ pub fn handle_enter(input_value: &str, signals: &[Signal], foreground: &Tab, per
     // before the `@`/`#`/broadcast dispatch because slash syntax
     // is start-of-input only and unambiguous.
     if let Some((cmd, args)) = slash::parse(&msg) {
-        return run_slash(slash::dispatch(cmd, args), foreground);
+        return run_slash(slash::dispatch(cmd, args), foreground, releases);
     }
     send_message(&msg, signals, foreground, person, anyway)
 }
 
 /// Run a dispatched slash command: the one path both the typed command
 /// and the tab menu's items take.
-pub fn run_slash(outcome: slash::SlashOutcome, foreground: &Tab) -> EnterAction {
+pub fn run_slash(outcome: slash::SlashOutcome, foreground: &Tab, releases: &mut Releases) -> EnterAction {
     match outcome {
         slash::SlashOutcome::Ok(s) => EnterAction::ClearWithStatus(s),
         slash::SlashOutcome::Err(s) => EnterAction::StatusOnly(s),
         slash::SlashOutcome::HideHere => EnterAction::HideHere,
         slash::SlashOutcome::Join(name) => run_join(&name),
         slash::SlashOutcome::Leave(chan) => run_leave(chan, foreground),
-        slash::SlashOutcome::Dissolve(chan) => run_dissolve(chan, foreground),
+        slash::SlashOutcome::Dissolve(chan) => run_dissolve(chan, foreground, releases),
         slash::SlashOutcome::ListChannels => {
             channels_status_in(&signals_base(), attend_groups::member_alive)
         }
@@ -118,7 +118,7 @@ pub fn run_slash(outcome: slash::SlashOutcome, foreground: &Tab) -> EnterAction 
             run_invite(&member, channel, foreground)
         }
         slash::SlashOutcome::Kick { member, channel } => {
-            run_kick(&member, channel, foreground)
+            run_kick(&member, channel, foreground, releases)
         }
         slash::SlashOutcome::Config { key, value } => run_config(key, value),
     }
@@ -459,7 +459,7 @@ fn leave_group_in(base: &std::path::Path, member: &str, name: &str) -> EnterActi
 /// advances to the tab now occupying its slot (floor `#open`, #393).
 /// Other foregrounds keep their focus: dissolving a background tab
 /// must not yank the operator out of the channel they're reading.
-fn run_dissolve(channel: Option<String>, foreground: &Tab) -> EnterAction {
+fn run_dissolve(channel: Option<String>, foreground: &Tab, releases: &mut Releases) -> EnterAction {
     let name = tabs::command_scope(channel, foreground);
     if name == BASE_CHANNEL_NAME {
         return EnterAction::StatusOnly(
@@ -469,7 +469,7 @@ fn run_dissolve(channel: Option<String>, foreground: &Tab) -> EnterAction {
     let caps = ColorDepth::detect();
     let names_before = tabs::strip_names(&channels(caps));
     let me = crate::signal::human_member_id();
-    match dissolve_group_in(&attend_membership::Bus::here().waiting_at_most(GROUPS_LOCK_WAIT), &name, &me, attend_groups::member_alive) {
+    match dissolve_group_in(releases, &name, &me, attend_groups::member_alive) {
         EnterAction::ClearWithStatus(status) => {
             let focus = if *foreground == Tab::Channel(name.clone()) {
                 tabs::advance_after_dissolve(&name, &names_before)
@@ -501,14 +501,14 @@ fn run_dissolve(channel: Option<String>, foreground: &Tab) -> EnterAction {
 /// the exclusion an operator could not dissolve any channel they had
 /// joined. The empty-group send gate excludes the sender the same way.
 fn dissolve_group_in<F: Fn(&str) -> bool>(
-    bus: &attend_membership::Bus,
+    releases: &mut Releases,
     name: &str,
     self_member: &str,
     is_live: F,
 ) -> EnterAction {
     // Member id is irrelevant for dissolve — it acts on the group,
     // not on this member's entry.
-    let groups = writing_groups(&bus.signals, "");
+    let groups = writing_groups(&releases.bus.signals, "");
     let members = groups.members(name);
     let dir_exists = groups.group_dir(name).is_dir();
     if members.is_none() && !dir_exists {
@@ -525,11 +525,10 @@ fn dissolve_group_in<F: Fn(&str) -> bool>(
             if live == 1 { "" } else { "s" }
         ));
     }
-    let done = attend_membership::dissolve(bus, "", name);
+    let done = attend_membership::dissolve(&releases.bus, "", name);
     if let Ok(d) = &done {
-        let mut pending = pending();
         for member in &d.unsettled {
-            pending.add(member, &format!("a member of #{name}"));
+            releases.pending.add(member, &format!("a member of #{name}"));
         }
     }
     dissolve_status(name, done)
@@ -547,23 +546,33 @@ fn dissolve_status(name: &str, done: Result<attend_membership::Dissolved, String
 /// A status's note of a release that did not settle.
 const BUSY_NOTE: &str = "the channels lock was busy, so the chat tries again at its next refresh";
 
-/// The releases a kick or a dissolve left unsettled, retried at the next
-/// refresh ([`retry_pending`]).
-static PENDING: std::sync::Mutex<attend_membership::Pending> = std::sync::Mutex::new(attend_membership::Pending::new());
-
-fn pending() -> std::sync::MutexGuard<'static, attend_membership::Pending> {
-    PENDING.lock().unwrap_or_else(|e| e.into_inner())
+/// The releases a kick or a dissolve left unsettled, with the bus they act
+/// through: the retry at the next refresh ([`Releases::retry`]) runs on the
+/// bus that recorded them.
+pub struct Releases {
+    bus: attend_membership::Bus,
+    pending: attend_membership::Pending,
 }
 
-/// Retry the releases a kick or a dissolve left unsettled, waiting for the
-/// channels lock at most twice [`GROUPS_LOCK_WAIT`]. The status to show,
-/// and whether it is a warning; `None` when nothing was pending.
-pub fn retry_pending() -> Option<(String, bool)> {
-    let mut pending = pending();
-    if pending.is_empty() {
-        return None;
+impl Releases {
+    /// This host's bus, its writes waiting at most [`GROUPS_LOCK_WAIT`].
+    pub fn here() -> Self {
+        Self::on(attend_membership::Bus::here().waiting_at_most(GROUPS_LOCK_WAIT))
     }
-    retry_status(&pending.retry(&attend_membership::Bus::here().waiting_at_most(GROUPS_LOCK_WAIT)))
+
+    fn on(bus: attend_membership::Bus) -> Self {
+        Releases { bus, pending: attend_membership::Pending::new() }
+    }
+
+    /// Retry the releases left unsettled, waiting for the channels lock at
+    /// most twice [`GROUPS_LOCK_WAIT`]. The status to show, and whether it
+    /// is a warning; `None` when nothing was pending.
+    pub fn retry(&mut self) -> Option<(String, bool)> {
+        if self.pending.is_empty() {
+            return None;
+        }
+        retry_status(&self.pending.retry(&self.bus))
+    }
 }
 
 /// The status a retry leaves: the remedy for a release given up, else who
@@ -571,7 +580,8 @@ pub fn retry_pending() -> Option<(String, bool)> {
 fn retry_status(r: &attend_membership::Retried) -> Option<(String, bool)> {
     match (r.unsettled.as_slice(), r.settled.as_slice()) {
         ([], []) => None,
-        ([], settled) => Some((format!("{} no longer listen{} by the channel", settled.join(", "), if settled.len() == 1 { "s" } else { "" }), false)),
+        ([], [one]) => Some((format!("{one} is in no channel now and has stopped listening"), false)),
+        ([], many) => Some((format!("{} are in no channel now and have stopped listening", many.join(", ")), false)),
         ([one], _) => Some((format!("the channels lock is still busy, so {one} may still be listening; run `attend listen off` in that session"), true)),
         (many, _) => Some((format!("the channels lock is still busy, so {} sessions may still be listening; run `attend listen off` in those sessions", many.len()), true)),
     }
@@ -768,7 +778,7 @@ pub fn add_peer(g: &str, peer: &crate::peers::Peer) -> EnterAction {
 /// kicked session's routing changed without its participation, and
 /// silent drift between its focus state and reality is exactly what
 /// the notice prevents (#393). Best-effort like every signal write.
-fn run_kick(member: &str, channel: Option<String>, foreground: &Tab) -> EnterAction {
+fn run_kick(member: &str, channel: Option<String>, foreground: &Tab, releases: &mut Releases) -> EnterAction {
     let g = tabs::command_scope(channel, foreground);
     if g == BASE_CHANNEL_NAME {
         return EnterAction::StatusOnly(
@@ -782,18 +792,18 @@ fn run_kick(member: &str, channel: Option<String>, foreground: &Tab) -> EnterAct
         Ok(p) => p,
         Err(e) => return EnterAction::StatusOnly(e),
     };
-    kick_member(&g, &peer.session_id, &peer.display, Some(&peer.root))
+    kick_member(&g, &peer.session_id, &peer.display, Some(&peer.root), releases)
 }
 
 /// Remove the member `id` from channel `g`, named `label` on the status
 /// line, live or not: the menus reach a quiet member through its
 /// membership id, where `/kick @name` resolves only live peers. A claude
 /// with a `root` is told in its inbox, which it reads when it next runs.
-pub fn kick_member(g: &str, id: &str, label: &str, root: Option<&str>) -> EnterAction {
+pub fn kick_member(g: &str, id: &str, label: &str, root: Option<&str>, releases: &mut Releases) -> EnterAction {
     if g == BASE_CHANNEL_NAME {
         return EnterAction::StatusOnly("#open is the base channel — you can't kick from it".into());
     }
-    let action = kick_member_in(&attend_membership::Bus::here().waiting_at_most(GROUPS_LOCK_WAIT), g, id, label);
+    let action = kick_member_in(releases, g, id, label);
     if let (EnterAction::ClearWithStatus(_), Some(root)) = (&action, root) {
         let notice = format!(
             "you were removed from #{g} by the operator — rejoin with attend_join, or: attend channel join {g}"
@@ -810,14 +820,14 @@ pub fn kick_member(g: &str, id: &str, label: &str, root: Option<&str>) -> EnterA
 /// — kick targets someone else's entry. `label` is the target's display
 /// name for the status line (session ids don't belong in the status row).
 fn kick_member_in(
-    bus: &attend_membership::Bus,
+    releases: &mut Releases,
     name: &str,
     member_id: &str,
     label: &str,
 ) -> EnterAction {
-    let done = attend_membership::remove(bus, "", name, member_id);
+    let done = attend_membership::remove(&releases.bus, "", name, member_id);
     if done.as_ref().is_ok_and(|r| !r.settled) {
-        pending().add(member_id, &format!("@{label}"));
+        releases.pending.add(member_id, &format!("@{label}"));
     }
     kick_status(name, label, done)
 }
@@ -1129,7 +1139,7 @@ mod tests {
 
     #[test]
     fn enter_empty_is_noop() {
-        match handle_enter("   ", &[], &Tab::Merged, None, false) {
+        match handle_enter("   ", &[], &Tab::Merged, None, false, &mut Releases::here()) {
             EnterAction::None => {}
             _ => panic!("empty input should produce EnterAction::None"),
         }
@@ -1148,7 +1158,7 @@ mod tests {
                 EnterAction::StatusOnly(s) => assert!(s.contains("base channel"), "got: {s}"),
                 _ => panic!("scoped /leave on base channel must reject"),
             }
-            match run_dissolve(None, tab) {
+            match run_dissolve(None, tab, &mut Releases::here()) {
                 EnterAction::StatusOnly(s) => assert!(s.contains("base channel"), "got: {s}"),
                 _ => panic!("scoped /dissolve on base channel must reject"),
             }
@@ -1156,7 +1166,7 @@ mod tests {
                 EnterAction::StatusOnly(s) => assert!(s.contains("base channel"), "got: {s}"),
                 _ => panic!("scoped /invite on base channel must reject"),
             }
-            match run_kick("Cleo", None, tab) {
+            match run_kick("Cleo", None, tab, &mut Releases::here()) {
                 EnterAction::StatusOnly(s) => assert!(s.contains("base channel"), "got: {s}"),
                 _ => panic!("scoped /kick on base channel must reject"),
             }
@@ -1177,6 +1187,25 @@ mod tests {
             heartbeats: base.join("heartbeat"),
             lock_wait: Some(GROUPS_LOCK_WAIT),
         }
+    }
+
+    /// The releases of a bus at a test's signals `base`.
+    fn releases_at(base: &std::path::Path) -> Releases {
+        Releases::on(bus_at(base))
+    }
+
+    /// A release left unsettled on a bus is retried on that bus, not on the
+    /// host's: the entry settles against the scratch enrollment.
+    #[test]
+    fn a_pending_release_is_retried_on_the_bus_that_recorded_it() {
+        let base = tempdir_like();
+        let mut releases = releases_at(&base);
+        std::fs::create_dir_all(base.join("enrolled")).unwrap();
+        std::fs::write(base.join("enrolled").join("sess-a"), "join\n").unwrap();
+        releases.pending.add("sess-a", "@Cleo");
+        assert_eq!(releases.retry(), Some(("@Cleo is in no channel now and has stopped listening".to_string(), false)));
+        assert!(!attend_presence::enrollment::is_enrolled_in(&base.join("enrolled"), "sess-a"), "released on the scratch bus");
+        assert_eq!(releases.retry(), None, "nothing is left to retry");
     }
 
     #[test]
@@ -1254,7 +1283,7 @@ mod tests {
     #[test]
     fn dissolve_unknown_group_is_precise() {
         let base = tempdir_like();
-        match dissolve_group_in(&bus_at(&base), "ghost", "aaron", |_| false) {
+        match dissolve_group_in(&mut releases_at(&base), "ghost", "aaron", |_| false) {
             EnterAction::StatusOnly(s) => assert!(s.contains("unknown group")),
             _ => panic!("unknown group should keep input with status"),
         }
@@ -1267,7 +1296,7 @@ mod tests {
         // channel bar until dissolved.
         let base = tempdir_like();
         std::fs::create_dir_all(base.join("@bg-test")).unwrap();
-        match dissolve_group_in(&bus_at(&base), "bg-test", "aaron", |_| false) {
+        match dissolve_group_in(&mut releases_at(&base), "bg-test", "aaron", |_| false) {
             EnterAction::ClearWithStatus(s) => assert!(s.contains("dissolved #bg-test")),
             _ => panic!("orphan dissolve should clear input with status"),
         }
@@ -1280,7 +1309,7 @@ mod tests {
         attend_groups::Groups::new(&base, "dead-session")
             .join("temp", false)
             .unwrap();
-        match dissolve_group_in(&bus_at(&base), "temp", "aaron", |_| false) {
+        match dissolve_group_in(&mut releases_at(&base), "temp", "aaron", |_| false) {
             EnterAction::ClearWithStatus(s) => assert!(s.contains("dissolved #temp")),
             _ => panic!("stale-member dissolve should clear input with status"),
         }
@@ -1294,7 +1323,7 @@ mod tests {
         attend_groups::Groups::new(&base, "live-session")
             .join("deploy", false)
             .unwrap();
-        match dissolve_group_in(&bus_at(&base), "deploy", "aaron", |_| true) {
+        match dissolve_group_in(&mut releases_at(&base), "deploy", "aaron", |_| true) {
             EnterAction::StatusOnly(s) => assert!(s.contains("1 live member")),
             _ => panic!("live-member dissolve should refuse with status"),
         }
@@ -1309,7 +1338,7 @@ mod tests {
         // channel open against them. A live peer still does.
         let base = tempdir_like();
         join_group_in(&base, "aaron", "kwin-canvas");
-        match dissolve_group_in(&bus_at(&base), "kwin-canvas", "aaron", |_| true) {
+        match dissolve_group_in(&mut releases_at(&base), "kwin-canvas", "aaron", |_| true) {
             EnterAction::ClearWithStatus(s) => assert!(s.contains("dissolved #kwin-canvas"), "got: {s}"),
             _ => panic!("the operator alone in a channel should dissolve it"),
         }
@@ -1318,7 +1347,7 @@ mod tests {
 
         join_group_in(&base, "aaron", "testing");
         join_group_in(&base, "live-session", "testing");
-        match dissolve_group_in(&bus_at(&base), "testing", "aaron", |_| true) {
+        match dissolve_group_in(&mut releases_at(&base), "testing", "aaron", |_| true) {
             EnterAction::StatusOnly(s) => assert!(s.contains("1 live member") && s.contains("/kick"), "got: {s}"),
             _ => panic!("a live peer still holds the channel"),
         }
@@ -1330,7 +1359,7 @@ mod tests {
         attend_groups::Groups::new(&base, "sess-a")
             .join("deploy", false)
             .unwrap();
-        match kick_member_in(&bus_at(&base), "deploy", "sess-a", "Tamsin-alpha") {
+        match kick_member_in(&mut releases_at(&base), "deploy", "sess-a", "Tamsin-alpha") {
             EnterAction::ClearWithStatus(s) => {
                 assert!(s.contains("kicked @Tamsin-alpha from #deploy"), "got: {s}")
             }
@@ -1364,7 +1393,8 @@ mod tests {
             retry_status(&attend_membership::Retried { settled: settled.iter().map(|m| m.to_string()).collect(), unsettled: unsettled.iter().map(|m| m.to_string()).collect() })
         };
         assert_eq!(retried(&[], &[]), None);
-        assert_eq!(retried(&["@Cleo"], &[]), Some(("@Cleo no longer listens by the channel".to_string(), false)));
+        assert_eq!(retried(&["@Cleo"], &[]), Some(("@Cleo is in no channel now and has stopped listening".to_string(), false)));
+        assert_eq!(retried(&["@Cleo", "@Ada"], &[]), Some(("@Cleo, @Ada are in no channel now and have stopped listening".to_string(), false)));
         assert_eq!(retried(&[], &["@Cleo"]), Some(("the channels lock is still busy, so @Cleo may still be listening; run `attend listen off` in that session".to_string(), true)));
         assert_eq!(retried(&["@Ada"], &["@Cleo", "a member of #temp"]), Some(("the channels lock is still busy, so 2 sessions may still be listening; run `attend listen off` in those sessions".to_string(), true)));
     }
@@ -1373,7 +1403,7 @@ mod tests {
     fn kick_unknown_group_and_nonmember_surface_kick_errors() {
         let base = tempdir_like();
         // Unknown group: Groups::kick's own error string passes through.
-        match kick_member_in(&bus_at(&base), "ghost", "sess-a", "Cleo") {
+        match kick_member_in(&mut releases_at(&base), "ghost", "sess-a", "Cleo") {
             EnterAction::StatusOnly(s) => assert!(s.contains("unknown group"), "got: {s}"),
             _ => panic!("unknown group should keep input with status"),
         }
@@ -1381,7 +1411,7 @@ mod tests {
         attend_groups::Groups::new(&base, "someone-else")
             .join("deploy", false)
             .unwrap();
-        match kick_member_in(&bus_at(&base), "deploy", "sess-a", "Cleo") {
+        match kick_member_in(&mut releases_at(&base), "deploy", "sess-a", "Cleo") {
             EnterAction::StatusOnly(s) => assert!(s.contains("not a member"), "got: {s}"),
             _ => panic!("non-member kick should keep input with status"),
         }
@@ -1411,7 +1441,7 @@ mod tests {
         attend_groups::Groups::new(&base, "somebody")
             .join("ops", false)
             .unwrap();
-        match kick_member_in(&bus_at(&base), "ops", "somebody", "somebody") {
+        match kick_member_in(&mut releases_at(&base), "ops", "somebody", "somebody") {
             EnterAction::ClearWithStatus(s) => {
                 assert!(s.contains("kicked @somebody from #ops"), "got: {s}")
             }

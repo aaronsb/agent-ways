@@ -971,7 +971,8 @@ impl ChatPane {
                 if self.dry_run {
                     self.say("dry run: /kick not run", false);
                 } else {
-                    self.apply(keys::kick_member(&c, &m.id, &m.label, m.root.as_deref()));
+                    let action = keys::kick_member(&c, &m.id, &m.label, m.root.as_deref(), &mut self.releases);
+                    self.apply(action);
                 }
             }
         }
@@ -1007,7 +1008,7 @@ impl ChatPane {
             return true;
         }
         let fg = self.normal_tab();
-        let action = keys::run_slash(outcome, &fg);
+        let action = keys::run_slash(outcome, &fg, &mut self.releases);
         self.apply(action)
     }
 
