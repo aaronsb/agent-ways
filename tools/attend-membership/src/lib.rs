@@ -322,8 +322,9 @@ fn earlier_id(bus: &Bus, session_id: &str) -> Option<String> {
 /// heartbeat is cleared. Idempotent: a move already done, or done in part,
 /// completes. Each step takes its own lock and releases it before the next,
 /// so the move holds no seen-set or enrollment lock across the channels
-/// lock. A membership sweep between the carry and the rename keeps `old`,
-/// which the carried record names ([`attend_groups::member_alive`]).
+/// lock. A membership sweep between the carry and the rename renames `old`
+/// itself, since the carried record names it
+/// ([`attend_groups::Groups::cleanup_stale_moving`]).
 pub fn move_session(bus: &Bus, old: &str, new: &str, origin: &str) {
     let old_store = bus.store(old);
     if let Some(snapshot) = old_store.load() {
@@ -624,13 +625,14 @@ mod tests {
         assert!(!attend_presence::enrollment::is_enrolled_in(&bus.enrolled, SID));
     }
 
-    /// A sweep that lands inside a move, after the enrollment is carried
-    /// and before the memberships are renamed, sees the earlier id with no
-    /// record and a lapsed heartbeat. The record the move carried names it
-    /// as an earlier id of a session whose process runs, so the sweep keeps
-    /// it and the rename still has the membership to move.
+    /// A move that stopped after carrying the enrollment, before renaming
+    /// the memberships, leaves the earlier id a member with no record and a
+    /// lapsed heartbeat. The record the move carried names it as an earlier
+    /// id of a session whose process runs, so the sweep renames it to that
+    /// session, invitation included, and drops nothing. A move that runs on
+    /// afterwards finds nothing left to rename.
     #[test]
-    fn a_sweep_inside_a_move_keeps_the_membership_it_moves() {
+    fn a_sweep_finishes_a_move_that_stopped_after_the_carry() {
         let (_s, bus) = scratch("move-sweep");
         const OLD: &str = "2f2632d7-3f59-4c24-9aae-0000000000bb";
         let pid = std::process::id();
@@ -638,21 +640,30 @@ mod tests {
         std::fs::create_dir_all(&bus.enrolled).unwrap();
         std::fs::write(bus.enrolled.join(OLD), format!("join\nclaude {own}\n")).unwrap();
         Groups::new(&bus.signals, OLD).join("other", false).unwrap();
+        bus.groups("aaron").create("topic", None).unwrap();
+        bus.groups("aaron").invite("topic", OLD).unwrap();
 
-        // The move's first step, then the sweep, judged as cleanup judges
-        // a member with no heartbeat, then the rest of the move.
+        // The move's first step, and no more; then the sweep, judging every
+        // member's own liveness as lapsed.
         attend_presence::enrollment::carry_in(&bus.enrolled, OLD, SID).unwrap();
-        let dropped = bus.groups("x").cleanup_stale_with(|m| attend_presence::enrollment::carried_to_live_in(&bus.enrolled, m), Duration::from_secs(3600));
-        move_session(&bus, OLD, SID, ROOT);
+        let successor = |m: &str| attend_presence::enrollment::live_successor_in(&bus.enrolled, m);
+        let dropped = bus.groups("x").cleanup_stale_moving(|_| false, successor, Duration::from_secs(3600));
         assert!(dropped.is_empty(), "{dropped:?}");
         assert_eq!(bus.groups("x").members("other").unwrap(), vec![SID]);
+        assert_eq!(bus.groups("x").invites("topic").into_iter().map(|i| i.member).collect::<Vec<_>>(), vec![SID]);
+        move_session(&bus, OLD, SID, ROOT);
+        assert_eq!(bus.groups("x").members("other").unwrap(), vec![SID]);
 
-        // Once the session's process has gone, the earlier id is swept.
+        // Once the session's process has gone, the earlier id has no
+        // successor, and the sweep drops it.
+        Groups::new(&bus.signals, OLD).join("other", false).unwrap();
         let mut child = std::process::Command::new("true").spawn().unwrap();
         child.wait().unwrap();
         let gone = format!("{}-1@{}", child.id(), attend_presence::process::host_name());
         std::fs::write(bus.enrolled.join(SID), format!("join\nclaude {gone}\nprevious {OLD}\n")).unwrap();
-        assert!(!attend_presence::enrollment::carried_to_live_in(&bus.enrolled, OLD));
+        assert_eq!(successor(OLD), None);
+        let dropped = bus.groups("x").cleanup_stale_moving(|m| m == SID, successor, Duration::from_secs(3600));
+        assert_eq!(dropped, vec![OLD]);
     }
 
     /// A move carries every piece of the earlier id's state to the new id:

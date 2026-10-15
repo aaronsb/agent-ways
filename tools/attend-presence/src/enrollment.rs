@@ -295,27 +295,29 @@ pub fn process_has_exited(session_id: &str) -> bool {
     read(session_id).and_then(|r| r.claude).map(|key| process_fact(&key)) == Some(Fact::Exited)
 }
 
-/// Whether a record of a session that listens, in a Claude Code process
-/// that runs on this host, names `id` as an earlier id: a `/clear`'s move
+/// The session whose record names `id` as an earlier id, when it listens
+/// in a Claude Code process that runs on this host: a `/clear`'s move
 /// carried `id`'s enrollment there and may not yet have renamed its
-/// channel memberships ([`carry`]). The membership sweep keeps such an id.
-pub fn carried_to_live(id: &str) -> bool {
-    carried_to_live_in(&dir(), id)
+/// channel memberships ([`carry`]). The membership sweep renames such an
+/// id to it.
+pub fn live_successor(id: &str) -> Option<String> {
+    live_successor_in(&dir(), id)
 }
 
-/// [`carried_to_live`] under the records in `dir`.
-pub fn carried_to_live_in(dir: &Path, id: &str) -> bool {
-    let Ok(entries) = fs::read_dir(dir) else { return false };
+/// [`live_successor`] under the records in `dir`.
+pub fn live_successor_in(dir: &Path, id: &str) -> Option<String> {
+    let entries = fs::read_dir(dir).ok()?;
     entries
         .flatten()
         .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
         .filter_map(|e| e.file_name().to_str().map(str::to_string))
         .filter(|name| !name.starts_with('.') && name != id)
-        .filter_map(|sid| read_in(dir, &sid))
-        .any(|r| {
-            !r.sources.is_empty()
-                && r.previous.iter().any(|p| p == id)
-                && r.claude.as_deref().map(process_fact) == Some(Fact::Running)
+        .find(|sid| {
+            read_in(dir, sid).is_some_and(|r| {
+                !r.sources.is_empty()
+                    && r.previous.iter().any(|p| p == id)
+                    && r.claude.as_deref().map(process_fact) == Some(Fact::Running)
+            })
         })
 }
 

@@ -334,18 +334,15 @@ impl Groups {
     pub fn rename_member(&self, old: &str, new: &str) {
         let Ok(_lock) = self.lock_state() else { return };
         let mut state = self.load_state();
-        let mut changed = false;
-        for entry in state.values_mut() {
-            if entry.members.iter().any(|m| m == old) {
-                entry.members.retain(|m| m != old && m != new);
-                entry.members.push(new.to_string());
-                changed = true;
-            }
-        }
-        if changed {
+        if rename_in(&mut state, old, new) {
             self.save_state(&state);
         }
-        // An invitation or briefing follows its member to the new id.
+        self.move_records(old, new);
+    }
+
+    /// Move `old`'s invitations and briefings to `new`: each follows its
+    /// member to the new id.
+    fn move_records(&self, old: &str, new: &str) {
         for (_, dir) in channel_dirs(&self.base) {
             for kind in [INVITE, BRIEF] {
                 let from = dir.join(format!("{old}.{kind}"));
@@ -668,8 +665,13 @@ impl Groups {
     /// A member dropped from its last channel loses the enrollment an add
     /// gave it (ADR-404 D1). A join's survives the sweep: liveness does not
     /// undo a session's own enrollment (#720).
+    ///
+    /// A member that is not live but that a live session's record names as
+    /// an earlier id is renamed to that session, as the `/clear` move that
+    /// carried its enrollment would have done ([`Groups::cleanup_stale_moving`]).
     pub fn cleanup_stale(&self) {
-        for member in self.cleanup_stale_with(member_alive, attend_presence::heartbeat::DEFAULT_GRACE) {
+        let is_live = |m: &str| attend_presence::alive(m, &std::collections::HashSet::new());
+        for member in self.cleanup_stale_moving(is_live, attend_presence::enrollment::live_successor, attend_presence::heartbeat::DEFAULT_GRACE) {
             self.when_in_no_channel(&member, || {
                 attend_presence::enrollment::withdraw(&member, attend_presence::enrollment::Source::Add).ok();
             });
@@ -700,24 +702,46 @@ impl Groups {
         is_live: F,
         orphan_grace: std::time::Duration,
     ) -> Vec<String> {
+        self.cleanup_stale_moving(is_live, |_| None, orphan_grace)
+    }
+
+    /// [`Groups::cleanup_stale_with`], renaming a member that is not live
+    /// to the id `successor` gives it, with its invitations and briefings,
+    /// in place of dropping it: a `/clear` move that stopped after carrying
+    /// the enrollment, finished under the lock the sweep holds.
+    pub fn cleanup_stale_moving<F: Fn(&str) -> bool, S: Fn(&str) -> Option<String>>(
+        &self,
+        is_live: F,
+        successor: S,
+        orphan_grace: std::time::Duration,
+    ) -> Vec<String> {
         let Ok(_lock) = self.lock_state() else { return Vec::new() };
         let mut state = self.load_state();
         let mut dropped: Vec<String> = Vec::new();
+        let mut moved: Vec<(String, String)> = Vec::new();
 
-        for entry in state.values_mut() {
-            entry.members.retain(|sid| {
-                let live = is_live(sid);
-                if !live {
-                    dropped.push(sid.clone());
-                }
-                live
-            });
+        let members: std::collections::BTreeSet<String> = state.values().flat_map(|e| e.members.iter().cloned()).collect();
+        for sid in members {
+            if is_live(&sid) {
+                continue;
+            }
+            match successor(&sid) {
+                Some(new) => moved.push((sid, new)),
+                None => dropped.push(sid),
+            }
         }
-        dropped.sort();
-        dropped.dedup();
+        for (old, new) in &moved {
+            rename_in(&mut state, old, new);
+        }
+        for entry in state.values_mut() {
+            entry.members.retain(|sid| !dropped.contains(sid));
+        }
 
-        if !dropped.is_empty() {
+        if !dropped.is_empty() || !moved.is_empty() {
             self.save_state(&state);
+        }
+        for (old, new) in &moved {
+            self.move_records(old, new);
         }
 
         // Clean up empty unpinned channels
@@ -943,6 +967,20 @@ pub fn briefings(base: &Path, member: &str) -> Vec<(String, std::time::SystemTim
     out
 }
 
+/// Move every membership of `old` in `state` to `new`. Returns whether any
+/// moved.
+fn rename_in(state: &mut HashMap<String, GroupEntry>, old: &str, new: &str) -> bool {
+    let mut changed = false;
+    for entry in state.values_mut() {
+        if entry.members.iter().any(|m| m == old) {
+            entry.members.retain(|m| m != old && m != new);
+            entry.members.push(new.to_string());
+            changed = true;
+        }
+    }
+    changed
+}
+
 /// Whether a member is still alive for cleanup: [`attend_presence::alive`]
 /// with no process scan. A fresh heartbeat counts (ADR-129): a claude
 /// session's attend touches it on every tick, an enrolled session's drain
@@ -951,15 +989,14 @@ pub fn briefings(base: &Path, member: &str) -> Vec<(String, std::time::SystemTim
 /// (ADR-170). So does a listening session whose recorded Claude Code process
 /// still runs on this host (ADR-129, addendum of 2026-10-13), so a member
 /// through a long turn is not pruned. An earlier id that such a session's
-/// record names counts too ([`attend_presence::enrollment::carried_to_live`]):
+/// record names counts too ([`attend_presence::enrollment::live_successor`]):
 /// a `/clear`'s move carries the enrollment before it renames the
-/// memberships, and a sweep between the two would drop the membership the
-/// rename then has nothing to move of.
+/// memberships, and the sweep renames such an id rather than dropping it.
 ///
 /// A Claude process that never listened is not consulted: with nothing
 /// to deliver to it, for cleanup purposes it is as good as a dead claude.
 pub fn member_alive(member_id: &str) -> bool {
-    attend_presence::alive(member_id, &std::collections::HashSet::new()) || attend_presence::enrollment::carried_to_live(member_id)
+    attend_presence::alive(member_id, &std::collections::HashSet::new()) || attend_presence::enrollment::live_successor(member_id).is_some()
 }
 
 // ── Minimal YAML parser/serializer ─────────────────────────────
