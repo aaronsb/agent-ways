@@ -175,9 +175,24 @@ pub fn all_channels_in(base: &Path, caps: ColorDepth) -> Vec<ChannelRow> {
 /// ([`attend_groups::load_invites`]), each list by invitee.
 pub type Invites = std::collections::HashMap<String, Vec<attend_groups::Invite>>;
 
-/// The pending invitations under the signals base, read once per world.
+/// How often the chat prunes the invitations and briefings of sessions that
+/// have gone ([`attend_groups::Groups::prune_records`]): each prune judges
+/// every invitee's liveness, and a world is read every refresh.
+const PRUNE_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The pending invitations under the signals base, read once per world. The
+/// invitations of sessions that have gone are pruned first, at most once
+/// every [`PRUNE_EVERY`], so the column does not list them as invited.
 pub fn invites() -> Invites {
-    attend_groups::load_invites(&signals_base())
+    static PRUNED: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+    let base = signals_base();
+    let mut pruned = PRUNED.lock().unwrap_or_else(|e| e.into_inner());
+    if !pruned.is_some_and(|at| at.elapsed() < PRUNE_EVERY) {
+        attend_groups::Groups::new(&base, "").prune_records();
+        *pruned = Some(std::time::Instant::now());
+    }
+    drop(pruned);
+    attend_groups::load_invites(&base)
 }
 
 /// The channels the tab bar shows, from the column's rows: those on disk,

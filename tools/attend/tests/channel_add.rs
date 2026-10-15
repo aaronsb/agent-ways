@@ -145,8 +145,20 @@ fn the_sweep_withdraws_the_add_of_a_member_it_drops_from_every_channel() {
     added_by_aaron_as(&f, gone);
     assert!(f.cache().join("enrolled").join(gone).exists());
     f.ok(&["channel", "list"]);
-    assert!(attend_groups::Groups::new(&f.signals(), "x").members("topic").unwrap_or_default().is_empty());
+    assert!(attend_groups::Groups::new(&f.signals(), "x").members("topic").unwrap().is_empty());
     assert!(!f.cache().join("enrolled").join(gone).exists(), "the add's enrollment is withdrawn");
+}
+
+/// An invitee that exits without ever listening leaves no session record
+/// here, since Claude Code deletes it at exit, and no heartbeat: the sweep
+/// prunes its invitation.
+#[test]
+fn the_sweep_prunes_an_invitation_to_a_session_that_has_gone() {
+    let f = with_topic("invite-gone");
+    let groups = attend_groups::Groups::new(&f.signals(), "aaron");
+    groups.invite("topic", "2f2632d7-3f59-4c24-9aae-00000000dead").unwrap();
+    f.ok(&["channel", "list"]);
+    assert!(groups.invites("topic").is_empty(), "the invitation is pruned");
 }
 
 /// Self-joining after an add changes nothing: the session is a member, and

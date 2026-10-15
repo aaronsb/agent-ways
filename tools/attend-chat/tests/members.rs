@@ -18,6 +18,9 @@ use attend_chat::app::Chat;
 const ALPHA_SID: &str = "aaaaaaaa-0000-4000-8000-000000000001";
 const BETA_SID: &str = "bbbbbbbb-0000-4000-8000-000000000002";
 const GAMMA_SID: &str = "cccccccc-0000-4000-8000-000000000003";
+/// Invited to #infra, it exited without listening: no session record, no
+/// heartbeat.
+const GONE_SID: &str = "dddddddd-0000-4000-8000-000000000004";
 const W: u16 = 120;
 const H: u16 = 35;
 
@@ -45,6 +48,7 @@ fn chat(dry: bool) -> Chat {
         let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() - 240;
         std::fs::write(base.join(format!("@infra/{GAMMA_SID}.invite")), format!("by: aaron\nat: {at}\n")).unwrap();
         std::fs::write(base.join(format!("@deploy/{BETA_SID}.invite")), format!("by: aaron\nat: {at}\n")).unwrap();
+        std::fs::write(base.join(format!("@infra/{GONE_SID}.invite")), format!("by: aaron\nat: {at}\n")).unwrap();
     });
     Chat::new(None, Palette::default(), Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(true).dry_run(dry)
 }
@@ -153,6 +157,17 @@ fn a_member_row_opens_its_agents_menu_by_a_click_or_enter() {
     assert!(rows(&mut c).iter().any(|r| r.contains(&format!("pick one: @{gamma}"))), "{:#?}", rows(&mut c));
     pick(&mut c, "Who is this");
     assert!(c.status().contains("invited to #infra by aaron"), "Who is this names the inviter: {}", c.status());
+}
+
+/// The column's refresh prunes the invitation of a session that has gone,
+/// so it is not listed as invited.
+#[test]
+fn an_invitation_to_a_session_that_has_gone_is_pruned_and_not_listed() {
+    let mut c = chat(true);
+    let infra = under(&mut c, "infra");
+    assert!(!infra.iter().any(|r| r.contains("dddddddd")), "{infra:#?}");
+    let invite = attend_chat::signal::signals_base().join(format!("@infra/{GONE_SID}.invite"));
+    assert!(!invite.exists(), "the invitation is pruned");
 }
 
 #[test]

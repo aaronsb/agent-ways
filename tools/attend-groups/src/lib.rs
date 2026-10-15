@@ -462,9 +462,20 @@ impl Groups {
         }
     }
 
-    /// Remove every invitation and briefing whose member `has_exited` says
-    /// has exited. An invitee is not a member, so the membership sweep does
-    /// not see it; a session that never listened is still a live invitee.
+    /// Remove every invitation and briefing whose member has gone
+    /// ([`attend_presence::gone`]): it exited on this host, or no session
+    /// record here names it and its heartbeat is absent or long stale. An
+    /// invitee is not a member, so the membership sweep does not see it,
+    /// and Claude Code deletes a session's record when it exits: an invitee
+    /// that exits without ever listening leaves neither a record nor a
+    /// heartbeat. A session that runs and never listened is still a live
+    /// invitee.
+    pub fn prune_records(&self) {
+        self.prune_records_with(attend_presence::gone);
+    }
+
+    /// [`Groups::prune_records`] with an injectable judgement of which
+    /// members have gone.
     pub fn prune_records_with<F: Fn(&str) -> bool>(&self, has_exited: F) {
         for (_, dir) in channel_dirs(&self.base) {
             let Ok(entries) = fs::read_dir(&dir) else { continue };
@@ -639,7 +650,7 @@ impl Groups {
                 attend_presence::enrollment::withdraw(&member, attend_presence::enrollment::Source::Add).ok();
             });
         }
-        self.prune_records_with(attend_presence::has_exited);
+        self.prune_records();
     }
 
     /// Run `settle` under the channels lock when `member` is in no channel.
