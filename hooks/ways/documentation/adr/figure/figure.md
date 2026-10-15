@@ -23,8 +23,6 @@ A record and its figure pair together and remain as published. In the operator's
 
 - The figure changes only when the record is amended, in the same change as the amendment.
 - A later record on the same topic may draw a very different figure.
-- The figure prints no status and no build state. Either one goes stale.
-- A figure of the system as it is now belongs in living docs, where automatic redrawing suits.
 
 ## Placement and showing
 
