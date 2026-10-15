@@ -20,6 +20,7 @@ The consider step records the operator's intent (ADR-304 §12 and its notes). Th
 - Probes are intent checks, at most one or two, each in the operator's terms and answerable in a word. Write "you wanted list pages to feel fast; is data up to 30 seconds old fine for that?" in place of "is the latency win real?". Label each probe `*Confident (name):*` or `*Not confident (name):*` for how sure you are that you read their intent right. The tool names probes by that label.
 - The inversion names the two ends the decision sits between. Put it to the operator only when it turns on what they want.
 - When the decision carries `observable` entries, show them where you can: run the command, show the output, open the page. Say in `via` what was shown (ADR-307).
+- When the record has a figure, show it before the probes, and say in `via` that it was shown (adr/figure).
 - Ask the probes as part of your reply, one short line each. With more than one pending, ask them through the choice tool as one batch when it is available. An answer is never required. `adr accept` reads no answer and records nothing on the operator's behalf.
 
 ## A canary
