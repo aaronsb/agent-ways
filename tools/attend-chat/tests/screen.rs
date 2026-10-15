@@ -67,6 +67,11 @@ fn fixture() -> &'static Fixture {
         // the column lists it there, set back, under beta (ADR-405,
         // amendment of 2026-10-15).
         std::fs::write(base.join(format!("@deploy/{GAMMA_SID}.invite")), format!("by: aaron\nat: {}\n", NOW - 240)).unwrap();
+        // gamma last beat an hour ago: quiet, and not gone, so the prune
+        // of invitations to sessions that have gone keeps its invitation.
+        attend_presence::heartbeat::touch(GAMMA_SID).unwrap();
+        let beat = std::fs::File::options().write(true).open(attend_presence::heartbeat::heartbeat_path(GAMMA_SID)).unwrap();
+        beat.set_modified(std::time::SystemTime::now() - Duration::from_secs(3600)).unwrap();
         // A channel `_groups.yaml` still names after its directory was
         // swept: the left column lists it, set back (ADR-405).
         attend_groups::Groups::new(&base, ALPHA_SID).join("archive", false).unwrap();
