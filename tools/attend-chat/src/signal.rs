@@ -317,6 +317,15 @@ fn sender_identity() -> (String, String, String, String) {
     (sender_id, from, project, cwd)
 }
 
+/// The person at the keyboard as an actor in an add or an invitation
+/// (attend-membership): recorded by member id, and the message that tells
+/// the member sent as [`write_signal`] sends, `from_kind = human`.
+pub fn actor() -> attend_membership::Actor {
+    let (sender_id, from, project, cwd) = sender_identity();
+    let member = human_member_id();
+    attend_membership::Actor { member_id: member.clone(), kind: "human", name: member, sender_id, from, project, cwd }
+}
+
 /// Focus-group membership identity for the human at the keyboard
 /// (ADR-170): the sanitized username alone, no terminal suffix. One
 /// entry per human regardless of terminal or cwd — the same dedupe

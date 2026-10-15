@@ -1,6 +1,7 @@
 //! What the `≡` menu's Settings ▸ lists and writes: the attend mod's
-//! `attend_mod.listening` and `attend_mod.keepwarm`, ways keys a project
-//! can set, then the chat's own `attend.chat.*` keys, which only the user
+//! `attend_mod.listening`, `attend_mod.keepwarm` and keepalive policy
+//! (`attend_mod.keepalive.*`, ADR-414), ways keys a project can set, then
+//! the chat's own `attend.chat.*` keys, which only the user
 //! file holds ([`crate::settings`]). Each shows the value in effect and the
 //! layer it comes from. A write goes to the file of the place chosen, the
 //! user's or a project's, through the agent-settings writer, as
@@ -16,7 +17,19 @@ use agent_settings::writer::edit_file_within;
 use crate::settings::{plain, LOCK_WAIT};
 
 /// The attend mod's keys the menu lists, in its order.
-pub const MOD_KEYS: &[&str] = &["attend_mod.listening", "attend_mod.keepwarm"];
+pub const MOD_KEYS: &[&str] = &[
+    "attend_mod.listening",
+    "attend_mod.keepwarm",
+    "attend_mod.keepalive.enabled",
+    "attend_mod.keepalive.max_keepalives",
+    "attend_mod.keepalive.margin_minutes",
+    "attend_mod.keepalive.windows",
+    "attend_mod.keepalive.timezone",
+    "attend_mod.keepalive.wrap",
+    "attend_mod.keepalive.wrap_file",
+    "attend_mod.keepalive.wrap_to",
+    "attend_mod.keepalive.after_wrap",
+];
 
 const CHAT: &str = "attend.chat.";
 
@@ -192,6 +205,25 @@ pub fn per_project(name: &str) -> bool {
     matches!(Key::of(name), Some(Key::Ways(s)) if matches!(s.scope, Scope::Both | Scope::Project))
 }
 
+/// Whether `name` is typed in an entry dialog rather than picked: a
+/// number, text or a list, which has no fixed values. A list is typed with
+/// its entries separated by commas, as `ways settings set` reads one.
+pub fn is_typed(name: &str) -> bool {
+    matches!(Key::of(name).map(|k| k.spec().kind), Some(Kind::Int { .. } | Kind::Float { .. } | Kind::Text | Kind::Path | Kind::List))
+}
+
+/// What an entry dialog takes to write an empty value for `name`, apart
+/// from an empty entry, which removes the key: `""` for text, `[]` for a
+/// list. An empty value written in a project's file overrides a lower
+/// layer's.
+pub fn empty_literal(name: &str) -> Option<&'static str> {
+    match Key::of(name).map(|k| k.spec().kind) {
+        Some(Kind::Text | Kind::Path) => Some("\"\""),
+        Some(Kind::List) => Some("[]"),
+        _ => None,
+    }
+}
+
 /// The values `name` takes.
 pub fn choices(name: &str) -> Vec<String> {
     match Key::of(name).map(|k| k.spec().kind) {
@@ -253,7 +285,12 @@ pub fn set_at(name: &str, raw: &str, place: &Place, dir: &Path) -> Result<Done, 
         return crate::settings::set(name, raw, &file, dir)
             .map(|said| Done { said: format!("{} · {}", said.replacen(short_name, name, 1), tilde(&file)), overridden: false });
     }
-    let v = key.spec().parse_cli(raw, &key.layers(place), &[]).map_err(|m| format!("{name}: {m}"))?;
+    // `""` typed in an entry dialog is the empty text itself; `[]` already
+    // reads as the empty list.
+    let v = match (key.spec().kind, raw.trim()) {
+        (Kind::Text | Kind::Path, "\"\"") => serde_yaml::Value::String(String::new()),
+        _ => key.spec().parse_cli(raw, &key.layers(place), &[]).map_err(|m| format!("{name}: {m}"))?,
+    };
     let kp = key.path();
     let (_, changed) = edit_file_within(&file, header, Some(LOCK_WAIT), |d| d.set(&kp, &v)).map_err(|e| format!("{e}; nothing written"))?;
     let set = if changed { "" } else { "already " };
@@ -401,6 +438,15 @@ mod tests {
             [
                 "attend_mod.listening = active (project)",
                 "attend_mod.keepwarm = off (user)",
+                "attend_mod.keepalive.enabled = true (default)",
+                "attend_mod.keepalive.max_keepalives = 8 (default)",
+                "attend_mod.keepalive.margin_minutes = 10 (default)",
+                "attend_mod.keepalive.windows = daily 00:00-24:00 (default)",
+                "attend_mod.keepalive.timezone =  (default)",
+                "attend_mod.keepalive.wrap = transcript (default)",
+                "attend_mod.keepalive.wrap_file = {state}/wrap/{session}.md (default)",
+                "attend_mod.keepalive.wrap_to =  (default)",
+                "attend_mod.keepalive.after_wrap = lapse (default)",
                 "attend.chat.tabs.jump = auto (default)",
                 "attend.chat.tabs.menu_on_repeat = true (default)",
                 "attend.chat.tabs.focus_key = both (default)",

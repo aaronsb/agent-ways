@@ -55,6 +55,14 @@ pub struct StateSnapshot {
     pub reply_hint_shown: bool,
     pub git_branch: Option<String>,
     pub git_head: Option<String>,
+    /// The attend mod version this session's mod last reported with its
+    /// beat (`attend listen beat --mod`). `None` until a mod that reports
+    /// one beats.
+    pub mod_version: Option<String>,
+    /// The installed mod version the stale-mod notice announced to this
+    /// session. The notice goes again when a different version is installed
+    /// and this session's mod is still older than it.
+    pub mod_stale_noted: Option<String>,
 }
 
 impl StateSnapshot {
@@ -96,6 +104,12 @@ impl StateSnapshot {
         if self.baselined {
             lines.push("baselined: true".to_string());
         }
+        if let Some(ref v) = self.mod_version {
+            lines.push(format!("mod_version: {}", v));
+        }
+        if let Some(ref v) = self.mod_stale_noted {
+            lines.push(format!("mod_stale_noted: {}", v));
+        }
 
         lines.push(format!("version: {}", env!("CARGO_PKG_VERSION")));
 
@@ -134,6 +148,12 @@ impl StateSnapshot {
                     }
                     "baselined" => {
                         state.baselined = value == "true";
+                    }
+                    "mod_version" => {
+                        state.mod_version = Some(value.to_string());
+                    }
+                    "mod_stale_noted" => {
+                        state.mod_stale_noted = Some(value.to_string());
                     }
                     _ => {} // ignore unknown keys for forward compat
                 }
@@ -269,6 +289,24 @@ impl StateStore {
         self.write_merged(&snap, true)
     }
 
+    /// Record the attend mod version the session's mod reported. Writes
+    /// only when it differs from the recorded one, so the 30-second beat
+    /// costs a read. Returns whether the file now says `version`.
+    pub fn record_mod_version(&self, version: &str) -> bool {
+        if self.load().is_some_and(|s| s.mod_version.as_deref() == Some(version)) {
+            return true;
+        }
+        let snap = StateSnapshot { mod_version: Some(version.to_string()), ..Default::default() };
+        self.write_merged(&snap, true)
+    }
+
+    /// Record that the stale-mod notice announced `installed` to this
+    /// session. Returns whether the file now says so.
+    pub fn mark_mod_stale_noted(&self, installed: &str) -> bool {
+        let snap = StateSnapshot { mod_stale_noted: Some(installed.to_string()), ..Default::default() };
+        self.write_merged(&snap, true)
+    }
+
     /// Make the session cold again: clear `baselined` and keep the seen-set,
     /// so the next conduit applies the cold-start rule (`cold_start`) to
     /// what arrived since. A session that turns listening back on after a
@@ -309,6 +347,10 @@ impl StateStore {
         let mut merged = StateSnapshot {
             seen_signals: HashSet::new(),
             baselined: disk.baselined || mem.baselined,
+            // The mod's fields have writers of their own (the beat and the
+            // drain), so a sensor checkpoint keeps what the disk holds.
+            mod_version: mem.mod_version.clone().or_else(|| disk.mod_version.clone()),
+            mod_stale_noted: mem.mod_stale_noted.clone().or_else(|| disk.mod_stale_noted.clone()),
             ..if fields_from_disk {
                 StateSnapshot {
                     disclosed_thresholds: disk.disclosed_thresholds.clone(),
@@ -437,6 +479,27 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    /// The mod's version and the stale-note flag survive every other write
+    /// to the file, and neither write disturbs the seen-set.
+    #[test]
+    fn mod_fields_persist_across_other_writes() {
+        let dir = temp_dir("mod-fields");
+        let store = StateStore::new_in(dir.join("state"), Some("s1".into()));
+        assert!(store.record_mod_version("0.27.1"));
+        assert!(store.mark_mod_stale_noted("0.28.0"));
+        store.mark_seen(["a.signal"]);
+        store.checkpoint(&StateSnapshot::default());
+        let snap = store.load().unwrap();
+        assert_eq!(snap.mod_version.as_deref(), Some("0.27.1"));
+        assert_eq!(snap.mod_stale_noted.as_deref(), Some("0.28.0"));
+        assert!(store.mark_mod_stale_noted("0.29.0"));
+        assert_eq!(store.load().unwrap().mod_stale_noted.as_deref(), Some("0.29.0"), "a later announcement replaces the earlier");
+        assert!(!snap.baselined, "recording a mod version does not warm the session");
+        assert!(store.record_mod_version("0.28.0"));
+        assert_eq!(store.load().unwrap().mod_version.as_deref(), Some("0.28.0"));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// Golden wire-format round-trip: the drain, the sensor loop, and

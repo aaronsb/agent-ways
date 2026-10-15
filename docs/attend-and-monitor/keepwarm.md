@@ -15,9 +15,36 @@ attend keepwarm off         # disarm
 attend keepwarm status      # the card below; also what bare `attend keepwarm` prints
 ```
 
-These verbs act on the Claude session that runs them, so run them from inside the session (the agent's Bash tool, or `!` in the prompt). Outside a session they print `keepwarm: no Claude session owns this process, nothing to warm` and exit 1. The sensor itself runs inside `attend run`, so attend must be running under Monitor for anything to wake. In a session the attend mod is listening in, the mod runs the same judgment with `attend keepwarm check` on its poll instead ([`mod.md`](mod.md)).
+These verbs act on the Claude session that runs them, so run them from inside the session (the agent's Bash tool, or `!` in the prompt). Outside a session they print `keepwarm: no Claude session owns this process, nothing to warm` and exit 1. The sensor itself runs inside `attend run`, so attend must be running under Monitor for anything to wake. In a session the attend mod hosts, the mod runs the same judgment with `attend keepwarm check` instead ([`mod.md`](mod.md)), and where autocompact is off it keeps the session warm with no arming at all (the keepalive policy, below).
 
 **Auto-arm.** When the sensor sees a paid cold write (below) on a context of at least 50k tokens, it arms three hours on its own if no window already covers them. A session that has paid one rewrite has shown it comes back, and the second rewrite is not paid that day.
+
+## The keepalive policy
+
+In an interactive Claude Code session that runs the attend mod and has autocompact off, nothing needs arming: the mod keeps an idle session warm for a stretch the operator bounds, then asks the agent to wrap and lets the cache lapse ([ADR-414](../architecture/attend/ADR-414-the-attend-mod-keeps-an-idle-session-warm-for-a-bounded-stretch-after-the-operator-s-last-prompt-then-asks-for-a-wrap-and-lets-the-cache-lapse-while-autocompact-is-off.md)). It runs whether the session is listening or dormant, and never in a `claude -p` run or an SDK session.
+
+- **The clock.** Every main-loop request restarts it, whatever started the turn: an operator prompt, an attend delivery, a keepalive, a background agent's notice. A keepalive is due at the newest request's time plus its cache tier's TTL, less `margin_minutes` (default 10, so 50 minutes on the hour tier). Nothing is due while a main-loop turn runs, on the five-minute tier, or under 50k tokens of context. At a due point whose cache has already lapsed (the host slept), nothing is sent and the policy stops until the operator's next prompt.
+- **The bound.** attend counts the keepalives sent since the operator's last prompt. At each due point: under `max_keepalives` (default 8) and inside a window, the mod submits the `keepwarm:` line and the count goes up; otherwise, unless `wrap` is `off`, it submits one `wrap:` turn; otherwise the policy stops. After a wrap or a stop nothing more is sent until the operator prompts, and the cache lapses about an hour later. With the defaults the keepalives land 50, 100 and on to 400 minutes after the last turn, the wrap at 450 minutes.
+- **What resets it.** A prompt the operator typed (the terminal, Remote Control, an SDK host's turn, the owner's Slack ping): the mod runs `attend keepwarm reset`. While autocompact is on the mod holds the prompt instead and sends it with `reset --at` when the gate first reads off. An attend delivery restarts the clock and leaves the count, since attend cannot tell a message the operator typed in attend-chat from a peer's.
+- **The windows.** `windows` lists entries `<days> <HH:MM>-<HH:MM>`: `daily`, one day (`Sat`) or a range (`Mon-Fri`, `Fri-Mon` wrapping the week). `24:00` closes a day; an end before its start crosses midnight and belongs to the start's day. They are read in `timezone`, an IANA name, or the host's zone when it is empty. They gate keepalives only: outside them the next due point sends the wrap. The default `daily 00:00-24:00` leaves the count as the only bound; an empty list is never inside. An entry that does not parse is dropped and the status card names it.
+- **The wrap.** The turn's first line gives the reason (`wrap: 7h30m since the operator's last prompt and 8 keepalives, the most this session allows.`), and its body asks the agent to run the wrap skill with `stay`, ask nothing, land nothing and start nothing. `wrap` routes the final reply: `transcript` (the default) leaves it there; `file` has the mod write it to `wrap_file`; `send` has the mod send it over attend to `wrap_to` (empty for the operator's own member id, a session name, a project path or `#channel`) as one message opening with a `handoff:` line, written to `wrap_file` instead when attend refuses the send. `wrap_file` must name `{session}` in its file name (so `{state}/wrap/{session}/notes.md` falls back) and resolve under `{state}/wrap/` with no `.` or `..` and through no symlink, since a project's checked-in config can set it; anything else goes to `{state}/wrap/<session>.md`, and the card names the refusal. `wrap_to` `#open` is refused, since it reaches every listening session, and the reply goes to the operator. Only the turn the wrap's own text started is routed, and its reply is the answer of the turn's first step that ended it, so a peer message or a notification that continues the turn is not taken for the handoff. attend writes the file (`attend keepwarm wrapped file --path <file> --save`, the reply on stdin), checking the path again and renaming a temp file over it. A wrap turn that ends other than with an answer is written nowhere, and one that never starts, or never answers before the cache lapses, is recorded unfinished. `after_wrap: compact` has the mod compact the conversation once the wrap has answered, with the focus of its closing `/compact` line.
+- **Armed windows.** `attend keepwarm on` overrides the count and the windows while its window is open, so no wrap is sent; `attend keepwarm off` stops the policy until the operator's next prompt. A paid cold write arms nothing where the policy runs.
+- **Autocompact.** The mod reads `isAutoCompactEnabled` from the session's usage breakdown before each check and again just before it submits a keepalive or a wrap, falling back to `autoCompactEnabled` in the merged settings, where only an explicit `false` is off. A gate it cannot read counts as on. With autocompact on the policy does not run: a listening session keeps ADR-182's armed windows, and a dormant one runs nothing, not even at a prompt.
+- **Failing closed.** Only an explicit `enabled: true` runs the policy. Settings ways cannot answer leave it off, and the card says `off: the attend_mod settings could not be read`. A sensor's own three-hour arm after a paid cold write is marked in the arm file, and the policy ignores it. Two processes on one session id take turns under a lock, so the wrap is decided once, and the Monitor-hosted sensor keeps the policy's marks when it writes the ledger.
+
+The keys sit under `attend_mod.keepalive` in the ways config and are set per project with `ways settings set <key> <value> --project <dir>` or in attend-chat's ☰ Settings ([`mod.md`](mod.md#configuration)), where `""` or `[]` in the entry dialog writes an empty text or list that overrides a lower layer.
+
+| Key | Values | Default |
+|---|---|---|
+| `enabled` | `true`, `false` | `true` |
+| `max_keepalives` | 0 to 48 | 8 |
+| `margin_minutes` | 3 to 30 | 10 |
+| `windows` | list of `<days> <HH:MM>-<HH:MM>` | `["daily 00:00-24:00"]` |
+| `timezone` | IANA name, or empty for the host's zone | empty |
+| `wrap` | `transcript`, `file`, `send`, `off` | `transcript` |
+| `wrap_file` | path; `{state}`, `{project}`, `{session}`, `{date}` expand | `{state}/wrap/{session}.md` under the ways state root |
+| `wrap_to` | for `send`: a member id, a session name, a project path or `#channel`; empty for the operator | empty |
+| `after_wrap` | `lapse`, `compact` | `lapse` |
 
 ## What a wake looks like
 
@@ -81,6 +108,8 @@ session     1 cold write paid, $1.64
 | `cold cost` | what rewriting the current context would cost, and what one warm turn costs |
 | `keepwarm` | `armed` with the window left and the next wake; `stopped` with the reason; or `not armed` |
 | `mod setting` | only in a session the attend mod hosts: the effective `attend_mod.keepwarm` setting and the file that set it. With `off` the mod never runs the check, so nothing arms or wakes in that session |
+| `keepalive` | where the mod has run the keepalive policy: the count of the maximum since your prompt, the next due point, the estimated wrap time and the windows; `off` with why (autocompact on, the policy disabled); `stopped` with why; or `wrapped` with where the reply went, a refused send's target and attend's reason included. Dropped window entries and an unknown timezone get lines of their own |
+| `cost` | with the policy running: what its keepalives have cost since your prompt, the most still to spend in keepalives before the wrap, and a cold re-write now |
 | `break-even` | how many wakes cost the same as one rewrite, and how much idle time that covers; left out for a model with no price |
 | `session` | the cold writes this session has paid and their total |
 
@@ -112,7 +141,7 @@ sensors:
     enabled: false
 ```
 
-`attend_mod.keepwarm: off` in the ways config (a project's `.claude/ways.yaml` wins) does the same for the attend mod: its sessions run no check, so nothing wakes and a paid cold write arms nothing. A dormant mod session never gets a keepwarm wake.
+`attend_mod.keepwarm: off` in the ways config (a project's `.claude/ways.yaml` wins) does the same for the attend mod: its sessions run no check, the keepalive policy included, so nothing wakes and a paid cold write arms nothing. `attend_mod.keepalive.enabled: false` turns off the policy alone and returns the project to the armed windows. A dormant mod session never gets an armed window's wake; with autocompact off it gets the policy's keepalives.
 
 A disabled sensor neither wakes nor auto-arms. The arm file and the ledger live under `$XDG_CACHE_HOME/attend/keepwarm/`; only the `attend keepwarm` verbs and the sensor read them.
 
@@ -122,3 +151,4 @@ A disabled sensor neither wakes nor auto-arms. The arm file and the ledger live 
 - [`delivery.md`](delivery.md) — the message lane keepwarm shares with the peers sensor
 - [`configuration.md`](configuration.md) — the `sensors.keepwarm` keys
 - **ADR-182** — the decision
+- **ADR-414** — the keepalive policy

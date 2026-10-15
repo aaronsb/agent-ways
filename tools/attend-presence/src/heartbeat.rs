@@ -98,7 +98,12 @@ pub fn is_fresh(session_id: &str, grace: Duration) -> bool {
 /// so a stopped attend does not appear fresh until grace expires.
 /// Best-effort; absence of the file is not an error.
 pub fn clear(session_id: &str) -> io::Result<()> {
-    match fs::remove_file(heartbeat_path(session_id)) {
+    clear_in(&heartbeat_dir(), session_id)
+}
+
+/// [`clear`] under the heartbeats in `dir` ([`heartbeat_dir`]).
+pub fn clear_in(dir: &std::path::Path, session_id: &str) -> io::Result<()> {
+    match fs::remove_file(dir.join(session_id)) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e),

@@ -1,13 +1,18 @@
 //! Whether a session enrolled in attend (#720).
 //!
 //! A session enrolls by running `attend run` (`/attend`), by joining a
-//! channel, or by turning listening on (`attend listen on`, ADR-406). Enrollment is what the Stop-hook drain delivers to, and it is a
-//! durable fact about the session, kept apart from liveness: a stale
-//! heartbeat, or `cleanup_stale` pruning a channel membership, does not
-//! un-enroll a session. Only an explicit opt-out does.
+//! channel, by turning listening on (`attend listen on`, ADR-406), or by
+//! another member adding it to a channel (ADR-404 D1). Enrollment is what
+//! the Stop-hook drain delivers to, and it is a durable fact about the
+//! session, kept apart from liveness: a stale heartbeat does not un-enroll
+//! a session. An explicit opt-out does, and so does losing the last
+//! channel: the join's and the add's ways are withdrawn when the session
+//! leaves it, is removed from it, or it is dissolved. The membership sweep,
+//! which drops a member whose liveness lapsed, withdraws only the add's
+//! way: a session's own join survives it.
 //!
 //! The record is `<cache>/enrolled/<session-id>`, one line each for:
-//! - every way the session enrolled (`run`, `join`, `listen`);
+//! - every way the session enrolled (`run`, `join`, `listen`, `add`);
 //! - `optout`, when `attend channel scene private` or `attend listen off` ran while
 //!   an `attend run` held the session: the run's enrollment ends once no
 //!   run holds it;
@@ -26,13 +31,18 @@
 //!   `#open` (ADR-404 D3a), so its cold start replays what was posted there
 //!   since (D3b).
 //!
-//! The session is enrolled while the record holds a way. Every edit is a
-//! read-modify-write under one lock (`agent_settings::writer::Lock`), and
-//! every file is written atomically (`write_atomic`).
+//! The session is enrolled while the record holds a way. A record whose
+//! last way goes keeps only its `claude` line, so whether the session has
+//! exited can still be judged ([`process_has_exited`]); a record with no
+//! process to keep is removed. Once that process has exited and no
+//! invitation or briefing names the session, the sweep removes the record
+//! ([`prune_exited`]). Every edit is a read-modify-write under one
+//! lock (`agent_settings::writer::Lock`), and every file is written
+//! atomically (`write_atomic`).
 
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// A way a session enrolled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +53,8 @@ pub enum Source {
     Join,
     /// `attend listen on`: listening without joining a channel.
     Listen,
+    /// Another member added it to a channel (ADR-404 D1).
+    Add,
 }
 
 impl Source {
@@ -53,6 +65,7 @@ impl Source {
             Source::Run => "run",
             Source::Join => "join",
             Source::Listen => "listen",
+            Source::Add => "add",
         }
     }
 }
@@ -114,6 +127,7 @@ impl Record {
                 "run" => r.sources.push(Source::Run),
                 "join" => r.sources.push(Source::Join),
                 "listen" => r.sources.push(Source::Listen),
+                "add" => r.sources.push(Source::Add),
                 "optout" => r.optout = true,
                 _ => {
                     if let Some(key) = line.strip_prefix("claude ") {
@@ -160,44 +174,77 @@ impl Record {
 }
 
 fn dir() -> PathBuf {
+    records_dir()
+}
+
+/// Where the enrollment records live, under attend's cache.
+pub fn records_dir() -> PathBuf {
     crate::cache::dir().join("enrolled")
 }
 
-fn path(session_id: &str) -> PathBuf {
-    dir().join(session_id)
-}
-
-fn index_path(claude_key: &str) -> PathBuf {
-    dir().join("by-claude").join(claude_key)
-}
-
 fn read(session_id: &str) -> Option<Record> {
-    fs::read_to_string(path(session_id)).ok().map(|t| Record::parse(&t))
+    read_in(&dir(), session_id)
 }
 
-/// Write `record` for `session_id`, or remove it when it holds no way.
-fn write(session_id: &str, record: &Record) -> io::Result<()> {
-    let p = path(session_id);
+fn read_in(dir: &Path, session_id: &str) -> Option<Record> {
+    fs::read_to_string(dir.join(session_id)).ok().map(|t| Record::parse(&t))
+}
+
+/// Write `record` for `session_id` under `dir`. A record that holds no way
+/// is written as its process alone, or removed when it names none. While
+/// the record holds a way, the process's index entry names `session_id`
+/// afterwards, unless it names an earlier id of the same process that is
+/// still enrolled and was not carried here ([`indexes_another`]).
+fn write_in(dir: &Path, session_id: &str, record: &Record) -> io::Result<()> {
+    let p = dir.join(session_id);
     if record.sources.is_empty() {
-        return match fs::remove_file(&p) {
-            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
-            _ => Ok(()),
+        return match &record.claude {
+            Some(key) => agent_settings::writer::write_atomic(&p, Record { claude: Some(key.clone()), ..Record::default() }.render()),
+            None => match fs::remove_file(&p) {
+                Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+                _ => Ok(()),
+            },
         };
     }
     agent_settings::writer::write_atomic(&p, record.render())?;
     if let Some(key) = &record.claude {
-        agent_settings::writer::write_atomic(&index_path(process_part(key)), session_id)?;
+        if !indexes_another(dir, key, session_id, record) {
+            agent_settings::writer::write_atomic(&dir.join("by-claude").join(process_part(key)), session_id)?;
+        }
     }
     Ok(())
+}
+
+/// Whether the index entry for process `key` names an id other than
+/// `session_id` that is enrolled under the same process and not among
+/// `record`'s earlier ids: the id the process had before a `/clear` that no
+/// move has carried yet. An add after the `/clear` records the new id under
+/// the process; the entry keeps the earlier id, so the session still reads
+/// as it ([`reading_ids`]) and the next move finds it ([`previous_id`]).
+fn indexes_another(dir: &Path, key: &str, session_id: &str, record: &Record) -> bool {
+    let Ok(indexed) = fs::read_to_string(dir.join("by-claude").join(process_part(key))) else { return false };
+    let indexed = indexed.trim();
+    indexed != session_id && !record.previous.iter().any(|p| p == indexed) && enrolled_under(dir, indexed, key)
+}
+
+/// Whether `session_id` is enrolled under the records in `dir` and its
+/// record names the process `key` does.
+fn enrolled_under(dir: &Path, session_id: &str, key: &str) -> bool {
+    read_in(dir, session_id).is_some_and(|r| !r.sources.is_empty() && r.claude.as_deref().is_some_and(|k| same_process(k, key)))
 }
 
 /// Run `edit` on `session_id`'s record under the enrollment lock and write
 /// the result.
 fn edit(session_id: &str, edit: impl FnOnce(&mut Record)) -> io::Result<()> {
-    let _lock = agent_settings::writer::Lock::acquire(&dir().join(".edit"))?;
-    let mut record = read(session_id).unwrap_or_default();
+    edit_in(&dir(), session_id, edit)
+}
+
+/// [`edit`] on the records under `dir`.
+fn edit_in(dir: &Path, session_id: &str, edit: impl FnOnce(&mut Record)) -> io::Result<()> {
+    let _lock = agent_settings::writer::Lock::acquire(&dir.join(".edit"))?;
+    let mut record = read_in(dir, session_id).unwrap_or_default();
     edit(&mut record);
-    write(session_id, &record)
+    write_in(dir, session_id, &record)
 }
 
 /// The key of the Claude Code process this process runs under.
@@ -240,11 +287,77 @@ pub fn process_is_live(session_id: &str) -> bool {
 }
 
 /// Whether `session_id`'s enrollment record names a Claude Code process
-/// of this host that is no longer running. False with no record, a record
-/// that names no process, or a key from another host or with no host:
-/// nothing here says the session has gone.
+/// of this host that is no longer running, enrolled or not: a session that
+/// stopped listening keeps its process in the record. False with no
+/// record, a record that names no process, or a key from another host or
+/// with no host: nothing here says the session has gone.
 pub fn process_has_exited(session_id: &str) -> bool {
     read(session_id).and_then(|r| r.claude).map(|key| process_fact(&key)) == Some(Fact::Exited)
+}
+
+/// The session whose record names `id` as an earlier id, when it listens
+/// in a Claude Code process that runs on this host: a `/clear`'s move
+/// carried `id`'s enrollment there and may not yet have renamed its
+/// channel memberships ([`carry`]). The membership sweep renames such an
+/// id to it.
+pub fn live_successor(id: &str) -> Option<String> {
+    live_successor_in(&dir(), id)
+}
+
+/// [`live_successor`] under the records in `dir`.
+pub fn live_successor_in(dir: &Path, id: &str) -> Option<String> {
+    let entries = fs::read_dir(dir).ok()?;
+    entries
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .filter_map(|e| e.file_name().to_str().map(str::to_string))
+        .filter(|name| !name.starts_with('.') && name != id)
+        .find(|sid| {
+            read_in(dir, sid).is_some_and(|r| {
+                !r.sources.is_empty()
+                    && r.previous.iter().any(|p| p == id)
+                    && r.claude.as_deref().map(process_fact) == Some(Fact::Running)
+            })
+        })
+}
+
+/// Remove every record that holds only a process of this host that has
+/// exited, unless `named` says an invitation or a briefing still names the
+/// session: nothing is left to judge by it. The index entry goes with it
+/// when it names the session, and so does the session's heartbeat, which
+/// would otherwise hold it short of [`crate::gone`] for a week. Each record
+/// is read again under the lock.
+pub fn prune_exited(named: impl Fn(&str) -> bool) {
+    prune_exited_in(&dir(), &crate::heartbeat::heartbeat_dir(), named, |key| process_fact(key) == Fact::Exited);
+}
+
+/// [`prune_exited`] under the records in `dir` and the heartbeats in
+/// `heartbeats`, with an injectable judgement of which process keys have
+/// exited.
+fn prune_exited_in(dir: &Path, heartbeats: &Path, named: impl Fn(&str) -> bool, exited: impl Fn(&str) -> bool) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    let ids: Vec<String> = entries
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .filter_map(|e| e.file_name().to_str().map(str::to_string))
+        .filter(|name| !name.starts_with('.'))
+        .collect();
+    for sid in ids {
+        if named(&sid) {
+            continue;
+        }
+        let Ok(_lock) = agent_settings::writer::Lock::acquire(&dir.join(".edit")) else { return };
+        let Some(key) = read_in(dir, &sid).filter(|r| r.sources.is_empty()).and_then(|r| r.claude) else { continue };
+        if !exited(&key) {
+            continue;
+        }
+        fs::remove_file(dir.join(&sid)).ok();
+        crate::heartbeat::clear_in(heartbeats, &sid).ok();
+        let index = dir.join("by-claude").join(process_part(&key));
+        if fs::read_to_string(&index).is_ok_and(|s| s.trim() == sid) {
+            fs::remove_file(index).ok();
+        }
+    }
 }
 
 /// What this host can say of the process a key names.
@@ -301,9 +414,36 @@ pub fn sources(session_id: &str) -> Vec<Source> {
 /// mod-hosted. A session that was not enrolled starts listening now
 /// ([`listening_since`]).
 pub fn enroll(session_id: &str, source: Source, host: Option<Host>) -> io::Result<()> {
-    let claude = own_claude_key();
+    enroll_in(&dir(), session_id, source, host, own_claude_key())
+}
+
+/// Record, under the records in `dir` ([`records_dir`]), that another member
+/// added `session_id` to a channel (ADR-404 D1). The add speaks for a session
+/// other than the caller, so the Claude Code process recorded is the
+/// session's own, `claude` ([`crate::session::claude_key_of`]); with none,
+/// the record names no process and the session's liveness rests on its
+/// heartbeat.
+pub fn enroll_added_in(dir: &Path, session_id: &str, claude: Option<String>) -> io::Result<()> {
+    enroll_in(dir, session_id, Source::Add, None, claude)
+}
+
+/// Whether `session_id` is enrolled under the records in `dir`
+/// ([`records_dir`]). Reads only: a pending opt-out counts as not enrolled
+/// once no `attend run` holds the session, and the record is left for
+/// [`is_enrolled`] to apply it.
+pub fn is_enrolled_in(dir: &Path, session_id: &str) -> bool {
+    let Some(record) = read_in(dir, session_id).filter(|r| !r.sources.is_empty()) else { return false };
+    !(record.optout && !crate::heartbeat::run_is_live(session_id))
+}
+
+/// [`withdraw`] under the records in `dir` ([`records_dir`]).
+pub fn withdraw_in(dir: &Path, session_id: &str, source: Source) -> io::Result<()> {
+    edit_in(dir, session_id, |r| r.sources.retain(|s| *s != source))
+}
+
+fn enroll_in(dir: &Path, session_id: &str, source: Source, host: Option<Host>, claude: Option<String>) -> io::Result<()> {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    edit(session_id, |r| {
+    edit_in(dir, session_id, |r| {
         if r.sources.is_empty() {
             r.since = Some(now);
         }
@@ -347,13 +487,14 @@ pub fn host(session_id: &str) -> Option<Host> {
 /// Withdraw one way `session_id` enrolled. The session stays enrolled while
 /// another way remains.
 pub fn withdraw(session_id: &str, source: Source) -> io::Result<()> {
-    edit(session_id, |r| r.sources.retain(|s| *s != source))
+    withdraw_in(&dir(), session_id, source)
 }
 
 /// `attend channel scene private` and `attend listen off`: the explicit opt-out.
 /// Withdraws the join and the listen, and the run too unless an `attend
 /// run` holds the session; then the run's enrollment ends once it no longer
-/// does ([`is_enrolled`] applies it).
+/// does ([`is_enrolled`] applies it). The record keeps the session's
+/// process ([`process_has_exited`]).
 pub fn opt_out(session_id: &str) -> io::Result<()> {
     let live = crate::heartbeat::run_is_live(session_id);
     edit(session_id, |r| {
@@ -370,8 +511,13 @@ pub fn opt_out(session_id: &str) -> io::Result<()> {
 /// the same process (`/clear`). Keeps any way `new` already had, and records
 /// `old` and the ids before it as `new`'s earlier ids ([`previous_ids`]).
 pub fn carry(old: &str, new: &str) -> io::Result<()> {
-    let Some(from) = read(old) else { return Ok(()) };
-    edit(new, |r| {
+    carry_in(&dir(), old, new)
+}
+
+/// [`carry`] under the records in `dir` ([`records_dir`]).
+pub fn carry_in(dir: &Path, old: &str, new: &str) -> io::Result<()> {
+    let Some(from) = read_in(dir, old) else { return Ok(()) };
+    edit_in(dir, new, |r| {
         for sid in from.previous.iter().map(String::as_str).chain([old]) {
             if sid != new && !r.previous.iter().any(|p| p == sid) {
                 r.previous.push(sid.to_string());
@@ -395,7 +541,7 @@ pub fn carry(old: &str, new: &str) -> io::Result<()> {
             r.since = from.since;
         }
     })?;
-    edit(old, |r| *r = Record::default())
+    edit_in(dir, old, |r| *r = Record::default())
 }
 
 /// The ids `session_id` had before each `/clear` that carried its
@@ -426,8 +572,8 @@ pub fn reading_ids(ident: &crate::session::SessionIdentity) -> Vec<String> {
     ids
 }
 
-/// Every session id with an enrollment record, enrolled or holding only a
-/// pending opt-out. Read-only.
+/// Every session id with an enrollment record: enrolled, holding a pending
+/// opt-out, or holding only its process. Read-only.
 pub fn recorded_ids() -> Vec<String> {
     fs::read_dir(dir())
         .into_iter()
@@ -450,10 +596,14 @@ pub fn any_indexed() -> bool {
 /// The index is kept under the key's process part, so a renamed host, or an
 /// entry written before keys carried a host, still finds it.
 pub fn previous_id(claude_key: &str, current: &str) -> Option<String> {
-    let sid = fs::read_to_string(index_path(process_part(claude_key))).ok()?;
+    previous_id_in(&dir(), claude_key, current)
+}
+
+/// [`previous_id`] under the records in `dir` ([`records_dir`]).
+pub fn previous_id_in(dir: &Path, claude_key: &str, current: &str) -> Option<String> {
+    let sid = fs::read_to_string(dir.join("by-claude").join(process_part(claude_key))).ok()?;
     let sid = sid.trim();
-    let same = |r: Record| r.claude.as_deref().is_some_and(|k| same_process(k, claude_key));
-    (sid != current && read(sid).is_some_and(same)).then(|| sid.to_string())
+    (sid != current && enrolled_under(dir, sid, claude_key)).then(|| sid.to_string())
 }
 
 #[cfg(test)]
@@ -485,6 +635,86 @@ mod tests {
             r.claude = Some(key.to_string());
         })
         .unwrap();
+    }
+
+    /// An add records the added session's own Claude Code process, not the
+    /// caller's, under the directory it is given.
+    #[test]
+    fn an_add_enrolls_another_session_under_its_own_process() {
+        let exe = std::env::current_exe().unwrap();
+        let dir = exe.parent().and_then(Path::parent).unwrap().join("test-scratch").join(format!("attend-enrol-add-{}", std::process::id()));
+        fs::remove_dir_all(&dir).ok();
+        let key = "4242-1700000000@elsewhere".to_string();
+        enroll_added_in(&dir, "s", Some(key.clone())).unwrap();
+        enroll_added_in(&dir, "s", Some(key.clone())).unwrap();
+        let r = read_in(&dir, "s").unwrap();
+        assert_eq!((r.sources, r.claude.as_deref()), (vec![Source::Add], Some(key.as_str())));
+        assert!(r.since.is_some(), "the session starts listening at the add");
+        assert_eq!(fs::read_to_string(dir.join("by-claude").join("4242-1700000000")).unwrap(), "s");
+        withdraw_in(&dir, "s", Source::Add).unwrap();
+        let kept = fs::read_to_string(dir.join("s"));
+        enroll_added_in(&dir, "t", None).unwrap();
+        withdraw_in(&dir, "t", Source::Add).unwrap();
+        let gone = !dir.join("t").exists();
+        fs::remove_dir_all(&dir).ok();
+        assert_eq!(kept.unwrap(), format!("claude {key}\n"), "a record with no way left keeps only its process");
+        assert!(gone, "and one with no process is removed");
+    }
+
+    /// A record holding only a process that has exited is removed, with
+    /// its index entry, unless an invitation or a briefing names the
+    /// session. A record with a way, or whose process runs, stays.
+    #[test]
+    fn a_record_holding_only_an_exited_process_is_pruned_unless_named() {
+        let exe = std::env::current_exe().unwrap();
+        let dir = exe.parent().and_then(Path::parent).unwrap().join("test-scratch").join(format!("attend-enrol-prune-{}", std::process::id()));
+        fs::remove_dir_all(&dir).ok();
+        let (gone, live) = ("1-1@here".to_string(), "2-2@here".to_string());
+        for (sid, key) in [("gone", &gone), ("named", &gone), ("live", &live), ("enrolled", &gone)] {
+            enroll_added_in(&dir, sid, Some(key.clone())).unwrap();
+            if sid != "enrolled" {
+                withdraw_in(&dir, sid, Source::Add).unwrap();
+            }
+        }
+        // `enrolled` holds the index entry; point it at `gone`, as the
+        // entry an exited session leaves.
+        agent_settings::writer::write_atomic(&dir.join("by-claude").join("1-1"), "gone").unwrap();
+        prune_exited_in(&dir, &dir.join("heartbeat"), |sid| sid == "named", |key| key == gone);
+        let left: Vec<bool> = ["gone", "named", "live", "enrolled"].iter().map(|s| dir.join(s).is_file()).collect();
+        let index = dir.join("by-claude").join("1-1").exists();
+        fs::remove_dir_all(&dir).ok();
+        assert_eq!(left, vec![false, true, true, true], "gone, named, live, enrolled");
+        assert!(!index, "the index entry naming the pruned id goes with it");
+    }
+
+    /// A session that stopped listening keeps its process in its record:
+    /// it is neither enrolled nor alive by that process, its record is no
+    /// earlier id to adopt, and once the process exits it has exited.
+    #[test]
+    fn an_opted_out_record_keeps_only_its_process() {
+        with_cache(|| {
+            let none = std::collections::HashSet::new();
+            enroll_in("off", &own_key());
+            edit("off", |r| {
+                r.sources.push(Source::Join);
+                r.host = Some(HostRecord { host: Host::Mod, claude: Some(own_key()) });
+                r.since = Some(1);
+            })
+            .unwrap();
+            opt_out("off").unwrap();
+            assert_eq!(read("off"), Some(Record { claude: Some(own_key()), ..Record::default() }));
+            assert!(!is_enrolled("off") && !is_enrolled_in(&records_dir(), "off"));
+            assert!(sources("off").is_empty() && listening_since("off").is_none() && host("off").is_none());
+            assert!(!crate::alive("off", &none) && !crate::has_exited("off"), "its process runs, and it does not listen");
+            assert_eq!(previous_id(&own_key(), "after-clear"), None, "no enrollment to adopt");
+            super::enroll_in(&records_dir(), "off", Source::Listen, None, None).unwrap();
+            assert_eq!(read("off").map(|r| (r.host, r.since.is_some_and(|s| s > 1))), Some((None, true)), "listening again starts a fresh record");
+
+            let gone = format!("{}-1@{}", gone_pid(), crate::process::host_name());
+            enroll_in("exited", &gone);
+            opt_out("exited").unwrap();
+            assert!(crate::has_exited("exited"), "its process has exited");
+        });
     }
 
     /// This test process, keyed as a Claude Code process is.
@@ -570,6 +800,30 @@ mod tests {
         });
     }
 
+    /// An add after `/clear` records the new id under the same Claude Code
+    /// process. Until a move carries the earlier id, the index keeps naming
+    /// it, so the session still reads as it and adoption still finds it.
+    #[test]
+    fn an_add_under_the_same_process_leaves_the_earlier_id_findable() {
+        with_cache(|| {
+            let key = own_key();
+            enroll_in("old", &key);
+            enroll_added_in(&records_dir(), "new", Some(key.clone())).unwrap();
+            assert_eq!(previous_id(&key, "new"), Some("old".to_string()));
+            let ident = crate::session::SessionIdentity {
+                session_id: "new".into(),
+                origin_path: "/w".into(),
+                session_resolved: true,
+                origin_resolved: true,
+                claude_pid: Some(std::process::id()),
+            };
+            assert_eq!(reading_ids(&ident), ["new", "old"]);
+            carry("old", "new").unwrap();
+            assert_eq!(previous_id(&key, "new"), None, "carried: the index names the new id");
+            assert_eq!(reading_ids(&ident), ["new", "old"]);
+        });
+    }
+
     #[test]
     fn a_carry_records_the_earlier_ids() {
         with_cache(|| {
@@ -649,7 +903,7 @@ mod tests {
             assert_eq!(listening_since("s"), None);
             enroll("s", Source::Listen, None).unwrap();
             assert!(listening_since("s").is_some(), "set on enrolling");
-            write("s", &Record { since: Some(1), ..read("s").unwrap() }).unwrap();
+            write_in(&dir(), "s", &Record { since: Some(1), ..read("s").unwrap() }).unwrap();
             enroll("s", Source::Join, None).unwrap();
             assert_eq!(listening_since("s"), at(1), "another way keeps it");
             assert_eq!(Record::parse(&read("s").unwrap().render()).since, Some(1));
@@ -700,7 +954,7 @@ mod tests {
             enroll("s", Source::Listen, Some(Host::Mod)).unwrap();
             assert_eq!(host("s"), Some(Host::Mod));
             let other = Record { host: Some(HostRecord { host: Host::Mod, claude: Some("1-999".into()) }), ..read("s").unwrap() };
-            write("s", &other).unwrap();
+            write_in(&dir(), "s", &other).unwrap();
             assert_eq!(Record::parse(&read("s").unwrap().render()), other);
             assert_eq!(host("s"), None, "recorded under another process");
             assert!(is_enrolled("s"), "the enrollment itself still holds");

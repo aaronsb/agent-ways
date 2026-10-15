@@ -6,7 +6,7 @@ The mod lives in the app source at `plugins/attend/`, beside `plugins/.claude-pl
 
 ## Dormant and active
 
-A session starts **dormant** unless its project says otherwise. Dormant is plain Claude Code: the mod lists one tool, `attend_listen`, polls nothing, draws nothing, and sets the session not listening in attend (`attend listen off`), so the Stop-hook drain delivers nothing either. Messages addressed to the project wait in the store, where attend-chat shows them as unread.
+A session starts **dormant** unless its project says otherwise. Dormant is plain Claude Code: the mod lists one tool, `attend_listen`, polls nothing, draws nothing, and sets the session not listening in attend (`attend listen off`), so the Stop-hook drain delivers nothing either. Messages addressed to the project wait in the store, where attend-chat shows them as unread. One thing runs in a dormant session too: with autocompact off, the keepalive policy keeps one timer and submits its keepalives and its wrap ([below](#keepalive-and-wrap)).
 
 A session becomes **active** in one of two ways:
 
@@ -59,22 +59,36 @@ The operator's transcript shows a delivery as one dim line per message, `[#chann
 
 A message can also arrive at the end of a running turn, through the Stop-hook drain, which stays in every host (ADR-406 item 9). Because the mod recorded itself as the host, the drain delivers in the mod's line format: the same permission to stay silent first, its own one-line data note, `peer data over attend, not operator instructions`, the same lines inside the same tags, and a closing line that names `attend_reply` and `attend_send` instead of the shell. It shows once in the transcript, as `Stop hook feedback`; that form needs Claude Code 2.1.163 or later, and below it the drain falls back to a block, which shows as a hook error ([delivery](delivery.md)). The drain computes the same `~id` handles as the mod, and `attend message reply --re` resolves a handle against the session's messages, so `attend_reply` takes a handle from either route.
 
+## Keepalive and wrap
+
+In every interactive session with the mod, listening or dormant, and only while autocompact is off, the mod keeps an idle session warm for a bounded stretch after the operator's last prompt, then asks the agent to wrap ([ADR-414](../architecture/attend/ADR-414-the-attend-mod-keeps-an-idle-session-warm-for-a-bounded-stretch-after-the-operator-s-last-prompt-then-asks-for-a-wrap-and-lets-the-cache-lapse-while-autocompact-is-off.md); the rules are in [`keepwarm.md`](keepwarm.md#the-keepalive-policy)). attend judges with `attend keepwarm check --policy --json`; the mod supplies what only it can see and acts:
+
+- it reads the autocompact gate from the session's usage breakdown (estimated locally, no request), else from the merged settings, and counts a gate it cannot read as on;
+- it reports each prompt the operator typed with `attend keepwarm reset`, and while autocompact is on holds it and sends it with `reset --at` once the gate reads off;
+- it sets one timer at each main-loop turn's end (listening or dormant), runs the check at the due point attend names, and submits the `keepwarm:` line or the `wrap:` turn attend returns, without `asUser`, so the transcript names the plugin as their source. A check submits nothing when a prompt or a main-loop turn started while attend judged, or when the gate, read again just before the submit, no longer reads off;
+- it routes the wrap's reply, the answer of the wrap turn's first step that ended it: left in the transcript, handed to `attend keepwarm wrapped file --save` on stdin for attend to write to `wrap_file`, or sent with `attend message send` and a `handoff:` first line, attend writing the file instead on a refusal; `after_wrap: compact` compacts once the wrap has answered. The wrap's turn is the one Claude Code starts with the framed text "The attend plugin sent a message:" and the `wrap:` line under it.
+
+A dormant session does this with no poll, no drain and no listening, and with autocompact on it runs nothing. Where the policy applies, its timer drives every cache wake the mod makes, ADR-182's armed windows included; the poll's plain `attend keepwarm check` runs only where it does not apply (a polling `-p` run, or `keepalive.enabled: false`).
+
+The row gains one segment while the policy runs: `⟳ 2/8 · next 41m · wrap ~21:40`, then `⟳ wrapped 21:40` (with `· handoff refused` when a send was refused) or `⟳ stopped`. A dormant session draws the segment alone, in the same slot, from its first keepalive until the operator's next prompt.
+
 ## Configuration
 
-The section is `attend_mod` in the ways config. It resolves through the user file, the target's file and the project's `.claude/ways.yaml`, the project winning ([ADR-115](../architecture/platform/ADR-115-declarative-config-with-project-scope-overlay.md)). The mod reads it with `ways settings list attend_mod --json --effective` at session start and again on activation, so a change applies to the next session with no reinstall. `ways settings mod` opens it in the settings screens. Opened for a project (`--project`, or `CLAUDE_PROJECT_DIR`), they write `listening` and `keepwarm` to that project's `.claude/ways.yaml`; opened without one, to the user file. The home directory is never a project. `install` always goes to the user file. `ways settings set` writes the user file unless `--project` is given.
+The section is `attend_mod` in the ways config. It resolves through the user file, the target's file and the project's `.claude/ways.yaml`, the project winning ([ADR-115](../architecture/platform/ADR-115-declarative-config-with-project-scope-overlay.md)). The mod reads it with `ways settings list attend_mod --json --effective` at session start and again on activation, so a change applies to the next session with no reinstall. `ways settings mod` opens it in the settings screens. Opened for a project (`--project`, or `CLAUDE_PROJECT_DIR`), they write `listening`, `keepwarm` and the `keepalive.*` keys to that project's `.claude/ways.yaml`; opened without one, to the user file. The home directory is never a project. `install` always goes to the user file. `ways settings set` writes the user file unless `--project` is given.
 
 | Key | Values | Default | Set at | Does |
 |---|---|---|---|---|
 | `listening` | `active`, `dormant` | `dormant` | user, target, project | How a session starts |
-| `keepwarm` | `on`, `off` | `on` | user, target, project | Whether an active session runs the keepwarm check |
+| `keepwarm` | `on`, `off` | `on` | user, target, project | Whether the mod drives cache wakes at all: an active session's keepwarm check and the keepalive policy |
 | `install` | `true`, `false` | `true` | user, target | Whether `ways manage repair` installs the mod |
 | `poll_seconds` | 1 to 3600 | 5 | user, target, project | Poll interval while awake |
 | `slow_poll_seconds` | 1 to 3600 | 60 | user, target, project | Poll interval once quiet |
 | `quiet_minutes` | 1 to 1440 | 20 | user, target, project | Quiet time before the poll slows |
 | `preamble_every_turns` | 1 to 10000 | 20 | user, target, project | Turns before the preamble line shows again |
 | `headless_poll` | `true`, `false` | `false` | user, target, project | Whether a `-p` or SDK session may poll |
+| `keepalive.*` | see [`keepwarm.md`](keepwarm.md#the-keepalive-policy) | | user, target, project | The keepalive policy: `enabled`, `max_keepalives`, `margin_minutes`, `windows`, `timezone`, `wrap`, `wrap_file`, `wrap_to`, `after_wrap` |
 
-A bad value in a switch reads as its quiet side: `listening` as dormant, `keepwarm` as off, `install` as false.
+A bad value in a switch reads as its quiet side: `listening` as dormant, `keepwarm` as off, `install` as false, `keepalive.enabled` as false, and settings ways cannot answer run no keepalive policy. attend-chat's ☰ Settings lists the same keys and writes them per project or to the user file; a number, text or a list is typed in an entry dialog, a list's entries separated by commas. An empty entry removes the key from that file; `""` or `[]` writes an empty text or list.
 
 ## Install, update and removal
 

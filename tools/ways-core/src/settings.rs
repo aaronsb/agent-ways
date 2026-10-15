@@ -113,7 +113,7 @@ const SECTIONS: &[SectionSpec] = &[
         top: &["attend_mod"],
         per_entry: false, entry: None, repair: None,
         columns: None,
-        doc: "The attend mod in Claude Code (ADR-406): whether a session starts listening, keepwarm, whether the mod is installed, and its poll timing.",
+        doc: "The attend mod in Claude Code (ADR-406, ADR-414): whether a session starts listening, keepwarm, keepalive, the install and poll timing.",
     },
     // Not in HOOK_SECTIONS: no hook path reads a theme (ADR-504 §11). Declared
     // in agent-theme, so attend reads the same keys (one source).
@@ -343,8 +343,8 @@ const KEYS: &[KeySpec] = &[
         path: &["attend_mod", "keepwarm"],
         kind: Kind::Choice(&["on", "off"]),
         default: DefaultValue::Yaml("on"),
-        doc: "Whether an active session runs attend's keepwarm check: on or off.",
-        long: "on keeps ADR-182's wakes in sessions that are listening: one wake after 50 idle minutes while a window is armed, and the three-hour window a paid cold write arms. off means no keepwarm wake in that project's sessions and arms nothing. A dormant session never gets one (ADR-406 item 13).",
+        doc: "Whether the attend mod drives cache wakes: on or off.",
+        long: "on keeps ADR-182's wakes in sessions that are listening: one wake after 50 idle minutes while a window is armed, and the three-hour window a paid cold write arms. It also lets the keepalive policy (attend_mod.keepalive.*) run in every interactive session with the mod, dormant ones included, while autocompact is off (ADR-414). off means no cache wake the mod drives in that project's sessions, the policy included, and arms nothing.",
         ..BASE
     },
     KeySpec {
@@ -407,6 +407,97 @@ const KEYS: &[KeySpec] = &[
         default: DefaultValue::Yaml("false"),
         doc: "Whether a claude -p run or an SDK session may poll attend.",
         long: "Such a run exits after one turn, so by default it lists attend_listen and never polls, whatever the project's start state.",
+        ..BASE
+    },
+    KeySpec {
+        name: "attend_mod.keepalive.enabled",
+        section: "attend_mod",
+        fail_closed: Some(closed_keepalive),
+        path: &["attend_mod", "keepalive", "enabled"],
+        kind: Kind::Bool,
+        default: DefaultValue::Yaml("true"),
+        doc: "Whether the attend mod keeps an idle session warm for a bounded stretch, then asks for a wrap.",
+        long: "The keepalive policy (ADR-414) runs in an interactive session with the mod while autocompact is off: one keepwarm: turn the margin before the prompt cache lapses, counted from the operator's last prompt, then one wrap: turn, after which the cache lapses. With autocompact on it does not run, and ADR-182's armed windows apply as before. false returns the project to ADR-182 alone. Only an explicit true runs it: a bad value, or settings that cannot be read, leave it off.",
+        ..BASE
+    },
+    KeySpec {
+        name: "attend_mod.keepalive.max_keepalives",
+        section: "attend_mod",
+        path: &["attend_mod", "keepalive", "max_keepalives"],
+        kind: Kind::Int { min: 0, max: 48 },
+        default: DefaultValue::Yaml("8"),
+        doc: "Keepalives allowed since the operator's last prompt before the wrap.",
+        long: "Each keepalive is one short turn that reads the cached context. With the defaults the keepalives land 50, 100 and on to 400 minutes after the last turn, and the wrap at 450 minutes. 0 wraps at the first due point.",
+        ..BASE
+    },
+    KeySpec {
+        name: "attend_mod.keepalive.margin_minutes",
+        section: "attend_mod",
+        path: &["attend_mod", "keepalive", "margin_minutes"],
+        kind: Kind::Int { min: 3, max: 30 },
+        default: DefaultValue::Yaml("10"),
+        doc: "Minutes before the prompt cache lapses that a keepalive is due.",
+        long: "Due at the last request's time plus its cache tier's TTL, less this margin. 10 keeps ADR-182's 50-minute point on the hour tier. The five-minute tier gets no keepalive.",
+        ..BASE
+    },
+    KeySpec {
+        name: "attend_mod.keepalive.windows",
+        section: "attend_mod",
+        path: &["attend_mod", "keepalive", "windows"],
+        kind: Kind::List,
+        default: DefaultValue::Yaml("[\"daily 00:00-24:00\"]"),
+        doc: "When keepalives may run: entries of `<days> <HH:MM>-<HH:MM>`.",
+        long: "Days are daily, one day (Sat) or a range (Mon-Fri; Fri-Mon wraps the week). 24:00 closes a day; an end before its start crosses midnight and belongs to the start's day. Outside every window the next due point sends the wrap instead. An entry that does not parse is dropped and `attend keepwarm status` names it; an empty list is never inside. Set several with commas: `ways settings set attend_mod.keepalive.windows \"Mon-Fri 08:00-19:00, Sat 10:00-14:00\"`.",
+        ..BASE
+    },
+    KeySpec {
+        name: "attend_mod.keepalive.timezone",
+        section: "attend_mod",
+        path: &["attend_mod", "keepalive", "timezone"],
+        kind: Kind::Text,
+        default: DefaultValue::Yaml("\"\""),
+        doc: "The IANA zone the windows are read in; empty for the host's zone.",
+        long: "Such as Europe/Berlin or America/Chicago. A name the host's time zone database does not know is reported by `attend keepwarm status`, and the host's zone is used.",
+        ..BASE
+    },
+    KeySpec {
+        name: "attend_mod.keepalive.wrap",
+        section: "attend_mod",
+        path: &["attend_mod", "keepalive", "wrap"],
+        kind: Kind::Choice(&["transcript", "file", "send", "off"]),
+        default: DefaultValue::Yaml("transcript"),
+        doc: "Where the wrap's final reply goes: transcript, file, send or off.",
+        long: "transcript leaves it in the conversation. file has the mod write it to wrap_file. send has the mod send it over attend to wrap_to, opening with a `handoff:` line; a refused send is written to wrap_file instead. off sends no wrap, and the policy stops at the bound. The transcript keeps the reply under every destination.",
+        ..BASE
+    },
+    KeySpec {
+        name: "attend_mod.keepalive.wrap_file",
+        section: "attend_mod",
+        path: &["attend_mod", "keepalive", "wrap_file"],
+        kind: Kind::Text,
+        default: DefaultValue::Yaml("\"{state}/wrap/{session}.md\""),
+        doc: "The file the mod writes the wrap's reply to, for file and a refused send.",
+        long: "{state} is the ways state root ($XDG_STATE_HOME/agent-ways), {project} the project directory's name, {session} the session id, and {date} the day in the windows' zone. The path must name {session} and resolve under {state}/wrap/ through no symlink; anything else falls back to {state}/wrap/<session>.md, and `attend keepwarm status` names the refusal.",
+        ..BASE
+    },
+    KeySpec {
+        name: "attend_mod.keepalive.wrap_to",
+        section: "attend_mod",
+        path: &["attend_mod", "keepalive", "wrap_to"],
+        kind: Kind::Text,
+        default: DefaultValue::Yaml("\"\""),
+        doc: "Who receives the wrap with send: empty for the operator.",
+        long: "As `attend message send --to` reads it: a person's member id, a session's name or a project path; #name posts in that channel. Empty sends it to the operator's own member id, so it reaches attend-chat as a direct message. #open is refused, since it reaches every listening session; the reply goes to the operator.",
+        ..BASE
+    },
+    KeySpec {
+        name: "attend_mod.keepalive.after_wrap",
+        section: "attend_mod",
+        path: &["attend_mod", "keepalive", "after_wrap"],
+        kind: Kind::Choice(&["lapse", "compact"]),
+        default: DefaultValue::Yaml("lapse"),
+        doc: "What follows the wrap: lapse, or compact the conversation.",
+        long: "lapse lets the prompt cache lapse an hour after the wrap. compact has the mod compact the conversation once the wrap has answered, with the focus of the wrap's closing /compact line, leaving a small context for the operator's return; it is one more warm request.",
         ..BASE
     },
     KeySpec {
@@ -520,6 +611,12 @@ fn closed_keepwarm(v: &Value) -> Option<Value> {
     (v.as_str() != Some("on")).then(|| Value::String("off".into()))
 }
 
+/// `attend_mod.keepalive.enabled`: anything but `true` reads as off, the
+/// side that starts no turn the operator did not type.
+fn closed_keepalive(v: &Value) -> Option<Value> {
+    (v != &Value::Bool(true)).then_some(Value::Bool(false))
+}
+
 /// `attend_mod.install`: anything but `true` reads as not installed.
 fn closed_uninstalled(v: &Value) -> Option<Value> {
     (v != &Value::Bool(true)).then_some(Value::Bool(false))
@@ -563,9 +660,22 @@ pub static SCHEMA: Schema = Schema {
 
 /// Keys of both scopes that the settings screens write to the project's
 /// `.claude/ways.yaml`, not the user file: how a project's sessions start
-/// is decided per project (ADR-406 item 2). `ways settings set` still writes
+/// is decided per project (ADR-406 item 2), and so is the keepalive policy
+/// (ADR-414 item 8). `ways settings set` still writes
 /// the user file unless `--project` is given.
-pub const SCREENS_WRITE_PROJECT: &[&str] = &["attend_mod.listening", "attend_mod.keepwarm"];
+pub const SCREENS_WRITE_PROJECT: &[&str] = &[
+    "attend_mod.listening",
+    "attend_mod.keepwarm",
+    "attend_mod.keepalive.enabled",
+    "attend_mod.keepalive.max_keepalives",
+    "attend_mod.keepalive.margin_minutes",
+    "attend_mod.keepalive.windows",
+    "attend_mod.keepalive.timezone",
+    "attend_mod.keepalive.wrap",
+    "attend_mod.keepalive.wrap_file",
+    "attend_mod.keepalive.wrap_to",
+    "attend_mod.keepalive.after_wrap",
+];
 
 /// Whether the attend mod is installed in a target (ADR-406 item 11): the
 /// user file, then the target's own file. A project cannot set it.
@@ -655,6 +765,26 @@ mod tests {
         assert_eq!(resolved("attend_mod.preamble_every_turns", &[]), Some(Value::Number(20.into())));
         assert_eq!(resolved("attend_mod.headless_poll", &[]), Some(Value::Bool(false)));
         assert!(attend_mod_install_in(&[]));
+    }
+
+    /// ADR-414 item 8: the keepalive policy's defaults, and its switch
+    /// falling to off when its section does not load.
+    #[test]
+    fn attend_mod_keepalive_defaults_and_its_switch_fails_closed() {
+        assert_eq!(resolved("attend_mod.keepalive.enabled", &[]), Some(Value::Bool(true)));
+        assert_eq!(resolved("attend_mod.keepalive.max_keepalives", &[]), Some(Value::Number(8.into())));
+        assert_eq!(resolved("attend_mod.keepalive.margin_minutes", &[]), Some(Value::Number(10.into())));
+        assert_eq!(
+            resolved("attend_mod.keepalive.windows", &[]),
+            Some(Value::Sequence(vec![Value::String("daily 00:00-24:00".into())]))
+        );
+        assert_eq!(resolved("attend_mod.keepalive.timezone", &[]), Some(Value::String(String::new())));
+        assert_eq!(resolved("attend_mod.keepalive.wrap", &[]), Some(Value::String("transcript".into())));
+        assert_eq!(resolved("attend_mod.keepalive.wrap_file", &[]), Some(Value::String("{state}/wrap/{session}.md".into())));
+        assert_eq!(resolved("attend_mod.keepalive.wrap_to", &[]), Some(Value::String(String::new())));
+        assert_eq!(resolved("attend_mod.keepalive.after_wrap", &[]), Some(Value::String("lapse".into())));
+        assert_eq!(closed_keepalive(&Value::Null), Some(Value::Bool(false)));
+        assert_eq!(closed_keepalive(&Value::Bool(true)), None);
     }
 
     #[test]

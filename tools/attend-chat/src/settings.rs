@@ -9,8 +9,15 @@ use agent_settings::load::{resolve, Layer};
 use agent_settings::schema::show;
 use serde_yaml::Value;
 
-/// A value as the status line shows it: a string bare, anything else as YAML.
+/// A value as the status line shows it: a string bare, a list of strings
+/// joined with commas (as `ways settings set` reads one back), anything
+/// else as YAML.
 pub(crate) fn plain(v: &Value) -> String {
+    if let Some(items) = v.as_sequence() {
+        if let Some(texts) = items.iter().map(Value::as_str).collect::<Option<Vec<_>>>() {
+            return texts.join(", ");
+        }
+    }
     v.as_str().map_or_else(|| show(v), str::to_string)
 }
 use agent_tui::{Jump, TabKeys};

@@ -22,6 +22,9 @@
 //! carries the state between calls in the ledger's cursor. Both settle a
 //! step's outcome through [`settle`].
 
+pub mod policy;
+pub mod windows;
+
 use sensor_trait::{Focus, Sensor};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -142,6 +145,11 @@ pub struct ArmFile {
     pub deadline: u64,
     pub armed_at: u64,
     pub window_secs: u64,
+    /// Armed by the sensor after a paid cold write, not by the operator. The
+    /// keepalive policy ignores such a window (ADR-414 item 5): it would
+    /// otherwise wake the session past the count the operator set.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -173,6 +181,10 @@ pub struct Ledger {
     /// baselines afresh.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor: Option<Cursor>,
+    /// The keepalive policy's count and marks (ADR-414 item 7). Absent in a
+    /// ledger written before the policy, which reads as a fresh count.
+    #[serde(default, skip_serializing_if = "policy::Policy::is_empty")]
+    pub policy: policy::Policy,
 }
 
 /// The part of [`State`] a step reads back: the idle clock, the context
@@ -183,6 +195,16 @@ pub struct Cursor {
     pub ctx: u64,
     pub model: String,
     pub deadline: u64,
+}
+
+/// Holds `session_id`'s keepwarm files for one read-step-write: two
+/// processes on one session id take turns, so a keepalive or a wrap is
+/// never decided twice. Released when the value drops.
+pub fn lock_session(dir: &Path, session_id: &str) -> std::io::Result<std::fs::File> {
+    std::fs::create_dir_all(dir)?;
+    let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(dir.join(format!("{session_id}.lock")))?;
+    f.lock()?;
+    Ok(f)
 }
 
 pub fn arm_path(dir: &Path, session_id: &str) -> PathBuf {
@@ -349,6 +371,7 @@ pub struct State {
     pub misses: Vec<Miss>,
     pub last_ping: Option<PingRecord>,
     pub stopped: Option<String>,
+    pub policy: policy::Policy,
 }
 
 /// What one poll decided. `arm_write` is a new deadline for the arm file
@@ -358,6 +381,8 @@ pub struct Outcome {
     pub observations: Vec<(f64, String)>,
     pub logs: Vec<String>,
     pub arm_write: Option<u64>,
+    /// `arm_write` is the sensor's own arm after a paid cold write.
+    pub auto_arm: bool,
     pub changed: bool,
 }
 
@@ -371,6 +396,7 @@ impl State {
             s.last_ping = l.last_ping;
             s.stopped = l.stopped;
             s.pinged_at = l.pinged_at;
+            s.policy = l.policy;
         }
         s
     }
@@ -413,6 +439,14 @@ impl State {
 
     /// One poll. `arm` is the arm file as it is on disk right now.
     pub fn step(&mut self, reading: &Reading, arm: Option<&ArmFile>, now: u64) -> Outcome {
+        self.step_with(reading, arm, now, true)
+    }
+
+    /// [`State::step`], with the three-hour arm after a paid cold write
+    /// (ADR-182 item 4) only when `auto_arm`: the keepalive policy keeps
+    /// every stretch warm on its own, so where it runs the write arms
+    /// nothing (ADR-414 item 5).
+    pub fn step_with(&mut self, reading: &Reading, arm: Option<&ArmFile>, now: u64, auto_arm: bool) -> Outcome {
         let mut out = Outcome::default();
 
         // The arm file is the operator's word. A fresh deadline clears a
@@ -476,10 +510,11 @@ impl State {
                 // scored: a check that resumes after hours away scores an
                 // old write, whose window may already have run out.
                 let until = entry.at_epoch + AUTO_WARM_SECS;
-                if entry.context() >= BIG_TOKENS && until > now && self.deadline < until {
+                if auto_arm && entry.context() >= BIG_TOKENS && until > now && self.deadline < until {
                     self.deadline = until;
                     self.stopped = None;
                     out.arm_write = Some(self.deadline);
+                    out.auto_arm = true;
                     line.push_str(&format!(", keeping the cache warm for {} so it is not paid again today", fmt_duration(until - now)));
                 }
                 out.logs.push(line);
@@ -555,15 +590,7 @@ impl State {
             } else if idle >= PING_AFTER_SECS && self.ctx >= BIG_TOKENS {
                 self.pinged_at = Some(now);
                 out.changed = true;
-                out.observations.push((
-                    3.0,
-                    format!(
-                        "keepwarm: {} idle, the prompt cache lapses in {} on {} tokens. Reply with one word and no tools.",
-                        fmt_duration(idle),
-                        fmt_duration(TTL_SECS - idle),
-                        fmt_tok(self.ctx),
-                    ),
-                ));
+                out.observations.push((3.0, wake_line(idle, TTL_SECS, self.ctx)));
             }
         }
 
@@ -577,6 +604,7 @@ impl State {
             stopped: self.stopped.clone(),
             pinged_at: self.pinged_at,
             updated_at: now,
+            policy: self.policy.clone(),
             cursor: self.baselined.then(|| Cursor {
                 last_seen_at: self.last_seen_at,
                 ctx: self.ctx,
@@ -587,10 +615,23 @@ impl State {
     }
 }
 
+/// The `keepwarm:` wake line (ADR-182), the agent contract the three
+/// synchronized guidance files describe: `idle` into a stretch whose cache
+/// lives `ttl`, on a context of `ctx` tokens.
+pub fn wake_line(idle: u64, ttl: u64, ctx: u64) -> String {
+    format!(
+        "keepwarm: {} idle, the prompt cache lapses in {} on {} tokens. Reply with one word and no tools.",
+        fmt_duration(idle),
+        fmt_duration(ttl.saturating_sub(idle)),
+        fmt_tok(ctx),
+    )
+}
+
 // ── The card ───────────────────────────────────────────────────
 
-/// The lines `attend keepwarm status` prints.
-pub fn card(reading: &Reading, arm: Option<&ArmFile>, ledger: Option<&Ledger>, now: u64) -> Vec<String> {
+/// The state the card reads: the transcript as it is now, the arm file, and
+/// what the ledger recorded.
+pub fn card_state(reading: &Reading, arm: Option<&ArmFile>, ledger: Option<&Ledger>) -> State {
     let mut s = State {
         baselined: true,
         last_seen_at: reading.last_at(),
@@ -604,7 +645,14 @@ pub fn card(reading: &Reading, arm: Option<&ArmFile>, ledger: Option<&Ledger>, n
         s.last_ping = l.last_ping.clone();
         s.stopped = l.stopped.clone();
         s.pinged_at = l.pinged_at;
+        s.policy = l.policy.clone();
     }
+    s
+}
+
+/// The lines `attend keepwarm status` prints.
+pub fn card(reading: &Reading, arm: Option<&ArmFile>, ledger: Option<&Ledger>, now: u64) -> Vec<String> {
+    let s = card_state(reading, arm, ledger);
     let mut lines = Vec::new();
     lines.push(format!("model       {}", if s.model.is_empty() { "not seen yet" } else { &s.model }));
     if s.last_seen_at == 0 {
@@ -667,7 +715,7 @@ pub fn settle(dir: &Path, session_id: &str, state: &State, arm_before: Option<&A
         if on_disk != started_from {
             eprintln!("[attend] keepwarm: arm file changed during the poll, leaving it");
         } else {
-            let file = ArmFile { deadline, armed_at: now, window_secs: deadline.saturating_sub(now) };
+            let file = ArmFile { deadline, armed_at: now, window_secs: deadline.saturating_sub(now), auto: out.auto_arm && deadline > 0 };
             if let Err(e) = write_arm(dir, session_id, &file) {
                 eprintln!("[attend] keepwarm: could not write the arm file: {e}");
             }
@@ -692,6 +740,7 @@ pub fn check_once(session_id: &str, dir: &Path, working_dir: &str, now: u64) -> 
         eprintln!("[attend] keepwarm: could not read the session transcript through `ways context`");
         return None;
     };
+    let _lock = lock_session(dir, session_id).ok();
     let mut state = State::resume(read_ledger(dir, session_id));
     let arm = read_arm(dir, session_id);
     let mut out = state.step(&reading, arm.as_ref(), now);
@@ -718,6 +767,22 @@ impl KeepwarmSensor {
     }
 }
 
+impl KeepwarmSensor {
+    /// One poll on `reading`, under the session's lock. The sensor never
+    /// judges the keepalive policy, so the policy's part of the ledger is
+    /// read back from disk before the step and written as it was: an
+    /// `attend run` beside a mod that runs the policy cannot wipe its count,
+    /// its wrap or its stop.
+    pub fn poll_with(&mut self, reading: &Reading, now: u64) -> Vec<(f64, String)> {
+        let _lock = lock_session(&self.dir, &self.session_id).ok();
+        self.state.policy = read_ledger(&self.dir, &self.session_id).map(|l| l.policy).unwrap_or_default();
+        let arm = read_arm(&self.dir, &self.session_id);
+        let out = self.state.step(reading, arm.as_ref(), now);
+        settle(&self.dir, &self.session_id, &self.state, arm.as_ref(), &out, now);
+        out.observations
+    }
+}
+
 impl Sensor for KeepwarmSensor {
     fn name(&self) -> &str {
         "keepwarm"
@@ -729,11 +794,7 @@ impl Sensor for KeepwarmSensor {
         let Some(reading) = read_context(&self.session_id, &focus.working_dir) else {
             return Vec::new();
         };
-        let now = sensor_trait::epoch_secs();
-        let arm = read_arm(&self.dir, &self.session_id);
-        let out = self.state.step(&reading, arm.as_ref(), now);
-        settle(&self.dir, &self.session_id, &self.state, arm.as_ref(), &out, now);
-        out.observations
+        self.poll_with(&reading, sensor_trait::epoch_secs())
     }
 
     fn emission_threshold(&self) -> f64 {
@@ -775,7 +836,7 @@ mod tests {
     }
 
     fn armed(deadline: u64) -> ArmFile {
-        ArmFile { deadline, armed_at: 0, window_secs: DEFAULT_WINDOW_SECS }
+        ArmFile { deadline, armed_at: 0, window_secs: DEFAULT_WINDOW_SECS, auto: false }
     }
 
     /// A baselined state at t=1000 with a 200k context and one request on record.
@@ -1091,7 +1152,7 @@ mod tests {
     #[test]
     fn arm_and_ledger_round_trip_through_files() {
         let dir = std::env::temp_dir().join(format!("keepwarm-test-{}", std::process::id()));
-        let arm = ArmFile { deadline: 42, armed_at: 1, window_secs: 41 };
+        let arm = ArmFile { deadline: 42, armed_at: 1, window_secs: 41, auto: false };
         write_arm(&dir, "sid", &arm).unwrap();
         assert_eq!(read_arm(&dir, "sid"), Some(arm));
         let ledger = Ledger { misses: vec![Miss { at: 1, tokens: 2, usd: Some(0.5) }], ..Ledger::default() };
@@ -1099,6 +1160,28 @@ mod tests {
         assert_eq!(read_ledger(&dir, "sid"), Some(ledger));
         assert_eq!(read_arm(&dir, "other"), None);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// An `attend run` beside a mod: the sensor's poll keeps the policy's
+    /// marks the mod wrote since the sensor loaded the ledger.
+    #[test]
+    fn the_sensor_keeps_the_policy_written_beside_it() {
+        let dir = std::env::temp_dir().join(format!("keepwarm-sensor-test-{}", std::process::id()));
+        let mut sensor = KeepwarmSensor::new("sid".into(), dir.clone());
+        let r = reading(vec![entry(1000, 200_000, 500)]);
+        sensor.poll_with(&r, 1000);
+        // The mod's policy check counts and wraps meanwhile.
+        let mut ledger = read_ledger(&dir, "sid").unwrap_or_default();
+        ledger.policy.count = 8;
+        ledger.policy.wrapped_at = Some(1500);
+        write_ledger(&dir, "sid", &ledger).unwrap();
+        // A cold write makes the sensor's step rewrite the ledger.
+        let r2 = reading(vec![entry(1000, 200_000, 500), entry(1600, 0, 200_500)]);
+        sensor.poll_with(&r2, 1700);
+        let after = read_ledger(&dir, "sid").unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(after.misses.len(), 1, "the step ran and wrote");
+        assert_eq!((after.policy.count, after.policy.wrapped_at), (8, Some(1500)));
     }
 
     #[test]

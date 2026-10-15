@@ -50,7 +50,7 @@ const RECORD_SLACK: std::time::Duration = std::time::Duration::from_secs(60);
 /// its pid and, where the record and this host both give a start time,
 /// started no later than the record's `startedAt` and [`RECORD_SLACK`]. A
 /// process that started later was given the pid after the record's exited.
-fn record_process_runs(pid: u32, started_at_ms: Option<u64>) -> bool {
+pub(crate) fn record_process_runs(pid: u32, started_at_ms: Option<u64>) -> bool {
     if !process::is_running(pid) {
         return false;
     }
@@ -163,6 +163,31 @@ mod tests {
         std::fs::write(home.join(".claude/sessions").join(format!("{name}.json")), format!(r#"{{"pid":{pid},"sessionId":"{session}","cwd":"/w"{started}}}"#)).unwrap();
     }
 
+    /// The process key an add records for another session is that
+    /// session's only while the record's pid is still its Claude Code
+    /// process (ADR-404 D1): pid 1 runs, and is no Claude Code process.
+    #[test]
+    fn an_add_keys_only_a_claude_code_process_its_record_still_names() {
+        with_home(|home| {
+            record(home, "a", 1, "not-claude", Some(SystemTime::now()));
+            assert_eq!(crate::session::claude_key_of("not-claude"), None);
+        });
+    }
+
+    /// Another session's earlier id is found by the process its record
+    /// names, Claude Code or not, as the session finds it from inside.
+    #[test]
+    fn a_sessions_process_key_is_its_records_whatever_the_process_runs() {
+        with_home(|home| {
+            let pid = std::process::id();
+            record(home, "a", pid, "this-test", Some(SystemTime::now()));
+            let key = format!("{pid}-{}@{}", crate::process::start_time(pid).unwrap(), crate::process::host_name());
+            assert_eq!(crate::session::process_key_of("this-test"), Some(key));
+            assert_eq!(crate::session::claude_key_of("this-test"), None, "this test is no Claude Code process");
+            assert_eq!(crate::session::process_key_of("nobody"), None);
+        });
+    }
+
     // Review of #998, finding 3: a session record's pid is judged with the
     // record's start time, so a pid given to a later process does not keep
     // an exited session alive.
@@ -196,6 +221,27 @@ mod tests {
             assert!(!crate::gone("away"), "no record here, heartbeat within the hold: another host may hold it");
             file.set_modified(SystemTime::now() - crate::UNJUDGED_HOLD - Duration::from_secs(60)).unwrap();
             assert!(crate::gone("away"), "heartbeat past the hold");
+        });
+    }
+
+    /// A session whose record held only its exited process stays gone
+    /// once the sweep prunes that record: the prune takes its heartbeat
+    /// too, so the heartbeat's hold does not speak for it.
+    #[test]
+    fn a_pruned_record_takes_its_heartbeat_and_the_session_stays_gone() {
+        with_home(|_| {
+            let mut child = std::process::Command::new("true").spawn().unwrap();
+            child.wait().unwrap();
+            let dir = crate::enrollment::records_dir();
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("left"), format!("claude {}-1@{}\n", child.id(), crate::process::host_name())).unwrap();
+            crate::heartbeat::touch("left").unwrap();
+            let file = std::fs::File::options().write(true).open(crate::heartbeat::heartbeat_path("left")).unwrap();
+            file.set_modified(SystemTime::now() - Duration::from_secs(3600)).unwrap();
+            assert!(crate::gone("left"), "its process exited");
+            crate::enrollment::prune_exited(|_| false);
+            assert!(!dir.join("left").exists(), "the record is pruned");
+            assert!(crate::gone("left"), "and the session is still gone");
         });
     }
 }

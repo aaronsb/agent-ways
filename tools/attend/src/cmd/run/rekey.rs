@@ -6,7 +6,7 @@
 //! has marked seen is lost, and it checkpoints under the old id. Then it
 //! re-executes with [`MOVED_FROM`] naming the old id. The new process
 //! resolves the new id and moves the session's state across at startup
-//! (`crate::util::move_session`), before it reads any of it. A run that
+//! (`attend_membership::move_session`), before it reads any of it. A run that
 //! starts without [`MOVED_FROM`] (the old one was killed before it could
 //! hand over, or the Monitor was restarted) finds the old id through the
 //! enrollment index keyed on the Claude Code process and moves it the same
@@ -60,7 +60,7 @@ pub(super) fn complete_move(ident: &attend_presence::session::SessionIdentity) -
             .and_then(|key| attend_presence::enrollment::previous_id(&key, new))?,
     };
     if old != *new && !old.is_empty() {
-        crate::util::move_session(&old, new, &ident.origin_path);
+        attend_membership::move_session(&attend_membership::Bus::here(), &old, new, &ident.origin_path);
     }
     Some(old)
 }

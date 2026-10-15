@@ -224,6 +224,14 @@ pub(crate) enum ChannelCmd {
     #[command(about = describe::JOIN)]
     Join(JoinArgs),
 
+    /// Add a session to a channel; it is told, and handed the recent history
+    ///
+    /// The session is enrolled with no answer from it (ADR-404 D1), told
+    /// by a direct message to its project, and handed the newest 50 of the
+    /// channel's messages to read, as a join answering an invitation is.
+    /// Any invitation it had there is spent.
+    Add(AddArgs),
+
     #[command(about = describe::LEAVE)]
     Leave(LeaveArgs),
 
@@ -333,6 +341,18 @@ pub(crate) struct JoinArgs {
     /// Pin so the channel persists across scene changes
     #[arg(long)]
     pub(crate) pin: bool,
+    /// Print the result as one JSON document
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Args)]
+pub(crate) struct AddArgs {
+    /// The session to add: its name or id
+    pub(crate) member: String,
+    /// Channel name (with or without the # prefix); with none, the one
+    /// channel this session is in
+    pub(crate) channel: Option<String>,
     /// Print the result as one JSON document
     #[arg(long)]
     pub(crate) json: bool,
@@ -580,11 +600,54 @@ pub enum KeepwarmCmd {
     /// one is due, else nothing (exit 0 either way). For a host that polls
     /// without `attend run`; prints nothing while an `attend run` holds the
     /// session, since its sensor wakes it.
-    Check,
+    Check(KeepwarmCheckArgs),
+    /// The operator prompted: the keepalive count starts again, and a sent
+    /// wrap and a stop are cleared. The attend mod runs it for each prompt
+    /// typed in the session (ADR-414 item 4)
+    Reset {
+        /// When the operator prompted, in epoch seconds (default now). The
+        /// mod passes a prompt it held while autocompact was on
+        #[arg(long)]
+        at: Option<u64>,
+    },
+    /// Record where the keepalive policy's wrap reply went, for the status
+    /// card. The attend mod runs it once the wrap turn ends (ADR-414 item 6)
+    Wrapped {
+        /// transcript, file, sent, refused or unfinished
+        outcome: String,
+        /// The file written, the recipient, or attend's reason for a refusal
+        #[arg(long, default_value = "")]
+        detail: String,
+        /// With --save: the wrap file to write the reply to, checked again
+        /// under the ways state root's wrap/ directory
+        #[arg(long, requires = "save")]
+        path: Option<String>,
+        /// Write the reply read on stdin to --path (outcome file or
+        /// refused), through a temp file renamed over it
+        #[arg(long, requires = "path")]
+        save: bool,
+    },
+}
+
+#[derive(Args, Clone, Debug, Default)]
+pub struct KeepwarmCheckArgs {
+    /// Apply the keepalive policy (ADR-414): from each turn's end, one wake
+    /// the margin before the cache lapses, counted from the operator's last
+    /// prompt and bounded by attend_mod.keepalive, then one wrap turn
+    #[arg(long)]
+    pub policy: bool,
+    /// Print the decision as one JSON object: action (none, keepalive or
+    /// wrap), text, next_at, count, max, wraps_at and reason
+    #[arg(long)]
+    pub json: bool,
+    /// The autocompact gate as the host read it: on, off or unknown. The
+    /// policy runs only with off; unknown counts as on
+    #[arg(long, requires = "policy", value_parser = ["on", "off", "unknown"], default_value = "unknown")]
+    pub autocompact: String,
 }
 
 /// Subcommands for `attend listen`. With no subcommand, defaults to `status`.
-#[derive(Subcommand, Clone, Copy)]
+#[derive(Subcommand, Clone)]
 pub enum ListenCmd {
     /// Listen: the Stop-hook drain delivers to this session. Messages
     /// addressed to its project while it was not listening are delivered by
@@ -608,7 +671,14 @@ pub enum ListenCmd {
     /// on a timer, through turns too, so the session stays within the
     /// liveness grace while it lives. A session that does not listen is
     /// written nothing
-    Beat,
+    Beat {
+        /// The attend mod's own version. The mod sends it with every beat;
+        /// attend records it for the session, and the Stop-hook drain
+        /// compares it with the installed mod to tell a session that loaded
+        /// an older one. A mod that sends none is compared by its start time
+        #[arg(long = "mod", value_name = "VERSION")]
+        mod_version: Option<String>,
+    },
 }
 
 /// A host `attend listen on --host` records.

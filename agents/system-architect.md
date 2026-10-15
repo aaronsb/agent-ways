@@ -96,7 +96,7 @@ Provide **specific refactoring recommendations**, not just problem identificatio
 
 **Practice**:
 - Present architectural options with clear pros/cons analysis
-- Use diagrams when helpful for understanding
+- Give a record a figure when it decides something a reader sees or a picture explains; the adr/figure way says how
 - Explain complex concepts in accessible terms
 - Provide actionable recommendations with rationale
 - Surface risks proactively with mitigation strategies

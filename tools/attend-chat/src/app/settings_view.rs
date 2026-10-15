@@ -2,15 +2,19 @@
 //! read ([`crate::settings_edit`]), each as `name = value (layer)`. Picking
 //! one walks to a value through the shell's pickers:
 //!
-//! - an attend mod key (`attend_mod.listening`, `attend_mod.keepwarm`)
-//!   first asks where to write it: the user file, the project the chat runs
-//!   in, a live agent's project, or another project typed in an entry
-//!   dialog. Each place says what its file holds.
+//! - an attend mod key (`attend_mod.listening`, `attend_mod.keepwarm`,
+//!   `attend_mod.keepalive.*`) first asks where to write it: the user file,
+//!   the project the chat runs in, a live agent's project, or another
+//!   project typed in an entry dialog. Each place says what its file holds.
 //! - a chat key (`attend.chat.*`) is the user file's alone, so it goes
 //!   straight to its values.
 //!
 //! The values mark the one in effect at that place; Unset here, offered
-//! where the place's file holds the key, removes it. The pick is written
+//! where the place's file holds the key, removes it. A number, text or
+//! list key has no values to pick: an entry dialog holds the value in
+//! effect there, a list's entries separated by commas, and an empty entry
+//! removes the key from the place's file; `""` or `[]` writes an empty
+//! text or list, which overrides a lower layer. The pick is written
 //! as `ways settings set` writes it, the bottom bar says where and names a
 //! layer that still overrides it, and the chat's own keys apply at once.
 
@@ -26,6 +30,7 @@ const LIST: &str = "settings";
 const LAYER: &str = "setting-layer:";
 const VALUE: &str = "setting-value:";
 const DIR: &str = "setting-dir:";
+const TYPED: &str = "setting-typed:";
 const SEP: char = '\u{1f}';
 
 /// The layer picker's last item: a project typed in a dialog.
@@ -79,12 +84,25 @@ impl ChatPane {
     fn value_menu(&mut self, name: &str, at: usize, anchor: Anchor) {
         let Some((_, place)) = self.setting_places.get(at).cloned() else { return };
         let now = edit::in_effect(name, &place);
+        if edit::is_typed(name) {
+            return self.value_entry(name, at, now, None);
+        }
         let mut items: Vec<Item> = edit::choices(name).into_iter().map(|c| Item::new(c.clone()).current(c == now)).collect();
         if edit::held(name, &place).is_some() {
             items.push(Item::new(UNSET));
         }
         let id = format!("{VALUE}{name}{SEP}{at}");
         self.to_open = Some(Open::Pick { id, title: format!("{name} · {}", place.name()), items, multi: false, anchor });
+    }
+
+    /// The entry dialog for a typed key at the place kept at index `at`,
+    /// holding `value`, with the reason the last value was refused.
+    fn value_entry(&mut self, name: &str, at: usize, value: String, error: Option<String>) {
+        let Some((_, place)) = self.setting_places.get(at) else { return };
+        let title = format!("{name} · {}", place.name());
+        // Text and lists can be empty on purpose: the dialog says how.
+        let error = error.or_else(|| edit::empty_literal(name).map(|e| format!("empty unsets · {e} writes empty")));
+        self.to_open = Some(Open::Entry { id: format!("{TYPED}{name}{SEP}{at}"), title, value, error, anchor: Anchor::Center });
     }
 
     /// The entry dialog for a project the layer picker does not list.
@@ -120,6 +138,38 @@ impl ChatPane {
                     self.value_menu(name, at, Anchor::Tab(0));
                 }
                 None => self.project_entry(name, value.to_string(), Some("no project encloses that directory".into())),
+            }
+        } else if let Some(rest) = id.strip_prefix(TYPED) {
+            let Some((name, at)) = rest.split_once(SEP).and_then(|(name, at)| Some((name, at.parse::<usize>().ok()?))) else {
+                return true;
+            };
+            let Some((_, place)) = self.setting_places.get(at).cloned() else {
+                self.say("the places offered changed; open Settings again", true);
+                return true;
+            };
+            let typed = value.trim();
+            if typed.is_empty() {
+                if edit::held(name, &place).is_some() {
+                    self.setting_chosen(name, &place, UNSET);
+                }
+                return true;
+            }
+            if self.dry_run {
+                self.say("dry run: nothing written", false);
+                return true;
+            }
+            // A value the schema refuses keeps the dialog open, with why.
+            let dir = std::env::current_dir().unwrap_or_default();
+            match edit::set_at(name, typed, &place, &dir) {
+                Ok(done) => {
+                    self.reload_settings();
+                    self.say(done.said, done.overridden);
+                }
+                // The dialog's title names the key already.
+                Err(e) => {
+                    let why = e.strip_prefix(&format!("{name}: ")).unwrap_or(&e).to_string();
+                    self.value_entry(name, at, typed.to_string(), Some(why))
+                }
             }
         } else if let Some(rest) = id.strip_prefix(VALUE) {
             let place = rest.split_once(SEP).and_then(|(name, at)| Some((name, self.setting_places.get(at.parse::<usize>().ok()?)?.1.clone())));

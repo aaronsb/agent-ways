@@ -106,7 +106,7 @@ agent-menu   | base  | wait:Agents side:○ wait:DMs side:○ wait:Address
 crowd        | crowd | wait:Agents F2 Down Up Up Up Up Up Up Up Up Up Up Up Up
 common       | base  | wait:Agents click:≡ wait:Hide_column
 hide-here    | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:hide_the_messages_so_far_in_⋯all?
-hide-done    | base  | wait:#open click:#open click:#open wait:Hide_messages_here Enter wait:y_hide pause:1.2 click:y_hide wait:the_bus_keeps_them
+hide-done    | base  | wait:#open click:#open click:#open wait:Hide_messages_here Enter wait:y_hide pause:1.2 click:y_hide wait:nothing_was_deleted
 hide-chan    | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Hide_messages_here wait:hide_the_messages_so_far_in_#deploy?
 paste        | base  | wait:Agents text:see: paste:line_one\\nline_two\\nline_three
 rawpaste     | base  | wait:Agents rawpaste:one\\ntwo
@@ -115,7 +115,7 @@ own-row      | own   | wait:operator click:#deploy click:#deploy wait:pick Escap
 quiet-send   | base  | wait:Agents rside:○ wait:Address click:Address_@ text:are_you_there Enter wait:no_heartbeat
 paste-asked  | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:hide_the_messages_so_far_in_⋯all? paste:yes_please\\nsecond_line wait:kept
 ask          | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide
-ask-yes      | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide pause:1.2 click:y_hide wait:the_bus_keeps_them
+ask-yes      | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide pause:1.2 click:y_hide wait:nothing_was_deleted
 ask-no       | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide click:n_keep wait:kept
 ask-feed     | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide click:signing wait:kept
 ask-row      | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide side:#infra wait:kept
@@ -182,13 +182,13 @@ focus-row    | base  | wait:Agents F2 Down End Up wait:_column_
 focus-feed   | base  | wait:Agents BTab wait:_feed_
 focus-msg    | base  | wait:Agents BTab Up Up wait:select
 enter-view   | base  | wait:Agents F2 Enter wait:pick_one:_⋯all
-enter-row    | base  | wait:Agents F2 Down End Up Enter wait:pick_one:_#infra
+enter-row    | base  | wait:Agents F2 Down End Up Up Enter wait:pick_one:_#infra
 enter-agent  | base  | wait:Agents F2 Down Enter wait:Add_agent_to_chat
 enter-feed   | base  | wait:Agents BTab Enter wait:message_from
 enter-plus   | base  | wait:Agents F2 Left Left Enter wait:new_channel_name
 add-menu     | base  | wait:Agents rside:beta wait:Add_agent_to_chat
 add-pick     | base  | wait:Agents rside:beta wait:Add_agent_to_chat click:Add_agent_to_chat wait:add_to_channel
-add-done     | base  | wait:Agents rside:● wait:Add_agent_to_chat click:Add_agent_to_chat wait:add_to_channel Enter wait:invite
+add-done     | base  | wait:Agents rside:● wait:Add_agent_to_chat click:Add_agent_to_chat wait:add_to_channel Enter wait:added_@
 narrow-bar   | many  | wait:Agents resize:60 wait:⋯all
 arrow-empty  | base  | wait:Agents Up text:1x wait:>_1x
 q-asks       | base  | wait:Agents BTab BTab q wait:quit?
@@ -199,7 +199,7 @@ tab-narrow   | base  | wait:Agents M-2 wait:rollout resize:70 gone:Agents wait:1
 digit-agent  | base  | wait:Agents F2 Down wait:_column_ text:2 wait:>_2
 esc-tab-out  | base  | wait:Agents BTab BTab wait:_column_ text:hello Tab wait:▸≡ Escape wait:pick_one:_attend-chat Escape gone:pick_one wait:_column_
 bar-narrow   | base  | wait:Agents M-2 wait:rollout resize:60 wait:⋯all
-digit-row    | base  | wait:Agents F2 Down End 2 wait:rollout
+digit-row    | base  | wait:Agents F2 Down End Up 2 wait:rollout
 digit-typed  | base  | wait:Agents F2 2 wait:>_2
 tab-leaves   | base  | wait:Agents text:hello Tab wait:▸≡
 feed-type    | base  | wait:Agents BTab wait:_feed_ q wait:>_q
@@ -214,6 +214,12 @@ tab-nomatch  | base  | wait:Agents text:hi_@zzz Tab wait:▸≡
 tab-once     | base  | wait:Agents text:#arch Tab wait:#archive Tab wait:▸≡
 esc-hide     | base  | wait:Agents BTab BTab Escape wait:Hide_column Down Down Down Enter gone:pick wait:_feed_
 add-chan     | base  | wait:Agents side:#infra side:#infra wait:pick click:Add_agent wait:add_to_#infra
+invite-chan  | base  | wait:Agents side:#infra side:#infra wait:pick click:Invite_agent wait:invite_to_#infra
+invite-done  | base  | wait:Agents side:#infra side:#infra wait:pick click:Invite_agent wait:invite_to_#infra Enter wait:they_join_themselves
+members      | base  | wait:◌_invited
+member-menu  | base  | wait:◌_invited side:◌ wait:Address
+member-who   | base  | wait:◌_invited side:◌ wait:Who_is_this click:Who_is_this wait:invited_to_#deploy_by_operator
+member-keys  | base  | wait:◌_invited F2 Down End Up Up Up Up wait:_column_
 dm-open      | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs
 dm-compose   | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs text:looks_good,_push_it Enter wait:sent_→
 dm-menu      | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs rfeed:→_you wait:Hide_DMs
@@ -227,8 +233,9 @@ review-both  | trays | wait:Agents_3/4 side:alpha wait:DMs rside:alpha wait:Revi
 "
 
 # The fixture: three claudes (alpha and beta live, gamma quiet), #deploy
-# with beta in it, an empty #infra, and #archive, which _groups.yaml still
-# names after its directory was swept. The human is `operator`. `crowd`
+# with beta in it and gamma invited there by the operator four minutes
+# before, an empty #infra, and #archive, which _groups.yaml still names
+# after its directory was swept, with alpha in it. The human is `operator`. `crowd`
 # adds fifteen agents, every other one live; `own` puts the operator in
 # #deploy, with a message there; `many` adds #ch01 to #ch24; `plain` the
 # plain shape; `dm` a direct message from alpha to the operator; `trays`
@@ -290,6 +297,7 @@ archive:
     - $A
 YAML
   now=$(date +%s)
+  printf 'by: operator\nat: %s\n' "$((now - 240))" > "$sig/@deploy/$C.invite"
   msg() { # dir id age from cwd text
     printf '%s|%s|%s|%s\n' "$4" "$(basename "$5")" "$5" "$6" > "$1/$2.signal"
     touch -d "@$((now - $3))" "$1/$2.signal"

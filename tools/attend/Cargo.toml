@@ -22,11 +22,15 @@ agent-theme = { path = "../agent-theme" }
 # attend's settings: the schema, the typed config and the writer (ADR-503).
 agent-settings = { path = "../agent-settings" }
 attend-config = { path = "../attend-config" }
+# The ways state root the keepalive policy's wrap files live under (ADR-414).
+ways-core = { path = "../ways-core" }
 serde_yaml = "0.9"
 # The verbs' results serialize for `--json` and for library callers.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 attend-groups = { path = "../attend-groups" }
+# The add, as every surface makes it (ADR-404 D1).
+attend-membership = { path = "../attend-membership" }
 attend-presence = { path = "../attend-presence" }
 attend-instances = { path = "../attend-instances" }
 claude-sessions = { path = "../claude-sessions" }

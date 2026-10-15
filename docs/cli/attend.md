@@ -22,6 +22,7 @@ This document contains the help content for the `attend` command-line program.
 * [`attend channel`↴](#attend-channel)
 * [`attend channel list`↴](#attend-channel-list)
 * [`attend channel join`↴](#attend-channel-join)
+* [`attend channel add`↴](#attend-channel-add)
 * [`attend channel leave`↴](#attend-channel-leave)
 * [`attend channel create`↴](#attend-channel-create)
 * [`attend channel describe`↴](#attend-channel-describe)
@@ -39,6 +40,8 @@ This document contains the help content for the `attend` command-line program.
 * [`attend keepwarm off`↴](#attend-keepwarm-off)
 * [`attend keepwarm status`↴](#attend-keepwarm-status)
 * [`attend keepwarm check`↴](#attend-keepwarm-check)
+* [`attend keepwarm reset`↴](#attend-keepwarm-reset)
+* [`attend keepwarm wrapped`↴](#attend-keepwarm-wrapped)
 * [`attend chat`↴](#attend-chat)
 * [`attend sensor`↴](#attend-sensor)
 * [`attend sensor list`↴](#attend-sensor-list)
@@ -140,7 +143,11 @@ Print `listening` or `not listening` (default)
 
 Mark a listening session alive: touch its heartbeat, deliver nothing. After a /clear it first takes over the enrollment the session's earlier id made, as the drain does. The attend mod runs it on a timer, through turns too, so the session stays within the liveness grace while it lives. A session that does not listen is written nothing
 
-**Usage:** `attend listen beat`
+**Usage:** `attend listen beat [OPTIONS]`
+
+###### **Options:**
+
+* `--mod <VERSION>` — The attend mod's own version. The mod sends it with every beat; attend records it for the session, and the Stop-hook drain compares it with the installed mod to tell a session that loaded an older one. A mod that sends none is compared by its start time
 
 
 
@@ -323,6 +330,7 @@ Join, leave, list and manage channels and scenes (default: list)
 
 * `list` — List every channel, marking the ones this session is in
 * `join` — Join a channel (creates it if absent)
+* `add` — Add a session to a channel; it is told, and handed the recent history
 * `leave` — Leave a channel
 * `create` — Create a channel without joining it (pinned so it persists empty)
 * `describe` — Set or replace a channel's single-line description
@@ -365,6 +373,25 @@ Join a channel (creates it if absent)
 ###### **Options:**
 
 * `--pin` — Pin so the channel persists across scene changes
+* `--json` — Print the result as one JSON document
+
+
+
+## `attend channel add`
+
+Add a session to a channel; it is told, and handed the recent history
+
+The session is enrolled with no answer from it (ADR-404 D1), told by a direct message to its project, and handed the newest 50 of the channel's messages to read, as a join answering an invitation is. Any invitation it had there is spent.
+
+**Usage:** `attend channel add [OPTIONS] <MEMBER> [CHANNEL]`
+
+###### **Arguments:**
+
+* `<MEMBER>` — The session to add: its name or id
+* `<CHANNEL>` — Channel name (with or without the # prefix); with none, the one channel this session is in
+
+###### **Options:**
+
 * `--json` — Print the result as one JSON document
 
 
@@ -535,6 +562,8 @@ Keep the prompt cache warm across idle stretches (ADR-182; default: status)
 * `off` — Disarm and forget the window
 * `status` — Cache state, context size, cold price, window left, and this session's cold writes
 * `check` — Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due, else nothing (exit 0 either way). For a host that polls without `attend run`; prints nothing while an `attend run` holds the session, since its sensor wakes it
+* `reset` — The operator prompted: the keepalive count starts again, and a sent wrap and a stop are cleared. The attend mod runs it for each prompt typed in the session (ADR-414 item 4)
+* `wrapped` — Record where the keepalive policy's wrap reply went, for the status card. The attend mod runs it once the wrap turn ends (ADR-414 item 6)
 
 
 
@@ -570,7 +599,50 @@ Cache state, context size, cold price, window left, and this session's cold writ
 
 Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due, else nothing (exit 0 either way). For a host that polls without `attend run`; prints nothing while an `attend run` holds the session, since its sensor wakes it
 
-**Usage:** `attend keepwarm check`
+**Usage:** `attend keepwarm check [OPTIONS]`
+
+###### **Options:**
+
+* `--policy` — Apply the keepalive policy (ADR-414): from each turn's end, one wake the margin before the cache lapses, counted from the operator's last prompt and bounded by attend_mod.keepalive, then one wrap turn
+* `--json` — Print the decision as one JSON object: action (none, keepalive or wrap), text, next_at, count, max, wraps_at and reason
+* `--autocompact <AUTOCOMPACT>` — The autocompact gate as the host read it: on, off or unknown. The policy runs only with off; unknown counts as on
+
+  Default value: `unknown`
+
+  Possible values: `on`, `off`, `unknown`
+
+
+
+
+## `attend keepwarm reset`
+
+The operator prompted: the keepalive count starts again, and a sent wrap and a stop are cleared. The attend mod runs it for each prompt typed in the session (ADR-414 item 4)
+
+**Usage:** `attend keepwarm reset [OPTIONS]`
+
+###### **Options:**
+
+* `--at <AT>` — When the operator prompted, in epoch seconds (default now). The mod passes a prompt it held while autocompact was on
+
+
+
+## `attend keepwarm wrapped`
+
+Record where the keepalive policy's wrap reply went, for the status card. The attend mod runs it once the wrap turn ends (ADR-414 item 6)
+
+**Usage:** `attend keepwarm wrapped [OPTIONS] <OUTCOME>`
+
+###### **Arguments:**
+
+* `<OUTCOME>` — transcript, file, sent, refused or unfinished
+
+###### **Options:**
+
+* `--detail <DETAIL>` — The file written, the recipient, or attend's reason for a refusal
+
+  Default value: ``
+* `--path <PATH>` — With --save: the wrap file to write the reply to, checked again under the ways state root's wrap/ directory
+* `--save` — Write the reply read on stdin to --path (outcome file or refused), through a temp file renamed over it
 
 
 

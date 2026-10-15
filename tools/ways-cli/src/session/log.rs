@@ -872,7 +872,8 @@ mod compaction_tests {
     #[test]
     fn compact_log_tail_keeps_recent_whole_lines() {
         // A unique temp path (process id; no clock/random in this crate's tests).
-        let path = std::env::temp_dir().join(format!("ways-evt-{}.jsonl", std::process::id()));
+        let dir = tmp("evt");
+        let path = dir.to_path_buf();
         // 1000 numbered JSON lines (~20 bytes each → ~20 KB).
         let mut content = String::new();
         for i in 0..1000 {
@@ -898,12 +899,12 @@ mod compaction_tests {
         assert_eq!(*lines.last().unwrap(), "{\"n\":999}");
         assert!(!after.contains("{\"n\":0}"), "oldest events dropped");
 
-        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     fn compaction_keeps_judge_calls_so_spend_still_counts_them() {
-        let path = std::env::temp_dir().join(format!("ways-evt-judge-{}.jsonl", std::process::id()));
+        let dir = tmp("evt-judge");
+        let path = dir.to_path_buf();
         let judge = |ts: &str| format!("{{\"event\":\"judge_call\",\"ts\":\"{ts}\",\"session\":\"s\",\"project\":\"/p\",\"input_tokens\":\"10\",\"output_tokens\":\"1\",\"cost_usd\":\"0.0100\",\"cost_source\":\"provider\"}}\n");
         let filler = |s: &mut String| {
             for i in 0..500 {
@@ -929,12 +930,12 @@ mod compaction_tests {
         // A second compaction carries them again without duplicating.
         compact_log_tail(&path, EVENTS, NOW, 2000, 0).unwrap();
         assert_eq!(ways_agent_core::spend::parse_log(&std::fs::read_to_string(&path).unwrap()).len(), 3);
-        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     fn compaction_skips_a_rewrite_that_frees_too_little_and_keeps_judge_calls() {
-        let path = std::env::temp_dir().join(format!("ways-evt-gap-{}.jsonl", std::process::id()));
+        let dir = tmp("evt-gap");
+        let path = dir.to_path_buf();
         let judge = |i: usize| format!("{{\"event\":\"judge_call\",\"ts\":\"2026-01-05T10:00:{:02}Z\",\"cost_source\":\"unknown\"}}\n", i % 60);
         // Judge history (~4 KB) larger than the gap (keep 500, min_freed 1000).
         let mut content: String = (0..50).map(judge).collect();
@@ -959,17 +960,16 @@ mod compaction_tests {
         let after = std::fs::read_to_string(&path).unwrap();
         assert!(after.len() < content.len(), "compacted once it pays");
         assert_eq!(ways_agent_core::spend::parse_log(&after).len(), 50, "every judge call kept");
-        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     fn compact_log_tail_noop_when_under_keep() {
-        let path = std::env::temp_dir().join(format!("ways-evt-small-{}.jsonl", std::process::id()));
+        let dir = tmp("evt-small");
+        let path = dir.to_path_buf();
         let content = "{\"n\":1}\n{\"n\":2}\n";
         std::fs::write(&path, content).unwrap();
         compact_log_tail(&path, EVENTS, NOW, 1024 * 1024, 0).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), content);
-        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
@@ -977,17 +977,18 @@ mod compaction_tests {
         // A single line larger than keep_bytes with no newline has no boundary
         // to cut at — the intended behavior is to drop it (it is already corrupt
         // for a line-oriented log), leaving an empty file rather than a partial.
-        let path = std::env::temp_dir().join(format!("ways-evt-blob-{}.jsonl", std::process::id()));
+        let dir = tmp("evt-blob");
+        let path = dir.to_path_buf();
         std::fs::write(&path, "x".repeat(5000)).unwrap();
         compact_log_tail(&path, EVENTS, NOW, 1000, 0).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
-        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     fn compact_log_tail_is_idempotent() {
         // After one compaction the file is under keep, so a second is a no-op.
-        let path = std::env::temp_dir().join(format!("ways-evt-idem-{}.jsonl", std::process::id()));
+        let dir = tmp("evt-idem");
+        let path = dir.to_path_buf();
         let mut content = String::new();
         for i in 0..500 {
             content.push_str(&format!("{{\"n\":{i}}}\n"));
@@ -998,7 +999,6 @@ mod compaction_tests {
         compact_log_tail(&path, EVENTS, NOW, 1500, 0).unwrap();
         let twice = std::fs::read_to_string(&path).unwrap();
         assert_eq!(once, twice, "second compaction is a no-op");
-        let _ = std::fs::remove_file(&path);
     }
 }
 

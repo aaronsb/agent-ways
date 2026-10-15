@@ -9,3 +9,6 @@ license = "AGPL-3.0-or-later"
 sensor-trait = { path = "../sensor-trait" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The keepalive policy's windows are read in an IANA zone (ADR-414 item 5):
+# the system tzdb, with no bundled copy.
+jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo", "tzdb-concatenated"] }

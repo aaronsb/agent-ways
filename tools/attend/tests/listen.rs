@@ -75,6 +75,25 @@ fn listen_off_stops_delivery_and_listen_on_applies_the_cold_start_again() {
     assert!(f.drain("plain").contains("no pending messages"));
 }
 
+/// `listen off` keeps the session's Claude Code process in its record, so
+/// a sweep can still judge whether the session has exited. The record
+/// alone enrolls nothing: the session does not listen and is not drained.
+#[test]
+fn listen_off_keeps_the_process_and_enrolls_nothing() {
+    let f = Fixture::new("listen-off-key");
+    f.ok(&["listen", "on"]);
+    f.drain("plain");
+    f.ok(&["listen", "off"]);
+    let record = std::fs::read_to_string(f.marker(&f.sid)).expect("the record stays");
+    assert!(record.lines().all(|l| l.starts_with("claude ")) && record.contains("claude "), "only the process: {record}");
+    let state = doc(&f, &["listen", "--json"]);
+    assert_eq!((state["listening"].clone(), state["via"].clone()), (json!(false), json!([])));
+    f.put("_broadcast", "other-1-open", "open after listen off", Duration::ZERO);
+    f.put(&f.project_tray(), "other-1-to", "addressed after listen off", Duration::ZERO);
+    assert_eq!(f.drain("plain"), "");
+    assert_eq!(f.ok(&["listen", "beat"]), "not listening\n");
+}
+
 #[test]
 fn a_joined_session_listens_and_listen_off_keeps_its_channels() {
     let f = Fixture::new("listen-join");
@@ -249,4 +268,24 @@ fn listen_beat_touches_a_listening_session_only() {
     assert!(std::time::SystemTime::now().duration_since(after).unwrap() >= Duration::from_secs(110), "after listen off it touches nothing");
     let out = f.without_session(|| f.attend(&["listen", "beat"]));
     assert_eq!(out.status.code(), Some(1), "no session, no beat");
+}
+
+/// `listen beat --mod <version>` records the version the session's mod runs,
+/// for the drain's stale-mod check; a beat without the flag, as an older mod
+/// sends it, works as before and records nothing.
+#[test]
+fn listen_beat_records_the_mod_version_when_given() {
+    let f = Fixture::new("listen-beat-mod");
+    assert_eq!(f.ok(&["listen", "beat"]), "not listening\n");
+    assert_eq!(f.ok(&["listen", "beat", "--mod", "0.27.1"]), "not listening\n");
+    assert!(!f.state_file(&f.sid).exists(), "a session that does not listen is written nothing");
+    f.ok(&["listen", "on", "--host", "mod"]);
+    assert_eq!(f.ok(&["listen", "beat"]), "listening\n", "an older mod sends no version");
+    assert!(!f.state_file(&f.sid).exists(), "and records none");
+    assert_eq!(f.ok(&["listen", "beat", "--mod", "0.27.1"]), "listening\n");
+    let state = std::fs::read_to_string(f.state_file(&f.sid)).unwrap();
+    assert!(state.contains("mod_version: 0.27.1"), "{state}");
+    f.ok(&["listen", "beat", "--mod", "0.28.0"]);
+    let state = std::fs::read_to_string(f.state_file(&f.sid)).unwrap();
+    assert!(state.contains("mod_version: 0.28.0") && !state.contains("0.27.1"), "{state}");
 }

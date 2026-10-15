@@ -6,7 +6,8 @@
 //! marks: the tab bar in the order drawn (`≡`, the created channel or DM
 //! view shown, `+`, then the reserved `#open` and the operator view), the
 //! column's rows (every agent, each followed by its DM views' rows while
-//! listed, then every channel), the feed, then the compose box, and round
+//! listed, then every channel, each followed by its members' rows), the
+//! feed, then the compose box, and round
 //! again. Tab walks it forward and Shift+Tab back, exact mirrors. A view
 //! with nothing to send, an agent's own DMs, has no compose box: the ring
 //! leaves it out, the focus that would go to it goes to the feed, and a
@@ -88,7 +89,7 @@ impl ChatPane {
                 Slot::Tab(_) => Kind::ChannelTab,
             },
             Focus::Row(i) => match world.and_then(|w| w.laid.rows.get(i)) {
-                Some(SideHit::Agent(_)) => Kind::AgentRow,
+                Some(SideHit::Agent(_) | SideHit::Member(..)) => Kind::AgentRow,
                 Some(SideHit::Dm(_) | SideHit::Review(_)) => Kind::DmRow,
                 _ => Kind::ChannelRow,
             },

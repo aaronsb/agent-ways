@@ -16,6 +16,8 @@
 //!   its DM views shown, the agent's menu opens. Each view's own row and tab
 //!   select the same way, and their menu is the view's. A human has no DM
 //!   view: either input opens its menu.
+//! - A member's row under a channel opens its agent's menu at once, docked
+//!   under the member's row, whether it participates or is invited.
 //! - `≡` opens the common menu; `+` asks a new channel's name in an entry
 //!   dialog docked under it. The compose box is never borrowed (ADR-409).
 
@@ -39,6 +41,9 @@ pub(super) enum Target {
     Agent(String),
     /// One of an agent's DM views, by the agent's membership id.
     View(super::dm::Kind, String),
+    /// An agent by its row under a channel: the channel's name and the
+    /// agent's membership id.
+    Member(String, String),
 }
 
 /// How it acts: select, which on the target shown opens its menu when
@@ -57,6 +62,7 @@ impl Target {
             SideHit::Dm(member) => Target::View(Kind::Dm, member),
             SideHit::Review(member) => Target::View(Kind::Review, member),
             SideHit::Channel(name) => Target::Channel(name),
+            SideHit::Member(channel, member) => Target::Member(channel, member),
         }
     }
 
@@ -86,8 +92,12 @@ impl ChatPane {
                 let shown = [Kind::Dm, Kind::Review].iter().any(|k| tab == k.tab(&member));
                 match how {
                     How::Select { .. } if !shown && self.has_dms(&member) => self.open_dm(member),
-                    _ => self.agent_menu(member, at),
+                    _ => self.agent_menu(member, None, at),
                 }
+            }
+            Target::Member(channel, member) => {
+                let at = at.or_else(|| self.side_row(&SideHit::Member(channel.clone(), member.clone())));
+                self.agent_menu(member, Some(channel), at);
             }
             Target::View(kind, member) => {
                 let shown = self.normal_tab() == kind.tab(&member);

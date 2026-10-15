@@ -13,6 +13,7 @@
 #   scripts/release.sh bump <ways|ways-audit|ways-mcp|ways-agent|attend|attend-chat> <patch|minor|major>
 #   scripts/release.sh tag  <ways|ways-audit|ways-mcp|ways-agent|attend|attend-chat> [--push]
 #   scripts/release.sh check <component>
+#   scripts/release.sh mod-version <component> <version>   # MOD_VERSION alone, as bump moves it
 #
 # Both bump and tag refuse a release whose range, from the component's last tag
 # to HEAD, changed plugins/attend/ without moving the plugin's version; `check`
@@ -55,6 +56,9 @@ lock_version() {
 # so a change under plugins/attend/ with the same version never reaches an
 # install that already has the mod.
 PLUGIN_MANIFEST="plugins/attend/.claude-plugin/plugin.json"
+# The mod cannot read its manifest, so it carries its version as a constant
+# the beat sends to attend; the bump moves both.
+PLUGIN_LIB="plugins/attend/hooks/lib.ts"
 
 plugin_version_of() {
   # The first "version" field, wherever it sits on its line, so a manifest
@@ -65,6 +69,12 @@ plugin_version_of() {
 # True when version $1 sorts before $2 (numeric fields, as sort -V orders them).
 version_lt() {
   [[ "$1" != "$2" && "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" == "$1" ]]
+}
+
+# Move the mod's MOD_VERSION constant to $1, and fail unless it reads $1 after.
+set_mod_version() {
+  sed -i.bak -E "s/^(export const MOD_VERSION = ')[^']*(')/\\1$1\\2/" "$PLUGIN_LIB" && rm -f "$PLUGIN_LIB.bak"
+  grep -qF "export const MOD_VERSION = '$1'" "$PLUGIN_LIB" || die "could not move MOD_VERSION in $PLUGIN_LIB to $1"
 }
 
 # Refuse a release whose range changed plugins/attend/ without moving the
@@ -154,6 +164,8 @@ case "$MODE" in
       ' "$PLUGIN_MANIFEST" > "$PLUGIN_MANIFEST.tmp" && mv "$PLUGIN_MANIFEST.tmp" "$PLUGIN_MANIFEST"
       [[ "$(plugin_version_of < "$PLUGIN_MANIFEST")" == "$NEXT" ]] || die "could not move $PLUGIN_MANIFEST to $NEXT"
       FILES+=("$PLUGIN_MANIFEST")
+      set_mod_version "$NEXT"
+      FILES+=("$PLUGIN_LIB")
     fi
     git add "${FILES[@]}"
     git commit -q -m "release(${COMPONENT}): bump to ${NEXT}"
@@ -215,5 +227,12 @@ EOF
     echo "release: plugins/attend/ is releasable with ${COMPONENT}"
     ;;
 
-  *) die "unknown mode '$MODE' (bump|tag|check)" ;;
+  mod-version)
+    # The constant alone, as bump moves it, for the bump's test.
+    [[ "$COMPONENT" == attend ]] || die "mod-version: only attend carries the mod's version, not '$COMPONENT'"
+    [[ -n "${3:-}" ]] || die "usage: release.sh mod-version $COMPONENT <version>"
+    set_mod_version "$3"
+    ;;
+
+  *) die "unknown mode '$MODE' (bump|tag|check|mod-version)" ;;
 esac

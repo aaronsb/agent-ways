@@ -1,7 +1,7 @@
 //! The attend library: the message verbs as typed calls, and the CLI over them.
 //!
 //! [`verbs`] holds the message verb bodies (send, reply, inbox, peers,
-//! status, join, leave, channels). Each takes typed arguments, derives the
+//! status, join, add, leave, channels). Each takes typed arguments, derives the
 //! session afresh, and returns a value: nothing in it prints or exits, so
 //! any frontend can call it (ADR-501 items 2 and 4). The `attend`
 //! binary is one such frontend; [`cli_main`] is its whole body.
@@ -111,7 +111,7 @@ pub fn cli_main() {
         #[cfg(not(feature = "sensor-keepwarm"))]
         Commands::Keepwarm { sub } => {
             eprintln!("keepwarm: this build of attend has no keepwarm sensor");
-            if !matches!(sub, Some(KeepwarmCmd::Check)) {
+            if !matches!(sub, Some(KeepwarmCmd::Check(_))) {
                 std::process::exit(1);
             }
         }
@@ -237,6 +237,7 @@ fn channel(ChannelGroup { list, sub }: ChannelGroup) {
             cmd::refuse_usage(why, why, true);
         }
         Some(ChannelCmd::Join(a)) => cmd::channels::cmd_join(&a.name, a.pin, a.json),
+        Some(ChannelCmd::Add(a)) => cmd::channels::cmd_add(&a.member, a.channel.as_deref(), a.json),
         Some(ChannelCmd::Leave(a)) => cmd::channels::cmd_leave(&a.name, a.json),
         Some(ChannelCmd::Create { name, description }) => {
             cmd::channels::cmd_create(name.trim_start_matches('#'), &description.join(" "));

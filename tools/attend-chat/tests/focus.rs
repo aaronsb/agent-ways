@@ -139,8 +139,7 @@ fn the_ring_walks_the_tab_bar_in_order_then_the_column_the_feed_and_the_box() {
     let rows: Vec<&str> = ring.iter().filter(|f| f.starts_with("row ")).map(String::as_str).collect();
     let channels: Vec<&str> = rows.iter().copied().filter(|r| r.starts_with("row #")).collect();
     assert_eq!(channels, ["row #open", "row #deploy", "row #infra"], "every channel, in the column's numbered order: {ring:?}");
-    let first_channel = rows.iter().position(|r| r.starts_with("row #")).unwrap();
-    assert!(rows[..first_channel].len() >= 2 && rows[first_channel..].iter().all(|r| r.starts_with("row #")), "every agent, then every channel: {ring:?}");
+    assert_eq!(rows, ["row Wells", "row Laszlo", "row #open", "row #deploy", "row Laszlo", "row aaron", "row #infra"], "every agent, then every channel, each followed by its members: {ring:?}");
     let tail: Vec<&str> = ring.iter().rev().take(2).rev().map(String::as_str).collect();
     assert_eq!(tail, ["mode feed", "mode chat"], "the feed, then the box: {ring:?}");
     // Back the other way: Shift+Tab and ← walk it in reverse.
@@ -332,16 +331,18 @@ fn enter_opens_the_menu_a_click_opens_for_every_kind_of_element() {
     focus_to(&mut c, "tab #open");
     press(&mut c, KeyCode::Enter);
     assert_eq!(c.foreground(), &Tab::Channel("deploy".into()), "the menu, not a switch");
-    // An agent's row: its menu.
-    let mut c = chat();
-    focus_to(&mut c, "mode feed");
-    press(&mut c, KeyCode::BackTab);
-    press(&mut c, KeyCode::BackTab);
-    press(&mut c, KeyCode::BackTab);
-    press(&mut c, KeyCode::BackTab);
-    assert!(focused(&mut c).starts_with("row "), "{}", focused(&mut c));
-    press(&mut c, KeyCode::Enter);
-    assert!(menu(&mut c).is_some_and(|m| m.starts_with('@')), "{}", screen(&mut c));
+    // A member's row under #deploy, three back from the feed, and an
+    // agent's row, six back: the agent's menu.
+    for back in [3, 6] {
+        let mut c = chat();
+        focus_to(&mut c, "mode feed");
+        for _ in 0..back {
+            press(&mut c, KeyCode::BackTab);
+        }
+        assert_eq!(focused(&mut c), "row Laszlo", "{back} back");
+        press(&mut c, KeyCode::Enter);
+        assert!(menu(&mut c).is_some_and(|m| m.starts_with("@Laszlo")), "{back} back: {}", screen(&mut c));
+    }
     // `+`: the new channel's name, asked in its dialog.
     let mut c = chat();
     focus_to(&mut c, "tab +");
@@ -888,7 +889,7 @@ fn agent_menu(c: &mut Chat, name: &str) {
 }
 
 #[test]
-fn add_agent_to_chat_lists_the_channels_the_agent_is_not_in_and_invites_it() {
+fn add_agent_to_chat_lists_the_channels_the_agent_is_not_in_and_adds_it() {
     let mut c = chat();
     let names = rows(&mut c);
     let beta = names.iter().find_map(|r| r.split('│').next().and_then(|l| l.split_whitespace().find(|w| w.contains("-beta") || w.starts_with("beta")).map(str::to_string)));
@@ -905,7 +906,7 @@ fn add_agent_to_chat_lists_the_channels_the_agent_is_not_in_and_invites_it() {
     assert!(items.iter().any(|r| r.contains("#deploy")) && items.iter().any(|r| r.contains("#infra")), "{s}");
     assert!(!items.iter().any(|r| r.contains("#open") || r.contains("⋯all")), "the base channel and the operator view are not offered: {items:?}");
     press(&mut c, KeyCode::Enter);
-    assert!(c.status().contains("/invite not run"), "the pick invites: {}", c.status());
+    assert_eq!(c.status(), "dry run: nothing added", "the pick adds");
     // alpha is in #deploy already: only #infra is offered.
     let mut c = chat();
     let alpha = rows(&mut c).iter().find_map(|r| r.split('│').next().and_then(|l| l.split_whitespace().find(|w| w.contains("-alpha") || w.starts_with("alpha")).map(str::to_string))).unwrap();
@@ -964,7 +965,7 @@ fn a_click_on_a_row_gives_it_the_keyboard_and_the_arrows_move_from_it() {
         press(&mut c, code);
         seen.push(focused(&mut c));
     }
-    assert_eq!(seen, ["row #deploy", "row #infra", "row #deploy"], "↓↓↑ along the column as drawn");
+    assert_eq!(seen, ["row #deploy", "row Laszlo", "row #deploy"], "↓↓↑ along the column as drawn, through #deploy's first member");
 }
 
 #[test]

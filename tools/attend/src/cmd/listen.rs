@@ -13,7 +13,7 @@ pub(crate) fn cmd_listen(sub: ListenCmd, json: bool) {
         ListenCmd::On { host } => listen::on(host.map(|ListenHost::Mod| Host::Mod)),
         ListenCmd::Off => listen::off(),
         ListenCmd::Status => Ok(listen::status()),
-        ListenCmd::Beat => listen::beat(),
+        ListenCmd::Beat { ref mod_version } => listen::beat(mod_version.as_deref()),
     };
     let state = match result {
         Ok(state) => state,

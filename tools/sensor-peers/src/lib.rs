@@ -387,7 +387,7 @@ impl PeerSensor {
 
         let plan = baselining.then(|| {
             let pending: Vec<_> = found.iter().map(|f| (&scan_dirs[f.room].room, f.age)).collect();
-            attend_state::cold_start::plan(&pending, attend_state::cold_start::Window::for_session(&own_session_id))
+            attend_state::cold_start::plan(&pending, &attend_state::cold_start::Window::for_session(&own_session_id))
         });
 
         // The wake rule (ADR-406 item 2): a line on stdout wakes an idle

@@ -65,7 +65,6 @@ impl Ix {
     }
 
     /// The column row under the focus, by what it stands for.
-    #[cfg(test)]
     pub(super) fn row_hit(&self) -> Option<&SideHit> {
         self.row_hit.as_ref()
     }
@@ -453,7 +452,7 @@ impl<'a> Step<'a> {
                 let w = self.world()?;
                 let mut channels = w.rows.iter().enumerate().filter_map(|(i, h)| match h {
                     SideHit::Channel(c) => Some((i, c.clone())),
-                    SideHit::Agent(_) | SideHit::Dm(_) | SideHit::Review(_) => None,
+                    SideHit::Agent(_) | SideHit::Dm(_) | SideHit::Review(_) | SideHit::Member(..) => None,
                 });
                 let Some((i, name)) = channels.nth(n - 1) else { return Ok(()) };
                 if self.ix.side_focus().is_some() {
@@ -720,14 +719,16 @@ impl<'a> Step<'a> {
 
     /// After the world is read again, the column's cursor follows its row to
     /// where it is now; a DM view's row gone since leaves it on its agent's
-    /// row, and any other row gone leaves it at the same place, held within
-    /// a list that may have shrunk. A focused tab whose channel is gone moves
+    /// row, a member's row gone since on its channel's, and any other row
+    /// gone leaves it at the same place, held within a list that may have
+    /// shrunk. A focused tab whose channel is gone moves
     /// to the tab shown, which falls back to `#open` the same way.
     fn refocus(&mut self) -> R {
         if let (Some(i), Some(hit)) = (self.ix.side_focus(), self.ix.row_hit.clone()) {
             let rows = &self.world()?.rows;
             let owner = match &hit {
                 SideHit::Dm(m) | SideHit::Review(m) => rows.iter().position(|h| *h == SideHit::Agent(m.clone())),
+                SideHit::Member(c, _) => rows.iter().position(|h| *h == SideHit::Channel(c.clone())),
                 _ => None,
             };
             match rows.iter().position(|h| *h == hit) {

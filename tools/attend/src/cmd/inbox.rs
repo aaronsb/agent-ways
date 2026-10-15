@@ -295,7 +295,7 @@ pub(crate) fn scan_pending(
             .iter()
             .map(|f| (&scan_dirs[f.room].room, f.mtime.elapsed().unwrap_or_default()))
             .collect();
-        attend_state::cold_start::plan(&pending, attend_state::cold_start::Window::for_session(own_session_id))
+        attend_state::cold_start::plan(&pending, &attend_state::cold_start::Window::for_session(own_session_id))
     });
 
     let mut delivered: Vec<Drained> = Vec::new();
@@ -464,6 +464,14 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     // model; the join itself already printed the name as Bash output.
     let me = baselining.then(|| crate::util::display_name(&ident));
 
+    // A session whose attend mod predates the installed one is told, as the
+    // hook's operator-facing message. Only a mod host has a mod to reload.
+    let stale = if hook_mode && host == Some(Host::Mod) {
+        stale_mod_note(&store, attend_presence::session::started_at(&session_id), installed_mod(&claude_config_dir(), &app_mod_manifest()).as_ref())
+    } else {
+        None
+    };
+
     if delivered.is_empty() {
         // Nothing delivered: reset the re-entry counter (this boundary
         // chain is ending) and let the turn end. At most the cold start's
@@ -482,7 +490,7 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
         if mode == DrainMode::Json {
             print_drain_json("drained", &delivered, held_back, note.as_deref(), me.as_deref(), lapsed);
         } else if hook_mode {
-            if let Some(out) = hook_output(&delivered, note.as_deref(), me.as_deref(), host, form) {
+            if let Some(out) = hook_output(&delivered, note.as_deref(), me.as_deref(), host, form, stale.as_deref()) {
                 println!("{out}");
             }
         } else {
@@ -506,7 +514,7 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     if mode == DrainMode::Json {
         print_drain_json("drained", &delivered, held_back, note.as_deref(), me.as_deref(), lapsed);
     } else if hook_mode {
-        if let Some(out) = hook_output(&delivered, note.as_deref(), me.as_deref(), host, form) {
+        if let Some(out) = hook_output(&delivered, note.as_deref(), me.as_deref(), host, form, stale.as_deref()) {
             println!("{out}");
         }
     } else {
@@ -638,24 +646,131 @@ fn hook_output(
     me: Option<&str>,
     host: Option<Host>,
     form: StopForm,
+    operator_note: Option<&str>,
 ) -> Option<String> {
     if delivered.is_empty() {
         // A systemMessage is shown to the operator only, never to the
         // model, so the name, which is for the model, stays out of it.
-        let text = render_drain_reason(delivered, Some(note?), None);
+        let text = match (note, operator_note) {
+            (Some(n), Some(o)) => format!("{}\n{o}", render_drain_reason(delivered, Some(n), None)),
+            (Some(n), None) => render_drain_reason(delivered, Some(n), None),
+            (None, Some(o)) => o.to_string(),
+            (None, None) => return None,
+        };
         return Some(format!("{{\"systemMessage\": \"{}\"}}", json_escape(&text)));
     }
+    let operator = operator_note.map(|o| format!("\"systemMessage\": \"{}\", ", json_escape(o))).unwrap_or_default();
     let text = match host {
         Some(Host::Mod) => render_mod_delivery(delivered, note, me),
         None => render_drain_reason(delivered, note, me),
     };
     Some(match form {
         StopForm::Context => format!(
-            "{{\"hookSpecificOutput\": {{\"hookEventName\": \"Stop\", \"additionalContext\": \"{}\"}}}}",
+            "{{{operator}\"hookSpecificOutput\": {{\"hookEventName\": \"Stop\", \"additionalContext\": \"{}\"}}}}",
             json_escape(&text)
         ),
-        StopForm::Block => format!("{{\"decision\": \"block\", \"reason\": \"{}\"}}", json_escape(&text)),
+        StopForm::Block => format!("{{{operator}\"decision\": \"block\", \"reason\": \"{}\"}}", json_escape(&text)),
     })
+}
+
+/// What the operator reads when the mod a session loaded is older than the
+/// installed one and the session has not reported its version.
+const STALE_MOD_NOTE: &str = "attend: this session loaded the attend mod before it was updated, so idle wakes may not fire. Run /reload-plugins (or restart) to load the new one.";
+
+/// The note for a session whose reported version is `running`.
+fn stale_mod_note_for(running: &str, installed: &str) -> String {
+    format!("attend: this session runs attend mod {running} and {installed} is installed, so idle wakes may not fire. Run /reload-plugins (or restart) to load it.")
+}
+
+/// The attend mod an install holds: its version, and when it was written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InstalledMod {
+    version: Option<String>,
+    written: Option<std::time::SystemTime>,
+}
+
+/// The app's attend mod manifest.
+fn app_mod_manifest() -> std::path::PathBuf {
+    ways_core::paths::data_root().join("plugins/attend/.claude-plugin/plugin.json")
+}
+
+/// Claude Code's config directory: `$CLAUDE_CONFIG_DIR`, else `~/.claude`.
+fn claude_config_dir() -> std::path::PathBuf {
+    match std::env::var_os("CLAUDE_CONFIG_DIR").filter(|d| !d.is_empty()) {
+        Some(d) => d.into(),
+        None => claude_sessions::home_dir().join(".claude"),
+    }
+}
+
+fn manifest_version(manifest: &std::path::Path) -> Option<String> {
+    let doc: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(manifest).ok()?).ok()?;
+    doc.get("version")?.as_str().map(str::to_string)
+}
+
+fn written(path: &std::path::Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).ok()?.modified().ok()
+}
+
+/// The attend mod a `/reload-plugins` would load. Claude Code loads a plugin
+/// from its own cache, which `installed_plugins.json` under the config
+/// directory lists as `attend@agent-ways`, so that entry's version is
+/// the one to compare with. The app's manifest is the fallback where Claude
+/// Code has no such entry; it can run ahead of the cache until Claude Code
+/// refreshes it. `None` when neither is readable.
+fn installed_mod(config_dir: &std::path::Path, app_manifest: &std::path::Path) -> Option<InstalledMod> {
+    let cached = std::fs::read_to_string(config_dir.join("plugins/installed_plugins.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|doc| {
+            // Repair installs at user scope; prefer that entry when a project scope also lists one.
+            let entries = doc.get("plugins")?.get("attend@agent-ways")?.as_array()?;
+            let entry = entries.iter().find(|e| e.get("scope").and_then(|s| s.as_str()) == Some("user")).or_else(|| entries.first())?.clone();
+            let version = entry.get("version")?.as_str()?.to_string();
+            let manifest = std::path::Path::new(entry.get("installPath")?.as_str()?).join(".claude-plugin/plugin.json");
+            Some(InstalledMod { version: Some(version), written: written(&manifest).or_else(|| written(app_manifest)) })
+        });
+    cached.or_else(|| {
+        let version = manifest_version(app_manifest);
+        let w = written(app_manifest);
+        (version.is_some() || w.is_some()).then_some(InstalledMod { version, written: w })
+    })
+}
+
+/// `major.minor.patch` as numbers; a pre-release or build suffix is ignored.
+fn semver(v: &str) -> Option<(u64, u64, u64)> {
+    let core = v.split(['-', '+']).next()?;
+    let parts: Vec<u64> = core.split('.').map(|p| p.parse().ok()).collect::<Option<_>>()?;
+    match parts[..] {
+        [major, minor, patch] => Some((major, minor, patch)),
+        _ => None,
+    }
+}
+
+/// The note that this session's attend mod is older than the installed one.
+/// A mod that reports its version (`listen beat --mod`) is flagged when that
+/// version is lower than the installed one, so a session that reloaded stops
+/// being flagged. One that does not (an older mod) is flagged when it started
+/// before the installed mod was written. Nothing installed, an unreadable
+/// version, or a session whose start cannot be read gives nothing.
+///
+/// The note goes once per installed version: a later install announces
+/// itself again. When the state cannot record the announcement the note is
+/// withheld, so a drain that cannot remember never repeats it.
+fn stale_mod_note(store: &attend_state::StateStore, started: Option<std::time::SystemTime>, installed: Option<&InstalledMod>) -> Option<String> {
+    let snap = store.load().unwrap_or_default();
+    let installed = installed?;
+    let note = match snap.mod_version.as_deref() {
+        Some(running) => {
+            let inst = installed.version.as_deref()?;
+            (semver(running)? < semver(inst)?).then(|| stale_mod_note_for(running, inst))?
+        }
+        None => (started? < installed.written?).then(|| STALE_MOD_NOTE.to_string())?,
+    };
+    let announced = installed.version.as_deref().unwrap_or("unknown");
+    if snap.mod_stale_noted.as_deref() == Some(announced) || !store.mark_mod_stale_noted(announced) {
+        return None;
+    }
+    Some(note)
 }
 
 /// How a hook drain continues the turn with what it delivered.
@@ -1028,6 +1143,161 @@ mod drain_tests {
         }
     }
 
+    use std::time::Duration;
+
+    /// A scratch directory holding an app manifest at `version`, a state
+    /// store, and a config directory with no cache listing.
+    struct Stale {
+        dir: std::path::PathBuf,
+        store: attend_state::StateStore,
+        manifest: std::path::PathBuf,
+    }
+    impl Stale {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!("attend-stale-mod-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let s = Stale {
+                store: attend_state::StateStore::new_in(dir.join("state"), Some("sess".into())),
+                manifest: dir.join("plugin.json"),
+                dir,
+            };
+            s.install("0.28.0");
+            s
+        }
+        fn install(&self, version: &str) {
+            std::fs::write(&self.manifest, format!(r#"{{"name": "attend", "version": "{version}"}}"#)).unwrap();
+        }
+        fn installed(&self) -> Option<InstalledMod> {
+            installed_mod(&self.dir.join("no-config"), &self.manifest)
+        }
+        fn before(&self, by: Duration) -> Option<std::time::SystemTime> {
+            Some(std::fs::metadata(&self.manifest).unwrap().modified().unwrap() - by)
+        }
+        fn note(&self, started: Option<std::time::SystemTime>) -> Option<String> {
+            stale_mod_note(&self.store, started, self.installed().as_ref())
+        }
+    }
+    impl Drop for Stale {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    #[test]
+    fn a_session_started_before_the_installed_mod_is_told_once() {
+        let f = Stale::new("once");
+        let started = f.before(Duration::from_secs(60));
+        let note = f.note(started).expect("an early session is told");
+        assert_eq!(note, STALE_MOD_NOTE, "with no version recorded the note keeps the time-rule wording");
+        assert_eq!(f.note(started), None, "a second drain does not repeat it");
+    }
+
+    #[test]
+    fn a_session_started_after_the_installed_mod_is_told_nothing() {
+        let f = Stale::new("after");
+        let started = Some(std::fs::metadata(&f.manifest).unwrap().modified().unwrap() + Duration::from_secs(60));
+        assert_eq!(f.note(started), None);
+        assert_eq!(f.note(None), None, "an unknown start time says nothing");
+    }
+
+    #[test]
+    fn a_missing_manifest_gives_nothing() {
+        let f = Stale::new("missing");
+        std::fs::remove_file(&f.manifest).unwrap();
+        assert_eq!(f.installed(), None);
+        assert_eq!(f.note(Some(std::time::UNIX_EPOCH)), None);
+    }
+
+    #[test]
+    fn a_recorded_current_version_suppresses_the_note_and_an_older_one_triggers_it() {
+        let f = Stale::new("version");
+        // Started long before the manifest, so the time rule alone would flag it.
+        let started = f.before(Duration::from_secs(3600));
+        f.store.record_mod_version("0.28.0");
+        assert_eq!(f.note(started), None, "a session on the installed version is not flagged");
+        f.store.record_mod_version("0.27.1");
+        let note = f.note(Some(std::time::SystemTime::now())).expect("an older recorded version is flagged whatever its start");
+        assert_eq!(note, "attend: this session runs attend mod 0.27.1 and 0.28.0 is installed, so idle wakes may not fire. Run /reload-plugins (or restart) to load it.");
+        assert_eq!(f.note(started), None, "and only once");
+    }
+
+    #[test]
+    fn only_a_session_older_than_the_installed_version_is_flagged() {
+        let f = Stale::new("semver");
+        f.store.record_mod_version("0.28.1");
+        assert_eq!(f.note(None), None, "a newer mod than the installed one is not stale");
+        f.store.record_mod_version("0.9.0");
+        assert!(f.note(None).is_some(), "0.9.0 is older than 0.28.0, which a string compare gets wrong");
+        f.store.record_mod_version("not-a-version");
+        f.install("0.29.0");
+        assert_eq!(f.note(None), None, "an unreadable version says nothing");
+    }
+
+    #[test]
+    fn a_later_install_announces_itself_again() {
+        let f = Stale::new("rearm");
+        f.store.record_mod_version("0.27.1");
+        assert!(f.note(None).is_some());
+        assert_eq!(f.note(None), None, "the same installed version once");
+        f.install("0.29.0");
+        let note = f.note(None).expect("a newer install than the one announced");
+        assert!(note.contains("0.29.0 is installed"), "{note}");
+        assert_eq!(f.note(None), None);
+    }
+
+    #[test]
+    fn the_claude_code_cache_is_the_installed_version_when_it_lists_the_mod() {
+        let f = Stale::new("cache");
+        f.install("0.27.0");
+        let cfg = f.dir.join("config");
+        let cached = f.dir.join("cache/attend/0.28.0");
+        std::fs::create_dir_all(cached.join(".claude-plugin")).unwrap();
+        std::fs::write(cached.join(".claude-plugin/plugin.json"), r#"{"version": "0.28.0"}"#).unwrap();
+        std::fs::create_dir_all(cfg.join("plugins")).unwrap();
+        std::fs::write(
+            cfg.join("plugins/installed_plugins.json"),
+            format!(r#"{{"version": 2, "plugins": {{"attend@agent-ways": [{{"version": "0.28.0", "installPath": "{}"}}]}}}}"#, cached.display()),
+        )
+        .unwrap();
+        let from_cache = installed_mod(&cfg, &f.manifest).unwrap();
+        assert_eq!(from_cache.version.as_deref(), Some("0.28.0"), "the cache, not the app manifest at 0.27.0");
+        assert_eq!(from_cache.written, written(&cached.join(".claude-plugin/plugin.json")));
+        let no_entry = f.dir.join("other");
+        std::fs::create_dir_all(no_entry.join("plugins")).unwrap();
+        std::fs::write(no_entry.join("plugins/installed_plugins.json"), r#"{"plugins": {"x@y": []}}"#).unwrap();
+        assert_eq!(installed_mod(&no_entry, &f.manifest).unwrap().version.as_deref(), Some("0.27.0"), "no entry: the app manifest");
+    }
+
+    #[test]
+    fn a_state_that_cannot_record_the_announcement_withholds_the_note() {
+        let f = Stale::new("failclosed");
+        let blocked = f.dir.join("blocked");
+        std::fs::write(&blocked, "a file where the state directory should be").unwrap();
+        let store = attend_state::StateStore::new_in(blocked.join("state"), Some("sess".into()));
+        let started = f.before(Duration::from_secs(60));
+        assert_eq!(stale_mod_note(&store, started, f.installed().as_ref()), None);
+    }
+
+    #[test]
+    fn the_operator_note_rides_every_hook_form() {
+        let msgs = [msg(1)];
+        let empty = hook_output(&[] as &[FakeMsg], None, None, None, StopForm::Context, Some(STALE_MOD_NOTE)).unwrap();
+        let doc: serde_json::Value = serde_json::from_str(&empty).expect(&empty);
+        assert_eq!(doc["systemMessage"], STALE_MOD_NOTE);
+        assert!(doc.get("decision").is_none(), "{empty}");
+        let out = hook_output(&msgs, None, None, None, StopForm::Context, Some(STALE_MOD_NOTE)).unwrap();
+        let doc: serde_json::Value = serde_json::from_str(&out).expect(&out);
+        assert_eq!(doc["systemMessage"], STALE_MOD_NOTE, "{out}");
+        assert!(doc["hookSpecificOutput"]["additionalContext"].as_str().unwrap().contains("body 1"), "{out}");
+        assert!(doc.get("decision").is_none(), "{out}");
+        let out = hook_output(&msgs, None, None, None, StopForm::Block, Some(STALE_MOD_NOTE)).unwrap();
+        let doc: serde_json::Value = serde_json::from_str(&out).expect(&out);
+        assert_eq!(doc["systemMessage"], STALE_MOD_NOTE, "{out}");
+        assert_eq!(doc["decision"], "block", "{out}");
+        assert!(doc["reason"].as_str().unwrap().contains("body 1"), "{out}");
+    }
+
     #[test]
     fn json_escape_covers_hook_reason_hazards() {
         assert_eq!(json_escape("plain"), "plain");
@@ -1275,7 +1545,7 @@ mod drain_tests {
     /// goes as a systemMessage, so the turn ends.
     #[test]
     fn note_only_hook_output_does_not_block() {
-        let out = hook_output(&[] as &[FakeMsg], Some("3 older messages held back; reading them is optional: attend message inbox"), None, None, StopForm::Context).unwrap();
+        let out = hook_output(&[] as &[FakeMsg], Some("3 older messages held back; reading them is optional: attend message inbox"), None, None, StopForm::Context, None).unwrap();
         assert!(out.starts_with("{\"systemMessage\": \"[attend] 3 older messages held back"), "{out}");
         assert!(!out.contains("decision"), "{out}");
     }
@@ -1286,14 +1556,14 @@ mod drain_tests {
     #[test]
     fn delivered_messages_continue_the_turn_as_context_and_an_empty_drain_prints_nothing() {
         let msgs: Vec<FakeMsg> = (0..1).map(msg).collect();
-        let out = hook_output(&msgs, Some("1 older message held back; reading it is optional: attend message inbox"), None, None, StopForm::Context).unwrap();
+        let out = hook_output(&msgs, Some("1 older message held back; reading it is optional: attend message inbox"), None, None, StopForm::Context, None).unwrap();
         let doc: serde_json::Value = serde_json::from_str(&out).expect(&out);
         assert_eq!(doc["hookSpecificOutput"]["hookEventName"], "Stop", "{out}");
         let ctx = doc["hookSpecificOutput"]["additionalContext"].as_str().expect(&out);
         assert!(ctx.contains("body 0"), "{ctx}");
         assert!(ctx.contains("held back"), "the note rides the delivery: {ctx}");
         assert!(doc.get("decision").is_none() && doc.get("reason").is_none(), "{out}");
-        assert_eq!(hook_output(&[] as &[FakeMsg], None, Some("Chaucer"), None, StopForm::Context), None);
+        assert_eq!(hook_output(&[] as &[FakeMsg], None, Some("Chaucer"), None, StopForm::Context, None), None);
     }
 
     /// In a mod host the drain speaks the mod's format and tools (findings
@@ -1317,9 +1587,9 @@ mod drain_tests {
         assert_eq!(lines[6], "</attend-peer-messages>");
         assert!(lines[7].contains("attend_reply") && lines[7].contains("attend_send"), "{text}");
         assert!(!text.contains("attend message reply"), "no shell hint in a mod host: {text}");
-        let out = hook_output(&[msg(1)], None, None, Some(Host::Mod), StopForm::Context).unwrap();
+        let out = hook_output(&[msg(1)], None, None, Some(Host::Mod), StopForm::Context, None).unwrap();
         assert!(out.contains("peer data over attend"), "{out}");
-        let cli = hook_output(&[msg(1)], None, None, None, StopForm::Context).unwrap();
+        let cli = hook_output(&[msg(1)], None, None, None, StopForm::Context, None).unwrap();
         assert!(cli.contains("auto-threads to the newest"), "the default host keeps the shell hint: {cli}");
         assert!(!cli.contains("attend_reply"), "{cli}");
     }
@@ -1366,7 +1636,7 @@ mod drain_tests {
         assert_eq!(StopForm::for_version(Some("2.2.0-beta.1")), StopForm::Context);
         assert_eq!(StopForm::for_version(Some("garbage")), StopForm::Context);
         assert_eq!(StopForm::for_version(None), StopForm::Context);
-        let out = hook_output(&[msg(1)], None, None, None, StopForm::Block).unwrap();
+        let out = hook_output(&[msg(1)], None, None, None, StopForm::Block, None).unwrap();
         let doc: serde_json::Value = serde_json::from_str(&out).expect(&out);
         assert_eq!(doc["decision"], "block", "{out}");
         assert!(doc["reason"].as_str().unwrap().contains("body 1"), "{out}");
@@ -1525,7 +1795,7 @@ mod drain_tests {
     /// operator, so a note-only drain carries no name.
     #[test]
     fn a_note_only_drain_does_not_name_the_session() {
-        let out = hook_output(&[] as &[FakeMsg], Some("3 older messages held back; reading them is optional: attend message inbox"), Some("Chaucer-alpha"), None, StopForm::Context).unwrap();
+        let out = hook_output(&[] as &[FakeMsg], Some("3 older messages held back; reading them is optional: attend message inbox"), Some("Chaucer-alpha"), None, StopForm::Context, None).unwrap();
         assert!(!out.contains("you are"), "{out}");
     }
 

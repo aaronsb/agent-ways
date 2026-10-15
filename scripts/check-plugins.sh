@@ -2,7 +2,8 @@
 # Gates for the Claude Code mods under plugins/ (ADR-406):
 #
 #   1. the attend plugin carries attend's version (the plugin is released
-#      with attend, since it depends on attend's verbs);
+#      with attend, since it depends on attend's verbs), and the mod's
+#      MOD_VERSION constant in hooks/lib.ts equals the plugin's version;
 #   2. `claude plugin validate` on the marketplace and on each plugin;
 #   3. `claude plugin test` on each plugin;
 #   4. a TypeScript check against Claude Code's declarations, where they can
@@ -32,6 +33,13 @@ AV="$(cargo_version tools/attend/Cargo.toml)"
 [[ -n "$PV" ]] || fail "plugins/attend/.claude-plugin/plugin.json has no version"
 [[ "$PV" == "$AV" ]] || fail "the attend plugin is at $PV but attend is at $AV; they release together (scripts/release.sh bump attend moves both)"
 echo "version: attend plugin $PV matches attend $AV"
+
+# The mod sends MOD_VERSION with its beat; it cannot read plugin.json, so the
+# two are held equal here.
+MV="$(grep -oE "^export const MOD_VERSION = '[^']*'" plugins/attend/hooks/lib.ts | sed -E "s/.*'([^']*)'/\\1/")"
+[[ -n "$MV" ]] || fail "plugins/attend/hooks/lib.ts has no MOD_VERSION"
+[[ "$MV" == "$PV" ]] || fail "MOD_VERSION in plugins/attend/hooks/lib.ts is $MV but the plugin is at $PV; scripts/release.sh bump attend moves both"
+echo "version: MOD_VERSION $MV matches the plugin"
 
 command -v claude >/dev/null || fail "claude is not on PATH"
 
