@@ -137,8 +137,10 @@ pub struct Added {
 
 /// Channel `channel`, as a name an add or an invitation can take: the
 /// leading `#` dropped, `#open` and unknown channels refused, and a member
-/// already in it refused.
+/// already in it refused. A `member` that is not a member id is refused
+/// first, before its id names any file.
 fn checked<'a>(bus: &Bus, channel: &'a str, member: &str) -> Result<&'a str, Refused> {
+    attend_groups::validate_member_id(member).map_err(Refused::Failed)?;
     let name = channel.trim_start_matches('#');
     if name == attend_groups::BASE_CHANNEL {
         return Err(Refused::BaseChannel);
@@ -198,21 +200,28 @@ fn tell(bus: &Bus, actor: &Actor, target: Target, body: &str) -> Result<Told, St
     Ok(Told { dir, filename })
 }
 
-/// Invite `target` to `channel` (ADR-404 D1): tell it how to join, then
-/// record the invitation with `actor` as inviter. The invitee joins itself,
+/// Invite `target` to `channel` (ADR-404 D1): record the invitation with
+/// `actor` as inviter, then tell the invitee how to join. An invitation
+/// whose message cannot be written is withdrawn, so the invitee is told of
+/// every invitation recorded, and of no other. The invitee joins itself,
 /// or not; its join answers the invitation with the room's recent history.
 /// An invitee invited already has its record rewritten and is not told
 /// again.
 pub fn invite(bus: &Bus, actor: &Actor, channel: &str, target: Target) -> Result<Invited, Refused> {
     let name = checked(bus, channel, target.session_id)?;
     let groups = bus.groups(&actor.member_id);
-    if groups.is_invited(name, target.session_id) {
-        groups.invite(name, target.session_id).map_err(Refused::Failed)?;
+    let again = groups.is_invited(name, target.session_id);
+    groups.invite(name, target.session_id).map_err(Refused::Failed)?;
+    if again {
         return Ok(Invited { told: None });
     }
-    let told = tell(bus, actor, target, &invite_body(name, &groups.group_dir(name))).map_err(Refused::Failed)?;
-    groups.invite(name, target.session_id).map_err(Refused::Failed)?;
-    Ok(Invited { told: Some(told) })
+    match tell(bus, actor, target, &invite_body(name, &groups.group_dir(name))) {
+        Ok(told) => Ok(Invited { told: Some(told) }),
+        Err(e) => {
+            groups.uninvite(name, target.session_id);
+            Err(Refused::Failed(e))
+        }
+    }
 }
 
 /// Add `target` to `channel` (ADR-404 D1): enroll it, with no answer from
@@ -495,5 +504,38 @@ mod tests {
         assert!(matches!(add(&bus, &aaron(), "topic", target()), Err(Refused::Failed(_))));
         assert!(attend_groups::briefings(&bus.signals, SID).is_empty(), "no briefing is left");
         assert!(bus.groups("x").members("topic").unwrap().is_empty());
+    }
+
+    /// A session id that is not a member id is refused before anything is
+    /// written: the seen-set, the briefing, the enrollment or the message.
+    #[test]
+    fn a_session_id_that_is_no_member_id_is_refused_before_any_write() {
+        let (s, bus) = scratch("bad-id");
+        bus.groups("aaron").create("topic", None).unwrap();
+        history(&bus, "topic", ADDRESSED_MAX + 2);
+        let target = Target { session_id: "../escape", root: ROOT };
+        assert!(matches!(add(&bus, &aaron(), "topic", target), Err(Refused::Failed(_))));
+        assert!(matches!(invite(&bus, &aaron(), "topic", target), Err(Refused::Failed(_))));
+        assert!(!s.0.join("escape.state").exists(), "no seen-set beside the state dir");
+        assert!(!tray(&bus).exists(), "no one is told");
+        assert!(!bus.enrolled.exists(), "no one is enrolled");
+    }
+
+    /// An invitation is recorded and sent, or neither: one whose record
+    /// cannot be written is not sent, and one whose message cannot be
+    /// written is withdrawn.
+    #[test]
+    fn an_invitation_is_recorded_and_sent_or_neither() {
+        let (_s, bus) = scratch("invite-unrecorded");
+        bus.groups("aaron").create("topic", None).unwrap();
+        std::fs::create_dir_all(bus.signals.join("@topic").join(format!("{SID}.invite"))).unwrap();
+        assert!(matches!(invite(&bus, &aaron(), "topic", target()), Err(Refused::Failed(_))));
+        assert!(!tray(&bus).exists(), "no one is told of an invitation that is not recorded");
+
+        let (_s, bus) = scratch("invite-unsent");
+        bus.groups("aaron").create("topic", None).unwrap();
+        std::fs::write(tray(&bus), "").unwrap();
+        assert!(matches!(invite(&bus, &aaron(), "topic", target()), Err(Refused::Failed(_))));
+        assert!(bus.groups("x").invites("topic").is_empty(), "an invitation not sent is not recorded");
     }
 }

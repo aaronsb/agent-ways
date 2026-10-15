@@ -388,6 +388,14 @@ impl Groups {
         self.write_record(name, member, INVITE)
     }
 
+    /// Withdraw `member`'s invitation to `name`, for one whose message was
+    /// not sent.
+    pub fn uninvite(&self, name: &str, member: &str) {
+        if validate_group_name(name).is_ok() {
+            fs::remove_file(self.record_path(name, member, INVITE)).ok();
+        }
+    }
+
     /// Whether `member` has a pending invitation to `name`.
     pub fn is_invited(&self, name: &str, member: &str) -> bool {
         validate_group_name(name).is_ok() && self.record_path(name, member, INVITE).is_file()
@@ -830,7 +838,7 @@ pub fn validate_group_name(name: &str) -> Result<(), String> {
 }
 
 /// A member id a record can be named for: not empty, and no path.
-fn validate_member_id(member: &str) -> Result<(), String> {
+pub fn validate_member_id(member: &str) -> Result<(), String> {
     if member.is_empty() || member.contains(['/', '\\']) || member.starts_with('.') {
         return Err(format!("'{member}' is not a member id"));
     }
