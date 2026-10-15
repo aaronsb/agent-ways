@@ -76,13 +76,15 @@ impl SessionIdentity {
 
 /// The key of the Claude Code process session `session_id` runs in on this
 /// host, from its session record, as [`SessionIdentity::claude_key`] gives
-/// it; `None` when no record names it or its process no longer runs. For a
-/// caller that acts for another session, such as an add (ADR-404 D1).
+/// it; `None` when no record names it, or its pid is no longer held by the
+/// record's process ([`crate::record_process_runs`]) or by a Claude Code
+/// process at all. For a caller that acts for another session, such as an
+/// add (ADR-404 D1), which records the key as the session's own.
 pub fn claude_key_of(session_id: &str) -> Option<String> {
     sessions_dirs()
         .iter()
         .flat_map(|d| claude_sessions::read_session_records(d))
-        .filter(|r| r.session_id == session_id && crate::process::is_running(r.pid))
+        .filter(|r| r.session_id == session_id && crate::record_process_runs(r.pid, r.started_at_ms) && crate::process::is_claude(r.pid))
         .find_map(|r| Some(format!("{}-{}@{}", r.pid, crate::process::start_time(r.pid)?, crate::process::host_name())))
 }
 
