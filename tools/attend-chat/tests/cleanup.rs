@@ -453,7 +453,7 @@ fn a_named_channel_hides_its_messages_here_too() {
     assert!(feed(&mut c).contains("alpha in deploy"), "{}", feed(&mut c));
     channel_menu(&mut c, "#deploy");
     let menu = items(&mut c);
-    assert_eq!(menu.iter().position(|i| i == "Hide messages here"), Some(3), "after Describe…, before the delete: {menu:?}");
+    assert_eq!(menu.iter().position(|i| i == "Hide messages here"), Some(4), "after Describe…, before the delete: {menu:?}");
     pick(&mut c, "Hide messages here");
     assert!(screen(&mut c).contains("hide the messages so far in #deploy? nothing is deleted"), "{}", screen(&mut c));
     press(&mut c, KeyCode::Char('y'));

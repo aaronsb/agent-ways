@@ -665,9 +665,9 @@ fn run_invite(member: &str, channel: Option<String>, foreground: &Tab) -> EnterA
     }
 }
 
-/// Invite `peer` to channel `g`: the one invitation `/invite` and a menu's
-/// Add agent to chat both send, through attend-membership as every surface
-/// invites. The peer joins itself, or stays silent. A peer invited already
+/// Invite `peer` to channel `g`: the one invitation `/invite` and the
+/// channel menu's Invite agent ▸ both send, through attend-membership as
+/// every surface invites. The peer joins itself, or stays silent. A peer invited already
 /// is not told again.
 pub fn invite_peer(g: &str, peer: &crate::peers::Peer) -> EnterAction {
     let bus = attend_membership::Bus::here().waiting_at_most(GROUPS_LOCK_WAIT);
@@ -693,6 +693,24 @@ pub fn invite_peer(g: &str, peer: &crate::peers::Peer) -> EnterAction {
             EnterAction::StatusOnly(format!("@{} is already in #{g}", peer.display))
         }
         Err(e) => EnterAction::StatusOnly(format!("/invite failed: {e}")),
+    }
+}
+
+/// Add `peer` to channel `g` (ADR-404 D1), as Add agent ▸ and Add agent to
+/// chat ▸ do, through attend-membership as `attend channel add` adds: it is
+/// enrolled with no answer from it, any invitation it had there is spent,
+/// and it is told by a direct message, which shows as one the person sent.
+pub fn add_peer(g: &str, peer: &crate::peers::Peer) -> EnterAction {
+    let bus = attend_membership::Bus::here().waiting_at_most(GROUPS_LOCK_WAIT);
+    let target = attend_membership::Target { session_id: &peer.session_id, root: &peer.root };
+    let who = &peer.display;
+    match attend_membership::add(&bus, &crate::signal::actor(), g, target) {
+        Ok(attend_membership::Added { told: Ok(t), .. }) => sent(format!("added @{who} to #{g}"), read_back(&t.dir, &t.filename).into_iter().collect()),
+        Ok(attend_membership::Added { told: Err(e), .. }) => EnterAction::ClearWithStatus(format!("added @{who} to #{g}, but the message telling it was not written: {e}")),
+        Err(attend_membership::Refused::BaseChannel) => EnterAction::StatusOnly("#open is the base channel — everyone is already there".into()),
+        Err(attend_membership::Refused::UnknownChannel(_)) => EnterAction::StatusOnly(format!("#{g}: unknown channel")),
+        Err(attend_membership::Refused::AlreadyMember(_)) => EnterAction::StatusOnly(format!("@{who} is already in #{g}")),
+        Err(attend_membership::Refused::Failed(e)) => EnterAction::StatusOnly(format!("could not add @{who} to #{g}: {e}")),
     }
 }
 

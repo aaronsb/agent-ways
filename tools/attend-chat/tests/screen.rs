@@ -63,6 +63,10 @@ fn fixture() -> &'static Fixture {
         g.join("deploy", true).unwrap();
         g.set_description("deploy", "rollout coordination").unwrap();
         attend_groups::Groups::new(&base, "").create("infra", None).unwrap();
+        // gamma invited to #deploy four minutes before the frames' clock:
+        // the column lists it there, set back, under beta (ADR-405,
+        // amendment of 2026-10-15).
+        std::fs::write(base.join(format!("@deploy/{GAMMA_SID}.invite")), format!("by: aaron\nat: {}\n", NOW - 240)).unwrap();
         // A channel `_groups.yaml` still names after its directory was
         // swept: the left column lists it, set back (ADR-405).
         attend_groups::Groups::new(&base, ALPHA_SID).join("archive", false).unwrap();
@@ -1161,8 +1165,8 @@ fn ctrl_n_never_throws_away_a_description_being_typed() {
     let mut c = chat().enhanced(true).dry_run(true);
     typed(&mut c, "a draft");
     drawn(&mut c, &[ctrl('2'), ctrl('2')], 80, 25);
-    // Add agent, then Remove agent, then Describe….
-    for _ in 0..2 {
+    // Add agent, Invite agent, Remove agent, then Describe….
+    for _ in 0..3 {
         press(&mut c, key(KeyCode::Down));
     }
     press(&mut c, key(KeyCode::Enter));
@@ -1394,6 +1398,14 @@ fn golden_the_column_lists_every_agent_and_channel() {
     let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
     let gamma = rows.iter().find(|r| r.contains("gamma")).expect("the quiet agent is listed");
     assert!(gamma.contains('○'), "set back: {gamma}");
+    // Under #deploy: beta participating, gamma (Lyra) invited; under
+    // #archive, swept, alpha (Laszlo), still a member.
+    let column: Vec<&str> = rows.iter().map(|r| r.split('│').next().unwrap_or("")).collect();
+    let deploy = column.iter().position(|r| r.contains("#deploy")).expect("#deploy's row");
+    assert!(column[deploy + 1].contains("Wells") && column[deploy + 1].contains('●'), "{column:#?}");
+    assert!(column[deploy + 2].contains("Lyra") && column[deploy + 2].contains("◌ invited"), "{column:#?}");
+    let archive = column.iter().position(|r| r.contains("#archive")).expect("#archive's row");
+    assert!(column[archive + 1].contains("Laszlo"), "{column:#?}");
     assert!(!rows[rows.len() - 2].contains("@aaron"), "the legend row is the column's: {:?}", rows[rows.len() - 2]);
     for (w, h) in SIZES {
         g.check(&format!("sidebar-{w}x{h}"), &testkit::render_screen(&mut c, w, h));
@@ -1536,11 +1548,12 @@ fn golden_the_keyboard_walks_the_column() {
     assert!(bar(&mut c).contains(" column "), "the focus is in the column: {}", bar(&mut c));
     press(&mut c, key(KeyCode::End));
     press(&mut c, key(KeyCode::Up));
+    press(&mut c, key(KeyCode::Up));
     let shown = testkit::render_screen(&mut c, 80, 25);
     g.check("sidebar-keyboard-80x25", &shown);
     let rows = testkit::rows(&shown);
     let at = rows.iter().find(|r| r.starts_with('▸')).expect("the cursor is drawn");
-    assert!(at.contains("#infra"), "End, then Up: the channel above the last: {at}");
+    assert!(at.contains("#infra"), "End, then Up twice, past #archive's member: the channel above the last: {at}");
     press(&mut c, key(KeyCode::Enter));
     assert!(text(&mut c, 80, 25).contains("pick one: #infra"), "Enter opens the row's menu, as a click does");
     press(&mut c, key(KeyCode::Esc));
@@ -1667,7 +1680,10 @@ fn a_long_column_scrolls_with_the_cursor_and_the_wheel() {
     let at = cursor_row(&mut c, 80).expect("the cursor");
     assert!(at.contains("Laszlo"), "Home reaches the first agent: {at}");
     press(&mut c, key(KeyCode::End));
-    assert!(cursor_row(&mut c, 80).expect("the cursor").contains("#archive"), "End, the last channel");
+    let at = cursor_row(&mut c, 80).expect("the cursor");
+    assert!(at.contains("Laszlo") && !at.contains("alpha"), "End, the last row: the last channel's member: {at}");
+    press(&mut c, key(KeyCode::Up));
+    assert!(cursor_row(&mut c, 80).expect("the cursor").contains("#archive"), "Up, the last channel");
     press(&mut c, key(KeyCode::Esc));
     // The wheel over the agents scrolls them, and the feed stays put.
     let mut c = chat_crowded().enhanced(true);
@@ -1711,6 +1727,7 @@ fn the_columns_cursor_keeps_its_row_and_the_wheel_is_not_undone() {
     press(&mut c, key(KeyCode::F(2)));
     press(&mut c, key(KeyCode::Down));
     press(&mut c, key(KeyCode::End));
+    press(&mut c, key(KeyCode::Up));
     assert!(cursor_row(&mut c, 80).expect("the cursor").contains("#archive"));
     // A new agent above it moves every channel down a row.
     c.push(sig("claude:eeeeeeee-0000-4000-8000-000000000001", "/work/newcomer", 5, Channel::Open, "hello"));
@@ -1779,9 +1796,9 @@ fn a_question_after_a_menu_closed_unchanged_is_shown_by_keys() {
     let mut c = chat().enhanced(true).dry_run(true);
     drawn(&mut c, &[ctrl('2'), ctrl('2'), key(KeyCode::Esc)], 80, 25);
     assert!(!bar(&mut c).contains("unchanged"), "closing says nothing: {}", bar(&mut c));
-    // Ctrl+2 on the channel shown opens its menu; Join is item 6, Delete 7.
+    // Ctrl+2 on the channel shown opens its menu; Join is item 7, Delete 8.
     let mut keys = vec![ctrl('2')];
-    keys.extend(std::iter::repeat_n(key(KeyCode::Down), 6));
+    keys.extend(std::iter::repeat_n(key(KeyCode::Down), 7));
     keys.push(key(KeyCode::Enter));
     drawn(&mut c, &keys, 80, 25);
     let shown = bar(&mut c);

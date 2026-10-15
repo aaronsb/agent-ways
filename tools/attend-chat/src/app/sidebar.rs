@@ -1,14 +1,22 @@
 //! The left column (ADR-405): Agents, every identity the chat has seen,
 //! live ones first and the rest set back, those in the channel shown
 //! marked, each claude followed by the rows of its DM views while they are
-//! listed, the operator's DMs with it and then its own; then Channels, every channel, including empty ones and ones only
-//! `_groups.yaml` still names, numbered from 1 for Ctrl+digit. A click on a
-//! claude's row shows the DMs between the operator and it, and lists that
-//! view under the row; a click on a channel shows it. A click on what is
-//! shown already opens its menu, as Ctrl+digit does, and a human's row
-//! opens its menu at once. A menu docks on the line under its row.
-//! `attend.chat.sidebar_key` shows or hides the column, and a terminal too
-//! narrow for it beside the feed hides it.
+//! listed, the operator's DMs with it and then its own; then Channels,
+//! every channel, including empty ones and ones only `_groups.yaml` still
+//! names, numbered from 1 for Ctrl+digit, each followed by a row for each
+//! of its members (amendment of 2026-10-15): those in its members
+//! participate and are drawn as their Agents rows are, then those with a
+//! pending invitation there are invited, set back and marked `◌ invited`
+//! with the invitation's age where the row has room. An agent invited where
+//! it already is participates. `#open` holds everyone and lists no one.
+//!
+//! A click on a claude's row shows the DMs between the operator and it,
+//! and lists that view under the row; a click on a channel shows it. A
+//! click on what is shown already opens its menu, as Ctrl+digit does; a
+//! human's row and a member's row open the agent's menu at once. A menu
+//! docks on the line under its row. `attend.chat.sidebar_key` shows or
+//! hides the column, and a terminal too narrow for it beside the feed hides
+//! it.
 
 use agent_tui::ratatui::layout::{Constraint, Layout, Rect};
 use agent_tui::ratatui::style::{Modifier, Style};
@@ -23,7 +31,7 @@ use agent_tui::wrap::str_width;
 
 use super::ChatPane;
 use crate::chip::{color_for, Seen};
-use crate::groups::ChannelRow;
+use crate::groups::{ChannelRow, Invites};
 use crate::helper::{self, HelperMode};
 use crate::tabs::Tab;
 
@@ -37,13 +45,54 @@ const MIN_FEED: u16 = 50;
 /// channel by its name. Each DM view of an agent is a row under the
 /// agent's: `Dm`, the operator's DMs with it, and `Review`, the agent's own
 /// DMs with anyone, whose view offers nothing to send, since attend-chat
-/// has no send into another agent's DMs.
+/// has no send into another agent's DMs. `Member` is a row under a
+/// channel's, by the channel's name and the member's id, the same whether
+/// the member participates or is invited, so the cursor keeps to it when
+/// an invitation is answered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum SideHit {
     Agent(String),
     Dm(String),
     Review(String),
     Channel(String),
+    Member(String, String),
+}
+
+/// A row of the Channels section: a channel, by its index in the world's
+/// rows, or a member under it, with the invitation that makes it invited.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ChannelItem<'a> {
+    Channel(usize),
+    Member { channel: &'a str, member: &'a str, invite: Option<&'a attend_groups::Invite> },
+}
+
+impl ChannelItem<'_> {
+    pub(super) fn hit(&self, rows: &[ChannelRow]) -> SideHit {
+        match *self {
+            ChannelItem::Channel(i) => SideHit::Channel(rows[i].known.group.name.clone()),
+            ChannelItem::Member { channel, member, .. } => SideHit::Member(channel.to_string(), member.to_string()),
+        }
+    }
+}
+
+/// The Channels section's rows in order: each channel, then its members,
+/// those in its members first in their order, then those it has invited,
+/// by id, leaving out any invited where it already is. `#open` holds every
+/// session and lists none.
+pub(super) fn channel_items<'a>(rows: &'a [ChannelRow], invites: &'a Invites) -> Vec<ChannelItem<'a>> {
+    let mut out = Vec::new();
+    for (i, row) in rows.iter().enumerate() {
+        out.push(ChannelItem::Channel(i));
+        if row.known.is_base {
+            continue;
+        }
+        let channel = row.known.group.name.as_str();
+        let members = &row.known.membership.members;
+        out.extend(members.iter().map(|m| ChannelItem::Member { channel, member: m, invite: None }));
+        let invited = invites.get(channel).into_iter().flatten().filter(|i| !members.contains(&i.member));
+        out.extend(invited.map(|i| ChannelItem::Member { channel, member: &i.member, invite: Some(i) }));
+    }
+    out
 }
 
 /// The DM views the column lists under agents' rows, each by its agent's
@@ -152,13 +201,16 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
         Tab::Merged | Tab::Dm(_) | Tab::Review(_) => Vec::new(),
     };
     let live = world.seen.iter().filter(|s| s.live).count();
-    let n_seen = world.seen.len();
-    let rows: Vec<(ChannelRow, usize)> = world.rows.iter().cloned().zip(world.live_members.iter().copied()).collect();
+    let seen = world.seen.clone();
+    let rows = world.rows.clone();
+    let live_members = world.live_members.clone();
+    let invites = world.invites.clone();
+    let items = channel_items(&rows, &invites);
     let [inner, rule] = Layout::horizontal([Constraint::Min(1), Constraint::Length(1)]).areas(area);
     for y in rule.top()..rule.bottom() {
         f.render_widget(Paragraph::new(Span::styled("│", theme::rule())), Rect { y, height: 1, ..rule });
     }
-    let (ah, ch) = split(inner.height, agents_list.len(), rows.len());
+    let (ah, ch) = split(inner.height, agents_list.len(), items.len());
     let agents = Rect { height: ah, ..inner };
     let channels = Rect { y: inner.y + ah, height: ch, ..inner };
     // Each list scrolls on its own, keeping the keyboard's cursor in view.
@@ -166,11 +218,11 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     let n_a = agents_list.len();
     let follow = focus.filter(|_| chat.side_follow);
     let sa = in_view(chat.side_scroll[0], n_a, vis_a, follow.filter(|f| *f < n_a));
-    let sc = in_view(chat.side_scroll[1], rows.len(), vis_c, follow.and_then(|f| f.checked_sub(n_a)));
+    let sc = in_view(chat.side_scroll[1], items.len(), vis_c, follow.and_then(|f| f.checked_sub(n_a)));
     chat.side_scroll = [sa, sc];
     let below = |r: Rect| Rect { y: r.y + 1, height: r.height.saturating_sub(1), ..r };
     chat.hits.side_lists = [below(agents), below(channels)];
-    header(f, agents, &format!("Agents {live}/{n_seen}{}", more(sa, vis_a, n_a)));
+    header(f, agents, &format!("Agents {live}/{}{}", seen.len(), more(sa, vis_a, n_a)));
     let w = inner.width.saturating_sub(1) as usize;
     let mut hits = Vec::new();
     for (k, (i, (hit, s))) in agents_list.iter().enumerate().skip(sa).take(vis_a).enumerate() {
@@ -210,20 +262,30 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
         f.render_widget(Paragraph::new(line), r);
         hits.push((r, hit.clone()));
     }
-    header(f, channels, &format!("Channels {}{}", rows.len(), more(sc, vis_c, rows.len())));
+    header(f, channels, &format!("Channels {}{}", rows.len(), more(sc, vis_c, items.len())));
     let now = chat.now();
-    for (k, (i, (row, live))) in rows.iter().enumerate().skip(sc).take(vis_c).enumerate() {
+    let age_of = |t: Option<std::time::SystemTime>| t.and_then(|t| now.duration_since(t).ok()).map(age_label).unwrap_or_default();
+    for (k, (i, item)) in items.iter().enumerate().skip(sc).take(vis_c).enumerate() {
         let r = Rect { y: channels.y + 1 + k as u16, height: 1, ..channels };
-        let shown = fg == Tab::Channel(row.known.group.name.clone());
-        let mark = target(Style::new(), prefix_match(&row.known.group.name, channel_partial.as_deref()));
-        let age = row.last.and_then(|t| now.duration_since(t).ok()).map(age_label).unwrap_or_default();
         let focused = focus == Some(n_a + i);
-        let mut line = channel_line(chat, row, *live, &age, shown, w, mark, focused, i + 1);
+        let mut line = match *item {
+            ChannelItem::Channel(c) => {
+                let row = &rows[c];
+                let shown = fg == Tab::Channel(row.known.group.name.clone());
+                let mark = target(Style::new(), prefix_match(&row.known.group.name, channel_partial.as_deref()));
+                channel_line(chat, row, live_members[c], &age_of(row.last), shown, w, mark, focused, c + 1)
+            }
+            ChannelItem::Member { member, invite, .. } => {
+                let who = seen.iter().find(|s| s.member == member);
+                let label = who.map_or(member, |s| s.identity.nickname.as_str());
+                member_line(chat, label, who, invite.map(|i| age_of(i.at)).as_deref(), w, focused)
+            }
+        };
         if focused {
             line.spans[0] = cursor();
         }
         f.render_widget(Paragraph::new(line), r);
-        hits.push((r, SideHit::Channel(row.known.group.name.clone())));
+        hits.push((r, item.hit(&rows)));
     }
     chat.hits.side = hits;
 }
@@ -365,22 +427,55 @@ pub(super) fn identity_styles(depth: agent_theme::ColorDepth, palette: agent_ide
 /// the operator's DMs with the agent, on the same ground, in any palette.
 pub(super) const REVIEW_MARK: &str = "◈ ";
 
+/// What sets a child row in from its parent's: a DM view's under its
+/// agent's, a member's under its channel's.
+const INDENT: &str = "  ";
+
+/// What ends an invited member's row, in place of a participant's `●`.
+const INVITED: &str = "◌ invited";
+
+/// [`sized`] with no middle text: two segments, the name taking the
+/// middle's columns and the join a third segment would have drawn. A name
+/// too long for three is laid out in two already.
+fn sized_two(shape: Shape, bare: bool, texts: [&str; 2], w: usize) -> [String; 3] {
+    let [name, pad, last] = sized(shape, bare, [texts[0], "", texts[1]], w);
+    let join = usize::from(!bare && !shape.join.is_empty() && !pad.is_empty());
+    [format!("{name}{pad}{}", " ".repeat(join)), String::new(), last]
+}
+
 /// A DM view's row, under its agent's: indented, `label` on the info ground
 /// the destination flag wears, then the count of the DMs it holds. Bold
 /// while shown.
 fn dm_line(chat: &ChatPane, label: &str, count: usize, shown: bool, w: usize, focused: bool) -> Line<'static> {
-    const INDENT: &str = "  ";
-    let bare = theme::colourless();
-    let [name, pad, last] = sized(chat.shape, bare, [label, "", &count.to_string()], w.saturating_sub(INDENT.len()));
-    // Two segments where `sized` laid out three: the name takes the middle's
-    // columns, and the join a third segment would have drawn. A label too
-    // long for three is laid out in two already.
-    let join = usize::from(!bare && !chat.shape.join.is_empty() && !pad.is_empty());
-    let name = format!("{name}{pad}{}", " ".repeat(join));
+    let texts = sized_two(chat.shape, theme::colourless(), [label, &count.to_string()], w.saturating_sub(INDENT.len()));
     let lead = Seg::on("", Ground::Info).style;
     let styles = focused_styles([if shown { lead.add_modifier(Modifier::BOLD) } else { lead }, Style::new(), Seg::on("", Ground::Rule).style], focused);
     let mut spans = vec![Span::raw(" "), Span::raw(INDENT)];
-    spans.extend(chat.shape.lozenge(&segs([name, String::new(), last], styles)));
+    spans.extend(chat.shape.lozenge(&segs(texts, styles)));
+    Line::from(spans)
+}
+
+/// A member's row, under its channel's: indented, as a DM view's row is. A
+/// participant (`invited` none) is drawn as its Agents row is, its name on
+/// the identity colour and `●` live or `○` not on the darkest step, with no
+/// project. An invitee is set back, `label`, the invitation's age `invited`
+/// where the row has room for it, then [`INVITED`]. `who` is the agent as
+/// the column knows it; one it does not know is set back by its id.
+fn member_line(chat: &ChatPane, label: &str, who: Option<&Seen>, invited: Option<&str>, w: usize, focused: bool) -> Line<'static> {
+    let bare = theme::colourless();
+    let w = w.saturating_sub(INDENT.len());
+    let faded = Seg::faded("").style;
+    let (texts, styles) = match (invited, who) {
+        (Some(age), _) if !age.is_empty() => (sized(chat.shape, bare, [label, age, INVITED], w), [faded; 3]),
+        (Some(_), _) => (sized_two(chat.shape, bare, [label, INVITED], w), [faded; 3]),
+        (None, Some(s)) => {
+            let [name, _, mark] = identity_styles(chat.palette.depth(), s.identity.palette, s.live, s.identity.style.bold);
+            (sized_two(chat.shape, bare, [label, if s.live { "●" } else { "○" }], w), [name, Style::new(), mark])
+        }
+        (None, None) => (sized_two(chat.shape, bare, [label, "○"], w), [faded; 3]),
+    };
+    let mut spans = vec![Span::raw(" "), Span::raw(INDENT)];
+    spans.extend(chat.shape.lozenge(&segs(texts, focused_styles(styles, focused))));
     Line::from(spans)
 }
 
@@ -414,10 +509,11 @@ fn channel_line(chat: &ChatPane, row: &ChannelRow, live: usize, age: &str, shown
 }
 
 /// The column's rows of `world` in order: agents, each with the DM views
-/// `views` lists for it ([`agent_rows`]), then channels.
-pub(super) fn side_items_of(seen: &[Seen], rows: &[ChannelRow], views: &Views) -> Vec<SideHit> {
+/// `views` lists for it ([`agent_rows`]), then channels, each with its
+/// members ([`channel_items`]).
+pub(super) fn side_items_of(seen: &[Seen], rows: &[ChannelRow], invites: &Invites, views: &Views) -> Vec<SideHit> {
     let mut out: Vec<SideHit> = agent_rows(seen, views).into_iter().map(|(h, _)| h).collect();
-    out.extend(rows.iter().map(|r| SideHit::Channel(r.known.group.name.clone())));
+    out.extend(channel_items(rows, invites).iter().map(|i| i.hit(rows)));
     out
 }
 
@@ -569,7 +665,7 @@ mod tests {
 
     fn with_agents(c: &mut ChatPane, names: &[&str]) {
         let seen = names.iter().map(|n| seen(n)).collect();
-        c.world = Some(super::super::World::new(Vec::new(), seen, Vec::new(), Vec::new(), attend_instances::SnapshotCache::new(), &c.foreground, &c.views));
+        c.world = Some(super::super::World::new(Vec::new(), seen, Vec::new(), Vec::new(), Default::default(), attend_instances::SnapshotCache::new(), &c.foreground, &c.views));
         c.refocus();
     }
 
@@ -609,6 +705,86 @@ mod tests {
         let a = |m: &str| SideHit::Agent(m.into());
         let r = |m: &str| SideHit::Review(m.into());
         assert_eq!(hits, [a("id-Ada"), r("id-Ada"), a("id-aaron"), a("id-Bo"), SideHit::Dm("id-Bo".into()), r("id-Bo")], "the operator's DMs first, then the agent's own");
+    }
+
+    fn row(name: &str, members: &[&str], base: bool) -> ChannelRow {
+        let membership = attend_groups::GroupEntry { members: members.iter().map(|m| m.to_string()).collect(), ..Default::default() };
+        let group = agent_identity::Group::for_name(name, agent_theme::ColorDepth::Ansi16);
+        ChannelRow { known: crate::groups::KnownGroup { group, membership, is_base: base }, last: None, on_disk: true }
+    }
+
+    fn invite(channel: &str, member: &str) -> attend_groups::Invite {
+        attend_groups::Invite { channel: channel.into(), member: member.into(), by: Some("aaron".into()), at: None }
+    }
+
+    /// The Channels section as (row, invited) pairs: `#c` for a channel,
+    /// `c/m` for a member.
+    fn listed(rows: &[ChannelRow], invites: &Invites) -> Vec<(String, bool)> {
+        channel_items(rows, invites)
+            .into_iter()
+            .map(|i| match i {
+                ChannelItem::Channel(c) => (format!("#{}", rows[c].known.group.name), false),
+                ChannelItem::Member { channel, member, invite } => (format!("{channel}/{member}"), invite.is_some()),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn each_channel_lists_its_members_under_it_participants_then_invitees() {
+        let rows = [row("open", &[], true), row("deploy", &["s1", "aaron"], false), row("infra", &["s1"], false), row("empty", &[], false)];
+        let invites: Invites = [("deploy".to_string(), vec![invite("deploy", "s2"), invite("deploy", "s1")]), ("infra".to_string(), vec![invite("infra", "s3")])].into();
+        let l = |s: &str, invited| (s.to_string(), invited);
+        assert_eq!(
+            listed(&rows, &invites),
+            [l("#open", false), l("#deploy", false), l("deploy/s1", false), l("deploy/aaron", false), l("deploy/s2", true), l("#infra", false), l("infra/s1", false), l("infra/s3", true), l("#empty", false)],
+            "#open lists no one; s1, in two channels, under both; s1 invited where it already is participates, listed once; a human is listed"
+        );
+    }
+
+    #[test]
+    fn the_walk_takes_the_member_rows_in_the_order_drawn() {
+        let rows = [row("deploy", &["s1"], false)];
+        let invites: Invites = [("deploy".to_string(), vec![invite("deploy", "s2")])].into();
+        let items = side_items_of(&[seen("Ada")], &rows, &invites, &Views::default());
+        let m = |c: &str, id: &str| SideHit::Member(c.into(), id.into());
+        assert_eq!(items, [SideHit::Agent("id-Ada".into()), SideHit::Channel("deploy".into()), m("deploy", "s1"), m("deploy", "s2")]);
+    }
+
+    #[test]
+    fn an_invited_row_is_set_back_and_marked_apart_from_a_participants() {
+        let c = ChatPane::new(None, Default::default());
+        let text = |l: &Line| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>();
+        let ada = seen("Ada");
+        let joined = member_line(&c, "Ada", Some(&ada), None, 24, false);
+        let invited = member_line(&c, "Ada", Some(&ada), Some("4m"), 24, false);
+        let (joined_t, invited_t) = (text(&joined), text(&invited));
+        assert!(joined_t.contains('●') && !joined_t.contains(INVITED), "{joined_t:?}");
+        assert!(invited_t.contains(INVITED) && invited_t.contains("4m") && !invited_t.contains('●'), "{invited_t:?}");
+        assert_eq!((joined.width(), invited.width()), (1 + 24, 1 + 24), "both fill the row");
+        let faded = Seg::faded("").style;
+        assert!(invited.spans.iter().filter(|s| !s.content.trim().is_empty()).all(|s| s.style == faded), "the invited row is set back whole: {invited:?}");
+        assert_ne!(joined.spans.iter().find(|s| s.content.contains("Ada")).map(|s| s.style), Some(faded), "a participant wears its identity: {joined:?}");
+        let narrow = text(&member_line(&c, "Shannon-alphabet", Some(&ada), Some("4m"), 24, false));
+        assert!(narrow.contains(INVITED) && !narrow.contains("4m"), "the age goes first where the row has no room: {narrow:?}");
+    }
+
+    #[test]
+    fn the_cursor_on_a_member_row_follows_it_and_falls_to_its_channel_when_it_goes() {
+        let mut c = ChatPane::new(None, Default::default());
+        let world = |c: &mut ChatPane, members: &[&str], invited: &[&str]| {
+            let invites: Invites = [("deploy".to_string(), invited.iter().map(|m| invite("deploy", m)).collect())].into();
+            let rows = vec![row("deploy", members, false)];
+            c.world = Some(super::super::World::new(Vec::new(), vec![seen("Ada")], rows, vec![0], invites, attend_instances::SnapshotCache::new(), &c.foreground, &c.views));
+            c.refocus();
+        };
+        world(&mut c, &[], &["s2"]);
+        let items = c.side_items();
+        c.focus_at(&items, 2);
+        let on = SideHit::Member("deploy".into(), "s2".into());
+        world(&mut c, &["s1", "s2"], &[]);
+        assert_eq!((c.side_focus(), c.ix.row_hit().cloned()), (Some(3), Some(on.clone())), "invited, then joined: the cursor stays on it, a row down");
+        world(&mut c, &["s1"], &[]);
+        assert_eq!(c.ix.row_hit().cloned(), Some(SideHit::Channel("deploy".into())), "its row gone: on its channel's");
     }
 
     #[test]

@@ -171,6 +171,15 @@ pub fn all_channels_in(base: &Path, caps: ColorDepth) -> Vec<ChannelRow> {
     out
 }
 
+/// Every channel's pending invitations, by channel name
+/// ([`attend_groups::load_invites`]), each list by invitee.
+pub type Invites = std::collections::HashMap<String, Vec<attend_groups::Invite>>;
+
+/// The pending invitations under the signals base, read once per world.
+pub fn invites() -> Invites {
+    attend_groups::load_invites(&signals_base())
+}
+
 /// The channels the tab bar shows, from the column's rows: those on disk,
 /// in the rows' order. The same list as [`channels`], without a second scan.
 pub fn tab_channels(rows: &[ChannelRow]) -> Vec<KnownGroup> {
