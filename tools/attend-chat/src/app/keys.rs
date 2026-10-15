@@ -525,23 +525,57 @@ fn dissolve_group_in<F: Fn(&str) -> bool>(
             if live == 1 { "" } else { "s" }
         ));
     }
-    dissolve_status(name, attend_membership::dissolve(bus, "", name))
+    let done = attend_membership::dissolve(bus, "", name);
+    if let Ok(d) = &done {
+        let mut pending = pending();
+        for member in &d.unsettled {
+            pending.add(member, &format!("a member of #{name}"));
+        }
+    }
+    dissolve_status(name, done)
 }
 
-/// The status a dissolve leaves. A member whose release found the channels
-/// lock busy twice may still be listening, and the status says so.
+/// The status a dissolve leaves, noting a release that did not settle.
 fn dissolve_status(name: &str, done: Result<attend_membership::Dissolved, String>) -> EnterAction {
     match done {
-        Ok(d) => EnterAction::ClearWithStatus(match d.unsettled.len() {
-            0 => format!("dissolved #{name}"),
-            n => format!("dissolved #{name}; {BUSY_NOTE} {n} member{} may still be listening", if n == 1 { "" } else { "s" }),
-        }),
+        Ok(d) if d.unsettled.is_empty() => EnterAction::ClearWithStatus(format!("dissolved #{name}")),
+        Ok(_) => EnterAction::ClearWithStatus(format!("dissolved #{name}; {BUSY_NOTE}")),
         Err(e) => EnterAction::StatusOnly(format!("/dissolve: {e}")),
     }
 }
 
-/// How a status opens its note of a release that did not settle.
-const BUSY_NOTE: &str = "the channels lock was busy, so";
+/// A status's note of a release that did not settle.
+const BUSY_NOTE: &str = "the channels lock was busy, so the chat tries again at its next refresh";
+
+/// The releases a kick or a dissolve left unsettled, retried at the next
+/// refresh ([`retry_pending`]).
+static PENDING: std::sync::Mutex<attend_membership::Pending> = std::sync::Mutex::new(attend_membership::Pending::new());
+
+fn pending() -> std::sync::MutexGuard<'static, attend_membership::Pending> {
+    PENDING.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Retry the releases a kick or a dissolve left unsettled, waiting for the
+/// channels lock at most twice [`GROUPS_LOCK_WAIT`]. The status to show,
+/// and whether it is a warning; `None` when nothing was pending.
+pub fn retry_pending() -> Option<(String, bool)> {
+    let mut pending = pending();
+    if pending.is_empty() {
+        return None;
+    }
+    retry_status(&pending.retry(&attend_membership::Bus::here().waiting_at_most(GROUPS_LOCK_WAIT)))
+}
+
+/// The status a retry leaves: the remedy for a release given up, else who
+/// was released.
+fn retry_status(r: &attend_membership::Retried) -> Option<(String, bool)> {
+    match (r.unsettled.as_slice(), r.settled.as_slice()) {
+        ([], []) => None,
+        ([], settled) => Some((format!("{} no longer listen{} by the channel", settled.join(", "), if settled.len() == 1 { "s" } else { "" }), false)),
+        ([one], _) => Some((format!("the channels lock is still busy, so {one} may still be listening; run `attend listen off` in that session"), true)),
+        (many, _) => Some((format!("the channels lock is still busy, so {} sessions may still be listening; run `attend listen off` in those sessions", many.len()), true)),
+    }
+}
 
 /// Filesystem-effect core of `/channels create` (#404), parameterized
 /// on the base dir so tests can drive it against a tempdir. The
@@ -781,14 +815,18 @@ fn kick_member_in(
     member_id: &str,
     label: &str,
 ) -> EnterAction {
-    kick_status(name, label, attend_membership::remove(bus, "", name, member_id))
+    let done = attend_membership::remove(bus, "", name, member_id);
+    if done.as_ref().is_ok_and(|r| !r.settled) {
+        pending().add(member_id, &format!("@{label}"));
+    }
+    kick_status(name, label, done)
 }
 
 /// The status a kick leaves, noting a release that did not settle.
 fn kick_status(name: &str, label: &str, done: Result<attend_membership::Removed, String>) -> EnterAction {
     match done {
         Ok(r) if r.settled => EnterAction::ClearWithStatus(format!("kicked @{label} from #{name}")),
-        Ok(_) => EnterAction::ClearWithStatus(format!("kicked @{label} from #{name}; {BUSY_NOTE} @{label} may still be listening")),
+        Ok(_) => EnterAction::ClearWithStatus(format!("kicked @{label} from #{name}; {BUSY_NOTE}")),
         Err(e) => EnterAction::StatusOnly(format!("/kick: {e}")),
     }
 }
@@ -1304,8 +1342,8 @@ mod tests {
     }
 
     /// A kick or a dissolve whose release found the channels lock busy
-    /// twice says the member may still be listening; a settled one says
-    /// nothing more.
+    /// twice says the chat tries again; a settled one says nothing more.
+    /// The retry's status names who settled, or the remedy for who did not.
     #[test]
     fn an_unsettled_release_puts_a_note_in_the_status() {
         let status = |a: EnterAction| match a {
@@ -1314,14 +1352,21 @@ mod tests {
         };
         let kicked = |settled| status(kick_status("deploy", "Cleo", Ok(attend_membership::Removed { settled })));
         assert_eq!(kicked(true), "kicked @Cleo from #deploy");
-        assert_eq!(kicked(false), "kicked @Cleo from #deploy; the channels lock was busy, so @Cleo may still be listening");
+        assert_eq!(kicked(false), "kicked @Cleo from #deploy; the channels lock was busy, so the chat tries again at its next refresh");
         let dissolved = |unsettled: &[&str]| {
             let d = attend_membership::Dissolved { members: vec!["a".into(), "b".into()], unsettled: unsettled.iter().map(|m| m.to_string()).collect() };
             status(dissolve_status("temp", Ok(d)))
         };
         assert_eq!(dissolved(&[]), "dissolved #temp");
-        assert_eq!(dissolved(&["a"]), "dissolved #temp; the channels lock was busy, so 1 member may still be listening");
-        assert_eq!(dissolved(&["a", "b"]), "dissolved #temp; the channels lock was busy, so 2 members may still be listening");
+        assert_eq!(dissolved(&["a"]), "dissolved #temp; the channels lock was busy, so the chat tries again at its next refresh");
+
+        let retried = |settled: &[&str], unsettled: &[&str]| {
+            retry_status(&attend_membership::Retried { settled: settled.iter().map(|m| m.to_string()).collect(), unsettled: unsettled.iter().map(|m| m.to_string()).collect() })
+        };
+        assert_eq!(retried(&[], &[]), None);
+        assert_eq!(retried(&["@Cleo"], &[]), Some(("@Cleo no longer listens by the channel".to_string(), false)));
+        assert_eq!(retried(&[], &["@Cleo"]), Some(("the channels lock is still busy, so @Cleo may still be listening; run `attend listen off` in that session".to_string(), true)));
+        assert_eq!(retried(&["@Ada"], &["@Cleo", "a member of #temp"]), Some(("the channels lock is still busy, so 2 sessions may still be listening; run `attend listen off` in those sessions".to_string(), true)));
     }
 
     #[test]

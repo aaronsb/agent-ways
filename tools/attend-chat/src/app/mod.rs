@@ -1118,6 +1118,9 @@ impl Pane for ChatPane {
             }
             self.refresh();
             self.refreshed = Some(Instant::now());
+            if let Some((status, warn)) = keys::retry_pending() {
+                self.say(status, warn);
+            }
             if self.binary.as_ref().is_some_and(|(path, at)| updated_on_disk(path, *at)) {
                 self.binary = None;
                 self.say(UPDATED_ON_DISK, false);

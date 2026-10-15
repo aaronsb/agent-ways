@@ -374,6 +374,58 @@ pub fn dissolve(bus: &Bus, by: &str, channel: &str) -> Result<Dissolved, String>
     Ok(Dissolved { members, unsettled })
 }
 
+/// Members whose release did not settle, kept by a caller that waits a
+/// bounded time for the channels lock, to try again later ([`release`]).
+/// Each carries the label a status names it by.
+#[derive(Debug, Default)]
+pub struct Pending {
+    members: Vec<(String, String)>,
+}
+
+/// What one [`Pending::retry`] did, by label.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Retried {
+    /// Released: the members no longer listen by the channel.
+    pub settled: Vec<String>,
+    /// Found the lock busy again, and given up: each may still be listening.
+    pub unsettled: Vec<String>,
+}
+
+impl Pending {
+    pub const fn new() -> Self {
+        Pending { members: Vec::new() }
+    }
+
+    /// Keep `member` to retry, once.
+    pub fn add(&mut self, member: &str, label: &str) {
+        if !self.members.iter().any(|(m, _)| m == member) {
+            self.members.push((member.to_string(), label.to_string()));
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.members.is_empty()
+    }
+
+    /// Release each member once more, in order, until one finds the lock
+    /// busy at both tries. That member is given up, and those after it wait
+    /// for the next retry, so a retry waits for the lock at most as long as
+    /// one release does.
+    pub fn retry(&mut self, bus: &Bus) -> Retried {
+        let mut done = Retried::default();
+        while !self.members.is_empty() {
+            let (member, label) = self.members.remove(0);
+            if release(bus, &member) {
+                done.settled.push(label);
+            } else {
+                done.unsettled.push(label);
+                break;
+            }
+        }
+        done
+    }
+}
+
 /// After `member` lost a channel: once it is in no channel, the enrollment
 /// a join or an add gave it is withdrawn, as leaving its last channel
 /// withdraws it. One that also turned listening on or ran `attend run`
@@ -623,6 +675,39 @@ mod tests {
         drop(held);
         assert!(release(&bus, SID));
         assert!(!attend_presence::enrollment::is_enrolled_in(&bus.enrolled, SID));
+    }
+
+    /// A release that did not settle waits in a pending set for the next
+    /// refresh. A retry stops at the first member that finds the lock busy,
+    /// so it waits at most twice the bus's bound: that member is given up,
+    /// and those after it wait for the next retry. Once the lock is free
+    /// they settle.
+    #[test]
+    fn a_pending_release_is_retried_once_within_one_bound() {
+        let (_s, bus) = scratch("pending");
+        let wait = Duration::from_millis(100);
+        let bus = Bus { lock_wait: Some(wait), ..bus };
+        std::fs::create_dir_all(&bus.enrolled).unwrap();
+        for m in ["a", "b"] {
+            std::fs::write(bus.enrolled.join(m), "join\n").unwrap();
+        }
+        let mut pending = Pending::default();
+        pending.add("a", "@a");
+        pending.add("b", "@b");
+        pending.add("a", "@a");
+        let held = agent_settings::writer::Lock::acquire(&bus.signals.join("_groups.yaml")).unwrap();
+        let start = std::time::Instant::now();
+        let r = pending.retry(&bus);
+        let took = start.elapsed();
+        assert_eq!((r.settled, r.unsettled), (vec![], vec!["@a".to_string()]));
+        assert!(took >= 2 * wait && took < 4 * wait, "one release's two bounded waits, not two releases': {took:?}");
+        assert!(!pending.is_empty(), "b waits for the next retry");
+        drop(held);
+        let r = pending.retry(&bus);
+        assert_eq!((r.settled, r.unsettled), (vec!["@b".to_string()], vec![]));
+        assert!(pending.is_empty());
+        assert!(attend_presence::enrollment::is_enrolled_in(&bus.enrolled, "a"), "a was given up");
+        assert!(!attend_presence::enrollment::is_enrolled_in(&bus.enrolled, "b"));
     }
 
     /// A move that stopped after carrying the enrollment, before renaming
