@@ -215,7 +215,8 @@ impl PeerSensor {
         self.cache_lapsed_fn = Some(f);
     }
 
-    /// Whether this session's prompt cache has lapsed. A session with no
+    /// Whether this session's prompt cache has lapsed, by the wake gate
+    /// (`sensor_keepwarm::session_cache_lapsed`). A session with no
     /// resolved id has no transcript to read, which counts as lapsed.
     fn cache_lapsed(&self, working_dir: &str) -> bool {
         match (&self.cache_lapsed_fn, &self.own_session_id) {
