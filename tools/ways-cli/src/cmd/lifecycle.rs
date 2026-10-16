@@ -156,6 +156,7 @@ enum Line {
     Tagged { mark: Mark, indent: usize, tag: String, width: usize, text: String },
     Sub(String),
     Text { indent: usize, text: String },
+    Strong { indent: usize, text: String },
     Muted { indent: usize, text: String },
     Blank,
 }
@@ -212,6 +213,11 @@ impl Report {
         self.push(Line::Text { indent, text: text.into() })
     }
 
+    /// Bold text at `indent`: a heading inside quoted content.
+    pub fn strong(&mut self, indent: usize, text: impl Into<String>) -> &mut Self {
+        self.push(Line::Strong { indent, text: text.into() })
+    }
+
     pub fn muted(&mut self, indent: usize, text: impl Into<String>) -> &mut Self {
         self.push(Line::Muted { indent, text: text.into() })
     }
@@ -254,8 +260,12 @@ impl Report {
                     Line::Sub(text) => {
                         let _ = writeln!(out, "  {}", p.paint(Style::new().bold(), text));
                     }
+                    Line::Text { text, .. } if text.is_empty() => out.push('\n'),
                     Line::Text { indent, text } => {
                         let _ = writeln!(out, "{:indent$}{text}", "");
+                    }
+                    Line::Strong { indent, text } => {
+                        let _ = writeln!(out, "{:indent$}{}", "", p.paint(Style::new().bold(), text));
                     }
                     Line::Muted { indent, text } => {
                         let _ = writeln!(out, "{:indent$}{}", "", p.paint(Role::Muted, text));

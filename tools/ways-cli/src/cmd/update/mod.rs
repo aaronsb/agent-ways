@@ -91,7 +91,10 @@ pub fn run(mode: Mode, git_ref: Option<String>, verbose: bool) -> Result<()> {
     let head_after = git_head(&app);
     match (head_before.as_deref(), head_after.as_deref()) {
         (Some(a), Some(b)) if a == b => Steps::ok("already up to date"),
-        (Some(a), Some(b)) => Steps::ok(format!("fast-forwarded {} → {} ({} commits)", short(a), short(b), count(&app, a, b))),
+        (Some(a), Some(b)) => {
+            let n = count(&app, a, b);
+            Steps::ok(format!("fast-forwarded {} → {} ({n} commit{})", short(a), short(b), if n == "1" { "" } else { "s" }))
+        }
         _ => Steps::ok("pulled"),
     }
 

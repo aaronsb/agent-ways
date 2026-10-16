@@ -336,7 +336,11 @@ pub fn render(w: &WhatIf) -> Report {
                     for rel in found {
                         r.tagged(Mark::Up, 4, &rel.tag, 0, "");
                         for line in notes::trim(&rel.body) {
-                            r.text(6, line);
+                            if line.starts_with('#') {
+                                r.strong(6, line);
+                            } else {
+                                r.text(6, line);
+                            }
                         }
                     }
                     r.blank();

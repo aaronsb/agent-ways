@@ -182,3 +182,26 @@ fn unreachable_release_notes_are_named_and_the_report_goes_on() {
     assert!(stdout.contains("the release notes could not be fetched"), "{stdout}");
     assert!(stdout.contains("── Changes") && stdout.contains("── Actions"), "{stdout}");
 }
+
+#[test]
+fn commit_applies_with_one_header_per_stage() {
+    let s = Sandbox::new("commit");
+    let before = s.snapshot().0;
+    let out = s.ways(&["manage", "update", "--commit"], &s.base.join("releases.json"));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let all = format!("{}{stderr}", String::from_utf8_lossy(&out.stdout));
+    assert!(out.status.success(), "{all}");
+    assert_ne!(s.snapshot().0, before, "the pull moved HEAD: {all}");
+    assert!(s.app().join("relinked").exists(), "relink ran: {all}");
+    let order: Vec<usize> = ["── Pull", "── Binaries", "── Corpus", "── Reproject", "── Done"]
+        .iter()
+        .map(|h| stderr.find(h).unwrap_or_else(|| panic!("{h} missing:\n{all}")))
+        .collect();
+    assert!(order.windows(2).all(|w| w[0] < w[1]), "{all}");
+    assert!(stderr.contains("✓ fast-forwarded"), "{all}");
+    // The ways refresh fails here (no `ways` make target): a warning, and
+    // the failed make's output under it, not a raw scroll of every step.
+    assert!(stderr.contains("⚠ ways NOT refreshed"), "{all}");
+    assert!(!stderr.contains("Already up to date") && !stderr.contains("Fast-forward"), "git's own output is kept back: {all}");
+    assert!(!all.contains('\x1b'), "plain in a pipe");
+}
