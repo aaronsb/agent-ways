@@ -76,6 +76,7 @@ sweep
 #   paste:TEXT     a bracketed paste of TEXT, \n for a newline
 #   rawpaste:TEXT  TEXT sent as typed, newlines and all, with no brackets
 #   bigpaste:N     a bracketed paste of N x characters
+#   newdm:TEXT     a direct message TEXT from alpha to the operator, arriving now
 # The fixture is base, crowd (fifteen more agents), many (24 more channels,
 # so the last channel row sits at the foot), own (the operator in
 # #deploy), long (a fourth agent whose project name outruns any row),
@@ -83,7 +84,8 @@ sweep
 # in every project's tray: one the operator sent beta in an earlier
 # session, and the agents' DMs with each other), proj (alpha, where the
 # chat runs, a project whose .claude/ways.yaml sets
-# attend_mod.listening: active, and beta a git checkout) or plain (no
+# attend_mod.listening: active, and beta a git checkout), relic (@relic/,
+# two messages an earlier channel left, that no entry names) or plain (no
 # Nerd Font). An agent's name comes from the temp
 # path, and a long one cuts its project, so the quiet agent is clicked by
 # the column's first `○`, its row being the agents' last.
@@ -137,6 +139,7 @@ menu-tab     | base  | wait:Agents side:#infra side:#infra wait:pick click:#open
 prompt-click | base  | wait:Agents text:draft C-n wait:new_channel text:abc click:Agents gone:new_channel
 entry-name   | base  | wait:Agents text:draft C-n wait:new_channel_name text:release
 entry-bad    | base  | wait:Agents text:draft C-n wait:new_channel_name text:no_spaces Enter wait:no_spaces
+entry-relic  | relic | wait:Agents text:draft C-n wait:new_channel_name text:relic Enter wait:relic)
 entry-desc   | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Describe wait:describe_#deploy text:_for_staging
 entry-tab    | base  | wait:Agents text:draft C-n wait:new_channel_name text:abc click:#open gone:new_channel_name
 entry-row    | base  | wait:Agents click:+ wait:new_channel_name side:#infra gone:new_channel_name text:abc
@@ -225,6 +228,8 @@ dm-compose   | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs t
 dm-menu      | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs rfeed:→_you wait:Hide_DMs
 dm-hide      | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs side:DMs wait:Hide_DMs click:Hide_DMs gone:pick_one
 dm-quiet     | base  | wait:Agents side:○ wait:DMs text:are_you_there Enter wait:no_heartbeat
+dm-mark      | dm    | wait:→_you side:#open gone:→_you newdm:one_more_thing wait:
+dm-mark-gone | dm    | wait:→_you side:#open gone:→_you newdm:one_more_thing wait: side:alp wait:one_more_thing side:#open gone:
 dm-earlier   | trays | wait:Agents_3/4 side:beta wait:sent_before_this_chat
 review-open  | trays | wait:Agents_3/4 rside:alpha wait:Review_DMs click:Review_DMs wait:read_only
 review-type  | trays | wait:Agents_3/4 rside:alpha wait:Review_DMs click:Review_DMs wait:read_only text:hello BTab
@@ -322,6 +327,11 @@ YAML
     dm "$tb" s8 400 "claude:$A" "$F/work/alpha" agent "$A" "$B" "the legend moved; can you check the tab bar?"
     dm "$ta" s9 350 "claude:$B" "$F/work/beta" agent "$B" "$A" "checked: the bar holds"
     dm "$tb" s10 300 "claude:$C" "$F/work/gamma" agent "$C" "$B" "gamma to beta, not alpha's"
+  fi
+  if [ "$1" = relic ]; then
+    mkdir -p "$sig/@relic"
+    msg "$sig/@relic" r1 86400 "claude:$A" "$F/work/alpha" "from a channel dissolved by hand"
+    msg "$sig/@relic" r2 86000 "claude:$B" "$F/work/beta" "its folder stayed"
   fi
   [ "$1" = long ] && msg "$sig/_broadcast" s5 60 "claude:eeeeeeee-0000-4000-8000-000000000005" "$F/work/the-delta-project-with-a-name-far-too-long-for-a-row" "a project name longer than any row: the band cuts it and keeps the time"
   printf 'theme:\n  active: nord\n  shape: %s\n' "$shape" > "$F/config/agent-ways/config.yaml"
@@ -430,6 +440,10 @@ step() { # name step
     wait:*) poll "$n" "'$arg'" has "$arg"; return ;;
     gone:*) poll "$n" "'$arg' to go" lacks "$arg"; return ;;
     resize:*) resize "$n" "$arg" ;;
+    newdm:*)
+      local tray=$F/cache/attend/signals/_people/operator
+      mkdir -p "$tray"
+      printf '%s|%s|%s|%s\n' "claude:$A" alpha "$F/work/alpha" "$arg" > "$tray/new-$(date +%s%N).signal" ;;
     pause:*) sleep "$arg"; return ;;
     paste:*) $TH send "$n" -l $'\e[200~'"$(printf '%b' "$arg")"$'\e[201~' ;;
     rawpaste:*) $TH send "$n" -l "$(printf '%b' "$arg")" ;;

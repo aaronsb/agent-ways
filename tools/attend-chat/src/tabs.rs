@@ -157,23 +157,22 @@ pub fn advance_after_dissolve(dissolved: &str, names_before: &[String]) -> Tab {
 /// the person was party to: every channel, and every direct message to
 /// them, to their project's tray, or from them, but for the copy of a send
 /// that went beside a channel post, whose post it holds instead. A channel
-/// tab holds only its own traffic plus local `Info` blocks (command
-/// feedback must be visible wherever the command was typed) and what
-/// reached the person directly (ADR-401, `to`). Directed messages to a cwd
-/// inbox, and those the person sent, belong to merged only — the strict
-/// per-channel filter. A DM view holds the direct messages between the
-/// person and its agent, both ways, and the local blocks (ADR-405). A
-/// direct message between others belongs to none of these; an agent's own
-/// DM view holds every direct message the agent sent or received, with
-/// anyone, and the local blocks.
+/// tab holds only its own posts plus local `Info` blocks (command feedback
+/// must be visible wherever the command was typed). Direct messages, to the
+/// person, to a cwd inbox, or from the person, belong to merged and the DM
+/// views (ADR-405). A DM view holds the direct messages between the person
+/// and its agent, both ways, and the local blocks. A direct message between
+/// others belongs to none of these; an agent's own DM view holds every
+/// direct message the agent sent or received, with anyone, and the local
+/// blocks.
 pub fn shows(sig: &Signal, tab: &Tab) -> bool {
     match tab {
         Tab::Merged => !matches!(sig.channel, Channel::Elsewhere(_)) && !sig.beside_post,
         Tab::Channel(g) => match &sig.channel {
-            Channel::Info | Channel::Person => true,
+            Channel::Info => true,
             Channel::Open => g == BASE_CHANNEL_NAME,
             Channel::Group(name) => name == g,
-            Channel::Direct(_) | Channel::Sent(_) | Channel::Elsewhere(_) => false,
+            Channel::Person | Channel::Direct(_) | Channel::Sent(_) | Channel::Elsewhere(_) => false,
         },
         Tab::Dm(member) => sig.channel == Channel::Info || sig.is_dm_with(member),
         Tab::Review(member) => sig.channel == Channel::Info || sig.is_dm_of(member),
@@ -288,6 +287,8 @@ mod tests {
         assert!(!visible_in(&Channel::Direct("a2".into()), &tab));
         assert!(!visible_in(&Channel::Sent("a1".into()), &tab));
         assert!(!visible_in(&Channel::Elsewhere("a2".into()), &tab));
+        // A DM to the person shows in merged and its sender's DM view.
+        assert!(!visible_in(&Channel::Person, &tab));
         // Command feedback follows the operator everywhere.
         assert!(visible_in(&Channel::Info, &tab));
     }

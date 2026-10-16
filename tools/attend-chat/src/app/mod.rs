@@ -258,6 +258,12 @@ pub struct ChatPane {
     /// across restarts ([`crate::hidden`]).
     hidden: crate::hidden::Hidden,
     hidden_path: std::path::PathBuf,
+    /// The newest DM to the operator that the operator view, and each DM
+    /// view, held when it was last shown, kept as watermarks of the kind
+    /// Hide messages here keeps: an agent's row marks the DMs past both
+    /// ([`dm`]). In memory only: the chat opens on the operator view, which
+    /// shows every DM.
+    shown: crate::hidden::Hidden,
     /// The attend CLI the cleanup items run ([`cleanup`]), and the last
     /// delete made, for Undo delete.
     attend: std::path::PathBuf,
@@ -322,6 +328,7 @@ impl ChatPane {
             dm_names: Default::default(),
             hidden: crate::hidden::Hidden::load(&crate::hidden::default_path()),
             hidden_path: crate::hidden::default_path(),
+            shown: crate::hidden::Hidden::default(),
             attend: crate::attend_cli::program(),
             undo: None,
             removing: None,
@@ -537,7 +544,8 @@ impl ChatPane {
                 w.laid.shown = tabs::normalize(t.clone(), &names);
                 w.laid.bar = tabs::bar(&names, &w.laid.shown);
             }
-            self.foreground = t;
+            let left = std::mem::replace(&mut self.foreground, t);
+            self.note_shown(&left);
             self.feed = FeedState::default();
             self.invalidate();
             if self.world.is_some() {

@@ -538,3 +538,71 @@ fn the_message_menu_in_the_agents_own_view_writes_only_where_a_box_is() {
         assert_eq!(c.input().text().starts_with(&format!("@{}", nick(BETA_CWD))), want, "{item}: {:?}", c.input().text());
     }
 }
+
+/// The column's row of the agent at `cwd`, left of the rule.
+fn agent_row(c: &mut Chat, cwd: &str) -> String {
+    let name = nick(cwd);
+    column(c).into_iter().find(|r| r.contains(&name) && r.contains(cwd.rsplit('/').next().unwrap())).unwrap_or_else(|| panic!("no row for {name}: {}", screen(c)))
+}
+
+/// A DM to the operator, newer than everything `chat` holds.
+fn newer_dm(id: &str, ts: u64) -> Signal {
+    Signal { ts, ..sig(id, &format!("claude:{ALPHA_SID}"), ALPHA_CWD, "alpha again", Channel::Person) }
+}
+
+/// ADR-405's amendment of 2026-10-15: a channel shows no DMs, so an
+/// agent's row carries a mark while the agent has DMs to the operator newer
+/// than the last time its DM view, or the operator view, was shown.
+/// Showing either clears it. The chat opens on the operator view, so what
+/// it held then carries no mark.
+#[test]
+fn an_agents_row_marks_a_new_dm_until_its_view_or_all_is_shown() {
+    let mut c = chat();
+    side_click(&mut c, "#open");
+    assert_eq!(c.foreground(), &Tab::Channel("open".into()));
+    assert!(!agent_row(&mut c, ALPHA_CWD).contains('✉'), "what the operator view showed is not new: {}", screen(&mut c));
+    c.push(newer_dm("n-1", 1_790_949_100));
+    assert!(agent_row(&mut c, ALPHA_CWD).contains('✉'), "a new DM marks alpha: {}", screen(&mut c));
+    assert!(!agent_row(&mut c, BETA_CWD).contains('✉'), "beta sent nothing new");
+    side_click(&mut c, &nick(ALPHA_CWD));
+    assert_eq!(c.foreground(), &Tab::Dm(ALPHA_SID.into()));
+    assert!(!agent_row(&mut c, ALPHA_CWD).contains('✉'), "shown, the view clears it");
+    side_click(&mut c, "#open");
+    assert!(!agent_row(&mut c, ALPHA_CWD).contains('✉'), "and it stays clear: {}", screen(&mut c));
+    c.push(newer_dm("n-2", 1_790_949_200));
+    assert!(agent_row(&mut c, ALPHA_CWD).contains('✉'), "{}", screen(&mut c));
+    let buf = testkit::render_screen(&mut c, W, H);
+    let (x, y) = testkit::find(&buf, "⋯all").expect("the operator view's tab");
+    c.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x, row: y, modifiers: KeyModifiers::NONE });
+    assert_eq!(c.foreground(), &Tab::Merged);
+    side_click(&mut c, "#open");
+    assert!(!agent_row(&mut c, ALPHA_CWD).contains('✉'), "the operator view clears it too: {}", screen(&mut c));
+}
+
+/// The agent's own DM view holds its DMs with the operator too, so
+/// showing it clears the mark as the operator's DM view does.
+#[test]
+fn review_dms_clears_the_new_dm_mark() {
+    let mut c = chat();
+    side_click(&mut c, "#open");
+    c.push(newer_dm("n-1", 1_790_949_100));
+    assert!(agent_row(&mut c, ALPHA_CWD).contains('✉'), "{}", screen(&mut c));
+    review(&mut c);
+    assert_eq!(c.foreground(), &Tab::Review(ALPHA_SID.into()));
+    assert!(!agent_row(&mut c, ALPHA_CWD).contains('✉'), "shown, Review DMs clears it: {}", screen(&mut c));
+    side_click(&mut c, "#open");
+    assert!(!agent_row(&mut c, ALPHA_CWD).contains('✉'), "and it stays clear: {}", screen(&mut c));
+}
+
+/// A person's row has no DM view, so a DM from a person carries no mark:
+/// only the operator view could clear it.
+#[test]
+fn a_dm_from_a_person_marks_no_row() {
+    let mut c = chat();
+    side_click(&mut c, "#open");
+    c.push(Signal { ts: 1_790_949_100, ..sig("h-1", "external:bob@pts-2", "/work/bob", "bob to you", Channel::Person) });
+    c.refresh();
+    let col = column(&mut c).join("\n");
+    assert!(col.contains("bob"), "bob has a row: {col}");
+    assert!(!col.contains('✉'), "{col}");
+}

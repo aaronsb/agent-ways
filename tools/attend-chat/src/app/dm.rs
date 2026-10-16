@@ -12,6 +12,10 @@
 //!
 //! Hiding a view, on its menu or the agent's, takes its row off the column
 //! and deletes nothing; opening it again lists every message it held.
+//!
+//! A channel shows no DMs (ADR-405, amendment of 2026-10-15), so an agent's
+//! row carries an envelope while the agent has DMs to the operator newer
+//! than the last time its DM view, or the operator view, was shown.
 
 use agent_tui::ratatui::layout::Rect;
 use agent_tui::{Anchor, Item, Open};
@@ -20,6 +24,8 @@ use super::cleanup::{DELETE_READ, HIDE_HERE, SHOW_HIDDEN, TOMBSTONE, UNDO_DELETE
 use super::sidebar::SideHit;
 use super::ChatPane;
 use crate::attend_cli::Scope;
+use crate::hidden;
+use crate::signal::Channel;
 use crate::tabs::Tab;
 
 pub(super) const SHOW_DMS: &str = "Show DMs";
@@ -71,6 +77,51 @@ impl Kind {
 }
 
 impl ChatPane {
+    /// Record, as `tab` is left, that it showed every DM to the operator it
+    /// holds: the operator view all of them; an agent's DM view, or its own
+    /// (Review DMs), the agent's. Both views of an agent keep one mark, its
+    /// DM view's.
+    pub(super) fn note_shown(&mut self, tab: &Tab) {
+        let (mark, from) = match tab {
+            Tab::Merged => (Tab::Merged, None),
+            Tab::Dm(m) | Tab::Review(m) => (Tab::Dm(m.clone()), Some(m.as_str())),
+            Tab::Channel(_) => return,
+        };
+        let newest = self
+            .signals
+            .iter()
+            .filter(|s| s.channel == Channel::Person && from.is_none_or(|m| s.sender_member().as_deref() == Some(m)))
+            .map(hidden::order)
+            .max();
+        if let Some(n) = newest {
+            self.shown.hide(&mark, n);
+        }
+    }
+
+    /// The agents, by membership id, with a DM to the operator newer than
+    /// the last time the operator view or one of the agent's DM views was
+    /// left. The view shown now shows its DMs, so none count while it is the
+    /// operator view, and not the agent whose view it is. A DM that arrived
+    /// while the operator view was shown counts from when it was left: its
+    /// mark was recorded then, so one that arrives later and sorts before
+    /// it, by an undo, carries none. A person has no DM view to clear it
+    /// from, so only agents are marked.
+    pub(super) fn new_dms(&self) -> std::collections::HashSet<String> {
+        if self.foreground == Tab::Merged {
+            return Default::default();
+        }
+        self.signals
+            .iter()
+            .filter(|s| s.channel == Channel::Person && !self.shown.hides(&Tab::Merged, s))
+            .filter_map(|s| s.sender_member().map(|m| (m, s)))
+            .filter(|(m, s)| {
+                let shown_now = matches!(&self.foreground, Tab::Dm(f) | Tab::Review(f) if f == m);
+                !shown_now && !self.shown.hides(&Tab::Dm(m.clone()), s) && self.has_dms(m)
+            })
+            .map(|(m, _)| m)
+            .collect()
+    }
+
     /// Whether `member` has DM views: a claude the column lists. A human
     /// has none, since `@name` routes to a session's tray.
     pub(super) fn has_dms(&self, member: &str) -> bool {

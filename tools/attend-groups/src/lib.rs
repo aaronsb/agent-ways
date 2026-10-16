@@ -226,6 +226,7 @@ impl Groups {
         dirs.extend(
             self.joined_group_names()
                 .into_iter()
+                .filter(|name| validate_group_name(name).is_ok())
                 .map(|name| ReceiveDir { path: self.group_dir(&name), room: Room::Channel(name) }),
         );
         dirs
@@ -250,7 +251,8 @@ impl Groups {
         self.base.join("_groups.yaml")
     }
 
-    /// Join a named group. Creates the group if it doesn't exist.
+    /// Join a named group. Creates the group if it doesn't exist, unless an
+    /// earlier channel's messages are left in its folder ([`Groups::create`]).
     ///
     /// The entry and the directory are both written under the state lock,
     /// which the orphan sweep in [`Groups::cleanup_stale`] also holds, so
@@ -260,6 +262,9 @@ impl Groups {
 
         let _lock = self.lock_state()?;
         let mut state = self.load_state();
+        if !state.contains_key(name) {
+            self.refuse_leftover(name)?;
+        }
         let entry = state.entry(name.to_string()).or_insert(GroupEntry {
             pinned: false,
             members: Vec::new(),
@@ -284,7 +289,9 @@ impl Groups {
     /// explicit lifecycle verb, distinct from join's create-implicitly.
     /// Created channels are pinned: an empty unpinned group is swept
     /// by cleanup, so an explicit create must persist until someone
-    /// joins or the operator dissolves it.
+    /// joins or the operator dissolves it. A name whose directory an
+    /// earlier channel left with messages in it, and no entry, is refused
+    /// until it is dissolved: the new channel would open on them.
     pub fn create(&self, name: &str, description: Option<&str>) -> Result<(), String> {
         validate_group_name(name)?;
         // Same single-line contract as set_description — enforced HERE,
@@ -301,6 +308,7 @@ impl Groups {
         if state.contains_key(name) {
             return Err(format!("#{name} already exists"));
         }
+        self.refuse_leftover(name)?;
         state.insert(
             name.to_string(),
             GroupEntry {
@@ -313,6 +321,20 @@ impl Groups {
         fs::create_dir_all(self.group_dir(name))
             .map_err(|e| format!("creating group dir: {e}"))?;
         Ok(())
+    }
+
+    /// Refuse to make channel `name` over the messages an earlier channel
+    /// left in its folder: the new channel would open on them. Called with
+    /// the state lock held, for a name no entry names.
+    fn refuse_leftover(&self, name: &str) -> Result<(), String> {
+        let left = fs::read_dir(self.group_dir(name))
+            .map(|d| d.flatten().filter(|e| e.path().extension().is_some_and(|x| x == "signal")).count())
+            .unwrap_or(0);
+        if left == 0 {
+            return Ok(());
+        }
+        let messages = if left == 1 { "message" } else { "messages" };
+        Err(format!("#{name} has {left} {messages} left on disk from an earlier channel; dissolve it first (attend channel dissolve {name})"))
     }
 
     /// Set or replace a channel's description (#404). Single-line by
@@ -510,6 +532,7 @@ impl Groups {
 
     /// Leave a named group.
     pub fn leave(&self, name: &str) -> Result<(), String> {
+        validate_group_name(name)?;
         let _lock = self.lock_state()?;
         let mut state = self.load_state();
         if let Some(entry) = state.get_mut(name) {
@@ -543,6 +566,7 @@ impl Groups {
         if is_agent_member(&self.member_id) && !is_agent_member(member) {
             return Err("agents cannot kick a human member".to_string());
         }
+        validate_group_name(name)?;
         let _lock = self.lock_state()?;
         let mut state = self.load_state();
         let Some(entry) = state.get_mut(name) else {
@@ -577,6 +601,9 @@ impl Groups {
 
     /// Unpin a group.
     pub fn unpin(&self, name: &str) {
+        if validate_group_name(name).is_err() {
+            return;
+        }
         let Ok(_lock) = self.lock_state() else { return };
         let mut state = self.load_state();
         if let Some(entry) = state.get_mut(name) {
@@ -593,8 +620,10 @@ impl Groups {
         self.save_state(&state);
     }
 
-    /// Dissolve a group — remove it and notify members.
+    /// Dissolve a group — remove it and notify members. Its name is
+    /// checked first: the folder it names is removed whole.
     pub fn dissolve(&self, name: &str) -> Result<Vec<String>, String> {
+        validate_group_name(name)?;
         let _lock = self.lock_state()?;
         let mut state = self.load_state();
         let members = state
@@ -751,7 +780,7 @@ impl Groups {
         // Clean up empty unpinned channels
         let to_remove: Vec<String> = state
             .iter()
-            .filter(|(_, e)| e.members.is_empty() && !e.pinned)
+            .filter(|(name, e)| e.members.is_empty() && !e.pinned && validate_group_name(name).is_ok())
             .map(|(name, _)| name.clone())
             .collect();
 
@@ -1384,6 +1413,64 @@ mod tests {
 }
 
 #[cfg(test)]
+mod name_tests {
+    use super::*;
+
+    /// A signals base inside a root of its own, with a file beside the
+    /// base that a path escaping the base would reach.
+    fn rooted(tag: &str) -> (PathBuf, PathBuf) {
+        let root = std::env::temp_dir().join(format!("attend-groups-names-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let base = root.join("signals");
+        fs::create_dir_all(base.join("@x")).unwrap();
+        fs::create_dir_all(root.join("keep")).unwrap();
+        fs::write(root.join("keep/file"), "mine").unwrap();
+        (root, base)
+    }
+
+    fn intact(root: &Path, base: &Path) {
+        assert!(root.join("keep/file").is_file(), "nothing outside the base is removed");
+        assert!(base.join("@x").is_dir(), "nor the channel the name passes through");
+    }
+
+    /// `x/../..` names the base's parent once `@x` exists. Every verb that
+    /// builds a path from a channel name refuses it, or does nothing, and
+    /// removes nothing outside the base.
+    #[test]
+    fn a_name_that_leaves_the_base_is_refused_everywhere() {
+        let (root, base) = rooted("verbs");
+        let g = Groups::new(&base, "operator");
+        let bad = "x/../..";
+        assert!(g.dissolve(bad).is_err(), "dissolve refuses it");
+        assert!(g.leave(bad).is_err(), "leave refuses it");
+        assert!(g.kick(bad, "agent-1").is_err(), "kick refuses it");
+        g.unpin(bad);
+        g.pin(bad);
+        assert!(g.join(bad, false).is_err() && g.create(bad, None).is_err());
+        assert!(g.invite(bad, "agent-1").is_err() && g.brief(bad, "agent-1").is_err());
+        g.uninvite(bad, "agent-1");
+        g.unbrief(bad, "agent-1");
+        assert!(!g.take_invite(bad) && g.invites(bad).is_empty());
+        assert!(g.add(bad, "agent-1", || Ok(())).is_err());
+        intact(&root, &base);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A hand-edited _groups.yaml that names such a channel, empty and
+    /// unpinned, is not swept or unpinned through it.
+    #[test]
+    fn a_state_entry_that_leaves_the_base_removes_nothing() {
+        let (root, base) = rooted("state");
+        fs::write(base.join("_groups.yaml"), "x/../..:\n  pinned: false\n  members: []\n").unwrap();
+        let g = Groups::new(&base, "operator");
+        g.unpin("x/../..");
+        g.cleanup_stale_with(|_| false, std::time::Duration::from_secs(3600));
+        intact(&root, &base);
+        let _ = fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
 mod kick_tests {
     use super::*;
 
@@ -1482,6 +1569,40 @@ mod lifecycle_tests {
         assert!(b.join("@plans").is_dir());
         assert!(g.create("plans", None).unwrap_err().contains("already exists"));
         assert!(g.create("open", None).is_err(), "reserved names stay reserved");
+        fs::remove_dir_all(&b).ok();
+    }
+
+    /// A name whose `@name/` an earlier channel left behind, its messages
+    /// still in it and no entry naming it, is refused by create and by a
+    /// join that would make the channel: a new channel there would open on
+    /// the old one's messages. Dissolve takes the leftover
+    /// away, entry or none, and the name is free again. A leftover holding
+    /// no message is no refusal.
+    #[test]
+    fn create_refuses_a_leftover_directory_holding_messages() {
+        let b = base("leftover");
+        let g = Groups::new(&b, "operator");
+        let dir = b.join("@old");
+        fs::create_dir_all(&dir).unwrap();
+        for i in 0..12 {
+            fs::write(dir.join(format!("m{i}.signal")), "x").unwrap();
+        }
+        fs::write(dir.join("alpha.invite"), "by: x\n").unwrap();
+        assert_eq!(g.create("old", None).unwrap_err(), "#old has 12 messages left on disk from an earlier channel; dissolve it first (attend channel dissolve old)");
+        assert_eq!(g.join("old", false).unwrap_err(), "#old has 12 messages left on disk from an earlier channel; dissolve it first (attend channel dissolve old)", "a join would make the channel too");
+        assert!(!load_groups(&b).contains_key("old"), "nothing recorded");
+        // A channel with an entry is joined whatever its folder holds.
+        g.join("live", false).unwrap();
+        fs::write(b.join("@live/m.signal"), "x").unwrap();
+        Groups::new(&b, "second").join("live", false).unwrap();
+        fs::create_dir_all(b.join("@one")).unwrap();
+        fs::write(b.join("@one/m.signal"), "x").unwrap();
+        assert_eq!(g.create("one", None).unwrap_err(), "#one has 1 message left on disk from an earlier channel; dissolve it first (attend channel dissolve one)");
+        assert_eq!(g.dissolve("old").unwrap(), Vec::<String>::new(), "no entry, no members");
+        assert!(!dir.exists(), "the leftover is gone");
+        g.create("old", None).unwrap();
+        fs::create_dir_all(b.join("@bare")).unwrap();
+        g.create("bare", None).unwrap();
         fs::remove_dir_all(&b).ok();
     }
 
