@@ -8,9 +8,9 @@ agent-tui frame 100x30
 |│     manage_mode               whatif                ││                                           │|
 |│                                                     ││Changed by actions, since each change      │|
 |│                                                     ││reconciles: `ways manage target            │|
-|│                                                     ││add|enable|disable|remove <dir>` (ADR-184).│|
-|│                                                     ││Absent means the default ~/.claude,        │|
-|│                                                     ││enabled.                                   │|
+|│                                                     ││add|enable|disable|remove <dir> --commit`  │|
+|│                                                     ││(ADR-184). Absent means the default        │|
+|│                                                     ││~/.claude, enabled.                        │|
 |│                                                     ││                                           │|
 |│                                                     ││1 entry, 0 changed                         │|
 |│                                                     ││                                           │|

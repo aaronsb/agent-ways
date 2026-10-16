@@ -8,8 +8,8 @@ agent-tui frame 100x30
 |│     manage_mode               whatif                ││                                           │|
 |│                                                     ││Changed by actions, since each change      │|
 |│                                                     ││reconciles: `ways manage target            │|
-|│                                                     ││add|enable|disable|remove <dir>` (ADR-184).│|
-|│                                                     ││Absent means the default ~/.claude,        │|
+|│                                                     ││add|enable|disable|remove <dir> --commit`  │|
+|│                                                     ││(ADR-184). Absent means the default        │|
 |│ ┌plan: error───────────────────────────────────────────────────────────────────────────────────┐ │|
 |│ │ $ ways manage target plan ~/elsewhere                                                        │ │|
 |│ │                                                                                              │ │|

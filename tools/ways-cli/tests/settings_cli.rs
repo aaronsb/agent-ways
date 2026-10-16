@@ -521,7 +521,7 @@ fn fix_never_drops_the_targets_list() {
     f.write(&f.user(), src);
     let (_, err, code) = f.run(&["settings", "fix", "install"]);
     assert_eq!(code, 3, "{err}");
-    assert!(err.contains("`ways manage target add|enable|disable|remove <dir>` repairs it"), "{err}");
+    assert!(err.contains("`ways manage target add|enable|disable|remove <dir> --commit` repairs it"), "{err}");
     assert_eq!(std::fs::read_to_string(f.user()).unwrap(), src);
     // The load diagnostic names that command too, not fix.
     let (_, err, _) = f.run(&["settings", "get", "install.targets"]);

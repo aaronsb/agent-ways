@@ -878,7 +878,7 @@ fn refresh_ways(app: &Path, has_toolchain: bool) -> Result<()> {
             })?;
             bail!(
                 "downloaded ways binary is not a verified upgrade and no toolchain is present \
-                 — kept the previous binary (install a toolchain, then `ways manage update`)"
+                 — kept the previous binary (install a toolchain, then `ways manage update --commit`)"
             );
         }
     }

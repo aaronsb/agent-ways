@@ -146,7 +146,7 @@ link:
 		mkdir -p "$(CLAUDE_BIN)"; dst="$(CLAUDE_BIN)/way-embed"; \
 		if [ "$(CURDIR)/$(WAY_EMBED_BIN)" -ef "$$dst" ]; then :; \
 		elif [ -e "$$dst" ] && [ ! -L "$$dst" ]; then \
-			echo "  ⚠ $$dst is a real file; not replacing it (ways manage repair --force moves it aside)"; \
+			echo "  ⚠ $$dst is a real file; not replacing it (ways manage repair --commit --force moves it aside)"; \
 		else $(LINK) "$(CURDIR)/$(WAY_EMBED_BIN)" "$$dst"; fi; \
 	fi
 

@@ -439,3 +439,88 @@ fn the_scan_reads_moved_names_in_messages() {
     assert!(moved_mentions("ways manage update && ways manage target list").is_empty());
     assert!(moved_mentions("always update the cache; ways-update skill; ways updated").is_empty());
 }
+
+// --- Applying hints carry --commit (ADR-511) --------------------------------
+//
+// Every mutating `ways manage` verb reports until `--commit`. A message the
+// code prints that tells the operator to run one of them to get something
+// done ("run `ways manage repair` once it is") has to say `--commit`, or
+// the operator follows it and nothing changes. The scan reads code only:
+// Rust (comments aside), shell and Makefiles. Docs and skills are left out,
+// since they name the bare verb on purpose when they mean the what-if.
+
+/// The verbs that change the install.
+const APPLYING: &[&str] = &["update", "repair", "uninstall", "reinstall", "target add", "target enable", "target disable", "target remove"];
+
+/// Words that, just before a command, make it an instruction to run it.
+const CUES: &[&str] = &["run ", "Run ", "run: ", "re-run ", "retry ", "then ", "finish with", "try ", "Try "];
+
+/// Each `ways manage <verb>` on `line` that is an applying hint without
+/// `--commit` (or its alias `--yes`), or an explicit `--what-if`/`--dry-run`.
+/// A hint is a command after a cue word, or one the code queues or names as
+/// the repair of a settings section.
+fn hints_missing_commit(line: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for (at, m) in line.match_indices("ways manage ") {
+        let rest = &line[at + m.len()..];
+        let Some(verb) = APPLYING.iter().find(|v| rest.starts_with(**v) && !rest[v.len()..].starts_with(|c: char| c.is_ascii_alphanumeric() || c == '-')) else {
+            continue;
+        };
+        let end = rest.find(['`', '"', '\'', ')', ';']).unwrap_or(rest.len());
+        let span = &rest[..end];
+        if ["--commit", "--yes", "--what-if", "--dry-run"].iter().any(|f| span.contains(f)) {
+            continue;
+        }
+        let before = &line[..at];
+        let window: String = before.chars().rev().take(24).collect::<Vec<_>>().into_iter().rev().collect();
+        let cued = CUES.iter().any(|c| window.contains(c)) || ["Action::new(", "Out::new(", "repair: Some("].iter().any(|c| before.contains(c));
+        if cued {
+            debug_assert!(span.starts_with(verb));
+            out.push(format!("ways manage {}", span.trim_end().trim_end_matches(['.', ','])));
+        }
+    }
+    out
+}
+
+#[test]
+fn an_applying_hint_is_found_and_a_commit_or_a_description_is_not() {
+    assert_eq!(hints_missing_commit("re-run `ways manage repair` once it is"), ["ways manage repair"]);
+    assert_eq!(hints_missing_commit("echo \"  then run: ways manage repair\""), ["ways manage repair"]);
+    assert_eq!(hints_missing_commit("(install a toolchain, then `ways manage update`)"), ["ways manage update"]);
+    assert_eq!(hints_missing_commit("Action::new(\"add\", \"ways manage target add {}\")"), ["ways manage target add {}"]);
+    assert!(hints_missing_commit("re-run `ways manage repair --commit` once it is").is_empty());
+    assert!(hints_missing_commit("Run `ways manage uninstall --yes` to do this").is_empty());
+    assert!(hints_missing_commit("`ways manage repair` failed — see the output above").is_empty(), "a description");
+    assert!(hints_missing_commit("Report::new(\"ways manage update: what-if\")").is_empty(), "a title");
+    assert!(hints_missing_commit("run `ways manage target list` to see them").is_empty(), "a verb that changes nothing");
+}
+
+#[test]
+fn every_applying_hint_in_code_says_commit() {
+    let root = repo_root();
+    let mut bad = Vec::new();
+    let mut scanned = 0;
+    for path in tracked_files(&root) {
+        if path.ends_with("tests/call_sites.rs") || !in_scope(&path) && !matches!(path.as_str(), "Makefile") {
+            continue;
+        }
+        let Some(k) = kind(&path) else { continue };
+        if k == Kind::Markdown || path.ends_with(".json") || path.ends_with(".yml") || path.ends_with(".yaml") {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(root.join(&path)) else { continue };
+        scanned += 1;
+        for (n, line) in text.lines().enumerate() {
+            let code = match k {
+                Kind::Rust if line.trim_start().starts_with("//") => continue,
+                Kind::Rust => line,
+                _ => shell_code(line),
+            };
+            for hint in hints_missing_commit(code) {
+                bad.push(format!("  {path}:{}: `{hint}`", n + 1));
+            }
+        }
+    }
+    assert!(scanned > 100, "the scan read {scanned} files; it found nothing to check");
+    assert!(bad.is_empty(), "applying hints without --commit (ADR-511):\n{}", bad.join("\n"));
+}

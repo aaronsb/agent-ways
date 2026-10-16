@@ -276,7 +276,7 @@ fn recorded(dir: &str) -> Result<Target> {
     let list = Config::load(&crate::util::project_dir()).targets();
     match find_target(&list, dir) {
         Some(i) => Ok(list[i].clone()),
-        None => bail!("{dir} is not a target; `ways manage target list` lists them, `ways manage target add` adds one"),
+        None => bail!("{dir} is not a target; `ways manage target list` lists them, `ways manage target add <dir> --commit` adds one"),
     }
 }
 
@@ -320,7 +320,7 @@ fn set_enabled(dir: &str, enabled: bool, mode: Mode) -> Result<()> {
         Some(list)
     })?;
     if missing {
-        bail!("{dir} is not a target; `ways manage target list` lists them, `ways manage target add` adds one");
+        bail!("{dir} is not a target; `ways manage target list` lists them, `ways manage target add <dir> --commit` adds one");
     }
     let target = chosen.expect("set when found");
     if enabled && !target.dir().is_dir() {

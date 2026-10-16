@@ -8,8 +8,8 @@ agent-tui frame 100x30
 |│     manage_mode               whatif                ││                                           │|
 |│                                                     ││Changed by actions, since each change      │|
 |│                                                     ││reconciles: `ways manage target            │|
-|│               ┌plan: report──────────────────────────────────────────────────────┐ir>` (ADR-184).│|
-|│               │ $ ways manage target plan ~/work-claude                          │claude,        │|
+|│               ┌plan: report──────────────────────────────────────────────────────┐ir> --commit`  │|
+|│               │ $ ways manage target plan ~/work-claude                          │default        │|
 |│               │                                                                  │               │|
 |│               │ ways manage target plan: ~/work-claude                           │               │|
 |│               │                                                                  │               │|
