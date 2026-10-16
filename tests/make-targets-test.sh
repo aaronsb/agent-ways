@@ -115,4 +115,37 @@ none=$(make -s -C "$ROOT" dev-restore APP_DIR="$APP" XDG_BIN="$WORK/empty-xdg" C
 check "dev-restore fails when it repoints nothing" "yes" "$([[ $? -ne 0 ]] && echo yes || echo no)"
 check "and says so" "yes" "$(has "$none" "no link repointed")"
 
+# purge-attend-state refuses while an `attend run` is live. Its pgrep must not
+# match its own recipe, whose command line holds the pattern. The fake pgrep
+# runs the real one and keeps only the matches in this test's process tree,
+# so an `attend run` elsewhere on the machine decides nothing here.
+REAL_PGREP=$(command -v pgrep)
+mkdir -p "$WORK/purgebin"
+cat > "$WORK/purgebin/pgrep" <<PGREP
+#!/usr/bin/env bash
+found=1
+for pid in \$("$REAL_PGREP" "\$@"); do
+    p=\$pid
+    while [[ -n \$p && \$p -gt 1 ]]; do
+        if [[ \$p -eq $$ ]]; then echo "\$pid"; found=0; break; fi
+        p=\$(ps -o ppid= -p "\$p" | tr -d ' ')
+    done
+done
+exit \$found
+PGREP
+chmod +x "$WORK/purgebin/pgrep"
+purge() { PATH="$WORK/purgebin:$PATH" XDG_CACHE_HOME="$WORK/purge-cache" make -s -C "$ROOT" purge-attend-state >/dev/null 2>&1; }
+mkdir -p "$WORK/purge-cache/attend/signals"
+purge
+check "purge-attend-state proceeds with no attend run" "0" "$?"
+check "and wipes the attend cache" "no" "$([[ -e $WORK/purge-cache/attend ]] && echo yes || echo no)"
+mkdir -p "$WORK/purge-cache/attend/signals"
+(exec -a "attend run" sleep 30) &
+live=$!
+purge
+check "purge-attend-state refuses while an attend run is live" "yes" "$([[ $? -ne 0 ]] && echo yes || echo no)"
+check "and keeps the attend cache" "yes" "$([[ -e $WORK/purge-cache/attend ]] && echo yes || echo no)"
+kill "$live" 2>/dev/null
+wait "$live" 2>/dev/null
+
 exit $fail
