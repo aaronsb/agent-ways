@@ -457,9 +457,10 @@ pub(crate) struct InboxFlags {
     /// named channels; then deliver all that is pending. Other `#open`
     /// posts alone wait for the next turn (ADR-406 item 2). Once the session's prompt cache has
     /// lapsed (its tier's TTL less two minutes after its last turn, or
-    /// no transcript readable in five seconds), nothing wakes it: the
-    /// drain delivers nothing and reports `cache_lapsed`. The attend
-    /// mod polls with it while idle.
+    /// a transcript not readable in five seconds), nothing wakes it: the
+    /// drain delivers nothing and reports `cache_lapsed`. A session with
+    /// no turn yet has no cache to lose and is woken. The attend mod
+    /// polls with it while idle.
     #[arg(long, requires = "drain")]
     pub(crate) wake: bool,
 

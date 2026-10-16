@@ -300,11 +300,11 @@ impl Reading {
     }
 }
 
-/// Whether the prompt cache has lapsed at `now`, for the wake gate (ADR-406
-/// item 2). The clock is keepwarm's, the newest assistant turn in the
-/// transcript, against that turn's own tier, less [`GATE_MARGIN_SECS`]. A
-/// reading that cannot be had, or that holds no turn, counts as lapsed, so
-/// a session whose last activity is unknown is never woken.
+/// Whether the prompt cache has lapsed at `now` (ADR-406 item 2). The clock
+/// is keepwarm's, the newest assistant turn in the transcript, against that
+/// turn's own tier, less [`GATE_MARGIN_SECS`]. A reading that cannot be
+/// had, or that holds no turn, counts as lapsed. The wake gate,
+/// [`wake_gate_lapsed`], first sets apart a session with no turn yet.
 pub fn cache_lapsed(reading: Option<&Reading>, now: u64) -> bool {
     match reading.and_then(|r| r.usage_tail.last()) {
         Some(last) if last.at_epoch > 0 => now.saturating_sub(last.at_epoch) >= last.ttl_secs().saturating_sub(GATE_MARGIN_SECS),
@@ -312,9 +312,36 @@ pub fn cache_lapsed(reading: Option<&Reading>, now: u64) -> bool {
     }
 }
 
-/// [`cache_lapsed`] on the transcript of `session_id`, read now.
+/// The wake gate's judgment on a session that has a transcript: its
+/// [`Reading`], or `None` when `ways context` gave none. A session with no
+/// assistant turn yet has no cache to lose, so it is wakeable. A missing
+/// reading leaves its last activity unknown, which counts as lapsed, and a
+/// reading with a turn is judged by [`cache_lapsed`].
+pub fn wake_gate_lapsed(reading: Option<&Reading>, now: u64) -> bool {
+    match reading {
+        Some(r) if r.usage_tail.is_empty() && r.tokens_used == 0 => false,
+        r => cache_lapsed(r, now),
+    }
+}
+
+/// The wake gate on session `session_id`, read now. A session whose
+/// transcript does not exist yet has had no turn, so it is wakeable;
+/// otherwise [`wake_gate_lapsed`] judges its reading.
 pub fn session_cache_lapsed(session_id: &str, working_dir: &str, now: u64) -> bool {
-    cache_lapsed(read_context(session_id, working_dir).as_ref(), now)
+    if !has_transcript(session_id) {
+        return false;
+    }
+    wake_gate_lapsed(read_context(session_id, working_dir).as_ref(), now)
+}
+
+/// Whether session `session_id` has a transcript under the config directory
+/// Claude Code runs it in (`CLAUDE_CONFIG_DIR`) or under `~/.claude`.
+fn has_transcript(session_id: &str) -> bool {
+    let configured = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|d| !d.is_empty()).map(claude_sessions::ClaudeDir::at);
+    configured
+        .into_iter()
+        .chain(std::iter::once(claude_sessions::ClaudeDir::user()))
+        .any(|dir| dir.find_transcript(None, session_id).is_some())
 }
 
 /// Run `ways context --json --session <id>` and parse it. `None` when it
@@ -860,6 +887,22 @@ mod tests {
         assert!(cache_lapsed(Some(&r), 1000 + TTL_SECS - GATE_MARGIN_SECS));
         assert!(cache_lapsed(Some(&reading(Vec::new())), 1000));
         assert!(cache_lapsed(None, 1000));
+    }
+
+    /// The wake gate: a session with no turn yet has no cache to lose and
+    /// is wakeable; a reading that cannot be had still counts as lapsed, and
+    /// a reading with a turn is judged by its clock.
+    #[test]
+    fn the_wake_gate_wakes_a_session_with_no_turn_yet() {
+        let none = Reading { tokens_used: 0, model: String::new(), usage_tail: Vec::new() };
+        assert!(!wake_gate_lapsed(Some(&none), 1000));
+        assert!(wake_gate_lapsed(None, 1000));
+        let r = reading(vec![entry(1000, 200_000, 500)]);
+        assert!(!wake_gate_lapsed(Some(&r), 1000 + PING_AFTER_SECS));
+        assert!(wake_gate_lapsed(Some(&r), 1000 + TTL_SECS));
+        // Usage the tail lost but the context still counts: a turn ran.
+        let counted = Reading { tokens_used: 200_000, ..none };
+        assert!(wake_gate_lapsed(Some(&counted), 1000));
     }
 
     /// A turn on the five-minute tier lapses on its own clock; the newest
