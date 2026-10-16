@@ -586,8 +586,9 @@ fn a_pasted_secret_past_the_cap_is_refused_out_loud() {
     press(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Enter]);
     let long = format!("{}TAIL", "k".repeat(crate::tree::SecretBuf::CAP));
     app.paste(&long);
-    assert!(app.message().contains("holds at most 512 bytes"), "{}", app.message());
+    assert!(app.message().contains("none of it was kept"), "{}", app.message());
     assert!(!app.message().contains("TAIL") && !app.message().contains("kk"), "{}", app.message());
+    assert!(app.message().contains("longer than the entry's 512 bytes"), "{}", app.message());
     assert!(app.masked(), "the entry stays open");
     assert_eq!(secret_held(&app), "", "none of the paste is kept");
 }
@@ -604,7 +605,7 @@ fn a_pasted_secret_after_typing_is_kept_whole_or_refused_whole() {
     let (mut app, _) = probe();
     press(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Enter, KeyCode::Char('a'), KeyCode::Char('b')]);
     app.paste(&"k".repeat(crate::tree::SecretBuf::CAP - 1));
-    assert!(app.message().contains("holds at most 512 bytes"), "{}", app.message());
+    assert!(app.message().contains("none of it was kept"), "{}", app.message());
     assert_eq!(secret_held(&app), "ab", "the typed characters are kept and none of the paste");
 }
 

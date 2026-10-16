@@ -150,16 +150,21 @@ impl App {
     /// whole or, past the cap, refused whole, leaving what was typed
     /// before it. The text is read in place and only `buf` takes a copy.
     /// The event loop wipes the paste's own string after this; crossterm's
-    /// parse buffer may hold the bytes until later input overwrites them,
-    /// as it does for typed keys.
+    /// own buffers may keep the bytes. Its parse buffer can grow on a long
+    /// paste and free the old allocation unwiped.
     pub(super) fn secret_paste(&mut self, text: &str) {
         const LINE_ENDS: [char; 5] = ['\n', '\r', '\u{85}', '\u{2028}', '\u{2029}'];
         let Mode::Secret { buf, .. } = &mut self.mode else { return };
         let text = text.trim_start();
         let line = text.split_once(LINE_ENDS).map_or(text, |(first, _)| first).trim_end();
         if !buf.push_all(line.chars().filter(|c| !c.is_control())) {
-            self.secret_full();
+            self.secret_paste_refused();
         }
+    }
+
+    /// A paste past the cap was refused whole: say so, never its length or content.
+    fn secret_paste_refused(&mut self) {
+        self.msg = format!("rejected: the paste is longer than the entry's {} bytes and none of it was kept; paste a shorter key", SecretBuf::CAP);
     }
 
     /// Review's keys. Moving and opening groups work; nothing edits or queues.
