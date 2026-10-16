@@ -354,6 +354,22 @@ impl Flow {
         FlowEvent::Stay
     }
 
+    /// A paste into the open path entry or filter, on one line, as typing
+    /// it would; with neither open it is dropped.
+    pub(crate) fn paste(&mut self, text: &str) {
+        match &mut self.entry {
+            Entry::Filter => {
+                let typed = crate::input::one_line(text);
+                if !typed.is_empty() {
+                    self.filter.push_str(&typed);
+                    self.cursor = 0;
+                }
+            }
+            Entry::Path(buf) => buf.push_str(&crate::input::one_line(text)),
+            Entry::Off => {}
+        }
+    }
+
     fn entry_key(&mut self, k: KeyEvent) -> FlowEvent {
         let typed = match k.code {
             KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => Some(c),
@@ -803,6 +819,29 @@ mod tests {
         assert_eq!(f.cands.len(), 4);
         keys(&mut f, &[KeyCode::End, KeyCode::Enter, KeyCode::Esc]);
         assert_eq!(f.picked_ids(), ["/x z"], "Esc cancels the path entry and keeps the picks");
+    }
+
+    #[test]
+    fn a_paste_fills_the_path_entry_and_the_filter() {
+        let mut f = flow(true);
+        f.paste("/ignored");
+        assert!(f.filter.is_empty() && f.cands.len() == 3, "with no entry open a paste is dropped");
+        keys(&mut f, &[KeyCode::End, KeyCode::Enter]);
+        f.paste("/x\u{1b} y\n");
+        assert!(matches!(&f.entry, Entry::Path(b) if b == "/x y"));
+        keys(&mut f, &[KeyCode::Enter]);
+        assert_eq!(f.picked_ids(), ["/x y"]);
+        keys(&mut f, &[KeyCode::Char('/')]);
+        f.paste("second\n");
+        assert_eq!(f.visible(), [1]);
+    }
+
+    #[test]
+    fn an_empty_paste_leaves_the_flow_filter_and_the_cursor() {
+        let mut f = flow(true);
+        keys(&mut f, &[KeyCode::Down, KeyCode::Char('/')]);
+        f.paste("\r\n");
+        assert_eq!((f.filter.as_str(), f.cursor), ("", 1));
     }
 
     #[test]

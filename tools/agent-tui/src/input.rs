@@ -23,6 +23,14 @@ pub struct Input {
     cursor: usize,
 }
 
+/// A paste for a one-line entry: its lines joined by a space, blank lines
+/// and control characters left out, so a line break copied with the text
+/// is never Enter and an escape sequence is never kept.
+pub fn one_line(pasted: &str) -> String {
+    let joined = pasted.split(['\n', '\r']).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(" ");
+    joined.chars().filter(|c| !c.is_control()).collect()
+}
+
 /// The byte offset of character `n` of `s`, or its length past the end.
 fn byte_at(s: &str, n: usize) -> usize {
     s.char_indices().nth(n).map_or(s.len(), |(b, _)| b)

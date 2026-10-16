@@ -529,6 +529,111 @@ fn a_secret_past_the_cap_is_refused_out_loud() {
     assert!(app.masked(), "the entry stays open");
 }
 
+/// What a secret entry holds: its characters, read only by the test.
+fn secret_held(app: &App) -> String {
+    let Mode::Secret { buf, .. } = &app.mode else { panic!("not in secret entry") };
+    buf.reveal().to_string()
+}
+
+/// A key copied from a provider's console arrives as one bracketed paste.
+/// It fills the masked entry as typing would, never shows, and reaches only
+/// its command's stdin.
+#[test]
+fn a_pasted_secret_reaches_only_its_commands_stdin() {
+    const SECRET: &str = "sk-ant-Q#Z9@X!";
+    let (mut app, p) = probe();
+    press(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Enter]);
+    app.paste(SECRET);
+    assert!(app.masked(), "the entry stays open for Enter");
+    assert!(!text(&render(&mut app, 100, 30)).contains(SECRET) && !app.message().contains(SECRET));
+    press(&mut app, &[KeyCode::Enter]);
+    assert_eq!(app.queued().len(), 1, "Enter stages the action");
+    press(&mut app, &[KeyCode::Char('w'), KeyCode::Char('a')]);
+    finish_apply(&mut app);
+    assert_eq!(*p.stdin.borrow(), [SECRET], "the command got the pasted key on stdin");
+}
+
+/// Keys are often copied with the line break after them, or with spaces
+/// around them: none of that is part of the key.
+#[test]
+fn a_pasted_secret_loses_the_newline_it_was_copied_with() {
+    for pasted in ["sk-ant-abc\n", "sk-ant-abc\r\n", "  sk-ant-abc \n", "\nsk-ant-abc\n\n"] {
+        let (mut app, _) = probe();
+        press(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Enter]);
+        app.paste(pasted);
+        assert_eq!(secret_held(&app), "sk-ant-abc", "{pasted:?}");
+    }
+}
+
+/// A line break inside a paste ends it: a second line is never part of the
+/// key, and a control character is never kept.
+#[test]
+fn a_pasted_secret_keeps_one_line_and_no_control_characters() {
+    let (mut app, _) = probe();
+    press(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Enter]);
+    app.paste("sk-\u{7}ant-abc\nexport OTHER=1\n");
+    assert_eq!(secret_held(&app), "sk-ant-abc");
+    assert!(app.masked(), "the line break did not press Enter");
+    assert!(app.queued().is_empty());
+}
+
+/// A paste past the cap is refused whole: it arrives as one unit, so none
+/// of it is kept, and Enter cannot stage a cut key. The message carries
+/// nothing of what was pasted.
+#[test]
+fn a_pasted_secret_past_the_cap_is_refused_out_loud() {
+    let (mut app, _) = probe();
+    press(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Enter]);
+    let long = format!("{}TAIL", "k".repeat(crate::tree::SecretBuf::CAP));
+    app.paste(&long);
+    assert!(app.message().contains("none of it was kept"), "{}", app.message());
+    assert!(!app.message().contains("TAIL") && !app.message().contains("kk"), "{}", app.message());
+    assert!(app.message().contains("longer than the entry's 512 bytes"), "{}", app.message());
+    assert!(app.masked(), "the entry stays open");
+    assert_eq!(secret_held(&app), "", "none of the paste is kept");
+}
+
+/// A paste after typed characters is all or nothing: one that fits joins
+/// them, and one past the cap leaves them as they were.
+#[test]
+fn a_pasted_secret_after_typing_is_kept_whole_or_refused_whole() {
+    let (mut app, _) = probe();
+    press(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Enter, KeyCode::Char('a'), KeyCode::Char('b')]);
+    app.paste(&"k".repeat(crate::tree::SecretBuf::CAP - 2));
+    assert_eq!(secret_held(&app).len(), crate::tree::SecretBuf::CAP, "a paste that fits joins the typed characters");
+    assert!(!app.message().starts_with("rejected"), "{}", app.message());
+    let (mut app, _) = probe();
+    press(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Enter, KeyCode::Char('a'), KeyCode::Char('b')]);
+    app.paste(&"k".repeat(crate::tree::SecretBuf::CAP - 1));
+    assert!(app.message().contains("none of it was kept"), "{}", app.message());
+    assert_eq!(secret_held(&app), "ab", "the typed characters are kept and none of the paste");
+}
+
+/// The Unicode line ends end a pasted key as a line break does.
+#[test]
+fn a_pasted_secret_ends_at_a_unicode_line_end() {
+    for end in ['\u{85}', '\u{2028}', '\u{2029}'] {
+        let (mut app, _) = probe();
+        press(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Enter]);
+        app.paste(&format!("sk-ant-abc{end}export OTHER=1"));
+        assert_eq!(secret_held(&app), "sk-ant-abc", "{end:?}");
+    }
+}
+
+/// A value pasted into the editor is one line: the line break it was
+/// copied with does not commit it, and Enter does.
+#[test]
+fn a_paste_fills_the_value_editor() {
+    let (mut app, p) = probe();
+    press(&mut app, &[KeyCode::Char('e')]);
+    app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    app.paste("0.40\n");
+    assert!(matches!(&app.mode, Mode::Edit(b) if b == "0.40"), "the editor holds the paste");
+    press(&mut app, &[KeyCode::Enter, KeyCode::Char('w'), KeyCode::Char('a')]);
+    finish_apply(&mut app);
+    assert_eq!(*p.written.borrow(), ["/c/a.yaml matching.tau=0.4"]);
+}
+
 #[test]
 fn a_new_app_draws_plain_lozenges() {
     let mut app = App::new("t", tree());

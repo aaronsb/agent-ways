@@ -137,7 +137,10 @@ pub(crate) fn run_on(s: &mut dyn Screen, term: &mut DefaultTerminal, signals: &S
             Err(_) => return Ok(Some(HANGUP)),
             // A repeat is a key too: holding Backspace in a text entry.
             Ok(Some(Event::Key(k))) if k.kind != KeyEventKind::Release && !s.key(k) => return Ok(None),
-            Ok(Some(Event::Paste(text))) => s.paste(&text),
+            Ok(Some(Event::Paste(mut text))) => {
+                s.paste(&text);
+                crate::tree::wipe(&mut text);
+            }
             _ => {}
         }
         if ticker.due(s.tick_every(), Instant::now()) {
