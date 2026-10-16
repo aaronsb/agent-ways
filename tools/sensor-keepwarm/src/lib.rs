@@ -290,6 +290,10 @@ pub struct Reading {
     pub tokens_used: u64,
     #[serde(default)]
     pub model: String,
+    /// How `tokens_used` was had: `api` from the transcript's API usage, or
+    /// an estimate (`bytes`) where the transcript holds none.
+    #[serde(default)]
+    pub method: String,
     #[serde(default)]
     pub usage_tail: Vec<UsageEntry>,
 }
@@ -314,12 +318,15 @@ pub fn cache_lapsed(reading: Option<&Reading>, now: u64) -> bool {
 
 /// The wake gate's judgment on a session that has a transcript: its
 /// [`Reading`], or `None` when `ways context` gave none. A session with no
-/// assistant turn yet has no cache to lose, so it is wakeable. A missing
-/// reading leaves its last activity unknown, which counts as lapsed, and a
-/// reading with a turn is judged by [`cache_lapsed`].
+/// assistant turn yet has no cache to lose, so it is wakeable: its reading
+/// has no usage tail and a count that came from no API usage (`ways`
+/// estimates one from the file's bytes, as for a transcript a local command
+/// such as `/mcp` wrote before the first prompt). A missing reading leaves
+/// its last activity unknown, which counts as lapsed, and a reading with a
+/// turn is judged by [`cache_lapsed`].
 pub fn wake_gate_lapsed(reading: Option<&Reading>, now: u64) -> bool {
     match reading {
-        Some(r) if r.usage_tail.is_empty() && r.tokens_used == 0 => false,
+        Some(r) if r.usage_tail.is_empty() && r.method != "api" => false,
         r => cache_lapsed(r, now),
     }
 }
@@ -328,20 +335,23 @@ pub fn wake_gate_lapsed(reading: Option<&Reading>, now: u64) -> bool {
 /// transcript does not exist yet has had no turn, so it is wakeable;
 /// otherwise [`wake_gate_lapsed`] judges its reading.
 pub fn session_cache_lapsed(session_id: &str, working_dir: &str, now: u64) -> bool {
-    if !has_transcript(session_id) {
+    let config_dir = std::env::var_os("CLAUDE_CONFIG_DIR");
+    if !has_transcript(config_dir.as_deref().map(Path::new), &claude_sessions::home_dir(), working_dir, session_id) {
         return false;
     }
     wake_gate_lapsed(read_context(session_id, working_dir).as_ref(), now)
 }
 
 /// Whether session `session_id` has a transcript under the config directory
-/// Claude Code runs it in (`CLAUDE_CONFIG_DIR`) or under `~/.claude`.
-fn has_transcript(session_id: &str) -> bool {
-    let configured = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|d| !d.is_empty()).map(claude_sessions::ClaudeDir::at);
+/// Claude Code runs it in (`config_dir`, its `CLAUDE_CONFIG_DIR`) or under
+/// `home`'s `.claude`. The project directory `working_dir` names is looked in
+/// first; the scan of every project is the fallback.
+fn has_transcript(config_dir: Option<&Path>, home: &Path, working_dir: &str, session_id: &str) -> bool {
+    let configured = config_dir.filter(|d| !d.as_os_str().is_empty()).map(claude_sessions::ClaudeDir::at);
     configured
         .into_iter()
-        .chain(std::iter::once(claude_sessions::ClaudeDir::user()))
-        .any(|dir| dir.find_transcript(None, session_id).is_some())
+        .chain(std::iter::once(claude_sessions::ClaudeDir::at(home.join(".claude"))))
+        .any(|dir| dir.find_transcript(Some(working_dir), session_id).is_some())
 }
 
 /// Run `ways context --json --session <id>` and parse it. `None` when it
@@ -859,7 +869,7 @@ mod tests {
 
     fn reading(entries: Vec<UsageEntry>) -> Reading {
         let tokens_used = entries.last().map(|e| e.context()).unwrap_or(0);
-        Reading { tokens_used, model: "claude-fable-5-1".into(), usage_tail: entries }
+        Reading { tokens_used, model: "claude-fable-5-1".into(), method: "api".into(), usage_tail: entries }
     }
 
     fn armed(deadline: u64) -> ArmFile {
@@ -894,15 +904,43 @@ mod tests {
     /// a reading with a turn is judged by its clock.
     #[test]
     fn the_wake_gate_wakes_a_session_with_no_turn_yet() {
-        let none = Reading { tokens_used: 0, model: String::new(), usage_tail: Vec::new() };
+        // What `ways context --json` prints for a transcript a local command
+        // such as `/mcp` wrote before the first prompt: no API usage, the
+        // context estimated from the file's bytes.
+        let none: Reading =
+            serde_json::from_str(r#"{"tokens_used":56,"model":"unknown","method":"bytes","usage_tail":[]}"#).unwrap();
         assert!(!wake_gate_lapsed(Some(&none), 1000));
         assert!(wake_gate_lapsed(None, 1000));
         let r = reading(vec![entry(1000, 200_000, 500)]);
         assert!(!wake_gate_lapsed(Some(&r), 1000 + PING_AFTER_SECS));
         assert!(wake_gate_lapsed(Some(&r), 1000 + TTL_SECS));
-        // Usage the tail lost but the context still counts: a turn ran.
-        let counted = Reading { tokens_used: 200_000, ..none };
-        assert!(wake_gate_lapsed(Some(&counted), 1000));
+        // A count from API usage with no tail to date it: a turn ran, and
+        // its clock is unknown.
+        let api = Reading { method: "api".into(), ..none };
+        assert!(wake_gate_lapsed(Some(&api), 1000));
+    }
+
+    /// A transcript is found under the config directory Claude Code runs
+    /// the session in, or under `~/.claude`, in the session's own project
+    /// directory or, failing that, any.
+    #[test]
+    fn a_transcript_is_found_under_claude_config_dir_or_home() {
+        let root = std::env::temp_dir().join(format!("kw-has-transcript-{}", std::process::id()));
+        let (config, home) = (root.join("config"), root.join("home"));
+        let put = |base: &Path, project: &str, sid: &str| {
+            let dir = base.join("projects").join(claude_sessions::project_slug(project));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(format!("{sid}.jsonl")), "").unwrap();
+        };
+        put(&config, "/work/a", "in-config");
+        put(&home.join(".claude"), "/work/a", "in-home");
+        put(&home.join(".claude"), "/work/elsewhere", "moved");
+        assert!(has_transcript(Some(&config), &home, "/work/a", "in-config"));
+        assert!(!has_transcript(None, &home, "/work/a", "in-config"), "only CLAUDE_CONFIG_DIR holds it");
+        assert!(has_transcript(Some(&config), &home, "/work/a", "in-home"));
+        assert!(has_transcript(None, &home, "/work/a", "moved"), "the scan finds it outside the project");
+        assert!(!has_transcript(Some(&config), &home, "/work/a", "none"));
+        std::fs::remove_dir_all(&root).ok();
     }
 
     /// A turn on the five-minute tier lapses on its own clock; the newest

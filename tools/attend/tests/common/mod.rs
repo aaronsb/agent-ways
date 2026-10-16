@@ -114,10 +114,12 @@ impl Fixture {
         );
     }
 
-    /// Session `sid` has a transcript and no assistant turn in it yet:
-    /// `ways context` reads no usage and no context.
+    /// Session `sid` has a transcript and no assistant turn in it yet (a
+    /// local command such as `/mcp` wrote it): `ways context` reads no API
+    /// usage and estimates the context from the file's bytes, as the real
+    /// one prints for such a transcript.
     pub fn no_turn_yet(&self, sid: &str) {
-        self.write_reading(sid, r#"{"tokens_used":0,"model":"","usage_tail":[]}"#);
+        self.write_reading(sid, r#"{"tokens_used":4392,"model":"unknown","method":"bytes","usage_tail":[]}"#);
     }
 
     /// Session `sid` has a transcript that `ways context` cannot read.
