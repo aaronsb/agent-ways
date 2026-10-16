@@ -647,33 +647,37 @@ For one release the old top-level names `update`, `uninstall` and `target` still
 
 **Run from:** Anywhere. The app source in `$XDG_DATA_HOME/agent-ways` must be an agent-ways git checkout; an install from before 1.0 is refused and needs migrating first.
 
-**Tells you:** Each step as it runs: pull the app source, refresh every binary of the suite (a pre-built download first, a build from source as the fallback), rebuild the corpus, run `ways manage repair`, and check the judge's keys. A binary that fails to refresh is put back, so a failed update leaves the old install working. `--dry-run` prints the steps and runs nothing. `--ref <branch|tag|commit>` pins the install to that ref and builds the whole suite from source, leaving the release channel until `ways manage update --ref main`.
+**Tells you:** Without `--commit`, what the update would change, after a fetch and with nothing else touched ([ADR-511](../architecture/platform/ADR-511-every-mutating-lifecycle-verb-reports-what-it-would-change-until-commit.md)): each component's version installed and at the target, the GitHub release notes of every release in between, the commits grouped by area with features and fixes listed, local changes the pull would stash, the actions `--commit` would take on this machine, and binary links that point into a dev checkout. `--verbose` lists every commit. Offline, the notes are reported as unreachable and the rest still prints. It exits 0.
+
+With `--commit`, each stage under its own header: pull the app source, refresh every binary of the suite (a pre-built download first, a build from source as the fallback), rebuild the corpus, run `ways manage repair`, and check the judge's keys. A command's raw output shows under `--verbose`, or when it fails. A binary that fails to refresh is put back, so a failed update leaves the old install working. `--ref <branch|tag|commit>` pins the install to that ref and builds the whole suite from source, leaving the release channel until `ways manage update --ref main --commit`.
+
+`--dry-run` is accepted for the what-if and `--yes` for `--commit`. `ways settings set install.manage_mode commit` makes the command apply without the flag; `--what-if` then reports.
 
 ```
-ways manage update
-ways manage update --dry-run
-ways manage update --ref ways-v1.32.0
+ways manage update                       # what it would do
+ways manage update --commit
+ways manage update --ref ways-v1.32.0 --commit
 ```
 
 ### `ways manage repair`
 
-**When:** Repairing the `~/.claude` projection ([ADR-144](../architecture/platform/ADR-144-install-repair-migrate-as-one-manifest-reconciler.md)). The installer and `ways manage update` run it for you; run it by hand after pulling the app source, or when a projected root is missing.
+**When:** Repairing the `~/.claude` projection ([ADR-144](../architecture/platform/ADR-144-install-repair-migrate-as-one-manifest-reconciler.md)). The installer and `ways manage update --commit` run it for you; run `ways manage repair --commit` by hand after pulling the app source, or when a projected root is missing.
 
 **Run from:** Anywhere.
 
-**Tells you:** Which projection roots it linked or relinked, one line each, and a summary unless `--quiet`. It stops with a non-zero exit, before touching anything, when a projected root (`skills/`, `agents/`, `commands/`, `hooks/ways/`, `hooks/check-config-updates.sh`, `bin/*`) is a real directory or file rather than a symlink, and lists the paths. It never deletes a real path.
+**Tells you:** Without `--commit`, what it would link, relink, withdraw and register, under a `what-if` title, then the `settings.json` merge each converging target would take (as `ways manage target plan` shows it) and any binary link that points into a dev checkout; nothing changes ([ADR-511](../architecture/platform/ADR-511-every-mutating-lifecycle-verb-reports-what-it-would-change-until-commit.md)). With `--commit`, which projection roots it linked or relinked, one line each, and a summary unless `--quiet`. It stops with a non-zero exit, before touching anything, when a projected root (`skills/`, `agents/`, `commands/`, `hooks/ways/`, `hooks/check-config-updates.sh`, `bin/*`) is a real directory or file rather than a symlink, and lists the paths. It never deletes a real path.
 
 With no `--dest`, it runs over every target in the user config ([ADR-184](../architecture/platform/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)). Each enabled target is converged. Each disabled one is withdrawn: our symlinks are unlinked, and our hooks block and permissions are removed from its `settings.json` through the same merge base that wrote them. An explicit `--dest` is a single-target run and leaves the list alone.
 
 Last in each enabled target it installs the attend mod through Claude Code's plugin CLI ([ADR-406](../architecture/attend/ADR-406-attend-reaches-agents-through-a-claude-code-mod-that-agent-ways-installs-dormant-by-default-one-status-row-transport-stays-the-signal-store.md)): it adds the `agent-ways` marketplace from the app's `plugins/` folder and installs `attend@agent-ways` when they are missing, and updates both when the installed version is older than the shipped one. A disabled target, and every target once `attend_mod.install` is false, has the mod uninstalled and the marketplace removed. An `attend` plugin from another marketplace is reported and left alone, and a missing `claude` binary or a failed call is reported without failing the repair. See [the attend mod](../attend-and-monitor/mod.md).
 
 ```
-ways manage repair                       # every target in config.yaml; default: ~/.claude
-ways manage repair --dry-run             # preview; prints "refused <root>" for real paths, exit 0
-ways manage repair --force               # rename each real path to <name>.ways-backup-<seconds>, then link
-ways manage repair --source <checkout> --dest <dir>   # dogfood a development checkout
-ways manage repair --mode copy           # copy files instead of symlinking (default: symlink)
-ways manage repair --quiet               # no summary line
+ways manage repair                       # what it would do; prints "refused <root>" for real paths, exit 0
+ways manage repair --commit              # every target in config.yaml; default: ~/.claude
+ways manage repair --commit --force      # rename each real path to <name>.ways-backup-<seconds>, then link
+ways manage repair --commit --source <checkout> --dest <dir>   # dogfood a development checkout
+ways manage repair --commit --mode copy  # copy files instead of symlinking (default: symlink)
+ways manage repair --commit --quiet      # no summary line
 ```
 
 ### `ways manage uninstall`
@@ -682,25 +686,25 @@ ways manage repair --quiet               # no summary line
 
 **Run from:** Anywhere.
 
-**Tells you:** The plan: every target it withdraws from, the agent it stops, the command links it removes, and the app and cache directories it deletes. Without `--yes` it prints the plan and changes nothing. Your config (your ways, API keys and settings) and state (events) stay unless `--purge` is given. A plan that would delete anything but the app's own directories is refused.
+**Tells you:** The plan: every target it withdraws from, the agent it stops, the command links it removes, and the app and cache directories it deletes. Without `--commit` it prints the plan and changes nothing. Your config (your ways, API keys and settings) and state (events) stay unless `--purge` is given. A plan that would delete anything but the app's own directories is refused.
 
 ```
 ways manage uninstall                 # the plan only
-ways manage uninstall --yes
-ways manage uninstall --yes --purge   # also your config and state
+ways manage uninstall --commit
+ways manage uninstall --commit --purge   # also your config and state
 ```
 
 ### `ways manage reinstall`
 
-**When:** An install looks damaged, or a cache or a stale projection is suspected, and you want the same version back cleanly ([ADR-509](../architecture/platform/ADR-509-lifecycle-commands-sit-under-one-ways-manage-group-the-updater-s-reconcile-stays-a-hidden-fixed-name.md)). Moving to another version is `ways manage update`.
+**When:** An install looks damaged, or a cache or a stale projection is suspected, and you want the same version back cleanly ([ADR-509](../architecture/platform/ADR-509-lifecycle-commands-sit-under-one-ways-manage-group-the-updater-s-reconcile-stays-a-hidden-fixed-name.md)). Moving to another version is `ways manage update --commit`.
 
 **Run from:** Anywhere. It needs the network and room for a second copy of the app.
 
-**Tells you:** The plan: the commit it puts back and the source it fetches it from, the uninstall it runs, and the install that follows. Without `--yes` it prints the plan and changes nothing. With `--yes` it fetches and verifies that commit into `agent-ways.reinstall` beside the app first; if that fails, nothing has been removed. It then uninstalls, keeping your config and state, and runs the staged installer, which projects every target your config lists. It does not take `--purge`. If the install step fails, the staged copy is kept and the last line is the command that finishes the install from it.
+**Tells you:** The plan: the commit it puts back and the source it fetches it from, the uninstall it runs, and the install that follows. Without `--commit` it prints the plan and changes nothing. With `--commit` it fetches and verifies that commit into `agent-ways.reinstall` beside the app first; if that fails, nothing has been removed. It then uninstalls, keeping your config and state, and runs the staged installer, which projects every target your config lists. It does not take `--purge`. If the install step fails, the staged copy is kept and the last line is the command that finishes the install from it.
 
 ```
 ways manage reinstall          # the plan only
-ways manage reinstall --yes
+ways manage reinstall --commit
 ```
 
 ### `ways manage target`
@@ -711,7 +715,7 @@ ways manage reinstall --yes
 
 **Tells you:** `list` prints each target with its enabled and observe flags, its converged state (`active`, `pending`, `partial`, `refused`, `stale` or `withdrawn`), and its own config file when one exists. With no `targets` key in the user config, the one target is `~/.claude`.
 
-`plan <dir>` previews activation and touches nothing. It shows every projection root as `linked`, `link`, `relink` or `refused`, and the settings merge as what is kept of yours, what is added, what of a prior install is replaced and what would be removed. `add <dir>` prints that plan and stops with exit 3 when a real path sits at a root or an entry of yours would go; `--force` moves real paths aside and proceeds. `disable` withdraws and keeps the record; `enable` reconciles into it again; `remove` withdraws and drops the record. `list`, `plan` and `add` take `--json`.
+`plan <dir>` previews activation and touches nothing. It shows every projection root as `linked`, `link`, `relink` or `refused`, and the settings merge as what is kept of yours, what is added, what of a prior install is replaced and what would be removed. `add <dir>` prints that plan and changes nothing; with `--commit` it records the target and reconciles into it, and stops with exit 3 when a real path sits at a root or an entry of yours would go; `--force` moves real paths aside and proceeds. `disable` withdraws and keeps the record; `enable` reconciles into it again; `remove` withdraws and drops the record. Each of the four reports what it would change until `--commit` is given ([ADR-511](../architecture/platform/ADR-511-every-mutating-lifecycle-verb-reports-what-it-would-change-until-commit.md)). `list`, `plan` and `add` take `--json`.
 
 A target can carry its own configuration: a `config.yaml` at `$XDG_CONFIG_HOME/agent-ways/targets/<key>/config.yaml`, or the path in the entry's `config:` field. It has the same keys as the user config and is layered over it for sessions under that target's config directory. `ways settings list` names the layer it applied.
 
@@ -720,11 +724,11 @@ A project can switch ways off for itself with `enabled: false` in its `.claude/w
 ```
 ways manage target list
 ways manage target plan ~/.claude-work
-ways manage target add ~/.claude-work            # record, then reconcile into it
-ways manage target add ~/.claude-work --dry-run  # the plan only
-ways manage target disable ~/.claude-work        # withdraw our links and hooks
-ways manage target enable ~/.claude-work
-ways manage target remove ~/.claude-work
+ways manage target add ~/.claude-work                # the plan only
+ways manage target add ~/.claude-work --commit       # record, then reconcile into it
+ways manage target disable ~/.claude-work --commit   # withdraw our links and hooks
+ways manage target enable ~/.claude-work --commit
+ways manage target remove ~/.claude-work --commit
 ```
 
 Bare `ways manage target` on a terminal opens the settings screens on their install tab. In a pipe it prints its help and exits 2.
@@ -747,7 +751,7 @@ The hooks call these. They are hidden from `ways --help`, and their names stay f
 | `ways project-slug [path]` | Macros that read per-project state (`meta/memory/macro.sh`). |
 | `ways events-log-path` | Scripts outside the binary that read the event log. |
 | `ways manifest` | Debugging `ways manage repair`: the projection manifest it converges toward. |
-| `reconcile` | The previous release's updater, which spawns it on the newly installed binary. It runs the same code as `ways manage repair`, with the same flags and exit codes, and prints no notice ([ADR-509](../architecture/platform/ADR-509-lifecycle-commands-sit-under-one-ways-manage-group-the-updater-s-reconcile-stays-a-hidden-fixed-name.md)). |
+| `reconcile` | The previous release's updater, which spawns it on the newly installed binary, and the installer. It runs the same code as `ways manage repair`, with the same flags and exit codes, and prints no notice. It applies with no flag, where `ways manage repair` reports until `--commit`, because its callers cannot pass a flag the binary they call may lack ([ADR-511](../architecture/platform/ADR-511-every-mutating-lifecycle-verb-reports-what-it-would-change-until-commit.md), [ADR-509](../architecture/platform/ADR-509-lifecycle-commands-sit-under-one-ways-manage-group-the-updater-s-reconcile-stays-a-hidden-fixed-name.md)). |
 | `ways judge-setup` | The installer and the end of `ways manage update`: checks the judge's keys and, on a terminal, offers to add one. |
 
 **Testing a way by hand.** `ways scan prompt` runs the same code as the UserPromptSubmit hook and prints the markdown that would be injected; no output means nothing crossed a threshold. `ways show way` prints a way as Claude receives it. Both need `--session`; any string, such as `dummy`, makes a dry run that touches no real session. Both are session-aware, so a second call with the same session prints nothing for a way already shown. `--project <dir>` adds that project's ways.

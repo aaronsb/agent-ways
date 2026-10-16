@@ -1011,10 +1011,13 @@ enum ThemeCommand {
 
 #[derive(Subcommand)]
 enum ManageCommand {
-    /// Pull the app source, refresh the binaries, rebuild, reproject
+    /// What an update would change; with --commit, pull, refresh, reproject
     ///
-    /// Update the agent-ways install: pull, refresh binaries (pre-built
-    /// first), regenerate the corpus, reproject (ADR-150).
+    /// Without --commit, fetch and report what the update would change:
+    /// versions, release notes, the source delta, local changes, the actions
+    /// on this machine, and dev links (ADR-511). With --commit, pull, refresh
+    /// the binaries (pre-built first), regenerate the corpus and reproject
+    /// (ADR-150).
     Update(UpdateArgs),
     /// Converge every target toward the projection (ADR-144)
     ///
@@ -1024,22 +1027,21 @@ enum ManageCommand {
     /// pull in $XDG_DATA is live with no further step. Idempotent; silent
     /// when already up to date.
     Repair(RepairArgs),
-    /// Remove agent-ways; without --yes, print the plan only
+    /// Remove agent-ways; without --commit, print the plan only
     ///
     /// Remove agent-ways: withdraw from every target, stop the agent, unlink the
     /// commands and delete the app. Your config and state stay unless --purge.
-    /// Prints the plan and changes nothing without --yes.
+    /// Prints the plan and changes nothing without --commit (ADR-511).
     Uninstall(UninstallArgs),
-    /// Put the installed version back; without --yes, print the plan only
+    /// Put the installed version back; without --commit, print the plan only
     ///
     /// Fetch and verify the installed version, from the source it came from,
     /// into a staging directory; then uninstall, keeping your config and
     /// state, and install from the stage. A failed fetch removes nothing.
-    /// Prints the plan and changes nothing without --yes.
+    /// Prints the plan and changes nothing without --commit (ADR-511).
     Reinstall {
-        /// Do it. Without this flag the plan is printed and nothing changes.
-        #[arg(long)]
-        yes: bool,
+        #[command(flatten)]
+        apply: cmd::lifecycle::Apply,
         /// Refused: a reinstall keeps your config and state
         #[arg(long, hide = true)]
         purge: bool,
@@ -1056,14 +1058,17 @@ enum ManageCommand {
 
 #[derive(clap::Args)]
 struct UpdateArgs {
-    /// Show what would run without executing it
-    #[arg(long)]
-    dry_run: bool,
+    #[command(flatten)]
+    apply: cmd::lifecycle::Apply,
     /// Pin the install to a specific branch, tag, or commit and build the
     /// whole suite from source, instead of pulling the latest release.
-    /// Leaves the release channel until `ways manage update --ref main`.
+    /// Leaves the release channel until `ways manage update --ref main --commit`.
     #[arg(long = "ref", value_name = "REF")]
     git_ref: Option<String>,
+    /// List every commit in the what-if, and show the raw output of each
+    /// step of a --commit run
+    #[arg(long, short)]
+    verbose: bool,
 }
 
 #[derive(clap::Args)]
@@ -1077,9 +1082,8 @@ struct RepairArgs {
     /// Materialization: symlink (default) or copy
     #[arg(long)]
     mode: Option<String>,
-    /// Show what would change without touching the filesystem
-    #[arg(long)]
-    dry_run: bool,
+    #[command(flatten)]
+    apply: cmd::lifecycle::Apply,
     /// Suppress the summary line (still prints any changes)
     #[arg(long)]
     quiet: bool,
@@ -1092,9 +1096,8 @@ struct RepairArgs {
 
 #[derive(clap::Args)]
 struct UninstallArgs {
-    /// Do it. Without this flag the plan is printed and nothing changes.
-    #[arg(long)]
-    yes: bool,
+    #[command(flatten)]
+    apply: cmd::lifecycle::Apply,
     /// Also delete your config (your ways, API keys, settings) and state (events).
     #[arg(long)]
     purge: bool,
@@ -1124,18 +1127,29 @@ enum TargetCommand {
         /// Move real paths at projection roots aside and proceed past a blocked plan
         #[arg(long)]
         force: bool,
-        /// Show the plan and stop
-        #[arg(long)]
-        dry_run: bool,
+        #[command(flatten)]
+        apply: cmd::lifecycle::Apply,
         #[arg(long)]
         json: bool,
     },
     /// Re-enable a recorded target and reconcile into it
-    Enable { dir: String },
+    Enable {
+        dir: String,
+        #[command(flatten)]
+        apply: cmd::lifecycle::Apply,
+    },
     /// Withdraw our links and hooks from a target, keeping its record
-    Disable { dir: String },
+    Disable {
+        dir: String,
+        #[command(flatten)]
+        apply: cmd::lifecycle::Apply,
+    },
     /// Withdraw from a target and drop its record
-    Remove { dir: String },
+    Remove {
+        dir: String,
+        #[command(flatten)]
+        apply: cmd::lifecycle::Apply,
+    },
 }
 
 fn main() -> Result<()> {
@@ -1201,17 +1215,27 @@ fn moved(old: &str) {
 }
 
 fn update(args: UpdateArgs) -> Result<()> {
-    cmd::update::run(args.dry_run, args.git_ref)
+    cmd::update::run(args.apply.mode(true), args.git_ref, args.verbose)
 }
 
 /// `ways manage repair` and the hidden fixed name `reconcile`: one function,
-/// so the two cannot drift (ADR-509 §4).
-fn repair(a: RepairArgs) -> Result<()> {
-    cmd::reconcile::run(a.source, a.dest, a.mode, a.dry_run, a.quiet, a.force)
+/// so the two cannot drift (ADR-509 §4). They differ in the default only:
+/// `manage repair` reports until `--commit` (ADR-511), and `reconcile`
+/// applies, because another release's updater and the installer call it
+/// with no flag.
+fn repair(a: RepairArgs, fixed_name: bool) -> Result<()> {
+    let mode = if fixed_name {
+        if a.apply.what_if { cmd::lifecycle::Mode::WhatIf } else { cmd::lifecycle::Mode::Commit }
+    } else {
+        a.apply.mode(true)
+    };
+    cmd::reconcile::repair(a.source, a.dest, a.mode, mode, a.quiet, a.force)
 }
 
 fn uninstall(args: UninstallArgs) -> Result<()> {
-    cmd::uninstall::run(args.yes, args.purge)
+    // Removing the install always needs the flag; install.manage_mode does
+    // not apply (ADR-511 item 3).
+    cmd::uninstall::run(args.apply.mode(false), args.purge)
 }
 
 fn target(action: Option<TargetCommand>) -> Result<()> {
@@ -1221,10 +1245,10 @@ fn target(action: Option<TargetCommand>) -> Result<()> {
     match action {
         TargetCommand::List { json } => cmd::target::list(json),
         TargetCommand::Plan { dir, json } => cmd::target::plan(&dir, json),
-        TargetCommand::Add { dir, force, dry_run, json } => cmd::target::add(&dir, force, dry_run, json),
-        TargetCommand::Enable { dir } => cmd::target::enable(&dir),
-        TargetCommand::Disable { dir } => cmd::target::disable(&dir),
-        TargetCommand::Remove { dir } => cmd::target::remove(&dir),
+        TargetCommand::Add { dir, force, apply, json } => cmd::target::add(&dir, force, apply.mode(true), json),
+        TargetCommand::Enable { dir, apply } => cmd::target::enable(&dir, apply.mode(true)),
+        TargetCommand::Disable { dir, apply } => cmd::target::disable(&dir, apply.mode(true)),
+        TargetCommand::Remove { dir, apply } => cmd::target::remove(&dir, apply.mode(true)),
     }
 }
 
@@ -1261,7 +1285,7 @@ fn run() -> Result<()> {
         Commands::Corpus { ways_dir, output, quiet, verbose, if_stale } => cmd::corpus::run(ways_dir, output, quiet, verbose, if_stale),
         Commands::Init { project } => cmd::init::run(project.as_deref()),
         Commands::Manifest { source, json } => cmd::manifest::run(json, source),
-        Commands::Reconcile(args) => repair(args),
+        Commands::Reconcile(args) => repair(args, true),
         Commands::Status { json } => cmd::status::run(json),
         Commands::Lookup { project, what } => {
             // Every reader below resolves the project as a hook would, from the
@@ -1391,9 +1415,9 @@ fn run() -> Result<()> {
         Commands::Manage { action: None } => bare_group(&["manage"], || settings_screen("install")),
         Commands::Manage { action: Some(action) } => match action {
             ManageCommand::Update(args) => update(args),
-            ManageCommand::Repair(args) => repair(args),
+            ManageCommand::Repair(args) => repair(args, false),
             ManageCommand::Uninstall(args) => uninstall(args),
-            ManageCommand::Reinstall { yes, purge } => cmd::reinstall::run(yes, purge),
+            ManageCommand::Reinstall { apply, purge } => cmd::reinstall::run(apply.mode(false), purge),
             ManageCommand::Target { action } => target(action),
         },
         Commands::Update(args) => {

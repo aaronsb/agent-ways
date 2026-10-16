@@ -33,8 +33,8 @@ The four lifecycle commands moved under `ways manage` ([ADR-509](../architecture
 
 | Old | New |
 |---|---|
-| `ways update [--dry-run] [--ref <ref>]` | `ways manage update [--dry-run] [--ref <ref>]` |
-| `ways reconcile [flags]` | `ways manage repair [flags]` |
-| `ways uninstall [--yes] [--purge]` | `ways manage uninstall [--yes] [--purge]` |
+| `ways update [--dry-run] [--ref <ref>]` | `ways manage update --commit [--ref <ref>]`; `ways manage update` alone reports (ADR-511) |
+| `ways reconcile [flags]` | `ways manage repair --commit [flags]` |
+| `ways uninstall [--yes] [--purge]` | `ways manage uninstall --commit [--purge]` |
 | `ways target list\|plan\|add\|enable\|disable\|remove` | `ways manage target list\|plan\|add\|enable\|disable\|remove` |
-| `ways uninstall --yes`, then the installer | `ways manage reinstall --yes` |
+| `ways uninstall --yes`, then the installer | `ways manage reinstall --commit` |

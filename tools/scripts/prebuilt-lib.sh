@@ -95,7 +95,7 @@ binary_version() {
 # order, and at an equal core a pre-release (1.2.0-rc1) is behind the release
 # while two pre-releases are level.
 # A version that does not parse is at least B only when it equals B. The same
-# order as `version_older` in tools/ways-cli/src/cmd/update.rs.
+# order as `version_older` in tools/ways-cli/src/cmd/update/mod.rs.
 version_at_least() {
   local a="$1" b="$2" ac bc
   [[ "$a" == "$b" ]] && return 0

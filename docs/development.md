@@ -6,7 +6,7 @@
 
 | Role | Where it lives | Do you edit it? |
 |---|---|---|
-| **Your install** | `~/.claude` (projection) + `$XDG_DATA_HOME/agent-ways` (the app) | **No.** `ways manage update` stashes local changes, fast-forwards, and pops them back, so an edit there can conflict with an update or block it. |
+| **Your install** | `~/.claude` (projection) + `$XDG_DATA_HOME/agent-ways` (the app) | **No.** `ways manage update --commit` stashes local changes, fast-forwards, and pops them back, so an edit there can conflict with an update or block it. `ways manage update` alone lists them. |
 | **Your dev checkout** | a standalone clone, e.g. `~/src/agent-ways` (not `~/.claude`, not `$XDG_DATA`) | **Yes.** Branch, edit, commit, PR here. |
 | **A sandbox** | a throwaway `$HOME`/`$XDG_*` under `/tmp` | Only the test harness writes here. |
 
@@ -112,10 +112,10 @@ Each TUI has a scenario script that reaches its screen states with real keys at 
 2. **Dogfood via reconcile.** Project your dev tree into your live install:
 
    ```bash
-   ways manage repair --source ~/src/agent-ways --dest ~/.claude
+   ways manage repair --commit --source ~/src/agent-ways --dest ~/.claude
    ```
 
-   This projects hooks, ways, skills and agents from the dev tree. Binaries are projected from `<source>/bin/`. After `make ways-rebuild` (or `make update-binaries`), `bin/<name>` is a symlink into `tools/target/release/`, so later `cargo build --release` runs reach the projection too. A `bin/<name>` that `make setup` downloaded stays the prebuilt until you run a `-rebuild` target. Revert by reconciling from the app: `ways manage repair --source $XDG_DATA_HOME/agent-ways --dest ~/.claude`.
+   This projects hooks, ways, skills and agents from the dev tree. Binaries are projected from `<source>/bin/`. After `make ways-rebuild` (or `make update-binaries`), `bin/<name>` is a symlink into `tools/target/release/`, so later `cargo build --release` runs reach the projection too. A `bin/<name>` that `make setup` downloaded stays the prebuilt until you run a `-rebuild` target. Revert by reconciling from the app: `ways manage repair --commit --source $XDG_DATA_HOME/agent-ways --dest ~/.claude`. Without `--commit` either command reports what it would link and changes nothing.
 
 3. **Worktree (parallel branches).** `git worktree add` from your standalone clone, never from `$XDG_DATA/agent-ways`. A worktree hung off the app dir ties your branches to the install, and a reinstall that replaces the app dir orphans it.
 

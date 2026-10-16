@@ -245,7 +245,7 @@ fn a_finished_flow_queues_on_its_tab_and_the_review_applies_it() {
     assert!(app.flow().is_none());
     let q = app.queued();
     assert_eq!(q.len(), 1);
-    assert_eq!(q[0].command, format!("ways manage target add {}", arg(&fx.root.join(".claude-work"))));
+    assert_eq!(q[0].command, format!("ways manage target add {} --commit", arg(&fx.root.join(".claude-work"))));
     assert!(q[0].confirm && q[0].key == "install.targets");
     assert_eq!((app.pending_in(3), app.pending_in(0)), (1, 0), "it counts on the install tab only");
     press(&mut app, &[KeyCode::Char('w')]);
@@ -256,7 +256,7 @@ fn a_finished_flow_queues_on_its_tab_and_the_review_applies_it() {
     assert!(t.contains("asks") && t.contains("yes: it is"), "{t}");
     press(&mut app, &[KeyCode::Char('a')]);
     agent_tui::testkit::finish_apply(&mut app);
-    assert_eq!(*ran.borrow(), [format!("ways manage target add {}", arg(&fx.root.join(".claude-work")))]);
+    assert_eq!(*ran.borrow(), [format!("ways manage target add {} --commit", arg(&fx.root.join(".claude-work")))]);
     assert_eq!(app.pending(), 0);
 }
 
@@ -270,7 +270,7 @@ fn a_disabled_recorded_target_is_enabled_not_added() {
     press(&mut app, &[KeyCode::Char('4'), KeyCode::Char('a'), KeyCode::Enter]);
     assert!(text(&mut app).contains("disabled"));
     press(&mut app, &[KeyCode::Char(' '), KeyCode::Right, KeyCode::Right, KeyCode::Enter]);
-    assert_eq!(queue(&app)[0], format!("ways manage target enable {}", arg(&off)));
+    assert_eq!(queue(&app)[0], format!("ways manage target enable {} --commit", arg(&off)));
 }
 
 #[test]

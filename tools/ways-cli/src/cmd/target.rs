@@ -4,6 +4,7 @@
 //! Output follows ADR-185: tables for people, one JSON document under
 //! `--json`, a debug rendering never.
 
+use crate::cmd::lifecycle::{self, Mark, Mode, Report};
 use crate::cmd::reconcile::{self, Plan};
 use crate::config::{Config, Target};
 use crate::paths;
@@ -71,7 +72,7 @@ pub fn list(json: bool) -> Result<()> {
     if list.is_empty() {
         println!("no targets: agent-ways is installed and inactive.");
         println!("  ways manage target plan <dir>   # what activating a Claude Code config dir would do");
-        println!("  ways manage target add <dir>    # activate it (default dir: ~/.claude)");
+        println!("  ways manage target add <dir> --commit   # activate it (default dir: ~/.claude)");
         return Ok(());
     }
     let mut t = Table::new(&["Target", "Enabled", "Observe", "State", "Config"]);
@@ -124,65 +125,113 @@ fn find_target(list: &[Target], dir: &str) -> Option<usize> {
     })
 }
 
-pub fn print_plan(plan: &Plan, json: bool) -> Result<()> {
+/// One target's plan in the lifecycle report shape (ADR-511): a section of
+/// projection roots, each marked by what activation does to it, then the
+/// settings.json merge, then what blocks it. `parse_plan` in the settings
+/// screens reads this text back, so a change here changes it there too.
+pub fn plan_sections(r: &mut Report, plan: &Plan) {
+    r.section("Roots");
+    let width = plan.roots.iter().map(|x| x.rel.chars().count()).max().unwrap_or(0).max(28);
+    for root in &plan.roots {
+        let mark = match root.state.as_str() {
+            "linked" => Mark::Same,
+            "link" => Mark::Add,
+            "relink" => Mark::Up,
+            "refused" => Mark::Warn,
+            _ => Mark::Info,
+        };
+        r.item(mark, format!("{:<width$}  {:<8}{}", root.rel, root.state, root.detail));
+    }
+    settings_section(r, "settings.json", &plan.settings);
+    if plan.blocked {
+        r.section("Blocked");
+        r.item(Mark::Warn, "blocked: a real path sits at a projection root, or an entry of yours would be removed.");
+        r.muted(4, "--force renames each real path to <name>.ways-backup-<seconds> and proceeds;");
+        r.muted(4, "move a hook out of .claude/hooks/ first if it is listed under REMOVE or replace.");
+    }
+}
+
+/// The settings.json merge a plan computed, as a section named `heading`:
+/// what of the operator's is kept, and each hook or permission entry the
+/// merge adds, refreshes, replaces or removes. `ways manage repair`'s
+/// what-if shows the same section for each target it converges.
+pub fn settings_section(r: &mut Report, heading: &str, settings: &Option<reconcile::SettingsPlan>) {
+    r.section(heading);
+    match settings {
+        None => {
+            r.item(Mark::Info, "the source ships none; nothing merged");
+        }
+        Some(s) if s.unchanged => {
+            r.item(Mark::Same, "already merged, nothing changes");
+        }
+        Some(s) => {
+            r.item(Mark::Same, format!("kept      {} hook entr{} of yours", s.user_hooks_kept, if s.user_hooks_kept == 1 { "y" } else { "ies" }));
+            for h in &s.hooks_added {
+                r.item(Mark::Add, format!("add       {}: {}", h.event, h.command));
+            }
+            for h in &s.hooks_refreshed {
+                r.item(Mark::Up, format!("refresh   {}: {}  (ours, from a prior version)", h.event, h.command));
+            }
+            for h in &s.hooks_replaced {
+                r.item(Mark::Up, format!("replace   {}: {}  (reads as an agent-ways hook)", h.event, h.command));
+            }
+            for h in &s.hooks_removed {
+                r.item(Mark::Remove, format!("REMOVE    {}: {}", h.event, h.command));
+            }
+            if !s.perms_added.is_empty() {
+                r.item(Mark::Add, format!("allow     +{} entries", s.perms_added.len()));
+            }
+            if !s.deny_added.is_empty() {
+                r.item(Mark::Add, format!("deny      +{} entries (secret paths, ADR-152)", s.deny_added.len()));
+            }
+        }
+    }
+}
+
+/// Print a plan under `title`, or the plan document under `--json`.
+pub fn print_plan(title: String, plan: &Plan, json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(plan)?);
         return Ok(());
     }
-    println!("plan for {}", plan.dest);
-    let mut t = Table::new(&["Root", "Action", "Detail"]);
-    t.align(0, Align::Left);
-    t.no_auto_fit();
-    for r in &plan.roots {
-        t.add_owned(vec![r.rel.clone(), r.state.clone(), r.detail.clone()]);
-    }
-    t.print();
-    match &plan.settings {
-        None => println!("settings.json: the source ships none; nothing merged"),
-        Some(s) if s.unchanged => println!("settings.json: already merged, nothing changes"),
-        Some(s) => {
-            println!("settings.json:");
-            println!("  kept      {} hook entr{} of yours", s.user_hooks_kept, if s.user_hooks_kept == 1 { "y" } else { "ies" });
-            for h in &s.hooks_added {
-                println!("  add       {}: {}", h.event, h.command);
-            }
-            for h in &s.hooks_refreshed {
-                println!("  refresh   {}: {}  (ours, from a prior version)", h.event, h.command);
-            }
-            for h in &s.hooks_replaced {
-                println!("  replace   {}: {}  (reads as an agent-ways hook)", h.event, h.command);
-            }
-            for h in &s.hooks_removed {
-                println!("  REMOVE    {}: {}", h.event, h.command);
-            }
-            if !s.perms_added.is_empty() {
-                println!("  allow     +{} entries", s.perms_added.len());
-            }
-            if !s.deny_added.is_empty() {
-                println!("  deny      +{} entries (secret paths, ADR-152)", s.deny_added.len());
-            }
-        }
-    }
-    if plan.blocked {
-        println!();
-        println!("blocked: a real path sits at a projection root, or an entry of yours would be removed.");
-        println!("  --force renames each real path to <name>.ways-backup-<seconds> and proceeds;");
-        println!("  move a hook out of .claude/hooks/ first if it is listed under REMOVE or replace.");
-    }
+    let mut r = Report::new(title);
+    plan_sections(&mut r, plan);
+    r.print();
     Ok(())
 }
 
 pub fn plan(dir: &str, json: bool) -> Result<()> {
     let (_, canonical) = resolve_dir(dir)?;
     let plan = reconcile::plan_target(&canonical)?;
-    print_plan(&plan, json)
+    // The title names the directory as given, as the `--commit` hint does;
+    // the resolved path can differ (macOS resolves /var to /private/var).
+    print_plan(format!("ways manage target plan: {dir}"), &plan, json)
 }
 
-pub fn add(dir: &str, force: bool, dry_run: bool, json: bool) -> Result<()> {
+/// The line that ends a target verb's what-if (ADR-511). Under `--json` the
+/// plan document is the whole of stdout, so it goes to stderr.
+fn whatif_footer(command: &str, json: bool) {
+    let line = lifecycle::commit_hint(command);
+    if json {
+        eprintln!("{line}");
+    } else {
+        let mut r = Report::new("");
+        r.footer(Mark::Info, line);
+        r.print();
+    }
+}
+
+pub fn add(dir: &str, force: bool, mode: Mode, json: bool) -> Result<()> {
     let (stored, canonical) = resolve_dir(dir)?;
     let plan = reconcile::plan_target(&canonical)?;
-    print_plan(&plan, json)?;
-    if dry_run {
+    let title = match mode {
+        Mode::WhatIf => format!("ways manage target add: what-if for {dir}"),
+        Mode::Commit => format!("ways manage target add: {dir}"),
+    };
+    print_plan(title, &plan, json)?;
+    if mode == Mode::WhatIf {
+        let force = if force { " --force" } else { "" };
+        whatif_footer(&format!("ways manage target add {}{force}", lifecycle::shell_word(dir)), json);
         return Ok(());
     }
     if plan.blocked && !force {
@@ -214,8 +263,8 @@ pub fn add(dir: &str, force: bool, dry_run: bool, json: bool) -> Result<()> {
     // to stderr.
     if let Err(e) = reconcile::run_for_targets(&[target], false, json, force) {
         eprintln!(
-            "target recorded in {} but the reconcile failed; `ways manage repair` retries it, \
-             `ways manage target remove` forgets it",
+            "target recorded in {} but the reconcile failed; `ways manage repair --commit` retries it, \
+             `ways manage target remove <dir> --commit` forgets it",
             path.display()
         );
         return Err(e);
@@ -224,7 +273,47 @@ pub fn add(dir: &str, force: bool, dry_run: bool, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn set_enabled(dir: &str, enabled: bool) -> Result<()> {
+/// The recorded target `dir` names, read without a write.
+fn recorded(dir: &str) -> Result<Target> {
+    let list = Config::load(&crate::util::project_dir()).targets();
+    match find_target(&list, dir) {
+        Some(i) => Ok(list[i].clone()),
+        None => bail!("{dir} is not a target; `ways manage target list` lists them, `ways manage target add <dir> --commit` adds one"),
+    }
+}
+
+/// What enable, disable or remove would do, from a dry run of the
+/// reconcile they run (ADR-511).
+fn whatif(verb: &str, dir: &str, mut target: Target, enabled: bool, record: &str) -> Result<()> {
+    let mut head = Report::new(format!("ways manage target {verb}: what-if"));
+    head.section("Record").item(Mark::Act, record);
+    target.enabled = enabled;
+    if target.dir().is_dir() {
+        head.section("Reconcile");
+        head.print();
+        use std::io::Write as _;
+        let _ = std::io::stdout().flush();
+        reconcile::run_for_targets(&[target], true, false, false)?;
+    } else {
+        head.print();
+    }
+    whatif_footer(&format!("ways manage target {verb} {}", lifecycle::shell_word(dir)), false);
+    Ok(())
+}
+
+fn set_enabled(dir: &str, enabled: bool, mode: Mode) -> Result<()> {
+    if mode == Mode::WhatIf {
+        let target = recorded(dir)?;
+        if enabled && !target.dir().is_dir() {
+            bail!("{} does not exist; a target must be a directory to enable", target.dir().display());
+        }
+        let (verb, record) = if enabled {
+            ("enable", format!("record {} as enabled and reconcile into it", target.dir().display()))
+        } else {
+            ("disable", format!("record {} as disabled and withdraw from it", target.dir().display()))
+        };
+        return whatif(verb, dir, target, enabled, &record);
+    }
     let implicit = Config::load(&crate::util::project_dir()).targets();
     let mut chosen: Option<Target> = None;
     let mut missing = false;
@@ -239,7 +328,7 @@ fn set_enabled(dir: &str, enabled: bool) -> Result<()> {
         Some(list)
     })?;
     if missing {
-        bail!("{dir} is not a target; `ways manage target list` lists them, `ways manage target add` adds one");
+        bail!("{dir} is not a target; `ways manage target list` lists them, `ways manage target add <dir> --commit` adds one");
     }
     let target = chosen.expect("set when found");
     if enabled && !target.dir().is_dir() {
@@ -248,15 +337,20 @@ fn set_enabled(dir: &str, enabled: bool) -> Result<()> {
     reconcile::run_for_targets(&[target], false, false, false)
 }
 
-pub fn enable(dir: &str) -> Result<()> {
-    set_enabled(dir, true)
+pub fn enable(dir: &str, mode: Mode) -> Result<()> {
+    set_enabled(dir, true, mode)
 }
 
-pub fn disable(dir: &str) -> Result<()> {
-    set_enabled(dir, false)
+pub fn disable(dir: &str, mode: Mode) -> Result<()> {
+    set_enabled(dir, false, mode)
 }
 
-pub fn remove(dir: &str) -> Result<()> {
+pub fn remove(dir: &str, mode: Mode) -> Result<()> {
+    if mode == Mode::WhatIf {
+        let target = recorded(dir)?;
+        let record = format!("withdraw from {} and drop it from the targets list", target.dir().display());
+        return whatif("remove", dir, target, false, &record);
+    }
     let implicit = Config::load(&crate::util::project_dir()).targets();
     let mut removed: Option<Target> = None;
     // Withdraw first, then forget: a removed target is a withdrawn one. The

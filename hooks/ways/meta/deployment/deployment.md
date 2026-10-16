@@ -15,10 +15,12 @@ This supersedes the pre-1.0 world where `~/.claude` *was* the git clone. That "i
 
 ## How install and update work now
 
-- **Fresh install** — the `curl … | bash` one-liner stages the app into `$XDG_DATA_HOME/agent-ways`, builds it, links the binaries onto `PATH`, and runs `ways manage repair` to materialize the projection and merge `settings.json`. An existing `~/.claude` is **preserved**: reconcile adds or repairs the projected roots, and when a projected root path is already a real directory or file it stops before touching anything and names the path. `ways manage repair --force` renames each such path to a timestamped sibling (`<name>.ways-backup-<seconds>`) and then links; nothing is ever deleted. There is no "clobber vs. keep" menu to reason about anymore.
-- **Update** — pull the app source (or re-run the installer) in `$XDG_DATA_HOME/agent-ways`, then `ways manage repair` reprojects. Because the roots are symlinks into the app dir, a symlink projection is *live* the moment the source updates; reconcile is idempotent and silent when nothing changed.
-- **Repair** — `ways manage repair` alone re-materializes any missing or stale projected root. On a legacy in-place clone it stops at the clone's real directories and changes nothing; that case needs the migrator (below).
-- **Reinstall** — `ways manage reinstall` puts the installed version back from the source it came from, keeping the user's config and state. It fetches and verifies the new copy before it removes anything, so a failed fetch leaves the install as it was. Without `--yes` it prints the plan. All of these live under `ways manage` (ADR-509), whose help lists them.
+Every `ways manage` verb that changes the install reports what it would change and changes nothing until `--commit` (ADR-511). To preview, pass `--what-if`: it reports even where `install.manage_mode: commit` makes the bare verb apply.
+
+- **Fresh install** — the `curl … | bash` one-liner stages the app into `$XDG_DATA_HOME/agent-ways`, builds it, links the binaries onto `PATH`, and runs the projection repair (under the hidden fixed name of `ways manage repair --commit`, which applies with no flag) to materialize the projection and merge `settings.json`. An existing `~/.claude` is **preserved**: reconcile adds or repairs the projected roots, and when a projected root path is already a real directory or file it stops before touching anything and names the path. `ways manage repair --commit --force` renames each such path to a timestamped sibling (`<name>.ways-backup-<seconds>`) and then links; nothing is ever deleted. There is no "clobber vs. keep" menu to reason about anymore.
+- **Update** — `ways manage update --what-if` fetches and reports what an update would change (versions, release notes, the commits by area, local changes, the actions, dev links) and changes nothing. Read it back to the user. `ways manage update --commit` pulls the app source, refreshes the binaries and reprojects. Because the roots are symlinks into the app dir, a symlink projection is *live* the moment the source updates; reconcile is idempotent and silent when nothing changed.
+- **Repair** — `ways manage repair --commit` re-materializes any missing or stale projected root; `--what-if` reports what it would link, merge and withdraw. On a legacy in-place clone the repair stops at the clone's real directories and changes nothing; that case needs the migrator (below).
+- **Reinstall** — `ways manage reinstall` puts the installed version back from the source it came from, keeping the user's config and state. It fetches and verifies the new copy before it removes anything, so a failed fetch leaves the install as it was. All of these live under `ways manage` (ADR-509), whose help lists them.
 
 ## Targets: where the install is active (ADR-184)
 
@@ -26,11 +28,11 @@ Installation and activation are separate states. The projection lands in each **
 
 - `ways manage target list` lists targets and their converged state; `ways status` says it on its first line.
 - `ways manage target plan <dir>` previews activation: every root as linked, link, relink, or refused, and the settings merge as kept, added, replaced, removed. Nothing is touched.
-- `ways manage target add <dir>` prints the plan and stops (exit 3) when a real path sits at a root or an entry of the user's would go. `--force` moves real paths aside.
-- `ways manage target disable <dir>` and `remove <dir>` withdraw.
+- `ways manage target add <dir> --commit` records the target and projects, and stops (exit 3) when a real path sits at a root or an entry of the user's would go. `--force` moves real paths aside.
+- `ways manage target disable <dir> --commit` and `remove <dir> --commit` withdraw.
 - A project switches ways off for itself with `enabled: false` in `.claude/ways.yaml`.
 
-When a user asks whether agent-ways will touch something they own, the answer is the plan. Run it and read it back to them before `add`. The installer still activates the default target on its own in this release; the handoff to the targets bootstrap is the next increment of ADR-184.
+When a user asks whether agent-ways will touch something they own, the answer is the plan. Run it and read it back to them before `add --commit`. The installer still activates the default target on its own in this release; the handoff to the targets bootstrap is the next increment of ADR-184.
 
 ## The one decision left: is this a legacy in-place clone?
 

@@ -5,11 +5,11 @@ agent-tui frame 100x30
 |│     (none recorded)           ~/.claude (default) [a││                                           │|
 |│ ▾ settings                    value                 ││The Claude Code config directories         │|
 |│     secret_path_deny          true                  ││agent-ways is active in.                   │|
-|│                                                     ││                                           │|
+|│     manage_mode               whatif                ││                                           │|
 |│                                                     ││Changed by actions, since each change      │|
 |│                                                     ││reconciles: `ways manage target            │|
-|│                                                     ││add|enable|disable|remove <dir>` (ADR-184).│|
-|│                                                     ││Absent means the default ~/.claude,        │|
+|│                                                     ││add|enable|disable|remove <dir> --commit`  │|
+|│                                                     ││(ADR-184). Absent means the default        │|
 |│ ┌plan: error───────────────────────────────────────────────────────────────────────────────────┐ │|
 |│ │ $ ways manage target plan ~/elsewhere                                                        │ │|
 |│ │                                                                                              │ │|
@@ -19,7 +19,7 @@ agent-tui frame 100x30
 |│ │ exit 1                                                                                       │,│|
 |│ └──────────────────────────────────────────────────────────────────────────────────────────────┘ │|
 |│                                                     ││  A add (asks first)                       │|
-|│                                                     ││    ways manage target add '<arg>'         │|
+|│                                                     ││    ways manage target add '<arg>' --commit│|
 |│                                                     ││  p plan                                   │|
 |│                                                     ││    ways manage target plan '<arg>'        │|
 |│                                                     ││                                           │|
@@ -120,8 +120,7 @@ styles
  19  56-59  Cyan - -
  19  99-99  - - DIM
  20   0-0   - - DIM
- 20  54-89  - - DIM
- 20  99-99  - - DIM
+ 20  54-99  - - DIM
  21   0-0   - - DIM
  21  54-55  - - DIM
  21  56-59  Cyan - -

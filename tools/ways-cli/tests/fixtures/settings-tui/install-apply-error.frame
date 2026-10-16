@@ -1,8 +1,8 @@
 agent-tui frame 100x30
 | 1 ways    2 matching    3 gate    4 install  ●1 ↺    5 attend    6 sensors    7 mod    8 theme     |
 |┌ writes user — ~/proj — review ──────────────────────┐┌detail─────────────────────────────────────┐|
-|│   ▾ queued  ●1                                      ││$ ways manage target add /tmp/x            │|
-|│▌✗     1. $ ways manage target add /tmp/x  ▲         ││                                           │|
+|│   ▾ queued  ●1                                      ││$ ways manage target add /tmp/x --commit   │|
+|│▌✗     1. $ ways mana… target add /tmp/x --commit  ▲ ││                                           │|
 |│                                                     ││Records the directory as a target and      │|
 |│                                                     ││projects agent-ways into it.               │|
 |│                                                     ││                                           │|
@@ -11,10 +11,10 @@ agent-tui frame 100x30
 |│                                                     ││          les                              │|
 |│                                                     ││touches   the directory given              │|
 |│                 ┌add: error────────────────────────────────────────────────────┐                 │|
-|│                 │ $ ways manage target add /tmp/x                              │target add /tmp/x│|
-|│                 │                                                              │dd: ~/x is not a │|
-|│                 │ target add: ~/x is not a Claude config directory             │rectory          │|
-|│                 │ adding ~/x as a target                                       │                 │|
+|│                 │ $ ways manage target add /tmp/x --commit                     │target add /tmp/x│|
+|│                 │                                                              │                 │|
+|│                 │ target add: ~/x is not a Claude config directory             │dd: ~/x is not a │|
+|│                 │ adding ~/x as a target                                       │rectory          │|
 |│                 │                                                              │                 │|
 |│                 │ exit 2                                                       │                 │|
 |│                 └──────────────────────────────────────────────────────────────┘                 │|
@@ -48,15 +48,15 @@ styles
   2   4-11  - - BOLD
   2  12-15  LightRed - -
   2  54-55  - - DIM
-  2  56-86  LightRed - BOLD
+  2  56-95  LightRed - BOLD
   2  99-99  - - DIM
   3   0-0   - - DIM
   3   1-1   Cyan - BOLD|REVERSED
   3   2-3   Red - BOLD|REVERSED
   3   4-12  - - BOLD|REVERSED
-  3  13-41  LightRed - BOLD|REVERSED
-  3  42-44  Yellow - BOLD|REVERSED
-  3  45-53  - - BOLD|REVERSED
+  3  13-49  LightRed - BOLD|REVERSED
+  3  50-52  Yellow - BOLD|REVERSED
+  3  53-53  - - BOLD|REVERSED
   3  54-55  - - DIM
   3  99-99  - - DIM
   4   0-0   - - DIM
@@ -89,22 +89,22 @@ styles
  11  99-99  - - DIM
  12   0-0   - - DIM
  12  18-18  Red - -
- 12  20-50  - - DIM|ITALIC
+ 12  20-59  - - DIM|ITALIC
  12  81-98  Red - -
  12  99-99  - - DIM
  13   0-0   - - DIM
  13  18-18  Red - -
  13  81-81  Red - -
- 13  82-98  Red - BOLD
  13  99-99  - - DIM
  14   0-0   - - DIM
  14  18-18  Red - -
  14  81-81  Red - -
- 14  82-88  Red - BOLD
+ 14  82-98  Red - BOLD
  14  99-99  - - DIM
  15   0-0   - - DIM
  15  18-18  Red - -
  15  81-81  Red - -
+ 15  82-88  Red - BOLD
  15  99-99  - - DIM
  16   0-0   - - DIM
  16  18-18  Red - -

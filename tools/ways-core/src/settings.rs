@@ -85,7 +85,7 @@ const SECTIONS: &[SectionSpec] = &[
         file: FILE,
         top: &["targets"],
         per_entry: true, entry: None,
-        repair: Some("`ways manage target add|enable|disable|remove <dir>`"),
+        repair: Some("`ways manage target add|enable|disable|remove <dir> --commit`"),
         columns: Some(("target", "state")),
         doc: "Where agent-ways is active. Changed by `ways manage target`, which reconciles.",
     },
@@ -96,6 +96,14 @@ const SECTIONS: &[SectionSpec] = &[
         per_entry: false, entry: None, repair: None,
         columns: None,
         doc: "Whether the secret-path permissions.deny baseline is merged into settings.json.",
+    },
+    SectionSpec {
+        name: "install.manage_mode",
+        file: FILE,
+        top: &["manage_mode"],
+        per_entry: false, entry: None, repair: None,
+        columns: None,
+        doc: "Whether `ways manage update`, `repair` and `target` apply without --commit.",
     },
     SectionSpec {
         name: "ways.project",
@@ -320,7 +328,7 @@ const KEYS: &[KeySpec] = &[
         scope: Scope::User,
         check: Some(check_targets),
         doc: "The Claude Code config directories agent-ways is active in.",
-        long: "Changed by actions, since each change reconciles: `ways manage target add|enable|disable|remove <dir>` (ADR-184). Absent means the default ~/.claude, enabled.",
+        long: "Changed by actions, since each change reconciles: `ways manage target add|enable|disable|remove <dir> --commit` (ADR-184). Absent means the default ~/.claude, enabled.",
         ..BASE
     },
     agent_theme::settings::ACTIVE,
@@ -511,6 +519,17 @@ const KEYS: &[KeySpec] = &[
         long: "On by default (ADR-152). false suppresses the baseline entirely; a Claude Code deny cannot be reopened by an allow, so this is the one opt-out.",
         ..BASE
     },
+    KeySpec {
+        name: "install.manage_mode",
+        section: "install.manage_mode",
+        path: &["manage_mode"],
+        kind: Kind::Choice(&["whatif", "commit"]),
+        default: DefaultValue::Yaml("whatif"),
+        scope: Scope::User,
+        doc: "What a `ways manage` verb does without a flag: whatif (report only) or commit (apply).",
+        long: "whatif, the default, has `ways manage update`, `repair` and `target add|enable|disable|remove` print what they would change and change nothing until --commit is given. commit makes them apply without the flag, as they did before the lifecycle convention. --commit and --what-if on the command line win over this setting. `uninstall` and `reinstall` remove the install and always need --commit. Machine-wide, so user scope only.",
+        ..BASE
+    },
 ];
 
 fn refire_default(bound: &[String]) -> Option<Value> {
@@ -692,6 +711,19 @@ fn attend_mod_install_in(layers: &[Layer]) -> bool {
     agent_settings::load::resolve(spec, &[], layers).value.and_then(|v| v.as_bool()).unwrap_or(true)
 }
 
+/// Whether the user config sets `install.manage_mode: commit`, so a
+/// `ways manage` verb that honours it applies without `--commit`. A bad or
+/// absent value is whatif.
+pub fn manage_mode_commit() -> bool {
+    let layers = [Layer::read(&SCHEMA, "user", FILE, LayerScope::User, &crate::paths::user_config())];
+    manage_mode_commit_in(&layers)
+}
+
+fn manage_mode_commit_in(layers: &[Layer]) -> bool {
+    let Some(spec) = SCHEMA.keys.iter().find(|k| k.name == "install.manage_mode") else { return false };
+    agent_settings::load::resolve(spec, &[], layers).value.and_then(|v| v.as_str().map(|s| s == "commit")).unwrap_or(false)
+}
+
 /// The project overlay file of a project directory.
 pub fn project_file(project_dir: &Path) -> PathBuf {
     project_dir.join(".claude").join("ways.yaml")
@@ -754,6 +786,15 @@ mod tests {
     fn resolved(name: &str, layers: &[Layer]) -> Option<Value> {
         let spec = SCHEMA.keys.iter().find(|k| k.name == name).unwrap();
         agent_settings::load::resolve(spec, &[], layers).value
+    }
+
+    #[test]
+    fn manage_mode_defaults_to_whatif_and_reads_commit_from_the_user_file() {
+        assert!(!manage_mode_commit_in(&[layer("user", LayerScope::User, "")]));
+        assert!(manage_mode_commit_in(&[layer("user", LayerScope::User, "manage_mode: commit\n")]));
+        assert!(!manage_mode_commit_in(&[layer("user", LayerScope::User, "manage_mode: whatif\n")]));
+        assert!(!manage_mode_commit_in(&[layer("user", LayerScope::User, "manage_mode: yes\n")]), "a bad value is whatif");
+        assert!(!manage_mode_commit_in(&[layer("project", LayerScope::Project, "manage_mode: commit\n")]), "a project cannot set it");
     }
 
     #[test]

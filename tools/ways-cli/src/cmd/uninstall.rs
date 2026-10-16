@@ -4,7 +4,7 @@
 //! agent, removes the command links that point into the app, and deletes the
 //! app and every cache it has used. The operator's config (their ways, API
 //! keys, settings) and state (events, probe data) are kept unless `--purge` is
-//! given. Without `--yes` it prints the plan and changes nothing. A plan that
+//! given. Without `--commit` it prints the plan and changes nothing. A plan that
 //! would delete anything but the app's own directories is refused.
 
 use std::path::{Path, PathBuf};
@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Result};
 
+use crate::cmd::lifecycle::{Mark, Report};
 use crate::config::{Config, Target};
 use crate::paths;
 
@@ -152,24 +153,39 @@ fn plan_from(roots: &Roots, recorded: Vec<Target>, links: Vec<PathBuf>, purge: b
     })
 }
 
-fn print_plan(p: &Plan, app_present: bool, purge: bool) {
-    let show = |label: &str, items: &[PathBuf]| {
-        if !items.is_empty() {
-            println!("{label}");
-            for i in items {
-                println!("  {}", i.display());
-            }
+/// The plan in the lifecycle report shape (ADR-511): a part per kind of
+/// change, each path marked by what happens to it. `nested` writes the parts
+/// as sub-headings inside the caller's open section, as `reinstall` shows
+/// its uninstall step; otherwise each part is a section of its own.
+fn plan_into(r: &mut Report, p: &Plan, app_present: bool, purge: bool, nested: bool) {
+    let part = |r: &mut Report, label: &str, note: &str, mark: Mark, items: &[PathBuf]| {
+        if items.is_empty() {
+            return;
+        }
+        if nested {
+            r.sub(label);
+        } else {
+            r.section(label);
+        }
+        if !note.is_empty() {
+            r.muted(if nested { 4 } else { 2 }, note);
+        }
+        for i in items {
+            r.item_at(mark, if nested { 4 } else { 2 }, i.display().to_string());
         }
     };
     let targets: Vec<PathBuf> = p.targets.iter().map(|t| t.dir()).collect();
-    show("Withdraw from (links, hooks, permissions and the MCP entry ways wrote):", &targets);
+    part(r, "Withdraw from", "links, hooks, permissions and the MCP entry ways wrote", Mark::Remove, &targets);
     if !app_present {
-        println!("The app is already gone, so nothing can be withdrawn; reinstall and uninstall again to clear a projection left behind.");
+        if !nested {
+            r.section("Withdraw from");
+        }
+        r.item(Mark::Warn, "The app is already gone, so nothing can be withdrawn; reinstall and uninstall again to clear a projection left behind.");
     }
-    show("Remove command links:", &p.links);
-    show("Delete:", &p.remove);
+    part(r, "Remove command links", "", Mark::Remove, &p.links);
+    part(r, "Delete", "", Mark::Remove, &p.remove);
     if !purge {
-        show("Keep (your ways, keys, settings, events; --purge deletes them):", &p.keep);
+        part(r, "Keep", "your ways, keys, settings, events; --purge deletes them", Mark::Same, &p.keep);
     }
 }
 
@@ -199,8 +215,14 @@ impl Uninstall {
         Ok(Some(Uninstall { plan, app_present: roots.data.exists(), purge }))
     }
 
-    pub(crate) fn print(&self) {
-        print_plan(&self.plan, self.app_present, self.purge);
+    /// The plan as the sections of a report of its own.
+    pub(crate) fn report_into(&self, r: &mut Report) {
+        plan_into(r, &self.plan, self.app_present, self.purge, false);
+    }
+
+    /// The plan as sub-headings inside the caller's open section.
+    pub(crate) fn nested_into(&self, r: &mut Report) {
+        plan_into(r, &self.plan, self.app_present, self.purge, true);
     }
 
     /// Whether the plan keeps the operator's config or state.
@@ -247,22 +269,27 @@ impl Uninstall {
             }
         }
         if failed > 0 {
-            bail!("{failed} path(s) could not be deleted; fix the cause and run `ways manage uninstall --yes` again");
+            bail!("{failed} path(s) could not be deleted; fix the cause and run `ways manage uninstall --commit` again");
         }
         Ok(())
     }
 }
 
-pub fn run(yes: bool, purge: bool) -> Result<()> {
+pub fn run(mode: crate::cmd::lifecycle::Mode, purge: bool) -> Result<()> {
     let Some(uninstall) = Uninstall::plan(purge)? else {
         println!("agent-ways is not installed: nothing to remove.");
         return Ok(());
     };
-    uninstall.print();
-    if !yes {
-        println!("\nNothing changed. Run `ways manage uninstall --yes` to do this.");
+    let what_if = mode == crate::cmd::lifecycle::Mode::WhatIf;
+    let mut r = Report::new(if what_if { "ways manage uninstall: what-if" } else { "ways manage uninstall" });
+    uninstall.report_into(&mut r);
+    if what_if {
+        let purge = if purge { " --purge" } else { "" };
+        r.footer(Mark::Info, crate::cmd::lifecycle::commit_hint(&format!("ways manage uninstall{purge}")));
+        r.print();
         return Ok(());
     }
+    r.print();
     uninstall.apply()?;
     println!("\nagent-ways is uninstalled. Restart Claude Code so running sessions drop the hooks.");
     if uninstall.keeps_anything() {

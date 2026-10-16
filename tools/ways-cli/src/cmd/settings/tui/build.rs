@@ -508,7 +508,7 @@ impl Ways {
             "install" => {
                 root.actions = vec![
                     activate(),
-                    Action::new("repair", "ways manage repair")
+                    Action::new("repair", "ways manage repair --commit")
                         .confirm()
                         .doc("Rewrites each recorded target's projection to match the settings: hooks, settings.json and the corpus.")
                         .touches("every recorded target directory"),
@@ -650,7 +650,7 @@ impl Ways {
                     .filter_map(|t| {
                         let path = t.get("path")?.as_str()?.to_string();
                         let on = t.get("enabled").and_then(Value::as_bool).unwrap_or(true);
-                        let cmd = |verb: &str| format!("ways manage target {verb} {}", quote(&path));
+                        let cmd = |verb: &str| format!("ways manage target {verb} {} --commit", quote(&path));
                         let toggle = if on {
                             Action::new("disable", cmd("disable")).confirm().doc("Stops projecting into this directory and withdraws what was projected.").touches(path.clone())
                         } else {
@@ -682,7 +682,7 @@ impl Ways {
         }
         let mut g = Node::group("targets", format!("{}\n\n{}", b.spec.doc, b.spec.long), rows).with_actions(vec![
             activate(),
-            Action::new("add", "ways manage target add {}")
+            Action::new("add", "ways manage target add {} --commit")
                 .arg(Arg::Text("directory".into()))
                 .confirm()
                 .doc("Records the directory as a target and projects agent-ways into it.")

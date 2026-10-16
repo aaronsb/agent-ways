@@ -5,21 +5,21 @@ agent-tui frame 100x30
 |│     (none recorded)           ~/.claude (default) [a││                                           │|
 |│ ▾ settings                    value                 ││The Claude Code config directories         │|
 |│     secret_path_deny          true                  ││agent-ways is active in.                   │|
-|│                                                     ││                                           │|
+|│     manage_mode               whatif                ││                                           │|
 |│                                                     ││Changed by actions, since each change      │|
 |│                                                     ││reconciles: `ways manage target            │|
-|│                                                     ││add|enable|disable|remove <dir>` (ADR-184).│|
-|│                 ┌plan: report──────────────────────────────────────────────────┐/.claude,        │|
-|│                 │ $ ways manage target plan ~/work-claude                      │                 │|
-|│                 │                                                              │                 │|
-|│                 │ plan for ~/work-claude                                       │                 │|
-|│                 │   Root       Action Detail                                   │                 │|
-|│                 │   ────────────────────────                                   │                 │|
-|│                 │   hooks/ways link   absent                                   │                 │|
-|│                 │ settings.json: the source ships none; nothing merged         │nfig directories,│|
-|│                 └──────────────────────────────────────────────────────────────┘                 │|
-|│                                                     ││  A add (asks first)                       │|
-|│                                                     ││    ways manage target add '<arg>'         │|
+|│               ┌plan: report──────────────────────────────────────────────────────┐ir> --commit`  │|
+|│               │ $ ways manage target plan ~/work-claude                          │default        │|
+|│               │                                                                  │               │|
+|│               │ ways manage target plan: ~/work-claude                           │               │|
+|│               │                                                                  │               │|
+|│               │ ── Roots ─────────────────────────────────────────────────────── │               │|
+|│               │   + hooks/ways                    link    absent                 │               │|
+|│               │                                                                  │               │|
+|│               │ ── settings.json ─────────────────────────────────────────────── │ig directories,│|
+|│               │   · the source ships none; nothing merged                        │               │|
+|│               └──────────────────────────────────────────────────────────────────┘               │|
+|│                                                     ││    ways manage target add '<arg>' --commit│|
 |│                                                     ││  p plan                                   │|
 |│                                                     ││    ways manage target plan '<arg>'        │|
 |│                                                     ││                                           │|
@@ -77,52 +77,52 @@ styles
   8  54-55  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
-  9  54-55  - - DIM
+  9  16-16  LightBlue - -
+  9  17-28  LightBlue - BOLD
+  9  29-83  LightBlue - -
   9  99-99  - - DIM
  10   0-0   - - DIM
- 10  18-18  LightBlue - -
- 10  19-30  LightBlue - BOLD
- 10  31-81  LightBlue - -
+ 10  16-16  LightBlue - -
+ 10  18-56  - - DIM|ITALIC
+ 10  83-83  LightBlue - -
  10  99-99  - - DIM
  11   0-0   - - DIM
- 11  18-18  LightBlue - -
- 11  20-58  - - DIM|ITALIC
- 11  81-81  LightBlue - -
+ 11  16-16  LightBlue - -
+ 11  83-83  LightBlue - -
  11  99-99  - - DIM
  12   0-0   - - DIM
- 12  18-18  LightBlue - -
- 12  81-81  LightBlue - -
+ 12  16-16  LightBlue - -
+ 12  83-83  LightBlue - -
  12  99-99  - - DIM
  13   0-0   - - DIM
- 13  18-18  LightBlue - -
- 13  81-81  LightBlue - -
+ 13  16-16  LightBlue - -
+ 13  83-83  LightBlue - -
  13  99-99  - - DIM
  14   0-0   - - DIM
- 14  18-18  LightBlue - -
- 14  81-81  LightBlue - -
+ 14  16-16  LightBlue - -
+ 14  83-83  LightBlue - -
  14  99-99  - - DIM
  15   0-0   - - DIM
- 15  18-18  LightBlue - -
- 15  81-81  LightBlue - -
+ 15  16-16  LightBlue - -
+ 15  83-83  LightBlue - -
  15  99-99  - - DIM
  16   0-0   - - DIM
- 16  18-18  LightBlue - -
- 16  81-81  LightBlue - -
+ 16  16-16  LightBlue - -
+ 16  83-83  LightBlue - -
  16  99-99  - - DIM
  17   0-0   - - DIM
- 17  18-18  LightBlue - -
- 17  81-81  LightBlue - -
- 17  82-99  - - DIM
+ 17  16-16  LightBlue - -
+ 17  83-83  LightBlue - -
+ 17  84-99  - - DIM
  18   0-0   - - DIM
- 18  18-81  LightBlue - -
+ 18  16-16  LightBlue - -
+ 18  83-83  LightBlue - -
  18  99-99  - - DIM
  19   0-0   - - DIM
- 19  54-55  - - DIM
- 19  56-59  Cyan - -
+ 19  16-83  LightBlue - -
  19  99-99  - - DIM
  20   0-0   - - DIM
- 20  54-89  - - DIM
- 20  99-99  - - DIM
+ 20  54-99  - - DIM
  21   0-0   - - DIM
  21  54-55  - - DIM
  21  56-59  Cyan - -

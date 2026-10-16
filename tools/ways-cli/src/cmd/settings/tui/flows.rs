@@ -141,7 +141,7 @@ pub fn activate_flow(env: &Env) -> Flow {
                 .map(|c| {
                     let off = targets.iter().any(|(p, on)| !on && expand(p, &home).display().to_string() == c.id);
                     let verb = if off { "enable" } else { "add" };
-                    Out::new(verb, format!("ways manage target {verb} {}", quote(&c.id)), true)
+                    Out::new(verb, format!("ways manage target {verb} {} --commit", quote(&c.id)), true)
                 })
                 .collect()
         },
@@ -178,26 +178,37 @@ fn strip_ansi(s: &str) -> String {
 /// `ways manage target plan` output as styled lines: each root by its verb
 /// (linked is kept, link adds, relink replaces, refused is refused), then the
 /// settings merge by its verb (kept, add, replace, REMOVE). A refused root
-/// carries the note that `--force` moves the real path aside.
+/// carries the note that `--force` moves the real path aside. The text is
+/// the lifecycle report shape (ADR-511): a title `<command>: <dir>`, ruled
+/// section headers, and a mark before each line, which the verb replaces.
 pub fn parse_plan(text: &str) -> Vec<PLine> {
+    const MARKS: [&str; 8] = ["=", "+", "↑", "⚠", "-", "·", "*", "→"];
     let mut out: Vec<PLine> = Vec::new();
-    let mut table = false;
+    let (mut table, mut settings_pending) = (false, false);
     for raw in text.lines() {
         let line = strip_ansi(raw);
         let t = line.trim();
         if t.is_empty() {
             continue;
         }
-        let words: Vec<&str> = t.split_whitespace().collect();
-        if t.starts_with("plan for ") {
-            out.push(PLine::new(Verb::Heading, t));
-            table = true;
+        if let Some(header) = t.strip_prefix("── ") {
+            let name = header.trim_end_matches(|c: char| c == '─' || c.is_whitespace());
+            table = name == "Roots";
+            settings_pending = name == "settings.json";
             continue;
         }
-        if table {
-            if words[0] == "Root" || t.starts_with('─') {
-                continue;
+        if t.starts_with("ways manage target ") {
+            if let Some((_, dir)) = t.rsplit_once(": ") {
+                out.push(PLine::new(Verb::Heading, format!("plan for {dir}")));
             }
+            continue;
+        }
+        let t = match t.split_once(' ') {
+            Some((m, rest)) if MARKS.contains(&m) => rest.trim_start(),
+            _ => t,
+        };
+        let words: Vec<&str> = t.split_whitespace().collect();
+        if table {
             let verb = match words.get(1).copied() {
                 Some("linked") => Some(Verb::Kept),
                 Some("link") => Some(Verb::Added),
@@ -211,10 +222,19 @@ pub fn parse_plan(text: &str) -> Vec<PLine> {
             }
             table = false;
         }
+        if settings_pending {
+            settings_pending = false;
+            if t.starts_with("already merged") {
+                out.push(PLine::new(Verb::Kept, format!("settings.json: {t}")));
+                continue;
+            }
+            if t.starts_with("the source ships none") {
+                out.push(PLine::new(Verb::Plain, format!("settings.json: {t}")));
+                continue;
+            }
+            out.push(PLine::new(Verb::Heading, "settings.json:"));
+        }
         let verb = match words[0] {
-            w if w.starts_with("settings.json") && t.contains("already merged") => Verb::Kept,
-            w if w.starts_with("settings.json") && t.ends_with(':') => Verb::Heading,
-            w if w.starts_with("settings.json") => Verb::Plain,
             "kept" => Verb::Kept,
             "add" | "allow" | "deny" => Verb::Added,
             "refresh" | "replace" => Verb::Replaced,
@@ -402,26 +422,28 @@ pub mod testkit {
     pub fn sample_plan(dir: &str) -> String {
         let esc = '\u{1b}';
         format!(
-            "plan for {dir}
-  {esc}[1mRoot                          Action Detail      {esc}[0m
-  {esc}[2m─────────────────────────────────────────────────{esc}[0m
-  skills                        linked already ours
-  agents                        link   absent
-  commands                      relink points elsewhere
-  hooks/ways                    refused real directory
-  bin/ways                      link   absent
-settings.json:
-  kept      2 hook entries of yours
-  add       SessionStart: \"${{HOME}}/.claude/hooks/ways/check-setup.sh\"
-  refresh   Stop: \"${{HOME}}/.claude/hooks/ways/check-response.sh\"  (ours, from a prior version)
-  replace   PreToolUse: \"x\"  (reads as an agent-ways hook)
-  REMOVE    PostToolUse: \"y\"
-  allow     +3 entries
-  deny      +9 entries (secret paths, ADR-152)
+            "{esc}[1mways manage target plan: {dir}{esc}[0m
 
-blocked: a real path sits at a projection root, or an entry of yours would be removed.
-  --force renames each real path to <name>.ways-backup-<seconds> and proceeds;
-  move a hook out of .claude/hooks/ first if it is listed under REMOVE or replace.
+{esc}[2m──{esc}[0m {esc}[1;36mRoots{esc}[0m {esc}[2m──────────────────────────────────{esc}[0m
+  {esc}[2m={esc}[0m skills                        linked  already ours
+  {esc}[32m+{esc}[0m agents                        link    absent
+  {esc}[32m↑{esc}[0m commands                      relink  points elsewhere
+  {esc}[33m⚠{esc}[0m hooks/ways                    refused real directory
+  {esc}[32m+{esc}[0m bin/ways                      link    absent
+
+── settings.json ─────────────────────────
+  = kept      2 hook entries of yours
+  + add       SessionStart: \"${{HOME}}/.claude/hooks/ways/check-setup.sh\"
+  ↑ refresh   Stop: \"${{HOME}}/.claude/hooks/ways/check-response.sh\"  (ours, from a prior version)
+  ↑ replace   PreToolUse: \"x\"  (reads as an agent-ways hook)
+  - REMOVE    PostToolUse: \"y\"
+  + allow     +3 entries
+  + deny      +9 entries (secret paths, ADR-152)
+
+── Blocked ───────────────────────────────
+  ⚠ blocked: a real path sits at a projection root, or an entry of yours would be removed.
+    --force renames each real path to <name>.ways-backup-<seconds> and proceeds;
+    move a hook out of .claude/hooks/ first if it is listed under REMOVE or replace.
 "
         )
     }
@@ -513,9 +535,10 @@ mod tests {
 
     #[test]
     fn a_clean_plan_is_all_kept_and_a_refused_root_without_the_note_gets_it() {
-        let clean = parse_plan("plan for /d\n  Root Action Detail\n  ────\n  skills linked already ours\nsettings.json: already merged, nothing changes\n");
+        let clean = parse_plan("ways manage target plan: /d\n\n── Roots ──\n  = skills linked already ours\n\n── settings.json ──\n  = already merged, nothing changes\n");
         assert!(clean.iter().all(|l| matches!(l.verb, Verb::Heading | Verb::Kept)), "{clean:?}");
-        let refused = parse_plan("plan for /d\n  skills refused real directory\n");
+        assert_eq!(clean.last().unwrap().text, "settings.json: already merged, nothing changes");
+        let refused = parse_plan("ways manage target plan: /d\n── Roots ──\n  ⚠ skills refused real directory\n");
         assert_eq!(refused.last().unwrap().verb, Verb::Refused);
         assert!(refused.last().unwrap().text.contains("--force moves each real path aside"));
     }

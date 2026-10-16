@@ -146,7 +146,7 @@ link:
 		mkdir -p "$(CLAUDE_BIN)"; dst="$(CLAUDE_BIN)/way-embed"; \
 		if [ "$(CURDIR)/$(WAY_EMBED_BIN)" -ef "$$dst" ]; then :; \
 		elif [ -e "$$dst" ] && [ ! -L "$$dst" ]; then \
-			echo "  ⚠ $$dst is a real file; not replacing it (ways manage repair --force moves it aside)"; \
+			echo "  ⚠ $$dst is a real file; not replacing it ($(REPAIR_CMD) --force moves it aside)"; \
 		else $(LINK) "$(CURDIR)/$(WAY_EMBED_BIN)" "$$dst"; fi; \
 	fi
 
@@ -167,13 +167,19 @@ relink:
 # Retired targets, kept so an in-flight pre-#715 `make update` finishes: make has
 # already parsed the old Makefile, so its recipe still runs `$(MAKE) install`
 # against this file after `scripts/update.sh` pulls it.
+# The update command bin/ways takes: a ways from before ADR-511 has no
+# --commit and updates with the bare form.
+UPDATE_CMD = $(shell ./bin/ways manage update --help 2>/dev/null | grep -- '--commit' >/dev/null && echo 'ways manage update --commit' || echo 'ways manage update')
+# The repair command, the same way.
+REPAIR_CMD = $(shell ./bin/ways manage repair --help 2>/dev/null | grep -- '--commit' >/dev/null && echo 'ways manage repair --commit' || echo 'ways manage repair')
+
 install: link
-	@echo "note: 'make install' is retired; use 'ways manage update'."
+	@echo "note: 'make install' is retired; use '$(UPDATE_CMD)'."
 
 # transition: removed by #717 (ADR-506)
 update:
-	@echo "note: 'make update' is retired; running 'ways manage update'."
-	@./bin/ways manage update
+	@echo "note: 'make update' is retired; running '$(UPDATE_CMD)'."
+	@./bin/$(UPDATE_CMD)
 
 # transition: removed by #717 (ADR-506)
 sync-to-home:
@@ -366,6 +372,7 @@ test-hooks:
 	@cargo build --manifest-path tools/Cargo.toml -p ways --quiet
 	@bash tests/hooks-test.sh
 	@bash tests/make-link-test.sh
+	@bash tests/installer-report-test.sh
 	@bash tests/make-targets-test.sh
 	@bash tests/release-plugin-test.sh
 	@bash tests/prebuilt-lib-test.sh

@@ -21,13 +21,13 @@ This guide covers the paths that aren't straight: an existing `~/.claude` you ca
 
 Everything else in `~/.claude` (`settings.json` values you set, `.credentials.json`, `projects/`, `memory/`, `CLAUDE.md`) is preserved, because the install never replaces your directory. `settings.json` is backed up before the merge. `scripts/`, `tools/` and the rest of the app stay in `$XDG_DATA` and are not projected.
 
-The one case that needs your attention: if a projected root path (`~/.claude/skills`, `agents`, `commands`, `hooks/ways`, or a file under `~/.claude/bin`) is already a real directory or file of your own, `ways manage repair` stops before touching anything and names it. Nothing is deleted. Move it aside yourself (copy anything you want to keep into a project's `.claude/skills/`), or run `ways manage repair --force` to rename each such path to a timestamped sibling (`skills.ways-backup-<seconds>`) and then link.
+The one case that needs your attention: if a projected root path (`~/.claude/skills`, `agents`, `commands`, `hooks/ways`, or a file under `~/.claude/bin`) is already a real directory or file of your own, `ways manage repair` stops before touching anything and names it. Nothing is deleted. Move it aside yourself (copy anything you want to keep into a project's `.claude/skills/`), or run `ways manage repair --commit --force` to rename each such path to a timestamped sibling (`skills.ways-backup-<seconds>`) and then link.
 
-`ways manage uninstall` reverses all of this, including the MCP registration. It lists what it would do; `ways manage uninstall --yes` does it. Your own ways, API keys and event log stay unless you add `--purge`. `ways manage reinstall` puts the installed version back the same way, keeping what is yours, and fetches the copy before it removes anything.
+`ways manage uninstall` reverses all of this, including the MCP registration. It lists what it would do; `ways manage uninstall --commit` does it. Your own ways, API keys and event log stay unless you add `--purge`. `ways manage reinstall --commit` puts the installed version back the same way, keeping what is yours, and fetches the copy before it removes anything; without `--commit` it prints the plan.
 
 ## Activation is separate from installation
 
-Installing stages the app and builds the binaries. Activation is what puts the projection into a Claude Code config directory, and it is recorded as a **target** in your user config ([ADR-184](architecture/platform/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)). With no `targets` key the one target is `~/.claude`, enabled, which is what every install before this model behaved as; the next `ways manage repair` or `ways manage update` records it, and the install is explicit from then on.
+Installing stages the app and builds the binaries. Activation is what puts the projection into a Claude Code config directory, and it is recorded as a **target** in your user config ([ADR-184](architecture/platform/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)). With no `targets` key the one target is `~/.claude`, enabled, which is what every install before this model behaved as; the next `ways manage repair --commit` or `ways manage update --commit` records it, and the install is explicit from then on.
 
 Before activating a directory, ask what it would do:
 
@@ -35,7 +35,7 @@ Before activating a directory, ask what it would do:
 ways manage target plan ~/.claude-work
 ```
 
-The plan lists every projected root as linked, to link, to relink, or refused, and shows the settings merge: the hook entries of yours it keeps, the entries it adds, and anything it would replace or remove. `ways manage target add <dir>` prints the same plan and stops when something of yours would be refused or removed. `ways manage target disable <dir>` withdraws the links and our hooks block through the same merge base that wrote them, and `ways manage target list` shows where agent-ways is active. `ways status` says the same on its first line.
+The plan lists every projected root as linked, to link, to relink, or refused, and shows the settings merge: the hook entries of yours it keeps, the entries it adds, and anything it would replace or remove. `ways manage target add <dir>` prints the same plan and changes nothing; with `--commit` it records the target and projects into it, and stops when something of yours would be refused or removed. `ways manage target disable <dir> --commit` withdraws the links and our hooks block through the same merge base that wrote them, and `ways manage target list` shows where agent-ways is active. `ways status` says the same on its first line.
 
 Each target can carry its own configuration set, a `config.yaml` under `$XDG_CONFIG_HOME/agent-ways/targets/<key>/` with the same keys as the user config, layered over it for sessions under that directory. Two profiles on one machine can run different languages or disabled domains.
 
@@ -49,7 +49,7 @@ The judge decides which of the ways matched on your prompt are injected ([ADR-19
 
 **Defaults.** The judge runs once a stored key passes its check, and its mode defaults to `enforce`: a way it judges irrelevant is held back. With no key the gate is off and every matched way is injected. If a call fails, the matcher's decision stands. Only the key file counts: an agent started by a hook never reads `$ANTHROPIC_API_KEY` or `$OPENROUTER_API_KEY`.
 
-**Setup.** The installer and `ways manage update` end by checking each stored key with a call that costs nothing. When none passes, they say so and, on a terminal, offer to add an Anthropic or OpenRouter key; the installer reads that answer from `/dev/tty`, so it works under `curl … | bash`. Off a terminal they print the fix instead. `ways --help` repeats the warning until the judge works or you turn it off.
+**Setup.** The installer and `ways manage update --commit` end by checking each stored key with a call that costs nothing. When none passes, they say so and, on a terminal, offer to add an Anthropic or OpenRouter key; the installer reads that answer from `/dev/tty`, so it works under `curl … | bash`. Off a terminal they print the fix instead. `ways --help` repeats the warning until the judge works or you turn it off.
 
 ```bash
 ways agent key add --provider anthropic    # or openrouter
@@ -73,13 +73,13 @@ If `~/.claude/` is your **own** git repo (you version-control your config), that
 **A projection install** (the app source is a git checkout in `$XDG_DATA_HOME/agent-ways`). Update in place:
 
 ```bash
-ways manage update              # pull, refresh binaries, regenerate the corpus, reproject
-ways manage update --dry-run    # show what it would run
-ways manage update --ref REF    # pin to a branch, tag or commit; build the suite from source
-ways manage update --ref main   # return to the release channel
+ways manage update                       # what would change; nothing is changed
+ways manage update --commit              # pull, refresh binaries, regenerate the corpus, reproject
+ways manage update --ref REF --commit    # pin to a branch, tag or commit; build the suite from source
+ways manage update --ref main --commit   # return to the release channel
 ```
 
-`ways manage update` pulls with `--ff-only`, stashing local changes in the app dir first and restoring them after. It refreshes the binaries (prebuilt first, source build as fallback), regenerates the corpus, relinks, and reprojects `~/.claude`. Use it rather than `make setup`, which skips binaries that already exist and would leave you on the old build.
+Without `--commit` the command fetches and reports: versions installed and at the target, the release notes in between, the commits grouped by area, local changes, the actions `--commit` would take, and any binary links that point into a dev checkout. `--verbose` lists every commit. `ways manage update --commit` pulls with `--ff-only`, stashing local changes in the app dir first and restoring them after. It refreshes the binaries (prebuilt first, source build as fallback), regenerates the corpus, relinks, and reprojects `~/.claude`. Use it rather than `make setup`, which skips binaries that already exist and would leave you on the old build.
 
 **An install last updated before ways 1.28.0.** 1.28.0 removed the readers for pre-1.0 locations ([ADR-506](architecture/platform/ADR-506-the-consolidation-ends-with-no-legacy-compatibility.md)). If any of these still exist, move them by hand; the commands spell out the XDG defaults:
 
@@ -116,7 +116,7 @@ Running the installer from inside the app dir is what links the suite binaries i
 ```bash
 cd "$XDG_DATA_HOME/agent-ways"
 git fetch upstream && git merge upstream/main   # resolve conflicts in your custom ways
-make update-binaries && ways manage repair          # force-rebuild (make setup would skip existing binaries)
+make update-binaries && ways manage repair --commit # force-rebuild (make setup would skip existing binaries)
 ```
 
 If you're actively *developing* agent-ways, use a standalone dev checkout instead and dogfood via reconcile. See [development.md](development.md).

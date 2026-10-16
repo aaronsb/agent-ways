@@ -277,7 +277,7 @@ const SCREEN_GROUPS: &[&str] = &["session", "manage"];
 /// `reconcile`: the fixed name every successor binary keeps, because the
 /// previous release's updater calls it (ADR-509 §4).
 const MOVED: &[&str] = &["update", "reconcile", "uninstall", "target"];
-const UPDATER: &str = "tools/ways-cli/src/cmd/update.rs (spawn)";
+const UPDATER: &str = "tools/ways-cli/src/cmd/update/mod.rs (spawn)";
 
 /// The installer and check-setup run the app's freshly set-up binary, which
 /// `make setup` downloads from the latest release, not from the checkout they
@@ -386,7 +386,8 @@ fn cross_release_callers_run_the_fixed_name() {
         let text = std::fs::read_to_string(root.join(path)).unwrap();
         // An echoed command escapes its quotes: `\"$APP_DIR/bin/ways\" reconcile`.
         let text = text.replace("\\\"", "\"");
-        let runs: Vec<&str> = text.lines().filter(|l| l.contains("\"$APP_DIR/bin/ways\" ") && !l.contains("bin/ways\" status")).collect();
+        // `status` and the `reconcile --help` probe for --commit read, not repair.
+        let runs: Vec<&str> = text.lines().filter(|l| l.contains("\"$APP_DIR/bin/ways\" ") && !l.contains("bin/ways\" status") && !l.contains("reconcile --help")).collect();
         let fixed = runs.iter().filter(|l| l.contains("\"$APP_DIR/bin/ways\" reconcile")).count();
         assert!(runs.iter().all(|l| !l.contains("bin/ways\" manage")), "{path} runs `manage` on a release binary:\n{}", runs.join("\n"));
         assert_eq!(fixed, want, "{path}: the repair invocations that run `reconcile`:\n{}", runs.join("\n"));
@@ -438,4 +439,249 @@ fn the_scan_reads_moved_names_in_messages() {
     // The new forms, other words, and the skill's name are not moved names.
     assert!(moved_mentions("ways manage update && ways manage target list").is_empty());
     assert!(moved_mentions("always update the cache; ways-update skill; ways updated").is_empty());
+}
+
+// --- Applying hints carry --commit (ADR-511) --------------------------------
+//
+// Every mutating `ways manage` verb reports until `--commit`. A message the
+// code prints that tells the operator to run one of them to get something
+// done ("run `ways manage repair` once it is") has to say `--commit`, or
+// the operator follows it and nothing changes. Code is read as logical
+// lines: a Rust or TypeScript string continued with a trailing `\` joins its
+// next line. The docs, skills, ways and the mod's markdown are held to a
+// stricter rule: every bare mutating verb there is a finding unless its form
+// says it is a description, or it is on the allowlist below.
+
+/// The verbs that change the install.
+const APPLYING: &[&str] = &["update", "repair", "uninstall", "reinstall", "target add", "target enable", "target disable", "target remove"];
+
+/// Words that, just before a command, make it an instruction to run it.
+const CUES: &[&str] = &["run ", "Run ", "run: ", "re-run ", "retry ", "then ", "finish", "To ", "try ", "Try ", "use ", "Use "];
+
+/// Flags that make a mention explicit about applying or reporting.
+const EXPLICIT: &[&str] = &["--commit", "--yes", "--what-if", "--dry-run"];
+
+/// Each `ways manage <verb>` on `line` without an explicit flag, with the
+/// text before it and the rest of the line after its span.
+fn bare_mentions(line: &str) -> Vec<(&str, String, &str)> {
+    let mut out = Vec::new();
+    for (at, m) in line.match_indices("ways manage ") {
+        let rest = &line[at + m.len()..];
+        let Some(verb) = APPLYING.iter().find(|v| rest.starts_with(**v) && !rest[v.len()..].starts_with(|c: char| c.is_ascii_alphanumeric() || c == '-')) else {
+            continue;
+        };
+        let end = rest.find(['`', '"', '\'', ')', ';', '#']).unwrap_or(rest.len());
+        let span = &rest[..end];
+        if EXPLICIT.iter().any(|f| span.contains(f)) {
+            continue;
+        }
+        debug_assert!(span.starts_with(verb));
+        out.push((&line[..at], format!("ways manage {}", span.trim_end().trim_end_matches(['.', ','])), &rest[end..]));
+    }
+    out
+}
+
+/// Each applying hint on a line of code: a bare mention after a cue word,
+/// or one the code queues or names as the repair of a settings section.
+fn hints_missing_commit(line: &str) -> Vec<String> {
+    bare_mentions(line)
+        .into_iter()
+        .filter(|(before, _, _)| {
+            let window: String = before.chars().rev().take(24).collect::<Vec<_>>().into_iter().rev().collect();
+            CUES.iter().any(|c| window.contains(c)) || ["Action::new(", "Out::new(", "repair: Some("].iter().any(|c| before.contains(c))
+        })
+        .map(|(_, hint, _)| hint)
+        .collect()
+}
+
+/// A line's logical form: a string continued with a trailing `\` takes the
+/// next line, its indent dropped.
+fn logical_lines(text: &str) -> Vec<(usize, String)> {
+    let mut out: Vec<(usize, String)> = Vec::new();
+    let mut open: Option<(usize, String)> = None;
+    for (n, line) in text.lines().enumerate() {
+        let piece = match &open {
+            Some(_) => line.trim_start(),
+            None => line,
+        };
+        let (start, mut acc) = open.take().unwrap_or((n, String::new()));
+        match piece.strip_suffix('\\') {
+            Some(head) => {
+                acc.push_str(head);
+                open = Some((start, acc));
+            }
+            None => {
+                acc.push_str(piece);
+                out.push((start, acc));
+            }
+        }
+    }
+    out.extend(open);
+    out
+}
+
+#[test]
+fn an_applying_hint_is_found_and_a_commit_or_a_description_is_not() {
+    assert_eq!(hints_missing_commit("re-run `ways manage repair` once it is"), ["ways manage repair"]);
+    assert_eq!(hints_missing_commit("echo \"  then run: ways manage repair\""), ["ways manage repair"]);
+    assert_eq!(hints_missing_commit("(install a toolchain, then `ways manage update`)"), ["ways manage update"]);
+    assert_eq!(hints_missing_commit("To finish, `ways manage repair`"), ["ways manage repair"]);
+    assert_eq!(hints_missing_commit("Action::new(\"add\", \"ways manage target add {}\")"), ["ways manage target add {}"]);
+    assert!(hints_missing_commit("re-run `ways manage repair --commit` once it is").is_empty());
+    assert!(hints_missing_commit("Run `ways manage uninstall --yes` to do this").is_empty());
+    assert!(hints_missing_commit("`ways manage repair` failed — see the output above").is_empty(), "a description");
+    assert!(hints_missing_commit("Report::new(\"ways manage update: what-if\")").is_empty(), "a title");
+    assert!(hints_missing_commit("run `ways manage target list` to see them").is_empty(), "a verb that changes nothing");
+    // A wrapped Rust string is read as one line.
+    let wrapped = "    bail!(\"…or run \\\n             `ways manage repair --force` to rename\")";
+    let joined = logical_lines(wrapped);
+    assert_eq!(joined.len(), 1, "{joined:?}");
+    assert_eq!(hints_missing_commit(&joined[0].1), ["ways manage repair --force"]);
+}
+
+/// Lines of code that name a bare verb on purpose, with the reason.
+const CODE_ALLOW: &[(&str, &str)] = &[
+    // The hook test expects the bare form a ways from before --commit gets.
+    ("tests/hooks-test.sh", "Run `ways manage update` to install it."),
+];
+
+/// Whether `path` is code the hint scan reads.
+fn hint_code(path: &str) -> bool {
+    let code_root = in_scope(path) || path == "Makefile" || (path.starts_with("plugins/") && !path.contains("/node_modules/"));
+    let code_kind = path.ends_with(".rs") || path.ends_with(".ts") || path.ends_with(".sh") || path.ends_with("/Makefile") || path == "Makefile" || (path.starts_with("hooks/") && !path.rsplit('/').next().unwrap_or("").contains('.'));
+    code_root && code_kind && !path.ends_with("tests/call_sites.rs")
+}
+
+/// Every applying hint in the code under `root`, and how many files were read.
+fn code_hints(root: &Path) -> (Vec<String>, usize) {
+    let mut bad = Vec::new();
+    let mut scanned = 0;
+    for path in tracked_files(root).into_iter().filter(|p| hint_code(p)) {
+        let Ok(text) = std::fs::read_to_string(root.join(&path)) else { continue };
+        scanned += 1;
+        let slashes = path.ends_with(".rs") || path.ends_with(".ts");
+        for (n, line) in logical_lines(&text) {
+            let code = if slashes {
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                line.as_str()
+            } else {
+                shell_code(&line)
+            };
+            if CODE_ALLOW.iter().any(|(p, needle)| *p == path && code.contains(needle)) {
+                continue;
+            }
+            for hint in hints_missing_commit(code) {
+                bad.push(format!("  {path}:{}: `{hint}`", n + 1));
+            }
+        }
+    }
+    (bad, scanned)
+}
+
+#[test]
+fn every_applying_hint_in_code_says_commit() {
+    let (bad, scanned) = code_hints(&repo_root());
+    assert!(scanned > 100, "the scan read {scanned} files; it found nothing to check");
+    assert!(bad.is_empty(), "applying hints without --commit (ADR-511):\n{}", bad.join("\n"));
+}
+
+/// Words that, right after a bare mention, make it a description of what
+/// the verb does rather than an instruction to run it.
+const DESCRIBES: &[&str] = &[
+    "runs", "reports", "replaces", "records", "converges", "installs", "stops", "pulls", "needs", "does", "is", "projects",
+    "refreshes", "re-downloads", "fixes", "prints", "lists", "honours", "points", "would", "puts", "reverses", "relinks",
+    "registers", "fetches", "/", "'s", "three-way", "alone", "run", ", which"
+];
+
+/// Words that, right before a bare mention, make it a description.
+/// Each is matched as whole words at the end of the text before the mention.
+const DESCRIBED_AFTER: &[&str] = &["block", "Whether", "whether", "the next", "via", "after", "as", "by", "of", "Debugging", "same code as", "where", "end of"];
+
+/// Mentions in markdown that read as instructions by form but are
+/// descriptions or deliberate what-ifs, with the reason each is kept.
+const MD_ALLOW: &[(&str, &str)] = &[
+    // The meta-domain table lists the deployment way's trigger words.
+    ("docs/hooks-and-ways/meta.md", "prompt pattern (agent-ways, `ways manage update`"),
+    // The update's stage list names the repair it runs.
+    ("docs/reference/ways-cli.md", "rebuild the corpus, run `ways manage repair`"),
+    // A Mermaid edge label in the extending diagram.
+    ("docs/hooks-and-ways/extending.md", "ways manage update replaces it"),
+    // The way's vocabulary line lists words, not commands.
+    ("hooks/ways/meta/deployment/deployment.md", "$XDG_DATA_HOME/agent-ways ways manage repair reinstall"),
+    // The way's description names what the installer runs.
+    ("hooks/ways/meta/deployment/deployment.md", "installer/update/`ways manage repair` work under it"),
+];
+
+/// Whether a bare mention in markdown reads as a description, by its form:
+/// a heading, a fenced command whose comment says it only reports, a verb
+/// or connective right after it, or a describing word right before it.
+fn md_describes(line: &str, before: &str, after: &str) -> bool {
+    let t = line.trim_start();
+    if t.starts_with('#') {
+        return true;
+    }
+    let comment = line.split_once(" # ").map(|(_, c)| c.to_lowercase()).unwrap_or_default();
+    if ["what it would", "the plan", "report", "nothing", "preview"].iter().any(|w| comment.contains(w)) {
+        return true;
+    }
+    let next = after.trim_start_matches(['`', '"', ')']).trim_start();
+    if DESCRIBES.iter().any(|w| next.starts_with(&format!("{w} ")) || next.starts_with(&format!("{w},")) || next == *w || (*w == "'s" && next.starts_with("'s"))) {
+        return true;
+    }
+    let prev = before.trim_end_matches(['`', '"']).trim_end();
+    DESCRIBED_AFTER.iter().any(|w| prev.strip_suffix(w).is_some_and(|head| !head.ends_with(|c: char| c.is_alphanumeric())))
+}
+
+/// Every bare mutating verb in the markdown under `root` that is neither
+/// described by its form nor allowlisted, and how many files were read.
+fn md_hints(root: &Path) -> (Vec<String>, usize) {
+    let mut bad = Vec::new();
+    let mut scanned = 0;
+    for path in tracked_files(root) {
+        let md = path.ends_with(".md");
+        let roots = ["docs/", "skills/", "hooks/", "plugins/"].iter().any(|r| path.starts_with(r)) || path == "README.md" || path == ".claude/CLAUDE.md";
+        let history = path.starts_with("docs/architecture/") || path.starts_with("docs/research/") || path.contains("CHANGELOG") || path.contains("/node_modules/");
+        if !md || !roots || history {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(root.join(&path)) else { continue };
+        scanned += 1;
+        for (n, line) in text.lines().enumerate() {
+            for (before, hint, after) in bare_mentions(line) {
+                if md_describes(line, before, after) || MD_ALLOW.iter().any(|(p, needle)| *p == path && line.contains(needle)) {
+                    continue;
+                }
+                bad.push(format!("  {path}:{}: `{hint}`", n + 1));
+            }
+        }
+    }
+    (bad, scanned)
+}
+
+#[test]
+fn every_bare_mutating_verb_in_the_docs_is_a_description() {
+    let (bad, scanned) = md_hints(&repo_root());
+    assert!(scanned > 50, "the scan read {scanned} files; it found nothing to check");
+    assert!(bad.is_empty(), "bare mutating verbs in docs that read as instructions (add --commit or --what-if, or allowlist a description in MD_ALLOW):\n{}", bad.join("\n"));
+}
+
+#[test]
+fn a_markdown_instruction_is_found_and_a_description_is_not() {
+    let check = |line: &str| bare_mentions(line).into_iter().filter(|(b, _, a)| !md_describes(line, b, a)).map(|(_, h, _)| h).collect::<Vec<_>>();
+    assert_eq!(check("Then run `ways manage update` to finish."), ["ways manage update"]);
+    assert_eq!(check("ways manage repair"), ["ways manage repair"], "a bare fenced command");
+    assert!(check("ways manage repair                       # what it would do").is_empty());
+    assert!(check("`ways manage repair` converges every enabled target").is_empty());
+    assert!(check("### `ways manage update`").is_empty());
+    assert!(check("Whether `ways manage repair` installs the mod").is_empty());
+    // Instructions the looser rules let through (the re-review's plants).
+    assert_eq!(check("(`ways manage update`, or `make attend link` from the app dir)"), ["ways manage update"]);
+    assert_eq!(check("project the checkout with `ways manage repair --source <checkout>`"), ["ways manage repair --source <checkout>"]);
+    assert_eq!(check("Run `ways manage repair` and restart Claude Code."), ["ways manage repair"]);
+    assert_eq!(check("Remove it with `ways manage uninstall`."), ["ways manage uninstall"]);
+    // `as`, `by` and `of` are whole words: "has" and "was" are not "as".
+    assert_eq!(check("The install has `ways manage update`"), ["ways manage update"]);
+    assert!(check("as `ways manage update --ref` did").is_empty());
 }

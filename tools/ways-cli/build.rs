@@ -14,7 +14,7 @@ fn main() {
     // reachable; `--dirty` flags a build with uncommitted changes. Example:
     // `ways-v1.0.0-78-gc595437`. The downgrade guard keys on the sha, not the tag.
     //
-    // KEEP IN LOCKSTEP with `source_describe()` in src/cmd/update.rs — the guard
+    // KEEP IN LOCKSTEP with `source_describe()` in src/cmd/update/mod.rs — the guard
     // compares shas from both, so the abbreviation (default length here) and the
     // `--long`/`--match` flags must match or the comparison keys off divergent
     // strings. (They can't share a const: build.rs runs before the crate exists.)

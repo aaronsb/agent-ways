@@ -79,7 +79,8 @@ echo "Platform: ${PLATFORM}" >&2
 echo "Release:  ${RELEASE_TAG}" >&2
 
 # Check if our platform binary exists in the release
-if ! gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json assets --jq '.assets[].name' 2>/dev/null | grep -q "^${BIN_NAME}$"; then
+# Not `grep -q`: under pipefail its early exit can SIGPIPE gh into a false miss.
+if ! gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json assets --jq '.assets[].name' 2>/dev/null | grep "^${BIN_NAME}$" >/dev/null; then
   echo "No pre-built binary for ${PLATFORM} in release ${RELEASE_TAG}." >&2
   echo "Available binaries:" >&2
   gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json assets --jq '.assets[].name' 2>/dev/null | grep "mmaid-" | sed 's/^/  /' >&2

@@ -3,9 +3,12 @@
 //! The 1.0 lifecycle separates the *app source* (`$XDG_DATA/agent-ways`, a git
 //! checkout) from its *projection* (`~/.claude`, symlinks + a merged
 //! `settings.json`) — ADR-142. Updating means refreshing the source, its
-//! binaries, and reprojecting. Previously that meant "find the app dir, `cd`,
-//! `make update`, reconcile". This wraps the mainline flow behind one
+//! binaries, and reprojecting. This wraps the mainline flow behind one
 //! command, with the same guard/gate the other lifecycle verbs use.
+//!
+//! Without `--commit` it changes nothing but a fetch and prints what the
+//! update would do: versions, release notes, the source delta, local changes,
+//! the actions on this machine and any dev links (ADR-511, `whatif`).
 //!
 //! Two properties the naive `make update` lacks:
 //!
@@ -28,12 +31,17 @@
 //!   command fails early and safe — it shells `bash`/`make`, absent on a bare
 //!   Windows install — rather than corrupting anything.)
 
+mod delta;
+mod notes;
+mod whatif;
+
+use super::lifecycle::{self, Mode, Steps};
 use crate::paths;
 use anyhow::{bail, Context, Result};
 use std::path::Path;
 use std::process::Command;
 
-pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
+pub fn run(mode: Mode, git_ref: Option<String>, verbose: bool) -> Result<()> {
     let app = paths::data_root();
 
     // Guard: the app source must be an agent-ways git checkout.
@@ -44,6 +52,16 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
             app.display()
         );
     }
+    lifecycle::set_verbose(verbose);
+
+    if mode == Mode::WhatIf {
+        let channel = match git_ref {
+            Some(r) => whatif::Channel::Ref(r),
+            None => whatif::Channel::Release { upstream: whatif::upstream(&app) },
+        };
+        whatif::render(&whatif::gather(&app, channel, verbose)).print();
+        return Ok(());
+    }
 
     let has_toolchain = tool_present("cargo");
 
@@ -53,26 +71,10 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     // the ADR-150 downgrade guard is intentionally bypassed — you are pinning a
     // ref, not chasing newest. Handled entirely by run_ref_upgrade.
     if let Some(git_ref) = git_ref {
-        return run_ref_upgrade(&app, &git_ref, dry_run, has_toolchain);
+        return run_ref_upgrade(&app, &git_ref, has_toolchain);
     }
 
     let ways_bin = app.join("bin").join(exe("ways"));
-
-    if dry_run {
-        println!("ways manage update would, in {}:", app.display());
-        println!("  1. scripts/update.sh          — git pull (autostash-safe)");
-        println!("     (binary steps 2-4 run only if the pull changed their source, or a suite");
-        println!("      binary's --version is older than its Cargo.toml, or way-embed's than its source)");
-        println!("  2. refresh ways               — if cargo source changed: download pre-built (guarded), else build");
-        println!("  3. refresh way-embed          — if tools/way-embed changed or way-embed is older than its source:");
-        println!("     latest release, kept when at or ahead of it; else build (optional)");
-        println!("  4. refresh the rest of tools/suite-bins — if cargo source changed: download pre-built, else build;");
-        println!("     a stale binary whose source did not change: latest release in place, else build");
-        println!("  5. make relink                — install any suite binary still missing, symlink the suite onto PATH");
-        println!("  6. {} corpus + reconcile      — regenerate corpus, reproject ~/.claude", ways_bin.display());
-        println!("(dry-run — nothing executed)");
-        return Ok(());
-    }
 
     // 1. Pull. Capture HEAD before/after so we can tell what the pull actually
     //    touched. Content lands far more often than a release is cut, so the common
@@ -83,9 +85,18 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     //    Gate each build group on whether its own source moved in this pull, and
     //    each suite binary also on whether it is older than its Cargo.toml.
     let head_before = git_head(&app);
-    eprintln!("==> pull ({})", app.display());
-    run_step(Command::new("bash").arg("scripts/update.sh").current_dir(&app), "git pull")?;
+    Steps::stage("Pull");
+    Steps::info(format!("app {}", app.display()));
+    pull(&app)?;
     let head_after = git_head(&app);
+    match (head_before.as_deref(), head_after.as_deref()) {
+        (Some(a), Some(b)) if a == b => Steps::ok("already up to date"),
+        (Some(a), Some(b)) => {
+            let n = count(&app, a, b);
+            Steps::ok(format!("fast-forwarded {} → {} ({n} commit{})", short(a), short(b), if n == "1" { "" } else { "s" }))
+        }
+        _ => Steps::ok("pulled"),
+    }
 
     let (committed_cargo, committed_embed) = match (head_before.as_deref(), head_after.as_deref()) {
         // Both HEADs resolved — classify the diff. If git can't produce it, refresh
@@ -114,6 +125,7 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     let stale = if cargo_changed { Vec::new() } else { stale_suite_binaries(&app) };
 
     let before = binary_versions(&app);
+    Steps::stage("Binaries");
 
     // Content-only update: nothing that feeds a binary changed and no binary is
     // older than its source. Skip the whole
@@ -123,18 +135,14 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     // build it allows is relink's for a suite binary the install lacks, when the
     // pre-built download fails and cargo is present; it stops once the binary exists.
     if !cargo_changed && !way_embed_changed && stale.is_empty() {
-        eprintln!("==> binaries: no source change in this update — skipping suite rebuild");
+        Steps::ok("no binary source changed: the binaries stay");
         // relink is idempotent and cheap when the suite is complete. It runs on every
         // update, not just rebuilds: it installs a suite binary the install lacks and
         // self-heals a missing or broken PATH symlink.
-        if let Err(e) = run_step(Command::new("make").arg("relink").current_dir(&app), "relink") {
-            eprintln!(
-                "  ⚠ could not relink binaries ({e}); run `make link` in {} to fix PATH links.",
-                app.display()
-            );
-        }
+        relink(&app);
         reproject(&app, &ways_bin)?;
         print_complete(&version_changes(&before, &binary_versions(&app)));
+        judge_setup();
         return Ok(());
     }
 
@@ -145,11 +153,14 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     //    reproject the pulled source) rather than aborting mid-update. Skipped when
     //    the cargo suite's source didn't move; a stale ways is refreshed in step 4.
     let ways_refreshed = if cargo_changed {
-        eprintln!("==> refresh ways (pre-built first, downgrade-guarded)");
+        Steps::act("ways: pre-built first, downgrade-guarded");
         match refresh_ways(&app, has_toolchain) {
-            Ok(()) => true,
+            Ok(()) => {
+                Steps::ok("the ways binary is refreshed");
+                true
+            }
             Err(e) => {
-                eprintln!("  ⚠ ways binary NOT refreshed ({e}); keeping the previous binary.");
+                Steps::warn(format!("ways NOT refreshed ({e}); the previous binary stays"));
                 false
             }
         }
@@ -162,36 +173,31 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     //    rename dance (which targets app/bin) doesn't apply here. Optional —
     //    semantic matching degrades to regex without it.
     if way_embed_changed {
-        eprintln!("==> refresh way-embed (pre-built first)");
-        if let Err(e) = run_step(
-            Command::new("make").args(["-C", "tools/way-embed", "rebuild-binary"]).current_dir(&app),
-            "way-embed refresh",
-        ) {
-            eprintln!("  ⚠ way-embed not refreshed ({e}); semantic matching degrades to regex until next update.");
+        Steps::act("way-embed: pre-built first");
+        match run_step(Command::new("make").args(["-C", "tools/way-embed", "rebuild-binary"]).current_dir(&app), "way-embed refresh") {
+            Ok(()) => Steps::ok("way-embed refreshed"),
+            Err(e) => Steps::warn(format!("way-embed not refreshed ({e}); semantic matching degrades to regex until the next update")),
         }
     }
 
-    // 4. Awareness — attend/attend-chat. Now download-first (their `make` targets
-    //    try the pre-built binary before building), so they refresh even without a
-    //    toolchain; the build fallback still needs cargo but the download path does
-    //    not. A failed refresh reverts and keeps the current version.
-    // These are the rest of the suite — ways-audit (compliance) and the attend
-    // awareness pair. `ways` (step 2, downgrade-guarded) and way-embed (step 3,
-    // its own cache path) are refreshed above; everything else flows through the
-    // same `refresh_component` path so the whole collection updates uniformly —
-    // no separate lifecycle for any one tool.
+    // 4. The rest of the suite — ways-audit, ways-mcp, ways-agent and the
+    //    attend pair — through the same download-first `refresh_component` path,
+    //    so the whole collection updates uniformly. A failed refresh reverts and
+    //    keeps the current version.
     if cargo_changed {
         for comp in suite_bins(&app).iter().filter(|n| *n != "ways") {
-            eprintln!("==> refresh {comp} (pre-built first)");
-            if let Err(e) = refresh_component(&app, comp, &[comp.as_str()], &app) {
-                eprintln!("  ⚠ {comp} not refreshed ({e}); it keeps its current version.");
+            Steps::act(format!("{comp}: pre-built first"));
+            match refresh_component(&app, comp, &[comp.as_str()], &app) {
+                Ok(()) => Steps::ok(format!("{comp} refreshed")),
+                Err(e) => Steps::warn(format!("{comp} not refreshed ({e}); it keeps its current version")),
             }
         }
     }
     for s in &stale {
-        eprintln!("==> {} is {}, source is {}: refreshing it", s.name, s.installed, s.source);
-        if let Err(e) = refresh_stale(&app, s, has_toolchain) {
-            eprintln!("  ⚠ {e}");
+        Steps::act(format!("{} is {}, its source is {}: refreshing it", s.name, s.installed, s.source));
+        match refresh_stale(&app, s, has_toolchain) {
+            Ok(()) => Steps::ok(format!("{} refreshed", s.name)),
+            Err(e) => Steps::warn(e.to_string()),
         }
     }
 
@@ -200,13 +206,7 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     // from the original `make install`. `make relink` installs any suite binary
     // missing from `bin/`, then links what exists. The pulled Makefile owns the
     // suite list, so an updater older than a component still installs it here.
-    eprintln!("==> relink suite binaries onto PATH");
-    if let Err(e) = run_step(Command::new("make").arg("relink").current_dir(&app), "relink") {
-        eprintln!(
-            "  ⚠ could not relink binaries ({e}); run `make link` in {} to fix PATH links.",
-            app.display()
-        );
-    }
+    relink(&app);
 
     // 5. Regenerate the corpus + reproject with whatever ways binary is now in place.
     //    Always runs, so a failed binary refresh doesn't leave the pulled source
@@ -216,20 +216,66 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     if ways_refreshed {
         print_complete(&version_changes(&before, &binary_versions(&app)));
     } else {
-        println!("\nSource updated and reprojected, but the ways binary refresh failed (no pre-built");
-        println!("available and no build toolchain?). Your install still runs the previous binary —");
-        println!("retry `ways manage update`, or `make update-binaries` with a toolchain, then restart Claude Code.");
+        Steps::stage("Done");
+        Steps::warn("The source is updated and reprojected, but the ways binary refresh failed (no pre-built");
+        Steps::info("available and no build toolchain?). The install still runs the previous binary: retry");
+        Steps::info("`ways manage update --commit`, or `make update-binaries` with a toolchain, then restart Claude Code.");
     }
     judge_setup();
     Ok(())
 }
 
+/// Step 1: `scripts/update.sh`, the autostash-safe pull. Its output is kept
+/// unless it warns (a stash that did not restore cleanly) or fails.
+fn pull(app: &Path) -> Result<()> {
+    let (ok, out) = lifecycle::run_quiet(Command::new("bash").arg("scripts/update.sh").current_dir(app)).context("running scripts/update.sh")?;
+    if !ok {
+        Steps::fail("the pull stopped; nothing after it ran");
+        bail!("the pull failed — see the output above");
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    if text.contains('⚠') {
+        Steps::warn("local changes conflicted with upstream; they are safe in the stash:");
+        Steps::output(&out);
+    } else if text.contains("could not stash") {
+        Steps::warn("the local changes could not be stashed; the pull ran over them");
+    } else if text.contains("Local changes present") {
+        Steps::ok("local changes stashed and restored");
+    }
+    Ok(())
+}
+
+/// `make relink`: install any suite binary still missing, link the suite onto
+/// PATH. A failure is reported, never fatal.
+fn relink(app: &Path) {
+    match run_step(Command::new("make").arg("relink").current_dir(app), "relink") {
+        Ok(()) => Steps::ok(format!("suite linked onto PATH in {}", lifecycle::xdg_bin().display())),
+        Err(e) => Steps::warn(format!("could not relink binaries ({e}); run `make link` in {} to fix PATH links", app.display())),
+    }
+}
+
+fn short(sha: &str) -> String {
+    sha.chars().take(8).collect()
+}
+
+/// Commits in `a..b`, or `?`.
+fn count(app: &Path, a: &str, b: &str) -> String {
+    Command::new("git")
+        .args(["rev-list", "--count", &format!("{a}..{b}")])
+        .current_dir(app)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|| "?".into())
+}
+
 /// The relevance judge's check and offer, after an update that succeeded. Its
 /// failure is reported and never fails the update.
 fn judge_setup() {
-    println!();
+    Steps::stage("Judge");
     if let Err(e) = super::judge::setup() {
-        eprintln!("ways: judge setup: {e:#}");
+        Steps::warn(format!("judge setup: {e:#}"));
     }
 }
 
@@ -310,7 +356,7 @@ fn classify_build_groups<'a>(paths: impl Iterator<Item = &'a str>) -> (bool, boo
 /// line, which this catches.) `(false, false)` if git can't answer.
 fn working_tree_build_groups(app: &Path) -> (bool, bool) {
     let Some(out) = Command::new("git")
-        .args(["diff", "--name-only", "HEAD"])
+        .args(["--no-optional-locks", "diff", "--name-only", "HEAD"])
         .current_dir(app)
         .output()
         .ok()
@@ -417,13 +463,17 @@ fn version_changes(before: &[(String, Seen)], after: &[(String, Seen)]) -> Vec<S
 
 /// The closing lines of an update whose ways binary is in place.
 fn print_complete(changes: &[String]) {
+    Steps::stage("Done");
     if changes.is_empty() {
-        println!("\nUpdate complete (binaries unchanged). Restart Claude Code to pick up the");
-        println!("refreshed ways, skills, and hooks.");
+        Steps::ok("Update complete (binaries unchanged).");
+        Steps::info("Restart Claude Code to pick up the refreshed ways, skills, and hooks.");
     } else {
-        println!("\nUpdate complete: {}.", changes.join(", "));
-        println!("Restart Claude Code to pick up the new binaries (a running session keeps the");
-        println!("old hooks, ways, and skills in memory).");
+        Steps::ok("Update complete:");
+        for c in changes {
+            Steps::line(lifecycle::Mark::Up, c);
+        }
+        Steps::info("Restart Claude Code to pick up the new binaries (a running session keeps the");
+        Steps::info("old hooks, ways, and skills in memory).");
     }
 }
 
@@ -521,12 +571,34 @@ fn reproject(app: &Path, ways_bin: &Path) -> Result<()> {
     if !ways_bin.exists() {
         bail!("no ways binary at {} after update — cannot reconcile. Re-run the installer.", ways_bin.display());
     }
-    eprintln!("==> regenerate corpus");
-    if let Err(e) = run_step(Command::new(ways_bin).args(["corpus", "--quiet"]).current_dir(app), "ways corpus") {
-        eprintln!("  ⚠ corpus not regenerated ({e}); the next session retries.");
+    regenerate_corpus(app, ways_bin);
+    reconcile(app, ways_bin)
+}
+
+/// Regenerate the corpus, best-effort.
+fn regenerate_corpus(app: &Path, ways_bin: &Path) {
+    Steps::stage("Corpus");
+    match run_step(Command::new(ways_bin).args(["corpus", "--quiet"]).current_dir(app), "ways corpus") {
+        Ok(()) => Steps::ok("corpus regenerated"),
+        Err(e) => Steps::warn(format!("corpus not regenerated ({e}); the next session retries")),
     }
-    eprintln!("==> reconcile projection");
-    run_step(Command::new(ways_bin).arg("reconcile").current_dir(app), "ways manage repair")
+}
+
+/// Reproject every target through the fixed name `reconcile` (ADR-509 §4),
+/// which applies on every release. Its own report of what moved is shown,
+/// indented under the stage.
+fn reconcile(app: &Path, ways_bin: &Path) -> Result<()> {
+    Steps::stage("Reproject");
+    let (ok, out) = lifecycle::run_quiet(Command::new(ways_bin).arg("reconcile").current_dir(app)).context("running the reconcile of the projection")?;
+    if !ok {
+        bail!("`ways manage repair` failed — see the output above");
+    }
+    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    for line in text.lines().filter(|l| !l.trim().is_empty()) {
+        eprintln!("    {line}");
+    }
+    Steps::ok("projection reconciled");
+    Ok(())
 }
 
 /// `ways manage update --ref <ref>` — pin the install to a branch, tag, or commit and
@@ -534,21 +606,9 @@ fn reproject(app: &Path, ways_bin: &Path) -> Result<()> {
 /// release-channel update: fetch-and-checkout instead of pull, force source
 /// builds instead of download-first (an unpublished ref has no pre-built
 /// binary), and no downgrade guard (an explicit pin is not a downgrade). Lands on
-/// a detached HEAD at the ref; `ways manage update --ref main` returns to the channel.
-fn run_ref_upgrade(app: &Path, git_ref: &str, dry_run: bool, has_toolchain: bool) -> Result<()> {
+/// a detached HEAD at the ref; `ways manage update --ref main --commit` returns to the channel.
+fn run_ref_upgrade(app: &Path, git_ref: &str, has_toolchain: bool) -> Result<()> {
     let ways_bin = app.join("bin").join(exe("ways"));
-
-    if dry_run {
-        println!("ways manage update --ref {git_ref} would, in {}:", app.display());
-        println!("  1. git fetch origin {git_ref}");
-        println!("  2. git checkout --detach       — pin the checkout to the ref");
-        println!("  3. make ways-rebuild ways-audit-rebuild [ways-mcp-rebuild] [ways-agent-rebuild] attend-rebuild attend-chat-rebuild  (source, needs cargo)");
-        println!("  4. make -C tools/way-embed     — build way-embed from source (needs cmake; optional)");
-        println!("  5. make relink                 — install any suite binary still missing, symlink the suite onto PATH");
-        println!("  6. {} corpus + reconcile       — regenerate corpus, reproject ~/.claude", ways_bin.display());
-        println!("(dry-run — nothing executed)");
-        return Ok(());
-    }
 
     if !has_toolchain {
         bail!(
@@ -561,34 +621,29 @@ fn run_ref_upgrade(app: &Path, git_ref: &str, dry_run: bool, has_toolchain: bool
     //    which then detaches uniformly whether it is a branch, tag, or sha. If
     //    the server won't serve the ref directly (rare — e.g. a bare sha), fall
     //    back to a full fetch and resolve the name in the working checkout.
-    eprintln!("==> fetch {git_ref} ({})", app.display());
-    let direct = Command::new("git")
-        .args(["fetch", "origin", git_ref])
-        .current_dir(app)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
+    Steps::stage("Fetch");
+    Steps::info(format!("app {}", app.display()));
+    let direct = lifecycle::run_quiet_ok(Command::new("git").args(["fetch", "origin", git_ref]).current_dir(app));
     let checkout_target = if direct {
         "FETCH_HEAD".to_string()
     } else {
-        eprintln!("  (couldn't fetch {git_ref} directly; fetching all refs + tags)");
-        run_step(
-            Command::new("git").args(["fetch", "--tags", "origin"]).current_dir(app),
-            "git fetch",
-        )?;
+        Steps::info(format!("{git_ref} could not be fetched directly; fetching all refs and tags"));
+        run_step(Command::new("git").args(["fetch", "--tags", "origin"]).current_dir(app), "git fetch")?;
         git_ref.to_string()
     };
+    Steps::ok(format!("fetched {git_ref}"));
 
     // 2. Pin to the ref (detached). Fails loudly on a dirty tree rather than
     //    discarding local changes — the app checkout is normally clean (build
     //    artifacts are gitignored; corpus/settings land outside it).
-    eprintln!("==> checkout {git_ref} (detached)");
+    Steps::stage("Checkout");
     run_step(
         Command::new("git")
             .args(["-c", "advice.detachedHead=false", "checkout", "--detach", &checkout_target])
             .current_dir(app),
         "git checkout",
     )?;
+    Steps::ok(format!("{git_ref} checked out on a detached HEAD"));
 
     // 3-5. Build the suite and way-embed from source, then relink.
     build_from_source(app)?;
@@ -598,17 +653,14 @@ fn run_ref_upgrade(app: &Path, git_ref: &str, dry_run: bool, has_toolchain: bool
     if !ways_bin.exists() {
         bail!("no ways binary at {} after the source build — cannot reconcile.", ways_bin.display());
     }
-    eprintln!("==> regenerate corpus");
-    if let Err(e) = run_step(Command::new(&ways_bin).args(["corpus", "--quiet"]).current_dir(app), "ways corpus") {
-        eprintln!("  ⚠ corpus not regenerated ({e}); the next session retries.");
-    }
-    eprintln!("==> reconcile projection");
-    run_step(Command::new(&ways_bin).arg("reconcile").current_dir(app), "ways manage repair")?;
+    regenerate_corpus(app, &ways_bin);
+    reconcile(app, &ways_bin)?;
 
-    println!("\nUpgraded to {git_ref} (built from source; the checkout is on a detached HEAD).");
-    println!("Return to the release channel with:  ways manage update --ref main");
-    println!("Restart Claude Code to pick up the new version. A running session takes the");
-    println!("attend mod's new code with /reload-plugins; the attend binary is read at each call.");
+    Steps::stage("Done");
+    Steps::ok(format!("Upgraded to {git_ref} (built from source; the checkout is on a detached HEAD)."));
+    Steps::info("Return to the release channel with:  ways manage update --ref main --commit");
+    Steps::info("Restart Claude Code to pick up the new version. A running session takes the");
+    Steps::info("attend mod's new code with /reload-plugins; the attend binary is read at each call.");
     judge_setup();
     Ok(())
 }
@@ -636,14 +688,16 @@ pub(super) fn build_from_source(app: &Path) -> Result<()> {
     // The Rust suite, forced from source: an unpublished ref has no download.
     // The *-rebuild targets each cargo-build and relink.
     let targets = source_targets(app);
-    eprintln!("==> build the suite from source ({})", targets.join(" "));
+    Steps::stage("Build");
+    Steps::act(format!("building the suite from source ({}); this takes a few minutes", targets.join(" ")));
     run_step(Command::new("make").args(&targets).current_dir(app), "suite source build")?;
+    Steps::ok("suite built");
 
     // way-embed from source. Its default make target is a source build (cmake),
     // unlike `rebuild-binary` which is download-first — so the ref's own
     // matcher is what gets installed. Optional: semantic matching degrades to
     // regex without it.
-    eprintln!("==> build way-embed from source");
+    Steps::act("building way-embed from source");
     match run_step(
         Command::new("make").args(["-C", "tools/way-embed"]).current_dir(app),
         "way-embed source build",
@@ -659,22 +713,17 @@ pub(super) fn build_from_source(app: &Path) -> Result<()> {
             let cached = crate::paths::corpus_dir().join(exe("way-embed"));
             if cached.exists() {
                 match std::fs::remove_file(&cached) {
-                    Ok(()) => eprintln!("     cleared shadowing cache binary {}", cached.display()),
-                    Err(e) => eprintln!("  ⚠ could not clear cache binary {} ({e})", cached.display()),
+                    Ok(()) => Steps::info(format!("cleared the shadowing cache binary {}", cached.display())),
+                    Err(e) => Steps::warn(format!("could not clear the cache binary {} ({e})", cached.display())),
                 }
             }
+            Steps::ok("way-embed built");
         }
-        Err(e) => eprintln!("  ⚠ way-embed not rebuilt ({e}); semantic matching degrades to regex."),
+        Err(e) => Steps::warn(format!("way-embed not rebuilt ({e}); semantic matching degrades to regex")),
     }
 
     // Install any suite binary still missing and link the suite onto PATH.
-    eprintln!("==> relink suite binaries onto PATH");
-    if let Err(e) = run_step(Command::new("make").arg("relink").current_dir(app), "relink") {
-        eprintln!(
-            "  ⚠ could not relink binaries ({e}); run `make link` in {} to fix PATH links.",
-            app.display()
-        );
-    }
+    relink(app);
     Ok(())
 }
 
@@ -699,13 +748,7 @@ fn refresh_component(app: &Path, name: &str, make_args: &[&str], make_dir: &Path
             .with_context(|| format!("renaming {} aside", bin.display()))?;
     }
 
-    let built = Command::new("make")
-        .args(make_args)
-        .current_dir(make_dir)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-        && bin.exists();
+    let built = run_make(make_dir, make_args) && bin.exists();
 
     if built {
         if had {
@@ -729,12 +772,7 @@ fn refresh_component(app: &Path, name: &str, make_args: &[&str], make_dir: &Path
 /// rename-revert protection of `refresh_component`.
 fn refresh_stale(app: &Path, stale: &Stale, has_toolchain: bool) -> Result<()> {
     let name = stale.name.as_str();
-    let fetched = Command::new("bash")
-        .args(["tools/scripts/download-prebuilt.sh", name])
-        .current_dir(app)
-        .stdout(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success());
+    let fetched = lifecycle::run_quiet_ok(Command::new("bash").args(["tools/scripts/download-prebuilt.sh", name]).current_dir(app));
     let Some(now) = stale_suite_binaries(app).into_iter().find(|s| s.name == name) else {
         return Ok(());
     };
@@ -747,7 +785,7 @@ fn refresh_stale(app: &Path, stale: &Stale, has_toolchain: bool) -> Result<()> {
             now.installed, now.source
         );
     }
-    eprintln!("     {why}; building {name} from source");
+    Steps::info(format!("{why}; building {name} from source"));
     refresh_component(app, name, &[&format!("{name}-rebuild")], app)
 }
 
@@ -802,16 +840,16 @@ fn refresh_ways(app: &Path, has_toolchain: bool) -> Result<()> {
     };
     match &verdict {
         Freshness::AtLeastAsNew => {}
-        Freshness::Older => eprintln!(
-            "  ⚠ downloaded pre-built ({}) is behind the pulled source ({}) — not a valid update.",
+        Freshness::Older => Steps::warn(format!(
+            "the downloaded pre-built ({}) is behind the pulled source ({}), so it is not a valid update",
             candidate.as_deref().unwrap_or("?"),
             source.as_deref().unwrap_or("?"),
-        ),
-        Freshness::Unknown => eprintln!(
-            "  ⚠ could not verify the downloaded binary's lineage (candidate={}, source={}).",
+        )),
+        Freshness::Unknown => Steps::warn(format!(
+            "could not verify the downloaded binary's lineage (candidate {}, source {})",
             candidate.as_deref().unwrap_or("?"),
             source.as_deref().unwrap_or("?"),
-        ),
+        )),
     }
 
     match guard_action(&verdict, had, has_toolchain) {
@@ -822,7 +860,7 @@ fn refresh_ways(app: &Path, has_toolchain: bool) -> Result<()> {
             Ok(())
         }
         GuardAction::BuildFromSource => {
-            eprintln!("     building ways from source (the pulled checkout is authoritative)…");
+            Steps::act("building ways from source (the pulled checkout is authoritative)");
             if run_make(app, &["ways-rebuild"]) && bin.exists() {
                 if had {
                     let _ = std::fs::remove_file(&backup);
@@ -842,7 +880,7 @@ fn refresh_ways(app: &Path, has_toolchain: bool) -> Result<()> {
             })?;
             bail!(
                 "downloaded ways binary is not a verified upgrade and no toolchain is present \
-                 — kept the previous binary (install a toolchain, then `ways manage update`)"
+                 — kept the previous binary (install a toolchain, then `ways manage update --commit`)"
             );
         }
     }
@@ -893,29 +931,36 @@ fn has_make_target(dir: &Path, target: &str) -> bool {
         .is_ok_and(|s| s.success())
 }
 
-/// Run a `make` target in `dir`, returning whether it succeeded.
+/// Run a `make` target in `dir`, returning whether it succeeded. Its output
+/// shows under `--verbose` or when it fails.
 fn run_make(dir: &Path, args: &[&str]) -> bool {
-    Command::new("make")
-        .args(args)
-        .current_dir(dir)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    lifecycle::run_quiet_ok(Command::new("make").args(args).current_dir(dir))
 }
 
 /// The pulled source's `git describe`, or None. KEEP IN LOCKSTEP with the flag
 /// list in build.rs (`WAYS_BUILD`): the guard compares shas derived from both, so
 /// the abbreviation length and `--long`/`--match` flags must be identical or it
 /// keys off divergent strings.
+///
+/// `git describe --dirty` refreshes and rewrites the index even under
+/// `--no-optional-locks`, and the reinstall plan reads this, so the dirty
+/// mark comes from `status --porcelain --untracked-files=no` instead, which
+/// does not write. It is the same mark: describe's `-dirty` also counts
+/// tracked changes only.
 pub(super) fn source_describe(app: &Path) -> Option<String> {
-    Command::new("git")
-        .args(["describe", "--tags", "--always", "--long", "--dirty", "--match", "ways-v*"])
-        .current_dir(app)
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .filter(|s| !s.is_empty())
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .arg("--no-optional-locks")
+            .args(args)
+            .current_dir(app)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    };
+    let describe = git(&["describe", "--tags", "--always", "--long", "--match", "ways-v*"]).filter(|s| !s.is_empty())?;
+    let dirty = git(&["status", "--porcelain", "--untracked-files=no"]).is_some_and(|s| !s.is_empty());
+    Some(if dirty { format!("{describe}-dirty") } else { describe })
 }
 
 /// The `git describe` a binary bakes, read from its `--version` output —
@@ -1028,12 +1073,12 @@ pub(super) fn is_app_checkout(dir: &Path) -> bool {
             .unwrap_or(false)
 }
 
+/// Run one step of a commit run. Its output shows under `--verbose`, or
+/// below the step when it fails.
 pub(super) fn run_step(cmd: &mut Command, label: &str) -> Result<()> {
-    let status = cmd
-        .status()
-        .with_context(|| format!("running `{label}` (is it installed?)"))?;
-    if !status.success() {
-        bail!("`{label}` failed ({status}) — see the output above");
+    let (ok, out) = lifecycle::run_quiet(cmd).with_context(|| format!("running `{label}` (is it installed?)"))?;
+    if !ok {
+        bail!("`{label}` failed ({}) — see the output above", out.status);
     }
     Ok(())
 }

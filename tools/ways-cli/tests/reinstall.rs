@@ -122,13 +122,13 @@ fn text(out: &Output) -> String {
 }
 
 #[test]
-fn without_yes_it_prints_the_plan_and_changes_nothing() {
+fn without_commit_it_prints_the_plan_and_changes_nothing() {
     let s = Sandbox::new("plan", BUILDS);
     let out = s.ways(&["manage", "reinstall"]);
     let t = text(&out);
     assert!(out.status.success(), "{t}");
     assert!(t.contains("Fetch and verify") && t.contains(s.stage().to_str().unwrap()), "{t}");
-    assert!(t.contains("Uninstall, keeping your config and state") && t.contains("Delete:"), "{t}");
+    assert!(t.contains("Uninstall, keeping your config and state") && t.contains("  Delete\n"), "{t}");
     assert!(t.contains("Install from the stage") && t.contains(" on main"), "{t}");
     assert!(t.contains("Nothing changed"), "{t}");
     assert!(!t.contains("local changes"), "a clean app says nothing: {t}");
@@ -141,7 +141,7 @@ fn without_yes_it_prints_the_plan_and_changes_nothing() {
 #[test]
 fn purge_is_refused() {
     let s = Sandbox::new("purge", BUILDS);
-    let out = s.ways(&["manage", "reinstall", "--yes", "--purge"]);
+    let out = s.ways(&["manage", "reinstall", "--commit", "--purge"]);
     assert_eq!(out.status.code(), Some(2), "{}", text(&out));
     assert!(text(&out).contains("does not take --purge"));
     s.untouched();
@@ -151,7 +151,7 @@ fn purge_is_refused() {
 fn a_failed_fetch_removes_nothing() {
     let s = Sandbox::new("nofetch", BUILDS);
     git(&s.app(), &["remote", "set-url", "origin", s.base.join("gone").to_str().unwrap()]);
-    let out = s.ways(&["manage", "reinstall", "--yes"]);
+    let out = s.ways(&["manage", "reinstall", "--commit"]);
     let t = text(&out);
     assert!(!out.status.success(), "{t}");
     assert!(t.contains("nothing was removed"), "{t}");
@@ -164,7 +164,7 @@ fn a_commit_the_source_lacks_fails_verification_and_removes_nothing() {
     write(&s.app().join("local.txt"), "x\n");
     git(&s.app(), &["add", "."]);
     git(&s.app(), &["commit", "-qm", "local only"]);
-    let out = s.ways(&["manage", "reinstall", "--yes"]);
+    let out = s.ways(&["manage", "reinstall", "--commit"]);
     let t = text(&out);
     assert!(!out.status.success(), "{t}");
     assert!(t.contains("does not have") && t.contains("nothing was removed"), "{t}");
@@ -174,7 +174,7 @@ fn a_commit_the_source_lacks_fails_verification_and_removes_nothing() {
 #[test]
 fn a_failed_install_keeps_the_stage_and_prints_the_finishing_line() {
     let s = Sandbox::new("noinstall", FAILS);
-    let out = s.ways(&["manage", "reinstall", "--yes"]);
+    let out = s.ways(&["manage", "reinstall", "--commit"]);
     let t = text(&out);
     assert!(!out.status.success(), "{t}");
     assert!(s.stage().join("scripts/install.sh").is_file(), "the stage is kept: {t}");
@@ -187,7 +187,7 @@ fn a_failed_install_keeps_the_stage_and_prints_the_finishing_line() {
 #[test]
 fn a_projection_stop_keeps_the_built_app_and_names_repair_as_the_finish() {
     let s = Sandbox::new("refused", REFUSES);
-    let out = s.ways(&["manage", "reinstall", "--yes"]);
+    let out = s.ways(&["manage", "reinstall", "--commit"]);
     let t = text(&out);
     assert!(!out.status.success(), "{t}");
     assert!(s.app().join("bin/ways").is_file(), "the built app is kept: {t}");
@@ -203,7 +203,7 @@ fn an_installer_without_stage_mode_is_not_run() {
     let s = Sandbox::new("oldinstaller", BUILDS);
     // An installer from before --stage updates in place and exits 0.
     write(&s.app().join("scripts/install.sh"), "touch \"$(dirname \"$0\")/../updated\"\n");
-    let out = s.ways(&["manage", "reinstall", "--yes"]);
+    let out = s.ways(&["manage", "reinstall", "--commit"]);
     let t = text(&out);
     assert!(!out.status.success(), "{t}");
     assert!(t.contains("--stage") && t.contains("nothing was removed"), "{t}");
@@ -216,7 +216,7 @@ fn a_detached_source_build_is_rebuilt_from_source() {
     let s = Sandbox::new("detached", SOURCE);
     let rev = git(&s.app(), &["rev-parse", "HEAD"]);
     git(&s.app(), &["checkout", "-q", "--detach"]);
-    let out = s.ways(&["manage", "reinstall", "--yes"]);
+    let out = s.ways(&["manage", "reinstall", "--commit"]);
     let t = text(&out);
     assert!(out.status.success(), "{t}");
     assert_eq!(git(&s.app(), &["rev-parse", "HEAD"]), rev, "{t}");
@@ -229,7 +229,7 @@ fn a_detached_source_build_is_rebuilt_from_source() {
 #[test]
 fn a_branch_install_keeps_the_release_binaries() {
     let s = Sandbox::new("onbranch", SOURCE);
-    let out = s.ways(&["manage", "reinstall", "--yes"]);
+    let out = s.ways(&["manage", "reinstall", "--commit"]);
     let t = text(&out);
     assert!(out.status.success(), "{t}");
     assert!(!s.app().join("bin/rebuilt").exists(), "a branch install is the release channel: {t}");
@@ -240,7 +240,7 @@ fn an_app_without_git_beside_a_stage_names_the_finish() {
     let s = Sandbox::new("nogit", BUILDS);
     git(&s.base.join("data"), &["clone", "-q", s.base.join("origin").to_str().unwrap(), "agent-ways.reinstall"]);
     std::fs::remove_dir_all(s.app().join(".git")).unwrap();
-    let out = s.ways(&["manage", "reinstall", "--yes"]);
+    let out = s.ways(&["manage", "reinstall", "--commit"]);
     let t = text(&out);
     assert!(!out.status.success(), "{t}");
     let finish = format!("cd '{}' && AGENT_WAYS_ORIGIN='{}' bash scripts/install.sh", s.stage().display(), s.base.join("origin").display());
@@ -252,7 +252,7 @@ fn an_app_without_git_beside_a_stage_names_the_finish() {
 fn a_relative_origin_resolves_from_the_app_dir() {
     let s = Sandbox::new("relorigin", BUILDS);
     git(&s.app(), &["remote", "set-url", "origin", "../../origin"]);
-    let out = s.ways(&["manage", "reinstall", "--yes"]);
+    let out = s.ways(&["manage", "reinstall", "--commit"]);
     let t = text(&out);
     assert!(out.status.success(), "{t}");
     assert!(s.app().join("bin/ways").is_file(), "{t}");
@@ -263,7 +263,7 @@ fn a_stage_left_beside_a_changed_app_is_not_discarded() {
     let s = Sandbox::new("leftstage", BUILDS);
     write(&s.stage().join("scripts/install.sh"), "# an earlier run's stage\n");
     std::fs::remove_file(s.app().join("hooks/check-config-updates.sh")).unwrap();
-    let out = s.ways(&["manage", "reinstall", "--yes"]);
+    let out = s.ways(&["manage", "reinstall", "--commit"]);
     let t = text(&out);
     assert!(!out.status.success(), "{t}");
     assert!(s.stage().join("scripts/install.sh").is_file(), "the stage is kept: {t}");
@@ -282,7 +282,7 @@ fn a_failed_uninstall_keeps_the_stage_and_prints_the_finishing_line() {
     write(&locked.join("file"), "x\n");
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
-    let out = s.ways(&["manage", "reinstall", "--yes"]);
+    let out = s.ways(&["manage", "reinstall", "--commit"]);
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
     let t = text(&out);
     assert!(!out.status.success(), "{t}");
@@ -300,7 +300,7 @@ fn a_reinstall_puts_back_the_same_commit_branch_and_origin() {
     write(&s.base.join("origin/later.txt"), "x\n");
     git(&s.base.join("origin"), &["add", "."]);
     git(&s.base.join("origin"), &["commit", "-qm", "later"]);
-    let out = s.ways(&["manage", "reinstall", "--yes"]);
+    let out = s.ways(&["manage", "reinstall", "--commit"]);
     let t = text(&out);
     assert!(out.status.success(), "{t}");
     assert_eq!(git(&s.app(), &["rev-parse", "HEAD"]), rev, "{t}");
@@ -359,4 +359,23 @@ fn the_installer_refuses_a_value_flag_without_its_value() {
         assert!(!s.base.join("staged").exists() && !s.base.join("data/--from").exists(), "{args:?} staged something: {t}");
         assert!(!s.app().join("bin").exists(), "{args:?} installed: {t}");
     }
+}
+
+#[test]
+fn the_plan_leaves_the_index_alone() {
+    let s = Sandbox::new("index", BUILDS);
+    let makefile = s.app().join("Makefile");
+    let text = std::fs::read_to_string(&makefile).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    std::fs::write(&makefile, text).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let mtime = || std::fs::metadata(s.app().join(".git/index")).unwrap().modified().unwrap();
+    let before = mtime();
+    let out = s.ways(&["manage", "reinstall"]);
+    assert!(out.status.success(), "{}", text_of(&out));
+    assert_eq!(mtime(), before, "the plan rewrote .git/index");
+}
+
+fn text_of(out: &Output) -> String {
+    format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
 }

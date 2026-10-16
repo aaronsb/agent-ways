@@ -20,6 +20,7 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 
 use super::uninstall::Uninstall;
+use super::lifecycle::{Mark, Report};
 use super::update::{build_from_source, git_head, is_app_checkout, run_step, source_describe, tool_present};
 use crate::paths;
 
@@ -51,8 +52,11 @@ impl Source {
     }
 }
 
+/// A read-only git query: `--no-optional-locks` keeps `git status` from
+/// refreshing the index, so the plan writes nothing (ADR-511).
 fn git(dir: &Path, args: &[&str]) -> Option<String> {
     Command::new("git")
+        .arg("--no-optional-locks")
         .args(args)
         .current_dir(dir)
         .output()
@@ -83,11 +87,11 @@ fn quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
-pub fn run(yes: bool, purge: bool) -> Result<()> {
+pub fn run(mode: super::lifecycle::Mode, purge: bool) -> Result<()> {
     if purge {
         eprintln!(
             "ways manage reinstall keeps your config and state, so it does not take --purge.\n\
-             To delete them as well, run `ways manage uninstall --purge --yes`, then the installer."
+             To delete them as well, run `ways manage uninstall --purge --commit`, then the installer."
         );
         std::process::exit(2);
     }
@@ -109,28 +113,34 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
     let source = Source::read(&app)?;
     let uninstall = Uninstall::plan(false)?;
 
-    println!("Reinstall {} from {}:\n", source.label(), source.url);
-    println!("1. Fetch and verify that commit into {}. If this fails, nothing is removed.", stage.display());
-    println!("2. Uninstall, keeping your config and state:");
     // The stage holds the committed HEAD only; edits in the app dir go with it.
     let dirty = git(&app, &["status", "--porcelain"]).is_some();
-    if dirty {
-        println!("   {} has local changes, which the uninstall deletes.", app.display());
-    }
-    if let Some(u) = &uninstall {
-        u.print();
-    }
-    println!("3. Install from the stage (scripts/install.sh), then project every target your config lists.");
     // A detached HEAD is a `manage update --ref` source build. The installer's
     // setup downloads release binaries, so the suite is built from source again.
     let source_build = source.branch.is_none();
-    if source_build {
-        println!("   The install is a source build (detached HEAD), so the suite is built from source again, as `ways manage update --ref` did.");
+    let what_if = mode == super::lifecycle::Mode::WhatIf;
+    let mut r = Report::new(if what_if { "ways manage reinstall: what-if" } else { "ways manage reinstall" });
+    r.subtitle(format!("Reinstall {} from {}", source.label(), source.url));
+    r.section("1. Fetch");
+    r.item(Mark::Act, format!("Fetch and verify that commit into {}. If this fails, nothing is removed.", stage.display()));
+    r.section("2. Uninstall, keeping your config and state");
+    if dirty {
+        r.item(Mark::Warn, format!("{} has local changes, which the uninstall deletes.", app.display()));
     }
-    if !yes {
-        println!("\nNothing changed. Run `ways manage reinstall --yes` to do this.");
+    if let Some(u) = &uninstall {
+        u.nested_into(&mut r);
+    }
+    r.section("3. Install");
+    r.item(Mark::Act, "Install from the stage (scripts/install.sh), then project every target your config lists.");
+    if source_build {
+        r.item(Mark::Info, "The install is a source build (detached HEAD), so the suite is built from source again, as `ways manage update --ref` did.");
+    }
+    if what_if {
+        r.footer(Mark::Info, super::lifecycle::commit_hint("ways manage reinstall"));
+        r.print();
         return Ok(());
     }
+    r.print();
 
     if source_build && !tool_present("cargo") {
         bail!(
@@ -148,7 +158,7 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
             eprintln!(
                 "A stage from an earlier reinstall is at {}, and {} has changes.\n\
                  If that reinstall stopped partway, delete what is left of the app, then finish from the stage:\n  {}\n\
-                 Otherwise remove the stage and run `ways manage reinstall --yes` again.",
+                 Otherwise remove the stage and run `ways manage reinstall --commit` again.",
                 stage.display(),
                 app.display(),
                 finish_line(&stage, &source.url)
@@ -163,7 +173,7 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
     if !std::fs::read_to_string(&installer).is_ok_and(|t| t.contains("--stage)")) {
         bail!(
             "{} has no --stage mode, which reinstall fetches through; nothing was removed. \
-             Run `ways manage update` to move to a version that has it.",
+             Run `ways manage update --commit` to move to a version that has it.",
             installer.display()
         );
     }
@@ -238,7 +248,7 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
     if source_build {
         if let Err(e) = build_from_source(&app) {
             eprintln!(
-                "\nagent-ways {} is installed with release binaries, and the source build failed. Fix the cause above, then run:\n  ways manage update --ref {}",
+                "\nagent-ways {} is installed with release binaries, and the source build failed. Fix the cause above, then run:\n  ways manage update --ref {} --commit",
                 source.label(),
                 source.rev
             );
@@ -247,7 +257,7 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
     }
     if stopped {
         eprintln!(
-            "\nagent-ways {} is installed, and no target is projected yet. Fix the cause above, then finish with:\n  ways manage repair",
+            "\nagent-ways {} is installed, and no target is projected yet. Fix the cause above, then finish with:\n  ways manage repair --commit",
             source.label()
         );
         bail!("the repair after the install failed");
@@ -258,7 +268,7 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
     //    lists.
     eprintln!("==> project every target");
     if let Err(e) = super::reconcile::run(Some(app.to_string_lossy().into_owned()), None, None, false, false, false) {
-        eprintln!("\nagent-ways {} is installed, but a target was not projected. Fix the cause above, then run:\n  ways manage repair", source.label());
+        eprintln!("\nagent-ways {} is installed, but a target was not projected. Fix the cause above, then run:\n  ways manage repair --commit", source.label());
         return Err(e);
     }
     println!("\nagent-ways {} is reinstalled. Restart Claude Code to pick it up.", source.label());

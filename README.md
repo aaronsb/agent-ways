@@ -162,14 +162,14 @@ The installer:
 
 - stages the app into `$XDG_DATA_HOME/agent-ways` and builds the binaries, fetching the embedding model (~21MB);
 - links the suite binaries into `~/.local/bin`;
-- runs `ways manage repair`, which symlinks the projected roots (`skills/`, `agents/`, `commands/`, `hooks/ways/`, built binaries) into `~/.claude`, merges its hook entries and permissions into `settings.json`, and registers the `agent-ways` MCP server in `~/.claude.json`;
+- runs the projection repair (under the hidden fixed name of `ways manage repair --commit`, which applies with no flag), which symlinks the projected roots (`skills/`, `agents/`, `commands/`, `hooks/ways/`, built binaries) into `~/.claude`, merges its hook entries and permissions into `settings.json`, and registers the `agent-ways` MCP server in `~/.claude.json`;
 - checks for a relevance-judge key and, on a terminal, offers to add one.
 
 Your existing `~/.claude` (sessions, credentials, your own `settings.json` values, `projects/`) is preserved. If one of the projected root paths is already a real directory of yours, reconcile stops and names it; it never deletes it. The [install guide](docs/install-guide.md) covers that case, forks and previous installs. Restart Claude Code and the ways are active.
 
 To customize, add your own ways under `$XDG_CONFIG_HOME/agent-ways/ways/` (see [Creating Ways](#creating-ways)). To replace the shipped corpus, fork the repo and install from your fork. To work on agent-ways itself, set up a [development checkout](docs/development.md).
 
-To remove it, `ways manage uninstall` lists what it would do: withdraw from `~/.claude` and your other targets, remove the MCP registration, unlink the commands, delete the app and its caches. `ways manage uninstall --yes` does it. Your own ways, API keys and event log stay unless you add `--purge` (ADR-198). To put the same version back cleanly, `ways manage reinstall --yes` fetches it first, then uninstalls and installs, keeping what is yours.
+To remove it, `ways manage uninstall` lists what it would do: withdraw from `~/.claude` and your other targets, remove the MCP registration, unlink the commands, delete the app and its caches. `ways manage uninstall --commit` does it. Your own ways, API keys and event log stay unless you add `--purge` (ADR-198). To put the same version back cleanly, `ways manage reinstall --commit` fetches it first, then uninstalls and installs, keeping what is yours.
 
 > **Stop and read this** if you're letting an AI agent run the installer. You are about to let an agent modify `~/.claude/` — the directory that controls how Claude Code behaves. The agent is editing its own configuration. Review the repo first. You are responsible for the result.
 
@@ -368,15 +368,15 @@ For the attention mechanics: [context-decay.md](docs/hooks-and-ways/context-deca
 The app source lives in `$XDG_DATA_HOME/agent-ways`. Update it with:
 
 ```bash
-ways manage update              # pull, refresh binaries, regenerate the corpus, reproject ~/.claude
-ways manage update --dry-run    # show what it would run
-ways manage update --ref REF    # pin to a branch, tag or commit and build from source
-ways manage update --ref main   # return to the release channel
+ways manage update                       # what would change; nothing is changed
+ways manage update --commit              # pull, refresh binaries, regenerate the corpus, reproject ~/.claude
+ways manage update --ref REF --commit    # pin to a branch, tag or commit and build from source
+ways manage update --ref main --commit   # return to the release channel
 ```
 
-`ways manage update` pulls the app source, prefers prebuilt binaries over a source build, regenerates the corpus, relinks, reprojects `~/.claude` (`ways manage repair`), and ends with the judge key check. Re-running the installer one-liner does the same and is idempotent. The [install guide](docs/install-guide.md#scenario-a-previous-agent-ways-install) covers the flags and older installs.
+Without `--commit`, `ways manage update` fetches and reports what the update would change: each component's version, the release notes in between, the commits grouped by area, local changes in the app dir, the actions it would take, and any binary links a `make dev-install` left. With `--commit` it pulls the app source, prefers prebuilt binaries over a source build, regenerates the corpus, relinks, reprojects `~/.claude` through the repair, and ends with the judge key check. `ways settings set install.manage_mode commit` makes it apply without the flag. Re-running the installer one-liner also updates and is idempotent. The [install guide](docs/install-guide.md#scenario-a-previous-agent-ways-install) covers the flags and older installs.
 
-A fork fetches and merges upstream in the app dir (`git fetch upstream && git merge upstream/main`), then runs `make update-binaries && ways manage repair`. The corpus rebuilds itself at the next session start.
+A fork fetches and merges upstream in the app dir (`git fetch upstream && git merge upstream/main`), then runs `make update-binaries && ways manage repair --commit`. The corpus rebuilds itself at the next session start.
 
 At session start, `check-config-updates.sh` flags when the app source is behind upstream (`aaronsb/agent-ways`), fetching at most once per hour. A fork or a non-GitHub origin gets no nudge. There is no off switch yet that survives the next `ways manage repair`: deleting the script or its `settings.json` entry is undone by reconcile ([#816](https://github.com/aaronsb/agent-ways/issues/816)).
 

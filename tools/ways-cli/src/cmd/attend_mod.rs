@@ -171,7 +171,7 @@ fn market(have: &Installed, dir: &str, recorded: Option<&str>) -> Market {
 fn foreign_note(from: &str, recover: &str) -> String {
     format!(
         "an {MARKETPLACE} marketplace from {from}, which this app did not add, is configured; it and its plugins are left as they are. \
-         To hand it to this app, run `{recover}` and then `ways manage repair`"
+         To hand it to this app, run `{recover}` and then `ways manage repair --commit`"
     )
 }
 
@@ -298,7 +298,7 @@ pub fn converge(source_root: &Path, dest_root: &Path, default_root: &Path, insta
     let Some(shipped) = shipped_version(source_root) else { return Vec::new() };
     let Some(claude) = claude_bin() else {
         return vec![format!(
-            "attend mod: not {}: `claude` is not on PATH; re-run `ways manage repair` once it is",
+            "attend mod: not {}: `claude` is not on PATH; re-run `ways manage repair --commit` once it is",
             if install { "installed" } else { "checked" }
         )];
     };
@@ -446,7 +446,7 @@ mod tests {
         let p = plan_converge(&have(Some(&dev), Some("0.17.0")), DIR, Some("/old/plugins"), "0.18.0", "CMD");
         assert!(p.calls.is_empty(), "{p:?}");
         assert!(p.notes[0].contains(&dev), "{p:?}");
-        assert!(p.notes[0].contains("run `CMD` and then `ways manage repair`"), "the way out: {p:?}");
+        assert!(p.notes[0].contains("run `CMD` and then `ways manage repair --commit`"), "the way out: {p:?}");
         let w = plan_withdraw(&have(Some(&dev), Some("0.17.0")), DIR, None, "CMD");
         assert!(w.calls.is_empty(), "its plugin is the operator's too: {w:?}");
         assert_eq!(w.notes.len(), 1);

@@ -65,4 +65,4 @@ $ ways corpus
 
 ## A different signal: SIGILL on Linux
 
-A `way-embed` that dies with `SIGILL` on an older x86-64 CPU is a different problem: a prebuilt compiled for instructions the CPU lacks. Linux prebuilts are now built without native CPU tuning, so `ways manage update` fixes it. Until the engine runs, the corpus build keeps the previous corpus and `ways status` names the failure.
+A `way-embed` that dies with `SIGILL` on an older x86-64 CPU is a different problem: a prebuilt compiled for instructions the CPU lacks. Linux prebuilts are now built without native CPU tuning, so `ways manage update --commit` fixes it. Until the engine runs, the corpus build keeps the previous corpus and `ways status` names the failure.

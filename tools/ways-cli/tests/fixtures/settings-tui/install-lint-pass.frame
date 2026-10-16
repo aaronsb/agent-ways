@@ -5,7 +5,7 @@ agent-tui frame 100x30
 |│     (none recorded)           ~/.claude (default) [a││                                           │|
 |│ ▾ settings                    value                 ││Merge the secret-path permissions.deny     │|
 |│▌    secret_path_deny          true                  ││baseline into settings.json.               │|
-|│                                                     ││                                           │|
+|│     manage_mode               whatif                ││                                           │|
 |│                                                     ││On by default (ADR-152). false suppresses  │|
 |│                                                     ││the baseline entirely; a Claude Code deny  │|
 |│                                                     ││cannot be reopened by an allow, so this is │|
