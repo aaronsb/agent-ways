@@ -142,8 +142,22 @@ pub fn plan_sections(r: &mut Report, plan: &Plan) {
         };
         r.item(mark, format!("{:<width$}  {:<8}{}", root.rel, root.state, root.detail));
     }
-    r.section("settings.json");
-    match &plan.settings {
+    settings_section(r, "settings.json", &plan.settings);
+    if plan.blocked {
+        r.section("Blocked");
+        r.item(Mark::Warn, "blocked: a real path sits at a projection root, or an entry of yours would be removed.");
+        r.muted(4, "--force renames each real path to <name>.ways-backup-<seconds> and proceeds;");
+        r.muted(4, "move a hook out of .claude/hooks/ first if it is listed under REMOVE or replace.");
+    }
+}
+
+/// The settings.json merge a plan computed, as a section named `heading`:
+/// what of the operator's is kept, and each hook or permission entry the
+/// merge adds, refreshes, replaces or removes. `ways manage repair`'s
+/// what-if shows the same section for each target it converges.
+pub fn settings_section(r: &mut Report, heading: &str, settings: &Option<reconcile::SettingsPlan>) {
+    r.section(heading);
+    match settings {
         None => {
             r.item(Mark::Info, "the source ships none; nothing merged");
         }
@@ -171,12 +185,6 @@ pub fn plan_sections(r: &mut Report, plan: &Plan) {
                 r.item(Mark::Add, format!("deny      +{} entries (secret paths, ADR-152)", s.deny_added.len()));
             }
         }
-    }
-    if plan.blocked {
-        r.section("Blocked");
-        r.item(Mark::Warn, "blocked: a real path sits at a projection root, or an entry of yours would be removed.");
-        r.muted(4, "--force renames each real path to <name>.ways-backup-<seconds> and proceeds;");
-        r.muted(4, "move a hook out of .claude/hooks/ first if it is listed under REMOVE or replace.");
     }
 }
 

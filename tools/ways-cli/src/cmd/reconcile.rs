@@ -68,10 +68,12 @@ pub fn repair(source: Option<String>, dest: Option<String>, mode: Option<String>
         return run(source, dest, mode, false, quiet, force);
     }
     let app: PathBuf = source.clone().map(PathBuf::from).unwrap_or_else(paths::data_root);
-    let dirs: Vec<PathBuf> = match &dest {
-        Some(d) => vec![PathBuf::from(d).join("bin")],
-        None => lifecycle::target_bin_dirs(),
+    // The targets the repair converges: --dest alone, else every enabled one.
+    let converging: Vec<PathBuf> = match &dest {
+        Some(d) => vec![PathBuf::from(d)],
+        None => crate::config::global().targets().into_iter().filter(|t| t.enabled).map(|t| t.dir()).collect(),
     };
+    let dirs: Vec<PathBuf> = converging.iter().map(|d| d.join("bin")).collect();
     let p = lifecycle::stdout_painter();
     let mut head = Report::new("ways manage repair: what-if");
     head.subtitle(format!("source {}", app.display()));
@@ -80,6 +82,19 @@ pub fn repair(source: Option<String>, dest: Option<String>, mode: Option<String>
     let _ = std::io::stdout().flush();
     run(source, dest, mode, true, quiet, force)?;
     let mut tail = Report::new("");
+    // The settings.json merge each converging target would take, computed as
+    // `ways manage target plan` computes it; the dry run above does not run
+    // the merge.
+    let roots = projection_roots(&app);
+    for d in converging.iter().filter(|d| d.is_dir()) {
+        match plan_for(&paths::state_root(), &app, d, &roots) {
+            Ok(plan) => crate::cmd::target::settings_section(&mut tail, &format!("settings.json — {}", d.display()), &plan.settings),
+            Err(e) => {
+                tail.section(format!("settings.json — {}", d.display()));
+                tail.item(Mark::Warn, format!("the merge could not be previewed: {e:#}"));
+            }
+        }
+    }
     lifecycle::dev_links_section(&mut tail, &lifecycle::dev_links(&app, &lifecycle::linked_bins(&app), &dirs), "The repair");
     tail.footer(Mark::Info, lifecycle::commit_hint("ways manage repair"));
     print!("{}", tail.render(&p));

@@ -28,6 +28,10 @@ impl Fx {
         write(&src.join("skills/wrap/SKILL.md"), "---\nx\n");
         write(&src.join("hooks/ways/meta/a.md"), "---\nx\n");
         write(&src.join("hooks/check-config-updates.sh"), "#!/bin/sh\n");
+        write(
+            &src.join("settings.json"),
+            r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"${HOME}/.claude/hooks/ways/check-setup.sh"}]}]}}"#,
+        );
         Fx { root }
     }
 
@@ -95,6 +99,8 @@ fn repair_reports_until_commit_and_reconcile_still_applies() {
     let t = text(&out);
     assert!(t.contains("ways manage repair: what-if") && t.contains("would link skills") && t.contains("`ways manage repair --commit`"), "{t}");
     assert!(!t.contains('\x1b'), "plain in a pipe");
+    assert!(t.contains(&format!("── settings.json — {d}")) && t.contains("+ add       SessionStart:"), "the merge is previewed: {t}");
+    assert!(!dest.join("settings.json").exists(), "and not written");
 
     let out = fx.ways(&["manage", "repair", "--commit", "--source", s, "--dest", d]);
     assert!(out.status.success(), "{}", text(&out));
