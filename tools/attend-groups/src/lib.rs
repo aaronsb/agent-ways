@@ -226,6 +226,7 @@ impl Groups {
         dirs.extend(
             self.joined_group_names()
                 .into_iter()
+                .filter(|name| validate_group_name(name).is_ok())
                 .map(|name| ReceiveDir { path: self.group_dir(&name), room: Room::Channel(name) }),
         );
         dirs
@@ -531,6 +532,7 @@ impl Groups {
 
     /// Leave a named group.
     pub fn leave(&self, name: &str) -> Result<(), String> {
+        validate_group_name(name)?;
         let _lock = self.lock_state()?;
         let mut state = self.load_state();
         if let Some(entry) = state.get_mut(name) {
@@ -564,6 +566,7 @@ impl Groups {
         if is_agent_member(&self.member_id) && !is_agent_member(member) {
             return Err("agents cannot kick a human member".to_string());
         }
+        validate_group_name(name)?;
         let _lock = self.lock_state()?;
         let mut state = self.load_state();
         let Some(entry) = state.get_mut(name) else {
@@ -598,6 +601,9 @@ impl Groups {
 
     /// Unpin a group.
     pub fn unpin(&self, name: &str) {
+        if validate_group_name(name).is_err() {
+            return;
+        }
         let Ok(_lock) = self.lock_state() else { return };
         let mut state = self.load_state();
         if let Some(entry) = state.get_mut(name) {
@@ -614,8 +620,10 @@ impl Groups {
         self.save_state(&state);
     }
 
-    /// Dissolve a group — remove it and notify members.
+    /// Dissolve a group — remove it and notify members. Its name is
+    /// checked first: the folder it names is removed whole.
     pub fn dissolve(&self, name: &str) -> Result<Vec<String>, String> {
+        validate_group_name(name)?;
         let _lock = self.lock_state()?;
         let mut state = self.load_state();
         let members = state
@@ -772,7 +780,7 @@ impl Groups {
         // Clean up empty unpinned channels
         let to_remove: Vec<String> = state
             .iter()
-            .filter(|(_, e)| e.members.is_empty() && !e.pinned)
+            .filter(|(name, e)| e.members.is_empty() && !e.pinned && validate_group_name(name).is_ok())
             .map(|(name, _)| name.clone())
             .collect();
 
@@ -1401,6 +1409,64 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(5));
         Groups::new(&base, "x").cleanup_stale_with(|_| true, std::time::Duration::ZERO);
         assert!(!base.join("@open").exists());
+    }
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+
+    /// A signals base inside a root of its own, with a file beside the
+    /// base that a path escaping the base would reach.
+    fn rooted(tag: &str) -> (PathBuf, PathBuf) {
+        let root = std::env::temp_dir().join(format!("attend-groups-names-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let base = root.join("signals");
+        fs::create_dir_all(base.join("@x")).unwrap();
+        fs::create_dir_all(root.join("keep")).unwrap();
+        fs::write(root.join("keep/file"), "mine").unwrap();
+        (root, base)
+    }
+
+    fn intact(root: &Path, base: &Path) {
+        assert!(root.join("keep/file").is_file(), "nothing outside the base is removed");
+        assert!(base.join("@x").is_dir(), "nor the channel the name passes through");
+    }
+
+    /// `x/../..` names the base's parent once `@x` exists. Every verb that
+    /// builds a path from a channel name refuses it, or does nothing, and
+    /// removes nothing outside the base.
+    #[test]
+    fn a_name_that_leaves_the_base_is_refused_everywhere() {
+        let (root, base) = rooted("verbs");
+        let g = Groups::new(&base, "operator");
+        let bad = "x/../..";
+        assert!(g.dissolve(bad).is_err(), "dissolve refuses it");
+        assert!(g.leave(bad).is_err(), "leave refuses it");
+        assert!(g.kick(bad, "agent-1").is_err(), "kick refuses it");
+        g.unpin(bad);
+        g.pin(bad);
+        assert!(g.join(bad, false).is_err() && g.create(bad, None).is_err());
+        assert!(g.invite(bad, "agent-1").is_err() && g.brief(bad, "agent-1").is_err());
+        g.uninvite(bad, "agent-1");
+        g.unbrief(bad, "agent-1");
+        assert!(!g.take_invite(bad) && g.invites(bad).is_empty());
+        assert!(g.add(bad, "agent-1", || Ok(())).is_err());
+        intact(&root, &base);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A hand-edited _groups.yaml that names such a channel, empty and
+    /// unpinned, is not swept or unpinned through it.
+    #[test]
+    fn a_state_entry_that_leaves_the_base_removes_nothing() {
+        let (root, base) = rooted("state");
+        fs::write(base.join("_groups.yaml"), "x/../..:\n  pinned: false\n  members: []\n").unwrap();
+        let g = Groups::new(&base, "operator");
+        g.unpin("x/../..");
+        g.cleanup_stale_with(|_| false, std::time::Duration::from_secs(3600));
+        intact(&root, &base);
+        let _ = fs::remove_dir_all(&root);
     }
 }
 
