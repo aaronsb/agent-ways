@@ -26,7 +26,7 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
-status: proposed
+status: accepted
 date: 2026-10-16
 deciders:
   - aaronsb
@@ -46,7 +46,7 @@ observable:
 
 - **Decided:** every `ways manage` verb that changes the install prints what it would change and changes nothing until `--commit` is given. The report has one shape for every verb: a title, sections under ruled headers, a mark per line (↑ moves, = unchanged, + added, * fixed, → an action, ⚠ needs attention), coloured by role on a terminal and plain in a pipe. `update` reports versions, release notes, the source delta, local changes, the actions and dev links. A commit run prints one header per stage with ✓, ⚠ or ✗ per outcome and keeps raw command output for `--verbose` or a failure. `--yes` and `--dry-run` stay accepted. `install.manage_mode: commit` lets an operator restore apply-by-default for `update`, `repair` and `target`. The hidden `reconcile` keeps applying, and the installer keeps installing in one step.
 - **Trades away:** every caller that means to apply must now say `--commit`: scripts, skills, hints, the settings screens and the operator's habit. An operator who types `ways manage update` and walks away has updated nothing.
-- **One-way?** No. The default is one function and one setting; flipping it back is a one-line change, and `install.manage_mode: commit` does it per machine today.
+- **One-way?** No: reversible. The default is one function and one setting; flipping it back is a one-line change, and `install.manage_mode: commit` does it per machine today.
 - **Probes:** *Confident (default):* you want a bare `ways manage update` to change nothing on disk except a fetch, and to tell you what `--commit` would do. *Not confident (scope):* you want `repair` and `target` to follow the same default, so that `ways manage repair` on its own reports, even though a repair is usually run to fix something now.
 - **Inversion:** one end keeps every verb applying at once and adds a richer `--dry-run`, so habits and callers stay as they are and the operator has to remember to look first. The other end makes every lifecycle path report first with no way to opt out, including the installer one-liner and the updater's cross-release call. This decision reports first for every verb a person types, keeps one setting to opt out, and leaves the two calls that come from another release, or that are themselves the explicit request, applying.
 
@@ -63,7 +63,7 @@ Two callers cannot pass a new flag. The previous release's updater spawns `recon
 ## Decision
 
 1. **What-if is the default.** A mutating `ways manage` verb without `--commit` changes nothing except a read-only fetch, prints what it would change, and exits 0. The verbs are `update`, `repair`, `target add|enable|disable|remove`, `uninstall` and `reinstall`. A what-if that found something to change still exits 0: a script that runs it under `set -e` must not fail on the report.
-2. **One apply flag.** `--commit` applies, on every verb. `--what-if` names the default explicitly. `--yes` (`uninstall`, `reinstall`) and `--dry-run` (`update`, `repair`, `target add`) stay accepted as hidden aliases of `--commit` and `--what-if`, so existing docs and habits keep working. The two flags conflict.
+2. **One apply flag.** `--commit` applies, on every verb. `--what-if` names the default explicitly. `--yes` (from `uninstall` and `reinstall`) and `--dry-run` (from `update`, `repair` and `target add`) stay accepted on every verb as hidden aliases of `--commit` and `--what-if`, so existing docs and habits keep working. The two flags conflict.
 3. **One setting.** `install.manage_mode` in the user config takes `whatif` (the default) or `commit`. With `commit`, `update`, `repair` and `target` apply without the flag; a flag on the command line wins over the setting. `uninstall` and `reinstall` remove the install and always need `--commit`. `ways settings` lists the key on the install tab.
 4. **One report.** The report and the step scroll live in one module of the `ways` binary (`cmd/lifecycle.rs`) that every verb uses. They draw from the theme engine's roles (ADR-504): a ruled header per section, a mark and role per line, the terminal palette on a terminal and plain text in a pipe, under `NO_COLOR`, or with `TERM=dumb`. The plain text is the coloured text with the escapes removed. A commit run prints one header per stage and ✓, ⚠ or ✗ per outcome. The output of the commands it runs is captured, shown when a command fails, and streamed under `--verbose`.
 5. **Versions and notes where a verb moves versions.** `update` reports, for each suite binary, way-embed and the attend mod, the version installed and the version at the target. For each component that moves it prints the GitHub release notes of every `<component>-vX.Y.Z` release after the installed version up to the target, without the heading and without the CI tail after the closing `---`. The notes come from the GitHub Releases API through `curl`, the tool the installer one-liner already needs, with a token from `GH_TOKEN` or `GITHUB_TOKEN` when set. `gh` is not required. Unreachable notes are named as unreachable, and the report goes on. `WAYS_RELEASES_JSON` names a file to read in place of the API, for a mirror or a test.

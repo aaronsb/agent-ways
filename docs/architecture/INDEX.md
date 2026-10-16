@@ -129,6 +129,7 @@ _Session awareness: sensors, peers, messaging, keepwarm_
 | [ADR-411](./attend/ADR-411-a-session-that-listened-comes-back-listening-when-its-session-id-is-resumed.md) | A session that listened comes back listening when its session id is resumed | accepted |
 | [ADR-412](./attend/ADR-412-one-message-is-one-signal-and-no-conduit-splits-it.md) | One message is one signal, and no conduit splits it | accepted |
 | [ADR-413](./attend/ADR-413-attend-s-cli-groups-its-verbs-by-noun-the-mod-s-tools-are-the-principal-reply-path.md) | Attend's CLI groups its verbs by noun; the mod's tools are the principal reply path | accepted |
+| [ADR-414](./attend/ADR-414-the-attend-mod-keeps-an-idle-session-warm-for-a-bounded-stretch-after-the-operator-s-last-prompt-then-asks-for-a-wrap-and-lets-the-cache-lapse-while-autocompact-is-off.md) | The attend mod keeps an idle session warm for a bounded stretch after the operator's last prompt, then asks for a wrap and lets the cache lapse, while autocompact is off | accepted |
 
 ## Platform
 _Install, update, configuration, permissions, the CLI contract, testing_
@@ -169,6 +170,7 @@ _Install, update, configuration, permissions, the CLI contract, testing_
 | [ADR-508](./platform/ADR-508-the-live-fixture-runs-locally-its-github-workflow-runs-on-manual-dispatch-only.md) | The live fixture runs locally; its GitHub workflow runs on manual dispatch only | accepted |
 | [ADR-509](./platform/ADR-509-lifecycle-commands-sit-under-one-ways-manage-group-the-updater-s-reconcile-stays-a-hidden-fixed-name.md) | Lifecycle commands sit under one ways manage group; the updater's reconcile stays a hidden fixed name | accepted |
 | [ADR-510](./platform/ADR-510-settings-project-names-the-enclosing-project-and-a-write-names-its-file.md) | Settings --project names the enclosing project, and a write names its file | accepted |
+| [ADR-511](./platform/ADR-511-every-mutating-lifecycle-verb-reports-what-it-would-change-until-commit.md) | Every mutating lifecycle verb reports what it would change until --commit | accepted |
 
 ## Practice
 _The ways method, way authoring, the development loop_
