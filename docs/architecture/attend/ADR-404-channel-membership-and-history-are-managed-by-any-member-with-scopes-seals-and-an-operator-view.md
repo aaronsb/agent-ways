@@ -77,6 +77,11 @@ basis:
     level: guided
     said: maybe we use tombstones to mark, and then we have a seperate cleanup in days or agent generations
     via: Claude Code session 2026-10-13
+  - operator: aaronsb
+    level: directed
+    said: a fresh claude code with no interaction should be able to be woken on a message
+    via: relayed by the main session, 2026-10-16, with the decision that the hold covers only mail from before the session started
+  - evidence: 'reported 2026-10-16, attend 0.28.0 with its mod: a session started at 09:21:43 in ~/Projects/system/arch/arch-update with attend_mod.listening active; a peer direct message at 09:22:08 showed on the row as 1 unread and opened no turn, since the poll was skipped until the operator first prompted (plugins/attend/hooks/register.tsx, tick); the operator prompt at 09:22:47 carried the message to the model as context the transcript never drew, and the operator reported the message as swallowed'
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -330,3 +335,9 @@ These shipped with the record and stand on the decisions named; rejecting a deci
 - **No override at all.** Simplest, and a flap could not be forced; but an operator correcting their own mistake would wait out the cooldown with nothing to do.
 - **Exempting the operator, by a CLI flag or by attend-chat's identity.** A flag any agent could pass, and an exemption that asks nothing makes the cooldown invisible to whoever holds it. Asking each time keeps it visible and recorded.
 - **A timing or hold-to-confirm test before the override.** Considered and dropped as more ceremony than the risk needs: anything that drives the screen could pass it too.
+
+## Addendum, 2026-10-16: new mail wakes a session its config started
+
+Appended after acceptance; nothing above is changed. D3b's interim item gave the attend mod a hold: a session its config starts listening submitted no turn before the operator's first prompt. The cold start already holds back what was sent before a session began, so the hold only kept mail sent since then from waking the session. The row counted the message, no turn opened, and the operator's first prompt carried it to the model as context the transcript never drew.
+
+The hold is removed. A session its config starts listening polls from its start like any other, and a message sent to it after it began wakes it before the operator types anything (ADR-406, addendum of 2026-10-16, for a session with no turn yet). Mail from before the session began stays backlog, held back with the count note. A wake delivery carries messages alone, so the note rides the operator's next prompt as context.

@@ -92,6 +92,11 @@ basis:
     level: directed
     said: I think moving to the top is better, because it is the consideration for the message first
     via: the operator in the head session, 2026-10-14, on where the silence line sits; item 4 is amended in place so every delivery opens with it, scoped to the messages below, and the reply tools close it
+  - operator: aaronsb
+    level: directed
+    said: a fresh claude code with no interaction should be able to be woken on a message
+    via: relayed by the main session, 2026-10-16
+  - evidence: '2026-10-16: the wake gate counted a session with no transcript, or a transcript with no assistant turn, as lapsed (sensor_keepwarm::cache_lapsed and session_cache_lapsed), so attend message inbox --drain --wake reported cache_lapsed and delivered nothing to a session that had had no turn'
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -386,3 +391,9 @@ Appended after acceptance; nothing above is changed. The operator's answers reco
 ## Addendum, 2026-10-12: splitting is removed in ADR-412
 
 Appended after acceptance; nothing above is changed. Item 10 moved splitting a long body into `attend send`. ADR-412 amends the Decision so that one message is one signal whatever its length, and no conduit splits it on delivery.
+
+## Addendum, 2026-10-16: a session with no turn yet is wakeable
+
+Appended after acceptance; nothing above is changed. Item 2 counts a transcript that holds no turn as lapsed, and a session with no transcript yet read the same way, so a new session was never woken before the operator's first prompt. A session with no turn has no cache for a wake to rewrite. The gate now wakes a session whose transcript does not exist yet, or whose reading shows no turn and no context. A transcript that cannot be read in five seconds still counts as lapsed. The mod's poll, `attend message unread`, the Monitor poller and the peers sensor read the one gate.
+
+What rides the operator's prompt as context, a message held on a lapsed cache or the cold start's held-back note, is text Claude Code does not draw. The mod draws it under the prompt as transcript lines the model never reads: a line saying how many messages went with the prompt, one dim line per message as a delivery's row draws them, and the note.
