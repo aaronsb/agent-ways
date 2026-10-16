@@ -30,9 +30,7 @@ fn chat(dry: bool) -> Chat {
         std::fs::create_dir_all(home.join(".claude/sessions")).unwrap();
         for (i, (sid, name)) in [(ALPHA_SID, "alpha"), (BETA_SID, "beta"), (GAMMA_SID, "gamma")].into_iter().enumerate() {
             support::pin_alive(sid);
-            let work = home.join("work").join(name);
-            std::fs::create_dir_all(&work).unwrap();
-            let record = format!("{{\"pid\":1,\"sessionId\":\"{sid}\",\"cwd\":\"{}\"}}\n", work.display());
+            let record = format!("{{\"pid\":1,\"sessionId\":\"{sid}\",\"cwd\":\"{}\"}}\n", cwd(name));
             std::fs::write(home.join(format!(".claude/sessions/{i}.json")), record).unwrap();
         }
         let none = attend_groups::Groups::new(base, "");
@@ -53,10 +51,17 @@ fn chat(dry: bool) -> Chat {
     Chat::new(None, Palette::default(), Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(true).dry_run(dry)
 }
 
-/// The nickname the chat gives the claude working in `~/work/<project>`.
+/// The working directory of the claude on `project`: a fixed path, outside
+/// the fixture home, whose name changes with the process. The nickname is
+/// hashed from it, so a fixed path keeps the three nicknames distinct and
+/// short enough for an invited row to show its age, in every run.
+fn cwd(project: &str) -> String {
+    format!("/work/{project}")
+}
+
+/// The nickname the chat gives the claude working on `project`.
 fn name(project: &str) -> String {
-    let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
-    agent_identity::Identity::for_cwd(&home.join("work").join(project).to_string_lossy(), ColorDepth::Ansi16).nickname.to_string()
+    agent_identity::Identity::for_cwd(&cwd(project), ColorDepth::Ansi16).nickname.to_string()
 }
 
 fn rows(c: &mut Chat) -> Vec<String> {
