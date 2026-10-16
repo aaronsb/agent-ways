@@ -377,7 +377,7 @@ pub fn render(w: &WhatIf) -> Report {
 
     let up_to_date = w.head == w.target && !w.components.iter().any(Component::moves) && w.local.is_empty();
     if up_to_date {
-        r.footer(Mark::Ok, "Up to date. Nothing was changed.");
+        r.footer(Mark::Ok, "Up to date. Nothing changed.");
     } else {
         r.footer(Mark::Info, lifecycle::commit_hint(&command));
     }
@@ -420,7 +420,7 @@ mod tests {
         assert!(text.contains("    ways-v1.41.0\n      ### Added\n      - a thing (#5)\n"), "{text}");
         assert!(!text.contains("Pre-built"), "the CI tail is dropped");
         assert!(!text.contains("ways-v1.40.0"), "the installed release is not repeated");
-        assert!(text.ends_with("· Nothing was changed. Run `ways manage update --commit` to apply.\n"), "{text}");
+        assert!(text.ends_with("· Nothing changed. Run `ways manage update --commit` to apply.\n"), "{text}");
     }
 
     #[test]

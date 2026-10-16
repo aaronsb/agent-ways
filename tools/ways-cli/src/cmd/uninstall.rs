@@ -4,7 +4,7 @@
 //! agent, removes the command links that point into the app, and deletes the
 //! app and every cache it has used. The operator's config (their ways, API
 //! keys, settings) and state (events, probe data) are kept unless `--purge` is
-//! given. Without `--yes` it prints the plan and changes nothing. A plan that
+//! given. Without `--commit` it prints the plan and changes nothing. A plan that
 //! would delete anything but the app's own directories is refused.
 
 use std::path::{Path, PathBuf};
@@ -247,20 +247,21 @@ impl Uninstall {
             }
         }
         if failed > 0 {
-            bail!("{failed} path(s) could not be deleted; fix the cause and run `ways manage uninstall --yes` again");
+            bail!("{failed} path(s) could not be deleted; fix the cause and run `ways manage uninstall --commit` again");
         }
         Ok(())
     }
 }
 
-pub fn run(yes: bool, purge: bool) -> Result<()> {
+pub fn run(mode: crate::cmd::lifecycle::Mode, purge: bool) -> Result<()> {
     let Some(uninstall) = Uninstall::plan(purge)? else {
         println!("agent-ways is not installed: nothing to remove.");
         return Ok(());
     };
     uninstall.print();
-    if !yes {
-        println!("\nNothing changed. Run `ways manage uninstall --yes` to do this.");
+    if mode == crate::cmd::lifecycle::Mode::WhatIf {
+        let purge = if purge { " --purge" } else { "" };
+        println!("\n{}", crate::cmd::lifecycle::commit_hint(&format!("ways manage uninstall{purge}")));
         return Ok(());
     }
     uninstall.apply()?;

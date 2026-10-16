@@ -83,11 +83,11 @@ fn quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
-pub fn run(yes: bool, purge: bool) -> Result<()> {
+pub fn run(mode: super::lifecycle::Mode, purge: bool) -> Result<()> {
     if purge {
         eprintln!(
             "ways manage reinstall keeps your config and state, so it does not take --purge.\n\
-             To delete them as well, run `ways manage uninstall --purge --yes`, then the installer."
+             To delete them as well, run `ways manage uninstall --purge --commit`, then the installer."
         );
         std::process::exit(2);
     }
@@ -127,8 +127,8 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
     if source_build {
         println!("   The install is a source build (detached HEAD), so the suite is built from source again, as `ways manage update --ref` did.");
     }
-    if !yes {
-        println!("\nNothing changed. Run `ways manage reinstall --yes` to do this.");
+    if mode == super::lifecycle::Mode::WhatIf {
+        println!("\n{}", super::lifecycle::commit_hint("ways manage reinstall"));
         return Ok(());
     }
 
@@ -148,7 +148,7 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
             eprintln!(
                 "A stage from an earlier reinstall is at {}, and {} has changes.\n\
                  If that reinstall stopped partway, delete what is left of the app, then finish from the stage:\n  {}\n\
-                 Otherwise remove the stage and run `ways manage reinstall --yes` again.",
+                 Otherwise remove the stage and run `ways manage reinstall --commit` again.",
                 stage.display(),
                 app.display(),
                 finish_line(&stage, &source.url)

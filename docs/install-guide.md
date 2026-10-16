@@ -23,7 +23,7 @@ Everything else in `~/.claude` (`settings.json` values you set, `.credentials.js
 
 The one case that needs your attention: if a projected root path (`~/.claude/skills`, `agents`, `commands`, `hooks/ways`, or a file under `~/.claude/bin`) is already a real directory or file of your own, `ways manage repair` stops before touching anything and names it. Nothing is deleted. Move it aside yourself (copy anything you want to keep into a project's `.claude/skills/`), or run `ways manage repair --commit --force` to rename each such path to a timestamped sibling (`skills.ways-backup-<seconds>`) and then link.
 
-`ways manage uninstall` reverses all of this, including the MCP registration. It lists what it would do; `ways manage uninstall --yes` does it. Your own ways, API keys and event log stay unless you add `--purge`. `ways manage reinstall` puts the installed version back the same way, keeping what is yours, and fetches the copy before it removes anything.
+`ways manage uninstall` reverses all of this, including the MCP registration. It lists what it would do; `ways manage uninstall --commit` does it. Your own ways, API keys and event log stay unless you add `--purge`. `ways manage reinstall` puts the installed version back the same way, keeping what is yours, and fetches the copy before it removes anything.
 
 ## Activation is separate from installation
 

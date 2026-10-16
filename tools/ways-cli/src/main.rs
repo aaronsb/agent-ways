@@ -1027,22 +1027,21 @@ enum ManageCommand {
     /// pull in $XDG_DATA is live with no further step. Idempotent; silent
     /// when already up to date.
     Repair(RepairArgs),
-    /// Remove agent-ways; without --yes, print the plan only
+    /// Remove agent-ways; without --commit, print the plan only
     ///
     /// Remove agent-ways: withdraw from every target, stop the agent, unlink the
     /// commands and delete the app. Your config and state stay unless --purge.
-    /// Prints the plan and changes nothing without --yes.
+    /// Prints the plan and changes nothing without --commit (ADR-511).
     Uninstall(UninstallArgs),
-    /// Put the installed version back; without --yes, print the plan only
+    /// Put the installed version back; without --commit, print the plan only
     ///
     /// Fetch and verify the installed version, from the source it came from,
     /// into a staging directory; then uninstall, keeping your config and
     /// state, and install from the stage. A failed fetch removes nothing.
-    /// Prints the plan and changes nothing without --yes.
+    /// Prints the plan and changes nothing without --commit (ADR-511).
     Reinstall {
-        /// Do it. Without this flag the plan is printed and nothing changes.
-        #[arg(long)]
-        yes: bool,
+        #[command(flatten)]
+        apply: cmd::lifecycle::Apply,
         /// Refused: a reinstall keeps your config and state
         #[arg(long, hide = true)]
         purge: bool,
@@ -1097,9 +1096,8 @@ struct RepairArgs {
 
 #[derive(clap::Args)]
 struct UninstallArgs {
-    /// Do it. Without this flag the plan is printed and nothing changes.
-    #[arg(long)]
-    yes: bool,
+    #[command(flatten)]
+    apply: cmd::lifecycle::Apply,
     /// Also delete your config (your ways, API keys, settings) and state (events).
     #[arg(long)]
     purge: bool,
@@ -1235,7 +1233,9 @@ fn repair(a: RepairArgs, fixed_name: bool) -> Result<()> {
 }
 
 fn uninstall(args: UninstallArgs) -> Result<()> {
-    cmd::uninstall::run(args.yes, args.purge)
+    // Removing the install always needs the flag; install.manage_mode does
+    // not apply (ADR-511 item 3).
+    cmd::uninstall::run(args.apply.mode(false), args.purge)
 }
 
 fn target(action: Option<TargetCommand>) -> Result<()> {
@@ -1417,7 +1417,7 @@ fn run() -> Result<()> {
             ManageCommand::Update(args) => update(args),
             ManageCommand::Repair(args) => repair(args, false),
             ManageCommand::Uninstall(args) => uninstall(args),
-            ManageCommand::Reinstall { yes, purge } => cmd::reinstall::run(yes, purge),
+            ManageCommand::Reinstall { apply, purge } => cmd::reinstall::run(apply.mode(false), purge),
             ManageCommand::Target { action } => target(action),
         },
         Commands::Update(args) => {

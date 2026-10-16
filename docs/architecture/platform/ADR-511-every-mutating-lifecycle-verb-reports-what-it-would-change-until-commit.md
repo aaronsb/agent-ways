@@ -101,7 +101,7 @@ app ~/.local/share/agent-ways · at d3fe7f7d · target 17b500e0
   → ways: download the ways-v1.41.1 release
   → reproject ~/.claude (ways manage repair)
 
-· Nothing was changed. Run `ways manage update --commit` to apply.
+· Nothing changed. Run `ways manage update --commit` to apply.
 ```
 
 This amends ADR-150's Decision (the self-update applies only under `--commit`, and reports first), ADR-144's Decision (the repair verb reports first; the reconciler's own entry, `reconcile`, still applies), ADR-184's Decision (`target add|enable|disable|remove` report first; `target plan` is unchanged), and ADR-509's Decision (item 1's table: every verb takes `--commit`; item 3's `--yes` becomes an alias of `--commit`).

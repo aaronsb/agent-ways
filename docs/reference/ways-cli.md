@@ -686,12 +686,12 @@ ways manage repair --commit --quiet      # no summary line
 
 **Run from:** Anywhere.
 
-**Tells you:** The plan: every target it withdraws from, the agent it stops, the command links it removes, and the app and cache directories it deletes. Without `--yes` it prints the plan and changes nothing. Your config (your ways, API keys and settings) and state (events) stay unless `--purge` is given. A plan that would delete anything but the app's own directories is refused.
+**Tells you:** The plan: every target it withdraws from, the agent it stops, the command links it removes, and the app and cache directories it deletes. Without `--commit` it prints the plan and changes nothing. Your config (your ways, API keys and settings) and state (events) stay unless `--purge` is given. A plan that would delete anything but the app's own directories is refused.
 
 ```
 ways manage uninstall                 # the plan only
-ways manage uninstall --yes
-ways manage uninstall --yes --purge   # also your config and state
+ways manage uninstall --commit
+ways manage uninstall --commit --purge   # also your config and state
 ```
 
 ### `ways manage reinstall`
@@ -700,11 +700,11 @@ ways manage uninstall --yes --purge   # also your config and state
 
 **Run from:** Anywhere. It needs the network and room for a second copy of the app.
 
-**Tells you:** The plan: the commit it puts back and the source it fetches it from, the uninstall it runs, and the install that follows. Without `--yes` it prints the plan and changes nothing. With `--yes` it fetches and verifies that commit into `agent-ways.reinstall` beside the app first; if that fails, nothing has been removed. It then uninstalls, keeping your config and state, and runs the staged installer, which projects every target your config lists. It does not take `--purge`. If the install step fails, the staged copy is kept and the last line is the command that finishes the install from it.
+**Tells you:** The plan: the commit it puts back and the source it fetches it from, the uninstall it runs, and the install that follows. Without `--commit` it prints the plan and changes nothing. With `--commit` it fetches and verifies that commit into `agent-ways.reinstall` beside the app first; if that fails, nothing has been removed. It then uninstalls, keeping your config and state, and runs the staged installer, which projects every target your config lists. It does not take `--purge`. If the install step fails, the staged copy is kept and the last line is the command that finishes the install from it.
 
 ```
 ways manage reinstall          # the plan only
-ways manage reinstall --yes
+ways manage reinstall --commit
 ```
 
 ### `ways manage target`

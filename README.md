@@ -169,7 +169,7 @@ Your existing `~/.claude` (sessions, credentials, your own `settings.json` value
 
 To customize, add your own ways under `$XDG_CONFIG_HOME/agent-ways/ways/` (see [Creating Ways](#creating-ways)). To replace the shipped corpus, fork the repo and install from your fork. To work on agent-ways itself, set up a [development checkout](docs/development.md).
 
-To remove it, `ways manage uninstall` lists what it would do: withdraw from `~/.claude` and your other targets, remove the MCP registration, unlink the commands, delete the app and its caches. `ways manage uninstall --yes` does it. Your own ways, API keys and event log stay unless you add `--purge` (ADR-198). To put the same version back cleanly, `ways manage reinstall --yes` fetches it first, then uninstalls and installs, keeping what is yours.
+To remove it, `ways manage uninstall` lists what it would do: withdraw from `~/.claude` and your other targets, remove the MCP registration, unlink the commands, delete the app and its caches. `ways manage uninstall --commit` does it. Your own ways, API keys and event log stay unless you add `--purge` (ADR-198). To put the same version back cleanly, `ways manage reinstall --commit` fetches it first, then uninstalls and installs, keeping what is yours.
 
 > **Stop and read this** if you're letting an AI agent run the installer. You are about to let an agent modify `~/.claude/` — the directory that controls how Claude Code behaves. The agent is editing its own configuration. Review the repo first. You are responsible for the result.
 

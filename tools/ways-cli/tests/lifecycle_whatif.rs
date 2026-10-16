@@ -147,3 +147,21 @@ fn target_verbs_report_until_commit() {
     assert!(out.status.success() && std::fs::read_link(other.join("skills")).is_err(), "enable reports: {}", text(&out));
     assert!(text(&out).contains("would link"), "{}", text(&out));
 }
+
+#[test]
+fn uninstall_and_reinstall_take_commit_and_change_nothing_without_it() {
+    let fx = Fx::new("uninstall");
+    let app = fx.root.join("home/.local/share/agent-ways");
+    std::os::unix::fs::symlink(fx.src(), &app).unwrap();
+    let out = fx.ways(&["manage", "uninstall"]);
+    let t = text(&out);
+    assert!(out.status.success(), "{t}");
+    assert!(t.contains("Nothing changed. Run `ways manage uninstall --commit` to apply."), "{t}");
+    assert!(app.exists() && fx.src().join("skills/wrap/SKILL.md").is_file(), "the app is kept");
+    // --commit and --what-if conflict; --yes is --commit's alias.
+    let out = fx.ways(&["manage", "uninstall", "--commit", "--what-if"]);
+    assert_eq!(out.status.code(), Some(2), "{}", text(&out));
+    let out = fx.ways(&["manage", "reinstall", "--yes", "--purge"]);
+    assert_eq!(out.status.code(), Some(2), "--yes parses and --purge is refused: {}", text(&out));
+    assert!(text(&out).contains("ways manage uninstall --purge --commit"), "{}", text(&out));
+}

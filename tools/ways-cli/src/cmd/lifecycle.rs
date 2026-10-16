@@ -63,7 +63,7 @@ pub fn resolve(commit: bool, what_if: bool, setting_commits: bool) -> Mode {
 
 /// The line that ends every what-if report: how to apply it.
 pub fn commit_hint(command: &str) -> String {
-    format!("Nothing was changed. Run `{command} --commit` to apply.")
+    format!("Nothing changed. Run `{command} --commit` to apply.")
 }
 
 // --- painting ---------------------------------------------------------------
