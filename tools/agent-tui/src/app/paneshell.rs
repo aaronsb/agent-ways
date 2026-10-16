@@ -738,11 +738,11 @@ impl App {
     /// first, as typing answers it, and the paste goes on.
     ///
     /// - The masked entry takes the paste's first line, trimmed, as typed
-    ///   characters, refused past the cap ([`App::secret_paste`]).
+    ///   characters, refused whole past the cap ([`App::secret_paste`]).
     /// - The pane's entry dialog, an argument entry, the value editor, a
     ///   name, the filter, and a flow's path entry or filter take it on one
     ///   line ([`crate::input::one_line`]): a line break in it is never
-    ///   Enter.
+    ///   Enter, and a paste with nothing left on that line changes nothing.
     /// - Browsing, the pane takes it whole, unless the tab bar has the
     ///   focus.
     ///
@@ -758,10 +758,14 @@ impl App {
             Mode::Secret { .. } => self.secret_paste(text),
             Mode::Arg { buf, .. } | Mode::Edit(buf) | Mode::Name { buf, .. } => buf.push_str(&crate::input::one_line(text)),
             Mode::Filter => {
+                let typed = crate::input::one_line(text);
+                if typed.is_empty() {
+                    return;
+                }
                 if self.filter.is_empty() {
                     self.saved[self.tab] = self.cursor;
                 }
-                self.filter.push_str(&crate::input::one_line(text));
+                self.filter.push_str(&typed);
                 self.cursor = 0;
             }
             Mode::Flow(flow) => flow.paste(text),

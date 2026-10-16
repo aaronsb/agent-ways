@@ -479,6 +479,20 @@ impl SecretBuf {
         fits
     }
 
+    /// Add a run of characters that arrived as one, such as a paste: all
+    /// of them, or, when together they pass [`SecretBuf::CAP`], none,
+    /// leaving the buffer as it was.
+    pub fn push_all(&mut self, run: impl Iterator<Item = char> + Clone) -> bool {
+        let n: usize = run.clone().map(char::len_utf8).sum();
+        if self.0.len() + n > SECRET_CAP {
+            return false;
+        }
+        run.for_each(|c| {
+            self.push(c);
+        });
+        true
+    }
+
     /// The most a secret holds, in bytes.
     pub const CAP: usize = SECRET_CAP;
     /// Remove the last character and zero its bytes.
@@ -508,6 +522,15 @@ impl SecretBuf {
         // SAFETY: test-only; these bytes were written before `pop` truncated.
         spare.iter().map(|b| unsafe { b.assume_init() }).collect()
     }
+}
+
+/// Zero a string's bytes in place, for text that may hold a secret, such
+/// as a paste, before it is dropped. The length is kept; the bytes become
+/// NULs.
+pub fn wipe(s: &mut String) {
+    // SAFETY: NUL bytes are valid UTF-8, so the string stays valid.
+    unsafe { s.as_mut_vec() }.fill(0);
+    std::hint::black_box(s.as_bytes());
 }
 
 #[cfg(test)]
@@ -817,6 +840,24 @@ mod tests {
         }
         assert!(!b.push('x'), "a character past the cap is refused, not kept or cut");
         assert_eq!(b.reveal().len(), SecretBuf::CAP);
+    }
+
+    #[test]
+    fn push_all_keeps_all_or_nothing() {
+        let mut b = SecretBuf::default();
+        assert!(b.push('a'));
+        assert!(!b.push_all("k".repeat(SecretBuf::CAP).chars()), "past the cap the whole run is refused");
+        assert_eq!(b.reveal(), "a", "and the buffer is as it was");
+        assert!(b.push_all("k".repeat(SecretBuf::CAP - 1).chars()), "a run that fits is kept");
+        assert_eq!(b.reveal().len(), SecretBuf::CAP);
+    }
+
+    #[test]
+    fn wipe_zeroes_a_strings_bytes() {
+        let mut s = String::from("sk-ant-abc");
+        wipe(&mut s);
+        assert_eq!(s.len(), 10);
+        assert!(s.bytes().all(|b| b == 0));
     }
 
     #[test]

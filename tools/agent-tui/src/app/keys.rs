@@ -144,15 +144,20 @@ impl App {
     }
 
     /// A paste into the masked entry: its first line, trimmed of the
-    /// whitespace and line breaks a copied key carries, each character
-    /// pushed as a typed one is, control characters left out. A line
-    /// break inside it ends it, never presses Enter. Past the cap it is
-    /// refused as typing is. The text is read in place and nothing of it
-    /// is kept outside `buf`.
+    /// whitespace and line breaks a copied key carries, control characters
+    /// left out. A line end inside it (`\n`, `\r`, U+0085, U+2028, U+2029)
+    /// ends it, never presses Enter. A paste arrives whole, so it is kept
+    /// whole or, past the cap, refused whole, leaving what was typed
+    /// before it. The text is read in place and only `buf` takes a copy.
+    /// The event loop wipes the paste's own string after this; crossterm's
+    /// parse buffer may hold the bytes until later input overwrites them,
+    /// as it does for typed keys.
     pub(super) fn secret_paste(&mut self, text: &str) {
+        const LINE_ENDS: [char; 5] = ['\n', '\r', '\u{85}', '\u{2028}', '\u{2029}'];
         let Mode::Secret { buf, .. } = &mut self.mode else { return };
-        let line = text.trim_start().split(['\n', '\r']).next().unwrap_or_default().trim_end();
-        if !line.chars().filter(|c| !c.is_control()).all(|c| buf.push(c)) {
+        let text = text.trim_start();
+        let line = text.split_once(LINE_ENDS).map_or(text, |(first, _)| first).trim_end();
+        if !buf.push_all(line.chars().filter(|c| !c.is_control())) {
             self.secret_full();
         }
     }

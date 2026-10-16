@@ -359,8 +359,11 @@ impl Flow {
     pub(crate) fn paste(&mut self, text: &str) {
         match &mut self.entry {
             Entry::Filter => {
-                self.filter.push_str(&crate::input::one_line(text));
-                self.cursor = 0;
+                let typed = crate::input::one_line(text);
+                if !typed.is_empty() {
+                    self.filter.push_str(&typed);
+                    self.cursor = 0;
+                }
             }
             Entry::Path(buf) => buf.push_str(&crate::input::one_line(text)),
             Entry::Off => {}
@@ -831,6 +834,14 @@ mod tests {
         keys(&mut f, &[KeyCode::Char('/')]);
         f.paste("second\n");
         assert_eq!(f.visible(), [1]);
+    }
+
+    #[test]
+    fn an_empty_paste_leaves_the_flow_filter_and_the_cursor() {
+        let mut f = flow(true);
+        keys(&mut f, &[KeyCode::Down, KeyCode::Char('/')]);
+        f.paste("\r\n");
+        assert_eq!((f.filter.as_str(), f.cursor), ("", 1));
     }
 
     #[test]

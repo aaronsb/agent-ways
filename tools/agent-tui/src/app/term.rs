@@ -497,7 +497,10 @@ impl App {
                         return Ok(self.session(None));
                     }
                 }
-                Ok(Some(Event::Paste(text))) => self.paste(&text),
+                Ok(Some(Event::Paste(mut text))) => {
+                    self.paste(&text);
+                    crate::tree::wipe(&mut text);
+                }
                 Ok(_) => {}
             }
             // Timed, not on an idle poll: input arriving all the time would

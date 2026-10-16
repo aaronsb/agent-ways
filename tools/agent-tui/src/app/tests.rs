@@ -144,6 +144,17 @@ fn a_paste_fills_the_filter() {
     assert_eq!(app.cursor, 1, "Esc returns to the cursor the paste started from");
 }
 
+/// A paste that is only a line break puts nothing in the filter, so it
+/// leaves the cursor where it was, as no key typed would move it.
+#[test]
+fn an_empty_paste_leaves_the_filter_and_the_cursor() {
+    let mut app = App::new("t", tabbed());
+    keys(&mut app, &[KeyCode::Down, KeyCode::Char('/')]);
+    app.paste("\n");
+    assert_eq!((app.filter.as_str(), app.cursor), ("", 1));
+    assert!(screen(&mut app).contains("alpha"), "no row is filtered out");
+}
+
 fn flag(name: &str) -> Node {
     Node::leaf(name, "", Setting::new(Kind::Bool, "true", "default").default("true"))
 }
