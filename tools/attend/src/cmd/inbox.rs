@@ -442,6 +442,7 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     // so a message that would wake it waits for the operator's next turn
     // like any other. The clock is keepwarm's: the newest turn in the
     // transcript, and a transcript that cannot be read counts as lapsed.
+    // A session with no turn yet has no cache to lose and is woken.
     let due = wake && delivered.iter().any(|d| d.wakes);
     let lapsed = due && crate::util::cache_lapsed(&ident);
     // Nothing that wakes the session, or a lapsed cache: what it found
