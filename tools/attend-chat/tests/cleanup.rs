@@ -36,7 +36,7 @@ static SERIAL: Mutex<()> = Mutex::new(());
 /// batch [`BATCH`]; an undo restores them; a delete in `#legacy` is refused
 /// as an attend without the verb refuses it; a tombstone of delta is refused
 /// as attend refuses one that has not exited. `#empty` has nothing to
-/// delete. `#slow` answers in a second,
+/// delete. `#slow` answers in a second, and logs `done` once it has,
 /// and a delete in `#long` (not its dry run) in eleven, past the ten the
 /// chat once gave attend.
 const FAKE: &str = r##"#!/bin/sh
@@ -44,7 +44,7 @@ echo "$*" >> "$FAKE_ATTEND_LOG"
 case "$*" in
   *"--channel legacy"*) echo "error: unrecognized subcommand 'delete'" >&2; exit 2 ;;
   *"--channel empty"*) echo '{"scope":"#empty","dry_run":true,"marked":0,"batch":null,"ids":[],"held":[]}' ;;
-  *"--channel slow"*) sleep 1; echo '{"scope":"#slow","dry_run":true,"marked":3,"batch":null,"ids":[],"held":[]}' ;;
+  *"--channel slow"*) sleep 1; echo done >> "$FAKE_ATTEND_LOG"; echo '{"scope":"#slow","dry_run":true,"marked":3,"batch":null,"ids":[],"held":[]}' ;;
   *"--channel long"*"--dry-run"*) echo '{"scope":"#long","dry_run":true,"marked":3,"batch":null,"ids":[],"held":[]}' ;;
   *"--channel long"*) sleep 11; echo '{"scope":"#long","dry_run":false,"marked":3,"batch":"001784732645123-4243","ids":[],"held":[]}' ;;
   *"--undo"*) echo '{"batch":"001784732645123-4242","age_secs":5,"unmarked":12,"already_removed":0}' ;;
@@ -89,7 +89,12 @@ fn fixture() -> std::sync::MutexGuard<'static, ()> {
 
 /// Each call the fake took, as its argv.
 fn calls() -> Vec<String> {
-    std::fs::read_to_string(log_path()).unwrap_or_default().lines().map(str::to_string).collect()
+    std::fs::read_to_string(log_path()).unwrap_or_default().lines().filter(|l| *l != "done").map(str::to_string).collect()
+}
+
+/// Whether a `#slow` count ran to its answer.
+fn slow_answered() -> bool {
+    std::fs::read_to_string(log_path()).unwrap_or_default().lines().any(|l| l == "done")
 }
 
 fn sig(id: &str, from: &str, cwd: &str, message: &str, channel: Channel, ts: u64) -> Signal {
@@ -529,17 +534,29 @@ fn no_while_counting_stops_the_count_and_holds_nothing() {
     channel_menu(&mut c, "#slow");
     pick(&mut c, "Delete read messages");
     pick_now(&mut c, "All");
+    // The count is running once the fake has logged its call; an Esc
+    // before that would stop a count that never reached it.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while calls().is_empty() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     press_now(&mut c, KeyCode::Esc);
     assert!(c.removing().is_none(), "the count is stopped");
     assert_eq!(c.status(), "kept");
     channel_menu(&mut c, "#deploy");
     pick(&mut c, "Hide messages here");
-    std::thread::sleep(std::time::Duration::from_millis(1200));
-    testkit::render_screen(&mut c, W, H);
-    Screen::tick(&mut c);
+    // Past the second the count would have taken to answer, nothing it
+    // could carry reaches the hide's question.
+    for _ in 0..120 {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        testkit::render_screen(&mut c, W, H);
+        Screen::tick(&mut c);
+        assert!(c.removing().is_none(), "the stopped count stays stopped");
+    }
     assert!(screen(&mut c).contains("hide the messages so far in #deploy?"), "the hide's question, untouched: {}", screen(&mut c));
     press(&mut c, KeyCode::Char('y'));
     assert!(c.status().starts_with("hid ") && c.status().ends_with(" in #deploy; nothing was deleted"), "the y answers the hide: {}", c.status());
+    assert!(!slow_answered(), "the stopped count never answered");
     assert_eq!(calls(), ["message delete --channel slow --older-than all --dry-run --json"], "nothing deleted for everyone");
 }
 
