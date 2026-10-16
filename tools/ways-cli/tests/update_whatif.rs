@@ -242,3 +242,24 @@ fn a_ref_behind_the_install_is_reported_as_a_downgrade() {
     assert!(stdout.contains("--commit leaves these commits behind") && stdout.contains("feat(ways): a new thing (#2)"), "{stdout}");
     assert!(!stdout.contains("the fetch failed"), "a ref that resolves is not a failed fetch: {stdout}");
 }
+
+/// The index's modification time.
+fn index_mtime(app: &Path) -> std::time::SystemTime {
+    std::fs::metadata(app.join(".git/index")).unwrap().modified().unwrap()
+}
+
+#[test]
+fn the_what_if_leaves_the_index_alone() {
+    let s = Sandbox::new("index");
+    // A tracked file touched without a change: a refreshing git command
+    // (porcelain `git diff HEAD`) would rewrite the index to record its stat.
+    let makefile = s.app().join("Makefile");
+    let text = std::fs::read_to_string(&makefile).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    std::fs::write(&makefile, text).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let before = index_mtime(&s.app());
+    let out = s.ways(&["manage", "update"], &s.base.join("releases.json"));
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(index_mtime(&s.app()), before, "the what-if rewrote .git/index");
+}

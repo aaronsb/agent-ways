@@ -52,8 +52,11 @@ impl Source {
     }
 }
 
+/// A read-only git query: `--no-optional-locks` keeps `git status` from
+/// refreshing the index, so the plan writes nothing (ADR-511).
 fn git(dir: &Path, args: &[&str]) -> Option<String> {
     Command::new("git")
+        .arg("--no-optional-locks")
         .args(args)
         .current_dir(dir)
         .output()

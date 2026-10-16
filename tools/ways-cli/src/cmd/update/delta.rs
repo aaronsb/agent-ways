@@ -46,7 +46,7 @@ pub fn read(app: &Path, from: &str, to: &str) -> Option<Delta> {
 }
 
 fn git(app: &Path, args: &[&str]) -> Option<String> {
-    let out = Command::new("git").args(args).current_dir(app).output().ok()?;
+    let out = Command::new("git").arg("--no-optional-locks").args(args).current_dir(app).output().ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
@@ -150,7 +150,16 @@ fn mark_of(kind: Option<&str>) -> (Mark, bool) {
 
 /// Write the delta into `r`: per area, its counts by type, the features and
 /// fixes listed, and the rest summarised unless `all`.
-pub fn render(r: &mut Report, d: &Delta, all: bool) {
+/// Which way the commits move: into the checkout, or out of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    /// The commits an update brings in, with the pull requests they merged.
+    Incoming,
+    /// The commits a `--ref` behind HEAD leaves behind.
+    Dropped,
+}
+
+pub fn render(r: &mut Report, d: &Delta, all: bool, direction: Direction) {
     let mut areas: Vec<(&str, Vec<&Commit>)> = Vec::new();
     for c in &d.commits {
         match areas.iter_mut().find(|(a, _)| *a == c.area) {
@@ -160,7 +169,10 @@ pub fn render(r: &mut Report, d: &Delta, all: bool) {
     }
     areas.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then(a.0.cmp(b.0)));
     let total = d.commits.len();
-    r.text(2, format!("{total} commit{}, {} pull request{} merged", plural(total), d.prs.len(), plural(d.prs.len())));
+    match direction {
+        Direction::Incoming => r.text(2, format!("{total} commit{}, {} pull request{} merged", plural(total), d.prs.len(), plural(d.prs.len()))),
+        Direction::Dropped => r.text(2, format!("{total} commit{} the checkout would leave behind", plural(total))),
+    };
     for (area, commits) in &areas {
         let mut kinds: Vec<(String, usize)> = Vec::new();
         for c in commits {
@@ -187,7 +199,7 @@ pub fn render(r: &mut Report, d: &Delta, all: bool) {
             r.muted(4, format!("{hidden} other commit{} (--verbose lists them)", plural(hidden)));
         }
     }
-    if !d.prs.is_empty() {
+    if !d.prs.is_empty() && direction == Direction::Incoming {
         r.blank();
         let list: Vec<String> = d.prs.iter().map(|n| format!("#{n}")).collect();
         r.muted(2, format!("pull requests: {}", list.join(" ")));
@@ -241,7 +253,7 @@ mod tests {
         };
         let mut r = Report::new("t");
         r.section("Changes");
-        render(&mut r, &d, false);
+        render(&mut r, &d, false, Direction::Incoming);
         let text = r.render(&Painter::plain());
         let body: Vec<&str> = text.lines().skip(3).collect();
         assert_eq!(
@@ -251,7 +263,11 @@ mod tests {
              \x20 ways (1 fix)\n    fix      fix(ways): five\n\n  pull requests: #7 #9"
         );
         let mut all = Report::new("t");
-        render(&mut all, &d, true);
+        render(&mut all, &d, true, Direction::Incoming);
         assert!(all.render(&Painter::plain()).contains("docs     docs(attend): three"));
+        let mut gone = Report::new("t");
+        render(&mut gone, &Delta { commits: vec![classify("feat(ways): x", &[])], prs: vec![] }, false, Direction::Dropped);
+        let gone = gone.render(&Painter::plain());
+        assert!(gone.contains("1 commit the checkout would leave behind") && !gone.contains("merged"), "{gone}");
     }
 }

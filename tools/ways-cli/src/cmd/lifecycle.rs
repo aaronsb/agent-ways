@@ -508,7 +508,8 @@ pub fn dev_links_section(r: &mut Report, links: &[DevLink], what: &str, app: &Pa
             r.muted(4, format!("{} -> {}", d.link.display(), d.points_to.display()));
         }
     }
-    let mut line = format!("{what} points them at {}.", app.display());
+    let them = if links.len() == 1 { "it" } else { "them" };
+    let mut line = format!("{what} points {them} at {}.", app.display());
     if canon(app) == canon(&crate::paths::data_root()) {
         line.push_str(" Run `make dev-install` in the checkout afterwards to return to the dev build.");
     }
@@ -579,6 +580,9 @@ mod tests {
         assert_eq!(text.matches("into the checkout /devA").count(), 1, "{text}");
         assert!(text.contains("2 binary links point into the checkout /devA") && text.contains("1 binary link points into the checkout /devB"), "{text}");
         assert!(text.contains("The update points them at /not/the/app.") && !text.contains("make dev-install"), "the way back is only named for the installed app: {text}");
+        let mut one = Report::new("");
+        dev_links_section(&mut one, &links[1..2], "The repair", Path::new("/x"));
+        assert!(one.render(&Painter::plain()).contains("The repair points it at /x."), "one link is \"it\"");
     }
 
     #[test]

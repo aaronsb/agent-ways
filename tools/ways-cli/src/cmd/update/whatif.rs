@@ -9,7 +9,7 @@
 
 use super::delta::{self, Delta};
 use super::notes::{self, Release};
-use super::{classify_build_groups, exe, git_head, installed_version, package_field, suite_bins, version_older, way_embed_source_version, working_tree_build_groups};
+use super::{classify_build_groups, exe, git_head, installed_version, package_field, suite_bins, version_older, way_embed_source_version};
 use crate::cmd::lifecycle::{self, DevLink, Mark, Report};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -100,7 +100,7 @@ pub fn gather(app: &Path, channel: Channel, verbose: bool) -> WhatIf {
     };
     let local = git_lines(app, &["status", "--porcelain"]);
     let releases: &[Release] = notes.as_ref().map(|f| f.releases.as_slice()).unwrap_or(&[]);
-    let actions = actions(app, &channel, relation, head.as_deref(), target.as_deref(), &components, releases, !local.is_empty());
+    let actions = actions(app, &channel, relation, head.as_deref(), target.as_deref(), &components, releases, &local);
     let dev = lifecycle::update_dev_links(app);
     WhatIf { app: app.to_path_buf(), channel, head, target, fetch_error, relation, components, notes, delta, dropped, local, actions, dev, verbose }
 }
@@ -173,7 +173,7 @@ fn git_lines(app: &Path, args: &[&str]) -> Vec<String> {
 
 /// A file at a revision.
 fn show(app: &Path, rev: &str, path: &str) -> Option<String> {
-    let out = Command::new("git").args(["show", &format!("{rev}:{path}")]).current_dir(app).output().ok()?;
+    let out = Command::new("git").args(["--no-optional-locks", "show", &format!("{rev}:{path}")]).current_dir(app).output().ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
@@ -232,7 +232,8 @@ fn define_version(src: &str) -> Option<String> {
 
 /// What `--commit` would do on this machine, in order.
 #[allow(clippy::too_many_arguments)]
-fn actions(app: &Path, channel: &Channel, relation: Relation, head: Option<&str>, target: Option<&str>, comps: &[Component], releases: &[Release], dirty: bool) -> Vec<(Mark, String)> {
+fn actions(app: &Path, channel: &Channel, relation: Relation, head: Option<&str>, target: Option<&str>, comps: &[Component], releases: &[Release], local: &[String]) -> Vec<(Mark, String)> {
+    let dirty = !local.is_empty();
     let mut out = Vec::new();
     let cargo = super::tool_present("cargo");
     let short = |s: &str| s.chars().take(8).collect::<String>();
@@ -258,7 +259,10 @@ fn actions(app: &Path, channel: &Channel, relation: Relation, head: Option<&str>
                 (Relation::Behind, Some(h), Some(t)) => changed(app, h, t),
                 _ => (false, false),
             };
-            let (wt_cargo, wt_embed) = working_tree_build_groups(app);
+            // The working tree's own edits, from the `status --porcelain`
+            // lines already read: `git diff HEAD` would refresh and rewrite
+            // the index, and a what-if writes nothing (ADR-511).
+            let (wt_cargo, wt_embed) = classify_build_groups(local.iter().filter_map(|l| porcelain_path(l)));
             cargo_changed |= wt_cargo;
             embed_changed |= wt_embed;
             let mut any = false;
@@ -330,13 +334,24 @@ fn changed(app: &Path, a: &str, b: &str) -> (bool, bool) {
     classify_build_groups(paths.iter().map(String::as_str))
 }
 
+/// The path a `git status --porcelain` line names (the destination of a
+/// rename), or None for an untracked file, which no build reads until it is
+/// tracked.
+fn porcelain_path(line: &str) -> Option<&str> {
+    if line.starts_with("??") || line.len() < 4 {
+        return None;
+    }
+    let path = &line[3..];
+    Some(path.rsplit_once(" -> ").map_or(path, |(_, to)| to).trim_matches('"'))
+}
+
 /// Commits in `a..b`.
 fn count_commits(app: &Path, a: &str, b: &str) -> usize {
     git_lines(app, &["rev-list", "--count", &format!("{a}..{b}")]).first().and_then(|n| n.parse().ok()).unwrap_or(0)
 }
 
 fn is_ancestor(app: &Path, a: &str, b: &str) -> bool {
-    Command::new("git").args(["merge-base", "--is-ancestor", a, b]).current_dir(app).status().is_ok_and(|s| s.success())
+    Command::new("git").args(["--no-optional-locks", "merge-base", "--is-ancestor", a, b]).current_dir(app).status().is_ok_and(|s| s.success())
 }
 
 /// The report, ready to print.
@@ -425,12 +440,12 @@ pub fn render(w: &WhatIf) -> Report {
         }
         (Relation::Ahead, _, Some(d)) => {
             r.item(Mark::Warn, "the ref is behind the checkout: --commit leaves these commits behind");
-            delta::render(&mut r, d, w.verbose);
+            delta::render(&mut r, d, w.verbose, delta::Direction::Dropped);
         }
         (Relation::Ahead, _, None) => {
             r.item(Mark::Same, "the checkout is ahead of the target: no new commits");
         }
-        (_, Some(d), _) => delta::render(&mut r, d, w.verbose),
+        (_, Some(d), _) => delta::render(&mut r, d, w.verbose, delta::Direction::Incoming),
         _ => {
             r.item(Mark::Warn, "git could not list the commits between the checkout and the target");
         }
@@ -530,6 +545,14 @@ mod tests {
         assert!(text.contains("⚠ the release notes could not be fetched (GitHub Releases could not be reached)"), "{text}");
         assert!(text.contains("no new commits"), "{text}");
         assert!(text.contains("`ways manage update --ref main --commit`"), "{text}");
+    }
+
+    #[test]
+    fn porcelain_lines_name_their_paths() {
+        assert_eq!(porcelain_path(" M tools/ways-cli/src/main.rs"), Some("tools/ways-cli/src/main.rs"));
+        assert_eq!(porcelain_path("R  docs/a.md -> tools/b.rs"), Some("tools/b.rs"));
+        assert_eq!(porcelain_path("?? tools/new.rs"), None, "untracked");
+        assert_eq!(classify_build_groups([" M tools/x/src/lib.rs", "?? tools/way-embed/y.cpp"].iter().filter_map(|l| porcelain_path(l))), (true, false));
     }
 
     #[test]

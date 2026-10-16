@@ -360,3 +360,22 @@ fn the_installer_refuses_a_value_flag_without_its_value() {
         assert!(!s.app().join("bin").exists(), "{args:?} installed: {t}");
     }
 }
+
+#[test]
+fn the_plan_leaves_the_index_alone() {
+    let s = Sandbox::new("index", BUILDS);
+    let makefile = s.app().join("Makefile");
+    let text = std::fs::read_to_string(&makefile).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    std::fs::write(&makefile, text).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let mtime = || std::fs::metadata(s.app().join(".git/index")).unwrap().modified().unwrap();
+    let before = mtime();
+    let out = s.ways(&["manage", "reinstall"]);
+    assert!(out.status.success(), "{}", text_of(&out));
+    assert_eq!(mtime(), before, "the plan rewrote .git/index");
+}
+
+fn text_of(out: &Output) -> String {
+    format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
+}

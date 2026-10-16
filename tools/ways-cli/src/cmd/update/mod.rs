@@ -941,15 +941,26 @@ fn run_make(dir: &Path, args: &[&str]) -> bool {
 /// list in build.rs (`WAYS_BUILD`): the guard compares shas derived from both, so
 /// the abbreviation length and `--long`/`--match` flags must be identical or it
 /// keys off divergent strings.
+///
+/// `git describe --dirty` refreshes and rewrites the index even under
+/// `--no-optional-locks`, and the reinstall plan reads this, so the dirty
+/// mark comes from `status --porcelain --untracked-files=no` instead, which
+/// does not write. It is the same mark: describe's `-dirty` also counts
+/// tracked changes only.
 pub(super) fn source_describe(app: &Path) -> Option<String> {
-    Command::new("git")
-        .args(["describe", "--tags", "--always", "--long", "--dirty", "--match", "ways-v*"])
-        .current_dir(app)
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .filter(|s| !s.is_empty())
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .arg("--no-optional-locks")
+            .args(args)
+            .current_dir(app)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    };
+    let describe = git(&["describe", "--tags", "--always", "--long", "--match", "ways-v*"]).filter(|s| !s.is_empty())?;
+    let dirty = git(&["status", "--porcelain", "--untracked-files=no"]).is_some_and(|s| !s.is_empty());
+    Some(if dirty { format!("{describe}-dirty") } else { describe })
 }
 
 /// The `git describe` a binary bakes, read from its `--version` output —

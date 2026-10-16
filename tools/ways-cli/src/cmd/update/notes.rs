@@ -82,11 +82,16 @@ fn pages(get: impl Fn(usize) -> Result<String, String>) -> Result<Fetched, Strin
 /// A token from the environment, trimmed; one that would break curl's
 /// config syntax (a quote, a backslash or a line break) is not sent.
 fn token() -> Option<String> {
-    ["GH_TOKEN", "GITHUB_TOKEN"]
-        .iter()
-        .find_map(|k| std::env::var(k).ok())
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty() && !v.contains(['"', '\\', '\n', '\r']))
+    token_from(|k| std::env::var(k).ok())
+}
+
+/// The first of GH_TOKEN and GITHUB_TOKEN that is usable once trimmed: an
+/// empty or unusable one falls through to the next.
+fn token_from(get: impl Fn(&str) -> Option<String>) -> Option<String> {
+    ["GH_TOKEN", "GITHUB_TOKEN"].iter().find_map(|k| {
+        let v = get(k)?.trim().to_string();
+        (!v.is_empty() && !v.contains(['"', '\\', '\n', '\r'])).then_some(v)
+    })
 }
 
 fn parse(items: &[serde_json::Value]) -> Vec<Release> {
@@ -243,6 +248,15 @@ mod tests {
         assert_eq!(limited, "GitHub: API rate limit exceeded");
         let capped = pages(|_| Ok(page(100))).unwrap();
         assert!(capped.warning.as_deref().unwrap().contains("the cap is"), "{capped:?}");
+    }
+
+    #[test]
+    fn an_empty_or_unusable_gh_token_falls_through_to_github_token() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
+        assert_eq!(token_from(env(&[("GH_TOKEN", ""), ("GITHUB_TOKEN", "x")])).as_deref(), Some("x"));
+        assert_eq!(token_from(env(&[("GH_TOKEN", "a\"b"), ("GITHUB_TOKEN", " y\n")])).as_deref(), Some("y"));
+        assert_eq!(token_from(env(&[("GH_TOKEN", " g ")])).as_deref(), Some("g"));
+        assert_eq!(token_from(env(&[])), None);
     }
 
     #[test]
