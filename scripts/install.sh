@@ -302,9 +302,11 @@ is_agent_ways_repo() {
 # `make setup` installs the latest release, which can predate the flag
 # (ADR-511); that ways repairs with the bare form. The probe asks the fixed
 # name, which takes the same flags as `manage repair` and which every
-# release has (ADR-509 §4).
+# release has (ADR-509 §4). `grep` reads all of the help, not `grep -q`: an
+# early exit kills the writer with SIGPIPE, and under pipefail that reads as
+# "no --commit".
 repair_cmd() {
-  if "$APP_DIR/bin/ways" reconcile --help 2>/dev/null | grep -q -- '--commit'; then
+  if "$APP_DIR/bin/ways" reconcile --help 2>/dev/null | grep -- '--commit' >/dev/null; then
     echo "ways manage repair --commit"
   else
     echo "ways manage repair"

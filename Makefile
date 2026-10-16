@@ -146,7 +146,7 @@ link:
 		mkdir -p "$(CLAUDE_BIN)"; dst="$(CLAUDE_BIN)/way-embed"; \
 		if [ "$(CURDIR)/$(WAY_EMBED_BIN)" -ef "$$dst" ]; then :; \
 		elif [ -e "$$dst" ] && [ ! -L "$$dst" ]; then \
-			echo "  ⚠ $$dst is a real file; not replacing it (ways manage repair --commit --force moves it aside)"; \
+			echo "  ⚠ $$dst is a real file; not replacing it ($(REPAIR_CMD) --force moves it aside)"; \
 		else $(LINK) "$(CURDIR)/$(WAY_EMBED_BIN)" "$$dst"; fi; \
 	fi
 
@@ -169,7 +169,10 @@ relink:
 # against this file after `scripts/update.sh` pulls it.
 # The update command bin/ways takes: a ways from before ADR-511 has no
 # --commit and updates with the bare form.
-UPDATE_CMD = $(shell ./bin/ways manage update --help 2>/dev/null | grep -q -- '--commit' && echo 'ways manage update --commit' || echo 'ways manage update')
+UPDATE_CMD = $(shell ./bin/ways manage update --help 2>/dev/null | grep -- '--commit' >/dev/null && echo 'ways manage update --commit' || echo 'ways manage update')
+# The repair command, the same way: the fixed name `reconcile` takes the
+# same flags as `manage repair` on every release.
+REPAIR_CMD = $(shell ./bin/ways reconcile --help 2>/dev/null | grep -- '--commit' >/dev/null && echo 'ways manage repair --commit' || echo 'ways manage repair')
 
 install: link
 	@echo "note: 'make install' is retired; use '$(UPDATE_CMD)'."

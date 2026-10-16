@@ -56,7 +56,7 @@ setup:
 	@echo "Pre-built binary installed."
 	@[ -z "$$BUILD_FAILS" ] || { echo "cargo: build failed" >&2; exit 1; }
 	@mkdir -p bin
-	@printf '#!/bin/sh\ncase "$$1 $$2" in\n  "reconcile --help") [ -n "$$OLD_WAYS" ] || echo "      --commit  Make the changes" ;;\n  reconcile*) echo "linked skills (absent)"; [ -z "$$RECONCILE_FAILS" ] || { echo "refused: skills is a real directory" >&2; exit 1; } ;;\n  status*) [ -n "$$ENGINE_OFF" ] || echo "Engine: embedding" ;;\nesac\nexit 0\n' > bin/ways
+	@printf '#!/bin/sh\ncase "$$1 $$2" in\n  "reconcile --help") [ -n "$$OLD_WAYS" ] || echo "      --commit  Make the changes"; i=0; while [ $$i -lt 4000 ]; do echo "      --option-$$i  more help text, enough to outlast a pipe buffer"; i=$$((i+1)); done ;;\n  reconcile*) echo "linked skills (absent)"; [ -z "$$RECONCILE_FAILS" ] || { echo "refused: skills is a real directory" >&2; exit 1; } ;;\n  status*) [ -n "$$ENGINE_OFF" ] || echo "Engine: embedding" ;;\nesac\nexit 0\n' > bin/ways
 	@chmod +x bin/ways
 MK
     git -C "$src" init -q
@@ -151,15 +151,19 @@ check "the bootstrap with no other flag exits 0" "0" "$rc"
 has "and runs the inner install to the end" "── Done" "$out"
 if command -v docker >/dev/null 2>&1 && docker image inspect bash:3.2 >/dev/null 2>&1; then
     out=$(docker run --rm -v "$ROOT/scripts/install.sh:/install.sh:ro" -v "$WORK/upstream/src:/upstream:ro" bash:3.2 bash -c '
-        apk add -q --no-cache git make jq >/dev/null 2>&1 || { echo "apk failed"; exit 9; }
+        apk add -q --no-cache git make jq >/dev/null 2>&1 || { echo "APK-NO-NETWORK"; exit 0; }
         export HOME=/h && mkdir -p /h && git config --global safe.directory "*"
         XDG_DATA_HOME=/h/.local/share XDG_CONFIG_HOME=/h/.config XDG_CACHE_HOME=/h/.cache \
           AGENT_WAYS_BOOTSTRAP_URL=/upstream bash /install.sh --bootstrap </dev/null 2>&1
         echo "rc=$?"; bash --version | head -1' 2>&1)
+    if [[ "$out" == *APK-NO-NETWORK* ]]; then
+        echo "  SKIP: bash 3.2 bootstrap (apk could not fetch git, make and jq)"
+    else
     has "bash 3.2 runs the bootstrap" "GNU bash, version 3.2" "$out"
     lacks "with no unbound array" "unbound variable" "$out"
     has "to the end" "── Done" "$out"
     has "and exits 0" "rc=0" "$out"
+    fi
 else
     echo "  SKIP: bash 3.2 bootstrap (no local bash:3.2 image; docker pull bash:3.2 to run it)"
 fi

@@ -57,7 +57,8 @@ sl_git() {
     branch=$(sl__run git branch --show-current 2>/dev/null) || branch=""
     [[ -n "$branch" ]] || branch=$(sl__run git rev-parse --short HEAD 2>/dev/null) || branch=""
     [[ -n "$branch" ]] || return 0
-    if sl__run git status --porcelain 2>/dev/null | grep -q .; then
+    # Not `grep -q`: under a caller's pipefail its early exit SIGPIPEs git.
+    if sl__run git status --porcelain 2>/dev/null | grep . >/dev/null; then
         branch="$branch*"
     fi
     printf '🔀 %s ' "$branch"
