@@ -32,9 +32,23 @@ XDG_DATA="${XDG_DATA_HOME:-${HOME}/.local/share}"
 APP_DIR="${XDG_DATA}/agent-ways"
 XDG_BIN="${HOME}/.local/bin"
 
-# --- Colors ---
+# --- Colors and the staged report ---
+#
+# The report has the shape every `ways manage` verb prints (ADR-511): ruled
+# section headers between stages and a mark per outcome (✓ ok, ⚠ warn,
+# ✗ fail, → action, · info). Colour when stdout is a terminal, or when
+# CLICOLOR_FORCE or FORCE_COLOR is set; plain text in a pipe, under NO_COLOR,
+# and with TERM=dumb. The text is the same either way.
 
-if [[ -t 1 ]]; then
+forced_color() {
+  local v
+  for v in "${CLICOLOR_FORCE:-}" "${FORCE_COLOR:-}"; do
+    [[ -n "$v" && "$v" != 0 ]] && return 0
+  done
+  return 1
+}
+
+if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != dumb ]] && { [[ -t 1 ]] || forced_color; }; then
   RED='\033[0;31m'
   GREEN='\033[0;32m'
   YELLOW='\033[1;33m'
@@ -45,6 +59,45 @@ if [[ -t 1 ]]; then
 else
   RED='' GREEN='' YELLOW='' CYAN='' BOLD='' DIM='' RESET=''
 fi
+
+# The width of a section rule, as `ways` draws it.
+RULE_WIDTH=64
+
+rule() {
+  local n="$1" out=""
+  while (( n-- > 0 )); do out+="─"; done
+  printf '%s' "$out"
+}
+
+# A section header: a blank line, then `── Name ────…`.
+section() {
+  local name="$1" fill
+  fill=$(( RULE_WIDTH - ${#name} - 4 ))
+  (( fill < 3 )) && fill=3
+  printf '\n%b──%b %b%s%b %b%s%b\n' "$DIM" "$RESET" "$BOLD$CYAN" "$name" "$RESET" "$DIM" "$(rule "$fill")" "$RESET"
+}
+
+# One outcome line: `  <mark> text`.
+mark() {
+  local kind="$1" glyph color
+  shift
+  case "$kind" in
+    ok) glyph="✓" color="$GREEN" ;;
+    warn) glyph="⚠" color="$YELLOW" ;;
+    fail) glyph="✗" color="$RED" ;;
+    act) glyph="→" color="$CYAN" ;;
+    *) glyph="·" color="$DIM" ;;
+  esac
+  printf '  %b%s%b %s\n' "$color" "$glyph" "$RESET" "$*"
+}
+
+# A command's own output, indented under its stage.
+indent() {
+  local line
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    printf '    %s\n' "$line"
+  done
+}
 
 # --- Help ---
 
@@ -218,12 +271,8 @@ fi
 
 check_prereqs
 
-echo ""
-echo -e "${BOLD}agent-ways installer${RESET} ${DIM}(1.0 XDG projection)${RESET}"
-echo -e "Source:      ${CYAN}${SRC}${RESET}"
-echo -e "Application: ${CYAN}${APP_DIR}${RESET}"
-echo -e "Projection:  ${CYAN}${DEST}${RESET}"
-echo ""
+echo -e "${BOLD}agent-ways installer${RESET}"
+echo -e "${DIM}source ${SRC} · app ${APP_DIR} · projection ${DEST}${RESET}"
 
 # --- Helpers ---
 
@@ -246,15 +295,14 @@ is_agent_ways_repo() {
 # sits at a projected root. The caller exits 3, so `ways manage reinstall` keeps
 # the built app.
 print_projection_stopped() {
-  echo ""
-  echo -e "${YELLOW}Projection stopped.${RESET} The app is staged in ${CYAN}${APP_DIR}${RESET}; the repair of ${DEST} did not finish."
-  echo "  Read the error above. When it lists real paths at projected roots, move those"
-  echo "  aside (or copy what you want to keep into a project's .claude/skills/)."
-  echo "  Then run:"
-  echo -e "    ${CYAN}ways manage repair --commit${RESET}            # link the projected roots"
-  echo -e "    ${CYAN}ways manage repair --commit --force${RESET}    # or: rename each real path to <name>.ways-backup-<seconds> first"
-  echo "  If ~/.claude is itself a git clone of agent-ways (pre-1.0), do not use --force;"
-  echo "  see ${UPSTREAM_URL}/blob/ways-v1.8.3/docs/migration-1.0.md"
+  mark fail "Projection stopped. The app is staged in ${APP_DIR}; the repair of ${DEST} did not finish."
+  echo "    Read the error above. When it lists real paths at projected roots, move those"
+  echo "    aside (or copy what you want to keep into a project's .claude/skills/)."
+  echo "    Then run:"
+  echo -e "      ${CYAN}ways manage repair --commit${RESET}            # link the projected roots"
+  echo -e "      ${CYAN}ways manage repair --commit --force${RESET}    # or: rename each real path to <name>.ways-backup-<seconds> first"
+  echo "    If ~/.claude is itself a git clone of agent-ways (pre-1.0), do not use --force;"
+  echo "    see ${UPSTREAM_URL}/blob/ways-v1.8.3/docs/migration-1.0.md"
 }
 
 # Put the built binaries on PATH (~/.local/bin). Symlinks into the stable app dir.
@@ -304,8 +352,7 @@ embedding_engine_ok() {
 # commands are the backstop. This function never builds or installs anything.
 print_recovery_card() {
   cat <<CARD
-
-${YELLOW}⚠ Semantic (meaning-based) way-matching is OFF${RESET} — keyword/pattern ways still fire,
+  ${YELLOW}⚠${RESET} Semantic (meaning-based) way-matching is OFF — keyword/pattern ways still fire,
   but the embedding engine (way-embed) isn't working on this platform (${PLATFORM}).
 
   ${BOLD}Easiest fix — let the agent you're installing this for finish it.${RESET}
@@ -323,8 +370,17 @@ ${YELLOW}⚠ Semantic (meaning-based) way-matching is OFF${RESET} — keyword/pa
     make deps      # only if cmake/compiler is missing — installs the toolchain (sudo)
     make setup     # build way-embed + fetch model + regenerate corpus
   Details: ${CYAN}${APP_DIR}/docs/finish-install.md${RESET}
-
 CARD
+}
+
+# The semantic-matching check of ADR-146 as a stage of the report.
+check_engine() {
+  section "Semantic matching"
+  if embedding_engine_ok; then
+    mark ok "the embedding engine runs"
+  else
+    print_recovery_card
+  fi
 }
 
 # The relevance judge (ADR-196): `ways judge-setup` checks the stored keys and,
@@ -337,9 +393,8 @@ judge_setup() {
     # A ways binary from before judge-setup: warn when no key file exists.
     local keys="${XDG_CONFIG_HOME:-$HOME/.config}/agent-ways/keys"
     if [[ ! -e "$keys/anthropic" && ! -e "$keys/openrouter" ]]; then
-      echo -e "  ${YELLOW}Ways is degraded: the relevance judge is off, so every matched way is injected.${RESET}"
-      echo -e "  Fix: ${CYAN}ways agent key add --provider anthropic${RESET} (or openrouter)"
-      echo ""
+      mark warn "Ways is degraded: the relevance judge is off, so every matched way is injected."
+      echo -e "    Fix: ${CYAN}ways agent key add --provider anthropic${RESET} (or openrouter)"
     fi
     return 0
   fi
@@ -349,7 +404,6 @@ judge_setup() {
   else
     "$ways" judge-setup || true
   fi
-  echo ""
 }
 
 # --- Clobber: remove the app dir AND ~/.claude (backs ~/.claude up first) ---
@@ -374,34 +428,42 @@ fi
 # --- Already installed (native XDG)? Update in place. ---
 
 if is_agent_ways_repo "$APP_DIR"; then
-  echo -e "${GREEN}Already installed${RESET} (app at ${CYAN}${APP_DIR}${RESET}). Updating..."
-  echo ""
-  git -C "$APP_DIR" pull --ff-only 2>&1 || {
-    echo ""
-    echo -e "${YELLOW}git pull failed.${RESET} You may have local changes in the app dir."
-    echo "  cd $APP_DIR && git status"
+  section "Pull"
+  mark info "already installed: the app at ${APP_DIR} updates in place"
+  git -C "$APP_DIR" pull --ff-only 2>&1 | indent || {
+    mark fail "git pull failed. You may have local changes in the app dir."
+    echo "    cd $APP_DIR && git status"
     exit 1
   }
-  echo ""
-  echo -e "Rebuilding (${CYAN}make setup${RESET})..."
-  make -C "$APP_DIR" setup || true
+  mark ok "pulled"
+  section "Build"
+  mark act "make setup"
+  if make -C "$APP_DIR" setup 2>&1 | indent; then
+    mark ok "built"
+  else
+    mark warn "the build had issues; ways falls back to pattern and keyword matching"
+  fi
+  section "Link"
   link_path_binaries
-  echo ""
+  mark ok "suite linked onto PATH in ${XDG_BIN}"
+  section "Reproject"
   if [[ -x "$APP_DIR/bin/ways" ]]; then
-    echo -e "Reconciling projection → ${CYAN}${DEST}${RESET}..."
+    mark act "reconciling the projection into ${DEST}"
     # The fixed name: `make setup` may install the latest release, which can
     # predate `ways manage` (ADR-509 §4).
-    if ! "$APP_DIR/bin/ways" reconcile --source "$APP_DIR" --dest "$DEST"; then
+    if ! "$APP_DIR/bin/ways" reconcile --source "$APP_DIR" --dest "$DEST" 2>&1 | indent; then
       print_projection_stopped
       exit 3
     fi
-    echo ""
-    echo -e "${GREEN}Updated.${RESET} Restart Claude Code for changes to take effect."
-    embedding_engine_ok || print_recovery_card
+    mark ok "projection reconciled"
+    check_engine
+    section "Judge"
     judge_setup
+    section "Done"
+    mark ok "Updated. Restart Claude Code for changes to take effect."
   else
-    echo -e "${YELLOW}ways binary not built — projection was NOT reconciled.${RESET}"
-    echo "  Fix the build (cd $APP_DIR && make setup), then run: ways manage repair --commit"
+    mark warn "ways binary not built, so the projection was NOT reconciled."
+    echo "    Fix the build (cd $APP_DIR && make setup), then run: ways manage repair --commit"
   fi
   exit 0
 fi
@@ -419,64 +481,64 @@ fi
 
 # --- Fresh native install: stage app → build → reconcile projection ---
 
-echo -e "Staging application → ${CYAN}${APP_DIR}${RESET}..."
+section "Stage"
 if [[ "$SRC" == "$APP_DIR" ]]; then
-  echo -e "${GREEN}Source is already the app dir.${RESET}"
+  mark ok "the source is already the app dir"
 else
+  mark act "staging the app into ${APP_DIR}"
   mkdir -p "$(dirname "$APP_DIR")"
-  git clone "$SRC" "$APP_DIR" 2>&1
+  git clone "$SRC" "$APP_DIR" 2>&1 | indent
   # Only rewrite origin when we cloned from a temp/bootstrap source — never
   # clobber the remote of a checkout we were run from. A reinstall names the
   # source its install came from in AGENT_WAYS_ORIGIN (ADR-509).
   git -C "$APP_DIR" remote set-url origin "${AGENT_WAYS_ORIGIN:-$UPSTREAM_URL}" 2>/dev/null || true
+  mark ok "staged"
 fi
 find "$APP_DIR/hooks" -name '*.sh' -exec chmod +x {} + 2>/dev/null || true
 
-echo ""
-echo -e "Building binaries + embedding model (${CYAN}make setup${RESET})..."
-echo -e "${DIM}(downloads ~21MB model + pre-built binary on first run)${RESET}"
-echo ""
+section "Build"
+mark act "make setup: binaries and the embedding model (about 21MB on first run)"
 # Create the engine cache dir first, so the Makefile and the binary resolve the
 # same dir.
 mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/agent-ways/user"
-make -C "$APP_DIR" setup || {
-  echo ""
-  echo -e "${YELLOW}Build had issues.${RESET} Ways will fall back to pattern/keyword matching."
-  echo "  Retry with: cd $APP_DIR && make setup"
-  echo ""
-}
+if make -C "$APP_DIR" setup 2>&1 | indent; then
+  mark ok "built"
+else
+  mark warn "the build had issues; ways falls back to pattern and keyword matching"
+  echo "    Retry with: cd $APP_DIR && make setup"
+fi
 
 # Bootstrap the binaries onto PATH so 'ways' is callable.
+section "Link"
 link_path_binaries
+mark ok "suite linked onto PATH in ${XDG_BIN}"
 
-echo ""
+section "Reproject"
 if [[ -x "$APP_DIR/bin/ways" ]]; then
-  echo -e "Reconciling projection → ${CYAN}${DEST}${RESET}..."
-  echo -e "${DIM}(symlinks the projected roots; merges settings.json; your files stay; a real directory at a projected root stops it, nothing is deleted)${RESET}"
-  echo ""
+  mark act "reconciling the projection into ${DEST}"
+  echo -e "    ${DIM}(symlinks the projected roots; merges settings.json; your files stay; a real directory at a projected root stops it, nothing is deleted)${RESET}"
   mkdir -p "$DEST"
   # The fixed name: `make setup` may install the latest release, which can
   # predate `ways manage` (ADR-509 §4).
-  if ! "$APP_DIR/bin/ways" reconcile --source "$APP_DIR" --dest "$DEST"; then
+  if ! "$APP_DIR/bin/ways" reconcile --source "$APP_DIR" --dest "$DEST" 2>&1 | indent; then
     print_projection_stopped
     exit 3
   fi
-  echo ""
-  echo -e "${BOLD}Done.${RESET} ~/.claude is now a projection of ${DIM}${APP_DIR}${RESET}"
-  echo ""
-  echo "  Restart Claude Code for ways to take effect."
-  echo -e "  If ${CYAN}${XDG_BIN}${RESET} isn't on your PATH, add it to your shell rc."
-  echo ""
+  mark ok "projection reconciled"
   # ADR-146 verify: the projection is up, but if semantic matching didn't come
   # up (no prebuilt way-embed for this platform / toolchain missing), guide recovery.
-  embedding_engine_ok || print_recovery_card
+  check_engine
+  section "Judge"
   judge_setup
+  section "Done"
+  mark ok "~/.claude is now a projection of ${APP_DIR}"
+  echo "    Restart Claude Code for ways to take effect."
+  echo -e "    If ${CYAN}${XDG_BIN}${RESET} isn't on your PATH, add it to your shell rc."
 else
   # No binary → don't create an empty ~/.claude. The app is staged; finish by hand.
-  echo -e "${YELLOW}ways binary not built — projection not created.${RESET}"
-  echo "  The application is staged at $APP_DIR. To finish:"
-  echo -e "    ${CYAN}cd $APP_DIR && make setup${RESET}      # build the binary"
-  echo -e "    ${CYAN}\"$APP_DIR/bin/ways\" reconcile${RESET}   # materialize the projection"
-  echo ""
+  mark fail "ways binary not built, so the projection was not created."
+  echo "    The application is staged at $APP_DIR. To finish:"
+  echo -e "      ${CYAN}cd $APP_DIR && make setup${RESET}      # build the binary"
+  echo -e "      ${CYAN}\"$APP_DIR/bin/ways\" reconcile${RESET}   # materialize the projection"
   exit 1
 fi
