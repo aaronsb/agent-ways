@@ -284,7 +284,9 @@ impl Groups {
     /// explicit lifecycle verb, distinct from join's create-implicitly.
     /// Created channels are pinned: an empty unpinned group is swept
     /// by cleanup, so an explicit create must persist until someone
-    /// joins or the operator dissolves it.
+    /// joins or the operator dissolves it. A name whose directory an
+    /// earlier channel left with messages in it, and no entry, is refused
+    /// until it is dissolved: the new channel would open on them.
     pub fn create(&self, name: &str, description: Option<&str>) -> Result<(), String> {
         validate_group_name(name)?;
         // Same single-line contract as set_description — enforced HERE,
@@ -300,6 +302,13 @@ impl Groups {
         let mut state = self.load_state();
         if state.contains_key(name) {
             return Err(format!("#{name} already exists"));
+        }
+        let left = fs::read_dir(self.group_dir(name))
+            .map(|d| d.flatten().filter(|e| e.path().extension().is_some_and(|x| x == "signal")).count())
+            .unwrap_or(0);
+        if left > 0 {
+            let messages = if left == 1 { "message" } else { "messages" };
+            return Err(format!("#{name} has {left} {messages} left on disk from an earlier channel; dissolve it first (attend channel dissolve {name})"));
         }
         state.insert(
             name.to_string(),
@@ -1482,6 +1491,34 @@ mod lifecycle_tests {
         assert!(b.join("@plans").is_dir());
         assert!(g.create("plans", None).unwrap_err().contains("already exists"));
         assert!(g.create("open", None).is_err(), "reserved names stay reserved");
+        fs::remove_dir_all(&b).ok();
+    }
+
+    /// A name whose `@name/` an earlier channel left behind, its messages
+    /// still in it and no entry naming it, is refused: a new channel there
+    /// would open on the old one's messages. Dissolve takes the leftover
+    /// away, entry or none, and the name is free again. A leftover holding
+    /// no message is no refusal.
+    #[test]
+    fn create_refuses_a_leftover_directory_holding_messages() {
+        let b = base("leftover");
+        let g = Groups::new(&b, "operator");
+        let dir = b.join("@old");
+        fs::create_dir_all(&dir).unwrap();
+        for i in 0..12 {
+            fs::write(dir.join(format!("m{i}.signal")), "x").unwrap();
+        }
+        fs::write(dir.join("alpha.invite"), "by: x\n").unwrap();
+        assert_eq!(g.create("old", None).unwrap_err(), "#old has 12 messages left on disk from an earlier channel; dissolve it first (attend channel dissolve old)");
+        assert!(!load_groups(&b).contains_key("old"), "nothing recorded");
+        fs::create_dir_all(b.join("@one")).unwrap();
+        fs::write(b.join("@one/m.signal"), "x").unwrap();
+        assert_eq!(g.create("one", None).unwrap_err(), "#one has 1 message left on disk from an earlier channel; dissolve it first (attend channel dissolve one)");
+        assert_eq!(g.dissolve("old").unwrap(), Vec::<String>::new(), "no entry, no members");
+        assert!(!dir.exists(), "the leftover is gone");
+        g.create("old", None).unwrap();
+        fs::create_dir_all(b.join("@bare")).unwrap();
+        g.create("bare", None).unwrap();
         fs::remove_dir_all(&b).ok();
     }
 

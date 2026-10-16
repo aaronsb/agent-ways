@@ -84,7 +84,8 @@ sweep
 # in every project's tray: one the operator sent beta in an earlier
 # session, and the agents' DMs with each other), proj (alpha, where the
 # chat runs, a project whose .claude/ways.yaml sets
-# attend_mod.listening: active, and beta a git checkout) or plain (no
+# attend_mod.listening: active, and beta a git checkout), relic (@relic/,
+# two messages an earlier channel left, that no entry names) or plain (no
 # Nerd Font). An agent's name comes from the temp
 # path, and a long one cuts its project, so the quiet agent is clicked by
 # the column's first `○`, its row being the agents' last.
@@ -138,6 +139,7 @@ menu-tab     | base  | wait:Agents side:#infra side:#infra wait:pick click:#open
 prompt-click | base  | wait:Agents text:draft C-n wait:new_channel text:abc click:Agents gone:new_channel
 entry-name   | base  | wait:Agents text:draft C-n wait:new_channel_name text:release
 entry-bad    | base  | wait:Agents text:draft C-n wait:new_channel_name text:no_spaces Enter wait:no_spaces
+entry-relic  | relic | wait:Agents text:draft C-n wait:new_channel_name text:relic Enter wait:relic)
 entry-desc   | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Describe wait:describe_#deploy text:_for_staging
 entry-tab    | base  | wait:Agents text:draft C-n wait:new_channel_name text:abc click:#open gone:new_channel_name
 entry-row    | base  | wait:Agents click:+ wait:new_channel_name side:#infra gone:new_channel_name text:abc
@@ -325,6 +327,11 @@ YAML
     dm "$tb" s8 400 "claude:$A" "$F/work/alpha" agent "$A" "$B" "the legend moved; can you check the tab bar?"
     dm "$ta" s9 350 "claude:$B" "$F/work/beta" agent "$B" "$A" "checked: the bar holds"
     dm "$tb" s10 300 "claude:$C" "$F/work/gamma" agent "$C" "$B" "gamma to beta, not alpha's"
+  fi
+  if [ "$1" = relic ]; then
+    mkdir -p "$sig/@relic"
+    msg "$sig/@relic" r1 86400 "claude:$A" "$F/work/alpha" "from a channel dissolved by hand"
+    msg "$sig/@relic" r2 86000 "claude:$B" "$F/work/beta" "its folder stayed"
   fi
   [ "$1" = long ] && msg "$sig/_broadcast" s5 60 "claude:eeeeeeee-0000-4000-8000-000000000005" "$F/work/the-delta-project-with-a-name-far-too-long-for-a-row" "a project name longer than any row: the band cuts it and keeps the time"
   printf 'theme:\n  active: nord\n  shape: %s\n' "$shape" > "$F/config/agent-ways/config.yaml"

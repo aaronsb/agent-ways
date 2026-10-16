@@ -1504,6 +1504,17 @@ mod tests {
     }
 
     #[test]
+    fn create_channel_reports_a_leftover_directory() {
+        let base = tempdir_like();
+        std::fs::create_dir_all(base.join("@relic")).unwrap();
+        std::fs::write(base.join("@relic/m.signal"), "x").unwrap();
+        match create_channel_in(&base, "relic", None) {
+            EnterAction::StatusOnly(s) => assert_eq!(s, "/channels create: #relic has 1 message left on disk from an earlier channel; dissolve it first (attend channel dissolve relic)"),
+            _ => panic!("a leftover should keep input with status"),
+        }
+    }
+
+    #[test]
     fn describe_channel_sets_clears_and_rejects_unknown() {
         let base = tempdir_like();
         create_channel_in(&base, "plans", None);

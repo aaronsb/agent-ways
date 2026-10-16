@@ -66,23 +66,29 @@ impl App {
 
     /// The dialog over `area` in a dialog's frame, docked where it was
     /// opened from, else in the middle: its title, the line with its
-    /// cursor, then what was wrong with the last text entered or how to
-    /// answer. Where it landed is recorded, so a click outside it closes it.
+    /// cursor, then what was wrong with the last text entered, on as many
+    /// lines as it takes, or how to answer. Where it landed is recorded, so
+    /// a click outside it closes it.
     pub(super) fn draw_entry(&mut self, f: &mut Frame, area: Rect, e: &Entry) {
-        let mut hint = match &e.error {
+        let hint = match &e.error {
             Some(err) => Line::styled(err.clone(), theme::err()),
             None => Line::styled("Enter sets · Esc cancels", theme::hint()),
         };
-        // Two lines inside the border, and room for a name and a short line.
-        let frame = Dialog::new(e.title.clone(), WIDTH + 4).height(4).dock(e.dock).keys_only().build().expect("the entry is answered by its keys");
+        let hint = crate::wrap::wrap_line(&hint, WIDTH as usize);
+        // The line, then the hint's lines, inside the border.
+        let frame = Dialog::new(e.title.clone(), WIDTH + 4).height(3 + hint.len() as u16).dock(e.dock).keys_only().build().expect("the entry is answered by its keys");
         let drawn = frame.draw(f, area, self.shape);
         let width = drawn.body.width.saturating_sub(1).max(1);
         let rows = e.input.rows(width, theme::body());
         let row = rows.iter().position(|l| l.spans.iter().any(|s| s.style.add_modifier.contains(ratatui::style::Modifier::REVERSED))).unwrap_or(0);
         let mut line = rows.get(row).cloned().unwrap_or_default();
         line.spans.insert(0, Span::raw(" "));
-        hint.spans.insert(0, Span::raw(" "));
-        f.render_widget(Paragraph::new(vec![line, hint]), drawn.body);
+        let mut lines = vec![line];
+        lines.extend(hint.into_iter().map(|mut h| {
+            h.spans.insert(0, Span::raw(" "));
+            h
+        }));
+        f.render_widget(Paragraph::new(lines), drawn.body);
         self.hits.dialog = Some((std::mem::discriminant(&self.mode), drawn));
     }
 }
