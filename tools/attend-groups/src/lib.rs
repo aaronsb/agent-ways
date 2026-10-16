@@ -250,7 +250,8 @@ impl Groups {
         self.base.join("_groups.yaml")
     }
 
-    /// Join a named group. Creates the group if it doesn't exist.
+    /// Join a named group. Creates the group if it doesn't exist, unless an
+    /// earlier channel's messages are left in its folder ([`Groups::create`]).
     ///
     /// The entry and the directory are both written under the state lock,
     /// which the orphan sweep in [`Groups::cleanup_stale`] also holds, so
@@ -260,6 +261,9 @@ impl Groups {
 
         let _lock = self.lock_state()?;
         let mut state = self.load_state();
+        if !state.contains_key(name) {
+            self.refuse_leftover(name)?;
+        }
         let entry = state.entry(name.to_string()).or_insert(GroupEntry {
             pinned: false,
             members: Vec::new(),
@@ -303,13 +307,7 @@ impl Groups {
         if state.contains_key(name) {
             return Err(format!("#{name} already exists"));
         }
-        let left = fs::read_dir(self.group_dir(name))
-            .map(|d| d.flatten().filter(|e| e.path().extension().is_some_and(|x| x == "signal")).count())
-            .unwrap_or(0);
-        if left > 0 {
-            let messages = if left == 1 { "message" } else { "messages" };
-            return Err(format!("#{name} has {left} {messages} left on disk from an earlier channel; dissolve it first (attend channel dissolve {name})"));
-        }
+        self.refuse_leftover(name)?;
         state.insert(
             name.to_string(),
             GroupEntry {
@@ -322,6 +320,20 @@ impl Groups {
         fs::create_dir_all(self.group_dir(name))
             .map_err(|e| format!("creating group dir: {e}"))?;
         Ok(())
+    }
+
+    /// Refuse to make channel `name` over the messages an earlier channel
+    /// left in its folder: the new channel would open on them. Called with
+    /// the state lock held, for a name no entry names.
+    fn refuse_leftover(&self, name: &str) -> Result<(), String> {
+        let left = fs::read_dir(self.group_dir(name))
+            .map(|d| d.flatten().filter(|e| e.path().extension().is_some_and(|x| x == "signal")).count())
+            .unwrap_or(0);
+        if left == 0 {
+            return Ok(());
+        }
+        let messages = if left == 1 { "message" } else { "messages" };
+        Err(format!("#{name} has {left} {messages} left on disk from an earlier channel; dissolve it first (attend channel dissolve {name})"))
     }
 
     /// Set or replace a channel's description (#404). Single-line by
@@ -1495,8 +1507,9 @@ mod lifecycle_tests {
     }
 
     /// A name whose `@name/` an earlier channel left behind, its messages
-    /// still in it and no entry naming it, is refused: a new channel there
-    /// would open on the old one's messages. Dissolve takes the leftover
+    /// still in it and no entry naming it, is refused by create and by a
+    /// join that would make the channel: a new channel there would open on
+    /// the old one's messages. Dissolve takes the leftover
     /// away, entry or none, and the name is free again. A leftover holding
     /// no message is no refusal.
     #[test]
@@ -1510,7 +1523,12 @@ mod lifecycle_tests {
         }
         fs::write(dir.join("alpha.invite"), "by: x\n").unwrap();
         assert_eq!(g.create("old", None).unwrap_err(), "#old has 12 messages left on disk from an earlier channel; dissolve it first (attend channel dissolve old)");
+        assert_eq!(g.join("old", false).unwrap_err(), "#old has 12 messages left on disk from an earlier channel; dissolve it first (attend channel dissolve old)", "a join would make the channel too");
         assert!(!load_groups(&b).contains_key("old"), "nothing recorded");
+        // A channel with an entry is joined whatever its folder holds.
+        g.join("live", false).unwrap();
+        fs::write(b.join("@live/m.signal"), "x").unwrap();
+        Groups::new(&b, "second").join("live", false).unwrap();
         fs::create_dir_all(b.join("@one")).unwrap();
         fs::write(b.join("@one/m.signal"), "x").unwrap();
         assert_eq!(g.create("one", None).unwrap_err(), "#one has 1 message left on disk from an earlier channel; dissolve it first (attend channel dissolve one)");

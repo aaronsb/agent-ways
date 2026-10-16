@@ -760,12 +760,14 @@ mod tests {
     fn a_move_carries_the_earlier_ids_state() {
         let (_s, bus) = scratch("move");
         const OLD: &str = "2f2632d7-3f59-4c24-9aae-0000000000aa";
+        // Joined before its history is put in it: a join makes no channel
+        // over messages no entry names.
+        Groups::new(&bus.signals, OLD).join("other", false).unwrap();
         history(&bus, "other", 1);
         bus.store(OLD).baseline(["peer-000.signal".to_string()]);
         std::fs::create_dir_all(&bus.enrolled).unwrap();
         std::fs::write(bus.enrolled.join(OLD), "join\n").unwrap();
         attend_instances::Registry::with_base(bus.instances.clone()).register(ROOT, OLD).unwrap();
-        Groups::new(&bus.signals, OLD).join("other", false).unwrap();
         bus.groups("aaron").create("topic", None).unwrap();
         bus.groups("aaron").invite("topic", OLD).unwrap();
         std::fs::write(bus.state.join(format!("{OLD}.banner")), "").unwrap();

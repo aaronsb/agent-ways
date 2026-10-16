@@ -33,6 +33,9 @@ fn fixture(tag: &str) -> PathBuf {
     .unwrap();
 
     let signals = signals(&home);
+    // The channel exists before its message: a join makes no channel over
+    // messages no entry names.
+    attend_groups::Groups::new(&signals, "").create("side", None).unwrap();
     let trays = [
         ("_broadcast".to_string(), "open-msg"),
         (claude_sessions::attend_key(ORIGIN), "project-msg"),

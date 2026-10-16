@@ -16,12 +16,20 @@ const OLD: &str = "testing history from yesterday";
 const LIVE: &str = "testing said just now";
 
 /// A new agent that is already warm: it enrolled through another channel
-/// and its first drain applied the cold start.
+/// and its first drain applied the cold start. #testing exists, with no
+/// member yet.
 fn warm_agent(tag: &str) -> Fixture {
     let f = Fixture::new(tag);
     f.ok(&["channel", "join", "newtopic"]);
     f.drain("plain");
+    testing(&f);
     f
+}
+
+/// Make #testing, as the operator does, before its history is put in it: a
+/// join makes no channel over messages no entry names.
+fn testing(f: &Fixture) {
+    attend_groups::Groups::new(&f.signals(), "").create("testing", None).unwrap();
 }
 
 #[test]
@@ -58,6 +66,7 @@ fn rejoining_a_channel_already_joined_keeps_what_is_owed() {
 #[test]
 fn a_late_join_under_attend_run_holds_back_the_history_too() {
     let f = Fixture::new("join-backlog-run");
+    testing(&f);
     // An old #open message: the sensor's cold start announces it, which
     // marks its first message scan done.
     f.put("_broadcast", "other-open", "old open", 60 * MINUTE);
@@ -86,6 +95,7 @@ fn invite(f: &Fixture, channel: &str) {
 fn a_join_that_answers_an_invitation_delivers_the_rooms_recent_history() {
     // Cold, as an invited agent usually is: its join is what enrolls it.
     let f = Fixture::new("join-invited-cold");
+    testing(&f);
     for i in 0..60 {
         // Ten minutes and more old: past the cold-start window.
         f.put("@testing", &format!("other-brief-{i:02}"), &format!("briefing {i:02}"), 10 * MINUTE + Duration::from_secs(60 - i));
@@ -102,10 +112,12 @@ fn a_join_that_answers_an_invitation_delivers_the_rooms_recent_history() {
     assert!(!drained.contains("briefing 09"), "older than the newest 50: {drained}");
     assert!(drained.contains("addressed before the join"), "{drained}");
     assert!(!drained.contains("old open chatter"), "the rest of the cold start still holds: {drained}");
-    // The invitation is spent: leaving and joining again is a self-join.
+    // The invitation is spent: leaving and joining again is a self-join,
+    // which holds back the room's history, the briefing's 60 among it.
     f.ok(&["channel", "leave", "testing"]);
     f.put("@testing", "other-later", "later history", 10 * MINUTE);
-    assert!(f.ok(&["channel", "join", "testing"]).contains("1 older message held back"));
+    let again = f.ok(&["channel", "join", "testing"]);
+    assert!(again.contains("61 older messages held back") && !again.contains("invited"), "{again}");
 }
 
 #[test]
@@ -133,4 +145,21 @@ fn a_scene_holds_back_its_channels_history_and_says_so() {
     let out = f.ok(&["channel", "scene", "workroom"]);
     assert!(out.contains("joined: testing (3 older messages held back; reading them is optional: attend message inbox)"), "{out}");
     assert!(!f.drain("plain").contains(OLD));
+}
+
+/// A join that would make a channel over an earlier one's leftover folder
+/// is refused and names the remedy; dissolving the folder frees the name.
+#[test]
+fn a_join_over_a_leftover_folder_is_refused() {
+    let f = Fixture::new("join-leftover");
+    for i in 0..3 {
+        f.put("@relic", &format!("other-old-{i}"), &format!("{OLD} {i}"), 24 * 60 * MINUTE);
+    }
+    let out = f.attend(&["channel", "join", "relic"]);
+    assert!(!out.status.success(), "refused");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("#relic has 3 messages left on disk from an earlier channel; dissolve it first (attend channel dissolve relic)"), "{err}");
+    assert!(!attend_groups::load_groups(&f.signals()).contains_key("relic"), "nothing recorded");
+    f.ok(&["channel", "dissolve", "relic"]);
+    assert!(f.ok(&["channel", "join", "relic"]).contains("joined #relic"));
 }
