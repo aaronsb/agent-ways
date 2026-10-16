@@ -93,6 +93,7 @@ const DEFAULTS = {
   deliveries: 0,
   afterCompaction: false,
   turnsSinceFull: 0,
+  heldNote: null,
   cacheLapsed: false,
   keepalive: null,
 } satisfies AttendStatus
@@ -320,7 +321,7 @@ async function poll($: $, mod: Mod) {
       if (was.listening !== listening || was.cacheLapsed !== first.cacheLapsed) {
         await updateStatus($, s => ({ ...s, listening, cacheLapsed: first.cacheLapsed }))
       }
-      if (first.note) mod.heldNote = first.note
+      if (first.note) await setHeldNote($, mod, first.note)
       if (first.messages.length === 0) return
       const msgs = [...first.messages]
       await updateStatus($, s => ({ ...s, unread: Math.max(s.unread, msgs.length) }))
@@ -370,6 +371,12 @@ async function deliver($: $, mod: Mod, msgs: readonly Listed[]): Promise<boolean
   return true
 }
 
+/** Keeps the held-back note, or clears it, in the module and in $.state. */
+async function setHeldNote($: $, mod: Mod, note: string | undefined) {
+  mod.heldNote = note
+  await updateStatus($, s => ({ ...s, heldNote: note ?? null }))
+}
+
 /** The operator's prompt while a message waits on a lapsed cache, or while
  *  a held-back note waits: one drain, and what it delivered rides `e` as
  *  context, the note with it, rather than as a turn of its own. The
@@ -397,7 +404,7 @@ async function enterWithPending($: $, mod: Mod, e: PromptSubmitInput, next: (e: 
     if (m.re) mod.ids.set(shortId(m.re), m.re)
   }
   const heldNote = d?.note ?? mod.heldNote
-  mod.heldNote = undefined
+  await setHeldNote($, mod, undefined)
   const note = heldNote ? `attend: ${oneLine(heldNote)}` : undefined
   const lines = msgs.map(formatMessage)
   const block = msgs.length > 0 ? frameInbound(lines, true) : undefined
@@ -407,7 +414,7 @@ async function enterWithPending($: $, mod: Mod, e: PromptSubmitInput, next: (e: 
   // lapsed cache, they wait for the operator's next prompt, with the row
   // still saying so; otherwise the poll submits them.
   const keep = async () => {
-    mod.heldNote = heldNote
+    await setHeldNote($, mod, heldNote)
     if (msgs.length === 0) return
     mod.pending = [...msgs]
     mod.submitTries = 0
@@ -722,11 +729,14 @@ export const register: Register = on => {
     // finds the session id in the record of sessions that listened, or the
     // project's config starts it, as it does every session there.
     const id = await $.session.id()
-    const wasActive = isActive(await readStatus($)) || (await readListened($)).includes(id)
+    const kept = await readStatus($)
+    const wasActive = isActive(kept) || (await readListened($)).includes(id)
     if (wasActive || startsActive(mod)) {
       // Listed by turn one; listening and the first drain follow the hook.
-      // Active from here, so a /clear before activate runs keeps it.
+      // Active from here, so a /clear before activate runs keeps it. A
+      // reload keeps a held-back note the cold start will not report again.
       mod.active = true
+      mod.heldNote = kept.heldNote ?? undefined
       await registerActiveTools($)
       $.clock.after(0, () => void activate($, mod, id))
     } else {
@@ -755,7 +765,7 @@ export const register: Register = on => {
     if (!goesOn) return done
     mod.isRelistening = true
     try {
-      await updateStatus($, s => ({ ...s, mode: 'active' as const, afterCompaction: true, turnsSinceFull: 0 }))
+      await updateStatus($, s => ({ ...s, mode: 'active' as const, afterCompaction: true, turnsSinceFull: 0, heldNote: mod.heldNote ?? null }))
       await rememberListening($, mod, id)
       if (mod.active) {
         $.clock.after(RELISTEN_MS, () => void listenOn($).finally(() => (mod.isRelistening = false)))

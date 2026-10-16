@@ -274,7 +274,8 @@ function host(on: On, world: World) {
   const count = (cmd: string) => argvs.filter(a => a.slice(1).join(' ').startsWith(cmd)).length
   const ran = (cmd: string) => count(cmd) > 0
   const mode = () => (state.value as { mode?: string } | undefined)?.mode
-  return { argvs, submitted, origins, prompts, tools, specs, count, ran, mode, clearState, store, storeWrites, logs, toasts, world, writes, fsWrites, compacts }
+  const status = () => state.value as Partial<AttendStatus> | undefined
+  return { status, argvs, submitted, origins, prompts, tools, specs, count, ran, mode, clearState, store, storeWrites, logs, toasts, world, writes, fsWrites, compacts }
 }
 
 /** What `attend keepwarm check --policy --json` prints. */
@@ -1093,6 +1094,58 @@ describe('a session its config started, before the operator\'s first prompt', ()
     world.dropPrompts = false
     await typed($, 'entered')
     expect(h.prompts[1]?.context).toEqual([`attend: ${NOTE}`])
+  })
+
+  // #950 review, finding 2, for the note: the cold start reports it once,
+  // so a reload before the operator prompts must not lose it.
+  test('the note is kept in $.state until it rides a prompt', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains: [noteOnly] })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(10_000)
+    expect(h.status()?.heldNote).toBe(NOTE)
+    await typed($)
+    expect(h.status()?.heldNote).toBe(null)
+  })
+
+  test('a fresh module restored from $.state carries the kept note on the first prompt', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, status: { mode: 'active', heldNote: NOTE } })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(10_000)
+    expect(h.submitted).toEqual([])
+    await typed($)
+    expect(h.prompts[0]?.context).toEqual([`attend: ${NOTE}`])
+  })
+
+  // A prompt on a lapsed cache whose drain runs the cold start takes the
+  // messages and the note together. When a hook drops that prompt, the next
+  // one carries each once, and the one after carries neither.
+  test('a dropped prompt that took messages and the note hands each on once', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const both = JSON.stringify({ ...JSON.parse(one(4, 'project')), held_back: 3, note: NOTE })
+    const drains: string[] = Array<string>(4).fill(DRAIN_CACHE_LAPSED)
+    const world: World = { config: { listening: 'active', keepwarm: 'off' }, drains, dropPrompts: true }
+    const h = host(on, world)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(10_000)
+    drains.splice(0, drains.length, both)
+    await typed($, 'dropped')
+    const first = h.prompts[0]?.context ?? []
+    expect(first.length).toBe(1)
+    expect(first[0]).toContain('m4')
+    expect(first[0]).toContain(NOTE)
+    expect(h.logs).toEqual([])
+    world.dropPrompts = false
+    await clock.advance(30_000)
+    expect(h.submitted).toEqual([])
+    await typed($, 'entered')
+    const second = (h.prompts[1]?.context ?? []).join('\n')
+    expect(second.split('m4').length - 1).toBe(1)
+    expect(second.split(NOTE).length - 1).toBe(1)
+    expect(h.logs.filter(l => l === `attend: ${NOTE}`).length).toBe(1)
+    await typed($, 'and again')
+    expect(h.prompts[2]?.context).toEqual([])
   })
 
   // #950 review, finding 5: the owner's ping from Slack is the operator's
@@ -2146,7 +2199,7 @@ describe('keepalive policy: the pure pieces', () => {
 
   test('the row: the segment alone while dormant and shown, beside the peers while active', () => {
     const k: KeepaliveRow = { state: 'running', count: 2, max: 8, nextAt: 41 * 60, wrapsAt: '21:40', wrappedAt: null, idle: null, isRefused: false, isShown: true }
-    const base: AttendStatus = { mode: 'dormant', listening: null, peers: 3, unread: 1, channels: ['#room'], deliveries: 0, afterCompaction: false, turnsSinceFull: 0, cacheLapsed: false, keepalive: null }
+    const base: AttendStatus = { mode: 'dormant', listening: null, peers: 3, unread: 1, channels: ['#room'], deliveries: 0, afterCompaction: false, turnsSinceFull: 0, heldNote: null, cacheLapsed: false, keepalive: null }
     expect(rowText({ ...base, keepalive: k }, 0)).toBe('⟳ 2/8 · next 41m · wrap ~21:40')
     expect(rowText({ ...base, keepalive: rowAfterPrompt(k) }, 0)).toBeUndefined()
     expect(rowText({ ...base, keepalive: null }, 0)).toBeUndefined()
@@ -2157,7 +2210,7 @@ describe('keepalive policy: the pure pieces', () => {
   })
 
   test('the row says why the policy is idle: under the 50k floor, the 5m tier, no request yet', () => {
-    const base: AttendStatus = { mode: 'dormant', listening: null, peers: 0, unread: 0, channels: [], deliveries: 0, afterCompaction: false, turnsSinceFull: 0, cacheLapsed: false, keepalive: null }
+    const base: AttendStatus = { mode: 'dormant', listening: null, peers: 0, unread: 0, channels: [], deliveries: 0, afterCompaction: false, turnsSinceFull: 0, heldNote: null, cacheLapsed: false, keepalive: null }
     const idle = (o: Record<string, unknown>) => keepaliveRowOf(parseKeepaliveDecision(decision({ count: 0, max: 1, ...o }))!, { state: 'running', count: 0, max: 1, nextAt: null, wrapsAt: null, wrappedAt: null, idle: null, isRefused: false, isShown: true })
     expect(rowText({ ...base, keepalive: idle({ idle: 'under 50k' }) }, 0)).toBe('⟳ 0/1 · idle: under 50k')
     expect(rowText({ ...base, keepalive: idle({ idle: '5m tier' }) }, 0)).toBe('⟳ 0/1 · idle: 5m tier')

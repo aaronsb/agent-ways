@@ -153,7 +153,8 @@ export type Mod = {
   isRelistening: boolean
   /** The cold start's held-back note, from a drain the poll ran. A wake
    *  delivery carries messages alone, so the note rides the operator's next
-   *  prompt as context. */
+   *  prompt as context. The module's copy serves a /clear, which empties
+   *  $.state; the copy in $.state (`heldNote`) serves a reload. */
   heldNote: string | undefined
   /** The keepalive policy's state (ADR-414). */
   ka: Keepalive
