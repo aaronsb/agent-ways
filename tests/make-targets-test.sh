@@ -118,13 +118,16 @@ check "and says so" "yes" "$(has "$none" "no link repointed")"
 # purge-attend-state refuses while an `attend run` is live. Its pgrep must not
 # match its own recipe, whose command line holds the pattern. The fake pgrep
 # runs the real one and keeps only the matches in this test's process tree,
-# so an `attend run` elsewhere on the machine decides nothing here.
+# so an `attend run` elsewhere on the machine decides nothing here. It
+# leaves itself out, as the real pgrep does: its own arguments hold the
+# pattern.
 REAL_PGREP=$(command -v pgrep)
 mkdir -p "$WORK/purgebin"
 cat > "$WORK/purgebin/pgrep" <<PGREP
 #!/usr/bin/env bash
 found=1
 for pid in \$("$REAL_PGREP" "\$@"); do
+    [[ \$pid -eq \$\$ ]] && continue
     p=\$pid
     while [[ -n \$p && \$p -gt 1 ]]; do
         if [[ \$p -eq $$ ]]; then echo "\$pid"; found=0; break; fi

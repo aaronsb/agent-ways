@@ -446,13 +446,12 @@ clean:
 #
 # The guard's pgrep reads every command line, the recipe's own shell's
 # among them, so the recipe never spells the phrase it looks for whole:
-# the pattern is bracketed and the warning quotes the pattern.
+# the shell assembles it from $$p when it runs.
 purge-attend-state: ATTEND_CACHE = $(or $(filter /%,$(XDG_CACHE_HOME)),$(HOME)/.cache)/attend
 purge-attend-state:
-	@echo "Wiping $(ATTEND_CACHE)/ (peers, signals, channels, instances, heartbeats, sensor state)"
-	@if pgrep -f '[a]ttend run' >/dev/null 2>&1; then \
+	@p=attend; if pgrep -f "$$p run" >/dev/null 2>&1; then \
 		echo ""; \
-		echo "WARNING: an attend process is running (pgrep -f '[a]ttend run')."; \
+		echo "WARNING: an '$$p run' is running."; \
 		echo "         Purging cached state under a live attend leaves it"; \
 		echo "         operating on stale in-memory views. Stop your"; \
 		echo "         attend processes first, then re-run this target."; \
@@ -460,5 +459,6 @@ purge-attend-state:
 		echo "         Aborting."; \
 		exit 1; \
 	fi
+	@echo "Wiping $(ATTEND_CACHE)/ (peers, signals, channels, instances, heartbeats, sensor state)"
 	@rm -rf "$(ATTEND_CACHE)"
 	@echo "Done. Next attend launch starts from a clean slate."
