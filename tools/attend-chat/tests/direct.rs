@@ -1,8 +1,9 @@
 //! What reaches the operator directly, and what the operator sends directly
 //! (ADR-401 `to`): a reply or a direct message to the person lands in their
 //! person tray, `_people/<member-id>/`, which the chat watches and shows as
-//! direct in every view; an `@Name` send writes a direct message whose `to`
-//! is that session's id. In its own file, so its own fixture.
+//! direct in the operator view and its sender's DM view; an `@Name` send
+//! writes a direct message whose `to` is that session's id. In its own file,
+//! so its own fixture.
 
 mod support;
 
@@ -11,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use agent_tui::testkit;
 use agent_tui::theme::{Palette, Shape};
-use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use attend_chat::app::Chat;
 use attend_chat::signal::{self, Channel, Signal};
 use attend_chat::tabs::Tab;
@@ -70,9 +71,11 @@ fn the_person_tray_streams_into_the_chat() {
     assert!(!attend_chat::tabs::shows(got.iter().find(|s| s.message == "not yours").unwrap(), &Tab::Merged));
 }
 
-/// A direct message to the person shows in every view, labelled `→ you`.
+/// A direct message to the person shows in the operator view and in its
+/// sender's DM view, labelled `→ you`. No channel tab shows it: the DM views
+/// hold these since ADR-405's amendment of 2026-10-13.
 #[test]
-fn a_direct_message_shows_in_every_view_labelled() {
+fn a_direct_message_shows_in_merged_and_the_senders_view_only() {
     base();
     let mut c = Chat::new(None, Palette::default(), Shape::PLAIN).heartbeat(false);
     c.push(Signal {
@@ -87,13 +90,61 @@ fn a_direct_message_shows_in_every_view_labelled() {
         tray: String::new(),
         beside_post: false,
     });
-    for tab in [Tab::Merged, Tab::Channel("open".into()), Tab::Dm(PEER_SID.into())] {
+    for tab in [Tab::Merged, Tab::Dm(PEER_SID.into())] {
         assert!(attend_chat::tabs::shows(&c.signals()[0], &tab), "{tab:?}");
+    }
+    for tab in [Tab::Channel("open".into()), Tab::Channel("deploy".into())] {
+        assert!(!attend_chat::tabs::shows(&c.signals()[0], &tab), "{tab:?}");
     }
     let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
     let header = rows.iter().find(|r| r.contains("→ you")).unwrap_or_else(|| panic!("{rows:#?}"));
     assert!(rows.iter().any(|r| r.contains("a reply for you")), "{rows:#?}");
     assert!(!header.contains("a reply for you"), "the label is on the header: {header}");
+}
+
+/// The operator's report of 2026-10-15: a channel made after a DM reached
+/// them showed that DM. A chat that backfilled an earlier DM from the
+/// person tray, through the watcher, shows a new channel empty.
+#[test]
+fn a_new_channel_shows_no_earlier_direct_message() {
+    let base = base();
+    let tray = attend_groups::person_dir(base, &signal::human_member_id());
+    std::fs::create_dir_all(&tray).unwrap();
+    let line = agent_identity::signal::format_tagged(
+        &format!("claude:{PEER_SID}"),
+        "peer",
+        PEER_CWD,
+        &agent_identity::Envelope { to: Some(&signal::human_member_id()), ..Default::default() },
+        None,
+        "an older dm, from before the channel",
+    );
+    agent_identity::signal::write_signal_file(&tray, "older-dm-1-0.signal", &line).unwrap();
+    let (tx, rx) = std::sync::mpsc::channel::<attend_chat::watcher::Delivery>();
+    watcher::spawn_watcher(base.to_path_buf(), String::new(), signal::human_member_id(), tx).unwrap();
+    let mut c = Chat::new(Some(rx), Palette::default(), Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(true).dry_run(true);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline && !c.signals().iter().any(|s| s.message.contains("an older dm")) {
+        c.drain();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(c.signals().iter().any(|s| s.message.contains("an older dm") && s.channel == Channel::Person), "{:#?}", c.signals());
+    attend_groups::Groups::new(base, "").create("fresh", None).unwrap();
+    c.refresh();
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 120, 35));
+    let (x, y) = rows
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find_map(|(y, r)| {
+            let col = r.split('│').next()?;
+            col.find("#fresh").map(|b| (col[..b].chars().count() as u16, y as u16))
+        })
+        .unwrap_or_else(|| panic!("no #fresh in the column: {rows:#?}"));
+    c.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x, row: y, modifiers: KeyModifiers::NONE });
+    assert_eq!(c.foreground(), &Tab::Channel("fresh".into()));
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 120, 35));
+    let feed: Vec<&str> = rows.iter().skip(1).map(|r| r.split_once('│').map_or(r.as_str(), |(_, rest)| rest)).collect();
+    assert!(!feed.iter().any(|r| r.contains("→ you") || r.contains("an older dm")), "{rows:#?}");
 }
 
 /// `@Name` writes a direct message whose `to` is that session's id, in its
