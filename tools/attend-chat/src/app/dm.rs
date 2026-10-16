@@ -12,6 +12,10 @@
 //!
 //! Hiding a view, on its menu or the agent's, takes its row off the column
 //! and deletes nothing; opening it again lists every message it held.
+//!
+//! A channel shows no DMs (ADR-405, amendment of 2026-10-15), so an agent's
+//! row carries an envelope while the agent has DMs to the operator newer
+//! than the last time its DM view, or the operator view, was shown.
 
 use agent_tui::ratatui::layout::Rect;
 use agent_tui::{Anchor, Item, Open};
@@ -20,6 +24,8 @@ use super::cleanup::{DELETE_READ, HIDE_HERE, SHOW_HIDDEN, TOMBSTONE, UNDO_DELETE
 use super::sidebar::SideHit;
 use super::ChatPane;
 use crate::attend_cli::Scope;
+use crate::hidden;
+use crate::signal::Channel;
 use crate::tabs::Tab;
 
 pub(super) const SHOW_DMS: &str = "Show DMs";
@@ -71,6 +77,43 @@ impl Kind {
 }
 
 impl ChatPane {
+    /// Record that `tab`, the operator view or a DM view, has shown every
+    /// DM to the operator it holds: the operator view all of them, a DM view
+    /// its agent's.
+    pub(super) fn note_shown(&mut self, tab: &Tab) {
+        let from = match tab {
+            Tab::Merged => None,
+            Tab::Dm(m) => Some(m.as_str()),
+            Tab::Channel(_) | Tab::Review(_) => return,
+        };
+        let newest = self
+            .signals
+            .iter()
+            .filter(|s| s.channel == Channel::Person && from.is_none_or(|m| s.sender_member().as_deref() == Some(m)))
+            .map(hidden::order)
+            .max();
+        if let Some(n) = newest {
+            self.shown.hide(tab, n);
+        }
+    }
+
+    /// The agents, by membership id, with a DM to the operator newer than
+    /// the last time the operator view or the agent's DM view was shown.
+    /// The view shown now has shown its DMs: none while it is the operator
+    /// view, and not the agent whose DM view it is.
+    pub(super) fn new_dms(&self) -> std::collections::HashSet<String> {
+        if self.foreground == Tab::Merged {
+            return Default::default();
+        }
+        self.signals
+            .iter()
+            .filter(|s| s.channel == Channel::Person && !self.shown.hides(&Tab::Merged, s))
+            .filter_map(|s| s.sender_member().map(|m| (Tab::Dm(m.clone()), m, s)))
+            .filter(|(tab, _, s)| *tab != self.foreground && !self.shown.hides(tab, s))
+            .map(|(_, m, _)| m)
+            .collect()
+    }
+
     /// Whether `member` has DM views: a claude the column lists. A human
     /// has none, since `@name` routes to a session's tray.
     pub(super) fn has_dms(&self, member: &str) -> bool {

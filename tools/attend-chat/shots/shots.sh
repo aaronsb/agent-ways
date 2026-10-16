@@ -76,6 +76,7 @@ sweep
 #   paste:TEXT     a bracketed paste of TEXT, \n for a newline
 #   rawpaste:TEXT  TEXT sent as typed, newlines and all, with no brackets
 #   bigpaste:N     a bracketed paste of N x characters
+#   newdm:TEXT     a direct message TEXT from alpha to the operator, arriving now
 # The fixture is base, crowd (fifteen more agents), many (24 more channels,
 # so the last channel row sits at the foot), own (the operator in
 # #deploy), long (a fourth agent whose project name outruns any row),
@@ -225,6 +226,8 @@ dm-compose   | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs t
 dm-menu      | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs rfeed:→_you wait:Hide_DMs
 dm-hide      | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs side:DMs wait:Hide_DMs click:Hide_DMs gone:pick_one
 dm-quiet     | base  | wait:Agents side:○ wait:DMs text:are_you_there Enter wait:no_heartbeat
+dm-mark      | dm    | wait:→_you side:#open gone:→_you newdm:one_more_thing wait:
+dm-mark-gone | dm    | wait:→_you side:#open gone:→_you newdm:one_more_thing wait: side:alp wait:one_more_thing side:#open gone:
 dm-earlier   | trays | wait:Agents_3/4 side:beta wait:sent_before_this_chat
 review-open  | trays | wait:Agents_3/4 rside:alpha wait:Review_DMs click:Review_DMs wait:read_only
 review-type  | trays | wait:Agents_3/4 rside:alpha wait:Review_DMs click:Review_DMs wait:read_only text:hello BTab
@@ -430,6 +433,10 @@ step() { # name step
     wait:*) poll "$n" "'$arg'" has "$arg"; return ;;
     gone:*) poll "$n" "'$arg' to go" lacks "$arg"; return ;;
     resize:*) resize "$n" "$arg" ;;
+    newdm:*)
+      local tray=$F/cache/attend/signals/_people/operator
+      mkdir -p "$tray"
+      printf '%s|%s|%s|%s\n' "claude:$A" alpha "$F/work/alpha" "$arg" > "$tray/new-$(date +%s%N).signal" ;;
     pause:*) sleep "$arg"; return ;;
     paste:*) $TH send "$n" -l $'\e[200~'"$(printf '%b' "$arg")"$'\e[201~' ;;
     rawpaste:*) $TH send "$n" -l "$(printf '%b' "$arg")" ;;

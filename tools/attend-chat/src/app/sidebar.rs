@@ -190,6 +190,7 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
         _ => (None, None),
     };
     let fg = chat.normal_tab();
+    let new_dms = chat.new_dms();
     let focus = chat.side_focus();
     let views = chat.views.clone();
     let world = chat.world();
@@ -249,7 +250,7 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
             _ => {
                 // Marked as Tab would complete it: a claude, not a human.
                 let mark = target(Style::new(), s.identity.is_claude && prefix_match(&s.identity.nickname, agent_partial.as_deref()));
-                let mut line = agent_line(chat, s, w, mark, focused);
+                let mut line = agent_line(chat, s, w, mark, focused, new_dms.contains(&s.member));
                 if members.contains(&s.member) && !focused {
                     line.spans[0] = Span::styled(theme::SELECTED_MARK, theme::accent());
                 }
@@ -389,15 +390,22 @@ fn at(c: Rgb, depth: agent_theme::ColorDepth) -> Color {
 
 /// An agent's row, a lozenge in the status line's style: the name on the
 /// identity colour, the project on a darker step of it, and `●` live or
-/// `○` not on the darkest. An inactive agent wears the desaturated steps.
+/// `○` not on the darkest. While the agent has a DM to the operator not yet
+/// shown (`new_dm`) the DM mark, bold, takes the dot's place; the colours
+/// still say live or not. An inactive agent wears the desaturated steps.
 /// At 16 colours the name keeps its ANSI colour and the rest is set back.
-fn agent_line(chat: &ChatPane, s: &Seen, w: usize, mark: Style, focused: bool) -> Line<'static> {
+fn agent_line(chat: &ChatPane, s: &Seen, w: usize, mark: Style, focused: bool, new_dm: bool) -> Line<'static> {
     let depth = chat.palette.depth();
     let k = &s.identity;
     let project = agent_identity::cwd_basename(&k.cwd);
-    let dot = if s.live { "●" } else { "○" };
+    let dot = match (new_dm, s.live) {
+        (true, _) => chat.dm_glyph(),
+        (false, true) => "●",
+        (false, false) => "○",
+    };
     let texts = sized(chat.shape, theme::colourless(), [&k.nickname, &project, dot], w);
     let [name, project, dot] = identity_styles(depth, k.palette, s.live, k.style.bold);
+    let dot = if new_dm { dot.add_modifier(Modifier::BOLD) } else { dot };
     let styles = focused_styles([name.patch(mark), project, dot], focused);
     let mut spans = vec![Span::raw(" ")];
     spans.extend(chat.shape.lozenge(&segs(texts, styles)));
@@ -586,6 +594,17 @@ impl ChatPane {
     /// frame, whether it is shown.
     pub(super) fn column_this_frame(&self) -> bool {
         self.width.map_or(self.sidebar, |w| self.side_width(w).is_some())
+    }
+
+    /// What takes an agent's `●` place while it has a DM to the operator not
+    /// yet shown ([`super::dm`]): an envelope, the Nerd Font's in a shape
+    /// that needs one.
+    pub(super) fn dm_glyph(&self) -> &'static str {
+        if self.shape.join.is_empty() {
+            "✉"
+        } else {
+            "\u{f0e0}"
+        }
     }
 
     /// The person glyph a member count carries: a Nerd Font's beside the
