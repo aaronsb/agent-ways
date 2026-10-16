@@ -203,7 +203,9 @@ pub fn print_plan(title: String, plan: &Plan, json: bool) -> Result<()> {
 pub fn plan(dir: &str, json: bool) -> Result<()> {
     let (_, canonical) = resolve_dir(dir)?;
     let plan = reconcile::plan_target(&canonical)?;
-    print_plan(format!("ways manage target plan: {}", plan.dest), &plan, json)
+    // The title names the directory as given, as the `--commit` hint does;
+    // the resolved path can differ (macOS resolves /var to /private/var).
+    print_plan(format!("ways manage target plan: {dir}"), &plan, json)
 }
 
 /// The line that ends a target verb's what-if (ADR-511). Under `--json` the
@@ -223,8 +225,8 @@ pub fn add(dir: &str, force: bool, mode: Mode, json: bool) -> Result<()> {
     let (stored, canonical) = resolve_dir(dir)?;
     let plan = reconcile::plan_target(&canonical)?;
     let title = match mode {
-        Mode::WhatIf => format!("ways manage target add: what-if for {}", plan.dest),
-        Mode::Commit => format!("ways manage target add: {}", plan.dest),
+        Mode::WhatIf => format!("ways manage target add: what-if for {dir}"),
+        Mode::Commit => format!("ways manage target add: {dir}"),
     };
     print_plan(title, &plan, json)?;
     if mode == Mode::WhatIf {
