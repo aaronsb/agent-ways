@@ -54,7 +54,7 @@ for bin in "$ENGINE" bin/way-embed bin/way-embed-*; do
 done
 
 if [ "$signed" -eq 0 ]; then
-    echo "No way-embed binary found at $ENGINE or in bin/ — run 'ways manage update' first." >&2
+    echo "No way-embed binary found at $ENGINE or in bin/ — run 'ways manage update --commit' first." >&2
     exit 2
 fi
 

@@ -6,7 +6,7 @@
 
 | Role | Where it lives | Do you edit it? |
 |---|---|---|
-| **Your install** | `~/.claude` (projection) + `$XDG_DATA_HOME/agent-ways` (the app) | **No.** `ways manage update` stashes local changes, fast-forwards, and pops them back, so an edit there can conflict with an update or block it. |
+| **Your install** | `~/.claude` (projection) + `$XDG_DATA_HOME/agent-ways` (the app) | **No.** `ways manage update --commit` stashes local changes, fast-forwards, and pops them back, so an edit there can conflict with an update or block it. `ways manage update` alone lists them. |
 | **Your dev checkout** | a standalone clone, e.g. `~/src/agent-ways` (not `~/.claude`, not `$XDG_DATA`) | **Yes.** Branch, edit, commit, PR here. |
 | **A sandbox** | a throwaway `$HOME`/`$XDG_*` under `/tmp` | Only the test harness writes here. |
 

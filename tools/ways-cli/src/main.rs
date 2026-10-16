@@ -1011,10 +1011,13 @@ enum ThemeCommand {
 
 #[derive(Subcommand)]
 enum ManageCommand {
-    /// Pull the app source, refresh the binaries, rebuild, reproject
+    /// What an update would change; with --commit, pull, refresh, reproject
     ///
-    /// Update the agent-ways install: pull, refresh binaries (pre-built
-    /// first), regenerate the corpus, reproject (ADR-150).
+    /// Without --commit, fetch and report what the update would change:
+    /// versions, release notes, the source delta, local changes, the actions
+    /// on this machine, and dev links (ADR-511). With --commit, pull, refresh
+    /// the binaries (pre-built first), regenerate the corpus and reproject
+    /// (ADR-150).
     Update(UpdateArgs),
     /// Converge every target toward the projection (ADR-144)
     ///
@@ -1056,14 +1059,17 @@ enum ManageCommand {
 
 #[derive(clap::Args)]
 struct UpdateArgs {
-    /// Show what would run without executing it
-    #[arg(long)]
-    dry_run: bool,
+    #[command(flatten)]
+    apply: cmd::lifecycle::Apply,
     /// Pin the install to a specific branch, tag, or commit and build the
     /// whole suite from source, instead of pulling the latest release.
-    /// Leaves the release channel until `ways manage update --ref main`.
+    /// Leaves the release channel until `ways manage update --ref main --commit`.
     #[arg(long = "ref", value_name = "REF")]
     git_ref: Option<String>,
+    /// List every commit in the what-if, and show the raw output of each
+    /// step of a --commit run
+    #[arg(long, short)]
+    verbose: bool,
 }
 
 #[derive(clap::Args)]
@@ -1201,7 +1207,7 @@ fn moved(old: &str) {
 }
 
 fn update(args: UpdateArgs) -> Result<()> {
-    cmd::update::run(args.dry_run, args.git_ref)
+    cmd::update::run(args.apply.mode(true), args.git_ref, args.verbose)
 }
 
 /// `ways manage repair` and the hidden fixed name `reconcile`: one function,

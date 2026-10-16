@@ -33,7 +33,7 @@ Check that `attend` is installed:
 command -v attend
 ```
 
-If not found, tell the user to run `ways manage update` (or `make attend link` from the agent-ways app dir). Stop here.
+If not found, tell the user to run `ways manage update --commit` (or `make attend link` from the agent-ways app dir). Stop here.
 
 **In a mod host, call `attend_listen` instead.** When the `attend_listen` tool is listed, the attend mod is loaded (ADR-406). Call it and skip Steps 2 and 3: it turns listening on for the rest of the session, draws one status row, delivers messages as turns, and adds `attend_send`, `attend_reply`, `attend_join` and `attend_peers`, which take the message as a typed parameter with no quoting. Do not also start Monitor; two pollers on one session are noisy. Monitor below is the fallback where the tool is absent.
 

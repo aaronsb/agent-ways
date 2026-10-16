@@ -647,12 +647,16 @@ For one release the old top-level names `update`, `uninstall` and `target` still
 
 **Run from:** Anywhere. The app source in `$XDG_DATA_HOME/agent-ways` must be an agent-ways git checkout; an install from before 1.0 is refused and needs migrating first.
 
-**Tells you:** Each step as it runs: pull the app source, refresh every binary of the suite (a pre-built download first, a build from source as the fallback), rebuild the corpus, run `ways manage repair`, and check the judge's keys. A binary that fails to refresh is put back, so a failed update leaves the old install working. `--dry-run` prints the steps and runs nothing. `--ref <branch|tag|commit>` pins the install to that ref and builds the whole suite from source, leaving the release channel until `ways manage update --ref main`.
+**Tells you:** Without `--commit`, what the update would change, after a fetch and with nothing else touched ([ADR-511](../architecture/platform/ADR-511-every-mutating-lifecycle-verb-reports-what-it-would-change-until-commit.md)): each component's version installed and at the target, the GitHub release notes of every release in between, the commits grouped by area with features and fixes listed, local changes the pull would stash, the actions `--commit` would take on this machine, and binary links that point into a dev checkout. `--verbose` lists every commit. Offline, the notes are reported as unreachable and the rest still prints. It exits 0.
+
+With `--commit`, each stage under its own header: pull the app source, refresh every binary of the suite (a pre-built download first, a build from source as the fallback), rebuild the corpus, run `ways manage repair`, and check the judge's keys. A command's raw output shows under `--verbose`, or when it fails. A binary that fails to refresh is put back, so a failed update leaves the old install working. `--ref <branch|tag|commit>` pins the install to that ref and builds the whole suite from source, leaving the release channel until `ways manage update --ref main --commit`.
+
+`--dry-run` is accepted for the what-if and `--yes` for `--commit`. `install.manage_mode: commit` in the user config makes the command apply without the flag; `--what-if` then reports.
 
 ```
 ways manage update
-ways manage update --dry-run
-ways manage update --ref ways-v1.32.0
+ways manage update --commit
+ways manage update --ref ways-v1.32.0 --commit
 ```
 
 ### `ways manage repair`

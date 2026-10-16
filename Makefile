@@ -168,12 +168,13 @@ relink:
 # already parsed the old Makefile, so its recipe still runs `$(MAKE) install`
 # against this file after `scripts/update.sh` pulls it.
 install: link
-	@echo "note: 'make install' is retired; use 'ways manage update'."
+	@echo "note: 'make install' is retired; use 'ways manage update --commit'."
 
 # transition: removed by #717 (ADR-506)
 update:
-	@echo "note: 'make update' is retired; running 'ways manage update'."
-	@./bin/ways manage update
+	@echo "note: 'make update' is retired; running 'ways manage update --commit'."
+	@# A bin/ways from before the lifecycle convention (ADR-511) has no --commit and applies by default.
+	@if ./bin/ways manage update --help 2>/dev/null | grep -q -- '--commit'; then ./bin/ways manage update --commit; else ./bin/ways manage update; fi
 
 # transition: removed by #717 (ADR-506)
 sync-to-home:

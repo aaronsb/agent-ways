@@ -444,7 +444,7 @@ check "attend macro: says nothing for an unresolved session" "" \
     "$(attend_macro agent '{"session_id":"x","resolved":false,"listening":false,"via":[],"host":null,"run_live":false}' '[]' "$MOD_ON")"
 check "attend macro: says nothing when listen status fails" "" "$(attend_macro agent '' '[]' "$MOD_ON")"
 check "attend macro: attend not installed" \
-    '**Note**: attend is not installed. Run `ways manage update` to install it.' \
+    '**Note**: attend is not installed. Run `ways manage update --commit` to install it.' \
     "$(PATH="$SYSBIN" "$BASH_BIN" "$HOOKS/softwaredev/environment/attend/macro.sh" 2>&1)"
 check "attend macro: calls attend only with the argv it expects" "" "$(cat "$WORK/attend-unexpected" 2>/dev/null)"
 

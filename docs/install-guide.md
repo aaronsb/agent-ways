@@ -73,13 +73,13 @@ If `~/.claude/` is your **own** git repo (you version-control your config), that
 **A projection install** (the app source is a git checkout in `$XDG_DATA_HOME/agent-ways`). Update in place:
 
 ```bash
-ways manage update              # pull, refresh binaries, regenerate the corpus, reproject
-ways manage update --dry-run    # show what it would run
-ways manage update --ref REF    # pin to a branch, tag or commit; build the suite from source
-ways manage update --ref main   # return to the release channel
+ways manage update                       # what would change; nothing is changed
+ways manage update --commit              # pull, refresh binaries, regenerate the corpus, reproject
+ways manage update --ref REF --commit    # pin to a branch, tag or commit; build the suite from source
+ways manage update --ref main --commit   # return to the release channel
 ```
 
-`ways manage update` pulls with `--ff-only`, stashing local changes in the app dir first and restoring them after. It refreshes the binaries (prebuilt first, source build as fallback), regenerates the corpus, relinks, and reprojects `~/.claude`. Use it rather than `make setup`, which skips binaries that already exist and would leave you on the old build.
+Without `--commit` the command fetches and reports: versions installed and at the target, the release notes in between, the commits grouped by area, local changes, the actions `--commit` would take, and any binary links that point into a dev checkout. `--verbose` lists every commit. `ways manage update --commit` pulls with `--ff-only`, stashing local changes in the app dir first and restoring them after. It refreshes the binaries (prebuilt first, source build as fallback), regenerates the corpus, relinks, and reprojects `~/.claude`. Use it rather than `make setup`, which skips binaries that already exist and would leave you on the old build.
 
 **An install last updated before ways 1.28.0.** 1.28.0 removed the readers for pre-1.0 locations ([ADR-506](architecture/platform/ADR-506-the-consolidation-ends-with-no-legacy-compatibility.md)). If any of these still exist, move them by hand; the commands spell out the XDG defaults:
 

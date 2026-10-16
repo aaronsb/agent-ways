@@ -16,7 +16,7 @@ A local build for this host takes about a minute. A tagged release takes a bump 
 
    `dev-install` changes binaries only. Hooks, ways, skills and the attend mod still come from the app. To evaluate those, project the checkout with `ways manage repair --source <checkout>`, or load a branch's mod for one session with `claude --plugin-dir <checkout>/plugins/attend`. The mod calls `attend` on `PATH`, so it runs against the dev-install build.
 
-   Two commands undo part of a dev install. `ways manage repair` relinks `~/.claude/bin/<bin>` to the app. `ways manage update` runs `make relink`, which relinks `~/.local/bin/<bin>` to the app. Do not run either during an evaluation, or run `make dev-install` again after them.
+   Two commands undo part of a dev install when given `--commit`. `ways manage repair --commit` relinks `~/.claude/bin/<bin>` to the app. `ways manage update --commit` runs `make relink`, which relinks `~/.local/bin/<bin>` to the app. Without `--commit` both report the dev links they would move and change nothing. Do not commit either during an evaluation, or run `make dev-install` again after them.
 
 2. **Restore the released install.**
 

@@ -163,7 +163,7 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
     if !std::fs::read_to_string(&installer).is_ok_and(|t| t.contains("--stage)")) {
         bail!(
             "{} has no --stage mode, which reinstall fetches through; nothing was removed. \
-             Run `ways manage update` to move to a version that has it.",
+             Run `ways manage update --commit` to move to a version that has it.",
             installer.display()
         );
     }
@@ -238,7 +238,7 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
     if source_build {
         if let Err(e) = build_from_source(&app) {
             eprintln!(
-                "\nagent-ways {} is installed with release binaries, and the source build failed. Fix the cause above, then run:\n  ways manage update --ref {}",
+                "\nagent-ways {} is installed with release binaries, and the source build failed. Fix the cause above, then run:\n  ways manage update --ref {} --commit",
                 source.label(),
                 source.rev
             );

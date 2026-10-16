@@ -277,7 +277,7 @@ const SCREEN_GROUPS: &[&str] = &["session", "manage"];
 /// `reconcile`: the fixed name every successor binary keeps, because the
 /// previous release's updater calls it (ADR-509 §4).
 const MOVED: &[&str] = &["update", "reconcile", "uninstall", "target"];
-const UPDATER: &str = "tools/ways-cli/src/cmd/update.rs (spawn)";
+const UPDATER: &str = "tools/ways-cli/src/cmd/update/mod.rs (spawn)";
 
 /// The installer and check-setup run the app's freshly set-up binary, which
 /// `make setup` downloads from the latest release, not from the checkout they

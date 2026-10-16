@@ -196,7 +196,7 @@ pub fn run(json_output: bool) -> Result<()> {
         println!("  ways-mcp:  {}", mcp_binary_line());
         match crate::cmd::agent::resolve() {
             Some(p) => println!("  ways-agent: {}", p.display()),
-            None => println!("  ways-agent: not found — the relevance gate is off until `ways manage update` installs it"),
+            None => println!("  ways-agent: not found — the relevance gate is off until `ways manage update --commit` installs it"),
         }
         for t in install_targets().0.iter().filter(|t| t.enabled) {
             println!("  mcp:       {} in {}", mcp_registration(&t.dir()), t.path);
@@ -455,7 +455,7 @@ fn mcp_binary_line() -> String {
     let bin = crate::paths::data_root().join("bin").join("ways-mcp");
     match version_of(&bin) {
         Some(v) => format!("{} ({v})", bin.display()),
-        None => "not installed (`make ways-mcp` in the app directory, or `ways manage update`)".to_string(),
+        None => "not installed (`make ways-mcp` in the app directory, or `ways manage update --commit`)".to_string(),
     }
 }
 
@@ -574,7 +574,7 @@ mod tests {
             sidecar_line(&incomplete),
             "Body sidecar: not used, confirmation embeds per call — incomplete (missing a; stale b, c, d and 1 more); run `ways corpus`"
         );
-        assert!(sidecar_line(&Err(Fallback::NoVectors)).ends_with("the corpus was built with a way-embed that cannot return chunk vectors, which way-embed 1.2.0 adds; `ways manage update` installs it once it is published and rebuilds the corpus"));
+        assert!(sidecar_line(&Err(Fallback::NoVectors)).ends_with("the corpus was built with a way-embed that cannot return chunk vectors, which way-embed 1.2.0 adds; `ways manage update --commit` installs it once it is published and rebuilds the corpus"));
         assert!(sidecar_line(&Err(Fallback::BuiltWithoutVectors)).ends_with("built without chunk vectors; run `ways corpus`"));
         assert!(sidecar_line(&Err(Fallback::BuildFailed("boom".into()))).ends_with("build failed: boom"));
         assert_eq!(sidecar_json(&Err(Fallback::Absent)), json!({ "used": false, "reason": "absent; run `ways corpus`" }));

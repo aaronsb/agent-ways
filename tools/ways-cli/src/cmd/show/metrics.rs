@@ -180,8 +180,8 @@ pub(crate) fn render_update_status(content: &str) -> String {
     let repo_disp = if repo.is_empty() { "$XDG_DATA_HOME/agent-ways" } else { &repo };
     let mut out = String::from("\n");
     out.push_str(&format!("**⚠ agent-ways is {behind} commit(s) behind upstream.** Update the app source and reproject:\n"));
-    out.push_str("`ways manage update`\n");
-    out.push_str(&format!("`ways manage update` pulls `{repo_disp}`, refreshes the binaries, and reprojects `~/.claude`. A bare pull plus `make setup` skips existing binaries and leaves them stale.\n"));
+    out.push_str("`ways manage update`, then `ways manage update --commit`\n");
+    out.push_str(&format!("`ways manage update` reports what would change; with `--commit` it pulls `{repo_disp}`, refreshes the binaries, and reprojects `~/.claude`. A bare pull plus `make setup` skips existing binaries and leaves them stale.\n"));
     out
 }
 

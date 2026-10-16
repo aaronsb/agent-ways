@@ -5,7 +5,7 @@ agent-tui frame 100x30
 |│     (none recorded)           ~/.claude (default) [a││                                           │|
 |│ ▾ settings                    value                 ││The Claude Code config directories         │|
 |│     secret_path_deny          true                  ││agent-ways is active in.                   │|
-|│                                                     ││                                           │|
+|│     manage_mode               whatif                ││                                           │|
 |│                                                     ││Changed by actions, since each change      │|
 |│                                                     ││reconciles: `ways manage target            │|
 |│                                                     ││add|enable|disable|remove <dir>` (ADR-184).│|

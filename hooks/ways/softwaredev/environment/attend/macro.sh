@@ -9,7 +9,7 @@
 # agent's (#932). Any failure prints nothing rather than a guess.
 
 if ! command -v attend &>/dev/null; then
-  echo "**Note**: attend is not installed. Run \`ways manage update\` to install it."
+  echo "**Note**: attend is not installed. Run \`ways manage update --commit\` to install it."
   exit 0
 fi
 
