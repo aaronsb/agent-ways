@@ -77,14 +77,15 @@ impl Kind {
 }
 
 impl ChatPane {
-    /// Record that `tab`, the operator view or a DM view, has shown every
-    /// DM to the operator it holds: the operator view all of them, a DM view
-    /// its agent's.
+    /// Record, as `tab` is left, that it showed every DM to the operator it
+    /// holds: the operator view all of them; an agent's DM view, or its own
+    /// (Review DMs), the agent's. Both views of an agent keep one mark, its
+    /// DM view's.
     pub(super) fn note_shown(&mut self, tab: &Tab) {
-        let from = match tab {
-            Tab::Merged => None,
-            Tab::Dm(m) => Some(m.as_str()),
-            Tab::Channel(_) | Tab::Review(_) => return,
+        let (mark, from) = match tab {
+            Tab::Merged => (Tab::Merged, None),
+            Tab::Dm(m) | Tab::Review(m) => (Tab::Dm(m.clone()), Some(m.as_str())),
+            Tab::Channel(_) => return,
         };
         let newest = self
             .signals
@@ -93,14 +94,18 @@ impl ChatPane {
             .map(hidden::order)
             .max();
         if let Some(n) = newest {
-            self.shown.hide(tab, n);
+            self.shown.hide(&mark, n);
         }
     }
 
     /// The agents, by membership id, with a DM to the operator newer than
-    /// the last time the operator view or the agent's DM view was shown.
-    /// The view shown now has shown its DMs: none while it is the operator
-    /// view, and not the agent whose DM view it is.
+    /// the last time the operator view or one of the agent's DM views was
+    /// left. The view shown now shows its DMs, so none count while it is the
+    /// operator view, and not the agent whose view it is. A DM that arrived
+    /// while the operator view was shown counts from when it was left: its
+    /// mark was recorded then, so one that arrives later and sorts before
+    /// it, by an undo, carries none. A person has no DM view to clear it
+    /// from, so only agents are marked.
     pub(super) fn new_dms(&self) -> std::collections::HashSet<String> {
         if self.foreground == Tab::Merged {
             return Default::default();
@@ -108,9 +113,12 @@ impl ChatPane {
         self.signals
             .iter()
             .filter(|s| s.channel == Channel::Person && !self.shown.hides(&Tab::Merged, s))
-            .filter_map(|s| s.sender_member().map(|m| (Tab::Dm(m.clone()), m, s)))
-            .filter(|(tab, _, s)| *tab != self.foreground && !self.shown.hides(tab, s))
-            .map(|(_, m, _)| m)
+            .filter_map(|s| s.sender_member().map(|m| (m, s)))
+            .filter(|(m, s)| {
+                let shown_now = matches!(&self.foreground, Tab::Dm(f) | Tab::Review(f) if f == m);
+                !shown_now && !self.shown.hides(&Tab::Dm(m.clone()), s) && self.has_dms(m)
+            })
+            .map(|(m, _)| m)
             .collect()
     }
 
