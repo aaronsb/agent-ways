@@ -250,6 +250,19 @@ fn act(app: &mut App, label: &str) {
 }
 
 #[test]
+fn a_paste_names_a_new_theme() {
+    let d = dir("paste");
+    let mut app = app_in(&d, ColorDepth::TrueColor);
+    keys(&mut app, &[KeyCode::Char('3')]);
+    act(&mut app, "new");
+    app.paste("pasted\n");
+    assert!(matches!(&app.mode, Mode::Name { buf, .. } if buf == "pasted"), "the line break did not press Enter");
+    keys(&mut app, &[KeyCode::Enter]);
+    assert!(d.join("pasted.theme").exists());
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
 fn new_copy_rename_and_delete_write_the_themes_dir() {
     let d = dir("files");
     let mut app = app_in(&d, ColorDepth::TrueColor);

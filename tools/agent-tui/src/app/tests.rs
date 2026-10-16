@@ -115,6 +115,35 @@ fn action_only_node_opens_the_menu_on_enter() {
     assert_eq!(app.queue.items()[0].command, "ways manage target plan '/tmp/a b'");
 }
 
+/// A path pasted into an argument entry fills it as one line: the line
+/// break it was copied with is not Enter, and Enter stages it.
+#[test]
+fn a_paste_fills_an_argument_entry() {
+    let target = Node::leaf("/home/me/.claude", "", Setting::new(Kind::ReadOnly, "enabled", "user"))
+        .with_actions(vec![Action::new("plan", "ways manage target plan {}").arg(Arg::Text("dir".into()))]);
+    let mut app = App::new("t", vec![Node::group("install", "", vec![target]).opened()]);
+    keys(&mut app, &[KeyCode::Enter, KeyCode::Enter]);
+    app.paste("/tmp/a\u{1b} b\n");
+    assert!(matches!(&app.mode, Mode::Arg { buf, .. } if buf == "/tmp/a b"), "one line, no control characters");
+    assert!(app.queue.is_empty(), "the line break did not press Enter");
+    keys(&mut app, &[KeyCode::Enter]);
+    assert_eq!(app.queue.items()[0].command, "ways manage target plan '/tmp/a b'");
+}
+
+/// A paste into the filter narrows the rows as typing it would.
+#[test]
+fn a_paste_fills_the_filter() {
+    let mut app = App::new("t", tabbed());
+    keys(&mut app, &[KeyCode::Down, KeyCode::Char('/')]);
+    app.paste("language\n");
+    assert_eq!(app.filter, "language");
+    assert!(matches!(app.mode, Mode::Filter));
+    let hits = screen(&mut app);
+    assert!(hits.contains("language") && !hits.contains("alpha"));
+    keys(&mut app, &[KeyCode::Esc]);
+    assert_eq!(app.cursor, 1, "Esc returns to the cursor the paste started from");
+}
+
 fn flag(name: &str) -> Node {
     Node::leaf(name, "", Setting::new(Kind::Bool, "true", "default").default("true"))
 }

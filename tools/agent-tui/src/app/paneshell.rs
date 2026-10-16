@@ -734,23 +734,43 @@ impl App {
         matches!(m.kind, MouseEventKind::Down(MouseButton::Left | MouseButton::Right))
     }
 
-    /// A paste: the pane's, while nothing is open over it and the tab bar
-    /// does not have the focus. A question waiting is answered no first, as
-    /// typing answers it, and the paste goes on to the pane. Elsewhere it
-    /// is dropped, never typed.
+    /// A paste goes where typing would. A question waiting is answered no
+    /// first, as typing answers it, and the paste goes on.
+    ///
+    /// - The masked entry takes the paste's first line, trimmed, as typed
+    ///   characters, refused past the cap ([`App::secret_paste`]).
+    /// - The pane's entry dialog, an argument entry, the value editor, a
+    ///   name, the filter, and a flow's path entry or filter take it on one
+    ///   line ([`crate::input::one_line`]): a line break in it is never
+    ///   Enter.
+    /// - Browsing, the pane takes it whole, unless the tab bar has the
+    ///   focus.
+    ///
+    /// Anywhere else, a menu, a picker or a question, it is dropped, never
+    /// typed.
     pub fn paste(&mut self, text: &str) {
         if let Mode::Ask(a) = &self.mode {
             let a = a.clone();
             self.answer(a, false);
         }
-        if matches!(self.mode, Mode::Entry(_)) {
-            return self.entry_paste(text);
-        }
-        if !matches!(self.mode, Mode::Browse) || self.strip.is_some() {
-            return;
-        }
-        if let Some(p) = &mut self.pane {
-            p.paste(text);
+        match &mut self.mode {
+            Mode::Entry(_) => self.entry_paste(text),
+            Mode::Secret { .. } => self.secret_paste(text),
+            Mode::Arg { buf, .. } | Mode::Edit(buf) | Mode::Name { buf, .. } => buf.push_str(&crate::input::one_line(text)),
+            Mode::Filter => {
+                if self.filter.is_empty() {
+                    self.saved[self.tab] = self.cursor;
+                }
+                self.filter.push_str(&crate::input::one_line(text));
+                self.cursor = 0;
+            }
+            Mode::Flow(flow) => flow.paste(text),
+            Mode::Browse if self.strip.is_none() => {
+                if let Some(p) = &mut self.pane {
+                    p.paste(text);
+                }
+            }
+            _ => {}
         }
     }
 

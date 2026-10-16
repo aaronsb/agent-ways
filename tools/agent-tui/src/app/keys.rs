@@ -121,10 +121,7 @@ impl App {
                 }
                 KeyCode::Char(c) => {
                     if !buf.push(c) {
-                        self.msg = format!(
-                            "rejected: the entry holds at most {} bytes; what was typed past that is not kept. Esc and enter a shorter key",
-                            SecretBuf::CAP
-                        );
+                        self.secret_full();
                     }
                     self.mode = Mode::Secret { path, action, buf };
                 }
@@ -139,6 +136,25 @@ impl App {
             m => self.mode = m,
         }
         true
+    }
+
+    /// The masked entry is full: say so, and nothing of what was entered.
+    fn secret_full(&mut self) {
+        self.msg = format!("rejected: the entry holds at most {} bytes; what was typed past that is not kept. Esc and enter a shorter key", SecretBuf::CAP);
+    }
+
+    /// A paste into the masked entry: its first line, trimmed of the
+    /// whitespace and line breaks a copied key carries, each character
+    /// pushed as a typed one is, control characters left out. A line
+    /// break inside it ends it, never presses Enter. Past the cap it is
+    /// refused as typing is. The text is read in place and nothing of it
+    /// is kept outside `buf`.
+    pub(super) fn secret_paste(&mut self, text: &str) {
+        let Mode::Secret { buf, .. } = &mut self.mode else { return };
+        let line = text.trim_start().split(['\n', '\r']).next().unwrap_or_default().trim_end();
+        if !line.chars().filter(|c| !c.is_control()).all(|c| buf.push(c)) {
+            self.secret_full();
+        }
     }
 
     /// Review's keys. Moving and opening groups work; nothing edits or queues.

@@ -1003,3 +1003,33 @@ fn child_titles_name_the_layers_written() {
 fn each_tab_s_title_names_the_layers_it_writes() {
     let _ = std::fs::remove_dir_all(in_fixture("child_titles_name_the_layers_written"));
 }
+
+// A provider key pasted into its rotate entry, as the terminal sends a
+// bracketed paste with the line break it was copied with, reaches the
+// command's stdin. It runs in a fixture of its own, where a key file makes
+// the key present, so the node offers rotate.
+#[test]
+#[ignore = "run by a_pasted_key_reaches_the_rotate_entry"]
+fn child_takes_a_pasted_key_into_rotate() {
+    let Some((ways, _)) = child() else { return };
+    let file = ways_agent_core::keys::key_path(ways_agent_core::profile::Provider::Anthropic);
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, "sk-ant-old").unwrap();
+    let mut app = App::new("t", ways.build(&ways.layers()));
+    press(&mut app, &[KeyCode::Char('/')]);
+    type_str(&mut app, "keys.anthropic");
+    press(&mut app, &[KeyCode::Enter, KeyCode::End, KeyCode::Enter, KeyCode::Char('a'), KeyCode::Enter]);
+    assert!(app.masked(), "rotate opened its masked entry:\n{}", text(&mut app));
+    app.paste("sk-ant-pasted-new\n");
+    assert!(!text(&mut app).contains("sk-ant-pasted-new"), "the pasted key never shows");
+    press(&mut app, &[KeyCode::Enter]);
+    let q = app.queued();
+    assert_eq!(q.len(), 1);
+    assert_eq!(q[0].command, "ways agent key rotate --provider anthropic < <stdin>");
+    assert_eq!(q[0].stdin.as_ref().map(|s| s.reveal()), Some("sk-ant-pasted-new"), "the paste, trimmed, rides to stdin");
+}
+
+#[test]
+fn a_pasted_key_reaches_the_rotate_entry() {
+    let _ = std::fs::remove_dir_all(in_fixture("child_takes_a_pasted_key_into_rotate"));
+}

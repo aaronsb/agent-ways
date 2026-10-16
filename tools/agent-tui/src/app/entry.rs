@@ -58,8 +58,7 @@ impl App {
     /// A paste into the open dialog, on one line.
     pub(super) fn entry_paste(&mut self, text: &str) {
         if let Mode::Entry(e) = &mut self.mode {
-            let one: String = text.split(['\n', '\r']).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(" ");
-            e.input.insert_str(&one.chars().filter(|c| !c.is_control()).collect::<String>());
+            e.input.insert_str(&crate::input::one_line(text));
             e.error = None;
         }
     }
