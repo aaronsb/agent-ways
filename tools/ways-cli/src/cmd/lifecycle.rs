@@ -196,7 +196,12 @@ impl Report {
     }
 
     pub fn item(&mut self, mark: Mark, text: impl Into<String>) -> &mut Self {
-        self.push(Line::Item { mark, indent: 2, text: text.into() })
+        self.item_at(mark, 2, text)
+    }
+
+    /// An item at `indent`, as under a sub-heading.
+    pub fn item_at(&mut self, mark: Mark, indent: usize, text: impl Into<String>) -> &mut Self {
+        self.push(Line::Item { mark, indent, text: text.into() })
     }
 
     /// A tag in the mark's colour, padded to `width`, then text.

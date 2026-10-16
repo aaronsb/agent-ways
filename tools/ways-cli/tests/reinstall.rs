@@ -128,7 +128,7 @@ fn without_commit_it_prints_the_plan_and_changes_nothing() {
     let t = text(&out);
     assert!(out.status.success(), "{t}");
     assert!(t.contains("Fetch and verify") && t.contains(s.stage().to_str().unwrap()), "{t}");
-    assert!(t.contains("Uninstall, keeping your config and state") && t.contains("Delete:"), "{t}");
+    assert!(t.contains("Uninstall, keeping your config and state") && t.contains("  Delete\n"), "{t}");
     assert!(t.contains("Install from the stage") && t.contains(" on main"), "{t}");
     assert!(t.contains("Nothing changed"), "{t}");
     assert!(!t.contains("local changes"), "a clean app says nothing: {t}");

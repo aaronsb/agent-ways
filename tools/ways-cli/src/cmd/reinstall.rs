@@ -20,6 +20,7 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 
 use super::uninstall::Uninstall;
+use super::lifecycle::{Mark, Report};
 use super::update::{build_from_source, git_head, is_app_checkout, run_step, source_describe, tool_present};
 use crate::paths;
 
@@ -109,28 +110,34 @@ pub fn run(mode: super::lifecycle::Mode, purge: bool) -> Result<()> {
     let source = Source::read(&app)?;
     let uninstall = Uninstall::plan(false)?;
 
-    println!("Reinstall {} from {}:\n", source.label(), source.url);
-    println!("1. Fetch and verify that commit into {}. If this fails, nothing is removed.", stage.display());
-    println!("2. Uninstall, keeping your config and state:");
     // The stage holds the committed HEAD only; edits in the app dir go with it.
     let dirty = git(&app, &["status", "--porcelain"]).is_some();
-    if dirty {
-        println!("   {} has local changes, which the uninstall deletes.", app.display());
-    }
-    if let Some(u) = &uninstall {
-        u.print();
-    }
-    println!("3. Install from the stage (scripts/install.sh), then project every target your config lists.");
     // A detached HEAD is a `manage update --ref` source build. The installer's
     // setup downloads release binaries, so the suite is built from source again.
     let source_build = source.branch.is_none();
-    if source_build {
-        println!("   The install is a source build (detached HEAD), so the suite is built from source again, as `ways manage update --ref` did.");
+    let what_if = mode == super::lifecycle::Mode::WhatIf;
+    let mut r = Report::new(if what_if { "ways manage reinstall: what-if" } else { "ways manage reinstall" });
+    r.subtitle(format!("Reinstall {} from {}", source.label(), source.url));
+    r.section("1. Fetch");
+    r.item(Mark::Act, format!("Fetch and verify that commit into {}. If this fails, nothing is removed.", stage.display()));
+    r.section("2. Uninstall, keeping your config and state");
+    if dirty {
+        r.item(Mark::Warn, format!("{} has local changes, which the uninstall deletes.", app.display()));
     }
-    if mode == super::lifecycle::Mode::WhatIf {
-        println!("\n{}", super::lifecycle::commit_hint("ways manage reinstall"));
+    if let Some(u) = &uninstall {
+        u.nested_into(&mut r);
+    }
+    r.section("3. Install");
+    r.item(Mark::Act, "Install from the stage (scripts/install.sh), then project every target your config lists.");
+    if source_build {
+        r.item(Mark::Info, "The install is a source build (detached HEAD), so the suite is built from source again, as `ways manage update --ref` did.");
+    }
+    if what_if {
+        r.footer(Mark::Info, super::lifecycle::commit_hint("ways manage reinstall"));
+        r.print();
         return Ok(());
     }
+    r.print();
 
     if source_build && !tool_present("cargo") {
         bail!(

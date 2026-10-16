@@ -125,7 +125,13 @@ fn target_verbs_report_until_commit() {
     let out = fx.ways(&["manage", "target", "add", o]);
     let t = text(&out);
     assert!(out.status.success(), "{t}");
-    assert!(t.contains("plan for") && t.contains(&format!("`ways manage target add {o} --commit`")), "{t}");
+    assert!(t.contains(&format!("ways manage target add: what-if for {o}")) && t.contains(&format!("`ways manage target add {o} --commit`")), "{t}");
+    for section in ["── Roots", "── settings.json"] {
+        assert!(t.contains(section), "{section}: {t}");
+    }
+    assert!(t.contains("  + skills"), "a root to link carries the add mark: {t}");
+    let plan = text(&fx.ways(&["manage", "target", "plan", o]));
+    assert!(plan.starts_with(&format!("ways manage target plan: {o}\n")) && plan.contains("── Roots"), "{plan}");
     assert!(std::fs::read_link(other.join("skills")).is_err() && !recorded().contains(o), "add changed nothing: {t}");
 
     let out = fx.ways(&["manage", "target", "add", o, "--commit"]);
@@ -157,6 +163,7 @@ fn uninstall_and_reinstall_take_commit_and_change_nothing_without_it() {
     let t = text(&out);
     assert!(out.status.success(), "{t}");
     assert!(t.contains("Nothing changed. Run `ways manage uninstall --commit` to apply."), "{t}");
+    assert!(t.starts_with("ways manage uninstall: what-if\n") && t.contains("── Delete") && t.contains("  - "), "{t}");
     assert!(app.exists() && fx.src().join("skills/wrap/SKILL.md").is_file(), "the app is kept");
     // --commit and --what-if conflict; --yes is --commit's alias.
     let out = fx.ways(&["manage", "uninstall", "--commit", "--what-if"]);

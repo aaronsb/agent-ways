@@ -4,7 +4,7 @@
 //! Output follows ADR-185: tables for people, one JSON document under
 //! `--json`, a debug rendering never.
 
-use crate::cmd::lifecycle::{self, Mode};
+use crate::cmd::lifecycle::{self, Mark, Mode, Report};
 use crate::cmd::reconcile::{self, Plan};
 use crate::config::{Config, Target};
 use crate::paths;
@@ -125,58 +125,77 @@ fn find_target(list: &[Target], dir: &str) -> Option<usize> {
     })
 }
 
-pub fn print_plan(plan: &Plan, json: bool) -> Result<()> {
-    if json {
-        println!("{}", serde_json::to_string_pretty(plan)?);
-        return Ok(());
+/// One target's plan in the lifecycle report shape (ADR-511): a section of
+/// projection roots, each marked by what activation does to it, then the
+/// settings.json merge, then what blocks it. `parse_plan` in the settings
+/// screens reads this text back, so a change here changes it there too.
+pub fn plan_sections(r: &mut Report, plan: &Plan) {
+    r.section("Roots");
+    let width = plan.roots.iter().map(|x| x.rel.chars().count()).max().unwrap_or(0).max(28);
+    for root in &plan.roots {
+        let mark = match root.state.as_str() {
+            "linked" => Mark::Same,
+            "link" => Mark::Add,
+            "relink" => Mark::Up,
+            "refused" => Mark::Warn,
+            _ => Mark::Info,
+        };
+        r.item(mark, format!("{:<width$}  {:<8}{}", root.rel, root.state, root.detail));
     }
-    println!("plan for {}", plan.dest);
-    let mut t = Table::new(&["Root", "Action", "Detail"]);
-    t.align(0, Align::Left);
-    t.no_auto_fit();
-    for r in &plan.roots {
-        t.add_owned(vec![r.rel.clone(), r.state.clone(), r.detail.clone()]);
-    }
-    t.print();
+    r.section("settings.json");
     match &plan.settings {
-        None => println!("settings.json: the source ships none; nothing merged"),
-        Some(s) if s.unchanged => println!("settings.json: already merged, nothing changes"),
+        None => {
+            r.item(Mark::Info, "the source ships none; nothing merged");
+        }
+        Some(s) if s.unchanged => {
+            r.item(Mark::Same, "already merged, nothing changes");
+        }
         Some(s) => {
-            println!("settings.json:");
-            println!("  kept      {} hook entr{} of yours", s.user_hooks_kept, if s.user_hooks_kept == 1 { "y" } else { "ies" });
+            r.item(Mark::Same, format!("kept      {} hook entr{} of yours", s.user_hooks_kept, if s.user_hooks_kept == 1 { "y" } else { "ies" }));
             for h in &s.hooks_added {
-                println!("  add       {}: {}", h.event, h.command);
+                r.item(Mark::Add, format!("add       {}: {}", h.event, h.command));
             }
             for h in &s.hooks_refreshed {
-                println!("  refresh   {}: {}  (ours, from a prior version)", h.event, h.command);
+                r.item(Mark::Up, format!("refresh   {}: {}  (ours, from a prior version)", h.event, h.command));
             }
             for h in &s.hooks_replaced {
-                println!("  replace   {}: {}  (reads as an agent-ways hook)", h.event, h.command);
+                r.item(Mark::Up, format!("replace   {}: {}  (reads as an agent-ways hook)", h.event, h.command));
             }
             for h in &s.hooks_removed {
-                println!("  REMOVE    {}: {}", h.event, h.command);
+                r.item(Mark::Remove, format!("REMOVE    {}: {}", h.event, h.command));
             }
             if !s.perms_added.is_empty() {
-                println!("  allow     +{} entries", s.perms_added.len());
+                r.item(Mark::Add, format!("allow     +{} entries", s.perms_added.len()));
             }
             if !s.deny_added.is_empty() {
-                println!("  deny      +{} entries (secret paths, ADR-152)", s.deny_added.len());
+                r.item(Mark::Add, format!("deny      +{} entries (secret paths, ADR-152)", s.deny_added.len()));
             }
         }
     }
     if plan.blocked {
-        println!();
-        println!("blocked: a real path sits at a projection root, or an entry of yours would be removed.");
-        println!("  --force renames each real path to <name>.ways-backup-<seconds> and proceeds;");
-        println!("  move a hook out of .claude/hooks/ first if it is listed under REMOVE or replace.");
+        r.section("Blocked");
+        r.item(Mark::Warn, "blocked: a real path sits at a projection root, or an entry of yours would be removed.");
+        r.muted(4, "--force renames each real path to <name>.ways-backup-<seconds> and proceeds;");
+        r.muted(4, "move a hook out of .claude/hooks/ first if it is listed under REMOVE or replace.");
     }
+}
+
+/// Print a plan under `title`, or the plan document under `--json`.
+pub fn print_plan(title: String, plan: &Plan, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(plan)?);
+        return Ok(());
+    }
+    let mut r = Report::new(title);
+    plan_sections(&mut r, plan);
+    r.print();
     Ok(())
 }
 
 pub fn plan(dir: &str, json: bool) -> Result<()> {
     let (_, canonical) = resolve_dir(dir)?;
     let plan = reconcile::plan_target(&canonical)?;
-    print_plan(&plan, json)
+    print_plan(format!("ways manage target plan: {}", plan.dest), &plan, json)
 }
 
 /// The line that ends a target verb's what-if (ADR-511). Under `--json` the
@@ -186,14 +205,20 @@ fn whatif_footer(command: &str, json: bool) {
     if json {
         eprintln!("{line}");
     } else {
-        println!("\n{line}");
+        let mut r = Report::new("");
+        r.footer(Mark::Info, line);
+        r.print();
     }
 }
 
 pub fn add(dir: &str, force: bool, mode: Mode, json: bool) -> Result<()> {
     let (stored, canonical) = resolve_dir(dir)?;
     let plan = reconcile::plan_target(&canonical)?;
-    print_plan(&plan, json)?;
+    let title = match mode {
+        Mode::WhatIf => format!("ways manage target add: what-if for {}", plan.dest),
+        Mode::Commit => format!("ways manage target add: {}", plan.dest),
+    };
+    print_plan(title, &plan, json)?;
     if mode == Mode::WhatIf {
         let force = if force { " --force" } else { "" };
         whatif_footer(&format!("ways manage target add {dir}{force}"), json);
