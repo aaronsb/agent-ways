@@ -1,6 +1,6 @@
 ---
 name: ways-update
-description: Update the agent-ways installation to the latest version — pull the app source in $XDG_DATA, rebuild the Rust binaries (ways/attend/way-embed) and corpus, and refresh the ~/.claude projection with `ways manage repair`. Use when the user wants to update agent-ways, pull the latest ways/hooks, or refresh their ways framework install. Not for editing or authoring individual ways (that is the ways skill) or upgrading project dependencies.
+description: Update the agent-ways installation to the latest version — preview the update with `ways manage update --what-if` (versions, release notes, the commits, local changes, the actions, dev links), read it back to the user, then apply it with `ways manage update --commit`, which pulls the app source in $XDG_DATA, refreshes the binaries and corpus, and reprojects ~/.claude. Use when the user wants to update agent-ways, pull the latest ways/hooks, or refresh their ways framework install. Not for editing or authoring individual ways (that is the ways skill) or upgrading project dependencies.
 allowed-tools: Bash, Read
 ---
 
@@ -17,10 +17,10 @@ anything (ADR-511).
 ### 1. Show the user what would change
 
 ```bash
-ways manage update
+ways manage update --what-if
 ```
 
-This fetches and changes nothing else. It prints each component's version
+This fetches and changes nothing else; `--what-if` reports even where `install.manage_mode: commit` makes the bare command apply. It prints each component's version
 installed and at the target, the release notes in between, the commits grouped by
 area, local changes in the app dir, the actions `--commit` would take, and any
 binary links that point into a dev checkout. Summarise it for the user. Three
@@ -30,7 +30,8 @@ findings stop here for the user's decision:
   conflict leaves them in the stash. Offer to commit them on a fork or stash them
   by hand first. Do not discard them.
 - **The checkout has diverged** from its upstream. The fast-forward would stop.
-  The user decides whether to push, rebase or merge.
+  The user decides whether to push, rebase or merge. A checkout that is only
+  *ahead* of its upstream is reported as ahead: the pull changes nothing there.
 - **Development setup.** A `make dev-install` is active, and the update would
   point its links back at the app. The user runs `make dev-install` in the
   checkout afterwards to return to the dev build.
@@ -45,14 +46,21 @@ It pulls with `--ff-only`, refreshes the binaries (a pre-built release first, a
 source build as the fallback), regenerates the corpus, reprojects every target and
 checks the judge's keys. `--verbose` shows each command's raw output.
 
-**A fork** (origin is the fork, `upstream` tracks agent-ways) merges upstream by
-hand first, then applies:
+**A fork** (origin is the fork, `upstream` tracks agent-ways): the what-if
+compares the checkout with the fork's own `origin/main`, so it shows none of the
+upstream changes. Preview those with git, show them to the user, then merge
+upstream by hand and apply:
 
 ```bash
 APP="${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways"
-git -C "$APP" fetch upstream && git -C "$APP" merge upstream/main   # resolve conflicts in custom ways
+git -C "$APP" fetch upstream
+git -C "$APP" log --oneline HEAD..upstream/main                      # what the merge brings in
+git -C "$APP" merge upstream/main                                    # resolve conflicts in custom ways
 ways manage update --commit
 ```
+
+After the merge the checkout is ahead of `origin/main`, which the what-if reports
+as ahead; the pull then changes nothing and the rest of the update runs.
 
 ### 3. Tell the user to restart
 

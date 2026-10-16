@@ -227,9 +227,9 @@ assert_eq "status --json: engine embedding" "embedding" "$(jq -r .engine.active 
 
 # --- 7. reconcile is idempotent ----------------------------------------------
 
-section "reconcile --dry-run, twice"
-DRY1=$(ways manage repair --dry-run 2>&1); DRY1_RC=$?
-DRY2=$(ways manage repair --dry-run 2>&1); DRY2_RC=$?
+section "repair --what-if, twice"
+DRY1=$(ways manage repair --what-if 2>&1); DRY1_RC=$?
+DRY2=$(ways manage repair --what-if 2>&1); DRY2_RC=$?
 assert_eq "first dry-run exits 0" "0" "$DRY1_RC"
 assert_eq "second dry-run exits 0" "0" "$DRY2_RC"
 assert_eq "dry-run output identical" "$DRY1" "$DRY2"
@@ -237,7 +237,7 @@ assert_contains "dry-run reports up to date" "up to date" "$DRY1"
 if [[ "$DRY1" == *refused* ]]; then fail "dry-run reports no refusal" "$DRY1"; else ok "dry-run reports no refusal"; fi
 SETTINGS_AFTER=$(file_hash "$DEST/settings.json")
 assert "a committed reconcile exits 0" ways manage repair --commit --quiet
-assert_eq "bare reconcile leaves settings.json alone" "$SETTINGS_AFTER" "$(file_hash "$DEST/settings.json")"
+assert_eq "a committed repair leaves settings.json alone" "$SETTINGS_AFTER" "$(file_hash "$DEST/settings.json")"
 
 # --- 8. the second config dir ----------------------------------------------
 

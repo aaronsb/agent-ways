@@ -162,7 +162,7 @@ The installer:
 
 - stages the app into `$XDG_DATA_HOME/agent-ways` and builds the binaries, fetching the embedding model (~21MB);
 - links the suite binaries into `~/.local/bin`;
-- runs `ways manage repair`, which symlinks the projected roots (`skills/`, `agents/`, `commands/`, `hooks/ways/`, built binaries) into `~/.claude`, merges its hook entries and permissions into `settings.json`, and registers the `agent-ways` MCP server in `~/.claude.json`;
+- runs the projection repair (under the hidden fixed name of `ways manage repair --commit`, which applies with no flag), which symlinks the projected roots (`skills/`, `agents/`, `commands/`, `hooks/ways/`, built binaries) into `~/.claude`, merges its hook entries and permissions into `settings.json`, and registers the `agent-ways` MCP server in `~/.claude.json`;
 - checks for a relevance-judge key and, on a terminal, offers to add one.
 
 Your existing `~/.claude` (sessions, credentials, your own `settings.json` values, `projects/`) is preserved. If one of the projected root paths is already a real directory of yours, reconcile stops and names it; it never deletes it. The [install guide](docs/install-guide.md) covers that case, forks and previous installs. Restart Claude Code and the ways are active.
@@ -374,7 +374,7 @@ ways manage update --ref REF --commit    # pin to a branch, tag or commit and bu
 ways manage update --ref main --commit   # return to the release channel
 ```
 
-Without `--commit`, `ways manage update` fetches and reports what the update would change: each component's version, the release notes in between, the commits grouped by area, local changes in the app dir, the actions it would take, and any binary links a `make dev-install` left. With `--commit` it pulls the app source, prefers prebuilt binaries over a source build, regenerates the corpus, relinks, reprojects `~/.claude` (`ways manage repair`), and ends with the judge key check. `install.manage_mode: commit` in the user config makes it apply without the flag. Re-running the installer one-liner also updates and is idempotent. The [install guide](docs/install-guide.md#scenario-a-previous-agent-ways-install) covers the flags and older installs.
+Without `--commit`, `ways manage update` fetches and reports what the update would change: each component's version, the release notes in between, the commits grouped by area, local changes in the app dir, the actions it would take, and any binary links a `make dev-install` left. With `--commit` it pulls the app source, prefers prebuilt binaries over a source build, regenerates the corpus, relinks, reprojects `~/.claude` (`ways manage repair`), and ends with the judge key check. `ways settings set install.manage_mode commit` makes it apply without the flag. Re-running the installer one-liner also updates and is idempotent. The [install guide](docs/install-guide.md#scenario-a-previous-agent-ways-install) covers the flags and older installs.
 
 A fork fetches and merges upstream in the app dir (`git fetch upstream && git merge upstream/main`), then runs `make update-binaries && ways manage repair --commit`. The corpus rebuilds itself at the next session start.
 

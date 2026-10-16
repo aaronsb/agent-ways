@@ -67,7 +67,7 @@ Two callers cannot pass a new flag. The previous release's updater spawns `recon
 
 ## Decision
 
-1. **What-if is the default.** A mutating `ways manage` verb without `--commit` changes nothing except a read-only fetch, prints what it would change, and exits 0. The verbs are `update`, `repair`, `target add|enable|disable|remove`, `uninstall` and `reinstall`. A what-if that found something to change still exits 0: a script that runs it under `set -e` must not fail on the report.
+1. **What-if is the default.** A mutating `ways manage` verb without `--commit` changes nothing except a read-only fetch, prints what it would change. The verbs are `update`, `repair`, `target add|enable|disable|remove`, `uninstall` and `reinstall`. A what-if exits 0 even when it found something to change: a script that runs it under `set -e` must not fail on the report.
 2. **One apply flag.** `--commit` applies, on every verb. `--what-if` names the default explicitly. `--yes` (from `uninstall` and `reinstall`) and `--dry-run` (from `update`, `repair` and `target add`) stay accepted on every verb as hidden aliases of `--commit` and `--what-if`, so existing docs and habits keep working. The two flags conflict.
 3. **One setting.** `install.manage_mode` in the user config takes `whatif` (the default) or `commit`. With `commit`, `update`, `repair` and `target` apply without the flag; a flag on the command line wins over the setting. `uninstall` and `reinstall` remove the install and always need `--commit`. `ways settings` lists the key on the install tab.
 4. **One report.** The report and the step scroll live in one module of the `ways` binary (`cmd/lifecycle.rs`) that every verb uses. They draw from the theme engine's roles (ADR-504): a ruled header per section, a mark and role per line, the terminal palette on a terminal and plain text in a pipe, under `NO_COLOR`, or with `TERM=dumb`. The plain text is the coloured text with the escapes removed. A commit run prints one header per stage and ✓, ⚠ or ✗ per outcome. The output of the commands it runs is captured, shown when a command fails, and streamed under `--verbose`.
@@ -109,7 +109,7 @@ app ~/.local/share/agent-ways · at d3fe7f7d · target 17b500e0
 · Nothing changed. Run `ways manage update --commit` to apply.
 ```
 
-This amends ADR-150's Decision (the self-update applies only under `--commit`, and reports first), ADR-144's Decision (the repair verb reports first; the reconciler's own entry, `reconcile`, still applies), ADR-184's Decision (`target add|enable|disable|remove` report first; `target plan` is unchanged), and ADR-509's Decision (item 1's table: every verb takes `--commit`; item 3's `--yes` becomes an alias of `--commit`).
+This amends ADR-150's Decision (the self-update applies only under `--commit`, and reports first), ADR-144's Decision (the repair verb reports first; the reconciler's own entry, `reconcile`, still applies), ADR-184's Decision (`target add|enable|disable|remove` report first; `target plan` is unchanged), and ADR-509's Decision (item 1's table: every verb takes `--commit`; item 3's `--yes` becomes an alias of `--commit`; item 5's one-release aliases `ways update`, `ways uninstall` and `ways target` report like the verbs they forward to).
 
 ## Consequences
 
@@ -122,7 +122,7 @@ This amends ADR-150's Decision (the self-update applies only under `--commit`, a
 
 ### Negative
 
-- Every applying caller changes: docs, skills, hints, the settings screens, tests and habits. A caller left on the bare form silently reports instead of applying. The call-site test catches renamed commands, not a missing `--commit`.
+- Every applying caller changes: docs, skills, hints, the settings screens, tests and habits. A caller left on the bare form silently reports instead of applying. The call-site test fails an applying hint without `--commit` in Rust, shell, Makefiles and the TypeScript mod, and a bare mutating verb in the docs, skills and ways outside an allowlist of descriptive mentions; a hint phrased with none of its cue words still gets past it.
 - The release notes need the network and an unauthenticated API call per page of 100 releases, against GitHub's limit of 60 an hour per address.
 - `ways manage repair` run to fix something now needs `--commit`; the operator who wants the old behaviour sets `install.manage_mode: commit`.
 - `reconcile` and `manage repair` now differ in their default, which a reader of the source has to keep apart.

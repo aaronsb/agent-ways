@@ -121,7 +121,7 @@ The record of sessions that listened is kept per plugin identity, so `attend@inl
 
 To put a branch's mod and attend into a session that is already running, with no release and no restart:
 
-1. Push the branch, then run `ways manage update --ref <branch> --commit` in a shell. Without `--commit` it reports the versions and commits the checkout would move to. It checks the app source out at the branch (`plugins/attend/` changes in place) and builds attend and the rest of the suite from source.
+1. Push the branch, then run `ways manage update --ref <branch> --commit` in a shell. It checks the app source out at the branch (`plugins/attend/` changes in place) and builds attend and the rest of the suite from source. Without `--commit` it only reports the versions and commits the checkout would move to.
 2. In the running session, run `/reload-plugins`. It prints that `attend@agent-ways` was re-read from its folder; register and `session.start` run again, and the tools carry the new descriptions. Closing the `/plugin` menu after disabling and enabling attend runs the same reload.
 3. `ways manage update --ref main --commit` returns to the release channel.
 

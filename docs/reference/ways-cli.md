@@ -651,17 +651,17 @@ For one release the old top-level names `update`, `uninstall` and `target` still
 
 With `--commit`, each stage under its own header: pull the app source, refresh every binary of the suite (a pre-built download first, a build from source as the fallback), rebuild the corpus, run `ways manage repair`, and check the judge's keys. A command's raw output shows under `--verbose`, or when it fails. A binary that fails to refresh is put back, so a failed update leaves the old install working. `--ref <branch|tag|commit>` pins the install to that ref and builds the whole suite from source, leaving the release channel until `ways manage update --ref main --commit`.
 
-`--dry-run` is accepted for the what-if and `--yes` for `--commit`. `install.manage_mode: commit` in the user config makes the command apply without the flag; `--what-if` then reports.
+`--dry-run` is accepted for the what-if and `--yes` for `--commit`. `ways settings set install.manage_mode commit` makes the command apply without the flag; `--what-if` then reports.
 
 ```
-ways manage update
+ways manage update                       # what it would do
 ways manage update --commit
 ways manage update --ref ways-v1.32.0 --commit
 ```
 
 ### `ways manage repair`
 
-**When:** Repairing the `~/.claude` projection ([ADR-144](../architecture/platform/ADR-144-install-repair-migrate-as-one-manifest-reconciler.md)). The installer and `ways manage update` run it for you; run it by hand after pulling the app source, or when a projected root is missing.
+**When:** Repairing the `~/.claude` projection ([ADR-144](../architecture/platform/ADR-144-install-repair-migrate-as-one-manifest-reconciler.md)). The installer and `ways manage update --commit` run it for you; run `ways manage repair --commit` by hand after pulling the app source, or when a projected root is missing.
 
 **Run from:** Anywhere.
 
@@ -696,7 +696,7 @@ ways manage uninstall --commit --purge   # also your config and state
 
 ### `ways manage reinstall`
 
-**When:** An install looks damaged, or a cache or a stale projection is suspected, and you want the same version back cleanly ([ADR-509](../architecture/platform/ADR-509-lifecycle-commands-sit-under-one-ways-manage-group-the-updater-s-reconcile-stays-a-hidden-fixed-name.md)). Moving to another version is `ways manage update`.
+**When:** An install looks damaged, or a cache or a stale projection is suspected, and you want the same version back cleanly ([ADR-509](../architecture/platform/ADR-509-lifecycle-commands-sit-under-one-ways-manage-group-the-updater-s-reconcile-stays-a-hidden-fixed-name.md)). Moving to another version is `ways manage update --commit`.
 
 **Run from:** Anywhere. It needs the network and room for a second copy of the app.
 
@@ -751,7 +751,7 @@ The hooks call these. They are hidden from `ways --help`, and their names stay f
 | `ways project-slug [path]` | Macros that read per-project state (`meta/memory/macro.sh`). |
 | `ways events-log-path` | Scripts outside the binary that read the event log. |
 | `ways manifest` | Debugging `ways manage repair`: the projection manifest it converges toward. |
-| `reconcile` | The previous release's updater, which spawns it on the newly installed binary, and the installer. It runs the same code as `ways manage repair`, with the same flags and exit codes, and prints no notice. It applies with no flag, where `ways manage repair` reports until `--commit`, because its callers cannot pass a flag the binary they call may lack (ADR-511) ([ADR-509](../architecture/platform/ADR-509-lifecycle-commands-sit-under-one-ways-manage-group-the-updater-s-reconcile-stays-a-hidden-fixed-name.md)). |
+| `reconcile` | The previous release's updater, which spawns it on the newly installed binary, and the installer. It runs the same code as `ways manage repair`, with the same flags and exit codes, and prints no notice. It applies with no flag, where `ways manage repair` reports until `--commit`, because its callers cannot pass a flag the binary they call may lack ([ADR-511](../architecture/platform/ADR-511-every-mutating-lifecycle-verb-reports-what-it-would-change-until-commit.md), [ADR-509](../architecture/platform/ADR-509-lifecycle-commands-sit-under-one-ways-manage-group-the-updater-s-reconcile-stays-a-hidden-fixed-name.md)). |
 | `ways judge-setup` | The installer and the end of `ways manage update`: checks the judge's keys and, on a terminal, offers to add one. |
 
 **Testing a way by hand.** `ways scan prompt` runs the same code as the UserPromptSubmit hook and prints the markdown that would be injected; no output means nothing crossed a threshold. `ways show way` prints a way as Claude receives it. Both need `--session`; any string, such as `dummy`, makes a dry run that touches no real session. Both are session-aware, so a second call with the same session prints nothing for a way already shown. `--project <dir>` adds that project's ways.

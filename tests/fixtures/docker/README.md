@@ -36,7 +36,7 @@ The release-asset downloads go through `gh`, so the wrapper exports `GH_TOKEN` f
 1. The installer runs unattended, exits 1 on the real `skills/` directory, and leaves the skill, `settings.json`, and the hooks directory as they were. `way-embed` arrived as a release download; the image cannot build it.
 2. `ways manage repair --commit --force` moves the directory to a timestamped sibling with the skill intact, links the projection roots, and merges `settings.json` with every user hook kept by identity and the `model` key kept.
 3. The target is recorded in the user config. `ways manage target list --json` and `ways status --json` report one enabled target, active, with the embedding engine up.
-4. `ways manage repair --dry-run` twice prints identical output and reports up to date. A committed repair changes nothing.
+4. `ways manage repair --what-if` twice prints identical output and reports up to date. A committed repair changes nothing.
 5. The second config directory hashes the same as its seed.
 6. `attend peer status` and `claude --version` exit 0. The version is the pinned one unless `latest` was requested.
 7. Hooks run the way Claude Code runs them. The runner reads each event's commands out of the merged `settings.json`, keeps the entries whose matcher matches the source or tool name, expands `${HOME}`, and pipes the payload to stdin. It asserts the ways table and core guidance on `SessionStart`, the ADR way on an ADR prompt, the gitconfig way on `git config --global`, the validate way on an edit to `README.md`, the user's own hooks still running, and a zero exit from every hook.
