@@ -1699,7 +1699,6 @@ describe('keepalive policy', () => {
       world.hold = new Promise<void>(r => (release = r))
       const h = host(on, world)
       await $.session.start(INTERACTIVE)
-      // The config's hold ends at the operator's first prompt.
       await typed($)
       await clock.advance(1_500)
       if (kind === 'a scheduled wakeup') {
@@ -1942,7 +1941,7 @@ describe('keepalive policy', () => {
     const before = await $.ui.mount(BAND as never)
     expect(await before.find({ text: /⟳ 2\/8/ } as never)).toBeDefined()
     await before.unmount()
-    // The first prompt ends the config's hold, so a delivery wakes it after.
+    // The operator's prompt resets the count; a delivery after it does not.
     await typed($)
     expect(h.argvs.filter(a => a.slice(1, 3).join(' ') === 'keepwarm reset').map(a => a.slice(3))).toEqual([['--at', String(S + 5)]])
     drains.push(one(1, 'project'), DRAIN_EMPTY)
