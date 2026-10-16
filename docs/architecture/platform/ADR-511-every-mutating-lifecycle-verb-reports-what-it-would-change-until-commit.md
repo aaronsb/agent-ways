@@ -26,6 +26,11 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "Report, like the rest"
+    via: chat choice, 2026-10-16
+    covers: [scope]
 status: accepted
 date: 2026-10-16
 deciders:
