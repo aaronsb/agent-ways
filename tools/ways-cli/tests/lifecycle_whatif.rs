@@ -178,3 +178,86 @@ fn uninstall_and_reinstall_take_commit_and_change_nothing_without_it() {
     assert_eq!(out.status.code(), Some(2), "--yes parses and --purge is refused: {}", text(&out));
     assert!(text(&out).contains("ways manage uninstall --purge --commit"), "{}", text(&out));
 }
+
+/// Run `ways` with stdout and stderr on a pty, and return what it drew.
+#[cfg(target_os = "linux")]
+fn on_pty(fx: &Fx, args: &[&str], env: &[(&str, &str)]) -> String {
+    use std::io::Read;
+    use std::os::fd::{FromRawFd, OwnedFd};
+    use std::process::Stdio;
+    let (mut m, mut s) = (0, 0);
+    let ws = libc::winsize { ws_row: 40, ws_col: 120, ws_xpixel: 0, ws_ypixel: 0 };
+    // SAFETY: openpty fills two descriptors we then own.
+    assert_eq!(unsafe { libc::openpty(&mut m, &mut s, std::ptr::null_mut(), std::ptr::null(), &ws) }, 0);
+    // SAFETY: fresh descriptors from openpty.
+    let (master, slave) = unsafe { (OwnedFd::from_raw_fd(m), OwnedFd::from_raw_fd(s)) };
+    let home = fx.root.join("home");
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_ways"));
+    cmd.args(args)
+        .current_dir(fx.root.join("project"))
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env("XDG_DATA_HOME", home.join(".local/share"))
+        .env("XDG_STATE_HOME", home.join(".local/state"))
+        .env("XDG_CACHE_HOME", fx.root.join("cache"))
+        .env("PATH", "/usr/bin:/bin")
+        .env("TERM", "xterm-256color");
+    for var in ["NO_COLOR", "CLICOLOR_FORCE", "FORCE_COLOR", "COLORTERM", "CLAUDE_CONFIG_DIR", "XDG_BIN_HOME"] {
+        cmd.env_remove(var);
+    }
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    cmd.stdin(Stdio::null()).stdout(Stdio::from(slave.try_clone().unwrap())).stderr(Stdio::from(slave));
+    let mut child = cmd.spawn().unwrap();
+    // The command keeps its copies of the slave until dropped, and a read of
+    // the master only ends once every copy is closed.
+    drop(cmd);
+    let mut file = std::fs::File::from(master);
+    let mut out = Vec::new();
+    let mut buf = [0u8; 4096];
+    // Reading the master ends with EIO once the child has closed the slave.
+    while let Ok(n) = file.read(&mut buf) {
+        if n == 0 {
+            break;
+        }
+        out.extend_from_slice(&buf[..n]);
+    }
+    child.wait().unwrap();
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn no_color_and_a_dumb_terminal_draw_no_escapes_on_a_terminal() {
+    let fx = Fx::new("pty");
+    let (s, d) = (fx.src(), fx.root.join("other"));
+    let args = ["manage", "repair", "--source", s.to_str().unwrap(), "--dest", d.to_str().unwrap()];
+    let coloured = on_pty(&fx, &args, &[]);
+    assert!(coloured.contains('\x1b') && coloured.contains("what-if"), "a terminal gets colour: {coloured:?}");
+    for env in [[("NO_COLOR", "1")], [("TERM", "dumb")]] {
+        let plain = on_pty(&fx, &args, &env);
+        assert!(plain.contains("ways manage repair: what-if"), "{env:?}: {plain:?}");
+        assert!(!plain.contains('\x1b'), "{env:?} draws no escape, attributes included: {plain:?}");
+    }
+}
+
+#[test]
+fn a_repair_from_a_checkout_does_not_call_the_installed_app_a_dev_build() {
+    let fx = Fx::new("source-links");
+    // The installed app, and a dev checkout projected with --source.
+    let app = fx.root.join("home/.local/share/agent-ways");
+    std::fs::create_dir_all(app.join("bin")).unwrap();
+    std::fs::create_dir_all(app.join(".git")).unwrap();
+    std::fs::write(app.join("bin/ways"), "").unwrap();
+    let src = fx.src();
+    std::fs::create_dir_all(src.join(".git")).unwrap();
+    write(&src.join("tools/suite-bins"), "ways\n");
+    let dest = fx.root.join("other");
+    std::fs::create_dir_all(dest.join("bin")).unwrap();
+    std::os::unix::fs::symlink(app.join("bin/ways"), dest.join("bin/ways")).unwrap();
+    let out = fx.ways(&["manage", "repair", "--source", src.to_str().unwrap(), "--dest", dest.to_str().unwrap()]);
+    let t = text(&out);
+    assert!(out.status.success(), "{t}");
+    assert!(!t.contains("Development setup"), "a link into the installed app is the install's own: {t}");
+}

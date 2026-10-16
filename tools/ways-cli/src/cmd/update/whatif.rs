@@ -41,6 +41,21 @@ impl Component {
     }
 }
 
+/// Where the checkout stands against the target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Relation {
+    /// At the target.
+    Same,
+    /// Behind it: a fast-forward reaches it.
+    Behind,
+    /// Ahead of it: the target is an ancestor of HEAD.
+    Ahead,
+    /// Each side has commits the other lacks.
+    Diverged,
+    /// Git could not name one side.
+    Unknown,
+}
+
 /// Everything the report shows, gathered before it is rendered.
 #[derive(Debug, Clone)]
 pub struct WhatIf {
@@ -49,9 +64,13 @@ pub struct WhatIf {
     pub head: Option<String>,
     pub target: Option<String>,
     pub fetch_error: Option<String>,
+    pub relation: Relation,
     pub components: Vec<Component>,
-    pub notes: Result<Vec<Release>, String>,
+    pub notes: Result<notes::Fetched, String>,
     pub delta: Option<Delta>,
+    /// On `--ref`, the commits the checkout would leave behind when the ref
+    /// is behind HEAD.
+    pub dropped: Option<Delta>,
     pub local: Vec<String>,
     pub actions: Vec<(Mark, String)>,
     pub dev: Vec<DevLink>,
@@ -69,15 +88,32 @@ pub fn gather(app: &Path, channel: Channel, verbose: bool) -> WhatIf {
     let target_rev = target.clone().or_else(|| head.clone());
     let components = components(app, target_rev.as_deref());
     let moving = components.iter().any(Component::moves);
-    let notes = if moving { notes::fetch() } else { Ok(Vec::new()) };
+    let notes = if moving { notes::fetch() } else { Ok(notes::Fetched::default()) };
+    let relation = relation(app, head.as_deref(), target.as_deref());
     let delta = match (&head, &target) {
-        (Some(h), Some(t)) if h != t => delta::read(app, h, t),
+        (Some(h), Some(t)) if matches!(relation, Relation::Behind | Relation::Diverged) => delta::read(app, h, t),
+        _ => None,
+    };
+    let dropped = match (&channel, &head, &target) {
+        (Channel::Ref(_), Some(h), Some(t)) if relation == Relation::Ahead => delta::read(app, t, h),
         _ => None,
     };
     let local = git_lines(app, &["status", "--porcelain"]);
-    let actions = actions(app, &channel, head.as_deref(), target.as_deref(), &components, notes.as_deref().unwrap_or(&[]), !local.is_empty());
-    let dev = lifecycle::dev_links(app, &lifecycle::linked_bins(app), &lifecycle::link_dirs());
-    WhatIf { app: app.to_path_buf(), channel, head, target, fetch_error, components, notes, delta, local, actions, dev, verbose }
+    let releases: &[Release] = notes.as_ref().map(|f| f.releases.as_slice()).unwrap_or(&[]);
+    let actions = actions(app, &channel, relation, head.as_deref(), target.as_deref(), &components, releases, !local.is_empty());
+    let dev = lifecycle::update_dev_links(app);
+    WhatIf { app: app.to_path_buf(), channel, head, target, fetch_error, relation, components, notes, delta, dropped, local, actions, dev, verbose }
+}
+
+/// Where HEAD stands against the target.
+fn relation(app: &Path, head: Option<&str>, target: Option<&str>) -> Relation {
+    match (head, target) {
+        (Some(h), Some(t)) if h == t => Relation::Same,
+        (Some(h), Some(t)) if is_ancestor(app, h, t) => Relation::Behind,
+        (Some(h), Some(t)) if is_ancestor(app, t, h) => Relation::Ahead,
+        (Some(_), Some(_)) => Relation::Diverged,
+        _ => Relation::Unknown,
+    }
 }
 
 /// Fetch, then the commit the update would land on.
@@ -91,8 +127,13 @@ fn resolve_target(app: &Path, channel: &Channel) -> (Option<String>, Option<Stri
         Channel::Ref(r) => match fetch(app, &["fetch", "--quiet", "origin", r]) {
             None => (rev(app, "FETCH_HEAD"), None),
             Some(e) => {
+                // A bare sha the server will not serve by name: fetch
+                // everything and resolve it here. The first error matters
+                // only when the ref still does not resolve.
                 let err = fetch(app, &["fetch", "--quiet", "--tags", "origin"]);
-                (rev(app, r).or_else(|| rev(app, &format!("origin/{r}"))), err.or(Some(e)))
+                let found = rev(app, r).or_else(|| rev(app, &format!("origin/{r}")));
+                let err = if found.is_some() { None } else { err.or(Some(e)) };
+                (found, err)
             }
         },
     }
@@ -100,7 +141,7 @@ fn resolve_target(app: &Path, channel: &Channel) -> (Option<String>, Option<Stri
 
 /// Run a fetch; `Some(why)` when it failed.
 fn fetch(app: &Path, args: &[&str]) -> Option<String> {
-    match Command::new("git").args(args).current_dir(app).output() {
+    match Command::new("git").args(args).current_dir(app).env("GIT_TERMINAL_PROMPT", "0").output() {
         Ok(o) if o.status.success() => None,
         Ok(o) => Some(String::from_utf8_lossy(&o.stderr).lines().last().unwrap_or("git fetch failed").trim().to_string()),
         Err(e) => Some(format!("git fetch could not run ({e})")),
@@ -116,8 +157,11 @@ fn rev(app: &Path, name: &str) -> Option<String> {
     git_lines(app, &["rev-parse", "--verify", "--quiet", &format!("{name}^{{commit}}")]).into_iter().next()
 }
 
+/// A read-only git query: `--no-optional-locks` keeps `git status` from
+/// refreshing the index.
 fn git_lines(app: &Path, args: &[&str]) -> Vec<String> {
     Command::new("git")
+        .arg("--no-optional-locks")
         .args(args)
         .current_dir(app)
         .output()
@@ -188,7 +232,7 @@ fn define_version(src: &str) -> Option<String> {
 
 /// What `--commit` would do on this machine, in order.
 #[allow(clippy::too_many_arguments)]
-fn actions(app: &Path, channel: &Channel, head: Option<&str>, target: Option<&str>, comps: &[Component], releases: &[Release], dirty: bool) -> Vec<(Mark, String)> {
+fn actions(app: &Path, channel: &Channel, relation: Relation, head: Option<&str>, target: Option<&str>, comps: &[Component], releases: &[Release], dirty: bool) -> Vec<(Mark, String)> {
     let mut out = Vec::new();
     let cargo = super::tool_present("cargo");
     let short = |s: &str| s.chars().take(8).collect::<String>();
@@ -198,19 +242,20 @@ fn actions(app: &Path, channel: &Channel, head: Option<&str>, target: Option<&st
                 out.push((Mark::Warn, "the checkout is on a detached HEAD (a --ref install), so the pull would stop. `ways manage update --ref main --commit` returns to the release channel".to_string()));
                 return out;
             };
-            match (head, target) {
-                (Some(h), Some(t)) if h == t => out.push((Mark::Same, format!("pull: already at {up} ({})", short(t)))),
-                (Some(h), Some(t)) if is_ancestor(app, h, t) => {
+            match (relation, head, target) {
+                (Relation::Same, _, Some(t)) => out.push((Mark::Same, format!("pull: already at {up} ({})", short(t)))),
+                (Relation::Behind, Some(h), Some(t)) => {
                     if dirty {
                         out.push((Mark::Act, "stash the local changes, then restore them after the pull".to_string()));
                     }
                     out.push((Mark::Act, format!("pull: fast-forward {} → {} ({up})", short(h), short(t))));
                 }
-                (Some(_), Some(_)) => out.push((Mark::Warn, format!("pull: the checkout has diverged from {up}, so the fast-forward would stop and nothing after it would run"))),
+                (Relation::Ahead, Some(h), Some(t)) => out.push((Mark::Same, format!("pull: the checkout is ahead of {up} by {}, so the pull changes nothing", lifecycle::count(count_commits(app, t, h), "commit", "commits")))),
+                (Relation::Diverged, _, _) => out.push((Mark::Warn, format!("pull: the checkout has diverged from {up}, so the fast-forward would stop and nothing after it would run"))),
                 _ => out.push((Mark::Warn, "pull: git could not name the commits on either side".to_string())),
             }
-            let (mut cargo_changed, mut embed_changed) = match (head, target) {
-                (Some(h), Some(t)) if h != t => changed(app, h, t),
+            let (mut cargo_changed, mut embed_changed) = match (relation, head, target) {
+                (Relation::Behind, Some(h), Some(t)) => changed(app, h, t),
                 _ => (false, false),
             };
             let (wt_cargo, wt_embed) = working_tree_build_groups(app);
@@ -285,6 +330,11 @@ fn changed(app: &Path, a: &str, b: &str) -> (bool, bool) {
     classify_build_groups(paths.iter().map(String::as_str))
 }
 
+/// Commits in `a..b`.
+fn count_commits(app: &Path, a: &str, b: &str) -> usize {
+    git_lines(app, &["rev-list", "--count", &format!("{a}..{b}")]).first().and_then(|n| n.parse().ok()).unwrap_or(0)
+}
+
 fn is_ancestor(app: &Path, a: &str, b: &str) -> bool {
     Command::new("git").args(["merge-base", "--is-ancestor", a, b]).current_dir(app).status().is_ok_and(|s| s.success())
 }
@@ -293,8 +343,9 @@ fn is_ancestor(app: &Path, a: &str, b: &str) -> bool {
 pub fn render(w: &WhatIf) -> Report {
     let command = match &w.channel {
         Channel::Release { .. } => "ways manage update".to_string(),
-        Channel::Ref(r) => format!("ways manage update --ref {r}"),
+        Channel::Ref(r) => format!("ways manage update --ref {}", lifecycle::shell_word(r)),
     };
+    let on_ref = matches!(w.channel, Channel::Ref(_));
     let mut r = Report::new(format!("{command}: what-if"));
     let short = |s: &Option<String>| s.as_deref().map(|s| s.chars().take(8).collect::<String>()).unwrap_or_else(|| "?".into());
     r.subtitle(format!("app {} · at {} · target {}", w.app.display(), short(&w.head), short(&w.target)));
@@ -310,6 +361,9 @@ pub fn render(w: &WhatIf) -> Report {
         let name = format!("{}{:pad$}", c.name, "");
         match (&c.installed, &c.target) {
             (Some(i), Some(t)) if version_older(i, t) => r.item(Mark::Up, format!("{name}  {i} → {t}")),
+            // `--ref` checks the ref out and builds it, older or not.
+            (Some(i), Some(t)) if on_ref && version_older(t, i) && c.name != MOD => r.item(Mark::Down, format!("{name}  {i} → {t} (a downgrade: --commit rebuilds it from source)")),
+            (Some(i), Some(t)) if on_ref && version_older(t, i) => r.item(Mark::Down, format!("{name}  {i} → {t} (a downgrade)")),
             (Some(i), Some(t)) if i != t => r.item(Mark::Same, format!("{name}  {i} (ahead of {t}; unchanged)")),
             (Some(i), _) => r.item(Mark::Same, format!("{name}  {i} unchanged")),
             (None, Some(t)) => r.item(Mark::Add, format!("{name}  not installed → {t}")),
@@ -324,12 +378,24 @@ pub fn render(w: &WhatIf) -> Report {
             Err(e) => {
                 r.item(Mark::Warn, format!("the release notes could not be fetched ({e}); the versions above still hold"));
             }
-            Ok(releases) => {
+            Ok(fetched) => {
+                if let Some(warning) = &fetched.warning {
+                    r.item(Mark::Warn, warning);
+                }
+                let releases = fetched.releases.as_slice();
                 for c in &moving {
-                    let from = c.installed.as_deref().unwrap_or("0");
                     let to = c.target.as_deref().unwrap_or("?");
-                    let found = notes::between(releases, &c.name, from, to);
+                    let found = notes::between(releases, &c.name, c.installed.as_deref(), to);
                     r.sub(format!("{} {} → {to}", c.name, c.installed.as_deref().unwrap_or("none")));
+                    match c.installed.as_deref() {
+                        None => {
+                            r.muted(4, "not installed, so only the target's own release is shown");
+                        }
+                        Some(i) if !notes::orderable(i) => {
+                            r.muted(4, format!("the installed version {i} does not order against releases, so only the target's own release is shown"));
+                        }
+                        _ => {}
+                    }
                     if found.is_empty() {
                         r.muted(4, format!("no {} release between them yet", c.name));
                     }
@@ -353,11 +419,18 @@ pub fn render(w: &WhatIf) -> Report {
     }
 
     r.section("Changes");
-    match (&w.delta, &w.head, &w.target) {
-        (_, Some(h), Some(t)) if h == t => {
+    match (w.relation, &w.delta, &w.dropped) {
+        (Relation::Same, _, _) => {
             r.item(Mark::Same, "the checkout is at the target: no new commits");
         }
-        (Some(d), _, _) => delta::render(&mut r, d, w.verbose),
+        (Relation::Ahead, _, Some(d)) => {
+            r.item(Mark::Warn, "the ref is behind the checkout: --commit leaves these commits behind");
+            delta::render(&mut r, d, w.verbose);
+        }
+        (Relation::Ahead, _, None) => {
+            r.item(Mark::Same, "the checkout is ahead of the target: no new commits");
+        }
+        (_, Some(d), _) => delta::render(&mut r, d, w.verbose),
         _ => {
             r.item(Mark::Warn, "git could not list the commits between the checkout and the target");
         }
@@ -365,7 +438,8 @@ pub fn render(w: &WhatIf) -> Report {
 
     if !w.local.is_empty() {
         r.section("Local changes");
-        r.item(Mark::Warn, format!("{} path{} in the app differ from its commit; the pull stashes them and restores them after", w.local.len(), if w.local.len() == 1 { "" } else { "s" }));
+        let differ = if w.local.len() == 1 { "differs" } else { "differ" };
+        r.item(Mark::Warn, format!("{} in the app {differ} from its commit; the pull stashes them and restores them after", lifecycle::count(w.local.len(), "path", "paths")));
         for l in &w.local {
             r.muted(4, l);
         }
@@ -377,9 +451,10 @@ pub fn render(w: &WhatIf) -> Report {
         r.item(*mark, text);
     }
 
-    lifecycle::dev_links_section(&mut r, &w.dev, "The update");
+    lifecycle::dev_links_section(&mut r, &w.dev, "The update", &crate::paths::data_root());
 
-    let up_to_date = w.head == w.target && !w.components.iter().any(Component::moves) && w.local.is_empty();
+    let level = w.relation == Relation::Same || (!on_ref && w.relation == Relation::Ahead);
+    let up_to_date = level && !w.components.iter().any(Component::moves) && w.local.is_empty() && w.dev.is_empty();
     if up_to_date {
         r.footer(Mark::Ok, "Up to date. Nothing changed.");
     } else {
@@ -405,12 +480,17 @@ mod tests {
             head: Some("aaaaaaaaaaaa".into()),
             target: Some("bbbbbbbbbbbb".into()),
             fetch_error: None,
+            relation: Relation::Behind,
             components: vec![comp("ways", Some("1.40.0"), Some("1.41.0")), comp("attend", Some("0.28.1"), Some("0.28.1")), comp(MOD, Some("0.28.1"), Some("0.28.1"))],
-            notes: Ok(vec![
-                Release { tag: "ways-v1.41.0".into(), body: "## ways 1.41.0\n\n### Added\n- a thing (#5)\n\n---\nPre-built ways CLI binaries for 4 platforms.\n".into() },
-                Release { tag: "ways-v1.40.0".into(), body: "old".into() },
-            ]),
+            notes: Ok(notes::Fetched {
+                releases: vec![
+                    Release { tag: "ways-v1.41.0".into(), body: "## ways 1.41.0\n\n### Added\n- a thing (#5)\n\n---\nPre-built ways CLI binaries for 4 platforms.\n".into() },
+                    Release { tag: "ways-v1.40.0".into(), body: "old".into() },
+                ],
+                warning: None,
+            }),
             delta: Some(Delta { commits: vec![delta::classify("feat(ways): a thing", &[])], prs: vec![5] }),
+            dropped: None,
             local: vec![" M settings.json".into()],
             actions: vec![(Mark::Act, "pull: fast-forward aaaaaaaa → bbbbbbbb (origin/main)".into())],
             dev: Vec::new(),
@@ -435,9 +515,11 @@ mod tests {
             head: Some("a".into()),
             target: Some("a".into()),
             fetch_error: Some("could not resolve host".into()),
+            relation: Relation::Same,
             components: vec![comp("ways", Some("1.0.0"), Some("1.1.0"))],
             notes: Err("GitHub Releases could not be reached".into()),
             delta: None,
+            dropped: None,
             local: Vec::new(),
             actions: Vec::new(),
             dev: Vec::new(),

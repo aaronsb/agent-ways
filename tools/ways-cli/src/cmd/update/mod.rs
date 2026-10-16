@@ -237,6 +237,8 @@ fn pull(app: &Path) -> Result<()> {
     if text.contains('⚠') {
         Steps::warn("local changes conflicted with upstream; they are safe in the stash:");
         Steps::output(&out);
+    } else if text.contains("could not stash") {
+        Steps::warn("the local changes could not be stashed; the pull ran over them");
     } else if text.contains("Local changes present") {
         Steps::ok("local changes stashed and restored");
     }
@@ -354,7 +356,7 @@ fn classify_build_groups<'a>(paths: impl Iterator<Item = &'a str>) -> (bool, boo
 /// line, which this catches.) `(false, false)` if git can't answer.
 fn working_tree_build_groups(app: &Path) -> (bool, bool) {
     let Some(out) = Command::new("git")
-        .args(["diff", "--name-only", "HEAD"])
+        .args(["--no-optional-locks", "diff", "--name-only", "HEAD"])
         .current_dir(app)
         .output()
         .ok()

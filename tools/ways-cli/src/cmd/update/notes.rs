@@ -25,33 +25,68 @@ pub struct Release {
     pub body: String,
 }
 
+/// The releases read, and what kept the list short when something did: a
+/// page that failed after earlier ones were read, or the page cap.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Fetched {
+    pub releases: Vec<Release>,
+    pub warning: Option<String>,
+}
+
 /// Every published release (drafts and prereleases left out), newest first,
-/// or why they could not be read.
+/// or why none could be read.
 ///
 /// `WAYS_RELEASES_JSON` names a file holding one page of the API's answer,
 /// read in its place: a mirror for an offline machine, and the fixture the
 /// tests use.
-pub fn fetch() -> Result<Vec<Release>, String> {
+pub fn fetch() -> Result<Fetched, String> {
     if let Some(file) = std::env::var_os("WAYS_RELEASES_JSON") {
         let text = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", std::path::Path::new(&file).display()))?;
         let list: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", std::path::Path::new(&file).display()))?;
-        return Ok(parse(list.as_array().map(Vec::as_slice).unwrap_or(&[])));
+        return Ok(Fetched { releases: parse(list.as_array().map(Vec::as_slice).unwrap_or(&[])), warning: None });
     }
-    let mut out = Vec::new();
+    pages(|page| curl(&format!("https://api.github.com/repos/{REPO}/releases?per_page=100&page={page}")))
+}
+
+/// Read pages through `get` until a short page, a failure or the cap. A
+/// failure on the first page is the error; a later one keeps what was read
+/// and says so.
+fn pages(get: impl Fn(usize) -> Result<String, String>) -> Result<Fetched, String> {
+    let mut out = Fetched::default();
     for page in 1..=MAX_PAGES {
-        let url = format!("https://api.github.com/repos/{REPO}/releases?per_page=100&page={page}");
-        let text = curl(&url)?;
-        let list: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("GitHub answered with something other than JSON: {e}"))?;
-        let Some(items) = list.as_array() else {
-            let msg = list.get("message").and_then(|m| m.as_str()).unwrap_or("an unexpected answer");
-            return Err(format!("GitHub: {msg}"));
-        };
-        out.extend(parse(items));
-        if items.len() < 100 {
-            break;
+        let read = get(page).and_then(|text| {
+            let list: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("GitHub answered with something other than JSON: {e}"))?;
+            match list.as_array() {
+                Some(items) => Ok((parse(items), items.len())),
+                None => Err(format!("GitHub: {}", list.get("message").and_then(|m| m.as_str()).unwrap_or("an unexpected answer"))),
+            }
+        });
+        match read {
+            Ok((releases, n)) => {
+                out.releases.extend(releases);
+                if n < 100 {
+                    return Ok(out);
+                }
+            }
+            Err(e) if page == 1 => return Err(e),
+            Err(e) => {
+                out.warning = Some(format!("only the newest {} releases were read; page {page} failed ({e})", out.releases.len()));
+                return Ok(out);
+            }
         }
     }
+    out.warning = Some(format!("only the newest {} releases were read (the cap is {MAX_PAGES} pages)", MAX_PAGES * 100));
     Ok(out)
+}
+
+/// A token from the environment, trimmed; one that would break curl's
+/// config syntax (a quote, a backslash or a line break) is not sent.
+fn token() -> Option<String> {
+    ["GH_TOKEN", "GITHUB_TOKEN"]
+        .iter()
+        .find_map(|k| std::env::var(k).ok())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty() && !v.contains(['"', '\\', '\n', '\r']))
 }
 
 fn parse(items: &[serde_json::Value]) -> Vec<Release> {
@@ -64,9 +99,11 @@ fn parse(items: &[serde_json::Value]) -> Vec<Release> {
 
 /// GET `url` with curl, with a token from the environment when one is set.
 fn curl(url: &str) -> Result<String, String> {
-    let token = ["GH_TOKEN", "GITHUB_TOKEN"].iter().find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()));
+    // No `-f`: an error answer keeps its JSON `message` (a rate limit,
+    // say), which `pages` reports.
+    let token = token();
     let mut child = Command::new("curl")
-        .args(["-sS", "-f", "-L", "--max-time", "15", "-H", "Accept: application/vnd.github+json", "--config", "-", url])
+        .args(["-sS", "-L", "--max-time", "15", "-H", "Accept: application/vnd.github+json", "--config", "-", url])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -91,14 +128,25 @@ pub fn tag_version<'a>(tag: &'a str, component: &str) -> Option<&'a str> {
     tag.strip_prefix(component)?.strip_prefix("-v")
 }
 
+/// Whether `v` is a version the range can order: `X.Y.Z`, with an optional
+/// pre-release suffix.
+pub fn orderable(v: &str) -> bool {
+    let core = v.split_once('-').map_or(v, |(c, _)| c);
+    !core.is_empty() && core.split('.').all(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// The releases of `component` after `installed` up to and including
-/// `target`, oldest first. An unparseable installed version takes only the
-/// target's own release.
-pub fn between<'a>(releases: &'a [Release], component: &str, installed: &str, target: &str) -> Vec<&'a Release> {
+/// `target`, oldest first. With no installed version, or one that does not
+/// parse, only the target's own release.
+pub fn between<'a>(releases: &'a [Release], component: &str, installed: Option<&str>, target: &str) -> Vec<&'a Release> {
+    let from = installed.filter(|i| orderable(i));
     let mut hits: Vec<(&str, &Release)> = releases
         .iter()
         .filter_map(|r| Some((tag_version(&r.tag, component)?, r)))
-        .filter(|(v, _)| version_older(installed, v) && !version_older(target, v))
+        .filter(|(v, _)| match from {
+            Some(i) => version_older(i, v) && !version_older(target, v),
+            None => *v == target,
+        })
         .collect();
     hits.sort_by(|(a, _), (b, _)| if version_older(a, b) { std::cmp::Ordering::Less } else if version_older(b, a) { std::cmp::Ordering::Greater } else { std::cmp::Ordering::Equal });
     hits.into_iter().map(|(_, r)| r).collect()
@@ -163,12 +211,15 @@ mod tests {
             rel("ways-v1.39.0"),
             rel("ways-v1.42.0"),
         ];
-        let tags = |c: &str, a: &str, b: &str| between(&all, c, a, b).iter().map(|r| r.tag.clone()).collect::<Vec<_>>();
+        let tags = |c: &str, a: &str, b: &str| between(&all, c, Some(a), b).iter().map(|r| r.tag.clone()).collect::<Vec<_>>();
         assert_eq!(tags("ways", "1.40.0", "1.41.1"), ["ways-v1.40.2", "ways-v1.41.0", "ways-v1.41.1"]);
         assert_eq!(tags("ways", "1.41.1", "1.41.1"), Vec::<String>::new(), "unchanged has no notes");
         assert!(tags("attend", "0.1.0", "9.0.0").is_empty(), "attend-chat tags are not attend's");
         assert_eq!(tags("attend-chat", "0.20.0", "0.21.0"), ["attend-chat-v0.21.0"]);
         assert_eq!(latest(&all, "ways"), Some("1.42.0"));
+        let only = |i: Option<&str>| between(&all, "ways", i, "1.41.1").iter().map(|r| r.tag.clone()).collect::<Vec<_>>();
+        assert_eq!(only(None), ["ways-v1.41.1"], "not installed: the target's release only");
+        assert_eq!(only(Some("dev-build")), ["ways-v1.41.1"], "an unparseable version: the target's release only");
         assert_eq!(latest(&all, "ways-mcp"), None);
     }
 
@@ -179,6 +230,19 @@ mod tests {
         // A rule that does not introduce the CI tail stays.
         assert_eq!(trim("### Added\n- a\n---\n### Notes\n- b\n"), ["### Added", "- a", "---", "### Notes", "- b"]);
         assert!(trim("").is_empty());
+    }
+
+    #[test]
+    fn a_later_page_that_fails_keeps_what_was_read_and_says_so() {
+        let page = |n: usize| format!("[{}]", (0..n).map(|i| format!(r#"{{"tag_name":"ways-v1.0.{i}","body":""}}"#)).collect::<Vec<_>>().join(","));
+        let got = pages(|p| if p == 1 { Ok(page(100)) } else { Err("curl: (28) timed out".into()) }).unwrap();
+        assert_eq!(got.releases.len(), 100);
+        assert!(got.warning.as_deref().unwrap().contains("page 2 failed (curl: (28) timed out)"), "{got:?}");
+        assert_eq!(pages(|_| Err("offline".into())).unwrap_err(), "offline");
+        let limited = pages(|_| Ok(r#"{"message":"API rate limit exceeded"}"#.into())).unwrap_err();
+        assert_eq!(limited, "GitHub: API rate limit exceeded");
+        let capped = pages(|_| Ok(page(100))).unwrap();
+        assert!(capped.warning.as_deref().unwrap().contains("the cap is"), "{capped:?}");
     }
 
     #[test]

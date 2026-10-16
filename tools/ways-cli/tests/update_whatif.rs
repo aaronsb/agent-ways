@@ -78,7 +78,11 @@ impl Sandbox {
         let dev = s.base.join("dev");
         std::fs::create_dir_all(dev.join(".git")).unwrap();
         exec(&dev.join("bin/way-embed"), "#!/bin/sh\n");
-        std::os::unix::fs::symlink(dev.join("bin/way-embed"), bin.join("way-embed")).unwrap();
+        // way-embed links into a target's bin/, where the repair projects it;
+        // `make link` never puts it in ~/.local/bin.
+        let claude_bin = s.base.join("home/.claude/bin");
+        std::fs::create_dir_all(&claude_bin).unwrap();
+        std::os::unix::fs::symlink(dev.join("bin/way-embed"), claude_bin.join("way-embed")).unwrap();
         write(&s.base.join("releases.json"), RELEASES);
         for d in ["config", "state", "cache", "tmp", "home/.claude"] {
             std::fs::create_dir_all(s.base.join(d)).unwrap();
@@ -204,4 +208,37 @@ fn commit_applies_with_one_header_per_stage() {
     assert!(stderr.contains("⚠ ways NOT refreshed"), "{all}");
     assert!(!stderr.contains("Already up to date") && !stderr.contains("Fast-forward"), "git's own output is kept back: {all}");
     assert!(!all.contains('\x1b'), "plain in a pipe");
+}
+
+#[test]
+fn a_checkout_ahead_of_upstream_is_ahead_not_diverged() {
+    let s = Sandbox::new("ahead");
+    git(&s.app(), &["checkout", "-q", "--", "settings.json"]);
+    git(&s.app(), &["-c", "user.name=t", "-c", "user.email=t@example.com", "pull", "-q", "--ff-only"]);
+    write(&s.app().join("local.txt"), "mine\n");
+    git(&s.app(), &["add", "local.txt"]);
+    git(&s.app(), &["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "chore: a local commit"]);
+    let out = s.ways(&["manage", "update"], &s.base.join("releases.json"));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{stdout}");
+    assert!(stdout.contains("ahead of origin/main by 1 commit, so the pull changes nothing"), "{stdout}");
+    assert!(!stdout.contains("diverged"), "{stdout}");
+    assert!(stdout.contains("ahead of the target: no new commits"), "{stdout}");
+}
+
+#[test]
+fn a_ref_behind_the_install_is_reported_as_a_downgrade() {
+    let s = Sandbox::new("downgrade");
+    let first = git(&s.app(), &["rev-parse", "HEAD"]);
+    git(&s.app(), &["checkout", "-q", "--", "settings.json"]);
+    git(&s.app(), &["-c", "user.name=t", "-c", "user.email=t@example.com", "pull", "-q", "--ff-only"]);
+    exec(&s.app().join("bin/ways"), "#!/bin/sh\necho 'ways 1.1.0 (ways-v1.1.0-0-gabc1234)'\n");
+    let before = s.snapshot();
+    let out = s.ways(&["manage", "update", "--ref", &first], &s.base.join("releases.json"));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{stdout}");
+    assert_eq!(s.snapshot(), before, "a --ref what-if changes nothing");
+    assert!(stdout.contains("↓ ways") && stdout.contains("1.1.0 → 1.0.0 (a downgrade: --commit rebuilds it from source)"), "{stdout}");
+    assert!(stdout.contains("--commit leaves these commits behind") && stdout.contains("feat(ways): a new thing (#2)"), "{stdout}");
+    assert!(!stdout.contains("the fetch failed"), "a ref that resolves is not a failed fetch: {stdout}");
 }

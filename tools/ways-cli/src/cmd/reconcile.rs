@@ -95,7 +95,11 @@ pub fn repair(source: Option<String>, dest: Option<String>, mode: Option<String>
             }
         }
     }
-    lifecycle::dev_links_section(&mut tail, &lifecycle::dev_links(&app, &lifecycle::linked_bins(&app), &dirs), "The repair");
+    // A link into the projected source, or into the installed app, is the
+    // install's own; the repair moves the rest to the source.
+    let data = paths::data_root();
+    let links = lifecycle::dev_links(&[app.as_path(), data.as_path()], &lifecycle::linked_bins(&app), &dirs);
+    lifecycle::dev_links_section(&mut tail, &links, "The repair", &app);
     tail.footer(Mark::Info, lifecycle::commit_hint("ways manage repair"));
     print!("{}", tail.render(&p));
     Ok(())

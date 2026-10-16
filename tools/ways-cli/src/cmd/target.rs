@@ -229,7 +229,7 @@ pub fn add(dir: &str, force: bool, mode: Mode, json: bool) -> Result<()> {
     print_plan(title, &plan, json)?;
     if mode == Mode::WhatIf {
         let force = if force { " --force" } else { "" };
-        whatif_footer(&format!("ways manage target add {dir}{force}"), json);
+        whatif_footer(&format!("ways manage target add {}{force}", lifecycle::shell_word(dir)), json);
         return Ok(());
     }
     if plan.blocked && !force {
@@ -283,13 +283,19 @@ fn recorded(dir: &str) -> Result<Target> {
 /// What enable, disable or remove would do, from a dry run of the
 /// reconcile they run (ADR-511).
 fn whatif(verb: &str, dir: &str, mut target: Target, enabled: bool, record: &str) -> Result<()> {
-    println!("ways manage target {verb}: what-if");
-    println!("{record}");
+    let mut head = Report::new(format!("ways manage target {verb}: what-if"));
+    head.section("Record").item(Mark::Act, record);
     target.enabled = enabled;
     if target.dir().is_dir() {
+        head.section("Reconcile");
+        head.print();
+        use std::io::Write as _;
+        let _ = std::io::stdout().flush();
         reconcile::run_for_targets(&[target], true, false, false)?;
+    } else {
+        head.print();
     }
-    whatif_footer(&format!("ways manage target {verb} {dir}"), false);
+    whatif_footer(&format!("ways manage target {verb} {}", lifecycle::shell_word(dir)), false);
     Ok(())
 }
 
@@ -300,9 +306,9 @@ fn set_enabled(dir: &str, enabled: bool, mode: Mode) -> Result<()> {
             bail!("{} does not exist; a target must be a directory to enable", target.dir().display());
         }
         let (verb, record) = if enabled {
-            ("enable", format!("would record {} as enabled and reconcile into it:", target.dir().display()))
+            ("enable", format!("record {} as enabled and reconcile into it", target.dir().display()))
         } else {
-            ("disable", format!("would record {} as disabled and withdraw from it:", target.dir().display()))
+            ("disable", format!("record {} as disabled and withdraw from it", target.dir().display()))
         };
         return whatif(verb, dir, target, enabled, &record);
     }
@@ -340,7 +346,7 @@ pub fn disable(dir: &str, mode: Mode) -> Result<()> {
 pub fn remove(dir: &str, mode: Mode) -> Result<()> {
     if mode == Mode::WhatIf {
         let target = recorded(dir)?;
-        let record = format!("would withdraw from {} and drop it from the targets list:", target.dir().display());
+        let record = format!("withdraw from {} and drop it from the targets list", target.dir().display());
         return whatif("remove", dir, target, false, &record);
     }
     let implicit = Config::load(&crate::util::project_dir()).targets();
