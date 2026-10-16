@@ -508,7 +508,7 @@ impl Ways {
             "install" => {
                 root.actions = vec![
                     activate(),
-                    Action::new("repair", "ways manage repair")
+                    Action::new("repair", "ways manage repair --commit")
                         .confirm()
                         .doc("Rewrites each recorded target's projection to match the settings: hooks, settings.json and the corpus.")
                         .touches("every recorded target directory"),

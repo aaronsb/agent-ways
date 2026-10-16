@@ -76,9 +76,7 @@ pub fn gather(app: &Path, channel: Channel, verbose: bool) -> WhatIf {
     };
     let local = git_lines(app, &["status", "--porcelain"]);
     let actions = actions(app, &channel, head.as_deref(), target.as_deref(), &components, notes.as_deref().unwrap_or(&[]), !local.is_empty());
-    let mut bins = suite_bins(app);
-    bins.push(exe("way-embed"));
-    let dev = lifecycle::dev_links(app, &bins, &lifecycle::link_dirs());
+    let dev = lifecycle::dev_links(app, &lifecycle::linked_bins(app), &lifecycle::link_dirs());
     WhatIf { app: app.to_path_buf(), channel, head, target, fetch_error, components, notes, delta, local, actions, dev, verbose }
 }
 

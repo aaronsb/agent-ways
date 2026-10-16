@@ -214,7 +214,7 @@ pub fn add(dir: &str, force: bool, dry_run: bool, json: bool) -> Result<()> {
     // to stderr.
     if let Err(e) = reconcile::run_for_targets(&[target], false, json, force) {
         eprintln!(
-            "target recorded in {} but the reconcile failed; `ways manage repair` retries it, \
+            "target recorded in {} but the reconcile failed; `ways manage repair --commit` retries it, \
              `ways manage target remove` forgets it",
             path.display()
         );

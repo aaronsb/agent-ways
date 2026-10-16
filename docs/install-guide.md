@@ -21,13 +21,13 @@ This guide covers the paths that aren't straight: an existing `~/.claude` you ca
 
 Everything else in `~/.claude` (`settings.json` values you set, `.credentials.json`, `projects/`, `memory/`, `CLAUDE.md`) is preserved, because the install never replaces your directory. `settings.json` is backed up before the merge. `scripts/`, `tools/` and the rest of the app stay in `$XDG_DATA` and are not projected.
 
-The one case that needs your attention: if a projected root path (`~/.claude/skills`, `agents`, `commands`, `hooks/ways`, or a file under `~/.claude/bin`) is already a real directory or file of your own, `ways manage repair` stops before touching anything and names it. Nothing is deleted. Move it aside yourself (copy anything you want to keep into a project's `.claude/skills/`), or run `ways manage repair --force` to rename each such path to a timestamped sibling (`skills.ways-backup-<seconds>`) and then link.
+The one case that needs your attention: if a projected root path (`~/.claude/skills`, `agents`, `commands`, `hooks/ways`, or a file under `~/.claude/bin`) is already a real directory or file of your own, `ways manage repair` stops before touching anything and names it. Nothing is deleted. Move it aside yourself (copy anything you want to keep into a project's `.claude/skills/`), or run `ways manage repair --commit --force` to rename each such path to a timestamped sibling (`skills.ways-backup-<seconds>`) and then link.
 
 `ways manage uninstall` reverses all of this, including the MCP registration. It lists what it would do; `ways manage uninstall --yes` does it. Your own ways, API keys and event log stay unless you add `--purge`. `ways manage reinstall` puts the installed version back the same way, keeping what is yours, and fetches the copy before it removes anything.
 
 ## Activation is separate from installation
 
-Installing stages the app and builds the binaries. Activation is what puts the projection into a Claude Code config directory, and it is recorded as a **target** in your user config ([ADR-184](architecture/platform/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)). With no `targets` key the one target is `~/.claude`, enabled, which is what every install before this model behaved as; the next `ways manage repair` or `ways manage update` records it, and the install is explicit from then on.
+Installing stages the app and builds the binaries. Activation is what puts the projection into a Claude Code config directory, and it is recorded as a **target** in your user config ([ADR-184](architecture/platform/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)). With no `targets` key the one target is `~/.claude`, enabled, which is what every install before this model behaved as; the next `ways manage repair --commit` or `ways manage update --commit` records it, and the install is explicit from then on.
 
 Before activating a directory, ask what it would do:
 
@@ -116,7 +116,7 @@ Running the installer from inside the app dir is what links the suite binaries i
 ```bash
 cd "$XDG_DATA_HOME/agent-ways"
 git fetch upstream && git merge upstream/main   # resolve conflicts in your custom ways
-make update-binaries && ways manage repair          # force-rebuild (make setup would skip existing binaries)
+make update-binaries && ways manage repair --commit # force-rebuild (make setup would skip existing binaries)
 ```
 
 If you're actively *developing* agent-ways, use a standalone dev checkout instead and dogfood via reconcile. See [development.md](development.md).

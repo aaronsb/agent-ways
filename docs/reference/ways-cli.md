@@ -665,19 +665,19 @@ ways manage update --ref ways-v1.32.0 --commit
 
 **Run from:** Anywhere.
 
-**Tells you:** Which projection roots it linked or relinked, one line each, and a summary unless `--quiet`. It stops with a non-zero exit, before touching anything, when a projected root (`skills/`, `agents/`, `commands/`, `hooks/ways/`, `hooks/check-config-updates.sh`, `bin/*`) is a real directory or file rather than a symlink, and lists the paths. It never deletes a real path.
+**Tells you:** Without `--commit`, what it would link, relink, withdraw and register, under a `what-if` title, with any binary link that points into a dev checkout; nothing changes ([ADR-511](../architecture/platform/ADR-511-every-mutating-lifecycle-verb-reports-what-it-would-change-until-commit.md)). With `--commit`, which projection roots it linked or relinked, one line each, and a summary unless `--quiet`. It stops with a non-zero exit, before touching anything, when a projected root (`skills/`, `agents/`, `commands/`, `hooks/ways/`, `hooks/check-config-updates.sh`, `bin/*`) is a real directory or file rather than a symlink, and lists the paths. It never deletes a real path.
 
 With no `--dest`, it runs over every target in the user config ([ADR-184](../architecture/platform/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)). Each enabled target is converged. Each disabled one is withdrawn: our symlinks are unlinked, and our hooks block and permissions are removed from its `settings.json` through the same merge base that wrote them. An explicit `--dest` is a single-target run and leaves the list alone.
 
 Last in each enabled target it installs the attend mod through Claude Code's plugin CLI ([ADR-406](../architecture/attend/ADR-406-attend-reaches-agents-through-a-claude-code-mod-that-agent-ways-installs-dormant-by-default-one-status-row-transport-stays-the-signal-store.md)): it adds the `agent-ways` marketplace from the app's `plugins/` folder and installs `attend@agent-ways` when they are missing, and updates both when the installed version is older than the shipped one. A disabled target, and every target once `attend_mod.install` is false, has the mod uninstalled and the marketplace removed. An `attend` plugin from another marketplace is reported and left alone, and a missing `claude` binary or a failed call is reported without failing the repair. See [the attend mod](../attend-and-monitor/mod.md).
 
 ```
-ways manage repair                       # every target in config.yaml; default: ~/.claude
-ways manage repair --dry-run             # preview; prints "refused <root>" for real paths, exit 0
-ways manage repair --force               # rename each real path to <name>.ways-backup-<seconds>, then link
-ways manage repair --source <checkout> --dest <dir>   # dogfood a development checkout
-ways manage repair --mode copy           # copy files instead of symlinking (default: symlink)
-ways manage repair --quiet               # no summary line
+ways manage repair                       # what it would do; prints "refused <root>" for real paths, exit 0
+ways manage repair --commit              # every target in config.yaml; default: ~/.claude
+ways manage repair --commit --force      # rename each real path to <name>.ways-backup-<seconds>, then link
+ways manage repair --commit --source <checkout> --dest <dir>   # dogfood a development checkout
+ways manage repair --commit --mode copy  # copy files instead of symlinking (default: symlink)
+ways manage repair --commit --quiet      # no summary line
 ```
 
 ### `ways manage uninstall`
@@ -751,7 +751,7 @@ The hooks call these. They are hidden from `ways --help`, and their names stay f
 | `ways project-slug [path]` | Macros that read per-project state (`meta/memory/macro.sh`). |
 | `ways events-log-path` | Scripts outside the binary that read the event log. |
 | `ways manifest` | Debugging `ways manage repair`: the projection manifest it converges toward. |
-| `reconcile` | The previous release's updater, which spawns it on the newly installed binary. It runs the same code as `ways manage repair`, with the same flags and exit codes, and prints no notice ([ADR-509](../architecture/platform/ADR-509-lifecycle-commands-sit-under-one-ways-manage-group-the-updater-s-reconcile-stays-a-hidden-fixed-name.md)). |
+| `reconcile` | The previous release's updater, which spawns it on the newly installed binary, and the installer. It runs the same code as `ways manage repair`, with the same flags and exit codes, and prints no notice. It applies with no flag, where `ways manage repair` reports until `--commit`, because its callers cannot pass a flag the binary they call may lack (ADR-511) ([ADR-509](../architecture/platform/ADR-509-lifecycle-commands-sit-under-one-ways-manage-group-the-updater-s-reconcile-stays-a-hidden-fixed-name.md)). |
 | `ways judge-setup` | The installer and the end of `ways manage update`: checks the judge's keys and, on a terminal, offers to add one. |
 
 **Testing a way by hand.** `ways scan prompt` runs the same code as the UserPromptSubmit hook and prints the markdown that would be injected; no output means nothing crossed a threshold. `ways show way` prints a way as Claude receives it. Both need `--session`; any string, such as `dummy`, makes a dry run that touches no real session. Both are session-aware, so a second call with the same session prints nothing for a way already shown. `--project <dir>` adds that project's ways.

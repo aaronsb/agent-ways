@@ -247,7 +247,7 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
     }
     if stopped {
         eprintln!(
-            "\nagent-ways {} is installed, and no target is projected yet. Fix the cause above, then finish with:\n  ways manage repair",
+            "\nagent-ways {} is installed, and no target is projected yet. Fix the cause above, then finish with:\n  ways manage repair --commit",
             source.label()
         );
         bail!("the repair after the install failed");
@@ -258,7 +258,7 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
     //    lists.
     eprintln!("==> project every target");
     if let Err(e) = super::reconcile::run(Some(app.to_string_lossy().into_owned()), None, None, false, false, false) {
-        eprintln!("\nagent-ways {} is installed, but a target was not projected. Fix the cause above, then run:\n  ways manage repair", source.label());
+        eprintln!("\nagent-ways {} is installed, but a target was not projected. Fix the cause above, then run:\n  ways manage repair --commit", source.label());
         return Err(e);
     }
     println!("\nagent-ways {} is reinstalled. Restart Claude Code to pick it up.", source.label());

@@ -376,7 +376,7 @@ ways manage update --ref main --commit   # return to the release channel
 
 Without `--commit`, `ways manage update` fetches and reports what the update would change: each component's version, the release notes in between, the commits grouped by area, local changes in the app dir, the actions it would take, and any binary links a `make dev-install` left. With `--commit` it pulls the app source, prefers prebuilt binaries over a source build, regenerates the corpus, relinks, reprojects `~/.claude` (`ways manage repair`), and ends with the judge key check. `install.manage_mode: commit` in the user config makes it apply without the flag. Re-running the installer one-liner also updates and is idempotent. The [install guide](docs/install-guide.md#scenario-a-previous-agent-ways-install) covers the flags and older installs.
 
-A fork fetches and merges upstream in the app dir (`git fetch upstream && git merge upstream/main`), then runs `make update-binaries && ways manage repair`. The corpus rebuilds itself at the next session start.
+A fork fetches and merges upstream in the app dir (`git fetch upstream && git merge upstream/main`), then runs `make update-binaries && ways manage repair --commit`. The corpus rebuilds itself at the next session start.
 
 At session start, `check-config-updates.sh` flags when the app source is behind upstream (`aaronsb/agent-ways`), fetching at most once per hour. A fork or a non-GitHub origin gets no nudge. There is no off switch yet that survives the next `ways manage repair`: deleting the script or its `settings.json` entry is undone by reconcile ([#816](https://github.com/aaronsb/agent-ways/issues/816)).
 

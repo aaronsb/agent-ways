@@ -1083,9 +1083,8 @@ struct RepairArgs {
     /// Materialization: symlink (default) or copy
     #[arg(long)]
     mode: Option<String>,
-    /// Show what would change without touching the filesystem
-    #[arg(long)]
-    dry_run: bool,
+    #[command(flatten)]
+    apply: cmd::lifecycle::Apply,
     /// Suppress the summary line (still prints any changes)
     #[arg(long)]
     quiet: bool,
@@ -1211,9 +1210,17 @@ fn update(args: UpdateArgs) -> Result<()> {
 }
 
 /// `ways manage repair` and the hidden fixed name `reconcile`: one function,
-/// so the two cannot drift (ADR-509 §4).
-fn repair(a: RepairArgs) -> Result<()> {
-    cmd::reconcile::run(a.source, a.dest, a.mode, a.dry_run, a.quiet, a.force)
+/// so the two cannot drift (ADR-509 §4). They differ in the default only:
+/// `manage repair` reports until `--commit` (ADR-511), and `reconcile`
+/// applies, because another release's updater and the installer call it
+/// with no flag.
+fn repair(a: RepairArgs, fixed_name: bool) -> Result<()> {
+    let mode = if fixed_name {
+        if a.apply.what_if { cmd::lifecycle::Mode::WhatIf } else { cmd::lifecycle::Mode::Commit }
+    } else {
+        a.apply.mode(true)
+    };
+    cmd::reconcile::repair(a.source, a.dest, a.mode, mode, a.quiet, a.force)
 }
 
 fn uninstall(args: UninstallArgs) -> Result<()> {
@@ -1267,7 +1274,7 @@ fn run() -> Result<()> {
         Commands::Corpus { ways_dir, output, quiet, verbose, if_stale } => cmd::corpus::run(ways_dir, output, quiet, verbose, if_stale),
         Commands::Init { project } => cmd::init::run(project.as_deref()),
         Commands::Manifest { source, json } => cmd::manifest::run(json, source),
-        Commands::Reconcile(args) => repair(args),
+        Commands::Reconcile(args) => repair(args, true),
         Commands::Status { json } => cmd::status::run(json),
         Commands::Lookup { project, what } => {
             // Every reader below resolves the project as a hook would, from the
@@ -1397,7 +1404,7 @@ fn run() -> Result<()> {
         Commands::Manage { action: None } => bare_group(&["manage"], || settings_screen("install")),
         Commands::Manage { action: Some(action) } => match action {
             ManageCommand::Update(args) => update(args),
-            ManageCommand::Repair(args) => repair(args),
+            ManageCommand::Repair(args) => repair(args, false),
             ManageCommand::Uninstall(args) => uninstall(args),
             ManageCommand::Reinstall { yes, purge } => cmd::reinstall::run(yes, purge),
             ManageCommand::Target { action } => target(action),

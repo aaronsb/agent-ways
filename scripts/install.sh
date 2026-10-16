@@ -18,7 +18,7 @@
 #
 # Exit codes: 0 done; 1 failed; 2 usage; 3 the app is built and on PATH, and the
 # repair after the build failed, most often at a real path in a projected root
-# (fix the cause it names, then finish with `ways manage repair`).
+# (fix the cause it names, then finish with `ways manage repair --commit`).
 
 set -euo pipefail
 
@@ -251,8 +251,8 @@ print_projection_stopped() {
   echo "  Read the error above. When it lists real paths at projected roots, move those"
   echo "  aside (or copy what you want to keep into a project's .claude/skills/)."
   echo "  Then run:"
-  echo -e "    ${CYAN}ways manage repair${RESET}            # link the projected roots"
-  echo -e "    ${CYAN}ways manage repair --force${RESET}    # or: rename each real path to <name>.ways-backup-<seconds> first"
+  echo -e "    ${CYAN}ways manage repair --commit${RESET}            # link the projected roots"
+  echo -e "    ${CYAN}ways manage repair --commit --force${RESET}    # or: rename each real path to <name>.ways-backup-<seconds> first"
   echo "  If ~/.claude is itself a git clone of agent-ways (pre-1.0), do not use --force;"
   echo "  see ${UPSTREAM_URL}/blob/ways-v1.8.3/docs/migration-1.0.md"
 }
@@ -401,7 +401,7 @@ if is_agent_ways_repo "$APP_DIR"; then
     judge_setup
   else
     echo -e "${YELLOW}ways binary not built — projection was NOT reconciled.${RESET}"
-    echo "  Fix the build (cd $APP_DIR && make setup), then run: ways manage repair"
+    echo "  Fix the build (cd $APP_DIR && make setup), then run: ways manage repair --commit"
   fi
   exit 0
 fi

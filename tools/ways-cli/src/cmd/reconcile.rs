@@ -56,7 +56,37 @@ struct Outcome {
     detail: String,
 }
 
-/// `ways manage repair` entrypoint.
+/// `ways manage repair`, and the hidden `reconcile` (ADR-509 §4): with
+/// `Commit`, [`run`]; with `WhatIf`, the same run as a dry run between a
+/// title and a closing section that names the dev links the repair would
+/// move and how to apply (ADR-511). The previous release's updater and the
+/// installer call `reconcile` with no flag, so main.rs hands it `Commit`
+/// unless `--what-if` is given.
+pub fn repair(source: Option<String>, dest: Option<String>, mode: Option<String>, apply: crate::cmd::lifecycle::Mode, quiet: bool, force: bool) -> Result<()> {
+    use crate::cmd::lifecycle::{self, Mark, Report};
+    if apply == lifecycle::Mode::Commit {
+        return run(source, dest, mode, false, quiet, force);
+    }
+    let app: PathBuf = source.clone().map(PathBuf::from).unwrap_or_else(paths::data_root);
+    let dirs: Vec<PathBuf> = match &dest {
+        Some(d) => vec![PathBuf::from(d).join("bin")],
+        None => lifecycle::target_bin_dirs(),
+    };
+    let p = lifecycle::stdout_painter();
+    let mut head = Report::new("ways manage repair: what-if");
+    head.subtitle(format!("source {}", app.display()));
+    print!("{}", head.render(&p));
+    use std::io::Write as _;
+    let _ = std::io::stdout().flush();
+    run(source, dest, mode, true, quiet, force)?;
+    let mut tail = Report::new("");
+    lifecycle::dev_links_section(&mut tail, &lifecycle::dev_links(&app, &lifecycle::linked_bins(&app), &dirs), "The repair");
+    tail.footer(Mark::Info, lifecycle::commit_hint("ways manage repair"));
+    print!("{}", tail.render(&p));
+    Ok(())
+}
+
+/// The apply path of `ways manage repair`.
 ///
 /// The real-path guard: a projection root that is already a real directory or
 /// file (a user's own `~/.claude/skills`, a pre-1.0 in-place clone's tree) is
@@ -414,8 +444,8 @@ fn converge_one(
         let list = foreign.iter().map(|p| format!("  {}", p.display())).collect::<Vec<_>>().join("\n");
         bail!(
             "{} projection root(s) under {} are real paths, not ways symlinks:\n{}\n\
-             reconcile will not delete them. Move them aside yourself, or re-run with \
-             --force to rename each to a timestamped sibling (<name>.ways-backup-<seconds>). \
+             reconcile will not delete them. Move them aside yourself, or run \
+             `ways manage repair --commit --force` to rename each to a timestamped sibling (<name>.ways-backup-<seconds>). \
              If {} is itself a git clone of agent-ways (pre-1.0), do not use --force; \
              see https://github.com/aaronsb/agent-ways/blob/ways-v1.8.3/docs/migration-1.0.md.",
             foreign.len(),

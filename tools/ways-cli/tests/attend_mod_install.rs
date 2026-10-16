@@ -99,7 +99,7 @@ impl Fx {
     fn repair_from(&self, src: &Path) -> Output {
         let out = self
             .ways(&self.stub_path())
-            .args(["manage", "repair", "--source"])
+            .args(["manage", "repair", "--commit", "--source"])
             .arg(src)
             .arg("--dest")
             .arg(self.dest())
@@ -204,7 +204,7 @@ fn a_disabled_target_loses_the_mod_before_its_links() {
     fx.changes();
     assert!(std::fs::symlink_metadata(fx.dest().join("skills")).is_ok());
     write(&fx.user_config(), &format!("targets:\n  - path: {}\n    enabled: false\n", fx.dest().display()));
-    let out = fx.ways(&fx.stub_path()).args(["manage", "repair", "--source"]).arg(fx.src()).output().unwrap();
+    let out = fx.ways(&fx.stub_path()).args(["manage", "repair", "--commit", "--source"]).arg(fx.src()).output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let dest = fx.dest().display().to_string();
     assert_eq!(
@@ -232,7 +232,7 @@ fn a_failed_call_or_a_missing_claude_never_fails_the_repair() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("could not read Claude Code's plugins: boom"));
 
     if !Path::new("/usr/bin/claude").exists() && !Path::new("/bin/claude").exists() {
-        let out = fx.ways("/usr/bin:/bin").args(["manage", "repair", "--source"]).arg(fx.src()).arg("--dest").arg(fx.dest()).output().unwrap();
+        let out = fx.ways("/usr/bin:/bin").args(["manage", "repair", "--commit", "--source"]).arg(fx.src()).arg("--dest").arg(fx.dest()).output().unwrap();
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         assert!(String::from_utf8_lossy(&out.stderr).contains("`claude` is not on PATH"));
     }
@@ -272,11 +272,11 @@ fn an_agent_ways_marketplace_this_app_never_added_is_left_alone() {
     assert_eq!(fx.changes(), Vec::<String>::new());
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains(&dev.display().to_string()), "{err}");
-    let recover = format!("run `CLAUDE_CONFIG_DIR={} claude plugin marketplace remove agent-ways` and then `ways manage repair`", fx.dest().display());
+    let recover = format!("run `CLAUDE_CONFIG_DIR={} claude plugin marketplace remove agent-ways` and then `ways manage repair --commit`", fx.dest().display());
     assert!(err.contains(&recover), "the note gives the way out: {err}");
     // Disabling the target leaves it alone too.
     write(&fx.user_config(), &format!("targets:\n  - path: {}\n    enabled: false\n", fx.dest().display()));
-    let out = fx.ways(&fx.stub_path()).args(["manage", "repair", "--source"]).arg(fx.src()).output().unwrap();
+    let out = fx.ways(&fx.stub_path()).args(["manage", "repair", "--commit", "--source"]).arg(fx.src()).output().unwrap();
     assert!(out.status.success());
     assert_eq!(fx.changes(), Vec::<String>::new());
 }
@@ -336,7 +336,7 @@ fn a_disabled_target_with_no_record_loses_a_mod_whose_folder_is_gone() {
     fx.changes();
     let moved = lose_the_record_and_move(&fx);
     write(&fx.user_config(), &format!("targets:\n  - path: {}\n    enabled: false\n", fx.dest().display()));
-    let out = fx.ways(&fx.stub_path()).args(["manage", "repair", "--source"]).arg(&moved).output().unwrap();
+    let out = fx.ways(&fx.stub_path()).args(["manage", "repair", "--commit", "--source"]).arg(&moved).output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let dest = fx.dest().display().to_string();
     assert_eq!(

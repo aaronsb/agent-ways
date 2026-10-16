@@ -471,7 +471,7 @@ fn settings_findings() -> Vec<String> {
 fn mcp_registration(dir: &std::path::Path) -> String {
     match crate::cmd::mcp_register::status(dir, &crate::paths::projection_root()) {
         Some(cmd) => format!("{} → {cmd}", crate::cmd::mcp_register::SERVER),
-        None => format!("{} not registered (`ways manage repair` registers it)", crate::cmd::mcp_register::SERVER),
+        None => format!("{} not registered (`ways manage repair --commit` registers it)", crate::cmd::mcp_register::SERVER),
     }
 }
 

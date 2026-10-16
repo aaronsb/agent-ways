@@ -230,7 +230,9 @@ impl Report {
     /// structure with no escapes.
     pub fn render(&self, p: &Painter) -> String {
         let mut out = String::new();
-        let _ = writeln!(out, "{}", p.paint(Style::new().bold(), &self.title));
+        if !self.title.is_empty() {
+            let _ = writeln!(out, "{}", p.paint(Style::new().bold(), &self.title));
+        }
         for s in &self.subtitle {
             let _ = writeln!(out, "{}", p.paint(Role::Muted, s));
         }
@@ -408,17 +410,34 @@ pub fn dev_links(app: &Path, bins: &[String], dirs: &[PathBuf]) -> Vec<DevLink> 
     out
 }
 
-/// The bin directories a lifecycle verb relinks: `$XDG_BIN` and each
-/// enabled target's `bin/`.
+/// The bin directories an update relinks: `$XDG_BIN` (through `make
+/// relink`) and each enabled target's `bin/` (through the repair).
 pub fn link_dirs() -> Vec<PathBuf> {
     let mut dirs = vec![xdg_bin()];
-    for t in crate::config::global().targets().into_iter().filter(|t| t.enabled) {
-        let d = t.dir().join("bin");
+    for d in target_bin_dirs() {
         if !dirs.contains(&d) {
             dirs.push(d);
         }
     }
     dirs
+}
+
+/// Each enabled target's `bin/`: the links a repair projects.
+pub fn target_bin_dirs() -> Vec<PathBuf> {
+    crate::config::global().targets().into_iter().filter(|t| t.enabled).map(|t| t.dir().join("bin")).collect()
+}
+
+/// The suite binaries `tools/suite-bins` in `app` lists, and way-embed:
+/// every binary a lifecycle verb links.
+pub fn linked_bins(app: &Path) -> Vec<String> {
+    let mut bins: Vec<String> = std::fs::read_to_string(app.join("tools/suite-bins"))
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| l.starts_with(|c: char| c.is_ascii_lowercase()))
+        .filter_map(|l| l.split_whitespace().next().map(str::to_string))
+        .collect();
+    bins.push("way-embed".to_string());
+    bins
 }
 
 /// The report section for dev links: what the verb would do to them, and
