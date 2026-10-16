@@ -72,8 +72,9 @@ fn the_person_tray_streams_into_the_chat() {
 }
 
 /// A direct message to the person shows in the operator view and in its
-/// sender's DM view, labelled `→ you`. No channel tab shows it: the DM views
-/// hold these since ADR-405's amendment of 2026-10-13.
+/// sender's DM view, labelled `→ you`. No channel tab shows it: ADR-405's
+/// second amendment of 2026-10-15 leaves DMs to the operator view and the
+/// DM views of 2026-10-13.
 #[test]
 fn a_direct_message_shows_in_merged_and_the_senders_view_only() {
     base();
