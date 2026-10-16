@@ -38,7 +38,7 @@ XDG_BIN="${HOME}/.local/bin"
 # section headers between stages and a mark per outcome (✓ ok, ⚠ warn,
 # ✗ fail, → action, · info). Colour when stdout is a terminal, or when
 # CLICOLOR_FORCE or FORCE_COLOR is set; plain text in a pipe, under NO_COLOR,
-# and with TERM=dumb. The text is the same either way.
+# and with TERM=dumb, empty or unset. The text is the same either way.
 
 forced_color() {
   local v
@@ -48,14 +48,17 @@ forced_color() {
   return 1
 }
 
-if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != dumb ]] && { [[ -t 1 ]] || forced_color; }; then
-  RED='\033[0;31m'
-  GREEN='\033[0;32m'
-  YELLOW='\033[1;33m'
-  CYAN='\033[0;36m'
-  BOLD='\033[1m'
-  DIM='\033[2m'
-  RESET='\033[0m'
+# Real escape bytes, so a heredoc prints colour as well as `echo -e` and
+# `printf %b` do. An unset or empty TERM is a terminal with no colour, as
+# `ways` reads it.
+if [[ -z "${NO_COLOR:-}" && "${TERM:-dumb}" != dumb ]] && { [[ -t 1 ]] || forced_color; }; then
+  RED=$'\033[0;31m'
+  GREEN=$'\033[0;32m'
+  YELLOW=$'\033[1;33m'
+  CYAN=$'\033[0;36m'
+  BOLD=$'\033[1m'
+  DIM=$'\033[2m'
+  RESET=$'\033[0m'
 else
   RED='' GREEN='' YELLOW='' CYAN='' BOLD='' DIM='' RESET=''
 fi
@@ -242,7 +245,9 @@ if [[ "$BOOTSTRAP" == "true" ]]; then
   trap 'rm -rf "$BOOTSTRAP_DIR"' EXIT
 
   CLONE="$BOOTSTRAP_DIR/agent-ways"
-  fetch_verified "$UPSTREAM_URL" "$CLONE" || exit 1
+  # AGENT_WAYS_BOOTSTRAP_URL names another source to clone: a mirror, or
+  # the stand-in the installer tests use.
+  fetch_verified "${AGENT_WAYS_BOOTSTRAP_URL:-$UPSTREAM_URL}" "$CLONE" || exit 1
   echo ""
 
   # Forward flags (minus --bootstrap) to the verified copy
@@ -254,7 +259,9 @@ if [[ "$BOOTSTRAP" == "true" ]]; then
   cd "$CLONE"
   # Mark the inner run as bootstrapped so its conflict-options reference the
   # re-runnable curl one-liner, not this temp clone (deleted by the EXIT trap).
-  AGENT_WAYS_BOOTSTRAPPED=1 bash "$CLONE/scripts/install.sh" "${FORWARD_ARGS[@]}"
+  # `${a[@]+"${a[@]}"}`: bash before 4.4 calls an empty array unbound
+  # under `set -u`, and the documented `bash -s -- --bootstrap` forwards none.
+  AGENT_WAYS_BOOTSTRAPPED=1 bash "$CLONE/scripts/install.sh" ${FORWARD_ARGS[@]+"${FORWARD_ARGS[@]}"}
   exit $?
 fi
 
@@ -291,6 +298,19 @@ is_agent_ways_repo() {
   return 1
 }
 
+# The repair command a hint names: with --commit when the app's ways has it.
+# `make setup` installs the latest release, which can predate the flag
+# (ADR-511); that ways repairs with the bare form. The probe asks the fixed
+# name, which takes the same flags as `manage repair` and which every
+# release has (ADR-509 §4).
+repair_cmd() {
+  if "$APP_DIR/bin/ways" reconcile --help 2>/dev/null | grep -q -- '--commit'; then
+    echo "ways manage repair --commit"
+  else
+    echo "ways manage repair"
+  fi
+}
+
 # Shown when the repair after the build fails, most often because a real path
 # sits at a projected root. The caller exits 3, so `ways manage reinstall` keeps
 # the built app.
@@ -298,9 +318,11 @@ print_projection_stopped() {
   mark fail "Projection stopped. The app is staged in ${APP_DIR}; the repair of ${DEST} did not finish."
   echo "    Read the error above. When it lists real paths at projected roots, move those"
   echo "    aside (or copy what you want to keep into a project's .claude/skills/)."
+  local repair
+  repair="$(repair_cmd)"
   echo "    Then run:"
-  echo -e "      ${CYAN}ways manage repair --commit${RESET}            # link the projected roots"
-  echo -e "      ${CYAN}ways manage repair --commit --force${RESET}    # or: rename each real path to <name>.ways-backup-<seconds> first"
+  echo -e "      ${CYAN}${repair}${RESET}            # link the projected roots"
+  echo -e "      ${CYAN}${repair} --force${RESET}    # or: rename each real path to <name>.ways-backup-<seconds> first"
   echo "    If ~/.claude is itself a git clone of agent-ways (pre-1.0), do not use --force;"
   echo "    see ${UPSTREAM_URL}/blob/ways-v1.8.3/docs/migration-1.0.md"
 }
@@ -311,9 +333,11 @@ print_projection_stopped() {
 link_path_binaries() {
   mkdir -p "$XDG_BIN"
   local b
+  LINKED=0
   for b in $(suite_bins); do
     if [[ -e "$APP_DIR/bin/$b" ]]; then
       ln -sf "$APP_DIR/bin/$b" "$XDG_BIN/$b"
+      LINKED=$((LINKED + 1))
     fi
   done
   # claude-projects was a script linked from tools/; `ways projects` replaced
@@ -322,6 +346,17 @@ link_path_binaries() {
     rm -f "$XDG_BIN/claude-projects"
   fi
   return 0
+}
+
+# The Link stage: link what was built, and say how much that was.
+link_stage() {
+  section "Link"
+  link_path_binaries
+  if (( LINKED > 0 )); then
+    mark ok "suite linked onto PATH in ${XDG_BIN} (${LINKED} binaries)"
+  else
+    mark warn "no suite binary was built, so nothing was linked onto PATH"
+  fi
 }
 
 # Echo the suite binaries from the app's tools/suite-bins, the list the
@@ -443,9 +478,7 @@ if is_agent_ways_repo "$APP_DIR"; then
   else
     mark warn "the build had issues; ways falls back to pattern and keyword matching"
   fi
-  section "Link"
-  link_path_binaries
-  mark ok "suite linked onto PATH in ${XDG_BIN}"
+  link_stage
   section "Reproject"
   if [[ -x "$APP_DIR/bin/ways" ]]; then
     mark act "reconciling the projection into ${DEST}"
@@ -463,7 +496,7 @@ if is_agent_ways_repo "$APP_DIR"; then
     mark ok "Updated. Restart Claude Code for changes to take effect."
   else
     mark warn "ways binary not built, so the projection was NOT reconciled."
-    echo "    Fix the build (cd $APP_DIR && make setup), then run: ways manage repair --commit"
+    echo "    Fix the build (cd $APP_DIR && make setup), then run: $(repair_cmd)"
   fi
   exit 0
 fi
@@ -487,7 +520,7 @@ if [[ "$SRC" == "$APP_DIR" ]]; then
 else
   mark act "staging the app into ${APP_DIR}"
   mkdir -p "$(dirname "$APP_DIR")"
-  git clone "$SRC" "$APP_DIR" 2>&1 | indent
+  git clone "$SRC" "$APP_DIR" 2>&1 | indent || { mark fail "could not stage the app from ${SRC}"; exit 1; }
   # Only rewrite origin when we cloned from a temp/bootstrap source — never
   # clobber the remote of a checkout we were run from. A reinstall names the
   # source its install came from in AGENT_WAYS_ORIGIN (ADR-509).
@@ -509,9 +542,7 @@ else
 fi
 
 # Bootstrap the binaries onto PATH so 'ways' is callable.
-section "Link"
-link_path_binaries
-mark ok "suite linked onto PATH in ${XDG_BIN}"
+link_stage
 
 section "Reproject"
 if [[ -x "$APP_DIR/bin/ways" ]]; then
@@ -531,7 +562,7 @@ if [[ -x "$APP_DIR/bin/ways" ]]; then
   section "Judge"
   judge_setup
   section "Done"
-  mark ok "~/.claude is now a projection of ${APP_DIR}"
+  mark ok "${DEST} is now a projection of ${APP_DIR}"
   echo "    Restart Claude Code for ways to take effect."
   echo -e "    If ${CYAN}${XDG_BIN}${RESET} isn't on your PATH, add it to your shell rc."
 else

@@ -386,7 +386,8 @@ fn cross_release_callers_run_the_fixed_name() {
         let text = std::fs::read_to_string(root.join(path)).unwrap();
         // An echoed command escapes its quotes: `\"$APP_DIR/bin/ways\" reconcile`.
         let text = text.replace("\\\"", "\"");
-        let runs: Vec<&str> = text.lines().filter(|l| l.contains("\"$APP_DIR/bin/ways\" ") && !l.contains("bin/ways\" status")).collect();
+        // `status` and the `reconcile --help` probe for --commit read, not repair.
+        let runs: Vec<&str> = text.lines().filter(|l| l.contains("\"$APP_DIR/bin/ways\" ") && !l.contains("bin/ways\" status") && !l.contains("reconcile --help")).collect();
         let fixed = runs.iter().filter(|l| l.contains("\"$APP_DIR/bin/ways\" reconcile")).count();
         assert!(runs.iter().all(|l| !l.contains("bin/ways\" manage")), "{path} runs `manage` on a release binary:\n{}", runs.join("\n"));
         assert_eq!(fixed, want, "{path}: the repair invocations that run `reconcile`:\n{}", runs.join("\n"));
@@ -538,6 +539,12 @@ fn an_applying_hint_is_found_and_a_commit_or_a_description_is_not() {
     assert_eq!(hints_missing_commit(&joined[0].1), ["ways manage repair --force"]);
 }
 
+/// Lines of code that name a bare verb on purpose, with the reason.
+const CODE_ALLOW: &[(&str, &str)] = &[
+    // The hook test expects the bare form a ways from before --commit gets.
+    ("tests/hooks-test.sh", "Run `ways manage update` to install it."),
+];
+
 /// Whether `path` is code the hint scan reads.
 fn hint_code(path: &str) -> bool {
     let code_root = in_scope(path) || path == "Makefile" || (path.starts_with("plugins/") && !path.contains("/node_modules/"));
@@ -562,6 +569,9 @@ fn code_hints(root: &Path) -> (Vec<String>, usize) {
             } else {
                 shell_code(&line)
             };
+            if CODE_ALLOW.iter().any(|(p, needle)| *p == path && code.contains(needle)) {
+                continue;
+            }
             for hint in hints_missing_commit(code) {
                 bad.push(format!("  {path}:{}: `{hint}`", n + 1));
             }

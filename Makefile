@@ -167,14 +167,17 @@ relink:
 # Retired targets, kept so an in-flight pre-#715 `make update` finishes: make has
 # already parsed the old Makefile, so its recipe still runs `$(MAKE) install`
 # against this file after `scripts/update.sh` pulls it.
+# The update command bin/ways takes: a ways from before ADR-511 has no
+# --commit and updates with the bare form.
+UPDATE_CMD = $(shell ./bin/ways manage update --help 2>/dev/null | grep -q -- '--commit' && echo 'ways manage update --commit' || echo 'ways manage update')
+
 install: link
-	@echo "note: 'make install' is retired; use 'ways manage update --commit'."
+	@echo "note: 'make install' is retired; use '$(UPDATE_CMD)'."
 
 # transition: removed by #717 (ADR-506)
 update:
-	@echo "note: 'make update' is retired; running 'ways manage update --commit'."
-	@# A bin/ways from before the lifecycle convention (ADR-511) has no --commit and applies by default.
-	@if ./bin/ways manage update --help 2>/dev/null | grep -q -- '--commit'; then ./bin/ways manage update --commit; else ./bin/ways manage update; fi
+	@echo "note: 'make update' is retired; running '$(UPDATE_CMD)'."
+	@./bin/$(UPDATE_CMD)
 
 # transition: removed by #717 (ADR-506)
 sync-to-home:

@@ -443,9 +443,18 @@ check "attend macro: a subagent's own call, parent listening through the mod" \
 check "attend macro: says nothing for an unresolved session" "" \
     "$(attend_macro agent '{"session_id":"x","resolved":false,"listening":false,"via":[],"host":null,"run_live":false}' '[]' "$MOD_ON")"
 check "attend macro: says nothing when listen status fails" "" "$(attend_macro agent '' '[]' "$MOD_ON")"
-check "attend macro: attend not installed" \
+# The hint takes --commit only from a ways that has it (ADR-511); a release
+# from before the flag, or no ways at all, gets the bare form.
+mkdir -p "$WORK/ways-commit" "$WORK/ways-old"
+printf '#!/bin/sh\necho "      --commit  Make the changes"\n' > "$WORK/ways-commit/ways"
+printf '#!/bin/sh\necho "      --dry-run  Show what would run"\n' > "$WORK/ways-old/ways"
+chmod +x "$WORK/ways-commit/ways" "$WORK/ways-old/ways"
+check "attend macro: attend not installed, a ways with --commit" \
     '**Note**: attend is not installed. Run `ways manage update --commit` to install it.' \
-    "$(PATH="$SYSBIN" "$BASH_BIN" "$HOOKS/softwaredev/environment/attend/macro.sh" 2>&1)"
+    "$(PATH="$WORK/ways-commit:$SYSBIN" "$BASH_BIN" "$HOOKS/softwaredev/environment/attend/macro.sh" 2>&1)"
+check "attend macro: attend not installed, a ways from before --commit" \
+    '**Note**: attend is not installed. Run `ways manage update` to install it.' \
+    "$(PATH="$WORK/ways-old:$SYSBIN" "$BASH_BIN" "$HOOKS/softwaredev/environment/attend/macro.sh" 2>&1)"
 check "attend macro: calls attend only with the argv it expects" "" "$(cat "$WORK/attend-unexpected" 2>/dev/null)"
 
 # The github macro fits under the 3 s macro deadline, and a check whose

@@ -54,7 +54,11 @@ for bin in "$ENGINE" bin/way-embed bin/way-embed-*; do
 done
 
 if [ "$signed" -eq 0 ]; then
-    echo "No way-embed binary found at $ENGINE or in bin/ — run 'ways manage update --commit' first." >&2
+    # A ways from before ADR-511 has no --commit and updates with the bare form.
+    update="ways manage update"
+    WAYS_BIN="./bin/ways"; [ -x "$WAYS_BIN" ] || WAYS_BIN=ways
+    "$WAYS_BIN" manage update --help 2>/dev/null | grep -q -- '--commit' && update="ways manage update --commit"
+    echo "No way-embed binary found at $ENGINE or in bin/ — run '$update' first." >&2
     exit 2
 fi
 

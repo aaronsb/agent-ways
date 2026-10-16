@@ -9,7 +9,10 @@
 # agent's (#932). Any failure prints nothing rather than a guess.
 
 if ! command -v attend &>/dev/null; then
-  echo "**Note**: attend is not installed. Run \`ways manage update --commit\` to install it."
+  # A ways from before ADR-511 has no --commit and updates with the bare form.
+  UPDATE="ways manage update"
+  ways manage update --help 2>/dev/null | grep -q -- '--commit' && UPDATE="ways manage update --commit"
+  echo "**Note**: attend is not installed. Run \`$UPDATE\` to install it."
   exit 0
 fi
 
