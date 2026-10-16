@@ -170,9 +170,8 @@ relink:
 # The update command bin/ways takes: a ways from before ADR-511 has no
 # --commit and updates with the bare form.
 UPDATE_CMD = $(shell ./bin/ways manage update --help 2>/dev/null | grep -- '--commit' >/dev/null && echo 'ways manage update --commit' || echo 'ways manage update')
-# The repair command, the same way: the fixed name `reconcile` takes the
-# same flags as `manage repair` on every release.
-REPAIR_CMD = $(shell ./bin/ways reconcile --help 2>/dev/null | grep -- '--commit' >/dev/null && echo 'ways manage repair --commit' || echo 'ways manage repair')
+# The repair command, the same way.
+REPAIR_CMD = $(shell ./bin/ways manage repair --help 2>/dev/null | grep -- '--commit' >/dev/null && echo 'ways manage repair --commit' || echo 'ways manage repair')
 
 install: link
 	@echo "note: 'make install' is retired; use '$(UPDATE_CMD)'."

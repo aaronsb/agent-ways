@@ -592,15 +592,18 @@ fn every_applying_hint_in_code_says_commit() {
 const DESCRIBES: &[&str] = &[
     "runs", "reports", "replaces", "records", "converges", "installs", "stops", "pulls", "needs", "does", "is", "projects",
     "refreshes", "re-downloads", "fixes", "prints", "lists", "honours", "points", "would", "puts", "reverses", "relinks",
-    "registers", "fetches", "and", "or", "/", "'s", "three-way", "alone", "run", ", which"
+    "registers", "fetches", "/", "'s", "three-way", "alone", "run", ", which"
 ];
 
 /// Words that, right before a bare mention, make it a description.
-const DESCRIBED_AFTER: &[&str] = &["block", "Whether", "whether", "the next", "via", "after", "as", "by", "of", "Debugging", "same code as", "where", "end of", "with", "(", "pattern (agent-ways,"];
+/// Each is matched as whole words at the end of the text before the mention.
+const DESCRIBED_AFTER: &[&str] = &["block", "Whether", "whether", "the next", "via", "after", "as", "by", "of", "Debugging", "same code as", "where", "end of"];
 
 /// Mentions in markdown that read as instructions by form but are
 /// descriptions or deliberate what-ifs, with the reason each is kept.
 const MD_ALLOW: &[(&str, &str)] = &[
+    // The meta-domain table lists the deployment way's trigger words.
+    ("docs/hooks-and-ways/meta.md", "prompt pattern (agent-ways, `ways manage update`"),
     // The update's stage list names the repair it runs.
     ("docs/reference/ways-cli.md", "rebuild the corpus, run `ways manage repair`"),
     // A Mermaid edge label in the extending diagram.
@@ -628,7 +631,7 @@ fn md_describes(line: &str, before: &str, after: &str) -> bool {
         return true;
     }
     let prev = before.trim_end_matches(['`', '"']).trim_end();
-    DESCRIBED_AFTER.iter().any(|w| prev.ends_with(w))
+    DESCRIBED_AFTER.iter().any(|w| prev.strip_suffix(w).is_some_and(|head| !head.ends_with(|c: char| c.is_alphanumeric())))
 }
 
 /// Every bare mutating verb in the markdown under `root` that is neither
@@ -673,4 +676,12 @@ fn a_markdown_instruction_is_found_and_a_description_is_not() {
     assert!(check("`ways manage repair` converges every enabled target").is_empty());
     assert!(check("### `ways manage update`").is_empty());
     assert!(check("Whether `ways manage repair` installs the mod").is_empty());
+    // Instructions the looser rules let through (the re-review's plants).
+    assert_eq!(check("(`ways manage update`, or `make attend link` from the app dir)"), ["ways manage update"]);
+    assert_eq!(check("project the checkout with `ways manage repair --source <checkout>`"), ["ways manage repair --source <checkout>"]);
+    assert_eq!(check("Run `ways manage repair` and restart Claude Code."), ["ways manage repair"]);
+    assert_eq!(check("Remove it with `ways manage uninstall`."), ["ways manage uninstall"]);
+    // `as`, `by` and `of` are whole words: "has" and "was" are not "as".
+    assert_eq!(check("The install has `ways manage update`"), ["ways manage update"]);
+    assert!(check("as `ways manage update --ref` did").is_empty());
 }
