@@ -3,8 +3,9 @@
 //! unread and reaches the session with the operator's next turn. The clock
 //! is keepwarm's, the newest turn in the transcript at its own cache tier,
 //! less a two-minute margin; the fixture's stand-in `ways` serves it for the
-//! fixture's session id only, and no reading counts as lapsed. Keepwarm's
-//! own wake is not gated.
+//! fixture's session id only, and a transcript with no reading counts as
+//! lapsed. A session with no turn yet has no cache to lose and is woken.
+//! Keepwarm's own wake is not gated.
 
 mod common;
 use common::Fixture;
@@ -13,7 +14,8 @@ use std::time::Duration;
 const MIN: Duration = Duration::from_secs(60);
 
 /// A listening fixture past its cold start, whose last turn was `ago` back
-/// (`None`: no transcript), with one message addressed to it pending.
+/// (`None`: no transcript, no turn yet), with one message addressed to it
+/// pending.
 fn addressed(tag: &str, ago: Option<Duration>) -> Fixture {
     let f = Fixture::new(tag);
     f.ok(&["listen", "on"]);
@@ -105,14 +107,41 @@ fn a_session_the_operator_warmed_is_woken_again() {
     assert_eq!(bodies(&wake_drain(&f)), ["for you"]);
 }
 
-/// No transcript to read: the last activity is unknown, which counts as cold.
+/// A transcript `ways` cannot read: the last activity is unknown, which
+/// counts as cold.
 #[test]
 fn unknown_activity_counts_as_cold() {
     let f = addressed("cold-unknown", None);
+    f.unreadable_transcript(&f.sid);
     let d = wake_drain(&f);
     assert_eq!(bodies(&d), Vec::<String>::new(), "{d}");
     assert_eq!(d["cache_lapsed"], true, "{d}");
     assert_eq!(unread(&f), 1);
+}
+
+/// The operator: "a fresh claude code with no interaction should be able
+/// to be woken on a message". A session with no transcript yet has had no
+/// turn and has no cache to lose: an addressed message wakes it.
+#[test]
+fn a_session_with_no_transcript_yet_is_woken() {
+    let f = addressed("cold-fresh", None);
+    assert!(!f.transcript(&f.sid).exists());
+    let d = wake_drain(&f);
+    assert_eq!(bodies(&d), ["for you"], "{d}");
+    assert_eq!(d["cache_lapsed"], false, "{d}");
+}
+
+/// A transcript with no assistant turn in it yet (the session-start
+/// rows alone) is a session with no cache either: it is woken, and
+/// `attend message unread` does not call the message cold.
+#[test]
+fn a_session_whose_transcript_holds_no_turn_is_woken() {
+    let f = addressed("cold-noturn", None);
+    f.no_turn_yet(&f.sid);
+    assert_eq!(f.ok(&["message", "unread"]).lines().next(), Some("1 unread"));
+    let d = wake_drain(&f);
+    assert_eq!(bodies(&d), ["for you"], "{d}");
+    assert_eq!(d["cache_lapsed"], false, "{d}");
 }
 
 /// Nothing addressed is pending: the drain reports no lapse, since it held

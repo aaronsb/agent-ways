@@ -30,7 +30,7 @@ impl Session {
 
     fn reading(&self) -> Reading {
         let tokens_used = self.tail.last().map(|e| e.context()).unwrap_or(0);
-        Reading { tokens_used, model: "claude-opus-5".into(), usage_tail: self.tail.clone() }
+        Reading { tokens_used, model: "claude-opus-5".into(), method: "api".into(), usage_tail: self.tail.clone() }
     }
 
     /// A main-loop request at `at`, warm.

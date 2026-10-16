@@ -93,26 +93,61 @@ impl Fixture {
 
     /// Set session `sid`'s cache clock: its newest assistant turn was `ago`
     /// back, on a large context at the one-hour tier; `None` leaves no
-    /// transcript to read.
+    /// transcript, as for a session that has had no turn yet.
     pub fn last_turn_of(&self, sid: &str, ago: Option<Duration>) {
         self.last_turn_at_tier(sid, ago, "1h");
     }
 
     /// [`Fixture::last_turn_of`] at cache tier `tier` (`1h` or `5m`).
     pub fn last_turn_at_tier(&self, sid: &str, ago: Option<Duration>, tier: &str) {
-        let reading = self.home.join("readings").join(format!("{sid}.json"));
         let Some(ago) = ago else {
-            std::fs::remove_file(&reading).ok();
+            std::fs::remove_file(self.reading(sid)).ok();
+            std::fs::remove_file(self.transcript(sid)).ok();
             return;
         };
         let at = (SystemTime::now() - ago).duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
-        std::fs::write(
-            &reading,
-            format!(
+        self.write_reading(
+            sid,
+            &format!(
                 r#"{{"tokens_used":200520,"model":"claude-fable-5-1","usage_tail":[{{"at_epoch":{at},"model":"claude-fable-5-1","input":20,"cache_read":200000,"cache_creation":500,"output":5,"tier":"{tier}"}}]}}"#
             ),
-        )
-        .unwrap();
+        );
+    }
+
+    /// Session `sid` has a transcript and no assistant turn in it yet (a
+    /// local command such as `/mcp` wrote it): `ways context` reads no API
+    /// usage and estimates the context from the file's bytes, as the real
+    /// one prints for such a transcript.
+    pub fn no_turn_yet(&self, sid: &str) {
+        self.write_reading(sid, r#"{"tokens_used":4392,"model":"unknown","method":"bytes","usage_tail":[]}"#);
+    }
+
+    /// Session `sid` has a transcript that `ways context` cannot read.
+    pub fn unreadable_transcript(&self, sid: &str) {
+        std::fs::remove_file(self.reading(sid)).ok();
+        self.touch_transcript(sid);
+    }
+
+    /// The reading the stand-in `ways` serves for `sid`, with the
+    /// transcript it stands for.
+    fn write_reading(&self, sid: &str, json: &str) {
+        std::fs::write(self.reading(sid), json).unwrap();
+        self.touch_transcript(sid);
+    }
+
+    fn reading(&self, sid: &str) -> PathBuf {
+        self.home.join("readings").join(format!("{sid}.json"))
+    }
+
+    /// Where Claude Code keeps session `sid`'s transcript in this fixture.
+    pub fn transcript(&self, sid: &str) -> PathBuf {
+        self.home.join(".claude").join("projects").join(claude_sessions::project_slug(&self.origin)).join(format!("{sid}.jsonl"))
+    }
+
+    fn touch_transcript(&self, sid: &str) {
+        let path = self.transcript(sid);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "").unwrap();
     }
 
     /// Rewrite the session record, as Claude Code does on `/clear`. The
