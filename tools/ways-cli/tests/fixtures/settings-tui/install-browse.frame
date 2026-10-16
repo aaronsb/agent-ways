@@ -19,7 +19,7 @@ agent-tui frame 100x30
 |│                                                     ││    guided: pick Claude config directories,│|
 |│                                                     ││preview the plan                           │|
 |│                                                     ││  A add (asks first)                       │|
-|│                                                     ││    ways manage target add '<arg>'         │|
+|│                                                     ││    ways manage target add '<arg>' --commit│|
 |│                                                     ││  p plan                                   │|
 |│                                                     ││    ways manage target plan '<arg>'        │|
 |│                                                     ││                                           │|
@@ -111,8 +111,7 @@ styles
  19  56-59  Cyan - -
  19  99-99  - - DIM
  20   0-0   - - DIM
- 20  54-89  - - DIM
- 20  99-99  - - DIM
+ 20  54-99  - - DIM
  21   0-0   - - DIM
  21  54-55  - - DIM
  21  56-59  Cyan - -

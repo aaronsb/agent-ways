@@ -109,3 +109,41 @@ fn repair_reports_until_commit_and_reconcile_still_applies() {
     assert!(out.status.success(), "{}", text(&out));
     assert!(std::fs::read_link(fresh.join("skills")).is_ok(), "reconcile applies with no flag: {}", text(&out));
 }
+
+#[test]
+fn target_verbs_report_until_commit() {
+    let fx = Fx::new("target");
+    let src = fx.src();
+    // The app the target verbs project from is $XDG_DATA_HOME/agent-ways.
+    let app = fx.root.join("home/.local/share/agent-ways");
+    std::os::unix::fs::symlink(&src, &app).unwrap();
+    let other = fx.root.join("other");
+    let o = other.to_str().unwrap();
+    let config = fx.root.join("home/.config/agent-ways/config.yaml");
+    let recorded = || std::fs::read_to_string(&config).unwrap_or_default();
+
+    let out = fx.ways(&["manage", "target", "add", o]);
+    let t = text(&out);
+    assert!(out.status.success(), "{t}");
+    assert!(t.contains("plan for") && t.contains(&format!("`ways manage target add {o} --commit`")), "{t}");
+    assert!(std::fs::read_link(other.join("skills")).is_err() && !recorded().contains(o), "add changed nothing: {t}");
+
+    let out = fx.ways(&["manage", "target", "add", o, "--commit"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(std::fs::read_link(other.join("skills")).is_ok() && recorded().contains(o), "{}", text(&out));
+    let after_add = recorded();
+
+    for verb in ["disable", "remove"] {
+        let out = fx.ways(&["manage", "target", verb, o]);
+        let t = text(&out);
+        assert!(out.status.success(), "{verb}: {t}");
+        assert!(t.contains(&format!("ways manage target {verb}: what-if")) && t.contains("would unlink"), "{verb}: {t}");
+        assert_eq!(recorded(), after_add, "{verb} kept the record");
+        assert!(std::fs::read_link(other.join("skills")).is_ok(), "{verb} kept the links");
+    }
+    let out = fx.ways(&["manage", "target", "disable", o, "--commit"]);
+    assert!(out.status.success() && std::fs::read_link(other.join("skills")).is_err(), "{}", text(&out));
+    let out = fx.ways(&["manage", "target", "enable", o]);
+    assert!(out.status.success() && std::fs::read_link(other.join("skills")).is_err(), "enable reports: {}", text(&out));
+    assert!(text(&out).contains("would link"), "{}", text(&out));
+}

@@ -715,7 +715,7 @@ ways manage reinstall --yes
 
 **Tells you:** `list` prints each target with its enabled and observe flags, its converged state (`active`, `pending`, `partial`, `refused`, `stale` or `withdrawn`), and its own config file when one exists. With no `targets` key in the user config, the one target is `~/.claude`.
 
-`plan <dir>` previews activation and touches nothing. It shows every projection root as `linked`, `link`, `relink` or `refused`, and the settings merge as what is kept of yours, what is added, what of a prior install is replaced and what would be removed. `add <dir>` prints that plan and stops with exit 3 when a real path sits at a root or an entry of yours would go; `--force` moves real paths aside and proceeds. `disable` withdraws and keeps the record; `enable` reconciles into it again; `remove` withdraws and drops the record. `list`, `plan` and `add` take `--json`.
+`plan <dir>` previews activation and touches nothing. It shows every projection root as `linked`, `link`, `relink` or `refused`, and the settings merge as what is kept of yours, what is added, what of a prior install is replaced and what would be removed. `add <dir>` prints that plan and changes nothing; with `--commit` it records the target and reconciles into it, and stops with exit 3 when a real path sits at a root or an entry of yours would go; `--force` moves real paths aside and proceeds. `disable` withdraws and keeps the record; `enable` reconciles into it again; `remove` withdraws and drops the record. Each of the four reports what it would change until `--commit` is given ([ADR-511](../architecture/platform/ADR-511-every-mutating-lifecycle-verb-reports-what-it-would-change-until-commit.md)). `list`, `plan` and `add` take `--json`.
 
 A target can carry its own configuration: a `config.yaml` at `$XDG_CONFIG_HOME/agent-ways/targets/<key>/config.yaml`, or the path in the entry's `config:` field. It has the same keys as the user config and is layered over it for sessions under that target's config directory. `ways settings list` names the layer it applied.
 
@@ -724,11 +724,11 @@ A project can switch ways off for itself with `enabled: false` in its `.claude/w
 ```
 ways manage target list
 ways manage target plan ~/.claude-work
-ways manage target add ~/.claude-work            # record, then reconcile into it
-ways manage target add ~/.claude-work --dry-run  # the plan only
-ways manage target disable ~/.claude-work        # withdraw our links and hooks
-ways manage target enable ~/.claude-work
-ways manage target remove ~/.claude-work
+ways manage target add ~/.claude-work                # the plan only
+ways manage target add ~/.claude-work --commit       # record, then reconcile into it
+ways manage target disable ~/.claude-work --commit   # withdraw our links and hooks
+ways manage target enable ~/.claude-work --commit
+ways manage target remove ~/.claude-work --commit
 ```
 
 Bare `ways manage target` on a terminal opens the settings screens on their install tab. In a pipe it prints its help and exits 2.

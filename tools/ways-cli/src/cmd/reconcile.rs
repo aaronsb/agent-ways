@@ -186,7 +186,7 @@ pub(crate) fn run_targets_in(
         if !quiet {
             eprintln!(
                 "no targets: agent-ways is installed and inactive. \
-                 `ways manage target add <dir>` activates a Claude Code config directory; \
+                 `ways manage target add <dir> --commit` activates a Claude Code config directory; \
                  `ways manage target list` lists them."
             );
         }

@@ -1129,18 +1129,29 @@ enum TargetCommand {
         /// Move real paths at projection roots aside and proceed past a blocked plan
         #[arg(long)]
         force: bool,
-        /// Show the plan and stop
-        #[arg(long)]
-        dry_run: bool,
+        #[command(flatten)]
+        apply: cmd::lifecycle::Apply,
         #[arg(long)]
         json: bool,
     },
     /// Re-enable a recorded target and reconcile into it
-    Enable { dir: String },
+    Enable {
+        dir: String,
+        #[command(flatten)]
+        apply: cmd::lifecycle::Apply,
+    },
     /// Withdraw our links and hooks from a target, keeping its record
-    Disable { dir: String },
+    Disable {
+        dir: String,
+        #[command(flatten)]
+        apply: cmd::lifecycle::Apply,
+    },
     /// Withdraw from a target and drop its record
-    Remove { dir: String },
+    Remove {
+        dir: String,
+        #[command(flatten)]
+        apply: cmd::lifecycle::Apply,
+    },
 }
 
 fn main() -> Result<()> {
@@ -1234,10 +1245,10 @@ fn target(action: Option<TargetCommand>) -> Result<()> {
     match action {
         TargetCommand::List { json } => cmd::target::list(json),
         TargetCommand::Plan { dir, json } => cmd::target::plan(&dir, json),
-        TargetCommand::Add { dir, force, dry_run, json } => cmd::target::add(&dir, force, dry_run, json),
-        TargetCommand::Enable { dir } => cmd::target::enable(&dir),
-        TargetCommand::Disable { dir } => cmd::target::disable(&dir),
-        TargetCommand::Remove { dir } => cmd::target::remove(&dir),
+        TargetCommand::Add { dir, force, apply, json } => cmd::target::add(&dir, force, apply.mode(true), json),
+        TargetCommand::Enable { dir, apply } => cmd::target::enable(&dir, apply.mode(true)),
+        TargetCommand::Disable { dir, apply } => cmd::target::disable(&dir, apply.mode(true)),
+        TargetCommand::Remove { dir, apply } => cmd::target::remove(&dir, apply.mode(true)),
     }
 }
 

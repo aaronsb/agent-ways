@@ -4,6 +4,7 @@
 //! Output follows ADR-185: tables for people, one JSON document under
 //! `--json`, a debug rendering never.
 
+use crate::cmd::lifecycle::{self, Mode};
 use crate::cmd::reconcile::{self, Plan};
 use crate::config::{Config, Target};
 use crate::paths;
@@ -71,7 +72,7 @@ pub fn list(json: bool) -> Result<()> {
     if list.is_empty() {
         println!("no targets: agent-ways is installed and inactive.");
         println!("  ways manage target plan <dir>   # what activating a Claude Code config dir would do");
-        println!("  ways manage target add <dir>    # activate it (default dir: ~/.claude)");
+        println!("  ways manage target add <dir> --commit   # activate it (default dir: ~/.claude)");
         return Ok(());
     }
     let mut t = Table::new(&["Target", "Enabled", "Observe", "State", "Config"]);
@@ -178,11 +179,24 @@ pub fn plan(dir: &str, json: bool) -> Result<()> {
     print_plan(&plan, json)
 }
 
-pub fn add(dir: &str, force: bool, dry_run: bool, json: bool) -> Result<()> {
+/// The line that ends a target verb's what-if (ADR-511). Under `--json` the
+/// plan document is the whole of stdout, so it goes to stderr.
+fn whatif_footer(command: &str, json: bool) {
+    let line = lifecycle::commit_hint(command);
+    if json {
+        eprintln!("{line}");
+    } else {
+        println!("\n{line}");
+    }
+}
+
+pub fn add(dir: &str, force: bool, mode: Mode, json: bool) -> Result<()> {
     let (stored, canonical) = resolve_dir(dir)?;
     let plan = reconcile::plan_target(&canonical)?;
     print_plan(&plan, json)?;
-    if dry_run {
+    if mode == Mode::WhatIf {
+        let force = if force { " --force" } else { "" };
+        whatif_footer(&format!("ways manage target add {dir}{force}"), json);
         return Ok(());
     }
     if plan.blocked && !force {
@@ -215,7 +229,7 @@ pub fn add(dir: &str, force: bool, dry_run: bool, json: bool) -> Result<()> {
     if let Err(e) = reconcile::run_for_targets(&[target], false, json, force) {
         eprintln!(
             "target recorded in {} but the reconcile failed; `ways manage repair --commit` retries it, \
-             `ways manage target remove` forgets it",
+             `ways manage target remove <dir> --commit` forgets it",
             path.display()
         );
         return Err(e);
@@ -224,7 +238,41 @@ pub fn add(dir: &str, force: bool, dry_run: bool, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn set_enabled(dir: &str, enabled: bool) -> Result<()> {
+/// The recorded target `dir` names, read without a write.
+fn recorded(dir: &str) -> Result<Target> {
+    let list = Config::load(&crate::util::project_dir()).targets();
+    match find_target(&list, dir) {
+        Some(i) => Ok(list[i].clone()),
+        None => bail!("{dir} is not a target; `ways manage target list` lists them, `ways manage target add` adds one"),
+    }
+}
+
+/// What enable, disable or remove would do, from a dry run of the
+/// reconcile they run (ADR-511).
+fn whatif(verb: &str, dir: &str, mut target: Target, enabled: bool, record: &str) -> Result<()> {
+    println!("ways manage target {verb}: what-if");
+    println!("{record}");
+    target.enabled = enabled;
+    if target.dir().is_dir() {
+        reconcile::run_for_targets(&[target], true, false, false)?;
+    }
+    whatif_footer(&format!("ways manage target {verb} {dir}"), false);
+    Ok(())
+}
+
+fn set_enabled(dir: &str, enabled: bool, mode: Mode) -> Result<()> {
+    if mode == Mode::WhatIf {
+        let target = recorded(dir)?;
+        if enabled && !target.dir().is_dir() {
+            bail!("{} does not exist; a target must be a directory to enable", target.dir().display());
+        }
+        let (verb, record) = if enabled {
+            ("enable", format!("would record {} as enabled and reconcile into it:", target.dir().display()))
+        } else {
+            ("disable", format!("would record {} as disabled and withdraw from it:", target.dir().display()))
+        };
+        return whatif(verb, dir, target, enabled, &record);
+    }
     let implicit = Config::load(&crate::util::project_dir()).targets();
     let mut chosen: Option<Target> = None;
     let mut missing = false;
@@ -248,15 +296,20 @@ fn set_enabled(dir: &str, enabled: bool) -> Result<()> {
     reconcile::run_for_targets(&[target], false, false, false)
 }
 
-pub fn enable(dir: &str) -> Result<()> {
-    set_enabled(dir, true)
+pub fn enable(dir: &str, mode: Mode) -> Result<()> {
+    set_enabled(dir, true, mode)
 }
 
-pub fn disable(dir: &str) -> Result<()> {
-    set_enabled(dir, false)
+pub fn disable(dir: &str, mode: Mode) -> Result<()> {
+    set_enabled(dir, false, mode)
 }
 
-pub fn remove(dir: &str) -> Result<()> {
+pub fn remove(dir: &str, mode: Mode) -> Result<()> {
+    if mode == Mode::WhatIf {
+        let target = recorded(dir)?;
+        let record = format!("would withdraw from {} and drop it from the targets list:", target.dir().display());
+        return whatif("remove", dir, target, false, &record);
+    }
     let implicit = Config::load(&crate::util::project_dir()).targets();
     let mut removed: Option<Target> = None;
     // Withdraw first, then forget: a removed target is a withdrawn one. The

@@ -397,7 +397,7 @@ fn install_line() -> String {
 fn install_summary(targets: &[crate::config::Target], explicit: bool) -> String {
     let enabled: Vec<&crate::config::Target> = targets.iter().filter(|t| t.enabled).collect();
     if enabled.is_empty() {
-        return "installed, inactive (no enabled target; `ways manage target add <dir>` activates one)".to_string();
+        return "installed, inactive (no enabled target; `ways manage target add <dir> --commit` activates one)".to_string();
     }
     let names: Vec<String> = enabled
         .iter()
@@ -598,6 +598,6 @@ mod tests {
     fn the_install_line_points_to_the_target_list() {
         let t = crate::config::Target { path: "/nonexistent/.claude".into(), enabled: true, observe: None, config: None };
         assert!(install_summary(&[t], true).ends_with("; `ways manage target list` shows each"));
-        assert!(install_summary(&[], true).contains("`ways manage target add <dir>`"));
+        assert!(install_summary(&[], true).contains("`ways manage target add <dir> --commit`"));
     }
 }

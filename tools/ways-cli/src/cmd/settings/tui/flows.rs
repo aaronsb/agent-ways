@@ -141,7 +141,7 @@ pub fn activate_flow(env: &Env) -> Flow {
                 .map(|c| {
                     let off = targets.iter().any(|(p, on)| !on && expand(p, &home).display().to_string() == c.id);
                     let verb = if off { "enable" } else { "add" };
-                    Out::new(verb, format!("ways manage target {verb} {}", quote(&c.id)), true)
+                    Out::new(verb, format!("ways manage target {verb} {} --commit", quote(&c.id)), true)
                 })
                 .collect()
         },

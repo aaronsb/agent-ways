@@ -26,8 +26,8 @@ Installation and activation are separate states. The projection lands in each **
 
 - `ways manage target list` lists targets and their converged state; `ways status` says it on its first line.
 - `ways manage target plan <dir>` previews activation: every root as linked, link, relink, or refused, and the settings merge as kept, added, replaced, removed. Nothing is touched.
-- `ways manage target add <dir>` prints the plan and stops (exit 3) when a real path sits at a root or an entry of the user's would go. `--force` moves real paths aside.
-- `ways manage target disable <dir>` and `remove <dir>` withdraw.
+- `ways manage target add <dir>` prints the plan and changes nothing. With `--commit` it records the target and projects, and stops (exit 3) when a real path sits at a root or an entry of the user's would go. `--force` moves real paths aside.
+- `ways manage target disable <dir> --commit` and `remove <dir> --commit` withdraw. Without `--commit` each reports what it would withdraw.
 - A project switches ways off for itself with `enabled: false` in `.claude/ways.yaml`.
 
 When a user asks whether agent-ways will touch something they own, the answer is the plan. Run it and read it back to them before `add`. The installer still activates the default target on its own in this release; the handoff to the targets bootstrap is the next increment of ADR-184.

@@ -35,7 +35,7 @@ Before activating a directory, ask what it would do:
 ways manage target plan ~/.claude-work
 ```
 
-The plan lists every projected root as linked, to link, to relink, or refused, and shows the settings merge: the hook entries of yours it keeps, the entries it adds, and anything it would replace or remove. `ways manage target add <dir>` prints the same plan and stops when something of yours would be refused or removed. `ways manage target disable <dir>` withdraws the links and our hooks block through the same merge base that wrote them, and `ways manage target list` shows where agent-ways is active. `ways status` says the same on its first line.
+The plan lists every projected root as linked, to link, to relink, or refused, and shows the settings merge: the hook entries of yours it keeps, the entries it adds, and anything it would replace or remove. `ways manage target add <dir>` prints the same plan and changes nothing; with `--commit` it records the target and projects into it, and stops when something of yours would be refused or removed. `ways manage target disable <dir> --commit` withdraws the links and our hooks block through the same merge base that wrote them, and `ways manage target list` shows where agent-ways is active. `ways status` says the same on its first line.
 
 Each target can carry its own configuration set, a `config.yaml` under `$XDG_CONFIG_HOME/agent-ways/targets/<key>/` with the same keys as the user config, layered over it for sessions under that directory. Two profiles on one machine can run different languages or disabled domains.
 
