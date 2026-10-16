@@ -144,6 +144,39 @@ check "the update's stages, in order" "yes" "$(stage_order "$out" "Pull" "Build"
 has "the pull's output sits under its stage" "    Already up to date." "$out"
 has "it ends updated" "  ✓ Updated." "$out"
 
+echo "probes under pipefail:"
+# A ways whose help names --commit on its first line and then runs on past a
+# pipe buffer. A probe that stops reading early (`grep -q`) kills it with
+# SIGPIPE, and pipefail then reports "no --commit". Each probe runs 20 times:
+# the outcome of the race depends on timing.
+mkdir -p "$WORK/probe/app/bin" "$WORK/probe/sig/scripts" "$WORK/probe/sig/bin" "$WORK/probe/shim" "$WORK/probe/cache"
+cat > "$WORK/probe/app/bin/ways" <<'STUB'
+#!/bin/sh
+echo "      --commit  Make the changes"
+i=0; while [ $i -lt 4000 ]; do echo "      --option-$i  more help text, enough to outlast a pipe buffer"; i=$((i+1)); done
+STUB
+chmod +x "$WORK/probe/app/bin/ways"
+repair_fn=$(sed -n '/^repair_cmd() {/,/^}/p' "$ROOT/scripts/install.sh")
+misses=0
+for _ in $(seq 20); do
+    got=$(APP_DIR="$WORK/probe/app" bash -c 'set -euo pipefail; eval "$1"; repair_cmd' _ "$repair_fn")
+    [[ "$got" == "ways manage repair --commit" ]] || misses=$((misses+1))
+done
+check "the installer's repair probe reads the whole help" "0" "$misses"
+# fix-way-embed-signature.sh probes only on macOS and only with no engine to
+# re-sign: a uname shim says Darwin and the cache holds no way-embed.
+cp "$ROOT/scripts/fix-way-embed-signature.sh" "$WORK/probe/sig/scripts/"
+cp "$WORK/probe/app/bin/ways" "$WORK/probe/sig/bin/ways"
+printf '#!/bin/sh\necho Darwin\n' > "$WORK/probe/shim/uname"
+printf '#!/bin/sh\nexit 0\n' > "$WORK/probe/shim/codesign"
+chmod +x "$WORK/probe/shim/uname" "$WORK/probe/shim/codesign"
+misses=0
+for _ in $(seq 20); do
+    got=$(PATH="$WORK/probe/shim:$PATH" XDG_CACHE_HOME="$WORK/probe/cache" bash "$WORK/probe/sig/scripts/fix-way-embed-signature.sh" 2>&1)
+    [[ "$got" == *"run 'ways manage update --commit' first"* ]] || misses=$((misses+1))
+done
+check "the signature fix's update probe reads the whole help" "0" "$misses"
+
 echo "bootstrap:"
 make_source "$WORK/upstream/src"
 out=$(INSTALL_ARGS=--bootstrap install bootstrap AGENT_WAYS_BOOTSTRAP_URL="$WORK/upstream/src"); rc=$?
