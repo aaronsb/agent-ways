@@ -35,10 +35,6 @@ export type AttendStatus = {
   afterCompaction: boolean
   /** Turns since the preamble line last showed. */
   turnsSinceFull: number
-  /** The config started this session listening and the operator has not
-   *  prompted yet: no turn is submitted, and what is pending rides the first
-   *  prompt. Kept here so a reloaded module keeps holding. */
-  awaitingOperator: boolean
   /** A message that would wake the session waits because the prompt cache
    *  has lapsed: the session is not woken, and what waits rides the
    *  operator's next prompt (ADR-406 item 2). */

@@ -148,18 +148,13 @@ export type Mod = {
   /** session.start has run; before it, at process start, the engine has not
    *  bound the session and refuses a tool registration. */
   isStarted: boolean
-  /** The source of the SessionStart that came before session.start at
-   *  process start (`startup`, `resume`, `fork`); undefined when none came. */
-  startSource: string | undefined
   /** A /clear or a /resume moved the session to an id attend has not been
    *  told is listening yet; the poll holds its drain until it has. */
   isRelistening: boolean
-  /** The session started listening from its project's config and the
-   *  operator has not prompted yet. The poll submits no turn: what is
-   *  pending rides as context on the operator's first prompt, and the row
-   *  counts it meanwhile. The first prompt ends the hold, and so does a
-   *  resume to another conversation. */
-  isAwaitingOperator: boolean
+  /** The cold start's held-back note, from a drain the poll ran. A wake
+   *  delivery carries messages alone, so the note rides the operator's next
+   *  prompt as context. */
+  heldNote: string | undefined
   /** The keepalive policy's state (ADR-414). */
   ka: Keepalive
 }

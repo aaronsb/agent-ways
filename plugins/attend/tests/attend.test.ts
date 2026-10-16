@@ -900,7 +900,7 @@ describe('active', () => {
 
   test('send and reply run one attend call with the body after --; reply maps ~id', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
-    const h = host(on, { config: { listening: 'active' }, drains: [DRAIN_EMPTY, one(3), DRAIN_EMPTY] })
+    const h = host(on, { config: { listening: 'active' }, drains: [one(3), DRAIN_EMPTY] })
     await $.session.start(INTERACTIVE)
     await typed($)
     await clock.advance(5_000)
@@ -960,6 +960,13 @@ describe('a session whose cache has lapsed', () => {
     const context = h.prompts[1]?.context ?? []
     expect(context.length).toBe(1)
     expect(context[0]).toContain(`[project] ${SENDER} 21:21: m7`)
+    // The engine draws no context: the operator sees what went with their
+    // prompt as the transcript's dim lines, one per message.
+    expect(h.logs).toEqual([
+      'attend: 1 peer message(s) went to Claude with your prompt',
+      `[project] ${SENDER} 21:21: m7 ~${shortId(idOf(7))}`,
+    ])
+    expect(h.toasts).toEqual([])
     h.world.unread = '{"unread":0,"held_back":0,"listening":true,"rooms":[]}'
     await clock.advance(10_000)
     const ui = await $.ui.mount(BAND as never)
@@ -1019,152 +1026,86 @@ describe('a session whose cache has lapsed', () => {
   })
 })
 
-// Observed on attend 0.20.0: a session the config started listening, with no
-// prompt typed, had its first turn submitted by the mod for messages already
-// pending at start. Nothing pending at start opens a turn on its own.
-describe('before the operator\'s first prompt', () => {
-  test('nothing pending at start is submitted; the row counts it, and it rides the first prompt as context', async ($, on) => {
-    const clock = mock.clock(on, { now: T0 })
-    const h = host(on, {
-      config: { listening: 'active', keepwarm: 'off' },
-      drains: [one(1, 'project'), DRAIN_EMPTY],
-      unread: '{"unread":1,"held_back":0,"listening":true,"rooms":[]}',
-    })
-    await $.session.start(INTERACTIVE)
-    await clock.advance(10 * 60_000)
-    expect(h.ran('listen on')).toBe(true)
-    expect(h.count('message inbox --drain')).toBe(0)
-    expect(h.submitted).toEqual([])
-    const ui = await $.ui.mount(BAND as never)
-    expect(await ui.find({ text: /1 unread/ } as never)).toBeDefined()
-    await ui.unmount()
+// A session its config started listening is woken by mail sent to it after
+// it began, before the operator types anything, as any listening session
+// is. Mail from before it began is attend's to hold back (ADR-404 D3b): the
+// cold start marks it seen and reports a note, and the mod starts no turn
+// for a note. The note rides the operator's next prompt as context.
+describe('a session its config started, before the operator\'s first prompt', () => {
+  const NOTE = '3 older messages held back; reading them is optional: attend message inbox'
+  const noteOnly = JSON.stringify({ ...JSON.parse(DRAIN_EMPTY), held_back: 3, note: NOTE })
 
-    await typed($, 'what were we doing?')
-    expect(h.submitted).toEqual([])
-    expect(h.prompts.length).toBe(1)
-    expect(h.prompts[0]?.text).toBe('what were we doing?')
-    const context = h.prompts[0]?.context ?? []
-    expect(context.length).toBe(1)
-    expect(context[0]?.startsWith(OPENS)).toBe(true)
-    expect(context[0]).toContain(`[project] ${SENDER} 21:21: m1`)
-    expect(full(context[0] ?? '')).toBe(true)
-    // A handle delivered there maps for attend_reply as one submitted would.
-    await $.tool.call({ tool: 'mcp__attend__attend_reply', message: 'ok', re: `~${shortId(idOf(1))}` } as never)
-    expect(h.argvs.filter(a => a[1] === 'message' && a[2] === 'reply').pop()).toEqual(['attend', 'message', 'reply', '--re', idOf(1), '--', 'ok'])
-  })
-
-  test('after the first prompt, what arrives while idle is a turn again', async ($, on) => {
+  // The operator: "a fresh claude code with no interaction should be able
+  // to be woken on a message".
+  test('a message sent after it began wakes it, with no operator prompt', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const drains: string[] = []
     const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains })
     await $.session.start(INTERACTIVE)
-    await typed($)
-    expect(h.prompts[0]?.context).toEqual([])
-    drains.push(one(2), DRAIN_EMPTY)
     await clock.advance(10_000)
-    expect(h.submitted.length).toBe(1)
-    expect(h.submitted[0]).toContain('m2')
-  })
-
-  test('a prompt that is not the operator\'s does not lift the hold', async ($, on) => {
-    const clock = mock.clock(on, { now: T0 })
-    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains: [one(4), DRAIN_EMPTY] })
-    await $.session.start(INTERACTIVE)
-    await $.prompt.submit({ text: 'done', wait: false, origin: { kind: 'task-notification' } } as never)
-    await clock.advance(30_000)
-    expect(h.count('message inbox --drain')).toBe(0)
+    expect(h.argvs).toContainEqual(['attend', 'message', 'inbox', '--drain', '--json', '--wake'])
     expect(h.submitted).toEqual([])
-  })
-
-  test('a session turned on by attend_listen, or reloaded active, is not held', async ($, on) => {
-    const clock = mock.clock(on, { now: T0 })
-    const drains: string[] = []
-    const h = host(on, { drains })
-    await $.session.start(INTERACTIVE)
-    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
-    await $.session.start(INTERACTIVE)
-    drains.push(one(5), DRAIN_EMPTY)
+    drains.push(one(1, 'project'), DRAIN_EMPTY)
     await clock.advance(10_000)
+    expect(h.prompts).toEqual([])
     expect(h.submitted.length).toBe(1)
+    expect(h.submitted[0]).toContain(`[project] ${SENDER} 21:21: m1`)
+    expect(full(h.submitted[0] ?? '')).toBe(true)
   })
 
-  // #950 review, finding 1: the cold start's held-back note reaches the
-  // model with the messages, and a note alone still rides the prompt.
-  test('the held-back note rides the first prompt with the messages', async ($, on) => {
-    mock.clock(on, { now: T0 })
-    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains: [DRAIN_COLD_BACKLOG] })
-    await $.session.start(INTERACTIVE)
-    await typed($)
-    const context = h.prompts[0]?.context ?? []
-    expect(context.length).toBe(1)
-    expect(context[0]).toContain('addressed while dormant')
-    expect(context[0]).toContain('attend: 1 older message held back; reading it is optional: attend message inbox')
-    expect(context[0]).not.toContain('Chaucer-alpha')
-  })
-
-  test('a note with no message is attached on its own, and counts no delivery', async ($, on) => {
-    mock.clock(on, { now: T0 })
-    const noteOnly = JSON.stringify({ ...JSON.parse(DRAIN_EMPTY), held_back: 3, note: '3 older messages held back; reading them is optional: attend message inbox' })
+  test('mail from before it began starts no turn; the note rides the first prompt, shown in the transcript', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
     const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains: [noteOnly] })
     await $.session.start(INTERACTIVE)
-    await typed($)
-    expect(h.prompts[0]?.context).toEqual(['attend: 3 older messages held back; reading them is optional: attend message inbox'])
-    expect(h.toasts).toEqual([])
-  })
-
-  // #950 review, finding 2: a reload before the first prompt keeps holding.
-  test('a reload of a held session keeps holding until the operator prompts', async ($, on) => {
-    const clock = mock.clock(on, { now: T0 })
-    const drains: string[] = []
-    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains })
-    await $.session.start(INTERACTIVE)
-    await clock.advance(5_000)
-    await $.session.start(INTERACTIVE)
-    drains.push(one(6), DRAIN_EMPTY)
-    await clock.advance(30_000)
-    expect(h.count('message inbox --drain')).toBe(0)
+    await clock.advance(10 * 60_000)
     expect(h.submitted).toEqual([])
-    await typed($)
-    expect(h.prompts[0]?.context.join('\n')).toContain('m6')
-  })
-
-  // #950 review, finding 3: a prompt that does not enter loses nothing.
-  test('a dropped first prompt leaves its messages for the poll to deliver', async ($, on) => {
-    const clock = mock.clock(on, { now: T0 })
-    const world: World = { config: { listening: 'active', keepwarm: 'off' }, drains: [one(8, 'project')], dropPrompts: true }
-    const h = host(on, world)
-    await $.session.start(INTERACTIVE)
-    await typed($)
-    expect(h.prompts[0]?.context.join('\n')).toContain('m8')
+    await typed($, 'what were we doing?')
+    expect(h.prompts[0]?.text).toBe('what were we doing?')
+    expect(h.prompts[0]?.context).toEqual([`attend: ${NOTE}`])
+    expect(h.logs).toEqual([`attend: ${NOTE}`])
     expect(h.toasts).toEqual([])
-    expect(h.submitted).toEqual([])
-    await clock.advance(10_000)
-    expect(h.submitted.length).toBe(1)
-    expect(h.submitted[0]).toContain('m8')
-    // attend drained it once, at the prompt: the poll's later drains find
-    // nothing, so the turn carries the kept batch.
-    expect(h.submitted.filter(t => t.includes('m8')).length).toBe(1)
+    // Carried once: the next prompt goes as typed.
+    await typed($, 'and then?')
+    expect(h.prompts[1]?.context).toEqual([])
   })
 
-  // #950 review, finding 4: the operator is told what went with the prompt.
-  test('messages that ride the prompt are announced to the operator', async ($, on) => {
-    mock.clock(on, { now: T0 })
+  test('the cold start\'s messages are a turn of their own; its note waits for the operator\'s prompt', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
     const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains: [DRAIN_COLD_BACKLOG] })
     await $.session.start(INTERACTIVE)
+    await clock.advance(10_000)
+    expect(h.submitted.length).toBe(1)
+    expect(h.submitted[0]).toContain('addressed while dormant')
+    expect(h.submitted[0]).not.toContain('held back')
     await typed($)
-    expect(h.toasts).toEqual(['attend: 2 peer message(s) went to Claude with your prompt'])
+    expect(h.prompts[0]?.context).toEqual(['attend: 1 older message held back; reading it is optional: attend message inbox'])
+  })
+
+  test('a prompt that does not enter keeps the note for the next one', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const world: World = { config: { listening: 'active', keepwarm: 'off' }, drains: [noteOnly], dropPrompts: true }
+    const h = host(on, world)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(10_000)
+    await typed($, 'dropped')
+    expect(h.prompts[0]?.context).toEqual([`attend: ${NOTE}`])
+    expect(h.logs).toEqual([])
+    world.dropPrompts = false
+    await typed($, 'entered')
+    expect(h.prompts[1]?.context).toEqual([`attend: ${NOTE}`])
   })
 
   // #950 review, finding 5: the owner's ping from Slack is the operator's
   // prompt; an unclassified one is not.
-  test('a Slack ping from the owner lifts the hold; an unclassified prompt does not', async ($, on) => {
-    mock.clock(on, { now: T0 })
-    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains: [one(9), DRAIN_EMPTY] })
+  test('the note rides a Slack ping from the owner; an unclassified prompt leaves it waiting', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains: [noteOnly] })
     await $.session.start(INTERACTIVE)
+    await clock.advance(10_000)
     await typed($, 'from a same-user socket', 'unclassified')
-    expect(h.count('message inbox --drain')).toBe(0)
+    expect(h.prompts[0]?.context).toEqual([])
     await typed($, 'from slack', 'slack-ping')
-    expect(h.prompts[1]?.context.join('\n')).toContain('m9')
+    expect(h.prompts[1]?.context).toEqual([`attend: ${NOTE}`])
   })
 })
 
@@ -1267,128 +1208,40 @@ describe('a resume', () => {
     expect(h.mode()).toBe('active')
   })
 
-  // The record leaves out a session its config started: one that starts
-  // with a transcript was resumed, and wakes for a message as it did
-  // before, with no first-prompt hold. Claude Code runs the resume
-  // SessionStart first, then session.start with the transcript loaded.
-  test('claude --resume of a session its config started wakes for a message before any prompt', async ($, on) => {
-    const clock = mock.clock(on, { now: T0 })
-    const drains: string[] = []
-    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', transcript: 2, drains })
-    await $.classic.SessionStart({ source: 'resume', session_id: 's1' } as never)
-    await $.session.start(INTERACTIVE)
-    await clock.advance(1_000)
-    drains.push(one(1), DRAIN_EMPTY)
-    await clock.advance(10_000)
-    expect(h.submitted.length).toBe(1)
-    expect(h.submitted[0]).toContain('m1')
-  })
+  // The record leaves out a session its config started: the config starts
+  // it again, resumed, forked, cleared or new, and a message wakes it
+  // before any prompt. Claude Code runs the process's SessionStart first,
+  // then session.start.
+  for (const source of ['resume', 'startup', 'fork'] as const) {
+    test(`a ${source} in a project its config starts listening wakes for a message before any prompt`, async ($, on) => {
+      const clock = mock.clock(on, { now: T0 })
+      const drains: string[] = []
+      const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', transcript: source === 'startup' ? 0 : 2, drains })
+      await $.classic.SessionStart({ source, session_id: 's1' } as never)
+      await $.session.start(INTERACTIVE)
+      await clock.advance(1_000)
+      drains.push(one(1), DRAIN_EMPTY)
+      await clock.advance(10_000)
+      expect(h.submitted.length).toBe(1)
+      expect(h.submitted[0]).toContain('m1')
+    })
+  }
 
-  // Resuming from the picker starts a new session, held for the first
-  // prompt, then goes on under the chosen one with no session.start.
-  test('a resume chosen from the picker ends the first-prompt hold', async ($, on) => {
-    const clock = mock.clock(on, { now: T0 })
-    const drains: string[] = []
-    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's9', drains })
-    await $.session.start(INTERACTIVE)
-    await clock.advance(1_000)
-    await clear($, h, 's1', 'resume')
-    await clock.advance(2_000)
-    drains.push(one(1), DRAIN_EMPTY)
-    await clock.advance(10_000)
-    expect(h.submitted.length).toBe(1)
-    expect(h.submitted[0]).toContain('m1')
-  })
-
-  test('a new session in a project its config starts listening still holds for the first prompt', async ($, on) => {
-    const clock = mock.clock(on, { now: T0 })
-    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', drains: [one(1), DRAIN_EMPTY] })
-    await $.classic.SessionStart({ source: 'startup', session_id: 's1' } as never)
-    await $.session.start(INTERACTIVE)
-    await clock.advance(30_000)
-    expect(h.submitted).toEqual([])
-  })
-
-  test('a /clear keeps the first-prompt hold', async ($, on) => {
-    const clock = mock.clock(on, { now: T0 })
-    const drains: string[] = []
-    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', drains })
-    await $.session.start(INTERACTIVE)
-    await clock.advance(1_000)
-    await clear($, h, 's2')
-    drains.push(one(1), DRAIN_EMPTY)
-    await clock.advance(30_000)
-    expect(h.submitted).toEqual([])
-  })
-
-  // Where no SessionStart came before session.start, the transcript says
-  // whether the session was resumed.
-  test('with no start source, a session that starts with a transcript is not held', async ($, on) => {
-    const clock = mock.clock(on, { now: T0 })
-    const drains: string[] = []
-    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', transcript: 2, drains })
-    await $.session.start(INTERACTIVE)
-    await clock.advance(1_000)
-    drains.push(one(1), DRAIN_EMPTY)
-    await clock.advance(10_000)
-    expect(h.submitted.length).toBe(1)
-  })
-
-  test('a start source of startup holds whatever the transcript holds', async ($, on) => {
-    const clock = mock.clock(on, { now: T0 })
-    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', transcript: 2, drains: [one(1), DRAIN_EMPTY] })
-    await $.classic.SessionStart({ source: 'startup', session_id: 's1' } as never)
-    await $.session.start(INTERACTIVE)
-    await clock.advance(30_000)
-    expect(h.submitted).toEqual([])
-  })
-
-  // A fork gets a new id, which starts as the config says (ADR-411).
-  test('a fork in a project its config starts listening is held for the first prompt', async ($, on) => {
-    const clock = mock.clock(on, { now: T0 })
-    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 'fork1', transcript: 2, drains: [one(1), DRAIN_EMPTY] })
-    await $.classic.SessionStart({ source: 'fork', session_id: 'fork1' } as never)
-    await $.session.start(INTERACTIVE)
-    await clock.advance(30_000)
-    expect(h.submitted).toEqual([])
-  })
-
-  test('a transcript read that fails holds the session', async ($, on) => {
-    const clock = mock.clock(on, { now: T0 })
-    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', transcript: -1, drains: [one(1), DRAIN_EMPTY] })
-    await $.session.start(INTERACTIVE)
-    await clock.advance(30_000)
-    expect(h.submitted).toEqual([])
-  })
-
-  test('a reload after a /clear stays held', async ($, on) => {
-    const clock = mock.clock(on, { now: T0 })
-    const drains: string[] = []
-    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', drains })
-    await $.session.start(INTERACTIVE)
-    await clock.advance(1_000)
-    await clear($, h, 's2')
-    await clock.advance(2_000)
-    await $.session.start(INTERACTIVE)
-    drains.push(one(1), DRAIN_EMPTY)
-    await clock.advance(30_000)
-    expect(h.submitted).toEqual([])
-  })
-
-  test('a reload after a resume from the picker stays unheld', async ($, on) => {
-    const clock = mock.clock(on, { now: T0 })
-    const drains: string[] = []
-    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's9', drains })
-    await $.session.start(INTERACTIVE)
-    await clock.advance(1_000)
-    await clear($, h, 's1', 'resume')
-    await clock.advance(2_000)
-    await $.session.start(INTERACTIVE)
-    await clock.advance(1_000)
-    drains.push(one(1), DRAIN_EMPTY)
-    await clock.advance(10_000)
-    expect(h.submitted.length).toBe(1)
-  })
+  for (const source of ['clear', 'resume'] as const) {
+    test(`after a ${source === 'clear' ? '/clear' : 'resume from the picker'}, a message wakes the session before any prompt`, async ($, on) => {
+      const clock = mock.clock(on, { now: T0 })
+      const drains: string[] = []
+      const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's9', drains })
+      await $.session.start(INTERACTIVE)
+      await clock.advance(1_000)
+      await clear($, h, 's1', source)
+      await clock.advance(2_000)
+      drains.push(one(1), DRAIN_EMPTY)
+      await clock.advance(10_000)
+      expect(h.submitted.length).toBe(1)
+      expect(h.submitted[0]).toContain('m1')
+    })
+  }
 
   test('a session id that never listened starts dormant', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
@@ -2294,7 +2147,7 @@ describe('keepalive policy: the pure pieces', () => {
 
   test('the row: the segment alone while dormant and shown, beside the peers while active', () => {
     const k: KeepaliveRow = { state: 'running', count: 2, max: 8, nextAt: 41 * 60, wrapsAt: '21:40', wrappedAt: null, idle: null, isRefused: false, isShown: true }
-    const base: AttendStatus = { mode: 'dormant', listening: null, peers: 3, unread: 1, channels: ['#room'], deliveries: 0, afterCompaction: false, turnsSinceFull: 0, awaitingOperator: false, cacheLapsed: false, keepalive: null }
+    const base: AttendStatus = { mode: 'dormant', listening: null, peers: 3, unread: 1, channels: ['#room'], deliveries: 0, afterCompaction: false, turnsSinceFull: 0, cacheLapsed: false, keepalive: null }
     expect(rowText({ ...base, keepalive: k }, 0)).toBe('⟳ 2/8 · next 41m · wrap ~21:40')
     expect(rowText({ ...base, keepalive: rowAfterPrompt(k) }, 0)).toBeUndefined()
     expect(rowText({ ...base, keepalive: null }, 0)).toBeUndefined()
@@ -2305,7 +2158,7 @@ describe('keepalive policy: the pure pieces', () => {
   })
 
   test('the row says why the policy is idle: under the 50k floor, the 5m tier, no request yet', () => {
-    const base: AttendStatus = { mode: 'dormant', listening: null, peers: 0, unread: 0, channels: [], deliveries: 0, afterCompaction: false, turnsSinceFull: 0, awaitingOperator: false, cacheLapsed: false, keepalive: null }
+    const base: AttendStatus = { mode: 'dormant', listening: null, peers: 0, unread: 0, channels: [], deliveries: 0, afterCompaction: false, turnsSinceFull: 0, cacheLapsed: false, keepalive: null }
     const idle = (o: Record<string, unknown>) => keepaliveRowOf(parseKeepaliveDecision(decision({ count: 0, max: 1, ...o }))!, { state: 'running', count: 0, max: 1, nextAt: null, wrapsAt: null, wrappedAt: null, idle: null, isRefused: false, isShown: true })
     expect(rowText({ ...base, keepalive: idle({ idle: 'under 50k' }) }, 0)).toBe('⟳ 0/1 · idle: under 50k')
     expect(rowText({ ...base, keepalive: idle({ idle: '5m tier' }) }, 0)).toBe('⟳ 0/1 · idle: 5m tier')

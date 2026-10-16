@@ -93,7 +93,6 @@ const DEFAULTS = {
   deliveries: 0,
   afterCompaction: false,
   turnsSinceFull: 0,
-  awaitingOperator: false,
   cacheLapsed: false,
   keepalive: null,
 } satisfies AttendStatus
@@ -180,20 +179,6 @@ async function listenOn($: $): Promise<ProcessRunResult> {
   const r = await run($, LISTEN_ON_ARGV)
   await updateStatus($, s => ({ ...s, listening: r.exitCode === 0 }))
   return r
-}
-
-/** Whether this process resumed its session (`claude --resume`). The
- *  SessionStart at process start names its source, so a fork or a fresh
- *  start reads as not resumed. Where none came, a session that starts with
- *  a transcript was resumed, and a read that fails counts as a new one. */
-async function isResumed($: $, mod: Mod): Promise<boolean> {
-  if (mod.startSource !== undefined) return mod.startSource === 'resume'
-  try {
-    const m = await $.session.messages()
-    return Array.isArray(m) && m.length > 0
-  } catch {
-    return false
-  }
 }
 
 /** The sessions that listened, newest last, as $.store holds them. */
@@ -286,7 +271,7 @@ async function tick($: $, mod: Mod, force: boolean) {
     const interval = pollInterval(mod.config, now - mod.lastActivityMs, isTurnRunning)
     if (!force && now - mod.lastPollMs < interval) return
     mod.lastPollMs = now
-    if (!isTurnRunning && !mod.isRelistening && !mod.isAwaitingOperator) await poll($, mod)
+    if (!isTurnRunning && !mod.isRelistening) await poll($, mod)
     await refreshUnread($, mod)
     if (force || now - mod.lastPeersMs >= PEERS_EVERY_MS) await refreshPeers($, mod)
     // Where the keepalive policy applies, its own timer drives every wake.
@@ -306,7 +291,13 @@ async function tick($: $, mod: Mod, force: boolean) {
  *  its named channels), and then delivers all that is pending. A
  *  turn is submitted only when the drain delivered at least one message: the
  *  cold start's held-back note and the session's name are fields of the
- *  drain's document, never a message.
+ *  drain's document, never a message. The note is kept for the operator's
+ *  next prompt.
+ *
+ *  A session its config started listening polls from its start like any
+ *  other. attend's cold start holds back what was sent before the session
+ *  began (ADR-404 D3b), so what wakes a new session is mail sent to it
+ *  since, and a session with no turn yet has no cache to lapse.
  *
  *  The drain marks what it delivers read before the prompt is submitted, so
  *  the batch waits in `mod.pending` until a submit takes it. A submit that
@@ -329,6 +320,7 @@ async function poll($: $, mod: Mod) {
       if (was.listening !== listening || was.cacheLapsed !== first.cacheLapsed) {
         await updateStatus($, s => ({ ...s, listening, cacheLapsed: first.cacheLapsed }))
       }
+      if (first.note) mod.heldNote = first.note
       if (first.messages.length === 0) return
       const msgs = [...first.messages]
       await updateStatus($, s => ({ ...s, unread: Math.max(s.unread, msgs.length) }))
@@ -378,19 +370,14 @@ async function deliver($: $, mod: Mod, msgs: readonly Listed[]): Promise<boolean
   return true
 }
 
-/** Holds, or stops holding, the session's turns until the operator's first
- *  prompt. The module's flag serves a /clear, which empties $.state; the
- *  copy in $.state serves a reload, which starts the module afresh. */
-async function setAwaiting($: $, mod: Mod, awaiting: boolean) {
-  mod.isAwaitingOperator = awaiting
-  await updateStatus($, s => ({ ...s, awaitingOperator: awaiting }))
-}
-
-/** The operator's first prompt in a session the config started listening:
- *  one drain, and what it delivered rides `e` as context, the cold start's
- *  held-back note with it, rather than as a turn of its own. A prompt that
- *  does not enter leaves the messages in `mod.pending`, which the poll
- *  submits as it does a batch whose submit failed. */
+/** The operator's prompt while a message waits on a lapsed cache, or while
+ *  a held-back note waits: one drain, and what it delivered rides `e` as
+ *  context, the note with it, rather than as a turn of its own. The
+ *  operator sees what went, in the transcript under their prompt
+ *  ({@link showWithPrompt}). A prompt that does not enter leaves the
+ *  messages in `mod.pending`, and the note in `mod.heldNote`: taken on a
+ *  lapsed cache they wait for the operator's next prompt, otherwise the poll
+ *  submits the messages as it does a batch whose submit failed. */
 async function enterWithPending($: $, mod: Mod, e: PromptSubmitInput, next: (e: PromptSubmitInput) => Promise<PromptSubmitResult>, isCold: boolean) {
   // A batch an earlier cold prompt failed to carry goes first.
   const carried = mod.isPendingCold ? mod.pending : []
@@ -409,14 +396,18 @@ async function enterWithPending($: $, mod: Mod, e: PromptSubmitInput, next: (e: 
     mod.ids.set(shortId(m.id), m.id)
     if (m.re) mod.ids.set(shortId(m.re), m.re)
   }
-  const note = d?.note ? `attend: ${oneLine(d.note)}` : undefined
-  const block = msgs.length > 0 ? frameInbound(msgs.map(formatMessage), true) : undefined
+  const heldNote = d?.note ?? mod.heldNote
+  mod.heldNote = undefined
+  const note = heldNote ? `attend: ${oneLine(heldNote)}` : undefined
+  const lines = msgs.map(formatMessage)
+  const block = msgs.length > 0 ? frameInbound(lines, true) : undefined
   const attached = [block, note].filter((x): x is string => x !== undefined)
   if (attached.length === 0) return next(e)
   // Read by attend and not entered: they wait in `mod.pending`. Taken on a
   // lapsed cache, they wait for the operator's next prompt, with the row
   // still saying so; otherwise the poll submits them.
   const keep = async () => {
+    mod.heldNote = heldNote
     if (msgs.length === 0) return
     mod.pending = [...msgs]
     mod.submitTries = 0
@@ -432,11 +423,23 @@ async function enterWithPending($: $, mod: Mod, e: PromptSubmitInput, next: (e: 
   }
   if (r.drop !== undefined) {
     await keep()
-  } else if (msgs.length > 0) {
-    await updateStatus($, t => ({ ...t, deliveries: t.deliveries + 1, afterCompaction: false, turnsSinceFull: 0 }))
-    $.ui.toast(`attend: ${msgs.length} peer message(s) went to Claude with your prompt`)
+    return r
   }
+  if (msgs.length > 0) await updateStatus($, t => ({ ...t, deliveries: t.deliveries + 1, afterCompaction: false, turnsSinceFull: 0 }))
+  showWithPrompt($, lines, note)
   return r
+}
+
+/** What rode the operator's prompt as context, which the engine never draws:
+ *  a line saying so, then one dim transcript line per message as a
+ *  delivery's row draws them, and the held-back note. The model reads none
+ *  of it. */
+function showWithPrompt($: $, lines: readonly string[], note: string | undefined) {
+  if (lines.length > 0) {
+    $.ui.log(`attend: ${lines.length} peer message(s) went to Claude with your prompt`)
+    for (const l of lines) $.ui.log(oneLine(l))
+  }
+  if (note) $.ui.log(note)
 }
 
 
@@ -687,9 +690,8 @@ export const register: Register = on => {
     submitTries: 0,
     joined: new Set(),
     isStarted: false,
-    startSource: undefined,
     isRelistening: false,
-    isAwaitingOperator: false,
+    heldNote: undefined,
     ka: {
       applies: false,
       gate: 'unknown',
@@ -717,21 +719,14 @@ export const register: Register = on => {
     await registerListen($)
     mod.isStarted = true
     // A reload finds the mode in $.state; a new process (`claude --resume`)
-    // finds the session id in the record of sessions that listened. The
-    // record leaves out a session its config started, so a resume of one
-    // goes on unheld, as it did before the process exited.
+    // finds the session id in the record of sessions that listened, or the
+    // project's config starts it, as it does every session there.
     const id = await $.session.id()
-    const kept = await readStatus($)
-    const wasActive =
-      isActive(kept) || (await readListened($)).includes(id) || (startsActive(mod) && (await isResumed($, mod)))
-    if (wasActive || (mod.config.listening === 'active' && mod.canPoll)) {
+    const wasActive = isActive(await readStatus($)) || (await readListened($)).includes(id)
+    if (wasActive || startsActive(mod)) {
       // Listed by turn one; listening and the first drain follow the hook.
-      // Active from here, so a /clear before activate runs keeps it. A
-      // session the config starts listening has had no prompt yet: nothing
-      // it finds pending starts a turn before the operator's first prompt.
-      // A reload keeps whatever hold $.state records.
+      // Active from here, so a /clear before activate runs keeps it.
       mod.active = true
-      await setAwaiting($, mod, isActive(kept) ? kept.awaitingOperator : !wasActive)
       await registerActiveTools($)
       $.clock.after(0, () => void activate($, mod, id))
     } else {
@@ -753,7 +748,6 @@ export const register: Register = on => {
   on('classic.SessionStart', async ($, e, next) => {
     // Read before the chain runs, so session.start cannot overtake it.
     const isAtStart = !mod.isStarted
-    if (isAtStart) mod.startSource = e.source
     const done = await next(e)
     if (isAtStart || (e.source !== 'clear' && e.source !== 'resume')) return done
     const id = e.session_id || (await $.session.id())
@@ -761,16 +755,7 @@ export const register: Register = on => {
     if (!goesOn) return done
     mod.isRelistening = true
     try {
-      // The operator chose a conversation to go on with, as a first prompt
-      // would: the hold for one ends.
-      if (e.source === 'resume') mod.isAwaitingOperator = false
-      await updateStatus($, s => ({
-        ...s,
-        mode: 'active' as const,
-        afterCompaction: true,
-        turnsSinceFull: 0,
-        awaitingOperator: mod.isAwaitingOperator,
-      }))
+      await updateStatus($, s => ({ ...s, mode: 'active' as const, afterCompaction: true, turnsSinceFull: 0 }))
       await rememberListening($, mod, id)
       if (mod.active) {
         $.clock.after(RELISTEN_MS, () => void listenOn($).finally(() => (mod.isRelistening = false)))
@@ -797,10 +782,10 @@ export const register: Register = on => {
     return done
   })
 
-  // The operator's first prompt in a session the config started listening,
-  // or their next prompt while a message waits on a lapsed cache: what is
-  // pending enters beside it, read in the same turn, rather than as a turn
-  // the operator never asked for.
+  // The operator's next prompt while a message waits on a lapsed cache, or
+  // while the cold start's held-back note waits: what is pending enters
+  // beside it, read in the same turn, rather than as a turn the operator
+  // never asked for.
   on('prompt.submit', async ($, e, next) => {
     // Any prompt (a schedule, a peer, a task notice) moves the epoch, so a
     // check in flight queues nothing behind its turn; only the operator's
@@ -809,8 +794,7 @@ export const register: Register = on => {
     if (!OPERATOR_ORIGINS.has(e.origin.kind)) return next(e)
     await keepaliveOperator($, mod)
     const isHeldCold = (await readStatus($)).cacheLapsed || mod.isPendingCold
-    if (!mod.isAwaitingOperator && !isHeldCold) return next(e)
-    await setAwaiting($, mod, false)
+    if (mod.heldNote === undefined && !isHeldCold) return next(e)
     if (isHeldCold) await updateStatus($, s => ({ ...s, cacheLapsed: false }))
     if (!(await isOn($, mod))) return next(e)
     return enterWithPending($, mod, e, next, isHeldCold)
