@@ -32,6 +32,20 @@ fn base() -> &'static Path {
     Box::leak(signal::signals_base().into_boxed_path())
 }
 
+/// The number the column gives `#channel`, read off a frame, for the
+/// Alt+digit that shows it. The tests in this file share one fixture and
+/// run at once, and one of them creates `#fresh`, which sorts between the
+/// others' channels; a test that pressed a fixed digit got whichever
+/// channel held that place when its frame was drawn.
+fn column_number(rows: &[String], channel: &str) -> char {
+    let name = format!("#{channel}");
+    rows.iter()
+        .filter_map(|r| r.split('│').next())
+        .find(|col| col.split_whitespace().any(|w| w == name))
+        .and_then(|col| col.split_whitespace().next()?.chars().next().filter(char::is_ascii_digit))
+        .unwrap_or_else(|| panic!("no numbered {name} in the column: {rows:#?}"))
+}
+
 /// The person tray's signals reach the chat through the watcher, as
 /// `Channel::Person`; another person's tray is read too, as a direct
 /// message between others, which no view of the person's shows (#995).
@@ -225,9 +239,9 @@ fn an_at_name_send_to_a_non_member_in_a_channel_view_is_refused() {
     attend_groups::Groups::new(base, PEER_SID).join("crew", true).unwrap();
     attend_groups::Groups::new(base, "someone-else").create("lobby", None).unwrap();
     let nick = agent_identity::Identity::for_cwd(PEER_CWD, agent_theme::ColorDepth::NoColor).nickname.to_string();
-    let send_in = |digit: char, channel: &str| {
+    let send_in = |channel: &str| {
         let mut c = Chat::new(None, Palette::default(), Shape::PLAIN).heartbeat(false);
-        testkit::render_screen(&mut c, 80, 25);
+        let digit = column_number(&testkit::rows(&testkit::render_screen(&mut c, 80, 25)), channel);
         testkit::drive(&mut c, &[KeyEvent::new(KeyCode::Char(digit), KeyModifiers::ALT)]);
         assert_eq!(c.foreground(), &Tab::Channel(channel.into()));
         let body = format!("@{nick} in {channel}?");
@@ -238,11 +252,11 @@ fn an_at_name_send_to_a_non_member_in_a_channel_view_is_refused() {
         let rows = testkit::rows(&testkit::render_screen(&mut c, 120, 30));
         (c, body, rows)
     };
-    let (c, body, rows) = send_in('3', "lobby");
+    let (c, body, rows) = send_in("lobby");
     assert!(rows.iter().any(|r| r.contains(&format!("@{nick} is not in #lobby; nothing sent"))), "{rows:#?}");
     assert_eq!(c.input().text(), body, "the draft stays in the box");
     assert_eq!(std::fs::read_dir(base.join("@lobby")).map(|d| d.count()).unwrap_or(0), 0, "nothing written");
-    let (c, _, _) = send_in('2', "crew");
+    let (c, _, _) = send_in("crew");
     assert!(c.input().is_empty(), "a member addressee posts");
     let raw = std::fs::read_dir(base.join("@crew")).unwrap().flatten().map(|e| std::fs::read_to_string(e.path()).unwrap()).find(|r| r.contains("in crew?")).expect("posted in #crew");
     assert_eq!(agent_identity::parse_signal(agent_identity::wire_line(&raw)).unwrap().to, Some(PEER_SID));
