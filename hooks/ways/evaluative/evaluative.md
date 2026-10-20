@@ -1,6 +1,6 @@
 ---
-description: evaluative loop engineering, where a coding agent writes the software and a harness and oracle it does not control judge whether the work is done; separating the author from the judge, and choosing which kind of evaluative loop fits the product
-vocabulary: evaluative loop coding agent writes all the code what decides its work is done author judge harness oracle verdict agent-written agent authored self-grade grade its own homework answer key baseline regenerate weaken loosen tolerance exit status instrument greater loop development loop judge the output looks right done claim count harness grows escaped defect readout telemetry naive re-recording
+description: evaluative loop engineering, where a coding agent writes the software and a harness and oracle it does not control judge whether the work is done; separating the author from the judge, proving the grader with a selftest, getting an OK before paid runs, counting only completed runs, and choosing which kind of evaluative loop fits the product
+vocabulary: evaluative loop coding agent writes all the code what decides its work is done author judge harness oracle verdict agent-written agent authored self-grade grade its own homework answer key baseline regenerate weaken loosen tolerance exit status instrument greater loop development loop judge the output looks right done claim count harness grows escaped defect readout telemetry naive re-recording selftest paid run spend cost per run interleave same-day control incomplete run rate limited
 scope: agent, subagent
 refire: 0.15
 ---
@@ -21,6 +21,10 @@ These hold in every loop type below.
 - **A provisional baseline is not yet a judge.** While the design or layout is still being decided, keep frozen baselines few and provisional, and pin behaviour with state or transition checks (code/testing/gates/assertions, rapid iteration phase). Changing a provisional baseline during that phase does not touch the judge. Marking a baseline provisional, or promoting it once the operator accepts the result, is a reviewed change.
 - **The verdict is the exit status.** A harness that prints failures and exits zero leaves the agent as the only gate. The run fails when a check fails.
 - **Gates and instruments are proven as code/testing/gates requires:** a skipped check reads as skipped, and each instrument has been seen red once.
+- **A grader passes a selftest before its scores count.** The reference answer passes. An empty answer, an "I don't know", and an answer to a different question each fail. Rerun it after each grader change, and store its runs apart from real ones.
+- **A paid run waits for an OK.** Before a run that calls a paid model or API, quote its cost from a small run and get the operator's OK. A run the operator's own request already named is covered.
+- **Only completed runs count.** A run that crashed, timed out, hit a rate limit, or was never graded is incomplete. Keep it out of pass rates and out of cost and latency medians, and never score it as a model failure.
+- **Control for drift.** Interleave variants (A, B, A, B), on reruns too. Before blaming a change, rerun the unchanged version the same day, because the model provider can drift too. Log the cost and time of every run with its date, and label estimates as estimates.
 - **A cited count comes from a run in this change.** A pass count in a commit, PR, or handoff names the command and was produced after the last edit.
 - **The harness grows with the product.** A feature ships its check in the same change. A defect that escaped the harness becomes a case before the fix lands.
 
