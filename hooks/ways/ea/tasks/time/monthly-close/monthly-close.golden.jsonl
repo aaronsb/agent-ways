@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"do the monthly close: subtract my billable hours from the month target and log the rest as worklogs on my jira tickets"}
+{"kind":"situational","prompt":"finance needs the rest of my october hours on capex tickets, and it has to match what i already billed to clients"}
