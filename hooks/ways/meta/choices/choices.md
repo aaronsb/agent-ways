@@ -1,6 +1,6 @@
 ---
-description: presenting genuine decisions to the human as explicit choices rather than burying options in prose or deciding silently
-vocabulary: choice option decision present ask user select alternatives branch point recommend tradeoff prefer fork pick which clarify rubber-stamping over-asking hedging fatigue pending
+description: presenting genuine decisions to the human as explicit choices rather than burying options in prose or deciding silently, so they get a say on the approach, and when to infer from evidence and skip the question
+vocabulary: choice option decision present ask user select alternatives branch point recommend tradeoff prefer fork pick which clarify rubber-stamping over-asking hedging fatigue pending infer calibrate evidence defaults unattended
 pattern: which (one|option|approach)|ask the user|let.{0,15}decide|how (should|do) (we|you|i)|waiting on (me|for me)|decisions? (for|from) me|need from me
 scope: agent, subagent
 refire: 0.15
@@ -34,7 +34,25 @@ The harness has a tool for this (`AskUserQuestion`): structured options with sho
 
 The bar is a *genuine* fork. Over-asking trains the human to rubber-stamp, which defeats the point — the same way a linter that nags on non-defects trains its reader to ignore it. Ask when their answer changes the work; otherwise decide, state it, and keep moving.
 
+## Infer first, ask by context
+
+If the evidence already answers the question, make the call, record it, and act. A transcript that states the decision closes the item. Calendar data that shows who attended answers who attended. Do not ask item by item or wait for a formal reply.
+
+| Context | Calibration |
+|---|---|
+| Taste, voice, design, message intent, or the user invites questions | Ask liberally, before drafting |
+| Execution work | Ask only if the answer would change the output. Never block on it |
+| Facts only the user knows (history, totals, personal details) | Interview one question at a time |
+| The answer is in the repo, data, or transcripts | Look. Do not ask |
+
+Before a big deliverable, list the top open questions, plain and numbered, so the user can answer by number. Saying there are none is fine.
+
+## Unattended on an approved plan
+
+Proceed on assumptions grounded in transcripts and stated intent, inside the stated bounds. List them under "Defaults adopted (override if wrong)". Defer only the decisions that cannot be grounded. Close with open items marked blocking or not blocking, plus the actions only the user can take.
+
 ## See Also
 
 - trust/autonomy(meta) — when to act without asking vs. check in first
+- pushback(meta) — checking the user's own claims when they ask you to
 - delivery/implement(softwaredev) — defend a plan, then invite challenge
