@@ -121,4 +121,5 @@ Each line is `{"kind":"direct","prompt":"..."}`; a way that fires on a tool call
 - knowledge/authoring/locale-stubs(meta) — per-language matching aliases
 - knowledge/authoring/tool-agnostic(meta) — ways describe intent, not tool calls
 - knowledge/authoring/pii-free(meta) — privacy constraint on way content
+- knowledge/authoring/posture(meta) — a short always-on personal posture way
 - knowledge/optimization(meta) — vocabulary tuning, sparsity, discrimination
