@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"open my outlook web inbox in the browser i'm already signed into and save a draft reply to the latest message from the client"}
+{"kind":"situational","prompt":"the client's microsoft tenant blocks api access, so read yesterday's teams meeting recap and transcript through my signed-in chrome"}
