@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"add a verification sequence to the end of this plan, cheapest checks first, each with the exact command and what it should return"}
+{"kind":"situational","prompt":"the subagent reports every test passing, but the score is just under our bar and I'm tempted to lower the threshold so the run goes green"}
