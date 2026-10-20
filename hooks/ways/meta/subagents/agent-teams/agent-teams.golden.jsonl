@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"set up an agent team for this refactor with a tester, a fixer, and an orchestrator, each owning different files"}
+{"kind":"situational","prompt":"two other claude sessions are open in this same repo right now, so be careful before you stage and commit anything"}
