@@ -58,7 +58,9 @@ for dir in plugins/*/; do
   fi
 done
 
-# 4. Type check.
+# 4. Type check. One scratch directory holds each plugin's tsconfig in turn.
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
 for dir in plugins/*/; do
   dir="${dir%/}"
   [[ -f "$dir/.claude-plugin/plugin.json" ]] || continue
@@ -68,8 +70,6 @@ for dir in plugins/*/; do
     echo "typecheck: $dir skipped, no Claude Code declarations (set CLAUDE_CODE_TYPES to claude-code.d.ts)"
     continue
   fi
-  tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' EXIT
   abs="$ROOT/$dir"
   cat > "$tmp/tsconfig.json" <<EOF
 {

@@ -14,8 +14,13 @@ pub(crate) fn cmd_peers(json: bool) {
     let painter = agent_theme::painter();
     let caps = painter.depth();
 
+    // Scope per row, this session first: the cwd basename, extended only
+    // where two live sessions would otherwise wear the same label.
+    let roster = peers::roster(&p.me, &p.peers);
+    let scopes = peers::scopes(&roster);
+
     let mut t = agent_fmt::Table::new(&["Focus", "Agent", "Status", "Context"]);
-    t.max_width(1, 28);
+    t.max_width(1, agent_column_cap(&roster, &scopes));
 
     // Self-row Focus cell: "(self)" identifies which row IS the runner of
     // `attend peer list`, without using the literal string "project" — that
@@ -23,7 +28,7 @@ pub(crate) fn cmd_peers(json: bool) {
     // and silently land signals in an empty `@project/` room.
     t.add_owned(vec![
         "(self)".to_string(),
-        render_agent_label(&p.me, caps, &painter),
+        render_agent_label(&p.me, &scopes[0], caps, &painter),
         p.me.status.clone(),
         String::new(),
     ]);
@@ -38,7 +43,7 @@ pub(crate) fn cmd_peers(json: bool) {
     // Show peers
     if !p.peers.is_empty() {
         t.add(vec!["", "", "", ""]);
-        for peer in &p.peers {
+        for (peer, scope) in p.peers.iter().zip(&scopes[1..]) {
             // Same-cwd peers previously rendered "(project)" in the
             // Focus column — a string that primed agents into running
             // `attend message send --channel project`, a group nobody had
@@ -48,7 +53,7 @@ pub(crate) fn cmd_peers(json: bool) {
             let focus_label = if peer.here { "(here)".to_string() } else { String::new() };
             t.add_owned(vec![
                 focus_label,
-                render_agent_label(peer, caps, &painter),
+                render_agent_label(peer, scope, caps, &painter),
                 peer.status.clone(),
                 format!("{:.0}%", peer.context_pct.unwrap_or(0.0)),
             ]);
@@ -72,18 +77,126 @@ pub(crate) fn cmd_peers(json: bool) {
     );
 }
 
+/// The "Agent" column's width cap. 28 holds a name and a basename; a row
+/// whose scope was extended to tell two sessions apart gets room for it, up
+/// to [`AGENT_COLUMN_MAX`], since the table's truncation would cut the tail
+/// that differs.
+fn agent_column_cap(roster: &[&Agent], scopes: &[String]) -> usize {
+    roster
+        .iter()
+        .zip(scopes)
+        .filter(|(a, s)| **s != agent_identity::cwd_basename(&a.cwd))
+        .map(|(a, s)| label_len(&a.name, s))
+        .fold(28, usize::max)
+        .min(AGENT_COLUMN_MAX)
+}
+
+/// The widest an extended "Agent" cell grows, so a long parent folder cannot
+/// push the row past the terminal. [`fit_scope`] shortens the scope to fit.
+const AGENT_COLUMN_MAX: usize = 48;
+
+/// Visible length of `name (scope)`.
+fn label_len(name: &str, scope: &str) -> usize {
+    name.chars().count() + scope.chars().count() + 3
+}
+
+/// `scope`, shortened from the left with `…` when `name (scope)` would pass
+/// [`AGENT_COLUMN_MAX`]. The tail is kept: the basename and the session-id
+/// prefix are the parts that tell two sessions apart.
+fn fit_scope<'a>(name: &str, scope: &'a str) -> std::borrow::Cow<'a, str> {
+    if label_len(name, scope) <= AGENT_COLUMN_MAX {
+        return std::borrow::Cow::Borrowed(scope);
+    }
+    let keep = AGENT_COLUMN_MAX.saturating_sub(name.chars().count() + 4);
+    let skip = scope.chars().count() - keep;
+    std::borrow::Cow::Owned(format!("…{}", scope.chars().skip(skip).collect::<String>()))
+}
+
 /// Compose the "Agent" column cell: the name (with instance suffix when
-/// present, ADR-129) in identity color, cwd basename in parens in dim. The
-/// agent-fmt table measures visible length correctly even with ANSI codes
-/// embedded, so we can style freely without breaking alignment.
+/// present, ADR-129) in identity color, then `scope` in parens in dim. The
+/// scope is the cwd basename unless [`peers::scopes`] extended it to tell
+/// two sessions apart. The agent-fmt table measures visible length correctly
+/// even with ANSI codes embedded, so we can style freely without breaking
+/// alignment.
 ///
 /// The suffix is part of the name before color wrapping, so the whole
 /// `Tamsin-alpha` token shares the identity color — keeps the visual scan
 /// tight and matches the wire identity (a single addressable name, not a
 /// colored stem with a plain tail).
-fn render_agent_label(agent: &Agent, caps: agent_theme::ColorDepth, painter: &Painter) -> String {
+fn render_agent_label(agent: &Agent, scope: &str, caps: agent_theme::ColorDepth, painter: &Painter) -> String {
     let id = Identity::for_cwd(&agent.cwd, caps);
     let nick = ansi::wrap(&agent.name, &id.palette, id.style, painter);
-    let dim_basename = painter.paint(agent_theme::Role::Muted, format!("({})", id.cwd_basename));
-    format!("{nick} {dim_basename}")
+    let dim_scope = painter.paint(agent_theme::Role::Muted, format!("({})", fit_scope(&agent.name, scope)));
+    format!("{nick} {dim_scope}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn agent(sid: &str, cwd: &str, name: &str) -> Agent {
+        Agent {
+            session_id: Some(sid.to_string()),
+            cwd: cwd.to_string(),
+            name: name.to_string(),
+            nickname: name.to_string(),
+            instance: None,
+            status: "waiting".to_string(),
+            context_pct: None,
+            here: false,
+        }
+    }
+
+    fn labels(agents: &[Agent]) -> Vec<String> {
+        let roster: Vec<&Agent> = agents.iter().collect();
+        let scopes = peers::scopes(&roster);
+        let painter = Painter::plain();
+        roster.iter().zip(&scopes).map(|(a, s)| render_agent_label(a, s, painter.depth(), &painter)).collect()
+    }
+
+    #[test]
+    fn labels_without_a_collision_are_name_and_basename() {
+        let agents = [
+            agent("aaaaaaaa-1", "/home/a/praecipio/ai-workstation-ops", "Clelia"),
+            agent("bbbbbbbb-2", "/home/a/over-the-hill", "Clelia"),
+            agent("cccccccc-3", "/home/a/app", "McKay"),
+        ];
+        assert_eq!(labels(&agents), ["Clelia (ai-workstation-ops)", "Clelia (over-the-hill)", "McKay (app)"]);
+        let roster: Vec<&Agent> = agents.iter().collect();
+        assert_eq!(agent_column_cap(&roster, &peers::scopes(&roster)), 28);
+    }
+
+    #[test]
+    fn colliding_labels_are_told_apart_and_fit_the_column() {
+        let agents = [
+            agent("aaaaaaaa-1111", "/x/praecipio/app", "Clelia-alpha"),
+            agent("bbbbbbbb-2222", "/y/praecipio/app", "Clelia-alpha"),
+            agent("cccccccc-3333", "/z/personal/app", "Clelia-alpha"),
+        ];
+        let got = labels(&agents);
+        assert_eq!(
+            got,
+            [
+                "Clelia-alpha (praecipio/app aaaaaaaa)",
+                "Clelia-alpha (praecipio/app bbbbbbbb)",
+                "Clelia-alpha (personal/app)",
+            ]
+        );
+        let roster: Vec<&Agent> = agents.iter().collect();
+        assert_eq!(agent_column_cap(&roster, &peers::scopes(&roster)), got[0].len());
+    }
+
+    #[test]
+    fn a_long_extended_label_is_shortened_from_the_left_to_the_column_max() {
+        let agents = [
+            agent("aaaaaaaa-1111", "/x/a-very-long-client-folder-name-indeed/app", "Clelia-alpha"),
+            agent("bbbbbbbb-2222", "/y/a-very-long-client-folder-name-indeed/app", "Clelia-alpha"),
+        ];
+        let got = labels(&agents);
+        assert_eq!(got[0], "Clelia-alpha (…-folder-name-indeed/app aaaaaaaa)");
+        assert_eq!(got[1], "Clelia-alpha (…-folder-name-indeed/app bbbbbbbb)");
+        assert!(got.iter().all(|l| l.chars().count() == AGENT_COLUMN_MAX));
+        let roster: Vec<&Agent> = agents.iter().collect();
+        assert_eq!(agent_column_cap(&roster, &peers::scopes(&roster)), AGENT_COLUMN_MAX);
+    }
 }
