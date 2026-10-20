@@ -14,3 +14,8 @@ Long session. Hold the register core set: state each fact once and move to the n
 | "The cache warms on the first request. This is the key detail." | "The cache warms on the first request." |
 | "The lint runs before the build, not after it." | "The lint runs before the build." |
 | "The retry cap is three, which matters because the queue is shared." | "The retry cap is three. The queue is shared." |
+| "Certainly! Here is the fix. Would you like me to add tests?" | "Here is the fix." |
+| "The rollout serves as the first release." | "The rollout is the first release." |
+| "Thanks, [Name]" | "Thanks, Dana" |
+
+This holds in chat replies as well as in files. If the user asked for a shape or a length, match it.
