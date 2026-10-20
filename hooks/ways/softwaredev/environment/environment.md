@@ -18,6 +18,7 @@ Children of this way cover the development environment:
 | Makefile targets | `environment/makefile` |
 | Container build/run safety | `environment/container-safety` |
 | Authoring host versus target host | `environment/hostparity` |
+| Code on a system you cannot reach | `environment/remote-runtime` |
 | Awareness / attend loop | `environment/attend` |
 | Recovering from a failed attempt | `environment/recovery` |
 | Long, interactive, or never-returning commands | `environment/bounded-execution` |
@@ -31,6 +32,7 @@ Children of this way cover the development environment:
 - environment/makefile(softwaredev) — Makefile targets and conventions
 - environment/container-safety(softwaredev) — developer safety in container build/run definitions
 - environment/hostparity(softwaredev) — a green result on the authoring host is evidence about the authoring host only
+- environment/remote-runtime(softwaredev) — code the user deploys by hand to a system you cannot reach
 - environment/attend(softwaredev) — the attend awareness sensor loop
 - environment/recovery(softwaredev) — classify a failure, take its one allowed move, escalate after three attempts
 - environment/bounded-execution(softwaredev) — background the never-returning command, flag the interactive one, kill by pid
