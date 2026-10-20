@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"double check that against the current docs before you answer, don't assume, I need this to be accurate"}
+{"kind":"situational","prompt":"you said the deploy went out fine but the client still sees the old page, are you sure it actually shipped"}
