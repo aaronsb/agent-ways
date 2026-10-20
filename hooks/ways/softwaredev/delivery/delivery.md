@@ -1,5 +1,5 @@
 ---
-description: Shipping code — commits, pull requests, releases, migrations, and the path from local changes to production
+description: Shipping code, the whole path from local work on a laptop out to users and customers; commits, pull requests, releases, deploys, migrations, and the steps between finished code and production
 vocabulary: ship deliver deploy release commit push merge pull request pr land code review changelog version tag branch workflow ci cd pipeline promote stage production
 scope: agent, subagent
 refire: 0.15
@@ -17,6 +17,7 @@ Children of this way cover the journey from local changes to production:
 | PRs, issues, review, merge strategy | `delivery/github` |
 | Landing an increment — review gate → merge → cleanup | `delivery/merge` |
 | Releases, tagging, publishing | `delivery/release` |
+| Pushing and deploying: account, remotes, target, proof | `delivery/deploy` |
 | Patch creation | `delivery/patches` |
 | Implementation planning | `delivery/implement` |
 | Readiness of an area before changing it | `delivery/groundwork` |
@@ -30,6 +31,7 @@ see `data/migrations`.
 - delivery/commits(softwaredev) — commit structure and messages
 - delivery/github(softwaredev) — PR workflow
 - delivery/merge(softwaredev) — the review gate and landing an increment
+- delivery/deploy(softwaredev) — the right account, every remote, and proof the build is live
 - delivery/implement(softwaredev) — implementation planning
 - delivery/groundwork(softwaredev) — build, verify, deliver, recover before adding primitives
 - data/migrations(data) — schema migration discipline (moved out of delivery)
