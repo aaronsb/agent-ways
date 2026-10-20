@@ -78,15 +78,38 @@ pub(crate) fn cmd_peers(json: bool) {
 }
 
 /// The "Agent" column's width cap. 28 holds a name and a basename; a row
-/// whose scope was extended to tell two sessions apart gets room for all of
-/// it, since truncation would cut the part that differs.
+/// whose scope was extended to tell two sessions apart gets room for it, up
+/// to [`AGENT_COLUMN_MAX`], since the table's truncation would cut the tail
+/// that differs.
 fn agent_column_cap(roster: &[&Agent], scopes: &[String]) -> usize {
     roster
         .iter()
         .zip(scopes)
         .filter(|(a, s)| **s != agent_identity::cwd_basename(&a.cwd))
-        .map(|(a, s)| a.name.chars().count() + s.chars().count() + 3)
+        .map(|(a, s)| label_len(&a.name, s))
         .fold(28, usize::max)
+        .min(AGENT_COLUMN_MAX)
+}
+
+/// The widest an extended "Agent" cell grows, so a long parent folder cannot
+/// push the row past the terminal. [`fit_scope`] shortens the scope to fit.
+const AGENT_COLUMN_MAX: usize = 48;
+
+/// Visible length of `name (scope)`.
+fn label_len(name: &str, scope: &str) -> usize {
+    name.chars().count() + scope.chars().count() + 3
+}
+
+/// `scope`, shortened from the left with `…` when `name (scope)` would pass
+/// [`AGENT_COLUMN_MAX`]. The tail is kept: the basename and the session-id
+/// prefix are the parts that tell two sessions apart.
+fn fit_scope<'a>(name: &str, scope: &'a str) -> std::borrow::Cow<'a, str> {
+    if label_len(name, scope) <= AGENT_COLUMN_MAX {
+        return std::borrow::Cow::Borrowed(scope);
+    }
+    let keep = AGENT_COLUMN_MAX.saturating_sub(name.chars().count() + 4);
+    let skip = scope.chars().count() - keep;
+    std::borrow::Cow::Owned(format!("…{}", scope.chars().skip(skip).collect::<String>()))
 }
 
 /// Compose the "Agent" column cell: the name (with instance suffix when
@@ -103,7 +126,7 @@ fn agent_column_cap(roster: &[&Agent], scopes: &[String]) -> usize {
 fn render_agent_label(agent: &Agent, scope: &str, caps: agent_theme::ColorDepth, painter: &Painter) -> String {
     let id = Identity::for_cwd(&agent.cwd, caps);
     let nick = ansi::wrap(&agent.name, &id.palette, id.style, painter);
-    let dim_scope = painter.paint(agent_theme::Role::Muted, format!("({scope})"));
+    let dim_scope = painter.paint(agent_theme::Role::Muted, format!("({})", fit_scope(&agent.name, scope)));
     format!("{nick} {dim_scope}")
 }
 
@@ -161,5 +184,19 @@ mod tests {
         );
         let roster: Vec<&Agent> = agents.iter().collect();
         assert_eq!(agent_column_cap(&roster, &peers::scopes(&roster)), got[0].len());
+    }
+
+    #[test]
+    fn a_long_extended_label_is_shortened_from_the_left_to_the_column_max() {
+        let agents = [
+            agent("aaaaaaaa-1111", "/x/a-very-long-client-folder-name-indeed/app", "Clelia-alpha"),
+            agent("bbbbbbbb-2222", "/y/a-very-long-client-folder-name-indeed/app", "Clelia-alpha"),
+        ];
+        let got = labels(&agents);
+        assert_eq!(got[0], "Clelia-alpha (…-folder-name-indeed/app aaaaaaaa)");
+        assert_eq!(got[1], "Clelia-alpha (…-folder-name-indeed/app bbbbbbbb)");
+        assert!(got.iter().all(|l| l.chars().count() == AGENT_COLUMN_MAX));
+        let roster: Vec<&Agent> = agents.iter().collect();
+        assert_eq!(agent_column_cap(&roster, &peers::scopes(&roster)), AGENT_COLUMN_MAX);
     }
 }
