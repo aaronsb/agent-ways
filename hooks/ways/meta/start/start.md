@@ -1,6 +1,6 @@
 ---
-description: Recognize the beginning of a working session and route to the /start skill — orient to where work was left off, run a structured interview on a greenfield repo, check the context gauge to confirm it really is session-start, then recommend planning with context already warm.
-vocabulary: start begin open session kick off pick up where we left off resume orient greenfield new project fresh start what were we doing catch up state of play onboard warm context ready to work get going first thing slate toggles
+description: Recognize the beginning of a working session and route to the /start skill — orient to where work was left off, run a structured interview on a greenfield repo, check the context gauge to confirm it really is session-start, then recommend planning with context already warm. Reorienting is read-only. Report where we left things, what state the repo is in, and what was committed to but not finished.
+vocabulary: start begin open session kick off pick up where we left off resume orient greenfield new project fresh start what were we doing catch up state of play onboard warm context ready to work get going first thing slate toggles reorient read-only branch commits ahead behind
 pattern: /start\b|let'?s (get )?start|pick(ing)? up where|where (we|i) left off|start(ing)? (the |a )?(session|work|fresh)|new (work )?session|what were we (doing|working on)
 refire: 0.15
 scope: agent
@@ -22,6 +22,17 @@ Three things go wrong when the open is done by feel:
 - **Greenfield gets no interview.** With nothing to pick up, the temptation is to invent a plausible-looking task. The skill runs a *structured interview* instead — the referent of "let's start" is itself the uncertainty; name it, don't hunt for it.
 - **Planning starts cold.** The skill gathers state *first*, so when it recommends planning the context is already warm — plan mode inherits an oriented situation, not a blank page. That's the whole reason the order is start-then-plan.
 
+## Reorientation is read-only
+
+Whether or not the skill runs, rebuilding context changes nothing. Edit, create, and commit nothing until the user asks for a change. If you spot a fix while summarizing, note it and ask after the report.
+
+- **Confirm the context.** Check the working directory, `git remote -v`, and the active cloud and GitHub accounts. Users with many similar repos and accounts hit a mismatch often. If the request seems to belong to another repo or account, say so before writing code.
+- **Read the state.** Report the branch, the last several commits with dates, `git status`, and ahead or behind after a `git fetch`. Read plan files, the task list, open issues, and the prior session transcripts for this directory if the harness keeps them.
+- **Check doc freshness.** Compare the last commit date of the project instructions, README, and any relevant skill file against recent code commits. Flag a doc that lags a change it describes and offer to update it. See freshness(softwaredev).
+- **Report briefly.** Give branch, recent commits, sync status, and where the work stands. For a next-steps request, list only items committed to but not finished, open questions, and risks. Do not pad it with generic next steps.
+
+When the user asks for something they did or wrote before ("find the exact prompt I used"), search the session history and local files and return the verbatim original with its source and date. Do not reconstruct an approximation when the original can be found. A recap covers the original prompt (quoted), what was tried, what worked, and the lessons. Keep it in chat.
+
 ## The gauge guard
 
 Starting is a beginning-of-session act. If the context gauge shows the session is already half or three-quarters spent, `start` **dissuades** rather than pretends — opening fresh work deep into a used window strands it against the next compaction. The right move there is usually `wrap` (close and hand off) or `/clear` and a fresh window, not `start`.
@@ -36,4 +47,5 @@ Like `wrap` and `/compact`, `start` **cannot** invoke plan mode for you — Clau
 - wrap(meta) — the closing bookend; same gauge, opposite pole.
 - develop(meta) — once oriented, the loop `start` opens into.
 - delivery/issues(softwaredev) — the GitHub issues the session task list mirrors (ADR-180); the continuity check leans on them.
+- freshness(softwaredev) — docs that lag the code they describe.
 - context-status (skill) — the gauge `start` reads to decide it's really session-start.
