@@ -29,6 +29,7 @@ Children of this way split into the **model** that types the corpus and the
 | Model | The type-checker — `doclint`, the invariant set, the coverage matrix | `linting` *(forthcoming)* |
 | Model | Projecting the graph for human readers — folders, nav, mkdocs, Obsidian | `serialization` *(forthcoming)* |
 | Craft | The front door | `readme` |
+| Craft | Agent instruction files (CLAUDE.md, AGENTS.md) | `instruction-files` |
 | Craft | Reference for HTTP/REST surfaces | `api` |
 | Craft | Code-level docs (docstrings, JSDoc, rustdoc) | `docstrings` |
 | Craft | Structural diagrams | `mermaid` |
@@ -49,6 +50,7 @@ names the shape so the corpus has somewhere to grow into.
 
 - adr(documentation) — decision records as nodes in the graph
 - readme(documentation) — README as the front door
+- instruction-files(documentation) — CLAUDE.md and AGENTS.md hubs for agents
 - standards(documentation) — documentation house norms
 - mermaid(documentation) — structural diagrams
 - validate(documentation) — a fresh agent given only the entry point grades the docs; a wrong answer is a docs defect
