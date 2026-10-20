@@ -19,8 +19,25 @@ When preparing for a meeting:
 4. **Previous occurrence** — if recurring, pull the last meeting's recap, action items, and transcript.
 5. **Shared documents** — check file storage for recently shared or edited docs related to the topic.
 6. **Open tasks** — surface commitments related to this meeting's attendees, client, or project.
+7. **Business records** — the CRM account and open deals, and any wiki or project pages tied to the topic.
+8. **The attendees themselves** — look up each person on the web and in internal records, so the user knows their role and history.
+9. **Commitments in the record** — promises made in email, chat, or past transcripts that this meeting may test.
 
-Present as a concise prep brief: who's attending, what's been discussed, what's open, what to bring up.
+For the previous occurrence, read the transcript, not the AI summary. Summaries drop the exact words and who said them.
+
+### Brief structure
+
+Give every meeting the same headings in the same order. A fixed shape lets the user scan it on short notice.
+
+1. Who will be there
+2. Why I am invited
+3. Agenda
+4. What is unclear
+5. What is clear
+6. Questions I need answered
+7. Questions I should be prepared to answer
+
+Keep each section short. When you cannot see some context, such as a private side thread, say so and ask. Prep is read-only. Send no RSVPs or messages while preparing.
 
 ## Weekly Review
 
@@ -38,3 +55,9 @@ Comprehensive end-of-week synthesis:
 | Suggested actions | Cleanup, follow-ups, preparation for next week |
 
 Synthesize into a document if the user requests it.
+
+## See Also
+
+- calendar(ea) — reading the event and shared meeting history
+- comms/recap(ea) — transcripts of the previous occurrence
+- comms(ea) — the meeting's group chat
