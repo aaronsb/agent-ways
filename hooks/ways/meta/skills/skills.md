@@ -1,6 +1,6 @@
 ---
-description: How we write Claude Code skills in this repo — skill naming and scope conventions, the global-scope caveat, and choosing a skill as the authoring surface for a procedure; defers SKILL.md mechanics to the official docs
-vocabulary: skill slash command SKILL.md create author write invoke user-invocable plugin convention scope global hyphenated location-independent canonical self-contained procedures
+description: How we write Claude Code skills in this repo — skill naming and scope conventions, the global-scope caveat, and choosing a skill as the authoring surface for a procedure; measuring whether a skill or plugin changes behaviour with runs with and without it and with claude plugin eval; defers SKILL.md mechanics to the official docs
+vocabulary: skill slash command SKILL.md create author write invoke user-invocable plugin convention scope global hyphenated location-independent canonical self-contained procedures skill eval plugin eval with and without the skill does the skill help fresh session judge-model threshold max-cost-usd model update
 pattern: SKILL\.md|skill.?(creation|author|write)|claude.?code.?skill|~\/\.claude\/skills
 scope: agent, subagent
 refire: 0.15
@@ -51,6 +51,15 @@ A skill is picked up at Claude Code startup — there's no corpus rebuild (that'
 
 - Confirm `name` matches the directory and the frontmatter parses.
 - **Restart Claude Code**, then ask "what skills are available?" and trigger it with a realistic phrasing to confirm the description fires when it should — and doesn't fire on the near-miss requests you wrote it to avoid.
+
+Firing is half the check. The other half is whether the skill changes what gets done:
+
+- Run representative tasks with the skill absent first, and record the failures. Build at least three scenarios from them. Write only enough skill to pass, and keep a rule only if removing it causes mistakes.
+- A fresh session with the skill runs each scenario. Watch which files it reads and which rules it ignores. Run the same cases without the skill (evaluative/ablation). A case that passes both ways did not pass because of the skill.
+- When the skill encodes someone's judgment, that person is the expert. An agent may propose labels and failure notes, and the person confirms them before they become cases.
+- Test on each model the skill will run with, and rerun after each model update. If the base model passes without the skill, the skill may no longer be needed.
+- For a plugin, `claude plugin eval init` drafts cases and `claude plugin eval <path>` runs them beside a no-plugin baseline arm. Set `--threshold`, `--runs`, `--judge-model`, and `--max-cost-usd` explicitly, because the defaults are a threshold of 1.0 and a small judge model. Use `--ablation none` while tuning graders. A near-zero effect with a failing `tool_used` check usually means the description does not trigger.
+- Check what loads in a plugin eval run. Hook-injected guidance from outside the plugin may not load, so test it with headless `claude -p` runs in a fresh session.
 
 ## See Also
 
