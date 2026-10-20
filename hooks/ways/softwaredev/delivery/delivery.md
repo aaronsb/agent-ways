@@ -15,6 +15,7 @@ Children of this way cover the journey from local changes to production:
 |-------|-----|
 | Commits, messages | `delivery/commits` |
 | PRs, issues, review, merge strategy | `delivery/github` |
+| Jira tickets, Confluence pages, client backlogs | `delivery/atlassian` |
 | Landing an increment — review gate → merge → cleanup | `delivery/merge` |
 | Releases, tagging, publishing | `delivery/release` |
 | Patch creation | `delivery/patches` |

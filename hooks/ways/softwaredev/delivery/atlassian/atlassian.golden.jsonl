@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"close out these jira tickets with a comment linking the confluence pages we wrote"}
+{"kind":"situational","prompt":"the confluence page i pushed through the connector shows raw markdown instead of real formatting, fix it and republish it under the project parent page"}
