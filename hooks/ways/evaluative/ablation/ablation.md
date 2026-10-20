@@ -1,6 +1,6 @@
 ---
-description: an ablation evaluative loop for a change to what an agent is given, such as a rewritten system prompt, new instructions, a new tool or trimmed guidance, that seems better but hasn't been measured; compare arms with and without it, graded blind by an independent judge, with a positive control that the change engaged
-vocabulary: rewrote the system prompt changed the instructions reworded the prompt added a tool trimmed the guidance seems smarter now feels better before and after did it actually help with and without ablation ablate arms baseline arm treatment arm blind judge shuffled order strip the injected text positive control remove-one leave-one-out attribute the effect noise floor three way comparison trials graders run-to-run anecdotal scenario
+description: an ablation evaluative loop for a change to what an agent is given, such as a rewritten system prompt, new instructions, a new tool or trimmed guidance, that seems better but hasn't been measured; compare arms with and without it, graded blind by an independent judge, with a positive control that the change engaged; hill-climbing one change per round with keep or revert, stop limits, a read-only harness, and a small regression suite gating changes in CI
+vocabulary: rewrote the system prompt changed the instructions reworded the prompt added a tool trimmed the guidance seems smarter now feels better before and after did it actually help with and without ablation ablate arms baseline arm treatment arm blind judge shuffled order strip the injected text positive control remove-one leave-one-out attribute the effect noise floor three way comparison trials graders run-to-run anecdotal scenario hill climb hillclimb one change per round keep or revert iterate on the prompt stop condition stagnation cost cap max rounds self-grading regression suite ci gate eval threshold model release
 scope: agent, subagent
 refire: 0.15
 ---
@@ -38,6 +38,41 @@ When the treatment bundles several pieces, an arm with everything except one pie
 Run several trials per arm and scenario. Report trial counts, the model and version, and the resources each arm ran with. A difference smaller than the run-to-run spread between two identical arms is no finding; measure that spread once by running the baseline against itself.
 
 Cost scales as scenarios × arms × trials. The loop runs locally and on demand when a context change is worth measuring, never on every merge.
+
+## Iterate one change per round
+
+When a change is tuned over several rounds, each round is one ablation against the last kept state.
+
+1. Run the eval and store the baseline.
+2. Make one change: a prompt section, a tool description, the model, the effort level, or one rule.
+3. Rerun the same scenarios.
+4. Keep the change if the paired difference clears the run-to-run spread. Otherwise revert to the last kept state.
+5. Log the round with the version, score, cost, tokens, status (keep, discard, or crash), and one line on what changed.
+6. Read the failing transcripts before the next change.
+
+Keep the loop's state in files on disk. The model keeps nothing between runs.
+
+When scores tie, the simpler version wins. Reject a tiny gain that adds complexity, and keep a change that removes material and holds the score. Add an evaluator step or more agents only when an arm shows a gain. Include a simple baseline arm, such as one model retried several times. On published coding benchmarks, simple baselines have matched elaborate agent designs at a fraction of the cost.
+
+## Guard the loop
+
+- The optimizing agent edits only the target. Scenarios, graders, answer keys, and the harness stay read-only. A grader fix is its own round, with its own selftest.
+- Tune on dev scenarios, and report the final number only on a held-out set (`evaluative/held-out`).
+- The agent that made the change does not grade it. Use a fresh-context reviewer or a stop-hook script. Tell a reviewer to flag only gaps that affect correctness or the stated requirements.
+- Every loop has a pass condition a script can check, a stagnation breaker (such as stopping after three rounds that repeat the same states or errors), a cost cap, and a maximum round count.
+- Never loop on a subjective goal such as "improve the experience". A person reads what the loop kept before it ships.
+
+## The regression gate
+
+A separate small suite, mostly deterministic, gates every prompt, model, or pipeline change in CI. Set its pass threshold explicitly against the production baseline. Some eval tools default to 1.0, which fails any imperfect case. Gate a user-facing agent on pass^k, and attach the results to the pull request. Add each new production failure to the suite, and rerun the full suite on each new model release before switching. Run expensive judges on sampled live traffic instead of in CI. Offline evals catch only part of what breaks, so pair them with production monitoring, user feedback, and transcript review.
+
+## Common rationalizations
+
+| Rationalization | Counter |
+|---|---|
+| "It passes, so the change worked." | Run the baseline arm. It may pass too. |
+| "One more round will get it." | Check the stagnation breaker and the cost cap. |
+| "Fixing the grader is faster than fixing the prompt." | The loop never edits the harness. Fix graders in their own round. |
 
 ## See Also
 
