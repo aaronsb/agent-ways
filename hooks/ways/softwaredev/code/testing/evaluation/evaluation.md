@@ -53,6 +53,7 @@ Report each evaluation with three facts: the command that ran, how many times, a
 ## See Also
 
 - code/testing/evaluation/screens(softwaredev) — child: the visual loop for terminal screens
+- code/testing/evaluation/handoff(softwaredev) — child: running, rendering, and opening the work before the user tests it
 - code/testing/gates(softwaredev) — plant the defect so a gate is seen red; read state through the client's path
 - code/testing/gates/assertions(softwaredev) — golden baselines and the enumerated-delta review
 - environment/recovery(softwaredev) — classifying a flaky failure and the evidence that confirms an intermittent fix

@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"close the loop before you hand this off: run it yourself, check the rendered output, then open it for me and tell me what to test"}
+{"kind":"situational","prompt":"i finished the report generator and the build passes, should I just tell the user it's done and ask them to try it?"}
