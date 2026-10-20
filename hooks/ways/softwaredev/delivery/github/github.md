@@ -1,6 +1,6 @@
 ---
-description: GitHub pull requests, issues, review comments, CI checks
-vocabulary: github pull request pull requests pr prs issue issues fork upstream label labels milestone branch protection codeowners gh cli review comments ci checks squash rebase badges shields.io post-merge boards
+description: GitHub pull requests, issues, review comments, CI checks, the issue loop from opening to closing with a commit link, triaging open issues by critical path, the commit-push-PR-merge chain, and reviewing a teammate's PR for substance rather than nits
+vocabulary: github pull request pull requests pr prs issue issues fork upstream label labels milestone branch protection codeowners gh cli review comments ci checks squash rebase badges shields.io post-merge boards park resume triage critical path dependency graph orphans clusters runner-up close issue commit link teammate nits contribute upstream one fix per pr trade-off not in scope
 pattern: github|\bgh (pr|issue)\b|issue #?\d+|github issues?|pull.?requests?|\bprs?\b|review.?(pr|comment)|merge.?request
 commands: ^gh\ |^gh$
 refire: 0.15
@@ -31,11 +31,34 @@ When the user says "merge it" without a strategy, ask: regular merge or squash?
 
 ## Post-Merge Cleanup
 
-After every merge: `git checkout main && git pull && git fetch --prune`, then `git branch -d <branch>`.
+After every merge: `git checkout main && git pull && git fetch --prune`, then `git branch -d <branch>`. When a workflow runs on main (CI, Pages, a deploy), confirm it finished green before calling the work landed.
+
+## One Request, One Chain
+
+"Commit, push, PR, and merge" is one request. Pull the latest main, branch, commit, `git push -u`, `gh pr create`, review per `delivery/merge`, fix or decline each finding, merge, then clean up. Skip the PR only when the user says to merge directly. Self-approve only where the repository codifies it. Use an admin override only when branch protection requires it and the user asked.
 
 ## Repo Health
 
 The macro checks repository configuration (README, license, templates, branch protection, badges) and reports gaps. Offer to fix the items the user has rights to. Note the ones needing admin access without pushing. When badges are missing, suggest shields.io badges under the README title.
+
+## The Issue Loop
+
+- Feature work starts from an issue. Open one when none exists.
+- When parking an idea, file the issue before any build. Give enough context, files, and decisions to resume from the issue alone. Describe the need, and propose no solution unless asked.
+- Record later decisions, such as which variant shipped, as comments. Leave the body as filed, and leave the issue open while discussion is pending.
+- Close with a comment that says what was done and links the commit. Act with the account that owns the repository.
+
+## Triage
+
+When asked to triage all open issues, pull every one. Write "Issue landscape (as of <date>)", then a dependency graph: the critical path, clusters, items blocked from outside, and orphans. Recommend one issue with numbered reasons it beats the rest, and name a runner-up. Plan only the pick.
+
+## Reviewing Someone Else's PR
+
+Flag contradictions with the repository's purpose, style, or other content. Flag false statements and decisions that belong to the group. Skip wording nits and prescribed rewrites. Open with what you verified, phrase doubts as questions, and leave fixes to the author.
+
+## Contributing Upstream
+
+One fix per PR. The body carries Summary, Why, Trade-off, Test plan, and Not in scope. The title matches the commit subject. When the user names a reviewer, request their review.
 
 ## Keep It Light
 
@@ -47,3 +70,4 @@ Issues for requirements and bugs, a basic label set, no project boards or milest
 - delivery/merge(softwaredev) — the review-gate decision and landing an increment
 - delivery/issues(softwaredev) — issues mirrored into the session task list
 - adr(documentation) — reference ADRs in PR descriptions
+- delivery/groundwork/sequence(softwaredev) — ordering a queue of issues and PRs so verification lands first
