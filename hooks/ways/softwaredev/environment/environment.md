@@ -21,6 +21,7 @@ Children of this way cover the development environment:
 | Awareness / attend loop | `environment/attend` |
 | Recovering from a failed attempt | `environment/recovery` |
 | Long, interactive, or never-returning commands | `environment/bounded-execution` |
+| Batches of paid generation or API jobs | `environment/batch-runs` |
 
 ## See Also
 
@@ -34,3 +35,4 @@ Children of this way cover the development environment:
 - environment/attend(softwaredev) — the attend awareness sensor loop
 - environment/recovery(softwaredev) — classify a failure, take its one allowed move, escalate after three attempts
 - environment/bounded-execution(softwaredev) — background the never-returning command, flag the interactive one, kill by pid
+- environment/batch-runs(softwaredev) — launch the exact job spec, report each job, rerun on request, classify failures

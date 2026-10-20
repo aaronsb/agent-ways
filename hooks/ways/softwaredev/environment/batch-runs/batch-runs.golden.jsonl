@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"run prompt.txt against images 2a-d, 3x each, and report the path, seed, and cost for every job"}
+{"kind":"situational","prompt":"just topped up the credits on the video api, rerun the jobs that got blocked on billing"}
