@@ -17,6 +17,7 @@ Be concrete and concise:
 - What's still in progress or remaining
 - Key decisions made and their rationale
 - Anything you're uncertain about
+- Background jobs, monitors, and dev servers still running, and whether each survives compaction or a reboot. Stop stray shells and stalled loops now.
 
 ## Step 2: Ask the User
 
@@ -29,6 +30,8 @@ Present your summary, then use `AskUserQuestion` to check in:
 - Options based on the active work: which threads matter most going forward
 
 Keep it to 1-2 focused questions. The goal is calibration, not a survey.
+
+On an unattended run, ask nothing. Write the state, label each assumption "override if wrong", and keep working.
 
 Frame this as a collaboration checkpoint, not a limitation apology. Something like:
 
@@ -43,7 +46,17 @@ After the user responds, combine your summary with their steering into a checkpo
 3. Include the user's priorities and direction — their words, not your paraphrase
 4. **Produce a copy-pastable continuance prompt** — a short block the user can paste into a *fresh* session if this one ends: the goal/intent, what's landed, the immediate next step, and the key files/branches in play. When several tasks remain, add the working mode from the `/wrap` skill: the main session steers, subagents carry implementation and review, and each branch gets its own worktree. Compaction keeps the session alive; a continuance prompt is the handoff that survives even a hard reset.
 
-## Step 4: Offer Directed Compaction
+Save the state in repo artifacts, not in memory. Update the plan file, a decision log, or a README progress table where the project keeps them. Personal working notes, such as your own facilitator notes, go in a gitignored file unless the user asks to share them. Park unfinished ideas as resumable issues. A provisional or risky change (a stopgap config, an open incident) gets a short dated note in the project instructions: what was done, why, and what comes next.
+
+Before you write a memory entry, run the surprise test and routing table in memory(meta).
+
+## Step 4: Report What Is Uncommitted
+
+List the uncommitted files with a proposed commit split, and name any file you are holding back on purpose. Commit only if the user asked, and push only if they named the push. End with one plain line on what is uncommitted, any follow-ups the user owns, and the single most useful next step.
+
+On a fast exit ("I have to leave now"), skip the cleanup. Let the current step finish, write the state to disk, and hand over the continuance prompt.
+
+## Step 5: Offer Directed Compaction
 
 After writing the synthesis, offer to compact now:
 
