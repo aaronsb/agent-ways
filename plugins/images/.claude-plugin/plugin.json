@@ -1,0 +1,34 @@
+{
+  "name": "images",
+  "version": "0.1.0",
+  "description": "Draws images inline in the terminal transcript: pixels where Claude Code draws kitty graphics, half-block cells elsewhere.",
+  "author": {
+    "name": "Aaron Bockelie"
+  },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "renderer": {
+      "type": "string",
+      "title": "Renderer",
+      "description": "auto: pixels where Claude Code draws kitty graphics, half-blocks elsewhere. image: always the kitty Image. halfblock: always half-block cells.",
+      "options": [
+        "auto",
+        "image",
+        "halfblock"
+      ],
+      "default": "auto"
+    },
+    "showPathsInReplies": {
+      "type": "boolean",
+      "title": "Show paths in replies",
+      "description": "Draw an image a reply names by a bare absolute or ~/ path, not only as a markdown image.",
+      "default": true
+    },
+    "steerToSendUserFile": {
+      "type": "boolean",
+      "title": "Steer to SendUserFile",
+      "description": "Add a short system-prompt section, in the terminal only, telling Claude this terminal draws images and that SendUserFile is how to show one when asked.",
+      "default": true
+    }
+  }
+}
