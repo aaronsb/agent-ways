@@ -1,6 +1,6 @@
 ---
-description: an agent-eval evaluative loop for a multi-turn, tool-using agent that only succeeds some of the time; measure how often over repeated isolated trials, grading the end state it leaves and its transcript, with reference solutions, code graders first and calibrated model graders, pass@k or pass^k
-vocabulary: agent sometimes finishes the ticket sometimes wanders off how often succeeds three out of five agent eval agent evals eval suite trial trials grader graders code grader model grader human grader llm judge grader calibration transcript transcripts end state graded reference solution pass@k pass^k capability eval regression eval saturated saturation graduate reward hacking grader loophole broken task benchmark infrastructure noise llm-as-judge graduation outcome code-based
+description: an agent-eval evaluative loop for a multi-turn, tool-using agent that only succeeds some of the time; measure how often over repeated isolated trials, grading the end state it leaves and its transcript, with reference solutions, code graders first and calibrated model graders kept out of the agent's reach, pass@k or pass^k
+vocabulary: agent sometimes finishes the ticket sometimes wanders off how often succeeds three out of five agent eval agent evals eval suite trial trials grader graders code grader model grader human grader llm judge grader calibration transcript transcripts end state graded reference solution pass@k pass^k capability eval regression eval saturated saturation graduate reward hacking grader loophole broken task benchmark infrastructure noise llm-as-judge graduation outcome code-based fail-to-pass pass-to-pass tampered tests
 scope: agent, subagent
 refire: 0.15
 ---
@@ -29,11 +29,16 @@ Record with each trial run the model and version under test and the resource con
 
 ## Graders, in order of preference
 
-- **Code graders** wherever the criterion can be checked deterministically: reproducible and fast, but brittle to valid variation. This corpus's practice is to compare numbers with a tolerance and normalise formatting, so a correct answer is not rejected for a spurious difference.
+- **Code graders** wherever the criterion can be checked deterministically: reproducible and fast, but brittle to valid variation. This corpus's practice is to compare numbers with a tolerance and normalise formatting, so a correct answer is not rejected for a spurious difference. Many failures that look subjective yield to a keyword check or a regex, so try code before a judge. For a coding task, keep two test lists: FAIL_TO_PASS tests must start passing, and PASS_TO_PASS tests must keep passing. Run both in a pinned container.
 - **Model graders** where judgement is needed. Give each a clear rubric and one dimension to judge, let it reason before it scores, and let it answer "unknown". Allow partial credit on tasks with multiple components. Prefer a different model from the one being evaluated. Calibrate it against human grades on a sample before trusting it at scale.
 - **Human grading** is the reference for calibrating model graders, too slow and costly for every trial.
 
 Make graders hard to game: passing should require solving the task, not exploiting a loophole in how it is checked. Test both sides: cases where a behaviour should happen and cases where it should not.
+
+- **Keep the graders out of reach.** Assume the agent will exploit any grader it can see. Scoring code, reference answers, and test files sit where the agent cannot read or edit them. Check transcripts for edited tests, stubbed graders, and opened answer files.
+- **Partial credit is explicit.** Split each reference answer into fixed key points, grade each as present, partial, or absent, and state the pass rule, such as coverage of at least 0.6.
+- **A composite passes only when every part passes.** A grader that throws an error counts as a fail and records why.
+- **Generic metrics do not gate.** BLEU, perplexity, and similar off-the-shelf scores say little about the task. Similarity metrics still help for retrieval.
 
 ## Repeat trials, and pick the statistic
 
