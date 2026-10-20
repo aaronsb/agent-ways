@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"write a read-only helper cli for the skill so agents stop hand-rolling curl against the api"}
+{"kind":"situational","prompt":"the skill tells agents to paste curl snippets for the finance api, replace that with a script they can call by full path"}
