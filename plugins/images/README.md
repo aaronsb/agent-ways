@@ -44,21 +44,14 @@ The mod keeps resized pictures, and pasted or Read images written as data URI fi
 
 ## Install
 
-The mod lives in the dotfiles store, in the `dotfiles` marketplace at `claude/mods` (deployed as `~/.local/share/claude-mods`). Register the marketplace once per host, then install:
+The mod lives in the dotfiles store, in the `dotfiles` marketplace at `claude/mods` (deployed as `~/.local/share/claude-mods`). `dotfiles deploy` declares that marketplace in `~/.claude/settings.json` (`extraKnownMarketplaces`) and enables `images@dotfiles`; the next Claude Code session loads the mod from the folder, with no install step. `claude plugin list` shows it once a session has recorded the marketplace. To register it for the CLI before then:
 
 ```bash
 claude plugin marketplace add ~/.local/share/claude-mods
+claude plugin install images@dotfiles
 ```
 
-```text
-/plugin install images@dotfiles
-```
-
-`claude plugin install images@dotfiles` does the same from a shell.
-
-## Known issues
-
-- **Over ssh, a picture scrolled out of view stays blank when it comes back.** Claude Code frees an `Image`'s pixels when its row leaves the view, and a bytes source cannot be marked new, so nothing is sent again. Locally the mod draws from a file and raises its `generation`; over ssh the terminal cannot read that file, so the mod sends the bytes and has no way to resend them.
+or, in a session, `/plugin install images@dotfiles`.
 
 ## Smoke test
 
