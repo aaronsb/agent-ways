@@ -26,9 +26,11 @@ The deeper children below are for the bottom two rows. If someone says "let's ju
 | Schema design & modeling | `data/modeling` *(forthcoming)* |
 | Migrations — numbering, idempotency, consolidation | `data/migrations` |
 | Schema docs & ER diagrams | `data/schema-docs` |
+| Reporting numbers from a CRM or system of record | `data/crm-reporting` |
 
 ## See Also
 
 - architecture/design(softwaredev) — where a store fits in the broader system design
 - data/migrations(data) — the migration discipline, once you have a server DB
 - data/schema-docs(data) — generating schema reference and diagrams
+- data/crm-reporting(data) — reporting pipeline, bookings, and win rate from a CRM
