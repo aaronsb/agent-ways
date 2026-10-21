@@ -1,0 +1,216 @@
+---
+contract: adr/v1
+kind: decision
+verb: change
+capability:
+  - loop
+  - disclosure
+  - authoring
+basis:
+  - operator: aaronsb
+    level: guided
+    said: "our adr could introduce a new type of macro that returns its result in the next turn"
+    via: chat, relayed verbatim by the coordinating session, 2026-10-21
+  - operator: aaronsb
+    level: guided
+    said: "I think we should use a formula of time against turns to provide a max allows relevancy. if it exceeds that, our 'finally' is a message that says the x macro failed to return in time or turns and it's results are in y (in tmp)"
+    via: chat, relayed verbatim by the coordinating session, 2026-10-21
+  - operator: aaronsb
+    level: guided
+    said: "the finally phase of it should indicate that it's abnormal for that to happen and to investigate if reasonable"
+    via: chat, relayed verbatim by the coordinating session, 2026-10-21, on the line that replaces a result past its relevance budget
+  - operator: aaronsb
+    level: guided
+    said: "it's a stats of awareness"
+    via: chat, relayed verbatim by the coordinating session, 2026-10-21, on the review-request line
+  - operator: aaronsb
+    level: guided
+    said: "or something like that"
+    via: chat, relayed verbatim by the coordinating session, 2026-10-21, on the exact wording of the review-request line
+  - evidence: "`gh search prs --review-requested=@me --state=open` returned 30 rows with duplicates and no --limit; with --limit 200 and deduplication by repo#number it returned 75. Each run took 4.9 to 6.9 s"
+  - evidence: "a way macro runs under MACRO_DEADLINE, 3 s (tools/ways-cli/src/cmd/show/helpers.rs:164); a macro still running then is killed with its process group and its output is discarded"
+  - evidence: "six places decide solo versus team with different rules: delivery/github/macro.sh:84-86 and :122-131, docs/hooks-and-ways/macros.md:54-58, skills/merge/SKILL.md:33-37, commands/project-init.md:51, agents/code-reviewer.md:161-165, and supplychain/automation, which names solo with no detection"
+  - evidence: "in praecipio/anthropic-partnership the operator authored 19 of the last 21 PRs, which every current rule reads as solo, while CODEOWNERS gives /docs/ and /cert-prep/ four owners and PR #32, by another author, requests four reviewers"
+  - evidence: "attend's script sensors can drop a line after the script advanced its own marker: absolute and relative refractory (tools/sensor-trait/src/lib.rs:317-338), the lapsed-cache reset (tools/attend/src/cmd/run/tick.rs:406-413), and a slot magnitude under 3.0 emitted as low priority to stderr only (tick.rs:497-503, tools/attend/src/emit/mod.rs:16-27). The attend mod's hooks (plugins/attend/hooks/lib.ts) run no sensors"
+  - upstream: "GitHub REST, create a review for a pull request: a review created without `event` stays PENDING and is visible only to its author until submitted"
+  - upstream: "GitHub GraphQL `resolveReviewThread` and `addPullRequestReviewThreadReply` mutations"
+  - precedent: ADR-137
+  - precedent: ADR-004
+  - precedent: ADR-180
+  - precedent: ADR-604
+agent:
+  name: claude
+  model: claude-opus-5-5
+status: proposed
+date: 2026-10-21
+deciders:
+  - aaronsb
+amends: [ADR-004#execution-model]
+considered:
+  - operator: aaronsb
+    said: "sort of like how I can que up messages to send to you and they're relevant and you might get them after you've gotten other context but it still makes sense because the turn that it ran in was nearby"
+    via: chat, relayed verbatim by the coordinating session, 2026-10-21, answering whether a deferred result arrives on the next hook even when unrelated
+    covers: [next-hook]
+related:
+  - ADR-004
+  - ADR-137
+  - ADR-180
+  - ADR-403
+  - ADR-604
+observable:
+  - "A way declaring `macro_defer:` renders at once under the 3 s path, and its macro's result arrives at the next prompt or tool call with a header naming the way, its trigger and its age. A 6 s `gh search` logs no macro_timeout event."
+  - "A deferred result collected past its relevance budget arrives as one line naming the way, the bound it missed, that the miss is abnormal, and the result's path; the file is at that path and the session log holds a deferred_budget_missed event."
+  - "The review-request line at session start in this repository counts the top repo and the llama.cpp submodule (ggml-org/llama.cpp) as this project."
+  - "The contributor classifier run on praecipio/anthropic-partnership for a change under /docs/ reports team, decided by CODEOWNERS."
+---
+
+# ADR-606: Deferred macros, and the PR awareness, contributor classifier and PR feedback way built on them
+
+## Summary
+
+- **Decided:** Ways gain a deferred macro. A way that declares `macro_defer:` starts its macro detached when it fires, renders at once with the last cached result, and the finished result reaches the agent at its next hook event, once, with a header saying which way ran it, what fired it and how long ago. A result past a relevance budget that combines elapsed time and elapsed turns is replaced by one line saying the miss is abnormal, naming the file holding the result, and telling the agent to investigate when it bears on the work. The first consumer is a session-start line of review-request counts. On the same base: one contributor classifier answers solo or team per repository, per PR and per path, replacing six divergent rules; and a PR feedback way runs review findings to closure in three modes, author alone, author with other reviewers, and reviewer, with the PR as the ledger.
+- **Trades away:** A slow macro's result arrives a turn or more late and can land beside unrelated context. The engine gains detached processes, a results directory and a collector on two hooks. Nothing wakes an idle session when a new review request appears. Reviewer-mode output waits on the operator to submit it.
+- **One-way?** No. Reversible now; expensive once ways outside this repository declare `macro_defer:`, since removing the field then breaks their frontmatter.
+- **Probes:** *Confident (next-hook):* a slow lookup's result reaches the agent with whatever comes next, a prompt or a tool call, even when that prompt is about something else, as long as it is recent; past that it becomes a one-line pointer to the file. *Not confident (codeowners-team):* a repository where you write nearly every PR still counts as a team repository for paths CODEOWNERS assigns to other people, so the agent stops for review before merging changes there and `/merge full-sail` is refused for them.
+- **Inversion:** An agent that sees GitHub only when asked, or one that keeps a standing watch over everything. This sits between: counts at session start and per-PR state when a PR is in hand, each fetched off the hook's critical path, with drill-down on request.
+
+## Context
+
+A way's macro runs inside the hook that disclosed the way, under a 3 s deadline that kills it and discards its output. Some context worth giving an agent costs more than that to fetch. A search for the operator's open review requests across GitHub took 4.9 to 6.9 s. ADR-137 rules out raising the deadline: unbounded work runs outside the cycle and leaves a prepared result the cycle reads.
+
+The operator asked for three things. Agents should know which pull requests concern the session: review requests addressed to the operator, and open PRs in the top repository and its git submodules. Agents should work a PR through a feedback loop like the evaluation loop (softwaredev/code/testing/evaluation), one that spans sessions and people. And there should be one answer to whether a repository or PR is solo or multi-contributor. Today six places answer that with different rules, and a repository whose PRs are almost all the operator's still has CODEOWNERS and reviewers naming four other people.
+
+The existing paths each fall short. The ways CLI cannot run a 6 s query in a macro. Attend sensors run only under `attend run` or Monitor, not under the attend mod; ADR-137 and the gh-monitor skill retired GitHub watching from attend sensors, although `tools/attend/examples/gh-notifications.sh` still ships as a script sensor; and the proposed command sensors of ADR-403 are unbuilt and lack delivery acknowledgement. A bespoke background refresher like gh-tasks (ADR-180) would work for this feature and would be the second such process, with the next slow macro needing a third.
+
+GitHub already records the state a PR loop needs: review threads and whether each is resolved, each review's commit, requested reviewers. Guidance for working that state is missing. No way covers inline comments, thread replies, resolving a thread, reading a returned review, re-requesting review, or waiting on CI with gh-monitor inside the merge flow.
+
+## Decision
+
+### 1. Deferred macros
+
+**Declaration.** A way declares `macro_defer: <ttl>`, for example `macro_defer: 10m`, beside the existing `macro: prepend|append`. `macro:` keeps meaning where macro output sits in the rendered way. `macro_defer:` makes the run deferred and sets how long a result is reused. A third `macro:` value would merge the two axes, and a deferred way still needs a position for its cached result. An engine that predates the field ignores it and runs the macro synchronously, where a slow macro times out as it does today. The schema (`hooks/ways/frontmatter-schema.yaml`, `display.macro`) gains the field, and `ways author lint` checks its duration.
+
+**Firing.** When the way fires, `render_way` reads the way's cached result for this session and agent:
+
+- Within the TTL, it renders the cached result with its age, `(as of 4 min ago)`, and starts nothing.
+- Older or absent, it starts the macro detached in its own process group and session, outside the 3 s deadline, and renders the way with the stale result marked with its age, or with no macro output.
+
+A detached run is bounded at 60 s. An overrun is killed with its process group, logged as `macro_timeout` with `deferred=true`, and reported through the collector as below. One run per way per session and agent is in flight at a time; a fire while one runs starts nothing. A failed run (non-zero exit, or empty output) holds the slot for the TTL, so a failing source is not retried at every fire.
+
+**Location.** Every deferred run writes its stdout to a file under the agent's state directory, `<ways sessions-root>/<session>/deferred/<way>/` for the main agent and `<ways sessions-root>/<session>/agents/<agent>/deferred/<way>/` for a subagent, keyed as disclosure markers are. The sessions root is `$XDG_RUNTIME_DIR/claude-sessions`, or `/tmp/.claude-sessions-<uid>` where that variable is unset, so the files sit in per-user temporary storage. Beside the output, a metadata file records the start time, the trigger (the lane and what matched: `session-start`, `commands: gh pr`, a prompt), the operator turn count at the fire, the exit status, and whether the result was delivered. The files are removed with the rest of the session's state when the session's state is cleared, and the runtime directory does not outlive the login.
+
+**Delivery.** The collector runs in the `ways hook` prompt lane (UserPromptSubmit) and post_tool lane (PostToolUse), whichever comes first after the run starts. For each undelivered run of the current agent it computes the relevance budget below and injects one of:
+
+- the result, under a header such as `[deferred: delivery/review/requests · fired by session-start · ran 40 s ago]`, when the run finished within budget;
+- `<way> macro failed (exit <n>) after <s>; its output is at <path>`, when it failed within budget;
+- `<way> macro did not return within <time>/<turns> turns, which is abnormal; its output is at <path>. Investigate if it bears on the current work.`, when the budget is spent, whether the run finished, is still running, or was killed at its bound. For a run still in flight the path is where its output will land. Investigating means reading that file and the `macro_timeout` or `deferred_budget_missed` record, and judging whether the bound or the macro is at fault.
+
+A spent budget is logged as a `deferred_budget_missed` event naming the way, the bound, and whether the run had finished, beside `macro_timeout`, so `ways` tooling can count how often it happens. Each run delivers once and is then marked delivered. A result that a refire of the same way renders inline is marked delivered there, so it does not arrive twice. A subagent's deferred result is collected by that subagent's PostToolUse and goes to it alone; a result its subagent never collects stays as that subagent's file and is not handed to the parent.
+
+**Relevance budget.** A result is relevant while
+
+```
+age / max_age + turns / max_turns ≤ 1
+```
+
+where `age` is wall time since the macro fired and `turns` is operator prompts since the fire. The sum spends one budget on both axes, so a result is dropped for a long idle, for a burst of prompts, or for a moderate amount of each, and the check is one number to test. Defaults: `max_age` 10 minutes, `max_turns` 3. A result collected 4 minutes and one prompt after its fire scores 0.4 + 0.33 and is delivered. A subagent has no operator prompts, so its budget is time alone. Both maxima are ways settings, `deferred_macro.max_age` and `deferred_macro.max_turns`. A per-way override is left out until a way needs one.
+
+**Amendment to ADR-004.** ADR-004's Execution Model section says a macro runs once per session with its output cached with the way marker, and that no timeout or output limit is enforced (ADR-004:104-106). Neither holds today: a macro runs at each fire under the 3 s deadline. This record amends that section: a macro runs synchronously under `MACRO_DEADLINE` unless its way declares `macro_defer:`, in which case it runs as above.
+
+### 2. PR awareness
+
+A way under `softwaredev/delivery/review/` with `trigger: session-start`, `macro: prepend` and `macro_defer: 10m` gives the session a line of counts. It orients the session; it is not a task list. The shape, wording flexible:
+
+```
+Review requests: 75 open · 0 for this project · 10 Dependabot. /reviews lists them.
+```
+
+- **open:** every open PR requesting the operator's review, deduplicated by repo#number, from `gh search prs --review-requested=@me --state=open --limit 200`.
+- **for this project:** those in the top repository or any git submodule, each resolved with `gh repo view` inside it, people only, with `(+N Dependabot)` when the project has Dependabot PRs.
+- **Dependabot:** PRs authored by `dependabot[bot]` or `app/dependabot` anywhere. Other bots stay in the open count for now.
+
+A second sentence may count open PRs in this project. The macro keeps its own cross-session cache of the search under `$XDG_CACHE_HOME/agent-ways/`, so sessions started together make one query.
+
+The `/reviews` skill is the drill-down: it lists requests grouped by repository, this project first, and opens a chosen PR in reviewer mode. Mirroring review requests or unresolved threads into the task list as ADR-180 mirrors issues is an option, separate from this line and not decided here.
+
+When a session works a PR, the review way's deferred macro reports what changed since the operator last looked: `#32: head moved bd862fd→3ad6dda since your last review`, with the compare range, and new comments and reviews since then. The last-reviewed head is the `commit_id` of the operator's latest review on the PR, so this needs no local ledger.
+
+### 3. One contributor classifier
+
+One script, `hooks/ways/softwaredev/delivery/github/gh-team`, answers solo/pair or team for a repository, a PR, or a set of paths, and names the signal that decided. A PR or path is team when any signal shows another person with a stake. Signals, in the order checked:
+
+1. CODEOWNERS (root, `.github/` or `docs/`) assigns a touched path to anyone other than the operator.
+2. The PR requests review from anyone other than the operator.
+3. The PR's author is not the operator.
+4. Three or more distinct human PR authors in the last 90 days.
+5. Three or more active commit authors in the last 90 days, across all branches, deduplicated by GitHub login where known and by email otherwise, bots excluded.
+
+Signals 1 to 3 apply per PR or path; 4 and 5 also apply per repository. The operator's login comes from `gh config get -h github.com user`, which reads local config, with `gh api user` as the fallback. Contributor counts use `--paginate`.
+
+The github way's macro, the merge skill (`/merge full-sail` stays limited to solo/pair), the code-reviewer agent (self-PR versus team PR), and `project-init` call the classifier instead of their own rules. The repository-level counts move into the github way's deferred macro. `docs/hooks-and-ways/macros.md` describes the classifier in place of its current rule.
+
+### 4. The PR feedback way
+
+A new way, `softwaredev/delivery/review/`, sits beside `delivery/merge`, not under it: reviewer mode never merges, and author mode with other reviewers runs across sessions before merging is in view. `delivery/merge` links to it for the step between review and landing.
+
+The three modes differ in who supplies findings and who can push:
+
+| Mode | Findings from | Output |
+|---|---|---|
+| Author, self-driven | the agent's own review subagent, in one session | fixes, then merge |
+| Author, others reviewing | other people's review threads, across sessions | one fix per thread; a thread reply with the evidence (command, run count, whether the failure reproduced before the fix, as code/testing/evaluation reports it); the thread resolved through `resolveReviewThread`; review re-requested |
+| Reviewer | the diff since the operator's last-reviewed head | a PENDING review with inline comments, which the operator edits and submits |
+
+The PR is the loop's ledger. Unresolved threads are open findings, and a session starting cold rebuilds the loop's state from GitHub. The way covers inline comments, thread replies, resolving threads, reading a returned review, re-requesting review, and waiting on CI with the gh-monitor skill's `ci` mode in the merge flow.
+
+Posting under the operator's account is outward-facing. In reviewer mode nothing posts under the operator's name until they submit: the review is created without `event`, and where the operator already has a pending review on the PR the way adds threads to it, since GitHub keeps one pending review per user per PR. In author mode, thread replies and resolutions follow the repository's norms and the operator's standing authorization.
+
+### 5. Requirements on ADR-403
+
+A later step may move PR awareness to an ADR-403 command sensor, which would wake an idle session on a new request. That needs what ADR-403 does not yet specify, recorded here as requirements on it:
+
+- **Delivery acknowledgement.** A script that advances its own marker must learn whether attend delivered the line; today refractory gating, the lapsed-cache reset and low-priority suppression can drop it after the marker moved.
+- **Per-repository fan-out,** so one sensor spec covers the top repository and each submodule.
+- **Sensors in mod hosts.** The attend mod runs no sensors, so a sensor-based path reaches only sessions under `attend run` or Monitor.
+
+## Consequences
+
+### Positive
+
+- Any way can carry context that takes longer than 3 s to fetch, with no per-feature background process. The github way's repository-health and contributor calls can move off the 3 s path the same way.
+- A deferred result that arrives late, fails or overruns is announced once, with its file. Nothing a macro produced is dropped without a line saying so.
+- Deferred macros run in the ways hooks, so they work in attend-mod sessions, which run no attend sensors.
+- One classifier gives the github way, `/merge`, the code-reviewer agent and `project-init` the same answer, and a CODEOWNERS entry or a requested reviewer counts.
+- A PR's state survives session boundaries because it lives on GitHub. Review findings from other people are closed with evidence and an explicit resolve.
+- Reviewer-mode output cannot reach other people before the operator reads it.
+
+### Negative
+
+- A result can arrive next to an unrelated prompt; the header and the budget limit the confusion without removing it.
+- In a `claude -p` run with no tool calls after the fire there is no later hook, and the result is never collected.
+- The engine gains detached processes, a collector on UserPromptSubmit and PostToolUse, and per-agent result files to test and keep from leaking.
+- An idle session learns of a new review request at the operator's next prompt, not when it appears.
+- The classifier reads CODEOWNERS and PR metadata, so it costs more than a `git log` count and needs network for its per-PR signals.
+- A first fire has no cache, so the way's first rendering carries no macro output.
+
+### Neutral
+
+- Follow-ups outside this decision:
+  - `tools/attend/src/sensors/script.rs` reads a script's stdout only after it exits (`wait_with_output`, line 110). Output past the pipe buffer stalls the script until the 10 s kill and is lost, and a background child holding stdout can hang the tick loop.
+  - The comment in `tools/attend/examples/xdg-downloads.sh:83-90` says a single 2.0 line fires on its own; a slot under 3.0 is emitted as low priority and does not wake Monitor.
+  - The github way's macro does not check `gh auth status`, so an unauthenticated session reports "Not a GitHub repository".
+  - Stale text to correct: ADR-004:104-106, by an appended note pointing here; `hooks/ways/macro.sh:7` ("no network"), which the github macro already breaks; the team rule at `docs/hooks-and-ways/macros.md:54-58`; the `+name` form and working directory in the sensor authoring guide; the example count in the configuration guide; `scripts/gh-monitor-ci-watch.sh:15-16`, which cites commit 78028f3, absent from this repository's history.
+- The bespoke refresher planned before this decision is not built.
+
+## Alternatives Considered
+
+- **A bespoke refresher for PR data, started at SessionStart and TTL-gated, like gh-tasks.** Works for this feature. Rejected: a second per-feature background process, and every later slow macro would need another.
+- **A third `macro:` value, `deferred`.** One field. Rejected: it merges position and timing, a deferred way still needs a position for its cached result, and an older engine would run the macro synchronously and drop its output because the value matches neither position.
+- **Raise MACRO_DEADLINE.** Rejected by ADR-137: it moves the cliff, and every way's hook waits on it.
+- **Deliver a deferred result only when its way is relevant again.** Keeps results beside related context. Rejected: the result may never be relevant again in the session, and the operator compared delivery to a message queued mid-turn, which arrives next and still makes sense because its turn was near.
+- **Staleness by TTL alone.** Rejected for the operator's time-against-turns budget: a burst of prompts in two minutes moves the conversation further than ten idle minutes.
+- **`max(age/max_age, turns/max_turns) ≤ 1` instead of the sum.** Two independent caps. Rejected: a result at 90% of both caps is delivered, though both kinds of drift have nearly run out.
+- **An ADR-403 command sensor now.** Wakes idle sessions. Rejected for now: unbuilt, it can drop a line after the script moved its marker, it does not run in mod hosts, and ADR-137 retired GitHub watching from sensors. Kept as a later step with the requirements in section 5.
+- **Fix each of the six classifiers in place.** Smaller diffs. Rejected: six copies drift again, as they already did.
+- **Reviewer mode posting with `event: COMMENT`.** Saves the operator a click. Rejected: it publishes under the operator's name before they have read it.
+- **The GitHub MCP server as the client.** Rejected for the reasons in ADR-180: it duplicates `gh` and adds tool definitions to every session.
