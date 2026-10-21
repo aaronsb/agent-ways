@@ -106,3 +106,9 @@ The merge way's review gate surfaced the conflict. It gained an exemption that l
 - **Ways as authoritative defaults, overridden by project-local ways.** Rejected: every project would have to restate its policy in the ways format, while the forge and the hooks already hold it.
 - **Ways as advice only, deferring to everything.** Rejected: where nothing enforces, the way is the only guidance the agent has, and it has to be followed.
 - **Ways install their own enforcement globally.** Rejected as a default: hooks installed by ways in every project would make the ways the enforcer and outrank each project's choice. Rule 5 keeps this as a per-project offer.
+
+## Note (2026-10-21): rule 2, as ADR-606 amends it
+
+Rule 2 of the Decision, restated here so a later record can name it alone: "**Enforcement decides.** What the project enforces is the policy. A way may add rigor on top of it and never subtracts from it: no skipped required check, no bypass flag, no suggestion to disable a hook or rule to get past it."
+
+ADR-606 §5 amends this rule, and the conditions are stated there alone. In outline: a recorded override may subtract from enforcement for one merge under those conditions, and the clause against suggesting that a rule be disabled is lifted for a proposal to change the repository's configuration, made after repeated overrides of one rule or when a bypass is refused. Rules 1 and 3 to 8 stand as written.
