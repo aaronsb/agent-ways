@@ -41,6 +41,24 @@ MV="$(grep -oE "^export const MOD_VERSION = '[^']*'" plugins/attend/hooks/lib.ts
 [[ "$MV" == "$PV" ]] || fail "MOD_VERSION in plugins/attend/hooks/lib.ts is $MV but the plugin is at $PV; scripts/release.sh bump attend moves both"
 echo "version: MOD_VERSION $MV matches the plugin"
 
+# Where an organization manages Claude Code (Team and Enterprise, or a
+# machine with managed settings), the built-in cc-plugin-sec-default sits
+# outermost and sends these events past the plugins a person installs, so a
+# mod's hook on one never runs there (Claude Code 2.1.306). A mod in this
+# repo hooks none of them.
+PASSED_OVER="classic\\.|prompt\\.(section|context|attachment|compose)|skill\\.prompt|attribution\\.text|session\\.compact|settings\\.read"
+mods=0
+for dir in plugins/*/hooks; do
+  [[ -d "$dir" ]] || continue
+  mods=$((mods + 1))
+  if hits="$(grep -rnE "\\bon\\(\\s*['\"](${PASSED_OVER})" "$dir")"; then
+    echo "$hits" >&2
+    fail "$dir hooks an event an organization's policy plugin passes over"
+  fi
+done
+(( mods > 0 )) || fail "no plugins/*/hooks directory to check"
+echo "hooks: $mods mod(s) hook no event the policy plugin passes over"
+
 command -v claude >/dev/null || fail "claude is not on PATH"
 
 # 2. and 3.
