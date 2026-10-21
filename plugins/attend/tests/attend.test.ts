@@ -29,6 +29,7 @@ import {
   defuseFence,
   formatMessage,
   frameInbound,
+  isContextReset,
   isFullPreamble,
   keepwarmLine,
   parseConfig,
@@ -182,7 +183,13 @@ function host(on: On, world: World) {
   }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
-  on('classic.SessionStart', () => ({}))
+  on('session.measure', ($, e) => ({ changed: e.changed }))
+  // A slash command's core: /compact empties the context it runs in.
+  const commands: string[] = []
+  on('command.run', ($, e) => {
+    commands.push(e.command)
+    return { text: '' }
+  })
   const specs: Record<string, { description: string; inputSchema: { properties: Record<string, { description?: string }> } }> = {}
   on('tool.register', ($, e) => {
     tools.push(e.name)
@@ -275,7 +282,7 @@ function host(on: On, world: World) {
   const ran = (cmd: string) => count(cmd) > 0
   const mode = () => (state.value as { mode?: string } | undefined)?.mode
   const status = () => state.value as Partial<AttendStatus> | undefined
-  return { status, argvs, submitted, origins, prompts, tools, specs, count, ran, mode, clearState, store, storeWrites, logs, toasts, world, writes, fsWrites, compacts }
+  return { status, argvs, submitted, origins, prompts, tools, specs, count, ran, mode, clearState, store, storeWrites, logs, toasts, world, writes, fsWrites, compacts, commands }
 }
 
 /** What `attend keepwarm check --policy --json` prints. */
@@ -291,15 +298,23 @@ async function typed($: Engine, text = 'hello', kind = 'composer') {
   await $.prompt.submit({ text, wait: false, origin: { kind } } as never)
 }
 
-/** A /clear or an in-session /resume as Claude Code 2.1.296 runs it:
- *  `session.end` with that reason, the plugin's $.state emptied, then the
- *  settings SessionStart under the session id that goes on (the new one, or
- *  the resumed one). No `session.start` follows. */
+/** A /clear or an in-session /resume as Claude Code 2.1.306 runs it:
+ *  `session.end` with that reason, the plugin's $.state emptied, and the
+ *  process going on under another session id (the new one, or the resumed
+ *  one). No `session.start` follows. The settings SessionStart that also
+ *  fires is not raised: the mod hooks no classic event, since an
+ *  organization's policy plugin sends those past it. */
 async function clear($: Engine, h: ReturnType<typeof host>, to = 's2', source: 'clear' | 'resume' = 'clear') {
   await $.session.end({ reason: source, sessionId: h.world.sessionId ?? 's1' } as never)
   h.clearState()
   h.world.sessionId = to
-  await $.classic.SessionStart({ source, session_id: to } as never)
+}
+
+/** One `session.measure` after a main-loop turn, the context at `tokens`
+ *  (absent: no response of the live window yet). */
+async function measured($: Engine, tokens: number | undefined) {
+  const context = tokens === undefined ? { window: 200_000 } : { window: 200_000, tokens, percent: Math.round(tokens / 2_000) }
+  await $.session.measure({ context, rateLimits: [], changed: ['context'] } as never)
 }
 
 const ACTIVE_TOOLS = ['attend_listen', 'attend_send', 'attend_reply', 'attend_join', 'attend_peers']
@@ -1187,6 +1202,8 @@ describe('a reload', () => {
     await clock.advance(1_000)
     await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
     await clear($, h)
+    // The mode is back once the dispatch that ended the session is over.
+    await clock.advance(0)
     expect(h.mode()).toBe('active')
     const reload = since(h)
     await $.session.start(INTERACTIVE)
@@ -1236,6 +1253,7 @@ describe('a fresh module', () => {
     const h = host(on, { status: { mode: 'active' } })
     await $.session.start(INTERACTIVE)
     await clear($, h)
+    await clock.advance(0)
     const reload = since(h)
     await $.session.start(INTERACTIVE)
     await clock.advance(1_000)
@@ -1263,14 +1281,12 @@ describe('a resume', () => {
 
   // The record leaves out a session its config started: the config starts
   // it again, resumed, forked, cleared or new, and a message wakes it
-  // before any prompt. Claude Code runs the process's SessionStart first,
-  // then session.start.
+  // before any prompt. At process start session.start alone carries it.
   for (const source of ['resume', 'startup', 'fork'] as const) {
     test(`a ${source} in a project its config starts listening wakes for a message before any prompt`, async ($, on) => {
       const clock = mock.clock(on, { now: T0 })
       const drains: string[] = []
       const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', transcript: source === 'startup' ? 0 : 2, drains })
-      await $.classic.SessionStart({ source, session_id: 's1' } as never)
       await $.session.start(INTERACTIVE)
       await clock.advance(1_000)
       drains.push(one(1), DRAIN_EMPTY)
@@ -1326,6 +1342,7 @@ describe('a resume', () => {
     await clock.advance(1_000)
     await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
     await clear($, h, 's2')
+    await clock.advance(0)
     expect(h.store[LISTENED]).toEqual(['s1', 's2'])
   })
 
@@ -1394,23 +1411,22 @@ describe('a resume', () => {
     expect(h.storeWrites).toEqual([])
   })
 
-  test('at process start the resume SessionStart comes first and session.start alone activates', async ($, on) => {
+  test('claude --resume of a session that listened: session.start alone activates, and listens once', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const h = host(on, { sessionId: 's1', store: { [LISTENED]: ['s1'] } })
-    await $.classic.SessionStart({ source: 'resume', session_id: 's1' } as never)
-    await clock.advance(2_000)
-    expect(h.tools).toEqual([])
-    expect(h.count('listen on')).toBe(0)
     await $.session.start(INTERACTIVE)
     await clock.advance(2_000)
     expect([...new Set(h.tools)]).toEqual(ACTIVE_TOOLS)
+    expect(h.count('listen on')).toBe(1)
+    await $.turn.start({ text: 'w', turnId: 't1' } as never)
+    await $.turn.complete(done('t1'))
+    await clock.advance(10_000)
     expect(h.count('listen on')).toBe(1)
   })
 
   test('a fork gets a new id the record does not list, and starts dormant', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const h = host(on, { sessionId: 'fork1', store: { [LISTENED]: ['s1'] } })
-    await $.classic.SessionStart({ source: 'fork', session_id: 'fork1' } as never)
     await $.session.start(INTERACTIVE)
     await clock.advance(1_000)
     expect(h.tools).toEqual(['attend_listen'])
@@ -1428,6 +1444,121 @@ describe('a resume', () => {
     expect(resume.tools()).toEqual([])
     expect(resume.ran('listen on')).toBe(false)
     expect(h.mode()).not.toBe('active')
+  })
+})
+
+// The mod hooks no classic.* event and no session.compact: where an
+// organization manages Claude Code, its policy plugin
+// (cc-plugin-sec-default) sends those past the plugins a person installs.
+// A /clear and a /resume reach the mod as session.end; a compaction as the
+// person's /compact, the mod's own, or the context fill falling.
+describe('session changes through engine events alone', () => {
+  test('a /clear whose new id shows late: the mod reads until it does, then listens under it', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 's1' })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    const after = since(h)
+    await $.session.end({ reason: 'clear', sessionId: 's1' } as never)
+    h.clearState()
+    await clock.advance(600)
+    expect(after.ran('listen on')).toBe(false)
+    h.world.sessionId = 's2'
+    await clock.advance(1_250)
+    expect(after.ran('listen on')).toBe(true)
+    expect(h.store[LISTENED]).toEqual(['s1', 's2'])
+    expect(h.mode()).toBe('active')
+    expect(h.status()?.afterCompaction).toBe(true)
+  })
+
+  test('a turn under the new id before the watch has read it carries listening at once', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 's1' })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    await clear($, h, 's2')
+    await $.turn.start({ text: 'after the clear', turnId: 't1' } as never)
+    expect(h.store[LISTENED]).toEqual(['s1', 's2'])
+    expect(h.mode()).toBe('active')
+    const after = since(h)
+    await clock.advance(1_000)
+    expect(after.ran('listen on')).toBe(true)
+  })
+
+  test('a /clear in a listening session tells attend the new id once', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 's1' })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    const before = h.count('listen on')
+    await clear($, h, 's2')
+    await clock.advance(30_000)
+    expect(h.count('listen on')).toBe(before + 1)
+  })
+
+  for (const reason of ['prompt_input_exit', 'logout', 'other'] as const) {
+    test(`a session.end for ${reason} listens nothing again`, async ($, on) => {
+      const clock = mock.clock(on, { now: T0 })
+      const h = host(on, { sessionId: 's1' })
+      await $.session.start(INTERACTIVE)
+      await clock.advance(1_000)
+      await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+      const after = since(h)
+      await $.session.end({ reason, sessionId: 's1' } as never)
+      await clock.advance(15_000)
+      expect(after.ran('listen on')).toBe(false)
+      expect(h.storeWrites).toEqual([LISTENED])
+    })
+  }
+
+  test('a context fill that falls by half, as an automatic compaction leaves it, brings the preamble back', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains })
+    await $.session.start(INTERACTIVE)
+    await typed($)
+    const deliverNext = async (n: number) => {
+      drains.push(one(n), DRAIN_EMPTY)
+      const want = h.submitted.length + 1
+      for (let i = 0; i < 20 && h.submitted.length < want; i++) await clock.advance(3_000)
+    }
+    await deliverNext(0)
+    await measured($, 150_000)
+    await deliverNext(1)
+    expect(full(h.submitted[1] ?? '')).toBe(false)
+    await measured($, 160_000)
+    await deliverNext(2)
+    expect(full(h.submitted[2] ?? '')).toBe(false)
+    await measured($, 30_000)
+    await deliverNext(3)
+    expect(full(h.submitted[3] ?? '')).toBe(true)
+    await measured($, 35_000)
+    await deliverNext(4)
+    expect(full(h.submitted[4] ?? '')).toBe(false)
+  })
+
+  test('a fill that reads as absent after one was reported counts as emptied', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' } })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await measured($, 80_000)
+    expect(h.status()?.afterCompaction).toBe(false)
+    await measured($, undefined)
+    expect(h.status()?.afterCompaction).toBe(true)
+  })
+
+  test('isContextReset: half or less, or absent after a reading; never on the first reading', () => {
+    expect(isContextReset(undefined, 10_000)).toBe(false)
+    expect(isContextReset(undefined, undefined)).toBe(false)
+    expect(isContextReset(100_000, 120_000)).toBe(false)
+    expect(isContextReset(100_000, 50_000)).toBe(false)
+    expect(isContextReset(100_000, 49_999)).toBe(true)
+    expect(isContextReset(100_000, undefined)).toBe(true)
+    expect(isContextReset(0, undefined)).toBe(false)
   })
 })
 
@@ -1477,7 +1608,9 @@ describe('preamble cadence through deliveries', () => {
     expect(full(h.submitted[2] ?? '')).toBe(true)
     await deliverNext(3)
     expect(full(h.submitted[3] ?? '')).toBe(false)
-    await $.session.compact({ trigger: 'manual', messages: [SUMMARY] } as never)
+    // The person's /compact, as it runs; the mod hooks no session.compact.
+    await $.command.run({ command: 'compact', args: '' } as never)
+    expect(h.commands).toEqual(['compact'])
     await deliverNext(4)
     expect(full(h.submitted[4] ?? '')).toBe(true)
     await deliverNext(5)
@@ -2096,6 +2229,8 @@ describe('keepalive policy', () => {
     expect(h.compacts).toEqual([])
     await clock.advance(2_000)
     expect(h.compacts).toEqual(['keep the ADR-414 plan'])
+    // Its own compaction tells the next delivery to carry the preamble.
+    expect(h.status()?.afterCompaction).toBe(true)
   })
 
   test('with lapse, nothing follows the wrap', async ($, on) => {

@@ -107,6 +107,18 @@ export function configArgv(project: string): string[] {
 
 // ── the module's state ─────────────────────────────────────────────────
 
+/** A /clear or an in-session /resume that session.end reported, while the
+ *  mod waits to read the id that goes on (ADR-406). */
+export type Move = {
+  /** The id that ended. */
+  endedId: string
+  reason: 'clear' | 'resume'
+  /** The session was listening when it ended. */
+  wasOn: boolean
+  /** Reads of `$.session.id()` that still found `endedId`. */
+  tries: number
+}
+
 /** What the module keeps between dispatches. A reload starts it afresh, so
  *  the mode a reload reads is the one in $.state: session.start restores it
  *  from there, and a /clear or a /resume, which empty $.state, has it put
@@ -151,6 +163,10 @@ export type Mod = {
   /** A /clear or a /resume moved the session to an id attend has not been
    *  told is listening yet; the poll holds its drain until it has. */
   isRelistening: boolean
+  /** A /clear or a /resume whose new id the mod has not read yet. */
+  move: Move | undefined
+  /** The context fill the last `session.measure` reported, in tokens. */
+  contextTokens: number | undefined
   /** The cold start's held-back note, from a drain the poll ran. A wake
    *  delivery carries messages alone, so the note rides the operator's next
    *  prompt as context. The module's copy serves a /clear, which empties
@@ -375,6 +391,16 @@ export function pollInterval(c: ModConfig, idleMs: number, isTurnRunning: boolea
  *  the first once `every` turns have passed since it last showed. */
 export function isFullPreamble(deliveries: number, afterCompaction: boolean, turnsSinceFull: number, every: number): boolean {
   return deliveries === 0 || afterCompaction || turnsSinceFull >= every
+}
+
+/** Whether the context window was emptied between two measurements: its
+ *  fill fell below half, or reads as absent, which it does until the first
+ *  response after a compaction or a /clear. A compaction at the engine's
+ *  threshold always falls that far. A first measurement compares with
+ *  nothing and is no reset. */
+export function isContextReset(before: number | undefined, after: number | undefined): boolean {
+  if (before === undefined || before <= 0) return false
+  return after === undefined || after < before / 2
 }
 
 /** Whether the keepalive policy may run in a session started with
