@@ -29,6 +29,10 @@ basis:
     via: chat, relayed by the coordinating session
   - operator: aaronsb
     level: guided
+    said: "maybe we add some pressure: after a reasonable amount of PRs have stacked and become unreasonable (I'm not sure what that number is) we add an additional gudiance to dismiss/decline or respond to them."
+    via: chat, relayed by the coordinating session
+  - operator: aaronsb
+    level: guided
     said: "it's a stats of awareness"
     via: chat, relayed verbatim by the coordinating session, 2026-10-21, on the review-request line
   - operator: aaronsb
@@ -82,13 +86,15 @@ observable:
   - "At the start of a new session, an item deferred in an earlier session is listed again for a decision, marked deferred with the date of the deferral; within the session that deferred it, it is not asked again."
   - "An item the operator declined is not listed in later sessions; a review request raised again after the decline is listed as a new item."
   - "With more open items than pending.recur_count, or an oldest older than pending.recur_age, the reminder appears during the session as well as at its start, and work continues without waiting on it."
+  - "With the pile past pending.clear_count or pending.clear_age, the session's first ask is a grouped clearing decision, and one answer to a group writes a marker for each item in it."
+  - "Each change of tier logs a pending_tier_entered event naming the tier, the open count and the oldest item's age."
 ---
 
 # ADR-606: Deferred macros, and the PR awareness, involvement check and PR feedback way built on them
 
 ## Summary
 
-- **Decided:** Ways gain a deferred macro. A way that declares `macro_defer:` starts its macro detached when it fires, renders at once with the last cached result, and the finished result reaches the agent at its next hook event, once, with a header saying which way ran it, what fired it and how long ago. A result past a relevance budget that combines elapsed time and elapsed turns is replaced by one line saying the miss is abnormal, naming the file holding the result, and telling the agent to investigate when it bears on the work. The first consumer is a session-start line of review-request counts. On the same base: one check of who else is involved replaces six divergent solo/team rules, never gates, and puts other people's pending items in front of the operator for a decision before work goes on. Declining closes an item as fully as acting on it; deferring, or giving no answer, brings it back at every session start, and the reminder grows more prominent as open items pile up and age, without ever blocking work; and a PR feedback way runs review findings to closure in three modes, author alone, author with other reviewers, and reviewer, with the PR as the ledger.
+- **Decided:** Ways gain a deferred macro. A way that declares `macro_defer:` starts its macro detached when it fires, renders at once with the last cached result, and the finished result reaches the agent at its next hook event, once, with a header saying which way ran it, what fired it and how long ago. A result past a relevance budget that combines elapsed time and elapsed turns is replaced by one line saying the miss is abnormal, naming the file holding the result, and telling the agent to investigate when it bears on the work. The first consumer is a session-start line of review-request counts. On the same base: one check of who else is involved replaces six divergent solo/team rules, never gates, and puts other people's pending items in front of the operator for a decision before work goes on. Declining closes an item as fully as acting on it; deferring, or giving no answer, brings it back at every session start, and the reminder grows more prominent as open items pile up and age, without ever blocking work. Past a clearing threshold, guidance has the agent put clearing the pile to the operator as the session's first decision, answered by group rather than item by item; and a PR feedback way runs review findings to closure in three modes, author alone, author with other reviewers, and reviewer, with the PR as the ledger.
 - **Trades away:** A slow macro's result arrives a turn or more late and can land beside unrelated context. The engine gains detached processes, a results directory and a collector on two hooks. Nothing wakes an idle session when a new review request appears. Reviewer-mode output waits on the operator to submit it. Other people's pending items cost the operator a decision at each session start, a deferred item included, and where the repository enforces no review, the agent does not hold work for a CODEOWNER or requested reviewer: their stake is surfaced and decided on, never waited for. A growing pile of open items is made deliberately more noticeable, in a session that may not be about them.
 - **One-way?** No. Reversible now; expensive once ways outside this repository declare `macro_defer:`, since removing the field then breaks their frontmatter.
 - **Probes:** *Confident (next-hook):* a slow lookup's result reaches the agent with whatever comes next, a prompt or a tool call, even when that prompt is about something else, as long as it is recent; past that it becomes a one-line pointer to the file. *Not confident (codeowners-team):* asked whether CODEOWNERS entries for other people should make the agent stop for review and refuse `/merge full-sail`; answered no, and the check now surfaces and never gates. *Not confident (deferred-returns):* asked whether a deferred item should stay quiet until work touches it again; answered that deferred items come back at the start of every session.
@@ -217,8 +223,13 @@ The operator may make a decline visible on GitHub, by removing themselves as a r
 | Summary | at most `pending.list_count` items (default 3), and the oldest under `pending.list_age` (default 7 days) | one summary line at session start, the `pending here` count |
 | Listed | more items, or an older oldest | a listed block at session start, asked before other work is taken up |
 | Recurring | more than `pending.recur_count` items (default 10), or the oldest past `pending.recur_age` (default 30 days) | the listed block at session start, and during the session one line giving the count and the oldest's age, at the review way's refire cadence and on the next prompt after a `gh pr` command, until the pile drops below this tier |
+| Clearing | more than `pending.clear_count` items (default 25), or the oldest past `pending.clear_age` (default 60 days) | everything in the recurring tier, the list grouped for clearing, and clearing guidance |
 
-Every tier asks for decisions and none blocks work. "Asked before other work is taken up" means the question comes first; when the operator moves on without answering, that is no answer, and the work goes ahead. The four thresholds are ways settings with the defaults above.
+Every tier asks for decisions and none blocks work. "Asked before other work is taken up" means the question comes first; when the operator moves on without answering, that is no answer, and the work goes ahead. The six thresholds are ways settings with the defaults above.
+
+**Clearing.** In the clearing tier the macro's output carries guidance, shipped beside the macro and disclosed only while the tier holds. It tells the agent to put clearing the pile to the operator as the first decision of the session: decline or dismiss what is stale or will not be done, and respond to the rest. It asks for a decision and holds no work. The list is grouped by repository, author and age band, and the operator can answer a group in one line, such as "decline everything older than 30 days in repo X" or "hand off author Y's PRs to Z". The agent writes the normal marker for each item in the group, so a pile of a hundred items clears in a few answers and each item's decision stays recorded.
+
+The defaults are a guess: the operator does not know the right number. Past about 25 items an item-by-item list stops being answerable in one sitting, and an item open for two months has usually been passed over more than once. Each change of tier, up or down, is logged to the ways event log as `pending_tier_entered`, naming the tier, the open count, the oldest item's age and the project, so real use can tune the thresholds.
 
 The PR is the loop's ledger. Unresolved threads are open findings, and a session starting cold rebuilds the loop's state from GitHub. The way covers inline comments, thread replies, resolving threads, reading a returned review, re-requesting review, and waiting on CI with the gh-monitor skill's `ci` mode in the merge flow.
 
@@ -241,7 +252,7 @@ A later step may move PR awareness to an ADR-403 command sensor, which would wak
 - Deferred macros run in the ways hooks, so they work in attend-mod sessions, which run no attend sensors.
 - One check gives the github way, `/merge`, the code-reviewer agent and `project-init` the same view of who else is involved, and a CODEOWNERS entry or a requested reviewer is seen.
 - Nothing the check finds holds work. In a repository where one operator drives most of the work while others are new, casual or observing, the operator is not left waiting on them, and their open asks still get an answer.
-- A pile of other people's open items cannot grow silently: it returns every session and gets louder as it grows and ages. Declining is a cheap way out of it.
+- A pile of other people's open items cannot grow silently: it returns every session and gets louder as it grows and ages. Declining is a cheap way out of it, and grouped answers keep a large pile clearable.
 - A PR's state survives session boundaries because it lives on GitHub. Review findings from other people are closed with evidence and an explicit resolve.
 - Reviewer-mode output cannot reach other people before the operator reads it.
 
@@ -256,6 +267,8 @@ A later step may move PR awareness to an ADR-403 command sensor, which would wak
 - Each surfaced item asks the operator for a decision, which adds a question to a session that would otherwise run straight through. A deferred item asks again at every session start, one more question per session for as long as it stays pending.
 - Decision markers are a small piece of local state outside GitHub. They do not travel to the operator's other machines, where a deferred item shows without its mark and a declined or handed-off item is listed again.
 - The recurring tier is deliberate annoyance. It interrupts sessions about unrelated work until the pile shrinks, and the thresholds that set it are a guess until use tunes them.
+- The clearing threshold, 25 items or 60 days, is a stated guess as well. Set too low, it turns an ordinary week into a clearing session; set too high, the list is already unworkable when the guidance arrives.
+- A grouped answer applies one decision to items the operator has not each read. A group decline can close an item that deserved a reply.
 - A first fire has no cache, so the way's first rendering carries no macro output.
 
 ### Neutral
