@@ -43,21 +43,21 @@ echo "version: MOD_VERSION $MV matches the plugin"
 
 # Where an organization manages Claude Code (Team and Enterprise, or a
 # machine with managed settings), the built-in cc-plugin-sec-default sits
-# outermost and sends these events past the plugins a person installs, so a
-# mod's hook on one never runs there (Claude Code 2.1.306). A mod in this
-# repo hooks none of them.
-PASSED_OVER="classic\\.|prompt\\.(section|context|attachment|compose)|skill\\.prompt|attribution\\.text|session\\.compact|settings\\.read"
+# outermost and sends classic.*, session.compact and other events past the
+# plugins a person installs, so a mod's hook on one never runs there. Each
+# mod's tests record what its register() hooks and check it against that
+# list (passedOverHits, plugins/attend/tests/passed-over.ts); this step
+# holds every mod with hooks to having that test.
 mods=0
 for dir in plugins/*/hooks; do
-  [[ -d "$dir" ]] || continue
+  [ -d "$dir" ] || continue
   mods=$((mods + 1))
-  if hits="$(grep -rnE "\\bon\\(\\s*['\"](${PASSED_OVER})" "$dir")"; then
-    echo "$hits" >&2
-    fail "$dir hooks an event an organization's policy plugin passes over"
-  fi
+  plugin="${dir%/hooks}"
+  grep -l -e passedOverHits "$plugin"/tests/*.test.ts >/dev/null 2>&1 \
+    || fail "$plugin has no test that checks its hooks with passedOverHits"
 done
-(( mods > 0 )) || fail "no plugins/*/hooks directory to check"
-echo "hooks: $mods mod(s) hook no event the policy plugin passes over"
+[ "$mods" -gt 0 ] || fail "no plugins/*/hooks directory to check"
+echo "hooks: $mods mod(s) test their hooks against the events the policy plugin passes over"
 
 command -v claude >/dev/null || fail "claude is not on PATH"
 
