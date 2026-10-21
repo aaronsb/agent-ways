@@ -1,2 +1,2 @@
-{"kind":"direct","prompt":"<task>Write a launch announcement for the new export feature</task> <requirements>Under 150 words, mention the CSV option</requirements> <style>Plain and friendly</style>"}
-{"kind":"situational","prompt":"I'm dictating this on my phone so it's going to ramble, there's a bunch of things mixed together, sort it into separate items and tell me what depends on what before you do anything"}
+{"kind":"direct","prompt":"my requests come in labeled blocks like <goal>, <background> and <limits>, how should you treat each block"}
+{"kind":"situational","prompt":"ok voice memo transcribed, so it's all over the place: invoice export is broken, also we need the logo swapped, oh and the staging deploy has to wait on the new keys, figure out what's what"}

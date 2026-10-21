@@ -1,2 +1,2 @@
-{"kind":"direct","prompt":"write me a goal statement for an agent to execute that migrates the config loader, with passing conditions it can check"}
-{"kind":"situational","prompt":"the helper agent I started ignored my writing rules and sent a reply in chat, what should its instructions have included"}
+{"kind":"direct","prompt":"what should the instructions to a delegated worker include, given it can't see our chat"}
+{"kind":"situational","prompt":"the helper you dispatched rewrote the wrong package and used a tone I told you I hate, so next time what do you hand it up front"}

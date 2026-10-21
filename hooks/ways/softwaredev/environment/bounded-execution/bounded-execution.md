@@ -1,6 +1,6 @@
 ---
-description: running long or interactive shell commands from an agent; use run_in_background for anything that follows a log or serves, give sudo, ssh, and package managers their non-interactive flag, stop a process by its pid and never by a pattern, claim running only on a liveness signal
-vocabulary: long running command hang hangs hung stuck process background run_in_background nohup setsid timeout tail -f follow logs docker run docker exec sudo ssh apt pacman install build make cargo build npm install kill pkill killall pid pidfile liveness still running completed foreground never-returning prompt-blocked half-applied launch
+description: running long or interactive shell commands from an agent and watching them while they run; use run_in_background for anything that follows a log or serves, give sudo, ssh, and package managers their non-interactive flag, stop a process by its pid and never by a pattern, attach a watcher to each background job, keep an eye on a data backfill, import, or reindex that will take hours, and report its progress, claim running or done only on a liveness signal
+vocabulary: long running command hang hangs hung stuck process background run_in_background nohup setsid timeout tail -f follow logs docker run docker exec sudo ssh apt pacman install build make cargo build npm install kill pkill killall pid pidfile liveness still running completed foreground never-returning prompt-blocked half-applied launch keep an eye on it watch it ping me when done let me know when it finishes progress eta how far along still pending backfill reindex import long job monitor watcher
 commands: \b(pkill|killall|kill\s+-|sudo|ssh\s|journalctl|tail\s+-f|docker\s+(run|exec)|apt(-get)?\s+install|pacman\s+-S|npm\s+(install|ci)|pip3?\s+install|cargo\s+build|make)\b
 scope: agent, subagent
 refire: 0.2
@@ -30,6 +30,14 @@ The `setsid nohup ... &` idiom from other harnesses works here. Prefer `run_in_b
 
 A launch that returned proves the launch. Before reporting a server, watcher, or job as up, observe it: a port answering, a log line after the launch, a pid that is still present a few seconds later. Before reporting a job as done, find its completion marker: the artifact it writes, its exit status, the last line its log is known to print. The absence of output is not completion, and a timeout is not completion. A command that exited zero having done nothing is recorded as a failed attempt (see environment/recovery).
 
+## Watch what you started
+
+- Attach the Monitor tool, or a bounded poll, to each background job when you start it, so a failure arrives when it happens and not when someone asks.
+- Keep a list of the jobs in flight. Close each one out with its result, and say which are still pending and why.
+- Check a running job's log by grepping it for errors and phase changes. Do not read the full stream into context; hand heavy log reading to a subagent.
+- When the user asks to be kept updated, report at intervals without being asked again: what is done, what remains, and an estimate of the time left.
+- Before you report, remove each watcher whose event has happened and stop any tail or loop you no longer need. A leftover watcher fires into later turns.
+
 ## When the tool timeout fires
 
 The harness killed a foreground command at its bound. Read what it produced before the kill. If the work was a build or install, it may be half applied: check the lockfile, the `node_modules` or `target` state, and rerun with a longer timeout parameter rather than backgrounding a command that expects a terminal. If the command was waiting on input, that is the prompt class above.
@@ -42,6 +50,7 @@ The harness killed a foreground command at its bound. Read what it produced befo
 | "It returned, so it's running" | A launch returning proves the launch. Look for the port, the log line, the pid. |
 | "No errors in the output, so it finished" | No output is what a stalled job prints. Find the completion marker. |
 | "sudo will use the cached credential" | Then `sudo -n` succeeds. Without `-n` a missing cache burns the timeout. |
+| "I'll check on it when the user asks" | Attach the watcher now. The failure lands while nobody is looking. |
 | "The timeout is annoying, I'll background the build" | A backgrounded build fails silently. Raise the timeout parameter instead. |
 
 ## See Also

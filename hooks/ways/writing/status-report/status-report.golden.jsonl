@@ -1,2 +1,2 @@
-{"kind":"direct","prompt":"write this week's client status report and keep it in the same shape as last week's"}
-{"kind":"situational","prompt":"leadership wants a short summary of everything this project has delivered since it started, built from the git history"}
+{"kind":"direct","prompt":"put together the monthly status note for the sponsor in the same layout as the one we sent in september"}
+{"kind":"situational","prompt":"the directors want a quick read on what shipped since the kickoff, and all the evidence is in the commit log"}

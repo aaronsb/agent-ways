@@ -1,2 +1,0 @@
-{"kind":"direct","prompt":"draft a slack message to the team about tonight's deploy with proper mentions and bullets that render"}
-{"kind":"situational","prompt":"reply in the release channel thread, tag the two reviewers so they get pinged, and link the PR instead of pasting the url"}

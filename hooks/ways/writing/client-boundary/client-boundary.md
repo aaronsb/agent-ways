@@ -1,68 +1,48 @@
 ---
-description: Keeping internal material out of client-facing and public artifacts. Covers INTERNAL_ and CLIENT_ file prefixes, what never reaches a client, sanitizing names and client scope before sharing or publishing, keeping separate clients and employers apart, and never revealing that anything was filtered or excluded.
-vocabulary: client-facing internal sanitize anonymize publish public share external partner case-study deliverable exclude scope headcount margin quotes nda confidential stakeholder engagement consultancy redact
-files: (^|/)(CLIENT_|INTERNAL_)[^/]*$
-pattern: client.?facing|\bsanitiz|anonymi[sz]|\bnda\b|client edition|case stud(y|ies)|llms\.txt|make (the )?repo public|stakeholder quote|quotes (of|from) stakeholders
+description: building or checking an outbound document for a client, customer, partner or the public from internal notes, a pasted chat thread or working files; find what they shouldn't see and leave out internal margins, costs, staffing, stakeholder quotes and another organization's material, anonymize people and names when publishing, and state limitations and risks plainly in what remains
+vocabulary: client customer outbound public share send publish case study summary draft internal notes slack thread pasted shouldn't see should not see ok to share confidential sanitize anonymize redact margin margins pricing costs staffing headcount stakeholder quote engagement other client employer limitations risks rate card team channel complaints recap
+pattern: client.?facing|customer.?facing|\bnda\b|case stud(y|ies)|llms\.txt|make (the )?repo public
 refire: 0.15
 scope: agent, subagent
 ---
 <!-- epistemic: constraint -->
-# Internal Versus Client
+# Internal Material in Outbound Documents
 
-Anyone who works for clients keeps two kinds of material. One is internal working notes. The other is what a client or the public will read. This way keeps them apart.
+When building a document a client, partner or the public will read from internal material, decide what stays internal before drafting. Build the outbound copy from a sanitized version of the source, never straight from raw notes or a pasted thread.
 
-## Mark files by audience
+## Stays internal
 
-- A filename prefix is a simple convention. `INTERNAL_` files never reach the client. `CLIENT_` files are deliberately client-facing. Unmarked files count as internal.
-- Build `CLIENT_` files only from sanitized client editions, never from raw internal notes or registers.
-- Review each file before a client drop. Run the project's client-document linter if it has one.
-
-## Never in a client artifact
-
-| Exclude | Use instead |
+| Material | In the outbound copy |
 |---|---|
 | Stakeholder quotes | The finding, unattributed |
-| Raw headcounts, per-person dollar figures | Percent of the department |
-| Exact dates (external audiences only) | Relative timeline |
-| Hours, margin, costs, tokens, internal deadlines, resourcing, uncommitted commercial topics | Omit |
-| Risk or concern language in next steps | Plain next actions |
-| "Known Gaps", "Critical Files", file paths in sales documents | Strengths and configurability |
-| Internal mechanism terms, such as manifest, canary, runbook, or guard hook | The outcome, plainly |
-| Unconfirmed scheduling, automation still being proven | Only what the user has confirmed |
+| Headcounts and per-person figures | A share or percent, when the point needs a number |
+| Margin, internal costs, hours, pricing not yet offered, internal deadlines and staffing | Omit |
+| Another client's or employer's names, material and code | Omit |
+| Internal tool names and mechanism terms | The outcome, plainly |
+| Scheduling or capability not yet confirmed | Only what the user has confirmed |
 
-## Leave no trace of filtering
+Review the whole draft against this table before it goes out, including anything pasted in from chat or email. Run the project's own document checks if it has them.
 
-- Never note what was excluded. Never label anything "Client Edition".
-- When the user removes something from scope, purge every trace of it, exclusion notes included. Then rebuild every derived output.
+## Limitations stay in
 
-## Framing
+Leaving out confidential material is a confidentiality call. It never extends to framing. Known gaps, risks and open questions that bear on the reader's decisions are stated plainly, as the writing way's proposal row requires. Do not recast a limitation as a strength or a risk as a next step. Where an exclusion changes what the reader can rely on, such as a scope cut, say what is out of scope.
 
-- Be honest but favorable, with simple arguments that are hard to dispute. Do not boast. Internal tools are not "products".
-- Disclose AI involvement only at the level the user has approved, in plain bullets.
-- Notes for technical partners get the mechanism exactly right. Client incident notes stay short.
+## Publishing
 
-## Public or shared artifacts
+For a case study, an article, a public issue, site copy, `llms.txt` or a repository made public:
 
-This covers GitHub issues, articles, case studies, site copy, `llms.txt`, and shared repos.
+- Remove or anonymize people, client names and private sources unless the user says otherwise. Get consent before a client or the public sees an identifiable person, photos included.
+- Scan for secrets, personal emails, webhooks and usernames, and replace user-specific configuration with placeholders (code/security/secrets).
+- Do not attribute motives to real people.
 
-- Remove or anonymize people, client names, private sources, and architecture unless told otherwise.
-- Scan for secrets, personal emails, webhooks, and usernames. Replace user-specific config with placeholders.
-- Do not attribute motives to real people. Ask what a procurement contact at each company would support saying.
-- Sanitize internal thinking documents only when asked.
+## Keep organizations apart
 
-## Keep the orgs apart
-
-- When the user works for more than one org, such as an employer and separate clients, keep each one's material off the others' sites and out of the others' deliverables.
-- Strip references to the other client when porting code between client repos.
-- Material mined from another repo is inspiration, not truth. This project's own design docs win. Report what you borrowed without naming the repo, client, use case, or code.
-
-## Facilitators and people
-
-- Answer keys, twists, and passwords for a workshop or game stay in the internal repo until the planned release. No routine push should be able to leak them.
-- Get consent before a client sees identifiable people, photos included.
+When the user works for more than one organization, keep each one's material out of the others' documents and repositories. Strip references to the other organization when porting code between them.
 
 ## See Also
 
+- writing(writing) — parent: audience, genre, and stating limitations
+- writing/provenance(writing) — the open-items list stays with the author
 - code/security/secrets(softwaredev) — credential scanning before anything is shared
 - knowledge/authoring/pii-free(meta) — the same stripping applied to way content
 - trust/delegation(meta) — outbound artifacts carry the user's name

@@ -150,3 +150,5 @@ PR-comment destination is a workflow question (GitHub-mode vs. local-mode). See 
 
 - environment/recovery(softwaredev) — classify a failed or wrong handback before retrying or re-briefing
 - research(research) — the fan-out step that uses these investigation rules
+- subagents/briefs(meta) — what a brief carries for a worker that inherits nothing
+- subagents/agent-teams(meta) — several agents or sessions on one repository, and shared-checkout rules

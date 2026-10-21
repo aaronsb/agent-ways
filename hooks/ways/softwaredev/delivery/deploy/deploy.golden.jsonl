@@ -1,2 +1,2 @@
-{"kind":"direct","prompt":"push this and deploy it, but first make sure we're logged into the right github and cloud account"}
-{"kind":"situational","prompt":"git push just failed with repository not found even though I can see the repo in my browser"}
+{"kind":"direct","prompt":"before we push anything, check which github login is active on this machine, then after the rollout confirm the site is serving the new version"}
+{"kind":"situational","prompt":"the rollout finished green but people still see yesterday's footer, and earlier my push bounced with a permissions error"}

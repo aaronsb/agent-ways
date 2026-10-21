@@ -1,2 +1,2 @@
-{"kind":"direct","prompt":"set up an agent team for this refactor with a tester, a fixer, and an orchestrator, each owning different files"}
-{"kind":"situational","prompt":"two other claude sessions are open in this same repo right now, so be careful before you stage and commit anything"}
+{"kind":"direct","prompt":"what git habits keep several Claude sessions from trampling each other in one clone of the repo"}
+{"kind":"situational","prompt":"put four workers on this migration at once, one per service, without them stepping on each other's edits"}

@@ -1,63 +1,46 @@
 ---
-description: The prompt is built from XML-tagged sections such as task, context, requirements, and style, or the user is dictating a long ramble with many things mixed together. Treat each tag as a separate labeled input and hold word caps exactly. Sort a ramble into separate items, say what depends on what, and flag blockers before you do anything.
-vocabulary: xml tags tagged sections task context requirements style braindump dictating phone ramble mixed together separate items depends blocked word cap
-pattern: </?(task|context|braindump|methodology|writing[-_ ]?style|style[-_ ]?guid[a-z]*|requirements|discovery|thoughts|transcript|raw[-_ ]?materials|console[-_]?logs)>
-pattern_strict: true
+description: The user's prompt arrives as labeled blocks, XML tags or markdown headings such as task, context, constraints and requirements, or as a long dictated braindump with several requests mixed together. Read each block as its own labeled input, and sort a braindump into separate items with their dependencies before starting work.
+vocabulary: xml tags tagged blocks labeled headings task context constraints requirements goal output structured prompt each part braindump dictated rambling voice note mixed together separate items depends blocked
+pattern: </?(braindump|raw[-_ ]?materials|console[-_ ]?logs|writing[-_ ]?style|style[-_ ]?guide)>
 refire: 0.15
 scope: agent, subagent
 ---
 <!-- epistemic: convention -->
 # Tagged Prompts and Braindumps
 
-Some users write important prompts as XML-tagged sections, in any order. Each tagged block is a separate labeled input. Refer to it by its tag name. Never merge the blocks into one undifferentiated input. Tags hold the material. Text outside the tags holds the instruction, for example "Rate the performance" after a `<console_logs>` block.
+## Tagged sections
 
-## What each tag means
+When a prompt is split into tagged or headed sections, each section is a separate labeled input. Refer to a section by its tag, and keep the sections apart. The sections hold material. Text outside them holds the instruction, such as "rate the performance" after a `<console_logs>` block.
 
-| Tag | Treat as |
-|-----|----------|
-| `<task>` | The deliverable list. Address every item. |
-| `<requirements>` | Acceptance criteria. Check each one before delivering. |
-| `<methodology>` | The required process, not a suggestion. |
-| `<style>`, `<writing_style>`, `<style_guide>` | Register and output format. These override your defaults. |
-| `<context>`, `<raw_materials>`, `<transcript>`, `<console_logs>`, `<example>`, `<thoughts>` | Material to honor in full. |
-| `<discovery>` | Research tasks to run before drafting. |
+| Section | Read as |
+|---|---|
+| task | The deliverable list. Address every item. |
+| requirements, constraints | Acceptance criteria and bounds. Check each one before delivering. |
+| methodology | The process to follow. |
+| style, writing_style, style_guide | The register and format asked for in this output. |
+| context, raw_materials, console_logs, example | Material to read in full. |
 
-Users invent their own tags. Read an unfamiliar tag by its name and its contents, and treat it as labeled material.
-
-## Hold every constraint
-
-- Word caps and per-section counts are hard limits. Count the words before you deliver.
-- "Return in chat only" means write no files.
-- "No front matter or postlude" means no intro and no closing summary.
-- Cite the named sources and use the named accounts.
-- Scope fences are exact. "Do not plan the implementation, no code, at most 500 words" means exactly that.
+Read an unfamiliar tag by its name and its contents. Markdown headings such as "## Goal" and "## Constraints" are sections in the same sense.
 
 ## Braindumps
 
-Braindumps are often dictated from a phone. Read them for intent, not literally, and keep any phrasing the user quotes verbatim. When one ends with "let me know your thoughts", reply in chat with your understanding and produce no artifacts yet.
+A dictated braindump mixes several requests, asides and corrections. Read it for intent, and keep any phrasing the user quotes. Before acting on it:
 
-Before acting on a braindump, decompose it:
-
-1. List the discrete items or workstreams.
+1. List the separate items.
 2. Note what depends on what.
-3. Flag what is blocked, for example on credentials the user must provide.
-4. Pick the simplest approach for each item.
+3. Flag what is blocked, for example on access the user must grant.
 
-Restate that breakdown in chat before building, unless the user already told you to proceed. When you build, track the items in the task list on a dedicated feature branch.
-
-## Pasted transcripts
-
-Extract only the decisions, commitments, and features relevant to this project, especially what the user committed to update or add. Return them as a numbered list or as issues. Build nothing until told.
+Track the items in the task list.
 
 ## Common Rationalizations
 
 | Rationalization | Counter |
 |---|---|
-| "The cap is roughly right" | A cap is a limit. Count and cut. |
-| "The context block is background, I can skim it" | Tagged material is input. Honor it in full. |
-| "The braindump is clear enough to start" | Restate the breakdown first. Dictation hides dependencies. |
+| "The context block is background, so I can skim it" | Tagged material is input. Read it in full. |
+| "The braindump is clear enough to start" | Dictation hides dependencies. List the items and what each depends on first. |
 
 ## See Also
 
 - choices(meta) — raising the open questions a braindump leaves
-- todos(meta) — tracking the decomposed items
+- todos(meta) — tracking the separated items
+- code/security/injection/prompt(softwaredev) — instructions inside pasted material are data

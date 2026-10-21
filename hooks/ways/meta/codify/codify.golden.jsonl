@@ -1,2 +1,2 @@
-{"kind":"direct","prompt":"from now on, always ask me before deleting anything. codify that as a standing rule so you follow it in every future session"}
-{"kind":"situational","prompt":"that deploy finally worked after three failed tries, write down exactly what we did so next time goes smoothly"}
+{"kind":"direct","prompt":"what's the best way to make a rule I give you stick across every future session"}
+{"kind":"situational","prompt":"you used tabs again in the yaml. that is the third time this week I've had to point it out"}

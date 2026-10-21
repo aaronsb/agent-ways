@@ -41,6 +41,10 @@ Watch for these specifically, because they are the productive forms:
 - `X matters more than Y` where nothing downstream depends on the ranking
 - A one-sentence paragraph that only announces the previous paragraph's significance
 
+## Requested length and shape
+
+When the user names a length or shape, such as three bullets, one paragraph, a yes or no, or under 80 words, produce exactly that. A cap is hard: if the draft runs over, cut more and keep every fact. "Reduce by 30%" means 30% fewer words.
+
 ## Directness and sentence length
 
 A short sentence is not automatically a direct one. Directness means going straight at the point, which a long sentence can do perfectly well. Connect clauses with *and*, *because*, *so* rather than breaking for emphasis. Emphasis by fragment asks the reader to supply the drama.

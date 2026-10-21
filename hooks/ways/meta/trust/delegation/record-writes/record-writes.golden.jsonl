@@ -1,2 +1,2 @@
-{"kind":"direct","prompt":"bulk update these forty crm records with the new owner, but show me the full change table first and verify afterward"}
-{"kind":"situational","prompt":"go through item #12 on the action tracker sheet, handle it, and mark it done"}
+{"kind":"direct","prompt":"before you mass-edit records in our sales database for me, how will you make sure nothing gets written wrong"}
+{"kind":"situational","prompt":"reassign all 60 open deals in the west territory to the new rep and change the close quarter on each one"}

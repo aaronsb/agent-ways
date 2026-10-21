@@ -1,2 +1,2 @@
-{"kind":"direct","prompt":"before you rewrite this script, make a backup of the working version and re-read the file since i've been editing it too"}
-{"kind":"situational","prompt":"you rebuilt the report and it wiped out the fixes i had typed straight into the generated document"}
+{"kind":"direct","prompt":"what's the safe way to change output that a build step writes, versus a file a colleague currently has open"}
+{"kind":"situational","prompt":"a codegen step writes our grpc stubs and one of them has a misspelled field, can you patch it"}

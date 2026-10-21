@@ -1,45 +1,41 @@
 ---
-description: Covers building a helper CLI that agents call from a skill, such as a read-only wrapper over a CRM, finance, or ticketing API. Make it an executable called by full path, enforce read-only in the request layer, keep business definitions in one place, return the standard figure before cleaned views, keep machine output clean, turn API errors into one line, never print secrets, and smoke-test every command and flag.
-vocabulary: helper-script skill-helper agent-helper api-wrapper read-only-wrapper cli-for-agents replace-curl executable shebang full-path smoke-test json-output canonical-filters get-only oauth-token one-line-errors
-pattern: (helper|wrapper) (script|cli) (for|that) (the |an? |our )?(agents?|skills?|api)\b|read.?only (cli|wrapper|helper)\b|\bcli (that )?(the |an? )?(agents?|skills?) (can )?(calls?|uses?)\b|replace (the )?curl (snippets|calls) (with|in)|\bcurl (snippets|calls|commands)\b
+description: a small command-line script that wraps an API for a skill to call, holding the auth, pagination, curl details and JSON payloads in one place, such as a read-only CLI over an internal or third-party API; call it by full path, keep it read-only in code, keep each business definition in one place, keep machine output clean, turn API errors into one line, never print secrets, and smoke-test every command
+vocabulary: wrap the api in a command curl calls from scratch hand-rolled curl json payloads api wrapper cli run by agents rather than humans bots read only get only full path executable shebang json output one line errors smoke test every flag canonical filters
+pattern: (helper|wrapper) (script|cli) (for|that) (the |an? |our )?(agents?|skills?|bots?)\b|read.?only (cli|wrapper|helper)\b|\bcurl (snippets|calls|commands)\b
 refire: 0.15
 scope: agent, subagent
 ---
 <!-- epistemic: convention -->
-# Helper CLIs for Agents
+# API Wrapper CLIs
 
-## Why a helper
-
-Curl snippets in a skill make every agent rediscover auth, pagination, quoting, and field names. One helper command does that work in one call. In one skill rebuild, a helper cut tool calls per question by about a third and nearly removed failed calls.
+Raw request snippets in a skill make each run rediscover auth, pagination, quoting, and field names, and each rediscovery costs calls and errors. A wrapper command does that work once, in code that can be tested.
 
 ## Calling it
 
-- Make the script executable with a shebang, such as `#!/usr/bin/env -S python3 -I`. Document every call by full path.
-- Never document `X="python3 script.py"` followed by `$X cmd`. Shell state does not persist between agent Bash calls, and zsh does not split an unquoted variable into words. Agents in one eval lost about two calls each to that pattern.
+- Make the script executable with a shebang and document every call by its full path.
+- Do not document `X="python3 script.py"` followed by `$X cmd`. Shell state does not persist between agent Bash calls, and zsh does not split an unquoted variable into words.
 - `--help` lists every command and flag on one screen.
 
 ## Safety lives in code
 
-- Route every data call through one GET function. The auth token request is the only other call. Audit it with `grep -n 'urlopen\|method=' script.py`.
-- Load credentials from the project's env file inside the script. Never print tokens or secrets. On auth failure, print only the status and the error type.
+- Route every data call through one read function. The auth token request is the only other call. A grep for the request method then audits the whole script.
+- Load credentials inside the script from the project's env file. Never print a token or secret. On auth failure, print the status and the error type only.
 
 ## One home for each definition
 
-- Put each business filter in one named constant, such as what counts as open, won, lost, test, or a vendor program record. Build every query from those constants.
-- Defaults return the standard figure, so the helper matches a report in the source system. Cleaned views print as labeled second lines with the count and amount removed.
-- Print the caveats a number needs next to it, such as excluded rows or placeholder costs.
+- Put each business filter, such as what counts as open, closed, or a test record, in one named constant, and build every query from those constants.
+- The default output matches the figure the source system reports. Print any cleaned view as a separate labeled line with what it removed.
+- Print the caveats a number needs next to it.
+- Encode the source query language's known traps in the helper once, instead of in every agent's prompt.
 
 ## Output
 
-- Print human tables by default. `--json` and `--csv` print clean output with nothing else on stdout.
-- Turn API errors into one line with the error code and message. Validate dates and flag values up front.
-- Label blank group keys "(blank)". Do not put thousands separators on years.
-- Build known query-language traps into the helper. For SOQL these are no aliases in non-aggregate queries, a duplicate `Name` alias when grouping two `.Name` fields, `AND (NOT ...)` instead of `AND NOT (...)`, and datetime literals on datetime fields.
+- Print human-readable tables by default. `--json` and `--csv` print only the data on stdout.
+- Turn an API error into one line with its code and message. Validate dates and flag values before the request.
 
 ## Test every path
 
-- Keep a smoke test that runs every command with its default and with each flag value, against live data. It fails on any error string or traceback, and it checks that `--json` parses.
-- Run it after every edit, before any eval round. The default path matters most, because most calls take it.
+Keep a smoke test that runs every command with its defaults and with each flag value. It fails on any error string or traceback and checks that `--json` parses. Run it after every edit. The default path matters most, because most calls take it.
 
 ## See Also
 

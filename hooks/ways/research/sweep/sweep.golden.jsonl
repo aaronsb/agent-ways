@@ -1,2 +1,2 @@
-{"kind":"direct","prompt":"research this with one scout per source, then have refuters check the key claims and keep a claim ledger in the research folder"}
-{"kind":"situational","prompt":"figure out why the vendor renewal stalled, the evidence is scattered across email, chat, tickets, and the wiki, and verify the key claims before you tell me anything"}
+{"kind":"direct","prompt":"how should I gather evidence from lots of separate places, like vendor docs, bug trackers and forum threads, before I settle on an answer"}
+{"kind":"situational","prompt":"we need to pick a feature-flag service and I don't trust the marketing pages, dig through what users, maintainers and comparisons actually say first"}

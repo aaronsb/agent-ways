@@ -1,2 +1,0 @@
-{"kind":"direct","prompt":"log yesterday's client hours through the time tracking api and show me the entries before you commit them"}
-{"kind":"situational","prompt":"my connector to the time system keeps logging duplicates for days i already filled in by hand, can you redo last tuesday properly"}

@@ -1,54 +1,45 @@
 ---
-description: building finished deliverables for clients or leadership, such as slide decks with one beat per slide and no clutter, glanceable status visuals regenerated from data, legible diagrams, simple PDFs in the project's agreed toolchain, compact office documents, and spreadsheets formatted for people, then rendering and inspecting every page
-vocabulary: deck slide slides presentation pdf report one-pager docx google doc spreadsheet excel xlsx pptx chart roadmap burnup status visual diagram svg png branded print style guide toolchain pandoc latex render inspect overflow overlap margins whitespace executive client deliverable frozen header
-pattern: (build|make|create|draft|export|generate|render).{0,30}\b(decks?|pdfs?|slides|one.?pagers?)\b|\bxlsx\b|\bpptx\b|burn.?up chart
-commands: \b(pandoc|pdflatex|xelatex|lualatex|latexmk|pdftoppm|soffice|libreoffice)\b
-files: \.(tex|docx|xlsx|pptx)$|(^|/)(decks?|slides)/
+description: building a finished deliverable that goes to a client, a customer or leadership, such as a slide deck, a PDF report, a Word or Google document, a one-pager or a spreadsheet; one beat per slide, charts regenerated from fresh data, the established style followed and deviations flagged, and every page rendered and looked at before it goes out
+vocabulary: deck slides presentation pdf docx word document google doc one pager spreadsheet excel xlsx pptx final report deliverable client customer leadership executive cio engagement send finished goes out status chart burnup roadmap visual diagram render inspect overflow margins template style guide toolchain convert export forward to their board sponsor polished
+pattern: \bxlsx\b|\bpptx\b|\bdocx\b|\bone.?pager\b|burn.?up chart
+commands: \b(pandoc|pdftoppm|soffice|libreoffice)\b
+files: \.(docx|xlsx|pptx|odt)$
 refire: 0.15
 scope: agent, subagent
 ---
 <!-- epistemic: convention -->
-# Decks, PDFs, Docs, and Sheets
+# Finished Deliverables
 
-These go straight to executives and clients. Write the deliverable itself, not commentary on the notes. Lead with validated data and make it visual. Match the established style. Where the brief conflicts with the established work, follow the established work and flag the difference. Every number traces to a source.
+A deck, PDF, document or sheet that goes to a client or to leadership is read without you there to explain it. Write the deliverable itself. Commentary on the notes stays in chat. Lead with checked figures (writing/provenance) and show them visually where a picture reads faster.
+
+## Follow the established work
+
+- Match the last approved version, the reader's template, or the supplied style guide. Where the brief conflicts with the established work, follow the established work and flag the difference to the user.
+- Keep the project's agreed toolchain. A switch changes the look the reader knows.
+- Record each style rule the user sets, such as how dates appear or whether numbers are numerals, in the project's README or style file, so the next build follows it.
+- Copy an approved source file before editing it.
 
 ## Decks
 
-- One slide per major beat. Plain, common-sense headers carry the story.
-- Start sparse. First drafts tend to carry far more text than the final version.
-- No text greebles: eyebrow labels, stat headers, or slide metadata nobody reads.
-- Write numerals ("9", not "nine").
-- Keep text inside the margins, with generous whitespace.
-- Use motion on at most one element per slide, if at all.
-- Record every style rule the user sets, such as how definitions are formatted or whether dates appear, in the deck README so the next build follows it.
+- One slide per major beat. Plain headers carry the story.
+- Start sparse. Cut until each slide holds its one point.
+- Keep text inside the margins.
 
-## Status visuals
+## Documents
 
-- Use labels of two to four words, large text, a simple status label (for example a green "On Track"), and checkbox next steps.
-- Show the whole agreed scope, not one phase, and make what is due and when easy to see.
-- Regenerate from a data file, and refresh the data first. A re-dated chart with stale numbers is worse than no chart.
+- Open with the main finding. Put method, sources and caveats in notes or an appendix.
+- Use one top-level heading and skip no levels. The first heading does not restate the title.
+- Turn a two- or three-row table into a sentence when that reads better.
+- In Google Docs, Word and Confluence, use the editor's formatting. Literal `**` and `##` show as text.
 
-## Diagrams
+## Status visuals and charts
 
-- Prefer SVG plus PNG from the repo's build pipeline when the output must look polished. Go vertical when a wide layout gets cramped. Skip legends that the arrows already explain.
-- Write image-model prompts as one plain paragraph with no bullets or headers. Check the output for accuracy.
-- If generated imagery misses the tone, use sourced public-domain imagery with license credits.
+- Regenerate each chart from its data file, and refresh the data first. A re-dated chart with stale numbers misleads the reader.
+- Show the whole agreed scope, and make what is due and when easy to see.
 
-## By Format
+## Build and check
 
-| Format | Do | Don't |
-|---|---|---|
-| PDF | Use the project's agreed toolchain (for example pandoc plus LaTeX, or HTML printed to PDF) and any supplied style guide. Keep branding, modest conventional type, enough white space, simple non-overlapping charts, a short sources section, and strict page limits. | Switch toolchains. Build callout-heavy or oversized layouts. Edit an approved source file in place (copy it first). |
-| Doc | Compact, scannable rich text: bold, color, tables with working borders, links inline where needed. Little white space. | Add "prepared for" boilerplate or a links appendix. |
-| Spreadsheet | Sized and formatted cells, a frozen header row, merged cells for hierarchy, full text instead of codes like "P1", blank cells when empty, concise linked sources. | Create renamed copies. Put instructions to the reader inside cells. |
-
-White space differs by format on purpose.
-
-Gitignore generated PDFs unless told to commit them. Delete one-off helper scripts when the deliverable is done.
-
-## Then Check It
-
-Render and inspect every page or slide for overlap, overflow, and blank areas before you call it done. Run a prose check on the extracted text as well.
+The pptx, docx, pdf and xlsx skills cover building each format. Before calling the deliverable done, render every page or slide and look at it for overflow, overlap and blank areas (code/testing/evaluation/handoff). Gitignore generated files unless told to commit them. Delete one-off helper scripts when the deliverable is done.
 
 ## Common Rationalizations
 
@@ -56,12 +47,14 @@ Render and inspect every page or slide for overlap, overflow, and blank areas be
 |---|---|
 | "The build succeeded, so the deck is fine" | A clean build can still overflow a margin. Look at every page. |
 | "More detail shows more work" | The reader wants the point. Cut until each slide holds one beat. |
-| "I'll just update the date on the chart" | Refresh the data first or leave the old date. |
+| "I'll just update the date on the chart" | Refresh the data first, or leave the old date. |
 | "This other toolchain is easier" | The project agreed on one. Switching breaks the established look. |
 
 ## See Also
 
-- writing(writing) — audience, structure, and genre before formatting
+- writing(writing) — parent: audience, structure, and genre before formatting
+- writing/provenance(writing) — every figure on the page traced to its source
+- writing/client-boundary(writing) — what internal material stays out of the client copy
+- code/testing/evaluation/handoff(softwaredev) — render static output and look before handing it over
 - visualization/charts(softwaredev) — quantitative charts from data
 - visualization/diagrams(softwaredev) — structural diagrams
-- mermaid(documentation) — Mermaid syntax when a quick diagram is enough

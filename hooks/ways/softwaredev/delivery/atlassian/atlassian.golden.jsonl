@@ -1,2 +1,2 @@
-{"kind":"direct","prompt":"close out these jira tickets with a comment linking the confluence pages we wrote"}
-{"kind":"situational","prompt":"the confluence page i pushed through the connector shows raw markdown instead of real formatting, fix it and republish it under the project parent page"}
+{"kind":"direct","prompt":"what should I keep in mind when a script updates Confluence pages and Jira tickets for our team?"}
+{"kind":"situational","prompt":"several teams share this tracker project, and I only want our six items touched when you mark them finished and note where the docs live"}

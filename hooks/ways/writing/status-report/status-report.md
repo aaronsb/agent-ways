@@ -1,62 +1,43 @@
 ---
-description: recurring progress artifacts such as a weekly client status report, a daily work journal, a stakeholder summary built from git history, or a git history report returned in chat, each patterned on the last approved instance
-vocabulary: status report weekly status weekly update client update stakeholder summary progress report daily journal work log git history git log accomplishments burnup burndown leadership update team share features since what did we accomplish mermaid branch diagram recurring last-approved template
-pattern: status (report|update)|weekly (update|report)|stakeholder summary|git history (report|summary)|(full|complete|entire) git history|what did we (do|accomplish)|features (developed|built|shipped) since
-refire: 0.15
+description: writing a recurring progress report such as a weekly status for a client, a steering committee or leadership update, a work journal, or a stakeholder summary of what shipped since a date; read the latest meeting notes and commits first and follow the structure and length of the last approved report
+vocabulary: weekly status weekly update weekly report friday update status report progress report program report steering committee leadership vps stakeholder summary red amber green rag work journal what moved this week what shipped since kickoff last week's report same layout sponsor
+pattern: status (report|update)|weekly (update|report)|stakeholder summary|git history (report|summary)|what did we (do|accomplish)|features (developed|built|shipped) since
 scope: agent, subagent
+refire: 0.15
 ---
 <!-- epistemic: convention -->
-# Status Reports and History
+# Recurring Status Reports
 
-Before drafting, open the last approved instance and match its structure, length, depth, and markdown. Do not invent a new format.
+A recurring report is read against the previous one. Before drafting, open the last approved instance and follow its structure, length, depth and markdown. Change the format when the user asks, and then update the template or skill the report is built from so the next one follows the change.
 
-## Weekly client status
+## Gather first
 
-1. Ingest new transcripts and messages first, so the report reflects the latest meetings.
-2. Pattern the report on last week's.
-3. Refresh any cumulative chart data, such as a burnup, and put the visual at the top.
-4. Write short bullets of plain declarative sentences that follow the user's register rules. Where a point needs proof, add a parenthetical link to the transcript or decision record behind it.
-5. Commit, push, or post the link only when the user or the routine names that step. Posting to a channel follows trust/delegation.
+- Read the records since the last report before writing: meeting transcripts, messages, tracker changes and the git log for the window. Memory misses the latest meeting.
+- Refresh cumulative chart data before redrawing the chart (writing/deliverables).
+- Where a point needs proof, add a short parenthetical link to the transcript, decision record or commit behind it (writing/provenance).
 
-When the user changes the standard, update the report skill or template so the next report follows it by default. Stale instructions produce stale reports.
+## What to report
 
-## Daily work journal
+- What changed, what is blocked and by whom, and the next action with its owner.
+- Capability delivered and its adoption over time. Lines of code, seat counts and days active tell the reader little.
+- For readers outside the team, plain statements of outcome, with no internal tool names or tracking sheets.
 
-Review the day's agent sessions, messages, and any pasted transcripts. Match the earlier entries in the journal folder in shape and depth. Commit only when the user or the routine names it.
+## Summaries from git history
 
-## Stakeholder summaries
-
-Build them from git history. Cover the full project lifecycle unless the user asks about one day.
-
-- Write 3 to 8 flat, single-sentence plain statements for readers who do not know the tools.
-- Use no `**Label:** text` prefixes.
-- For an internal team share, write one lead line, such as "Used <tool> to:", then one bullet per outcome. Do not reference internal tracking sheets.
-
-## Git history reports
-
-- Rebuild progress from the full log for the requested window. Use commit messages, timestamps, branches, merges, and code volume. For a "features since" request, list every feature developed since that date. Return it in chat and edit no files.
-- Add a Mermaid branch diagram when it helps, or a `.mmd` file if asked. Render it and check it before delivering. On GitHub, use `<br>` rather than `\n` in labels and escape angle brackets.
-- When asked for the story of the history, explain the decisions behind the changes and how they connect to earlier and later ones. Close with a one-paragraph status that names the current branch.
-
-## Metrics
-
-| Use | Avoid |
-|---|---|
-| Adoption over time | Seat counts |
-| Before-and-after capability | Median days active, lines of code |
-
-External audiences get percents and relative timelines. Internal records still use literal YYYY-MM-DD dates.
+- Rebuild the account from the full log for the window: commit messages, dates, branches and merges. For "everything since" a date, list every feature since that date. For the whole project, cover the whole history unless the user names a window.
+- Return it in chat unless the user asks for a file.
+- When asked for the story, explain the decisions behind the changes and how they connect.
 
 ## Common Rationalizations
 
 | Rationalization | Counter |
 |---|---|
-| "A fresh format would read better" | The reader expects last week's shape. Change it only when the user asks. |
-| "I remember what happened this week" | Ingest the transcripts and messages first. Memory misses the latest meeting. |
+| "A fresh format would read better" | The reader expects last week's shape. Change it when the user asks. |
+| "I remember what happened this week" | Read the transcripts and messages first. |
 | "Lines of code shows progress" | Readers cannot judge it. Report capability and adoption. |
 
 ## See Also
 
-- writing(writing) — genre rules for status updates
+- writing(writing) — parent: the status update genre
+- writing/provenance(writing) — linking each point to its record
 - comms/recap(ea) — the transcripts a status report draws on
-- mermaid(documentation) — diagram syntax and rendering

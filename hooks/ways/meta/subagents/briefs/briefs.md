@@ -1,63 +1,51 @@
 ---
-description: What a prompt for another agent must carry, since a subagent, workflow agent, or headless Claude Code run inherits no memory, project instructions, or conversation. The user's writing and send rules, the model and skills the user named, the fixed contract verbatim, owned files, absolute paths, small batches for bulk work, and single-paragraph goal statements with passing conditions.
-vocabulary: inherits-nothing carry-over house-rules writing-rule read-only-comms never-send named-skills model-pin fixed-contract owned-files absolute-paths confidence caveats bulk small-batches respawn missing-units quota headless claude-p task-prompt goal-paragraph passing-conditions for-an-agent-to-execute standalone
-pattern: (^|\s)/goals? (statement|paragraph)\b|goal.?ready|for an(other)? agent to (execute|run)|passing conditions?|headless (claude|cc)\b|claude -p\b|\bbriefs? (for|to) (the |each |every )?(sub)?agents?\b
+description: Writing the prompt or instructions for a subagent before sending it off, or working out why one came back wrong, given that it inherits none of this conversation, memory or corrections. The brief carries the user's writing and send rules, the named model and skills, the shared contract verbatim, the files it owns and the layout it needs.
+vocabulary: brief good instructions write the prompt for a subagent delegate hand off send an agent off subagent came back with garbage wrong didn't know the layout missed context inherits nothing writing rules never send drafts only named model skill contract verbatim owned files absolute paths batches headless
+pattern: \bbriefs? (for|to) (the |each |every |a )?(sub)?agents?\b|\bheadless (claude|cc)\b|\bfor an(other)? agent to (execute|run)\b
 refire: 0.15
 scope: agent, subagent
 ---
 <!-- epistemic: convention -->
 # What a Brief Must Carry
 
-A subagent, a workflow agent, or a headless run starts with nothing from this session. It has no memory, none of the user's corrections, and none of the conversation. Whatever the brief leaves out, the worker does not know. The parent way covers brief fidelity and the return shape. This way covers what to put in.
+A subagent, workflow agent or headless run starts with nothing from this session: no memory, none of the user's corrections, none of the conversation. What the brief leaves out, the worker does not know. The parent way covers brief fidelity and the return shape. This way covers what goes in.
 
-## Put everything in the brief
+## Put it in the brief
 
-- **The user's writing rules, verbatim**, when the worker writes text the user will read. Paste the rule. A summary like "match the user's style" carries nothing.
-- **Read-only or drafts-only** for any worker that touches email, chat, or other comms. It never sends. Say it in those words.
-- **The model the user named.** It goes on every agent the run starts. Check the pin before launch. A user who named one model version means that version, not the newest in its family.
-- **The skills or tools the user named**, by name: "use the comms skill throughout".
-- **The fixed contract, verbatim**: the API, data shape, or output format that parallel workers must agree on.
-- **The files the worker owns** and the scope it must not leave.
-- **"Use absolute paths in shell commands."** The worker's working directory can reset between calls.
+- **The user's writing rules, verbatim**, when the worker writes text the user will read. Paste the positive rule. "Match the user's style" carries nothing, and a list of banned phrases plants the phrases.
+- **Drafts only** for any worker that touches email, chat or other messages. Write "never send" in those words.
+- **The model the user named**, on every agent the run starts. A named version means that exact version. A newer model in the same family is a different model.
+- **The skills or tools the user named**, by name, such as "use the <named> skill throughout".
+- **The shared contract, verbatim**: the API, data shape or output format that parallel workers must agree on.
+- **The files the worker owns**, the scope it stays inside, and the repository layout it needs to find them.
+- **Absolute paths** in shell commands. The worker's working directory can reset between calls.
+- **One task.** Chaining two goals in one brief gets one of them done badly.
 
-## Add confidence and caveats to the return
-
-For research and judgment work, ask for two items beyond the parent's return shape:
-
-- A confidence level for the bottom line, with the reason.
-- Caveats, stated before the evidence.
-
-Ask for the bottom line first. A blocked or failed worker still returns every item.
+For research and judgment work, add to the return shape the parent lists a confidence level with its reason, and the caveats, stated before the evidence.
 
 ## Bulk work
 
-- Split bulk work into small fixed batches, such as a few pages or files per worker, so a killed worker loses little.
-- If a quota limit stops workers partway, parse each result file and count the valid ones. Then start workers for exactly the missing units. Do not rerun the whole set.
+- Split bulk work into small fixed batches, so a killed worker loses little.
+- When a quota stops workers partway, count the valid result files and start workers for exactly the missing units.
 
 ## Headless Claude Code
 
-For a headless run in a repo that already has project instructions, write a short, plain task prompt. Rely on the repo's own instructions, the built-in tools, and a generated config or env file. Do not add a custom system prompt, API pseudo-code, hand-rolled tools, artificial timeouts, or turn limits. Each of those overrides behavior the repo already set.
+In a repository that already has project instructions, give a headless run a short, plain task prompt. Add a custom system prompt, tool definitions, timeouts or turn limits only when the task needs them; each overrides what the repository already set.
 
-## Goal statements for another agent
-
-When the user asks for a goal statement or a prompt "for an agent to execute", return one imperative paragraph shaped "Do X, Y, and Z until A, B, and C hold."
-
-- State each passing condition so a reader can check it from shown output.
-- Name the exact commands and paths.
-- Make it stand alone. The receiving agent has none of this conversation.
-- Follow any goal notes in the project instructions.
+For a goal condition another agent will run toward, use the goal-author skill.
 
 ## Common Rationalizations
 
 | Rationalization | Counter |
 |---|---|
-| "The worker will pick up the project rules." | It sees what the brief and the repo give it. Your session's corrections are not in either. |
-| "I'll describe the contract in my own words." | Two workers paraphrase it two ways. Paste it verbatim. |
-| "It's a comms task, but the agent knows not to send." | Write "never send" in the brief. |
-| "Rerun the whole batch to be safe." | Count the valid results and rerun only the gaps. |
+| "The worker will pick up the project rules" | It sees what the brief and the repository give it. This session's corrections are in neither. |
+| "I'll describe the contract in my own words" | Two workers paraphrase it two ways. Paste it verbatim. |
+| "It's a messaging task, but the agent knows not to send" | Write "never send" in the brief. |
+| "Rerun the whole batch to be safe" | Count the valid results and rerun only the gaps. |
 
 ## See Also
 
-- subagents(meta) — parent: brief fidelity, the return shape, and depth
-- goals(meta) — goal mode and the condition it runs toward
+- subagents(meta) — parent: brief fidelity, the return shape and depth
+- subagents/agent-teams(meta) — several agents on one repository
 - workflows(meta) — scripted multi-agent runs that use these briefs
+- goals(meta) — goal mode and the condition it runs toward

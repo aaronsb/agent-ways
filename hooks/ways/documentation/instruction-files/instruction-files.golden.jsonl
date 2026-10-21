@@ -1,2 +1,2 @@
-{"kind":"direct","prompt":"set up claude.md files across this repo so agents can find their way around"}
-{"kind":"situational","prompt":"the agent instructions at the root of this repo have grown to 600 lines of old status notes and the agents keep missing the actual rules"}
+{"kind":"direct","prompt":"what should and shouldn't go in the CLAUDE.md for this project"}
+{"kind":"situational","prompt":"the guidance file that loads for every agent in this repo has turned into a diary of past sessions, clean it up so it only says what they need"}
