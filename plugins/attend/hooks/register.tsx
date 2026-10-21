@@ -22,7 +22,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ProcessRunResult, PromptSubmitInput, PromptSubmitResult, Register, Timer } from 'claude-code'
 
-import type { AttendStatus, KeepaliveRow } from '../types/index.d.ts'
+import type { AttendStatus, KeepaliveRow, MoveRecord } from '../types/index.d.ts'
+import { adoptMove, recordMove, settleIfMoved, watchMove } from './move.ts'
+import type { MoveActions } from './move.ts'
 import {
   ACTIVE_TOOLS,
   DEFAULT_CONFIG,
@@ -97,6 +99,7 @@ const DEFAULTS = {
   heldNote: null,
   cacheLapsed: false,
   keepalive: null,
+  move: null,
 } satisfies AttendStatus
 
 const status = atom({ plugin: 'attend', key: 'status' } as const, DEFAULTS)
@@ -124,11 +127,6 @@ const LISTENED = 'listened'
 const LISTENED_KEPT = 50
 // A /clear or a /resume tells attend the id that goes on after this long.
 const RELISTEN_MS = 1_000
-// After a /clear or a /resume, $.session.id() is read this often until it
-// names the id that goes on, at most MOVE_TRIES times; past that the mod
-// goes on with the id it reads.
-const MOVE_CHECK_MS = 250
-const MOVE_TRIES = 40
 // The keepalive policy: a gate read as on or unknown is read again after
 // this long, one read as off before every check, since a turn may follow
 // it; the check reads the transcript and the settings through ways; the
@@ -247,36 +245,49 @@ async function activate($: $, mod: Mod, id: string): Promise<ProcessRunResult> {
   return r
 }
 
-/** Reads the session id after a /clear or a /resume until it is no longer
- *  the one that ended, then puts the session back as it was (settleMove).
- *  The first read comes once the dispatch that ended the session is over. */
-async function watchMove($: $, mod: Mod) {
-  const m = mod.move
-  if (!m) return
-  if ((await $.session.id()) === m.endedId && ++m.tries < MOVE_TRIES) {
-    $.clock.after(MOVE_CHECK_MS, () => void watchMove($, mod))
-    return
+/** The move's actions in this module (move.ts) on `$`: following a /clear
+ *  or an in-session /resume to the id that goes on. */
+function moveActions($: $, mod: Mod): MoveActions {
+  return {
+    hold: m => holdMove($, mod, m),
+    settle: (id, m) => settleMove($, mod, id, m),
+    release: () => releaseMove($),
   }
-  await settleMove($, mod)
 }
 
-/** The session goes on under the id `$.session.id()` reads. An active
- *  session, or a /resume to a session that listened, puts the mode back,
- *  records the id and tells attend the id is listening; the poll holds its
- *  drain until then. The model's context changed as at a compaction, so the
- *  next delivery carries the preamble. Runs once per move: the watch and a
- *  turn that starts first race for it. */
-async function settleMove($: $, mod: Mod) {
-  const m = mod.move
-  if (!m) return
-  mod.move = undefined
+async function releaseMove($: $) {
+  await updateStatus($, s => ({ ...s, move: null }))
+}
+
+/** Before each read of the id: the move stays in $.state, which Claude Code
+ *  empties after session.end, so a reload takes the watch up; a session
+ *  that was listening keeps its mode there, so a reload finds it active, and
+ *  attend is told once that the session listens, whatever id it sees now.
+ *  The next delivery carries the preamble: the model's context changed as
+ *  at a compaction. */
+async function holdMove($: $, mod: Mod, m: MoveRecord) {
+  const s = await readStatus($)
+  const isKept = s.move !== null && s.move.ended.join(' ') === m.ended.join(' ')
+  if (isKept && (!m.wasOn || isActive(s))) return
+  await updateStatus($, t => ({
+    ...t,
+    move: m,
+    ...(m.wasOn ? { mode: 'active' as const, afterCompaction: true, turnsSinceFull: 0, heldNote: mod.heldNote ?? null } : {}),
+  }))
+  if (m.wasOn && !mod.isMoveListened) {
+    mod.isMoveListened = true
+    await listenOn($)
+  }
+}
+
+/** The session goes on under `id`, which is none of the ids that ended. An
+ *  active session, or a /resume to a session that listened, records the id
+ *  and tells attend the id is listening; the poll holds its drain until
+ *  then. */
+async function settleMove($: $, mod: Mod, id: string, m: MoveRecord) {
   try {
-    const id = await $.session.id()
     const goesOn = m.wasOn || mod.active || (m.reason === 'resume' && (await readListened($)).includes(id))
-    if (!goesOn) {
-      mod.isRelistening = false
-      return
-    }
+    if (!goesOn) return
     mod.isRelistening = true
     await updateStatus($, s => ({ ...s, mode: 'active' as const, afterCompaction: true, turnsSinceFull: 0, heldNote: mod.heldNote ?? null }))
     await rememberListening($, mod, id)
@@ -291,6 +302,18 @@ async function settleMove($: $, mod: Mod) {
     // No timer will lower the guard, so the poll would stay held.
     mod.isRelistening = false
     $.ui.log(`attend: could not carry listening to the session that goes on: ${String(err)}`)
+  }
+}
+
+/** Whether the context fill reads as absent, as it does after a compaction
+ *  until the next response; a /compact that failed or was cancelled leaves
+ *  it reported. Where usage cannot be read, it counts as cleared: an extra
+ *  preamble costs one line. */
+async function isFillCleared($: $): Promise<boolean> {
+  try {
+    return (await $.session.usage()).context.tokens === undefined
+  } catch {
+    return true
   }
 }
 
@@ -760,6 +783,8 @@ export const register: Register = on => {
     isStarted: false,
     isRelistening: false,
     move: undefined,
+    isMoveListened: false,
+    startWatch: undefined,
     contextTokens: undefined,
     heldNote: undefined,
     ka: {
@@ -788,11 +813,19 @@ export const register: Register = on => {
     if (mod.ka.applies) await armKeepalive($, mod, (await $.clock.now()) + POLICY_START_MS)
     await registerListen($)
     mod.isStarted = true
+    // The move's watch runs on this hook's `$`: session.end's bound aborts
+    // the waits of its own.
+    mod.startWatch = () => watchMove($, mod, moveActions($, mod))
     // A reload finds the mode in $.state; a new process (`claude --resume`)
     // finds the session id in the record of sessions that listened, or the
     // project's config starts it, as it does every session there.
     const id = await $.session.id()
     const kept = await readStatus($)
+    // A reload in the middle of a /clear or a /resume takes the watch up.
+    if (kept.move) {
+      adoptMove(mod, kept.move)
+      watchMove($, mod, moveActions($, mod))
+    }
     const wasActive = isActive(kept) || (await readListened($)).includes(id)
     if (wasActive || startsActive(mod)) {
       // Listed by turn one; listening and the first drain follow the hook.
@@ -812,25 +845,18 @@ export const register: Register = on => {
   // A /clear or an in-session /resume ends the conversation and the process
   // goes on under another session id, with no session.start, and Claude
   // Code empties this plugin's $.state. session.end with reason `clear` or
-  // `resume` is the engine's word for it; the id that goes on is not known
-  // yet, so the mod notes whether the session was listening and watches
-  // $.session.id() until it changes (watchMove). The mod hooks no classic.*
-  // event: where an organization manages Claude Code, its policy plugin
-  // sends those past the plugins a person installs. An exit, a logout or a
-  // -p run's end changes nothing here; at process start session.start alone
-  // reads the record.
-  on('session.end', async ($, e, next) => {
-    if (mod.isStarted && (e.reason === 'clear' || e.reason === 'resume')) {
-      try {
-        // Read before the chain runs, while $.state still holds the mode.
-        const wasOn = mod.active || isActive(await readStatus($))
-        mod.move = { endedId: e.sessionId, reason: e.reason, wasOn, tries: 0 }
-        if (wasOn) mod.isRelistening = true
-        $.clock.after(0, () => void watchMove($, mod))
-      } catch (err) {
-        mod.isRelistening = false
-        $.ui.log(`attend: could not note the session's end: ${String(err)}`)
-      }
+  // `resume` is the engine's word for it. The id that goes on shows later,
+  // so this hook only records the move, with no `$` call inside session.end's
+  // short bound, and move.ts watches the id on session.start's `$`. The mod
+  // hooks no classic.* event: where an organization manages Claude Code, its
+  // policy plugin sends those past the plugins a person installs. An exit, a
+  // logout or a -p run's end changes nothing here; at process start
+  // session.start alone reads the record.
+  on('session.end', ($, e, next) => {
+    if (mod.isStarted && mod.startWatch && (e.reason === 'clear' || e.reason === 'resume')) {
+      mod.isMoveListened = false
+      recordMove(mod, e.sessionId, e.reason, mod.active)
+      mod.startWatch()
     }
     return next(e)
   })
@@ -838,13 +864,13 @@ export const register: Register = on => {
   // A compaction drops the earlier preamble from the model's view, so the
   // next delivery shows it in full. session.compact passes over the plugins
   // a person installs where an organization manages Claude Code, so the mod
-  // reads a compaction from what reaches it there: the person's /compact as
-  // it runs, its own compaction after a wrap (markCompacted), and the
-  // context fill falling by half between two measurements, which an
-  // automatic compaction at the threshold does.
+  // reads a compaction from what reaches it there: the person's /compact
+  // once it has run and left the fill unreported, its own compaction after a
+  // wrap (markCompacted), and the context fill falling below half between
+  // two measurements, as an automatic compaction usually leaves it.
   on('command.run', { command: 'compact' }, async ($, e, next) => {
     const done = await next(e)
-    await markCompacted($)
+    if (await isFillCleared($)) await markCompacted($)
     return done
   })
 
@@ -890,8 +916,9 @@ export const register: Register = on => {
       else w.sawTurn = true
     }
     mod.lastActivityMs = await $.clock.now()
-    // A turn under the id that goes on, before the watch has read it.
-    if (mod.move) await settleMove($, mod)
+    // A turn under the id that goes on, before the watch has read it; a
+    // turn while the id still reads as one that ended leaves the watch on.
+    if (mod.move) await settleIfMoved($, mod, moveActions($, mod), text => void $.ui.log(text))
     if (await isOn($, mod)) await updateStatus($, s => ({ ...s, turnsSinceFull: s.turnsSinceFull + 1 }))
     return next(e)
   })

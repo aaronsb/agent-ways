@@ -5,6 +5,7 @@
 import type { Timer } from 'claude-code'
 
 import type { AttendStatus, KeepaliveRow } from '../types/index.d.ts'
+import type { Move } from './move.ts'
 
 export const ATTEND = 'attend'
 /** This mod's version, equal to .claude-plugin/plugin.json's. A mod cannot read
@@ -107,18 +108,6 @@ export function configArgv(project: string): string[] {
 
 // ── the module's state ─────────────────────────────────────────────────
 
-/** A /clear or an in-session /resume that session.end reported, while the
- *  mod waits to read the id that goes on (ADR-406). */
-export type Move = {
-  /** The id that ended. */
-  endedId: string
-  reason: 'clear' | 'resume'
-  /** The session was listening when it ended. */
-  wasOn: boolean
-  /** Reads of `$.session.id()` that still found `endedId`. */
-  tries: number
-}
-
 /** What the module keeps between dispatches. A reload starts it afresh, so
  *  the mode a reload reads is the one in $.state: session.start restores it
  *  from there, and a /clear or a /resume, which empty $.state, has it put
@@ -163,8 +152,15 @@ export type Mod = {
   /** A /clear or a /resume moved the session to an id attend has not been
    *  told is listening yet; the poll holds its drain until it has. */
   isRelistening: boolean
-  /** A /clear or a /resume whose new id the mod has not read yet. */
+  /** A /clear or a /resume whose new id the mod has not read yet
+   *  (move.ts). */
   move: Move | undefined
+  /** The move has told attend the session listens, before its new id
+   *  showed. */
+  isMoveListened: boolean
+  /** Starts the move's watch on session.start's `$`, whose timers outlive
+   *  any one hook: session.end's bound aborts the waits of its own. */
+  startWatch: (() => void) | undefined
   /** The context fill the last `session.measure` reported, in tokens. */
   contextTokens: number | undefined
   /** The cold start's held-back note, from a drain the poll ran. A wake
