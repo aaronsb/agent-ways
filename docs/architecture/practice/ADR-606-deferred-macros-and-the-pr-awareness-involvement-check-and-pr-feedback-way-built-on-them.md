@@ -25,6 +25,10 @@ basis:
     via: chat, relayed verbatim by the coordinating session, 2026-10-21, answering no to the codeowners-team probe
   - operator: aaronsb
     level: guided
+    said: "declining a pr, or declining to participate is as valid of an answer as sending the response. not doing anything at all will cause the same notifications on a new session to appear. if after multiple sessions more stack up, that's our 'stacking up the snakes' scenario, and it should be more annoying if there's too many of them"
+    via: chat, relayed by the coordinating session
+  - operator: aaronsb
+    level: guided
     said: "it's a stats of awareness"
     via: chat, relayed verbatim by the coordinating session, 2026-10-21, on the review-request line
   - operator: aaronsb
@@ -76,14 +80,16 @@ observable:
   - "The involvement check run on praecipio/anthropic-partnership for a change under /docs/ names the four CODEOWNERS and whether each was asked to review, and holds nothing."
   - "In a repository with another person's pending review request, a merge by the operator proceeds after the agent has surfaced the request and recorded the operator's decision on it."
   - "At the start of a new session, an item deferred in an earlier session is listed again for a decision, marked deferred with the date of the deferral; within the session that deferred it, it is not asked again."
+  - "An item the operator declined is not listed in later sessions; a review request raised again after the decline is listed as a new item."
+  - "With more open items than pending.recur_count, or an oldest older than pending.recur_age, the reminder appears during the session as well as at its start, and work continues without waiting on it."
 ---
 
 # ADR-606: Deferred macros, and the PR awareness, involvement check and PR feedback way built on them
 
 ## Summary
 
-- **Decided:** Ways gain a deferred macro. A way that declares `macro_defer:` starts its macro detached when it fires, renders at once with the last cached result, and the finished result reaches the agent at its next hook event, once, with a header saying which way ran it, what fired it and how long ago. A result past a relevance budget that combines elapsed time and elapsed turns is replaced by one line saying the miss is abnormal, naming the file holding the result, and telling the agent to investigate when it bears on the work. The first consumer is a session-start line of review-request counts. On the same base: one check of who else is involved replaces six divergent solo/team rules, never gates, and puts other people's pending items in front of the operator for a decision before work goes on; and a PR feedback way runs review findings to closure in three modes, author alone, author with other reviewers, and reviewer, with the PR as the ledger.
-- **Trades away:** A slow macro's result arrives a turn or more late and can land beside unrelated context. The engine gains detached processes, a results directory and a collector on two hooks. Nothing wakes an idle session when a new review request appears. Reviewer-mode output waits on the operator to submit it. Other people's pending items cost the operator a decision at each session start, a deferred item included, and where the repository enforces no review, the agent does not hold work for a CODEOWNER or requested reviewer: their stake is surfaced and decided on, never waited for.
+- **Decided:** Ways gain a deferred macro. A way that declares `macro_defer:` starts its macro detached when it fires, renders at once with the last cached result, and the finished result reaches the agent at its next hook event, once, with a header saying which way ran it, what fired it and how long ago. A result past a relevance budget that combines elapsed time and elapsed turns is replaced by one line saying the miss is abnormal, naming the file holding the result, and telling the agent to investigate when it bears on the work. The first consumer is a session-start line of review-request counts. On the same base: one check of who else is involved replaces six divergent solo/team rules, never gates, and puts other people's pending items in front of the operator for a decision before work goes on. Declining closes an item as fully as acting on it; deferring, or giving no answer, brings it back at every session start, and the reminder grows more prominent as open items pile up and age, without ever blocking work; and a PR feedback way runs review findings to closure in three modes, author alone, author with other reviewers, and reviewer, with the PR as the ledger.
+- **Trades away:** A slow macro's result arrives a turn or more late and can land beside unrelated context. The engine gains detached processes, a results directory and a collector on two hooks. Nothing wakes an idle session when a new review request appears. Reviewer-mode output waits on the operator to submit it. Other people's pending items cost the operator a decision at each session start, a deferred item included, and where the repository enforces no review, the agent does not hold work for a CODEOWNER or requested reviewer: their stake is surfaced and decided on, never waited for. A growing pile of open items is made deliberately more noticeable, in a session that may not be about them.
 - **One-way?** No. Reversible now; expensive once ways outside this repository declare `macro_defer:`, since removing the field then breaks their frontmatter.
 - **Probes:** *Confident (next-hook):* a slow lookup's result reaches the agent with whatever comes next, a prompt or a tool call, even when that prompt is about something else, as long as it is recent; past that it becomes a one-line pointer to the file. *Not confident (codeowners-team):* asked whether CODEOWNERS entries for other people should make the agent stop for review and refuse `/merge full-sail`; answered no, and the check now surfaces and never gates. *Not confident (deferred-returns):* asked whether a deferred item should stay quiet until work touches it again; answered that deferred items come back at the start of every session.
 - **Inversion:** Other people on a repository as a gate that holds the operator's work, or as background the agent never mentions. This sits between: their pending items come first for a decision, work proceeds whatever the decision, and only the repository's own enforcement holds a merge.
@@ -144,7 +150,7 @@ Review requests: 75 open · 0 for this project · 10 Dependabot. 1 item from oth
 - **Dependabot:** PRs authored by `dependabot[bot]` or `app/dependabot` anywhere. Other bots stay in the open count for now.
 - **pending here:** other people's unresolved threads and change requests on the operator's open PRs in this project, and others' open PRs in it (section 3).
 
-Beside the line, the same deferred macro lists each pending item from another person (section 3) for a decision, with an item deferred in an earlier session marked `deferred <date>`. The listing is a GitHub query like the counts, so it arrives through the deferred macro and is subject to the relevance budget like any other result.
+Beside the line, the same deferred macro reports the open pending items from other people in this project (section 3), as a summary line or a listed block by the pressure tiers in section 4, with an item deferred in an earlier session marked `deferred <date>`. The report is a GitHub query like the counts, so it arrives through the deferred macro and is subject to the relevance budget like any other result. Review requests in other repositories stay in the counts and in `/reviews`, and do not join this project's pile.
 
 The macro keeps its own cross-session cache of the search under `$XDG_CACHE_HOME/agent-ways/`, so sessions started together make one query.
 
@@ -187,11 +193,32 @@ The three modes differ in who supplies findings and who can push:
 | Author, others reviewing | other people's review threads, across sessions | one fix per thread; a thread reply with the evidence (command, run count, whether the failure reproduced before the fix, as code/testing/evaluation reports it); the thread resolved through `resolveReviewThread`; review re-requested |
 | Reviewer | the diff since the operator's last-reviewed head | a PENDING review with inline comments, which the operator edits and submits |
 
-**Other people's pending items come first, for a decision.** When the agent takes up a PR, and again before it merges, it puts the pending items from section 3 in front of the operator ahead of its own work and asks for a decision on each: act now, defer, decline, or hand off. A decision is not an action; deferring or declining is a full answer. The agent records it in one line in its report, or as a reply on the PR when the operator chooses that. Work proceeds whatever the answer. In a run with no operator present, such as `/goal`, the agent records each item as deferred, proceeds, and lists the items in its report.
+**Other people's pending items come first, for a decision.** When the agent takes up a PR, and again before it merges, it puts the pending items from section 3 in front of the operator ahead of its own work and asks for a decision on each:
 
-Deferring keeps an item out of the current session only. Within that session the agent does not ask about it again, at a PR's take-up or before a merge. At the next session start every pending item from another person is listed again for a decision (section 2), and a deferred one carries the mark and the date of its deferral.
+| Decision | Effect |
+|---|---|
+| Act | The agent does it now. The item closes when the action lands on GitHub: a review submitted, a thread answered or resolved, a PR merged or closed. An action that did not land leaves the item open. |
+| Decline | Closes the item. Declining a PR, or declining to take part, is as complete an answer as acting. |
+| Hand off | Closes the item for the agent, with the person or agent it went to. |
+| Defer | Keeps it open, out of the current session only. |
 
-A deferral outlives its session, so it is not kept in the per-session temporary area. The pending items themselves are re-derived from GitHub at each session start, so only the deferral marker is stored: the item's id (a review request, thread or PR node id), the date, and an optional note, one line each in `$XDG_STATE_HOME/agent-ways/deferrals/<owner>/<repo>.jsonl`. The marker exists only to show the mark. GitHub stays the source of what is pending, and a PR reply is not the store: it is public, it exists only when the operator chose one, and some items, such as a CODEOWNER not yet asked to review, have no thread to reply in. A marker whose item is no longer pending is removed when the listing is next built.
+No answer counts as defer. The agent records the decision in one line in its report. Work proceeds whatever the answer. In a run with no operator present, such as `/goal`, every item stays undecided, and the agent proceeds and lists the items in its report. There is no limit on how many times an item can be deferred.
+
+The operator may make a decline visible on GitHub, by removing themselves as a requested reviewer where they have the access, or by a short reply. Both are optional and outward-facing, so the agent does them only when the operator chooses.
+
+**Open items return every session.** An open item is not asked about again in the session that deferred it or left it unanswered, at a PR's take-up or before a merge. At the next session start every open item is reported again (section 2), and a deferred one carries the mark and the date of its deferral.
+
+**Decision markers.** A decision outlives its session, so it is not kept in the per-session temporary area. The pending items themselves are re-derived from GitHub at each session start, so only a marker is stored: its kind (`deferred`, `declined` or `handed-off`), the item's id (a review request, thread or PR node id) with the time the item was raised, the date, the hand-off target where there is one, and an optional note, one line each in `$XDG_STATE_HOME/agent-ways/decisions/<owner>/<repo>.jsonl`. A `declined` or `handed-off` marker keeps its item out of later listings; a `deferred` marker only supplies the mark. Act needs no marker, since GitHub records the action. An item raised again after a decline, such as a re-requested review, has a new raised time and is a new item. GitHub stays the source of what is pending, and a PR reply is not the store: it is public, it exists only when the operator chose one, and some items, such as a CODEOWNER not yet asked to review, have no thread to reply in. A marker whose item is no longer pending on GitHub is removed when the listing is next built.
+
+**Pressure scales with the pile.** The pile is this project's open items: pending items from other people with no closing decision. Its prominence follows two measures, the number of open items and the age of the oldest, taken from when GitHub raised it:
+
+| Tier | When | What the operator sees |
+|---|---|---|
+| Summary | at most `pending.list_count` items (default 3), and the oldest under `pending.list_age` (default 7 days) | one summary line at session start, the `pending here` count |
+| Listed | more items, or an older oldest | a listed block at session start, asked before other work is taken up |
+| Recurring | more than `pending.recur_count` items (default 10), or the oldest past `pending.recur_age` (default 30 days) | the listed block at session start, and during the session one line giving the count and the oldest's age, at the review way's refire cadence and on the next prompt after a `gh pr` command, until the pile drops below this tier |
+
+Every tier asks for decisions and none blocks work. "Asked before other work is taken up" means the question comes first; when the operator moves on without answering, that is no answer, and the work goes ahead. The four thresholds are ways settings with the defaults above.
 
 The PR is the loop's ledger. Unresolved threads are open findings, and a session starting cold rebuilds the loop's state from GitHub. The way covers inline comments, thread replies, resolving threads, reading a returned review, re-requesting review, and waiting on CI with the gh-monitor skill's `ci` mode in the merge flow.
 
@@ -214,6 +241,7 @@ A later step may move PR awareness to an ADR-403 command sensor, which would wak
 - Deferred macros run in the ways hooks, so they work in attend-mod sessions, which run no attend sensors.
 - One check gives the github way, `/merge`, the code-reviewer agent and `project-init` the same view of who else is involved, and a CODEOWNERS entry or a requested reviewer is seen.
 - Nothing the check finds holds work. In a repository where one operator drives most of the work while others are new, casual or observing, the operator is not left waiting on them, and their open asks still get an answer.
+- A pile of other people's open items cannot grow silently: it returns every session and gets louder as it grows and ages. Declining is a cheap way out of it.
 - A PR's state survives session boundaries because it lives on GitHub. Review findings from other people are closed with evidence and an explicit resolve.
 - Reviewer-mode output cannot reach other people before the operator reads it.
 
@@ -226,7 +254,8 @@ A later step may move PR awareness to an ADR-403 command sensor, which would wak
 - The involvement check reads CODEOWNERS and PR metadata, so it costs more than a `git log` count and needs network for its per-PR signals.
 - Where the repository enforces no review, the agent can merge a change to a path another person owns. The operator's recorded decision is the only trace of it.
 - Each surfaced item asks the operator for a decision, which adds a question to a session that would otherwise run straight through. A deferred item asks again at every session start, one more question per session for as long as it stays pending.
-- Deferral markers are a small piece of local state outside GitHub. They do not travel to the operator's other machines, where a deferred item shows without its mark.
+- Decision markers are a small piece of local state outside GitHub. They do not travel to the operator's other machines, where a deferred item shows without its mark and a declined or handed-off item is listed again.
+- The recurring tier is deliberate annoyance. It interrupts sessions about unrelated work until the pile shrinks, and the thresholds that set it are a guess until use tunes them.
 - A first fire has no cache, so the way's first rendering carries no macro output.
 
 ### Neutral
@@ -247,6 +276,7 @@ A later step may move PR awareness to an ADR-403 command sensor, which would wak
 - **Staleness by TTL alone.** Rejected for the operator's time-against-turns budget: a burst of prompts in two minutes moves the conversation further than ten idle minutes.
 - **`max(age/max_age, turns/max_turns) ≤ 1` instead of the sum.** Two independent caps. Rejected: a result at 90% of both caps is delivered, though both kinds of drift have nearly run out.
 - **An ADR-403 command sensor now.** Wakes idle sessions. Rejected for now: unbuilt, it can drop a line after the script moved its marker, it does not run in mod hosts, and ADR-137 retired GitHub watching from sensors. Kept as a later step with the requirements in section 5.
+- **A cap on deferrals, or dropping the defer option after a number of sessions.** Forces a resolution. Rejected: deferring and not answering stay valid answers indefinitely, and the rising prominence of a growing pile does the forcing without removing a choice.
 - **Fix each of the six solo/team rules in place.** Smaller diffs. Rejected: six copies drift again, as they already did.
 - **Gate on the check: team paths stop for review and `/merge full-sail` is refused for them.** Honors every named owner. Rejected by the operator: in most repositories one person drives the work while others are new, casual or observing, and a false signal leaves the operator waiting on work that never finishes. The repository's own enforcement already holds a merge where its owners want one held.
 - **Reviewer mode posting with `event: COMMENT`.** Saves the operator a click. Rejected: it publishes under the operator's name before they have read it.
