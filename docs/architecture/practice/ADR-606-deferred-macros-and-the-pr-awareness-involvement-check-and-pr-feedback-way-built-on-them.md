@@ -33,6 +33,14 @@ basis:
     via: chat, relayed by the coordinating session
   - operator: aaronsb
     level: guided
+    said: "the biggest issue is that when it's a single user reviewing itself, it cant be marked off as self"
+    via: chat, relayed by the coordinating session
+  - operator: aaronsb
+    level: guided
+    said: "this way we have two more complete scenarios - single contributor that stays honest, and the true collaboration with others model."
+    via: chat, relayed by the coordinating session
+  - operator: aaronsb
+    level: guided
     said: "it's a stats of awareness"
     via: chat, relayed verbatim by the coordinating session, 2026-10-21, on the review-request line
   - operator: aaronsb
@@ -46,6 +54,7 @@ basis:
   - evidence: "attend's script sensors can drop a line after the script advanced its own marker: absolute and relative refractory (tools/sensor-trait/src/lib.rs:317-338), the lapsed-cache reset (tools/attend/src/cmd/run/tick.rs:406-413), and a slot magnitude under 3.0 emitted as low priority to stderr only (tick.rs:497-503, tools/attend/src/emit/mod.rs:16-27). The attend mod's hooks (plugins/attend/hooks/lib.ts) run no sensors"
   - upstream: "GitHub REST, create a review for a pull request: a review created without `event` stays PENDING and is visible only to its author until submitted"
   - upstream: "GitHub GraphQL `resolveReviewThread` and `addPullRequestReviewThreadReply` mutations"
+  - upstream: "GitHub does not let a PR's author approve it or request changes on it; a review with event COMMENT is allowed, and the author can resolve review threads and set commit statuses through the REST statuses API"
   - precedent: ADR-137
   - precedent: ADR-004
   - precedent: ADR-180
@@ -88,14 +97,16 @@ observable:
   - "With more open items than pending.recur_count, or an oldest older than pending.recur_age, the reminder appears during the session as well as at its start, and work continues without waiting on it."
   - "With the pile past pending.clear_count or pending.clear_age, the session's first ask is a grouped clearing decision, and one answer to a group writes a marker for each item in it."
   - "Each change of tier logs a pending_tier_entered event naming the tier, the open count and the oldest item's age."
+  - "In a solo repository, a PR with an agent review shows a review/agent commit status that goes from pending to success as its threads are resolved, and returns to pending after a push."
+  - "A declined finding's thread carries the reason in a reply before it is resolved."
 ---
 
 # ADR-606: Deferred macros, and the PR awareness, involvement check and PR feedback way built on them
 
 ## Summary
 
-- **Decided:** Ways gain a deferred macro. A way that declares `macro_defer:` starts its macro detached when it fires, renders at once with the last cached result, and the finished result reaches the agent at its next hook event, once, with a header saying which way ran it, what fired it and how long ago. A result past a relevance budget that combines elapsed time and elapsed turns is replaced by one line saying the miss is abnormal, naming the file holding the result, and telling the agent to investigate when it bears on the work. The first consumer is a session-start line of review-request counts. On the same base: one check of who else is involved replaces six divergent solo/team rules, never gates, and puts other people's pending items in front of the operator for a decision before work goes on. Declining closes an item as fully as acting on it; deferring, or giving no answer, brings it back at every session start, and the reminder grows more prominent as open items pile up and age, without ever blocking work. Past a clearing threshold, guidance has the agent put clearing the pile to the operator as the session's first decision, answered by group rather than item by item; and a PR feedback way runs review findings to closure in three modes, author alone, author with other reviewers, and reviewer, with the PR as the ledger.
-- **Trades away:** A slow macro's result arrives a turn or more late and can land beside unrelated context. The engine gains detached processes, a results directory and a collector on two hooks. Nothing wakes an idle session when a new review request appears. Reviewer-mode output waits on the operator to submit it. Other people's pending items cost the operator a decision at each session start, a deferred item included, and where the repository enforces no review, the agent does not hold work for a CODEOWNER or requested reviewer: their stake is surfaced and decided on, never waited for. A growing pile of open items is made deliberately more noticeable, in a session that may not be about them.
+- **Decided:** Ways gain a deferred macro. A way that declares `macro_defer:` starts its macro detached when it fires, renders at once with the last cached result, and the finished result reaches the agent at its next hook event, once, with a header saying which way ran it, what fired it and how long ago. A result past a relevance budget that combines elapsed time and elapsed turns is replaced by one line saying the miss is abnormal, naming the file holding the result, and telling the agent to investigate when it bears on the work. The first consumer is a session-start line of review-request counts. On the same base: one check of who else is involved replaces six divergent solo/team rules, never gates, and puts other people's pending items in front of the operator for a decision before work goes on. Declining closes an item as fully as acting on it; deferring, or giving no answer, brings it back at every session start, and the reminder grows more prominent as open items pile up and age, without ever blocking work. Past a clearing threshold, guidance has the agent put clearing the pile to the operator as the session's first decision, answered by group rather than item by item; and a PR feedback way runs review findings to closure, with the PR as the ledger, in two scenarios. A single contributor that stays honest: the agent's review posts one thread per finding, each thread closes with evidence or a recorded decision and is resolved, and a `review/agent` commit status, labelled as the author's own claim, stands in for the approval GitHub will not let an author give. True collaboration with others: other people's reviews and the operator's reviews of their PRs run through threads and pending reviews, with the pending-item tiers above.
+- **Trades away:** A slow macro's result arrives a turn or more late and can land beside unrelated context. The engine gains detached processes, a results directory and a collector on two hooks. Nothing wakes an idle session when a new review request appears. Reviewer-mode output waits on the operator to submit it. A solo PR's sign-off is a status the author sets on their own work, not an approval. Other people's pending items cost the operator a decision at each session start, a deferred item included, and where the repository enforces no review, the agent does not hold work for a CODEOWNER or requested reviewer: their stake is surfaced and decided on, never waited for. A growing pile of open items is made deliberately more noticeable, in a session that may not be about them.
 - **One-way?** No. Reversible now; expensive once ways outside this repository declare `macro_defer:`, since removing the field then breaks their frontmatter.
 - **Probes:** *Confident (next-hook):* a slow lookup's result reaches the agent with whatever comes next, a prompt or a tool call, even when that prompt is about something else, as long as it is recent; past that it becomes a one-line pointer to the file. *Not confident (codeowners-team):* asked whether CODEOWNERS entries for other people should make the agent stop for review and refuse `/merge full-sail`; answered no, and the check now surfaces and never gates. *Not confident (deferred-returns):* asked whether a deferred item should stay quiet until work touches it again; answered that deferred items come back at the start of every session.
 - **Inversion:** Other people on a repository as a gate that holds the operator's work, or as background the agent never mentions. This sits between: their pending items come first for a decision, work proceeds whatever the decision, and only the repository's own enforcement holds a merge.
@@ -108,7 +119,7 @@ The operator asked for three things. Agents should know which pull requests conc
 
 The existing paths each fall short. The ways CLI cannot run a 6 s query in a macro. Attend sensors run only under `attend run` or Monitor, not under the attend mod; ADR-137 and the gh-monitor skill retired GitHub watching from attend sensors, although `tools/attend/examples/gh-notifications.sh` still ships as a script sensor; and the proposed command sensors of ADR-403 are unbuilt and lack delivery acknowledgement. A bespoke background refresher like gh-tasks (ADR-180) would work for this feature and would be the second such process, with the next slow macro needing a third.
 
-GitHub already records the state a PR loop needs: review threads and whether each is resolved, each review's commit, requested reviewers. Guidance for working that state is missing. No way covers inline comments, thread replies, resolving a thread, reading a returned review, re-requesting review, or waiting on CI with gh-monitor inside the merge flow.
+GitHub already records the state a PR loop needs: review threads and whether each is resolved, each review's commit, requested reviewers. Guidance for working that state is missing. A solo repository shows the gap most: GitHub does not let an author approve their own PR, so an agent review posted under the operator's account leaves the PR with no review decision, and a required-approval rule can never be met. In one such PR a thorough agent review sat in a single comment of fourteen numbered findings with a second comment listing fixes; which findings ended declined, deferred or left could be learned only by matching numbers across prose, and two commits pushed after the review were never re-reviewed. No way covers inline comments, thread replies, resolving a thread, reading a returned review, re-requesting review, or waiting on CI with gh-monitor inside the merge flow.
 
 ## Decision
 
@@ -189,15 +200,34 @@ The operator's login comes from `gh config get -h github.com user`, which reads 
 
 ### 4. The PR feedback way
 
-A new way, `softwaredev/delivery/review/`, sits beside `delivery/merge`, not under it: reviewer mode never merges, and author mode with other reviewers runs across sessions before merging is in view. `delivery/merge` links to it for the step between review and landing.
+A new way, `softwaredev/delivery/review/`, sits beside `delivery/merge`, not under it: reviewing someone else's PR never merges, and a PR with other reviewers runs across sessions before merging is in view. `delivery/merge` links to it for the step between review and landing.
 
-The three modes differ in who supplies findings and who can push:
+The PR is the loop's ledger in both scenarios below. Threads are findings, an unresolved thread is an open one, and a session starting cold reads open findings from GitHub without parsing prose. The way covers inline comments, thread replies, resolving threads, reading a returned review, re-requesting review, and waiting on CI with the gh-monitor skill's `ci` mode in the merge flow.
+
+#### A. Single contributor that stays honest
+
+The operator is the only author, and the agent's review subagent supplies the findings.
+
+- **Findings.** The review posts as a formal review with event `COMMENT`, which GitHub allows on one's own PR, with one inline comment per finding. Each finding is a thread.
+- **Sign-off per finding: a resolved thread.** Each thread closes with a reply carrying its evidence, as the evaluation way reports it (the scenario replayed, the command, red before the fix and green after), or with the decline or deferral and its reason, and is then resolved. A deferred finding becomes an issue naming the condition that reopens it, the residuals rule of `delivery/issues`.
+- **Sign-off for the PR: a commit status.** The agent sets `review/agent` on the head commit with `gh api repos/{owner}/{repo}/statuses/{sha}`:
+  - `pending` while threads are open, with the open count in the description;
+  - `failure` while a finding the review marked blocking is unresolved;
+  - `success` once every thread is resolved or decided, with `target_url` linking to the review;
+  - `pending` again when the head moves past the reviewed commit, with an offer to review that range alone.
+- **Honesty.** The status is the author's own claim and says so, for example "agent-reviewed; findings settled". No wording suggests independent approval (delivery/groundwork/claims). The operator chooses whether branch protection requires the status as a check.
+- **Merge.** The agent merges once no unresolved thread lacks a decision. Every finding needs a decision, not a fix. This holds the agent to its own review; section 3's rule that nothing gates concerns other people's stake.
+
+#### B. True collaboration with others
+
+Other people author, review, or ask for review. The pending items, decision markers and tiers below belong to this scenario, with two modes:
 
 | Mode | Findings from | Output |
 |---|---|---|
-| Author, self-driven | the agent's own review subagent, in one session | fixes, then merge |
 | Author, others reviewing | other people's review threads, across sessions | one fix per thread; a thread reply with the evidence (command, run count, whether the failure reproduced before the fix, as code/testing/evaluation reports it); the thread resolved through `resolveReviewThread`; review re-requested |
 | Reviewer | the diff since the operator's last-reviewed head | a PENDING review with inline comments, which the operator edits and submits |
+
+Formal approvals come from other people. Where a repository requires approvals and the agent's review should count toward them, a separate reviewer identity, a GitHub App or a machine user, can file formal reviews. It is optional: it costs setup per repository or organization and possibly a paid seat.
 
 **Other people's pending items come first, for a decision.** When the agent takes up a PR, and again before it merges, it puts the pending items from section 3 in front of the operator ahead of its own work and asks for a decision on each:
 
@@ -231,8 +261,6 @@ Every tier asks for decisions and none blocks work. "Asked before other work is 
 
 The defaults are a guess: the operator does not know the right number. Past about 25 items an item-by-item list stops being answerable in one sitting, and an item open for two months has usually been passed over more than once. Each change of tier, up or down, is logged to the ways event log as `pending_tier_entered`, naming the tier, the open count, the oldest item's age and the project, so real use can tune the thresholds.
 
-The PR is the loop's ledger. Unresolved threads are open findings, and a session starting cold rebuilds the loop's state from GitHub. The way covers inline comments, thread replies, resolving threads, reading a returned review, re-requesting review, and waiting on CI with the gh-monitor skill's `ci` mode in the merge flow.
-
 Posting under the operator's account is outward-facing. In reviewer mode nothing posts under the operator's name until they submit: the review is created without `event`, and where the operator already has a pending review on the PR the way adds threads to it, since GitHub keeps one pending review per user per PR. In author mode, thread replies and resolutions follow the repository's norms and the operator's standing authorization.
 
 ### 5. Requirements on ADR-403
@@ -255,6 +283,7 @@ A later step may move PR awareness to an ADR-403 command sensor, which would wak
 - A pile of other people's open items cannot grow silently: it returns every session and gets louder as it grows and ages. Declining is a cheap way out of it, and grouped answers keep a large pile clearable.
 - A PR's state survives session boundaries because it lives on GitHub. Review findings from other people are closed with evidence and an explicit resolve.
 - Reviewer-mode output cannot reach other people before the operator reads it.
+- A cold session reads a PR's open findings from GitHub's threads without parsing prose, and a solo PR shows its review state as a status beside its CI checks, including whether commits landed after the review.
 
 ### Negative
 
@@ -268,6 +297,8 @@ A later step may move PR awareness to an ADR-403 command sensor, which would wak
 - Decision markers are a small piece of local state outside GitHub. They do not travel to the operator's other machines, where a deferred item shows without its mark and a declined or handed-off item is listed again.
 - The recurring tier is deliberate annoyance. It interrupts sessions about unrelated work until the pile shrinks, and the thresholds that set it are a guess until use tunes them.
 - The clearing threshold, 25 items or 60 days, is a stated guess as well. Set too low, it turns an ordinary week into a clearing session; set too high, the list is already unworkable when the guidance arrives.
+- The `review/agent` status is self-asserted. An operator, or a reader of the repository, could take it for independent approval despite its wording.
+- An agent review makes more API writes: one comment per finding, a reply and a resolve per thread, and a status per change of state.
 - A grouped answer applies one decision to items the operator has not each read. A group decline can close an item that deserved a reply.
 - A first fire has no cache, so the way's first rendering carries no macro output.
 
@@ -293,4 +324,6 @@ A later step may move PR awareness to an ADR-403 command sensor, which would wak
 - **Fix each of the six solo/team rules in place.** Smaller diffs. Rejected: six copies drift again, as they already did.
 - **Gate on the check: team paths stop for review and `/merge full-sail` is refused for them.** Honors every named owner. Rejected by the operator: in most repositories one person drives the work while others are new, casual or observing, and a false signal leaves the operator waiting on work that never finishes. The repository's own enforcement already holds a merge where its owners want one held.
 - **Reviewer mode posting with `event: COMMENT`.** Saves the operator a click. Rejected: it publishes under the operator's name before they have read it.
+- **One top-level review comment with numbered findings.** The current practice, one write. Rejected: a finding's outcome can be learned only by matching numbers across prose, nothing marks the PR as reviewed, and nothing shows that later commits went unreviewed.
+- **A machine-user reviewer for every repository.** Gives a solo PR a real approval that branch protection counts. Not the default: each repository or organization needs the identity set up, possibly a paid seat and a credential to keep, and it presents the agent's own review as an independent approval. Kept as an option under scenario B.
 - **The GitHub MCP server as the client.** Rejected for the reasons in ADR-180: it duplicates `gh` and adds tool definitions to every session.
