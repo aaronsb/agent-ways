@@ -9,7 +9,15 @@ A Claude Code mod that draws pictures inline in the terminal transcript, under t
 - **Images a reply names**: a markdown image `![alt](/abs/path.png)` or `![alt](~/path.png)`, or a bare absolute or `~/` path such as "saved the chart to /tmp/chart.png" or "`~/Pictures/x.jpg`". Bare paths count in prose, in inline code and in quotes, with trailing punctuation dropped. Fenced code blocks are skipped, and relative paths and URLs are ignored. A path that names no file draws nothing. Each file draws once, in the order the reply names it, up to 4 per reply.
 - **Pasted images**: the images pasted with a prompt, drawn under that prompt.
 
-A GIF draws its first frame. Pictures are kept to 72 columns and 30 rows, never wider than the transcript, with the aspect kept. Other surfaces (desktop, VS Code, mobile) are left to Claude Code.
+A GIF draws its first frame. Other surfaces (desktop, VS Code, mobile) are left to Claude Code.
+
+## Size and caption
+
+A picture shows at its own size, one screen pixel per image pixel, times the `scale` option. The mod learns the terminal's cell size in pixels by asking the kernel for the window size of Claude Code's terminal (`TIOCGWINSZ`, through `python3`, Linux only), measured again when the transcript width changes, as it does after a font size change. A terminal that reports no pixels (tmux, some others), or a machine without `python3`, is taken to have 10x20-pixel cells. Half-blocks draw one column per image pixel, times `scale`.
+
+The size is then held to the transcript's width and 60% of its height, with the aspect kept, and a picture narrower than 24 columns is enlarged to 24, so icons and thumbnails stay legible. An enlargement of 1.25 times or more is made nearest-neighbour, each image pixel a solid block; a smaller one, from rounding to whole cells, is left to the terminal to blend.
+
+Under each picture a caption gives the file's name, its size in pixels, and how large it is shown against its own size: `chart.png · 1920×1080 · 83%`. The name links to the file (`file://`, OSC 8), where the picture has one; a pasted image has none.
 
 ## Pixels or half-blocks
 
@@ -27,6 +35,10 @@ Set them in `/config`, or under `pluginConfigs.images.options` in settings.
 `showPathsInReplies` (default `true`): draw images a reply names by a bare path. Off, a reply draws only its markdown images.
 
 `steerToSendUserFile` (default `true`): add a short section to the system prompt, on the terminal surface only, saying the terminal draws images and that a request to see one is answered with SendUserFile, which also shows it in remote and web views. Where the request does not offer SendUserFile, the section names Read and absolute paths instead. Off, the prompt is left as Claude Code composes it.
+
+`scale` (default `1`, from `0.25` to `4`): picture size against one screen pixel per image pixel. `2` doubles every picture, `0.5` halves it; the transcript's width and height and the 24-column floor still apply.
+
+`showCaptions` (default `true`): the line under each picture with its linked file name, pixel size and shown percentage.
 
 `renderer`:
 

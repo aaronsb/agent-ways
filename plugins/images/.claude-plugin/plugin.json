@@ -29,6 +29,20 @@
       "title": "Steer to SendUserFile",
       "description": "Add a short system-prompt section, in the terminal only, telling Claude this terminal draws images and that SendUserFile is how to show one when asked.",
       "default": true
+    },
+    "scale": {
+      "type": "number",
+      "title": "Scale",
+      "description": "Picture size against one screen pixel per image pixel: 1 shows images at their own size, 2 doubles them, 0.5 halves them. Pictures still fit the transcript width and 60% of its height, and none is narrower than 24 columns. From 0.25 to 4.",
+      "default": 1,
+      "min": 0.25,
+      "max": 4
+    },
+    "showCaptions": {
+      "type": "boolean",
+      "title": "Show captions",
+      "description": "Under each picture, its file name (a link to the file where there is one), its size in pixels, and the percentage it is shown at.",
+      "default": true
     }
   }
 }

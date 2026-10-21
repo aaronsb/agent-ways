@@ -10,16 +10,29 @@ export type Renderer = 'image' | 'halfblock'
 
 export const RENDERER_OPTIONS: readonly RendererOption[] = ['auto', 'image', 'halfblock']
 
-/** Widest picture, in columns, whatever the transcript allows. */
-export const MAX_COLUMNS = 72
-/** Tallest picture, in rows. */
-export const MAX_ROWS = 30
 /** Columns the engine's own row indent takes before a tool result's body. */
 export const TOOL_INDENT = 5
-/** Rough pixel width of a terminal cell, used to keep `Image` from upscaling. */
-export const CELL_PIXEL_WIDTH = 8
-/** Pixel box per cell a PNG for `Image` is shrunk to fit (never enlarged). */
-export const IMAGE_PIXELS_PER_CELL = { width: 10, height: 20 } as const
+/** Narrowest picture, in columns: a smaller one is enlarged to it. */
+export const MIN_COLUMNS = 24
+/** Largest box, in cells either way, that an `Image` or `Raster` takes. */
+export const CELLS_MAX = 255
+/** The share of the surface's rows a picture may take. */
+export const ROWS_SHARE = 0.6
+/** Rows a picture may take on a surface that does not say its height. */
+export const FALLBACK_ROWS = 30
+/**
+ * The enlargement from which a picture is enlarged nearest-neighbour, its
+ * pixels kept as blocks; a smaller one is left to the terminal's blending.
+ */
+export const NEAREST_FROM = 1.25
+/** The `scale` option's bounds. */
+export const SCALE_MIN = 0.25
+export const SCALE_MAX = 4
+
+/** A terminal cell's size in screen pixels. */
+export type CellPixels = { width: number; height: number }
+/** The cell size taken where the terminal does not report its pixels. */
+export const DEFAULT_CELL_PIXELS: CellPixels = { width: 10, height: 20 }
 
 /** The terminal's default colour in a Raster cell. */
 export const DEFAULT_COLOR = 0x01000000
@@ -33,6 +46,13 @@ export const PROBE_PNG =
 
 export function parseRendererOption(value: unknown): RendererOption {
   return RENDERER_OPTIONS.includes(value as RendererOption) ? (value as RendererOption) : 'auto'
+}
+
+/** The `scale` option: a positive number, held to SCALE_MIN..SCALE_MAX; 1 otherwise. */
+export function parseScale(value: unknown): number {
+  const n = typeof value === 'string' && value.trim() !== '' ? Number(value) : value
+  if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) return 1
+  return Math.min(SCALE_MAX, Math.max(SCALE_MIN, n))
 }
 
 /**
@@ -67,45 +87,98 @@ export type CellFit = {
   /** Pixel size the source is resized to for this renderer. */
   pixelWidth: number
   pixelHeight: number
+  /** Enlarged by NEAREST_FROM or more: resized nearest-neighbour, not blended. */
+  isBlocky: boolean
 }
 
+/** The cells a picture may take at a site. */
+export type Room = { columns: number; rows: number }
+
 /**
- * Sizes a `width` x `height` picture in cells. A cell is taken as 1:2 (w:h),
- * so a half-block cell holds two square pixels stacked. The width is the
- * least of `MAX_COLUMNS`, the room the transcript leaves, and the picture's
- * natural width (one column per pixel for half-blocks, one per
- * `CELL_PIXEL_WIDTH` pixels for `Image`), so a small picture is not enlarged.
- * A picture too tall for `maxRows` is narrowed to keep its aspect.
+ * Sizes a `width` x `height` picture in cells, its aspect kept on screen for
+ * cells of `cell` pixels. Its natural width is its own pixels shown one to one
+ * (`Image`), or one column per pixel (half-blocks), times `scale`; one
+ * narrower than MIN_COLUMNS is enlarged to it. The room then shrinks it, the
+ * aspect kept. An `Image`'s PNG shrinks to the box in screen pixels; enlarged
+ * by NEAREST_FROM or more it is enlarged here, nearest-neighbour, and below
+ * that it keeps its own size for the terminal to blend up.
  */
 export function fitCells(args: {
   width: number
   height: number
   renderer: Renderer
-  availableColumns: number
-  maxColumns?: number
-  maxRows?: number
+  room: Room
+  cell?: CellPixels
+  scale?: number
 }): CellFit {
-  const { width, height, renderer } = args
-  const maxColumns = Math.max(1, Math.min(args.maxColumns ?? MAX_COLUMNS, Math.floor(args.availableColumns)))
-  const maxRows = Math.max(1, args.maxRows ?? MAX_ROWS)
-  const w = Math.max(1, width)
-  const h = Math.max(1, height)
-  const natural = renderer === 'halfblock' ? w : Math.ceil(w / CELL_PIXEL_WIDTH)
-  let columns = Math.max(1, Math.min(maxColumns, natural))
-  let rows = Math.max(1, Math.round((columns * h) / w / 2))
-  if (rows > maxRows) {
-    rows = maxRows
-    columns = Math.max(1, Math.min(columns, Math.round((rows * 2 * w) / h)))
-  }
+  const { renderer, room } = args
+  const cell = args.cell ?? DEFAULT_CELL_PIXELS
+  const w = Math.max(1, args.width)
+  const h = Math.max(1, args.height)
+  const maxColumns = Math.min(CELLS_MAX, Math.max(1, Math.floor(room.columns)))
+  const maxRows = Math.min(CELLS_MAX, Math.max(1, Math.floor(room.rows)))
+  const rowsPerColumn = (h / w) * (cell.width / cell.height)
+  const natural = (renderer === 'halfblock' ? w : w / cell.width) * (args.scale ?? 1)
+  const fitted = Math.min(Math.max(MIN_COLUMNS, natural), maxColumns, maxRows / rowsPerColumn)
+  const columns = Math.max(1, Math.round(fitted))
+  const rows = Math.min(maxRows, Math.max(1, Math.round(fitted * rowsPerColumn)))
   if (renderer === 'halfblock') {
-    return { columns, rows, pixelWidth: columns, pixelHeight: rows * 2 }
+    return { columns, rows, pixelWidth: columns, pixelHeight: rows * 2, isBlocky: columns / w >= NEAREST_FROM }
   }
-  return {
-    columns,
-    rows,
-    pixelWidth: Math.min(w, columns * IMAGE_PIXELS_PER_CELL.width),
-    pixelHeight: Math.min(h, rows * IMAGE_PIXELS_PER_CELL.height),
+  const boxWidth = columns * cell.width
+  const boxHeight = rows * cell.height
+  if (Math.min(boxWidth / w, boxHeight / h) >= NEAREST_FROM) {
+    return { columns, rows, pixelWidth: boxWidth, pixelHeight: boxHeight, isBlocky: true }
   }
+  return { columns, rows, pixelWidth: Math.min(w, boxWidth), pixelHeight: Math.min(h, boxHeight), isBlocky: false }
+}
+
+/** How large a picture `width` pixels wide shows in `columns` cells, against one screen pixel per picture pixel. */
+export function shownPercent(width: number, columns: number, cell: CellPixels): number {
+  return Math.round(((columns * cell.width) / Math.max(1, width)) * 100)
+}
+
+/** A `file://` URL for an absolute path, each segment percent-encoded. */
+export function fileUrl(path: string): string {
+  return `file://${path.split('/').map(encodeURIComponent).join('/')}`
+}
+
+/**
+ * argv for a child that prints the terminal's `rows cols xpixels ypixels`. A
+ * child here has no controlling terminal, so it looks for one on a standard
+ * stream of its parent, or of an ancestor, and asks the kernel. Linux only.
+ */
+export const WINSIZE_ARGV: readonly string[] = [
+  'python3',
+  '-I',
+  '-c',
+  [
+    'import fcntl, os, struct, termios',
+    'pid = os.getppid()',
+    'for _ in range(4):',
+    '    for n in (0, 1, 2):',
+    '        try:',
+    '            fd = os.open(f"/proc/{pid}/fd/{n}", os.O_RDONLY | os.O_NOCTTY)',
+    '        except OSError:',
+    '            continue',
+    '        size = struct.unpack("HHHH", fcntl.ioctl(fd, termios.TIOCGWINSZ, bytes(8))) if os.isatty(fd) else None',
+    '        os.close(fd)',
+    '        if size:',
+    '            print(*size)',
+    '            raise SystemExit',
+    '    with open(f"/proc/{pid}/stat") as stat:',
+    '        pid = int(stat.read().rsplit(")", 1)[1].split()[1])',
+    '    if pid <= 1:',
+    '        break',
+    'raise SystemExit(1)',
+  ].join('\n'),
+]
+
+/** A cell's pixels from WINSIZE_ARGV's output; null where the terminal reports none. */
+export function parseCellPixels(stdout: string): CellPixels | null {
+  const [rows, columns, xPixels, yPixels] = stdout.trim().split(/\s+/).map(Number)
+  if (![rows, columns, xPixels, yPixels].every(n => Number.isInteger(n) && n > 0)) return null
+  return { width: xPixels / columns, height: yPixels / rows }
 }
 
 /**
@@ -281,10 +354,12 @@ export function expandHome(path: string, home: string | undefined): string | und
 /**
  * A picture to draw: a file on disk, or base64 bytes the engine holds (what a
  * Read showed the model, an image pasted with a prompt), named by a stable id.
+ * `path` is the absolute file it shows, where there is one: its caption links
+ * there.
  */
 export type ImageRef =
-  | { file: string; alt: string }
-  | { data: string; mime: string; id: string; alt: string }
+  | { file: string; alt: string; path?: string }
+  | { data: string; mime: string; id: string; alt: string; path?: string }
 
 type Obj = Record<string, unknown>
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null
@@ -302,7 +377,8 @@ export function toolImages(tool: string, input: unknown, output: unknown, id: st
     if (file === null || typeof file.base64 !== 'string' || typeof file.type !== 'string') return []
     if (!IMAGE_MIME.test(file.type)) return []
     const path = isObj(input) && typeof input.file_path === 'string' ? input.file_path : 'image'
-    return [{ data: file.base64, mime: file.type, id, alt: basename(path) }]
+    const ref = { data: file.base64, mime: file.type, id, alt: basename(path) }
+    return [path.startsWith('/') ? { ...ref, path } : ref]
   }
   if (tool === 'SendUserFile') {
     const attachments = isObj(output) && Array.isArray(output.attachments) ? output.attachments : null
@@ -315,7 +391,7 @@ export function toolImages(tool: string, input: unknown, output: unknown, id: st
         : (isObj(input) && Array.isArray(input.files) ? input.files : []).filter(
             (f): f is string => typeof f === 'string' && isImagePath(f),
           )
-    return paths.filter(p => p.startsWith('/')).map(file => ({ file, alt: basename(file) }))
+    return paths.filter(p => p.startsWith('/')).map(file => ({ file, alt: basename(file), path: file }))
   }
   return []
 }
@@ -355,14 +431,16 @@ export function identifyArgv(tool: string, src: string): string[] {
   return [tool, `${src}[0]`, '-auto-orient', '-format', '%w %h', 'info:']
 }
 
-/** argv to write `src`'s first frame as exact-size raw RGBA for half-blocks. */
+/** argv to write `src`'s first frame as exact-size raw RGBA for half-blocks; `-sample` is nearest-neighbour. */
 export function rgbaArgv(tool: string, src: string, fit: CellFit, out: string): string[] {
-  return [tool, `${src}[0]`, '-auto-orient', '-resize', `${fit.pixelWidth}x${fit.pixelHeight}!`, '-depth', '8', `rgba:${out}`]
+  const resize = fit.isBlocky ? '-sample' : '-resize'
+  return [tool, `${src}[0]`, '-auto-orient', resize, `${fit.pixelWidth}x${fit.pixelHeight}!`, '-depth', '8', `rgba:${out}`]
 }
 
-/** argv to write `src`'s first frame as a PNG no larger than the cell box. */
+/** argv to write `src`'s first frame as a PNG: enlarged to the box nearest-neighbour, or no larger than it. */
 export function pngArgv(tool: string, src: string, fit: CellFit, out: string): string[] {
-  return [tool, `${src}[0]`, '-auto-orient', '-resize', `${fit.pixelWidth}x${fit.pixelHeight}>`, '-strip', `png:${out}`]
+  const resize = fit.isBlocky ? ['-sample', `${fit.pixelWidth}x${fit.pixelHeight}`] : ['-resize', `${fit.pixelWidth}x${fit.pixelHeight}>`]
+  return [tool, `${src}[0]`, '-auto-orient', ...resize, '-strip', `png:${out}`]
 }
 
 /** A short stable hash (FNV-1a, hex) for cache file names. */
@@ -380,9 +458,15 @@ export function basename(path: string): string {
   return path.slice(path.lastIndexOf('/') + 1) || path
 }
 
-/** Columns a picture may take at a site indented by `indent`. */
-export function availableColumns(viewportColumns: number | undefined, indent: number): number {
-  return Math.max(1, (viewportColumns ?? 80) - indent - 1)
+/**
+ * The cells a picture may take at a site indented by `indent`: the width the
+ * transcript leaves (80 columns where unmeasured), and ROWS_SHARE of its rows.
+ */
+export function roomAt(viewport: { columns?: number; rows?: number } | undefined, indent: number): Room {
+  return {
+    columns: Math.max(1, (viewport?.columns ?? 80) - indent - 1),
+    rows: viewport?.rows ? Math.max(1, Math.floor(viewport.rows * ROWS_SHARE)) : FALLBACK_ROWS,
+  }
 }
 
 /**

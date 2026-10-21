@@ -49,17 +49,20 @@
 // line to `render.log` beside it (component, requestId, tool, and the shape
 // of its props, never their bytes).
 
-import type { Elements, EngineInterface, ProcessRunResult, Register, RenderElement, RenderNode } from 'claude-code'
+import type { Elements, EngineInterface, ProcessRunResult, Register, RenderElement, RenderNode, RenderViewport } from 'claude-code'
 
 import {
+  DEFAULT_CELL_PIXELS,
   PROBE_PNG,
   TOOL_INDENT,
-  availableColumns,
+  WINSIZE_ARGV,
+  basename,
   cellsToBase64,
   describeShape,
   chooseRenderer,
   contentImages,
   dataUri,
+  fileUrl,
   fitCells,
   fromBase64,
   hashKey,
@@ -67,16 +70,20 @@ import {
   REPLY_IMAGES_MAX,
   needsProbe,
   packHalfBlocks,
+  parseCellPixels,
   parseDimensions,
   parseRendererOption,
+  parseScale,
   pngArgv,
   probeVerdict,
   replyImages,
   rgbaArgv,
+  roomAt,
+  shownPercent,
   takeExisting,
   toolImages,
 } from './lib.ts'
-import type { ImageRef, Renderer, RendererOption } from './lib.ts'
+import type { CellPixels, ImageRef, Renderer, RendererOption, Room } from './lib.ts'
 
 const KITTY_GRAPHICS = { plugin: 'images', key: 'kittyGraphics' } as const
 const PASTED = { plugin: 'images', key: 'pasted' } as const
@@ -107,9 +114,12 @@ const STEER_WITHOUT_SEND =
   'path in your reply, and it is drawn here.'
 const TRACED = ['ToolUse', 'ToolResult', 'ToolGroup', 'ToolProgress', 'AssistantMessage', 'UserMessage', 'CommandOutput'] as const
 
-type Picture =
+/** The line under a picture: its file's name, linked to the file where there is one, and its sizes. */
+type Caption = { name: string; href: string | null; detail: string }
+type Picture = { caption: Caption } & (
   | { kind: 'image'; file: string; png: string | null; columns: number; rows: number; alt: string }
   | { kind: 'halfblock'; cells: string; columns: number; rows: number }
+)
 type Outcome = Picture | { kind: 'note'; text: string } | null
 
 type Terminal = Elements['terminal']
@@ -119,6 +129,8 @@ type Terminal = Elements['terminal']
 let option: RendererOption = 'auto'
 let showPathsInReplies = true
 let steerToSendUserFile = true
+let showCaptions = true
+let scale = 1
 let isProbing = false
 const memo = new Map<string, Picture>()
 /** Per site (requestId): its Images' generation, and whether it is off screen. */
@@ -132,6 +144,11 @@ let traceCheck: Promise<boolean> = Promise.resolve(false)
 let traceCheckedAt = -Infinity
 /** Set once a write to the cache failed and that was said, so it is said once. */
 let toldUnwritable = false
+/**
+ * The terminal's cell size, measured once per transcript width: a font size
+ * change moves both. A measure the host refused is asked again.
+ */
+let cellMeasure: { columns: number | undefined; cell: Promise<CellPixels | null> } | null = null
 
 async function isRegularFile($: EngineInterface, path: string): Promise<boolean> {
   const stat = await $.fs.stat(path).catch(() => null)
@@ -279,6 +296,22 @@ async function sourceOf(
   return { src, tag: `${file}|${stat.mtimeMs}|${stat.size}` }
 }
 
+/** The terminal's cell in screen pixels, or DEFAULT_CELL_PIXELS where it reports none. */
+async function cellPixels($: EngineInterface, columns: number | undefined): Promise<CellPixels> {
+  if (cellMeasure === null || cellMeasure.columns !== columns) cellMeasure = { columns, cell: measureCell($) }
+  const held = cellMeasure
+  const cell = await held.cell
+  if (cell === null && cellMeasure === held) cellMeasure = null
+  return cell ?? DEFAULT_CELL_PIXELS
+}
+
+/** null only when the measure could not run; a terminal that reports no pixels is the default. */
+async function measureCell($: EngineInterface): Promise<CellPixels | null> {
+  const ran = await run($, [...WINSIZE_ARGV])
+  if (ran === null) return null
+  return (ran.exitCode === 0 ? parseCellPixels(ran.stdout) : null) ?? DEFAULT_CELL_PIXELS
+}
+
 /** True when Claude Code runs over ssh, where the terminal cannot read our files. */
 async function isOverSsh($: EngineInterface): Promise<boolean> {
   if (overSsh === undefined) overSsh = Boolean((await $.env.get('SSH_CONNECTION')) || (await $.env.get('SSH_TTY')))
@@ -304,7 +337,13 @@ function generationFor(requestId: string, onScreen: unknown): number {
   return view.generation
 }
 
-async function picture($: EngineInterface, ref: ImageRef, renderer: Renderer, room: number): Promise<Outcome> {
+async function picture(
+  $: EngineInterface,
+  ref: ImageRef,
+  renderer: Renderer,
+  room: Room,
+  cell: CellPixels,
+): Promise<Outcome> {
   const tool = await findMagick($)
   if (tool === null) {
     return { kind: 'note', text: 'images: ImageMagick (magick or convert) is not installed; no picture drawn' }
@@ -318,11 +357,16 @@ async function picture($: EngineInterface, ref: ImageRef, renderer: Renderer, ro
   const sized = await run($, identifyArgv(tool, source.src))
   const dims = sized?.exitCode === 0 ? parseDimensions(sized.stdout) : null
   if (dims === null) return null
-  const fit = fitCells({ ...dims, renderer, availableColumns: room })
+  const fit = fitCells({ ...dims, renderer, room, cell, scale })
+  const caption: Caption = {
+    name: ref.path === undefined ? ref.alt : basename(ref.path),
+    href: ref.path === undefined ? null : fileUrl(ref.path),
+    detail: `${dims.width}×${dims.height} · ${shownPercent(dims.width, fit.columns, cell)}%`,
+  }
 
-  const key = hashKey(`${source.tag}|${renderer}|${fit.columns}x${fit.rows}`)
+  const key = hashKey(`${source.tag}|${renderer}|${fit.columns}x${fit.rows}|${fit.pixelWidth}x${fit.pixelHeight}`)
   const held = memo.get(key)
-  if (held !== undefined) return held
+  if (held !== undefined) return { ...held, caption }
 
   let made: Picture
   if (renderer === 'image') {
@@ -332,9 +376,9 @@ async function picture($: EngineInterface, ref: ImageRef, renderer: Renderer, ro
     let png: string | null = null
     if (await isOverSsh($)) {
       png = (await $.fs.read(out, { as: 'bytes' })).base64
-      if ((png.length * 3) / 4 > IMAGE_BYTES_MAX) return picture($, ref, 'halfblock', room)
+      if ((png.length * 3) / 4 > IMAGE_BYTES_MAX) return picture($, ref, 'halfblock', room, cell)
     }
-    made = { kind: 'image', file: out, png, columns: fit.columns, rows: fit.rows, alt: `image: ${ref.alt}` }
+    made = { kind: 'image', file: out, png, columns: fit.columns, rows: fit.rows, alt: `image: ${ref.alt}`, caption }
   } else {
     const out = `${dir}/${key}.rgba`
     if ((await run($, rgbaArgv(tool, source.src, fit, out)))?.exitCode !== 0) return null
@@ -342,7 +386,7 @@ async function picture($: EngineInterface, ref: ImageRef, renderer: Renderer, ro
     const rgba = fromBase64(base64)
     if (rgba.length !== fit.pixelWidth * fit.pixelHeight * 4) return null
     const cells = cellsToBase64(packHalfBlocks(rgba, fit.pixelWidth, fit.pixelHeight))
-    made = { kind: 'halfblock', cells, columns: fit.columns, rows: fit.rows }
+    made = { kind: 'halfblock', cells, columns: fit.columns, rows: fit.rows, caption }
   }
   memo.set(key, made)
   if (memo.size > MEMO_MAX) memo.delete(memo.keys().next().value as string)
@@ -381,23 +425,24 @@ async function pictures(
   el: Terminal,
   requestId: string,
   refs: readonly ImageRef[],
-  room: number,
+  room: Room,
+  cell: CellPixels,
   indent: number,
   generation: number,
 ): Promise<RenderNode | null> {
-  const { Box, Image, Raster, Text } = el
+  const { Box, Image, Link, Raster, Text } = el
   const { value: capability = null } = await $.state.get(KITTY_GRAPHICS)
   const renderer = chooseRenderer(option, capability)
   const drawn: RenderNode[] = []
   let note: string | null = null
   for (const [n, ref] of refs.entries()) {
-    const made = await picture($, ref, renderer, room)
+    const made = await picture($, ref, renderer, room, cell)
     if (made === null) continue
     if (made.kind === 'note') {
       note = made.text
       continue
     }
-    drawn.push(
+    const shown =
       made.kind === 'image' ? (
         <Image
           key={`images-${n}`}
@@ -408,7 +453,20 @@ async function pictures(
         />
       ) : (
         <Raster key={`images-${n}`} cells={made.cells} columns={made.columns} rows={made.rows} />
-      ),
+      )
+    if (!showCaptions) {
+      drawn.push(shown)
+      continue
+    }
+    const { name, href, detail } = made.caption
+    drawn.push(
+      <Box key={`picture-${n}`} flexDirection="column">
+        {shown}
+        <Box>
+          {href === null ? <Text dimColor>{name}</Text> : <Link href={href} label={name} />}
+          <Text dimColor>{` · ${detail}`}</Text>
+        </Box>
+      </Box>,
     )
   }
   if (drawn.length > 0 && needsProbe(option, capability)) {
@@ -431,13 +489,14 @@ async function withPictures(
   requestId: string,
   row: Promise<RenderElement>,
   refs: readonly ImageRef[],
-  viewportColumns: number | undefined,
+  viewport: RenderViewport | undefined,
   indent: number,
   onScreen: unknown,
 ): Promise<RenderElement> {
-  const room = availableColumns(viewportColumns, indent)
+  const room = roomAt(viewport, indent)
   const generation = generationFor(requestId, onScreen)
-  const [own, drawn] = await Promise.all([row, pictures($, el, requestId, refs, room, indent, generation)])
+  const cell = await cellPixels($, viewport?.columns)
+  const [own, drawn] = await Promise.all([row, pictures($, el, requestId, refs, room, cell, indent, generation)])
   if (drawn === null) return own
   const { Box } = el
   return (
@@ -452,6 +511,8 @@ export const register: Register = (on, options) => {
   option = parseRendererOption(options.renderer)
   showPathsInReplies = options.showPathsInReplies !== false
   steerToSendUserFile = options.steerToSendUserFile !== false
+  showCaptions = options.showCaptions !== false
+  scale = parseScale(options.scale)
 
   // One section, added last on the session side, where the terminal draws.
   if (steerToSendUserFile) {
@@ -475,7 +536,7 @@ export const register: Register = (on, options) => {
     if (e.surface !== 'terminal' || e.props.isErrored) return next(e)
     const refs = toolImages(e.props.tool, undefined, e.props.output, e.props.tool_use_id)
     if (refs.length === 0) return next(e)
-    return withPictures($, $.ui.resolve(e), e.requestId, next(e), refs, e.viewport?.columns, TOOL_INDENT, e.props.onScreen)
+    return withPictures($, $.ui.resolve(e), e.requestId, next(e), refs, e.viewport, TOOL_INDENT, e.props.onScreen)
   })
 
   // A Read's picture goes under its own row unless a folded group holds it.
@@ -485,7 +546,7 @@ export const register: Register = (on, options) => {
     if (folded.get(e.props.tool_use_id) === true) return next(e)
     const refs = toolImages(tool, input, output, e.props.tool_use_id)
     if (refs.length === 0) return next(e)
-    return withPictures($, $.ui.resolve(e), e.requestId, next(e), refs, e.viewport?.columns, TOOL_INDENT, e.props.onScreen)
+    return withPictures($, $.ui.resolve(e), e.requestId, next(e), refs, e.viewport, TOOL_INDENT, e.props.onScreen)
   })
 
   // Reads fold into one count line; the pictures go under it. An unfolded
@@ -503,16 +564,17 @@ export const register: Register = (on, options) => {
       .filter(call => !call.isRunning && !call.isErrored && !call.isInterrupted)
       .flatMap((call, n) => toolImages(call.tool, call.input, call.output, call.tool_use_id ?? `${e.requestId}-${n}`))
     if (refs.length === 0) return next(e)
-    return withPictures($, $.ui.resolve(e), e.requestId, next(e), refs, e.viewport?.columns, TOOL_INDENT, e.props.onScreen)
+    return withPictures($, $.ui.resolve(e), e.requestId, next(e), refs, e.viewport, TOOL_INDENT, e.props.onScreen)
   })
 
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     if (e.surface !== 'terminal' || e.props.isSummary === true || !IMAGE_MENTION.test(e.props.text)) return next(e)
     const named = replyImages(e.props.text, await $.env.get('HOME'), { bare: showPathsInReplies })
     // A path that names no file draws nothing, and says nothing.
-    const refs = await takeExisting(named, path => isRegularFile($, path), REPLY_IMAGES_MAX)
-    if (refs.length === 0) return next(e)
-    return withPictures($, $.ui.resolve(e), e.requestId, next(e), refs, e.viewport?.columns, MESSAGE_INDENT, e.props.onScreen)
+    const existing = await takeExisting(named, path => isRegularFile($, path), REPLY_IMAGES_MAX)
+    if (existing.length === 0) return next(e)
+    const refs = existing.map((ref): ImageRef => ({ ...ref, path: ref.file }))
+    return withPictures($, $.ui.resolve(e), e.requestId, next(e), refs, e.viewport, MESSAGE_INDENT, e.props.onScreen)
   })
 
   // A pasted image reaches the prompt row as base64 content; its bytes go to
@@ -537,6 +599,6 @@ export const register: Register = (on, options) => {
     const { value: files = [] } = await $.state.get({ ...PASTED, id: e.requestId })
     if (files.length === 0) return next(e)
     const refs = files.map((file, n): ImageRef => ({ file, alt: `pasted image ${n + 1}` }))
-    return withPictures($, $.ui.resolve(e), e.requestId, next(e), refs, e.viewport?.columns, MESSAGE_INDENT, e.props.onScreen)
+    return withPictures($, $.ui.resolve(e), e.requestId, next(e), refs, e.viewport, MESSAGE_INDENT, e.props.onScreen)
   })
 }

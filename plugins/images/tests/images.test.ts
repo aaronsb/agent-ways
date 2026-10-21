@@ -5,97 +5,144 @@ import type { On, ProcessRunResult } from 'claude-code'
 import {
   DEFAULT_COLOR,
   LOWER_HALF,
-  MAX_COLUMNS,
-  MAX_ROWS,
+  MIN_COLUMNS,
   SPACE,
   UPPER_HALF,
-  availableColumns,
   cellsToBase64,
   chooseRenderer,
   contentImages,
+  fileUrl,
   fitCells,
+  pngArgv,
   fromBase64,
   REPLY_IMAGES_MAX,
   needsProbe,
   packHalfBlocks,
+  parseCellPixels,
   parseDimensions,
   parseRendererOption,
+  parseScale,
   probeVerdict,
   replyImages,
   rgbaArgv,
+  roomAt,
+  shownPercent,
   takeExisting,
   toBase64,
   toolImages,
 } from '../hooks/lib.ts'
 
 describe('sizing', () => {
-  test('a wide picture fills the column cap, its aspect kept', () => {
-    // 1600x400: 72 columns; 72 * 400/1600 / 2 = 9 rows.
-    expect(fitCells({ width: 1600, height: 400, renderer: 'halfblock', availableColumns: 200 })).toEqual({
-      columns: 72,
-      rows: 9,
-      pixelWidth: 72,
-      pixelHeight: 18,
+  const ROOM = { columns: 200, rows: 60 }
+
+  test('a picture that fits shows pixel for pixel in the measured cells', () => {
+    // 1600x400 in 10x20 cells: 160 columns, 160 * 400/1600 * 10/20 = 20 rows.
+    expect(fitCells({ width: 1600, height: 400, renderer: 'image', room: ROOM, cell: { width: 10, height: 20 } })).toEqual({
+      columns: 160,
+      rows: 20,
+      pixelWidth: 1600,
+      pixelHeight: 400,
+      isBlocky: false,
+    })
+    // 8x16 cells: 40 columns for 320 pixels, 40 * 200/320 * 8/16 = 12.5 rows.
+    expect(fitCells({ width: 320, height: 200, renderer: 'image', room: ROOM, cell: { width: 8, height: 16 } })).toMatchObject({
+      columns: 40,
+      rows: 13,
     })
   })
 
-  test('a tall picture is held to the row cap and narrowed to keep its aspect', () => {
-    // 400x1600: 72 columns would be 144 rows; 30 rows gives 30*2*400/1600 = 15 columns.
-    const fit = fitCells({ width: 400, height: 1600, renderer: 'halfblock', availableColumns: 200 })
-    expect(fit).toEqual({ columns: 15, rows: MAX_ROWS, pixelWidth: 15, pixelHeight: 60 })
+  test('a picture larger than the room shrinks to it, its aspect kept', () => {
+    // 8000x6000: the 60 rows hold it to 60 / (0.75 * 0.5) = 160 columns.
+    expect(fitCells({ width: 8000, height: 6000, renderer: 'image', room: ROOM })).toEqual({
+      columns: 160,
+      rows: 60,
+      pixelWidth: 1600,
+      pixelHeight: 1200,
+      isBlocky: false,
+    })
+    // 400x1600 in half-blocks: 30 rows give 30 / (4 * 0.5) = 15 columns.
+    expect(fitCells({ width: 400, height: 1600, renderer: 'halfblock', room: { columns: 200, rows: 30 } })).toEqual({
+      columns: 15,
+      rows: 30,
+      pixelWidth: 15,
+      pixelHeight: 60,
+      isBlocky: false,
+    })
   })
 
-  test('a tiny picture is not enlarged: one column per pixel for half-blocks', () => {
-    expect(fitCells({ width: 4, height: 4, renderer: 'halfblock', availableColumns: 200 })).toEqual({
-      columns: 4,
-      rows: 2,
-      pixelWidth: 4,
-      pixelHeight: 4,
-    })
-    // A 1x1 picture still takes one cell.
-    expect(fitCells({ width: 1, height: 1, renderer: 'halfblock', availableColumns: 200 })).toMatchObject({
+  test('a small picture is enlarged to the narrowest width, nearest-neighbour', () => {
+    const fit = fitCells({ width: 16, height: 16, renderer: 'image', room: ROOM })
+    expect(fit).toEqual({ columns: MIN_COLUMNS, rows: 12, pixelWidth: 240, pixelHeight: 240, isBlocky: true })
+    expect(pngArgv('magick', '/p/i.png', fit, '/c/k.png')).toEqual([
+      'magick',
+      '/p/i.png[0]',
+      '-auto-orient',
+      '-sample',
+      '240x240',
+      '-strip',
+      'png:/c/k.png',
+    ])
+    const blocks = fitCells({ width: 4, height: 4, renderer: 'halfblock', room: ROOM })
+    expect(blocks).toEqual({ columns: MIN_COLUMNS, rows: 12, pixelWidth: MIN_COLUMNS, pixelHeight: 24, isBlocky: true })
+    expect(rgbaArgv('magick', '/p/i.png', blocks, '/c/k.rgba')).toContain('-sample')
+  })
+
+  test('an enlargement under NEAREST_FROM is left to the terminal to blend', () => {
+    // 220 pixels in 24 columns of 10: 1.09 times, under 1.25.
+    const fit = fitCells({ width: 220, height: 220, renderer: 'image', room: ROOM })
+    expect(fit).toMatchObject({ columns: MIN_COLUMNS, pixelWidth: 220, pixelHeight: 220, isBlocky: false })
+    expect(pngArgv('magick', '/p/i.png', fit, '/c/k.png')).toContain('220x220>')
+    // 160 pixels: 1.5 times, so blocks.
+    expect(fitCells({ width: 160, height: 160, renderer: 'image', room: ROOM }).isBlocky).toBe(true)
+  })
+
+  test('scale multiplies the natural size; the narrowest width still holds', () => {
+    const at = (scale: number) => fitCells({ width: 320, height: 200, renderer: 'image', room: ROOM, scale })
+    expect(at(1)).toMatchObject({ columns: 32, rows: 10 })
+    // Twice the size is twice the pixels, each a 2x2 block.
+    expect(at(2)).toMatchObject({ columns: 64, rows: 20, pixelWidth: 640, pixelHeight: 400, isBlocky: true })
+    expect(at(0.5)).toMatchObject({ columns: MIN_COLUMNS, rows: 8 })
+  })
+
+  test('the room is the transcript width and a share of its rows', () => {
+    expect(roomAt({ columns: 50, rows: 40 }, 5)).toEqual({ columns: 44, rows: 24 })
+    // An unmeasured surface is taken as 80 columns and 30 rows.
+    expect(roomAt(undefined, 5)).toEqual({ columns: 74, rows: 30 })
+    // A sliver of room still draws one cell.
+    expect(fitCells({ width: 100, height: 100, renderer: 'halfblock', room: { columns: 0, rows: 0 } })).toMatchObject({
       columns: 1,
       rows: 1,
     })
   })
 
-  test('a tiny picture under Image takes one column per eight pixels', () => {
-    const fit = fitCells({ width: 16, height: 16, renderer: 'image', availableColumns: 200 })
-    expect(fit.columns).toBe(2)
-    expect(fit.rows).toBe(1)
-    // The PNG is never resized up past its own size.
-    expect(fit.pixelWidth).toBe(16)
-    expect(fit.pixelHeight).toBe(16)
+  test('the scale option is a number held to its bounds', () => {
+    expect(parseScale(1.5)).toBe(1.5)
+    expect(parseScale('2')).toBe(2)
+    expect(parseScale(10)).toBe(4)
+    expect(parseScale(0.1)).toBe(0.25)
+    for (const bad of [0, -1, 'x', '', undefined, null]) expect(parseScale(bad)).toBe(1)
   })
 
-  test('a huge picture is capped in cells, and its PNG box in pixels', () => {
-    const fit = fitCells({ width: 8000, height: 6000, renderer: 'image', availableColumns: 200 })
-    expect(fit.columns).toBe(MAX_COLUMNS)
-    expect(fit.rows).toBe(27) // 72 * 6000/8000 / 2
-    expect(fit.pixelWidth).toBe(720)
-    expect(fit.pixelHeight).toBe(540)
+  test('the cell size comes from the terminal pixels; none reported is null', () => {
+    expect(parseCellPixels('99 178 1780 1980\n')).toEqual({ width: 10, height: 20 })
+    expect(parseCellPixels('24 80 0 0')).toBeNull()
+    expect(parseCellPixels('')).toBeNull()
   })
 
-  test('the transcript width clamps the picture below the column cap', () => {
-    const room = availableColumns(50, 5)
-    expect(room).toBe(44)
-    const fit = fitCells({ width: 1000, height: 500, renderer: 'halfblock', availableColumns: room })
-    expect(fit.columns).toBe(44)
-    expect(fit.rows).toBe(11)
-    // An unmeasured surface is taken as 80 columns.
-    expect(availableColumns(undefined, 5)).toBe(74)
-    // A sliver of room still draws one column.
-    expect(fitCells({ width: 100, height: 100, renderer: 'halfblock', availableColumns: 0 }).columns).toBe(1)
+  test('the caption percentage compares screen pixels with picture pixels', () => {
+    expect(shownPercent(320, 32, { width: 10, height: 20 })).toBe(100)
+    expect(shownPercent(1920, 160, { width: 10, height: 20 })).toBe(83)
+    expect(fileUrl('/tmp/a b#1.png')).toBe('file:///tmp/a%20b%231.png')
   })
 
   test('the ImageMagick argv resizes exactly for half-blocks, and reads the first frame', () => {
-    const fit = fitCells({ width: 1600, height: 400, renderer: 'halfblock', availableColumns: 200 })
+    const fit = fitCells({ width: 1600, height: 400, renderer: 'halfblock', room: ROOM })
     expect(rgbaArgv('magick', '/p/a.gif', fit, '/c/k.rgba')).toEqual([
       'magick',
       '/p/a.gif[0]',
       '-auto-orient',
       '-resize',
-      '72x18!',
+      '200x50!',
       '-depth',
       '8',
       'rgba:/c/k.rgba',
@@ -269,6 +316,10 @@ describe('finding images', () => {
   test('a Read that returned an image yields its bytes; a text Read yields nothing', () => {
     const image = { type: 'image', file: { base64: 'AAAA', type: 'image/png', originalSize: 3 } }
     expect(toolImages('Read', { file_path: '/p/shot.png' }, image, 't1')).toEqual([
+      { data: 'AAAA', mime: 'image/png', id: 't1', alt: 'shot.png', path: '/p/shot.png' },
+    ])
+    // A relative path names no file to link to.
+    expect(toolImages('Read', { file_path: 'shot.png' }, image, 't1')).toEqual([
       { data: 'AAAA', mime: 'image/png', id: 't1', alt: 'shot.png' },
     ])
     const text = { type: 'text', file: { filePath: '/p/a.ts', content: '' } }
@@ -288,7 +339,7 @@ describe('finding images', () => {
       '/out/b.jpeg',
     ])
     const input = { files: ['/out/c.webp', 'rel.png', '/out/d.csv'], status: 'normal' }
-    expect(toolImages('SendUserFile', input, undefined, 't')).toEqual([{ file: '/out/c.webp', alt: 'c.webp' }])
+    expect(toolImages('SendUserFile', input, undefined, 't')).toEqual([{ file: '/out/c.webp', alt: 'c.webp', path: '/out/c.webp' }])
     expect(toolImages('Bash', {}, {}, 't')).toEqual([])
   })
 
@@ -314,14 +365,6 @@ const ok = (stdout = ''): ProcessRunResult => ({
   isStderrTruncated: false,
 })
 
-/** 4x4 RGBA: red over blue, row by row. */
-const RGBA = toBase64(
-  Uint8Array.from({ length: 64 }, (_, i) => {
-    const y = Math.floor(i / 16)
-    const c = i % 4
-    return c === 3 ? 255 : y % 2 === 0 ? (c === 0 ? 255 : 0) : c === 2 ? 255 : 0
-  }),
-)
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIAAAUAAeImBZsAAAAASUVORK5CYII='
 
 type World = {
@@ -343,6 +386,8 @@ type World = {
   cwdGone?: boolean
   /** How many `mkdir` runs fail before one succeeds. */
   mkdirFailures?: number
+  /** What the terminal size child prints: `rows cols xpixels ypixels`. */
+  winsize?: string
   /** More environment, over the defaults. */
   env?: Record<string, string>
 }
@@ -350,6 +395,8 @@ type World = {
 function engine(on: On, world: World) {
   mock.env(on, { HOME: '/home/t', XDG_RUNTIME_DIR: '/run/user/1000', USER: 't', ...world.env })
   const written = new Set<string>()
+  /** The raw RGBA size each `rgba:` output was resized to. */
+  const resized = new Map<string, number>()
   let inFlight = 0
   on('process.run', async ($, e) => {
     world.ran.push([...e.argv])
@@ -361,6 +408,7 @@ function engine(on: On, world: World) {
       await new Promise(resolve => setTimeout(resolve, 2))
       inFlight--
     }
+    if (tool === 'python3') return { value: ok(world.winsize ?? '') }
     if (tool === 'mkdir' && (world.mkdirFailures ?? 0) > 0) {
       world.mkdirFailures = (world.mkdirFailures ?? 0) - 1
       return { value: { ...ok(), exitCode: 1 } }
@@ -374,6 +422,9 @@ function engine(on: On, world: World) {
     }
     if (tool === 'magick' || tool === 'convert') {
       if (!world.hasMagick) return { value: { ...ok(), exitCode: 127 } }
+      const out = e.argv.at(-1) ?? ''
+      const box = /^(\d+)x(\d+)!$/.exec(e.argv.find(arg => /^\d+x\d+!$/.test(arg)) ?? '')
+      if (out.startsWith('rgba:') && box !== null) resized.set(out.slice(5), Number(box[1]) * Number(box[2]) * 4)
       if (e.argv[1] === '-version') return { value: ok('Version: ImageMagick 7.1') }
       if (e.argv.at(-1) === 'info:') return { value: ok('4 4') }
     }
@@ -395,7 +446,7 @@ function engine(on: On, world: World) {
   on('fs.exists', ($, e) => ({ deny: `fs.exists is not for this plugin: ${e.path}` }))
   on('fs.read', ($, e) => {
     const path = String((e as { path?: unknown }).path ?? '')
-    return { value: { base64: path.endsWith('.png') ? PNG : RGBA } }
+    return { value: { base64: path.endsWith('.png') ? PNG : toBase64(new Uint8Array(resized.get(path) ?? 0).fill(255)) } }
   })
   on('ui.log', ($, e) => {
     world.logs?.push(String((e as { text?: unknown }).text ?? ''))
@@ -536,6 +587,34 @@ describe('drawing', () => {
     const ui = await $.ui.mount(REPLY as never)
     expect(await ui.find({ type: 'Raster' })).toBeUndefined()
     expect(await ui.find({ text: 'engine-row' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('a caption names the file, linked to it, with its size and the share shown', async ($, on) => {
+    engine(on, { hasMagick: true, blit: undefined, ran: [] })
+    const ui = await $.ui.mount(SENT as never)
+    const link = await ui.find({ type: 'Link' })
+    expect(link?.props.href).toBe('file:///pics/cat.png')
+    expect(link?.props.label).toBe('cat.png')
+    // 4x4 enlarged to 24 columns of 10 pixels.
+    expect(await ui.find({ text: ' · 4×4 · 6000%' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('showCaptions off: the picture alone', { options: { showCaptions: false } }, async ($, on) => {
+    engine(on, { hasMagick: true, blit: undefined, ran: [] })
+    const ui = await $.ui.mount(SENT as never)
+    expect(await ui.find({ type: 'Raster' })).toBeDefined()
+    expect(await ui.find({ type: 'Link' })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('the measured cell size sizes the picture', async ($, on) => {
+    const world: World = { hasMagick: true, blit: undefined, ran: [], winsize: '40 100 800 640' }
+    engine(on, world)
+    const ui = await $.ui.mount(SENT as never)
+    // 8x16 cells: 24 columns of 8 pixels show 4 pixels at 4800%.
+    expect(await ui.find({ text: ' · 4×4 · 4800%' })).toBeDefined()
     await ui.unmount()
   })
 
