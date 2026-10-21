@@ -28,7 +28,7 @@ When a session listens and its project's config would not start it listening, th
 - Any other new session id in a dormant project starts dormant. That includes a `--fork-session` child, which does not name the session it forked from.
 - A store write that fails is logged as a transcript line, and the session goes on listening.
 
-A `/clear` or an in-session `/resume` reaches the mod as `session.end`. The mod reads the session id until it names the id that goes on, then tells attend that id is listening, about a second later. A turn that starts first does this at once. The mod hooks no classic (settings-hook) event and no `session.compact`: where an organization manages Claude Code, its built-in policy plugin sends those events past the plugins a person installs. `make test-plugins` fails on a mod that hooks one.
+A `/clear` or an in-session `/resume` reaches the mod as `session.end`. Claude Code shows the id that goes on only once its settings SessionStart hooks have run, so the mod reads the session id at 250 ms, then less often, up to every 2 s. A listening session keeps listening meanwhile. Once the id has changed, the mod records it and tells attend it is listening, a second later; a turn under the new id that starts first does this at once. If the id has not changed after five minutes, the mod logs a line and records no new id. The mod hooks no classic (settings-hook) event and no `session.compact`: where an organization manages Claude Code, its built-in policy plugin sends those events past the plugins a person installs. `make test-plugins` fails on a mod that hooks one.
 
 Opening or closing attend-chat changes nothing in any session.
 
