@@ -83,7 +83,7 @@ basis:
 agent:
   name: claude
   model: claude-opus-5-5
-status: proposed
+status: accepted
 date: 2026-10-21
 deciders:
   - aaronsb
@@ -101,6 +101,9 @@ considered:
     said: "deferred items should come back at the start of every session"
     via: chat, relayed by the coordinating session
     covers: [deferred-returns]
+  - operator: aaronsb
+    said: "let's do this"
+    via: chat, accepting ADR-606 before implementation
 related:
   - ADR-004
   - ADR-137

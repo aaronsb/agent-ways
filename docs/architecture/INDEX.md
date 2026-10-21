@@ -197,6 +197,7 @@ _The ways method, way authoring, the development loop_
 | [ADR-603](./practice/ADR-603-cypress-survey-what-a-node-routed-seed-teaches-a-hook-disclosed-corpus.md) | Cypress survey: what a node-routed seed teaches a hook-disclosed corpus | accepted |
 | [ADR-604](./practice/ADR-604-ways-defer-to-external-system-enforcement.md) | Ways defer to external system enforcement | accepted |
 | [ADR-605](./practice/ADR-605-an-evaluative-ways-domain-the-agent-authors-the-harness-and-oracle-judge.md) | An evaluative ways domain: the agent authors, the harness and oracle judge | accepted |
+| [ADR-606](./practice/ADR-606-deferred-macros-and-the-pr-awareness-involvement-check-and-pr-feedback-way-built-on-them.md) | Deferred macros, and the PR awareness, involvement check and PR feedback way built on them | accepted |
 
 ## Ways engine
 _The ways engine, continued after the full 100-199 band: matching, disclosure and the corpus_
