@@ -4,7 +4,8 @@
 
 import type { Timer } from 'claude-code'
 
-import type { AttendStatus, KeepaliveRow } from '../types/index.d.ts'
+import type { AttendStatus, KeepaliveRow, MoveRecord } from '../types/index.d.ts'
+import type { Move } from './move.ts'
 
 export const ATTEND = 'attend'
 /** This mod's version, equal to .claude-plugin/plugin.json's. A mod cannot read
@@ -151,6 +152,20 @@ export type Mod = {
   /** A /clear or a /resume moved the session to an id attend has not been
    *  told is listening yet; the poll holds its drain until it has. */
   isRelistening: boolean
+  /** A /clear or a /resume whose new id the mod has not read yet
+   *  (move.ts). */
+  move: Move | undefined
+  /** A move the watch gave up on; the next main-loop turn under another id
+   *  settles it. */
+  gaveUp: MoveRecord | undefined
+  /** The move has told attend the session listens, before its new id
+   *  showed. */
+  isMoveListened: boolean
+  /** Starts the move's watch on session.start's `$`, whose timers outlive
+   *  any one hook: session.end's bound aborts the waits of its own. */
+  startWatch: (() => void) | undefined
+  /** The context fill the last `session.measure` reported, in tokens. */
+  contextTokens: number | undefined
   /** The cold start's held-back note, from a drain the poll ran. A wake
    *  delivery carries messages alone, so the note rides the operator's next
    *  prompt as context. The module's copy serves a /clear, which empties
@@ -375,6 +390,16 @@ export function pollInterval(c: ModConfig, idleMs: number, isTurnRunning: boolea
  *  the first once `every` turns have passed since it last showed. */
 export function isFullPreamble(deliveries: number, afterCompaction: boolean, turnsSinceFull: number, every: number): boolean {
   return deliveries === 0 || afterCompaction || turnsSinceFull >= every
+}
+
+/** Whether the context window was emptied between two measurements: its
+ *  fill fell below half, or reads as absent, which it does until the first
+ *  response after a compaction or a /clear. A compaction at the engine's
+ *  threshold always falls that far. A first measurement compares with
+ *  nothing and is no reset. */
+export function isContextReset(before: number | undefined, after: number | undefined): boolean {
+  if (before === undefined || before <= 0) return false
+  return after === undefined || after < before / 2
 }
 
 /** Whether the keepalive policy may run in a session started with

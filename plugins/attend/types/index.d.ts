@@ -16,6 +16,20 @@ export type KeepaliveRow = {
   isShown: boolean
 }
 
+/** Why the session ended under a running process (session.end's reason). */
+export type MoveReason = 'clear' | 'resume'
+
+/** A /clear or an in-session /resume whose new session id the mod has not
+ *  read yet (hooks/move.ts). */
+export type MoveRecord = {
+  /** Every id that ended during the move; none of them is the one that
+   *  goes on. */
+  ended: string[]
+  reason: MoveReason
+  /** The session was listening when it ended. */
+  wasOn: boolean
+}
+
 export type AttendStatus = {
   /** Dormant: plain Claude Code, nothing polled or drawn. Active: listening
    *  until Claude Code exits (ADR-406 item 2). */
@@ -46,6 +60,9 @@ export type AttendStatus = {
   /** The keepalive policy's segment of the row (ADR-414 item 9); null
    *  where the policy does not run. */
   keepalive: KeepaliveRow | null
+  /** A /clear or a /resume the mod is still following, kept so a reloaded
+   *  module takes the watch up; null when none is. */
+  move: MoveRecord | null
 }
 
 declare module 'claude-code' {
