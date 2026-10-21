@@ -46,15 +46,23 @@ echo "version: MOD_VERSION $MV matches the plugin"
 # outermost and sends classic.*, session.compact and other events past the
 # plugins a person installs, so a mod's hook on one never runs there. Each
 # mod's tests record what its register() hooks and check it against that
-# list (passedOverHits, plugins/attend/tests/passed-over.ts); this step
-# holds every mod with hooks to having that test.
+# list (passedOverHits, plugins/attend/tests/passed-over.ts), and
+# `claude plugin test` below runs it. This step holds every mod with hooks
+# to having that test: one that runs its register() through the recorder
+# and checks the result, not one that only names the helper.
 mods=0
 for dir in plugins/*/hooks; do
   [ -d "$dir" ] || continue
   mods=$((mods + 1))
   plugin="${dir%/hooks}"
-  grep -l -e passedOverHits "$plugin"/tests/*.test.ts >/dev/null 2>&1 \
-    || fail "$plugin has no test that checks its hooks with passedOverHits"
+  found=0
+  for t in "$plugin"/tests/*.test.ts; do
+    [ -f "$t" ] || continue
+    if grep -q -F -e 'registrationsOf(register' "$t" && grep -q -F -e 'passedOverHits(' "$t"; then
+      found=1
+    fi
+  done
+  [ "$found" -eq 1 ] || fail "$plugin has no test that runs its register() through registrationsOf and checks it with passedOverHits"
 done
 [ "$mods" -gt 0 ] || fail "no plugins/*/hooks directory to check"
 echo "hooks: $mods mod(s) test their hooks against the events the policy plugin passes over"

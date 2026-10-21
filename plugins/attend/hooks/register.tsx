@@ -783,6 +783,7 @@ export const register: Register = on => {
     isStarted: false,
     isRelistening: false,
     move: undefined,
+    gaveUp: undefined,
     isMoveListened: false,
     startWatch: undefined,
     contextTokens: undefined,
@@ -846,8 +847,9 @@ export const register: Register = on => {
   // goes on under another session id, with no session.start, and Claude
   // Code empties this plugin's $.state. session.end with reason `clear` or
   // `resume` is the engine's word for it. The id that goes on shows later,
-  // so this hook only records the move, with no `$` call inside session.end's
-  // short bound, and move.ts watches the id on session.start's `$`. The mod
+  // so this hook records the move as plain data and makes no call on its own
+  // `$`, whose waits session.end's short bound aborts: mod.startWatch()
+  // schedules the watch (move.ts) on session.start's `$`. The mod
   // hooks no classic.* event: where an organization manages Claude Code, its
   // policy plugin sends those past the plugins a person installs. An exit, a
   // logout or a -p run's end changes nothing here; at process start
@@ -918,7 +920,7 @@ export const register: Register = on => {
     mod.lastActivityMs = await $.clock.now()
     // A turn under the id that goes on, before the watch has read it; a
     // turn while the id still reads as one that ended leaves the watch on.
-    if (mod.move) await settleIfMoved($, mod, moveActions($, mod), text => void $.ui.log(text))
+    if (mod.move || mod.gaveUp) await settleIfMoved($, mod, moveActions($, mod), text => void $.ui.log(text))
     if (await isOn($, mod)) await updateStatus($, s => ({ ...s, turnsSinceFull: s.turnsSinceFull + 1 }))
     return next(e)
   })

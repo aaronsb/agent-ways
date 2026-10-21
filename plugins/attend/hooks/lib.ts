@@ -4,7 +4,7 @@
 
 import type { Timer } from 'claude-code'
 
-import type { AttendStatus, KeepaliveRow } from '../types/index.d.ts'
+import type { AttendStatus, KeepaliveRow, MoveRecord } from '../types/index.d.ts'
 import type { Move } from './move.ts'
 
 export const ATTEND = 'attend'
@@ -155,6 +155,9 @@ export type Mod = {
   /** A /clear or a /resume whose new id the mod has not read yet
    *  (move.ts). */
   move: Move | undefined
+  /** A move the watch gave up on; the next main-loop turn under another id
+   *  settles it. */
+  gaveUp: MoveRecord | undefined
   /** The move has told attend the session listens, before its new id
    *  showed. */
   isMoveListened: boolean

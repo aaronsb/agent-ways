@@ -1600,6 +1600,37 @@ describe('session changes through engine events alone', () => {
     const after = h.reads()
     await clock.advance(10 * 60_000)
     expect(h.reads()).toBe(after)
+    // The id shows at last: the next main-loop turn records it.
+    h.world.nextId = undefined
+    h.world.sessionId = 's2'
+    const late = since(h)
+    await $.turn.start({ text: 'much later', turnId: 't9' } as never)
+    expect(h.store[LISTENED]).toEqual(['s1', 's2'])
+    await clock.advance(1_000)
+    expect(late.ran('listen on')).toBe(true)
+  })
+
+  test('a module reloaded as soon as the /clear has run finds the move, and turns nothing off', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 's1' })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    await clear($, h, 's2', 'clear', { clock, ms: 12_000 })
+    // Only the watch's first step has run: no read of the id yet.
+    const reads = h.reads()
+    await clock.advance(0)
+    expect(h.reads()).toBe(reads)
+    expect(h.status()?.move).toEqual({ ended: ['s1'], reason: 'clear', wasOn: true })
+    const reload = since(h)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(0)
+    expect(reload.ran('listen off')).toBe(false)
+    expect(reload.tools()).toEqual(ACTIVE_TOOLS)
+    expect(h.mode()).toBe('active')
+    // The id shows 12 s after the /clear; the next read, on the 2 s backoff, takes it.
+    await clock.advance(15_000)
+    expect(h.store[LISTENED]).toEqual(['s1', 's2'])
   })
 
   test('a read of the id that fails is retried, logged once, and never holds the poll', async ($, on) => {
