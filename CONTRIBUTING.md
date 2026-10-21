@@ -6,12 +6,11 @@ When you build something that would benefit everyone — a new domain, a better 
 
 ## Development setup
 
-**Your dev checkout is not your install.** `~/.claude` is a projection of an XDG
-application; the app source lives in `$XDG_DATA_HOME/agent-ways`. So you develop from a
-**separate clone** (e.g. `~/src/agent-ways`) and choose when your changes reach your install —
-editing `~/.claude` directly no longer "just works." See **[docs/development.md](docs/development.md)**
-for the full setup, the sandbox/reconcile/worktree testing patterns, and why the worktree must
-hang off your standalone clone rather than `$XDG_DATA`.
+**Your dev checkout is not your install.** `~/.claude` is a projection of an XDG application; the app source lives in `$XDG_DATA_HOME/agent-ways`. So you develop from a **separate clone** (e.g. `~/src/agent-ways`) and choose when your changes reach your install — editing `~/.claude` directly no longer "just works." See **[docs/development.md](docs/development.md)** for the full setup, the sandbox/reconcile/worktree testing patterns, and why the worktree must hang off your standalone clone rather than `$XDG_DATA`.
+
+## What belongs upstream
+
+The shared corpus takes ways and skills. Knowledge about one tool belongs in that tool's own instructions, and personal preferences belong in your user-scope ways. [Contribution kinds and acceptance bars](docs/reference/contribution-kinds-and-acceptance-bars.md) defines each kind and the bar it must clear. [Contribute a way or skill](docs/how-to/contribute-a-way-or-skill.md) takes one from draft to pull request.
 
 ## Adding a Way
 
@@ -28,8 +27,8 @@ Open an issue. Include which hook or way is involved, your OS/shell, and any err
 
 ## Pull Requests
 
-- Keep changes focused — one way or one fix per PR
-- Test your trigger patterns against both positive and negative cases
+- Keep changes focused — one way, one skill or one fix per PR
+- A way or skill PR carries the kind, the scenario that shows its effect, probe results against held-out prompts with the engine state, and lint and register output ([step 7 of the how-to](docs/how-to/contribute-a-way-or-skill.md#7-open-the-pull-request))
 - If adding a new domain, include a brief rationale in the PR description
 
 ## Code Style

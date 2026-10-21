@@ -15,6 +15,8 @@ Map of the documentation tree. For the project overview, see the [main README](.
 | [explanation/](explanation/) | Diátaxis explanation pages: conceptual walkthroughs grounded in real scenarios (localization, the relevance judge, and [how ways works](explanation/how-ways-works/how-ways-works-the-model.md), the observable companion to cognitive-loop.md) |
 | [reference/events.md](reference/events.md) | Reference: every event in events.jsonl, its fields, and the trigger values |
 | [reference/ways-cli.md](reference/ways-cli.md) | Reference: the `ways` command, its subcommands and screens |
+| [reference/contribution-kinds-and-acceptance-bars.md](reference/contribution-kinds-and-acceptance-bars.md) | Reference: way, skill, tool knowledge and posture, the phrasing rule for a way, and the bar each kind must clear |
+| [how-to/contribute-a-way-or-skill.md](how-to/contribute-a-way-or-skill.md) | How-to: take a way or skill from draft to pull request, with matching hygiene and the ablation |
 | [architecture/](architecture/) | Agent Decision Records (managed by `docs/scripts/adr`): decisions, specs, and evidence records (surveys, audits, explorations; the former design notes, ADR-309) |
 
 ## Guides vs Reference
