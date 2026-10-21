@@ -21,6 +21,10 @@ basis:
     via: chat, relayed verbatim by the coordinating session, 2026-10-21, on the line that replaces a result past its relevance budget
   - operator: aaronsb
     level: guided
+    said: "in most repos, the pattern is going to be someone (like me) who we could consider an 'agentic power user' (we don't really want to use that term, but you can get what I mean) where many times I am just pushing things through because it needs to get done. other people are on the repo/project as well, but are new or casual, or just observing. a false signal that causes the power user to have to wait (and never finish) is not effective. so we don't want to block work from happening, but we should have it surfaced and prompted in a way that if there is any pending actions or requests from other users we prioritize a decision (but not necessarily action) on those items"
+    via: chat, relayed verbatim by the coordinating session, 2026-10-21, answering no to the codeowners-team probe
+  - operator: aaronsb
+    level: guided
     said: "it's a stats of awareness"
     via: chat, relayed verbatim by the coordinating session, 2026-10-21, on the review-request line
   - operator: aaronsb
@@ -51,6 +55,10 @@ considered:
     said: "sort of like how I can que up messages to send to you and they're relevant and you might get them after you've gotten other context but it still makes sense because the turn that it ran in was nearby"
     via: chat, relayed verbatim by the coordinating session, 2026-10-21, answering whether a deferred result arrives on the next hook even when unrelated
     covers: [next-hook]
+  - operator: aaronsb
+    said: "in most repos, the pattern is going to be someone (like me) who we could consider an 'agentic power user' (we don't really want to use that term, but you can get what I mean) where many times I am just pushing things through because it needs to get done. other people are on the repo/project as well, but are new or casual, or just observing. a false signal that causes the power user to have to wait (and never finish) is not effective. so we don't want to block work from happening, but we should have it surfaced and prompted in a way that if there is any pending actions or requests from other users we prioritize a decision (but not necessarily action) on those items"
+    via: chat, relayed verbatim by the coordinating session, 2026-10-21, answering no to the codeowners-team probe
+    covers: [codeowners-team]
 related:
   - ADR-004
   - ADR-137
@@ -61,24 +69,25 @@ observable:
   - "A way declaring `macro_defer:` renders at once under the 3 s path, and its macro's result arrives at the next prompt or tool call with a header naming the way, its trigger and its age. A 6 s `gh search` logs no macro_timeout event."
   - "A deferred result collected past its relevance budget arrives as one line naming the way, the bound it missed, that the miss is abnormal, and the result's path; the file is at that path and the session log holds a deferred_budget_missed event."
   - "The review-request line at session start in this repository counts the top repo and the llama.cpp submodule (ggml-org/llama.cpp) as this project."
-  - "The contributor classifier run on praecipio/anthropic-partnership for a change under /docs/ reports team, decided by CODEOWNERS."
+  - "The involvement check run on praecipio/anthropic-partnership for a change under /docs/ names the four CODEOWNERS and whether each was asked to review, and holds nothing."
+  - "In a repository with another person's pending review request, a merge by the operator proceeds after the agent has surfaced the request and recorded the operator's decision on it."
 ---
 
-# ADR-606: Deferred macros, and the PR awareness, contributor classifier and PR feedback way built on them
+# ADR-606: Deferred macros, and the PR awareness, involvement check and PR feedback way built on them
 
 ## Summary
 
-- **Decided:** Ways gain a deferred macro. A way that declares `macro_defer:` starts its macro detached when it fires, renders at once with the last cached result, and the finished result reaches the agent at its next hook event, once, with a header saying which way ran it, what fired it and how long ago. A result past a relevance budget that combines elapsed time and elapsed turns is replaced by one line saying the miss is abnormal, naming the file holding the result, and telling the agent to investigate when it bears on the work. The first consumer is a session-start line of review-request counts. On the same base: one contributor classifier answers solo or team per repository, per PR and per path, replacing six divergent rules; and a PR feedback way runs review findings to closure in three modes, author alone, author with other reviewers, and reviewer, with the PR as the ledger.
-- **Trades away:** A slow macro's result arrives a turn or more late and can land beside unrelated context. The engine gains detached processes, a results directory and a collector on two hooks. Nothing wakes an idle session when a new review request appears. Reviewer-mode output waits on the operator to submit it.
+- **Decided:** Ways gain a deferred macro. A way that declares `macro_defer:` starts its macro detached when it fires, renders at once with the last cached result, and the finished result reaches the agent at its next hook event, once, with a header saying which way ran it, what fired it and how long ago. A result past a relevance budget that combines elapsed time and elapsed turns is replaced by one line saying the miss is abnormal, naming the file holding the result, and telling the agent to investigate when it bears on the work. The first consumer is a session-start line of review-request counts. On the same base: one check of who else is involved replaces six divergent solo/team rules, never gates, and puts other people's pending items in front of the operator for a decision before work goes on; and a PR feedback way runs review findings to closure in three modes, author alone, author with other reviewers, and reviewer, with the PR as the ledger.
+- **Trades away:** A slow macro's result arrives a turn or more late and can land beside unrelated context. The engine gains detached processes, a results directory and a collector on two hooks. Nothing wakes an idle session when a new review request appears. Reviewer-mode output waits on the operator to submit it. Other people's pending items cost the operator a decision each time work touches them, and where the repository enforces no review, the agent does not hold work for a CODEOWNER or requested reviewer: their stake is surfaced and decided on, never waited for.
 - **One-way?** No. Reversible now; expensive once ways outside this repository declare `macro_defer:`, since removing the field then breaks their frontmatter.
-- **Probes:** *Confident (next-hook):* a slow lookup's result reaches the agent with whatever comes next, a prompt or a tool call, even when that prompt is about something else, as long as it is recent; past that it becomes a one-line pointer to the file. *Not confident (codeowners-team):* a repository where you write nearly every PR still counts as a team repository for paths CODEOWNERS assigns to other people, so the agent stops for review before merging changes there and `/merge full-sail` is refused for them.
-- **Inversion:** An agent that sees GitHub only when asked, or one that keeps a standing watch over everything. This sits between: counts at session start and per-PR state when a PR is in hand, each fetched off the hook's critical path, with drill-down on request.
+- **Probes:** *Confident (next-hook):* a slow lookup's result reaches the agent with whatever comes next, a prompt or a tool call, even when that prompt is about something else, as long as it is recent; past that it becomes a one-line pointer to the file. *Not confident (codeowners-team):* asked whether CODEOWNERS entries for other people should make the agent stop for review and refuse `/merge full-sail`; answered no, and the check now surfaces and never gates. *Not confident (deferred-returns):* when you defer someone's pending item, the agent stays quiet about it until work touches it again, and then asks you once more.
+- **Inversion:** Other people on a repository as a gate that holds the operator's work, or as background the agent never mentions. This sits between: their pending items come first for a decision, work proceeds whatever the decision, and only the repository's own enforcement holds a merge.
 
 ## Context
 
 A way's macro runs inside the hook that disclosed the way, under a 3 s deadline that kills it and discards its output. Some context worth giving an agent costs more than that to fetch. A search for the operator's open review requests across GitHub took 4.9 to 6.9 s. ADR-137 rules out raising the deadline: unbounded work runs outside the cycle and leaves a prepared result the cycle reads.
 
-The operator asked for three things. Agents should know which pull requests concern the session: review requests addressed to the operator, and open PRs in the top repository and its git submodules. Agents should work a PR through a feedback loop like the evaluation loop (softwaredev/code/testing/evaluation), one that spans sessions and people. And there should be one answer to whether a repository or PR is solo or multi-contributor. Today six places answer that with different rules, and a repository whose PRs are almost all the operator's still has CODEOWNERS and reviewers naming four other people.
+The operator asked for three things. Agents should know which pull requests concern the session: review requests addressed to the operator, and open PRs in the top repository and its git submodules. Agents should work a PR through a feedback loop like the evaluation loop (softwaredev/code/testing/evaluation), one that spans sessions and people. And there should be one answer to who else is involved in a repository or PR. Today six places decide solo versus team with different rules. In most repositories one operator drives most of the work while others on the repository are new, casual or observing; a repository whose PRs are almost all the operator's still has CODEOWNERS and reviewers naming four other people. Treating their presence as a gate leaves the operator waiting on people who will not act, and the work does not finish. Ignoring it leaves their requests unanswered.
 
 The existing paths each fall short. The ways CLI cannot run a 6 s query in a macro. Attend sensors run only under `attend run` or Monitor, not under the attend mod; ADR-137 and the gh-monitor skill retired GitHub watching from attend sensors, although `tools/attend/examples/gh-notifications.sh` still ships as a script sensor; and the proposed command sensors of ADR-403 are unbuilt and lack delivery acknowledgement. A bespoke background refresher like gh-tasks (ADR-180) would work for this feature and would be the second such process, with the next slow macro needing a third.
 
@@ -122,32 +131,42 @@ where `age` is wall time since the macro fired and `turns` is operator prompts s
 A way under `softwaredev/delivery/review/` with `trigger: session-start`, `macro: prepend` and `macro_defer: 10m` gives the session a line of counts. It orients the session; it is not a task list. The shape, wording flexible:
 
 ```
-Review requests: 75 open · 0 for this project · 10 Dependabot. /reviews lists them.
+Review requests: 75 open · 0 for this project · 10 Dependabot. 1 item from others pending here. /reviews lists them.
 ```
 
 - **open:** every open PR requesting the operator's review, deduplicated by repo#number, from `gh search prs --review-requested=@me --state=open --limit 200`.
 - **for this project:** those in the top repository or any git submodule, each resolved with `gh repo view` inside it, people only, with `(+N Dependabot)` when the project has Dependabot PRs.
 - **Dependabot:** PRs authored by `dependabot[bot]` or `app/dependabot` anywhere. Other bots stay in the open count for now.
+- **pending here:** other people's unresolved threads and change requests on the operator's open PRs in this project, and others' open PRs in it (section 3).
 
-A second sentence may count open PRs in this project. The macro keeps its own cross-session cache of the search under `$XDG_CACHE_HOME/agent-ways/`, so sessions started together make one query.
+The macro keeps its own cross-session cache of the search under `$XDG_CACHE_HOME/agent-ways/`, so sessions started together make one query.
 
 The `/reviews` skill is the drill-down: it lists requests grouped by repository, this project first, and opens a chosen PR in reviewer mode. Mirroring review requests or unresolved threads into the task list as ADR-180 mirrors issues is an option, separate from this line and not decided here.
 
 When a session works a PR, the review way's deferred macro reports what changed since the operator last looked: `#32: head moved bd862fd→3ad6dda since your last review`, with the compare range, and new comments and reviews since then. The last-reviewed head is the `commit_id` of the operator's latest review on the PR, so this needs no local ledger.
 
-### 3. One contributor classifier
+### 3. One check of who else is involved
 
-One script, `hooks/ways/softwaredev/delivery/github/gh-team`, answers solo/pair or team for a repository, a PR, or a set of paths, and names the signal that decided. A PR or path is team when any signal shows another person with a stake. Signals, in the order checked:
+One script, `hooks/ways/softwaredev/delivery/github/gh-involved`, replaces the six solo/team rules. For a repository, a PR, or a set of paths it lists the people other than the operator with a stake, the signal that names each, and their pending items. The corpus stops asking "solo or team"; the question is who else is involved and what they are waiting on.
 
-1. CODEOWNERS (root, `.github/` or `docs/`) assigns a touched path to anyone other than the operator.
-2. The PR requests review from anyone other than the operator.
-3. The PR's author is not the operator.
-4. Three or more distinct human PR authors in the last 90 days.
-5. Three or more active commit authors in the last 90 days, across all branches, deduplicated by GitHub login where known and by email otherwise, bots excluded.
+Signals that name a person:
 
-Signals 1 to 3 apply per PR or path; 4 and 5 also apply per repository. The operator's login comes from `gh config get -h github.com user`, which reads local config, with `gh api user` as the fallback. Contributor counts use `--paginate`.
+1. CODEOWNERS (root, `.github/` or `docs/`) assigns them a touched path.
+2. The PR requests their review.
+3. They authored the PR.
+4. They authored a PR in the repository in the last 90 days.
+5. They committed in the last 90 days, on any branch, deduplicated by GitHub login where known and by email otherwise, bots excluded.
 
-The github way's macro, the merge skill (`/merge full-sail` stays limited to solo/pair), the code-reviewer agent (self-PR versus team PR), and `project-init` call the classifier instead of their own rules. The repository-level counts move into the github way's deferred macro. `docs/hooks-and-ways/macros.md` describes the classifier in place of its current rule.
+Pending items are other people's open asks that bear on the work:
+
+- review requests addressed to the operator;
+- unresolved threads and change requests from others on a PR in hand;
+- others' open PRs touching the same paths;
+- CODEOWNERS of touched paths who have not been asked to review.
+
+The check never gates. Its output adds no human gate, does not refuse `/merge full-sail`, and does not make the agent wait. What holds a merge stays where `delivery/merge` puts it under ADR-604: the repository's own enforcement (rulesets, branch protection, required reviews, which GitHub applies whatever the agent does) and whether the work sets direction. The merge skill drops "team repos always gate" and full-sail's solo/pair limit; full-sail stays bounded by blast radius, direction and enforcement. The github way uses the check for PR description weight and reviewer suggestions, the code-reviewer agent for whose PR it is reviewing, and `project-init` for what to scaffold. The repository-level counts move into the github way's deferred macro. `docs/hooks-and-ways/macros.md` describes the check in place of its current rule.
+
+The operator's login comes from `gh config get -h github.com user`, which reads local config, with `gh api user` as the fallback. Contributor queries use `--paginate`.
 
 ### 4. The PR feedback way
 
@@ -160,6 +179,8 @@ The three modes differ in who supplies findings and who can push:
 | Author, self-driven | the agent's own review subagent, in one session | fixes, then merge |
 | Author, others reviewing | other people's review threads, across sessions | one fix per thread; a thread reply with the evidence (command, run count, whether the failure reproduced before the fix, as code/testing/evaluation reports it); the thread resolved through `resolveReviewThread`; review re-requested |
 | Reviewer | the diff since the operator's last-reviewed head | a PENDING review with inline comments, which the operator edits and submits |
+
+**Other people's pending items come first, for a decision.** When the agent takes up a PR, and again before it merges, it puts the pending items from section 3 in front of the operator ahead of its own work and asks for a decision on each: act now, defer, decline, or hand off. A decision is not an action; deferring or declining is a full answer. The agent records it in one line in its report, or as a reply on the PR when the operator chooses that. Work proceeds whatever the answer. In a run with no operator present, such as `/goal`, the agent records each item as deferred, proceeds, and lists the items in its report. A deferred item comes back the next time work touches it.
 
 The PR is the loop's ledger. Unresolved threads are open findings, and a session starting cold rebuilds the loop's state from GitHub. The way covers inline comments, thread replies, resolving threads, reading a returned review, re-requesting review, and waiting on CI with the gh-monitor skill's `ci` mode in the merge flow.
 
@@ -180,7 +201,8 @@ A later step may move PR awareness to an ADR-403 command sensor, which would wak
 - Any way can carry context that takes longer than 3 s to fetch, with no per-feature background process. The github way's repository-health and contributor calls can move off the 3 s path the same way.
 - A deferred result that arrives late, fails or overruns is announced once, with its file. Nothing a macro produced is dropped without a line saying so.
 - Deferred macros run in the ways hooks, so they work in attend-mod sessions, which run no attend sensors.
-- One classifier gives the github way, `/merge`, the code-reviewer agent and `project-init` the same answer, and a CODEOWNERS entry or a requested reviewer counts.
+- One check gives the github way, `/merge`, the code-reviewer agent and `project-init` the same view of who else is involved, and a CODEOWNERS entry or a requested reviewer is seen.
+- Nothing the check finds holds work. In a repository where one operator drives most of the work while others are new, casual or observing, the operator is not left waiting on them, and their open asks still get an answer.
 - A PR's state survives session boundaries because it lives on GitHub. Review findings from other people are closed with evidence and an explicit resolve.
 - Reviewer-mode output cannot reach other people before the operator reads it.
 
@@ -190,7 +212,9 @@ A later step may move PR awareness to an ADR-403 command sensor, which would wak
 - In a `claude -p` run with no tool calls after the fire there is no later hook, and the result is never collected.
 - The engine gains detached processes, a collector on UserPromptSubmit and PostToolUse, and per-agent result files to test and keep from leaking.
 - An idle session learns of a new review request at the operator's next prompt, not when it appears.
-- The classifier reads CODEOWNERS and PR metadata, so it costs more than a `git log` count and needs network for its per-PR signals.
+- The involvement check reads CODEOWNERS and PR metadata, so it costs more than a `git log` count and needs network for its per-PR signals.
+- Where the repository enforces no review, the agent can merge a change to a path another person owns. The operator's recorded decision is the only trace of it.
+- Each surfaced item asks the operator for a decision, which adds a question to a session that would otherwise run straight through.
 - A first fire has no cache, so the way's first rendering carries no macro output.
 
 ### Neutral
@@ -199,7 +223,7 @@ A later step may move PR awareness to an ADR-403 command sensor, which would wak
   - `tools/attend/src/sensors/script.rs` reads a script's stdout only after it exits (`wait_with_output`, line 110). Output past the pipe buffer stalls the script until the 10 s kill and is lost, and a background child holding stdout can hang the tick loop.
   - The comment in `tools/attend/examples/xdg-downloads.sh:83-90` says a single 2.0 line fires on its own; a slot under 3.0 is emitted as low priority and does not wake Monitor.
   - The github way's macro does not check `gh auth status`, so an unauthenticated session reports "Not a GitHub repository".
-  - Stale text to correct: ADR-004:104-106, by an appended note pointing here; `hooks/ways/macro.sh:7` ("no network"), which the github macro already breaks; the team rule at `docs/hooks-and-ways/macros.md:54-58`; the `+name` form and working directory in the sensor authoring guide; the example count in the configuration guide; `scripts/gh-monitor-ci-watch.sh:15-16`, which cites commit 78028f3, absent from this repository's history.
+  - Stale text to correct: ADR-004:104-106, by an appended note pointing here; `hooks/ways/macro.sh:7` ("no network"), which the github macro already breaks; the solo/team rule at `docs/hooks-and-ways/macros.md:54-58`; the `+name` form and working directory in the sensor authoring guide; the example count in the configuration guide; `scripts/gh-monitor-ci-watch.sh:15-16`, which cites commit 78028f3, absent from this repository's history.
 - The bespoke refresher planned before this decision is not built.
 
 ## Alternatives Considered
@@ -211,6 +235,7 @@ A later step may move PR awareness to an ADR-403 command sensor, which would wak
 - **Staleness by TTL alone.** Rejected for the operator's time-against-turns budget: a burst of prompts in two minutes moves the conversation further than ten idle minutes.
 - **`max(age/max_age, turns/max_turns) ≤ 1` instead of the sum.** Two independent caps. Rejected: a result at 90% of both caps is delivered, though both kinds of drift have nearly run out.
 - **An ADR-403 command sensor now.** Wakes idle sessions. Rejected for now: unbuilt, it can drop a line after the script moved its marker, it does not run in mod hosts, and ADR-137 retired GitHub watching from sensors. Kept as a later step with the requirements in section 5.
-- **Fix each of the six classifiers in place.** Smaller diffs. Rejected: six copies drift again, as they already did.
+- **Fix each of the six solo/team rules in place.** Smaller diffs. Rejected: six copies drift again, as they already did.
+- **Gate on the check: team paths stop for review and `/merge full-sail` is refused for them.** Honors every named owner. Rejected by the operator: in most repositories one person drives the work while others are new, casual or observing, and a false signal leaves the operator waiting on work that never finishes. The repository's own enforcement already holds a merge where its owners want one held.
 - **Reviewer mode posting with `event: COMMENT`.** Saves the operator a click. Rejected: it publishes under the operator's name before they have read it.
 - **The GitHub MCP server as the client.** Rejected for the reasons in ADR-180: it duplicates `gh` and adds tool definitions to every session.
