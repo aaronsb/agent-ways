@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"run this as a planned, verified multi-agent workflow: parallel sweep, skeptics on the key claims, a completeness critic, then one consolidated report"}
+{"kind":"situational","prompt":"my instructions say the word deepdive means plan it, fan out agents, verify, and integrate. deepdive: audit every service config for stale endpoints"}

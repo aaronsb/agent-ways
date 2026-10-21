@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"write me a goal statement for an agent to execute that migrates the config loader, with passing conditions it can check"}
+{"kind":"situational","prompt":"the helper agent I started ignored my writing rules and sent a reply in chat, what should its instructions have included"}

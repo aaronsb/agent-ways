@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"tune our crm skill with subagent evals and keep looping until it stops improving"}
+{"kind":"situational","prompt":"have fresh agents answer real questions using the support-desk skill, grade them against answer keys, then fix whatever the friction notes show"}

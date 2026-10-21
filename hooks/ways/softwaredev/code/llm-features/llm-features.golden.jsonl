@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"i'm building an mcp server that wraps our ticketing api so an agent can call it, what should i watch out for"}
+{"kind":"situational","prompt":"our app calls the language model to summarize records, but when the api key is missing it quietly shows canned sample summaries instead of failing"}

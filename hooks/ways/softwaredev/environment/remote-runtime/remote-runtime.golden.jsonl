@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"this script runs on the customer's self-hosted server that you can't reach, so i'll deploy it by hand and paste you the output"}
+{"kind":"situational","prompt":"i pasted the script that is live in their instance, it still errors after your fix and the only thing i can see is the browser console"}
