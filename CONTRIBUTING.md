@@ -4,13 +4,17 @@ The recommended setup is to **fork this repo** and customize it for your own wor
 
 When you build something that would benefit everyone — a new domain, a better trigger pattern, a macro that detects something clever — we'd love a PR back to upstream. The framework improves when people bring different workflows to it.
 
+## Contributions are welcome
+
+Most of the ways in this corpus came from someone meeting a practice outside it and judging that it would help. Your practice is the same kind of source, and it carries situations the maintainer's own work may never meet. [Where ways come from](docs/explanation/where-ways-come-from.md) explains why that variety is valued, how a contribution is weighed against the ways already there, and what can happen to it after review.
+
 ## Development setup
 
 **Your dev checkout is not your install.** `~/.claude` is a projection of an XDG application; the app source lives in `$XDG_DATA_HOME/agent-ways`. So you develop from a **separate clone** (e.g. `~/src/agent-ways`) and choose when your changes reach your install — editing `~/.claude` directly no longer "just works." See **[docs/development.md](docs/development.md)** for the full setup, the sandbox/reconcile/worktree testing patterns, and why the worktree must hang off your standalone clone rather than `$XDG_DATA`.
 
 ## What belongs upstream
 
-The shared corpus takes ways and skills. Knowledge about one tool belongs in that tool's own instructions, and personal preferences belong in your user-scope ways. [Contribution kinds and acceptance bars](docs/reference/contribution-kinds-and-acceptance-bars.md) defines each kind and the bar it must clear. [Contribute a way or skill](docs/how-to/contribute-a-way-or-skill.md) takes one from draft to pull request.
+The shared corpus takes ways and skills. Knowledge about one tool belongs in that tool's own instructions, and personal preferences belong in your user-scope ways. [Contribution kinds and the evidence that helps review](docs/reference/contribution-kinds-and-review-evidence.md) defines each kind and the evidence that helps the maintainer review it. [Contribute a way or skill](docs/how-to/contribute-a-way-or-skill.md) takes one from draft to pull request.
 
 ## Adding a Way
 

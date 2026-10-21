@@ -6,12 +6,13 @@ related:
   - "[[ADR-138]]"
   - "[[ADR-178]]"
   - "[[ADR-143]]"
+  - "[[01.026.E]]"
 aliases: []
 ---
 
-# Contribution kinds and acceptance bars
+# Contribution kinds and the evidence that helps review
 
-The shared ways corpus accepts two kinds of contribution, ways and skills. Two other kinds are often offered as ways and belong somewhere else. This page defines the four kinds, gives the phrasing rule for a way, and sets the bar each kind must clear. The steps for preparing a pull request are in [Contribute a way or skill](../how-to/contribute-a-way-or-skill.md).
+The shared ways corpus accepts two kinds of contribution, ways and skills. Two other kinds are often offered as ways and belong somewhere else. This page defines the four kinds, gives the phrasing rule for a way, and lists the evidence that helps review each kind. Why contributions are welcome and what happens to one after review are in [Where ways come from](../explanation/where-ways-come-from.md). The steps for preparing a pull request are in [Contribute a way or skill](../how-to/contribute-a-way-or-skill.md).
 
 ## The four kinds
 
@@ -38,31 +39,34 @@ Write a way as how the work is done when the situation arises. Name the situatio
 
 The agent reads a way at the moment the situation arises, so the way has to say what to do at that moment. An outcome leaves the steps to the agent. The named situation also gives the trigger words to match on.
 
-## Acceptance bars
+## Evidence that helps review
 
-| Kind | Bar | Evidence in the pull request |
-|---|---|---|
-| Way | Changes behaviour in a way that can be shown, and its trigger fires on everyday phrasing | An ablation result from `make test-live-matrix`, and probe results against held-out prompts |
-| Skill | Completes its task when invoked | A run of the skill on a representative task: its transcript or the end state it left |
-| Tool definition or resource | Goes to the tool | None; the corpus does not accept it |
-| Posture | Stays in the person's user-scope ways | None; the corpus does not accept it |
-| Docs that are never injected | Exempt from the behavioural bar | `docs/scripts/doc lint` and review |
+| Kind | Evidence that helps review |
+|---|---|
+| Way | Probe results against held-out prompts and, when the effect is in doubt, an ablation |
+| Skill | A run of the skill on a representative task showing it completes the task: its transcript or the end state it left |
+| Tool definition or resource | None; it goes to the tool |
+| Posture | None; it stays in the person's user-scope ways |
+| Docs that are never injected | `docs/scripts/doc lint` |
 
-### Why a way must show an effect
+This evidence informs the maintainer's decision. It is not a gate. Whether a contribution enters the corpus is the maintainer's judgment.
 
-Every way in the shared corpus is a candidate in every session of every install. When a way fires it costs tokens, and when it sits near other ways it competes with them for every prompt in that region. Injected text that changes nothing pays both costs and returns nothing.
+### Why evidence helps, and its limits
+
+Every way in the shared corpus is a candidate in every session of every install. A way costs tokens when it fires and competes with nearby ways for every prompt in its region. Probe results show the reviewer whether its trigger fires on everyday phrasing and whether it takes prompts from existing ways. An ablation shows whether behaviour changes when the way is present.
+
+The judgment that a way would help brings in variety from outside the guidance system: the person who writes it is predicting where the agent's default falls short. A benchmark of typical scenarios rarely contains the atypical situations a way is written for. No measured effect on typical prompts is therefore weak evidence against a way meant for an atypical one.
 
 ### The ablation for a way
 
-`make test-live-matrix` runs the tier 2 live fixture over several arms ([ADR-508](../architecture/platform/ADR-508-the-live-fixture-runs-locally-its-github-workflow-runs-on-manual-dispatch-only.md)). Each arm is a clone of this repository. A way's ablation uses four:
+`make test-live-matrix` runs the tier 2 live fixture over several arms ([ADR-508](../architecture/platform/ADR-508-the-live-fixture-runs-locally-its-github-workflow-runs-on-manual-dispatch-only.md)). Each arm is a clone of this repository. A way's ablation uses three:
 
 | Arm | Contents | What it measures |
 |---|---|---|
 | Without | The base branch, without the way | Baseline behaviour |
 | With | The contribution branch | Behaviour with the way available to its trigger |
 | Noise floor | The base branch again, under a second arm name | Run-to-run spread; a difference smaller than the spread between the two identical arms is no finding |
-| Forced | The contribution branch with the way made to fire in every scenario, such as by `trigger: session-start` | Whether the text changes behaviour when it is present, separately from whether its trigger fires |
 
-The scenarios are held out: someone other than the way's author writes them from a one-sentence statement of the situation, without the way's wording. A blind judge grades the transcripts without knowing which arm produced them and with the way's injected text stripped. The method is in [evaluative/ablation](../../hooks/ways/evaluative/ablation/ablation.md) and [evaluative/held-out](../../hooks/ways/evaluative/held-out/held-out.md).
+When the way's trigger may not be firing in the scenarios, add a forced arm. It is a branch with a commit that gives the way `trigger: session-start`, so the way is present in every scenario. Comparing it with the without-arm shows whether the text changes behaviour, separately from whether its trigger fires. The forced arm is a manual, committed branch, not a driver option.
 
-A way passes when the with-arm differs from the without-arm by more than the noise floor in the direction the way intends, and its probe results show the trigger firing on held-out everyday phrasing without taking prompts from existing ways.
+The scenarios are held out: someone other than the way's author writes them from a one-sentence statement of the situation, without the way's wording ([evaluative/held-out](../../hooks/ways/evaluative/held-out/held-out.md)). Grading the transcripts is manual and follows [evaluative/ablation](../../hooks/ways/evaluative/ablation/ablation.md): a blind judge grades them without knowing which arm produced them and with the way's injected text stripped.

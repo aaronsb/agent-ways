@@ -6,12 +6,13 @@ related:
   - "[[ADR-701]]"
   - "[[ADR-508]]"
   - "[[01.024.R]]"
+  - "[[01.026.E]]"
 aliases: []
 ---
 
 # Contribute a way or skill
 
-This guide takes one way or skill from a draft to a pull request against the shared corpus. It assumes a development checkout ([development.md](../development.md)). The kinds of contribution and the bar each must clear are defined in [Contribution kinds and acceptance bars](../reference/contribution-kinds-and-acceptance-bars.md). The mechanics of a way file (frontmatter, triggers, `refire:`, trees) are in [Writing a way](../hooks-and-ways/extending.md) and the [authoring way](../../hooks/ways/meta/knowledge/authoring/authoring.md) and its children.
+This guide takes one way or skill from a draft to a pull request against the shared corpus. It assumes a development checkout ([development.md](../development.md)). The kinds of contribution and the evidence that helps review each are in [Contribution kinds and the evidence that helps review](../reference/contribution-kinds-and-review-evidence.md). Why contributions are welcome, and what can happen to one after review, are in [Where ways come from](../explanation/where-ways-come-from.md). The mechanics of a way file (frontmatter, triggers, `refire:`, trees) are in [Writing a way](../hooks-and-ways/extending.md) and the [authoring way](../../hooks/ways/meta/knowledge/authoring/authoring.md) and its children.
 
 ## 1. Name the kind
 
@@ -19,7 +20,7 @@ Decide which of the four kinds the draft is: way, skill, tool knowledge or postu
 
 ## 2. Write it
 
-- Phrase a way as how the work is done when the situation arises ([phrasing a way](../reference/contribution-kinds-and-acceptance-bars.md#phrasing-a-way)).
+- Phrase a way as how the work is done when the situation arises ([phrasing a way](../reference/contribution-kinds-and-review-evidence.md#phrasing-a-way)).
 - Write the pattern, not the incident. Leave out client, employer and person specifics. An anecdote with only the names removed still describes one engagement, so restate it as the general situation it stands for ([pii-free](../../hooks/ways/meta/knowledge/authoring/pii-free/pii-free.md)).
 - Keep the register sober. Injected text reads as doctrine, and the model imitates the register of what it reads ([ADR-178](../architecture/practice/ADR-178-register-transfers-by-demonstration-core-md-carries-policy.md)). Run `scripts/check-register.sh` and clear what it reports for your file. The [prose](../../hooks/ways/meta/trust/prose/prose.md) way lists the shapes to cut.
 - Put a list of phrases, such as phrases to avoid or example wordings, only in a way that fires when someone asks for that work. A way that refires through long sessions repeats the list each time, and the model picks the phrases up.
@@ -66,17 +67,17 @@ A probe result means little without the state it was measured under. Report it w
 
 ## 6. Show the effect
 
-For a way, run the ablation described in [the ablation for a way](../reference/contribution-kinds-and-acceptance-bars.md#the-ablation-for-a-way). Each arm must be a clone (`git clone --branch <b> <repo> <dir>`); the matrix refuses a worktree.
+For a way whose effect is in doubt, run the ablation described in [the ablation for a way](../reference/contribution-kinds-and-review-evidence.md#the-ablation-for-a-way). Each arm must be a clone (`git clone --branch <b> <repo> <dir>`); the matrix refuses a worktree.
 
 ```bash
-MATRIX_ARMS="without=$BASE without2=$BASE with=$BRANCH forced=$FORCED" \
+MATRIX_ARMS="without=$BASE without2=$BASE with=$BRANCH" \
 MATRIX_TRIALS=3 \
 TIER2_SCENARIOS="<your-scenario>" \
 MATRIX_OUT="$HOME/matrix-out" \
 make test-live-matrix
 ```
 
-A scenario is a directory under `tests/fixtures/docker/scenarios/`; [the fixture notes](../../tests/fixtures/docker/CLAUDE.md) say how to add one. Each run writes its transcripts under `MATRIX_OUT/<model>/<arm>/t<k>`. Grade them with a blind judge as [evaluative/ablation](../../hooks/ways/evaluative/ablation/ablation.md) describes. Tier 2 spends API tokens, so run it locally when the way is ready ([ADR-508](../architecture/platform/ADR-508-the-live-fixture-runs-locally-its-github-workflow-runs-on-manual-dispatch-only.md)).
+A scenario is a directory under `tests/fixtures/docker/scenarios/`; [the fixture notes](../../tests/fixtures/docker/CLAUDE.md) say how to add one. When the trigger may not be firing, add `forced=$FORCED`, where `$FORCED` is a branch you commit as the reference describes. Each run writes its transcripts under `MATRIX_OUT/<model>/<arm>/t<k>`. Grade them by hand with a blind judge as [evaluative/ablation](../../hooks/ways/evaluative/ablation/ablation.md) describes. Tier 2 spends API tokens, so run it locally when the way is ready ([ADR-508](../architecture/platform/ADR-508-the-live-fixture-runs-locally-its-github-workflow-runs-on-manual-dispatch-only.md)).
 
 For a skill, invoke it on a representative task and keep the transcript or the end state it left.
 
@@ -85,6 +86,6 @@ For a skill, invoke it on a representative task and keep the transcript or the e
 Send one way or one skill per pull request. The description carries:
 
 - the kind, stated
-- the scenario that would show its effect, and the ablation result for a way or the run for a skill
+- the scenario that would show its effect, and the ablation result for a way when one was run, or the run for a skill
 - probe results against the held-out prompts, with the engine state from step 5
 - the output of `ways author lint <way-dir>` and `scripts/check-register.sh`
