@@ -337,8 +337,12 @@ type World = {
   unwritable?: boolean
   /** Every `$.ui.log` line. */
   logs?: string[]
-  /** The host refuses an `sh` write started while another is still running. */
+  /** The host refuses a child started while another is still running. */
   oneAtATime?: boolean
+  /** The session's working directory is gone: a child that inherits it cannot start. */
+  cwdGone?: boolean
+  /** How many `mkdir` runs fail before one succeeds. */
+  mkdirFailures?: number
   /** More environment, over the defaults. */
   env?: Record<string, string>
 }
@@ -350,12 +354,19 @@ function engine(on: On, world: World) {
   on('process.run', async ($, e) => {
     world.ran.push([...e.argv])
     const [tool] = e.argv
-    if (tool === 'sh' && e.argv[1] === '-c' && /\bcat\b/.test(e.argv[2] ?? '')) {
-      if (world.unwritable === true) return { value: { ...ok(), exitCode: 1 } }
-      if (world.oneAtATime === true && inFlight > 0) throw new Error('process.run refused: another child is running')
+    if (world.cwdGone === true && e.init?.cwd === undefined) throw new Error(`spawn ${tool} ENOENT`)
+    if (world.oneAtATime === true) {
+      if (inFlight > 0) throw new Error('process.run refused: another child is running')
       inFlight++
       await new Promise(resolve => setTimeout(resolve, 2))
       inFlight--
+    }
+    if (tool === 'mkdir' && (world.mkdirFailures ?? 0) > 0) {
+      world.mkdirFailures = (world.mkdirFailures ?? 0) - 1
+      return { value: { ...ok(), exitCode: 1 } }
+    }
+    if (tool === 'sh' && e.argv[1] === '-c' && /\bcat\b/.test(e.argv[2] ?? '')) {
+      if (world.unwritable === true) return { value: { ...ok(), exitCode: 1 } }
       const path = e.argv[4] ?? ''
       written.add(path)
       world.writes?.push([path, e.init?.stdin ?? ''])
@@ -796,7 +807,7 @@ describe('cache writes', () => {
   })
 })
 
-describe('concurrent writes', () => {
+describe('children', () => {
   test('renders in the same millisecond each log their line; none is called a failure', async ($, on) => {
     const world: World = { hasMagick: true, blit: undefined, ran: [], writes: [], logs: [], debug: true, oneAtATime: true }
     mock.clock(on)
@@ -811,5 +822,39 @@ describe('concurrent writes', () => {
     const lines = (world.writes ?? []).filter(([path]) => path.endsWith('/render.log')).map(([, text]) => text)
     for (const id of ['a', 'b', 'c', 'd', 'e']) expect(lines.some(line => line.includes(` ToolResult tu-${id} `))).toBe(true)
     expect(world.logs).toEqual([])
+  })
+  test('first renders in the same millisecond each draw, with no note', async ($, on) => {
+    const world: World = { hasMagick: true, blit: undefined, ran: [], oneAtATime: true }
+    engine(on, world)
+    const sites = ['a', 'b', 'c', 'd', 'e'].map(id => ({ ...SENT, requestId: `tu-${id}`, props: { ...SENT.props, tool_use_id: `tu-${id}` } }))
+    const found = await Promise.all(
+      sites.map(async site => {
+        const ui = await $.ui.mount(site as never)
+        const seen = { raster: await ui.find({ type: 'Raster' }), note: await ui.find({ text: /^images:/ }) }
+        await ui.unmount()
+        return seen
+      }),
+    )
+    for (const seen of found) {
+      expect(seen.raster).toBeDefined()
+      expect(seen.note).toBeUndefined()
+    }
+  })
+
+  test('a session whose working directory is gone still draws', async ($, on) => {
+    engine(on, { hasMagick: true, blit: undefined, ran: [], cwdGone: true })
+    const found = await drawn($)
+    expect(found.raster).toBeDefined()
+    expect(found.note).toBeUndefined()
+  })
+
+  test('a cache directory that could not be made is tried again by the next picture', async ($, on) => {
+    const world: World = { hasMagick: true, blit: undefined, ran: [], mkdirFailures: 1 }
+    engine(on, world)
+    const ui = await $.ui.mount(SENT as never)
+    expect(await ui.find({ text: /no private cache directory/ })).toBeDefined()
+    await ui.unmount()
+
+    expect((await drawn($)).raster).toBeDefined()
   })
 })

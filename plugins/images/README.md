@@ -40,7 +40,7 @@ Set them in `/config`, or under `pluginConfigs.images.options` in settings.
 
 ImageMagick, as `magick` (version 7) or `convert` (version 6), on `PATH`. It decodes and resizes every picture. Without it, each site shows Claude Code's own row and one dim note.
 
-The mod keeps resized pictures, and pasted or Read images written as data URI files, in `$XDG_RUNTIME_DIR/claude-images` (mode 0700). Without `XDG_RUNTIME_DIR` it uses `$TMPDIR/claude-images-$USER`, or `/tmp/claude-images-$USER`. It writes its own files there through `sh` (`cat`, `mv`), as ImageMagick writes its: an installed plugin's `$.fs` writes did not land there. When the directory takes no write, a Read or pasted image shows a dim note in place of the picture, and the session gets one dim line saying so.
+The mod keeps resized pictures, and pasted or Read images written as data URI files, in `$XDG_RUNTIME_DIR/claude-images` (mode 0700). Without `XDG_RUNTIME_DIR` it uses `$TMPDIR/claude-images-$USER`, or `/tmp/claude-images-$USER`. It writes its own files there through `sh` (`cat`, `mv`), as ImageMagick writes its: an installed plugin's `$.fs` writes did not land there. Its child processes run one at a time and from `/`, so a burst of renders (an agent reading several images at once) and a session whose working directory was removed both still draw. A failed check for ImageMagick or the directory is asked again by the next picture. When the directory takes no write, a Read or pasted image shows a dim note in place of the picture, and the session gets one dim line saying so.
 
 ## Install
 

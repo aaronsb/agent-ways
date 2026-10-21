@@ -36,6 +36,14 @@
 // writes did not land there. Without ImageMagick each site draws the
 // engine's row and one dim note.
 //
+// Children run one at a time, from `/`: the host refuses a child started while
+// another runs, and a session's working directory can vanish under it (a
+// removed worktree or temp dir), which fails every spawn that inherits it.
+// Finding ImageMagick and making the cache directory are kept once they
+// succeed; a failure is asked again by the next picture, so one refused run
+// under a burst of renders does not leave the rest of the session without
+// pictures.
+//
 // Render log, off unless asked for: while a file named `debug` sits in the
 // cache directory, each transcript component the mod can see appends one
 // line to `render.log` beside it (component, requestId, tool, and the shape
@@ -111,8 +119,6 @@ type Terminal = Elements['terminal']
 let option: RendererOption = 'auto'
 let showPathsInReplies = true
 let steerToSendUserFile = true
-let magick: string | null | undefined
-let cacheDir: string | null | undefined
 let isProbing = false
 const memo = new Map<string, Picture>()
 /** Per site (requestId): its Images' generation, and whether it is off screen. */
@@ -132,23 +138,61 @@ async function isRegularFile($: EngineInterface, path: string): Promise<boolean>
   return stat?.kind === 'file'
 }
 
-function run($: EngineInterface, argv: string[]): Promise<ProcessRunResult | null> {
-  return $.process.run(argv, { timeoutMs: RUN_TIMEOUT_MS }).catch(() => null)
+/** The children in flight, one after another: renders arrive in pairs within a millisecond. */
+let runs: Promise<unknown> = Promise.resolve()
+
+/**
+ * Runs `argv` from `/`, queued behind the runs before it, with `stdin` when
+ * given. A run the host refused is tried once more; null after a second
+ * refusal, or when the command cannot start.
+ */
+function run($: EngineInterface, argv: string[], stdin?: string): Promise<ProcessRunResult | null> {
+  const once = () => $.process.run(argv, { cwd: '/', stdin, timeoutMs: RUN_TIMEOUT_MS })
+  const done = runs.then(() => once().catch(once)).catch(() => null)
+  runs = done
+  return done
 }
 
-async function findMagick($: EngineInterface): Promise<string | null> {
-  if (magick !== undefined) return magick
+type Lookup = { found: string | null; running: Promise<string | null> | null }
+const magickLookup: Lookup = { found: null, running: null }
+const cacheLookup: Lookup = { found: null, running: null }
+
+/**
+ * A lookup kept once it finds its value; one that finds none, or throws, is
+ * asked again by the next caller. Callers that arrive while it runs wait on
+ * the same run.
+ */
+function lookup(held: Lookup, find: () => Promise<string | null>): Promise<string | null> {
+  if (held.found !== null) return Promise.resolve(held.found)
+  held.running ??= find()
+    .catch(() => null)
+    .then(found => {
+      held.found = found
+      held.running = null
+      return found
+    })
+  return held.running
+}
+
+function findMagick($: EngineInterface): Promise<string | null> {
+  return lookup(magickLookup, () => askMagick($))
+}
+
+async function askMagick($: EngineInterface): Promise<string | null> {
   for (const tool of ['magick', 'convert']) {
     const ran = await run($, [tool, '-version'])
-    if (ran?.exitCode === 0 && /ImageMagick/.test(ran.stdout)) return (magick = tool)
+    if (ran?.exitCode === 0 && /ImageMagick/.test(ran.stdout)) return tool
   }
-  return (magick = null)
+  return null
+}
+
+function cacheDirectory($: EngineInterface): Promise<string | null> {
+  return lookup(cacheLookup, () => makeCacheDirectory($))
 }
 
 // A directory of this user's alone: under XDG_RUNTIME_DIR where there is
 // one, else under the temp directory with the user's name, mode 0700.
-async function cacheDirectory($: EngineInterface): Promise<string | null> {
-  if (cacheDir !== undefined) return cacheDir
+async function makeCacheDirectory($: EngineInterface): Promise<string | null> {
   const runtime = await $.env.get('XDG_RUNTIME_DIR')
   const tmp = (await $.env.get('TMPDIR')) || '/tmp'
   const user = (await $.env.get('USER')) || 'user'
@@ -157,35 +201,17 @@ async function cacheDirectory($: EngineInterface): Promise<string | null> {
     : `${tmp.replace(/\/$/, '')}/claude-images-${user}`
   const made = await run($, ['mkdir', '-p', '-m', '700', '--', dir])
   const locked = made?.exitCode === 0 ? await run($, ['chmod', '700', '--', dir]) : null
-  return (cacheDir = locked?.exitCode === 0 ? dir : null)
-}
-
-/** The writes in flight, one after another: renders arrive in pairs within a millisecond. */
-let writes: Promise<unknown> = Promise.resolve()
-
-/** One `sh` run that writes `text` to `path`: its exit code, or null when the run was refused. */
-async function shWrite($: EngineInterface, path: string, text: string, how: 'whole' | 'append'): Promise<number | null> {
-  const script = how === 'append' ? 'cat >> "$1"' : 'cat > "$1.$$" && mv -f "$1.$$" "$1"'
-  const ran = await $.process
-    .run(['sh', '-c', script, 'sh', path], { stdin: text, timeoutMs: RUN_TIMEOUT_MS })
-    .catch(() => null)
-  return ran === null ? null : ran.exitCode
+  return locked?.exitCode === 0 ? dir : null
 }
 
 /**
  * Writes `text` to `path` through a child process, whole (written aside, then
- * moved into place) or appended, queued behind the writes before it. A run the
- * host refused is tried once more; false only for a non-zero exit, or a second
- * refusal.
+ * moved into place) or appended; false for a non-zero exit, or a run that
+ * never started.
  */
-function writeFile($: EngineInterface, path: string, text: string, how: 'whole' | 'append'): Promise<boolean> {
-  const done = writes.then(async () => {
-    const first = await shWrite($, path, text, how)
-    const code = first === null ? await shWrite($, path, text, how) : first
-    return code === 0
-  })
-  writes = done.catch(() => undefined)
-  return done
+async function writeFile($: EngineInterface, path: string, text: string, how: 'whole' | 'append'): Promise<boolean> {
+  const script = how === 'append' ? 'cat >> "$1"' : 'cat > "$1.$$" && mv -f "$1.$$" "$1"'
+  return (await run($, ['sh', '-c', script, 'sh', path], text))?.exitCode === 0
 }
 
 /** Says once per load, as a dim transcript line, that the cache took no write. */
