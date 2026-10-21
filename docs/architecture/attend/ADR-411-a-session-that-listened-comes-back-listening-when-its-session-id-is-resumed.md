@@ -86,3 +86,11 @@ ADR-406 item 2 ends an activation when Claude Code exits and persists nothing, s
 - **Persist per project.** Rejected: it would make every later session in the project listen, which ADR-406's dormant default exists to prevent, and which `attend_mod.listening: active` already offers when wanted.
 - **Let a fork inherit by reading the parent's transcript.** Rejected: at session start the fork names no parent and its transcript is not yet written. Finding the parent would mean reading Claude Code's transcript files, which the mod does not own.
 - **Record every activation, config-driven ones included.** Rejected: active projects and scripted `-p` runs would write the record often, churn the cap and widen the lost-write window, for sessions their config restores anyway.
+
+## Addendum, 2026-10-21: the mod reads a /clear and a /resume from session.end
+
+Appended after acceptance; nothing above is changed. Item 3 named the settings SessionStart as the event an in-session `/resume` raises, and the mod hooked it as `classic.SessionStart` for `/clear` too. Where an organization manages Claude Code (Team and Enterprise, or a machine with managed settings), Claude Code 2.1.306 seats its built-in policy plugin outermost, and that plugin sends every `classic.*` event, and `session.compact`, past the plugins a person installs. The mod's hook never ran there, so a `/clear` or a `/resume` left attend unaware of the id that went on.
+
+- **The trigger.** `session.end` with reason `clear` or `resume` reaches the mod in every host. The mod notes whether the session was listening, then reads `$.session.id()` until it no longer names the ending id, as the 2.1.296 probe found it reads the old id for a while. It then restores the session as item 3 says. A main-loop turn that starts first does the same at once. The mod hooks no `classic.*` event.
+- **Compaction.** The preamble's after-compaction flag (ADR-406) is set by the person's `/compact` (`command.run`), by the mod's own compaction after a wrap (ADR-414), and by a `session.measure` whose context fill fell below half of the previous one or reads as absent, which a compaction at the engine's threshold always does. The mod hooks no `session.compact`.
+- **The gate.** `scripts/check-plugins.sh` fails when a mod under `plugins/` hooks an event the policy plugin passes over.
