@@ -117,14 +117,15 @@ observable:
   - "The review-request line at session start in this repository counts the top repository as this project and leaves out the vendored llama.cpp submodule (ggml-org/llama.cpp), where the operator has no push access and takes part in no PR, so its open PRs do not enter the pile."
   - "The involvement check run on praecipio/anthropic-partnership for a change under /docs/ names the four CODEOWNERS and whether each was asked to review, and holds nothing."
   - "In a repository with another person's pending review request, a merge by the operator proceeds after the agent has surfaced the request and recorded the operator's decision on it."
-  - "At the start of a new session, an item deferred in an earlier session is listed again for a decision, marked deferred with the date of the deferral; within the session that deferred it, it is not asked again."
+  - "At the start of a new session, an item deferred in an earlier session, a pending-here item or one raised with a PR in hand, is listed again for a decision while GitHub still shows it pending, marked deferred with the date of the deferral; within the session that deferred it, it is not asked again."
   - "An item the operator declined is not listed in later sessions; a review request raised again after the decline is listed as a new item."
   - "With more open items than pending.recur_count, or an oldest older than pending.recur_age, the reminder appears during the session as well as at its start, and work continues without waiting on it."
   - "With the pile past pending.clear_count or pending.clear_age, the session's first ask is a grouped clearing decision, and one answer to a group writes a marker for each item in it."
   - "Each change of tier logs a pending_tier_entered event naming the tier, the open count and the oldest item's age."
-  - "On a PR with no one else involved, an agent review shows a review/agent commit status that goes from pending to success as its threads are resolved, and returns to pending after a push."
+  - "On a PR with no other CODEOWNER, requested reviewer, reviewer, commenter or author, an agent review shows a review/agent commit status that goes from pending to success as its threads are resolved, and returns to pending after a push."
   - "A declined finding's thread carries the reason in a reply before it is resolved."
-  - "On a PR with no one else involved, in a repository where the operator's account can bypass the rule, a merge blocked only by a required approval completes without a question and carries the override comment."
+  - "On a PR with no other CODEOWNER, requested reviewer, reviewer, commenter or author, in a repository where the operator's account can bypass the rule, a merge blocked only by a required approval completes without a question and carries the override comment."
+  - "A PR carrying another person's CHANGES_REQUESTED review is treated as scenario B, though GitHub no longer lists that person as a requested reviewer."
   - "When `--admin` or a ruleset bypass is refused, the agent reports the refusal and the rule that blocked it, proposes the configuration change, and does not retry another way."
   - "With CODEOWNERS, PR metadata or `gh` authentication unreadable, the agent treats the PR as scenario B and asks before any force."
   - "In a repository with other people involved, the first forced merge happens only after the operator accepted a convention, and the override comment quotes the convention and names the people whose review was skipped."
@@ -164,7 +165,7 @@ GitHub already records the state a PR loop needs: review threads and whether eac
 
 A detached run is bounded at 60 s. An overrun is killed with its process group, logged as `macro_timeout` with `deferred=true`, and reported through the collector as below. One run per way per session and agent is in flight at a time; a fire while one runs starts nothing. A failed run (non-zero exit, or empty output) holds the slot for the TTL, so a failing source is not retried at every fire.
 
-**Location.** Every deferred run writes its stdout to a file under the agent's state directory, `<ways sessions-root>/<session>/deferred/<way>/` for the main agent and `<ways sessions-root>/<session>/agents/<agent>/deferred/<way>/` for a subagent, keyed as disclosure markers are. The sessions root is `$XDG_RUNTIME_DIR/claude-sessions`, or `/tmp/.claude-sessions-<uid>` where that variable is unset, so the files sit in per-user temporary storage. Beside the output, a metadata file records the start time, the trigger (the lane and what matched: `session-start`, `commands: gh pr`, a prompt), the operator turn count at the fire, the exit status, and whether the result was delivered. The files are removed with the rest of the session's state when the session's state is cleared. `$XDG_RUNTIME_DIR` does not outlive the login; the `/tmp` fallback can, so at each SessionStart the engine also removes every `deferred/` directory under the sessions root whose newest file is more than 7 days old.
+**Location.** Every deferred run writes its stdout to a file under the agent's state directory, `<ways sessions-root>/<session>/deferred/<way>/` for the main agent and `<ways sessions-root>/<session>/agents/<agent>/deferred/<way>/` for a subagent, keyed as disclosure markers are. The sessions root is `$XDG_RUNTIME_DIR/claude-sessions`, or `/tmp/.claude-sessions-<uid>` where that variable is unset, so the files sit in per-user temporary storage. Beside the output, a metadata file records the start time, the trigger (the lane and what matched: `session-start`, `commands: gh pr`, a prompt), the operator turn count at the fire, the exit status, and whether the result was delivered. When the session's state is cleared at SessionStart, delivered results go with it and undelivered ones stay, so the continuing session still collects them. `$XDG_RUNTIME_DIR` does not outlive the login; the `/tmp` fallback can, so at each SessionStart the engine also removes every `deferred/` directory under the sessions root whose newest file is more than 7 days old. When that sweep removes a result that was never delivered, the sweeping session's next collection emits one line naming the way, the count and the age: `<way>: <n> deferred results swept undelivered after <age>`.
 
 **Delivery.** The collector runs in the `ways hook` prompt lane (UserPromptSubmit) and post_tool lane (PostToolUse), whichever comes first after the run starts. For each undelivered run of the current agent it computes the relevance budget below and injects one of:
 
@@ -200,7 +201,7 @@ Review requests: 75 open · 0 for this project · 10 Dependabot · 4 via teams. 
 
 This project's repositories are the top repository and each git submodule, resolved with `gh repo view` inside it. A submodule counts only where the operator has push access to it or takes part in the PR: authored it, was asked to review it, or commented on it. A vendored upstream submodule with a large PR queue therefore adds nothing to the pile.
 
-Beside the line, the same deferred macro reports the pending-here items as a summary line or a listed block by the pressure tiers in section 4, with an item deferred in an earlier session marked `deferred <date>`. The session-start report uses no touched paths: others' PRs on the same paths, and CODEOWNERS not yet asked, are pending items only once a PR is in hand (section 3). The report is a GitHub query like the counts, so it arrives through the deferred macro and is subject to the relevance budget like any other result. Review requests in other repositories stay in the counts and in `/reviews`, and do not join this project's pile.
+Beside the line, the same deferred macro reports, as a summary line or a listed block by the pressure tiers in section 4, the pending-here items plus every item that carries a deferral marker and is still open, whatever its kind. An item raised with a PR in hand and deferred, such as a CODEOWNER not yet asked, therefore comes back too. Each marked item is checked against GitHub by its id, and one no longer pending is dropped with its marker. Deferred items show `deferred <date>`. The session-start report computes no touched paths: others' PRs on the same paths, and CODEOWNERS not yet asked, become pending items only once a PR is in hand (section 3), and return at session start only through a deferral marker. The report is a GitHub query like the counts, so it arrives through the deferred macro and is subject to the relevance budget like any other result. Review requests in other repositories stay in the counts and in `/reviews`, and do not join this project's pile.
 
 The macro keeps its own cross-session cache of the search under `$XDG_CACHE_HOME/agent-ways/` (`~/.cache/agent-ways/` when the variable is unset), so sessions started together make one query.
 
@@ -217,8 +218,9 @@ Signals that name a person:
 1. CODEOWNERS (root, `.github/` or `docs/`) assigns them a touched path.
 2. The PR requests their review.
 3. They authored the PR.
-4. They authored a PR in the repository in the last 90 days.
-5. They committed in the last 90 days, on any branch, deduplicated by GitHub login where known and by email otherwise, bots excluded.
+4. They submitted a review on the PR, or left a review comment or thread on it. GitHub drops a reviewer from the requested reviewers once they submit, so this signal keeps someone who requested changes in view.
+5. They authored a PR in the repository in the last 90 days.
+6. They committed in the last 90 days, on any branch, deduplicated by GitHub login where known and by email otherwise, bots excluded.
 
 Pending items are other people's open asks that bear on the work. The first two are the session-start pending-here items (section 2). The last two need a PR in hand and use that PR's touched paths:
 
@@ -241,7 +243,7 @@ The PR is the loop's ledger in both scenarios below. Threads are findings, an un
 
 #### A. Single contributor that stays honest
 
-Scenario A is decided per PR. It holds when section 3's signals 1 to 3 find no one else: no CODEOWNER of a touched path, no requested reviewer, no other author. A PR the operator wrote alone that touches a path someone else owns is scenario B, and so is a PR the check could not read. The agent's review subagent supplies the findings.
+Scenario A is decided per PR. It holds when section 3's signals 1 to 4 find no one else: no CODEOWNER of a touched path, no requested reviewer, no other author, and no other person who has reviewed or commented on it. Bots do not count. A PR the operator wrote alone that touches a path someone else owns is scenario B, and so is a PR the check could not read. The agent's review subagent supplies the findings.
 
 - **Findings.** The review posts as a formal review with event `COMMENT`, which GitHub allows on one's own PR, with one inline comment per finding. Each finding is a thread.
 - **Sign-off per finding: a resolved thread.** Each thread closes with a reply carrying its evidence, as the evaluation way reports it (the scenario replayed, the command, red before the fix and green after), or with the decline or deferral and its reason, and is then resolved. A deferred finding becomes an issue naming the condition that reopens it, the residuals rule of `delivery/issues`.
@@ -255,7 +257,7 @@ Scenario A is decided per PR. It holds when section 3's signals 1 to 3 find no o
 
 #### B. True collaboration with others
 
-Someone other than the operator has a stake in the PR: they own a touched path, were asked to review, or authored it. The pending items, decision markers and tiers below belong to this scenario, with two modes:
+Someone other than the operator has a stake in the PR: they own a touched path, were asked to review or have reviewed or commented on it, or authored it. The pending items, decision markers and tiers below belong to this scenario, with two modes:
 
 | Mode | Findings from | Output |
 |---|---|---|
@@ -277,11 +279,11 @@ No answer counts as defer. The agent records the decision in one line in its rep
 
 The operator may make a decline visible on GitHub, by removing themselves as a requested reviewer where they have the access, or by a short reply. Both are optional and outward-facing, so the agent does them only when the operator chooses.
 
-**Open items return every session.** An open item is not asked about again in the session that deferred it or left it unanswered, at a PR's take-up or before a merge. At the next session start every open item is reported again (section 2), and a deferred one carries the mark and the date of its deferral.
+**Open items return every session.** An open item is not asked about again in the session that deferred it or left it unanswered, at a PR's take-up or before a merge. At the next session start every pending-here item, and every deferred item GitHub still shows as pending, is reported again (section 2), and a deferred one carries the mark and the date of its deferral.
 
-**Decision markers.** A decision outlives its session, so it is not kept in the per-session temporary area. The pending items themselves are re-derived from GitHub at each session start, so only a marker is stored: its kind (`deferred`, `declined` or `handed-off`), the item's id (a review request, thread or PR node id) with the time the item was raised, the date, the hand-off target where there is one, and an optional note, one line each in `$XDG_STATE_HOME/agent-ways/decisions/<owner>/<repo>.jsonl` (`~/.local/state/agent-ways/...` when the variable is unset). A `declined` or `handed-off` marker keeps its item out of later listings; a `deferred` marker only supplies the mark. Act needs no marker, since GitHub records the action. An item raised again after a decline, such as a re-requested review, has a new raised time and is a new item. GitHub stays the source of what is pending, and a PR reply is not the store: it is public, it exists only when the operator chose one, and some items, such as a CODEOWNER not yet asked to review, have no thread to reply in. A marker whose item is no longer pending on GitHub is removed when the listing is next built.
+**Decision markers.** A decision outlives its session, so it is not kept in the per-session temporary area. The pending items themselves are re-derived from GitHub at each session start, so only a marker is stored: its kind (`deferred`, `declined` or `handed-off`), the item's id (a review request, thread or PR node id, with the person's login for a CODEOWNER not yet asked) with the time the item was raised, the date, the hand-off target where there is one, and an optional note, one line each in `$XDG_STATE_HOME/agent-ways/decisions/<owner>/<repo>.jsonl` (`~/.local/state/agent-ways/...` when the variable is unset). A `declined` or `handed-off` marker keeps its item out of later listings; a `deferred` marker only supplies the mark. Act needs no marker, since GitHub records the action. An item raised again after a decline, such as a re-requested review, has a new raised time and is a new item. GitHub stays the source of what is pending, and a PR reply is not the store: it is public, it exists only when the operator chose one, and some items, such as a CODEOWNER not yet asked to review, have no thread to reply in. A marker whose item is no longer pending on GitHub is removed when the listing is next built.
 
-**Pressure scales with the pile.** The pile is the pending-here items (section 2) with no closing decision. Its prominence follows two measures, the number of open items and the age of the oldest, taken from when GitHub raised it:
+**Pressure scales with the pile.** The pile is what the session-start report holds (section 2): the pending-here items and the deferred items still pending, none with a closing decision. Its prominence follows two measures, the number of open items and the age of the oldest, taken from when GitHub raised it:
 
 | Tier | When | What the operator sees |
 |---|---|---|
@@ -304,7 +306,7 @@ A merge held by branch protection, a ruleset, a required check or a required app
 
 The authorization follows the model the operator compared it to, Claude Code's auto-mode classifier: an action is judged against what the operator has authorized, not asked about one at a time. Scenario A is such an authorization, and in scenario B a convention set in the session is. Either lasts for the session. Nothing on the agent's side makes an exception standing: a block that keeps recurring is settled in the repository's configuration, where everyone can see it.
 
-**Scenario A.** The agent may force a merge on its own when the PR is in scenario A (section 4). It forces only approval-type blocks, typically a required approval that only a second account could give, and does not ask. A failing required check is never forced on its own: the agent surfaces it, and the operator may choose to override it. Honesty rests on the trace: the PR comment, the `review/agent` status and the `merge_override` event.
+**Scenario A.** The agent may force a merge on its own when the PR is in scenario A (section 4): no other CODEOWNER of a touched path, requested reviewer, author, reviewer or commenter, and the check could read all of them. It forces only approval-type blocks, typically a required approval that only a second account could give, and does not ask. A failing required check is never forced on its own: the agent surfaces it, and the operator may choose to override it. Honesty rests on the trace: the PR comment, the `review/agent` status and the `merge_override` event.
 
 **Scenario B.** The agent forces only under a convention the operator has established.
 
@@ -329,7 +331,7 @@ A rule that keeps blocking is a misfit between the repository's configuration an
 **Amendment to ADR-604 rule 2.** Rule 2, and `delivery/merge` after it, says a way may add rigor on top of enforcement and never subtracts from it: no skipped required check, no bypass flag, no suggestion to disable a hook or rule to get past it. ADR-604 now carries rule 2 under its own note heading, which this record amends. The change:
 
 - A recorded override may subtract from enforcement for one merge, made by the operator, or by the agent in scenario A or within a convention the operator set in the session. Outside those, the agent still never subtracts from enforcement on its own judgement.
-- The clause against suggesting that a rule be disabled is lifted for the repeated-friction proposal above. A lasting change to what the repository enforces is made in the repository's configuration, with the operator's yes, and is visible there.
+- The clause against suggesting that a rule be disabled is lifted for the configuration proposal above, in both of its cases: after repeated overrides of one rule, and at once when `--admin` or a bypass is refused, since no other route remains. A lasting change to what the repository enforces is made in the repository's configuration, with the operator's yes, and is visible there.
 
 Rules 1 and 3 to 8 of ADR-604 stay in force.
 
@@ -346,7 +348,7 @@ A later step may move PR awareness to an ADR-403 command sensor, which would wak
 ### Positive
 
 - Any way can carry context that takes longer than 3 s to fetch, with no per-feature cache-and-hook pipeline. The github way's repository-health and contributor calls can move off the 3 s path the same way.
-- A deferred result that arrives late, fails or overruns is announced once, with its file. Nothing a macro produced is dropped without a line saying so.
+- A deferred result that arrives late, fails or overruns is announced once, with its file. A result removed undelivered by the 7-day sweep is announced in one line by the session that swept it. Nothing a macro produced is dropped without a line, except what is lost when `$XDG_RUNTIME_DIR` is cleared at logout, where no process remains to report it.
 - Deferred macros run in the ways hooks, so they work in attend-mod sessions, which run no attend sensors.
 - One check gives the github way, `/merge`, the code-reviewer agent and `project-init` the same view of who else is involved, and a CODEOWNERS entry or a requested reviewer is seen.
 - Nothing the check finds holds work. In a repository where one operator drives most of the work while others are new, casual or observing, the operator is not left waiting on them, and their open asks still get an answer.
@@ -359,7 +361,7 @@ A later step may move PR awareness to an ADR-403 command sensor, which would wak
 ### Negative
 
 - A result can arrive next to an unrelated prompt; the header and the budget limit the confusion without removing it.
-- In a `claude -p` run with no tool calls after the fire there is no later hook, and the result is never collected.
+- In a `claude -p` run with no tool calls after the fire there is no later hook, and that run never collects the result. It stays in its file until the 7-day sweep, which reports it in another session's line.
 - The engine gains detached processes, a collector on UserPromptSubmit and PostToolUse, and per-agent result files to test and keep from leaking.
 - An idle session learns of a new review request at the operator's next prompt, not when it appears.
 - The involvement check reads CODEOWNERS and PR metadata, so it costs more than a `git log` count and needs network for its per-PR signals. Offline or unauthenticated, it fails closed, and a PR that would be scenario A is asked about like scenario B.
