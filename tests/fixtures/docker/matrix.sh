@@ -32,6 +32,9 @@ for pair in $MATRIX_ARMS; do
   name="${pair%%=*}" path="${pair#*=}"
   [[ "$name" != "$pair" && -n "$path" ]] || { echo "bad arm '$pair' (want NAME=PATH)" >&2; exit 2; }
   [[ -f "$path/tests/fixtures/docker/test-live.sh" ]] || { echo "arm $name: no live fixture under $path" >&2; exit 2; }
+  # The branch flavor clones the arm inside the container, and a worktree's
+  # .git points at a git dir outside the mount.
+  [[ -d "$path/.git" ]] || { echo "arm $name: $path is a worktree; use a clone (git clone --branch <b> <repo> <dir>)" >&2; exit 2; }
   ARM_PATH[$name]="$path"
   ARM_NAMES+=("$name")
 done
