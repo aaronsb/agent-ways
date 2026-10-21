@@ -41,6 +41,14 @@ basis:
     via: chat, relayed by the coordinating session
   - operator: aaronsb
     level: guided
+    said: "in both situations, if the github account is an owner or has rights, we can force through any blocks or rules if necessary"
+    via: chat, relayed by the coordinating session
+  - operator: aaronsb
+    level: guided
+    said: "this override is the 'getting things done' thing that often happens with the agentic power user experience I see"
+    via: chat, relayed by the coordinating session
+  - operator: aaronsb
+    level: guided
     said: "it's a stats of awareness"
     via: chat, relayed verbatim by the coordinating session, 2026-10-21, on the review-request line
   - operator: aaronsb
@@ -59,6 +67,7 @@ basis:
   - precedent: ADR-004
   - precedent: ADR-180
   - precedent: ADR-604
+  - upstream: "`gh pr merge --admin` merges past unmet branch protection for an account with admin rights; a ruleset bypass list lets named roles, teams or apps bypass its rules"
 agent:
   name: claude
   model: claude-opus-5-5
@@ -66,7 +75,7 @@ status: proposed
 date: 2026-10-21
 deciders:
   - aaronsb
-amends: [ADR-004#execution-model]
+amends: [ADR-004#execution-model, ADR-604#decision]
 considered:
   - operator: aaronsb
     said: "sort of like how I can que up messages to send to you and they're relevant and you might get them after you've gotten other context but it still makes sense because the turn that it ran in was nearby"
@@ -99,14 +108,16 @@ observable:
   - "Each change of tier logs a pending_tier_entered event naming the tier, the open count and the oldest item's age."
   - "In a solo repository, a PR with an agent review shows a review/agent commit status that goes from pending to success as its threads are resolved, and returns to pending after a push."
   - "A declined finding's thread carries the reason in a reply before it is resolved."
+  - "A merge blocked by a required approval, in a repository where the operator is admin, is completed only after the operator chooses to override or a standing grant covers it, and the PR carries a comment naming the bypassed rule and the reason."
+  - "After merge.override_suggest_after overrides of the same rule in one repository, the agent offers once to change the repository's configuration so the rule matches how the repository is worked."
 ---
 
 # ADR-606: Deferred macros, and the PR awareness, involvement check and PR feedback way built on them
 
 ## Summary
 
-- **Decided:** Ways gain a deferred macro. A way that declares `macro_defer:` starts its macro detached when it fires, renders at once with the last cached result, and the finished result reaches the agent at its next hook event, once, with a header saying which way ran it, what fired it and how long ago. A result past a relevance budget that combines elapsed time and elapsed turns is replaced by one line saying the miss is abnormal, naming the file holding the result, and telling the agent to investigate when it bears on the work. The first consumer is a session-start line of review-request counts. On the same base: one check of who else is involved replaces six divergent solo/team rules, never gates, and puts other people's pending items in front of the operator for a decision before work goes on. Declining closes an item as fully as acting on it; deferring, or giving no answer, brings it back at every session start, and the reminder grows more prominent as open items pile up and age, without ever blocking work. Past a clearing threshold, guidance has the agent put clearing the pile to the operator as the session's first decision, answered by group rather than item by item; and a PR feedback way runs review findings to closure, with the PR as the ledger, in two scenarios. A single contributor that stays honest: the agent's review posts one thread per finding, each thread closes with evidence or a recorded decision and is resolved, and a `review/agent` commit status, labelled as the author's own claim, stands in for the approval GitHub will not let an author give. True collaboration with others: other people's reviews and the operator's reviews of their PRs run through threads and pending reviews, with the pending-item tiers above.
-- **Trades away:** A slow macro's result arrives a turn or more late and can land beside unrelated context. The engine gains detached processes, a results directory and a collector on two hooks. Nothing wakes an idle session when a new review request appears. Reviewer-mode output waits on the operator to submit it. A solo PR's sign-off is a status the author sets on their own work, not an approval. Other people's pending items cost the operator a decision at each session start, a deferred item included, and where the repository enforces no review, the agent does not hold work for a CODEOWNER or requested reviewer: their stake is surfaced and decided on, never waited for. A growing pile of open items is made deliberately more noticeable, in a session that may not be about them.
+- **Decided:** Ways gain a deferred macro. A way that declares `macro_defer:` starts its macro detached when it fires, renders at once with the last cached result, and the finished result reaches the agent at its next hook event, once, with a header saying which way ran it, what fired it and how long ago. A result past a relevance budget that combines elapsed time and elapsed turns is replaced by one line saying the miss is abnormal, naming the file holding the result, and telling the agent to investigate when it bears on the work. The first consumer is a session-start line of review-request counts. On the same base: one check of who else is involved replaces six divergent solo/team rules, never gates, and puts other people's pending items in front of the operator for a decision before work goes on. Declining closes an item as fully as acting on it; deferring, or giving no answer, brings it back at every session start, and the reminder grows more prominent as open items pile up and age, without ever blocking work. Past a clearing threshold, guidance has the agent put clearing the pile to the operator as the session's first decision, answered by group rather than item by item; and a PR feedback way runs review findings to closure, with the PR as the ledger, in two scenarios. A single contributor that stays honest: the agent's review posts one thread per finding, each thread closes with evidence or a recorded decision and is resolved, and a `review/agent` commit status, labelled as the author's own claim, stands in for the approval GitHub will not let an author give. True collaboration with others: other people's reviews and the operator's reviews of their PRs run through threads and pending reviews, with the pending-item tiers above. In both, an operator with the rights can force a merge past a repository rule: the agent never forces on its own, puts the block, the rule and what an override skips to the operator in one question unless a standing grant covers it, records each override on the PR, and after repeated overrides of one rule offers once to change the repository's configuration.
+- **Trades away:** A slow macro's result arrives a turn or more late and can land beside unrelated context. The engine gains detached processes, a results directory and a collector on two hooks. Nothing wakes an idle session when a new review request appears. Reviewer-mode output waits on the operator to submit it. A solo PR's sign-off is a status the author sets on their own work, not an approval. An operator override weakens enforcement that other people may rely on. Other people's pending items cost the operator a decision at each session start, a deferred item included, and where the repository enforces no review, the agent does not hold work for a CODEOWNER or requested reviewer: their stake is surfaced and decided on, never waited for. A growing pile of open items is made deliberately more noticeable, in a session that may not be about them.
 - **One-way?** No. Reversible now; expensive once ways outside this repository declare `macro_defer:`, since removing the field then breaks their frontmatter.
 - **Probes:** *Confident (next-hook):* a slow lookup's result reaches the agent with whatever comes next, a prompt or a tool call, even when that prompt is about something else, as long as it is recent; past that it becomes a one-line pointer to the file. *Not confident (codeowners-team):* asked whether CODEOWNERS entries for other people should make the agent stop for review and refuse `/merge full-sail`; answered no, and the check now surfaces and never gates. *Not confident (deferred-returns):* asked whether a deferred item should stay quiet until work touches it again; answered that deferred items come back at the start of every session.
 - **Inversion:** Other people on a repository as a gate that holds the operator's work, or as background the agent never mentions. This sits between: their pending items come first for a decision, work proceeds whatever the decision, and only the repository's own enforcement holds a merge.
@@ -263,7 +274,19 @@ The defaults are a guess: the operator does not know the right number. Past abou
 
 Posting under the operator's account is outward-facing. In reviewer mode nothing posts under the operator's name until they submit: the review is created without `event`, and where the operator already has a pending review on the PR the way adds threads to it, since GitHub keeps one pending review per user per PR. In author mode, thread replies and resolutions follow the repository's norms and the operator's standing authorization.
 
-### 5. Requirements on ADR-403
+### 5. The operator may override enforcement
+
+In both scenarios, when the operator's account has the rights (admin or owner of the repository, or a place on a ruleset's bypass list), a merge held by branch protection, a ruleset, a required check or a required approval can be forced through with `gh pr merge --admin` or a ruleset bypass.
+
+- **The agent never forces on its own.** When a rule blocks a merge, the agent puts one question to the operator: the block and the rule that causes it, that the operator can override it, and what the override skips. In scenario B it names the person whose required review the override would skip.
+- **An override is routine and cheap.** Where one operator drives most of a repository's work, forcing past a rule to finish work happens often. An override costs the one question and a one-line record, and the merge proceeds. There is no second confirmation and no warning beyond what the question already says.
+- **Recorded on the PR.** The agent leaves a short comment on the PR naming the rule bypassed and the reason, beside the `review/agent` status. In scenario A the typical case is a required approval that only a second account could give.
+- **Standing grants.** The operator can authorize overrides in advance for a repository or for a kind of block, in the ways setting `merge.override_grants`. For repositories one person drives, a grant is the expected setup. Under a grant the agent overrides without asking and still writes the PR comment. Without one, each override is decided by itself.
+- **Repeated overrides mean the rule does not fit.** Each override is logged as a `merge_override` event with the repository, the rule, the reason and whether a grant covered it. When the same rule in the same repository has been overridden `merge.override_suggest_after` times (default 3), the agent suggests once that the repository's configuration change so the override stops being needed. For example, a required approval in a solo repository can never be met without a second account, so the suggestion is to replace it with a required `review/agent` status check. Applying the suggestion is the operator's decision and never automatic, as ADR-604 rules 5 and 6 have it.
+
+**Amendment to ADR-604.** ADR-604 rule 2, and `delivery/merge` after it, says a way may add rigor on top of enforcement and never subtracts from it, with no bypass flag. The change: the agent still never subtracts from enforcement on its own judgement, and the operator may, by an explicit override that the agent records on the PR, decided each time or in advance by a standing grant.
+
+### 6. Requirements on ADR-403
 
 A later step may move PR awareness to an ADR-403 command sensor, which would wake an idle session on a new request. That needs what ADR-403 does not yet specify, recorded here as requirements on it:
 
@@ -298,6 +321,8 @@ A later step may move PR awareness to an ADR-403 command sensor, which would wak
 - The recurring tier is deliberate annoyance. It interrupts sessions about unrelated work until the pile shrinks, and the thresholds that set it are a guess until use tunes them.
 - The clearing threshold, 25 items or 60 days, is a stated guess as well. Set too low, it turns an ordinary week into a clearing session; set too high, the list is already unworkable when the guidance arrives.
 - The `review/agent` status is self-asserted. An operator, or a reader of the repository, could take it for independent approval despite its wording.
+- An override weakens enforcement that other people may rely on, and a standing grant removes the question that would otherwise precede each one.
+- In scenario B an override can skip another person's required review. The agent names that person when it surfaces the block; the PR comment is the only record they get.
 - An agent review makes more API writes: one comment per finding, a reply and a resolve per thread, and a status per change of state.
 - A grouped answer applies one decision to items the operator has not each read. A group decline can close an item that deserved a reply.
 - A first fire has no cache, so the way's first rendering carries no macro output.
@@ -319,7 +344,7 @@ A later step may move PR awareness to an ADR-403 command sensor, which would wak
 - **Deliver a deferred result only when its way is relevant again.** Keeps results beside related context. Rejected: the result may never be relevant again in the session, and the operator compared delivery to a message queued mid-turn, which arrives next and still makes sense because its turn was near.
 - **Staleness by TTL alone.** Rejected for the operator's time-against-turns budget: a burst of prompts in two minutes moves the conversation further than ten idle minutes.
 - **`max(age/max_age, turns/max_turns) ≤ 1` instead of the sum.** Two independent caps. Rejected: a result at 90% of both caps is delivered, though both kinds of drift have nearly run out.
-- **An ADR-403 command sensor now.** Wakes idle sessions. Rejected for now: unbuilt, it can drop a line after the script moved its marker, it does not run in mod hosts, and ADR-137 retired GitHub watching from sensors. Kept as a later step with the requirements in section 5.
+- **An ADR-403 command sensor now.** Wakes idle sessions. Rejected for now: unbuilt, it can drop a line after the script moved its marker, it does not run in mod hosts, and ADR-137 retired GitHub watching from sensors. Kept as a later step with the requirements in section 6.
 - **A cap on deferrals, or dropping the defer option after a number of sessions.** Forces a resolution. Rejected: deferring and not answering stay valid answers indefinitely, and the rising prominence of a growing pile does the forcing without removing a choice.
 - **Fix each of the six solo/team rules in place.** Smaller diffs. Rejected: six copies drift again, as they already did.
 - **Gate on the check: team paths stop for review and `/merge full-sail` is refused for them.** Honors every named owner. Rejected by the operator: in most repositories one person drives the work while others are new, casual or observing, and a false signal leaves the operator waiting on work that never finishes. The repository's own enforcement already holds a merge where its owners want one held.
