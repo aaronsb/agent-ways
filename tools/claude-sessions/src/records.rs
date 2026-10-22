@@ -16,6 +16,10 @@ pub struct SessionRecord {
     /// When the session's process started (`startedAt`), in milliseconds
     /// since the epoch, when the record says.
     pub started_at_ms: Option<u64>,
+    /// The process's start (`procStart`) as the kernel gives it on Linux:
+    /// clock ticks after boot, `/proc/<pid>/stat` field 22. Claude Code
+    /// writes it as a string; a number reads the same.
+    pub proc_start: Option<u64>,
     /// The record file.
     pub path: PathBuf,
 }
@@ -28,7 +32,8 @@ pub fn parse_session_record(content: &str, path: &Path) -> Option<SessionRecord>
     let session_id = v.get("sessionId")?.as_str()?.to_string();
     let cwd = v.get("cwd").and_then(|c| c.as_str()).map(str::to_string);
     let started_at_ms = v.get("startedAt").and_then(serde_json::Value::as_u64);
-    Some(SessionRecord { pid, session_id, cwd, started_at_ms, path: path.to_path_buf() })
+    let proc_start = v.get("procStart").and_then(|s| s.as_u64().or_else(|| s.as_str()?.parse().ok()));
+    Some(SessionRecord { pid, session_id, cwd, started_at_ms, proc_start, path: path.to_path_buf() })
 }
 
 /// Every readable record in `dir` (`*.json` only), sorted by file name.
@@ -70,6 +75,14 @@ mod tests {
         assert!(got.iter().all(|r| r.started_at_ms.is_none()));
         let r = parse_session_record(r#"{"pid":7,"sessionId":"d","startedAt":1791774137947}"#, Path::new("7.json")).unwrap();
         assert_eq!(r.started_at_ms, Some(1_791_774_137_947));
+        assert!(got.iter().all(|r| r.proc_start.is_none()) && r.proc_start.is_none());
+        // `procStart` as Claude Code writes it, a string, and as a number.
+        let r = parse_session_record(r#"{"pid":8,"sessionId":"e","procStart":"52880213"}"#, Path::new("8.json")).unwrap();
+        assert_eq!(r.proc_start, Some(52_880_213));
+        let r = parse_session_record(r#"{"pid":8,"sessionId":"e","procStart":52880213}"#, Path::new("8.json")).unwrap();
+        assert_eq!(r.proc_start, Some(52_880_213));
+        let r = parse_session_record(r#"{"pid":8,"sessionId":"e","procStart":"soon"}"#, Path::new("8.json")).unwrap();
+        assert_eq!(r.proc_start, None);
     }
 
     #[test]

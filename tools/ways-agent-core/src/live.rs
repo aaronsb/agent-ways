@@ -106,21 +106,35 @@ pub fn live_sessions_in(dirs: &[PathBuf], root: &Path, layer: &Path, has_key: im
         .collect()
 }
 
-/// How far a record's `startedAt` may sit from its process's start time,
-/// read from the kernel, and still name that process: Claude Code writes it
-/// as it starts, and the boot time the kernel gives is in whole seconds.
-const START_TOLERANCE_MS: u64 = 10_000;
+/// How much later than its record's `startedAt` a session's process may
+/// have started and still be the record's, as attend's ADR-129 rule has it:
+/// Claude Code writes the record once it is up, which can take seconds, and
+/// a `/clear` rewrites it later still, so only a process that started well
+/// after the record is a later one.
+const RECORD_SLACK_MS: u64 = 60_000;
 
 /// Whether `r`'s process is running and is the one it names. Pid 0 is no
-/// process. Where the process's start time can be read, it must match the
-/// record's, so a pid reused by another process is not taken for the
-/// session's.
+/// process, and `kill(pid, 0)` is the only sign of a running one. A pid
+/// reused by another process is not taken for the session's: where the
+/// record carries `procStart` and the kernel gives the process's start in
+/// clock ticks, the two must be equal; otherwise the process must have
+/// started no later than `startedAt` and [`RECORD_SLACK_MS`].
 fn record_alive(r: &SessionRecord) -> bool {
     if r.pid == 0 || !process_alive(r.pid) {
         return false;
     }
-    match (r.started_at_ms, process_started_ms(r.pid)) {
-        (Some(recorded), Some(actual)) => recorded.abs_diff(actual) <= START_TOLERANCE_MS,
+    let ticks = process_start_ticks(r.pid);
+    same_process(r, ticks, ticks.and_then(ticks_to_ms))
+}
+
+/// Whether `r` names a running process whose start is `ticks` after boot,
+/// at `began_ms` since the epoch; `None` where the kernel cannot say.
+fn same_process(r: &SessionRecord, ticks: Option<u64>, began_ms: Option<u64>) -> bool {
+    if let (Some(recorded), Some(actual)) = (r.proc_start, ticks) {
+        return recorded == actual;
+    }
+    match (r.started_at_ms, began_ms) {
+        (Some(recorded), Some(began)) => began <= recorded.saturating_add(RECORD_SLACK_MS),
         _ => true,
     }
 }
@@ -142,15 +156,28 @@ fn process_alive(pid: u32) -> bool {
     }
 }
 
-/// When process `pid` started, in milliseconds since the epoch: its start
-/// in clock ticks after boot (`/proc/<pid>/stat` field 22) over the boot
-/// time (`btime` in `/proc/stat`). `None` where `/proc` cannot say.
-fn process_started_ms(pid: u32) -> Option<u64> {
+/// When process `pid` started, in clock ticks after boot: `/proc/<pid>/stat`
+/// field 22, the value a record's `procStart` holds. `None` where `/proc`
+/// cannot say.
+fn process_start_ticks(pid: u32) -> Option<u64> {
     #[cfg(target_os = "linux")]
     {
         let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
         // Fields after the command's closing `)` start at field 3.
-        let ticks: u64 = stat[stat.rfind(')')? + 1..].split_whitespace().nth(19)?.parse().ok()?;
+        stat[stat.rfind(')')? + 1..].split_whitespace().nth(19)?.parse().ok()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
+/// A start `ticks` after boot in milliseconds since the epoch, over the boot
+/// time (`btime` in `/proc/stat`, whole seconds).
+fn ticks_to_ms(ticks: u64) -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
         let btime: u64 = std::fs::read_to_string("/proc/stat").ok()?.lines().find_map(|l| l.strip_prefix("btime ")?.trim().parse().ok())?;
         // SAFETY: sysconf reads a constant.
         let hz = u64::try_from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) }).ok().filter(|h| *h > 0)?;
@@ -158,7 +185,7 @@ fn process_started_ms(pid: u32) -> Option<u64> {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = pid;
+        let _ = ticks;
         None
     }
 }
@@ -217,8 +244,14 @@ mod tests {
             Fx { base }
         }
         fn record(&self, pid: u32, id: &str, started_at: Option<u64>) {
+            self.record_started(pid, id, started_at, None);
+        }
+        /// A record with `startedAt` and `procStart`, written as Claude Code
+        /// writes them: a number and a string.
+        fn record_started(&self, pid: u32, id: &str, started_at: Option<u64>, proc_start: Option<u64>) {
             let at = started_at.map(|t| format!(",\"startedAt\":{t}")).unwrap_or_default();
-            std::fs::write(self.base.join(format!("sessions/{pid}.json")), format!("{{\"pid\":{pid},\"sessionId\":\"{id}\"{at}}}")).unwrap();
+            let ps = proc_start.map(|t| format!(",\"procStart\":\"{t}\"")).unwrap_or_default();
+            std::fs::write(self.base.join(format!("sessions/{pid}.json")), format!("{{\"pid\":{pid},\"sessionId\":\"{id}\"{at}{ps}}}")).unwrap();
         }
         fn held(&self, id: &str, engine: Option<&str>, provider: Option<Provider>, reason: &str) {
             let e = SessionEngine { resolution: resolution(engine, reason), provider };
@@ -323,13 +356,58 @@ mod tests {
         let layer = fx.layer("engine: claude-code\n");
         let ids: Vec<String> = fx.live(&layer, |_| false).into_iter().map(|s| s.session).collect();
         assert_eq!(ids, ["3f6c2a91-aaaa"], "a reaped pid and pid 0 are not live, and two listings of one dir count once");
-        // Where the start time can be read, the record's must match it.
-        if let Some(started) = process_started_ms(me) {
-            fx.record(me, "3f6c2a91-aaaa", Some(started));
-            assert_eq!(fx.live(&layer, |_| false).len(), 1, "the record's start is this process's");
-            fx.record(me, "3f6c2a91-aaaa", Some(started - 3_600_000));
-            assert!(fx.live(&layer, |_| false).is_empty(), "an hour off: another process reusing the pid");
+    }
+
+    #[test]
+    fn a_record_names_its_process_by_proc_start_where_the_kernel_gives_it() {
+        let Some(ticks) = process_start_ticks(std::process::id()) else { return }; // no /proc
+        let fx = Fx::new("procstart");
+        let me = std::process::id();
+        let layer = fx.layer("engine: claude-code\n");
+        let began = ticks_to_ms(ticks).unwrap();
+        fx.record_started(me, "3f6c2a91-aaaa", Some(began), Some(ticks));
+        assert_eq!(fx.live(&layer, |_| false).len(), 1, "procStart is this process's start");
+        // A start the pid's process does not have: the pid was reused, even
+        // with a `startedAt` the fallback rule would take.
+        fx.record_started(me, "3f6c2a91-aaaa", Some(began), Some(ticks + 1));
+        assert!(fx.live(&layer, |_| false).is_empty(), "procStart differs: another process holds the pid");
+        // No procStart: the process started no later than startedAt + 60 s.
+        fx.record_started(me, "3f6c2a91-aaaa", Some(began - 59_000), None);
+        assert_eq!(fx.live(&layer, |_| false).len(), 1, "started 59 s after the record");
+        fx.record_started(me, "3f6c2a91-aaaa", Some(began - 61_000), None);
+        assert!(fx.live(&layer, |_| false).is_empty(), "started 61 s after the record: a later process");
+    }
+
+    fn rec(started_at_ms: Option<u64>, proc_start: Option<u64>) -> SessionRecord {
+        SessionRecord { pid: 1, session_id: "s".into(), cwd: None, started_at_ms, proc_start, path: PathBuf::new() }
+    }
+
+    #[test]
+    fn proc_start_must_equal_the_kernels_where_both_are_known() {
+        let at = 1_792_688_488_645;
+        assert!(same_process(&rec(Some(at), Some(52_880_213)), Some(52_880_213), Some(at)));
+        // Pid reused: a different start, whatever startedAt says.
+        assert!(!same_process(&rec(Some(at), Some(52_880_213)), Some(52_880_214), Some(at)));
+        assert!(!same_process(&rec(None, Some(52_880_213)), Some(99), None));
+        // A procStart the kernel cannot check falls back to startedAt.
+        assert!(same_process(&rec(Some(at), Some(52_880_213)), None, None));
+    }
+
+    #[test]
+    fn with_no_proc_start_the_process_started_no_later_than_started_at_plus_60_s() {
+        let at = 1_792_688_488_645;
+        for (began, live) in [
+            (at + 6_000, true),            // a slow start
+            (at + 60_000, true),           // the edge
+            (at + 60_001, false),          // a later process took the pid
+            (at - 3_600_000, true),        // a record rewritten by /clear, an hour on
+            (at + 3_600_000, false),       // an hour later
+        ] {
+            assert_eq!(same_process(&rec(Some(at), None), None, Some(began)), live, "began {}", began as i64 - at as i64);
         }
+        // Nothing to compare: the pid answering is enough.
+        assert!(same_process(&rec(None, None), None, Some(at)));
+        assert!(same_process(&rec(Some(at), None), None, None));
     }
 
     #[test]
