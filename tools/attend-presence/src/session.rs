@@ -308,8 +308,11 @@ fn fixture_temp_dir_for(tmp: PathBuf, fallback: &Path) -> PathBuf {
     if origin_kept(&tmp.join("x")) {
         return tmp;
     }
-    let probe = fallback.join(format!(".attend-fixture-probe-{}", std::process::id()));
-    if let Err(e) = std::fs::create_dir_all(&probe) {
+    // One probe per call: parallel tests each make and remove their own.
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let probe = fallback.join(format!(".attend-fixture-probe-{}-{n}", std::process::id()));
+    if let Err(e) = std::fs::create_dir(&probe) {
         panic!(
             "the temp dir {} sits under a managed worktree (/.claude/worktrees/), where session identity would resolve \
              fixture projects to the checkout's root, and the fallback {} is not writable: {e} (#902)",
