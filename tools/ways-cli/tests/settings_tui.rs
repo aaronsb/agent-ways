@@ -73,10 +73,12 @@ impl Fx {
     }
 
     /// A running Claude Code session: its record, held by process `pid`,
-    /// and the judge resolution its first judge request wrote.
-    fn live_session(&self, pid: u32, id: &str, resolution: &str) {
+    /// and the resolution its first judge request held, if it named an engine.
+    fn live_session(&self, pid: u32, id: &str, resolution: Option<&str>) {
         self.file(&format!(".claude/sessions/{pid}.json"), &format!("{{\"pid\":{pid},\"sessionId\":\"{id}\",\"cwd\":\"/home/dev/proj\"}}"));
-        self.file(&format!(".local/state/agent-ways/judge/{id}/resolution.json"), resolution);
+        if let Some(r) = resolution {
+            self.file(&format!(".local/state/agent-ways/judge/{id}/resolution.json"), r);
+        }
     }
 
     fn read(&self, rel: &str) -> Option<String> {
@@ -696,13 +698,13 @@ fn golden_frames() {
     // The judge section (ADR-708 §7, §8): claude-code named with neither the
     // ways-judge mod nor a key, so it reads degraded with the fix; two live
     // sessions, one judging inside Claude Code and one left with no engine,
-    // whose reason names the remedy. A record's process is this test's own,
+    // whose reason names the remedy: it holds no resolution file and is
+    // resolved as the gate resolves it. A record's process is this test's own,
     // or its parent's, so both are alive.
     let judged = Fx::new();
     judged.file(".config/agent-ways/agent.yaml", "engine: claude-code\n");
-    judged.live_session(std::process::id(), "3f6c2a91-4b7e-4d10-9c55-2e8b7a1d0f42", r#"{"engine":"claude-code","reason":"explicit","provider":"claude-code"}"#);
-    let none = r#"{"engine":null,"reason":"engine_unavailable: claude-code unavailable: no Claude Code host, and no key is configured; load the ways mod or configure an Anthropic or OpenRouter key (`ways agent key add --provider anthropic` or `--provider openrouter`)"}"#;
-    judged.live_session(std::os::unix::process::parent_id(), "cccccccc-0000-4000-8000-000000000003", none);
+    judged.live_session(std::process::id(), "3f6c2a91-4b7e-4d10-9c55-2e8b7a1d0f42", Some(r#"{"engine":"claude-code","reason":"explicit","provider":"claude-code"}"#));
+    judged.live_session(std::os::unix::process::parent_id(), "cccccccc-0000-4000-8000-000000000003", None);
     for (size, name) in [("100x30", "gate-judge"), ("80x25", "gate-judge-80x25")] {
         g.check_text(name, &judged.snap("gate", "end", size, "16"));
     }

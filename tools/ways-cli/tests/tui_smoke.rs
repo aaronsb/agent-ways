@@ -183,10 +183,8 @@ fn settings_gate_judge_section() {
     let pid = std::process::id();
     std::fs::create_dir_all(home.join(".claude/sessions")).unwrap();
     std::fs::write(home.join(format!(".claude/sessions/{pid}.json")), format!("{{\"pid\":{pid},\"sessionId\":\"{SESSION}\"}}")).unwrap();
-    let judge = home.join(format!(".local/state/agent-ways/judge/{SESSION}"));
-    std::fs::create_dir_all(&judge).unwrap();
-    let reason = "engine_unavailable: claude-code unavailable: no Claude Code host, and no key is configured; load the ways mod or configure an Anthropic or OpenRouter key (`ways agent key add --provider anthropic` or `--provider openrouter`)";
-    std::fs::write(judge.join("resolution.json"), format!("{{\"engine\":null,\"reason\":\"{reason}\"}}")).unwrap();
+    // It named no engine, so it holds no resolution: it is resolved as the
+    // gate resolves it, from agent.yaml and the key files.
     let proj = fx.project();
     let s = fx.launch("judge", &["settings", "gate", "--project", &proj]);
 

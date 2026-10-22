@@ -65,7 +65,8 @@ fixture_env
 
 # The gate tab's judge section (ADR-708 §7, §8): claude-code named with
 # neither the ways-judge mod nor a key, and two running sessions, one judging
-# inside Claude Code and one left with no engine. A session record names a
+# inside Claude Code and one left with no engine, which holds no resolution
+# file and is resolved as the gate resolves it. A session record names a
 # live process: this script's, or its parent's.
 JUDGED="3f6c2a91-4b7e-4d10-9c55-2e8b7a1d0f42 cccccccc-0000-4000-8000-000000000003"
 setup_judge() {
@@ -79,8 +80,6 @@ setup_judge() {
   done
   printf '{"engine":"claude-code","reason":"explicit","provider":"claude-code"}\n' \
     >"$h/.local/state/agent-ways/judge/3f6c2a91-4b7e-4d10-9c55-2e8b7a1d0f42/resolution.json"
-  printf '%s\n' '{"engine":null,"reason":"engine_unavailable: claude-code unavailable: no Claude Code host, and no key is configured; load the ways mod or configure an Anthropic or OpenRouter key (`ways agent key add --provider anthropic` or `--provider openrouter`)"}' \
-    >"$h/.local/state/agent-ways/judge/cccccccc-0000-4000-8000-000000000003/resolution.json"
 }
 teardown_judge() {
   local h=$F/home id
