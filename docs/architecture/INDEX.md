@@ -200,6 +200,8 @@ _The ways method, way authoring, the development loop_
 | [ADR-605](./practice/ADR-605-an-evaluative-ways-domain-the-agent-authors-the-harness-and-oracle-judge.md) | An evaluative ways domain: the agent authors, the harness and oracle judge | accepted |
 | [ADR-606](./practice/ADR-606-deferred-macros-and-the-pr-awareness-involvement-check-and-pr-feedback-way-built-on-them.md) | Deferred macros, and the PR awareness, involvement check and PR feedback way built on them | accepted |
 | [ADR-607](./practice/ADR-607-children-of-a-loop-type-way-are-loop-types-or-concerns-several-loops-share.md) | Children of a loop-type way are loop types or concerns several loops share | accepted |
+| [ADR-608](./practice/ADR-608-delegation-is-asked-for-by-the-user-a-skill-or-a-claude-md-file-not-by-a-way-s-own-text.md) | Delegation is asked for by the user, a skill, or a CLAUDE.md file, not by a way's own text | proposed |
+| [ADR-609](./practice/ADR-609-outward-writes-need-the-user-s-ask-or-a-grant-in-their-claude-md-and-ways-offer-them-otherwise.md) | Outward writes need the user's ask or a grant in their CLAUDE.md, and ways offer them otherwise | proposed |
 
 ## Ways engine
 _The ways engine, continued after the full 100-199 band: matching, disclosure and the corpus_
