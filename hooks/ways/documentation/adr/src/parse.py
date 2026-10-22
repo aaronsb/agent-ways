@@ -55,7 +55,11 @@ def load_frontmatter(text: str):
         node = loader.get_single_node()
         if node is None:
             return None, []
-        return loader.construct_document(node), _duplicate_keys(node)
+        # Walk before constructing: construction flattens merge keys (<<)
+        # in place, prepending the merged pairs, and an override of a
+        # merged key would then read as a duplicate.
+        duplicates = _duplicate_keys(node)
+        return loader.construct_document(node), duplicates
     finally:
         loader.dispose()
 

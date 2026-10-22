@@ -188,6 +188,37 @@ EOF
 # The same record with one via: is not flagged.
 sed '/^    via: "chat"$/d' "$TMPDIR/ADR-007-dupkey.md" > "$TMPDIR/ADR-008-onekey.md"
 
+# Merge keys: an override of a merged key is not a duplicate, and a real
+# duplicate beside a merge key still is.
+cat > "$TMPDIR/ADR-009-merge.md" << 'EOF'
+---
+status: proposed
+date: 2026-02-01
+deciders:
+  - alice
+defaults: &defaults
+  level: directed
+  via: "chat"
+other: &other
+  said: "base"
+child:
+  <<: *defaults
+  via: "override"
+pair:
+  <<: [*defaults, *other]
+  said: "override"
+twice:
+  <<: *defaults
+  said: "first"
+  said: "second"
+---
+
+# ADR-009: Merge Keys
+
+## Context
+Merge overrides and one real duplicate.
+EOF
+
 # --- Tests ---
 
 echo "Inline metadata detection"
@@ -272,6 +303,16 @@ assert_lint_not_contains \
   "should not flag the record with a single via:" \
   "$TMPDIR/ADR-008-onekey.md" \
   "Duplicate key"
+
+assert_lint_not_contains \
+  "should not flag a key that overrides a merged one" \
+  "$TMPDIR/ADR-009-merge.md" \
+  "Duplicate key (child|pair|defaults|other)"
+
+assert_lint_contains \
+  "should flag a real duplicate beside a merge key" \
+  "$TMPDIR/ADR-009-merge.md" \
+  "❌ Duplicate key twice\.said in frontmatter \(lines 19 and 20\)"
 
 echo ""
 echo "--check exit code"
