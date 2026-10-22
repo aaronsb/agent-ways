@@ -5,25 +5,29 @@
 //! A session is live when a Claude Code session record names it and the
 //! record's process is running: its pid answers, and where the process's
 //! start time can be read, it is the one the record names. Each session's
-//! engine is the resolution it holds, or with none held, the one the gate
-//! would reach now, read through [`engine::read_gate`] as the gate reads it.
+//! engine is what the gate would do with it now, read through
+//! [`engine::read_gate`] as the gate reads it: the resolution the session
+//! holds while the gate judges and agent.yaml still has its profile, and
+//! otherwise the gate's own reason.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use claude_sessions::{read_session_records, ClaudeDir, SessionRecord};
 
-use crate::engine::{self, GateReading, SessionEngine, HOST_FILE, OFF};
+use crate::engine::{self, GateReading, Resolution, SessionEngine, HOST_FILE, OFF};
 use crate::profile::{self, Profile, Provider};
 
 /// A running Claude Code session and its engine.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LiveSession {
     pub session: String,
-    /// The held resolution; under `gate.mode: off`, [`OFF`] whatever is
-    /// held; with none held, the gate's resolution now when it names no
-    /// engine. `None` while the session would resolve to an engine and has
-    /// made no judge request.
+    /// The held resolution while the gate judges and agent.yaml still has
+    /// the held engine's profile; a [`CONFIG`](engine::CONFIG) reason when
+    /// the profile is gone. Otherwise the gate's resolution now when it
+    /// names no engine: [`OFF`] under `gate.mode: off`, no key, or a
+    /// configuration error, whatever is held. `None` while the session holds
+    /// nothing, would resolve to an engine, and has made no judge request.
     pub engine: Option<SessionEngine>,
     /// Whether the session holds a resolution in its judge state.
     pub held: bool,
@@ -87,21 +91,29 @@ pub fn live_sessions_in(dirs: &[PathBuf], root: &Path, layer: &Path, has_key: im
         ids.extend(read_session_records(dir).into_iter().filter(record_alive).map(|r| r.session_id).filter(|id| engine::is_plain_session_id(id)));
     }
     let reading = engine::read_gate(layer, &has_key, false);
+    // The profiles a held engine must still name for the gate to judge with it.
+    let profiles = match &reading {
+        Ok(GateReading::Judges { user, .. }) => Some(profile::profiles(user)),
+        _ => None,
+    };
     ids.into_iter()
         .map(|session| {
             let dir = root.join(&session);
             let held = SessionEngine::read(&dir);
-            let is_held = held.is_some();
-            let engine = match (&reading, held) {
-                // Off judges nothing, whatever a session holds.
-                (Ok(GateReading::Off), _) => Some(engine::resolve_reading(&reading, false, &has_key)),
-                (_, Some(h)) => Some(h),
-                (_, None) => {
+            let engine = match (&profiles, held.as_ref().and_then(|h| h.resolution.engine.as_deref())) {
+                (Some(all), Some(name)) if all.contains_key(name) => held.clone(),
+                // The gate logs this when the session's engine has lost its
+                // profile.
+                (Some(_), Some(name)) => Some(SessionEngine {
+                    resolution: Resolution { engine: None, reason: format!("{}: {}", engine::CONFIG, profile::names_no_profile(name)) },
+                    provider: None,
+                }),
+                _ => {
                     let now = engine::resolve_reading(&reading, dir.join(HOST_FILE).is_file(), &has_key);
                     now.resolution.engine.is_none().then_some(now)
                 }
             };
-            LiveSession { session, engine, held: is_held }
+            LiveSession { session, engine, held: held.is_some() }
         })
         .collect()
 }
@@ -225,7 +237,7 @@ pub fn unset_engine_line(profiles: &BTreeMap<String, Profile>, has_key: impl Fn(
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use crate::engine::{resolve_session, Resolution, EXPLICIT, NO_HOST};
+    use crate::engine::{resolve_session, EXPLICIT, KEY_FOUND, NO_HOST, NO_KEY};
 
     fn resolution(engine: Option<&str>, reason: &str) -> Resolution {
         Resolution { engine: engine.map(str::to_string), reason: reason.to_string() }
@@ -343,6 +355,43 @@ mod tests {
         let live = fx.live(&layer, |_| true);
         assert!(live[0].held && live[0].gate_off(), "{:?}", live[0]);
         assert_eq!(session_line(&live[0], &shipped()), "3f6c2a91  gate off — gate.mode off");
+    }
+
+    #[test]
+    fn a_held_engine_shows_only_while_the_gate_would_judge_with_it() {
+        let fx = Fx::new("held");
+        fx.record(std::process::id(), "eeeeeeee-0000", None);
+        fx.held("eeeeeeee-0000", Some("anthropic"), Some(Provider::Anthropic), KEY_FOUND);
+        // The key is gone and no engine is named: the gate is off, no key.
+        let layer = fx.layer("mode: enforce\n");
+        let live = fx.live(&layer, |_| false);
+        assert!(live[0].held, "{:?}", live[0]);
+        assert_eq!(live[0].engine.as_ref().unwrap().resolution, resolution(None, NO_KEY));
+        assert_eq!(session_line(&live[0], &shipped()), "eeeeeeee  no engine — no key");
+        // With the key back, the held engine shows.
+        assert_eq!(fx.live(&layer, |_| true)[0].engine.as_ref().unwrap().resolution, resolution(Some("anthropic"), KEY_FOUND));
+        // agent.yaml does not parse: the config reason, over the held engine.
+        let layer = fx.layer("engine: [anthropic\n");
+        let reason = fx.live(&layer, |_| true)[0].engine.clone().unwrap().resolution;
+        assert!(reason.engine.is_none() && reason.reason.starts_with("config: ") && reason.reason.ends_with("the gate is off until it is fixed"), "{reason:?}");
+    }
+
+    #[test]
+    fn a_held_engine_whose_profile_was_removed_shows_the_config_reason() {
+        let fx = Fx::new("gone");
+        fx.record(std::process::id(), "ffffffff-0000", None);
+        fx.held("ffffffff-0000", Some("mine"), Some(Provider::Anthropic), EXPLICIT);
+        let want = resolution(None, "config: engine 'mine' names no profile");
+        // The profile is gone and gate.engine is unset: the gate judges, but
+        // not with the session's engine.
+        let layer = fx.layer("mode: enforce\n");
+        assert_eq!(fx.live(&layer, |_| true)[0].engine.as_ref().unwrap().resolution, want);
+        // gate.engine still names it: the gate's own configuration error.
+        let layer = fx.layer("engine: mine\n");
+        assert_eq!(fx.live(&layer, |_| true)[0].engine.as_ref().unwrap().resolution, want);
+        // With the profile there, the held engine shows.
+        let layer = fx.layer("engine: mine\nprofiles:\n  mine:\n    provider: anthropic\n    model: claude-sonnet-5-5\n");
+        assert_eq!(fx.live(&layer, |_| true)[0].engine.as_ref().unwrap().resolution, resolution(Some("mine"), EXPLICIT));
     }
 
     #[test]
