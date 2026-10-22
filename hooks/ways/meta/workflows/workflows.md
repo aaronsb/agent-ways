@@ -29,12 +29,6 @@ Reach for a workflow to be **comprehensive** (decompose and cover in parallel),
 A workflow can spawn dozens of agents and burn a large amount of tokens, so it is
 **explicit opt-in** — never inferred from a task that merely *would* benefit. Scout inline first to discover the work-list (list the files, scope the diff), *then* fan out over it. Match the fan-out to the real scale, and **log what you deliberately leave uncovered** so a bounded sweep never reads as exhaustive.
 
-## Running the fan-out
-
-- Each worker's prompt carries the shared contract verbatim (subagents/briefs).
-- Workers research, draft, judge and verify, and return text. The main loop writes each shared file once and makes every side-effecting call itself, one at a time. A build worker edits only the files its package owns.
-- Synthesize after every worker has reported, and hand back one consolidated report with the decisions left to the user.
-
 ## Worked example: the deliver workflow
 
 `develop → pr → review → remediate → merge` is workflow-shaped: pipeline each unit of work through the stages independently; fan the *review* out across dimensions (bugs, security, reuse) and adversarially verify each finding; remediate per finding; **gate at merge** per the four-square (`delivery/merge`): the human gate applies when the work sets direction, and the irreversible one-way door is *release*, not the merge itself (see the autonomy design note). The payoff is wall-clock and rigor, not novelty.
@@ -42,6 +36,6 @@ A workflow can spawn dozens of agents and burn a large amount of tokens, so it i
 ## See also
 
 - subagents(meta) — single delegation, the rung just below a workflow
-- subagents/briefs(meta) — what each worker's prompt carries
+- workflows/fan-out(meta) — child: running a fan-out with shared contracts, serial writes and one report
 - the autonomy design note — the substrate ladder and gate taxonomy in full
 - choices(meta) — surfacing the curated decision at a gate

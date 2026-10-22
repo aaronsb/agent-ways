@@ -1,2 +1,0 @@
-{"kind":"direct","prompt":"my requests come in labeled blocks like <goal>, <background> and <limits>, how should you treat each block"}
-{"kind":"situational","prompt":"ok voice memo transcribed, so it's all over the place: invoice export is broken, also we need the logo swapped, oh and the staging deploy has to wait on the new keys, figure out what's what"}

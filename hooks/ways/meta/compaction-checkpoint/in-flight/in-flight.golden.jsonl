@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"we're about to compact, what do you still have going in the background and is any of it going to die with the context"}
+{"kind":"situational","prompt":"i'm heading out and the session will probably compact overnight, there's a watcher and a test server you started earlier and a pile of edits not in git yet"}
