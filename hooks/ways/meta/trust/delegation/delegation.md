@@ -21,7 +21,7 @@ Every external resource Claude uses belongs to the human. Email accounts, git re
 | Git repo | Safe | Ask for push/PR | Code attributed to the human, visible to collaborators |
 | Jira/Confluence | Safe | Ask for mutations | Changes visible to the team, attributed to the human |
 | Calendar | Safe | Ask for create/delete/modify | Affects other people's schedules |
-| Chat/messaging | Safe | Ask every time | Real-time, visible, cannot be unsent |
+| Chat/messaging | Safe | Ask every time, unless the human gave standing approval for that kind of reply (trust/voice) | Real-time, visible, cannot be unsent |
 
 Read operations are free — they inform without acting. Write operations reach other humans and create consequences.
 
