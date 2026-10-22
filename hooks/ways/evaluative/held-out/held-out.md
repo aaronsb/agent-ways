@@ -30,6 +30,7 @@ Ask for a spread: plain cases, cases phrased the way a person in the situation w
 - Store the set where the author does not read it during tuning, and record who wrote it, from what statement, and when.
 - Score it only at the gate. The author sees the score and the count, not the failing cases.
 - Once the author has seen a case's failure, that case is training data. Retire the set and have new cases written for the next gate.
+- When a gate's labels change between rounds, rescore the previous round's baseline on the new labels before you compare the two rounds.
 
 ## Report both scores
 
