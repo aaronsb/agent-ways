@@ -39,7 +39,7 @@ A deck, PDF, document or sheet that goes to a client or to leadership is read wi
 
 ## Build and check
 
-The pptx, docx, pdf and xlsx skills cover building each format. Before calling the deliverable done, render every page or slide and look at it for overflow, overlap and blank areas (code/testing/evaluation/handoff). Gitignore generated files unless told to commit them. Delete one-off helper scripts when the deliverable is done.
+The pptx, docx, pdf and xlsx skills cover building each format. Before calling the deliverable done, render every page or slide and look at it for overflow, overlap and blank areas (code/testing/evaluation/handoff). The decoration check (markdown/density) sees only Markdown writes, so extract the text of an HTML, LaTeX, Word or PDF deliverable (`pdftotext file.pdf -`, `pandoc -t plain file.docx`) and read it for the same patterns before handoff. Gitignore generated files unless told to commit them. Delete one-off helper scripts when the deliverable is done.
 
 ## Common Rationalizations
 

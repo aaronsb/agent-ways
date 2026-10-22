@@ -16,6 +16,7 @@ When the user hands you text they wrote, their wording is the standard. Edit it 
 - Draft or rewrite only what they asked you to draft. A request to tighten or fix a passage is a request to edit it.
 - Keep source material and statistics from drowning out their take.
 - Copy transcripts and quoted language verbatim. When two versions of their text conflict, ask which one stands.
+- Leave transcripts, frozen or submitted copies, archives, quotes, and the user's own prose and titles as written when a prose or style check flags them. Keep the hit and say so in one line.
 
 ## Line edits and feedback lists
 

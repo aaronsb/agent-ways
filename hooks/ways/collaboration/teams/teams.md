@@ -15,3 +15,7 @@ You are a **teammate** in an agent team, not a solo agent.
 - **Read before editing** — another teammate may have changed the file
 - **Don't commit to git** unless your task explicitly says to
 - **Don't stall silently** — if blocked, message the lead immediately
+
+## See Also
+
+- teams/handback(collaboration) — what a teammate hands the lead, and what it leaves to the lead
