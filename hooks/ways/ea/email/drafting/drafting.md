@@ -11,25 +11,25 @@ Compose draft replies in the user's voice. Send only a message the user asked to
 
 ## Workflow
 
-1. **Read the original thread** to understand full context.
-2. **Study the user's writing style.** Read 5-8 recent sent emails from the relevant account. Calibrate tone, length, greeting patterns, sign-off, and vocabulary.
-3. **Ask clarifying questions before drafting:**
+1. Read the original thread: to understand full context.
+2. Study the user's writing style. Read 5-8 recent sent emails from the relevant account. Calibrate tone, length, greeting patterns, sign-off, and vocabulary.
+3. Ask clarifying questions before drafting: 
    - What is the intent? (accepting, declining, requesting, informing)
    - Any specific points to include?
    - Tone preference if it differs from their usual?
-4. **Draft** following the user's observed patterns.
-5. **Present for review** and iterate on feedback.
-6. **Create as a platform draft** with proper threading (preserve message IDs, references, in-reply-to headers).
+4. Draft: following the user's observed patterns.
+5. Present for review: and iterate on feedback.
+6. Create as a platform draft: with proper threading (preserve message IDs, references, in-reply-to headers).
 
 ## Style Calibration
 
 The user's sent mail is the authority. Study it before every draft. Look for:
 
-- **Length pattern** — short/direct vs. detailed/thorough
-- **Greeting/sign-off** — what they actually use, not what's conventional
-- **Contractions** — do they use them naturally?
-- **Tone** — warm, formal, casual, terse?
-- **Structure** — prose paragraphs vs. bullet points?
+- Length pattern: short/direct vs. detailed/thorough
+- Greeting/sign-off: the ones they actually use
+- Contractions: do they use them naturally?
+- Tone: warm, formal, casual, terse?
+- Structure: prose paragraphs vs. bullet points?
 
 ## Generated-Writing Tells
 
