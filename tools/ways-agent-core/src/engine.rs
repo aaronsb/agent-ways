@@ -171,19 +171,21 @@ pub enum GateReading {
 /// Reads the layer at `path` as the gate does: a finding that fails closed,
 /// a file that cannot be read, or an engine that names a profile that does
 /// not build is a [`CONFIG`] reason, and the gate is off until it is fixed.
+/// The engine is resolved before `mode` is read, so a configuration error is
+/// reported under `mode: off` too, as [`profile::gate_settings`] reports it.
 /// `say` prints the layer's diagnostics on stderr, as a hook does; a screen
 /// or a status command passes false.
 pub fn read_gate(path: &Path, has_key: impl Fn(Provider) -> bool, say: bool) -> Result<GateReading, String> {
     let user = if say { profile::gate_layer(path) } else { profile::load_gate_layer(path).map(|(u, _)| u) };
     let user = user.map_err(|e| format!("{CONFIG}: {e:#}"))?;
+    let resolved = profile::resolve(&user, has_key).map_err(|e| format!("{CONFIG}: {e:#}"))?;
     if user.mode == Some(Mode::Off) {
         return Ok(GateReading::Off);
     }
-    match profile::resolve(&user, has_key) {
-        Err(e) => Err(format!("{CONFIG}: {e:#}")),
-        Ok(None) => Ok(GateReading::NoKey),
-        Ok(Some(settings)) => Ok(GateReading::Judges { user: Box::new(user), settings: Box::new(settings) }),
-    }
+    Ok(match resolved {
+        None => GateReading::NoKey,
+        Some(settings) => GateReading::Judges { user: Box::new(user), settings: Box::new(settings) },
+    })
 }
 
 /// A session's engine under the layer `user`: [`resolve_session`] over its
@@ -329,6 +331,12 @@ mod tests {
         // gate.mode off: no engine, whatever is named.
         let p = layer("off", Some("engine: claude-code\nmode: off\n"));
         assert_eq!(resolve_now(&p, &key, true), Resolution { engine: None, reason: OFF.into() });
+        // Unless the engine is a configuration error: that is reported first.
+        let p = layer("off-nosuch", Some("mode: off\nengine: nosuch\n"));
+        assert_eq!(resolve_now(&p, &key, true), Resolution { engine: None, reason: "config: engine 'nosuch' names no profile".into() });
+        // Mode off with no key either: off, not no key.
+        let p = layer("off-nokey", Some("mode: off\n"));
+        assert_eq!(resolve_now(&p, |_| false, false).reason, OFF);
         // No file, no key: off as before ADR-708.
         let p = layer("none", None);
         assert_eq!(resolve_now(&p, |_| false, false).reason, NO_KEY);

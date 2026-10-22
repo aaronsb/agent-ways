@@ -931,6 +931,9 @@ mod tests {
             ("mode: off\nengine: anthropic\nprofiles:\n  anthropic: [\n", true),
             ("mode: of\n", true),
             ("mode: off\n", false),
+            // The engine is a configuration error, so the gate says so even
+            // with mode off, as it did before ADR-708.
+            ("mode: off\nengine: nosuch\n", true),
             ("mode: shadow\n", false),
         ] {
             std::fs::write(&path, text).unwrap();
