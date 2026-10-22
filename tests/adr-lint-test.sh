@@ -156,6 +156,38 @@ deciders:
 Status value not in valid list.
 EOF
 
+# A basis entry with two via: keys. YAML loading keeps the second and drops
+# the first, so lint must name the key and both lines (#850).
+cat > "$TMPDIR/ADR-007-dupkey.md" << 'EOF'
+---
+contract: adr/v1
+kind: decision
+verb: change
+capability: adr
+basis:
+  - operator: alice
+    level: directed
+    said: "keep the first answer"
+    via: "chat, quoted context the author wrote"
+    via: "chat"
+agent:
+  name: Claude
+  model: claude-opus-5-5
+status: proposed
+date: 2026-02-01
+deciders:
+  - alice
+---
+
+# ADR-007: Duplicate Key In A Basis Entry
+
+## Context
+A basis entry repeats via.
+EOF
+
+# The same record with one via: is not flagged.
+sed '/^    via: "chat"$/d' "$TMPDIR/ADR-007-dupkey.md" > "$TMPDIR/ADR-008-onekey.md"
+
 # --- Tests ---
 
 echo "Inline metadata detection"
@@ -223,6 +255,23 @@ assert_lint_contains \
   "should report invalid status" \
   "$TMPDIR/ADR-006-badstatus.md" \
   "Invalid status.*Approved"
+
+echo ""
+echo "Duplicate frontmatter key"
+assert_lint_contains \
+  "should report the duplicate via: with both lines as an error" \
+  "$TMPDIR/ADR-007-dupkey.md" \
+  "❌ Duplicate key basis\[0\]\.via in frontmatter \(lines 10 and 11\)"
+
+assert_lint_exit \
+  "should exit 1 for a duplicate key" \
+  "$TMPDIR/ADR-007-dupkey.md" \
+  1
+
+assert_lint_not_contains \
+  "should not flag the record with a single via:" \
+  "$TMPDIR/ADR-008-onekey.md" \
+  "Duplicate key"
 
 echo ""
 echo "--check exit code"
