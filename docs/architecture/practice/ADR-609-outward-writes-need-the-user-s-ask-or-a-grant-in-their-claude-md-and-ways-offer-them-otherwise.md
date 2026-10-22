@@ -27,6 +27,9 @@ considered:
   - operator: aaronsb
     said: "so if claude filed it to begin with, on a project we're generally working on, that's not impersonation / we have to be careful not to define the world here."
     via: chat, session 2026-10-22
+  - operator: aaronsb
+    said: "it is actually ok to say in some way \"hi I'm claude code and I'm using user's x to send this message, to you.\" beyond that, justifying like 'the user told me to say it' or whatever isn't really necessary the act of sending it was enough justification. [...] sending something 'as claude' means that claude needs to decide if they have an ongoing contextual relationship with the recipient. if they don't (if they're 'cold calling as claude') it's likely not going to be wanted by the recipient, unless it's something extraordinary and has evidence of that extraordinary [...] there's likely very few general purpose reasons to act without at least a check from the user first. If the user puts claude code in a session and says \"go ahead, answer anything that shows up\" then that's the grant needed to operate autonomously /as claude/ with a borrowed messaging channel. but replying as the user, without saying it's claude, autonmously, even when the user says 'just go ahead and reply to anything as me' likely needs something special set up."
+    via: "chat, session 2026-10-22; applied to trust/voice in #1133 (2d3d300a)"
 status: accepted
 date: 2026-10-22
 deciders:
