@@ -8,7 +8,7 @@
 //!
 //! Terminal width is auto-detected via ioctl (Unix) or $COLUMNS. A table
 //! too wide narrows its text columns before its right-aligned (number)
-//! columns, and spare width goes to the first column.
+//! columns, never a pinned one, and spare width goes to the first column.
 
 use crate::width::{truncate_visible, visible_len};
 
@@ -25,6 +25,7 @@ pub struct Table {
     aligns: Vec<Align>,
     max_widths: Vec<usize>,
     cap_widths: Vec<Option<usize>>,
+    pinned: Vec<bool>,
     indent: usize,
     auto_fit: bool,
 }
@@ -72,6 +73,7 @@ impl Table {
             aligns: vec![Align::Left; n],
             max_widths,
             cap_widths: vec![None; n],
+            pinned: vec![false; n],
             indent: 2,
             auto_fit: true,
         }
@@ -93,6 +95,14 @@ impl Table {
     pub fn max_width(&mut self, col: usize, width: usize) {
         if col < self.cap_widths.len() {
             self.cap_widths[col] = Some(width);
+        }
+    }
+
+    /// Keep a column at its width when the table fits the terminal: a
+    /// caller that sized the column's cells itself pins it.
+    pub fn pin(&mut self, col: usize) {
+        if col < self.pinned.len() {
+            self.pinned[col] = true;
         }
     }
 
@@ -171,7 +181,8 @@ impl Table {
     /// terminal width, fitted to it. A table too wide narrows its widest
     /// left-aligned column a cell at a time, capped or not, down to 4; a
     /// right-aligned column (a number) narrows only once every left-aligned
-    /// one is at 4. Spare width goes to the first column.
+    /// one is at 4. A pinned column keeps its width. Spare width goes to the
+    /// first column.
     fn widths(&self, term_w: Option<usize>) -> Vec<usize> {
         let mut widths: Vec<usize> = self
             .max_widths
@@ -188,7 +199,9 @@ impl Table {
         let right = |i: usize| matches!(self.aligns.get(i), Some(Align::Right));
         while total > available {
             let pick = |want_right: bool| {
-                (0..widths.len()).filter(|&i| right(i) == want_right && widths[i] > 4).max_by_key(|&i| widths[i])
+                (0..widths.len())
+                    .filter(|&i| right(i) == want_right && !self.pinned[i] && widths[i] > 4)
+                    .max_by_key(|&i| widths[i])
             };
             let Some(i) = pick(false).or_else(|| pick(true)) else { break };
             widths[i] -= 1;
@@ -261,5 +274,37 @@ mod tests {
         let t = pair_table("short");
         assert_eq!(t.widths(Some(40)), vec![26, 5, 7]);
         assert_eq!(t.widths(None), vec![5, 5, 7]);
+    }
+
+    #[test]
+    fn a_pinned_column_keeps_its_width_while_others_narrow() {
+        let mut t = pair_table(&"x".repeat(60));
+        t.pin(1);
+        assert_eq!(t.widths(Some(60)), vec![15, 36, 7]);
+        // Past the other columns' floor the table overflows rather than cut it.
+        assert_eq!(t.widths(Some(30)), vec![4, 36, 4]);
+    }
+
+    #[test]
+    fn a_table_with_no_columns_has_no_widths() {
+        let t = Table::new(&[]);
+        assert_eq!(t.widths(Some(80)), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn number_columns_narrow_when_there_is_no_text() {
+        let mut t = Table::new(&["A", "B"]);
+        t.align(0, Align::Right);
+        t.align(1, Align::Right);
+        t.indent(0);
+        t.add_owned(vec!["1234567890".into(), "1234567890".into()]);
+        assert_eq!(t.widths(Some(15)), vec![7, 7]);
+    }
+
+    #[test]
+    fn a_width_below_the_minimums_overflows() {
+        let t = pair_table(&"x".repeat(60));
+        assert_eq!(t.widths(Some(5)), vec![4, 4, 4]);
+        assert_eq!(t.widths(Some(0)), vec![4, 4, 4]);
     }
 }
