@@ -494,6 +494,14 @@ pub fn first_with_key(all: &BTreeMap<String, Profile>, has_key: impl Fn(Provider
         .find(|n| all.get(*n).is_some_and(|p| !p.provider.keyless() && has_key(p.provider)))
 }
 
+/// Why an engine that names no profile cannot run. It is a configuration
+/// error wherever it is found: [`resolve`] fails with it and the gate fails
+/// closed, and [`crate::engine::resolve_session`] gives it as a `config:`
+/// reason.
+pub fn names_no_profile(engine: &str) -> String {
+    format!("engine '{engine}' names no profile")
+}
+
 /// Resolves the engine. `None` means no engine is named and no provider has a
 /// key: the gate is off and the hook keeps today's behaviour.
 pub fn resolve(user: &UserLayer, has_key: impl Fn(Provider) -> bool) -> Result<Option<Settings>> {
@@ -515,7 +523,7 @@ pub fn resolve(user: &UserLayer, has_key: impl Fn(Provider) -> bool) -> Result<O
     let profile = all
         .get(&engine)
         .cloned()
-        .with_context(|| format!("engine '{engine}' names no profile"))?;
+        .with_context(|| names_no_profile(&engine))?;
     Ok(Some(Settings { engine, engine_set: user.engine.is_some(), profile, mode: user.mode.unwrap_or_default() }))
 }
 

@@ -24,6 +24,8 @@ pub const ENGINE_UNAVAILABLE: &str = "engine_unavailable";
 /// `gate.engine` is unset and no provider has a key: the gate is off, as
 /// before ADR-708.
 pub const NO_KEY: &str = "no key";
+/// The prefix of a configuration error: the gate's `config:` fallback.
+pub const CONFIG: &str = "config";
 
 /// What an unavailable engine's reason tells the operator to do.
 const REMEDY: &str = "configure an Anthropic or OpenRouter key (`ways agent key add --provider anthropic` or `--provider openrouter`)";
@@ -34,8 +36,9 @@ pub struct Resolution {
     /// The profile the session judges with; `None` when it has none.
     pub engine: Option<String>,
     /// [`EXPLICIT`], [`KEY_FOUND`] or [`NO_HOST`] with an engine; with none,
-    /// [`NO_KEY`] or a reason that starts with [`ENGINE_UNAVAILABLE`] and
-    /// names the remedy.
+    /// [`NO_KEY`], a reason that starts with [`ENGINE_UNAVAILABLE`] and
+    /// names the remedy, or one that starts with [`CONFIG`] for an engine
+    /// that names no profile.
     pub reason: String,
 }
 
@@ -79,7 +82,8 @@ pub fn resolve_session(
         };
     };
     let Some(p) = profiles.get(name) else {
-        return Resolution::unavailable(format!("engine '{name}' names no profile; name a profile or {REMEDY}"));
+        // A configuration error, as `profile::resolve` reports it.
+        return Resolution { engine: None, reason: format!("{CONFIG}: {}", profile::names_no_profile(name)) };
     };
     match p.provider {
         Provider::ClaudeCode if host => Resolution::engine(name, EXPLICIT),
@@ -177,7 +181,13 @@ mod tests {
         let r = resolve_session(Some("cc-sonnet"), &all, false, only(Provider::Anthropic));
         assert_eq!((r.engine.as_deref(), r.reason.as_str()), (Some("anthropic"), NO_HOST));
         assert_eq!(resolve_session(Some("mine"), &all, false, only(Provider::Anthropic)).engine.as_deref(), Some("mine"));
-        assert!(resolve_session(Some("nosuch"), &all, true, |_| true).is_unavailable());
+        // A name with no profile is a configuration error, in the words
+        // `profile::resolve` fails with and the gate logs as `config:`.
+        let r = resolve_session(Some("nosuch"), &all, true, |_| true);
+        assert_eq!((r.engine, r.reason.as_str()), (None, "config: engine 'nosuch' names no profile"));
+        let user: crate::profile::UserLayer = serde_yaml::from_str("engine: nosuch\n").unwrap();
+        let e = crate::profile::resolve(&user, |_| true).unwrap_err();
+        assert_eq!(format!("{CONFIG}: {e:#}"), "config: engine 'nosuch' names no profile");
     }
 
     #[test]

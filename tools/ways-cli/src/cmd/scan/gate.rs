@@ -223,14 +223,14 @@ fn apply_from(
     };
     let Some(name) = session.resolution.engine else {
         // No key and no engine named: off, as before ADR-708.
-        if !session.resolution.is_unavailable() {
+        if session.resolution.reason == engine::NO_KEY {
             return Gate::default();
         }
         return fallback(&session.resolution.reason, to_judge, log, "0");
     };
     // The session's engine is a profile that agent.yaml no longer has.
     let Some(profile) = profiles.get(&name).cloned() else {
-        return fallback(&format!("config: engine '{name}' names no profile"), to_judge, log, "0");
+        return fallback(&format!("{}: {}", engine::CONFIG, profile::names_no_profile(&name)), to_judge, log, "0");
     };
     let settings = Settings { engine: name, engine_set: layer.engine_set, profile, mode: layer.mode };
     match (settings.profile.provider, store) {
