@@ -1,6 +1,6 @@
 ---
-description: Several agents or Claude sessions editing one git checkout at the same time, as a team or in parallel. Give each its own files, worktree and scratch folder; in a shared checkout, check branch and status before any git action, never switch branches or stash, stage files by name, and leave other sessions' changes alone.
-vocabulary: agent team teammates parallel agents several sessions other sessions at once same repo same checkout git working tree worktree each agent own files ownership overwrote clobbered each other collide stash add all switch branch scratch folder idle notice relayed
+description: Several agents or Claude sessions editing one git checkout at the same time, as a team or in parallel. Give each its own files, worktree and scratch folder; in a shared checkout, check branch and status before any git action and never switch branches.
+vocabulary: agent team teammates parallel agents several sessions other sessions at once same repo same checkout git working tree worktree each agent own files ownership overwrote clobbered each other collide switch branch scratch folder idle notice relayed
 pattern: \bagent teams?\b|\bshared (checkout|working (tree|directory))\b|\b(checkout|working tree) is shared\b|\b(other|several|multiple|parallel) (claude( code)?|cc) sessions\b
 refire: 0.15
 scope: agent, subagent

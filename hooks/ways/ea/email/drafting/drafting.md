@@ -33,7 +33,7 @@ The user's sent mail is the authority. Study it before every draft. Look for:
 
 ## Generated-Writing Tells
 
-The draft goes out under the user's name. Before presenting it, check it against writing/ai-signs: stock words, chatbot framing, clerk phrasing and the shapes that mark generated text. Where the user's sent mail uses a phrase that list flags, the sent mail wins.
+The draft goes out under the user's name. Before presenting it, check it against writing/ai-signs: stock words, chatbot framing, clerk phrasing and the shapes that mark generated text. Three email habits read as generated too: the opener "I hope this email finds you well", the follow-up "just circling back", and filler words such as "leverage" and "synergy". Where the user's sent mail uses a phrase that list flags, the sent mail wins.
 
 ## Threading
 
