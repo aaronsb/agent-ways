@@ -10,6 +10,7 @@
 use super::delta::{self, Delta};
 use super::notes::{self, Release};
 use super::{classify_build_groups, exe, git_head, installed_version, package_field, suite_bins, version_older, way_embed_source_version};
+use crate::cmd::attend_mod;
 use crate::cmd::lifecycle::{self, DevLink, Mark, Report};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -78,7 +79,14 @@ pub struct WhatIf {
 }
 
 /// The name of the attend mod's row.
-const MOD: &str = "attend mod";
+const MOD: &str = attend_mod::ATTEND.label;
+/// The name of the ways-judge mod's row.
+const JUDGE_MOD: &str = attend_mod::JUDGE.label;
+
+/// True for a mod's row: a plugin, not a binary the update builds.
+fn is_mod(name: &str) -> bool {
+    name == MOD || name == JUDGE_MOD
+}
 
 /// Gather the what-if for `channel`. Runs a fetch and reads; writes nothing
 /// else.
@@ -212,16 +220,22 @@ fn components(app: &Path, rev: Option<&str>) -> Vec<Component> {
         None => way_embed_source_version(app),
     };
     out.push(Component { name: "way-embed".into(), installed: embed_installed, target: embed_target });
-    let plugin = "plugins/attend/.claude-plugin/plugin.json";
     let mod_version = |text: Option<String>| -> Option<String> {
         let json: serde_json::Value = serde_json::from_str(&text?).ok()?;
         json.get("version")?.as_str().map(str::to_string)
     };
-    out.push(Component {
-        name: MOD.into(),
-        installed: mod_version(std::fs::read_to_string(app.join(plugin)).ok()),
-        target: mod_version(rev.and_then(|r| show(app, r, plugin))),
-    });
+    for (m, row) in [(attend_mod::ATTEND, MOD), (attend_mod::JUDGE, JUDGE_MOD)] {
+        let plugin = format!("plugins/{}/.claude-plugin/plugin.json", m.name);
+        let c = Component {
+            name: row.into(),
+            installed: mod_version(std::fs::read_to_string(app.join(&plugin)).ok()),
+            target: mod_version(rev.and_then(|r| show(app, r, &plugin))),
+        };
+        // An app that ships no ways-judge mod on either side has no row for it.
+        if row == MOD || c.installed.is_some() || c.target.is_some() {
+            out.push(c);
+        }
+    }
     out
 }
 
@@ -266,7 +280,7 @@ fn actions(app: &Path, channel: &Channel, relation: Relation, head: Option<&str>
             cargo_changed |= wt_cargo;
             embed_changed |= wt_embed;
             let mut any = false;
-            for c in comps.iter().filter(|c| c.name != MOD && c.name != "way-embed") {
+            for c in comps.iter().filter(|c| !is_mod(&c.name) && c.name != "way-embed") {
                 if !(cargo_changed || c.moves()) {
                     continue;
                 }
@@ -296,7 +310,8 @@ fn actions(app: &Path, channel: &Channel, relation: Relation, head: Option<&str>
     }
     out.push((Mark::Act, format!("relink the suite onto PATH in {}", lifecycle::xdg_bin().display())));
     out.push((Mark::Act, "regenerate the corpus".to_string()));
-    let mod_moves = comps.iter().find(|c| c.name == MOD).filter(|c| c.moves());
+    let attend = comps.iter().find(|c| c.name == MOD);
+    let judge = comps.iter().find(|c| c.name == JUDGE_MOD);
     for t in crate::config::global().targets() {
         let dir = t.dir();
         if !t.enabled {
@@ -305,14 +320,29 @@ fn actions(app: &Path, channel: &Channel, relation: Relation, head: Option<&str>
         }
         out.push((Mark::Act, format!("reproject {} (ways manage repair)", dir.display())));
         if ways_core::settings::attend_mod_install(&t.config_path()) {
-            match mod_moves {
-                Some(m) => out.push((Mark::Act, format!("{}: update the attend mod {} → {}", dir.display(), m.installed.as_deref().unwrap_or("none"), m.target.as_deref().unwrap_or("?")))),
-                None => out.push((Mark::Same, format!("{}: the attend mod stays as it is", dir.display()))),
-            }
+            out.extend(mod_action(&dir, MOD, attend));
+        }
+        // Repair keeps the ways-judge mod current where the target has it;
+        // `ways judge-setup` installs it.
+        if attend_mod::listed_in(&attend_mod::JUDGE, &dir) {
+            out.extend(mod_action(&dir, JUDGE_MOD, judge));
+        } else if judge.is_some() {
+            out.push((Mark::Info, format!("{}: the ways-judge mod is not installed; `ways judge-setup` installs it", dir.display())));
         }
     }
     out.push((Mark::Info, "check the judge's keys".to_string()));
     out
+}
+
+/// What repair does to an installed mod in the target at `dir`: update it
+/// when its row moves, else leave it.
+fn mod_action(dir: &Path, row: &str, c: Option<&Component>) -> Option<(Mark, String)> {
+    let c = c?;
+    Some(if c.moves() {
+        (Mark::Act, format!("{}: update the {row} {} → {}", dir.display(), c.installed.as_deref().unwrap_or("none"), c.target.as_deref().unwrap_or("?")))
+    } else {
+        (Mark::Same, format!("{}: the {row} stays as it is", dir.display()))
+    })
 }
 
 /// How one suite binary would be refreshed.
@@ -377,7 +407,7 @@ pub fn render(w: &WhatIf) -> Report {
         match (&c.installed, &c.target) {
             (Some(i), Some(t)) if version_older(i, t) => r.item(Mark::Up, format!("{name}  {i} → {t}")),
             // `--ref` checks the ref out and builds it, older or not.
-            (Some(i), Some(t)) if on_ref && version_older(t, i) && c.name != MOD => r.item(Mark::Down, format!("{name}  {i} → {t} (a downgrade: --commit rebuilds it from source)")),
+            (Some(i), Some(t)) if on_ref && version_older(t, i) && !is_mod(&c.name) => r.item(Mark::Down, format!("{name}  {i} → {t} (a downgrade: --commit rebuilds it from source)")),
             (Some(i), Some(t)) if on_ref && version_older(t, i) => r.item(Mark::Down, format!("{name}  {i} → {t} (a downgrade)")),
             (Some(i), Some(t)) if i != t => r.item(Mark::Same, format!("{name}  {i} (ahead of {t}; unchanged)")),
             (Some(i), _) => r.item(Mark::Same, format!("{name}  {i} unchanged")),
@@ -386,8 +416,8 @@ pub fn render(w: &WhatIf) -> Report {
         };
     }
 
-    let moving: Vec<&Component> = w.components.iter().filter(|c| c.moves() && c.name != MOD).collect();
-    if !moving.is_empty() || w.components.iter().any(|c| c.name == MOD && c.moves()) {
+    let moving: Vec<&Component> = w.components.iter().filter(|c| c.moves() && !is_mod(&c.name)).collect();
+    if !moving.is_empty() || w.components.iter().any(|c| is_mod(&c.name) && c.moves()) {
         r.section("Release notes");
         match &w.notes {
             Err(e) => {
@@ -428,6 +458,9 @@ pub fn render(w: &WhatIf) -> Report {
                 }
                 if w.components.iter().any(|c| c.name == MOD && c.moves()) {
                     r.muted(2, "The attend mod's changes are in attend's release notes.");
+                }
+                if w.components.iter().any(|c| c.name == JUDGE_MOD && c.moves()) {
+                    r.muted(2, "The ways-judge mod's changes are in the ways release notes.");
                 }
             }
         }
@@ -558,5 +591,18 @@ mod tests {
     #[test]
     fn define_version_reads_way_embeds_source() {
         assert_eq!(define_version("#define VERSION_MAJOR 1\n#define VERSION \"1.2.0\"\n").as_deref(), Some("1.2.0"));
+    }
+
+    #[test]
+    fn an_installed_mod_is_updated_or_left_like_attends() {
+        let dir = Path::new("/t/claude");
+        let judge = comp(JUDGE_MOD, Some("1.50.0"), Some("1.51.0"));
+        assert_eq!(mod_action(dir, JUDGE_MOD, Some(&judge)), Some((Mark::Act, "/t/claude: update the ways-judge mod 1.50.0 → 1.51.0".into())));
+        let same = comp(JUDGE_MOD, Some("1.51.0"), Some("1.51.0"));
+        assert_eq!(mod_action(dir, JUDGE_MOD, Some(&same)), Some((Mark::Same, "/t/claude: the ways-judge mod stays as it is".into())));
+        let attend = comp(MOD, Some("0.28.1"), Some("0.28.4"));
+        assert_eq!(mod_action(dir, MOD, Some(&attend)), Some((Mark::Act, "/t/claude: update the attend mod 0.28.1 → 0.28.4".into())));
+        assert_eq!(mod_action(dir, JUDGE_MOD, None), None, "no row: the app ships no ways-judge mod");
+        assert!(is_mod(MOD) && is_mod(JUDGE_MOD) && !is_mod("ways"));
     }
 }
