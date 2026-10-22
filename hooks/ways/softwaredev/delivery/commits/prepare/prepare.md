@@ -9,7 +9,7 @@ refire: 0.15
 
 ## When to Commit
 
-Commit once per accepted unit of work and before any phase change, so each step can be reverted alone.
+Once the user has asked for commits, commit once per accepted unit of work and before any phase change, so each step can be reverted alone.
 
 ## Before Committing
 
