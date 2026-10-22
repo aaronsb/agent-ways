@@ -500,7 +500,7 @@ fn file_check(
 /// The variable holding a key that hooks never see: set, with no key file.
 fn env_only(provider: ways_agent_core::profile::Provider) -> Option<&'static str> {
     use ways_agent_core::keys;
-    (keys::env_set(provider) && keys::locate_file(provider).is_none()).then(|| provider.key_env())
+    provider.key_env().filter(|_| keys::env_set(provider) && keys::locate_file(provider).is_none())
 }
 
 /// What the gate line says of the engine's key file.

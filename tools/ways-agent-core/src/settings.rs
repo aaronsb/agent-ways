@@ -71,7 +71,7 @@ const KEYS: &[KeySpec] = &[
     KeySpec {
         name: "gate.profiles.*.provider",
         path: &["profiles", "*", "provider"],
-        kind: Kind::Choice(&["anthropic", "openrouter"]),
+        kind: Kind::Choice(&["anthropic", "openrouter", "claude-code"]),
         default: DefaultValue::Fn(|b| shipped_field(b, "provider")),
         doc: "The provider a profile calls.",
         long: "A profile that changes provider must name its model too, since a model id belongs to its provider.",
@@ -182,14 +182,16 @@ fn shipped_field(bound: &[String], field: &str) -> Option<Value> {
     serde_yaml::to_value(p).ok()?.get(field).cloned()
 }
 
-/// The profiles `gate.engine` may name: the shipped ones, then each the
-/// user layer adds under `profiles:`, in the file's order. A profile of your
-/// own whose patch does not build, such as one with no model, names nothing
-/// the gate could run, so it is left out. A shipped one stays: its bad patch
-/// is dropped and it runs as shipped ([`profile::profiles`]).
+/// The profiles `gate.engine` may name: the shipped ones, the keyed ones in
+/// [`profile::SHIPPED_ORDER`] first, then each the user layer adds under
+/// `profiles:`, in the file's order. A profile of your own whose patch does
+/// not build, such as one with no model, names nothing the gate could run,
+/// so it is left out. A shipped one stays: its bad patch is dropped and it
+/// runs as shipped ([`profile::profiles`]).
 fn profile_names(layers: &[Layer], _: &[String]) -> Result<Vec<String>, String> {
     let shipped = profile::shipped();
-    let mut out: Vec<String> = shipped.keys().cloned().collect();
+    let mut out: Vec<String> = profile::SHIPPED_ORDER.iter().map(|n| n.to_string()).collect();
+    out.extend(shipped.keys().filter(|n| !profile::SHIPPED_ORDER.contains(&n.as_str())).cloned());
     for l in layers.iter().filter(|l| l.file == FILE) {
         let Some(Value::Mapping(m)) = l.accepted.get("profiles") else { continue };
         for (k, v) in m {
@@ -316,19 +318,24 @@ mod tests {
         let engine = KEYS.iter().find(|k| k.name == "gate.engine").unwrap();
         assert_eq!(
             engine.kind.choices(Some(&user("")), &[]),
-            Choices::Of { items: vec!["anthropic".into(), "openrouter".into()], multi: false }
+            Choices::Of { items: vec!["anthropic".into(), "openrouter".into(), "claude-code".into()], multi: false }
         );
         let layers = user("profiles:\n  mine:\n    provider: anthropic\n    model: claude-sonnet-5-5\n  anthropic:\n    threshold: 0.4\n");
-        assert_eq!(engine.kind.describe(&layers, &[]), "one of anthropic, openrouter, mine");
+        assert_eq!(engine.kind.describe(&layers, &[]), "one of anthropic, openrouter, claude-code, mine");
         assert!(engine.parse_cli("mine", &layers, &[]).is_ok());
         assert!(engine.parse_cli("openrouter", &layers, &[]).is_ok());
+        assert!(engine.parse_cli("claude-code", &layers, &[]).is_ok());
         let e = engine.parse_cli("open-router", &layers, &[]).unwrap_err();
-        assert_eq!(e, "expected one of anthropic, openrouter, mine, found 'open-router'");
+        assert_eq!(e, "expected one of anthropic, openrouter, claude-code, mine, found 'open-router'");
         // A profile of your own the gate could not build is no choice. A
         // shipped one switched to another provider without a model stays:
         // the bad patch is dropped and it runs as shipped.
         let layers = user("profiles:\n  half:\n    provider: openrouter\n  anthropic:\n    provider: openrouter\n  ok:\n    provider: openrouter\n    model: x/y\n");
-        assert_eq!(engine.kind.describe(&layers, &[]), "one of anthropic, openrouter, ok");
+        assert_eq!(engine.kind.describe(&layers, &[]), "one of anthropic, openrouter, claude-code, ok");
+        // A profile of your own may judge through Claude Code.
+        let layers = user("profiles:\n  cc:\n    provider: claude-code\n    model: sonnet\n");
+        assert!(layers[0].findings.is_empty(), "{:?}", layers[0].findings);
+        assert!(engine.parse_cli("cc", &layers, &[]).is_ok());
         // The hook path loads one file on its own and keeps the value.
         assert!(user("engine: nope\n")[0].findings.is_empty());
     }

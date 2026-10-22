@@ -14,9 +14,9 @@ agent-tui frame 100x30
 |│                        ┌pick one: gate.engine───────────────────────────┐nst the profile's model.│|
 |│                        │   anthropic                                    │                        │|
 |│                        │   openrouter                                   │                        │|
-|│                        │ ● mine      current                            │hropic | openrouter |   │|
+|│                        │   claude-code                                  │hropic | openrouter |   │|
+|│                        │ ● mine      current                            │(Enter picks)           │|
 |│                        └────────────────────────────────────────────────┘                        │|
-|│                                                     ││from     user ·                            │|
 |│                                                     ││~/.config/agent-ways/agent.yaml            │|
 |│                                                     ││writes   ~/.config/agent-ways/agent.yaml   │|
 |│                                                     ││[gate.engine]                              │|
@@ -99,14 +99,15 @@ styles
  14  99-99  - - DIM
  15   0-0   - - DIM
  15  25-25  LightBlue - -
- 15  26-73  - - BOLD|REVERSED
  15  74-74  LightBlue - -
  15  99-99  - - DIM
  16   0-0   - - DIM
- 16  25-74  LightBlue - -
+ 16  25-25  LightBlue - -
+ 16  26-73  - - BOLD|REVERSED
+ 16  74-74  LightBlue - -
  16  99-99  - - DIM
  17   0-0   - - DIM
- 17  54-64  - - DIM
+ 17  25-74  LightBlue - -
  17  99-99  - - DIM
  18   0-0   - - DIM
  18  54-55  - - DIM

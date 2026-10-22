@@ -321,10 +321,21 @@ impl State {
         }
         let settings = Self::settings().map_err(|e| format!("config: {e:#}"))?;
         let Some(settings) = settings else { return Err("off".to_string()) };
+        self.prepare_with(req, settings, begun)
+    }
+
+    /// [`State::prepare`] once the settings are read. The `claude-code`
+    /// engine judges inside Claude Code (ADR-708 §2): the agent refuses it
+    /// before reading a key, taking a slot or building a request, so it never
+    /// sends that engine's request to a provider.
+    fn prepare_with<'r>(&'r self, req: &'r JudgeRequest, settings: Settings, begun: Instant) -> Result<Prepared<'r>, String> {
         if settings.mode == Mode::Off {
             return Err("off".to_string());
         }
         let p = &settings.profile;
+        if p.provider == Provider::ClaudeCode {
+            return Err(format!("{}: {}", crate::engine::ENGINE_UNAVAILABLE, net::NOT_CALLED));
+        }
         let Some((key, source)) = keys::read(p.provider).map_err(|e| format!("key: {e:#}"))? else {
             return Err("no_key".to_string());
         };
@@ -543,5 +554,26 @@ mod tests {
         let state = State::new();
         let req = JudgeRequest { session: "s".into(), tool: "t".into(), turns: vec![], candidates: vec![] };
         assert!(matches!(state.judge(req), Reply::Fallback { reason, .. } if reason == "no_candidates"));
+    }
+
+    #[test]
+    fn the_agent_refuses_claude_code_and_sends_nothing() {
+        let state = State::new();
+        let req = JudgeRequest {
+            session: "s".into(),
+            tool: "claude-code".into(),
+            turns: vec![],
+            candidates: vec![Candidate { id: "a/b".into(), text: "a › b\nd".into() }],
+        };
+        for mode in ["enforce", "shadow"] {
+            let user: profile::UserLayer = serde_yaml::from_str(&format!("engine: claude-code\nmode: {mode}\n")).unwrap();
+            // Every key "present": the refusal is the engine's, not a missing key's.
+            let settings = profile::resolve(&user, |_| true).unwrap().unwrap();
+            let reason = state.prepare_with(&req, settings, Instant::now()).err().expect("refused");
+            assert_eq!(reason, format!("engine_unavailable: {}", net::NOT_CALLED), "{mode}");
+            // No slot taken and no key check started: no request was built.
+            assert_eq!(state.in_flight(), 0);
+            assert!(!state.checking.load(Ordering::SeqCst));
+        }
     }
 }

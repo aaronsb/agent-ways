@@ -126,7 +126,7 @@ fn an_engine_no_profile_names_is_a_finding_set_repairs_not_fix() {
     let gate = roots.iter().find(|r| r.name == "gate").expect("a gate tab");
     let findings = nodes(gate).into_iter().find(|n| n.name == "findings").expect("a findings group");
     let row = &findings.children[0];
-    assert!(row.finding.as_deref().is_some_and(|f| f.contains("expected one of anthropic, openrouter, found 'gone'")), "{:?}", row.finding);
+    assert!(row.finding.as_deref().is_some_and(|f| f.contains("expected one of anthropic, openrouter, claude-code, found 'gone'")), "{:?}", row.finding);
     assert!(row.actions.is_empty(), "no `fix`: it would change nothing");
     assert!(row.doc.contains("`ways settings set gate.engine <choice>` repairs it") && row.doc.contains("loads as written"), "{}", row.doc);
     assert!(!findings.doc.contains("A section with a finding falls through"), "{}", findings.doc);

@@ -12,15 +12,16 @@ use crate::profile::{Profile, Provider};
 const CACHE_READ_FACTOR: f64 = 0.1;
 const CACHE_WRITE_FACTOR: f64 = 1.25;
 
-/// The usage block a provider returned with its answer.
+/// The usage block a provider returned with its answer. It also reads Claude
+/// Code's `ModelUsage`, whose cache fields carry Anthropic's names.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Usage {
     /// Uncached input tokens.
     pub input_tokens: u64,
     pub output_tokens: u64,
-    #[serde(default)]
+    #[serde(default, alias = "cache_read_input_tokens")]
     pub cache_read_tokens: u64,
-    #[serde(default)]
+    #[serde(default, alias = "cache_creation_input_tokens")]
     pub cache_write_tokens: u64,
     /// The cost the provider reported for the call (OpenRouter).
     #[serde(default, skip_serializing_if = "Option::is_none")]
