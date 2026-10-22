@@ -34,6 +34,15 @@ basis:
   - evidence: "issue #528, September 2026 measurement of the semantic Bash lane: off-topic fires at high scores (`workstation/shell/prompt` at 0.91 on a `head` of a slide deck), the median firing call showed 1 way and 20% showed 4 or more, and one `git commit` described as \"commit the change\" produced 10.4k characters of way text"
   - evidence: ADR-705, the survey of Claude Code's tool surface, which groups the tools into types by primary field and lists the current lanes on that grid
   - evidence: "ADR-704, proposed on PR #1115's branch (feat/tools-trigger-lane) and not on main on 2026-10-22: a `tools:` regex on the tool name, `tool_phase: pre|post|both`, and the adapter `hooks/ways/check-tool.sh` over `ways hook tool`, wired for EnterPlanMode, ExitPlanMode and Workflow; its `scan::tool` copies `scan::file`'s hit loop"
+  - operator: aaronsb
+    level: directed
+    said: "I don't really use plan mode"
+    via: "the operator in the head session, 2026-10-22, relayed verbatim by the coordinator after the probes were answered"
+  - operator: aaronsb
+    level: directed
+    said: "instead, we use our own skills"
+    via: "the operator in the head session, 2026-10-22, following the message before it; relayed verbatim by the coordinator"
+  - upstream: "Claude Code hooks reference (code.claude.com/docs/en/hooks.md, fetched 2026-10-22), UserPromptExpansion: a PreToolUse hook matching the Skill tool fires only when Claude calls the tool, typing `/skillname` bypasses PreToolUse, and UserPromptExpansion fires on that direct path; it matches on `command_name`, carries `expansion_type` (`slash_command` or `mcp_prompt`), `command_name`, `command_args`, `command_source` and the typed `prompt`, and can add `additionalContext` alongside the expanded prompt. UserPromptSubmit receives the line as typed, not the expanded skill"
   - precedent: ADR-706
   - precedent: ADR-155
 agent:
@@ -67,9 +76,10 @@ observable:
   - "An existing `commands: git commit` way fires on PreToolUse for a Bash `git commit` through `check-tool.sh`, and the transcript pairs its `hook_success` row with a `hook_additional_context` row"
   - "A way with `files: \\.ipynb$` fires when the model calls NotebookEdit, and a way with `agents: ^Explore$` fires when it calls Agent with subagent_type Explore"
   - "A way with `tool_name: ExitPlanMode` and `tool_event: [PostToolUse]` fires once the operator approves a plan in an interactive session"
+  - "A way with `skills: ^merge$` fires when the operator types `/merge`, through a UserPromptExpansion hook with `command_name: merge`, and fires when the model calls the Skill tool with `skill: merge`, through PreToolUse; each fire is paired with a `hook_additional_context` row in the transcript, and the events log shows it once per invocation"
   - "After the build, the events log shows no `semantic:bash:*` fires; `commands:` and `files:` fires continue"
   - "`ways author lint` warns on a way that uses `reads:` or `mcp:` while that type is unwired, names the type, and says how to wire it; it rejects `tool_event: [PostToolUseFailure]`"
-  - "`settings.json` carries one PreToolUse, one PostToolUse and one PostToolUseFailure entry for `check-tool.sh`, each with an explicit timeout, and no entries for `check-bash-pre.sh`, `check-file-pre.sh` or `check-post.sh`"
+  - "`settings.json` carries one PreToolUse, one PostToolUse, one PostToolUseFailure and one UserPromptExpansion entry for `check-tool.sh`, each with an explicit timeout, and no entries for `check-bash-pre.sh`, `check-file-pre.sh` or `check-post.sh`"
 imported:
   from: docs/architecture/system/ADR-188-posttooluse-delivery-for-tool-lane-ways-and-retirement-of-the-semantic-bash-surface.md
   format: v0
@@ -80,7 +90,7 @@ imported:
 
 ## Summary
 
-- **Decided:** ways match tool calls in one lane. The tool catalog (ADR-706) resolves each call's tool to an abstract type and the value of that type's primary field, and one hit loop matches ways against it. Each type with a field has one frontmatter key whose value is a regex over that field: `commands:` (shell), `files:` (file-modify), `reads:` (file-read), `urls:` (web), `agents:` (delegation), `mcp:` (MCP tools). `tool_name:` matches the tool name for types with no useful field, and `tool_event:` lists the hook events a way fires on, PreToolUse by default. Existing `commands:` and `files:` ways keep working unchanged and now also reach PowerShell and NotebookEdit. One adapter, `check-tool.sh`, serves every tool event and absorbs the Bash, file and post-tool adapters. The shell, file-modify, delegation, web and plan-mode types are wired by default; file-read and MCP are not. The semantic lane on the Bash surface retires, so a Bash command fires only the regexes an author wrote. This replaces this record's first draft, which moved tool-lane ways to PostToolUse on the belief that PreToolUse context never reaches the model; that belief was wrong.
+- **Decided:** ways match tool calls in one lane. The tool catalog (ADR-706) resolves each call's tool to an abstract type and the value of that type's primary field, and one hit loop matches ways against it. Each type with a field has one frontmatter key whose value is a regex over that field: `commands:` (shell), `files:` (file-modify), `reads:` (file-read), `urls:` (web), `agents:` (delegation), `skills:` (skills), `mcp:` (MCP tools). A skill has two ways in, and `skills:` catches both: the model's Skill tool call on PreToolUse, and the operator's typed `/name` on UserPromptExpansion, which bypasses PreToolUse. `tool_name:` matches the tool name for types with no useful field, and `tool_event:` lists the hook events a way fires on, PreToolUse by default. Existing `commands:` and `files:` ways keep working unchanged and now also reach PowerShell and NotebookEdit. One adapter, `check-tool.sh`, serves every tool event and absorbs the Bash, file and post-tool adapters. The shell, file-modify, delegation, web, skill and plan-mode types are wired by default; file-read and MCP are not. The semantic lane on the Bash surface retires, so a Bash command fires only the regexes an author wrote. This replaces this record's first draft, which moved tool-lane ways to PostToolUse on the belief that PreToolUse context never reaches the model; that belief was wrong.
 - **Trades away:** the meaning-based match on Bash commands, which made 81% of all way fires over the three days before this record, along with whatever of it was on topic. Each newly wired tool costs one process per call per wired event. Ways on file reads and MCP calls stay silent until a user wires them, and lint can warn but cannot wire them.
 - **One-way?** No, not yet. The adapter, the wiring and the semantic retirement can each be reversed in a session. The key names (`reads:`, `urls:`, `agents:`, `mcp:`, `tool_name:`, `tool_event:`) become a contract with users' own ways at the first release that ships them.
 - **Probes:** *Confident (keys):* your existing ways fire as they do now. New keys let a way fire on what a file read, a web fetch, a subagent launch or an MCP call touches, and the file-read and MCP keys fire only once those tools are wired, because reads are the most frequent call and MCP servers differ per user. *Not confident (semantic):* Bash commands stop pulling ways in by meaning; only patterns an author wrote fire on a command. In the three days before this record that meaning-based matching made 5,705 of 7,034 way fires, many of them off topic. Is losing it what you want?
@@ -109,7 +119,7 @@ ADR-704 adds a fifth, `tools:`, a regex on the tool name with a `tool_phase:` th
 
 `commands:` and `files:` are already type keys. Each names one kind of tool and matches a regex against that kind's primary field. Claude Code groups its own tools the same way: a permission rule's specifier targets one primary field per tool, and rule families cover several tools at once (ADR-705). The lanes do not follow those families. PowerShell never reaches `commands:`, NotebookEdit never reaches `files:`, and nothing matches a file read's path, a fetched URL, a subagent's type or an MCP tool. Each gap closed so far has added a lane.
 
-The operator asked to take the contributor's tool lane, survey what else can be sensed, and build an attend sensor "in addition to ways triggers", and chose one frontmatter key per type over a single permission-rule key. ADR-706 decides the catalog that maps Claude Code's tool names to types. This record decides the lane that uses it.
+The operator asked to take the contributor's tool lane, survey what else can be sensed, and build an attend sensor "in addition to ways triggers", and chose one frontmatter key per type over a single permission-rule key. Asked about plan approval, the moment ADR-704 was built for, the operator answered "I don't really use plan mode" and "instead, we use our own skills". Skills reach Claude Code by two routes: the model calls the Skill tool, or the operator types `/name`. The typed route makes no tool call; Claude Code expands the skill into the prompt and fires UserPromptExpansion, not PreToolUse (ADR-705). ADR-706 decides the catalog that maps Claude Code's tool names to types. This record decides the lane that uses it.
 
 ### The semantic Bash lane now delivers
 
@@ -128,7 +138,10 @@ The first draft retired the semantic lane on the Bash surface (ADR-155 §4) beca
    | `reads:` | file-read | `path` | Read, Glob, Grep, LSP |
    | `urls:` | web | `url` | WebFetch |
    | `agents:` | delegation | `agent` | Agent's subagent type, Workflow's name |
+   | `skills:` | skill | `skill` | the Skill tool's `skill`; a typed `/name`, through UserPromptExpansion's `command_name` |
    | `mcp:` | mcp | `tool` | any `mcp__` tool, matched as `server__tool` |
+
+   - `skills:` is a regex over the skill's name. The catalog maps both routes into the skill type (ADR-706 item 2): a Skill tool call by its `skill` field, and a UserPromptExpansion payload whose `expansion_type` is `slash_command` by its `command_name`. The typed route also covers custom commands, which Claude Code expands the same way. A typed `/name` arrives at the prompt lane as the line the operator typed, and the lane never sees the expanded skill text there; `skills:` is the trigger for the skill itself. For the skill type, `tool_event: [PreToolUse]` covers both routes, because UserPromptExpansion fires before the skill's text reaches the model, as PreToolUse does before a tool runs. `PostToolUse` fires only on the tool route; the typed route has no after-event. Whether the tool route also fires UserPromptExpansion is not verified; if it does, refire (ADR-126) holds the second fire, and the build checks which events one model-invoked skill produces.
 
    - `tool_name:` is a regex over the canonical tool name. It serves the types with no useful field (plan-mode, scheduling, user-interaction, publish and the rest) and tools the catalog does not map. It replaces ADR-704's `tools:`, which collides with `tools:` in agent definitions; `tool_name` is also the payload key and the session event record's field (ADR-415).
    - `tool_event:` lists literal hook event names and applies to every key above. It defaults to `[PreToolUse]`. The lane admits `PreToolUse` and `PostToolUse`. It replaces ADR-704's `tool_phase: pre|post|both`.
@@ -137,9 +150,9 @@ The first draft retired the semantic lane on the Bash surface (ADR-155 §4) beca
 
 3. **The semantic lane on the Bash surface retires.** The lane stops scoring ways by embedding on the shell type, and the `semantic:bash:en` and `semantic:bash:multi` channels are removed. This supersedes ADR-155 §4, declared in frontmatter on both records. The embed pass remains for checks that declare `description` and `vocabulary`, fed by the lookbehind (ADR-160 stage 1), and runs only when such a check is in scope and no regex matched it. Reasoning before an action still reaches the prompt lane at the next prompt through the response-context channel (ADR-155 §3). A semantic act-time lane can return on its own decision, starting from ADR-191's pipeline and a calibration pass.
 
-4. **One adapter.** `hooks/ways/check-tool.sh` over `ways hook tool` is the one tool-call adapter for ways. It reads `hook_event_name`. On PreToolUse it runs the lane. On PostToolUse it runs the lane, then the postchecks (ADR-123) and the deferred-macro collector (ADR-606) that `ways hook post-tool` runs today, and prints one envelope. On PostToolUseFailure it runs the postchecks only. `check-bash-pre.sh`, `check-file-pre.sh` and `check-post.sh` fold into it. These stay as they are: `check-task-pre.sh`, whose semantic match on the delegation prompt is a different matcher from a field regex; the guard `strip-session-link-pre.sh` (ADR-181); `mark-tasks-active.sh`; `check-queued.sh` (ADR-161); `issues-pull.sh`; `check-pull.sh`. The adapter also writes the session event record for each tool event (ADR-415).
+4. **One adapter.** `hooks/ways/check-tool.sh` over `ways hook tool` is the one tool-call adapter for ways. It reads `hook_event_name`. On PreToolUse it runs the lane. On UserPromptExpansion it runs the lane for the skill type and emits in that event's envelope, whose `additionalContext` Claude Code adds alongside the expanded prompt. On PostToolUse it runs the lane, then the postchecks (ADR-123) and the deferred-macro collector (ADR-606) that `ways hook post-tool` runs today, and prints one envelope. On PostToolUseFailure it runs the postchecks only. `check-bash-pre.sh`, `check-file-pre.sh` and `check-post.sh` fold into it. These stay as they are: `check-task-pre.sh`, whose semantic match on the delegation prompt is a different matcher from a field regex; the guard `strip-session-link-pre.sh` (ADR-181); `mark-tasks-active.sh`; `check-queued.sh` (ADR-161); `issues-pull.sh`; `check-pull.sh`. The adapter also writes the session event record for each tool event (ADR-415).
 
-5. **Default wiring and its cost.** The adapter's matchers are generated from the catalog's wired set (ADR-706 item 2), one entry each on PreToolUse, PostToolUse and PostToolUseFailure. Every entry reaches every user through the settings merge (ADR-500), and each wired tool costs one process per call per event.
+5. **Default wiring and its cost.** The adapter's matchers are generated from the catalog's wired set (ADR-706 item 2), one entry each on PreToolUse, PostToolUse and PostToolUseFailure, plus one UserPromptExpansion entry with an empty matcher, since skill names are not known in advance. Every entry reaches every user through the settings merge (ADR-500), and each wired tool costs one process per call per event.
 
    | Type | Wired by default | Cost against today |
    |---|---|---|
@@ -148,7 +161,8 @@ The first draft retired the semantic lane on the Bash surface (ADR-155 §4) beca
    | delegation | yes | Agent gains one on Pre beside `check-task-pre.sh`; its Post spawn exists. Workflow adds two per launch. |
    | web | WebFetch, yes | two per fetch |
    | plan-mode | EnterPlanMode, ExitPlanMode, yes | two per call; rare |
-   | extension and publish | Skill and the outward publish tools, by name | two per call; rare |
+   | skill | yes: Skill on PreToolUse and PostToolUse, and UserPromptExpansion with an empty matcher | two per Skill call; one per typed slash command, which the operator types by hand |
+   | publish | the outward publish tools, by name | two per call; rare |
    | file-read | no | the most frequent tool; two per Read, Glob or Grep |
    | mcp | no | servers differ per user |
    | the rest | no | reachable through `tool_name:` once wired |
@@ -171,7 +185,7 @@ The first draft retired the semantic lane on the Bash surface (ADR-155 §4) beca
     - The schema entries for the new keys, and the lint rules in item 8.
     - Removal of the semantic branch in the command scan, and lazy embedding for checks.
     - A delivered-versus-emitted count in `ways introspect`, so a lane that emits and never delivers is visible within days.
-    - The acceptance observation: one interactive session in which a `commands:` way and an `agents:` way fire through `check-tool.sh`, each paired with a `hook_additional_context` row, and no `semantic:bash` fire appears.
+    - The acceptance observation: one interactive session in which a `commands:` way, an `agents:` way and a `skills:` way fire through `check-tool.sh`, the last both on a typed `/name` and on a Skill tool call, each paired with a `hook_additional_context` row, and no `semantic:bash` fire appears.
 
 ## Consequences
 

@@ -60,7 +60,8 @@ Grouping the tool set along those families gives these types. Value is rated H (
 | scheduling | CronCreate and its siblings, ScheduleWakeup, Monitor, RemoteTrigger | the tool name; Monitor also takes a `command` | M | H: the session will wake on its own |
 | messaging | SendMessage, ListAgents, SendUserMessage, PushNotification, `mcp__attend__*` | `to` | L | M |
 | user-interaction | AskUserQuestion, EndConversation | the tool name | M | H: the agent is waiting on its human |
-| extension | Skill, ToolSearch, the plugin and connector search tools | `skill`, `query` | M for Skill; N for the rest | L |
+| skill | Skill | `skill` (the skill's name) | H: the operator works through skills; a typed `/name` takes another route (below) | L |
+| extension | ToolSearch, the plugin and connector search tools | `query` | N | L |
 | publish | Artifact and its siblings, PublishPlugin, SendFeedback | `action`, `url` | H: an outward step | M |
 | memory | memory_list, memory_read, memory_write | `path` | M | L |
 | MCP (class) | `mcp__<server>__<tool>` | the name; no common argument field | H per server, such as a mail or chat server's send posture | M: an audit of external writes |
@@ -93,11 +94,22 @@ Every event carries `session_id`, `transcript_path`, `cwd`, `permission_mode`, `
 | PreCompact, PostCompact (trigger, compact_summary) | none known | M | H: the context sensor's ground truth |
 | PreModelSwitch, PostModelSwitch (from_model, to_model, source, context_tokens) | 30 s timeout | M | H: the window size changed |
 | SessionStart (source), SessionEnd (reason) | SessionEnd shares a 1.5 s budget | SessionStart wired | M |
-| UserPromptSubmit (prompt, source), UserPromptExpansion | none known | wired | L |
+| UserPromptSubmit (prompt, source) | none known | wired | L |
+| UserPromptExpansion (expansion_type, command_name, command_args, command_source, prompt) | fires for a typed command only (below) | not wired | L |
 | Notification (notification_type: permission_prompt, idle_prompt) | none known | L | H |
 | CwdChanged, WorktreeCreate, WorktreeRemove | none known | L | M |
 | ConfigChange, InstructionsLoaded, FileChanged | InstructionsLoaded skips direct AGENTS.md reads | M (#493) | L |
 | MessageDisplay, PostToolBatch, DirectoryAdded, Setup, Elicitation | MessageDisplay fires on every streamed chunk; PostToolBatch on every step | N | N |
+
+## Two routes into a skill
+
+A skill reaches the model by one of two routes, and they fire different hooks.
+
+- **The model calls the Skill tool.** The input is `{ skill, args? }` (`BuiltinToolInputs.Skill`, read). PreToolUse and PostToolUse fire with `tool_name: Skill` like any tool call (hooks reference, read).
+- **The operator types `/name`.** No tool call is made. The hooks reference says so directly: a PreToolUse hook matching the Skill tool fires only when Claude calls the tool, typing `/skillname` bypasses PreToolUse, and UserPromptExpansion fires on that direct path (read). Its payload carries `expansion_type` (`slash_command` for skills and custom commands, `mcp_prompt` for MCP prompts), `command_name`, `command_args`, an optional `command_source` and the typed `prompt` (read in the reference, in the `UserPromptExpansionHookInput` declaration, and in the 2.1.308 binary's payload schema). The binary's matcher function returns `command_name` for this event (read), and the binary's prompt-command expander calls the event's runner with `slash_command`, the command's name, its arguments and its source (read). UserPromptExpansion output may block the expansion or add `additionalContext`, which Claude Code places alongside the expanded prompt (reference, read; not yet observed in this project's transcripts).
+- **What UserPromptSubmit sees on the typed route.** The line as typed, such as `/deploy staging`, not the expanded skill text (reference, read). A UserPromptSubmit hook that blocks it stops the command from running, so UserPromptSubmit runs before the expansion (reference, read).
+- **The transcript of a typed skill.** A session in this project where the operator typed `/attend` records a user entry carrying `<command-message>attend</command-message>` and `<command-name>/attend</command-name>`, then the expanded text, and the model's next action is an ordinary tool call; no Skill `tool_use` appears (read from the session transcript).
+- **Not verified:** whether a Skill tool call also fires UserPromptExpansion. The reference describes the event as covering user-typed commands only (inferred from its wording).
 
 Gaps on tool calls themselves: `EndConversation` fires neither PreToolUse nor PostToolUse. PostToolUseFailure does not fire for a call rejected before it runs. Workflow's PostToolUse fires at launch, with `status: async_launched`, not at completion.
 

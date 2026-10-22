@@ -74,7 +74,7 @@ The operator asked for a Claude Code sensor crate for attend "in addition to way
 
 ## Decision
 
-1. **The writer.** Each event has exactly one recording hook command. Where a ways adapter already runs on the event, it writes the record before its own matching: `check-tool.sh` for the tool events (ADR-188), `check-prompt.sh` for UserPromptSubmit, `check-response.sh` for Stop, `inject-subagent.sh` for SubagentStart, `check-state.sh` for SessionStart. A new adapter, `hooks/ways/record-event.sh` over `ways hook record`, is wired with `async: true` for the events that carry no ways matching: SubagentStop, TaskCreated, TaskCompleted, PreCompact, PostCompact, PostModelSwitch, StopFailure, PermissionRequest, PermissionDenied, Notification, CwdChanged and SessionEnd. MessageDisplay and PostToolBatch are never wired: they fire on every streamed chunk and every step. The engine also appends a `way_event` record when it logs a fire or a suppression for the session. A failure to write is counted and never fails the hook.
+1. **The writer.** Each event has exactly one recording hook command. Where a ways adapter already runs on the event, it writes the record before its own matching: `check-tool.sh` for the tool events and for UserPromptExpansion, a typed skill or command (ADR-188), `check-prompt.sh` for UserPromptSubmit, `check-response.sh` for Stop, `inject-subagent.sh` for SubagentStart, `check-state.sh` for SessionStart. A new adapter, `hooks/ways/record-event.sh` over `ways hook record`, is wired with `async: true` for the events that carry no ways matching: SubagentStop, TaskCreated, TaskCompleted, PreCompact, PostCompact, PostModelSwitch, StopFailure, PermissionRequest, PermissionDenied, Notification, CwdChanged and SessionEnd. MessageDisplay and PostToolBatch are never wired: they fire on every streamed chunk and every step. The engine also appends a `way_event` record when it logs a fire or a suppression for the session. A failure to write is counted and never fails the hook.
 
 2. **The record.** One JSON object per line, schema version 1:
 
@@ -90,7 +90,7 @@ The operator asked for a Claude Code sensor crate for attend "in addition to way
    | `tool_name` | the tool's name as the payload gives it (tool events and permission events) |
    | `tool_type` | the catalog's type, or `unmapped` |
    | `tool_use_id` | pairs a call with its result |
-   | `field`, `value` | the abstract field (`command`, `path`, `url`, `agent`, `tool`) and its value |
+   | `field`, `value` | the abstract field (`command`, `path`, `url`, `agent`, `skill`, `tool`) and its value |
    | `status` | on a tool result: `ok`, `error` for PostToolUseFailure, or the response's own status where it reports one, such as a Workflow's `async_launched` |
    | `x` | the event's excerpt, below |
    | `truncated` | the fields that were cut |
