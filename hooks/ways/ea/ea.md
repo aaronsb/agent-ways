@@ -40,3 +40,4 @@ When scanning across accounts, iterate each configured account for the relevant 
 - trust(meta) — EA operations are governed by the trust model
 - briefing(ea) — daily operational briefing
 - tasks(ea) — task management lifecycle
+- lookup(ea) — reading the record before acting, without side effects, with dates written out

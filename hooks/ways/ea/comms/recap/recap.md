@@ -29,10 +29,6 @@ Transcripts are gold for understanding what was actually discussed vs. what made
 - Transcripts are speaker-attributed with timestamps.
 - Long transcripts may lazy-load — scroll/paginate to get complete content.
 - Search within transcripts when looking for specific topics.
-- An AI notes message sent after a meeting often holds only the summary, which is interpretation. Follow its link to the full transcript. The linked document may keep the transcript on its own tab or section, so fetch every part of it, with the account that attended.
-- Save a transcript through a script that writes the file, never by retyping it. Check that the saved file has speaker turns and runs the length of the meeting. A few short paragraphs means the notes came back instead.
-- When there is no transcript, transcription was off for that meeting. Say so.
-- Before attributing a statement, check the speaker label at that line of the transcript. Speakers change mid-topic.
 
 ## Cross-Referencing
 
@@ -44,3 +40,7 @@ AI summaries provide structured action items. Cross-reference with the task syst
 ## Meeting Continuity
 
 For recurring meetings, pull the recap of the previous occurrence to establish continuity — what was discussed last time, what action items were assigned, what's still open.
+
+## See Also
+
+- comms/recap/transcripts(ea) — saving a transcript verbatim and checking who said what

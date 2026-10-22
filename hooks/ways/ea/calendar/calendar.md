@@ -30,3 +30,7 @@ Default to the user's local timezone unless specified otherwise. Always include 
 ## Cross-Account Awareness
 
 When scheduling, check ALL accounts for conflicts — the user may have personal events that block professional availability and vice versa.
+
+## See Also
+
+- calendar/reading(ea) — colleagues' calendars, holds, attendance and RSVPs

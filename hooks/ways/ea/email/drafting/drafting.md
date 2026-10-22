@@ -53,3 +53,7 @@ When creating a draft reply, preserve the threading chain:
 ## Iteration Rule
 
 When iterating on draft text with the user, do NOT re-create the platform draft on every revision. Only create the draft once the user approves the final version.
+
+## See Also
+
+- email/drafting/composition(ea) — the shape, tone and handover of a routine email

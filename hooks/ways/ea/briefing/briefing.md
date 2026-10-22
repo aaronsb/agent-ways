@@ -30,3 +30,4 @@ A briefing ends in *suggestions* — a ranked action list and proposed task muta
 - calendar(ea) — per-domain judgment for the calendar
 - tasks(ea) — per-domain judgment for tasks
 - comms(ea) — per-domain judgment for chat
+- briefing/open-items(ea) — checking for the user's own reply before listing an item as open
