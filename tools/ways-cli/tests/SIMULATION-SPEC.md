@@ -88,6 +88,15 @@ Turn 4: bash "ssh user@server" → expect environment/ssh
 
 Tests: `commands:` regex matching, multiple independent triggers.
 
+### Scenario 2b: Per-Segment Command Matching (ADR-188 item 3a)
+
+```
+Turn 1: bash `echo "git commit later" && cat > notes.md <<'EOF' … git commit … EOF` → nothing
+Turn 2: bash "cd repo && git add -A && git commit -m 'fix: auth bug'" → expect cmd-trigger (^git\ commit)
+```
+
+Tests: a `commands:` regex runs against each operative segment, so an anchored pattern matches after `&&`, and echo arguments and heredoc bodies do not fire it.
+
 ### Scenario 3: File Edit Triggers
 
 ```

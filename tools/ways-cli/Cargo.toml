@@ -36,6 +36,9 @@ attend-config = { path = "../attend-config" }
 # The settings screens (ADR-504 §8) and the introspect screens (§9). Linked
 # into `ways`, never called on a hook path (§11).
 agent-tui = { path = "../agent-tui" }
+# Splits a Bash call into segments; the `commands:` lane matches each
+# operative segment (ADR-188 item 3a).
+command-describer = { path = "../command-describer" }
 
 [target.'cfg(windows)'.dependencies]
 # Process liveness for `ways projects relocate` (OpenProcess + GetExitCodeProcess),

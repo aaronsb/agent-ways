@@ -1,6 +1,7 @@
 //! The command (Bash) lane: `PreToolUse` on a shell command.
 
 use anyhow::Result;
+use command_describer::Segment;
 use std::collections::HashSet;
 
 use crate::cmd::show::ContextBudget;
@@ -10,8 +11,8 @@ use super::candidates::{check_when, collect_candidates, collect_checks};
 use super::order::{order_hits, Hit};
 use super::scoring::{batch_embed_score, capture_show_check, capture_show_way, EmbedScores};
 use super::{
-    check_semantic_score, effective_thresholds, effective_thresholds_in_scan, emit_hook_context,
-    has_shown_ancestor, lookbehind, reduce, regex_matches, regex_span, WayCandidate, BUDGET_COMMAND,
+    capped_span, check_semantic_score, compile_trigger, effective_thresholds, effective_thresholds_in_scan,
+    emit_hook_context, has_shown_ancestor, lookbehind, reduce, regex_span, WayCandidate, BUDGET_COMMAND,
 };
 
 // ── Command scan ────────────────────────────────────────────────
@@ -39,7 +40,8 @@ pub fn command(
     // ADR-130: cap embed input. Heredoc bodies (gh pr create --body
     // "$(cat <<EOF…)"), curl -d JSON payloads, and similar argument-
     // body bash commands can run kilobytes long. The regex matchers
-    // below see the full cmd; only the embed query is reduced.
+    // below see every operative segment in full; only the embed query is
+    // reduced.
     // ADR-160 stage 1 (contextualize): a bare command is an action, not intent.
     // Prepend the assistant's prose since the last human turn — the reasoning that
     // led to this tool call — so the semantic lane matches on intent. Fail-safe:
@@ -55,7 +57,9 @@ pub fn command(
     let reduced_for_embed = reduce::reduce_for_embed(&query_for_embed, BUDGET_COMMAND);
     let embed_matches = batch_embed_score(&reduced_for_embed);
 
-    let hits = command_hits(&CommandSurface { cmd, description, session_id, scope: &scope, project_dir: &project_dir }, &candidates, &embed_matches);
+    let command = ShellCommand::parse(cmd);
+    let surface = CommandSurface { command: &command, description, session_id, scope: &scope, project_dir: &project_dir };
+    let hits = command_hits(&surface, &candidates, &embed_matches);
     let mut shown: HashSet<String> = HashSet::new();
     for hit in &hits {
         let (channel, span, needs_parent) = &hit.payload;
@@ -95,7 +99,7 @@ pub fn command(
         let mut match_score: f64 = 0.0;
 
         if let Some(ref cmds_pattern) = check.commands {
-            if regex_matches(cmds_pattern, cmd) {
+            if command.span(cmds_pattern).is_some() {
                 match_score = 3.0;
             }
         }
@@ -119,9 +123,39 @@ pub fn command(
     Ok(())
 }
 
+/// A Bash call as the `commands:` regexes read it (ADR-188 item 3a): its
+/// operative segments, parsed once per call. A regex runs against each
+/// segment's own text, so `^gh` matches after `git push &&`, and one
+/// program's arguments cannot satisfy a pattern meant for another. It also
+/// runs against the text from the program word, so `^gh` matches
+/// `GH_TOKEN=x gh …` and `timeout 60 gh …`. Heredoc bodies, navigation
+/// (`cd`, `echo`, assignments) and filters after a pipe are not matched.
+#[derive(Default)]
+pub(super) struct ShellCommand {
+    operative: Vec<Segment>,
+}
+
+impl ShellCommand {
+    pub(super) fn parse(cmd: &str) -> Self {
+        let operative = command_describer::parse(cmd).into_iter().filter(Segment::is_operative).collect();
+        ShellCommand { operative }
+    }
+
+    /// The first match of a `commands:` regex in any operative segment,
+    /// capped for the event log like [`regex_span`]; `None` for no match or
+    /// an invalid pattern.
+    pub(super) fn span(&self, pattern: &str) -> Option<String> {
+        let re = compile_trigger(pattern)?;
+        self.operative
+            .iter()
+            .find_map(|s| re.find(&s.text).or_else(|| re.find(s.program_text())))
+            .map(|m| capped_span(m.as_str()))
+    }
+}
+
 /// What the Bash lane matches a command against.
 pub(super) struct CommandSurface<'a> {
-    pub(super) cmd: &'a str,
+    pub(super) command: &'a ShellCommand,
     pub(super) description: Option<&'a str>,
     pub(super) session_id: &'a str,
     pub(super) scope: &'a str,
@@ -136,7 +170,7 @@ pub(super) fn command_hits(
     candidates: &[WayCandidate],
     embed_matches: &EmbedScores,
 ) -> Vec<Hit<(&'static str, Option<String>, bool)>> {
-    let CommandSurface { cmd, description, session_id, scope, project_dir } = *surface;
+    let CommandSurface { command, description, session_id, scope, project_dir } = *surface;
     // Way matching: commands regex + pattern regex + semantic (ADR-155 §4).
     // Hits are collected, then admitted in a fixed order (scan/order.rs).
     // Payload: (channel, matched span, fired only on this scan's parent boost).
@@ -150,12 +184,13 @@ pub(super) fn command_hits(
             continue;
         }
 
-        // Commands regex first, then the description pattern — capture the span
-        // of whichever matched (ADR-153 §3), with the pattern that matched it.
+        // Commands regex first, per operative segment, then the description
+        // pattern — capture the span of whichever matched (ADR-153 §3), with
+        // the pattern that matched it.
         let matched = way
             .commands
             .as_deref()
-            .and_then(|p| regex_span(p, cmd).map(|s| (p, s)))
+            .and_then(|p| command.span(p).map(|s| (p, s)))
             .or_else(|| match (description, way.pattern.as_deref()) {
                 // Pattern compiles case-insensitively (ADR-157), so match the
                 // description in its original case for a truer captured span.
@@ -203,4 +238,60 @@ pub(super) fn command_hits(
     }
     order_hits(&mut hits);
     hits
+}
+
+#[cfg(test)]
+mod shell_command_tests {
+    //! ADR-188 item 3a: a `commands:` regex runs per operative segment.
+    use super::ShellCommand;
+
+    fn span(pattern: &str, cmd: &str) -> Option<String> {
+        ShellCommand::parse(cmd).span(pattern)
+    }
+
+    #[test]
+    fn an_anchored_pattern_matches_after_a_connector() {
+        assert_eq!(span(r"^gh\ |^gh$", "git push && gh pr create --fill").as_deref(), Some("gh "));
+        assert_eq!(span(r"^git\ commit", "cd repo && git add -A && git commit -m x").as_deref(), Some("git commit"));
+        assert_eq!(span(r"^ssh\ ", "ls; ssh host uptime").as_deref(), Some("ssh "));
+    }
+
+    #[test]
+    fn one_programs_arguments_do_not_satisfy_another_programs_pattern() {
+        // The raw string matches each of these; no operative segment does.
+        assert_eq!(span(r"\battend\b", "cd ~/plugins/attend && ls"), None);
+        assert_eq!(span(r"\bmake\b", r#"echo "make it stick" && ls"#), None);
+        assert_eq!(span(r"git\ push", "git log | grep 'git push'"), None);
+        assert_eq!(span(r"git\ diff.*\.md", "git diff --stat; cat notes.md"), None);
+        assert_eq!(span(r"gh-tasks", "F=hooks/issues/gh-tasks; head -1 $F"), None);
+        // The program's own segment still matches.
+        assert_eq!(span(r"\bmake\b", r#"echo "build" && make test"#).as_deref(), Some("make"));
+    }
+
+    #[test]
+    fn a_pattern_matches_from_the_program_word() {
+        assert_eq!(span(r"^gh\ ", "GH_TOKEN=x gh pr create").as_deref(), Some("gh "));
+        assert_eq!(span(r"^gh\ ", "cd x && timeout 580 gh pr checks 29 --watch").as_deref(), Some("gh "));
+        assert_eq!(span(r"^cargo", "TMPDIR=/tmp/t cargo test -p ways").as_deref(), Some("cargo"));
+        // The segment text, wrapper included, is still matched.
+        assert_eq!(span(r"\bsudo\b", "sudo -n true && yay -S foo").as_deref(), Some("sudo"));
+    }
+
+    #[test]
+    fn heredoc_text_does_not_match() {
+        let body = "cat > notes.md <<'EOF'\nthen git commit and make test\nEOF\nls";
+        assert_eq!(span(r"git\ commit", body), None);
+        assert_eq!(span(r"\bmake\b", body), None);
+        let pr = "gh pr create --title t --body \"$(cat <<'EOF'\nRan make test and git push.\nEOF\n)\"";
+        assert_eq!(span(r"\bmake\b", pr), None);
+        assert_eq!(span(r"git\ push", pr), None);
+        assert_eq!(span(r"gh\ pr\ create", pr).as_deref(), Some("gh pr create"));
+    }
+
+    #[test]
+    fn no_segment_or_a_bad_pattern_is_no_match() {
+        assert_eq!(span(r"gh", ""), None);
+        assert_eq!(span(r"(unclosed", "gh pr list"), None);
+        assert_eq!(ShellCommand::default().span(r".*"), None);
+    }
 }

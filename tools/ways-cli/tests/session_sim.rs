@@ -506,6 +506,23 @@ fn scenario_2_command_triggers() {
     // No new markers beyond what we already have
 }
 
+/// ADR-188 item 3a: `commands:` matches each operative segment. cmd-trigger's
+/// `^git\ commit` misses the raw string of a chained call and must match the
+/// segment; text that runs no `git commit` must not fire it.
+#[test]
+fn scenario_2b_command_triggers_match_per_segment() {
+    let s = Session::new("s2b");
+
+    // An echo argument and a heredoc body name the command; neither runs it.
+    s.scan_command("echo \"git commit later\" && cat > notes.md <<'EOF'\ngit commit -m x\nEOF");
+    assert_marker_absent("testdomain/cmd-trigger", &s.id);
+
+    // The anchored pattern matches the segment after the connector.
+    let out = s.scan_command("cd repo && git add -A && git commit -m 'fix: auth bug'");
+    assert_marker_exists("testdomain/cmd-trigger", &s.id);
+    assert_pretooluse_envelope(&out, "# Commit Messages");
+}
+
 // ── Scenario 3: File Edit Triggers ─────────────────────────────
 
 #[test]
