@@ -43,6 +43,11 @@ basis:
   - evidence: "tools/ways-agent-core/profiles.yaml ships two engine profiles, `anthropic` and `openrouter`, both Claude Haiku 4.5 with threshold 0.3, timeout_ms 2000, turns 1, max_turn_chars 1200, concurrency 8 and max_candidates 8; tools/ways-agent-core/src/profile.rs: `SHIPPED_ORDER` is anthropic then openrouter, and `resolve` takes the user layer's `engine` when set, else the first shipped profile whose provider has a key, else no gate; tools/ways-agent-core/src/settings.rs exposes the choice as `gate.engine`"
   - evidence: "tools/ways-cli/src/cmd/scan/gate.rs: on the prompt lane any judge failure, a deadline included, fails open and the matcher's decision stands (ADR-196 §7); a config that does not parse fails closed, with the gate off and nothing sent"
   - evidence: ADR-707, the judge study, where the judge reading narration passed more off-topic candidates than the judge reading the described call alone
+  - operator: aaronsb
+    level: directed
+    said: "we're using haiku 4.5 because it proved to be more effective than 5.5. let's continue with 4.5 through our improvements, then once we got everything working we'll re-evaluate the model choice and see if 5.5 is better"
+    via: "chat, session 2026-10-22"
+  - evidence: "ADR-709, the handoff spike: a process a `prompt.submit` handler starts beside `next(e)` answers the job a UserPromptSubmit settings hook waits on inside `next(e)`; `$.session.id()` equals the hook's `session_id`; `prompt.submit` fires under `claude -p` with origin `sdk`; and at judge sizes `claude-haiku-4-5` answered with median 1162 ms and 2 of 20 calls over 2000 ms, against median 1938 ms and 23 of 50 for the alias `haiku`, which Claude Code resolves to claude-haiku-5-5"
   - precedent: ADR-196
   - precedent: ADR-502
   - precedent: ADR-188
@@ -57,7 +62,7 @@ considered:
   - operator: aaronsb
     said: "1131 reads as we discussed I am ok with it"
     via: "chat in the agent-ways session, 2026-10-22, after reading PR #1131 (the PR body listed the three agent-made calls: Bash lane judges every candidate in batches of 8; tool_event default [PreToolUse, UserPromptExpansion]; no-judge setup writes gate.mode off)"
-status: proposed
+status: accepted
 date: 2026-10-22
 deciders:
   - aaronsb
@@ -69,6 +74,7 @@ related:
   - ADR-502
   - ADR-606
   - ADR-707
+  - ADR-709
 observable:
   - "`ways settings`, gate section, lists three engine profiles: anthropic, openrouter and claude-code, shown as \"Claude Code internal\"; selecting one writes `gate.engine`"
   - "Switching `gate.engine` between claude-code and anthropic in `ways settings` moves judging between the ways mod module and the ways agent; over a session of prompts and Bash calls on each setting, every judged candidate has exactly one judge request across both paths, counted from `judge_call` lines by candidate"
@@ -97,7 +103,7 @@ observable:
 
 ## Summary
 
-- **Decided:** a third shipped engine profile, `claude-code`, shown as "Claude Code internal", sits beside `anthropic` and `openrouter`. It has no key and names the model as an alias Claude Code resolves (`haiku`). Its threshold and limits are the others' until measured. Its judge runs inside Claude Code, in a ways module loaded as a mod, through `$.model.complete` on the session's own signed-in account. Each session has one judge engine, resolved once from `gate.engine` and held for the whole session, for every lane the gate covers, the prompt lane and ADR-188's Bash lane:
+- **Decided:** a third shipped engine profile, `claude-code`, shown as "Claude Code internal", sits beside `anthropic` and `openrouter`. It has no key and pins the model to `claude-haiku-4-5`, as the key profiles do. Its threshold and limits are the others' until measured. Its judge runs inside Claude Code, in a ways module loaded as a mod, through `$.model.complete` on the session's own signed-in account. Each session has one judge engine, resolved once from `gate.engine` and held for the whole session, for every lane the gate covers, the prompt lane and ADR-188's Bash lane:
   - With `claude-code` selected and the mod loaded, the mod module is the only judge and the ways agent sends no provider calls.
   - With `claude-code` selected and no mod loaded, the session resolves to a configured key engine, anthropic then openrouter, as the operator directed; with no key either, `ways agent status`, the settings gate screen and the log say to configure one.
   - With `anthropic` or `openrouter` selected, the module stands down even when it is loaded.
@@ -119,7 +125,7 @@ The judge came late to this project because it needed a separate API key to mana
 
 1. **The profile.** `tools/ways-agent-core/profiles.yaml` gains `claude-code`, display name "Claude Code internal", beside `anthropic` and `openrouter`:
    - provider `claude-code`, a new value of `Provider` with no key file and no key environment variable;
-   - model `haiku`, an alias Claude Code resolves and allowlist-checks like a `--model` value, so the profile follows Claude Code's own Haiku;
+   - model `claude-haiku-4-5`, the model every engine uses. The operator chose Haiku 4.5 over Haiku 5.5 as the more effective judge for this build, and the choice is re-evaluated once the engine and the Bash lane work end to end. The alias `haiku` is not used: under Claude Code it resolves to claude-haiku-5-5, which thinks, and at judge sizes it ran slower and passed the 2000 ms deadline more often (ADR-709 finding 5);
    - threshold 0.3, timeout_ms 2000, turns 1, max_turn_chars 1200, concurrency 8, max_candidates 8, as the shipped profiles, until the agreement and latency observables say otherwise.
 
    The user layer patches it like any profile. `SHIPPED_ORDER` stays anthropic then openrouter: an unset engine picks the first profile whose provider has a key, and `claude-code` has none, so it is chosen only by name. The profile is selectable, not a default. A release offers it only once the probe round trip in `observable` is recorded.
@@ -135,11 +141,13 @@ The judge came late to this project because it needed a separate API key to mana
 
    Selecting `claude-code` is the operator's approval to gate, as a working key is for the key engines (amending ADR-196 §6); `mode` keeps its meaning (enforce, shadow, off).
 
-3. **The host.** The judge runs in a ways component loaded into Claude Code: a small ways mod, or a ways module of the plugin agent-ways ships. It is not part of the attend mod, which carries messaging and session awareness. The module reads `gate.engine` and claims judge jobs only while it names `claude-code`. It registers itself as the session's judge host when the session starts, so the hook side and `ways agent status` can tell whether one is present, and it claims jobs only when its session's resolution names `claude-code`.
+3. **The host.** The judge runs in a ways component loaded into Claude Code: a small ways mod, or a ways module of the plugin agent-ways ships. It is not part of the attend mod, which carries messaging and session awareness. It registers itself as the session's judge host from `prompt.submit`, before each session id's first prompt reaches `next(e)`, so the hook side and `ways agent status` can tell whether one is present. It does not register at `session.start`, because `/clear` and an in-session `/resume` change the session id with no `session.start`. It reads its session's resolution through `ways judge` and claims jobs only when the resolution names `claude-code`.
 
-4. **The request.** The judge text is the gate's own (ADR-196 §2; ADR-188 item 3c's ordered block on the Bash lane). `$.model.complete` takes no tools, so the instruction asks for strict JSON in the shape of the `record_judgements` schema: one entry per candidate with its P(yes). The module parses the reply and validates it against the schema. A reply that does not parse or validate is a judge error with reason `invalid_reply`. The call sets `timeoutMs` to the profile's `timeout_ms`, since a `$` call's time does not count against a hook's budget, and records the reply's `usage`. No sampling parameter is sent; `complete` takes none, so #1130 does not reach this engine.
+4. **The request.** The judge text is the gate's own (ADR-196 §2; ADR-188 item 3c's ordered block on the Bash lane). `$.model.complete` takes no tools, so the instruction asks for strict JSON in the shape of the `record_judgements` schema: one entry per candidate with its P(yes). The module only transports: it sends the job's request through `$.model.complete` and hands the reply's text and `usage`, or its failure `reason`, back to the hook side. The hook side parses the reply and validates it against the schema in `judge::parse_reply`, which accepts a reply that is one fenced JSON block. A reply that does not parse or validate is a judge error with reason `invalid_reply`. The Bash lane's judge uses the same parser. The call sets `timeoutMs` to the profile's `timeout_ms`, since a `$` call's time does not count against a hook's budget. No sampling parameter is sent; `complete` takes none, so #1130 does not reach this engine.
 
 5. **The prompt lane.** The prompt lane's gate runs synchronously at UserPromptSubmit (ADR-196 §1). When the session's engine is `claude-code`, the hook writes the judge request as a job in the session's directory and waits for the verdict up to `timeout_ms` plus the read grace it allows the ways agent today. The module, in the same Claude Code process, claims the job, judges it through `$.model.complete` and writes the verdict back. How the module learns of a job promptly, by watching the job directory or from an in-process event of its own, is the build's choice, measured by the latency observable. A job not answered within the deadline is a deadline failure, handled as the prompt lane handles one today: it fails open, the matcher's decision stands, and `gate_fallback` is logged with reason `deadline` (ADR-196 §7). The module abandons the call at the same deadline.
+
+   **Note, 2026-10-22: the transport.** The build carries the handoff in a `prompt.submit` bracket, which ADR-709 tested with stand-ins. The mod's `prompt.submit` handler starts `next(e)`, which runs the UserPromptSubmit settings hooks and with them the ways scan, and does not await it. Alongside it, the handler spawns `ways judge take --session <id> --wait` with `$.process.spawn`. `take` returns when the scan writes a job or when the session's resolution names a key engine. When `next(e)` settles first, the handler stops `take` with the stream's `return()`, since `$.process.run` has no abort. On a job the handler calls `$.model.complete` with the job's request and pipes the reply to `ways judge answer`. Neither `next(e)` nor a `$` call is charged to the handler's budget. The mod's origin filter includes `sdk`, the origin `prompt.submit` reports under `claude -p`. This settles the choice the item above left to the build and changes no rule.
 
 6. **The Bash lane.** ADR-188 item 3c's jobs go to the deferred store as before. When the session's engine is `claude-code` the module claims and judges them, and on a key engine the adapter starts the ways agent detached. Either way the verdicts land in ADR-606's store and one collector delivers them. A judge failure on this lane delivers nothing, as ADR-188 item 3c says.
 
@@ -176,7 +184,7 @@ The judge came late to this project because it needed a separate API key to mana
 - A mod that loads late in a session leaves that session on the key engine it resolved to.
 - The prompt lane's judge now crosses a job file to a module in another part of the process; its latency is unmeasured, and a slow pickup fails open more often than the key path.
 - The judge's instruction differs between engines, a forced tool call on the key path and strict JSON on this one, so ADR-195's and ADR-707's numbers hold for `claude-code` only once the agreement observable is recorded.
-- Asked for strict JSON, Haiku through `$.model.complete` wrapped every reply of the probe in a ```json fence, so the module's parser must accept a reply that is one fenced JSON block, and treat anything else that does not parse as `invalid_reply`.
+- Asked for strict JSON, Haiku through `$.model.complete` wrapped every reply of the probe in a ```json fence, so `judge::parse_reply` accepts that shape (item 4); a model that answers in another shape fails as `invalid_reply`.
 - The engine depends on a preview API, and the module is one more component to ship and keep working across Claude Code builds. Mods are a preview feature, so the first setup choice works only on Claude Code versions that enable them; the setup step has to detect that rather than offer a choice that fails.
 - `judge_ready` grows from a key check into an engine check, and every surface that reads it changes with it.
 
@@ -184,7 +192,7 @@ The judge came late to this project because it needed a separate API key to mana
 
 - Mods are off by default, so most installs keep the key engines; the per-session rule changes nothing for them.
 - The shipped profiles are compiled into the agent (`include_str!`), so adding `claude-code` ships with a `ways-agent` release.
-- `profile::valid_model_id` already admits `haiku`; the `Provider` enum, its key lookup and the settings choice list gain one value each.
+- `profile::valid_model_id` already admits `claude-haiku-4-5`; the `Provider` enum, its key lookup and the settings choice list gain one value each.
 
 ## Alternatives Considered
 
@@ -193,6 +201,7 @@ The judge came late to this project because it needed a separate API key to mana
 - **No fallback: `claude-code` without a host leaves the session unjudged even where a key exists.** This record's earlier text. Replaced on the operator's answer that the fallback for an unavailable engine is one of the key paths; resolving it once per session keeps one judge per session.
 - **A named `gate.fallback_engine` setting.** Lets the operator pick the fallback explicitly. Not added: the shipped key order already decides it, and a setting can be added when a user needs a different order.
 - **Host the judge in the attend mod.** It is the mod agent-ways already ships. Rejected: attend carries messaging and session awareness, and the judge is the ways engine's concern; the operator asked that concerns stay separate.
+- **Name the model as the alias `haiku`.** The profile would follow whichever Haiku Claude Code resolves. Not adopted: under Claude Code 2.1.308 the alias resolves to claude-haiku-5-5, which the operator judged less effective than Haiku 4.5 for this gate, and which at judge sizes ran slower, with 23 of 50 calls past 2000 ms (ADR-709).
 - **`$.model.fork`.** The judge would see the session's whole transcript from the prompt cache. Rejected: in ADR-707 narration in the judge's input brought off-topic passes back, and a fork pays for the whole prefix again whenever the cache entry has lapsed.
 - **`$.model.classify`.** One label per text with a fixed prompt. Rejected: the gate judges up to eight candidates in one request against an instruction of its own and needs P(yes) per candidate, which a single label does not give.
 - **Make the prompt lane fail closed when the selected engine is unavailable.** Fewer unjudged injections in a run without the mod. Not adopted here: ADR-196 §7's fail-open rule covers every judge failure on the prompt lane, and changing it is a decision about the gate as a whole, not about this engine.
