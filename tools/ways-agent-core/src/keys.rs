@@ -341,10 +341,10 @@ pub fn clear_check(provider: Provider) {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Readiness {
     /// The gate runs in this mode (enforce or shadow): on `claude-code` with
-    /// the ways-judge mod installed, or on a key engine whose key file passed
-    /// its last check.
+    /// the ways-judge mod installed and enabled, or on a key engine whose key
+    /// file passed its last check.
     Ready(Provider, crate::profile::Mode),
-    /// `claude-code` is named and the ways-judge mod is not installed, so a
+    /// `claude-code` is named and the ways-judge mod is not enabled, so a
     /// session judges on this provider's key, which passed its last check
     /// (ADR-708 §2).
     Fallback(Provider, crate::profile::Mode),
@@ -356,6 +356,8 @@ pub enum Readiness {
     /// `claude-code` is named, the ways-judge mod is not installed, and no
     /// key engine has a key file to stand in (ADR-708 §7).
     NoMod,
+    /// As [`Readiness::NoMod`], with the mod installed but disabled.
+    ModDisabled,
     /// The engine's key file has no check that describes it, or its last
     /// check found this result.
     Unverified(Provider, Option<String>),
@@ -370,15 +372,44 @@ impl Readiness {
     }
 }
 
-/// The judge's readiness, judged as the agent's key gate judges a record.
-/// `mod_installed` says whether the ways-judge mod is installed and enabled
-/// in Claude Code; it is asked only when the engine is `claude-code`. Whether
-/// the mod loaded is a per-session fact the session's resolution settles.
-pub fn judge_ready(mod_installed: impl FnOnce() -> bool) -> Readiness {
-    judge_ready_in(&crate::profile::user_layer_path(), &keys_dir(), &checks_dir(), mod_installed)
+/// Where the ways-judge mod stands in Claude Code's settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JudgeMod {
+    /// Installed and enabled.
+    Enabled,
+    /// Installed and disabled.
+    Disabled,
+    /// Not installed.
+    Absent,
 }
 
-fn judge_ready_in(layer: &Path, keys: &Path, checks: &Path, mod_installed: impl FnOnce() -> bool) -> Readiness {
+/// The judge's readiness, judged as the agent's key gate judges a record.
+/// `judge_mod` says where the ways-judge mod stands in Claude Code; it is
+/// asked only when the engine is `claude-code`. Whether the mod loaded is a
+/// per-session fact the session's resolution settles.
+pub fn judge_ready(judge_mod: impl FnOnce() -> JudgeMod) -> Readiness {
+    judge_ready_in(&crate::profile::user_layer_path(), &keys_dir(), &checks_dir(), judge_mod)
+}
+
+/// True when the profile `engine` names runs on a key whose file passed its
+/// last check against the profile's model, as setup asks once it has added
+/// the key.
+pub fn key_engine_ready(engine: &str) -> bool {
+    key_engine_ready_in(&crate::profile::user_layer_path(), &keys_dir(), &checks_dir(), engine)
+}
+
+fn key_engine_ready_in(layer: &Path, keys: &Path, checks: &Path, engine: &str) -> bool {
+    use crate::profile::{profiles, Mode, UserLayer};
+    let Ok((user, _)) = UserLayer::load_with_findings(layer) else { return false };
+    match profiles(&user).get(engine) {
+        Some(p) if !p.provider.keyless() => {
+            matches!(key_readiness(p, Mode::Enforce, keys, checks, Readiness::Ready), Readiness::Ready(..))
+        }
+        _ => false,
+    }
+}
+
+fn judge_ready_in(layer: &Path, keys: &Path, checks: &Path, judge_mod: impl FnOnce() -> JudgeMod) -> Readiness {
     use crate::profile::{fails_closed, first_with_key, profiles, resolve, Mode, UserLayer};
     let user = match UserLayer::load_with_findings(layer) {
         Ok((user, findings)) => match fails_closed(&findings) {
@@ -399,13 +430,15 @@ fn judge_ready_in(layer: &Path, keys: &Path, checks: &Path, mod_installed: impl 
     if !settings.profile.provider.keyless() {
         return key_readiness(&settings.profile, settings.mode, keys, checks, Readiness::Ready);
     }
-    if mod_installed() {
+    let state = judge_mod();
+    if state == JudgeMod::Enabled {
         return Readiness::Ready(settings.profile.provider, settings.mode);
     }
-    // No mod: a session takes the first shipped key engine (ADR-708 §2).
+    // No mod enabled: a session takes the first shipped key engine (ADR-708 §2).
     let all = profiles(&user);
     match first_with_key(&all, has_key).and_then(|name| all.get(name)) {
         Some(stand_in) => key_readiness(stand_in, settings.mode, keys, checks, Readiness::Fallback),
+        None if state == JudgeMod::Disabled => Readiness::ModDisabled,
         None => Readiness::NoMod,
     }
 }
@@ -530,7 +563,7 @@ mod tests {
         use crate::profile::Mode;
         let base = scratch("ready");
         let (layer, keys, checks) = (base.join("agent.yaml"), base.join("keys"), base.join("state"));
-        let ready = || judge_ready_in(&layer, &keys, &checks, || false);
+        let ready = || judge_ready_in(&layer, &keys, &checks, || JudgeMod::Absent);
         assert_eq!(ready(), Readiness::NoKey(None));
         assert!(!ready().settled());
 
@@ -601,7 +634,7 @@ mod tests {
         let (layer, keys, checks) = (base.join("agent.yaml"), base.join("keys"), base.join("state"));
         std::fs::create_dir_all(&base).unwrap();
         std::fs::write(&layer, "engine: claude-code\n").unwrap();
-        let ready = |installed: bool| judge_ready_in(&layer, &keys, &checks, || installed);
+        let ready = |installed: bool| judge_ready_in(&layer, &keys, &checks, || if installed { JudgeMod::Enabled } else { JudgeMod::Absent });
         assert_eq!(ready(true), Readiness::Ready(Provider::ClaudeCode, Mode::Enforce));
         assert!(ready(true).settled());
         assert_eq!(ready(false), Readiness::NoMod);
@@ -618,7 +651,7 @@ mod tests {
         let (layer, keys, checks) = (base.join("agent.yaml"), base.join("keys"), base.join("state"));
         std::fs::create_dir_all(&base).unwrap();
         std::fs::write(&layer, "engine: claude-code\n").unwrap();
-        let ready = |installed: bool| judge_ready_in(&layer, &keys, &checks, || installed);
+        let ready = |installed: bool| judge_ready_in(&layer, &keys, &checks, || if installed { JudgeMod::Enabled } else { JudgeMod::Absent });
         let source = Source::File(store_in(&keys, Provider::Openrouter, "sk-or-v1-abcdefghijklmnop").unwrap());
         // The key engine that would stand in has to pass its check too.
         assert_eq!(ready(false), Readiness::Unverified(Provider::Openrouter, None));
@@ -640,7 +673,7 @@ mod tests {
         for engine in ["claude-code", "anthropic"] {
             std::fs::write(&layer, format!("engine: {engine}\nmode: off\n")).unwrap();
             for installed in [false, true] {
-                assert_eq!(judge_ready_in(&layer, &keys, &checks, || installed), Readiness::Off, "{engine} {installed}");
+                assert_eq!(judge_ready_in(&layer, &keys, &checks, || if installed { JudgeMod::Enabled } else { JudgeMod::Absent }), Readiness::Off, "{engine} {installed}");
             }
         }
         std::fs::remove_dir_all(&base).unwrap();
@@ -652,10 +685,47 @@ mod tests {
         let (layer, keys, checks) = (base.join("agent.yaml"), base.join("keys"), base.join("state"));
         std::fs::create_dir_all(&base).unwrap();
         std::fs::write(&layer, "engine: anthropic\n").unwrap();
-        let probe = || -> bool { panic!("the mod probe ran for a key engine") };
+        let probe = || -> JudgeMod { panic!("the mod probe ran for a key engine") };
         assert_eq!(judge_ready_in(&layer, &keys, &checks, probe), Readiness::NoKey(Some(Provider::Anthropic)));
         std::fs::remove_file(&layer).unwrap();
         assert_eq!(judge_ready_in(&layer, &keys, &checks, probe), Readiness::NoKey(None));
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn a_disabled_mod_with_no_key_reads_as_disabled_not_absent() {
+        use crate::profile::Mode;
+        let base = scratch("mod-disabled");
+        let (layer, keys, checks) = (base.join("agent.yaml"), base.join("keys"), base.join("state"));
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(&layer, "engine: claude-code\n").unwrap();
+        assert_eq!(judge_ready_in(&layer, &keys, &checks, || JudgeMod::Disabled), Readiness::ModDisabled);
+        assert!(!Readiness::ModDisabled.settled());
+        assert_eq!(judge_ready_in(&layer, &keys, &checks, || JudgeMod::Absent), Readiness::NoMod);
+        // A checked key stands in for a disabled mod as for an absent one.
+        let source = Source::File(store_in(&keys, Provider::Anthropic, "sk-ant-abcdefghijklmnop").unwrap());
+        std::fs::create_dir_all(&checks).unwrap();
+        let text = serde_json::to_string(&CheckRecord::now("valid", Provider::Anthropic.recommended_model(), &source)).unwrap();
+        std::fs::write(checks.join("key-check-anthropic.json"), text).unwrap();
+        assert_eq!(judge_ready_in(&layer, &keys, &checks, || JudgeMod::Disabled), Readiness::Fallback(Provider::Anthropic, Mode::Enforce));
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn a_key_engine_is_ready_once_its_key_file_passed_its_check() {
+        let base = scratch("key-engine-ready");
+        let (layer, keys, checks) = (base.join("agent.yaml"), base.join("keys"), base.join("state"));
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(&layer, "engine: claude-code\n").unwrap();
+        assert!(!key_engine_ready_in(&layer, &keys, &checks, "anthropic"), "no key");
+        let source = Source::File(store_in(&keys, Provider::Anthropic, "sk-ant-abcdefghijklmnop").unwrap());
+        assert!(!key_engine_ready_in(&layer, &keys, &checks, "anthropic"), "stored, not checked");
+        std::fs::create_dir_all(&checks).unwrap();
+        let text = serde_json::to_string(&CheckRecord::now("valid", Provider::Anthropic.recommended_model(), &source)).unwrap();
+        std::fs::write(checks.join("key-check-anthropic.json"), text).unwrap();
+        assert!(key_engine_ready_in(&layer, &keys, &checks, "anthropic"));
+        assert!(!key_engine_ready_in(&layer, &keys, &checks, "openrouter"), "another engine's key");
+        assert!(!key_engine_ready_in(&layer, &keys, &checks, "claude-code"), "a keyless engine has no key to be ready");
         std::fs::remove_dir_all(&base).unwrap();
     }
 }

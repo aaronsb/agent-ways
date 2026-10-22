@@ -312,6 +312,7 @@ fn actions(app: &Path, channel: &Channel, relation: Relation, head: Option<&str>
     out.push((Mark::Act, "regenerate the corpus".to_string()));
     let attend = comps.iter().find(|c| c.name == MOD);
     let judge = comps.iter().find(|c| c.name == JUDGE_MOD);
+    let claude_code_chosen = claude_code_engine();
     for t in crate::config::global().targets() {
         let dir = t.dir();
         if !t.enabled {
@@ -322,16 +323,30 @@ fn actions(app: &Path, channel: &Channel, relation: Relation, head: Option<&str>
         if ways_core::settings::attend_mod_install(&t.config_path()) {
             out.extend(mod_action(&dir, MOD, attend));
         }
-        // Repair keeps the ways-judge mod current where the target has it;
-        // `ways judge-setup` installs it.
-        if attend_mod::listed_in(&attend_mod::JUDGE, &dir) {
-            out.extend(mod_action(&dir, JUDGE_MOD, judge));
-        } else if judge.is_some() {
-            out.push((Mark::Info, format!("{}: the ways-judge mod is not installed; `ways judge-setup` installs it", dir.display())));
-        }
+        out.extend(judge_mod_action(&dir, attend_mod::recorded(&attend_mod::JUDGE, &dir), judge, claude_code_chosen));
     }
     out.push((Mark::Info, "check the judge's keys".to_string()));
     out
+}
+
+/// True when `gate.engine` names a profile on the keyless `claude-code`
+/// provider (ADR-708 §1).
+fn claude_code_engine() -> bool {
+    use ways_agent_core::profile::{profiles, user_layer_path, UserLayer};
+    let Ok(user) = UserLayer::load(&user_layer_path()) else { return false };
+    user.engine.as_ref().and_then(|e| profiles(&user).get(e).map(|p| p.provider.keyless())).unwrap_or(false)
+}
+
+/// The ways-judge mod's line for the target at `dir`. Repair keeps the mod
+/// installed and current where setup `recorded` installing it; with Claude
+/// Code internal chosen and no record, `ways judge-setup` is the way to it;
+/// under a key engine an absent mod is nothing to report.
+fn judge_mod_action(dir: &Path, recorded: bool, judge: Option<&Component>, claude_code_chosen: bool) -> Option<(Mark, String)> {
+    if recorded {
+        return mod_action(dir, JUDGE_MOD, judge);
+    }
+    (judge.is_some() && claude_code_chosen)
+        .then(|| (Mark::Info, format!("{}: the ways-judge mod is not installed; `ways judge-setup` installs it", dir.display())))
 }
 
 /// What repair does to an installed mod in the target at `dir`: update it
@@ -604,5 +619,17 @@ mod tests {
         assert_eq!(mod_action(dir, MOD, Some(&attend)), Some((Mark::Act, "/t/claude: update the attend mod 0.28.1 → 0.28.4".into())));
         assert_eq!(mod_action(dir, JUDGE_MOD, None), None, "no row: the app ships no ways-judge mod");
         assert!(is_mod(MOD) && is_mod(JUDGE_MOD) && !is_mod("ways"));
+    }
+
+    #[test]
+    fn the_judge_mod_line_follows_the_record_and_the_chosen_engine() {
+        let dir = Path::new("/t/claude");
+        let judge = comp(JUDGE_MOD, Some("1.50.0"), Some("1.51.0"));
+        let recorded = judge_mod_action(dir, true, Some(&judge), false).unwrap();
+        assert_eq!(recorded.0, Mark::Act, "recorded: repair updates it whatever the engine");
+        let hint = judge_mod_action(dir, false, Some(&judge), true).unwrap();
+        assert_eq!(hint, (Mark::Info, "/t/claude: the ways-judge mod is not installed; `ways judge-setup` installs it".into()));
+        assert_eq!(judge_mod_action(dir, false, Some(&judge), false), None, "a key engine: nothing to say");
+        assert_eq!(judge_mod_action(dir, false, None, true), None, "the app ships no mod");
     }
 }

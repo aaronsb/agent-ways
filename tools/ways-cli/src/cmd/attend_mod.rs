@@ -10,8 +10,9 @@
 //! shipped one. A disabled target, and every target once
 //! `attend_mod.install` is false, has the plugin uninstalled and the
 //! marketplace removed. `ways judge-setup` installs `ways-judge@agent-ways`
-//! when the operator picks Claude Code internal, and reconcile then keeps it
-//! current in each target that has it, as it does attend.
+//! when the operator picks Claude Code internal and records the request per
+//! target; reconcile then keeps it installed and current in each target that
+//! holds the record, and withdraws it with attend from a disabled one.
 //!
 //! Each call runs under `CLAUDE_CONFIG_DIR` by the rule ADR-501 item 9 set for
 //! the MCP registration (see [`super::mcp_register::config_dir`]), and is
@@ -49,12 +50,27 @@ pub struct Mod {
     pub id: &'static str,
     /// How report lines name it.
     pub label: &'static str,
+    /// The oldest Claude Code whose mod API carries every call the mod makes.
+    pub min_claude_code: &'static str,
+    /// For a mod installed on request rather than by every repair, the file
+    /// beside a target's marketplace record that says the request was made.
+    pub record: Option<&'static str>,
 }
 
-/// attend's agent-facing driver (ADR-406).
-pub const ATTEND: Mod = Mod { name: "attend", id: "attend@agent-ways", label: "attend mod" };
-/// The judge host for the `claude-code` engine (ADR-708 §3).
-pub const JUDGE: Mod = Mod { name: "ways-judge", id: "ways-judge@agent-ways", label: "ways-judge mod" };
+/// attend's agent-facing driver (ADR-406): function-hook modules, which
+/// Claude Code 2.1.296 offers. Every repair installs it.
+pub const ATTEND: Mod =
+    Mod { name: "attend", id: "attend@agent-ways", label: "attend mod", min_claude_code: "2.1.296", record: None };
+/// The judge host for the `claude-code` engine (ADR-708 §3). Beside the
+/// modules it calls `$.model.complete` and `$.process.spawn`, which the mod
+/// types of Claude Code 2.1.304 carry. `ways judge-setup` installs it.
+pub const JUDGE: Mod = Mod {
+    name: "ways-judge",
+    id: "ways-judge@agent-ways",
+    label: "ways-judge mod",
+    min_claude_code: "2.1.304",
+    record: Some("ways-judge-installed"),
+};
 
 /// The marketplace folder in the app source.
 fn marketplace_dir(source_root: &Path) -> PathBuf {
@@ -189,7 +205,9 @@ fn market(have: &Installed, dir: &str, recorded: Option<&str>) -> Market {
         Some("") => Market::Foreign("a source that is not a local folder".to_string()),
         Some(path) if same(path, dir) => Market::Current,
         Some(path) if recorded.is_some_and(|r| same(path, r)) => Market::Moved,
-        Some(path) if have.ours.is_some() && gone(path) => Market::Moved,
+        // Any plugin of ours from it marks it ours, not only this mod: the
+        // other mod's pass would otherwise call it foreign.
+        Some(path) if (have.ours.is_some() || !have.siblings.is_empty()) && gone(path) => Market::Moved,
         Some(path) => Market::Foreign(path.to_string()),
     }
 }
@@ -250,10 +268,11 @@ fn plugin_calls(have: &Installed, shipped: &str, refresh: bool) -> Vec<Call> {
     }
 }
 
-/// Remove `m`, and the marketplace where it is ours and no other of our
-/// plugins is installed from it. Under a marketplace that is not ours, the
-/// mod is the operator's too.
-pub fn plan_withdraw(have: &Installed, dir: &str, recorded: Option<&str>, recover: &str) -> Plan {
+/// Remove `m`, and the marketplace where it is ours, no other of our plugins
+/// is installed from it, and no other mod is `wanted_by_other` in this
+/// target. Under a marketplace that is not ours, the mod is the operator's
+/// too.
+pub fn plan_withdraw(have: &Installed, dir: &str, recorded: Option<&str>, recover: &str, wanted_by_other: bool) -> Plan {
     let mut plan = Plan::default();
     match market(have, dir, recorded) {
         Market::Foreign(from) => plan.notes.push(foreign_note(&from, recover)),
@@ -261,7 +280,9 @@ pub fn plan_withdraw(have: &Installed, dir: &str, recorded: Option<&str>, recove
             if have.ours.is_some() {
                 plan.calls.push(Call::Uninstall);
             }
-            if have.siblings.is_empty() {
+            // Another mod installed from it, or recorded as wanted and about
+            // to be installed again, keeps it.
+            if have.siblings.is_empty() && !wanted_by_other {
                 plan.calls.push(Call::MarketplaceRemove);
             }
         }
@@ -278,20 +299,47 @@ fn query(m: &Mod, claude: &Path, cfg: Option<&Path>) -> Result<Installed, String
     Ok(parse_installed(m, &markets, &plugins))
 }
 
-/// Where a target records the folder a repair added the marketplace from,
-/// beside its settings merge base. One record serves every mod, since they
-/// share the marketplace.
+/// A file of this target's beside its settings merge base.
+fn state_file(dest_root: &Path, name: &str) -> PathBuf {
+    super::reconcile::base_path_for(&crate::paths::state_root(), dest_root).with_file_name(name)
+}
+
+/// Where a target records the folder a repair added the marketplace from.
+/// One record serves every mod, since they share the marketplace.
 fn record_path(dest_root: &Path) -> PathBuf {
-    super::reconcile::base_path_for(&crate::paths::state_root(), dest_root).with_file_name("attend-mod-marketplace")
+    state_file(dest_root, "attend-mod-marketplace")
 }
 
 fn read_record(dest_root: &Path) -> Option<String> {
     std::fs::read_to_string(record_path(dest_root)).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
-/// Run a plan's calls in order, stopping at the first failure, and keep the
-/// record of where the marketplace was added from. Returns one line per call
-/// made and per note.
+/// True when `m` is installed on request and the target records that the
+/// request was made. Repair keeps such a mod installed from then on: the
+/// record outlives a marketplace removal that took the mod with it.
+pub fn recorded(m: &Mod, dest_root: &Path) -> bool {
+    m.record.is_some_and(|name| state_file(dest_root, name).is_file())
+}
+
+/// True when a mod other than `m` is recorded as wanted in the target, so a
+/// withdrawal of `m` from an enabled target leaves the marketplace for it.
+fn wanted_by_other(m: &Mod, dest_root: &Path) -> bool {
+    [ATTEND, JUDGE].iter().any(|o| o.id != m.id && recorded(o, dest_root))
+}
+
+/// Records that `m` was installed on request in the target at `dest_root`.
+pub fn record_request(m: &Mod, dest_root: &Path) -> std::io::Result<()> {
+    let Some(name) = m.record else { return Ok(()) };
+    let path = state_file(dest_root, name);
+    std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
+    std::fs::write(&path, format!("{}\n", m.id))
+}
+
+/// Run a plan's calls in order and keep the record of where the marketplace
+/// was added from. A failed marketplace call stops the plan, since every
+/// later call needs the marketplace; a failed plugin call is reported and
+/// the rest still run, so one mod's failure never costs the other its
+/// install. Returns one line per call made and per note.
 fn execute(m: &Mod, claude: &Path, cfg: Option<&Path>, dest_root: &Path, plan: &Plan, dry_run: bool) -> Vec<String> {
     let label = m.label;
     let mut lines: Vec<String> = plan.notes.iter().map(|n| format!("{label}: {n}")).collect();
@@ -320,7 +368,9 @@ fn execute(m: &Mod, claude: &Path, cfg: Option<&Path>, dest_root: &Path, plan: &
             }
             Err(e) => {
                 lines.push(format!("{label}: ⚠ `claude {}` failed: {e}", call.args(m).join(" ")));
-                break;
+                if matches!(call, Call::MarketplaceAdd(_) | Call::MarketplaceRemove | Call::MarketplaceUpdate) {
+                    break;
+                }
             }
         }
     }
@@ -332,8 +382,6 @@ fn execute(m: &Mod, claude: &Path, cfg: Option<&Path>, dest_root: &Path, plan: &
 pub enum Want {
     /// Install it, or update an older one.
     Install,
-    /// Update it where it is installed; install nothing.
-    Refresh,
     /// Remove it.
     Withdraw,
 }
@@ -344,11 +392,8 @@ pub fn converge(m: &Mod, source_root: &Path, dest_root: &Path, default_root: &Pa
     let label = m.label;
     let Some(shipped) = shipped_version(m, source_root) else { return Vec::new() };
     let Some(claude) = claude_bin() else {
-        return match want {
-            Want::Install => vec![format!("{label}: not installed: `claude` is not on PATH; re-run `ways manage repair --commit` once it is")],
-            Want::Withdraw => vec![format!("{label}: not checked: `claude` is not on PATH; re-run `ways manage repair --commit` once it is")],
-            Want::Refresh => Vec::new(),
-        };
+        let verb = if want == Want::Install { "installed" } else { "checked" };
+        return vec![format!("{label}: not {verb}: `claude` is not on PATH; re-run `ways manage repair --commit` once it is")];
     };
     let (cfg, _) = config_dir(dest_root, default_root);
     let have = match query(m, &claude, cfg.as_deref()) {
@@ -360,16 +405,18 @@ pub fn converge(m: &Mod, source_root: &Path, dest_root: &Path, default_root: &Pa
     let recover = recover_command(cfg.as_deref());
     let plan = match want {
         Want::Install => plan_converge(m, &have, &dir, recorded.as_deref(), &shipped, &recover),
-        Want::Refresh if have.ours.is_some() => plan_converge(m, &have, &dir, recorded.as_deref(), &shipped, &recover),
-        Want::Refresh => Plan::default(),
-        Want::Withdraw => plan_withdraw(&have, &dir, recorded.as_deref(), &recover),
+        Want::Withdraw => plan_withdraw(&have, &dir, recorded.as_deref(), &recover, wanted_by_other(m, dest_root)),
     };
     execute(m, &claude, cfg.as_deref(), dest_root, &plan, dry_run)
 }
 
-/// Remove `m` from a disabled target, before its links go.
+/// Remove `m` from a disabled target, before its links go. It runs where the
+/// source ships the mod or its marketplace, or the target records that the
+/// mod was installed on request, so a source that stopped shipping the mod
+/// still takes it out.
 pub fn withdraw(m: &Mod, source_root: &Path, dest_root: &Path, default_root: &Path, dry_run: bool) -> Vec<String> {
-    if shipped_version(m, source_root).is_none() {
+    let marketplace = marketplace_dir(source_root).join(".claude-plugin/marketplace.json").is_file();
+    if shipped_version(m, source_root).is_none() && !marketplace && !recorded(m, dest_root) {
         return Vec::new();
     }
     let Some(claude) = claude_bin() else {
@@ -379,24 +426,39 @@ pub fn withdraw(m: &Mod, source_root: &Path, dest_root: &Path, default_root: &Pa
     let dir = marketplace_dir(source_root).to_string_lossy().to_string();
     match query(m, &claude, cfg.as_deref()) {
         Ok(have) => {
-            let plan = plan_withdraw(&have, &dir, read_record(dest_root).as_deref(), &recover_command(cfg.as_deref()));
+            let plan = plan_withdraw(&have, &dir, read_record(dest_root).as_deref(), &recover_command(cfg.as_deref()), false);
             execute(m, &claude, cfg.as_deref(), dest_root, &plan, dry_run)
         }
         Err(e) => vec![format!("{}: ⚠ could not read Claude Code's plugins: {e}", m.label)],
     }
 }
 
-/// Whether the host can load `m`, decided as reconcile decides whether it can
-/// install attend: the app ships the mod, `claude` is on PATH, and its plugin
-/// CLI answers for the target at `dest_root`. The error says why not.
-pub fn host_can_load(m: &Mod, source_root: &Path, dest_root: &Path, default_root: &Path) -> Result<(), String> {
-    if shipped_version(m, source_root).is_none() {
-        return Err(format!("this app does not ship the {}", m.label));
+/// The version `claude --version` prints first, as in `2.1.309 (Claude Code)`.
+fn claude_code_version(out: &str) -> Option<&str> {
+    out.split_whitespace().next().filter(|v| v.split('.').count() >= 2 && v.split('.').all(|p| p.parse::<u32>().is_ok()))
+}
+
+/// Whether a `claude --version` output names a Claude Code that can run `m`.
+fn new_enough(m: &Mod, out: &str) -> Result<(), String> {
+    match claude_code_version(out) {
+        Some(v) if !super::update::version_older(v, m.min_claude_code) => Ok(()),
+        Some(v) => Err(format!("Claude Code {v} is older than {}, the first whose mods can run the {}", m.min_claude_code, m.label)),
+        None => Err(format!("`claude --version` printed no version ({})", out.trim())),
     }
+}
+
+/// Whether this host can run `m`: `claude` is on PATH, it is at least the
+/// Claude Code whose mod API carries the mod's calls (`m.min_claude_code`),
+/// and its plugin CLI answers for the target at `dest_root`. A mod's hooks
+/// module also loads behind a server-side rollout flag (ADR-406, addendum of
+/// 2026-10-12), which no local probe can read. The error names the host's
+/// limit.
+pub fn host_can_load(m: &Mod, dest_root: &Path, default_root: &Path) -> Result<(), String> {
     let claude = claude_bin().ok_or_else(|| "`claude` is not on PATH".to_string())?;
-    query(m, &claude, config_dir(dest_root, default_root).0.as_deref())
-        .map(|_| ())
-        .map_err(|e| format!("Claude Code's plugin CLI did not answer: {e}"))
+    let cfg = config_dir(dest_root, default_root).0;
+    let out = claude_stdout(&claude, cfg.as_deref(), &["--version"]).map_err(|e| format!("`claude --version` failed: {e}"))?;
+    new_enough(m, &out)?;
+    query(m, &claude, cfg.as_deref()).map(|_| ()).map_err(|e| format!("Claude Code's plugin CLI did not answer: {e}"))
 }
 
 /// The `enabledPlugins` value Claude Code keeps for `m` in a target's
@@ -549,7 +611,11 @@ mod tests {
         // marketplace ways-judge runs from stays.
         let mut h = have(Some(DIR), Some("0.17.0"));
         h.siblings.push("ways-judge@agent-ways".into());
-        assert_eq!(plan_withdraw(&h, DIR, None, "CMD").calls, vec![Call::Uninstall]);
+        assert_eq!(plan_withdraw(&h, DIR, None, "CMD", false).calls, vec![Call::Uninstall]);
+        // ways-judge is recorded as wanted but not installed now (a failed
+        // install lost it): the marketplace stays for its reinstall.
+        let alone = have(Some(DIR), Some("0.17.0"));
+        assert_eq!(plan_withdraw(&alone, DIR, None, "CMD", true).calls, vec![Call::Uninstall]);
     }
 
     /// A folder that still holds a marketplace, which this app never used.
@@ -567,7 +633,7 @@ mod tests {
         assert!(p.calls.is_empty(), "{p:?}");
         assert!(p.notes[0].contains(&dev), "{p:?}");
         assert!(p.notes[0].contains("run `CMD` and then `ways manage repair --commit`"), "the way out: {p:?}");
-        let w = plan_withdraw(&have(Some(&dev), Some("0.17.0")), DIR, None, "CMD");
+        let w = plan_withdraw(&have(Some(&dev), Some("0.17.0")), DIR, None, "CMD", false);
         assert!(w.calls.is_empty(), "its plugin is the operator's too: {w:?}");
         assert_eq!(w.notes.len(), 1);
         std::fs::remove_dir_all(&dev).ok();
@@ -578,7 +644,7 @@ mod tests {
         let gone = "/nowhere/agent-ways/plugins";
         let p = plan_converge(&ATTEND, &have(Some(gone), Some("0.17.0")), DIR, None, "0.17.0", "CMD");
         assert_eq!(p.calls, vec![Call::MarketplaceRemove, Call::MarketplaceAdd(DIR.into()), Call::Install]);
-        let w = plan_withdraw(&have(Some(gone), Some("0.17.0")), DIR, None, "CMD");
+        let w = plan_withdraw(&have(Some(gone), Some("0.17.0")), DIR, None, "CMD", false);
         assert_eq!(w.calls, vec![Call::Uninstall, Call::MarketplaceRemove]);
         // A checkout that is still there, only without plugins/ for now (a
         // branch switch), is not claimed: reported, with the way out.
@@ -587,7 +653,7 @@ mod tests {
         let p = plan_converge(&ATTEND, &have(Some(&dev), Some("0.17.0")), DIR, None, "0.17.0", "CMD");
         assert!(p.calls.is_empty(), "{p:?}");
         assert!(p.notes[0].contains("run `CMD`"), "{p:?}");
-        let w = plan_withdraw(&have(Some(&dev), Some("0.17.0")), DIR, None, "CMD");
+        let w = plan_withdraw(&have(Some(&dev), Some("0.17.0")), DIR, None, "CMD", false);
         assert!(w.calls.is_empty(), "{w:?}");
         // With no attend plugin from it, a gone folder proves nothing.
         let p = plan_converge(&ATTEND, &have(Some(gone), None), DIR, None, "0.17.0", "CMD");
@@ -614,12 +680,12 @@ mod tests {
 
     #[test]
     fn withdrawal_uninstalls_then_removes_the_marketplace() {
-        assert_eq!(plan_withdraw(&have(Some(DIR), Some("0.17.0")), DIR, None, "CMD").calls, vec![Call::Uninstall, Call::MarketplaceRemove]);
-        assert_eq!(plan_withdraw(&have(Some("/old/plugins"), Some("0.17.0")), DIR, Some("/old/plugins"), "CMD").calls, vec![Call::Uninstall, Call::MarketplaceRemove]);
-        assert_eq!(plan_withdraw(&have(None, None), DIR, None, "CMD"), Plan::default());
+        assert_eq!(plan_withdraw(&have(Some(DIR), Some("0.17.0")), DIR, None, "CMD", false).calls, vec![Call::Uninstall, Call::MarketplaceRemove]);
+        assert_eq!(plan_withdraw(&have(Some("/old/plugins"), Some("0.17.0")), DIR, Some("/old/plugins"), "CMD", false).calls, vec![Call::Uninstall, Call::MarketplaceRemove]);
+        assert_eq!(plan_withdraw(&have(None, None), DIR, None, "CMD", false), Plan::default());
         let mut h = have(None, None);
         h.foreign.push("attend@mine".into());
-        assert_eq!(plan_withdraw(&h, DIR, None, "CMD"), Plan::default(), "a foreign attend stays");
+        assert_eq!(plan_withdraw(&h, DIR, None, "CMD", false), Plan::default(), "a foreign attend stays");
     }
 
     #[test]
@@ -636,7 +702,7 @@ mod tests {
     }
 
     #[test]
-    fn a_source_without_the_mod_ships_no_version_and_cannot_load_it() {
+    fn a_source_without_the_mod_ships_no_version() {
         let app = std::env::temp_dir().join(format!("ways-attend-mod-ships-{}", std::process::id()));
         std::fs::create_dir_all(app.join("plugins/.claude-plugin")).unwrap();
         std::fs::create_dir_all(app.join("plugins/attend/.claude-plugin")).unwrap();
@@ -644,9 +710,34 @@ mod tests {
         std::fs::write(app.join("plugins/attend/.claude-plugin/plugin.json"), r#"{"version":"0.28.4"}"#).unwrap();
         assert_eq!(shipped_version(&ATTEND, &app).as_deref(), Some("0.28.4"));
         assert_eq!(shipped_version(&JUDGE, &app), None);
-        let err = host_can_load(&JUDGE, &app, &app, &app).unwrap_err();
-        assert!(err.contains("does not ship the ways-judge mod"), "{err}");
         std::fs::remove_dir_all(&app).unwrap();
+    }
+
+    #[test]
+    fn the_judge_mod_needs_a_claude_code_whose_mods_can_complete_and_spawn() {
+        assert_eq!(claude_code_version("2.1.309 (Claude Code)\n"), Some("2.1.309"));
+        assert_eq!(claude_code_version("Claude Code\n"), None);
+        assert!(new_enough(&JUDGE, "2.1.304 (Claude Code)").is_ok());
+        assert!(new_enough(&JUDGE, "2.1.309 (Claude Code)").is_ok());
+        assert!(new_enough(&JUDGE, "2.2.0 (Claude Code)").is_ok());
+        let old = new_enough(&JUDGE, "2.1.296 (Claude Code)").unwrap_err();
+        assert!(old.contains("Claude Code 2.1.296 is older than 2.1.304"), "{old}");
+        assert!(new_enough(&ATTEND, "2.1.296 (Claude Code)").is_ok(), "attend's floor is the modules release");
+        assert!(new_enough(&JUDGE, "garbage").unwrap_err().contains("printed no version"));
+    }
+
+    #[test]
+    fn a_gone_folder_with_only_the_other_mod_installed_is_ours_not_foreign() {
+        // attend is not installed; ways-judge is, from a folder that is gone.
+        let gone = "/nowhere/agent-ways/plugins";
+        let mut h = have(Some(gone), None);
+        h.siblings.push("ways-judge@agent-ways".into());
+        let p = plan_converge(&ATTEND, &h, DIR, None, "0.17.0", "CMD");
+        assert!(p.notes.is_empty(), "no foreign note: {p:?}");
+        assert_eq!(
+            p.calls,
+            vec![Call::MarketplaceRemove, Call::MarketplaceAdd(DIR.into()), Call::Install, Call::InstallSibling("ways-judge@agent-ways".into())]
+        );
     }
 
     /// Installed from this app's folder, sessions run the folder's version

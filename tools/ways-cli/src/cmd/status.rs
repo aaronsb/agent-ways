@@ -522,11 +522,17 @@ fn keyless_phrase(state: &ways_agent_core::keys::Readiness) -> String {
     use ways_agent_core::keys::Readiness;
     match state {
         Readiness::Ready(..) => "the ways-judge mod judges on Claude Code's own account".to_string(),
-        Readiness::Fallback(p, _) => format!("ways-judge mod not installed: the {p} key engine judges instead"),
-        Readiness::Unverified(p, None) => format!("ways-judge mod not installed: the {p} key stands in, not checked yet"),
-        Readiness::Unverified(p, Some(r)) => format!("ways-judge mod not installed: the {p} key stands in, last check {r}: fails open"),
+        Readiness::Fallback(p, _) => format!("ways-judge mod not enabled: the {p} key engine judges instead"),
+        Readiness::Unverified(p, None) => format!("ways-judge mod not enabled: the {p} key stands in, not checked yet"),
+        Readiness::Unverified(p, Some(r)) => format!("ways-judge mod not enabled: the {p} key stands in, last check {r}: fails open"),
         Readiness::Off => "gate.mode off".to_string(),
-        _ => "no ways-judge mod and no key: fails open (`ways judge-setup` installs the mod or adds a key)".to_string(),
+        Readiness::ModDisabled => {
+            "ways-judge mod disabled and no key: fails open (`claude plugin enable ways-judge@agent-ways`)".to_string()
+        }
+        Readiness::NoMod | Readiness::NoKey(_) => {
+            "no ways-judge mod and no key: fails open (`ways judge-setup` installs the mod or adds a key)".to_string()
+        }
+        Readiness::Config(e) => format!("agent.yaml does not load: {e}"),
     }
 }
 
@@ -594,6 +600,9 @@ mod tests {
         for state in [Readiness::NoMod, Readiness::Unverified(Provider::Openrouter, None)] {
             assert!(!keyless_phrase(&state).contains("--provider claude-code"));
         }
+        assert!(keyless_phrase(&Readiness::ModDisabled).contains("disabled"));
+        let config = keyless_phrase(&Readiness::Config("bad yaml".into()));
+        assert_eq!(config, "agent.yaml does not load: bad yaml", "a config error is not a missing mod");
     }
     use crate::cmd::scan::sidecar::Fallback;
     use serde_json::json;
