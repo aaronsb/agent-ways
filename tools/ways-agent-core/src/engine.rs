@@ -6,7 +6,8 @@
 //! registered, and which providers have a key; the caller stores it. No job
 //! falls back from one engine to another, so no candidate is judged twice.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -95,6 +96,129 @@ pub fn resolve_session(
         provider => Resolution::unavailable(format!(
             "engine '{name}' has no {provider} key; add one with `ways agent key add --provider {provider}`, or name another engine"
         )),
+    }
+}
+
+/// The file a session's resolution is published in, in its judge state
+/// directory.
+pub const RESOLUTION_FILE: &str = "resolution.json";
+
+/// The root of every session's judge state, one directory per session id:
+/// `$XDG_STATE_HOME/agent-ways/judge`. It outlives the session's runtime
+/// directory, since a session holds its engine for its whole life.
+pub fn judge_state_root() -> PathBuf {
+    ways_core::paths::state_root().join("judge")
+}
+
+/// A session's resolved engine, as its resolution file holds it: the
+/// resolution, and the provider of the engine it names, so a reader can tell
+/// whether the session judges inside Claude Code without reading the
+/// profiles.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionEngine {
+    #[serde(flatten)]
+    pub resolution: Resolution,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<Provider>,
+}
+
+impl SessionEngine {
+    /// True when the session judges inside Claude Code: the host claims its
+    /// jobs. Otherwise the host stands by for the session's life.
+    pub fn is_claude_code(&self) -> bool {
+        self.provider == Some(Provider::ClaudeCode)
+    }
+
+    /// The resolution in the session judge state directory `dir`, once one
+    /// was written; `None` before, or when the file does not parse.
+    pub fn read(dir: &Path) -> Option<SessionEngine> {
+        let text = std::fs::read_to_string(dir.join(RESOLUTION_FILE)).ok()?;
+        serde_json::from_str(&text).ok()
+    }
+}
+
+/// A running Claude Code session and the engine it resolved to; `engine` is
+/// `None` until its first judge request resolves one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LiveSession {
+    pub session: String,
+    pub engine: Option<SessionEngine>,
+}
+
+impl LiveSession {
+    /// The session id as the screens show it: its first eight characters.
+    pub fn short_id(&self) -> String {
+        self.session.chars().take(8).collect()
+    }
+}
+
+/// The sessions a running Claude Code process holds, each with its
+/// resolution (ADR-708 §8): those Claude Code's session records name, whose
+/// process is alive.
+pub fn live_sessions() -> Vec<LiveSession> {
+    let records = ways_core::paths::claude_dir().session_records();
+    let live = records.iter().filter(|r| process_alive(r.pid)).map(|r| r.session_id.as_str());
+    live_sessions_in(&judge_state_root(), live)
+}
+
+/// [`live_sessions`] for the session ids `live`, reading their resolutions
+/// under `root`. An id that is not a plain directory name is left out, and
+/// each id is listed once, in id order, so a list reads the same however
+/// the records were found.
+pub fn live_sessions_in<'a>(root: &Path, live: impl IntoIterator<Item = &'a str>) -> Vec<LiveSession> {
+    let plain = |id: &str| {
+        let ok = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
+        id.chars().next().is_some_and(ok) && id.chars().all(|c| ok(c) || c == '.')
+    };
+    let ids: BTreeSet<&str> = live.into_iter().filter(|id| plain(id)).collect();
+    ids.into_iter().map(|id| LiveSession { session: id.to_string(), engine: SessionEngine::read(&root.join(id)) }).collect()
+}
+
+/// Whether a process holds `pid`. Off Unix a session record is taken at its
+/// word: Claude Code removes it when the session ends.
+fn process_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        let Ok(pid) = libc::pid_t::try_from(pid) else { return false };
+        // SAFETY: signal 0 delivers nothing; the call only checks the pid.
+        let ret = unsafe { libc::kill(pid, 0) };
+        ret == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        true
+    }
+}
+
+/// An engine as the operator knows it: its profile name with the profile's
+/// display name, such as `claude-code (Claude Code internal)`; a profile of
+/// your own has no display name, and no engine reads `no engine`.
+pub fn engine_label(name: Option<&str>, profiles: &BTreeMap<String, Profile>) -> String {
+    let Some(name) = name else { return "no engine".to_string() };
+    match profiles.get(name).and_then(|p| p.display_name.as_deref()) {
+        Some(shown) => format!("{name} ({shown})"),
+        None => name.to_string(),
+    }
+}
+
+/// One live session as `ways status` and `ways agent status` list it: the
+/// short id, the engine, and the reason, which for an unavailable engine
+/// names the remedy (ADR-708 §7).
+pub fn session_line(s: &LiveSession, profiles: &BTreeMap<String, Profile>) -> String {
+    match &s.engine {
+        None => format!("{}  not resolved yet: no judge request so far", s.short_id()),
+        Some(e) => format!("{}  {} — {}", s.short_id(), engine_label(e.resolution.engine.as_deref(), profiles), e.resolution.reason),
+    }
+}
+
+/// What an unset `gate.engine` resolves to now (ADR-708 §8): the first
+/// shipped profile whose provider has a key file. `claude-code` is chosen
+/// only by name, so it is never the answer.
+pub fn unset_engine_line(profiles: &BTreeMap<String, Profile>, has_key: impl Fn(Provider) -> bool) -> String {
+    match profile::first_with_key(profiles, has_key) {
+        Some(name) => engine_label(Some(name), profiles),
+        None => "none: no Anthropic or OpenRouter key file, so an unset engine leaves the gate off".to_string(),
     }
 }
 
@@ -188,6 +312,46 @@ mod tests {
         let user: crate::profile::UserLayer = serde_yaml::from_str("engine: nosuch\n").unwrap();
         let e = crate::profile::resolve(&user, |_| true).unwrap_err();
         assert_eq!(format!("{CONFIG}: {e:#}"), "config: engine 'nosuch' names no profile");
+    }
+
+    fn scratch(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("ways-engine-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    }
+
+    fn resolved(root: &Path, id: &str, engine: Option<&str>, provider: Option<Provider>, reason: &str) {
+        let e = SessionEngine { resolution: Resolution { engine: engine.map(str::to_string), reason: reason.into() }, provider };
+        std::fs::create_dir_all(root.join(id)).unwrap();
+        std::fs::write(root.join(id).join(RESOLUTION_FILE), serde_json::to_vec(&e).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn each_live_session_shows_its_engine_and_why() {
+        let root = scratch("live");
+        let fallen = resolve_session(Some("claude-code"), &shipped(), false, only(Provider::Anthropic));
+        resolved(&root, "3f6c2a91-aaaa", Some("claude-code"), Some(Provider::ClaudeCode), EXPLICIT);
+        resolved(&root, "bbbbbbbb-0000", fallen.engine.as_deref(), Some(Provider::Anthropic), &fallen.reason);
+        let none = resolve_session(Some("claude-code"), &shipped(), false, |_| false);
+        resolved(&root, "cccccccc-0000", None, None, &none.reason);
+        let live = live_sessions_in(&root, ["dddddddd-0000", "3f6c2a91-aaaa", "bbbbbbbb-0000", "cccccccc-0000", "3f6c2a91-aaaa", "../x"]);
+        assert_eq!(live.len(), 4, "each id once, in id order, and no path that is not an id: {live:?}");
+        let lines: Vec<String> = live.iter().map(|s| session_line(s, &shipped())).collect();
+        assert_eq!(lines[0], "3f6c2a91  claude-code (Claude Code internal) — explicit");
+        assert_eq!(lines[1], "bbbbbbbb  anthropic (Anthropic API key) — claude-code unavailable: no Claude Code host");
+        assert!(lines[2].starts_with("cccccccc  no engine — engine_unavailable: claude-code unavailable"), "{}", lines[2]);
+        assert!(lines[2].contains("configure an Anthropic or OpenRouter key"), "{}", lines[2]);
+        assert!(!lines.iter().any(|l| l.contains("--provider claude-code")), "{lines:?}");
+        assert_eq!(lines[3], "dddddddd  not resolved yet: no judge request so far");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_unset_engine_names_the_first_key_engine_never_claude_code() {
+        assert_eq!(unset_engine_line(&shipped(), |_| true), "anthropic (Anthropic API key)");
+        assert_eq!(unset_engine_line(&shipped(), only(Provider::Openrouter)), "openrouter (OpenRouter API key)");
+        assert!(unset_engine_line(&shipped(), |_| false).starts_with("none: no Anthropic or OpenRouter key file"));
+        assert_eq!(engine_label(Some("mine"), &shipped()), "mine");
     }
 
     #[test]

@@ -23,8 +23,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use ways_agent_core::engine::Resolution;
-use ways_agent_core::profile::Provider;
+pub use ways_agent_core::engine::SessionEngine;
 use ways_agent_core::protocol::{JudgeAnswer, JudgeJob};
 
 /// How often a waiter looks for a file. The model call takes about a second,
@@ -34,26 +33,6 @@ pub const POLL: Duration = Duration::from_millis(10);
 /// How long a job written by a hook that was killed mid-wait stays
 /// claimable past its own deadline. A host never claims an older one.
 const STALE_GRACE: Duration = Duration::from_millis(1500);
-
-/// A session's resolved engine, as its resolution file holds it: the
-/// resolution, and the provider of the engine it names, so the host can tell
-/// whether its session judges inside Claude Code without reading the
-/// profiles.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SessionEngine {
-    #[serde(flatten)]
-    pub resolution: Resolution,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider: Option<Provider>,
-}
-
-impl SessionEngine {
-    /// True when the session judges inside Claude Code: the host claims its
-    /// jobs. Otherwise the host stands by for the session's life.
-    pub fn is_claude_code(&self) -> bool {
-        self.provider == Some(Provider::ClaudeCode)
-    }
-}
 
 /// A job a host claimed: its id, for the answer, and the request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -102,7 +81,7 @@ impl Store {
     /// ([`super::is_plain_session_id`]).
     pub fn for_session(session_id: &str) -> Option<Store> {
         super::is_plain_session_id(session_id).then(|| Store {
-            state: crate::paths::state_root().join("judge").join(session_id),
+            state: ways_agent_core::engine::judge_state_root().join(session_id),
             run: super::session_dir(session_id).join("judge"),
         })
     }
@@ -114,7 +93,7 @@ impl Store {
     }
 
     fn resolution_path(&self) -> PathBuf {
-        self.state.join("resolution.json")
+        self.state.join(ways_agent_core::engine::RESOLUTION_FILE)
     }
 
     fn host_path(&self) -> PathBuf {
@@ -137,8 +116,7 @@ impl Store {
 
     /// The session's resolution, once one was written.
     pub fn resolution(&self) -> Option<SessionEngine> {
-        let text = std::fs::read_to_string(self.resolution_path()).ok()?;
-        serde_json::from_str(&text).ok()
+        SessionEngine::read(&self.state)
     }
 
     /// The session's resolution, resolving it with `resolve` when it has
@@ -274,7 +252,7 @@ impl Store {
 /// A session's state outlives its runtime directory on purpose, so nothing
 /// else removes it. Run at SessionStart.
 pub fn prune(max_age: Duration) {
-    prune_in(&crate::paths::state_root().join("judge"), max_age);
+    prune_in(&ways_agent_core::engine::judge_state_root(), max_age);
 }
 
 fn prune_in(root: &Path, max_age: Duration) {
@@ -322,7 +300,8 @@ fn place(dir: &Path, name: &str, body: &[u8]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ways_agent_core::engine::{EXPLICIT, NO_HOST};
+    use ways_agent_core::engine::{Resolution, EXPLICIT, NO_HOST};
+    use ways_agent_core::profile::Provider;
 
     fn store(name: &str) -> (Store, PathBuf) {
         let base = std::env::temp_dir().join(format!("ways-judge-jobs-{name}-{}", std::process::id()));
