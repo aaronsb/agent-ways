@@ -17,7 +17,11 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
-status: proposed
+considered:
+  - operator: aaronsb
+    said: "(c) Commit + merge, (d) File issues"
+    via: AskUserQuestion answer, session 2026-10-22
+status: accepted
 date: 2026-10-22
 deciders:
   - aaronsb

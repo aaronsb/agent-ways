@@ -19,7 +19,11 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
-status: proposed
+considered:
+  - operator: aaronsb
+    said: "(a) Delegation ways, (b) Fresh reader. I assume with delegation ways, you mean: delegate to subagents without asking. My hope is that I do not have to remind you on each session to do so. As far as I know this is contrarian to the claude code system prompt and irritating to me - not delegating results in session churn."
+    via: AskUserQuestion answer, session 2026-10-22
+status: accepted
 date: 2026-10-22
 deciders:
   - aaronsb
