@@ -1,7 +1,7 @@
 ---
 description: the SPE loop (Specify, Predict, Evaluate) run through Claude Code plan mode, where the user's plan-mode prompt is a lightweight spec, the approved plan is a numeric prediction, a dynamic Workflow runs the eval, and re-entering plan mode respecs the next round; keeps a long unattended loop honest round after round
 vocabulary: spe specify predict evaluate respec round prediction spec plan-mode approved plan dynamic workflow eval rounds prediction log failures proposals draft baseline same-as-last-round naive variance converge pre-registered rnn tag
-pattern: \bspe\b|specify,? predict,? (and )?evaluate
+pattern: \bspe\b|specify[-,\s>]+(and\s+)?predict[-,\s>]+(and\s+)?evaluate
 scope: agent
 refire: normal
 ---
@@ -40,7 +40,7 @@ A Workflow returns at launch. Close out when its completion notice arrives (eval
 - Stop when predictions match results for 3 rounds in a row.
 - At a ceiling, when every config hits the metric's maximum, record each prediction as not scorable, leave the stop streak unchanged, and check once for a leak or a grader bug. Then tell the user in two or three sentences that the tasks no longer separate the configs, propose harder tasks or stricter graders, and let the user decide.
 - Halt and report on a budget cap, a leaked answer key, a broken grader, or a decision only the user can make.
-- In an unattended loop, never push, deploy, or send. The final report gives each round's headline, the prediction accuracy trend, and open decisions.
+- In an unattended loop, never push, deploy, or send messages unless the user asked for that in this loop. The final report gives each round's headline, the prediction accuracy trend, and open decisions.
 
 ## See Also
 

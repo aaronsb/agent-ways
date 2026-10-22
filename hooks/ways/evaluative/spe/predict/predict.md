@@ -49,7 +49,7 @@ Start the file with the comment `# Saved before the eval ran. Do not edit after 
 
 ## Then the gates
 
-After the commit, run the gates in order: the grader selftest, last round regraded as a control, and a dry run on 2 or 3 cells. Only then launch the full Workflow (evaluative/spe/evaluate).
+After the save (and the commit, if the user asked for one), run the gates in order: the grader selftest, last round regraded as a control, and a dry run on 2 or 3 cells. Only then launch the full Workflow (evaluative/spe/evaluate).
 
 ## See Also
 

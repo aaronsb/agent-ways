@@ -17,7 +17,7 @@ The eval runs the same tasks under each configuration. The tasks and graders sta
 
 - `spe/predictions/rNN.yaml` exists for this round and is committed. If not, stop and write it first (evaluative/spe/predict).
 - The grader selftest passes. The oracle answer passes, and the empty and wrong answers fail.
-- Last round's results, regraded with this round's graders, give a control. A change in the control is a grader change, not an agent change.
+- Last round's results, regraded with this round's graders, give a control. A change in the control is a grader change. Report it to the user with the old and new numbers.
 - A dry run on 2 or 3 cells with `args.only` returns valid output.
 
 ## The script
