@@ -15,7 +15,14 @@ basis:
 agent:
   name: claude
   model: claude-opus-5-5
-status: proposed
+considered:
+  - operator: aaronsb
+    said: "Yes, that's it"
+    via: "chat, AskUserQuestion, 2026-10-22, probe: organized"
+  - operator: aaronsb
+    said: "Rows in the table (Recommended)"
+    via: "chat, AskUserQuestion, 2026-10-22, probe: table"
+status: accepted
 date: 2026-10-22
 deciders:
   - aaronsb
