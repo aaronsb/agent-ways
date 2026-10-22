@@ -21,7 +21,7 @@ This is an efficiency principle, but the deeper payoff is that **rigor gets chea
 |--------|------|
 | You're about to write a multi-step `git`/`sed`/`mv` sequence a reader must get exactly right | Add a subcommand that does it atomically |
 | The steps encode a convention (numbering, naming, a file layout) | The tool should own the convention, not a doc that humans follow by hand |
-| You've done the same manual dance twice | The third time, build it — and backfill the first two |
+| You've done the same manual dance twice | The third time, propose building it, and backfilling the first two |
 | A step is reversible-only-with-care (renames, moves, history) | A command can do it safely (e.g. prefer the tool's `git mv` with a fallback) |
 
 A concrete example from this corpus: renaming an ADR means editing its heading *and* moving its file *and* refreshing an index — a three-step manual dance that's easy to half-do. `adr rename` owns all three. The point isn't the command; it's that the operation now has one correct home instead of living in a person's memory.

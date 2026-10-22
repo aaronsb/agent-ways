@@ -14,9 +14,9 @@ A deck, PDF, document or sheet that goes to a client or to leadership is read wi
 
 ## Follow the established work
 
-- Match the last approved version, the reader's template, or the supplied style guide. Where the brief conflicts with the established work, follow the established work and flag the difference to the user.
+- Match the last approved version, the reader's template, or the supplied style guide. Where the brief is specific, follow it, and flag to the user where it departs from the established work.
 - Keep the project's agreed toolchain. A switch changes the look the reader knows.
-- Record each style rule the user sets, such as how dates appear or whether numbers are numerals, where writing/register says standing style rules go, so the next build follows it.
+- When the user wants a style kept, record each rule they set, such as how dates appear or whether numbers are numerals, where writing/register says standing style rules go, so the next build follows it.
 - Copy an approved source file before editing it.
 
 ## Decks

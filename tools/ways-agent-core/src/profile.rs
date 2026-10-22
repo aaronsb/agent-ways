@@ -13,33 +13,50 @@ use serde::{Deserialize, Serialize};
 const SHIPPED: &str = include_str!("../profiles.yaml");
 
 /// Shipped profiles in the order the agent picks one when the user names none:
-/// the first whose provider has a key.
+/// the first whose provider has a key. `claude-code` holds no key, so it is
+/// chosen only by name (ADR-708 §1).
 pub const SHIPPED_ORDER: &[&str] = &["anthropic", "openrouter"];
 
-/// A hosted model provider. Each is an adapter behind one judge contract.
+/// A model provider. Each is an adapter behind one judge contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
     Anthropic,
     Openrouter,
+    /// Claude Code's own client, reached through a ways mod module on the
+    /// session's signed-in account (ADR-708). It takes no key, and the ways
+    /// agent sends it nothing.
+    #[serde(rename = "claude-code")]
+    ClaudeCode,
 }
 
 impl Provider {
+    /// The providers that take a key, which the key store and `ways agent
+    /// key` cover. `ClaudeCode` is keyless and not among them.
     pub const ALL: [Provider; 2] = [Provider::Anthropic, Provider::Openrouter];
 
     pub fn as_str(self) -> &'static str {
         match self {
             Provider::Anthropic => "anthropic",
             Provider::Openrouter => "openrouter",
+            Provider::ClaudeCode => "claude-code",
         }
     }
 
     /// The environment variable that overrides this provider's key file.
-    pub fn key_env(self) -> &'static str {
+    /// `None` for a provider that takes no key.
+    pub fn key_env(self) -> Option<&'static str> {
         match self {
-            Provider::Anthropic => "ANTHROPIC_API_KEY",
-            Provider::Openrouter => "OPENROUTER_API_KEY",
+            Provider::Anthropic => Some("ANTHROPIC_API_KEY"),
+            Provider::Openrouter => Some("OPENROUTER_API_KEY"),
+            Provider::ClaudeCode => None,
         }
+    }
+
+    /// True for a provider that takes no key: it has no key file, no key
+    /// variable, and nothing for `ways agent key` to check.
+    pub fn keyless(self) -> bool {
+        self.key_env().is_none()
     }
 
     /// The model the shipped profile is tuned for, and the one the picker recommends.
@@ -47,6 +64,10 @@ impl Provider {
         match self {
             Provider::Anthropic => "claude-haiku-4-5",
             Provider::Openrouter => "anthropic/claude-haiku-4.5",
+            // The key engines' model, pinned: under Claude Code the `haiku`
+            // alias resolves to Haiku 5.5, which thinks and runs past the
+            // 2 s deadline about half the time (ADR-708 spike).
+            Provider::ClaudeCode => "claude-haiku-4-5",
         }
     }
 
@@ -65,7 +86,8 @@ impl Provider {
         match s.to_ascii_lowercase().as_str() {
             "anthropic" => Ok(Provider::Anthropic),
             "openrouter" => Ok(Provider::Openrouter),
-            other => bail!("unknown provider '{other}' (expected anthropic or openrouter)"),
+            "claude-code" => Ok(Provider::ClaudeCode),
+            other => bail!("unknown provider '{other}' (expected anthropic, openrouter or claude-code)"),
         }
     }
 }
@@ -168,6 +190,10 @@ pub const MAX_TIMEOUT_MS: u64 = 25_000;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Profile {
+    /// The name settings and setup show, such as "Claude Code internal".
+    /// Every shipped profile has one; a profile of your own has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     pub provider: Provider,
     pub model: String,
     /// P(yes) below this blocks a candidate in enforce mode.
@@ -254,6 +280,7 @@ pub struct ProfilePatch {
 impl ProfilePatch {
     fn apply(&self, base: &Profile) -> Profile {
         Profile {
+            display_name: base.display_name.clone(),
             provider: self.provider.unwrap_or(base.provider),
             model: self.model.clone().unwrap_or_else(|| base.model.clone()),
             threshold: self.threshold.unwrap_or(base.threshold),
@@ -420,7 +447,8 @@ pub fn patched(name: &str, patch: &ProfilePatch, shipped: &BTreeMap<String, Prof
                 .get(provider.as_str())
                 .cloned()
                 .context("every provider has a shipped profile")?;
-            patch.apply(&base)
+            // The shipped profile's display name is not this one's.
+            Profile { display_name: None, ..patch.apply(&base) }
         }
     };
     profile.validate(name)?;
@@ -438,6 +466,16 @@ pub struct Settings {
     pub mode: Mode,
 }
 
+/// The first shipped profile, in [`SHIPPED_ORDER`], whose provider has a key:
+/// the engine an unset `gate.engine` picks. A keyless provider never has one,
+/// even when a patch moves a shipped profile onto it.
+pub fn first_with_key(all: &BTreeMap<String, Profile>, has_key: impl Fn(Provider) -> bool) -> Option<&'static str> {
+    SHIPPED_ORDER
+        .iter()
+        .copied()
+        .find(|n| all.get(*n).is_some_and(|p| !p.provider.keyless() && has_key(p.provider)))
+}
+
 /// Resolves the engine. `None` means no engine is named and no provider has a
 /// key: the gate is off and the hook keeps today's behaviour.
 pub fn resolve(user: &UserLayer, has_key: impl Fn(Provider) -> bool) -> Result<Option<Settings>> {
@@ -451,7 +489,7 @@ pub fn resolve(user: &UserLayer, has_key: impl Fn(Provider) -> bool) -> Result<O
     }
     let engine = match &user.engine {
         Some(name) => name.clone(),
-        None => match SHIPPED_ORDER.iter().find(|n| all.get(**n).is_some_and(|p| has_key(p.provider))) {
+        None => match first_with_key(&all, has_key) {
             Some(name) => name.to_string(),
             None => return Ok(None),
         },
@@ -470,13 +508,47 @@ mod tests {
     #[test]
     fn shipped_profiles_parse_validate_and_follow_the_order() {
         let all = shipped();
-        for name in SHIPPED_ORDER {
-            let p = &all[*name];
+        for (name, p) in &all {
             p.validate(name).unwrap();
-            assert_eq!(p.provider.as_str(), *name);
+            assert_eq!(p.provider.as_str(), name);
             assert_eq!(p.model, p.provider.recommended_model());
+            assert!(p.display_name.is_some(), "{name} has a display name");
         }
-        assert_eq!(all.len(), SHIPPED_ORDER.len());
+        assert_eq!(all.keys().map(String::as_str).collect::<Vec<_>>(), ["anthropic", "claude-code", "openrouter"]);
+        // The keyed profiles, in the order an unset engine tries them.
+        assert_eq!(SHIPPED_ORDER, ["anthropic", "openrouter"]);
+        assert!(SHIPPED_ORDER.iter().all(|n| !all[*n].provider.keyless()));
+    }
+
+    #[test]
+    fn claude_code_is_keyless_outside_all_and_chosen_only_by_name() {
+        let p = &shipped()["claude-code"];
+        assert_eq!((p.provider, p.model.as_str()), (Provider::ClaudeCode, "claude-haiku-4-5"));
+        assert_eq!(p.display_name.as_deref(), Some("Claude Code internal"));
+        assert_eq!((p.threshold, p.timeout_ms, p.max_candidates), (0.3, 2000, 8));
+        assert!(Provider::ClaudeCode.keyless());
+        assert!(!Provider::ALL.contains(&Provider::ClaudeCode));
+        assert!(Provider::ALL.iter().all(|p| !p.keyless()));
+        assert_eq!(Provider::parse("claude-code").unwrap(), Provider::ClaudeCode);
+        assert_eq!(serde_json::to_string(&Provider::ClaudeCode).unwrap(), "\"claude-code\"");
+        // An unset engine never picks it, whatever `has_key` says of it.
+        assert_eq!(resolve(&UserLayer::default(), |p| p == Provider::ClaudeCode).unwrap(), None);
+        assert_eq!(resolve(&UserLayer::default(), |_| true).unwrap().unwrap().engine, "anthropic");
+        // Named, it resolves as any profile does.
+        let named: UserLayer = serde_yaml::from_str("engine: claude-code\n").unwrap();
+        let s = resolve(&named, |_| false).unwrap().unwrap();
+        assert_eq!((s.engine.as_str(), s.profile.provider, s.engine_set), ("claude-code", Provider::ClaudeCode, true));
+    }
+
+    #[test]
+    fn a_profile_of_your_own_takes_no_shipped_display_name() {
+        let user: UserLayer = serde_yaml::from_str(
+            "profiles:\n  mine:\n    provider: anthropic\n    model: claude-sonnet-5-5\n  anthropic:\n    threshold: 0.4\n",
+        )
+        .unwrap();
+        let all = profiles(&user);
+        assert_eq!(all["mine"].display_name, None);
+        assert_eq!(all["anthropic"].display_name.as_deref(), Some("Anthropic API key"));
     }
 
     #[test]

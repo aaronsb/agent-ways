@@ -345,22 +345,22 @@ fn the_engine_is_one_of_the_profiles_in_effect() {
     // The shipped profiles only: anything else is refused and nothing written.
     let (_, err, code) = f.run(&["settings", "set", "gate.engine", "mine"]);
     assert_eq!(code, 3, "{err}");
-    assert!(err.contains("expected one of anthropic, openrouter, found 'mine'"), "{err}");
+    assert!(err.contains("expected one of anthropic, openrouter, claude-code, found 'mine'"), "{err}");
     assert!(!agent.exists());
     assert_eq!(f.run(&["settings", "set", "gate.engine", "openrouter"]).2, 0);
     // A profile of the user's own becomes a choice.
     f.write(&agent, "profiles:\n  mine:\n    provider: anthropic\n    model: claude-sonnet-5-5\n");
     assert_eq!(f.run(&["settings", "set", "gate.engine", "mine"]), (String::new(), "user: <ROOT>/xdg/config/agent-ways/agent.yaml\n".to_string(), 0));
     let (out, _, _) = f.run(&["settings", "help", "gate.engine"]);
-    assert!(out.contains("type:    one of anthropic, openrouter, mine"), "{out}");
+    assert!(out.contains("type:    one of anthropic, openrouter, claude-code, mine"), "{out}");
     let v: serde_json::Value = serde_json::from_str(&f.run(&["settings", "get", "gate.engine", "--json"]).0).unwrap();
-    assert_eq!(v["options"], serde_json::json!(["anthropic", "openrouter", "mine"]));
+    assert_eq!(v["options"], serde_json::json!(["anthropic", "openrouter", "claude-code", "mine"]));
     assert_eq!(v["value"], "mine");
     // Every other key's object is as it was: no options.
     let v: serde_json::Value = serde_json::from_str(&f.run(&["settings", "get", "gate.mode", "--json"]).0).unwrap();
     assert!(v.get("options").is_none(), "{v}");
     let (out, _, _) = f.run(&["settings", "emit", "gate"]);
-    assert!(out.starts_with("# gate.engine: one of anthropic, openrouter, mine\n"), "{out}");
+    assert!(out.starts_with("# gate.engine: one of anthropic, openrouter, claude-code, mine\n"), "{out}");
     // apply checks against the files and the object together.
     let (out, _, code) = f.run_stdin(&["settings", "apply", "--dry-run"], Some("engine: theirs\nprofiles:\n  theirs:\n    provider: openrouter\n    model: x/y\n"));
     assert_eq!(code, 0, "{out}");
@@ -371,7 +371,7 @@ fn the_engine_is_one_of_the_profiles_in_effect() {
     let (out, err, code) = f.run(&["settings", "lint"]);
     assert_eq!(code, 3);
     assert!(
-        out.contains("agent.yaml:1: [gate] engine: expected one of anthropic, openrouter, found 'gone'; it loads as written, and `ways settings set gate.engine <choice>` repairs it"),
+        out.contains("agent.yaml:1: [gate] engine: expected one of anthropic, openrouter, claude-code, found 'gone'; it loads as written, and `ways settings set gate.engine <choice>` repairs it"),
         "{out}"
     );
     assert!(err.contains("1 finding; each line names its repair") && !err.contains("fix"), "{err}");

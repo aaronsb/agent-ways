@@ -24,7 +24,7 @@ Issues carrying the `tasklist` label are mirrored into this session's task list 
 
 ## Ownership
 
-GitHub owns subject, description, and open or closed. The session owns `in_progress` and a `completed` request. A mirrored task is owned by `team-lead` so an idle teammate does not claim it; hand one to a teammate by setting its owner. Mark a mirrored task `in_progress` with TaskUpdate when you start it. Mark it `completed` when the work lands, then close the issue with `gh issue close`, since pushing status back is not wired yet. A reopen on GitHub returns the task to `pending` on the next pull.
+GitHub owns subject, description, and open or closed. The session owns `in_progress` and a `completed` request. A mirrored task is owned by `team-lead` so an idle teammate does not claim it; hand one to a teammate by setting its owner. Mark a mirrored task `in_progress` with TaskUpdate when you start it. Mark it `completed` when the work lands, then close the issue with `gh issue close` and a comment when a standing grant covers issue writes, and otherwise offer the close, since pushing status back is not wired yet. A reopen on GitHub returns the task to `pending` on the next pull.
 
 Removing the label stops the mirror for that issue: the task stays in the store as it was, the whisper says `unlabeled #n` once, and later closes never reach it. A stale `pending` on an unlabeled issue is expected, and `gh-tasks list` shows the URL to check.
 
@@ -48,7 +48,7 @@ A resumed session gets a fresh task list, keyed by an id the hooks never see. Th
 
 ## Residuals
 
-Out-of-scope work discovered mid-task gets its own issue rather than a quiet fix or a quiet drop. Name the issue for the finding, assign the owner who carries it, and state the condition that reopens it: a date, a dependency landing, a gate result. Dropping a capability from scope is an explicit decision confirmed by its owner; the same outcome reached by omission is a defect. An option judged legitimate and unneeded is filed the same way, with its trigger, so the case is not argued again. After a remediation pass, list what remains with why it remains, what would close it, and the cost.
+Out-of-scope work discovered mid-task is named in the report, with an offer to file it as its own issue, or filed where a standing grant covers issues. A quiet fix or a quiet drop hides it. Name the issue for the finding, assign the owner who carries it, and state the condition that reopens it: a date, a dependency landing, a gate result. Dropping a capability from scope is an explicit decision confirmed by its owner; the same outcome reached by omission is a defect. An option judged legitimate and unneeded is filed the same way, with its trigger, so the case is not argued again. After a remediation pass, list what remains with why it remains, what would close it, and the cost.
 
 ## See Also
 

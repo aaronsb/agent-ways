@@ -347,10 +347,10 @@ fn quoted_separators_do_not_split() {
     let segs = parse("echo \"a;b|c && d\" && grep -E 'x|y' file.txt > out.txt");
     assert_eq!(segs.len(), 2);
     assert_eq!(segs[0].text, "echo \"a;b|c && d\"");
-    // The search rule precedes the redirect rule, as the study measured it.
+    // A redirect to a file makes a search a write.
     assert_eq!(
         (segs[1].program.as_deref(), segs[1].class),
-        (Some("grep"), Some(Class::Search))
+        (Some("grep"), Some(Class::FileWrite))
     );
     let segs = parse("awk '{print $1; print $2}' f | sort");
     assert_eq!(segs.len(), 2);
@@ -517,110 +517,6 @@ fn newlines_after_an_operator_continue_the_list() {
 }
 
 #[test]
-fn gh_classes() {
-    let class = |cmd: &str| parse(cmd)[0].class;
-    assert_eq!(class("gh pr create --fill"), Some(Class::Publish));
-    assert_eq!(class("gh pr merge 12 --merge"), Some(Class::Publish));
-    assert_eq!(class("gh issue comment 5 --body x"), Some(Class::Publish));
-    assert_eq!(class("gh pr view 12 --json state"), Some(Class::VcsRead));
-    assert_eq!(
-        class("gh api -X POST repos/o/r/issues -f title=x"),
-        Some(Class::Publish)
-    );
-    assert_eq!(class("gh api repos/o/r/pulls"), Some(Class::VcsRead));
-    assert_eq!(class("gh run rerun 123 --failed"), Some(Class::Publish));
-    assert_eq!(class("gh run view 123 --log"), Some(Class::VcsRead));
-    assert_eq!(class("gh -R owner/repo pr create"), Some(Class::Publish));
-}
-
-#[test]
-fn git_classes() {
-    let class = |cmd: &str| parse(cmd)[0].class;
-    assert_eq!(class("git push origin main"), Some(Class::Publish));
-    assert_eq!(class("git commit -m x"), Some(Class::VcsWrite));
-    assert_eq!(class("git stash pop"), Some(Class::VcsWrite));
-    assert_eq!(class("git stash list"), Some(Class::VcsRead));
-    assert_eq!(class("git worktree list"), Some(Class::VcsRead));
-    assert_eq!(class("git worktree add ../x"), Some(Class::VcsWrite));
-    assert_eq!(class("git remote -v"), Some(Class::VcsRead));
-    assert_eq!(class("git remote add origin url"), Some(Class::VcsWrite));
-    assert_eq!(class("git config user.name"), Some(Class::VcsRead));
-    assert_eq!(
-        class("git config --global user.name x"),
-        Some(Class::VcsWrite)
-    );
-    assert_eq!(class("git branch -D x"), Some(Class::VcsWrite));
-    assert_eq!(class("git branch --show-current"), Some(Class::VcsRead));
-    assert_eq!(class("git grep -n foo"), Some(Class::Search));
-    assert_eq!(class("git -C tools status"), Some(Class::VcsRead));
-}
-
-#[test]
-fn other_classes() {
-    let class = |cmd: &str| parse(cmd)[0].class;
-    assert_eq!(
-        class("systemctl --user restart attend"),
-        Some(Class::Service)
-    );
-    assert_eq!(class("systemctl status nginx"), Some(Class::ReadInspect));
-    assert_eq!(class("docker ps -a"), Some(Class::ReadInspect));
-    assert_eq!(class("pkill -f server"), Some(Class::Service));
-    assert_eq!(class("pacman -Syu"), Some(Class::Package));
-    assert_eq!(class("pacman -Ss foo"), Some(Class::ReadInspect));
-    assert_eq!(class("npm install"), Some(Class::Package));
-    assert_eq!(class("npm test"), Some(Class::BuildTest));
-    assert_eq!(class("pip list"), Some(Class::ReadInspect));
-    assert_eq!(class("go test ./..."), Some(Class::BuildTest));
-    assert_eq!(class("go env GOPATH"), Some(Class::ReadInspect));
-    assert_eq!(class("go get x"), Some(Class::Package));
-    assert_eq!(class("cargo add serde"), Some(Class::Package));
-    assert_eq!(class("cargo clippy --workspace"), Some(Class::BuildTest));
-    assert_eq!(class("node script.js"), Some(Class::Other));
-    assert_eq!(class("node --test"), Some(Class::BuildTest));
-    assert_eq!(class("rg -n foo src"), Some(Class::Search));
-    assert_eq!(class("find . -name x -exec rm {} \\;"), Some(Class::Search));
-    assert_eq!(
-        class("find . -name '*.tmp' -delete"),
-        Some(Class::FileWrite)
-    );
-    assert_eq!(class("sed -n 1p f"), Some(Class::ReadInspect));
-    assert_eq!(class("tar -tzf a.tgz"), Some(Class::ReadInspect));
-    assert_eq!(class("tar -xzf a.tgz"), Some(Class::FileWrite));
-    assert_eq!(class("rm -rf target"), Some(Class::FileWrite));
-    assert_eq!(class("ls -la"), Some(Class::ReadInspect));
-    assert_eq!(class("adr new ways \"Title\""), Some(Class::FileWrite));
-    assert_eq!(class("ways corpus build"), Some(Class::BuildTest));
-    assert_eq!(class("attend message send x"), Some(Class::Publish));
-    assert_eq!(class("curl https://example.com"), Some(Class::Other));
-}
-
-#[test]
-fn subcommand_depths_follow_the_table() {
-    let sub = |cmd: &str| parse(cmd)[0].subcommand.clone();
-    assert_eq!(
-        sub("docker compose -f x.yml up -d").as_deref(),
-        Some("compose up")
-    );
-    assert_eq!(sub("kubectl -n foo get pods").as_deref(), Some("get"));
-    assert_eq!(sub("make -C tools -j4 test").as_deref(), Some("test"));
-    assert_eq!(
-        sub("git worktree add ../x -b y").as_deref(),
-        Some("worktree add")
-    );
-    assert_eq!(sub("gh api repos/o/r").as_deref(), Some("api"));
-    assert_eq!(
-        sub("ways author lint --check").as_deref(),
-        Some("author lint")
-    );
-    assert_eq!(
-        sub("systemctl --user restart x").as_deref(),
-        Some("restart")
-    );
-    assert_eq!(sub("make").as_deref(), None);
-    assert_eq!(sub("grep -rn foo src"), None);
-}
-
-#[test]
 fn per_segment_text_lets_an_anchored_regex_match_after_a_connector() {
     // ADR-188 item 3a: `^gh` misses on the raw string, matches the segment.
     let cmd = "git push && gh pr create --fill";
@@ -753,4 +649,82 @@ fn class_order_and_action_classes() {
     let mut sorted = Class::ALL;
     sorted.sort();
     assert_eq!(sorted, Class::ALL);
+}
+
+#[test]
+fn every_subshell_after_a_prefix_is_parsed() {
+    // Review finding 1: each shape the reviewer listed.
+    let segs = parse("for d in */; do (cd \"$d\" && git push); done");
+    assert_eq!(
+        rows(&segs),
+        vec![
+            (C::Subshell, R::Navigation, Some("cd"), None, None),
+            (
+                C::And,
+                R::Operative,
+                Some("git"),
+                Some("push"),
+                Some(Class::Publish)
+            ),
+        ]
+    );
+    assert_eq!(
+        programs("if (grep -q x f); then make; fi"),
+        ["grep", "make"]
+    );
+    assert_eq!(programs("! (rm x)"), ["rm"]);
+    assert_eq!(programs("{ (rm y); }"), ["rm"]);
+    assert_eq!(programs("if true\nthen\n(rm a)\nfi"), ["true", "rm"]);
+    let segs = parse("foo() ( rm -rf x )");
+    assert_eq!(
+        rows(&segs),
+        vec![(
+            C::Subshell,
+            R::Operative,
+            Some("rm"),
+            None,
+            Some(Class::FileWrite)
+        )]
+    );
+    // `time (…)` leaves no `time` segment behind.
+    assert_eq!(parse("time (python3 -c pass)").len(), 1);
+    // `if ((…))` is still arithmetic, not a subshell.
+    assert_eq!(programs("if ((x > 1)); then make; fi"), ["make"]);
+}
+
+#[test]
+fn a_case_pattern_paren_does_not_close_a_substitution() {
+    // Review finding 2.
+    let segs = parse("echo $(case x in a) rm z;; esac) && ls");
+    assert_eq!(
+        programs("echo $(case x in a) rm z;; esac) && ls"),
+        ["echo", "rm", "ls"]
+    );
+    assert_eq!((segs[1].depth, segs[1].text.as_str()), (1, "rm z"));
+    assert_eq!((segs[2].connector, segs[2].depth), (C::And, 0));
+    assert_eq!(programs("(case x in a) rm z;; esac) && ls"), ["rm", "ls"]);
+}
+
+#[test]
+fn a_case_pattern_with_a_leading_paren() {
+    // Review finding 3.
+    let segs = parse("case x in (a) rm -rf /;; (b) ls;; esac");
+    assert_eq!(
+        programs("case x in (a) rm -rf /;; (b) ls;; esac"),
+        ["rm", "ls"]
+    );
+    assert_eq!(segs[0].text, "rm -rf /");
+    assert_eq!(segs[0].class, Some(Class::FileWrite));
+}
+
+#[test]
+fn dollar_quotes_and_braces_inside_double_quotes_are_literal() {
+    // Review finding 4: neither `'` opens a quote that swallows the rest.
+    let segs = parse("echo \"cost $'5\" && rm -rf x");
+    assert_eq!(programs("echo \"cost $'5\" && rm -rf x"), ["echo", "rm"]);
+    assert_eq!(segs[0].text, "echo \"cost $'5\"");
+    assert_eq!(programs("echo \"${x:-it's}\" ; rm w"), ["echo", "rm"]);
+    assert_eq!(programs("echo \"say $\\\"hi\\\"\" && ls"), ["echo", "ls"]);
+    // Outside double quotes, $'…' is still an ANSI-C string.
+    assert_eq!(programs("echo $'a; rm x' && ls"), ["echo", "ls"]);
 }

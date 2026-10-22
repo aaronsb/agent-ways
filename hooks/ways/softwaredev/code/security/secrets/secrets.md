@@ -18,8 +18,8 @@ When creating `.env`, also create `.env.example` with placeholder values. Verify
 ## Hardcoded Secrets
 
 If you see a hardcoded secret in source:
-1. Extract to environment variable
-2. Flag it in your response
+1. Flag it in your response, every time
+2. Extract it to an environment variable when the file is in the task's scope
 3. Check if the secret has been committed to git history (if so, it is already leaked and rotation is needed)
 
 ## Recording a Credential

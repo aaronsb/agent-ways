@@ -47,7 +47,7 @@ A short sentence is not automatically a direct one. Directness means going strai
 
 ## Density is a symptom, not a rule
 
-Em-dashes, dramatic colons, and antithesis constructions are not wrong individually. They become a tic at volume, and volume is the thing to watch. Nobody should be counting punctuation while drafting; the count belongs to the check that runs afterward.
+In file prose, em-dashes, dramatic colons, and antithesis constructions are not wrong individually. They become a tic at volume, and volume is the thing to watch. Nobody should be counting punctuation while drafting; the count belongs to the check that runs afterward.
 
 ## When you are editing your own draft
 

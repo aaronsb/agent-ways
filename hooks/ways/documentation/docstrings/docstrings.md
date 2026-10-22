@@ -7,7 +7,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Docstrings Way
 
-Use docstrings in every language, following the idiomatic style:
+Match the docstring density of the surrounding code, in the language's idiomatic style:
 
 | Language | Style | Example |
 |----------|-------|---------|
@@ -18,6 +18,6 @@ Use docstrings in every language, following the idiomatic style:
 | Shell/Bash | Header comment block | `# Description of what this script does` |
 
 **When to write docstrings:**
-- Public APIs, exported functions, classes, modules — always
+- Public APIs, exported functions, classes, modules
 - Complex internal logic where intent isn't obvious from the name
 - Not needed for trivial getters, one-line helpers, or self-evident code

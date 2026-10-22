@@ -42,16 +42,16 @@ pub fn locate(provider: Provider) -> Option<Source> {
 }
 
 fn locate_in(provider: Provider, dir: &Path) -> Option<Source> {
-    if env_set(provider) {
-        return Some(Source::Env(provider.key_env()));
+    match provider.key_env() {
+        Some(var) if env_set(provider) => Some(Source::Env(var)),
+        _ => locate_file_in(provider, dir).map(Source::File),
     }
-    locate_file_in(provider, dir).map(Source::File)
 }
 
 /// True when the provider's key variable is set. It overrides the file for
 /// `ways agent` commands and a hand-started agent; hooks use the file.
 pub fn env_set(provider: Provider) -> bool {
-    std::env::var(provider.key_env()).is_ok_and(|v| !v.trim().is_empty())
+    provider.key_env().is_some_and(|var| std::env::var(var).is_ok_and(|v| !v.trim().is_empty()))
 }
 
 /// The provider's key file, ignoring the environment. The hook gate and the
@@ -62,6 +62,10 @@ pub fn locate_file(provider: Provider) -> Option<PathBuf> {
 }
 
 fn locate_file_in(provider: Provider, dir: &Path) -> Option<PathBuf> {
+    // A keyless provider has no key file, whatever sits at its name.
+    if provider.keyless() {
+        return None;
+    }
     let path = dir.join(provider.as_str());
     path.is_file().then_some(path)
 }
@@ -121,6 +125,9 @@ fn store_in(dir: &Path, provider: Provider, key: &str) -> Result<PathBuf> {
     use std::io::Write;
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
+    if provider.keyless() {
+        bail!("{provider} takes no key: it judges through Claude Code's own account");
+    }
     let key = validate(key)?;
     std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     // A symlinked keys directory would put the key wherever the link points.
@@ -494,12 +501,13 @@ mod tests {
 
         // A key only in the environment never reaches the agent a hook starts.
         // No other test reads this variable's value.
-        let saved = std::env::var_os(Provider::Anthropic.key_env());
-        std::env::set_var(Provider::Anthropic.key_env(), "sk-ant-from-the-environment-only");
+        let var = Provider::Anthropic.key_env().unwrap();
+        let saved = std::env::var_os(var);
+        std::env::set_var(var, "sk-ant-from-the-environment-only");
         let with_env = ready();
         match saved {
-            Some(v) => std::env::set_var(Provider::Anthropic.key_env(), v),
-            None => std::env::remove_var(Provider::Anthropic.key_env()),
+            Some(v) => std::env::set_var(var, v),
+            None => std::env::remove_var(var),
         }
         assert_eq!(with_env, Readiness::NoKey(None));
 
@@ -532,6 +540,22 @@ mod tests {
     }
 
     fn locate_env(p: Provider) -> Option<Source> {
-        std::env::var(p.key_env()).ok().filter(|v| !v.trim().is_empty()).map(|_| Source::Env(p.key_env()))
+        let var = p.key_env()?;
+        std::env::var(var).ok().filter(|v| !v.trim().is_empty()).map(|_| Source::Env(var))
+    }
+
+    #[test]
+    fn a_keyless_provider_has_no_key_file_and_stores_none() {
+        let dir = scratch("keyless").join("keys");
+        std::fs::create_dir_all(&dir).unwrap();
+        // A file at its name is not a key.
+        std::fs::write(dir.join("claude-code"), "sk-ant-abcdefghijklmnop\n").unwrap();
+        assert_eq!(locate_in(Provider::ClaudeCode, &dir), None);
+        assert!(!env_set(Provider::ClaudeCode));
+        assert!(store_in(&dir, Provider::ClaudeCode, "sk-ant-abcdefghijklmnop").is_err());
+        // The control: a keyed provider's file is found.
+        let path = store_in(&dir, Provider::Anthropic, "sk-ant-abcdefghijklmnop").unwrap();
+        assert_eq!(locate_file_in(Provider::Anthropic, &dir), Some(path));
+        std::fs::remove_dir_all(dir.parent().unwrap()).unwrap();
     }
 }

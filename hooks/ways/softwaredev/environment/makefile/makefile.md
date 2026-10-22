@@ -22,7 +22,7 @@ A Makefile is the project's task runner. It's the answer to "how do I build/test
 
 ## When to Use
 
-- **New repo**: Scaffold a Makefile early — it's the project's control panel
+- **New repo**: Propose one early — it's the project's control panel
 - **Existing repo with no Makefile**: Propose one when you see scattered build/test commands
 - **Existing Makefile**: Use it. Run `make help` or read targets before inventing ad-hoc commands
 

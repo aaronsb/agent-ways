@@ -37,9 +37,9 @@ pub const WRAPPERS: &[&str] = &[
 ];
 
 /// Shell keywords stripped from the front of a segment. `do` marks the
-/// segment as a loop body.
+/// segment as a loop body. `time` is a wrapper, so `time -p cmd` resolves.
 pub const LEAD_KEYWORDS: &[&str] = &[
-    "do", "then", "else", "elif", "if", "while", "until", "{", "!", "time",
+    "do", "then", "else", "elif", "if", "while", "until", "{", "!",
 ];
 
 /// Shell keywords that make the rest of a segment structure, not a command:
@@ -52,7 +52,7 @@ pub const SKIP_KEYWORDS: &[&str] = &[
 /// A program listed with 0 has no subcommand but stops collecting words at
 /// its first argument, as the listed programs do.
 pub const SUBCOMMAND_DEPTH: &[(&str, usize)] = &[
-    ("git", 1), ("gh", 2), ("cargo", 1), ("make", 1), ("docker", 2), ("podman", 2),
+    ("git", 1), ("gh", 2), ("cargo", 1), ("make", 1), ("docker", 1), ("podman", 1),
     ("systemctl", 1), ("tmux", 1), ("npm", 1), ("pnpm", 1), ("yarn", 1), ("pip", 1), ("pip3", 1),
     ("uv", 1), ("go", 1), ("kubectl", 1), ("ways", 2), ("adr", 1), ("doc", 1), ("attend", 2),
     ("attend-chat", 1), ("claude", 1), ("brew", 1), ("pacman", 0), ("yay", 0), ("apt", 1),
@@ -61,9 +61,13 @@ pub const SUBCOMMAND_DEPTH: &[(&str, usize)] = &[
     ("loginctl", 1), ("machinectl", 1), ("flatpak", 1), ("snap", 1), ("gcloud", 2), ("aws", 2),
 ];
 
-/// `git` subcommands that take a second subcommand word: `git stash pop`,
-/// `git worktree add`, `git remote add`, `git submodule update`.
-pub const GIT_SECOND_WORD: &[&str] = &["stash", "worktree", "remote", "submodule"];
+/// Subcommands that take a second subcommand word, per program: `git stash
+/// pop`, `git worktree add`, `docker compose up`, `docker image push`.
+pub const SECOND_WORD: &[(&str, &[&str])] = &[
+    ("git", &["stash", "worktree", "remote", "submodule"]),
+    ("docker", &["compose", "image", "container", "network", "volume", "system", "buildx", "context"]),
+    ("podman", &["compose", "image", "container", "network", "volume", "system", "buildx", "context"]),
+];
 
 /// Flags that take the next word as their value, per program. The value is
 /// not read as a subcommand or as the program (`sudo -u root cmd`,
@@ -79,8 +83,8 @@ pub const VALUE_FLAGS: &[(&str, &[&str])] = &[
     ("xargs", &["-I", "-n", "-P", "-L", "-d", "-a", "-E", "-s", "--max-args", "--max-procs", "--delimiter", "--arg-file"]),
     ("time", &["-f", "-o", "--format", "--output"]),
     ("timeout", &["-s", "-k", "--signal", "--kill-after"]),
-    ("git", &["-C", "-c"]),
-    ("gh", &["-R", "--repo"]),
+    ("git", &["-C", "-c", "--git-dir", "--work-tree", "--namespace"]),
+    ("gh", &["-R", "--repo", "-X", "--method"]),
     ("make", &["-C", "-f", "-I", "-o", "-W", "--directory", "--file", "--makefile"]),
     ("cargo", &["-p", "--package", "--manifest-path", "--target", "--bin", "--example", "--test", "--features", "-F", "-Z"]),
     ("docker", &["-H", "--host", "--context", "-f", "--file", "-p", "--project-name"]),
@@ -92,11 +96,20 @@ pub const VALUE_FLAGS: &[(&str, &[&str])] = &[
     ("systemctl", &["-H", "-M", "--host", "--machine"]),
 ];
 
+/// Flags that take the next word as their value only when it is a number:
+/// `make -j 4 install` but `make -j install`.
+pub const NUMERIC_VALUE_FLAGS: &[(&str, &[&str])] = &[
+    ("make", &["-j", "-l", "--jobs", "--load-average"]),
+    ("cargo", &["-j", "--jobs"]),
+];
+
 /// The input to a class rule: one segment from its program on.
 pub struct ClassInput<'a> {
     /// The program's base name.
     pub program: &'a str,
     /// Every word after the program, flags included, redirections excluded.
+    /// A flag written with its value (`--method=DELETE`, `-XPOST`) is split
+    /// into the flag and the value.
     pub tokens: &'a [&'a str],
     /// The positional words after the program: tokens not starting with
     /// `-`, less the values of [`VALUE_FLAGS`].
@@ -174,6 +187,14 @@ fn pacman_writes(c: &ClassInput) -> bool {
     })
 }
 
+/// `find … -exec rm {} \;` and the like: the command `find` runs writes.
+fn find_exec_writes(c: &ClassInput) -> bool {
+    c.tokens.windows(2).any(|w| {
+        matches!(w[0], "-exec" | "-execdir" | "-ok" | "-okdir")
+            && FILE_WRITE.contains(&w[1].rsplit('/').next().unwrap_or(w[1]))
+    })
+}
+
 const SERVICE: &[&str] = &[
     "systemctl", "kill", "pkill", "killall", "tmux", "screen", "docker", "podman", "launchctl",
     "nohup", "setsid", "journalctl", "loginctl", "busctl", "machinectl", "ps", "pgrep", "lsof",
@@ -216,6 +237,17 @@ const READ_INSPECT: &[&str] = &[
 /// The class rules, in order; the first that matches decides, and a
 /// segment no rule matches is [`Class::Other`].
 pub static CLASS_RULES: &[ClassRule] = &[
+    // Publishing to a registry or a forge, before each program's own rules.
+    ClassRule {
+        programs: &["docker", "podman"],
+        when: Cond::Any(&[
+            Cond::W0(&["push"]),
+            Cond::All(&[Cond::W0(&["image", "manifest", "buildx"]), Cond::W1(&["push"])]),
+        ]),
+        class: Class::Publish,
+    },
+    ClassRule { programs: &["npm", "pnpm", "yarn"], when: Cond::W0(&["publish"]), class: Class::Publish },
+    ClassRule { programs: &["cargo"], when: Cond::W0(&["publish"]), class: Class::Publish },
     // gh: writes to the forge publish, the rest reads it.
     ClassRule {
         programs: &["gh"],
@@ -227,11 +259,23 @@ pub static CLASS_RULES: &[ClassRule] = &[
     },
     ClassRule {
         programs: &["gh"],
+        when: Cond::Any(&[
+            Cond::All(&[Cond::W0(&["release"]), Cond::W1(&["upload"])]),
+            Cond::All(&[Cond::W0(&["secret", "variable"]), Cond::W1(&["set", "delete"])]),
+            Cond::All(&[Cond::W0(&["gist"]), Cond::W1(&["create", "edit", "delete"])]),
+        ]),
+        class: Class::Publish,
+    },
+    ClassRule {
+        programs: &["gh"],
         when: Cond::All(&[
             Cond::W0(&["api"]),
             Cond::Any(&[
-                Cond::All(&[Cond::Has(&["-X", "--method"]), Cond::Has(&["POST", "PATCH", "PUT", "DELETE"])]),
-                Cond::Has(&["-f", "-F", "--field", "--raw-field"]),
+                Cond::All(&[
+                    Cond::Has(&["-X", "--method"]),
+                    Cond::Has(&["POST", "PATCH", "PUT", "DELETE", "post", "patch", "put", "delete"]),
+                ]),
+                Cond::Has(&["-f", "-F", "--field", "--raw-field", "--input"]),
             ]),
         ]),
         class: Class::Publish,
@@ -247,6 +291,7 @@ pub static CLASS_RULES: &[ClassRule] = &[
     ClassRule {
         programs: &["git"],
         when: Cond::Any(&[
+            Cond::All(&[Cond::W0(&["tag"]), Cond::Any(&[Cond::Has(&["-l", "--list"]), Cond::Not(&Cond::WordsOver(1))])]),
             Cond::All(&[Cond::W0(&["worktree"]), Cond::W1(&["list"])]),
             Cond::All(&[Cond::W0(&["stash"]), Cond::W1(&["list", "show"])]),
             Cond::All(&[Cond::W0(&["remote"]), Cond::W1(&["", "get-url", "show"])]),
@@ -295,6 +340,13 @@ pub static CLASS_RULES: &[ClassRule] = &[
         class: Class::ReadInspect,
     },
     ClassRule { programs: SERVICE, when: Cond::Always, class: Class::Service },
+    ClassRule {
+        programs: &["kubectl"],
+        when: Cond::W0(&["apply", "delete", "create", "patch", "replace", "scale", "rollout"]),
+        class: Class::Service,
+    },
+    // `command -v x` (the describer resolves `command x` to `x`).
+    ClassRule { programs: &["command"], when: Cond::Always, class: Class::ReadInspect },
     // packages: package managers that also run builds and queries.
     ClassRule {
         programs: &["npm", "pnpm", "yarn"],
@@ -334,8 +386,12 @@ pub static CLASS_RULES: &[ClassRule] = &[
         class: Class::Other,
     },
     ClassRule { programs: BUILD_TEST, when: Cond::Always, class: Class::BuildTest },
-    // search; find -delete writes.
-    ClassRule { programs: &["find"], when: Cond::Has(&["-delete"]), class: Class::FileWrite },
+    // search; find -delete and find -exec rm write.
+    ClassRule {
+        programs: &["find"],
+        when: Cond::Any(&[Cond::Has(&["-delete"]), Cond::Pred(find_exec_writes)]),
+        class: Class::FileWrite,
+    },
     ClassRule { programs: SEARCH, when: Cond::Always, class: Class::Search },
     // file writes
     ClassRule {
@@ -375,10 +431,22 @@ pub fn subcommand_depth(program: &str) -> Option<usize> {
 /// Whether `flag` (without any `=value`) takes the next word as its value
 /// for `program`.
 pub fn takes_value(program: &str, flag: &str) -> bool {
-    VALUE_FLAGS
-        .iter()
-        .find(|(p, _)| *p == program)
-        .is_some_and(|(_, flags)| flags.contains(&flag))
+    listed(VALUE_FLAGS, program, flag)
+}
+
+/// Whether `flag` takes the next word as its value when that word is a
+/// number.
+pub fn takes_numeric_value(program: &str, flag: &str) -> bool {
+    listed(NUMERIC_VALUE_FLAGS, program, flag)
+}
+
+/// Whether `first` takes a second subcommand word for `program`.
+pub fn takes_second_word(program: &str, first: &str) -> bool {
+    listed(SECOND_WORD, program, first)
+}
+
+fn listed(table: &[(&str, &[&str])], program: &str, item: &str) -> bool {
+    table.iter().find(|(p, _)| *p == program).is_some_and(|(_, items)| items.contains(&item))
 }
 
 /// The class of an operative segment: the first matching rule's class.

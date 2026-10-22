@@ -55,6 +55,7 @@ fn name(p: Provider) -> &'static str {
     match p {
         Provider::Anthropic => "Anthropic",
         Provider::Openrouter => "OpenRouter",
+        Provider::ClaudeCode => "Claude Code internal",
     }
 }
 
@@ -71,15 +72,14 @@ pub fn setup() -> Result<()> {
     let mut state = keys::judge_ready();
     if let (Readiness::Unverified(p, _), Some(bin)) = (&state, &agent) {
         println!("Checking the relevance judge's key…");
+        let mut check = Command::new(bin);
+        check.args(["key", "check", "--provider", p.as_str()]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
         // Without the variable the check reads the key file, the one the agent
         // a hook starts reads, and records its result for judge_ready.
-        let _ = Command::new(bin)
-            .args(["key", "check", "--provider", p.as_str()])
-            .env_remove(p.key_env())
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+        if let Some(var) = p.key_env() {
+            check.env_remove(var);
+        }
+        let _ = check.status();
         state = keys::judge_ready();
     }
     let Some(warning) = warning(&state) else {
@@ -90,8 +90,8 @@ pub fn setup() -> Result<()> {
     };
     println!("{warning}");
     if let Readiness::NoKey(_) = state {
-        for p in Provider::ALL.into_iter().filter(|p| keys::env_set(*p)) {
-            println!("${} is set, but hooks read only the key file: add it there.", p.key_env());
+        for var in Provider::ALL.into_iter().filter(|p| keys::env_set(*p)).filter_map(Provider::key_env) {
+            println!("${var} is set, but hooks read only the key file: add it there.");
         }
     }
     let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::cost::JudgeCall;
+use crate::cost::{JudgeCall, Usage};
 use crate::judge::{Candidate, Turn};
 use crate::profile::{Mode, Provider};
 
@@ -121,6 +121,42 @@ pub struct Status {
     /// Judge latency over the most recent calls, in milliseconds.
     pub latency_p50_ms: Option<u64>,
     pub latency_p95_ms: Option<u64>,
+}
+
+/// A judge request for the `claude-code` engine (ADR-708 §4-5): what the
+/// hook side hands the ways mod module, which sends it through
+/// `$.model.complete` unchanged. The ways agent never sees one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JudgeJob {
+    /// The profile's model, which Claude Code resolves and allowlist-checks
+    /// like a `--model` value.
+    pub model: String,
+    /// [`crate::judge::SYSTEM`].
+    pub system: String,
+    /// [`crate::judge::render_json_prompt`]'s text.
+    pub prompt: String,
+    /// [`crate::judge::max_tokens`] for the candidates judged.
+    pub max_tokens: usize,
+    /// What remains of the profile's deadline when the job is written; the
+    /// module abandons the call past it.
+    pub timeout_ms: u64,
+}
+
+/// The module's answer to a [`JudgeJob`]: `$.model.complete`'s result,
+/// passed through. The hook side parses `text` with
+/// [`crate::judge::parse_reply`].
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct JudgeAnswer {
+    /// The reply's text, when the model answered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// The reply's token usage, in Claude Code's `ModelUsage` shape. It
+    /// carries no price: the spend is the account's usage (ADR-708 §10).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Usage>,
+    /// Why there is no text: `api-error`, `empty-reply` or `aborted`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// The agent's socket: `$WAYS_AGENT_SOCK`, else
@@ -263,6 +299,39 @@ mod tests {
         let line = serde_json::to_string(&reply).unwrap();
         assert!(line.contains("\"cost_source\":\"unknown\"") && !line.contains("cost_usd"));
         assert_eq!(serde_json::from_str::<Reply>(&line).unwrap(), reply);
+    }
+
+    #[test]
+    fn a_judge_job_and_its_answers_round_trip() {
+        let job = JudgeJob {
+            model: "claude-haiku-4-5".into(),
+            system: crate::judge::SYSTEM.into(),
+            prompt: crate::judge::render_json_prompt("p"),
+            max_tokens: crate::judge::max_tokens(2),
+            timeout_ms: 1800,
+        };
+        let line = serde_json::to_string(&job).unwrap();
+        assert!(line.contains(r#""model":"claude-haiku-4-5""#) && line.contains(r#""max_tokens":224"#) && line.contains(r#""timeout_ms":1800"#));
+        assert_eq!(serde_json::from_str::<JudgeJob>(&line).unwrap(), job);
+
+        // `$.model.complete`'s answered result, its usage as Claude Code
+        // names it.
+        let answered = r#"{"text":"```json\n{}\n```","usage":{"input_tokens":500,"output_tokens":120,"cache_read_input_tokens":3,"cache_creation_input_tokens":4}}"#;
+        let a: JudgeAnswer = serde_json::from_str(answered).unwrap();
+        assert_eq!(a.text.as_deref(), Some("```json\n{}\n```"));
+        assert_eq!(
+            a.usage,
+            Some(Usage { input_tokens: 500, output_tokens: 120, cache_read_tokens: 3, cache_write_tokens: 4, provider_cost_usd: None })
+        );
+        assert_eq!(a.reason, None);
+        // Unanswered: a reason and zero usage, no text.
+        let failed: JudgeAnswer = serde_json::from_str(
+            r#"{"reason":"api-error","usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}"#,
+        )
+        .unwrap();
+        assert_eq!((failed.text, failed.reason.as_deref()), (None, Some("api-error")));
+        let line = serde_json::to_string(&a).unwrap();
+        assert_eq!(serde_json::from_str::<JudgeAnswer>(&line).unwrap(), a);
     }
 
     #[cfg(unix)]

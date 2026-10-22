@@ -25,8 +25,8 @@ Setting up the shell layer of a personal developer machine — the things a user
 - **Layer on top, don't clobber.** Distros and Homebrew already set sensible PATH and XDG defaults. Add to them; don't replace them.
 - **Graceful degradation.** Every sourced config should `command -v <tool>` before configuring it. A missing tool must silently no-op.
 - **No plugin managers by default.** Plain shell + sourced files beats oh-my-zsh, zinit, antibody for a user who wants to maintain their own setup. If the user asks for one, fine — but don't introduce one uninvited.
-- **Ask before installing.** Font family, which CLI replacements, git identity, SSH key type — these are preferences. Confirm before running package manager commands.
-- **Offer the walkthrough shape.** Interactive setup is a sequence: detect → confirm → install → verify. At each step, report what was found and wait for confirmation before moving on. Don't batch-install the whole stack.
+- **Ask about preferences before installing.** Font family, which CLI replacements, git identity, SSH key type: each choice changes the install, which meets the asking bar in core.md.
+- **Offer the walkthrough shape.** Interactive setup is a sequence: detect, confirm, install, verify. Don't batch-install the whole stack.
 
 ## See Also
 

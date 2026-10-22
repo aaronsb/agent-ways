@@ -9,9 +9,9 @@ refire: 0.15
 
 Personal task management as the persistence layer closest to the user's brain. Tasks track obligations, deadlines, and commitments across all contexts.
 
-## Core Rule: Suggest, Never Auto-Execute
+## Core Rule: Suggest Inferred Changes
 
-Every task mutation must be suggested and approved. Present the proposal, wait for confirmation, then execute.
+A task change the user asked for counts as approved. A change you inferred is suggested first and made on a yes (ea, requested versus inferred writes).
 
 ## Suggesting Task Creation
 

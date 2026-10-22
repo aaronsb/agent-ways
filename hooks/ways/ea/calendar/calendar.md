@@ -13,7 +13,7 @@ Create, check, and manage calendar events across accounts.
 
 1. **Check availability** before creating any event. Query all relevant accounts for conflicts in the proposed time range.
 2. **Surface related tasks.** When reviewing upcoming events, match open tasks by client, project, or attendee names. "You have N open tasks related to [Client] before your 2pm with them."
-3. **Present event details** before creating. Always confirm: summary, start/end with timezone, description, attendees, reminders.
+3. **Present event details** before creating an event you inferred: summary, start/end with timezone, description, attendees, reminders. An event the user asked for is created as asked and reported with the same details (ea, requested versus inferred writes).
 4. **After meeting creation or review**, suggest task capture. When a meeting just ended or was created, ask if action items should be captured.
 
 ## Reminders for Future Deadlines

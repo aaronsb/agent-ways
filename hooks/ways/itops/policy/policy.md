@@ -8,6 +8,8 @@ refire: 0.15
 <!-- epistemic: constraint -->
 # Policy Way
 
+These tables describe the product's own policy. Claude's actions in this session still confirm first.
+
 ## Operation Classification
 
 | Class | Examples | Default Approval |

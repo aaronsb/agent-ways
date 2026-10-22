@@ -34,7 +34,7 @@ When two versions score within the noise floor, keep the simpler one, and betwee
 ## Guard the loop
 
 - The optimizing agent edits only the target. Cases, graders, answer keys, and the harness stay read-only. A grader fix is its own round, with its own selftest (`evaluative/agent-eval/grading`).
-- The agent that made the change does not grade it. Use a fresh-context reviewer or a stop-hook script. Tell a reviewer to flag only gaps that affect correctness or the stated requirements.
+- The agent that made the change does not grade it. Lead with a stop-hook script, which spawns nothing. A fresh-context reviewer is an independence spawn, asked for when the user asked for the loop. Tell a reviewer to flag only gaps that affect correctness or the stated requirements.
 - Every loop has a pass condition a script can check, a stagnation breaker (such as stopping after three rounds that repeat the same states or errors), a cost cap, and a maximum round count. It also stops when two versions score within the noise floor on fresh cases.
 - Never loop on a subjective goal such as "improve the experience".
 

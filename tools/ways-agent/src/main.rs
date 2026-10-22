@@ -143,11 +143,11 @@ fn run(cli: Cli) -> Result<ExitCode> {
     match cli.command {
         Command::Key { action } => match action {
             KeyAction::Add { provider, from_file, no_check, force } => {
-                key_add(Provider::parse(&provider)?, from_file, !no_check, false, force)
+                key_add(key_provider(&provider)?, from_file, !no_check, false, force)
             }
-            KeyAction::Rotate { provider, from_file, force } => key_add(Provider::parse(&provider)?, from_file, true, true, force),
+            KeyAction::Rotate { provider, from_file, force } => key_add(key_provider(&provider)?, from_file, true, true, force),
             KeyAction::Check { provider } => key_check(provider.as_deref()),
-            KeyAction::Remove { provider } => key_remove(Provider::parse(&provider)?),
+            KeyAction::Remove { provider } => key_remove(key_provider(&provider)?),
             KeyAction::Status => key_status(),
         },
         Command::Models { provider, all } => models(provider.as_deref(), all),
@@ -235,6 +235,15 @@ fn may_store(result: Option<&net::Check>, replacing: bool, force: bool) -> Resul
     }
 }
 
+/// A provider `ways agent key` acts on: one that takes a key.
+fn key_provider(name: &str) -> Result<Provider> {
+    let provider = Provider::parse(name)?;
+    if provider.keyless() {
+        bail!("{provider} takes no key: it judges through Claude Code's own account");
+    }
+    Ok(provider)
+}
+
 fn key_add(provider: Provider, from_file: Option<PathBuf>, check: bool, rotate: bool, force: bool) -> Result<ExitCode> {
     let replacing = keys::key_path(provider).is_file();
     if rotate && !replacing {
@@ -252,8 +261,8 @@ fn key_add(provider: Provider, from_file: Option<PathBuf>, check: bool, rotate: 
         Some(r) => keys::record_check(provider, &keys::CheckRecord::now(r.record_word(), &model, &source)),
         None => keys::clear_check(provider),
     }
-    if keys::env_set(provider) {
-        println!("note: ${} is set and overrides this file for `ways agent` commands; hooks use the file", provider.key_env());
+    if let Some(var) = provider.key_env().filter(|_| keys::env_set(provider)) {
+        println!("note: ${var} is set and overrides this file for `ways agent` commands; hooks use the file");
     }
     let Some(result) = result else {
         println!("not checked: the agent checks it on first use, and gates only once it passes");
@@ -302,7 +311,7 @@ fn origin(set: bool) -> &'static str {
 
 fn key_check(only: Option<&str>) -> Result<ExitCode> {
     let providers = match only {
-        Some(p) => vec![Provider::parse(p)?],
+        Some(p) => vec![key_provider(p)?],
         None => Provider::ALL.to_vec(),
     };
     let mut checked = 0;
@@ -335,8 +344,8 @@ fn key_remove(provider: Provider) -> Result<ExitCode> {
     } else {
         println!("no stored {provider} key");
     }
-    if keys::env_set(provider) {
-        println!("note: ${} is still set and supplies a key to `ways agent` commands; hooks use the file", provider.key_env());
+    if let Some(var) = provider.key_env().filter(|_| keys::env_set(provider)) {
+        println!("note: ${var} is still set and supplies a key to `ways agent` commands; hooks use the file");
     }
     Ok(ExitCode::SUCCESS)
 }

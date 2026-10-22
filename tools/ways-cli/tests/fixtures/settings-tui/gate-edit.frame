@@ -14,8 +14,8 @@ agent-tui frame 100x30
 |│                                                     ││checks the key against the profile's model.│|
 |│                                                     ││                                           │|
 |│                                                     ││value                                      │|
-|│                                                     ││type     one of anthropic | openrouter     │|
-|│                                                     ││(Enter picks)                              │|
+|│                                                     ││type     one of anthropic | openrouter |   │|
+|│                                                     ││claude-code (Enter picks)                  │|
 |│                                                     ││from     default                           │|
 |│                                                     ││writes   ~/.config/agent-ways/agent.yaml   │|
 |│                                                     ││[gate.engine]                              │|

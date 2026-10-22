@@ -16,6 +16,27 @@ const ANTHROPIC: &str = "https://api.anthropic.com";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const OPENROUTER: &str = "https://openrouter.ai/api/v1";
 
+/// The providers the agent calls over HTTP. `claude-code` judges inside
+/// Claude Code (ADR-708), so the agent has no request to send for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Api {
+    Anthropic,
+    Openrouter,
+}
+
+impl Api {
+    fn of(provider: Provider) -> Option<Api> {
+        match provider {
+            Provider::Anthropic => Some(Api::Anthropic),
+            Provider::Openrouter => Some(Api::Openrouter),
+            Provider::ClaudeCode => None,
+        }
+    }
+}
+
+/// Why the agent made no call for a provider it does not reach.
+pub const NOT_CALLED: &str = "claude-code judges inside Claude Code; the ways agent sends it no request";
+
 /// An HTTP agent that reports 4xx and 5xx as responses, so callers can name
 /// the status. Clones share one connection pool.
 pub fn agent(timeout: Duration) -> ureq::Agent {
@@ -86,7 +107,8 @@ impl std::fmt::Display for Check {
 /// Checks the key and the model with calls that cost nothing: a model lookup
 /// on Anthropic; the key-info and model-endpoints lookups on OpenRouter.
 pub fn check(provider: Provider, key: &str, model: &str) -> Check {
-    match lookup(provider, key, model) {
+    let Some(api) = Api::of(provider) else { return Check::Failed(0, NOT_CALLED.to_string()) };
+    match lookup(api, key, model) {
         Check::Valid => model_fit(model),
         other => other,
     }
@@ -101,20 +123,20 @@ fn model_fit(model: &str) -> Check {
     }
 }
 
-fn lookup(provider: Provider, key: &str, model: &str) -> Check {
+fn lookup(api: Api, key: &str, model: &str) -> Check {
     let http = agent(Duration::from_secs(15));
-    match provider {
-        Provider::Anthropic => {
+    match api {
+        Api::Anthropic => {
             let url = format!("{ANTHROPIC}/v1/models/{model}");
-            match get(&http, &url, Some(provider), key) {
+            match get(&http, &url, Some(api), key) {
                 Err(e) => Check::Unreachable(e),
                 Ok((200, _)) => Check::Valid,
                 Ok((404, _)) => Check::ModelUnavailable(model.to_string()),
                 Ok((status, body)) => status_check(status, &body),
             }
         }
-        Provider::Openrouter => {
-            let info = match get(&http, &format!("{OPENROUTER}/key"), Some(provider), key) {
+        Api::Openrouter => {
+            let info = match get(&http, &format!("{OPENROUTER}/key"), Some(api), key) {
                 Err(e) => return Check::Unreachable(e),
                 Ok((200, body)) => body,
                 Ok((status, body)) => return status_check(status, &body),
@@ -158,13 +180,16 @@ pub use crate::models::ModelInfo;
 /// The provider's model list. Anthropic's needs the key and carries no prices;
 /// OpenRouter's is public and priced.
 pub fn models(provider: Provider, key: Option<&str>) -> Result<Vec<ModelInfo>> {
+    let Some(api) = Api::of(provider) else {
+        bail!("{provider} has no model list to fetch: Claude Code resolves its model")
+    };
     let http = agent(Duration::from_secs(20));
-    let (url, auth) = match provider {
-        Provider::Anthropic => {
+    let (url, auth) = match api {
+        Api::Anthropic => {
             let Some(key) = key else { bail!("listing Anthropic's models needs a key; run `ways agent key add --provider anthropic`") };
-            (format!("{ANTHROPIC}/v1/models?limit=1000"), Some((provider, key)))
+            (format!("{ANTHROPIC}/v1/models?limit=1000"), Some((api, key)))
         }
-        Provider::Openrouter => (format!("{OPENROUTER}/models"), None),
+        Api::Openrouter => (format!("{OPENROUTER}/models"), None),
     };
     let (status, body) = match auth {
         Some((p, k)) => get(&http, &url, Some(p), k),
@@ -228,12 +253,12 @@ pub fn judge(
     timeout: Duration,
 ) -> std::result::Result<(Vec<f64>, Option<Usage>), JudgeFailure> {
     use crate::judge;
-    // Haiku 5.5's tokenizer counts the same text as about 30% more tokens.
-    let max_tokens = 96 + 64 * n;
+    let Some(api) = Api::of(provider) else { return Err(JudgeFailure::bare(NOT_CALLED.to_string())) };
+    let max_tokens = judge::max_tokens(n);
     // Newer models answer HTTP 400 to any non-default sampling parameter.
     let temperature = crate::profile::accepts_sampling(model);
-    let (url, mut body) = match provider {
-        Provider::Anthropic => (
+    let (url, mut body) = match api {
+        Api::Anthropic => (
             format!("{ANTHROPIC}/v1/messages"),
             serde_json::json!({
                 "model": model,
@@ -249,7 +274,7 @@ pub fn judge(
                 "messages": [{"role": "user", "content": prompt}],
             }),
         ),
-        Provider::Openrouter => (
+        Api::Openrouter => (
             format!("{OPENROUTER}/chat/completions"),
             serde_json::json!({
                 "model": model,
@@ -271,9 +296,9 @@ pub fn judge(
         body["temperature"] = serde_json::json!(0);
     }
     let mut req = http.post(&url).config().timeout_global(Some(timeout)).build();
-    req = match provider {
-        Provider::Anthropic => req.header("x-api-key", key).header("anthropic-version", ANTHROPIC_VERSION),
-        Provider::Openrouter => req.header("Authorization", &format!("Bearer {key}")).header("X-Title", "agent-ways"),
+    req = match api {
+        Api::Anthropic => req.header("x-api-key", key).header("anthropic-version", ANTHROPIC_VERSION),
+        Api::Openrouter => req.header("Authorization", &format!("Bearer {key}")).header("X-Title", "agent-ways"),
     };
     let mut resp = req.send_json(&body).map_err(|e| JudgeFailure::bare(transport_reason(e)))?;
     let status = resp.status().as_u16();
@@ -288,17 +313,17 @@ pub fn judge(
         let usage = refused.then(|| Usage { provider_cost_usd: Some(0.0), ..Default::default() });
         return Err(JudgeFailure { reason: format!("provider_{status}: {}", error_message(&reply)), usage });
     }
-    let usage = usage(provider, &reply);
+    let usage = usage(api, &reply);
     let failed = |reason: String| JudgeFailure { reason, usage: usage.clone() };
-    let input = match provider {
-        Provider::Anthropic => reply
+    let input = match api {
+        Api::Anthropic => reply
             .get("content")
             .and_then(Value::as_array)
             .and_then(|blocks| blocks.iter().find(|b| b.get("type").and_then(Value::as_str) == Some("tool_use")))
             .and_then(|b| b.get("input"))
             .cloned()
             .ok_or_else(|| failed(format!("answer: no tool_use block (stop_reason {})", reply["stop_reason"])))?,
-        Provider::Openrouter => {
+        Api::Openrouter => {
             let args = reply
                 .pointer("/choices/0/message/tool_calls/0/function/arguments")
                 .and_then(Value::as_str)
@@ -321,11 +346,11 @@ fn decode_arguments(args: &str) -> std::result::Result<Value, serde_json::Error>
 
 /// The usage block of a 200 reply, in either provider's shape. `None` when
 /// the reply carries no token counts.
-fn usage(provider: Provider, reply: &Value) -> Option<Usage> {
+fn usage(api: Api, reply: &Value) -> Option<Usage> {
     let u = reply.get("usage")?;
     let n = |ptr: &str| u.pointer(ptr).and_then(Value::as_u64);
-    match provider {
-        Provider::Anthropic => Some(Usage {
+    match api {
+        Api::Anthropic => Some(Usage {
             input_tokens: n("/input_tokens")?,
             output_tokens: n("/output_tokens")?,
             cache_read_tokens: n("/cache_read_input_tokens").unwrap_or(0),
@@ -333,7 +358,7 @@ fn usage(provider: Provider, reply: &Value) -> Option<Usage> {
             provider_cost_usd: None,
         }),
         // OpenRouter's prompt_tokens counts cache reads and writes too.
-        Provider::Openrouter => {
+        Api::Openrouter => {
             let cached = n("/prompt_tokens_details/cached_tokens").unwrap_or(0);
             let written = n("/prompt_tokens_details/cache_write_tokens").unwrap_or(0);
             Some(Usage {
@@ -357,13 +382,13 @@ fn transport_reason(e: ureq::Error) -> String {
 
 /// GET with the provider's auth headers. Returns the status and the parsed
 /// body (Null when it is not JSON), or the transport error's text.
-fn get(http: &ureq::Agent, url: &str, auth: Option<Provider>, key: &str) -> std::result::Result<(u16, Value), String> {
+fn get(http: &ureq::Agent, url: &str, auth: Option<Api>, key: &str) -> std::result::Result<(u16, Value), String> {
     let mut req = http.get(url);
     match auth {
-        Some(Provider::Anthropic) => {
+        Some(Api::Anthropic) => {
             req = req.header("x-api-key", key).header("anthropic-version", ANTHROPIC_VERSION);
         }
-        Some(Provider::Openrouter) => {
+        Some(Api::Openrouter) => {
             req = req.header("Authorization", &format!("Bearer {key}"));
         }
         None => {}
@@ -406,15 +431,29 @@ mod tests {
     fn usage_reads_both_provider_shapes() {
         let anthropic = json!({"usage": {"input_tokens": 900, "output_tokens": 40, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}});
         assert_eq!(
-            usage(Provider::Anthropic, &anthropic),
+            usage(Api::Anthropic, &anthropic),
             Some(Usage { input_tokens: 900, output_tokens: 40, ..Default::default() })
         );
         let openrouter = json!({"usage": {"prompt_tokens": 1000, "completion_tokens": 40, "cost": 0.0012, "prompt_tokens_details": {"cached_tokens": 100, "cache_write_tokens": 50}}});
         assert_eq!(
-            usage(Provider::Openrouter, &openrouter),
+            usage(Api::Openrouter, &openrouter),
             Some(Usage { input_tokens: 850, output_tokens: 40, cache_read_tokens: 100, cache_write_tokens: 50, provider_cost_usd: Some(0.0012) })
         );
-        assert_eq!(usage(Provider::Anthropic, &json!({"content": []})), None);
+        assert_eq!(usage(Api::Anthropic, &json!({"content": []})), None);
+    }
+
+    #[test]
+    fn claude_code_has_no_http_path() {
+        assert_eq!(Api::of(Provider::ClaudeCode), None);
+        // The control: each keyed provider has one.
+        assert!(Provider::ALL.iter().all(|p| Api::of(*p).is_some()));
+        // Each entry point refuses before any request: the URLs below are
+        // never built, so nothing reaches the network.
+        let http = agent(Duration::from_millis(1));
+        let f = judge(&http, Provider::ClaudeCode, "", "claude-haiku-4-5", "p", 1, Duration::from_millis(1)).unwrap_err();
+        assert_eq!(f, JudgeFailure { reason: NOT_CALLED.to_string(), usage: None });
+        assert_eq!(check(Provider::ClaudeCode, "", "claude-haiku-4-5"), Check::Failed(0, NOT_CALLED.to_string()));
+        assert!(models(Provider::ClaudeCode, None).is_err());
     }
 
     #[test]

@@ -7,7 +7,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # History Severing
 
-When git history itself is the problem — leaked secrets baked into commit objects, malicious payloads spread across tree history, or a fork relationship you want to break cleanly.
+When git history itself is the problem — leaked secrets baked into commit objects, malicious payloads spread across tree history, or a fork relationship you want to break cleanly. Run these only when the user asks for them, and only after a backup clone (`git clone --mirror`).
 
 ## Orphan Branch (Full Sever)
 

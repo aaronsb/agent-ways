@@ -8,6 +8,8 @@ refire: 0.15
 <!-- epistemic: heuristic -->
 # Incident Response Way
 
+These tables describe the product's own policy. Claude's actions in this session still confirm first.
+
 ## Support Tiers
 
 | Tier | Domain | Autonomy | Example |

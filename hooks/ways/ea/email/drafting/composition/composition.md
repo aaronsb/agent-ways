@@ -30,7 +30,7 @@ Match how the user writes to this recipient in this context. Real sent mail outr
 
 - Create the draft in the correct account's mailbox. Tell the user where it lives.
 - Attach nothing unless asked. When files need to go out, put them in one folder the user can attach by hand.
-- For recurring emails such as weekly updates, mirror the last instance's wording, addressees, and CCs. When the user changes the standard, update the template or skill that produces it.
+- For recurring emails such as weekly updates, mirror the last instance's wording, addressees, and CCs. When the user changes the standard, update the template or skill that produces it, and name the update in your final message.
 - Do not resend a draft that the user's sent mail has already superseded.
 - If the user sends an email themselves and a chat follow-up depends on it, wait for their confirmation before posting the follow-up.
 - Schedule a send only when the user has authorised it, and confirm the exact time and timezone first.

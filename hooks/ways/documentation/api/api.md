@@ -11,7 +11,7 @@ refire: 0.15
 
 When building API endpoints, don't forget:
 
-- **Pagination on every list endpoint** — add it from day one. Default: `?cursor=X&limit=N`, return `next_cursor` in body. Retrofitting pagination is painful.
+- **Pagination on every list endpoint over an unbounded collection** — add it from day one. Default: `?cursor=X&limit=N`, return `next_cursor` in body. Retrofitting pagination is painful.
 - **Consistent error shape** — error responses use the same structure as success:
   ```json
   { "error": { "code": "NOT_FOUND", "message": "User 123 not found" } }

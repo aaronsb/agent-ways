@@ -19,17 +19,17 @@ Memory is Claude Code's auto-memory — the `MEMORY.md` file and topic files in 
 
 This way fires in three contexts:
 
-1. **User asks to remember something** — explicit request like "remember this" or "note this for later"
-2. **Context threshold** — context is filling up and it's time to checkpoint before compaction
-3. **About to write a memory file** — a Write/Edit targets the auto-memory directory, firing this way at the tool call *before the write commits*
+1. User asks to remember something: explicit request like "remember this" or "note this for later"
+2. Context threshold: context is filling up and it's time to checkpoint before compaction
+3. About to write a memory file: a Write/Edit targets the auto-memory directory, firing this way at the tool call *before the write commits*
 
-The third trigger exists because the first two can't catch the most common over-save: a *spontaneous, content-shaped self-save* mid-session — writing "X is the active income source" while the conversation is about income, not about memory. Semantic matching scores that against a memory way describing the *memory subsystem* and comes up cold; the user said no memory words; context isn't full. Nothing fires, and the harness's "save broadly" default goes unchallenged. The file trigger observes the **write event** the semantic layer structurally cannot see, and injects the routing check at the only moment it matters.
+The third trigger exists because the first two can't catch the most common over-save: a *spontaneous, content-shaped self-save* mid-session — writing "X is the active income source" while the conversation is about income. Semantic matching scores that against a memory way describing the *memory subsystem* and comes up cold; the user said no memory words; context isn't full. Nothing fires, and the harness's "save broadly" default goes unchallenged. The file trigger observes the **write event** the semantic layer structurally cannot see, and injects the routing check at the only moment it matters.
 
 For explicit requests, just record what the user asked. For threshold checkpoints and write-time interceptions, apply the surprise test and routing table below — the write hasn't committed yet, so a better home is still reachable.
 
 ## Surprise Test (threshold checkpoint only)
 
-Did anything unexpected happen this session? A gotcha, a pattern that broke assumptions, a workaround you had to discover? If the session was routine — standard code, familiar patterns, no surprises — there's nothing new to record. Skip and keep working.
+Did anything unexpected happen this session? A gotcha, a pattern that broke assumptions, a workaround you had to discover? If the session was routine, with standard code, familiar patterns and no surprises, there's nothing new to record. Skip and keep working.
 
 ## Routing: what goes in memory vs. what has a better home
 
@@ -63,15 +63,15 @@ Memory's low friction makes it the attractor for capture. Pre-empt the common wa
 
 Memory's comparative advantage is **cross-cutting user-level truth that has no better home**. Everything project-scoped has a better home:
 
-- **Ways** are reviewable (PRs), revertible (git), surfaced by relevance (embedding scoring), and silent when not needed (disclosure graph). Memory loads unconditionally — wrong memory is worse than no memory.
-- **ADRs** capture decisions with context and are indexed for lint and reference.
-- **GitHub** is the authoritative ledger for state; snapshotting it into memory splits the source of truth.
+- Ways: are reviewable (PRs), revertible (git), surfaced by relevance (embedding scoring), and silent when not needed (disclosure graph). Memory loads unconditionally — wrong memory is worse than no memory.
+- ADRs: capture decisions with context and are indexed for lint and reference.
+- GitHub: is the authoritative ledger for state; snapshotting it into memory splits the source of truth.
 
 Concrete failure mode this routing prevents: in 2026-04-22, a session-recap memory inherited a design note's claim that certain `Curve` variants were unused. A 10-second `grep` showed they were load-bearing in attend's engagement system. The memory would have guided a confident code deletion. Ways + grep beat memory here because ways don't claim state they aren't — they prescribe reasoning.
 
 ## Memory as way references
 
-When memory does hold a project-relevant entry, it should be a *pointer* to a way, not a copy:
+When memory does hold a project-relevant entry, it should be a *pointer* to a way:
 
 ```markdown
 - `softwaredev/code/testing` — relevant when editing integration tests,
