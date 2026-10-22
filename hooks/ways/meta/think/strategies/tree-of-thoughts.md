@@ -20,7 +20,7 @@ Score each branch:
 - **Risk** (1-10, lower is better): What could go wrong?
 
 ### 5. Pruning
-Discard branches scoring below 5 on any dimension. Explain why each pruned branch fails — the reasoning matters more than the score.
+Discard branches scoring below 5 on any dimension. Explain why each pruned branch fails — the reasoning matters more than the score. When you chose this strategy yourself, end with the recommendation and its tradeoff.
 
 ### 6. Deep Development
 Extend the best 1-2 branches into concrete plans. Detail the steps, identify unknowns, note dependencies.

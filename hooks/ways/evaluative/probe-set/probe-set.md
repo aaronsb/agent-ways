@@ -37,7 +37,7 @@ The fitting data for any tuned parameter is disjoint from every evaluation set. 
 
 ## Record the result
 
-Write each evaluation to a results file: the commands, the corpus or build it ran against, the table, and what was surprising. A variant that was measured and not adopted is recorded too, so the question is not reopened without new evidence.
+Write each evaluation to a results file (a subagent returns the table and the caller writes the file): the commands, the corpus or build it ran against, the table, and what was surprising. A variant that was measured and not adopted is recorded too, so the question is not reopened without new evidence.
 
 ## See Also
 

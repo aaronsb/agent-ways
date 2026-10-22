@@ -41,7 +41,7 @@ If something did stand out, compile a concise summary. For each signal, capture:
 
 ### Part 2: Subagent Reviews Existing Artifacts and Proposes
 
-Spawn a subagent (`subagent_type: "general-purpose"`) with:
+Running introspection is asking for this subagent, so spawn it without pausing to ask, and name the payoff in a clause: a fresh reader reviews the artifacts without spending your remaining context (ADR-175). Spawn a subagent (`subagent_type: "general-purpose"`) with:
 1. Your summary of human signals from Part 1
 2. The project path so it can find `$PROJECT/.claude/ways/`
 3. Instructions to follow the review process below

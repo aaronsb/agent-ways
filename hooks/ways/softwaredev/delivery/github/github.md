@@ -2,7 +2,7 @@
 description: GitHub pull requests, issues, review comments, CI checks
 vocabulary: github pull request pull requests pr prs issue issues fork upstream label labels milestone branch protection codeowners gh cli review comments ci checks squash rebase badges shields.io post-merge boards
 pattern: github|\bgh (pr|issue)\b|issue #?\d+|github issues?|pull.?requests?|\bprs?\b|review.?(pr|comment)|merge.?request
-commands: ^gh\ |^gh$
+commands: (^|[;&|(]\s*)gh(\s|$)|\bgit\s+push\b
 refire: 0.15
 macro: prepend
 scope: agent, subagent
@@ -13,7 +13,7 @@ requires: ["Read", "Bash(cat:*)", "Bash(gh:*)", "Bash(git:*)", "Bash(grep:*)", "
 
 ## Pull Requests, Always
 
-Every change lands through a PR, solo projects included. A PR with no reviewer is still a decision record and a CI gate.
+When the user asks to land a change, it lands through a PR, solo projects included. A PR with no reviewer is still a decision record and a CI gate.
 
 - **Solo or pair:** a title and a few bullets.
 - **Team:** context, reviewers, linked issues.
@@ -21,13 +21,13 @@ Every change lands through a PR, solo projects included. A PR with no reviewer i
 
 ## Review Before Merge
 
-Review after opening the PR without waiting to be asked. Review depth and whether a human reads first are the four-square decision in `delivery/merge`. At minimum dispatch a `code-reviewer` subagent; scale to a swarm for high-blast-radius changes, and gate on operator approval when the work sets direction. "Merge it" is a request for that review, so dispatch it (ADR-175). Merge strategy is a separate question and still gets asked. The repository's own enforcement comes first, and a version-only release bump can skip review where nothing enforces it; see `delivery/merge`.
+Review after opening the PR without waiting to be asked. Review depth and whether a human reads first are the four-square decision in `delivery/merge`. At minimum dispatch a `code-reviewer` subagent; scale to a swarm for high-blast-radius changes, and gate on operator approval when the work sets direction. "Merge it" is a request for that review, so dispatch it (ADR-175). Merge strategy is a separate question, settled by the default below. The repository's own enforcement comes first, and a version-only release bump can skip review where nothing enforces it; see `delivery/merge`.
 
 ## Merge Strategy: Regular Merge by Default
 
 Default to `gh pr merge --merge`. A branch with an ADR, an implementation, and review fixes carries a narrative that `git log` on main should keep. Squash only when the branch is single-purpose with commit noise worth dropping. Never rebase-merge unless asked; it rewrites authorship and timestamps.
 
-When the user says "merge it" without a strategy, ask: regular merge or squash?
+When the user says "merge it" without a strategy, use the regular merge and name it in the reply.
 
 ## Post-Merge Cleanup
 

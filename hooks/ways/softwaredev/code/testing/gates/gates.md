@@ -65,7 +65,7 @@ One line per gate, state first:
 - Smoke test: absent (2026-09-09), no deploy target yet
 ```
 
-Close the report with what was deliberately left unverified, blocked distinguished from skipped. A partial pass must never read as completion.
+Close the report with what was deliberately left unverified, blocked distinguished from skipped. A partial pass must never read as completion. Put the report where it is going, such as the PR body, and list unrun gates in the final message.
 
 ## Common Rationalizations
 
