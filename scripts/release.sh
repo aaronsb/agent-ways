@@ -17,7 +17,8 @@
 #
 # Both bump and tag refuse a release whose range, from the component's last tag
 # to HEAD, changed plugins/attend/ without moving the plugin's version; `check`
-# runs that check alone. Bumping attend moves the plugin's version with it.
+# runs that check alone. Bumping attend moves the plugin's version with it;
+# bumping ways moves the ways-judge plugin's version.
 #
 # `tag` without --push creates the annotated tag locally and prints the push
 # command (keeps the publish deliberate); `--push` pushes it. way-embed is out of
@@ -59,6 +60,9 @@ PLUGIN_MANIFEST="plugins/attend/.claude-plugin/plugin.json"
 # The mod cannot read its manifest, so it carries its version as a constant
 # the beat sends to attend; the bump moves both.
 PLUGIN_LIB="plugins/attend/hooks/lib.ts"
+# The ways-judge mod (ADR-708) calls ways verbs and carries ways' version;
+# bumping ways moves it.
+JUDGE_MANIFEST="plugins/ways-judge/.claude-plugin/plugin.json"
 
 plugin_version_of() {
   # The first "version" field, wherever it sits on its line, so a manifest
@@ -69,6 +73,15 @@ plugin_version_of() {
 # True when version $1 sorts before $2 (numeric fields, as sort -V orders them).
 version_lt() {
   [[ "$1" != "$2" && "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" == "$1" ]]
+}
+
+# Move a plugin manifest's version to $2, and fail unless it reads $2 after.
+set_plugin_version() {
+  awk -v ver="$2" '
+    !done && /^[[:space:]]*"version"[[:space:]]*:/ { sub(/"version"[[:space:]]*:[[:space:]]*"[^"]+"/, "\"version\": \"" ver "\""); done=1 }
+    { print }
+  ' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+  [[ "$(plugin_version_of < "$1")" == "$2" ]] || die "could not move $1 to $2"
 }
 
 # Move the mod's MOD_VERSION constant to $1, and fail unless it reads $1 after.
@@ -158,14 +171,14 @@ case "$MODE" in
 
     FILES=("$MANIFEST" tools/Cargo.lock)
     if [[ "$COMPONENT" == "attend" && -f "$PLUGIN_MANIFEST" ]]; then
-      awk -v ver="$NEXT" '
-        !done && /^[[:space:]]*"version"[[:space:]]*:/ { sub(/"version"[[:space:]]*:[[:space:]]*"[^"]+"/, "\"version\": \"" ver "\""); done=1 }
-        { print }
-      ' "$PLUGIN_MANIFEST" > "$PLUGIN_MANIFEST.tmp" && mv "$PLUGIN_MANIFEST.tmp" "$PLUGIN_MANIFEST"
-      [[ "$(plugin_version_of < "$PLUGIN_MANIFEST")" == "$NEXT" ]] || die "could not move $PLUGIN_MANIFEST to $NEXT"
+      set_plugin_version "$PLUGIN_MANIFEST" "$NEXT"
       FILES+=("$PLUGIN_MANIFEST")
       set_mod_version "$NEXT"
       FILES+=("$PLUGIN_LIB")
+    fi
+    if [[ "$COMPONENT" == "ways" && -f "$JUDGE_MANIFEST" ]]; then
+      set_plugin_version "$JUDGE_MANIFEST" "$NEXT"
+      FILES+=("$JUDGE_MANIFEST")
     fi
     git add "${FILES[@]}"
     git commit -q -m "release(${COMPONENT}): bump to ${NEXT}"
@@ -199,6 +212,10 @@ EOF
     if [[ "$COMPONENT" == "attend" && -f "$PLUGIN_MANIFEST" ]]; then
       PV="$(plugin_version_of < "$PLUGIN_MANIFEST")"
       [[ "$PV" == "$VERSION" ]] || die "$PLUGIN_MANIFEST is $PV but attend is $VERSION; they release together"
+    fi
+    if [[ "$COMPONENT" == "ways" && -f "$JUDGE_MANIFEST" ]]; then
+      JV="$(plugin_version_of < "$JUDGE_MANIFEST")"
+      [[ "$JV" == "$VERSION" ]] || die "$JUDGE_MANIFEST is $JV but ways is $VERSION; they release together"
     fi
     check_plugin_bump
 
