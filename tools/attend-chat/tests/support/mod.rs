@@ -15,7 +15,7 @@ static ROOT: OnceLock<PathBuf> = OnceLock::new();
 pub fn fixture(name: &str, setup: impl FnOnce(&Path)) -> &'static Path {
     let mut setup = Some(setup);
     ROOT.get_or_init(|| {
-        let root = std::env::temp_dir().join(format!("attend-chat-{name}-{}", std::process::id()));
+        let root = attend_presence::session::fixture_temp_dir().join(format!("attend-chat-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         for d in ["home", "config", "cache", "state", "data"] {
             std::fs::create_dir_all(root.join(d)).unwrap();

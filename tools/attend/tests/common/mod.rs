@@ -42,13 +42,14 @@ impl Fixture {
 
     /// A fixture whose peers sensor polls every `secs` seconds.
     pub fn with_peers_interval(tag: &str, secs: u64) -> Self {
-        let home = std::env::temp_dir().join(format!("attend-it-{tag}-{}", std::process::id()));
+        let home = attend_presence::session::fixture_temp_dir().join(format!("attend-it-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         std::fs::create_dir_all(home.join(".claude").join("sessions")).unwrap();
         let config = home.join("config").join("attend");
         std::fs::create_dir_all(&config).unwrap();
         std::fs::write(config.join("config.yaml"), QUIET_CONFIG.replace("{peers}", &secs.to_string())).unwrap();
         let origin = home.join("proj");
+        assert_origin_kept(&origin);
         std::fs::create_dir_all(&origin).unwrap();
         let f = Fixture { origin: origin.to_string_lossy().into_owned(), sid: format!("sess-{tag}"), home };
         f.set_session_id(&f.sid.clone());
@@ -353,6 +354,19 @@ impl Drop for Fixture {
     }
 }
 
+/// Fail here, naming the path, when session identity would rewrite a fixture
+/// project's path. A project under a managed worktree resolves to the
+/// checkout's root, and the assertions downstream then fail without saying
+/// why (#902).
+pub fn assert_origin_kept(project: &Path) {
+    assert!(
+        attend_presence::session::origin_kept(project),
+        "fixture project {} sits under a managed worktree (/.claude/worktrees/), so session identity would resolve it \
+         to the checkout's root; make fixtures under attend_presence::session::fixture_temp_dir() (#902)",
+        project.display()
+    );
+}
+
 pub fn age_file(path: &Path, age: Duration) {
     let f = std::fs::File::options().write(true).open(path).unwrap();
     f.set_modified(SystemTime::now() - age).unwrap();
@@ -424,6 +438,7 @@ impl Peer {
     /// that moment takes the session for exited.
     pub fn start(f: &Fixture, sid: &str, project: &str) -> Peer {
         let cwd = f.home.join(project);
+        assert_origin_kept(&cwd);
         std::fs::create_dir_all(&cwd).unwrap();
         let cwd = cwd.to_string_lossy().into_owned();
         let child = Command::new(claude_program(f)).args(["-c", "sleep 60; :"]).stdout(Stdio::null()).spawn().unwrap();

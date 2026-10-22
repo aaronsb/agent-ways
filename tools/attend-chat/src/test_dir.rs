@@ -31,12 +31,13 @@ impl Drop for TestDir {
     }
 }
 
-/// Create an empty directory under the temp dir, named for `tag`, removed when
-/// the returned guard drops.
+/// Create an empty directory under the fixture temp dir (never under a
+/// managed worktree, #902), named for `tag`, removed when the returned guard
+/// drops.
 pub(crate) fn unique(tag: &str) -> TestDir {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-    let p = std::env::temp_dir().join(format!(
+    let p = attend_presence::session::fixture_temp_dir().join(format!(
         "attend-chat-{tag}-test-{}-{nanos}-{}",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)

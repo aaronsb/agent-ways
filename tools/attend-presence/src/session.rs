@@ -281,6 +281,29 @@ pub fn normalize_origin(cwd: &str) -> String {
     }
 }
 
+/// Whether [`normalize_origin`] leaves `path` as it is: no managed-worktree
+/// segment in it. A fixture that stands up session projects checks its roots
+/// with this, since a project under a worktree resolves to the checkout's
+/// root, and every such project to the same one (#902).
+pub fn origin_kept(path: &Path) -> bool {
+    let s = path.to_string_lossy();
+    normalize_origin(&s) == s
+}
+
+/// The temp directory for fixtures that stand up session projects: the
+/// system one, or `/tmp` when the system one sits under a managed worktree
+/// (a TMPDIR inside an agent's checkout). The strip applies to every session
+/// record's cwd, a peer's as much as this session's, so the fixture moves
+/// rather than the rule (#902).
+pub fn fixture_temp_dir() -> PathBuf {
+    let tmp = std::env::temp_dir();
+    if origin_kept(&tmp) {
+        tmp
+    } else {
+        PathBuf::from("/tmp")
+    }
+}
+
 /// The sessions directories a session record can be in: the config
 /// directory this process runs under (`CLAUDE_CONFIG_DIR`, which Claude Code
 /// passes to what it runs), then `~/.claude`.
@@ -585,6 +608,13 @@ mod origin_tests {
             normalize_origin("/.claude/worktrees/x"),
             "/.claude/worktrees/x"
         );
+    }
+
+    #[test]
+    fn a_fixture_temp_dir_is_never_under_a_managed_worktree() {
+        assert!(!origin_kept(Path::new("/home/a/proj/.claude/worktrees/agent-1/tmp")));
+        assert!(origin_kept(Path::new("/tmp")));
+        assert!(origin_kept(&fixture_temp_dir()));
     }
 
     /// Issue #394 regression: a session record whose cwd sits inside a
