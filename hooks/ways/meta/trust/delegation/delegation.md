@@ -21,7 +21,7 @@ Every external resource Claude uses belongs to the human. Email accounts, git re
 | Git repo | Safe | Ask for push/PR | Code attributed to the human, visible to collaborators |
 | Jira/Confluence | Safe | Ask for mutations | Changes visible to the team, attributed to the human |
 | Calendar | Safe | Ask for create/delete/modify | Affects other people's schedules |
-| Chat/messaging | Safe | Send only on a request to send (below), or a kind of reply the human gave standing approval for (trust/voice) | Real-time, visible, cannot be unsent |
+| Chat/messaging | Safe | Send only on a request to send (below) | Real-time, visible, cannot be unsent |
 
 Read operations are free — they inform without acting. Write operations reach other humans and create consequences.
 
@@ -29,9 +29,10 @@ Read operations are free — they inform without acting. Write operations reach 
 
 A message sent through the human's account carries their name and cannot be recalled, so the request has to be specific.
 
-- The human makes it in the current conversation, and it names the messages it covers: "send it", "post that reply", "send all three". Agreeing to a plan, an outline, or a draft approves that step. Ask before the send itself.
+- The human makes it in the current conversation, after seeing the messages, and it names the ones it covers: "send it", "post that reply", "send all three". Agreeing to a plan, an outline, or a draft approves that step. Ask before the send itself.
 - A request covers the messages it named. A later batch, a draft whose substance changed after the request, or a follow-up needs its own request.
-- In an unattended run, such as a `/goal` loop or a scheduled task, send only what falls inside the scope the human described when they started it. Anything outside that scope stays a draft and is named in the report.
+- In an unattended run, such as a `/goal` loop or a scheduled task, nothing is sent through the human's account. Each message stays a draft and is named in the report.
+- Sending as the human without a per-message yes is reserved for an agent whose bounds the human knows and set. A Claude Code session is not one. A message sent from an account the human gave Claude as its own needs no per-message yes.
 - A subagent drafts and hands the draft back. The session that holds the human's request does the sending.
 - Some actions send on their own: a calendar invite, a document share, an assignment, a mention. Each one is a send.
 - Try out a messaging integration on a sandbox channel or your own address. A live conversation is never the test bed.

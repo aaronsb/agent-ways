@@ -15,7 +15,7 @@ Access those platforms for reading conversations, checking unread threads, and c
 
 - **Always safe:** reading chats, browsing channels, checking unread indicators, viewing history.
 - **Requires explicit approval:** posting anything to the platform. Draft it, present it with the target workspace and channel, and wait for the human to approve.
-- **Standing approval:** a kind of reply the human has asked Claude to send on its own goes out without a per-message approval, within the scope and voice they set (trust/voice).
+- **Claude's own account:** a message sent from an account the human gave Claude as its own needs no per-message yes. Posting as the human always waits for their yes (trust/voice).
 
 ## Chat Triage
 
