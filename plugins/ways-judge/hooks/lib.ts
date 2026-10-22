@@ -7,12 +7,6 @@ import type { ModelCompleteRequest, ModelCompleteResult, ModelUsage } from 'clau
 
 export const WAYS = 'ways'
 
-/** Origins whose prompts run the settings UserPromptSubmit hooks the gate
- *  sits in: the terminal, Remote Control, an SDK host's turn (`claude -p`
- *  reports `sdk`), and the owner's ping from Slack. attend's
- *  OPERATOR_ORIGINS, the same set. */
-export const JUDGE_ORIGINS: ReadonlySet<string> = new Set(['composer', 'bridge', 'sdk', 'slack-ping'])
-
 /** Registers the mod as the session's judge host, once per session id. */
 export function hostArgv(id: string): string[] {
   return [WAYS, 'judge', 'host', '--session', id]

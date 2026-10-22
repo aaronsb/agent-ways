@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { ModelCompleteResult, On, ProcessRunResult } from 'claude-code'
 
 import { register } from '../hooks/register.ts'
-import { JUDGE_ORIGINS, answerOf, hostArgv, parseTake, requestOf, takeArgv } from '../hooks/lib.ts'
+import { answerOf, hostArgv, parseTake, requestOf, takeArgv } from '../hooks/lib.ts'
 import type { JudgeJob } from '../hooks/lib.ts'
 import { passedOverHits, registrationsOf } from './passed-over.ts'
 
@@ -126,6 +126,18 @@ describe('a job: one model call, one answer', () => {
     expect((h.answers[0] as { text?: string }).text).toBeUndefined()
   })
 
+  // The settings hook that writes the job cannot see a prompt's origin, so
+  // the mod takes for every prompt, not only the operator's.
+  for (const kind of ['plugin', 'task-notification', 'peer']) {
+    test(`a ${kind} prompt takes a job and judges it`, async ($, on) => {
+      const h = host(on, { take: { stdout: JSON.stringify(JOB) }, model: { isAnswered: true, text: 'verdict', usage: USAGE } })
+      await typed($, kind)
+      expect(h.take.started).toBe(1)
+      expect(h.models.length).toBe(1)
+      expect(h.answers).toEqual([{ text: 'verdict', usage: USAGE }])
+    })
+  }
+
   test('the session id is registered as judge host once, before its first prompt', async ($, on) => {
     const h = host(on, { take: { stdout: 'standby' } })
     await typed($)
@@ -156,13 +168,6 @@ describe('no job: no model call', () => {
     expect(h.models.length).toBe(0)
   })
 
-  test('a prompt the gate does not see starts no take', async ($, on) => {
-    const h = host(on, { noScan: true, take: { stdout: JSON.stringify(JOB) }, model: { isAnswered: true, text: 'x', usage: USAGE } })
-    await typed($, 'task-notification')
-    expect(h.argvs.length).toBe(0)
-    expect(h.models.length).toBe(0)
-  })
-
   test('a failed host registration starts no take', async ($, on) => {
     const h = host(on, { hostFails: true, noScan: true, take: { stdout: JSON.stringify(JOB) }, model: { isAnswered: true, text: 'x', usage: USAGE } })
     await typed($)
@@ -172,11 +177,6 @@ describe('no job: no model call', () => {
 })
 
 describe('the parts', () => {
-  test('the origins include sdk, which prompt.submit reports under claude -p', () => {
-    for (const kind of ['composer', 'bridge', 'sdk', 'slack-ping']) expect(JUDGE_ORIGINS.has(kind)).toBe(true)
-    expect(JUDGE_ORIGINS.has('plugin')).toBe(false)
-  })
-
   test('parseTake reads a job, standby, and neither', () => {
     expect(parseTake(JSON.stringify(JOB), 0)).toEqual({ kind: 'job', job: JOB })
     expect(parseTake('standby\n', 0)).toEqual({ kind: 'standby' })

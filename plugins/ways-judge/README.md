@@ -6,7 +6,7 @@ The relevance gate's Claude Code internal engine (ADR-708). It judges the gate's
 
 ## What it does
 
-On each prompt from the operator (the terminal, Remote Control, an SDK host or `claude -p`, a Slack ping), the `prompt.submit` hook:
+On each prompt, whatever its origin (the settings hook that writes the job cannot see the origin), the `prompt.submit` hook:
 
 1. registers the mod as the session's judge host with `ways judge host --session <id>`, once per session id;
 2. starts the prompt's own chain, `next(e)`, which runs the settings UserPromptSubmit hooks and the ways scan, without awaiting it;

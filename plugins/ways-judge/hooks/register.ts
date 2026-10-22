@@ -22,7 +22,6 @@
 import type { EngineInterface, HookStream, ProcessSpawnChunk, ProcessSpawnResult, PromptSubmitInput, PromptSubmitResult, Register } from 'claude-code'
 
 import {
-  JUDGE_ORIGINS,
   REFUSED,
   STOP_GRACE_MS,
   VERB_TIMEOUT_MS,
@@ -46,8 +45,10 @@ export const register: Register = on => {
   // again, which the verb takes as the same registration.
   const hosted = new Map<string, boolean>()
 
+  // Every prompt, whatever its origin: the settings hook that writes the job
+  // cannot see the origin, so the mod takes for each one. A take with no
+  // job costs one spawn, stopped when next(e) settles.
   on('prompt.submit', async ($, e, next) => {
-    if (!JUDGE_ORIGINS.has(e.origin.kind)) return next(e)
     let id: string
     try {
       id = await $.session.id()
