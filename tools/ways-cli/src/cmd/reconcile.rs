@@ -503,14 +503,15 @@ fn converge_one(
     // The mods, last, through Claude Code's plugin CLI. The attend mod
     // (ADR-406) is installed, updated, or with attend_mod.install false
     // removed. The ways-judge mod (ADR-708 §9) is installed by
-    // `ways judge-setup` and only kept current here, where the target's
-    // settings name it, so a target without it pays no CLI call.
+    // `ways judge-setup`, which records the request per target; where the
+    // record is, repair keeps the mod installed and current, so a mod a
+    // failed call lost comes back. A target without the record pays no call.
     use crate::cmd::attend_mod::{self, Want, ATTEND, JUDGE};
     let target_config = target_config_path(dest_root);
     let attend = if ways_core::settings::attend_mod_install(&target_config) { Want::Install } else { Want::Withdraw };
     let mut lines = attend_mod::converge(&ATTEND, source_root, dest_root, &paths::projection_root(), attend, dry_run);
-    if attend_mod::listed_in(&JUDGE, dest_root) {
-        lines.extend(attend_mod::converge(&JUDGE, source_root, dest_root, &paths::projection_root(), Want::Refresh, dry_run));
+    if attend_mod::recorded(&JUDGE, dest_root) {
+        lines.extend(attend_mod::converge(&JUDGE, source_root, dest_root, &paths::projection_root(), Want::Install, dry_run));
     }
     for line in lines {
         if !quiet {
@@ -560,7 +561,9 @@ fn withdraw_one(
     use crate::cmd::attend_mod::{self, ATTEND, JUDGE};
     let mcp_line = crate::cmd::mcp_register::withdraw(dest_root, &paths::projection_root(), dry_run);
     let mut mod_lines = Vec::new();
-    if attend_mod::listed_in(&JUDGE, dest_root) {
+    // The record, or the target's settings naming the mod, says it may be
+    // there; the record stays, so enabling the target again reinstalls it.
+    if attend_mod::recorded(&JUDGE, dest_root) || attend_mod::listed_in(&JUDGE, dest_root) {
         mod_lines.extend(attend_mod::withdraw(&JUDGE, source_root, dest_root, &paths::projection_root(), dry_run));
     }
     mod_lines.extend(attend_mod::withdraw(&ATTEND, source_root, dest_root, &paths::projection_root(), dry_run));

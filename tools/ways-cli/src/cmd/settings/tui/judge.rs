@@ -54,7 +54,7 @@ pub fn section(state: &JudgeState) -> Node {
         "readiness",
         format!(
             "{}\n\nRead as setup, the help footer and `ways status` read it: the engine named in gate.engine, its key file and last check, and for claude-code whether the ways-judge mod is installed and enabled. `ways judge-setup` offers the engines.",
-            crate::cmd::judge::outcome(s).unwrap_or_default()
+            crate::cmd::judge::outcome_text(s).unwrap_or_default()
         ),
         ro(crate::cmd::judge::state_word(s), "gate.engine, key files, the ways-judge mod"),
     )
@@ -155,6 +155,15 @@ mod tests {
         let ok = section(&fixture(Readiness::Ready(Provider::ClaudeCode, Mode::Enforce)));
         assert!(row(&ok, "readiness").finding.is_none());
         assert!(row(&ok, "readiness").doc.starts_with("Relevance judge on (Claude Code internal)."), "{}", row(&ok, "readiness").doc);
+    }
+
+    #[test]
+    fn a_disabled_mod_with_no_key_reads_degraded_with_the_enable_fix() {
+        let s = section(&fixture(Readiness::ModDisabled));
+        let r = row(&s, "readiness");
+        assert_eq!(r.setting.as_ref().unwrap().value, "degraded");
+        let f = r.finding.as_deref().unwrap();
+        assert!(f.contains("Fix: claude plugin enable ways-judge@agent-ways, or ways judge-setup for a key"), "{f}");
     }
 
     #[test]

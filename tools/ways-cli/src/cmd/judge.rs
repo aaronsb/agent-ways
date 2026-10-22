@@ -8,16 +8,25 @@ use std::io::{BufRead, IsTerminal, Write};
 use std::process::{Command, Stdio};
 
 use anyhow::{anyhow, Context, Result};
-use ways_agent_core::keys::{self, Readiness};
+use ways_agent_core::keys::{self, JudgeMod, Readiness};
 use ways_agent_core::profile::{Mode, Provider};
 
 use super::attend_mod::{self, Want, JUDGE};
 
-/// The judge's readiness now: `keys::judge_ready`, told whether the
-/// ways-judge mod is installed and enabled in an enabled target. Reads files
-/// only; Claude Code is not called.
+/// The judge's readiness now: `keys::judge_ready`, told where the ways-judge
+/// mod stands in the enabled targets: enabled in one, else installed and
+/// disabled in one, else absent. Reads files only; Claude Code is not called.
 pub fn readiness() -> Readiness {
-    keys::judge_ready(|| enabled_targets().iter().any(|dir| attend_mod::enabled_in(&JUDGE, dir)))
+    keys::judge_ready(|| {
+        let targets = enabled_targets();
+        if targets.iter().any(|dir| attend_mod::enabled_in(&JUDGE, dir)) {
+            JudgeMod::Enabled
+        } else if targets.iter().any(|dir| attend_mod::listed_in(&JUDGE, dir)) {
+            JudgeMod::Disabled
+        } else {
+            JudgeMod::Absent
+        }
+    })
 }
 
 /// The directories of the enabled targets.
@@ -36,6 +45,10 @@ pub(crate) fn reason(state: &Readiness) -> Option<(String, String)> {
         // provider a key command.
         Readiness::NoMod => no_mod(),
         Readiness::NoKey(Some(p)) | Readiness::Unverified(p, _) if p.keyless() => no_mod(),
+        Readiness::ModDisabled => (
+            "Claude Code internal's ways-judge mod is disabled, and no key stands in".to_string(),
+            format!("claude plugin enable {}, or ways judge-setup for a key", JUDGE.id),
+        ),
         Readiness::NoKey(None) => {
             ("No provider key".to_string(), "ways agent key add --provider anthropic (or openrouter)".to_string())
         }
@@ -74,24 +87,46 @@ pub fn warning(state: &Readiness) -> Option<String> {
     Some(format!("Ways is degraded: the relevance judge is off, so every matched way is injected.\n{detail}"))
 }
 
-/// One line on the judge's state, as setup ends with it and the settings
-/// gate screen shows it.
-pub(crate) fn outcome(state: &Readiness) -> Option<String> {
+/// The judge's state after setup, wrapped within 80 columns.
+fn outcome(state: &Readiness) -> Option<String> {
+    outcome_text(state).map(|text| wrap(&text, COLUMNS))
+}
+
+/// The judge's state in one unwrapped line, as [`outcome`] gives it and the
+/// settings gate screen shows it, wrapped to its pane.
+pub(crate) fn outcome_text(state: &Readiness) -> Option<String> {
     let shadow = |m: &Mode| if *m == Mode::Shadow { ", shadow: logs verdicts, blocks nothing" } else { "" };
-    match state {
-        Readiness::Ready(p, m) => Some(format!("Relevance judge on ({}{}).", name(*p), shadow(m))),
-        Readiness::Fallback(p, m) => Some(format!(
-            "Relevance judge on ({} key{}): Claude Code internal is chosen, but the ways-judge mod is not installed, so the {} key engine judges instead.",
+    let text = match state {
+        Readiness::Ready(p, m) => format!("Relevance judge on ({}{}).", name(*p), shadow(m)),
+        Readiness::Fallback(p, m) => format!(
+            "Relevance judge on ({} key{}): Claude Code internal is chosen, but the ways-judge mod is not enabled, so the {} key engine judges instead.",
             name(*p),
             shadow(m),
             name(*p)
-        )),
-        Readiness::Off => Some(
-            "Relevance judge off by choice (gate.mode: off): every matched way is injected. `ways settings set gate.mode enforce` turns it on."
-                .to_string(),
         ),
-        other => reason(other).map(|(why, _)| format!("Relevance judge still off: {why}.")),
+        Readiness::Off => {
+            "Relevance judge off by choice (gate.mode: off): every matched way is injected. `ways settings set gate.mode enforce` turns it on."
+                .to_string()
+        }
+        other => format!("Relevance judge still off: {}.", reason(other)?.0),
+    };
+    Some(text)
+}
+
+/// `text` broken at spaces into lines of at most `width` characters; a word
+/// longer than `width` keeps a line of its own.
+fn wrap(text: &str, width: usize) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    for word in text.split(' ') {
+        match lines.last_mut() {
+            Some(line) if line.chars().count() + 1 + word.chars().count() <= width => {
+                line.push(' ');
+                line.push_str(word);
+            }
+            _ => lines.push(word.to_string()),
+        }
     }
+    lines.join("\n")
 }
 
 /// The judge's state in a word, for the settings gate screen's value column.
@@ -101,7 +136,7 @@ pub(crate) fn state_word(state: &Readiness) -> &'static str {
         Readiness::Fallback(..) => "key stands in",
         Readiness::Off => "off by choice",
         Readiness::Config(_) => "config error",
-        Readiness::NoKey(_) | Readiness::NoMod | Readiness::Unverified(..) => "degraded",
+        Readiness::NoKey(_) | Readiness::NoMod | Readiness::ModDisabled | Readiness::Unverified(..) => "degraded",
     }
 }
 
@@ -211,7 +246,7 @@ pub fn setup() -> Result<()> {
         return Ok(());
     };
     println!("{warning}");
-    if let Readiness::NoKey(_) | Readiness::NoMod = state {
+    if let Readiness::NoKey(_) | Readiness::NoMod | Readiness::ModDisabled = state {
         for var in Provider::ALL.into_iter().filter(|p| keys::env_set(*p)).filter_map(Provider::key_env) {
             println!("${var} is set, but hooks read only the key file: add it there.");
         }
@@ -220,51 +255,73 @@ pub fn setup() -> Result<()> {
     if !interactive || matches!(state, Readiness::Config(_)) {
         return Ok(());
     }
-    let host = mod_host();
-    if let Err(why) = &host {
+    // An app that ships no ways-judge mod has nothing to offer; that is not
+    // the host's limit, so it goes unsaid.
+    let shipped = attend_mod::shipped_version(&JUDGE, &crate::paths::data_root()).is_some();
+    let host = if shipped { mod_host() } else { Err(String::new()) };
+    if let (true, Err(why)) = (shipped, &host) {
         println!("Claude Code internal is not offered: {why}.");
     }
     let offered = choices(host.is_ok(), agent.is_some());
+    // "No judge" alone is no choice to put to the operator.
+    if offered == [Choice::Off] {
+        return Ok(());
+    }
     let Some(choice) = pick(&offered)? else {
         println!("Skipped.");
         return Ok(());
     };
     match (choice, &agent) {
         (Choice::ClaudeCode, _) => install_mod()?,
-        (Choice::Key(provider), Some(bin)) => {
-            Command::new(bin)
-                .args(["key", "add", "--provider", provider.as_str()])
-                .status()
-                .with_context(|| format!("running {}", bin.display()))?;
-        }
+        (Choice::Key(provider), Some(bin)) => add_key(bin, provider)?,
         (Choice::Key(_), None) => unreachable!("a key is offered only with ways-agent installed"),
         (Choice::Off, _) => set("gate.mode", "off")?,
     }
-    if let Some(line) = outcome(&readiness()) {
-        println!("{line}");
+    if let Some(text) = outcome(&readiness()) {
+        println!("{text}");
     }
     Ok(())
 }
 
-/// Whether this host can load the ways-judge mod, judged against the first
-/// enabled target as reconcile judges attend's.
+/// Adds `provider`'s key with `ways-agent key add`, which checks it before it
+/// stores it, then names the provider's engine in `gate.engine` once the key
+/// file passed its check: the operator chose that engine.
+fn add_key(bin: &std::path::Path, provider: Provider) -> Result<()> {
+    Command::new(bin)
+        .args(["key", "add", "--provider", provider.as_str()])
+        .status()
+        .with_context(|| format!("running {}", bin.display()))?;
+    if keys::key_engine_ready(provider.as_str()) {
+        set("gate.engine", provider.as_str())?;
+    }
+    Ok(())
+}
+
+/// Whether this host can run the ways-judge mod, judged against the first
+/// enabled target.
 fn mod_host() -> Result<(), String> {
     let projection = crate::paths::projection_root();
     let dest = enabled_targets().into_iter().next().unwrap_or_else(|| projection.clone());
-    attend_mod::host_can_load(&JUDGE, &crate::paths::data_root(), &dest, &projection)
+    attend_mod::host_can_load(&JUDGE, &dest, &projection)
 }
 
-/// Installs the ways-judge mod in every enabled target, then names
-/// `claude-code` as the engine once it is enabled. A failed install leaves
+/// Installs the ways-judge mod in every enabled target and records the
+/// request in each target it is enabled in, so repair keeps it installed;
+/// then names `claude-code` as the engine. A failed install leaves
 /// `gate.engine` as it was.
 fn install_mod() -> Result<()> {
     let projection = crate::paths::projection_root();
+    let mut enabled = false;
     for dir in enabled_targets() {
         for line in attend_mod::converge(&JUDGE, &crate::paths::data_root(), &dir, &projection, Want::Install, false) {
             println!("{line}");
         }
+        if attend_mod::enabled_in(&JUDGE, &dir) {
+            enabled = true;
+            attend_mod::record_request(&JUDGE, &dir).with_context(|| format!("recording the ways-judge mod's install for {}", dir.display()))?;
+        }
     }
-    if !enabled_targets().iter().any(|dir| attend_mod::enabled_in(&JUDGE, dir)) {
+    if !enabled {
         println!("The ways-judge mod is not enabled in any target, so gate.engine is unchanged.");
         return Ok(());
     }
@@ -303,23 +360,57 @@ mod tests {
     #[test]
     fn every_warning_fits_80_columns_and_settled_states_say_nothing() {
         let results = ["invalid", "no_credit", "rate_limited", "model_unavailable", "unreachable", "failed"];
-        let mut states = vec![Readiness::NoKey(None), Readiness::NoMod, Readiness::Config("x".into())];
+        let mut states = vec![Readiness::NoKey(None), Readiness::NoMod, Readiness::ModDisabled, Readiness::Config("x".into())];
         for p in Provider::ALL.into_iter().chain([Provider::ClaudeCode]) {
             states.push(Readiness::NoKey(Some(p)));
             states.push(Readiness::Unverified(p, None));
             states.extend(results.map(|r| Readiness::Unverified(p, Some(r.into()))));
         }
-        for state in states {
-            let text = warning(&state).unwrap();
+        for state in &states {
+            let text = warning(state).unwrap();
             for line in text.lines() {
                 assert!(line.chars().count() <= 80, "{state:?}: {line:?}");
             }
             assert!(!text.contains("--provider claude-code"), "{state:?}: a keyless engine takes no key: {text}");
         }
+        // Every outcome line fits too, the settled states' included.
+        let mut all = states.clone();
+        for p in Provider::ALL.into_iter().chain([Provider::ClaudeCode]) {
+            for m in [Mode::Enforce, Mode::Shadow] {
+                all.extend([Readiness::Ready(p, m), Readiness::Fallback(p, m)]);
+            }
+        }
+        all.push(Readiness::Off);
+        for state in &all {
+            let text = outcome(state).unwrap();
+            for line in text.lines() {
+                assert!(line.chars().count() <= 80, "{state:?}: {line:?}");
+            }
+        }
         assert_eq!(warning(&Readiness::Ready(Provider::Anthropic, Mode::Enforce)), None);
         assert_eq!(warning(&Readiness::Off), None);
         assert_eq!(outcome(&Readiness::Ready(Provider::Anthropic, Mode::Enforce)).unwrap(), "Relevance judge on (Anthropic).");
         assert!(outcome(&Readiness::Ready(Provider::Openrouter, Mode::Shadow)).unwrap().contains("shadow"));
+    }
+
+    /// An outcome as one line, for checking its words across the wrap.
+    fn flat(state: &Readiness) -> String {
+        outcome(state).unwrap().replace('\n', " ")
+    }
+
+    #[test]
+    fn wrap_breaks_at_spaces_within_the_width() {
+        assert_eq!(wrap("aaa bbb ccc", 7), "aaa bbb\nccc");
+        assert_eq!(wrap("short", 80), "short");
+        assert_eq!(wrap("a-very-long-word x", 5), "a-very-long-word\nx");
+    }
+
+    #[test]
+    fn an_installed_but_disabled_mod_reads_as_not_enabled() {
+        let text = warning(&Readiness::ModDisabled).unwrap();
+        assert!(text.contains("ways-judge mod is disabled"), "{text}");
+        assert!(text.contains("claude plugin enable ways-judge@agent-ways"), "{text}");
+        assert!(!text.contains("has no ways-judge mod"), "{text}");
     }
 
     #[test]
@@ -344,16 +435,16 @@ mod tests {
     fn claude_code_without_the_mod_says_the_key_engine_runs() {
         let state = Readiness::Fallback(Provider::Anthropic, Mode::Enforce);
         assert_eq!(warning(&state), None, "a key engine stands in: not degraded");
-        let line = outcome(&state).unwrap();
+        let line = flat(&state);
         assert!(line.starts_with("Relevance judge on (Anthropic key)"), "{line}");
-        assert!(line.contains("ways-judge mod is not installed") && line.contains("Anthropic key engine judges"), "{line}");
+        assert!(line.contains("ways-judge mod is not enabled") && line.contains("Anthropic key engine judges"), "{line}");
     }
 
     #[test]
     fn gate_mode_off_reads_as_off_by_choice() {
         assert_eq!(warning(&Readiness::Off), None, "nothing to fix, so the help footer is silent");
         assert!(Readiness::Off.settled());
-        let line = outcome(&Readiness::Off).unwrap();
+        let line = flat(&Readiness::Off);
         assert!(line.starts_with("Relevance judge off by choice (gate.mode: off)"), "{line}");
     }
 
