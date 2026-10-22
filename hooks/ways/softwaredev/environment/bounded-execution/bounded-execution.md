@@ -1,7 +1,7 @@
 ---
 description: running long or interactive shell commands from an agent; use run_in_background for anything that follows a log or serves, give sudo, ssh, and package managers their non-interactive flag, stop a process by its pid and never by a pattern, claim running only on a liveness signal
 vocabulary: long running command hang hangs hung stuck process background run_in_background nohup setsid timeout tail -f follow logs docker run docker exec sudo ssh apt pacman install build make cargo build npm install kill pkill killall pid pidfile liveness still running completed foreground never-returning prompt-blocked half-applied launch
-commands: \b(pkill|killall|kill\s+-|sudo|ssh\s+-?|journalctl|tail\s+-f|docker\s+(run|exec)|apt(-get)?\s+install|pacman\s+-S|npm\s+(install|ci)|pip3?\s+install|cargo\s+build|make)\b
+commands: \b(pkill|killall|sudo|journalctl|docker\s+(run|exec)|apt(-get)?\s+install|pacman\s+-S[yu]*|npm\s+(install|ci)|pip3?\s+install|cargo\s+build|make)\b|\b(kill\s+-|ssh\s|tail\s+(\S+\s+){0,4}-[a-z]*f)
 scope: agent, subagent
 refire: 0.2
 ---
