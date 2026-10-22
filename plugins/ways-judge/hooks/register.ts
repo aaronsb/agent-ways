@@ -22,6 +22,7 @@
 import type { EngineInterface, HookStream, ProcessSpawnChunk, ProcessSpawnResult, PromptSubmitInput, PromptSubmitResult, Register } from 'claude-code'
 
 import {
+  ABORTED,
   REFUSED,
   STOP_GRACE_MS,
   VERB_TIMEOUT_MS,
@@ -114,11 +115,12 @@ async function serve($: EngineInterface, id: string, take: TakeStream, stopped: 
     if (!stopped.aborted) debug($, `ways judge take did not run: ${String(err)}`)
     return
   }
-  if (stopped.aborted) return
   const t = parseTake(out, code)
-  if (t.kind === 'none') debug($, t.why)
+  if (t.kind === 'none' && !stopped.aborted) debug($, t.why)
   if (t.kind !== 'job') return
-  const answer = await judge($, t.job, stopped)
+  // A claimed job is always answered, so its gate fails open at once rather
+  // than at its deadline; once the prompt went on there is no call to make.
+  const answer = stopped.aborted ? ABORTED : await judge($, t.job, stopped)
   try {
     const w = await $.process.run(answerArgv(id, t.job.id), { stdin: JSON.stringify(answer), timeoutMs: VERB_TIMEOUT_MS })
     if (w.exitCode !== 0) debug($, `ways judge answer failed (${w.exitCode}): ${w.stderr.trim()}`)

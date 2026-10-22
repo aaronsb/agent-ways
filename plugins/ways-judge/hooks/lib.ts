@@ -12,9 +12,13 @@ export function hostArgv(id: string): string[] {
   return [WAYS, 'judge', 'host', '--session', id]
 }
 
+/** How long a take may wait: the prompt hook's own timeout, so a take whose
+ *  stop was missed cannot outlive the prompt that started it. */
+export const TAKE_WAIT_MS = 30_000
+
 /** Waits for the session's next job; prints it, or `standby`. */
 export function takeArgv(id: string): string[] {
-  return [WAYS, 'judge', 'take', '--session', id, '--wait']
+  return [WAYS, 'judge', 'take', '--session', id, '--wait', '--timeout-ms', String(TAKE_WAIT_MS)]
 }
 
 /** Reads a JudgeAnswer as JSON on stdin, for the job `take` printed when it
@@ -90,3 +94,6 @@ export function answerOf(r: ModelCompleteResult): JudgeAnswer {
 /** The answer for a call the engine refused to send (a blocked model, a
  *  cap or a time limit it does not take). */
 export const REFUSED: JudgeAnswer = { reason: 'error' }
+
+/** The answer for a job claimed after the prompt went on. */
+export const ABORTED: JudgeAnswer = { reason: 'aborted' }
