@@ -60,6 +60,10 @@ pub(crate) struct WayCandidate {
     pub pattern_strict: bool,
     pub commands: Option<String>,
     pub files: Option<String>,
+    /// Regex matched against the tool name on the tool lane (ADR-704).
+    pub tools: Option<String>,
+    /// When the tool lane fires: `pre` (the default), `post`, or `both`.
+    pub tool_phase: Option<String>,
     pub description: String,
     pub vocabulary: String,
     /// Context-threshold percentage (only meaningful for trigger: context-threshold).
@@ -1026,6 +1030,89 @@ pub fn file(
 
     if !context.is_empty() {
         emit_hook_context("PreToolUse", context.trim_end());
+    }
+
+    Ok(())
+}
+
+// ── Tool lane (ADR-704) ─────────────────────────────────────────
+
+/// Whether a way's `tool_phase:` admits this hook event. A missing phase is
+/// `pre`. An unknown phase admits nothing, and lint names it.
+fn phase_admits(tool_phase: Option<&str>, hook_event: &str) -> bool {
+    let phase = tool_phase.map(|p| p.trim().trim_matches('"').to_ascii_lowercase());
+    let pre = hook_event == "PreToolUse";
+    let post = hook_event == "PostToolUse";
+    match phase.as_deref() {
+        None | Some("pre") => pre,
+        Some("post") => post,
+        Some("both") => pre || post,
+        Some(_) => false,
+    }
+}
+
+/// The tool-lane hits among `candidates` for `tool` at `hook_event`: scope,
+/// `when:`, the `tools:` regex on the tool name, then the phase.
+fn tool_hits(
+    candidates: &[WayCandidate],
+    tool: &str,
+    hook_event: &str,
+    scope: &str,
+    project_dir: &str,
+) -> Vec<Hit<String>> {
+    let mut hits: Vec<Hit<String>> = Vec::new();
+    for way in candidates {
+        if !session::scope_matches(&way.scope, scope) {
+            continue;
+        }
+        if !check_when(&way.when_project, &way.when_file_exists, project_dir) {
+            continue;
+        }
+        let Some(ref tools_pattern) = way.tools else { continue };
+        if !phase_admits(way.tool_phase.as_deref(), hook_event) {
+            continue;
+        }
+        if let Some(span) = regex_span(tools_pattern, tool) {
+            hits.push(Hit::explicit(&way.id, tools_pattern, &span, span.clone()));
+        }
+    }
+    order_hits(&mut hits);
+    hits
+}
+
+/// Match a tool call against `tools:` ways and emit their bodies.
+///
+/// Wired from PreToolUse and PostToolUse on the tools the settings template
+/// names (check-tool.sh). The envelope carries the real event name, so a
+/// PostToolUse fire lands after the tool returned. A failed call never gets
+/// here: the request reads as Skip (ADR-188 item 2).
+pub fn tool(
+    tool: &str,
+    hook_event: &str,
+    session_id: &str,
+    project: Option<&str>,
+    transcript: Option<&str>,
+) -> Result<()> {
+    crate::cmd::show::set_firing_transcript(transcript);
+    let project_dir = project
+        .map(|s| s.to_string())
+        .unwrap_or_else(crate::util::project_dir);
+
+    session::bump_epoch(session_id);
+    let scope = session::detect_scope(session_id);
+    let candidates = collect_candidates(&project_dir);
+
+    let mut context = String::new();
+    let mut budget = ContextBudget::hook();
+    for hit in &tool_hits(&candidates, tool, hook_event, &scope, &project_dir) {
+        let out = capture_show_way(&hit.id, session_id, "tool", None, Some(hit.payload.as_str()), None, Some(&mut budget)).body;
+        if !out.is_empty() {
+            context.push_str(&out);
+        }
+    }
+
+    if !context.is_empty() {
+        emit_hook_context(hook_event, context.trim_end());
     }
 
     Ok(())
@@ -2073,6 +2160,8 @@ mod eligibility_tests {
             pattern_strict: false,
             commands: None,
             files: None,
+            tools: None,
+            tool_phase: None,
             description: "d".into(),
             vocabulary: "v".into(),
             threshold: 0.0,
@@ -2134,5 +2223,41 @@ mod eligibility_tests {
         let ids = |unfiltered| diag_candidates(&cands, "/p", unfiltered).iter().map(|w| w.id.clone()).collect::<Vec<_>>();
         assert_eq!(ids(false), ["agent"], "default: what a prompt scan in agent scope competes");
         assert_eq!(ids(true), ["agent", "sub"]);
+    }
+
+    #[test]
+    fn the_tool_lane_matches_the_name_and_the_phase() {
+        let mut pre = way("pre", "agent", None);
+        pre.tools = Some("^exitplanmode$".into());
+        let mut post = way("post", "agent", None);
+        post.tools = Some("ExitPlanMode|Workflow".into());
+        post.tool_phase = Some("post".into());
+        let mut both = way("both", "agent", None);
+        both.tools = Some("Workflow".into());
+        both.tool_phase = Some("both".into());
+        let mut odd = way("odd", "agent", None);
+        odd.tools = Some("Workflow".into());
+        odd.tool_phase = Some("later".into());
+        let sub = { let mut w = way("sub", "subagent", None); w.tools = Some("Workflow".into()); w };
+        let cands = [pre, post, both, odd, sub, way("none", "agent", None)];
+        let ids = |tool: &str, event: &str| {
+            let mut v: Vec<String> = tool_hits(&cands, tool, event, "agent", "/p").into_iter().map(|h| h.id).collect();
+            v.sort();
+            v
+        };
+        assert_eq!(ids("ExitPlanMode", "PreToolUse"), ["pre"], "case-insensitive, pre by default");
+        assert_eq!(ids("ExitPlanMode", "PostToolUse"), ["post"]);
+        assert_eq!(ids("Workflow", "PreToolUse"), ["both"]);
+        assert_eq!(ids("Workflow", "PostToolUse"), ["both", "post"]);
+        assert!(ids("Bash", "PreToolUse").is_empty());
+        assert!(ids("Workflow", "PostToolUseFailure").is_empty());
+    }
+
+    #[test]
+    fn the_tool_lane_honours_when() {
+        let mut w = way("w", "agent", None);
+        w.tools = Some("Workflow".into());
+        w.when_file_exists = Some("definitely-not-here/*.md".into());
+        assert!(tool_hits(&[w], "Workflow", "PreToolUse", "agent", "/p").is_empty());
     }
 }

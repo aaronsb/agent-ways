@@ -76,6 +76,7 @@ pub fn run(event: HookEvent) -> Result<()> {
             scan::command(&command, description.as_deref(), &session, project, transcript)
         }
         Request::File { session, path } => scan::file(&path, &session, project, transcript),
+        Request::Tool { session, tool, hook_event } => scan::tool(&tool, &hook_event, &session, project, transcript),
         Request::Task { session, query, team, .. } => scan::task(&query, &session, project, team.as_deref()),
         Request::PostTool { session, hook_event } => {
             // As in the scan lanes: fired ways read the model and the refire
@@ -162,6 +163,7 @@ fn subagent_lane(request: &Request, from_subagent: bool) -> Option<&'static str>
         Request::State { .. } => Some("state"),
         Request::Command { .. } => Some("command"),
         Request::File { .. } => Some("file"),
+        Request::Tool { .. } => Some("tool"),
         Request::PostTool { .. } => Some("post_tool"),
         Request::Queued { .. } => Some("queued"),
         Request::Pull { .. } | Request::Stop { .. } | Request::SessionStart { .. } | Request::TasksActive { .. } | Request::Skip => None,
@@ -174,6 +176,7 @@ fn request_session(request: &Request) -> Option<&str> {
         | Request::State { session, .. }
         | Request::Command { session, .. }
         | Request::File { session, .. }
+        | Request::Tool { session, .. }
         | Request::Task { session, .. }
         | Request::PostTool { session, .. }
         | Request::Pull { session, .. }

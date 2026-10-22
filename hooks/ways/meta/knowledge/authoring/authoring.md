@@ -32,6 +32,7 @@ If you still want regex-only, that's your choice, but expect poor recall on natu
 **Other trigger types** (not prompt-based, semantic doesn't apply):
 - `files:` — regex matched against file paths (Edit/Write hooks)
 - `commands:` — regex matched against bash commands
+- `tools:` — regex matched against the tool name on the tools the hooks wire, with `tool_phase:` `pre` (default), `post`, or `both`
 - `trigger:` — state-based (context-threshold, file-exists, session-start)
 
 **All values must be single-line.** Do not use YAML folded (`>`) or literal (`|`) scalars — the trigger pipeline parsers only read the first line, silently returning `>` as the value. Use `ways author lint` to catch this.

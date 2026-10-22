@@ -27,14 +27,14 @@ Do not author in `~/.claude/hooks/ways/`. It is a symlink into the app's own cop
 A way is a directory holding `{wayname}.md`: YAML frontmatter, then the guidance. Optional files beside it are `macro.sh` for dynamic content (see [macros.md](macros.md)) a `provenance.yaml` sidecar that claims the controls the way serves (see [provenance.md](provenance.md)), and a `{wayname}.golden.jsonl` sidecar of test prompts: one `direct` and one `situational` line, each `{"kind":"direct","prompt":"..."}`. A core way must have one filled in; `ways author lint` checks it. There is no registration step.
 
 1. **Scaffold.** `ways author template <domain>/<wayname> -d "what this way covers" -V "words users would say"` writes the file and a blank golden sidecar. Run inside a project, it writes to the project's `.claude/ways/`. With `--global`, or outside a project, it writes to your personal root.
-2. **Edit.** Write the description, vocabulary and body, and fill both golden prompts. Add `pattern:`, `commands:`, `files:` or `trigger:` if the way should fire on those.
+2. **Edit.** Write the description, vocabulary and body, and fill both golden prompts. Add `pattern:`, `commands:`, `files:`, `tools:` or `trigger:` if the way should fire on those.
 3. **Lint.** `ways author lint <path>` checks the frontmatter against the schema. Fix every error.
 4. **Rebuild the corpus.** `ways corpus` re-embeds the ways. The semantic matcher reads the corpus, not the files, so an edit to `description:` or `vocabulary:` does nothing until the rebuild. A new session runs `ways corpus --if-stale`, which rebuilds when a way file is newer than the corpus.
 5. **Check the match.** `ways author match "a prompt that should fire it"` shows how the live matcher scores the prompt against every way. Try prompts that should fire it and prompts that should not.
 
 ### `refire:` is required
 
-Every way that fires on something needs a `refire:` field. That covers any way with `description:` and `vocabulary:`, `pattern:`, `commands:`, `files:` or `trigger:`. The firing gate resolves the way's cadence before its first fire and refuses a way without one, so a way with no `refire:` never reaches the agent, not even once. The one exception is the Task lane: a way that matches a Task prompt is stashed for the subagent without passing the gate. `ways author lint` reports a missing `refire:` as an error. The scaffolder writes `refire: 0.15`.
+Every way that fires on something needs a `refire:` field. That covers any way with `description:` and `vocabulary:`, `pattern:`, `commands:`, `files:`, `tools:` or `trigger:`. The firing gate resolves the way's cadence before its first fire and refuses a way without one, so a way with no `refire:` never reaches the agent, not even once. The one exception is the Task lane: a way that matches a Task prompt is stashed for the subagent without passing the gate. `ways author lint` reports a missing `refire:` as an error. The scaffolder writes `refire: 0.15`.
 
 `refire:` takes a fraction of the context window (`0.15`) or a preset name (`once`, `rare`, `normal`, `frequent`). It sets how long a way stays quiet after it fires before it may disclose again. See [context-decay.md](context-decay.md) for the model behind it. Check files and attend handlers are exempt; they ride on their parent way or on a signal.
 
@@ -43,6 +43,7 @@ Every way that fires on something needs a `refire:` field. That covers any way w
 | If your trigger is... | Use |
 |----------------------|-----|
 | Specific keywords or commands | `pattern:`, `commands:`, or `files:` (regex) |
+| A tool call, such as an approved plan or a launched Workflow | `tools:` (regex on the tool name) with `tool_phase:` |
 | A broad concept users describe in different words | `description:` + `vocabulary:` (semantic matching) |
 | A session condition, not content | `trigger:` with `context-threshold`, `file-exists`, or `session-start` |
 

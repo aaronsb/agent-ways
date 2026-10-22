@@ -177,6 +177,7 @@ More ways matched than the profile's `max_candidates` (default 8). The rest went
 | `semantic:bash:en`, `semantic:bash:multi` | A shell command's text matched a way's description semantically |
 | `bash` | A `commands:` pattern matched a shell command |
 | `file` | A `files:` pattern matched a file being edited |
+| `tool` | A `tools:` pattern matched the tool name on PreToolUse or PostToolUse |
 | `state` | A `trigger:` condition: `session-start`, `context-threshold`, `file-exists` |
 | `task` | The Task lane, scanning a subagent's prompt |
 | `prompt` | Near-miss and keyword-gate rows from the prompt lane; subagent dispatch fires with no recorded channel |

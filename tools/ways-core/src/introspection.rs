@@ -71,6 +71,9 @@ pub struct MatchCriteria {
     /// File channel — path globs whose touch fires the way.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub files: Option<String>,
+    /// Tool channel — tool names whose call fires the way (ADR-704).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<String>,
     /// State / explicit trigger channel.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trigger: Option<String>,
@@ -604,6 +607,7 @@ impl MatchCriteria {
             pattern: get("pattern"),
             commands: get("commands"),
             files: get("files"),
+            tools: get("tools"),
             trigger: get("trigger"),
             vocabulary: get("vocabulary"),
             scope: get("scope"),

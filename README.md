@@ -117,7 +117,7 @@ The judge is the only part that sends conversation text off your machine, and on
 | Component | What it does | Docs |
 |---|---|---|
 | `ways` | The CLI and the hook engine. Every hook script calls it to match ways, track session state and inject guidance. It also carries install, update, settings and authoring commands. | [CLI reference](docs/reference/ways-cli.md) |
-| `way-embed` | The embedding engine (C++, llama.cpp) for semantic matching. It is optional: without it, only `pattern:`, `commands:` and `files:` triggers fire. | [Matching](docs/hooks-and-ways/matching.md), [finishing an install](docs/finish-install.md) |
+| `way-embed` | The embedding engine (C++, llama.cpp) for semantic matching. It is optional: without it, only `pattern:`, `commands:`, `files:` and `tools:` triggers fire. | [Matching](docs/hooks-and-ways/matching.md), [finishing an install](docs/finish-install.md) |
 | `ways-agent` | A resident per-user daemon that holds your provider key and runs the relevance judge. The hook starts it on first use. | [Relevance judge](docs/explanation/relevance-judge/), [ADR-502](docs/architecture/platform/ADR-502-the-ways-agent-one-resident-daemon-per-user-for-search-judging-and-key-custody.md) |
 | `ways-mcp` | The agent-ways MCP server, registered with Claude Code as `agent-ways`. Today it hosts one read-only tool, `ways_status`. ADR-501 plans attend and keepalive modules on it. | [ADR-501](docs/architecture/platform/ADR-501-the-agent-ways-mcp-server-one-server-for-attend-keepalive-and-later-modules-inbound-through-channels.md) |
 | `attend` | The awareness layer: sensors for git state, peer sessions and process activity, surfaced into a running session as notifications. | [Attend and Monitor](docs/attend-and-monitor/README.md) |
@@ -240,6 +240,7 @@ vocabulary: domain keywords   # space-separated terms augmenting the embedding
 pattern: commit|push          # regex on user prompts (supplementary)
 commands: git\ commit         # regex on bash commands
 files: \.env$                 # regex on file paths
+tools: ^ExitPlanMode$         # regex on the tool name (tool_phase: pre|post|both)
 macro: prepend                # dynamic context via macro.sh
 scope: agent, subagent        # injection scope
 ---

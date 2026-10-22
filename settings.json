@@ -257,6 +257,16 @@
           }
         ]
       }
+,
+      {
+        "matcher": "EnterPlanMode|ExitPlanMode|Workflow",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${HOME}/.claude/hooks/ways/check-tool.sh"
+          }
+        ]
+      }
     ],
     "UserPromptSubmit": [
       {
@@ -316,6 +326,16 @@
           {
             "type": "command",
             "command": "${HOME}/.claude/hooks/ways/check-pull.sh"
+          }
+        ]
+      }
+,
+      {
+        "matcher": "EnterPlanMode|ExitPlanMode|Workflow",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${HOME}/.claude/hooks/ways/check-tool.sh"
           }
         ]
       }

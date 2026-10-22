@@ -627,7 +627,7 @@ pub fn format_trigger(trigger: &str) -> String {
         "semantic:bash:multi" => "embed:bash:multi".to_string(),
         "keyword" => "keyword".to_string(),
         "check-pull" => "check-pull".to_string(),
-        "bash" | "file" | "state" => trigger.to_string(),
+        "bash" | "file" | "tool" | "state" => trigger.to_string(),
         _ => trigger.to_string(),
     }
 }

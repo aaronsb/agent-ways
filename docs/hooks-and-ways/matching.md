@@ -84,7 +84,7 @@ flowchart TD
     J -- block --> BL[Not shown, keeps its refire budget]
 ```
 
-**Channel 1 — keyword (explicit triggers).** `pattern:` (prompt text), `commands:` (bash commands), `files:` (file paths). The prompt `pattern:` lane is **floor-gated** (ADR-155/156): a regex hit fires only if the way's calibrated probability `g(s)` also clears the keyword floor `τ_k` on at least one model lane, so a keyword can't drag in an unrelated prompt *when calibration is loaded*. It **fails open** (fires unconditionally) when there is genuinely no calibrated signal either direction — the engine didn't run, the way isn't embeddable, or no calibration is loaded — so the author's explicit trigger stands. `pattern_strict: true` also forces the unconditional fire by design (and bypasses the URL / code-fence mask). The `commands:` and `files:` fields match against tool inputs on PreToolUse and fire on the regex match itself; they are the author's "I know exactly when this should fire" surface.
+**Channel 1 — keyword (explicit triggers).** `pattern:` (prompt text), `commands:` (bash commands), `files:` (file paths), `tools:` (tool names). The prompt `pattern:` lane is **floor-gated** (ADR-155/156): a regex hit fires only if the way's calibrated probability `g(s)` also clears the keyword floor `τ_k` on at least one model lane, so a keyword can't drag in an unrelated prompt *when calibration is loaded*. It **fails open** (fires unconditionally) when there is genuinely no calibrated signal either direction — the engine didn't run, the way isn't embeddable, or no calibration is loaded — so the author's explicit trigger stands. `pattern_strict: true` also forces the unconditional fire by design (and bypasses the URL / code-fence mask). The `commands:` and `files:` fields match against tool inputs on PreToolUse, and `tools:` matches the tool name on PreToolUse or PostToolUse (`tool_phase:`, ADR-704). They fire on the regex match itself; they are the author's "I know exactly when this should fire" surface.
 
 **Channel 2 — embedding.** Sole semantic retrieval tier (ADR-125), in two tiers. The primary is the ADR-160 late-interaction matcher: the reduced surface is split into sentence chunks, each way is ranked by its best chunk, it must win a share of the chunks in a per-chunk softmax (or match one chunk strongly), and the chunk it won must be corroborated by the way's own body. It reads the **English** corpus only. When the surface yields fewer than two chunks, or the engine is missing, the single-vector fallback decides: the surface is embedded once per model, a node's score is the max cosine across its aliases, and the per-model calibration `g(s) = σ(a·s + b)` maps it to a probability that must clear `τ_s` on either lane. In **localized mode only** (ADR-139) the 768-dim multilingual lane runs as part of that fallback, so a native-language query reaches its node through a locale alias only when the surface is too short to chunk. Late-interaction matches a longer native-language prompt against the English aliases. English installs never load the multilingual model. The engine is a hard dependency: if it is missing, no semantic matching happens.
 
@@ -146,6 +146,7 @@ The default and most common mode. Three fields can be tested independently:
 - `pattern:` - tested against the user's prompt text
 - `commands:` - tested against bash commands (PreToolUse:Bash)
 - `files:` - tested against file paths (PreToolUse:Edit|Write)
+- `tools:` - tested against the tool name (PreToolUse and PostToolUse on the tools the settings matcher wires, by `tool_phase:`)
 
 A way can declare any combination. Each field is a standard regex evaluated case-insensitively against its input (ADR-157 — the pattern is compiled case-insensitively; the input keeps its original case).
 
@@ -179,7 +180,7 @@ There is **no per-way threshold field** — firing is governed by global setting
 
 ### Engine and setup
 
-The embedding engine is a hard dependency (ADR-125). `make setup` fetches the `way-embed` binary and the **English** GGUF model; the 127MB multilingual model is on-demand, fetched by `ways-localize` (or `make -C tools/way-embed model-multilingual`) only when an adopter localizes (ADR-139). If the engine/English model is missing, ways with only semantic triggers will not fire — only `pattern:`, `commands:`, `files:` ways will. The `ways status` command reports whether the engine is installed.
+The embedding engine is a hard dependency (ADR-125). `make setup` fetches the `way-embed` binary and the **English** GGUF model; the 127MB multilingual model is on-demand, fetched by `ways-localize` (or `make -C tools/way-embed model-multilingual`) only when an adopter localizes (ADR-139). If the engine/English model is missing, ways with only semantic triggers will not fire — only `pattern:`, `commands:`, `files:`, `tools:` ways will. The `ways status` command reports whether the engine is installed.
 
 ### Vocabulary design
 

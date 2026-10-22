@@ -2558,3 +2558,71 @@ fn scenario_the_way_pulled_event_keeps_its_fields() {
     clean_markers(&s);
     let _ = std::fs::remove_dir_all(&base);
 }
+
+// ── ADR-704: the tool lane ─────────────────────────────────────
+
+/// A transcript for `session` whose newest assistant turn reports `tokens`
+/// of context: the refire clock reads its position from here.
+#[cfg(unix)]
+fn transcript_at(dir: &Path, session: &str, tokens: u64) -> PathBuf {
+    let t = dir.join(format!("{session}.jsonl"));
+    std::fs::write(
+        &t,
+        format!(
+            "{{\"type\":\"assistant\",\"message\":{{\"model\":\"claude-opus-4-5\",\"usage\":{{\"input_tokens\":{tokens},\"output_tokens\":1}}}}}}\n"
+        ),
+    )
+    .unwrap();
+    t
+}
+
+#[cfg(unix)]
+#[test]
+fn scenario_tool_triggers() {
+    let home = sim_root().join("home");
+    let state = home.join(".local/state");
+    let project = std::env::temp_dir().join(format!("ways-sim-tool-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&project);
+    std::fs::create_dir_all(project.join(".claude")).unwrap();
+    let s = format!("sim-tool-{}", std::process::id());
+    clean_markers(&s);
+    let call = |event: &str, tool: &str, tokens: u64| {
+        let t = transcript_at(&project, &s, tokens);
+        hook_raw(
+            &home, &state, &project, "tool",
+            &format!(
+                r#"{{"session_id":"{s}","cwd":"{}","transcript_path":"{}","hook_event_name":"{event}","tool_name":"{tool}","tool_input":{{}}}}"#,
+                project.display(),
+                t.display()
+            ),
+        )
+    };
+
+    // The `when: file_exists` gate: no spe/README.md, no fire.
+    assert_eq!(call("PostToolUse", "ExitPlanMode", 1000), "");
+    std::fs::create_dir_all(project.join("spe")).unwrap();
+    std::fs::write(project.join("spe/README.md"), "# spe\n").unwrap();
+
+    // The phase filter: a post-only way stays silent before the tool runs,
+    // and another tool name never matches.
+    assert_eq!(call("PreToolUse", "ExitPlanMode", 1000), "");
+    assert_eq!(call("PostToolUse", "Workflow", 1000), "");
+    // A failed call is skipped outright.
+    assert_eq!(call("PostToolUseFailure", "ExitPlanMode", 1000), "");
+
+    // Post on the named tool fires, in the envelope of the real event.
+    let out = call("PostToolUse", "ExitPlanMode", 1000);
+    let v: serde_json::Value = serde_json::from_str(out.trim()).expect("one JSON envelope");
+    assert_eq!(v["hookSpecificOutput"]["hookEventName"], "PostToolUse");
+    assert!(v["hookSpecificOutput"]["additionalContext"].as_str().unwrap().contains("# Plan Approved"));
+    assert!(v["hookSpecificOutput"].get("permissionDecision").is_none());
+    assert_marker_exists("testdomain/tool-trigger", &s);
+
+    // Inside its refire window, the next approval is held back.
+    assert_eq!(call("PostToolUse", "ExitPlanMode", 2000), "");
+    // A later round, far past the window, fires again.
+    assert!(call("PostToolUse", "ExitPlanMode", 900_000).contains("# Plan Approved"));
+
+    clean_markers(&s);
+    let _ = std::fs::remove_dir_all(&project);
+}

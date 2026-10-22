@@ -261,7 +261,7 @@ pub(super) fn way_about(w: &Located, home: &Path) -> String {
     out.push(row("from", w.scope.label().into()));
     out.push(row("root", tilde(&w.root, home)));
     out.push(row("file", file.strip_prefix(&w.root).unwrap_or(file).display().to_string()));
-    for k in ["vocabulary", "pattern", "files", "commands", "trigger", "scope", "refire"] {
+    for k in ["vocabulary", "pattern", "files", "commands", "tools", "trigger", "scope", "refire"] {
         if let Some(v) = field(k) {
             out.push(row(k, v));
         }

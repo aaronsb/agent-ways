@@ -85,6 +85,8 @@ mod tests {
             pattern_strict: false,
             commands: None,
             files: None,
+            tools: None,
+            tool_phase: None,
             description: description.into(),
             vocabulary: "v".into(),
             threshold: 0.0,

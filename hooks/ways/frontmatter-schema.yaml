@@ -18,6 +18,8 @@
 #   keyword   pattern (+ pattern_strict)                   → scan regex lane
 #   bash      commands                                     → scan bash surface
 #   file      files                                        → scan Edit/Write surface
+#   tool      tools (+ tool_phase)                         → scan tool lane (ADR-704)
+#             (PreToolUse/PostToolUse on the tools the settings.json matcher names)
 #   state     trigger: session-start|context-threshold|file-exists (flat)  → scan/state.rs
 #             (context-threshold also needs threshold; file-exists needs path)
 #   attend    trigger: { type: attend, signals: [...] } (NESTED)           → attend binary
@@ -97,6 +99,21 @@ way:
       type: regex
       required: optional
       role: Regex matched against bash commands
+    tools:
+      type: regex
+      required: optional
+      role: >
+        Regex matched against the tool name on PreToolUse/PostToolUse (ADR-704).
+        Only tools the shipped settings.json matcher wires reach the lane
+        (today EnterPlanMode, ExitPlanMode, Workflow).
+    tool_phase:
+      type: enum
+      values: [pre, post, both]
+      required: optional
+      default: pre
+      role: >
+        When the tool lane fires. pre fires before the tool runs, post after it
+        returns successfully (never on PostToolUseFailure), both on either.
 
   preconditions:
     scope:
@@ -114,6 +131,10 @@ way:
           type: path
           required: optional
           role: Only fire in this project directory
+        file_exists:
+          type: path
+          required: optional
+          role: Only fire when this file (or glob) exists in the project
 
   # The attend lane is the NESTED shape of the top-level `trigger:` key:
   #   trigger:

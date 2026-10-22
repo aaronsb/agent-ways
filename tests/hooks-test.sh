@@ -332,6 +332,23 @@ check "a trusted project's postcheck runs" "present" "$([[ -e $WORK/project-post
 check "a trusted project's postcheck fires its way" "yes" "$(grep -q 'Project local body' <<< "$out" && echo yes || echo no)"
 rm -rf "$PROJ/.claude/ways/projdom" "$HOME/.claude/trusted-project-macros" "$WORK/project-postcheck-ran"
 
+# The tool lane (ADR-704): check-tool.sh fires a `tools:` way on its tool
+# and phase, in the envelope of the real event, and skips a failed call.
+mkdir -p "$CORE/tooldom/approved"
+printf -- '---\ntools: ^ExitPlanMode$\ntool_phase: post\nscope: agent\nrefire: 0.15\n---\n# Approved body\n' \
+    > "$CORE/tooldom/approved/approved.md"
+tool() {  # session event tool
+    jq -cn --arg s "$1" --arg e "$2" --arg t "$3" --arg c "$PROJ" '{session_id:$s,hook_event_name:$e,cwd:$c,tool_name:$t,tool_input:{}}' \
+        | bash "$HOOKS/check-tool.sh"
+}
+check "check-tool.sh is silent before the tool runs on a post-only way" "" "$(tool sess-tool-1 PreToolUse ExitPlanMode)"
+check "check-tool.sh skips a failed call" "" "$(tool sess-tool-1 PostToolUseFailure ExitPlanMode)"
+check "check-tool.sh is silent for another tool" "" "$(tool sess-tool-1 PostToolUse Workflow)"
+out=$(tool sess-tool-1 PostToolUse ExitPlanMode)
+check "check-tool.sh envelope names PostToolUse" "PostToolUse" "$(jq -r .hookSpecificOutput.hookEventName <<< "$out")"
+check "check-tool.sh fires the way on its tool" "yes" "$(grep -q 'Approved body' <<< "$out" && echo yes || echo no)"
+rm -rf "$CORE/tooldom"
+
 # #689: a macro run for a subagent gets the parent's session id, its own
 # agent id, the scope it runs for and the sessions root, and the markdown
 # queue macros leave the parent's queue for the parent.

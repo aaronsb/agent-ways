@@ -17,9 +17,11 @@ The hooks are declared in the `hooks` block of the repo's [`settings.json`](../s
 | **PreToolUse** | `Bash` | `check-bash-pre.sh`, `strip-session-link-pre.sh` |
 | **PreToolUse** | `TaskCreate` | `mark-tasks-active.sh` |
 | **PreToolUse** | `Task` | `check-task-pre.sh` |
+| **PreToolUse** | `EnterPlanMode\|ExitPlanMode\|Workflow` | `check-tool.sh` |
 | **SubagentStart** | | `inject-subagent.sh` |
 | **PostToolUse** | `Edit\|Write\|Bash\|Task` | `check-post.sh`, `check-queued.sh` |
 | **PostToolUse** | `Bash`, if `Bash(gh issue *)` | `issues-pull.sh post-gh` |
+| **PostToolUse** | `EnterPlanMode\|ExitPlanMode\|Workflow` | `check-tool.sh` |
 | **PostToolUseFailure** | `Edit\|Write\|Bash\|Task` | `check-post.sh` |
 | **Stop** | | `check-response.sh`, `attend-drain-stop.sh` |
 | **TaskCreated** | | `issues-task-created.sh` |
@@ -48,6 +50,7 @@ The PreToolUse lanes run before the tool executes, so guidance arrives while Cla
 - **`check-state.sh`** (`ways hook state`) - Shows `core.md` when its marker is missing, then evaluates `trigger:` fields. See [State triggers](#state-triggers).
 - **`check-bash-pre.sh`** (`ways hook command`) - Three channels: `commands:` against the command, `pattern:` against the tool's description, and a semantic lane over the command, its description and Claude's prose since the last human turn (ADR-155 §4, ADR-191). `*.check.md` checks are scored on the same surface. This lane has no judge and logs no near-misses. ADR-188, still proposed, would retire its semantic lane.
 - **`check-file-pre.sh`** (`ways hook file`) - Tests `files:` patterns against the path about to be edited. Regex only.
+- **`check-tool.sh`** (`ways hook tool`) - Tests `tools:` patterns against the tool name on PreToolUse and PostToolUse, filtered by `tool_phase:` (`pre` by default, `post`, or `both`). A failed call fires nothing. Regex only. Only the tools the settings matcher names reach it (ADR-704).
 
 All lanes respect the `scope:` field and the `when:` preconditions.
 
@@ -163,7 +166,7 @@ See [teams.md](hooks-and-ways/teams.md) for the full team coordination model.
 
 Each way declares how it should be matched in its frontmatter. The lanes are additive-OR: a way with both a `pattern:` and a `description:` + `vocabulary:` can fire from either.
 
-- **Keyword lane** - the regex `pattern:` against the prompt, plus the deterministic `commands:` and `files:` triggers on the tool surfaces.
+- **Keyword lane** - the regex `pattern:` against the prompt, plus the deterministic `commands:`, `files:` and `tools:` triggers on the tool surfaces.
 - **Semantic lane** - on the prompt, queued and task surfaces, the ADR-160 late-interaction matcher: the surface is split into sentences, each way is ranked by its best chunk and must either win a share of the chunks or match one chunk strongly, and the chunk it won must be corroborated by the way's own body. When the surface is too short to chunk, or the engine is missing, the single-vector calibrated gate decides instead (ADR-156). The bash surface uses the single-vector gate only.
 - **Relevance gate** - on the prompt and queued surfaces, what the two lanes fired is judged by a hosted model before it is shown (ADR-196).
 
@@ -177,7 +180,7 @@ flowchart TD
     classDef result fill:#00695C,stroke:#004D40,color:#fff
 
     W["{name}.md frontmatter"]
-    W -->|"pattern: / commands: / files:"| R
+    W -->|"pattern: / commands: / files: / tools:"| R
     W -->|"description: + vocabulary:"| S
 
     subgraph RX ["Keyword lane"]
@@ -186,6 +189,7 @@ flowchart TD
         R --> RD["pattern: → Bash description"]:::regex
         R --> RC["commands: → Bash command"]:::regex
         R --> RF["files: → file path"]:::regex
+        R --> RT["tools: → tool name"]:::regex
     end
 
     subgraph SM ["Semantic lane"]
@@ -216,6 +220,7 @@ A gated keyword never shadows a semantic fire: the semantic lane is checked firs
 pattern: commit|push          # matched against the prompt
 commands: git\ commit         # matched against Bash commands
 files: \.env$|config\.json    # matched against file paths
+tools: ^ExitPlanMode$         # matched against the tool name (tool_phase: pre|post|both)
 ```
 
 Fast and precise. Keyword matching is case-insensitive (ADR-157): the pattern is compiled case-insensitively, so a lowercase pattern matches the acronyms users type (`\bssh\b` matches `SSH`). The prompt keeps its original case, with only code fences and URLs stripped. Write patterns in lowercase and mean the concept.

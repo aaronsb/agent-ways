@@ -193,7 +193,7 @@ How does this apply in practice? Write the prose doc (or add a section to an exi
 
 Decide how the guidance should be delivered:
 - On what user prompt keywords? → `pattern:`
-- On what tool use? → `commands:` or `files:`
+- On what tool use? → `commands:`, `files:`, or `tools:` (the tool name, with `tool_phase:`)
 - On what concept? → `description:` + `vocabulary:` (embedding semantic matching)
 - On what condition? → `trigger:`
 

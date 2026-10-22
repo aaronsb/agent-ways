@@ -150,7 +150,7 @@ impl Frontmatter {
 /// `ways author lint`'s fire-eligibility check automatically. The corresponding
 /// dispatch entry point in `cmd/scan/` still needs wiring separately — this
 /// const is the advisory declaration, not the dispatcher.
-pub const FIRE_BEARING_FIELDS: &[&str] = &["pattern", "files", "commands", "trigger"];
+pub const FIRE_BEARING_FIELDS: &[&str] = &["pattern", "files", "commands", "tools", "trigger"];
 
 /// Does this frontmatter wire the way into any firing channel?
 /// Used by `ways author lint` to flag fire-bearing ways that lack a `refire:` field.

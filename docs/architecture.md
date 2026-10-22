@@ -102,6 +102,7 @@ flowchart LR
     PF["PreToolUse<br/>Edit, Write"]:::event
     PT["PreToolUse<br/>Task"]:::event
     PC["PreToolUse<br/>TaskCreate"]:::event
+    PW["PreToolUse, PostToolUse<br/>EnterPlanMode, ExitPlanMode, Workflow"]:::event
     SA[SubagentStart]:::event
     PO["PostToolUse<br/>Edit, Write, Bash, Task"]:::event
     PX["PostToolUseFailure<br/>Edit, Write, Bash, Task"]:::event
@@ -114,6 +115,7 @@ flowchart LR
     CB["check-bash-pre.sh → ways hook command"]:::script
     CF["check-file-pre.sh → ways hook file"]:::script
     CT["check-task-pre.sh → ways hook task"]:::script
+    CW["check-tool.sh → ways hook tool"]:::script
     MT["mark-tasks-active.sh → ways hook tasks-active"]:::script
     IS["inject-subagent.sh → ways hook subagent-start"]:::script
     PP["check-post.sh → ways hook post-tool"]:::script
@@ -128,6 +130,7 @@ flowchart LR
     PF --> CF
     PT --> CT
     PC --> MT
+    PW --> CW
     SA --> IS
     PO --> PP
     PX --> PP
@@ -140,11 +143,12 @@ flowchart LR
     CB --> On
     CF --> On
     CT --> On
+    CW --> On
     IS --> On
     PP --> On
     QQ --> On
 
-    On -->|prompt, queued, command, file| Match["Matcher<br/>keyword · semantic"]:::gate
+    On -->|prompt, queued, command, file, tool| Match["Matcher<br/>keyword · semantic"]:::gate
     On -->|state| State["core.md · state triggers"]:::gate
     On -->|post-tool| Post["postcheck.sh exits 0"]:::gate
     On -->|task| TaskM["Matcher on the Task prompt<br/>scope: subagent"]:::gate
@@ -320,6 +324,7 @@ flowchart LR
         Cmd["Bash command + description<br/>+ prose since the last human turn"]:::input
         File["File path"]:::input
         TaskP["Task prompt"]:::input
+        ToolN["Tool name + hook event"]:::input
     end
 
     Cand["collect_candidates<br/>project .claude/ways<br/>> user $XDG_CONFIG_HOME/agent-ways/ways<br/>> core ~/.claude/hooks/ways<br/>(a higher root shadows the same id, tree order)"]:::scan
@@ -330,10 +335,11 @@ flowchart LR
     Cmd --> Cand
     File --> Cand
     TaskP --> Cand
+    ToolN --> Cand
     Cand --> Pre
 
     Pre --> KW["pattern: on prompt, queued, task"]:::match
-    Pre --> DIR["commands: on the command<br/>pattern: on the description<br/>files: on the path"]:::match
+    Pre --> DIR["commands: on the command<br/>pattern: on the description<br/>files: on the path<br/>tools: on the tool name, tool_phase: on the event"]:::match
     Pre --> SEM["semantic<br/>late-interaction or g(s) fallback"]:::match
 
     KW --> Floor{"g(s) ≥ τ_k?<br/>fails open · pattern_strict bypasses"}:::gate
@@ -489,6 +495,7 @@ $XDG_DATA_HOME/agent-ways/hooks/ways/      # shipped ways, projected as ~/.claud
 ├── check-bash-pre.sh           # PreToolUse:Bash → ways hook command
 ├── check-file-pre.sh           # PreToolUse:Edit|Write → ways hook file
 ├── check-task-pre.sh           # PreToolUse:Task → ways hook task
+├── check-tool.sh               # PreToolUse, PostToolUse:EnterPlanMode|ExitPlanMode|Workflow → ways hook tool
 ├── mark-tasks-active.sh        # PreToolUse:TaskCreate → ways hook tasks-active (dormant marker)
 ├── inject-subagent.sh          # SubagentStart → ways hook subagent-start
 ├── check-post.sh               # PostToolUse, PostToolUseFailure → ways hook post-tool

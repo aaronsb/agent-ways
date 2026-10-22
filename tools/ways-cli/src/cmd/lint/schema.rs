@@ -18,6 +18,7 @@ pub(super) struct Schema {
     pub(super) valid_scopes: Vec<String>,
     pub(super) valid_macros: Vec<String>,
     pub(super) valid_triggers: Vec<String>,
+    pub(super) valid_tool_phases: Vec<String>,
     pub(super) excluded_path_segments: Vec<String>,
 }
 
@@ -34,6 +35,7 @@ pub(super) fn load(path: &Path) -> Result<Schema> {
         valid_scopes: extract_enum_values(&doc, "way", "scope"),
         valid_macros: extract_enum_values(&doc, "way", "macro"),
         valid_triggers: extract_enum_values(&doc, "way", "trigger"),
+        valid_tool_phases: extract_enum_values(&doc, "way", "tool_phase"),
         excluded_path_segments: extract_string_list(&doc, &["lint", "excluded_path_segments"]),
     })
 }

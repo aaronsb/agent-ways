@@ -52,6 +52,7 @@ A session is a sequence of **turns**. Each turn has:
 | `prompt` | UserPromptSubmit | `ways scan prompt --query <text> --session <id>` |
 | `tool_bash` | PreToolUse:Bash | `ways scan command --command <cmd> --session <id>` |
 | `tool_edit` | PreToolUse:Edit/Write | `ways scan file --path <path> --session <id>` |
+| `tool_call` | PreToolUse/PostToolUse on the wired tools | `ways hook tool` with the raw payload (ADR-704) |
 | `subagent_start` | SubagentStart | (future: `ways scan prompt` with subagent scope) |
 | `response` | Stop | (epoch bump only, no matching) |
 
@@ -96,6 +97,20 @@ Turn 3: edit ".claude/ways/custom/custom.md" → expect knowledge/authoring
 ```
 
 Tests: `files:` regex matching, project path filtering.
+
+### Scenario 3b: Tool Triggers (ADR-704)
+
+```
+Turn 1 (no spe/README.md): PostToolUse ExitPlanMode → nothing (when.file_exists)
+Turn 2: PreToolUse ExitPlanMode → nothing (tool_phase: post)
+Turn 3: PostToolUse Workflow → nothing (tools: names ExitPlanMode only)
+Turn 4: PostToolUseFailure ExitPlanMode → nothing (failures are skipped)
+Turn 5: PostToolUse ExitPlanMode → testdomain/tool-trigger, PostToolUse envelope
+Turn 6: same, inside the refire window → nothing
+Turn 7: same, far past the window → fires again
+```
+
+Tests: `tools:` regex on the tool name, `tool_phase:`, `when:` file_exists, refire across rounds. Test: `scenario_tool_triggers`.
 
 ### Scenario 4: Check Scoring Curve
 

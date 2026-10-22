@@ -48,6 +48,7 @@ scope: agent
 | `pattern:` | User prompts (regex) |
 | `files:` | File paths — Edit/Write hooks (regex) |
 | `commands:` | Bash commands (regex) |
+| `tools:` | Tool names on the tools the hooks wire (regex), with `tool_phase:` pre, post, or both |
 | `trigger:` | State conditions: `session-start`, `context-threshold`, `file-exists` |
 
 Semantic matching (`description` + `vocabulary`) is additive with regex triggers — either channel can fire the way.

@@ -33,6 +33,9 @@ pub enum HookEvent {
     SessionStart,
     /// PreToolUse TaskCreate: write the tasks-active marker (mark-tasks-active.sh). Nothing reads it today.
     TasksActive,
+    /// PreToolUse and PostToolUse on the tools the template wires: match the
+    /// tool name against `tools:` (check-tool.sh, ADR-704).
+    Tool,
 }
 
 /// What every event reads from the payload.
@@ -62,6 +65,7 @@ pub enum Request {
     SubagentStart { session: String },
     SessionStart { session: Option<String> },
     TasksActive { session: String },
+    Tool { session: String, tool: String, hook_event: String },
     Skip,
 }
 
@@ -159,6 +163,15 @@ impl HookInput {
             HookEvent::SubagentStart => Request::SubagentStart { session },
             HookEvent::SessionStart => Request::SessionStart { session: Some(session) },
             HookEvent::TasksActive => Request::TasksActive { session },
+            // A failed call fires nothing: a match there would stamp the way
+            // and hold it back from the retry that succeeds (ADR-188 item 2).
+            HookEvent::Tool => match (self.text("/tool_name"), self.text("/hook_event_name")) {
+                (_, Some(e)) if e == "PostToolUseFailure" => Request::Skip,
+                (Some(tool), hook_event) => {
+                    Request::Tool { session, tool, hook_event: hook_event.unwrap_or_else(|| "PreToolUse".into()) }
+                }
+                (None, _) => Request::Skip,
+            },
         }
     }
 }
@@ -303,8 +316,32 @@ mod tests {
     }
 
     #[test]
+    fn tool_needs_a_name() {
+        let raw = r#"{"session_id":"s","hook_event_name":"PostToolUse","tool_name":"ExitPlanMode"}"#;
+        assert_eq!(
+            req(E::Tool, raw),
+            Request::Tool { session: "s".into(), tool: "ExitPlanMode".into(), hook_event: "PostToolUse".into() }
+        );
+        assert_eq!(req(E::Tool, r#"{"session_id":"s","hook_event_name":"PreToolUse"}"#), Request::Skip);
+    }
+
+    #[test]
+    fn tool_phase_defaults_to_pre() {
+        assert_eq!(
+            req(E::Tool, r#"{"session_id":"s","tool_name":"Workflow"}"#),
+            Request::Tool { session: "s".into(), tool: "Workflow".into(), hook_event: "PreToolUse".into() }
+        );
+    }
+
+    #[test]
+    fn post_failure_is_skipped() {
+        let raw = r#"{"session_id":"s","hook_event_name":"PostToolUseFailure","tool_name":"Workflow"}"#;
+        assert_eq!(req(E::Tool, raw), Request::Skip);
+    }
+
+    #[test]
     fn no_session_no_work() {
-        for e in [E::Prompt, E::State, E::Command, E::File, E::Task, E::PostTool, E::Pull, E::Queued, E::Stop, E::SubagentStart, E::TasksActive] {
+        for e in [E::Prompt, E::State, E::Command, E::File, E::Task, E::PostTool, E::Pull, E::Queued, E::Stop, E::SubagentStart, E::TasksActive, E::Tool] {
             assert_eq!(req(e, r#"{"prompt":"x","transcript_path":"/t"}"#), Request::Skip, "{e:?}");
             // An id that would leave the sessions root is no id.
             let escaping = r#"{"session_id":"../victim","prompt":"x","transcript_path":"/t"}"#;

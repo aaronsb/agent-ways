@@ -251,6 +251,8 @@ fn parse_candidate(id: &str, corpus_prefix: &str, path: &Path, content: &str) ->
             .is_some_and(|v| v.trim_matches('"').eq_ignore_ascii_case("true")),
         commands: crate::frontmatter::field(&fm, "commands"),
         files: crate::frontmatter::field(&fm, "files"),
+        tools: crate::frontmatter::field(&fm, "tools"),
+        tool_phase: crate::frontmatter::field(&fm, "tool_phase"),
         description: crate::frontmatter::field(&fm, "description").unwrap_or_default(),
         vocabulary: crate::frontmatter::field(&fm, "vocabulary").unwrap_or_default(),
         // threshold: only read for ways with trigger: context-threshold (percentage).
