@@ -392,14 +392,33 @@ pub fn record_request(m: &Mod, dest_root: &Path) -> std::io::Result<()> {
     std::fs::write(&path, format!("{}\n", m.id))
 }
 
+/// The mods of ours `have` reports installed: the one being converged and
+/// its siblings. A marketplace removal takes exactly these.
+fn installed_mods(m: &Mod, have: &Installed) -> Vec<Mod> {
+    [ATTEND, JUDGE]
+        .into_iter()
+        .filter(|o| if o.id == m.id { have.ours.is_some() } else { have.siblings.iter().any(|s| s == o.id) })
+        .collect()
+}
+
 /// Run a plan's calls in order and keep the record of where the marketplace
 /// was added from. A failed marketplace call stops the plan, since every
 /// later call needs the marketplace; a failed plugin call is reported and
 /// the rest still run, so one mod's failure never costs the other its
 /// install. A recorded mod this app takes out, or fails to install, is
-/// marked pending, and one it installs is marked installed. Returns one line
-/// per call made and per note.
-fn execute(m: &Mod, claude: &Path, cfg: Option<&Path>, dest_root: &Path, plan: &Plan, dry_run: bool) -> Vec<String> {
+/// marked pending, and one it installs is marked installed. A marketplace
+/// removal takes out only the mods `have` reports installed: a recorded mod
+/// the operator had already uninstalled stays theirs. Returns one line per
+/// call made and per note.
+fn execute(
+    m: &Mod,
+    claude: &Path,
+    cfg: Option<&Path>,
+    dest_root: &Path,
+    plan: &Plan,
+    have: &Installed,
+    dry_run: bool,
+) -> Vec<String> {
     let label = m.label;
     let mut lines: Vec<String> = plan.notes.iter().map(|n| format!("{label}: {n}")).collect();
     for call in &plan.calls {
@@ -415,7 +434,7 @@ fn execute(m: &Mod, claude: &Path, cfg: Option<&Path>, dest_root: &Path, plan: &
             _ => None,
         };
         match (call, result.is_ok(), target) {
-            (Call::MarketplaceRemove, true, _) => [ATTEND, JUDGE].iter().for_each(|o| set_pending(o, dest_root, true)),
+            (Call::MarketplaceRemove, true, _) => installed_mods(m, have).iter().for_each(|o| set_pending(o, dest_root, true)),
             (Call::Install | Call::InstallSibling(_), ok, Some(t)) => set_pending(&t, dest_root, !ok),
             (Call::Uninstall, true, Some(t)) => set_pending(&t, dest_root, true),
             _ => {}
@@ -479,13 +498,15 @@ pub fn converge(m: &Mod, source_root: &Path, dest_root: &Path, default_root: &Pa
     let recorded = read_record(dest_root);
     let recover = recover_command(cfg.as_deref());
     let plan = match want {
-        // Not installed while its marketplace is this app's and current, and
-        // not taken out by this app: the operator removed it. A moved app's
-        // loss has a gone or stale marketplace, or is pending.
+        // Not installed and not taken out by this app: the operator removed
+        // it. Every removal this app makes (an uninstall, a marketplace
+        // removal while the mod was installed, a failed install) marks it
+        // pending, so this holds whether the marketplace is current, moved,
+        // or gone. Under another's marketplace the mod is left as it is.
         Want::Keep
             if have.ours.is_none()
                 && !pending(m, dest_root)
-                && market(&have, &dir, recorded.as_deref()) == Market::Current =>
+                && !matches!(market(&have, &dir, recorded.as_deref()), Market::Foreign(_)) =>
         {
             if dry_run {
                 return vec![format!("{label}: would stop keeping it: it was removed by hand")];
@@ -500,7 +521,7 @@ pub fn converge(m: &Mod, source_root: &Path, dest_root: &Path, default_root: &Pa
         Want::Install | Want::Keep => plan_converge(m, &have, &dir, recorded.as_deref(), &shipped, &recover),
         Want::Withdraw => plan_withdraw(&have, &dir, recorded.as_deref(), &recover, wanted_by_other(m, dest_root)),
     };
-    execute(m, &claude, cfg.as_deref(), dest_root, &plan, dry_run)
+    execute(m, &claude, cfg.as_deref(), dest_root, &plan, &have, dry_run)
 }
 
 /// Remove `m` from a disabled target, before its links go. It runs where the
@@ -520,7 +541,7 @@ pub fn withdraw(m: &Mod, source_root: &Path, dest_root: &Path, default_root: &Pa
     match query(m, &claude, cfg.as_deref()) {
         Ok(have) => {
             let plan = plan_withdraw(&have, &dir, read_record(dest_root).as_deref(), &recover_command(cfg.as_deref()), false);
-            execute(m, &claude, cfg.as_deref(), dest_root, &plan, dry_run)
+            execute(m, &claude, cfg.as_deref(), dest_root, &plan, &have, dry_run)
         }
         Err(e) => vec![format!("{}: ⚠ could not read Claude Code's plugins: {e}", m.label)],
     }

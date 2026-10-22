@@ -175,6 +175,31 @@ impl Fx {
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     }
 
+    /// The user config: the one target, enabled or not, and whether repair
+    /// installs attend there.
+    fn configure(&self, enabled: bool, attend: bool) {
+        let attend = if attend { String::new() } else { "attend_mod:\n  install: false\n".to_string() };
+        write(&self.user_config(), &format!("{attend}targets:\n  - path: {}\n    enabled: {enabled}\n", self.dest().display()));
+    }
+
+    /// `repair --commit` over the configured targets.
+    fn repair_targets(&self, src: &Path) {
+        let out = self.ways(&self.stub_path()).args(["manage", "repair", "--commit", "--source"]).arg(src).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    /// Both mods installed and recorded, attend kept or not, then the
+    /// operator uninstalls ways-judge by hand.
+    fn judge_removed_by_hand(&self, attend: bool) {
+        self.both();
+        self.configure(true, attend);
+        self.repair_targets(&self.src());
+        self.by_hand(&["plugin", "uninstall", JUDGE, "--scope", "user"]);
+        assert!(!self.has(JUDGE) && self.has(ATTEND) == attend, "{}", self.plugins());
+        assert!(self.judge_record().is_some(), "repair has not run since the removal");
+        self.changes();
+    }
+
     fn plugins(&self) -> String {
         std::fs::read_to_string(self.state().join("plugins.json")).unwrap_or_default()
     }
@@ -617,4 +642,52 @@ fn install_false_and_a_moved_app_move_the_judge_mod_alone() {
     fx.repair_from(&moved);
     assert_eq!(fx.changes(), vec![format!("{dest}|plugin install {JUDGE} --scope user")]);
     assert!(fx.has(JUDGE) && !fx.has(ATTEND), "{}", fx.plugins());
+}
+
+/// Review of #1142, round 4: the operator uninstalls ways-judge by hand, then
+/// the target is disabled before any repair. Withdrawing attend removes the
+/// marketplace, which took no ways-judge with it, so the record is not marked
+/// pending and enabling the target again never reinstalls the mod.
+#[test]
+fn a_judge_mod_uninstalled_by_hand_stays_gone_across_a_disable_and_re_enable() {
+    for attend in [true, false] {
+        let fx = Fx::new(&format!("judge-by-hand-disable-{attend}"));
+        fx.judge_removed_by_hand(attend);
+        fx.configure(false, attend);
+        fx.repair_targets(&fx.src());
+        assert!(fx.changes().iter().any(|c| c.ends_with("plugin marketplace remove agent-ways")), "attend {attend}");
+        let record = std::fs::read_to_string(fx.judge_record().expect("the record outlives the disable")).unwrap();
+        assert!(!record.contains("pending"), "attend {attend}: the removal took no ways-judge: {record:?}");
+        fx.configure(true, attend);
+        fx.repair_targets(&fx.src());
+        let changes = fx.changes();
+        assert!(!changes.iter().any(|c| c.contains(JUDGE)), "attend {attend}: not reinstalled: {changes:?}");
+        assert!(!fx.has(JUDGE), "attend {attend}: {}", fx.plugins());
+        assert!(fx.judge_record().is_none(), "attend {attend}: the record is cleared");
+        fx.repair_targets(&fx.src());
+        assert!(!fx.changes().iter().any(|c| c.contains(JUDGE)), "attend {attend}: and stays gone");
+    }
+}
+
+/// Review of #1142, round 4: the operator uninstalls ways-judge by hand, then
+/// the app moves before any repair. The repair that moves the marketplace
+/// installs again only what was installed from it.
+#[test]
+fn a_judge_mod_uninstalled_by_hand_stays_gone_after_the_app_moves() {
+    for attend in [true, false] {
+        let fx = Fx::new(&format!("judge-by-hand-moved-{attend}"));
+        fx.judge_removed_by_hand(attend);
+        let moved = fx.root.join("moved");
+        fx.repair_targets(&moved);
+        let changes = fx.changes();
+        assert!(!changes.iter().any(|c| c.contains(JUDGE)), "attend {attend}: not reinstalled: {changes:?}");
+        assert_eq!(fx.has(ATTEND), attend, "attend {attend}: {}", fx.plugins());
+        assert!(!fx.has(JUDGE), "attend {attend}: {}", fx.plugins());
+        assert!(fx.judge_record().is_none(), "attend {attend}: the record is cleared");
+        fx.repair_targets(&moved);
+        fx.repair_targets(&moved);
+        assert!(!fx.changes().iter().any(|c| c.contains(JUDGE)), "attend {attend}: and stays gone");
+        fx.repair_targets(&moved);
+        assert_eq!(fx.changes(), Vec::<String>::new(), "attend {attend}: converged");
+    }
 }

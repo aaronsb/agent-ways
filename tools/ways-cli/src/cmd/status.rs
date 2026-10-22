@@ -532,7 +532,7 @@ fn keyless_phrase(state: &ways_agent_core::keys::Readiness) -> String {
         Readiness::Unverified(p, Some(r)) => format!("ways-judge mod not enabled: the {p} key stands in, last check {r}: fails open"),
         Readiness::Off => "gate.mode off".to_string(),
         Readiness::ModDisabled => {
-            "ways-judge mod disabled and no key: fails open (`claude plugin enable ways-judge@agent-ways`)".to_string()
+            format!("ways-judge mod disabled and no key: fails open (`{}`)", crate::cmd::judge::enable_command())
         }
         Readiness::NoMod | Readiness::NoKey(_) => {
             "no ways-judge mod and no key: fails open (`ways judge-setup` installs the mod or adds a key)".to_string()

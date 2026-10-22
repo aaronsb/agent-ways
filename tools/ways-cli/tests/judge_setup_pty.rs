@@ -238,6 +238,29 @@ fn choosing_no_judge_turns_the_gate_off_and_clears_the_record() {
     assert!(shown.replace('\n', " ").contains("Relevance judge off by choice"), "{shown}");
 }
 
+/// Review of #1142, round 4: a disabled target keeps its record through the
+/// disable, so a key engine chosen meanwhile clears it there too; enabling
+/// that target again then does not reinstall the mod.
+#[test]
+fn a_key_engine_clears_the_record_of_a_disabled_target_too() {
+    let fx = Fx::new("disabled-target", true, true);
+    let home = fx.home();
+    std::fs::create_dir_all(home.join(".claude-b")).unwrap();
+    write(
+        &home.join(".config/agent-ways/config.yaml"),
+        &format!(
+            "targets:\n  - path: {}\n    enabled: false\n  - path: {}\n",
+            home.join(".claude").display(),
+            home.join(".claude-b").display()
+        ),
+    );
+    // The default target, now disabled, holds the record its withdrawal kept.
+    write(&fx.judge_record(), "ways-judge@agent-ways\npending\n");
+    fx.setup("2.1.296", Some("Choice [1-3"), "1\n");
+    assert!(fx.agent_yaml().contains("engine: anthropic"), "{}", fx.agent_yaml());
+    assert!(!fx.judge_record().exists(), "a disabled target's record clears too");
+}
+
 /// Finding 2: a Claude Code whose mods can complete and spawn is offered the
 /// mod first, of four.
 #[test]
