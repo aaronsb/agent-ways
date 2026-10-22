@@ -281,7 +281,13 @@ impl State {
     /// apply without a restart.
     /// A broken agent.yaml or a bad `mode` fails closed: the gate is off.
     fn settings() -> Result<Option<Settings>> {
-        profile::gate_settings(&profile::user_layer_path(), |p| keys::locate(p).is_some())
+        Self::settings_as(None)
+    }
+
+    /// [`State::settings`] with the session's engine in place of agent.yaml's
+    /// (ADR-708 §2), when the request names one.
+    fn settings_as(engine: Option<&str>) -> Result<Option<Settings>> {
+        profile::gate_settings_as(&profile::user_layer_path(), engine, |p| keys::locate(p).is_some())
     }
 
     fn judge(&self, req: JudgeRequest) -> Reply {
@@ -319,7 +325,7 @@ impl State {
         if req.candidates.is_empty() {
             return Err("no_candidates".to_string());
         }
-        let settings = Self::settings().map_err(|e| format!("config: {e:#}"))?;
+        let settings = Self::settings_as(req.engine.as_deref()).map_err(|e| format!("config: {e:#}"))?;
         let Some(settings) = settings else { return Err("off".to_string()) };
         self.prepare_with(req, settings, begun)
     }
@@ -552,7 +558,7 @@ mod tests {
     #[test]
     fn an_empty_candidate_list_falls_back_without_a_call() {
         let state = State::new();
-        let req = JudgeRequest { session: "s".into(), tool: "t".into(), turns: vec![], candidates: vec![] };
+        let req = JudgeRequest { session: "s".into(), tool: "t".into(), turns: vec![], candidates: vec![], engine: None };
         assert!(matches!(state.judge(req), Reply::Fallback { reason, .. } if reason == "no_candidates"));
     }
 
@@ -564,6 +570,7 @@ mod tests {
             tool: "claude-code".into(),
             turns: vec![],
             candidates: vec![Candidate { id: "a/b".into(), text: "a › b\nd".into() }],
+            engine: None,
         };
         for mode in ["enforce", "shadow"] {
             let user: profile::UserLayer = serde_yaml::from_str(&format!("engine: claude-code\nmode: {mode}\n")).unwrap();

@@ -379,6 +379,24 @@ pub fn fails_closed(findings: &[agent_settings::Finding]) -> Option<&agent_setti
 /// gives them. A finding that fails closed is returned as the error, so the
 /// caller turns the gate off and can log why.
 pub fn gate_settings(path: &Path, has_key: impl Fn(Provider) -> bool) -> Result<Option<Settings>> {
+    resolve(&gate_layer(path)?, has_key)
+}
+
+/// The settings the gate runs with when the session's engine is `engine`
+/// (ADR-708 §2): the layer at `path` as [`gate_settings`] reads it, with
+/// `engine` in place of its own. The session resolved its engine once, so a
+/// later change to `gate.engine` does not move it. `None` reads the layer's.
+pub fn gate_settings_as(path: &Path, engine: Option<&str>, has_key: impl Fn(Provider) -> bool) -> Result<Option<Settings>> {
+    let mut user = gate_layer(path)?;
+    if let Some(e) = engine {
+        user.engine = Some(e.to_string());
+    }
+    resolve(&user, has_key)
+}
+
+/// The layer at `path` as the gate reads it: diagnostics said on stderr, and
+/// a finding that fails closed returned as the error.
+pub fn gate_layer(path: &Path) -> Result<UserLayer> {
     let (user, findings) = UserLayer::load_with_findings(path)?;
     if let Some(f) = fails_closed(&findings) {
         bail!("{f}; the gate is off until it is fixed");
@@ -394,7 +412,7 @@ pub fn gate_settings(path: &Path, has_key: impl Fn(Provider) -> bool) -> Result<
             (false, true) => {}
         }
     }
-    resolve(&user, has_key)
+    Ok(user)
 }
 
 /// The shipped profiles, by name.
@@ -518,6 +536,21 @@ mod tests {
         // The keyed profiles, in the order an unset engine tries them.
         assert_eq!(SHIPPED_ORDER, ["anthropic", "openrouter"]);
         assert!(SHIPPED_ORDER.iter().all(|n| !all[*n].provider.keyless()));
+    }
+
+    #[test]
+    fn gate_settings_as_judges_with_the_sessions_engine_over_the_layers() {
+        let dir = std::env::temp_dir().join(format!("ways-gate-as-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("agent.yaml");
+        std::fs::write(&path, "engine: claude-code\nmode: shadow\n").unwrap();
+        let s = gate_settings_as(&path, Some("anthropic"), |_| true).unwrap().unwrap();
+        assert_eq!((s.engine.as_str(), s.profile.provider, s.mode), ("anthropic", Provider::Anthropic, Mode::Shadow));
+        assert_eq!(gate_settings_as(&path, None, |_| true).unwrap().unwrap().engine, "claude-code");
+        // A layer that fails closed fails closed whatever the session holds.
+        std::fs::write(&path, "mode: of\n").unwrap();
+        assert!(gate_settings_as(&path, Some("anthropic"), |_| true).is_err());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

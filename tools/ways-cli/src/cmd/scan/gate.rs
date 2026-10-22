@@ -279,6 +279,7 @@ fn run(
             .iter()
             .map(|p| Candidate { id: p.id.to_string(), text: way_text(p.id, p.description) })
             .collect(),
+        engine: None,
     };
     let begun = Instant::now();
     let reply = call(request, Duration::from_millis(settings.profile.timeout_ms) + READ_GRACE);
