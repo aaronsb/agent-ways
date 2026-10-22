@@ -1,6 +1,6 @@
 //! The shape of the command line ADR-507 decides, with ADR-509's `manage`
 //! group: the commands `ways --help` lists and their order, the hidden
-//! plumbing, the one-release aliases, the exit code of a group run with no
+//! plumbing, the removed lifecycle aliases, the exit code of a group run with no
 //! verb, and the banner only for a bare `ways` on a terminal.
 
 use std::process::{Command, Output};
@@ -40,8 +40,7 @@ fn help_lists_the_eleven_commands_in_order() {
 fn plumbing_is_hidden_and_still_runs() {
     let help = stdout(&ways(&["--help"]));
     for name in [
-        "hook", "show", "scan", "lookup", "manifest", "project-slug", "sessions-root", "events-log-path", "reconcile", "update",
-        "uninstall", "target",
+        "hook", "show", "scan", "lookup", "manifest", "project-slug", "sessions-root", "events-log-path", "reconcile",
     ] {
         assert!(!listed(&help).iter().any(|n| n == name), "{name} is listed");
         assert!(ways(&[name, "--help"]).status.success(), "{name} --help fails");
@@ -95,23 +94,18 @@ fn ways_uninstalled(name: &str, args: &[&str]) -> Output {
     out
 }
 
-/// The one-release aliases of ADR-509 §5, removed by issue #911: each names
-/// the new form on stderr, then runs it with the same arguments and exit
-/// code. `reconcile` is a fixed name, not an alias, and prints no notice.
+/// ADR-509 §5's one-release aliases are gone (issue #911): each old top-level
+/// name is a usage error and runs nothing. `reconcile` is a fixed name, not
+/// an alias (§4): it runs `manage repair` and prints no notice.
 #[test]
-fn the_old_lifecycle_names_print_the_new_form_and_forward_the_exit_code() {
+fn the_old_lifecycle_names_are_usage_errors_and_reconcile_stays() {
     for (old, args) in [("update", &["--dry-run"][..]), ("uninstall", &[]), ("target", &["list", "--json"])] {
-        let aliased = ways_uninstalled(old, &[&[old][..], args].concat());
-        let new = ways_uninstalled(old, &[&["manage", old][..], args].concat());
-        let stderr = String::from_utf8_lossy(&aliased.stderr);
-        assert_eq!(stderr.lines().next(), Some(format!("note: `ways {old}` is now `ways manage {old}`").as_str()), "{old}");
-        assert_eq!(aliased.status.code(), new.status.code(), "{old}: {stderr}");
-        assert_eq!(aliased.stdout, new.stdout, "{old}");
-        assert!(!String::from_utf8_lossy(&new.stderr).contains("note:"), "{old}: the new form carries no notice");
+        let out = ways_uninstalled(old, &[&[old][..], args].concat());
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(2), "{old}: {stderr}");
+        assert!(stderr.contains(&format!("unrecognized subcommand '{old}'")), "{old}: {stderr}");
+        assert!(out.stdout.is_empty(), "{old}");
     }
-    // A failing run forwards its failure: no app source to update.
-    let failed = ways_uninstalled("alias-fail", &["update"]);
-    assert_eq!(failed.status.code(), Some(1), "{}", String::from_utf8_lossy(&failed.stderr));
 
     let fixed = ways_uninstalled("reconcile", &["reconcile", "--dry-run"]);
     let repair = ways_uninstalled("reconcile", &["manage", "repair", "--dry-run"]);

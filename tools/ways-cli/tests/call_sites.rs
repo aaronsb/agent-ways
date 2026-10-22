@@ -271,9 +271,9 @@ fn ways_help(args: &[&str]) -> (bool, String) {
 /// call site is, they still need a verb: bare in a pipe they exit 2.
 const SCREEN_GROUPS: &[&str] = &["session", "manage"];
 
-/// The lifecycle names ADR-509 moved under `ways manage`. The one-release
-/// aliases keep them running, so the CLI still accepts them, but no caller in
-/// the repository may use them. The exception is the updater's spawn of
+/// The lifecycle names ADR-509 moved under `ways manage`. The CLI rejects
+/// them since their one-release aliases were removed (issue #911), and no
+/// caller in the repository may use them. The exception is the updater's spawn of
 /// `reconcile`: the fixed name every successor binary keeps, because the
 /// previous release's updater calls it (ADR-509 §4).
 const MOVED: &[&str] = &["update", "reconcile", "uninstall", "target"];
