@@ -142,3 +142,22 @@ The judge's AUC for ON against OFF on its candidates, from prior grades only, wa
 ## Spend
 
 Study 3 cost $10.90 at list price, including $2.53 for the Opus grading. Studies 1 and 2 made no API calls outside the session's own subagent graders, whose cost was not recorded.
+
+## Addendum, 2026-10-22: the arm E judge through `$.model.complete`
+
+Appended after the studies above; nothing above is changed.
+
+**Method.** At about 20:14Z on the same machine, Claude Code 2.1.308 loaded a probe mod under `claude -p` and ran its slash command `/judge-probe 20 1`. The command took 20 of study 3's uniform-set calls that carried arm E candidates, rebuilt arm E's judge prompts byte-identical to the study's, and sent each, one at a time, through `$.model.complete` on the session's own account: model claude-haiku-4-5, the study's judge text with an instruction to answer in strict JSON instead of the forced `record_judgements` tool call, timeoutMs 8000. A pair passes at P(yes) ≥ 0.3, as in study 3. The comparison is against arm E's first key-path trial on the same pairs.
+
+**Result.** 20 of 20 calls answered, with no API errors and no parse failures. Every reply came wrapped whole in a ```json fence.
+
+| | key path passes | key path blocks |
+|---|---|---|
+| `$.model.complete` passes | 20 | 3 |
+| `$.model.complete` blocks | 3 | 59 |
+
+The two agreed on 79 of 85 pairs. All six disagreements are pairs graded ADJ; on every ON and every OFF pair the two gave the same verdict. By prior grade, the `$.model.complete` path passed ON 12 of 12, ADJ 10 of 21 and OFF 1 of 52.
+
+Latency, sequential: median 1,241 ms, range 681 to 2,840 ms. Usage: 9,886 input and 2,563 output tokens over 20 calls, 296 to 792 input tokens per call, no cache reads. That is below the key path's roughly 1,160 input tokens per request in study 3; the forced-tool schema the key path sends is the likely difference, unconfirmed.
+
+**Limits.** 20 calls and 85 pairs from the uniform set: a smoke test, not a measurement of how closely the two paths agree. One trial, one model, the Bash lane's judge text only, and the probe sent the prompts itself rather than through a hook-side job. A mod slash command did run under `claude -p`, so a larger comparison can run headless.
