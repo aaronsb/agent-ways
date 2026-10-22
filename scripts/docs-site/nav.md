@@ -36,7 +36,6 @@
         * [ways reference](reference/ways-cli.md)
         * [Stats and observability](hooks-and-ways/stats.md)
         * [The event log](reference/events.md)
-        * [Renamed commands](reference/ways-cli-renames.md)
     * Embeddings (way-embed)
         * [Fix a SIGKILL on macOS](how-to/fix-way-embed-sigkill-macos.md)
     * Relevance judge (ways-agent)

@@ -793,7 +793,3 @@ ways-audit trace meta/knowledge
 ways-audit matrix --json > coverage.jsonl
 ways-audit assemble --json > findings.json
 ```
-
-## Renamed commands
-
-The old command names, and what replaced each, are in [ways-cli-renames.md](ways-cli-renames.md).

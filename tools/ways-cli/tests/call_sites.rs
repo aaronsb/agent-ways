@@ -31,7 +31,7 @@ fn tracked_files(root: &Path) -> Vec<String> {
 fn in_scope(path: &str) -> bool {
     // agent-tui is a library whose own tests use `ways` as a sample app name.
     let skip = ["docs/architecture/", "tests/fixtures/adr/", "tests/fixtures/docker/scenarios/", "docs/research/", "tools/agent-tui/"];
-    if skip.iter().any(|s| path.starts_with(s)) || path.contains("CHANGELOG") || path == "docs/reference/ways-cli-renames.md" {
+    if skip.iter().any(|s| path.starts_with(s)) || path.contains("CHANGELOG") {
         return false;
     }
     let roots = ["hooks/", "skills/", "commands/", "scripts/", ".github/", "docs/", "tests/", "tools/"];
