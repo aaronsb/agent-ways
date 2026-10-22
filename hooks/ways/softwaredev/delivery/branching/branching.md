@@ -44,3 +44,7 @@ Use prefixes that match conventional commit types:
 - `adr-NNN-topic` — ADR implementation work
 
 Keep names short, lowercase, hyphen-separated. The branch name often becomes the PR title.
+
+## See Also
+
+- delivery/branching/topic-branch(softwaredev) — cutting the branch before the first edit, one branch per piece of work

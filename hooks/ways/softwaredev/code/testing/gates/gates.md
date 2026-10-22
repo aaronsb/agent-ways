@@ -53,11 +53,6 @@ Never satisfy a check by changing what it measures. Do not remove the value it o
 
 A gate measures the effective state, read back through the path a real client takes. A check that reaches the service by a shortcut cannot see faults in the path it skipped. A control's presence in the code says nothing about its wiring. Verify the flag value on every path that can produce the outcome.
 
-## Delegated and bulk runs
-
-- After a delegated run, read the diff and check which files it changed. A run that edited outside its scope fails, whatever its summary says.
-- Before a bulk run, run the first few rows in a scratch location and check them. Scale up once those come out right.
-
 ## Report format
 
 One line per gate, state first:
@@ -86,6 +81,7 @@ Close the report with what was deliberately left unverified, blocked distinguish
 ## See Also
 
 - code/testing/gates/assertions(softwaredev) — whether an executed assertion can have proved anything
+- code/testing/gates/delegated-runs(softwaredev) — the diff of a delegated run, piloting a bulk run
 - code/testing(softwaredev) — parent: what to cover and what to assert
 - delivery/merge(softwaredev) — review depth and gate depth are chosen together
 - environment/recovery(softwaredev) — a gate red twice means the increment is wrong-sized

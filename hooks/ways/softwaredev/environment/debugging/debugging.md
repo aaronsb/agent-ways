@@ -25,3 +25,7 @@ refire: 0.15
 - `git bisect start` / `git bisect bad` / `git bisect good <ref>` to find the introducing commit
 - Add targeted logging at function boundaries, not scattered everywhere
 - Check the obvious: typos, wrong file, stale cache, wrong branch, missing env var
+
+## See Also
+
+- environment/debugging/evidence-first(softwaredev) — reading the evidence on hand, fixing the shared cause, isolating cheaply

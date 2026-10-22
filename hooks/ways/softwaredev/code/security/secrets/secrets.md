@@ -41,3 +41,7 @@ Rotate under explicit confirmation, and re-run the secret scan as each rotation'
 - Hash with bcrypt or argon2; never store plain text
 - Use a work factor appropriate for the platform (bcrypt cost 12+ for servers)
 - Never roll your own hashing; use the library
+
+## See Also
+
+- code/security/secrets/handling(softwaredev) — using a credential without showing it, keys off the client, the scan before a commit
