@@ -1,6 +1,6 @@
 ---
-description: an optimization loop that edits a prompt, system prompt or skill until example inputs give their expected outputs; hill-climbing one change per round, kept or reverted against the last kept version, with a frozen control, a read-only harness, fresh cases for the final score, dated answer keys, and stop limits on rounds, cost and stagnation
-vocabulary: iterate on the skill tweak the prompt until the examples pass expected outputs hill climb hillclimb keep or revert last kept version stagnation breaker cost cap friction notes fresh cases answer keys live data recompute optimizing agent edits only the target read-only harness grader fix own round
+description: iterating on a skill's or prompt's instructions against example cases until each gives its expected output; run it on the examples, see which outputs are wrong, adjust the wording, run them again; one edit per round, kept or reverted against the last kept version, fresh cases for the final score, dated answer keys, and stop limits on rounds, cost and stagnation
+vocabulary: run it on these examples see what fails adjust repeat until the examples pass sample inputs expected outputs labels they should get iterate on the skill tweak the wording round hill climb hillclimb keep or revert last kept version stagnation breaker cost cap fresh cases answer keys recompute optimizing agent edits only the target read-only harness
 scope: agent, subagent
 refire: 0.15
 ---

@@ -1,9 +1,9 @@
 ---
-description: writing time entries through the time system's api, connector or cli, checking a date for entries already there, dry running and reading back what landed, and submitting or locking a timesheet period only once the human confirms the hours
-vocabulary: api connector mcp cli programmatically post push write fill in my hours toggl harvest clockify dry-run commit read back list existing duplicate duplicates hand-entered leave lock locks submit submitted submission pay period policy error
-pattern: \bsubmit (my |the |this )?(timesheet|time ?sheet|week|hours)\b|\btime[- ]?(tracking|sheet)? ?(api|connector|cli)\b|\bput \d+(\.\d+)? ?(hours|hrs|h)\b|\bfill (in|out) (my |the )?(week|timesheet|hours)\b|\blog (my )?(time|hours)\b|what have i logged
+description: acting for the user inside their Harvest, Toggl, Clockify or Kantata account through its connector, mcp or cli; looking at what is already on a day before adding to it, dry running, reading back what landed, and locking in the week only once they have had a look
+vocabulary: connector mcp cli on my behalf for me in my account log my time book my time fill in my week from my calendar go ahead once I've had a look dry-run read back what have i logged hand-entered pto leave submit it for me approver
 refire: 0.15
 scope: agent, subagent
+pattern: \b(harvest|toggl|clockify|kantata)\b
 ---
 <!-- epistemic: convention -->
 # Writing Time Entries Through a Tool

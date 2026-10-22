@@ -1,6 +1,6 @@
 ---
-description: building graders for an agent eval suite that the agent cannot game, and gating prompt and model changes on their scores; graders kept out of the agent's reach, a grader selftest before its scores count, code checks tried before a judge, fail-to-pass and pass-to-pass test lists, partial credit from key-point coverage, and a small regression suite that gates prompt, model and pipeline changes in CI
-vocabulary: grader selftest empty answer fails tampered tests stubbed grader opened answer file pinned container key points coverage composite every part passes keyword check regex before a judge bleu perplexity off-the-shelf metric regression gate ci gate pass threshold production baseline new model release production failure sampled live traffic production monitoring
+description: making an agent's graders tamper-proof, so the agent under test cannot read, edit or game the grading scripts and answer files; a grader selftest that an empty answer fails, code checks before a judge, fail-to-pass and pass-to-pass test lists, partial credit from key-point coverage, and a CI gate that blocks the release when graded tasks regress
+vocabulary: grader selftest grading script empty answer gets full marks tampered tests stubbed rewrote the test file opened the answer file out of the agent's reach game the grader cheated pinned container key points partial credit composite bleu perplexity off-the-shelf metric ci gate new model version blocks the merge
 pattern: \bfail_?to_?pass\b|\bpass_?to_?pass\b
 scope: agent, subagent
 refire: 0.15

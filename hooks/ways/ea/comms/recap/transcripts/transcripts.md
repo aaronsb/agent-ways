@@ -1,7 +1,7 @@
 ---
-description: saving the full text of a call or meeting into a project exactly as it was said, following an AI notes message to the full transcript, catching speaker labels that got mixed up, and citing transcript lines for what was decided and who owns each follow-up
-vocabulary: verbatim word-for-word exactly full text call kickoff save folder ingest script retype cleanup caption vtt diarization labels mixed misattributed swapped talking attribution link tab line cite citation decided owns
-pattern: \bdiariz|misattribut|speaker labels?\b|\.vtt\b|transcript tab
+description: keeping what was said in a team meeting as the project's record, filing it into the project folder unedited, following the AI notes email to the full version, fixing who said what when names got swapped, and citing its lines for what was decided and who owns each follow-up
+vocabulary: kickoff standup sync design review team meeting record project folder file it unedited no cleanup notes email link tab who said what names swapped misattributed credited wrong person attribution quote the line cite decided decisions owns owner commitments
+pattern: misattribut|\bspeaker labels?\b|\btranscript tab\b
 files: \.vtt$|(^|/)meetings?[-_]?transcripts?/
 refire: 0.15
 scope: agent, subagent
