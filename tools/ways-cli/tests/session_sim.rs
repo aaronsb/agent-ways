@@ -506,20 +506,23 @@ fn scenario_2_command_triggers() {
     // No new markers beyond what we already have
 }
 
-/// ADR-188 item 3a: `commands:` matches each operative segment. cmd-trigger's
-/// `^git\ commit` misses the raw string of a chained call and must match the
-/// segment; text that runs no `git commit` must not fire it.
+/// ADR-188 item 3a: `commands:` matches each operative segment. Text that runs
+/// no `git commit` must not fire cmd-unanchored's `git\ commit`, which the raw
+/// string contains; cmd-trigger's `^git\ commit` misses the raw string of a
+/// chained call and must match the segment.
 #[test]
 fn scenario_2b_command_triggers_match_per_segment() {
     let s = Session::new("s2b");
 
     // An echo argument and a heredoc body name the command; neither runs it.
     s.scan_command("echo \"git commit later\" && cat > notes.md <<'EOF'\ngit commit -m x\nEOF");
+    assert_marker_absent("testdomain/cmd-unanchored", &s.id);
     assert_marker_absent("testdomain/cmd-trigger", &s.id);
 
     // The anchored pattern matches the segment after the connector.
     let out = s.scan_command("cd repo && git add -A && git commit -m 'fix: auth bug'");
     assert_marker_exists("testdomain/cmd-trigger", &s.id);
+    assert_marker_exists("testdomain/cmd-unanchored", &s.id);
     assert_pretooluse_envelope(&out, "# Commit Messages");
 }
 
@@ -568,6 +571,19 @@ fn scenario_4_check_scoring() {
     s.scan_command("pip install unknown-package");
     assert_epoch(&s.id, 3);
     assert_check_fires("testdomain2/with-check", &s.id, 2);
+}
+
+/// ADR-188 item 3a on the check path: the check's `^(npm|pip|cargo)\ (install|add)`
+/// misses the raw string of a chained call and matches its segment.
+#[test]
+fn scenario_4b_check_commands_match_per_segment() {
+    let s = Session::new("s4b");
+
+    s.scan_prompt("supply chain dependency security audit vulnerability");
+    assert_marker_exists("testdomain2/with-check", &s.id);
+
+    s.scan_command("cd app && npm install left-pad");
+    assert_check_fires("testdomain2/with-check", &s.id, 1);
 }
 
 // ── Scenario 5: Progressive Disclosure ─────────────────────────
