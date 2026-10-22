@@ -34,17 +34,27 @@ fn a_narrow_terminal_truncates_focus_and_keeps_the_agent_label_whole() {
     f.ok(&["channel", "join", CHANNEL]);
     let me: Value = serde_json::from_str(&f.ok(&["peer", "list", "--json"])).unwrap();
     let label = format!("{} (proj)", me["self"]["name"].as_str().unwrap());
+    let label_w = label.chars().count();
+    // The other columns at their widest cells: Status holds this session's
+    // status, Context only its header (no peer has a percentage).
+    let status_w = me["self"]["status"].as_str().unwrap().chars().count().max("Status".len());
+    let context_w = "Context".len();
 
     // Control: a wide terminal shows both cells whole.
     let wide = peer_list_at(&f, 200);
     assert!(channel_row(&wide).contains(CHANNEL), "{wide}");
     assert!(self_row(&wide).contains(&label), "{wide}");
 
-    // Below the natural width: indent, the four columns at their widest
-    // cells (Status and Context at least their headers), and the gaps.
-    let cols = 60;
-    let natural = 2 + CHANNEL.len() + label.chars().count() + "Status".len() + "Context".len() + 3;
-    assert!(natural > cols, "the table must not fit: natural {natural}, terminal {cols}");
+    // The width follows the label, since the name differs per run. Room is
+    // what is left after the indent (2), the gaps (3), Status and Context.
+    // Unpinned, the table narrows Focus and Agent together once they meet,
+    // so the label is cut whenever Focus and Agent share less than two
+    // labels' width; pinned, Focus takes the whole cut and keeps 5.
+    let cols = label_w + 24;
+    let room = cols - 2 - 3 - status_w - context_w;
+    assert!(room < 2 * label_w, "an unpinned table must cut the label: room {room}, label {label_w}");
+    assert!(room >= label_w + 4, "Focus must keep its minimum beside a whole label: room {room}, label {label_w}");
+    assert!(CHANNEL.len() > room - label_w, "Focus must have to truncate");
 
     let narrow = peer_list_at(&f, cols);
     let row = channel_row(&narrow);
