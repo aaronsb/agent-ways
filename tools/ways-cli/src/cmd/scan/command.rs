@@ -288,6 +288,53 @@ mod shell_command_tests {
         assert_eq!(span(r"gh\ pr\ create", pr).as_deref(), Some("gh pr create"));
     }
 
+    /// bounded-execution's pattern as shipped, per segment: flag alternatives
+    /// match combined flags, and word alternatives keep their boundary.
+    #[test]
+    fn bounded_execution_pattern_matches_its_commands() {
+        let way = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../hooks/ways/softwaredev/environment/bounded-execution/bounded-execution.md"
+        );
+        let text = std::fs::read_to_string(way).unwrap();
+        let pattern = text.lines().find_map(|l| l.strip_prefix("commands: ")).unwrap();
+        let fires = [
+            "pacman -Syu --noconfirm",
+            "pacman -S foo",
+            "tail -f app.log",
+            "tail -fn20 app.log",
+            "tail -n 20 -f app.log",
+            "tail -F app.log",
+            "tail -100f app.log",
+            "tail --follow=name x.log",
+            "kill -9 123",
+            "kill -- -123",
+            "ssh -o BatchMode=yes host uptime",
+            "ssh host uptime",
+            "sudo -n true",
+            "cd x && make test",
+            "docker run --rm img",
+            "tmux kill-session -t work",
+        ];
+        for cmd in fires {
+            assert!(span(pattern, cmd).is_some(), "should fire: {cmd}");
+        }
+        let silent = [
+            "pacman -Ss foo",
+            "tail -n 5 app.log",
+            "tail -100 app.log",
+            "kill 123",
+            "ssh-add -l",
+            "ssh-keygen -t ed25519",
+            "cmake ..",
+            "npm installer",
+            "echo 'tail -f app.log'",
+        ];
+        for cmd in silent {
+            assert_eq!(span(pattern, cmd), None, "should not fire: {cmd}");
+        }
+    }
+
     #[test]
     fn no_segment_or_a_bad_pattern_is_no_match() {
         assert_eq!(span(r"gh", ""), None);
