@@ -224,8 +224,8 @@ fn agent_status(start: bool) -> Result<ExitCode> {
         },
         Err(reason) => bail!("agent unreachable: {reason}"),
     }
-    let unset = ways_agent_core::engine::unset_engine_line(&profiles, |p| keys::locate_file(p).is_some());
-    for line in judge_lines(&unset, &ways_agent_core::engine::live_sessions(), &profiles) {
+    let unset = ways_agent_core::live::unset_engine_line(&profiles, |p| keys::locate_file(p).is_some());
+    for line in judge_lines(&unset, &ways_agent_core::live::live_sessions(&ways_agent_core::live::sessions_dirs()), &profiles) {
         println!("{line}");
     }
     Ok(ExitCode::SUCCESS)
@@ -236,8 +236,8 @@ fn agent_status(start: bool) -> Result<ExitCode> {
 /// a key engine.
 fn keyless_note(engine: &str, profiles: &std::collections::BTreeMap<String, profile::Profile>) -> String {
     format!(
-        "{} judges inside Claude Code through the ways-judge mod, on the account's own usage, and takes no key; this agent judges only the sessions that fell back to a key engine. `ways status` says whether the mod is installed.",
-        ways_agent_core::engine::engine_label(Some(engine), profiles)
+        "{} judges inside Claude Code through the ways-judge mod, on the account's own usage, and takes no key; this agent judges only the sessions that fell back to a key engine, and hooks start it for those. `ways status` says whether the mod is installed.",
+        ways_agent_core::live::engine_label(Some(engine), profiles)
     )
 }
 
@@ -246,7 +246,7 @@ fn keyless_note(engine: &str, profiles: &std::collections::BTreeMap<String, prof
 /// for a session with no engine names the remedy.
 fn judge_lines(
     unset: &str,
-    sessions: &[ways_agent_core::engine::LiveSession],
+    sessions: &[ways_agent_core::live::LiveSession],
     profiles: &std::collections::BTreeMap<String, profile::Profile>,
 ) -> Vec<String> {
     let mut out = vec![format!("unset engine resolves to {unset}")];
@@ -254,7 +254,7 @@ fn judge_lines(
         out.push("sessions: none live".to_string());
     } else {
         out.push("sessions:".to_string());
-        out.extend(sessions.iter().map(|s| format!("  {}", ways_agent_core::engine::session_line(s, profiles))));
+        out.extend(sessions.iter().map(|s| format!("  {}", ways_agent_core::live::session_line(s, profiles))));
     }
     out
 }
@@ -708,9 +708,14 @@ mod tests {
 
     #[test]
     fn status_lists_each_live_session_s_engine_and_why() {
-        use ways_agent_core::engine::{resolve_session, LiveSession, Resolution, SessionEngine, EXPLICIT};
+        use ways_agent_core::engine::{resolve_session, Resolution, SessionEngine, EXPLICIT};
+        use ways_agent_core::live::LiveSession;
         let shipped = profile::shipped();
-        let session = |id: &str, resolution: Resolution, provider| LiveSession { session: id.into(), engine: Some(SessionEngine { resolution, provider }) };
+        let session = |id: &str, resolution: Resolution, provider| LiveSession {
+            session: id.into(),
+            held: resolution.engine.is_some(),
+            engine: Some(SessionEngine { resolution, provider }),
+        };
         let fell = resolve_session(Some("claude-code"), &shipped, false, |p| p == Provider::Anthropic);
         let none = resolve_session(Some("claude-code"), &shipped, false, |_| false);
         let sessions = [
@@ -728,7 +733,9 @@ mod tests {
         // A keyless engine is never offered a key.
         let all = lines.join("\n") + &keyless_note("claude-code", &shipped);
         assert!(!all.contains("--provider claude-code"), "{all}");
-        assert!(keyless_note("claude-code", &shipped).starts_with("claude-code (Claude Code internal) judges inside Claude Code"));
+        let note = keyless_note("claude-code", &shipped);
+        assert!(note.starts_with("claude-code (Claude Code internal) judges inside Claude Code"), "{note}");
+        assert!(note.contains("fell back to a key engine, and hooks start it for those"), "{note}");
     }
 
     #[test]

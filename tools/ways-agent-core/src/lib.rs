@@ -10,6 +10,7 @@ pub mod engine;
 pub mod judge;
 pub mod models;
 pub mod keys;
+pub mod live;
 pub mod profile;
 pub mod protocol;
 pub mod settings;

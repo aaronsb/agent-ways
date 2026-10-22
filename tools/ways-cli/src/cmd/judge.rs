@@ -29,6 +29,17 @@ pub fn readiness() -> Readiness {
     })
 }
 
+/// The sessions directories the judge's session lines read: the config
+/// directory this process runs under, `~/.claude`, then each enabled
+/// target's, each once.
+pub fn session_dirs() -> Vec<std::path::PathBuf> {
+    let mut dirs = ways_agent_core::live::sessions_dirs();
+    for dir in enabled_targets() {
+        ways_agent_core::live::push_new(&mut dirs, claude_sessions::ClaudeDir::at(dir).sessions_dir());
+    }
+    dirs
+}
+
 /// The directories of the enabled targets.
 fn enabled_targets() -> Vec<std::path::PathBuf> {
     crate::config::global().targets().into_iter().filter(|t| t.enabled).map(|t| t.dir()).collect()

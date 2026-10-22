@@ -6,12 +6,12 @@
 //! registered, and which providers have a key; the caller stores it. No job
 //! falls back from one engine to another, so no candidate is judged twice.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::profile::{self, Profile, Provider};
+use crate::profile::{self, Mode, Profile, Provider, Settings, UserLayer};
 
 /// The engine was named in `gate.engine` and can run.
 pub const EXPLICIT: &str = "explicit";
@@ -141,115 +141,77 @@ impl SessionEngine {
 /// session, in its judge state directory.
 pub const HOST_FILE: &str = "host";
 
-/// A running Claude Code session and its engine. Only a resolution that
-/// names an engine is held in the session's file; a session with none
-/// resolves again at each request, so its `engine` is that resolution,
-/// computed now as the gate computes it. `engine` is `None` while the
-/// session would resolve to an engine and has made no judge request.
-#[derive(Debug, Clone, PartialEq)]
-pub struct LiveSession {
-    pub session: String,
-    pub engine: Option<SessionEngine>,
-}
-
-impl LiveSession {
-    /// The session id as the screens show it: its first eight characters.
-    pub fn short_id(&self) -> String {
-        self.session.chars().take(8).collect()
+/// Whether `session_id` names one directory directly under a root of
+/// per-session state: no separator, no leading dot, not empty. Every path
+/// built from a session id, from a hook payload, the command line or a
+/// session record, checks it first.
+pub fn is_plain_session_id(session_id: &str) -> bool {
+    let ok = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
+    let mut chars = session_id.chars();
+    match chars.next() {
+        Some(c) if ok(c) => chars.all(|c| ok(c) || c == '.'),
+        _ => false,
     }
-}
-
-/// The sessions a running Claude Code process holds, each with its engine
-/// (ADR-708 §8): those Claude Code's session records name, whose process is
-/// alive. A session with no held engine is resolved as the gate resolves it,
-/// from agent.yaml, the key files and its host registration.
-pub fn live_sessions() -> Vec<LiveSession> {
-    let records = ways_core::paths::claude_dir().session_records();
-    let live = records.iter().filter(|r| process_alive(r.pid)).map(|r| r.session_id.as_str());
-    let user = profile::UserLayer::load_with_findings(&profile::user_layer_path()).map(|(u, _)| u).unwrap_or_default();
-    let profiles = profile::profiles(&user);
-    let has_key = |p| crate::keys::locate_file(p).is_some();
-    live_sessions_in(&judge_state_root(), live, |host| {
-        if user.mode == Some(profile::Mode::Off) {
-            // The gate judges nothing, so no session resolves.
-            return Resolution { engine: None, reason: OFF.to_string() };
-        }
-        resolve_session(user.engine.as_deref(), &profiles, host, has_key)
-    })
 }
 
 /// The reason a session has no engine while `gate.mode` is off.
 pub const OFF: &str = "gate.mode off";
 
-/// [`live_sessions`] for the session ids `live`: each one's held resolution
-/// under `root`, or, with none held, `resolve` given whether a host
-/// registered, kept when it names no engine. An id that is not a plain
-/// directory name is left out, and each id is listed once, in id order, so a
-/// list reads the same however the records were found.
-pub fn live_sessions_in<'a>(root: &Path, live: impl IntoIterator<Item = &'a str>, resolve: impl Fn(bool) -> Resolution) -> Vec<LiveSession> {
-    let plain = |id: &str| {
-        let ok = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
-        id.chars().next().is_some_and(ok) && id.chars().all(|c| ok(c) || c == '.')
-    };
-    let ids: BTreeSet<&str> = live.into_iter().filter(|id| plain(id)).collect();
-    ids.into_iter()
-        .map(|id| {
-            let dir = root.join(id);
-            let engine = SessionEngine::read(&dir).or_else(|| {
-                let now = resolve(dir.join(HOST_FILE).is_file());
-                now.engine.is_none().then_some(SessionEngine { resolution: now, provider: None })
-            });
-            LiveSession { session: id.to_string(), engine }
-        })
-        .collect()
+/// agent.yaml as the gate reads it before any session resolves (ADR-708 §2).
+#[derive(Debug, Clone)]
+pub enum GateReading {
+    /// The gate judges: the layer, and the settings it resolves to.
+    Judges { user: Box<UserLayer>, settings: Box<Settings> },
+    /// `gate.mode: off`: the gate judges nothing.
+    Off,
+    /// No engine named and no key file: the gate is off, as before ADR-708.
+    NoKey,
 }
 
-/// Whether a process holds `pid`. Off Unix a session record is taken at its
-/// word: Claude Code removes it when the session ends.
-fn process_alive(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        let Ok(pid) = libc::pid_t::try_from(pid) else { return false };
-        // SAFETY: signal 0 delivers nothing; the call only checks the pid.
-        let ret = unsafe { libc::kill(pid, 0) };
-        ret == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+/// Reads the layer at `path` as the gate does: a finding that fails closed,
+/// a file that cannot be read, or an engine that names a profile that does
+/// not build is a [`CONFIG`] reason, and the gate is off until it is fixed.
+/// `say` prints the layer's diagnostics on stderr, as a hook does; a screen
+/// or a status command passes false.
+pub fn read_gate(path: &Path, has_key: impl Fn(Provider) -> bool, say: bool) -> Result<GateReading, String> {
+    let user = if say { profile::gate_layer(path) } else { profile::load_gate_layer(path).map(|(u, _)| u) };
+    let user = user.map_err(|e| format!("{CONFIG}: {e:#}"))?;
+    if user.mode == Some(Mode::Off) {
+        return Ok(GateReading::Off);
     }
-    #[cfg(not(unix))]
-    {
-        let _ = pid;
-        true
+    match profile::resolve(&user, has_key) {
+        Err(e) => Err(format!("{CONFIG}: {e:#}")),
+        Ok(None) => Ok(GateReading::NoKey),
+        Ok(Some(settings)) => Ok(GateReading::Judges { user: Box::new(user), settings: Box::new(settings) }),
     }
 }
 
-/// An engine as the operator knows it: its profile name with the profile's
-/// display name, such as `claude-code (Claude Code internal)`; a profile of
-/// your own has no display name, and no engine reads `no engine`.
-pub fn engine_label(name: Option<&str>, profiles: &BTreeMap<String, Profile>) -> String {
-    let Some(name) = name else { return "no engine".to_string() };
-    match profiles.get(name).and_then(|p| p.display_name.as_deref()) {
-        Some(shown) => format!("{name} ({shown})"),
-        None => name.to_string(),
+/// A session's engine under the layer `user`: [`resolve_session`] over its
+/// profiles, with the provider of the engine it names.
+pub fn session_engine(user: &UserLayer, host: bool, has_key: impl Fn(Provider) -> bool) -> SessionEngine {
+    let profiles = profile::profiles(user);
+    let resolution = resolve_session(user.engine.as_deref(), &profiles, host, has_key);
+    let provider = resolution.engine.as_ref().and_then(|e| profiles.get(e)).map(|p| p.provider);
+    SessionEngine { resolution, provider }
+}
+
+/// What a session resolves to under `reading`, as the gate resolves it:
+/// with no reading that judges, no engine and the reason.
+pub fn resolve_reading(reading: &Result<GateReading, String>, host: bool, has_key: impl Fn(Provider) -> bool) -> SessionEngine {
+    let none = |reason: &str| SessionEngine { resolution: Resolution { engine: None, reason: reason.to_string() }, provider: None };
+    match reading {
+        Err(reason) => none(reason),
+        Ok(GateReading::Off) => none(OFF),
+        Ok(GateReading::NoKey) => none(NO_KEY),
+        Ok(GateReading::Judges { user, .. }) => session_engine(user, host, has_key),
     }
 }
 
-/// One live session as `ways status` and `ways agent status` list it: the
-/// short id, the engine, and the reason, which for an unavailable engine
-/// names the remedy (ADR-708 §7).
-pub fn session_line(s: &LiveSession, profiles: &BTreeMap<String, Profile>) -> String {
-    match &s.engine {
-        None => format!("{}  not resolved yet: no judge request so far", s.short_id()),
-        Some(e) => format!("{}  {} — {}", s.short_id(), engine_label(e.resolution.engine.as_deref(), profiles), e.resolution.reason),
-    }
-}
-
-/// What an unset `gate.engine` resolves to now (ADR-708 §8): the first
-/// shipped profile whose provider has a key file. `claude-code` is chosen
-/// only by name, so it is never the answer.
-pub fn unset_engine_line(profiles: &BTreeMap<String, Profile>, has_key: impl Fn(Provider) -> bool) -> String {
-    match profile::first_with_key(profiles, has_key) {
-        Some(name) => engine_label(Some(name), profiles),
-        None => "none: no Anthropic or OpenRouter key file, so an unset engine leaves the gate off".to_string(),
-    }
+/// What a session resolves to now (ADR-708 §2), from the layer at `path`,
+/// the key files `has_key` reports and whether a host registered: the
+/// gate's reading and resolution in one call, printing nothing.
+pub fn resolve_now(path: &Path, has_key: impl Fn(Provider) -> bool, host: bool) -> Resolution {
+    resolve_reading(&read_gate(path, &has_key, false), host, &has_key).resolution
 }
 
 #[cfg(test)]
@@ -344,49 +306,58 @@ mod tests {
         assert_eq!(format!("{CONFIG}: {e:#}"), "config: engine 'nosuch' names no profile");
     }
 
-    fn scratch(tag: &str) -> PathBuf {
+    fn layer(tag: &str, text: Option<&str>) -> PathBuf {
         let d = std::env::temp_dir().join(format!("ways-engine-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
-        d
-    }
-
-    fn resolved(root: &Path, id: &str, engine: Option<&str>, provider: Option<Provider>, reason: &str) {
-        let e = SessionEngine { resolution: Resolution { engine: engine.map(str::to_string), reason: reason.into() }, provider };
-        std::fs::create_dir_all(root.join(id)).unwrap();
-        std::fs::write(root.join(id).join(RESOLUTION_FILE), serde_json::to_vec(&e).unwrap()).unwrap();
-    }
-
-    #[test]
-    fn each_live_session_shows_its_engine_and_why() {
-        let root = scratch("live");
-        let fallen = resolve_session(Some("claude-code"), &shipped(), false, only(Provider::Anthropic));
-        resolved(&root, "3f6c2a91-aaaa", Some("claude-code"), Some(Provider::ClaudeCode), EXPLICIT);
-        resolved(&root, "bbbbbbbb-0000", fallen.engine.as_deref(), Some(Provider::Anthropic), &fallen.reason);
-        // No engine is not held: cccccccc has no file and resolves now to
-        // none; dddddddd has a host and resolves now to claude-code, which
-        // it has not yet asked for.
-        std::fs::create_dir_all(root.join("dddddddd-0000")).unwrap();
-        std::fs::write(root.join("dddddddd-0000").join(HOST_FILE), "1").unwrap();
-        let now = |host| resolve_session(Some("claude-code"), &shipped(), host, |_| false);
-        let ids = ["dddddddd-0000", "3f6c2a91-aaaa", "bbbbbbbb-0000", "cccccccc-0000", "3f6c2a91-aaaa", "../x"];
-        let live = live_sessions_in(&root, ids, now);
-        assert_eq!(live.len(), 4, "each id once, in id order, and no path that is not an id: {live:?}");
-        let lines: Vec<String> = live.iter().map(|s| session_line(s, &shipped())).collect();
-        assert_eq!(lines[0], "3f6c2a91  claude-code (Claude Code internal) — explicit");
-        assert_eq!(lines[1], "bbbbbbbb  anthropic (Anthropic API key) — claude-code unavailable: no Claude Code host");
-        assert!(lines[2].starts_with("cccccccc  no engine — engine_unavailable: claude-code unavailable"), "{}", lines[2]);
-        assert!(lines[2].contains("configure an Anthropic or OpenRouter key"), "{}", lines[2]);
-        assert!(!lines.iter().any(|l| l.contains("--provider claude-code")), "{lines:?}");
-        assert_eq!(lines[3], "dddddddd  not resolved yet: no judge request so far");
-        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&d).unwrap();
+        let path = d.join("agent.yaml");
+        if let Some(t) = text {
+            std::fs::write(&path, t).unwrap();
+        }
+        path
     }
 
     #[test]
-    fn an_unset_engine_names_the_first_key_engine_never_claude_code() {
-        assert_eq!(unset_engine_line(&shipped(), |_| true), "anthropic (Anthropic API key)");
-        assert_eq!(unset_engine_line(&shipped(), only(Provider::Openrouter)), "openrouter (OpenRouter API key)");
-        assert!(unset_engine_line(&shipped(), |_| false).starts_with("none: no Anthropic or OpenRouter key file"));
-        assert_eq!(engine_label(Some("mine"), &shipped()), "mine");
+    fn resolve_now_reads_agent_yaml_as_the_gate_does() {
+        let key = only(Provider::Anthropic);
+        // claude-code with no host and a key: the key engine stands in.
+        let p = layer("cc", Some("engine: claude-code\n"));
+        assert_eq!(resolve_now(&p, &key, false), Resolution { engine: Some("anthropic".into()), reason: NO_HOST.into() });
+        assert_eq!(resolve_now(&p, &key, true).engine.as_deref(), Some("claude-code"));
+        // No key: unavailable, with the remedy.
+        assert!(resolve_now(&p, |_| false, false).is_unavailable());
+        // gate.mode off: no engine, whatever is named.
+        let p = layer("off", Some("engine: claude-code\nmode: off\n"));
+        assert_eq!(resolve_now(&p, &key, true), Resolution { engine: None, reason: OFF.into() });
+        // No file, no key: off as before ADR-708.
+        let p = layer("none", None);
+        assert_eq!(resolve_now(&p, |_| false, false).reason, NO_KEY);
+    }
+
+    #[test]
+    fn a_layer_the_gate_cannot_use_is_a_config_reason() {
+        // Does not parse: the gate fails closed and says why.
+        let p = layer("broken", Some("engine: [claude-code\n"));
+        let r = resolve_now(&p, |_| true, true);
+        assert_eq!(r.engine, None);
+        assert!(r.reason.starts_with("config: ") && r.reason.ends_with("the gate is off until it is fixed"), "{}", r.reason);
+        // Cannot be read: a directory where the file should be.
+        let p = layer("unreadable", None);
+        std::fs::create_dir_all(&p).unwrap();
+        let r = resolve_now(&p, |_| true, true);
+        assert!(r.engine.is_none() && r.reason.starts_with("config: "), "{r:?}");
+        // The engine is a profile of your own that does not build.
+        let p = layer("half", Some("engine: half\nprofiles:\n  half:\n    provider: openrouter\n"));
+        let r = resolve_now(&p, |_| true, true);
+        assert!(r.reason.starts_with("config: engine 'half' names a profile that does not build"), "{}", r.reason);
+    }
+
+    #[test]
+    fn plain_session_ids_name_one_directory() {
+        assert!(is_plain_session_id("abc-123") && is_plain_session_id("a.b_c"));
+        for bad in ["", "../x", ".hidden", "a/b", "a\\b"] {
+            assert!(!is_plain_session_id(bad), "{bad:?}");
+        }
     }
 
     #[test]

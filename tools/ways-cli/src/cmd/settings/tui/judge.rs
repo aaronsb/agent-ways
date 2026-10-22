@@ -7,7 +7,8 @@
 use std::collections::BTreeMap;
 
 use agent_tui::tree::{Kind, Node, Setting};
-use ways_agent_core::engine::{self, LiveSession};
+use ways_agent_core::engine;
+use ways_agent_core::live::{self, LiveSession};
 use ways_agent_core::keys::Readiness;
 use ways_agent_core::profile::{self, Profile};
 
@@ -33,7 +34,7 @@ impl JudgeState {
         Some(JudgeState {
             readiness: crate::cmd::judge::readiness(),
             unset: profile::first_with_key(&profiles, has_key).map(str::to_string),
-            sessions: engine::live_sessions(),
+            sessions: live::live_sessions(&crate::cmd::judge::session_dirs()),
             profiles,
         })
     }
@@ -99,10 +100,12 @@ pub fn section(state: &JudgeState) -> Node {
 /// its finding, and the reason's kind as where it came from.
 fn session_row(l: &LiveSession, labels: &[(String, String)]) -> Node {
     // No key with no engine named, or the gate off, is the operator's
-    // setting, not a fault: only an engine that cannot run has a fix.
+    // setting, not a fault: only an engine that cannot run, or agent.yaml
+    // the gate cannot use, has a fix.
     let unavailable = l.engine.as_ref().filter(|e| e.resolution.is_unavailable() || e.resolution.reason.starts_with(engine::CONFIG));
     let (value, source) = match &l.engine {
         None => ("not resolved".to_string(), "no judge request yet".to_string()),
+        Some(e) if l.gate_off() => ("gate off".to_string(), e.resolution.reason.clone()),
         Some(e) if unavailable.is_some() => ("none".to_string(), e.resolution.reason.split(':').next().unwrap_or_default().to_string()),
         Some(e) => (e.resolution.engine.clone().unwrap_or_else(|| "none".into()), e.resolution.reason.clone()),
     };
@@ -121,7 +124,7 @@ mod tests {
     use ways_agent_core::profile::{shipped, Mode, Provider};
 
     fn live(id: &str, r: Resolution, provider: Option<Provider>) -> LiveSession {
-        LiveSession { session: id.into(), engine: Some(SessionEngine { resolution: r, provider }) }
+        LiveSession { session: id.into(), held: r.engine.is_some(), engine: Some(SessionEngine { resolution: r, provider }) }
     }
 
     fn fixture(readiness: Readiness) -> JudgeState {
@@ -134,7 +137,7 @@ mod tests {
                 live("3f6c2a91-4b7e-4d10-9c55-2e8b7a1d0f42", Resolution { engine: Some("claude-code".into()), reason: EXPLICIT.into() }, Some(Provider::ClaudeCode)),
                 live("bbbbbbbb-0000-4000-8000-000000000002", fell, Some(Provider::Anthropic)),
                 live("cccccccc-0000-4000-8000-000000000003", none, None),
-                LiveSession { session: "dddddddd-0000-4000-8000-000000000004".into(), engine: None },
+                LiveSession { session: "dddddddd-0000-4000-8000-000000000004".into(), engine: None, held: false },
             ],
             profiles: shipped(),
         }
@@ -155,6 +158,18 @@ mod tests {
         let ok = section(&fixture(Readiness::Ready(Provider::ClaudeCode, Mode::Enforce)));
         assert!(row(&ok, "readiness").finding.is_none());
         assert!(row(&ok, "readiness").doc.starts_with("Relevance judge on (Claude Code internal)."), "{}", row(&ok, "readiness").doc);
+    }
+
+    #[test]
+    fn a_session_under_mode_off_reads_gate_off_with_no_finding() {
+        let off = Resolution { engine: None, reason: engine::OFF.into() };
+        let mut state = fixture(Readiness::Off);
+        state.sessions = vec![LiveSession { session: "3f6c2a91-4b7e".into(), held: true, engine: Some(SessionEngine { resolution: off, provider: None }) }];
+        let s = section(&state);
+        let r = row(row(&s, "sessions"), "3f6c2a91");
+        assert_eq!(r.setting.as_ref().unwrap().value, "gate off");
+        assert!(r.finding.is_none(), "off is a setting, not a fault");
+        assert!(row(&s, "readiness").finding.is_none());
     }
 
     #[test]
