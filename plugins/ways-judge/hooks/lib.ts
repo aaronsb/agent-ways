@@ -17,9 +17,11 @@ export function takeArgv(id: string): string[] {
   return [WAYS, 'judge', 'take', '--session', id, '--wait']
 }
 
-/** Reads a JudgeAnswer as JSON on stdin. */
-export function answerArgv(id: string): string[] {
-  return [WAYS, 'judge', 'answer', '--session', id]
+/** Reads a JudgeAnswer as JSON on stdin, for the job `take` printed when it
+ *  carried an id, so an answer can never land on a newer job. */
+export function answerArgv(id: string, job?: string): string[] {
+  const argv = [WAYS, 'judge', 'answer', '--session', id]
+  return job ? [...argv, '--job', job] : argv
 }
 
 /** How long the host and answer verbs may run. Each is a file write. */
@@ -30,6 +32,7 @@ export const STOP_GRACE_MS = 3_000
 
 /** A judge request, as `ways judge take` prints it. */
 export type JudgeJob = {
+  id?: string
   model: string
   system: string
   prompt: string

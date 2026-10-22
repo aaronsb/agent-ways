@@ -118,6 +118,13 @@ describe('a job: one model call, one answer', () => {
     expect(h.argvs).toContainEqual(['ways', 'judge', 'answer', '--session', ID])
   })
 
+  test('a job that carries an id is answered for that job', async ($, on) => {
+    const h = host(on, { take: { stdout: JSON.stringify({ ...JOB, id: 'j-42' }) }, model: { isAnswered: true, text: 'v', usage: USAGE } })
+    await typed($)
+    expect(h.models[0]).not.toHaveProperty('id')
+    expect(h.argvs).toContainEqual(['ways', 'judge', 'answer', '--session', ID, '--job', 'j-42'])
+  })
+
   test('a model call past its time limit answers the reason and no text', async ($, on) => {
     const h = host(on, { take: { stdout: JSON.stringify(JOB) }, model: { isAnswered: false, reason: 'aborted', usage: ZERO } })
     await typed($)

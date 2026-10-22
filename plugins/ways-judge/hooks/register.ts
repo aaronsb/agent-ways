@@ -120,7 +120,7 @@ async function serve($: EngineInterface, id: string, take: TakeStream, stopped: 
   if (t.kind !== 'job') return
   const answer = await judge($, t.job, stopped)
   try {
-    const w = await $.process.run(answerArgv(id), { stdin: JSON.stringify(answer), timeoutMs: VERB_TIMEOUT_MS })
+    const w = await $.process.run(answerArgv(id, t.job.id), { stdin: JSON.stringify(answer), timeoutMs: VERB_TIMEOUT_MS })
     if (w.exitCode !== 0) debug($, `ways judge answer failed (${w.exitCode}): ${w.stderr.trim()}`)
   } catch (err) {
     debug($, `ways judge answer did not run: ${String(err)}`)
