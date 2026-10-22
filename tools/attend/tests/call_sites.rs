@@ -5,9 +5,9 @@
 //! and keep the names current when they were written, except a decision
 //! still proposed, whose commands someone will type. Changelogs are
 //! append-only, and the record fixtures under tests/fixtures/ are frozen
-//! copies of records. The alias tests and tests/legacy_removed.rs name the
-//! old verbs on purpose. A skill invocation such as `/attend status` is the
-//! skill's argument, not the CLI.
+//! copies of records. tests/legacy_removed.rs names the old verbs on purpose,
+//! to show each one is refused (#982). A skill invocation such as
+//! `/attend status` is the skill's argument, not the CLI.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -46,7 +46,6 @@ fn attend_crates(root: &Path) -> Vec<String> {
 
 fn in_scope(path: &str, crates: &[String]) -> bool {
     const EXEMPT: &[&str] = &[
-        "tools/attend/tests/aliases.rs",
         "tools/attend/tests/legacy_removed.rs",
         "tests/fixtures/adr/",
         "tests/fixtures/docker/scenarios/adr-migrate/",
