@@ -10,8 +10,9 @@
 //!   fields) or `standby` when the session judges on another engine, and
 //!   exits 0. With nothing to take by the deadline, or on SIGTERM, it prints
 //!   nothing and exits 0.
-//! - `answer` reads the `JudgeAnswer` JSON on stdin, prints nothing and exits
-//!   0, also when the gate has stopped waiting and the answer is dropped.
+//! - `answer --job <id>` reads the `JudgeAnswer` JSON on stdin for the job
+//!   `take` printed, prints nothing and exits 0, also when the gate has
+//!   stopped waiting and the answer is dropped.
 //! - A session id that is not plain, or stdin that is not an answer, exits 2;
 //!   a file that cannot be written exits 1.
 
@@ -20,6 +21,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use clap::Subcommand;
+use ways_agent_core::profile;
 use ways_agent_core::protocol::JudgeAnswer;
 
 use crate::session::judge_jobs::{AnswerError, Store, POLL};
@@ -48,14 +50,14 @@ pub enum JudgeCommand {
         #[arg(long, default_value_t = DEFAULT_WAIT_MS)]
         timeout_ms: u64,
     },
-    /// Store the answer on stdin for the session's claimed job
+    /// Store the answer on stdin for a job take printed
     Answer {
         /// The session id
         #[arg(long)]
         session: String,
-        /// The job answered: the `id` take printed (default: the newest claimed job)
+        /// The job answered: the `id` take printed
         #[arg(long)]
-        job: Option<String>,
+        job: String,
     },
 }
 
@@ -65,7 +67,8 @@ pub fn run(command: JudgeCommand) -> Result<()> {
         JudgeCommand::Take { session, wait, timeout_ms } => {
             let store = store(&session);
             stop_on_sigterm();
-            if let Some(line) = take(&store, wait.then(|| Instant::now() + Duration::from_millis(timeout_ms)), stopped)? {
+            let configured = names_claude_code(&profile::user_layer_path());
+            if let Some(line) = take(&store, configured, wait.then(|| Instant::now() + Duration::from_millis(timeout_ms)), stopped)? {
                 println!("{line}");
             }
             Ok(())
@@ -75,8 +78,8 @@ pub fn run(command: JudgeCommand) -> Result<()> {
             let mut input = String::new();
             std::io::stdin().read_to_string(&mut input).context("reading the answer")?;
             let answer: JudgeAnswer = serde_json::from_str(&input).unwrap_or_else(|e| usage(&format!("not a judge answer: {e}")));
-            match store.answer(job.as_deref(), &answer) {
-                Ok(_) | Err(AnswerError::NoJob(_)) => Ok(()),
+            match store.answer(&job, &answer) {
+                Ok(()) | Err(AnswerError::NoJob(_)) => Ok(()),
                 Err(AnswerError::Io(e)) => Err(e).context("writing the answer"),
             }
         }
@@ -93,10 +96,24 @@ fn usage(message: &str) -> ! {
     std::process::exit(2)
 }
 
-/// What `take` prints: a claimed job as JSON, or `standby` once the session
-/// resolved to an engine other than `claude-code`. Looks once with no
-/// `deadline`, else until it passes or `stop` says so.
-fn take(store: &Store, deadline: Option<Instant>, stop: impl Fn() -> bool) -> Result<Option<String>> {
+/// Whether agent.yaml at `path` has the gate judge with a `claude-code`
+/// profile when a host is registered: on, and its engine one whose provider
+/// is `claude-code`. A layer that fails closed turns the gate off, so no.
+fn names_claude_code(path: &std::path::Path) -> bool {
+    let Ok((user, findings)) = profile::UserLayer::load_with_findings(path) else { return false };
+    if profile::fails_closed(&findings).is_some() || user.mode == Some(profile::Mode::Off) {
+        return false;
+    }
+    user.engine.as_ref().and_then(|e| profile::profiles(&user).get(e).map(|p| p.provider)) == Some(profile::Provider::ClaudeCode)
+}
+
+/// What `take` prints: a claimed job as JSON, or `standby` when the session
+/// will not judge inside Claude Code: it resolved to another engine, or it
+/// holds no resolution and `configured` (agent.yaml names a claude-code
+/// engine) is false. A session with no engine holds no resolution, so a
+/// session on claude-code with no resolution yet is waited on. Looks once
+/// with no `deadline`, else until it passes or `stop` says so.
+fn take(store: &Store, configured: bool, deadline: Option<Instant>, stop: impl Fn() -> bool) -> Result<Option<String>> {
     loop {
         if stop() {
             return Ok(None);
@@ -104,7 +121,11 @@ fn take(store: &Store, deadline: Option<Instant>, stop: impl Fn() -> bool) -> Re
         if let Some(job) = store.take().context("taking a judge job")? {
             return Ok(Some(serde_json::to_string(&job)?));
         }
-        if store.resolution().is_some_and(|r| !r.is_claude_code()) {
+        let claude_code = match store.resolution() {
+            Some(r) => r.is_claude_code(),
+            None => configured,
+        };
+        if !claude_code {
             return Ok(Some("standby".to_string()));
         }
         if deadline.is_none_or(|d| Instant::now() >= d) {
@@ -160,8 +181,33 @@ mod tests {
         let (s, base) = store("standby");
         resolved(&s, "anthropic", Provider::Anthropic, NO_HOST);
         let begun = Instant::now();
-        assert_eq!(take(&s, Some(begun + Duration::from_secs(5)), || false).unwrap().as_deref(), Some("standby"));
+        // The held resolution wins over what agent.yaml now names.
+        assert_eq!(take(&s, true, Some(begun + Duration::from_secs(5)), || false).unwrap().as_deref(), Some("standby"));
         assert!(begun.elapsed() < Duration::from_secs(1), "without waiting out the timeout");
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// A session with no engine holds no resolution: `take` reads agent.yaml
+    /// and stands by unless it names a claude-code engine.
+    #[test]
+    fn take_says_standby_with_no_resolution_unless_agent_yaml_names_claude_code() {
+        let (s, base) = store("unheld");
+        assert_eq!(take(&s, false, Some(Instant::now() + Duration::from_secs(5)), || false).unwrap().as_deref(), Some("standby"));
+        assert_eq!(take(&s, true, Some(Instant::now() + Duration::from_millis(50)), || false).unwrap(), None, "waits for the job");
+        std::fs::create_dir_all(&base).unwrap();
+        let yaml = base.join("agent.yaml");
+        for (text, names) in [
+            ("engine: claude-code\nmode: enforce\n", true),
+            ("profiles:\n  cc-sonnet:\n    provider: claude-code\n    model: sonnet\nengine: cc-sonnet\n", true),
+            ("engine: claude-code\nmode: off\n", false),
+            ("engine: anthropic\n", false),
+            ("", false),
+            ("mode: of\nengine: claude-code\n", false),
+        ] {
+            std::fs::write(&yaml, text).unwrap();
+            assert_eq!(names_claude_code(&yaml), names, "{text:?}");
+        }
+        assert!(!names_claude_code(&base.join("missing.yaml")));
         std::fs::remove_dir_all(&base).ok();
     }
 
@@ -175,7 +221,7 @@ mod tests {
             let job = JudgeJob { model: "m".into(), system: "s".into(), prompt: "p".into(), max_tokens: 96, timeout_ms: 1900 };
             writer.write_job(&job).unwrap();
         });
-        let line = take(&s, Some(Instant::now() + Duration::from_secs(5)), || false).unwrap().expect("a job");
+        let line = take(&s, false, Some(Instant::now() + Duration::from_secs(5)), || false).unwrap().expect("a job");
         let t: Taken = serde_json::from_str(&line).unwrap();
         assert_eq!((t.job.prompt.as_str(), t.job.timeout_ms), ("p", 1900));
         std::fs::remove_dir_all(&base).ok();
@@ -184,10 +230,11 @@ mod tests {
     #[test]
     fn take_prints_nothing_at_the_timeout_or_when_stopped() {
         let (s, base) = store("quiet");
-        // Unresolved: the host keeps waiting, since the scan may yet judge.
-        assert_eq!(take(&s, Some(Instant::now() + Duration::from_millis(50)), || false).unwrap(), None);
-        assert_eq!(take(&s, None, || false).unwrap(), None);
-        assert_eq!(take(&s, Some(Instant::now() + Duration::from_secs(5)), || true).unwrap(), None);
+        // Unresolved on claude-code: the host keeps waiting, since the scan
+        // may yet judge.
+        assert_eq!(take(&s, true, Some(Instant::now() + Duration::from_millis(50)), || false).unwrap(), None);
+        assert_eq!(take(&s, true, None, || false).unwrap(), None);
+        assert_eq!(take(&s, true, Some(Instant::now() + Duration::from_secs(5)), || true).unwrap(), None);
         std::fs::remove_dir_all(&base).ok();
     }
 }
