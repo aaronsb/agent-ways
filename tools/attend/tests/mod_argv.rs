@@ -90,8 +90,8 @@ fn help(args: &[String]) -> (Option<i32>, String) {
     (out.status.code(), String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr))
 }
 
-/// Each word of `path` is a subcommand its parent's help lists. A hidden
-/// alias parses but is not listed, so a flat verb fails here (ADR-413 item 5).
+/// Each word of `path` is a subcommand its parent's help lists, so a hidden
+/// subcommand, which parses, still fails here.
 fn assert_listed(origin: &str, path: &[String]) {
     for (i, word) in path.iter().enumerate() {
         let (_, parent) = help(&path[..i]);
@@ -129,14 +129,17 @@ fn every_argv_the_hook_scripts_run_parses() {
     }
 }
 
-/// The reader's control: an unknown verb is refused, a hidden alias is not
-/// listed, and a flag absent from a verb's help is caught.
+/// The reader's control: an unknown verb and a removed flat verb (#982) are
+/// refused, an unlisted word is not listed, and a flag absent from a verb's
+/// help is caught.
 #[test]
 fn a_flat_verb_or_an_unknown_flag_fails_the_check() {
-    let (code, _) = help(&["frobnicate".into()]);
-    assert_eq!(code, Some(2));
+    for verb in ["frobnicate", "peers"] {
+        let (code, _) = help(&[verb.into()]);
+        assert_eq!(code, Some(2), "`attend {verb}` parsed");
+    }
     let flat = std::panic::catch_unwind(|| assert_listed("control", &["peers".into()]));
-    assert!(flat.is_err(), "a hidden alias passed as listed");
+    assert!(flat.is_err(), "an unlisted word passed as listed");
     let (code, text) = help(&["peer".into(), "list".into()]);
     assert_eq!(code, Some(0));
     assert!(!text.contains("--wake "), "the flag test would pass anything: {text}");
