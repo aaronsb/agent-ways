@@ -19,15 +19,15 @@ flowchart TB
     end
     subgraph LATE["Detached, then the next hook"]
         direction TB
-        J{"gate.engine, ADR-708<br>one engine judges,<br>no fallback between them"}
-        J -->|claude-code| MH["Claude Code internal<br>ways mod module<br>$.model.complete, session's own account<br>strict JSON, validated"]
-        J -->|anthropic or openrouter| KB["Ways agent<br>own API key<br>record_judgements tool"]
+        J{"Session engine, ADR-708<br>resolved once per session from gate.engine;<br>claude-code without the mod resolves<br>to a configured key engine;<br>no per-job fallback"}
+        J -->|claude-code, mod loaded| MH["Claude Code internal<br>ways mod module<br>$.model.complete, session's own account<br>strict JSON, validated"]
+        J -->|anthropic or openrouter,<br>or claude-code with no mod and a key| KB["Ways agent<br>own API key<br>record_judgements tool"]
         JT["Judge text, ADR-196<br>About to run: description,<br>then segments in order<br>with connectors and descriptions"] -.-> MH
         JT -.-> KB
         MH -->|pass| STORE["Deferred result store<br>ADR-606"]
         KB -->|pass| STORE
-        MH -->|fail, error, or no mod loaded| DROP["Held back, logged"]
-        KB -->|fail, error, or no key| DROP
+        MH -->|fail or error| DROP["Held back, logged"]
+        KB -->|fail or error| DROP
         STORE --> COL["Collector at the agent's next<br>PostToolUse or UserPromptSubmit"]
         COL -->|within budget| INJ["Inject with deferred header<br>way, Bash lane, segment, age"]
         COL -->|past budget| PTR["One-line pointer<br>to the result file"]
