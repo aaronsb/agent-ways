@@ -156,6 +156,14 @@ impl Mode {
     }
 }
 
+/// The longest judge deadline a profile may set. The prompt lane's hooks
+/// (check-prompt.sh, check-queued.sh) run under a 30 s bound in settings.json,
+/// and a judged hook waits up to the deadline plus the agent's start and the
+/// hook's read grace, about 3 s. A deadline past what the bound holds would
+/// have Claude Code kill the hook, dropping its output and the fail-open
+/// record with it.
+pub const MAX_TIMEOUT_MS: u64 = 25_000;
+
 /// One engine: a provider, a model, and the settings tuned for that model.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -191,8 +199,8 @@ impl Profile {
         if !(0.0..=1.0).contains(&self.threshold) {
             bail!("profile '{name}': threshold {} is outside 0..1", self.threshold);
         }
-        if self.timeout_ms == 0 || self.timeout_ms > 60_000 {
-            bail!("profile '{name}': timeout_ms {} is outside 1..60000", self.timeout_ms);
+        if self.timeout_ms == 0 || self.timeout_ms > MAX_TIMEOUT_MS {
+            bail!("profile '{name}': timeout_ms {} is outside 1..{MAX_TIMEOUT_MS}", self.timeout_ms);
         }
         if self.turns == 0 || self.max_turn_chars == 0 || self.concurrency == 0 || self.max_candidates == 0 {
             bail!("profile '{name}': turns, max_turn_chars, concurrency and max_candidates must be at least 1");

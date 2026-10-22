@@ -120,7 +120,7 @@ A judge call takes about 0.6 s plus 0.1 s per candidate, so a request carries at
 - an unjudged way whose ancestor the judge blocked is blocked with it, logged as `way_judged` with `reason: ancestor` and the ancestor's id;
 - a way that fired only on its parent's boost is withheld when the parent is not shown, and when the judge blocked that parent the block is logged for the child the same way.
 
-The agent's deadline is the profile's `timeout_ms` (2,000 ms shipped), and the agent's wait for a provider slot counts against it. The hook reads the reply for `timeout_ms` plus 1.5 s, so the agent's own fallback arrives first. Starting an agent comes before that read and can take up to 1.5 s more, so a prompt that has to start the agent can wait about `timeout_ms` plus 3 s.
+The agent's deadline is the profile's `timeout_ms` (2,000 ms shipped), and the agent's wait for a provider slot counts against it. The hook reads the reply for `timeout_ms` plus 1.5 s, so the agent's own fallback arrives first. Starting an agent comes before that read and can take up to 1.5 s more, so a prompt that has to start the agent can wait about `timeout_ms` plus 3 s. The prompt-lane hooks (`check-prompt.sh`, `check-queued.sh`) run under a 30 s bound, so a profile's `timeout_ms` is capped at 25,000 ms: past the bound Claude Code kills the hook and drops its output, the fail-open record included.
 
 ## How it fails
 

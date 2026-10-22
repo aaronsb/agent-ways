@@ -16,7 +16,7 @@ use crate::protocol::{Envelope, Reply, ReplyEnvelope, Request, PROTOCOL};
 const BIN: &str = "ways-agent";
 
 /// How long a hook waits for a freshly started agent to listen.
-const START_WAIT: Duration = Duration::from_millis(1500);
+pub const START_WAIT: Duration = Duration::from_millis(1500);
 
 /// After a failed start, hooks do not try again for this long.
 const START_BACKOFF: Duration = Duration::from_secs(300);
