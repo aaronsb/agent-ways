@@ -6,7 +6,7 @@
 #   ways manage update | ways manage repair | ways manage uninstall | make cut-release
 
 .DEFAULT_GOAL := help
-.PHONY: site site-serve explainer-video explainer-stills setup link relink install update sync-to-home update-binaries dev-install dev-restore _unix_only clean help deps way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-hooks test-plugins test-lang test-locales test-multilingual test-live purge-attend-state
+.PHONY: site site-serve explainer-video explainer-stills setup link relink install update sync-to-home update-binaries dev-install dev-restore _unix_only clean help deps way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-hooks test-plugins test-lang test-locales test-multilingual test-live test-live-matrix purge-attend-state
 
 ifeq ($(OS),Windows_NT)
     SHELL := C:/Program Files/Git/usr/bin/bash.exe
@@ -63,6 +63,8 @@ help:
 	@echo "  make test-locales Check locale files for gaps and duplicates"
 	@echo "  make test-multilingual  Verify multilingual way matching (18 languages)"
 	@echo "  make test-live TIER=1  Live install fixture in Docker (ADR-186; FLAVOR=branch|release)"
+	@echo "  make test-live-matrix  Tier 2 over arms x models x trials (MATRIX_ARMS, MATRIX_MODELS, MATRIX_TRIALS,"
+	@echo "                         MATRIX_MODEL_TRIALS, MATRIX_JOBS, MATRIX_OUT)"
 	@echo "  make docs         Regenerate docs/cli/attend.md from the clap definition"
 	@echo "  make site         Build the manual (docs/ + ways) into site/ with MkDocs"
 	@echo "  make site-serve   Preview the manual at http://127.0.0.1:8000 with live reload"
@@ -413,6 +415,9 @@ test-multilingual: ways
 # The branch flavor mounts the checkout and the four suite binaries.
 test-live:
 	@TIER="$(or $(TIER),1)" bash tests/fixtures/docker/test-live.sh
+
+test-live-matrix:
+	@bash tests/fixtures/docker/matrix.sh
 
 # --- Release ---
 
