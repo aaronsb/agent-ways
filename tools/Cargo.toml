@@ -25,6 +25,7 @@ members = [
     "claude-sessions",
     "attend-config",
     "tui-harness",
+    "command-describer",
 ]
 resolver = "2"
 
