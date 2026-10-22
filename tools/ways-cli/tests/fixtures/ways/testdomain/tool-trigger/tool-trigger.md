@@ -1,6 +1,6 @@
 ---
-tools: ^ExitPlanMode$
-tool_phase: post
+tool_name: ^ExitPlanMode$
+tool_event: [PostToolUse]
 when:
   file_exists: spe/README.md
 scope: agent

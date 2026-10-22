@@ -102,15 +102,15 @@ Tests: `files:` regex matching, project path filtering.
 
 ```
 Turn 1 (no spe/README.md): PostToolUse ExitPlanMode → nothing (when.file_exists)
-Turn 2: PreToolUse ExitPlanMode → nothing (tool_phase: post)
-Turn 3: PostToolUse Workflow → nothing (tools: names ExitPlanMode only)
-Turn 4: PostToolUseFailure ExitPlanMode → nothing (failures are skipped)
+Turn 2: PreToolUse ExitPlanMode → nothing (tool_event: [PostToolUse])
+Turn 3: PostToolUse Workflow → nothing (tool_name: names ExitPlanMode only)
+Turn 4: PostToolUseFailure ExitPlanMode → nothing (the event is not listed)
 Turn 5: PostToolUse ExitPlanMode → testdomain/tool-trigger, PostToolUse envelope
 Turn 6: same, inside the refire window → nothing
 Turn 7: same, far past the window → fires again
 ```
 
-Tests: `tools:` regex on the tool name, `tool_phase:`, `when:` file_exists, refire across rounds. Test: `scenario_tool_triggers`.
+Tests: `tool_name:` regex on the tool name, `tool_event:`, `when:` file_exists, refire across rounds. Test: `scenario_tool_triggers`.
 
 ### Scenario 4: Check Scoring Curve
 

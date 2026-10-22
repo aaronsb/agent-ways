@@ -339,7 +339,7 @@ flowchart LR
     Cand --> Pre
 
     Pre --> KW["pattern: on prompt, queued, task"]:::match
-    Pre --> DIR["commands: on the command<br/>pattern: on the description<br/>files: on the path<br/>tools: on the tool name, tool_phase: on the event"]:::match
+    Pre --> DIR["commands: on the command<br/>pattern: on the description<br/>files: on the path<br/>tool_name: on the tool name, tool_event: on the event"]:::match
     Pre --> SEM["semantic<br/>late-interaction or g(s) fallback"]:::match
 
     KW --> Floor{"g(s) ≥ τ_k?<br/>fails open · pattern_strict bypasses"}:::gate

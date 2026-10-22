@@ -15,7 +15,7 @@ All values must be single-line. `ways author lint` validates each field against 
 - `pattern_strict:`, `pattern_keep:` - keyword-lane modifiers; see knowledge/authoring/keyword-lane(meta)
 - `files:` - Regex matched against file paths (Edit/Write)
 - `commands:` - Regex matched against bash commands
-- `tools:` - Regex matched against the tool name (PreToolUse and PostToolUse on wired tools). `tool_phase:` picks `pre` (default), `post`, or `both`
+- `tool_name:` - Regex matched against the tool name on wired tools. `tool_event:` lists the hook events, e.g. `[PreToolUse, PostToolUse]`; the default is `[PreToolUse]`
 
 ## Semantic
 
