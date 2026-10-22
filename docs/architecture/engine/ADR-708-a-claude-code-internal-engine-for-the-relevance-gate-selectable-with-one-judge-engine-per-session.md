@@ -165,6 +165,8 @@ The judge came late to this project because it needed a separate API key to mana
 
    `keys::judge_ready` gains the engine. `claude-code` with the mod installed and mods enabled is Ready; whether the mod actually loaded is a per-session fact, left to the session resolution of item 2. `claude-code` with neither the mod nor a key is degraded, and its fix line names enabling the mod or adding a key. `gate.mode: off` reads as off by choice. The installer, `ways manage update`, `ways agent status`, the help footer and the settings gate screen keep reading this one function, so they never disagree.
 
+   **Note, 2026-10-22: the mods check.** The step judges that Claude Code can load the mod when `claude --version` names 2.1.304 or later, the oldest Claude Code checked to carry `$.model.complete` and `$.process.spawn` (2.1.304's bundled mod types, the plugin-authoring `claude-code.d.ts`), and its plugin CLI answers; an older release may carry both, unchecked, and the hooks module's rollout flag (ADR-406, addendum of 2026-10-12) cannot be read from outside a session.
+
 10. **Logging and cost.** Every judge call is logged as `judge_call` with the engine. Under `claude-code` it carries the reply's token usage and no provider price, since the spend is the account's usage. `way_judged`, `gate_fallback` and the decision record are written by the hook side as today, whichever engine judged.
 
 ## Consequences

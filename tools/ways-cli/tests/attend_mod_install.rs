@@ -144,22 +144,25 @@ impl Fx {
         log.lines().filter(|l| !l.ends_with("list --json")).map(str::to_string).collect()
     }
 
-    /// What `ways judge-setup` leaves once it installed ways-judge in the
-    /// target: the record beside the marketplace record. Needs a repair
-    /// first, which writes that record.
-    fn record_judge(&self) {
+    /// The record `ways judge-setup` writes once it installed ways-judge in
+    /// the target, beside the marketplace record; `pending` as this app marks
+    /// it after taking the mod out. Needs a repair first, which writes the
+    /// marketplace record.
+    fn record_judge(&self, pending: bool) {
         let market = walk(&self.root.join("home"))
             .into_iter()
             .find(|p| p.file_name().is_some_and(|n| n == "attend-mod-marketplace"))
             .expect("a repair has recorded the marketplace");
-        write(&market.with_file_name("ways-judge-installed"), &format!("{JUDGE}\n"));
+        let text = if pending { format!("{JUDGE}\npending\n") } else { format!("{JUDGE}\n") };
+        write(&market.with_file_name("ways-judge-installed"), &text);
     }
 
-    /// Both mods installed and the judge recorded, as after setup: a repair,
-    /// the record, and the repair that installs the judge.
+    /// Both mods installed and the judge recorded, as after setup: a repair
+    /// installs attend, then setup installs the judge and records it.
     fn both(&self) {
         self.repair();
-        self.record_judge();
+        self.by_hand(&["plugin", "install", JUDGE, "--scope", "user"]);
+        self.record_judge(false);
         self.repair();
         assert!(self.has(JUDGE) && self.has(ATTEND), "{}", self.plugins());
         self.changes();
@@ -183,6 +186,24 @@ impl Fx {
     /// The target's settings: the `enabledPlugins` the stub keeps.
     fn enabled(&self) -> String {
         std::fs::read_to_string(self.dest().join("settings.json")).unwrap_or_default()
+    }
+
+    /// The record setup writes once it installed the judge mod, if present.
+    fn judge_record(&self) -> Option<PathBuf> {
+        walk(&self.root.join("home")).into_iter().find(|p| p.file_name().is_some_and(|n| n == "ways-judge-installed"))
+    }
+
+    /// The operator's own `claude plugin <args>` against the target.
+    fn by_hand(&self, args: &[&str]) {
+        let out = Command::new(self.root.join("stubbin/claude"))
+            .args(args)
+            .env("STUB_STATE", self.state())
+            .env("CLAUDE_CONFIG_DIR", self.dest())
+            .env("STUB_SHIPPED", "0.17.0")
+            .env("STUB_JUDGE_SHIPPED", "1.42.1")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     }
 
     /// Calls to fail, by their exact arguments; empty clears them.
@@ -438,12 +459,14 @@ fn a_dev_marketplace_missing_for_now_is_reported_not_claimed() {
 }
 
 #[test]
-fn repair_leaves_an_unrecorded_judge_mod_alone_and_installs_a_recorded_one() {
+fn repair_leaves_an_unrecorded_judge_mod_alone_and_installs_a_pending_one() {
     let fx = Fx::new("judge-recorded");
     fx.repair();
     let dest = fx.dest().display().to_string();
     assert!(!fx.changes().iter().any(|c| c.contains(JUDGE)), "no record, no ways-judge call");
-    fx.record_judge();
+    // Recorded, and marked pending: this app took it out or failed to
+    // install it, so repair puts it back.
+    fx.record_judge(true);
     fx.repair();
     assert_eq!(fx.changes(), vec![format!("{dest}|plugin install {JUDGE} --scope user")]);
     assert!(fx.enabled().contains(&format!("\"{JUDGE}\":true")), "{}", fx.enabled());
@@ -545,6 +568,27 @@ fn a_failed_install_after_a_move_never_loses_the_judge_mod() {
     fx.fail(&[]);
     fx.repair_from(&away);
     assert_eq!(fx.changes(), vec![format!("{dest}|plugin install {JUDGE} --scope user")]);
+}
+
+/// Re-review of #1142: the operator uninstalls ways-judge by hand while its
+/// marketplace is this app's and current. Repair reads that as their choice:
+/// it clears the record, says so once, and never reinstalls the mod.
+#[test]
+fn a_judge_mod_uninstalled_by_hand_stays_gone_and_its_record_clears() {
+    let fx = Fx::new("judge-by-hand");
+    fx.both();
+    assert!(fx.judge_record().is_some());
+    fx.by_hand(&["plugin", "uninstall", JUDGE, "--scope", "user"]);
+    fx.changes();
+    let out = fx.repair();
+    assert_eq!(fx.changes(), Vec::<String>::new(), "nothing reinstalled");
+    let err = String::from_utf8_lossy(&out.stderr);
+    let said: Vec<&str> = err.lines().filter(|l| l.contains("removed by hand")).collect();
+    assert_eq!(said.len(), 1, "one line says so: {err}");
+    assert!(fx.judge_record().is_none(), "the record is cleared");
+    assert!(!fx.has(JUDGE) && fx.has(ATTEND), "{}", fx.plugins());
+    fx.repair();
+    assert_eq!(fx.changes(), Vec::<String>::new(), "and stays gone");
 }
 
 /// With attend_mod.install false the judge's pass is the one that moves the

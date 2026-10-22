@@ -505,13 +505,14 @@ fn converge_one(
     // removed. The ways-judge mod (ADR-708 §9) is installed by
     // `ways judge-setup`, which records the request per target; where the
     // record is, repair keeps the mod installed and current, so a mod a
-    // failed call lost comes back. A target without the record pays no call.
+    // failed call lost comes back, and a mod the operator uninstalled by hand
+    // clears the record instead. A target without the record pays no call.
     use crate::cmd::attend_mod::{self, Want, ATTEND, JUDGE};
     let target_config = target_config_path(dest_root);
     let attend = if ways_core::settings::attend_mod_install(&target_config) { Want::Install } else { Want::Withdraw };
     let mut lines = attend_mod::converge(&ATTEND, source_root, dest_root, &paths::projection_root(), attend, dry_run);
     if attend_mod::recorded(&JUDGE, dest_root) {
-        lines.extend(attend_mod::converge(&JUDGE, source_root, dest_root, &paths::projection_root(), Want::Install, dry_run));
+        lines.extend(attend_mod::converge(&JUDGE, source_root, dest_root, &paths::projection_root(), Want::Keep, dry_run));
     }
     for line in lines {
         if !quiet {

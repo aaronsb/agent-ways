@@ -72,6 +72,11 @@ impl Fx {
         self.root.join("home")
     }
 
+    /// The default target's record that setup installed the judge mod.
+    fn judge_record(&self) -> PathBuf {
+        self.home().join(".local/state/agent-ways/ways-judge-installed")
+    }
+
     fn agent_yaml(&self) -> String {
         std::fs::read_to_string(self.home().join(".config/agent-ways/agent.yaml")).unwrap()
     }
@@ -206,11 +211,31 @@ fn exe(p: &Path, text: &str) {
 #[test]
 fn an_old_claude_code_gets_three_choices_and_a_key_choice_names_its_engine() {
     let fx = Fx::new("old-host", true, true);
+    // An earlier setup installed the mod, which is gone now.
+    write(&fx.judge_record(), "ways-judge@agent-ways\n");
     let shown = fx.setup("2.1.296", Some("Choice [1-3"), "1\n");
-    assert!(shown.contains("Claude Code internal is not offered: Claude Code 2.1.296 is older than 2.1.304"), "{shown}");
+    assert!(!fx.judge_record().exists(), "a key engine chosen: repair stops keeping the mod");
+    // The line wraps at 80 columns.
+    for line in shown.lines() {
+        assert!(line.chars().count() <= 80, "{line:?}");
+    }
+    let flat = shown.replace('\n', " ");
+    assert!(flat.contains("Claude Code internal is not offered: Claude Code 2.1.296 is older than 2.1.304"), "{shown}");
     assert!(shown.contains("[1] An Anthropic API key") && !shown.contains("[4]"), "{shown}");
     assert!(fx.agent_yaml().contains("engine: anthropic"), "{}", fx.agent_yaml());
     assert!(shown.contains("Relevance judge on (Anthropic)."), "{shown}");
+}
+
+/// Re-review of #1142: choosing no judge records gate.mode off and stops
+/// repair keeping the mod.
+#[test]
+fn choosing_no_judge_turns_the_gate_off_and_clears_the_record() {
+    let fx = Fx::new("no-judge", true, true);
+    write(&fx.judge_record(), "ways-judge@agent-ways\n");
+    let shown = fx.setup("2.1.296", Some("Choice [1-3"), "3\n");
+    assert!(fx.agent_yaml().contains("mode: off"), "{}", fx.agent_yaml());
+    assert!(!fx.judge_record().exists());
+    assert!(shown.replace('\n', " ").contains("Relevance judge off by choice"), "{shown}");
 }
 
 /// Finding 2: a Claude Code whose mods can complete and spawn is offered the

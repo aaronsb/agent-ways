@@ -47,7 +47,7 @@ fn reason(state: &Readiness) -> Option<(String, String)> {
         Readiness::NoKey(Some(p)) | Readiness::Unverified(p, _) if p.keyless() => no_mod(),
         Readiness::ModDisabled => (
             "Claude Code internal's ways-judge mod is disabled, and no key stands in".to_string(),
-            format!("claude plugin enable {}, or ways judge-setup for a key", JUDGE.id),
+            format!("{}, or ways judge-setup for a key", enable_command()),
         ),
         Readiness::NoKey(None) => {
             ("No provider key".to_string(), "ways agent key add --provider anthropic (or openrouter)".to_string())
@@ -64,6 +64,17 @@ fn reason(state: &Readiness) -> Option<(String, String)> {
         }
         Readiness::Config(_) => ("agent.yaml does not load".to_string(), "ways settings gate".to_string()),
     })
+}
+
+/// The command that enables the ways-judge mod in the first enabled target
+/// that holds it disabled, naming that target's config dir when it is not
+/// the default.
+fn enable_command() -> String {
+    let projection = crate::paths::projection_root();
+    let disabled = enabled_targets()
+        .into_iter()
+        .find(|dir| attend_mod::listed_in(&JUDGE, dir) && !attend_mod::enabled_in(&JUDGE, dir));
+    attend_mod::enable_command(&JUDGE, disabled.as_deref().unwrap_or(&projection), &projection)
 }
 
 /// Why `claude-code` cannot gate with neither the mod nor a key, and both
@@ -243,7 +254,7 @@ pub fn setup() -> Result<()> {
     let shipped = attend_mod::shipped_version(&JUDGE, &crate::paths::data_root()).is_some();
     let host = if shipped { mod_host() } else { Err(String::new()) };
     if let (true, Err(why)) = (shipped, &host) {
-        println!("Claude Code internal is not offered: {why}.");
+        println!("{}", wrap(&format!("Claude Code internal is not offered: {why}."), COLUMNS));
     }
     let offered = choices(host.is_ok(), agent.is_some());
     // "No judge" alone is no choice to put to the operator.
@@ -258,7 +269,10 @@ pub fn setup() -> Result<()> {
         (Choice::ClaudeCode, _) => install_mod()?,
         (Choice::Key(provider), Some(bin)) => add_key(bin, provider)?,
         (Choice::Key(_), None) => unreachable!("a key is offered only with ways-agent installed"),
-        (Choice::Off, _) => set("gate.mode", "off")?,
+        (Choice::Off, _) => {
+            set("gate.mode", "off")?;
+            stop_keeping_mod()?;
+        }
     }
     if let Some(text) = outcome(&readiness()) {
         println!("{text}");
@@ -276,6 +290,17 @@ fn add_key(bin: &std::path::Path, provider: Provider) -> Result<()> {
         .with_context(|| format!("running {}", bin.display()))?;
     if keys::key_engine_ready(provider.as_str()) {
         set("gate.engine", provider.as_str())?;
+        stop_keeping_mod()?;
+    }
+    Ok(())
+}
+
+/// Once the operator chose a key engine or no judge, repair stops keeping
+/// the ways-judge mod: each enabled target's record of its install goes. The
+/// mod itself stays as it is, and stands down under any other engine.
+fn stop_keeping_mod() -> Result<()> {
+    for dir in enabled_targets() {
+        attend_mod::forget_request(&JUDGE, &dir).with_context(|| format!("clearing the ways-judge mod's record for {}", dir.display()))?;
     }
     Ok(())
 }

@@ -50,7 +50,7 @@ pub struct Mod {
     pub id: &'static str,
     /// How report lines name it.
     pub label: &'static str,
-    /// The oldest Claude Code whose mod API carries every call the mod makes.
+    /// The oldest Claude Code checked to carry every call the mod makes.
     pub min_claude_code: &'static str,
     /// For a mod installed on request rather than by every repair, the file
     /// beside a target's marketplace record that says the request was made.
@@ -62,8 +62,10 @@ pub struct Mod {
 pub const ATTEND: Mod =
     Mod { name: "attend", id: "attend@agent-ways", label: "attend mod", min_claude_code: "2.1.296", record: None };
 /// The judge host for the `claude-code` engine (ADR-708 §3). Beside the
-/// modules it calls `$.model.complete` and `$.process.spawn`, which the mod
-/// types of Claude Code 2.1.304 carry. `ways judge-setup` installs it.
+/// modules it calls `$.model.complete` and `$.process.spawn`; its floor is
+/// the oldest Claude Code checked to carry both (2.1.304's bundled mod
+/// types). An older release may carry them too, unchecked. `ways
+/// judge-setup` installs it.
 pub const JUDGE: Mod = Mod {
     name: "ways-judge",
     id: "ways-judge@agent-ways",
@@ -229,6 +231,20 @@ fn recover_command(cfg: Option<&Path>) -> String {
     }
 }
 
+/// The exact command that enables `m` in the target whose `CLAUDE_CONFIG_DIR`
+/// is `cfg` (`None` for the default target).
+fn enable_command_in(m: &Mod, cfg: Option<&Path>) -> String {
+    match cfg {
+        Some(d) => format!("CLAUDE_CONFIG_DIR={} claude plugin enable {}", d.display(), m.id),
+        None => format!("claude plugin enable {}", m.id),
+    }
+}
+
+/// The command that enables `m` in the target at `dest_root`.
+pub fn enable_command(m: &Mod, dest_root: &Path, default_root: &Path) -> String {
+    enable_command_in(m, config_dir(dest_root, default_root).0.as_deref())
+}
+
 /// Install `m`, or bring it up to `shipped`, from `dir`. `recorded` is the
 /// folder a repair last added the marketplace from.
 pub fn plan_converge(m: &Mod, have: &Installed, dir: &str, recorded: Option<&str>, shipped: &str, recover: &str) -> Plan {
@@ -314,11 +330,52 @@ fn read_record(dest_root: &Path) -> Option<String> {
     std::fs::read_to_string(record_path(dest_root)).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
+/// The file that records `m`'s install on request in a target.
+fn request_path(m: &Mod, dest_root: &Path) -> Option<PathBuf> {
+    m.record.map(|name| state_file(dest_root, name))
+}
+
 /// True when `m` is installed on request and the target records that the
 /// request was made. Repair keeps such a mod installed from then on: the
 /// record outlives a marketplace removal that took the mod with it.
 pub fn recorded(m: &Mod, dest_root: &Path) -> bool {
-    m.record.is_some_and(|name| state_file(dest_root, name).is_file())
+    request_path(m, dest_root).is_some_and(|p| p.is_file())
+}
+
+/// The record's second line, `pending`, marks a recorded mod that this app
+/// took out or failed to install (a marketplace removal, an uninstall from a
+/// disabled target, a failed install), as opposed to one the operator
+/// removed. Repair installs a pending mod again.
+const PENDING: &str = "pending";
+
+fn pending(m: &Mod, dest_root: &Path) -> bool {
+    request_path(m, dest_root)
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .is_some_and(|text| text.lines().any(|l| l.trim() == PENDING))
+}
+
+/// Marks a recorded mod pending, or installed again. A mod with no record
+/// is left alone.
+fn set_pending(m: &Mod, dest_root: &Path, pending: bool) {
+    if let (true, Some(path)) = (recorded(m, dest_root), request_path(m, dest_root)) {
+        let text = if pending { format!("{}\n{PENDING}\n", m.id) } else { format!("{}\n", m.id) };
+        let _ = std::fs::write(path, text);
+    }
+}
+
+/// The mod a plugin id names, among the ones this marketplace ships.
+fn mod_by_id(id: &str) -> Option<Mod> {
+    [ATTEND, JUDGE].into_iter().find(|m| m.id == id)
+}
+
+/// Forgets that `m` was installed on request in the target at `dest_root`,
+/// so repair stops keeping it: the operator chose another engine, or
+/// removed the mod by hand.
+pub fn forget_request(m: &Mod, dest_root: &Path) -> std::io::Result<()> {
+    match request_path(m, dest_root).map(std::fs::remove_file) {
+        Some(Err(e)) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
 }
 
 /// True when a mod other than `m` is recorded as wanted in the target, so a
@@ -339,7 +396,9 @@ pub fn record_request(m: &Mod, dest_root: &Path) -> std::io::Result<()> {
 /// was added from. A failed marketplace call stops the plan, since every
 /// later call needs the marketplace; a failed plugin call is reported and
 /// the rest still run, so one mod's failure never costs the other its
-/// install. Returns one line per call made and per note.
+/// install. A recorded mod this app takes out, or fails to install, is
+/// marked pending, and one it installs is marked installed. Returns one line
+/// per call made and per note.
 fn execute(m: &Mod, claude: &Path, cfg: Option<&Path>, dest_root: &Path, plan: &Plan, dry_run: bool) -> Vec<String> {
     let label = m.label;
     let mut lines: Vec<String> = plan.notes.iter().map(|n| format!("{label}: {n}")).collect();
@@ -348,7 +407,20 @@ fn execute(m: &Mod, claude: &Path, cfg: Option<&Path>, dest_root: &Path, plan: &
             lines.push(format!("{label}: would run `claude {}`", call.args(m).join(" ")));
             continue;
         }
-        match claude_stdout(claude, cfg, &call.args(m)) {
+        let result = claude_stdout(claude, cfg, &call.args(m));
+        // The mod an install or uninstall acts on.
+        let target = match call {
+            Call::Install | Call::Uninstall => Some(*m),
+            Call::InstallSibling(id) => mod_by_id(id),
+            _ => None,
+        };
+        match (call, result.is_ok(), target) {
+            (Call::MarketplaceRemove, true, _) => [ATTEND, JUDGE].iter().for_each(|o| set_pending(o, dest_root, true)),
+            (Call::Install | Call::InstallSibling(_), ok, Some(t)) => set_pending(&t, dest_root, !ok),
+            (Call::Uninstall, true, Some(t)) => set_pending(&t, dest_root, true),
+            _ => {}
+        }
+        match result {
             Ok(_) => {
                 lines.push(format!("{label}: {}", call.describe(m)));
                 let record = record_path(dest_root);
@@ -382,6 +454,9 @@ fn execute(m: &Mod, claude: &Path, cfg: Option<&Path>, dest_root: &Path, plan: &
 pub enum Want {
     /// Install it, or update an older one.
     Install,
+    /// Keep a mod recorded as installed on request: install it again, or
+    /// update it, unless the operator removed it.
+    Keep,
     /// Remove it.
     Withdraw,
 }
@@ -392,7 +467,7 @@ pub fn converge(m: &Mod, source_root: &Path, dest_root: &Path, default_root: &Pa
     let label = m.label;
     let Some(shipped) = shipped_version(m, source_root) else { return Vec::new() };
     let Some(claude) = claude_bin() else {
-        let verb = if want == Want::Install { "installed" } else { "checked" };
+        let verb = if want == Want::Withdraw { "checked" } else { "installed" };
         return vec![format!("{label}: not {verb}: `claude` is not on PATH; re-run `ways manage repair --commit` once it is")];
     };
     let (cfg, _) = config_dir(dest_root, default_root);
@@ -404,7 +479,25 @@ pub fn converge(m: &Mod, source_root: &Path, dest_root: &Path, default_root: &Pa
     let recorded = read_record(dest_root);
     let recover = recover_command(cfg.as_deref());
     let plan = match want {
-        Want::Install => plan_converge(m, &have, &dir, recorded.as_deref(), &shipped, &recover),
+        // Not installed while its marketplace is this app's and current, and
+        // not taken out by this app: the operator removed it. A moved app's
+        // loss has a gone or stale marketplace, or is pending.
+        Want::Keep
+            if have.ours.is_none()
+                && !pending(m, dest_root)
+                && market(&have, &dir, recorded.as_deref()) == Market::Current =>
+        {
+            if dry_run {
+                return vec![format!("{label}: would stop keeping it: it was removed by hand")];
+            }
+            return vec![match forget_request(m, dest_root) {
+                Ok(()) => format!(
+                    "{label}: removed by hand, so repair no longer reinstalls it; `ways judge-setup` installs it again"
+                ),
+                Err(e) => format!("{label}: ⚠ removed by hand, and its record could not be cleared: {e}"),
+            }];
+        }
+        Want::Install | Want::Keep => plan_converge(m, &have, &dir, recorded.as_deref(), &shipped, &recover),
         Want::Withdraw => plan_withdraw(&have, &dir, recorded.as_deref(), &recover, wanted_by_other(m, dest_root)),
     };
     execute(m, &claude, cfg.as_deref(), dest_root, &plan, dry_run)
@@ -442,13 +535,16 @@ fn claude_code_version(out: &str) -> Option<&str> {
 fn new_enough(m: &Mod, out: &str) -> Result<(), String> {
     match claude_code_version(out) {
         Some(v) if !super::update::version_older(v, m.min_claude_code) => Ok(()),
-        Some(v) => Err(format!("Claude Code {v} is older than {}, the first whose mods can run the {}", m.min_claude_code, m.label)),
+        Some(v) => Err(format!(
+            "Claude Code {v} is older than {}, the oldest checked to carry the calls the {} makes",
+            m.min_claude_code, m.label
+        )),
         None => Err(format!("`claude --version` printed no version ({})", out.trim())),
     }
 }
 
 /// Whether this host can run `m`: `claude` is on PATH, it is at least the
-/// Claude Code whose mod API carries the mod's calls (`m.min_claude_code`),
+/// oldest Claude Code checked to carry the mod's calls (`m.min_claude_code`),
 /// and its plugin CLI answers for the target at `dest_root`. A mod's hooks
 /// module also loads behind a server-side rollout flag (ADR-406, addendum of
 /// 2026-10-12), which no local probe can read. The error names the host's
@@ -658,6 +754,15 @@ mod tests {
         // With no attend plugin from it, a gone folder proves nothing.
         let p = plan_converge(&ATTEND, &have(Some(gone), None), DIR, None, "0.17.0", "CMD");
         assert!(p.calls.is_empty() && p.notes.len() == 1, "{p:?}");
+    }
+
+    #[test]
+    fn the_enable_command_names_a_non_default_target() {
+        assert_eq!(enable_command_in(&JUDGE, None), "claude plugin enable ways-judge@agent-ways");
+        assert_eq!(
+            enable_command_in(&JUDGE, Some(Path::new("/t/claude-b"))),
+            "CLAUDE_CONFIG_DIR=/t/claude-b claude plugin enable ways-judge@agent-ways"
+        );
     }
 
     #[test]
