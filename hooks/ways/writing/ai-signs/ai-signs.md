@@ -57,3 +57,4 @@ One word can be chance. Several in one draft are the sign.
 - trust/prose(meta) — significance clauses in long prose you write
 - trust/voice(meta) — whose voice the draft speaks in
 - email/drafting(ea) — calibrating a reply from the user's sent mail
+- writing/ai-signs/actors(writing) — child: sentences that name who did what

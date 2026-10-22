@@ -40,3 +40,4 @@ Some platforms use browser-based sessions that expire. If a session has expired 
 
 - environment/attend(softwaredev) — peer messaging between Claude sessions; autonomous replies live there
 - email(ea) — the inbox side of the same triage
+- comms/messaging(ea) — composing and placing a post, thread reply or direct message

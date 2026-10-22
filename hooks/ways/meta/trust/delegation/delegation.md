@@ -49,3 +49,4 @@ This is the cost of operating through someone else's identity. A wrong email fro
 
 - trust(meta) — trust spectrum that governs delegation scope
 - tasks(ea) — task mutations require the same suggest-then-confirm pattern
+- trust/delegation/record-writes(meta) — child: a batch of writes to a system of record, confirmed and read back

@@ -16,6 +16,7 @@ Children of this way cover specific aspects of writing and maintaining code:
 | Security, auth, secrets | `code/security` |
 | Performance, profiling | `code/performance` |
 | Error handling, boundaries | `code/errors` |
+| Features that call a language model, MCP servers | `code/llm-features` |
 | Supply chain, dependencies | `code/supplychain` |
 
 ## See Also
@@ -26,3 +27,4 @@ Children of this way cover specific aspects of writing and maintaining code:
 - code/performance(softwaredev) — profiling and optimization
 - code/errors(softwaredev) — error handling boundaries
 - code/supplychain(softwaredev) — dependency and supply-chain integrity
+- code/llm-features(softwaredev) — features that call a model, and MCP servers

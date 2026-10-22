@@ -54,4 +54,5 @@ Not every question needs a structured investigation. If the answer is in the cod
 
 - architecture/design(softwaredev) — research feeds design decisions
 - think(meta) — structured thinking strategies for investigation
+- research/sweep(research) — child: a survey across many independent sources
 - research/provenance(research) — child: every claim, figure and citation traced to its source

@@ -41,3 +41,4 @@ When scanning across accounts, iterate each configured account for the relevant 
 - briefing(ea) — daily operational briefing
 - tasks(ea) — task management lifecycle
 - lookup(ea) — reading the record before acting, without side effects, with dates written out
+- accounts(ea) — which of the user's addresses sends, and checking each login works
