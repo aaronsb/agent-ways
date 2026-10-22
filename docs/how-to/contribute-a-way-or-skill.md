@@ -22,7 +22,8 @@ Decide which of the four kinds the draft is: way, skill, tool knowledge or postu
 
 - Phrase a way as how the work is done when the situation arises ([phrasing a way](../reference/contribution-kinds-and-review-evidence.md#phrasing-a-way)).
 - Write the pattern, not the incident. Leave out client, employer and person specifics. An anecdote with only the names removed still describes one engagement, so restate it as the general situation it stands for ([pii-free](../../hooks/ways/meta/knowledge/authoring/pii-free/pii-free.md)).
-- Keep the register sober. Injected text reads as doctrine, and the model imitates the register of what it reads ([ADR-178](../architecture/practice/ADR-178-register-transfers-by-demonstration-core-md-carries-policy.md)). Run `scripts/check-register.sh` and clear what it reports for your file. The [prose](../../hooks/ways/meta/trust/prose/prose.md) way lists the shapes to cut.
+- To extend an existing way, add a child way under it ([trees](../../hooks/ways/meta/knowledge/authoring/trees/trees.md)) and leave the parent's body as it is, apart from a See Also line. Each way then has one source, and either can be tuned or removed without the other.
+- Keep the register sober. Injected text reads as doctrine, and the model imitates the register of what it reads ([ADR-178](../architecture/practice/ADR-178-register-transfers-by-demonstration-core-md-carries-policy.md)). The [prose](../../hooks/ways/meta/trust/prose/prose.md) way lists the shapes that read as decoration.
 - Put a list of phrases, such as phrases to avoid or example wordings, only in a way that fires when someone asks for that work. A way that refires through long sessions repeats the list each time, and the model picks the phrases up.
 
 ## 3. Check the engine before tuning
@@ -88,4 +89,4 @@ Send one way or one skill per pull request. The description carries:
 - the kind, stated
 - the scenario that would show its effect, and the ablation result for a way when one was run, or the run for a skill
 - probe results against the held-out prompts, with the engine state from step 5
-- the output of `ways author lint <way-dir>` and `scripts/check-register.sh`
+- the output of `ways author lint <way-dir>`
