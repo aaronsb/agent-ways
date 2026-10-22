@@ -63,13 +63,14 @@ fn names_root(tree_path: &Path, ways_root: &Path) -> PathBuf {
     }
 }
 
-/// A directory's name relative to `root`; `.` for the root itself.
+/// A directory's name relative to `root`, joined with '/' on every platform as
+/// the corpus names a way; `.` for the root itself.
 fn way_id(dir: &Path, root: &Path) -> String {
     let rel = dir.strip_prefix(root).unwrap_or(dir);
     if rel.as_os_str().is_empty() {
         ".".to_string()
     } else {
-        rel.display().to_string()
+        crate::util::path_to_id(rel)
     }
 }
 
@@ -270,3 +271,20 @@ fn extract_threshold_from_content(content: &str) -> Option<f64> {
     crate::frontmatter::field_in(content, "threshold")?.parse().ok()
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn way_id_joins_components_with_slash() {
+        let root: PathBuf = ["hooks", "ways"].iter().collect();
+        let dir: PathBuf = ["hooks", "ways", "prose", "editing", "tone"].iter().collect();
+        let id = way_id(&dir, &root);
+        assert_eq!(id, "prose/editing/tone");
+        assert!(!id.contains('\\'), "platform separator in {id}");
+        let file = dir.join("tone.md");
+        assert_eq!(file_way_id(&file, &root), "prose/editing/tone");
+        assert_eq!(way_id(&root, &root), ".");
+    }
+}
