@@ -10,7 +10,29 @@
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
-fn fixture(tag: &str) -> PathBuf {
+/// A fixture home, removed with its contents when dropped.
+struct Home(PathBuf);
+
+impl std::ops::Deref for Home {
+    type Target = PathBuf;
+    fn deref(&self) -> &PathBuf {
+        &self.0
+    }
+}
+
+impl AsRef<std::ffi::OsStr> for Home {
+    fn as_ref(&self) -> &std::ffi::OsStr {
+        self.0.as_os_str()
+    }
+}
+
+impl Drop for Home {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn fixture(tag: &str) -> Home {
     let d = std::env::temp_dir().join(format!("attend-legacy-removed-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
@@ -24,10 +46,10 @@ fn fixture(tag: &str) -> PathBuf {
         format!(r#"{{"pid":{pid},"sessionId":"test-session-{tag}","cwd":"/tmp/fixture-{tag}"}}"#),
     )
     .unwrap();
-    d
+    Home(d)
 }
 
-fn attend(tag: &str, args: &[&str]) -> (Output, PathBuf) {
+fn attend(tag: &str, args: &[&str]) -> (Output, Home) {
     let home = fixture(tag);
     let out = Command::new(env!("CARGO_BIN_EXE_attend"))
         .args(args)
