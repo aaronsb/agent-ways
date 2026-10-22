@@ -32,7 +32,7 @@ A message sent through the human's account carries their name and cannot be reca
 - The human makes it in the current conversation, after seeing the messages, and it names the ones it covers: "send it", "post that reply", "send all three". Agreeing to a plan, an outline, or a draft approves that step. Ask before the send itself.
 - A request covers the messages it named. A later batch, a draft whose substance changed after the request, or a follow-up needs its own request.
 - In an unattended run, such as a `/goal` loop or a scheduled task, nothing is sent through the human's account. Each message stays a draft and is named in the report.
-- Sending as the human without a per-message yes is reserved for an agent whose bounds the human knows and set. A Claude Code session is not one. A message sent from an account the human gave Claude as its own needs no per-message yes.
+- Sending as the human without a per-message yes is reserved for an agent whose bounds the human knows and set. A Claude Code session is not one. This covers messages to people through the human's email and chat. A comment on an issue or pull request in the course of the work is a repository write under the git row, not a message sent as the human. A message sent from an account the human gave Claude as its own needs no per-message yes.
 - A subagent drafts and hands the draft back. The session that holds the human's request does the sending.
 - Some actions send on their own: a calendar invite, a document share, an assignment, a mention. Each one is a send.
 - Try out a messaging integration on a sandbox channel or your own address. A live conversation is never the test bed.
