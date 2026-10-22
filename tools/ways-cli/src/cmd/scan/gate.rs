@@ -41,6 +41,12 @@ const READ_GRACE: Duration = Duration::from_millis(1500);
 /// refuses a `timeoutMs` of 0, and a call given less than this cannot answer.
 const MIN_JOB: Duration = Duration::from_millis(50);
 
+/// How long a written job waits for a host to claim it. A host that is up
+/// claims within milliseconds of the scan writing it (ADR-709 measured 22 ms
+/// end to end); past this the host is taken to be gone, and the prompt
+/// fails open now instead of waiting out the whole budget.
+const CLAIM_WINDOW: Duration = Duration::from_millis(500);
+
 /// Where gate events go: `session::log_event` in the hook.
 pub(super) type EventSink<'a> = &'a dyn Fn(&[(&str, &str)]);
 
@@ -216,9 +222,16 @@ fn apply_from(
         let provider = resolution.engine.as_ref().and_then(|e| profiles.get(e)).map(|p| p.provider);
         SessionEngine { resolution, provider }
     };
+    // `resolve` borrows only, so it is Copy and still here for the fallback.
     let session = match store.map(|s| s.resolve_once(resolve)) {
         Some(Ok(found)) => found,
-        Some(Err(e)) => return fallback(&format!("resolution: {e}"), to_judge, log, "0"),
+        // A state directory that cannot hold the resolution: resolve for this
+        // request alone, with no host, which never names claude-code, so the
+        // request goes to the agent and no job is written.
+        Some(Err(e)) => {
+            eprintln!("[ways] judge state: {e}; judging without the session's held engine");
+            resolve(false)
+        }
         None => resolve(false),
     };
     let Some(name) = session.resolution.engine else {
@@ -237,8 +250,9 @@ fn apply_from(
         (Provider::ClaudeCode, Some(store)) => {
             run(pending, prompt, response_context, &settings, log, |req, _| handoff(store, &settings, req, begun))
         }
-        // `resolve(false)` never names claude-code.
-        (Provider::ClaudeCode, None) => unreachable!("a session with no store has no host"),
+        // `resolve(false)` never names claude-code, so this is a bug; it
+        // fails open like any other failure.
+        (Provider::ClaudeCode, None) => fallback("internal: a claude-code session with no judge store", to_judge, log, "0"),
         _ => run(pending, prompt, response_context, &settings, log, |mut req, timeout| {
             req.engine = Some(settings.engine.clone());
             call(req, timeout)
@@ -283,8 +297,10 @@ fn settings(
 /// and parses it with [`judge::parse_reply`]. The job's own `timeout_ms` is
 /// what remains of the budget when it is written. Every failure comes back
 /// as a fallback reply, carrying a call when the host took the job and so
-/// may have spent one: `deadline` on silence, `invalid_reply: …` on a reply
-/// that does not parse, `model_error: …` when the model call failed.
+/// may have spent one: `deadline: unclaimed` when no host claims the job
+/// within [`CLAIM_WINDOW`], `deadline` on silence after a claim,
+/// `invalid_reply: …` on a reply that does not parse, `model_error: …` when
+/// the model call failed.
 fn handoff(store: &Store, settings: &Settings, req: JudgeRequest, begun: Instant) -> Result<Reply, String> {
     let p = &settings.profile;
     let budget = Duration::from_millis(p.timeout_ms);
@@ -303,7 +319,7 @@ fn handoff(store: &Store, settings: &Settings, req: JudgeRequest, begun: Instant
     };
     let id = store.write_job(&job).map_err(|e| format!("job: {e}"))?;
     let written = Instant::now();
-    let waited = store.wait_answer(&id, begun + budget + READ_GRACE);
+    let waited = store.wait_answer(&id, written + CLAIM_WINDOW, begun + budget + READ_GRACE);
     store.finish(&id);
     let latency_ms = written.elapsed().as_millis() as u64;
     // The spend is the account's usage: no price (ADR-708 §10).
@@ -318,6 +334,7 @@ fn handoff(store: &Store, settings: &Settings, req: JudgeRequest, begun: Instant
     };
     let JudgeAnswer { text, usage, reason } = match waited {
         Waited::Answered(a) => a,
+        Waited::Unclaimed => return Ok(Reply::Fallback { reason: "deadline: unclaimed".into(), latency_ms, call: None }),
         Waited::Silent { taken } => {
             return Ok(Reply::Fallback { reason: "deadline".into(), latency_ms, call: taken.then(|| Box::new(call(None))) })
         }
@@ -996,7 +1013,7 @@ mod tests {
             while Instant::now() < until {
                 if let Some(t) = store.take().unwrap() {
                     if let Some(a) = reply(&t) {
-                        store.answer(Some(&t.id), &a).unwrap();
+                        store.answer(&t.id, &a).unwrap();
                     }
                     return Some(t);
                 }
@@ -1079,22 +1096,80 @@ mod tests {
     fn silence_fails_open_as_deadline() {
         let s = Session::new("silence", "engine: claude-code\nmode: enforce\nprofiles:\n  claude-code:\n    timeout_ms: 200\n");
         s.store.register_host().unwrap();
-        // No host takes the job: nothing was spent, so no call is logged.
-        let events = Events::default();
-        let g = s.gate(false, &events, &Default::default());
-        assert_eq!(g.status, Status::Fallback { reason: "deadline".into() });
-        assert!(g.ids().is_empty());
-        assert!(calls(&events).is_empty(), "an unclaimed job made no call");
-        assert_eq!(field(events.borrow().iter().find(|e| field(e, "event") == "gate_fallback").unwrap(), "reason"), "deadline");
-        // A host takes it and never answers: a call of unknown cost.
+        // A host takes the job and never answers: the gate stops within its
+        // budget plus the read grace, and logs a call of unknown cost.
         let events = Events::default();
         let h = host(&s.store, |_| None);
+        let begun = Instant::now();
         let g = s.gate(false, &events, &Default::default());
+        let took = begun.elapsed();
         h.join().unwrap().expect("taken");
         assert_eq!(g.status, Status::Fallback { reason: "deadline".into() });
+        assert!(g.ids().is_empty());
+        assert!(took < Duration::from_millis(200) + READ_GRACE + Duration::from_millis(500), "{took:?}");
+        assert!(took >= Duration::from_millis(200) + READ_GRACE, "it waited out the grace: {took:?}");
+        assert_eq!(field(events.borrow().iter().find(|e| field(e, "event") == "gate_fallback").unwrap(), "reason"), "deadline");
         let calls = calls(&events);
         assert_eq!(calls.len(), 1);
         assert_eq!((field(&calls[0], "engine"), field(&calls[0], "reason"), field(&calls[0], "cost_source")), ("claude-code", "deadline", "unknown"));
+    }
+
+    /// A claude-code session whose host has gone: no one claims the job, and
+    /// each prompt fails open after the claim window, not the whole budget.
+    #[test]
+    fn an_unclaimed_job_fails_open_after_the_claim_window() {
+        let s = Session::new("unclaimed", CLAUDE_CODE);
+        s.store.register_host().unwrap();
+        let events = Events::default();
+        let begun = Instant::now();
+        let g = s.gate(false, &events, &Default::default());
+        let took = begun.elapsed();
+        assert_eq!(g.status, Status::Fallback { reason: "deadline: unclaimed".into() });
+        assert!(took >= CLAIM_WINDOW && took < CLAIM_WINDOW + Duration::from_millis(400), "{took:?}");
+        assert!(calls(&events).is_empty(), "an unclaimed job made no call");
+        assert_eq!(s.store.take().unwrap(), None, "the job was withdrawn");
+    }
+
+    /// No host and no key: no engine, and that is not held, so a key added
+    /// mid-session judges the next prompt.
+    #[test]
+    fn a_key_added_after_an_unavailable_prompt_judges_the_next() {
+        let s = Session::new("key-later", CLAUDE_CODE);
+        let agent = Default::default();
+        let g = s.gate(false, &Events::default(), &agent);
+        assert!(matches!(&g.status, Status::Fallback { reason } if reason.starts_with("engine_unavailable")), "{:?}", g.status);
+        assert!(s.store.resolution().is_none());
+        let g = s.gate(true, &Events::default(), &agent);
+        assert!(matches!(g.status, Status::Judged { .. }), "{:?}", g.status);
+        assert_eq!(*agent.borrow(), [Some("anthropic".to_string())]);
+        assert_eq!(s.store.resolution().unwrap().resolution.engine.as_deref(), Some("anthropic"));
+    }
+
+    /// Judge state that cannot be kept, or does not parse: the request
+    /// resolves in memory with no host and goes to the agent; no job.
+    #[test]
+    fn judge_state_that_cannot_be_kept_resolves_in_memory_on_the_agent_path() {
+        let s = Session::new("bad-state", CLAUDE_CODE);
+        s.store.register_host().unwrap();
+        std::fs::write(s.base.join("state/resolution.json"), "{not json").unwrap();
+        let agent = Default::default();
+        let g = s.gate(true, &Events::default(), &agent);
+        assert!(matches!(g.status, Status::Judged { .. }), "{:?}", g.status);
+        assert_eq!(*agent.borrow(), [Some("anthropic".to_string())]);
+        assert!(!s.base.join("run/jobs").exists(), "no job");
+
+        let s = Session::new("unwritable-state", CLAUDE_CODE);
+        std::fs::write(s.base.join("file"), "").unwrap();
+        let store = Store::at(s.base.join("file/state"), s.base.join("run"));
+        let events = Events::default();
+        let sink = recorder(&events);
+        let agent = std::cell::RefCell::new(Vec::new());
+        let g = apply_from(&s.yaml, |_| true, Some(&store), &pending(), "q", None, &log(&sink), |req, _| {
+            agent.borrow_mut().push(req.engine.clone());
+            Ok(judged(Mode::Enforce, &[]))
+        });
+        assert!(matches!(g.status, Status::Judged { .. }), "{:?}", g.status);
+        assert_eq!(*agent.borrow(), [Some("anthropic".to_string())]);
     }
 
     #[test]

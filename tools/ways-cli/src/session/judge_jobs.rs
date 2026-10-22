@@ -46,6 +46,8 @@ pub struct Taken {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Waited {
     Answered(JudgeAnswer),
+    /// No host claimed the job in its window, and it was withdrawn.
+    Unclaimed,
     /// Nothing arrived by the deadline. `taken` says whether the host
     /// claimed the job, and so may have spent a model call on it.
     Silent { taken: bool },
@@ -120,20 +122,25 @@ impl Store {
     }
 
     /// The session's resolution, resolving it with `resolve` when it has
-    /// none. `resolve` gets whether a host registered. The file is published
-    /// by an exclusive create, so of two first requests racing, one
-    /// resolution stands and both return it.
+    /// none. `resolve` gets whether a host registered. A resolution that
+    /// names an engine is published by an exclusive create, so of two first
+    /// requests racing, one stands and both return it. One that names none
+    /// is returned and not kept: the next request resolves again, so a key
+    /// added mid-session takes effect.
     pub fn resolve_once(&self, resolve: impl FnOnce(bool) -> SessionEngine) -> io::Result<SessionEngine> {
         if let Some(found) = self.resolution() {
             return Ok(found);
         }
-        std::fs::create_dir_all(&self.state)?;
         let mine = resolve(self.host_registered());
+        if mine.resolution.engine.is_none() {
+            return Ok(mine);
+        }
+        std::fs::create_dir_all(&self.state)?;
         let tmp = self.state.join(format!(".resolution.{}", unique()));
-        std::fs::write(&tmp, serde_json::to_vec(&mine)?)?;
+        let written = std::fs::write(&tmp, serde_json::to_vec(&mine)?);
         // link(2) fails when the name exists: the exclusive create, with the
         // content already in place for any reader.
-        let linked = std::fs::hard_link(&tmp, self.resolution_path());
+        let linked = written.and_then(|()| std::fs::hard_link(&tmp, self.resolution_path()));
         let _ = std::fs::remove_file(&tmp);
         match linked {
             Ok(()) => Ok(mine),
@@ -144,10 +151,14 @@ impl Store {
         }
     }
 
-    /// Writes `job` for the host and returns its id.
+    /// Writes `job` for the host and returns its id. The job directory is
+    /// the user's alone (0700 on Unix): a job carries conversation text.
     pub fn write_job(&self, job: &JudgeJob) -> io::Result<String> {
         let dir = self.jobs();
-        std::fs::create_dir_all(&dir)?;
+        if let Some(session) = self.run.parent() {
+            std::fs::create_dir_all(session)?;
+        }
+        private_dir(&dir)?;
         let id = unique();
         place(&dir, &format!("{id}.json"), &serde_json::to_vec(job)?)?;
         Ok(id)
@@ -187,47 +198,39 @@ impl Store {
         Ok(None)
     }
 
-    /// Stores the host's answer to job `id`, or to the newest claimed job
-    /// when `id` is `None`.
-    pub fn answer(&self, id: Option<&str>, answer: &JudgeAnswer) -> Result<String, AnswerError> {
+    /// Stores the host's answer to job `id`, the id `take` printed.
+    pub fn answer(&self, id: &str, answer: &JudgeAnswer) -> Result<(), AnswerError> {
         let dir = self.jobs();
-        let id = match id {
-            Some(id) if valid_id(id) => id.to_string(),
-            Some(id) => return Err(AnswerError::NoJob(format!("not a job id: {id:?}"))),
-            None => {
-                let taken: Vec<String> = std::fs::read_dir(&dir)
-                    .map(|entries| {
-                        entries
-                            .flatten()
-                            .filter_map(|e| e.file_name().to_str().and_then(|n| n.strip_suffix(".taken")).map(str::to_string))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                // The newest: the prompt lane's gates wait one at a time, and
-                // an older claimed job's gate is about to clear it.
-                match taken.into_iter().max() {
-                    Some(newest) => newest,
-                    None => return Err(AnswerError::NoJob("no claimed job to answer".into())),
-                }
-            }
-        };
+        if !valid_id(id) {
+            return Err(AnswerError::NoJob(format!("not a job id: {id:?}")));
+        }
         if !dir.join(format!("{id}.taken")).is_file() {
             return Err(AnswerError::NoJob(format!("job {id} is not claimed or its gate stopped waiting")));
         }
         let body = serde_json::to_vec(answer).map_err(|e| AnswerError::Io(e.into()))?;
-        place(&dir, &format!("{id}.answer"), &body).map_err(AnswerError::Io)?;
-        Ok(id)
+        place(&dir, &format!("{id}.answer"), &body).map_err(AnswerError::Io)
     }
 
-    /// Waits for job `id`'s answer until `deadline`. An answer that does not
+    /// Waits for job `id`'s answer until `deadline`. A job no host has
+    /// claimed by `claim_by` is withdrawn and the wait ends as
+    /// [`Waited::Unclaimed`]: the host is gone. An answer that does not
     /// parse counts as none.
-    pub fn wait_answer(&self, id: &str, deadline: Instant) -> Waited {
+    pub fn wait_answer(&self, id: &str, claim_by: Instant, deadline: Instant) -> Waited {
         let dir = self.jobs();
         let path = dir.join(format!("{id}.answer"));
+        let mut claimed = false;
         loop {
             if let Ok(text) = std::fs::read_to_string(&path) {
                 if let Ok(a) = serde_json::from_str::<JudgeAnswer>(&text) {
                     return Waited::Answered(a);
+                }
+            }
+            if !claimed && Instant::now() >= claim_by {
+                // Removing the pending file races the host's claiming rename:
+                // one of them wins. Gone already means the host claimed it.
+                match std::fs::remove_file(dir.join(format!("{id}.json"))) {
+                    Ok(()) => return Waited::Unclaimed,
+                    Err(_) => claimed = true,
                 }
             }
             if Instant::now() >= deadline {
@@ -286,15 +289,29 @@ fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit() || b == b'-')
 }
 
-/// Writes `body` as `dir/name`, whole: to a dot-file beside it, then renamed.
+/// Writes `body` as `dir/name`, whole and readable by the user alone (0600
+/// on Unix): to a dot-file beside it, then renamed.
 fn place(dir: &Path, name: &str, body: &[u8]) -> io::Result<()> {
     let tmp = dir.join(format!(".{name}.{}", unique()));
-    let mut f = std::fs::File::create(&tmp)?;
-    f.write_all(body)?;
-    drop(f);
-    std::fs::rename(&tmp, dir.join(name)).inspect_err(|_| {
+    let mut open = std::fs::OpenOptions::new();
+    open.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut open, 0o600);
+    let written = open.open(&tmp).and_then(|mut f| f.write_all(body)).and_then(|()| std::fs::rename(&tmp, dir.join(name)));
+    if written.is_err() {
         let _ = std::fs::remove_file(&tmp);
-    })
+    }
+    written
+}
+
+/// Creates `dir` and any missing parents up to it as the user's alone (0700
+/// on Unix). A directory that exists is left as it is.
+fn private_dir(dir: &Path) -> io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(dir)
 }
 
 #[cfg(test)]
@@ -367,10 +384,77 @@ mod tests {
         assert_eq!((taken.id.as_str(), &taken.job), (id.as_str(), &job(2000)));
         assert_eq!(s.take().unwrap(), None, "claimed once");
         let a = JudgeAnswer { text: Some("{}".into()), ..Default::default() };
-        assert_eq!(s.answer(None, &a).unwrap(), id);
-        assert_eq!(s.wait_answer(&id, Instant::now()), Waited::Answered(a));
+        s.answer(&id, &a).unwrap();
+        assert_eq!(s.wait_answer(&id, Instant::now(), Instant::now()), Waited::Answered(a));
         s.finish(&id);
         assert_eq!(std::fs::read_dir(base.join("run/jobs")).unwrap().count(), 0);
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn a_resolution_with_no_engine_is_not_kept() {
+        let (s, base) = store("none");
+        let none = SessionEngine { resolution: Resolution { engine: None, reason: "engine_unavailable: x".into() }, provider: None };
+        assert_eq!(s.resolve_once(|_| none.clone()).unwrap(), none);
+        assert_eq!(s.resolution(), None, "not written");
+        // The next request resolves again, and a key engine found then stands.
+        let later = engine("anthropic", Provider::Anthropic, NO_HOST);
+        assert_eq!(s.resolve_once(|_| later.clone()).unwrap(), later);
+        assert_eq!(s.resolution(), Some(later));
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn a_state_dir_that_cannot_be_written_or_read_is_an_error_and_leaves_nothing() {
+        // A regular file where the state root's parent should be: no
+        // directory can be made under it, as root or not.
+        let (_, base) = store("unwritable");
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(base.join("file"), "").unwrap();
+        let s = Store::at(base.join("file/state"), base.join("run"));
+        assert!(s.resolve_once(|_| engine("anthropic", Provider::Anthropic, EXPLICIT)).is_err());
+        // A resolution.json that does not parse cannot be replaced.
+        let (s, base2) = store("garbage");
+        std::fs::create_dir_all(base2.join("state")).unwrap();
+        std::fs::write(base2.join("state/resolution.json"), "{not json").unwrap();
+        assert!(s.resolve_once(|_| engine("anthropic", Provider::Anthropic, EXPLICIT)).is_err());
+        let names: Vec<_> = std::fs::read_dir(base2.join("state")).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(names, ["resolution.json"], "no temp file left");
+        std::fs::remove_dir_all(&base).ok();
+        std::fs::remove_dir_all(&base2).ok();
+    }
+
+    #[test]
+    fn a_job_no_host_claims_in_its_window_is_withdrawn() {
+        let (s, base) = store("unclaimed");
+        let id = s.write_job(&job(2000)).unwrap();
+        let begun = Instant::now();
+        let w = s.wait_answer(&id, begun + Duration::from_millis(100), begun + Duration::from_secs(5));
+        assert_eq!(w, Waited::Unclaimed);
+        assert!(begun.elapsed() < Duration::from_secs(1), "{:?}", begun.elapsed());
+        assert_eq!(s.take().unwrap(), None, "withdrawn: no host can claim it now");
+        // A job claimed inside the window is waited on to the deadline.
+        let id = s.write_job(&job(2000)).unwrap();
+        s.take().unwrap().unwrap();
+        let begun = Instant::now();
+        let w = s.wait_answer(&id, begun, begun + Duration::from_millis(200));
+        assert_eq!(w, Waited::Silent { taken: true });
+        assert!(begun.elapsed() >= Duration::from_millis(200));
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn jobs_and_answers_are_the_users_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let (s, base) = store("modes");
+        let id = s.write_job(&job(2000)).unwrap();
+        let mode = |p: &str| std::fs::metadata(base.join(p)).unwrap().permissions().mode() & 0o777;
+        assert_eq!((mode("run"), mode("run/jobs")), (0o700, 0o700));
+        assert_eq!(mode(&format!("run/jobs/{id}.json")), 0o600);
+        s.take().unwrap().unwrap();
+        s.answer(&id, &JudgeAnswer::default()).unwrap();
+        assert_eq!(mode(&format!("run/jobs/{id}.answer")), 0o600);
         std::fs::remove_dir_all(&base).ok();
     }
 
@@ -386,9 +470,10 @@ mod tests {
     fn silence_says_whether_the_host_claimed_the_job() {
         let (s, base) = store("silent");
         let id = s.write_job(&job(2000)).unwrap();
-        assert_eq!(s.wait_answer(&id, Instant::now()), Waited::Silent { taken: false });
+        let later = Instant::now() + Duration::from_secs(5);
+        assert_eq!(s.wait_answer(&id, later, Instant::now()), Waited::Silent { taken: false });
         s.take().unwrap().unwrap();
-        assert_eq!(s.wait_answer(&id, Instant::now() + POLL * 2), Waited::Silent { taken: true });
+        assert_eq!(s.wait_answer(&id, later, Instant::now() + POLL * 2), Waited::Silent { taken: true });
         std::fs::remove_dir_all(&base).ok();
     }
 
@@ -398,11 +483,10 @@ mod tests {
         let id = s.write_job(&job(2000)).unwrap();
         s.take().unwrap().unwrap();
         s.finish(&id);
-        let err = s.answer(Some(&id), &JudgeAnswer::default()).unwrap_err();
+        let err = s.answer(&id, &JudgeAnswer::default()).unwrap_err();
         assert!(matches!(err, AnswerError::NoJob(_)), "{err}");
         assert!(!base.join(format!("run/jobs/{id}.answer")).exists());
-        assert!(matches!(s.answer(None, &JudgeAnswer::default()), Err(AnswerError::NoJob(_))));
-        assert!(matches!(s.answer(Some("../x"), &JudgeAnswer::default()), Err(AnswerError::NoJob(_))));
+        assert!(matches!(s.answer("../x", &JudgeAnswer::default()), Err(AnswerError::NoJob(_))));
         std::fs::remove_dir_all(&base).ok();
     }
 

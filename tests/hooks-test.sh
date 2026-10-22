@@ -582,7 +582,7 @@ judged_prompt() {  # session relevant -> the hook's additionalContext
     "$W" judge host --session "$1"
     ( "$W" judge take --session "$1" --wait --timeout-ms 8000 > "$WORK/$1.job"
       printf '{"text":"```json\\n{\\"judgements\\":[{\\"id\\":\\"g1\\",\\"relevant\\":%s,\\"confidence\\":0.95}]}\\n```","usage":{"input_tokens":900,"output_tokens":40,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}' "$2" \
-        | "$W" judge answer --session "$1" ) &
+        | "$W" judge answer --session "$1" --job "$(jq -r .id "$WORK/$1.job")" ) &
     jq -cn --arg s "$1" --arg c "$WORK/project" '{session_id:$s,cwd:$c,hook_event_name:"UserPromptSubmit",prompt:"please frobnicate the widget"}' \
         | bash "$HOOKS/check-prompt.sh" | jq -r '.hookSpecificOutput.additionalContext // empty'
     wait
@@ -600,14 +600,16 @@ check "with no engine the way is shown unjudged" "# Frob way body" \
     "$(jq -cn --arg c "$WORK/project" '{session_id:"sess-host-key",cwd:$c,hook_event_name:"UserPromptSubmit",prompt:"please frobnicate the widget"}' \
         | bash "$HOOKS/check-prompt.sh" | jq -r '.hookSpecificOutput.additionalContext // empty')"
 check "take says standby for a session on another engine" "standby" "$("$W" judge take --session sess-host-key --wait --timeout-ms 5000)"
-# The mod stops a take it no longer needs with SIGTERM: a clean exit, no output.
+# The mod stops a take it no longer needs with SIGTERM: a clean exit, no
+# output. Under claude-code with no resolution yet, take waits for a job.
+printf 'engine: claude-code\nmode: enforce\n' > "$XDG_CONFIG_HOME/agent-ways/agent.yaml"
 "$W" judge take --session sess-host-idle --wait --timeout-ms 20000 > "$WORK/idle.out" &
 take_pid=$!
 sleep 0.3
 kill -TERM "$take_pid"
 wait "$take_pid"
 check "take exits 0 and prints nothing on SIGTERM" "0:" "$?:$(cat "$WORK/idle.out")"
-check "a late answer is dropped quietly" "0" "$(echo '{"text":"x","usage":{"input_tokens":0,"output_tokens":0}}' | "$W" judge answer --session sess-host-idle; echo $?)"
+check "a late answer is dropped quietly" "0" "$(echo '{"text":"x","usage":{"input_tokens":0,"output_tokens":0}}' | "$W" judge answer --session sess-host-idle --job 1-2-3; echo $?)"
 rm -rf "$CORE/judgedom" "$XDG_CONFIG_HOME/agent-ways/agent.yaml"
 
 # attend-drain-stop.sh passes the drain's stdout and stdin through, and ends
