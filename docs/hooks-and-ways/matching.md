@@ -144,7 +144,7 @@ The matcher itself is stateless per call — it reads session markers every turn
 The default and most common mode. Three fields can be tested independently:
 
 - `pattern:` - tested against the user's prompt text
-- `commands:` - tested against bash commands (PreToolUse:Bash)
+- `commands:` - tested against each operative segment of a bash command (PreToolUse:Bash), from the segment's start and from its program word. `^gh` matches `git push && gh pr create` and `GH_TOKEN=x gh pr list`. A pattern cannot span `&&`, `;` or a pipe. The arguments of navigation segments (`cd`, `echo`, an assignment) and of filters after a pipe, and heredoc bodies, are not matched (ADR-188 item 3a).
 - `files:` - tested against file paths (PreToolUse:Edit|Write)
 - `tool_name:` - tested against the tool name (on the tools the settings matcher wires, at the events `tool_event:` lists)
 

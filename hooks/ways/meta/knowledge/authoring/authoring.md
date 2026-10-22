@@ -31,7 +31,7 @@ If you still want regex-only, that's your choice, but expect poor recall on natu
 
 **Other trigger types** (not prompt-based, semantic doesn't apply):
 - `files:` — regex matched against file paths (Edit/Write hooks)
-- `commands:` — regex matched against bash commands
+- `commands:` — regex matched against each operative segment of a bash command: `^` anchors at the start of a segment, a pattern cannot span `&&`, `;` or a pipe, and the arguments of navigation and filter segments and heredoc bodies are not matched
 - `tool_name:` — regex matched against the tool name on the tools the hooks wire, with `tool_event:` listing the hook events, `[PreToolUse]` by default
 - `trigger:` — state-based (context-threshold, file-exists, session-start)
 

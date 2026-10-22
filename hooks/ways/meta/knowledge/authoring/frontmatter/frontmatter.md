@@ -14,7 +14,7 @@ All values must be single-line. `ways author lint` validates each field against 
 - `pattern:` - Regex matched against user prompts
 - `pattern_strict:`, `pattern_keep:` - keyword-lane modifiers; see knowledge/authoring/keyword-lane(meta)
 - `files:` - Regex matched against file paths (Edit/Write)
-- `commands:` - Regex matched against bash commands
+- `commands:` - Regex matched against each operative segment of a bash command. `^` anchors at the start of a segment, a pattern cannot span `&&`, `;` or a pipe, and the arguments of navigation and filter segments (`cd`, `echo`, a `grep` after a pipe) and heredoc bodies are not matched
 - `tool_name:` - Regex matched against the tool name on wired tools. `tool_event:` lists the hook events, e.g. `[PreToolUse, PostToolUse]`; the default is `[PreToolUse]`
 
 ## Semantic
