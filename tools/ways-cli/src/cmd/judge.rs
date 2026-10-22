@@ -69,7 +69,7 @@ fn reason(state: &Readiness) -> Option<(String, String)> {
 /// The command that enables the ways-judge mod in the first enabled target
 /// that holds it disabled, naming that target's config dir when it is not
 /// the default.
-fn enable_command() -> String {
+pub(crate) fn enable_command() -> String {
     let projection = crate::paths::projection_root();
     let disabled = enabled_targets()
         .into_iter()
@@ -296,10 +296,11 @@ fn add_key(bin: &std::path::Path, provider: Provider) -> Result<()> {
 }
 
 /// Once the operator chose a key engine or no judge, repair stops keeping
-/// the ways-judge mod: each enabled target's record of its install goes. The
-/// mod itself stays as it is, and stands down under any other engine.
+/// the ways-judge mod: every target's record of its install goes, a disabled
+/// target's included, so enabling that target again does not reinstall it.
+/// The mod itself stays as it is, and stands down under any other engine.
 fn stop_keeping_mod() -> Result<()> {
-    for dir in enabled_targets() {
+    for dir in crate::config::global().targets().into_iter().map(|t| t.dir()) {
         attend_mod::forget_request(&JUDGE, &dir).with_context(|| format!("clearing the ways-judge mod's record for {}", dir.display()))?;
     }
     Ok(())
