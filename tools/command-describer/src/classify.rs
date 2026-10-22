@@ -15,11 +15,11 @@ pub(crate) fn build(src: &str, excluded: &[Range<usize>], raw: RawSegment) -> Op
     let span = tokens.first()?.span.start..tokens.last()?.span.end;
     let text = cut(src, &span, excluded);
 
-    let words: Vec<&str> = tokens
+    let word_tokens: Vec<&Token> = tokens
         .iter()
         .filter(|t| t.kind == TokenKind::Word)
-        .map(|t| t.value.as_str())
         .collect();
+    let words: Vec<&str> = word_tokens.iter().map(|t| t.value.as_str()).collect();
     let redirect = writes_file(tokens);
 
     let at = program_index(&words);
@@ -35,8 +35,10 @@ pub(crate) fn build(src: &str, excluded: &[Range<usize>], raw: RawSegment) -> Op
             class: None,
             span,
             text,
+            program_at: 0,
         });
     };
+    let program_at = text_offset(word_tokens[at].span.start, &span, excluded);
     let rest = &words[at + 1..];
     let (subcommand, flags) = subcommand_and_flags(program, rest);
 
@@ -73,6 +75,7 @@ pub(crate) fn build(src: &str, excluded: &[Range<usize>], raw: RawSegment) -> Op
         class,
         span,
         text,
+        program_at,
     })
 }
 
@@ -122,6 +125,18 @@ fn cut(src: &str, span: &Range<usize>, excluded: &[Range<usize>]) -> String {
     }
     text.push_str(&src[p..span.end]);
     text
+}
+
+/// The byte offset in the segment's text of source position `pos`: its
+/// distance from the span's start, less any excluded range cut before it.
+fn text_offset(pos: usize, span: &Range<usize>, excluded: &[Range<usize>]) -> usize {
+    let cut_before: usize = excluded
+        .iter()
+        .map(|r| r.start.max(span.start)..r.end.min(pos))
+        .filter(|r| r.start < r.end)
+        .map(|r| r.end - r.start)
+        .sum();
+    pos - span.start - cut_before
 }
 
 /// Output goes to a file: `>`, `>>`, `>|`, `&>` or `&>>` to a target other

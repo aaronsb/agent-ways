@@ -191,11 +191,21 @@ pub struct Segment {
     pub span: Range<usize>,
     /// The original text over `span`, with any heredoc body inside it cut out.
     pub text: String,
+    /// Byte offset in `text` where the program word starts, past leading
+    /// assignments and wrappers; 0 when `program` is `None`.
+    pub program_at: usize,
 }
 
 impl Segment {
     pub fn is_operative(&self) -> bool {
         self.role == Role::Operative
+    }
+
+    /// The segment's text from its program word on: `gh pr create` for
+    /// `GH_TOKEN=x gh pr create`, `pacman -S foo` for `sudo pacman -S foo`.
+    /// The whole text when the segment has no program.
+    pub fn program_text(&self) -> &str {
+        &self.text[self.program_at..]
     }
 
     /// Program, subcommand and flags, space-joined, with arguments and paths

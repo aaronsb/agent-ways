@@ -632,6 +632,34 @@ fn per_segment_text_lets_an_anchored_regex_match_after_a_connector() {
 }
 
 #[test]
+fn program_text_starts_at_the_program_word() {
+    let text = |cmd: &str| -> Vec<String> {
+        parse(cmd)
+            .iter()
+            .map(|s| s.program_text().to_string())
+            .collect()
+    };
+    assert_eq!(
+        text("GH_TOKEN=x gh pr create --fill"),
+        ["gh pr create --fill"]
+    );
+    assert_eq!(
+        text("sudo -u root pacman -S foo && timeout 30s gh pr checks 3"),
+        ["pacman -S foo", "gh pr checks 3"]
+    );
+    assert_eq!(text("git status"), ["git status"]);
+    // No program: the whole text.
+    assert_eq!(text("FOO=1"), ["FOO=1"]);
+    // A heredoc body cut before the program word keeps the offset in `text`.
+    let segs = parse("cat <<EOF $(\nbody\nEOF\nA=1 git push)");
+    let push = segs
+        .iter()
+        .find(|s| s.program.as_deref() == Some("git"))
+        .unwrap();
+    assert_eq!(push.program_text(), "git push");
+}
+
+#[test]
 fn a_navigation_program_behind_a_wrapper_is_operative() {
     let segs = parse("sudo -n true && yay -S --noconfirm foo");
     assert_eq!(segs[0].program.as_deref(), Some("true"));
