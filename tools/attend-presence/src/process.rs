@@ -232,19 +232,13 @@ fn start_time_by_command(pid: u32) -> Option<String> {
     (!s.is_empty()).then(|| s.to_string())
 }
 
-/// Whether `pid` is alive and running Claude Code: some argument of its
-/// command line names `claude`. The full line is read, not `comm`:
+/// Whether `pid` is alive and running the Claude Code program itself, by
+/// its command line ([`is_claude_argv`]). The full line is read, not `comm`:
 /// background sessions exec the versioned binary directly, so `comm` shows
-/// the version string rather than `claude`.
+/// the version string rather than `claude`. A process whose command line
+/// only holds a path under a `.claude/` folder (a hook, a shell sourcing a
+/// snapshot, a test binary in a worktree there) is not Claude Code.
 pub fn is_claude(pid: u32) -> bool {
-    argv(pid).is_some_and(|args| {
-        args.iter().any(|a| if cfg!(windows) { a.to_lowercase().contains("claude") } else { a.contains("claude") })
-    })
-}
-
-/// Whether `pid` runs the Claude Code program itself (see
-/// [`is_claude_argv`]).
-pub fn is_claude_program(pid: u32) -> bool {
     argv(pid).is_some_and(|args| is_claude_argv(&args))
 }
 
@@ -279,14 +273,11 @@ pub fn is_claude_argv(args: &[String]) -> bool {
 
 /// The nearest ancestor of `pid` that is the Claude Code program itself,
 /// within 15 hops. A shell whose command line merely mentions `claude`
-/// (the Bash tool sources a snapshot under `~/.claude/`) is skipped.
+/// (the Bash tool sources a snapshot under `~/.claude/`) is passed over.
 pub fn claude_ancestor(pid: u32) -> Option<u32> {
-    const SHELLS: &[&str] = &["sh", "bash", "zsh", "fish", "dash"];
     let mut cur = parent_pid(pid)?;
     for _ in 0..15 {
-        let program = argv(cur).and_then(|a| a.into_iter().next()).unwrap_or_default();
-        let base = std::path::Path::new(&program).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        if !SHELLS.contains(&base.as_str()) && is_claude(cur) {
+        if is_claude(cur) {
             return Some(cur);
         }
         cur = parent_pid(cur)?;
