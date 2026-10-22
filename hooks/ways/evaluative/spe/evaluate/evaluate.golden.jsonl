@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"write this round's eval workflow script with a selftest gate, a dry run, and a budget cap"}
+{"kind":"situational","prompt":"make sure the trial agents cannot read the graders or the predictions during the eval run"}
