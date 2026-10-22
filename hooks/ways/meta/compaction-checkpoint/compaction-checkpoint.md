@@ -39,17 +39,13 @@ Frame this as a collaboration checkpoint, not a limitation apology. Something li
 After the user responds, combine your summary with their steering into a checkpoint file:
 
 1. If active `TaskCreate` tasks exist, update their descriptions with the user's input
-2. If no task list, put the synthesis on a GitHub issue carrying the `tasklist` label (ADR-180), new or existing
+2. If no task list, offer to put the synthesis on a GitHub issue carrying the `tasklist` label (ADR-180), new or existing
 3. Include the user's priorities and direction — their words, not your paraphrase
 4. **Produce a copy-pastable continuance prompt** — a short block the user can paste into a *fresh* session if this one ends: the goal/intent, what's landed, the immediate next step, and the key files/branches in play. When several tasks remain, add the working mode from the `/wrap` skill: the main session steers, subagents carry implementation and review, and each branch gets its own worktree. Compaction keeps the session alive; a continuance prompt is the handoff that survives even a hard reset.
 
-## Step 4: Offer Directed Compaction
+## Step 4: Hand Over Directed Compaction
 
-After writing the synthesis, offer to compact now:
-
-> "I've captured our synthesis. Want me to compact now so we get a controlled, directed compaction with your priorities as the anchor — rather than waiting for the system to do a generic one?"
-
-If the user agrees, run `/compact` (or let them trigger it). The synthesis is the freshest, highest-signal content in context, so compaction will preserve it as the dominant signal.
+After writing the synthesis, hand the user a ready-to-run `/compact <focus>` line, with the focus naming their priorities. No way or skill can run a slash command, so the user runs it (see wrap(meta)). The synthesis is the freshest, highest-signal content in context, so compaction preserves it as the dominant signal.
 
 This is the difference between controlled compaction (user-directed, synthesis-anchored) and uncontrolled compaction (generic, whatever the system decides to keep).
 
