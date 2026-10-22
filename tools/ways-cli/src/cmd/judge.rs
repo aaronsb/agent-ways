@@ -27,7 +27,7 @@ fn enabled_targets() -> Vec<std::path::PathBuf> {
 
 /// Why the judge cannot gate, and the fix. None when it gates or the operator
 /// turned it off.
-fn reason(state: &Readiness) -> Option<(String, String)> {
+pub(crate) fn reason(state: &Readiness) -> Option<(String, String)> {
     Some(match state {
         Readiness::Ready(..) | Readiness::Fallback(..) | Readiness::Off => return None,
         // A keyless engine takes no key: its remedies are the mod or a key
@@ -74,8 +74,9 @@ pub fn warning(state: &Readiness) -> Option<String> {
     Some(format!("Ways is degraded: the relevance judge is off, so every matched way is injected.\n{detail}"))
 }
 
-/// One line on the judge's state after setup.
-fn outcome(state: &Readiness) -> Option<String> {
+/// One line on the judge's state, as setup ends with it and the settings
+/// gate screen shows it.
+pub(crate) fn outcome(state: &Readiness) -> Option<String> {
     let shadow = |m: &Mode| if *m == Mode::Shadow { ", shadow: logs verdicts, blocks nothing" } else { "" };
     match state {
         Readiness::Ready(p, m) => Some(format!("Relevance judge on ({}{}).", name(*p), shadow(m))),
@@ -90,6 +91,17 @@ fn outcome(state: &Readiness) -> Option<String> {
                 .to_string(),
         ),
         other => reason(other).map(|(why, _)| format!("Relevance judge still off: {why}.")),
+    }
+}
+
+/// The judge's state in a word, for the settings gate screen's value column.
+pub(crate) fn state_word(state: &Readiness) -> &'static str {
+    match state {
+        Readiness::Ready(..) => "ready",
+        Readiness::Fallback(..) => "key stands in",
+        Readiness::Off => "off by choice",
+        Readiness::Config(_) => "config error",
+        Readiness::NoKey(_) | Readiness::NoMod | Readiness::Unverified(..) => "degraded",
     }
 }
 

@@ -49,6 +49,7 @@ fn roots(fx: &Fixture) -> Vec<Node> {
         xdg_config: fx.root.join(".config"),
         claude_config_dir: None,
         claude: fx.root.join(".claude"),
+        judge: || None,
     };
     Ways::new(ctx).build(&[])
 }
@@ -466,6 +467,7 @@ fn a_switch_for_a_way_no_root_holds_is_listed_as_not_found() {
         xdg_config: fx.root.join(".config"),
         claude_config_dir: None,
         claude: fx.root.join(".claude"),
+        judge: || None,
     };
     let r = Ways::new(ctx).build(&[project]);
     let project = r[0].children.iter().find(|n| n.name == "project").unwrap();
@@ -488,6 +490,7 @@ fn ctx_of(fx: &Fixture) -> Ctx {
         xdg_config: fx.root.join(".config"),
         claude_config_dir: None,
         claude: fx.root.join(".claude"),
+        judge: || None,
     }
 }
 
@@ -907,6 +910,7 @@ fn a_prefix_switch_shows_its_ways_off_and_is_not_listed_as_not_found() {
         xdg_config: fx.root.join(".config"),
         claude_config_dir: None,
         claude: fx.root.join(".claude"),
+        judge: || None,
     };
     let r = Ways::new(ctx).build(&[project]);
     let project = r[0].children.iter().find(|n| n.name == "project").unwrap();

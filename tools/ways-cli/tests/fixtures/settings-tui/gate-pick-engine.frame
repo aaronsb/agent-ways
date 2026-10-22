@@ -6,27 +6,27 @@ agent-tui frame 100x30
 |│     mode                      enforce               ││The profile the gate uses.                 │|
 |│ ▸ profiles · setting          value                 ││                                           │|
 |│ ▸ keys · provider             key                   ││A shipped profile or one of your own under │|
-|│                                                     ││gate.profiles. Unset: the first shipped    │|
-|│                                                     ││profile whose provider has a key           │|
-|│                                                     ││(anthropic, then openrouter); adding a key │|
-|│                                                     ││never switches it, and `ways agent status` │|
-|│                                                     ││says which applies. `ways agent key check` │|
-|│                        ┌pick one: gate.engine───────────────────────────┐nst the profile's model.│|
-|│                        │   anthropic                                    │                        │|
-|│                        │   openrouter                                   │                        │|
-|│                        │   claude-code                                  │hropic | openrouter |   │|
-|│                        │ ● mine      current                            │(Enter picks)           │|
-|│                        └────────────────────────────────────────────────┘                        │|
+|│ ▾ judge · state               value                 ││gate.profiles. The shipped ones are        │|
+|│     readiness                 degraded !            ││anthropic (Anthropic API key), openrouter  │|
+|│     unset engine              none                  ││(OpenRouter API key) and claude-code       │|
+|│   ▾ sessions                                        ││(Claude Code internal), which judges inside│|
+|│       (none live)             none                  ││Claude Code through the ways-judge mod and │|
+|│                        ┌pick one: gate.engine───────────────────────────┐: the first shipped     │|
+|│                        │   anthropic    Anthropic API key               │der has a key           │|
+|│                        │   openrouter   OpenRouter API key              │enrouter), never        │|
+|│                        │   claude-code  Claude Code internal            │ a key never switches   │|
+|│                        │ ● mine         current                         │ status` says which     │|
+|│                        └────────────────────────────────────────────────┘t key check` checks a   │|
+|│                                                     ││key engine's key against the profile's     │|
+|│                                                     ││model.                                     │|
+|│                                                     ││                                           │|
+|│                                                     ││value    mine                              │|
+|│                                                     ││type     one of anthropic | openrouter |   │|
+|│                                                     ││claude-code | mine (Enter picks)           │|
+|│                                                     ││from     user ·                            │|
 |│                                                     ││~/.config/agent-ways/agent.yaml            │|
 |│                                                     ││writes   ~/.config/agent-ways/agent.yaml   │|
 |│                                                     ││[gate.engine]                              │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
 | pick   ↑↓ choose · Enter or click sets · Esc closes                                                |
 styles
@@ -70,18 +70,26 @@ styles
   6  54-55  - - DIM
   6  99-99  - - DIM
   7   0-0   - - DIM
+  7   2-8   - - BOLD
+  7   9-16  - - DIM
+  7  32-36  - - DIM
   7  54-55  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
+  8  32-39  - - DIM
+  8  40-41  Red - BOLD
   8  54-55  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
+  9  32-35  - - DIM
   9  54-55  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
+ 10   2-13  - - BOLD
  10  54-55  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
+ 11  32-35  - - DIM
  11  54-55  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM
@@ -113,28 +121,28 @@ styles
  18  54-55  - - DIM
  18  99-99  - - DIM
  19   0-0   - - DIM
- 19  54-64  - - DIM
+ 19  54-55  - - DIM
  19  99-99  - - DIM
  20   0-0   - - DIM
  20  54-55  - - DIM
  20  99-99  - - DIM
  21   0-0   - - DIM
- 21  54-55  - - DIM
+ 21  54-64  - - DIM
  21  99-99  - - DIM
  22   0-0   - - DIM
- 22  54-55  - - DIM
+ 22  54-64  - - DIM
  22  99-99  - - DIM
  23   0-0   - - DIM
  23  54-55  - - DIM
  23  99-99  - - DIM
  24   0-0   - - DIM
- 24  54-55  - - DIM
+ 24  54-64  - - DIM
  24  99-99  - - DIM
  25   0-0   - - DIM
  25  54-55  - - DIM
  25  99-99  - - DIM
  26   0-0   - - DIM
- 26  54-55  - - DIM
+ 26  54-64  - - DIM
  26  99-99  - - DIM
  27   0-0   - - DIM
  27  54-55  - - DIM

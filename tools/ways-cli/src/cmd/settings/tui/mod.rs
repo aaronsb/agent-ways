@@ -10,6 +10,7 @@
 
 pub mod build;
 pub mod flows;
+pub mod judge;
 pub mod others;
 #[cfg(test)]
 mod tests;
@@ -60,6 +61,9 @@ pub struct Ctx {
     pub claude_config_dir: Option<PathBuf>,
     /// The Claude config directory whose projects the setup flow offers.
     pub claude: PathBuf,
+    /// What the gate tab's judge section shows, read at each build of the
+    /// tree; `None` leaves the section out.
+    pub judge: fn() -> Option<judge::JudgeState>,
 }
 
 /// Whether the screens write `b` to the project's file: a project-scope key,
@@ -95,6 +99,7 @@ impl Ctx {
             themes: agent_theme::user_dir(),
             claude_config_dir: std::env::var_os("CLAUDE_CONFIG_DIR").filter(|v| !v.is_empty()).map(PathBuf::from),
             claude: ways_core::paths::claude_dir().root().to_path_buf(),
+            judge: judge::JudgeState::live,
             xdg_config,
             home,
         }

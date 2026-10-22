@@ -1,0 +1,142 @@
+agent-tui frame 80x25
+| 1 ways   2 match…   3 gate   4 insta…   5 attend   6 senso…   7 mod   8 theme  |
+|┌ writes user — ~/proj ────────────────────┐┌detail────────────────────────────┐|
+|│ ▾ settings              value            ││session                           │|
+|│     engine              claude-code      ││cccccccc-0000-4000-8000-0000000000│|
+|│     mode                enforce          ││03                                │|
+|│ ▸ profiles · setting    value            ││                                  │|
+|│ ▸ keys · provider       key              ││The engine this session resolved  │|
+|│ ▾ judge · state         value            ││to at its first judge request,    │|
+|│     readiness           degraded !       ││held for its life.                │|
+|│     unset engine        none             ││                                  │|
+|│   ▾ sessions                             ││finding  engine_unavailable:      │|
+|│       3f6c2a91          claude-code      ││claude-code unavailable: no Claude│|
+|│▌      cccccccc          none !           ││Code host, and no key is          │|
+|│                                          ││configured; load the ways mod or  │|
+|│                                          ││configure an Anthropic or         │|
+|│                                          ││OpenRouter key (`ways agent key   │|
+|│                                          ││add --provider anthropic` or      │|
+|│                                          ││`--provider openrouter`)          │|
+|│                                          ││                                  │|
+|│                                          ││value    none                     │|
+|│                                          ││type     read-only here           │|
+|│                                          ││from     engine_unavailable       │|
+|│                                          ││                                  │|
+|└──────────────────────────────────────────┘└──────────────────────────────────┘|
+| browse  0 changed │ 0 queued │ mouse on (m)  ? keys · Tab 1-9 tabs · / filters…|
+styles
+  0   0-7   White Blue -
+  0   9-18  White Blue -
+  0  20-27  Black Cyan BOLD
+  0  29-38  White Blue -
+  0  40-49  White Blue -
+  0  51-60  White Blue -
+  0  62-68  White Blue -
+  0  70-78  White Blue -
+  1   0-0   - - DIM
+  1   1-22  LightBlue - BOLD|DIM
+  1  23-44  - - DIM
+  1  45-50  LightBlue - BOLD|DIM
+  1  51-79  - - DIM
+  2   0-0   - - DIM
+  2   2-11  - - BOLD
+  2  26-30  - - DIM
+  2  43-44  - - DIM
+  2  45-51  - - BOLD
+  2  79-79  - - DIM
+  3   0-0   - - DIM
+  3  43-44  - - DIM
+  3  45-78  - - BOLD
+  3  79-79  - - DIM
+  4   0-0   - - DIM
+  4  43-44  - - DIM
+  4  45-46  - - BOLD
+  4  79-79  - - DIM
+  5   0-0   - - DIM
+  5   2-11  - - BOLD
+  5  12-21  - - DIM
+  5  26-30  - - DIM
+  5  43-44  - - DIM
+  5  79-79  - - DIM
+  6   0-0   - - DIM
+  6   2-7   - - BOLD
+  6   8-18  - - DIM
+  6  26-28  - - DIM
+  6  43-44  - - DIM
+  6  79-79  - - DIM
+  7   0-0   - - DIM
+  7   2-8   - - BOLD
+  7   9-16  - - DIM
+  7  26-30  - - DIM
+  7  43-44  - - DIM
+  7  79-79  - - DIM
+  8   0-0   - - DIM
+  8  26-33  - - DIM
+  8  34-35  Red - BOLD
+  8  43-44  - - DIM
+  8  79-79  - - DIM
+  9   0-0   - - DIM
+  9  26-29  - - DIM
+  9  43-44  - - DIM
+  9  79-79  - - DIM
+ 10   0-0   - - DIM
+ 10   2-13  - - BOLD
+ 10  43-53  - - DIM
+ 10  54-72  Red - BOLD
+ 10  79-79  - - DIM
+ 11   0-0   - - DIM
+ 11  26-36  - - DIM
+ 11  43-44  - - DIM
+ 11  45-78  Red - BOLD
+ 11  79-79  - - DIM
+ 12   0-0   - - DIM
+ 12   1-1   Cyan - BOLD|REVERSED
+ 12   2-25  - - BOLD|REVERSED
+ 12  26-29  - - BOLD|DIM|REVERSED
+ 12  30-31  Red - BOLD|REVERSED
+ 12  32-42  - - BOLD|REVERSED
+ 12  43-44  - - DIM
+ 12  45-68  Red - BOLD
+ 12  79-79  - - DIM
+ 13   0-0   - - DIM
+ 13  43-44  - - DIM
+ 13  45-76  Red - BOLD
+ 13  79-79  - - DIM
+ 14   0-0   - - DIM
+ 14  43-44  - - DIM
+ 14  45-69  Red - BOLD
+ 14  79-79  - - DIM
+ 15   0-0   - - DIM
+ 15  43-44  - - DIM
+ 15  45-75  Red - BOLD
+ 15  79-79  - - DIM
+ 16   0-0   - - DIM
+ 16  43-44  - - DIM
+ 16  45-72  Red - BOLD
+ 16  79-79  - - DIM
+ 17   0-0   - - DIM
+ 17  43-44  - - DIM
+ 17  45-68  Red - BOLD
+ 17  79-79  - - DIM
+ 18   0-0   - - DIM
+ 18  43-44  - - DIM
+ 18  79-79  - - DIM
+ 19   0-0   - - DIM
+ 19  43-53  - - DIM
+ 19  79-79  - - DIM
+ 20   0-0   - - DIM
+ 20  43-53  - - DIM
+ 20  79-79  - - DIM
+ 21   0-0   - - DIM
+ 21  43-53  - - DIM
+ 21  79-79  - - DIM
+ 22   0-0   - - DIM
+ 22  43-44  - - DIM
+ 22  79-79  - - DIM
+ 23   0-79  - - DIM
+ 24   0-7   Black Cyan BOLD
+ 24   9-17  - - DIM|ITALIC
+ 24  18-20  - - DIM
+ 24  21-28  - - DIM|ITALIC
+ 24  29-31  - - DIM
+ 24  32-43  - - DIM|ITALIC

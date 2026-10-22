@@ -8,11 +8,11 @@ agent-tui frame 100x30
 |│ ▾ keys · provider             key                   ││Never shown and never passed as an argument│|
 |│▌    anthropic                 present [a]           ││(ADR-503 §12). Add or rotate one with `ways│|
 |│     openrouter                absent [a]            ││agent key add --provider <p>`, which reads │|
-|│                                                     ││it from stdin or a prompt that shows a dot │|
-|│                                                     ││per character.                             │|
-|│                 ┌check: fail───────────────────────────────────────────────────┐                 │|
-|│                 │ $ ways agent key check --provider anthropic                  │                 │|
-|│                 │                                                              │ers it masked)   │|
+|│ ▾ judge · state               value                 ││it from stdin or a prompt that shows a dot │|
+|│     readiness                 degraded !            ││per character.                             │|
+|│     unset engine┌check: fail───────────────────────────────────────────────────┐                 │|
+|│   ▾ sessions    │ $ ways agent key check --provider anthropic                  │                 │|
+|│       (none live│                                                              │ers it masked)   │|
 |│                 │ provider: anthropic                                          │                 │|
 |│                 │ check: the key was refused (401)                             │                 │|
 |│                 │                                                              │                 │|
@@ -81,9 +81,14 @@ styles
   8  54-55  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
+  9   2-8   - - BOLD
+  9   9-16  - - DIM
+  9  32-36  - - DIM
   9  54-55  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
+ 10  32-39  - - DIM
+ 10  40-41  Red - BOLD
  10  54-55  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
@@ -92,6 +97,7 @@ styles
  11  30-81  Red - -
  11  99-99  - - DIM
  12   0-0   - - DIM
+ 12   2-13  - - BOLD
  12  18-18  Red - -
  12  20-62  - - DIM|ITALIC
  12  81-81  Red - -

@@ -165,3 +165,48 @@ fn settings_matching_edit() {
     assert!(pane.contains("unsaved in matching"), "pane was:\n{pane}");
     assert!(!fx.home().join(".config/agent-ways/config.yaml").exists(), "an edit wrote the config before apply");
 }
+
+/// The gate tab's judge section (ADR-708 §7, §8) with claude-code named and
+/// neither the ways-judge mod nor a key: the engine picker names each engine
+/// as setup does, a live session left with no engine carries its
+/// `engine_unavailable` reason and remedy, and the readiness row the fix.
+#[test]
+fn settings_gate_judge_section() {
+    if !harness_or_skip("settings_gate_judge_section") {
+        return;
+    }
+    let mut fx = Fx::new("judge");
+    let home = fx.home();
+    std::fs::create_dir_all(home.join(".config/agent-ways")).unwrap();
+    std::fs::write(home.join(".config/agent-ways/agent.yaml"), "engine: claude-code\n").unwrap();
+    // A running session: its record names this test's own process.
+    let pid = std::process::id();
+    std::fs::create_dir_all(home.join(".claude/sessions")).unwrap();
+    std::fs::write(home.join(format!(".claude/sessions/{pid}.json")), format!("{{\"pid\":{pid},\"sessionId\":\"{SESSION}\"}}")).unwrap();
+    let judge = home.join(format!(".local/state/agent-ways/judge/{SESSION}"));
+    std::fs::create_dir_all(&judge).unwrap();
+    let reason = "engine_unavailable: claude-code unavailable: no Claude Code host, and no key is configured; load the ways mod or configure an Anthropic or OpenRouter key (`ways agent key add --provider anthropic` or `--provider openrouter`)";
+    std::fs::write(judge.join("resolution.json"), format!("{{\"engine\":null,\"reason\":\"{reason}\"}}")).unwrap();
+    let proj = fx.project();
+    let s = fx.launch("judge", &["settings", "gate", "--project", &proj]);
+
+    let pane = s.wait_for("judge · state", WAIT).unwrap();
+    assert!(pane.contains("degraded") && pane.contains("bbbbbbbb"), "pane was:\n{pane}");
+
+    // The engine's picker: each shipped profile beside its display name.
+    s.send(&["Down", "Enter"]).unwrap();
+    let pane = s.wait_for("Claude Code internal", WAIT).unwrap();
+    assert!(pane.contains("Anthropic API key") && pane.contains("OpenRouter API key"), "pane was:\n{pane}");
+    s.send(&["Escape"]).unwrap();
+
+    // The live session, the last row: its reason and the remedy.
+    s.send(&["End"]).unwrap();
+    let pane = s.wait_for("engine_unavailable", WAIT).unwrap();
+    assert!(pane.contains("Anthropic or") && pane.contains("--provider openrouter"), "the fix line:\n{pane}");
+    assert!(!pane.contains("--provider claude-code"), "pane was:\n{pane}");
+
+    // The readiness row: the fix setup offers.
+    s.send(&["Up", "Up", "Up"]).unwrap();
+    let pane = s.wait_for("Fix: ways judge-setup", WAIT).unwrap();
+    assert!(pane.contains("Claude Code internal has") && pane.contains("(installs the mod, or adds an"), "pane was:\n{pane}");
+}

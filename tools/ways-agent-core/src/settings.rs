@@ -24,6 +24,16 @@ const SECTIONS: &[SectionSpec] = &[
     SectionSpec { name: "gate.keys", file: "keys", top: &[], per_entry: false, entry: None, repair: None, columns: Some(("provider", "key")), doc: "Provider API keys, shown present or absent. `ways agent key` adds, rotates, checks and removes them." },
 ];
 
+/// The profiles a tuning key is listed for with no file setting it: every
+/// shipped profile. Each takes the key, the keyless `claude-code` included.
+const PROFILES: &[&str] = &["anthropic", "openrouter", "claude-code"];
+
+/// The profiles whose provider takes a key: the keys under `gate.keys`, and
+/// the tuning only the ways agent reads (its concurrency, the price of a
+/// provider call). A `claude-code` profile judges inside Claude Code, on the
+/// account's own usage, so it has neither.
+const KEYED: &[&str] = &["anthropic", "openrouter"];
+
 const BASE: KeySpec = KeySpec {
     name: "",
     section: "gate.profiles",
@@ -31,7 +41,7 @@ const BASE: KeySpec = KeySpec {
     path: &[],
     kind: Kind::Text,
     default: DefaultValue::None,
-    instances: &["anthropic", "openrouter"],
+    instances: PROFILES,
     scope: Scope::User,
     doc: "",
     long: "",
@@ -51,7 +61,7 @@ const KEYS: &[KeySpec] = &[
         kind: Kind::ChoiceOf { options: profile_names, multi: false },
         instances: &[],
         doc: "The profile the gate uses.",
-        long: "A shipped profile or one of your own under gate.profiles. Unset: the first shipped profile whose provider has a key (anthropic, then openrouter); adding a key never switches it, and `ways agent status` says which applies. `ways agent key check` checks the key against the profile's model.",
+        long: "A shipped profile or one of your own under gate.profiles. The shipped ones are anthropic (Anthropic API key), openrouter (OpenRouter API key) and claude-code (Claude Code internal), which judges inside Claude Code through the ways-judge mod and takes no key. Unset: the first shipped profile whose provider has a key (anthropic, then openrouter), never claude-code; adding a key never switches it, and `ways agent status` says which applies. `ways agent key check` checks a key engine's key against the profile's model.",
         ..BASE
     },
     KeySpec {
@@ -130,6 +140,7 @@ const KEYS: &[KeySpec] = &[
         default: DefaultValue::Fn(|b| shipped_field(b, "concurrency")),
         doc: "Provider calls the agent runs at once, across all sessions.",
         long: "",
+        instances: KEYED,
         ..BASE
     },
     KeySpec {
@@ -147,6 +158,7 @@ const KEYS: &[KeySpec] = &[
         kind: PRICE,
         doc: "USD per million input tokens, for pricing judge calls.",
         long: "For a provider that does not report a call's cost, as Anthropic does not. Unset: the list price of Claude Haiku 5.5 or 4.5 for that model and its dated ids, else the call's cost is unknown. Applies only with price_out_per_mtok set too. `ways agent cost` reports the spend.",
+        instances: KEYED,
         ..BASE
     },
     KeySpec {
@@ -155,6 +167,7 @@ const KEYS: &[KeySpec] = &[
         kind: PRICE,
         doc: "USD per million output tokens, for pricing judge calls.",
         long: "Set with price_in_per_mtok; see it for the default.",
+        instances: KEYED,
         ..BASE
     },
     KeySpec {
@@ -166,6 +179,7 @@ const KEYS: &[KeySpec] = &[
         computed: Some(key_presence),
         doc: "Whether a provider key is present.",
         long: "Never shown and never passed as an argument (ADR-503 §12). Add or rotate one with `ways agent key add --provider <p>`, which reads it from stdin or a prompt that shows a dot per character.",
+        instances: KEYED,
         ..BASE
     },
 ];
@@ -207,6 +221,17 @@ fn profile_names(layers: &[Layer], _: &[String]) -> Result<Vec<String>, String> 
     Ok(out)
 }
 
+/// What each profile `gate.engine` may name is called, as (profile, name):
+/// the shipped profiles' display names. A profile of your own has none.
+pub fn engine_labels(layers: &[Layer]) -> Vec<(String, String)> {
+    let shipped = profile::shipped();
+    profile_names(layers, &[])
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|n| Some((n.clone(), shipped.get(&n)?.display_name.clone()?)))
+        .collect()
+}
+
 /// The models a profile may name: the cached list of the profile's
 /// provider, which `ways agent models` writes. No network I/O: a settings
 /// load must not wait on a provider. A profile whose provider is not known
@@ -220,6 +245,11 @@ fn model_ids_in(dir: &std::path::Path, layers: &[Layer], bound: &[String]) -> Re
         return Err("the list depends on the profile's provider".into());
     }
     let provider = profile_provider(layers, bound).ok_or("no provider known for this profile")?;
+    if provider.keyless() {
+        // No provider list to fetch: Claude Code resolves the model id as it
+        // resolves a `--model` value.
+        return Err("Claude Code resolves the model itself; any model id it accepts".into());
+    }
     crate::models::options_in(dir, provider)
 }
 
@@ -302,6 +332,36 @@ mod tests {
         assert!(model_ids_in(&dir, &layers, &[]).is_err());
         assert!(model_ids_in(&dir, &layers, &b("nosuch")).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_engine_choices_carry_the_shipped_display_names() {
+        let layers = user("profiles:\n  mine:\n    provider: anthropic\n    model: claude-sonnet-5-5\n");
+        let labels = engine_labels(&layers);
+        assert_eq!(
+            labels,
+            vec![
+                ("anthropic".to_string(), "Anthropic API key".to_string()),
+                ("openrouter".to_string(), "OpenRouter API key".to_string()),
+                ("claude-code".to_string(), "Claude Code internal".to_string()),
+            ],
+            "a profile of your own has no display name"
+        );
+    }
+
+    #[test]
+    fn the_claude_code_profile_lists_its_tuning_and_no_key_or_price() {
+        let listed = |name: &str| KEYS.iter().find(|k| k.name == name).unwrap().instances.contains(&"claude-code");
+        for k in ["provider", "model", "threshold", "timeout_ms", "turns", "max_turn_chars", "max_candidates"] {
+            assert!(listed(&format!("gate.profiles.*.{k}")), "{k}");
+        }
+        for k in ["gate.profiles.*.concurrency", "gate.profiles.*.price_in_per_mtok", "gate.profiles.*.price_out_per_mtok", "gate.keys.*"] {
+            assert!(!listed(k), "{k}: the ways agent's, or a key's, and claude-code has neither");
+        }
+        // Its model takes any id: there is no list to fetch, and no
+        // `ways agent models --provider claude-code` to point at.
+        let why = model_ids_in(&scratch("cc"), &user(""), &["claude-code".to_string()]).unwrap_err();
+        assert!(!why.contains("--provider claude-code"), "{why}");
     }
 
     #[test]
