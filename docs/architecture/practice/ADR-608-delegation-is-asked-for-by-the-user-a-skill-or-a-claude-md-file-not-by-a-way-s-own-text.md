@@ -114,3 +114,7 @@ The ways are not edited by this record. These are the edits it implies:
 - **Convert the delegating ways into skills.** Not adopted wholesale. A skill is a named source, so a procedure that runs as a skill needs no further clause. But a way fires on its trigger, while a skill needs invoking. The research and validation guidance is behaviour the corpus wants disclosed during other work, not only when someone runs a procedure. A site whose content is a runnable procedure, such as the research sweep, may still move to a skill in its own change.
 - **Treat every spawn the same, with no independence rule.** Rejected. A cold read or a held-out writer has no inline substitute. Making them wait on a separate request for delegation after the user asked for the check would mean asking twice for one thing.
 - **Do nothing until the operator's model changes.** Rejected. The operator's main model does not receive the sentence by default, but claude-opus-5 sessions do. `meta/subagents` quotes a sentence that is no longer in the binary, and a quote that is wrong in a way misleads every model that reads it.
+
+## Correction note (2026-10-22)
+
+The "Way edits this implies" texts for `watching.md`, `introspection.md` and `bounded-execution` left out the condition from item 1: an efficiency spawn needs one of the three sources only where the model's instructions restrict the Agent tool. The way edits apply that condition. The decided text above is unchanged.

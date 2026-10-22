@@ -9,7 +9,7 @@ refire: 0.2
 
 - Attach the Monitor tool, or a bounded poll, to each background job when you start it, so a failure arrives when it happens and not when someone asks.
 - Keep a list of the jobs in flight. Close each one out with its result, and say which are still pending and why.
-- Check a running job's log by grepping it for errors and phase changes. Do not read the full stream into context. Hand heavy log reading to a subagent when the user, a skill in use or a CLAUDE.md line asks for it, and otherwise propose it.
+- Check a running job's log by grepping it for errors and phase changes. Do not read the full stream into context. Hand heavy log reading to a subagent. Where your instructions restrict the Agent tool, do that when the user, a skill in use or a CLAUDE.md line asks for it, and otherwise propose it.
 - When the user asks to be kept updated, report at intervals without being asked again: what is done, what remains, and an estimate of the time left.
 - Before you report, remove each watcher whose event has happened and stop any tail or loop you no longer need. A leftover watcher fires into later turns.
 

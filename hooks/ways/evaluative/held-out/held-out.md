@@ -17,7 +17,7 @@ The same person or agent wrote the code and every test for it, and all the tests
 
 ## Who writes the cases
 
-A fresh agent with no session context. When the user asked for held-out cases, that agent is asked for: spawn it and name the payoff in a clause, its cases carry none of your assumptions. When this way fired during other work and nobody asked for the check, propose it. A stronger model gives a stronger check. A model of the same tier with no context gives a cheaper one, and still removes the author's memory of how the subject is built.
+A fresh agent with no session context. When the user asked for held-out cases, that agent is asked for. Spawn it and name the payoff in a clause, its cases carry none of your assumptions. When this way fired during other work and nobody asked for the check, propose it. A stronger model gives a stronger check. A model of the same tier with no context gives a cheaper one, and still removes the author's memory of how the subject is built.
 
 ## What the writer sees
 

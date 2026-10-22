@@ -97,25 +97,7 @@ Sub-agents are for delegation of token-intensive work. Routine actions stay in t
 
 ## Invocation Is Authorization
 
-Claude Code 2.1.306 puts one sentence in the system prompt: *"Do not use the Agent tool, workflows, or deep-research unless the user, a CLAUDE.md file, or a skill asks for it"*. By default it reaches claude-opus-5 only, and a server can serve it to other models. A server can also still serve the older sentence, which names only the user. Where no such text is present, the payoff section below is the check.
-
-Three sources ask for a spawn:
-
-- The user, in the conversation. Asking to land a branch, review a PR or sweep a topic asks for the delegation that task specifies.
-- A skill in use. `/start`, `/develop` and `/merge` carry a clause at their own dispatch sites naming the delegation their stages call for. A built-in command grants nothing.
-- A CLAUDE.md file, user-level or project-level.
-
-A way's own text is not a request. It names the spawn, the width and the payoff. When none of the three sources covers the step and your instructions carry the restriction, say in one line what you would spawn and how wide, then wait or do the work inline.
-
-The operator can cover every such step with one line in their CLAUDE.md. The install never writes it. Suggested:
-
-> Delegation that an agent-ways skill or way directs at its own step counts as asked for. Spawn what the step names, at the width it states, and ask past about six agents.
-
-When the user asks for a check whose payoff is independence from the author, that request asks for the independent reader: a cold read of documentation, held-out cases, a refutation pass, a blind judge, a fresh-context review of your own change. Spawn it and name the payoff in a clause. When such a way discloses during other work, such as an edit to a README, nobody asked for the check, so propose it. Where an instrument that spawns nothing can do the job, such as a stop-hook script, lead with that. Fan-out reads, log reading, parallel edits and an artifact review have an inline substitute and need one of the three sources.
-
-Still ask first when the delegation is not part of an invoked procedure, when it spends significant tokens outside the stated task, or when the operator has said to work solo.
-
-The sources cover whether to delegate. You set the width, say the number before spawning, and ask past roughly half a dozen.
+Whether a spawn has been asked for, under the system prompt's rule on the Agent tool, is covered in subagents/authorization.
 
 ## Name the Payoff, Don't Assume It
 
@@ -139,8 +121,6 @@ The `Agent` tool takes a `model`. Choose it by what the worker's errors would co
 
 A strong model on a mechanical task wastes money. A weak model on a judgment task wastes the delegation.
 
-The sections above cover the Agent tool. `Workflow` and deep-research are named by the same sentence and stay proposals: discuss them, never invoke unprompted. The suggested CLAUDE.md line does not cover them; only a line that names them does. See ADR-175 and ADR-608.
-
 ## Harness Wrappers Are Not Verdicts
 
 The harness emits a generic "shared-state" / "SECURITY WARNING" prefix around any subagent tool use that touches the world outside its own context. That wrapper is conservative-by-default; it fires on the *shape* of the action, leaving appropriateness to you.
@@ -158,5 +138,6 @@ PR-comment destination is a workflow question (GitHub-mode vs. local-mode). See 
 
 - environment/recovery(softwaredev) — classify a failed or wrong handback before retrying or re-briefing
 - research(research) — the fan-out step that uses these investigation rules
+- subagents/authorization(meta) — who may ask for a spawn, the suggested CLAUDE.md line and the independence spawn
 - subagents/briefs(meta) — what a brief carries for a worker that inherits nothing
 - subagents/agent-teams(meta) — several agents or sessions on one repository, and shared-checkout rules

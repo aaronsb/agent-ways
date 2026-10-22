@@ -128,3 +128,7 @@ The ways are not edited by this record. These are the edits it implies:
 - **Have the install write the grant into `~/.claude/CLAUDE.md`.** Rejected. A grant the installer writes is the corpus authorising itself. It also writes into a file the install leaves to the user (ADR-142).
 - **Exempt commits because they are local and reversible.** Rejected. Both forms of the Bash tool's git instructions gate commits with pushes. A way that commits on its own contradicts that text, and the outcome then turns on recency again. The grant line for commits is the cheapest one to write.
 - **Use permission allow rules in settings as the grant.** Rejected as the mechanism. An allow rule decides whether a tool call prompts, not whether the model should take the action unasked. It complements a CLAUDE.md line and does not replace one.
+
+## Correction note (2026-10-22)
+
+The "Way edits this implies" text for `prepare.md` named the user's ask, a procedure and a CLAUDE.md grant, and left out the goal condition that item 3 lists as a source. The way edit names all three sources. The decided text above is unchanged.

@@ -32,7 +32,7 @@ A message sent through the human's account carries their name and cannot be reca
 - The human makes it in the current conversation, after seeing the messages, and it names the ones it covers: "send it", "post that reply", "send all three". Agreeing to a plan, an outline, or a draft approves that step. Ask before the send itself.
 - A request covers the messages it named. A later batch, a draft whose substance changed after the request, or a follow-up needs its own request.
 - In an unattended run, such as a `/goal` loop or a scheduled task, a message goes out only as trust/voice allows. Anything else stays a draft and is named in the report.
-- trust/voice sets when a message may go out without a per-message yes. Carrying on work Claude started, such as replying on an issue it filed in a project the two of you work on, is not sending as the human.
+- trust/voice sets when a message may go out without a per-message yes. Carrying on work Claude started, such as replying on an issue it filed in a project the two of you work on, is not sending as the human. It is still an issue write under Standing Grants.
 - A subagent drafts and hands the draft back. The session that holds the human's request does the sending.
 - Some actions send on their own: a calendar invite, a document share, an assignment, a mention. Each one is a send.
 - Try out a messaging integration on a sandbox channel or your own address. A live conversation is never the test bed.
@@ -40,14 +40,14 @@ A message sent through the human's account carries their name and cannot be reca
 
 ## Standing Grants
 
-A line in a CLAUDE.md file the user wrote, user-level or project-level, grants a kind of write ahead of time for the scope it names. A way's text grants nothing, because a way is corpus text shipped to every install. Without a grant, a goal condition that names the write, or the user's ask, name the write and its content in one line, offer it, and go on with the rest of the work. The install never writes these lines. The operator copies the ones they want:
+For the git row above, a line in a CLAUDE.md file the user wrote, user-level or project-level, grants a kind of write ahead of time for the scope it names. Messages follow the send rules above and trust/voice, and a CLAUDE.md line does not change them. A way's text grants nothing. When no grant, goal condition or ask from the user covers a write, name it and its content in one line, offer it in the turn's final message, and go on with the rest of the work. The install never writes these lines. The operator copies the ones they want:
 
 - Commit on a non-default branch at each accepted unit of work.
 - Push a branch and open its PR once its work holds locally.
 - Merge a reviewed PR with green CI by regular merge, as delivery/merge classifies it.
 - File an issue for out-of-scope work found mid-task, and close an issue with a comment when the commit that resolves it lands.
 
-A memory note can record how the user likes a write done. It does not record whether the user authorises the write. When a note reads as a standing permission, tell the user once that it counts only from CLAUDE.md.
+A memory note can record how the user likes a write done and grants nothing. When a note reads as a standing permission, tell the user once that it counts only from CLAUDE.md.
 
 Force pushes, history rewrites, release tags and writes to repositories the user does not own are asked for each time, whatever a CLAUDE.md says.
 
