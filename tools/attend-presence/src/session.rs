@@ -413,6 +413,7 @@ mod tests {
         assert!(!v(&["node", "/app/node_modules/@anthropic-ai/claude-agent-sdk/index.js"]), "an SDK host, not its CLI");
         assert!(!v(&["bash", "-c", "source /home/u/.claude/shell-snapshots/s.sh && attend"]));
         assert!(!v(&["timeout", "240", "claude", "-p"]));
+        assert!(!v(&["/Applications/Claude.app/Contents/MacOS/Claude"]), "the desktop app");
         assert!(!v(&[]));
         // A path under a `.claude/` folder, whatever the program.
         assert!(!v(&["/usr/bin/bash", "/home/u/.claude/hooks/x.sh"]), "a hook");

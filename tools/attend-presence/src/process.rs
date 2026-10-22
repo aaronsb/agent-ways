@@ -47,9 +47,11 @@ fn parent_pid_by_command(pid: u32) -> Option<u32> {
 }
 
 /// The command line of `pid` as arguments, or `None` when the process is
-/// gone or cannot be read. Linux reads `/proc/<pid>/cmdline` exactly;
-/// elsewhere `ps -ww` prints the line untruncated and it is split on
-/// whitespace. On Windows the one argument is the executable's path.
+/// gone or cannot be read. Linux reads `/proc/<pid>/cmdline` and macOS the
+/// `KERN_PROCARGS2` sysctl, both exactly, so an argument holding a space
+/// stays whole. Other Unix systems, and macOS for a process the sysctl
+/// refuses (another user's), split `ps -ww` output on whitespace. On
+/// Windows the one argument is the executable's path.
 pub fn argv(pid: u32) -> Option<Vec<String>> {
     #[cfg(target_os = "linux")]
     if proc_mounted() {
@@ -66,10 +68,53 @@ pub fn argv(pid: u32) -> Option<Vec<String>> {
 
 #[cfg(not(windows))]
 fn argv_by_command(pid: u32) -> Option<Vec<String>> {
+    #[cfg(target_os = "macos")]
+    if let Some(args) = procargs(pid) {
+        return Some(args);
+    }
     let out = Command::new("ps").args(["-ww", "-p", &pid.to_string(), "-o", "args="]).output().ok()?;
     out.status
         .success()
         .then(|| String::from_utf8_lossy(&out.stdout).split_whitespace().map(str::to_string).collect())
+}
+
+/// The `KERN_PROCARGS2` buffer of `pid`, sized by `KERN_ARGMAX` as `ps`
+/// sizes it. The kernel refuses another user's process unless the caller
+/// is root.
+#[cfg(target_os = "macos")]
+fn procargs(pid: u32) -> Option<Vec<String>> {
+    let mut argmax: libc::c_int = 0;
+    let mut size = std::mem::size_of::<libc::c_int>();
+    let mut mib = [libc::CTL_KERN, libc::KERN_ARGMAX];
+    // SAFETY: `argmax` is writable for the `size` bytes passed, and no new
+    // value is set.
+    let ret = unsafe { libc::sysctl(mib.as_mut_ptr(), 2, std::ptr::from_mut(&mut argmax).cast(), &mut size, std::ptr::null_mut(), 0) };
+    if ret != 0 {
+        return None;
+    }
+    let mut buf = vec![0u8; usize::try_from(argmax).ok()?];
+    let mut size = buf.len();
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, libc::c_int::try_from(pid).ok()?];
+    // SAFETY: `buf` is writable for the `size` bytes passed, and no new
+    // value is set.
+    let ret = unsafe { libc::sysctl(mib.as_mut_ptr(), 3, buf.as_mut_ptr().cast(), &mut size, std::ptr::null_mut(), 0) };
+    if ret != 0 {
+        return None;
+    }
+    parse_procargs2(buf.get(..size)?)
+}
+
+/// The arguments in a `KERN_PROCARGS2` buffer: `argc` as a native `int`,
+/// the executable's path, NUL padding, then `argc` NUL-terminated arguments,
+/// with the environment after them.
+#[cfg(any(target_os = "macos", test))]
+fn parse_procargs2(buf: &[u8]) -> Option<Vec<String>> {
+    let argc = usize::try_from(i32::from_ne_bytes(buf.get(..4)?.try_into().ok()?)).ok()?;
+    let rest = &buf[4..];
+    let rest = &rest[rest.iter().position(|&b| b == 0)?..];
+    let rest = &rest[rest.iter().position(|&b| b != 0)?..];
+    let args: Vec<String> = rest.split(|&b| b == 0).take(argc).map(|s| String::from_utf8_lossy(s).into_owned()).collect();
+    (!args.is_empty()).then_some(args)
 }
 
 #[cfg(windows)]
@@ -250,10 +295,12 @@ pub fn is_claude(pid: u32) -> bool {
 /// `@anthropic-ai/claude-agent-sdk/cli.js`. A script that only lives under a
 /// `.claude/` folder (an operator's hook or statusline), a shell sourcing a
 /// snapshot under `~/.claude/`, and a wrapper such as `timeout claude` are not.
+/// Names compare case-sensitively: the desktop app's own executable,
+/// `Claude.app/Contents/MacOS/Claude`, is not Claude Code.
 pub fn is_claude_argv(args: &[String]) -> bool {
     let unix = |s: &str| s.replace('\\', "/");
     let base = |s: &str| {
-        let b = std::path::Path::new(&unix(s)).file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+        let b = std::path::Path::new(&unix(s)).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         b.trim_end_matches(".exe").trim_end_matches(".cmd").to_string()
     };
     let Some(program) = args.first() else { return false };
@@ -324,6 +371,37 @@ mod tests {
         assert!(!host_name().is_empty() && !host_name().contains('@'));
     }
     use super::*;
+
+    #[test]
+    fn procargs_keep_an_argument_with_spaces_whole() {
+        let buf = |argc: i32, exec: &str, args: &[&str]| {
+            let mut b = argc.to_ne_bytes().to_vec();
+            b.extend_from_slice(exec.as_bytes());
+            b.extend_from_slice(&[0, 0, 0]);
+            for a in args.iter().chain(&["HOME=/Users/u", "PATH=/usr/bin"]) {
+                b.extend_from_slice(a.as_bytes());
+                b.push(0);
+            }
+            b
+        };
+        let bundled = "/Users/u/Library/Application Support/Claude/claude-code/2.1.296/claude";
+        let args = parse_procargs2(&buf(2, bundled, &[bundled, "--resume"])).unwrap();
+        assert_eq!(args, [bundled, "--resume"]);
+        assert!(is_claude_argv(&args), "Claude Code bundled under a path with a space");
+
+        let script = "/Users/u/My Tools/node_modules/@anthropic-ai/claude-code/cli.js";
+        let args = parse_procargs2(&buf(2, "/opt/homebrew/bin/node", &["node", script])).unwrap();
+        assert_eq!(args, ["node", script]);
+        assert!(is_claude_argv(&args), "node running a script under a path with a space");
+
+        let app = "/Applications/Claude.app/Contents/MacOS/Claude";
+        let args = parse_procargs2(&buf(1, app, &[app])).unwrap();
+        assert_eq!(args, [app]);
+        assert!(!is_claude_argv(&args), "the desktop app is not Claude Code");
+
+        assert_eq!(parse_procargs2(&buf(0, "/bin/x", &[])), None, "no arguments");
+        assert_eq!(parse_procargs2(&[1, 0]), None, "short");
+    }
 
     #[test]
     fn stat_parent_survives_a_command_name_with_parens_and_spaces() {

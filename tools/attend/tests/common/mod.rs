@@ -446,9 +446,9 @@ impl Drop for Peer {
 
 /// A Claude Code process of its own in the fixture's project, which runs
 /// attend as its child: a shell whose program is named claude
-/// ([`claude_program`]), with a session record. An add records its process key as the session's own, and
-/// `/clear` ([`Claude::clear`]) gives it a new id under the same process.
-/// Killed on drop.
+/// ([`claude_program`]), with a session record. An add records its process
+/// key as the session's own, and `/clear` ([`Claude::clear`]) gives it a new
+/// id under the same process. Killed on drop.
 pub struct Claude {
     child: Child,
     stdin: std::process::ChildStdin,
