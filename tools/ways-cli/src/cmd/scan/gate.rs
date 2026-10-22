@@ -21,10 +21,13 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use ways_agent_core::cost::JudgeCall;
-use ways_agent_core::judge::{way_text, Candidate, Role, Turn};
-use ways_agent_core::profile::{self, Mode, Settings};
-use ways_agent_core::protocol::{JudgeRequest, Judged, Reply, Request};
+use ways_agent_core::cost::{CostSource, JudgeCall, Usage};
+use ways_agent_core::engine;
+use ways_agent_core::judge::{self, way_text, Candidate, Role, Turn};
+use ways_agent_core::profile::{self, Mode, Provider, Settings, UserLayer};
+use ways_agent_core::protocol::{JudgeAnswer, JudgeJob, JudgeRequest, Judged, Reply, Request, Verdict};
+
+use crate::session::judge_jobs::{SessionEngine, Store, Waited};
 
 
 /// Grace beyond the engine's deadline for the hook's read, so the agent's own
@@ -33,6 +36,10 @@ use ways_agent_core::protocol::{JudgeRequest, Judged, Reply, Request};
 /// client) comes before the read, so a cold start can take about
 /// `timeout_ms` plus 3 s.
 const READ_GRACE: Duration = Duration::from_millis(1500);
+
+/// The least budget a Claude Code job is written with. `$.model.complete`
+/// refuses a `timeoutMs` of 0, and a call given less than this cannot answer.
+const MIN_JOB: Duration = Duration::from_millis(50);
 
 /// Where gate events go: `session::log_event` in the hook.
 pub(super) type EventSink<'a> = &'a dyn Fn(&[(&str, &str)]);
@@ -163,43 +170,95 @@ pub(super) fn apply(
     log: &LogContext<'_>,
 ) -> Gate {
     use ways_agent_core::keys;
+    let store = Store::for_session(log.session_id);
     // The agent reads the key file, never a hook's environment, so only a key
     // file turns the gate on: an ANTHROPIC_API_KEY set for Claude Code itself
     // must not send every prompt to an agent with no key to use.
-    apply_from(&profile::user_layer_path(), |p| keys::locate_file(p).is_some(), pending, prompt, response_context, log, |req, timeout| {
+    apply_from(&profile::user_layer_path(), |p| keys::locate_file(p).is_some(), store.as_ref(), pending, prompt, response_context, log, |req, timeout| {
         ways_agent_core::client::call(Request::Judge(req), timeout, true)
     })
 }
 
-/// [`apply`] with the agent file, the key check and the agent call injected,
-/// so a test can show which configurations never reach a provider.
+/// [`apply`] with the agent file, the key check, the session's judge store
+/// and the agent call injected, so a test can show which configurations
+/// never reach a provider.
+///
+/// The session's engine is resolved at its first judge request and held
+/// (ADR-708 §2). A key engine goes to the ways agent, named in the request;
+/// `claude-code` goes to the session's judge host as a job ([`handoff`]);
+/// none fails open with the resolution's `engine_unavailable` reason. No
+/// request reaches both. A store of `None`, a session id that names no
+/// directory, can have no host, so it never resolves to `claude-code`.
+#[allow(clippy::too_many_arguments)]
 fn apply_from(
     path: &std::path::Path,
-    has_key: impl Fn(ways_agent_core::profile::Provider) -> bool,
+    has_key: impl Fn(Provider) -> bool,
+    store: Option<&Store>,
     pending: &[Pending<'_>],
     prompt: &str,
     response_context: Option<&str>,
     log: &LogContext<'_>,
     call: impl FnOnce(JudgeRequest, Duration) -> Result<Reply, String>,
 ) -> Gate {
-    match settings(path, has_key, log) {
-        Ok(Some(settings)) => run(pending, prompt, response_context, &settings, log, call),
-        Ok(None) => Gate::default(),
-        Err(reason) => Gate::fallback(&reason),
+    let begun = Instant::now();
+    let (user, layer) = match settings(path, &has_key, log) {
+        Ok(Some(found)) => found,
+        Ok(None) => return Gate::default(),
+        Err(reason) => return Gate::fallback(&reason),
+    };
+    let to_judge = pending.iter().filter(|p| !p.pattern_strict).count().min(layer.profile.max_candidates);
+    if to_judge == 0 {
+        return Gate { status: Status::Idle, ..Gate::default() };
+    }
+    let profiles = profile::profiles(&user);
+    let resolve = |host: bool| {
+        let resolution = engine::resolve_session(user.engine.as_deref(), &profiles, host, &has_key);
+        let provider = resolution.engine.as_ref().and_then(|e| profiles.get(e)).map(|p| p.provider);
+        SessionEngine { resolution, provider }
+    };
+    let session = match store.map(|s| s.resolve_once(resolve)) {
+        Some(Ok(found)) => found,
+        Some(Err(e)) => return fallback(&format!("resolution: {e}"), to_judge, log, "0"),
+        None => resolve(false),
+    };
+    let Some(name) = session.resolution.engine else {
+        // No key and no engine named: off, as before ADR-708.
+        if !session.resolution.is_unavailable() {
+            return Gate::default();
+        }
+        return fallback(&session.resolution.reason, to_judge, log, "0");
+    };
+    // The session's engine is a profile that agent.yaml no longer has.
+    let Some(profile) = profiles.get(&name).cloned() else {
+        return fallback(&format!("config: engine '{name}' names no profile"), to_judge, log, "0");
+    };
+    let settings = Settings { engine: name, engine_set: layer.engine_set, profile, mode: layer.mode };
+    match (settings.profile.provider, store) {
+        (Provider::ClaudeCode, Some(store)) => {
+            run(pending, prompt, response_context, &settings, log, |req, _| handoff(store, &settings, req, begun))
+        }
+        // `resolve(false)` never names claude-code.
+        (Provider::ClaudeCode, None) => unreachable!("a session with no store has no host"),
+        _ => run(pending, prompt, response_context, &settings, log, |mut req, timeout| {
+            req.engine = Some(settings.engine.clone());
+            call(req, timeout)
+        }),
     }
 }
 
-/// The gate's settings. `None` when the gate is off: no engine and no key, or
-/// mode off. A configuration error is logged as `gate_fallback` and returned
-/// as its reason. An agent.yaml that does not parse, or a bad `mode`, fails
-/// closed: the gate is off and nothing is sent to a provider (ADR-503 addendum).
+/// The gate's agent.yaml and the settings it resolves to. `None` when the
+/// gate is off: no engine and no key, or mode off. A configuration error is
+/// logged as `gate_fallback` and returned as its reason. An agent.yaml that
+/// does not parse, or a bad `mode`, fails closed: the gate is off and
+/// nothing is sent to a provider (ADR-503 addendum).
 fn settings(
     path: &std::path::Path,
-    has_key: impl Fn(ways_agent_core::profile::Provider) -> bool,
+    has_key: impl Fn(Provider) -> bool,
     log: &LogContext<'_>,
-) -> Result<Option<Settings>, String> {
-    match profile::gate_settings(path, has_key) {
-        Ok(s) => Ok(s.filter(|s| s.mode != Mode::Off)),
+) -> Result<Option<(UserLayer, Settings)>, String> {
+    let read = profile::gate_layer(path).and_then(|user| Ok(profile::resolve(&user, has_key)?.map(|s| (user, s))));
+    match read {
+        Ok(s) => Ok(s.filter(|(_, s)| s.mode != Mode::Off)),
         Err(e) => {
             let reason = format!("config: {e:#}");
             // Logged for the tuning passes, and said on stderr, since a hook
@@ -215,6 +274,71 @@ fn settings(
             eprintln!("[ways] settings: {e:#}");
             Err(reason)
         }
+    }
+}
+
+/// Judges `req` through the session's Claude Code host (ADR-708 §5): writes
+/// the JSON-only request as a job, waits for the host's answer until the
+/// gate's budget (`timeout_ms` from `begun`) plus [`READ_GRACE`] runs out,
+/// and parses it with [`judge::parse_reply`]. The job's own `timeout_ms` is
+/// what remains of the budget when it is written. Every failure comes back
+/// as a fallback reply, carrying a call when the host took the job and so
+/// may have spent one: `deadline` on silence, `invalid_reply: …` on a reply
+/// that does not parse, `model_error: …` when the model call failed.
+fn handoff(store: &Store, settings: &Settings, req: JudgeRequest, begun: Instant) -> Result<Reply, String> {
+    let p = &settings.profile;
+    let budget = Duration::from_millis(p.timeout_ms);
+    let remaining = budget.saturating_sub(begun.elapsed());
+    if remaining < MIN_JOB {
+        return Ok(Reply::Fallback { reason: "deadline: before call".into(), latency_ms: 0, call: None });
+    }
+    let n = req.candidates.len();
+    let turns = judge::render_turns(&req.turns, p.turns, p.max_turn_chars);
+    let job = JudgeJob {
+        model: p.model.clone(),
+        system: judge::SYSTEM.to_string(),
+        prompt: judge::render_json_prompt(&judge::render_prompt(&turns, &req.candidates)),
+        max_tokens: judge::max_tokens(n),
+        timeout_ms: remaining.as_millis() as u64,
+    };
+    let id = store.write_job(&job).map_err(|e| format!("job: {e}"))?;
+    let written = Instant::now();
+    let waited = store.wait_answer(&id, begun + budget + READ_GRACE);
+    store.finish(&id);
+    let latency_ms = written.elapsed().as_millis() as u64;
+    // The spend is the account's usage: no price (ADR-708 §10).
+    let call = |usage: Option<Usage>| JudgeCall {
+        engine: settings.engine.clone(),
+        provider: p.provider,
+        model: p.model.clone(),
+        candidates: n,
+        usage,
+        cost_usd: None,
+        cost_source: CostSource::Unknown,
+    };
+    let JudgeAnswer { text, usage, reason } = match waited {
+        Waited::Answered(a) => a,
+        Waited::Silent { taken } => {
+            return Ok(Reply::Fallback { reason: "deadline".into(), latency_ms, call: taken.then(|| Box::new(call(None))) })
+        }
+    };
+    // A reason is a failed call whatever text came with it.
+    let (Some(text), None) = (text, &reason) else {
+        let reason = format!("model_error: {}", reason.as_deref().unwrap_or("no text"));
+        return Ok(Reply::Fallback { reason, latency_ms, call: Some(Box::new(call(usage))) });
+    };
+    match judge::parse_reply(&text, n) {
+        Ok(p_yes) => Ok(Reply::Judged(Judged {
+            engine: settings.engine.clone(),
+            provider: p.provider,
+            model: p.model.clone(),
+            mode: settings.mode,
+            threshold: p.threshold,
+            verdicts: req.candidates.iter().zip(p_yes).map(|(c, p_yes)| Verdict { id: c.id.clone(), p_yes }).collect(),
+            latency_ms,
+            call: Some(call(usage)),
+        })),
+        Err(e) => Ok(Reply::Fallback { reason: e.reason(), latency_ms, call: Some(Box::new(call(usage))) }),
     }
 }
 
@@ -301,9 +425,10 @@ fn run(
             // An agent older than #741 sends no call; its reason says whether
             // it reached the provider.
             // `deadline` alone is a provider timeout; `deadline: …` is the
-            // agent running out of time before it called.
-            let reached = reason == "deadline"
-                || ["transport", "provider_", "answer"].iter().any(|p| reason.starts_with(p));
+            // agent running out of time before it called. A Claude Code host
+            // always says: its fallback carries a call when it made one.
+            let reached = settings.profile.provider != Provider::ClaudeCode
+                && (reason == "deadline" || ["transport", "provider_", "answer"].iter().any(|p| reason.starts_with(p)));
             match call {
                 Some(call) => log_call(&call, Some(&reason), log),
                 None if reached => {
@@ -438,8 +563,7 @@ fn fallback(reason: &str, candidates: usize, log: &LogContext<'_>, elapsed_ms: &
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ways_agent_core::profile::{Provider, UserLayer};
-    use ways_agent_core::protocol::Verdict;
+    use crate::session::judge_jobs::Taken;
     use std::collections::HashSet;
 
     fn settings(mode: Mode) -> Settings {
@@ -800,7 +924,7 @@ mod tests {
             let events = Events::default();
             let sink = recorder(&events);
             let calls = std::cell::Cell::new(0);
-            let gate = apply_from(&path, |_| true, &pending(), "add a secret", None, &log(&sink), |_, _| {
+            let gate = apply_from(&path, |_| true, None, &pending(), "add a secret", None, &log(&sink), |_, _| {
                 calls.set(calls.get() + 1);
                 Err("stub".into())
             });
@@ -824,5 +948,229 @@ mod tests {
             assert_eq!(fallback, closed, "{text:?}: {:?}", events.borrow());
         }
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── ADR-708: the session's engine and the claude-code handoff ──
+
+    /// A session's judge store and its agent.yaml, in a directory of their own.
+    struct Session {
+        base: std::path::PathBuf,
+        store: Store,
+        yaml: std::path::PathBuf,
+    }
+
+    impl Session {
+        fn new(name: &str, yaml: &str) -> Session {
+            let base = std::env::temp_dir().join(format!("ways-gate-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&base);
+            std::fs::create_dir_all(&base).unwrap();
+            let yaml_path = base.join("agent.yaml");
+            std::fs::write(&yaml_path, yaml).unwrap();
+            Session { store: Store::at(base.join("state"), base.join("run")), base, yaml: yaml_path }
+        }
+
+        /// The gate with `has_key` for every provider, and an agent call that
+        /// records each request's engine and answers with `agent`.
+        fn gate(&self, has_key: bool, events: &Events, agent: &std::cell::RefCell<Vec<Option<String>>>) -> Gate {
+            let sink = recorder(events);
+            apply_from(&self.yaml, |_| has_key, Some(&self.store), &pending(), "store the api key", Some("ok"), &log(&sink), |req, _| {
+                agent.borrow_mut().push(req.engine.clone());
+                Ok(judged(Mode::Enforce, &[("softwaredev/code/security/secrets", 0.9), ("data/migrations", 0.9)]))
+            })
+        }
+    }
+
+    impl Drop for Session {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.base);
+        }
+    }
+
+    /// A host on a thread: it claims the session's next job and answers with
+    /// what `reply` makes of it, as the mod pipes `$.model.complete`'s result
+    /// to `ways judge answer`. `None` takes the job and stays silent.
+    fn host(store: &Store, reply: impl FnOnce(&Taken) -> Option<JudgeAnswer> + Send + 'static) -> std::thread::JoinHandle<Option<Taken>> {
+        let store = store.clone();
+        std::thread::spawn(move || {
+            let until = Instant::now() + Duration::from_secs(10);
+            while Instant::now() < until {
+                if let Some(t) = store.take().unwrap() {
+                    if let Some(a) = reply(&t) {
+                        store.answer(Some(&t.id), &a).unwrap();
+                    }
+                    return Some(t);
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            None
+        })
+    }
+
+    fn answer_text(text: &str) -> JudgeAnswer {
+        let usage = ways_agent_core::cost::Usage { input_tokens: 1160, output_tokens: 117, ..Default::default() };
+        JudgeAnswer { text: Some(text.to_string()), usage: Some(usage), reason: None }
+    }
+
+    const CLAUDE_CODE: &str = "engine: claude-code\nmode: enforce\n";
+
+    #[test]
+    fn a_host_answers_and_the_gate_blocks_and_admits_by_its_verdict() {
+        let s = Session::new("host-verdict", CLAUDE_CODE);
+        s.store.register_host().unwrap();
+        let events = Events::default();
+        let agent = Default::default();
+        // g1 is the secrets way, g2 the migrations way; the strict way is
+        // never sent.
+        let h = host(&s.store, |_| {
+            Some(answer_text(
+                "```json\n{\"judgements\":[{\"id\":\"g1\",\"relevant\":true,\"confidence\":0.9},{\"id\":\"g2\",\"relevant\":false,\"confidence\":0.95}]}\n```",
+            ))
+        });
+        let g = s.gate(false, &events, &agent);
+        let taken = h.join().unwrap().expect("the host took a job");
+        assert!(agent.borrow().is_empty(), "the agent is never asked");
+        assert_eq!(g.ids(), HashSet::from(["data/migrations".to_string()]));
+        assert!(
+            matches!(&g.status, Status::Judged { engine, model, .. } if engine == "claude-code" && model == "claude-haiku-4-5"),
+            "{:?}",
+            g.status
+        );
+        // The job is the JSON-only request, under the remaining budget.
+        assert_eq!(taken.job.model, "claude-haiku-4-5");
+        assert_eq!(taken.job.system, ways_agent_core::judge::SYSTEM);
+        assert!(taken.job.prompt.ends_with(ways_agent_core::judge::JSON_ONLY), "{}", taken.job.prompt);
+        assert!(taken.job.prompt.contains("<guidance id=\"g2\">"));
+        assert_eq!(taken.job.max_tokens, ways_agent_core::judge::max_tokens(2));
+        assert!(taken.job.timeout_ms > 0 && taken.job.timeout_ms <= 2000, "{}", taken.job.timeout_ms);
+        // One call, named for its engine, with the answer's usage and no price.
+        let calls = calls(&events);
+        assert_eq!(calls.len(), 1, "{calls:?}");
+        let c = &calls[0];
+        let got: Vec<&str> = ["outcome", "engine", "provider", "model", "candidates", "input_tokens", "output_tokens"].iter().map(|k| field(c, k)).collect();
+        assert_eq!(got, ["judged", "claude-code", "claude-code", "claude-haiku-4-5", "2", "1160", "117"]);
+        assert!(c.iter().all(|(k, _)| k != "cost_usd"), "no provider cost: {c:?}");
+        let verdicts: Vec<_> = events.borrow().iter().filter(|e| field(e, "event") == "way_judged").map(|e| (field(e, "way").to_string(), field(e, "engine").to_string())).collect();
+        assert_eq!(verdicts.len(), 2);
+        assert!(verdicts.iter().all(|(_, e)| e == "claude-code"));
+        assert_eq!(std::fs::read_dir(s.base.join("run/jobs")).unwrap().count(), 0, "the job is cleared");
+    }
+
+    #[test]
+    fn the_jobs_timeout_is_what_remains_of_the_gates_budget() {
+        let s = Session::new("budget", CLAUDE_CODE);
+        s.store.register_host().unwrap();
+        let events = Events::default();
+        let sink = recorder(&events);
+        let h = host(&s.store, |_| Some(answer_text("{\"judgements\":[]}")));
+        // The gate's clock started 500 ms before the job was written.
+        let settings = Settings { engine: "claude-code".into(), engine_set: true, profile: profile::shipped()["claude-code"].clone(), mode: Mode::Enforce };
+        let begun = Instant::now() - Duration::from_millis(500);
+        run(&pending(), "q", None, &settings, &log(&sink), |req, _| handoff(&s.store, &settings, req, begun));
+        let taken = h.join().unwrap().unwrap();
+        assert!(taken.job.timeout_ms <= 1500 && taken.job.timeout_ms > 1000, "{}", taken.job.timeout_ms);
+        // Under the least budget a call can use, no job is written.
+        let late = Instant::now() - Duration::from_millis(1970);
+        let g = run(&pending(), "q", None, &settings, &log(&sink), |req, _| handoff(&s.store, &settings, req, late));
+        assert_eq!(g.status, Status::Fallback { reason: "deadline: before call".into() });
+        assert_eq!(s.store.take().unwrap(), None);
+    }
+
+    #[test]
+    fn silence_fails_open_as_deadline() {
+        let s = Session::new("silence", "engine: claude-code\nmode: enforce\nprofiles:\n  claude-code:\n    timeout_ms: 200\n");
+        s.store.register_host().unwrap();
+        // No host takes the job: nothing was spent, so no call is logged.
+        let events = Events::default();
+        let g = s.gate(false, &events, &Default::default());
+        assert_eq!(g.status, Status::Fallback { reason: "deadline".into() });
+        assert!(g.ids().is_empty());
+        assert!(calls(&events).is_empty(), "an unclaimed job made no call");
+        assert_eq!(field(events.borrow().iter().find(|e| field(e, "event") == "gate_fallback").unwrap(), "reason"), "deadline");
+        // A host takes it and never answers: a call of unknown cost.
+        let events = Events::default();
+        let h = host(&s.store, |_| None);
+        let g = s.gate(false, &events, &Default::default());
+        h.join().unwrap().expect("taken");
+        assert_eq!(g.status, Status::Fallback { reason: "deadline".into() });
+        let calls = calls(&events);
+        assert_eq!(calls.len(), 1);
+        assert_eq!((field(&calls[0], "engine"), field(&calls[0], "reason"), field(&calls[0], "cost_source")), ("claude-code", "deadline", "unknown"));
+    }
+
+    #[test]
+    fn a_garbage_reply_fails_open_as_invalid_reply() {
+        let s = Session::new("garbage", CLAUDE_CODE);
+        s.store.register_host().unwrap();
+        let events = Events::default();
+        let h = host(&s.store, |_| Some(answer_text("Both pieces of guidance look relevant to me.")));
+        let g = s.gate(false, &events, &Default::default());
+        h.join().unwrap().unwrap();
+        let Status::Fallback { reason } = &g.status else { panic!("{:?}", g.status) };
+        assert!(reason.starts_with("invalid_reply"), "{reason}");
+        assert!(g.ids().is_empty());
+        let calls = calls(&events);
+        assert_eq!((calls.len(), field(&calls[0], "input_tokens")), (1, "1160"), "the spent call is logged with its usage");
+        // A host whose model call failed sends its reason and no text.
+        let h = host(&s.store, |_| Some(JudgeAnswer { reason: Some("api-error".into()), ..Default::default() }));
+        let g = s.gate(false, &Events::default(), &Default::default());
+        h.join().unwrap().unwrap();
+        assert_eq!(g.status, Status::Fallback { reason: "model_error: api-error".into() });
+        // A reason fails the call even when text came with it.
+        let h = host(&s.store, |_| Some(JudgeAnswer { reason: Some("aborted".into()), ..answer_text("{\"judgements\":[]}") }));
+        let g = s.gate(false, &Events::default(), &Default::default());
+        h.join().unwrap().unwrap();
+        assert_eq!(g.status, Status::Fallback { reason: "model_error: aborted".into() });
+    }
+
+    #[test]
+    fn a_host_registered_after_resolution_leaves_the_session_on_its_key_engine() {
+        let s = Session::new("late-host", CLAUDE_CODE);
+        let agent = Default::default();
+        let g = s.gate(true, &Events::default(), &agent);
+        assert!(matches!(g.status, Status::Judged { .. }), "{:?}", g.status);
+        // The agent judged with the session's engine, not agent.yaml's.
+        assert_eq!(*agent.borrow(), [Some("anthropic".to_string())]);
+        let r = s.store.resolution().unwrap();
+        assert_eq!((r.resolution.engine.as_deref(), r.resolution.reason.as_str()), (Some("anthropic"), ways_agent_core::engine::NO_HOST));
+        s.store.register_host().unwrap();
+        s.gate(true, &Events::default(), &agent);
+        assert_eq!(agent.borrow().len(), 2, "still the agent");
+        assert!(!s.base.join("run/jobs").exists(), "no job was ever written");
+    }
+
+    #[test]
+    fn a_key_engine_never_writes_a_job_and_claude_code_never_calls_the_agent() {
+        let s = Session::new("one-engine", "engine: anthropic\nmode: enforce\n");
+        s.store.register_host().unwrap();
+        let agent = Default::default();
+        s.gate(true, &Events::default(), &agent);
+        assert_eq!(*agent.borrow(), [Some("anthropic".to_string())]);
+        assert!(!s.base.join("run/jobs").exists());
+        assert!(!s.store.resolution().unwrap().is_claude_code());
+    }
+
+    #[test]
+    fn claude_code_with_no_host_and_no_key_fails_open_as_engine_unavailable() {
+        let s = Session::new("unavailable", CLAUDE_CODE);
+        let events = Events::default();
+        let agent = Default::default();
+        let g = s.gate(false, &events, &agent);
+        let Status::Fallback { reason } = &g.status else { panic!("{:?}", g.status) };
+        assert!(reason.starts_with("engine_unavailable: claude-code unavailable"), "{reason}");
+        assert!(agent.borrow().is_empty());
+        let events = events.borrow();
+        let fb = events.iter().find(|e| field(e, "event") == "gate_fallback").expect("logged");
+        assert_eq!((field(fb, "reason"), field(fb, "candidates")), (reason.as_str(), "2"));
+    }
+
+    #[test]
+    fn nothing_to_judge_resolves_nothing() {
+        let s = Session::new("idle", CLAUDE_CODE);
+        let events = Events::default();
+        let sink = recorder(&events);
+        let strict = vec![Pending { id: "a", description: "d", pattern_strict: true }];
+        let g = apply_from(&s.yaml, |_| true, Some(&s.store), &strict, "q", None, &log(&sink), |_, _| panic!("no call"));
+        assert_eq!(g.status, Status::Idle);
+        assert!(s.store.resolution().is_none(), "the first judge request resolves, not the first scan");
     }
 }
