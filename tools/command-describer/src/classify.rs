@@ -6,9 +6,9 @@ use std::ops::Range;
 
 use crate::lex::{RawSegment, Token, TokenKind};
 use crate::tables::{
-    self, ClassInput, FILTERS, GIT_SECOND_WORD, LEAD_KEYWORDS, NAVIGATION, SKIP_KEYWORDS, WRAPPERS,
+    self, ClassInput, FILTERS, LEAD_KEYWORDS, NAVIGATION, SKIP_KEYWORDS, WRAPPERS,
 };
-use crate::{Connector, Role, Segment};
+use crate::{Class, Connector, Role, Segment};
 
 pub(crate) fn build(src: &str, excluded: &[Range<usize>], raw: RawSegment) -> Option<Segment> {
     let (connector, tokens) = strip_keywords(raw.connector, &raw.tokens)?;
@@ -25,14 +25,21 @@ pub(crate) fn build(src: &str, excluded: &[Range<usize>], raw: RawSegment) -> Op
     let at = program_index(&words);
     let program = words.get(at).map(|w| basename(w)).filter(|p| program_ok(p));
     let Some(program) = program else {
+        // A segment that names no program still writes a file by redirect
+        // (`> out.txt`, `exec > log`).
+        let (role, class) = if redirect {
+            (Role::Operative, Some(Class::FileWrite))
+        } else {
+            (Role::Navigation, None)
+        };
         return Some(Segment {
             connector,
             depth: raw.depth,
-            role: Role::Navigation,
+            role,
             program: None,
             subcommand: None,
             flags: Vec::new(),
-            class: None,
+            class,
             span,
             text,
             program_at: 0,
@@ -45,7 +52,11 @@ pub(crate) fn build(src: &str, excluded: &[Range<usize>], raw: RawSegment) -> Op
     // A navigation program behind a wrapper runs as a process: `sudo -n
     // true` checks a credential, `sudo mkdir` writes as root.
     let wrapped = words[..at].iter().any(|w| WRAPPERS.contains(&basename(w)));
-    let role = if NAVIGATION.contains(&program) && !wrapped {
+    // A redirect to a file makes any segment operative: `echo x >>
+    // ~/.bashrc` and `… | jq . > out.json` write.
+    let role = if redirect {
+        Role::Operative
+    } else if NAVIGATION.contains(&program) && !wrapped {
         Role::Navigation
     } else if connector == Connector::Pipe
         && FILTERS.contains(&program)
@@ -56,13 +67,21 @@ pub(crate) fn build(src: &str, excluded: &[Range<usize>], raw: RawSegment) -> Op
         Role::Operative
     };
     let class = (role == Role::Operative).then(|| {
+        let tokens = split_flag_values(program, rest);
         let positional = positional_words(program, rest);
-        tables::classify(&ClassInput {
+        let class = tables::classify(&ClassInput {
             program,
-            tokens: rest,
+            tokens: &tokens,
             words: &positional,
             redirect,
-        })
+        });
+        // A redirect makes the class at least a file write: `grep x > out`
+        // writes, `cargo test > log` still builds.
+        if redirect {
+            class.min(Class::FileWrite)
+        } else {
+            class
+        }
     });
 
     Some(Segment {
@@ -165,7 +184,8 @@ fn is_duration(w: &str) -> bool {
 }
 
 /// The index of the program: past leading assignments and each wrapper
-/// with its flags, flag values, durations and assignments.
+/// with its flags, flag values, durations and assignments. `command -v x`
+/// looks `x` up without running it, so `command` is the program there.
 fn program_index(words: &[&str]) -> usize {
     let mut i = 0;
     while words.get(i).is_some_and(|w| is_assignment(w)) {
@@ -176,11 +196,17 @@ fn program_index(words: &[&str]) -> usize {
         if !WRAPPERS.contains(&wrapper) {
             break;
         }
+        if wrapper == "command" && words.get(i + 1).is_some_and(|t| matches!(*t, "-v" | "-V")) {
+            break;
+        }
         i += 1;
         while let Some(t) = words.get(i) {
             if t.starts_with('-') {
-                let takes = tables::takes_value(wrapper, t) && !t.contains('=');
-                i += if takes { 2 } else { 1 };
+                i += if value_follows(wrapper, t, words.get(i + 1)) {
+                    2
+                } else {
+                    1
+                };
             } else if is_duration(t) || is_assignment(t) {
                 i += 1;
             } else {
@@ -234,7 +260,8 @@ fn flag_name<'a>(program: &str, t: &'a str) -> Option<&'a str> {
 
 /// Subcommand words and flags. A program with subcommands keeps up to its
 /// depth of leading words and stops at its first argument; flags are read
-/// throughout. `python -m mod` reads `mod` as its subcommand.
+/// throughout, and `make` variable assignments are skipped. `python -m mod`
+/// reads `mod` as its subcommand.
 fn subcommand_and_flags(program: &str, rest: &[&str]) -> (Vec<String>, Vec<String>) {
     let depth = tables::subcommand_depth(program);
     let mut want = depth.unwrap_or(0);
@@ -245,14 +272,17 @@ fn subcommand_and_flags(program: &str, rest: &[&str]) -> (Vec<String>, Vec<Strin
         j += 1;
         if let Some(name) = flag_name(program, t) {
             flags.push(name.to_string());
-            if takes_value_here(program, name, t, rest.get(j)) {
+            if value_follows(program, t, rest.get(j)) {
                 j += 1;
             }
             continue;
         }
+        if program == "make" && is_assignment(t) {
+            continue;
+        }
         if words.len() < want && is_word(t) {
             words.push(t.to_string());
-            if program == "git" && words.len() == 1 && GIT_SECOND_WORD.contains(t) {
+            if words.len() == 1 && tables::takes_second_word(program, t) {
                 want = 2;
             }
             continue;
@@ -261,20 +291,75 @@ fn subcommand_and_flags(program: &str, rest: &[&str]) -> (Vec<String>, Vec<Strin
             want = words.len();
         }
     }
-    if matches!(program, "python" | "python3") && rest.first() == Some(&"-m") {
-        if let Some(module) = rest.get(1) {
+    if matches!(program, "python" | "python3") {
+        // `-m` among the interpreter's own flags, before any script.
+        let m = rest
+            .iter()
+            .take_while(|t| t.starts_with('-'))
+            .position(|t| *t == "-m");
+        if let Some(module) = m.and_then(|m| rest.get(m + 1)) {
             words = vec![module.to_string()];
         }
     }
     (words, flags)
 }
 
-/// The flag takes the next word as its value here: a value flag for the
-/// program, written without `=`, followed by a word that is not a flag.
-fn takes_value_here(program: &str, name: &str, raw: &str, next: Option<&&str>) -> bool {
-    tables::takes_value(program, name)
-        && !raw.contains('=')
-        && next.is_some_and(|n| !n.starts_with('-'))
+/// The flag `t` takes the next word, `next`, as its value: a value flag for
+/// the program written without `=`, or a short-flag cluster whose last flag
+/// is one (`sudo -iu postgres`), followed by a word that is not a flag. A
+/// numeric-value flag takes it only when it is a number (`make -j 4`).
+fn value_follows(program: &str, t: &str, next: Option<&&str>) -> bool {
+    let Some(next) = next.filter(|n| !n.starts_with('-')) else {
+        return false;
+    };
+    let numeric = || next.parse::<f64>().is_ok();
+    if t.starts_with("--") {
+        return !t.contains('=')
+            && (tables::takes_value(program, t)
+                || tables::takes_numeric_value(program, t) && numeric());
+    }
+    let Some(short) = t.strip_prefix('-') else {
+        return false;
+    };
+    // getopt: the first value flag in a cluster takes the rest of the word,
+    // or the next word when it ends the cluster.
+    for (i, c) in short.char_indices() {
+        let flag = format!("-{c}");
+        let last = i + c.len_utf8() == short.len();
+        if tables::takes_value(program, &flag) {
+            return last;
+        }
+        if tables::takes_numeric_value(program, &flag) {
+            return last && numeric();
+        }
+    }
+    false
+}
+
+/// The tokens with each flag split from a value written into it:
+/// `--method=DELETE` gives `--method`, `DELETE`; `-XPOST` gives `-X`, `POST`
+/// when `-X` is a value flag for the program.
+fn split_flag_values<'a>(program: &str, rest: &[&'a str]) -> Vec<&'a str> {
+    let mut out = Vec::with_capacity(rest.len());
+    for t in rest {
+        if t.starts_with("--") {
+            if let Some((name, value)) = t.split_once('=') {
+                out.extend([name, value]);
+                continue;
+            }
+        } else if let Some(short) = t.strip_prefix('-') {
+            let attached = short.char_indices().find_map(|(i, c)| {
+                let end = 1 + i + c.len_utf8();
+                (tables::takes_value(program, &format!("-{c}")) && end < t.len()).then_some(end)
+            });
+            if let Some(end) = attached {
+                out.extend([&t[..end], &t[end..]]);
+                continue;
+            }
+        }
+        out.push(*t);
+    }
+    out
 }
 
 /// Positional words after the program: tokens not starting with `-`, less
@@ -285,8 +370,7 @@ fn positional_words<'a>(program: &str, rest: &[&'a str]) -> Vec<&'a str> {
     while let Some(t) = rest.get(j) {
         j += 1;
         if t.starts_with('-') {
-            let name = t.split('=').next().unwrap_or(t);
-            if takes_value_here(program, name, t, rest.get(j)) {
+            if value_follows(program, t, rest.get(j)) {
                 j += 1;
             }
         } else {
@@ -364,6 +448,33 @@ mod tests {
         let (w, f) = subcommand_and_flags("grep", &["-rn", "foo", "src"]);
         assert!(w.is_empty());
         assert_eq!(f, ["-rn"]);
+    }
+
+    #[test]
+    fn value_flags_follow_getopt() {
+        assert!(value_follows("sudo", "-u", Some(&"root")));
+        assert!(value_follows("sudo", "-iu", Some(&"postgres")));
+        assert!(!value_follows("sudo", "-uroot", Some(&"psql")));
+        assert!(!value_follows("sudo", "-u", Some(&"-i")));
+        assert!(value_follows("git", "--git-dir", Some(&"/x/.git")));
+        assert!(!value_follows("git", "--git-dir=/x/.git", Some(&"status")));
+        assert!(value_follows("make", "-j", Some(&"4")));
+        assert!(!value_follows("make", "-j", Some(&"install")));
+        assert!(!value_follows("grep", "-rn", Some(&"foo")));
+    }
+
+    #[test]
+    fn flag_values_are_split_for_the_rules() {
+        assert_eq!(
+            split_flag_values("gh", &["api", "-XPOST", "x"]),
+            ["api", "-X", "POST", "x"]
+        );
+        assert_eq!(
+            split_flag_values("gh", &["api", "--method=DELETE"]),
+            ["api", "--method", "DELETE"]
+        );
+        assert_eq!(split_flag_values("gh", &["-X", "PUT"]), ["-X", "PUT"]);
+        assert_eq!(split_flag_values("ls", &["-la"]), ["-la"]);
     }
 
     #[test]

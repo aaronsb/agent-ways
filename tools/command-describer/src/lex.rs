@@ -142,13 +142,20 @@ impl List {
         }
     }
 
-    /// The current segment holds only leading keywords (`do`, `then`, `{`):
-    /// a newline after them does not end it.
-    fn only_keywords(&self) -> bool {
-        self.cur
-            .tokens
-            .iter()
-            .all(|t| t.kind == TokenKind::Word && LEAD_KEYWORDS.contains(&t.value.as_str()))
+    /// The current segment holds only a prefix that runs nothing itself:
+    /// leading keywords (`do`, `then`, `!`), `time` and its flags, or a
+    /// function header (`name()`). A newline after it does not end the
+    /// segment, and a `(` after it opens a subshell.
+    fn only_prefix(&self) -> bool {
+        let timed = self.cur.tokens.first().is_some_and(|t| t.value == "time");
+        self.cur.tokens.iter().all(|t| {
+            let v = t.value.as_str();
+            t.kind == TokenKind::Word
+                && (LEAD_KEYWORDS.contains(&v)
+                    || v == "time"
+                    || timed && v.starts_with('-')
+                    || v.len() > 2 && v.ends_with("()"))
+        })
     }
 
     fn finish(mut self) -> Vec<RawSegment> {
@@ -181,7 +188,7 @@ impl Lexer<'_> {
                     self.pos += 1;
                     // A newline after `&&`, `|` or a lone `do` continues the
                     // segment; elsewhere it ends one.
-                    if !l.only_keywords() {
+                    if !l.only_prefix() {
                         l.flush(Connector::Newline);
                     }
                     self.heredoc_bodies();
@@ -247,15 +254,19 @@ impl Lexer<'_> {
                 b'(' => self.open_paren(&mut l),
                 b')' => {
                     self.pos += 1;
-                    if term == Term::Paren {
-                        return l.finish();
-                    }
                     // A `)` closing a `case` pattern: the pattern is not a
-                    // command. Any other stray `)` just ends the segment.
+                    // command, and the `)` does not end an enclosing `$( … )`
+                    // or `( … )`.
                     if l.in_case_pattern() {
                         l.cur.tokens.clear();
                         l.case_pattern = false;
+                        l.flush(Connector::Semicolon);
+                        continue;
                     }
+                    if term == Term::Paren {
+                        return l.finish();
+                    }
+                    // Any other stray `)` just ends the segment.
                     l.flush(Connector::Semicolon);
                 }
                 b'`' if term == Term::Backtick => {
@@ -268,15 +279,21 @@ impl Lexer<'_> {
         l.finish()
     }
 
-    /// `(` between words: a subshell, an arithmetic command, or part of the
-    /// segment (`name()`, `for ((…))`). At a segment's start, or after its
-    /// leading keywords, it opens a subshell.
+    /// `(` between words: a case pattern's opener, a subshell, an arithmetic
+    /// command, or part of the segment (`name()`, `for ((…))`). At a
+    /// segment's start, or after a prefix that runs nothing, it opens a
+    /// subshell.
     fn open_paren(&mut self, l: &mut List) {
-        // After leading keywords alone (`time (…)`, `! (…)`, `if (…)`) the
-        // `(` still opens a subshell; the keywords are stripped later.
-        if !l.only_keywords() {
+        if l.in_case_pattern() {
+            // A pattern's optional leading `(`: `case x in (a) …`.
+            self.pos += 1;
+            return;
+        }
+        // After a prefix alone (`time (…)`, `! (…)`, `if (…)`, `f() (…)`)
+        // the `(` still opens a subshell.
+        if !l.only_prefix() {
             let start = self.pos;
-            let end = self.skip_balanced(start, b'(', b')');
+            let end = self.skip_balanced(start, b'(', b')', true);
             self.pos = end;
             let raw = String::from_utf8_lossy(&self.b[start..end]).into_owned();
             match l.cur.tokens.last_mut() {
@@ -292,15 +309,10 @@ impl Lexer<'_> {
             }
             return;
         }
-        if l.in_case_pattern() {
-            // A pattern's optional leading `(`: `case x in (a) …`.
-            self.pos += 1;
-            return;
-        }
         if self.peek(1) == Some(b'(') {
             // `(( expr ))`: one word, which names no program.
             let start = self.pos;
-            self.pos = self.skip_balanced(start, b'(', b')');
+            self.pos = self.skip_balanced(start, b'(', b')', true);
             let value = String::from_utf8_lossy(&self.b[start..self.pos]).into_owned();
             l.cur.tokens.push(Token {
                 span: start..self.pos,
@@ -309,6 +321,8 @@ impl Lexer<'_> {
             });
             return;
         }
+        // The prefix runs nothing; `time` alone would read as a segment.
+        l.cur.tokens.clear();
         self.pos += 1;
         let inner = self.sub_list(l.depth, Connector::Subshell, Term::Paren);
         l.out.extend(inner);
@@ -320,7 +334,7 @@ impl Lexer<'_> {
             return self.list(depth + 1, first, term);
         }
         self.pos = match term {
-            Term::Paren => self.skip_balanced(self.pos - 1, b'(', b')'),
+            Term::Paren => self.skip_balanced(self.pos - 1, b'(', b')', true),
             Term::Backtick => self.b[self.pos..]
                 .iter()
                 .position(|&c| c == b'`')
@@ -332,7 +346,9 @@ impl Lexer<'_> {
 
     /// The end (exclusive) of the balanced `open … close` group at `start`,
     /// stepping over quotes and escapes; the input's end when unbalanced.
-    fn skip_balanced(&self, start: usize, open: u8, close: u8) -> usize {
+    /// Inside double quotes a `'` is literal, so `single_quotes` is false
+    /// there.
+    fn skip_balanced(&self, start: usize, open: u8, close: u8, single_quotes: bool) -> usize {
         let mut depth = 0usize;
         let mut i = start;
         let mut quote: Option<u8> = None;
@@ -348,7 +364,7 @@ impl Lexer<'_> {
                 None => {
                     if c == b'\\' {
                         i += 1;
-                    } else if c == b'\'' || c == b'"' {
+                    } else if c == b'"' || c == b'\'' && single_quotes {
                         quote = Some(c);
                     } else if c == open {
                         depth += 1;
@@ -458,7 +474,7 @@ impl Lexer<'_> {
                     // `arr=( … )` and extglob `@( … )` stay in the word.
                     let prev = val.last().copied();
                     if matches!(prev, Some(b'=' | b'@' | b'?' | b'*' | b'+' | b'!')) {
-                        let end = self.skip_balanced(self.pos, b'(', b')');
+                        let end = self.skip_balanced(self.pos, b'(', b')', true);
                         val.extend_from_slice(&self.b[self.pos..end]);
                         self.pos = end;
                         continue;
@@ -479,7 +495,7 @@ impl Lexer<'_> {
                     self.pos = (end + 1).min(self.b.len());
                 }
                 b'"' => self.double_quoted(l, term, &mut val),
-                b'$' => self.dollar(l, &mut val),
+                b'$' => self.dollar(l, &mut val, false),
                 _ => {
                     val.push(c);
                     self.pos += 1;
@@ -563,7 +579,7 @@ impl Lexer<'_> {
                         self.pos += 1;
                     }
                 },
-                b'$' => self.dollar(l, val),
+                b'$' => self.dollar(l, val, true),
                 b'`' if term == Term::Backtick => return,
                 b'`' => self.backtick(l, val),
                 _ => {
@@ -575,11 +591,13 @@ impl Lexer<'_> {
     }
 
     /// `$( … )`, `$(( … ))`, `${ … }`, `$'…'`, `$"…"`, or a plain `$`.
-    fn dollar(&mut self, l: &mut List, val: &mut Vec<u8>) {
+    /// Inside double quotes `$'` and `$"` are a literal `$`, and a `'`
+    /// inside `${ … }` is literal.
+    fn dollar(&mut self, l: &mut List, val: &mut Vec<u8>, in_dquote: bool) {
         let start = self.pos;
         match self.peek(1) {
             Some(b'(') if self.peek(2) == Some(b'(') => {
-                self.pos = self.skip_balanced(start + 1, b'(', b')');
+                self.pos = self.skip_balanced(start + 1, b'(', b')', !in_dquote);
             }
             Some(b'(') => {
                 self.pos += 2;
@@ -587,7 +605,12 @@ impl Lexer<'_> {
                 l.nested.extend(inner);
             }
             Some(b'{') => {
-                self.pos = self.skip_balanced(start + 1, b'{', b'}');
+                self.pos = self.skip_balanced(start + 1, b'{', b'}', !in_dquote);
+            }
+            Some(b'\'' | b'"') if in_dquote => {
+                val.push(b'$');
+                self.pos += 1;
+                return;
             }
             Some(b'\'') => {
                 self.pos += 2;
