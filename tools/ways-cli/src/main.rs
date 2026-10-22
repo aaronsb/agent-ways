@@ -525,6 +525,9 @@ enum AuthorCommand {
         /// Show Jaccard similarity between siblings
         #[arg(long)]
         jaccard: bool,
+        /// Ways root directory (default: ~/.claude/hooks/ways)
+        #[arg(long)]
+        ways_dir: Option<String>,
     },
     /// Score way-against-way cosine similarity
     Siblings {
@@ -1473,7 +1476,7 @@ fn run() -> Result<()> {
                     cmd::probe::Eval { body_rank: body_rank.as_deref().and_then(config::BodyRank::parse), unrelated, body_rank_weight, single_section_confirm },
                 )
             }
-            AuthorCommand::Tree { path, jaccard } => cmd::tree::run(path, jaccard),
+            AuthorCommand::Tree { path, jaccard, ways_dir } => cmd::tree::run(path, jaccard, ways_dir),
             AuthorCommand::Siblings { id, threshold, corpus, model } => cmd::siblings::run(id, threshold, corpus, model),
             AuthorCommand::Suggest { file, min_freq } => cmd::suggest::run(file, min_freq),
             AuthorCommand::Graph { ways_dir, output } => cmd::graph::run(ways_dir, output),

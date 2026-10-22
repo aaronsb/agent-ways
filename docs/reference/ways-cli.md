@@ -464,13 +464,14 @@ ways author match "git commit message format" --project ~/my-project
 
 **When:** Checking how a domain's progressive-disclosure tree is built, or its thresholds and sizes before editing it.
 
-**Run from:** Anywhere. Pass a way name or path (`softwaredev` or `meta/knowledge`).
+**Run from:** Anywhere. Pass a way name or path (`softwaredev` or `meta/knowledge`). Names and paths resolve against the installed ways; `--ways-dir <dir>` resolves them against another ways root instead, such as a checkout's `hooks/ways`. A tree outside the ways root prints its names relative to its own `hooks/ways`, or, with no `hooks/ways` above it, relative to its own parent.
 
 **Tells you:** A table of each node in the subtree with its depth, type (way or check), disclosure threshold, vocabulary count and token size. `--jaccard` adds the vocabulary overlap between siblings.
 
 ```
 ways author tree softwaredev
 ways author tree softwaredev --jaccard
+ways author tree --ways-dir hooks/ways softwaredev --jaccard
 ```
 
 ### `ways author siblings`

@@ -5,14 +5,21 @@ use walkdir::WalkDir;
 
 use agent_fmt::{Table, Align};
 
-pub fn run(path: String, jaccard: bool) -> Result<()> {
-    let ways_root = crate::paths::projected_ways_root();
-    let tree_path = resolve_path(&path, &ways_root)?;
-    let rel_root = tree_path
-        .strip_prefix(&ways_root)
-        .unwrap_or(&tree_path)
-        .display()
-        .to_string();
+pub fn run(path: String, jaccard: bool, ways_dir: Option<String>) -> Result<()> {
+    let ways_root = match ways_dir {
+        Some(dir) => {
+            let dir = PathBuf::from(dir);
+            if !dir.is_dir() {
+                anyhow::bail!("--ways-dir is not a directory: {}", dir.display());
+            }
+            dir
+        }
+        None => crate::paths::projected_ways_root(),
+    };
+    let ways_root = canonical(&ways_root);
+    let tree_path = canonical(&resolve_path(&path, &ways_root)?);
+    let names_root = names_root(&tree_path, &ways_root);
+    let rel_root = way_id(&tree_path, &names_root);
 
     let files = find_way_files(&tree_path)?;
 
@@ -25,12 +32,51 @@ pub fn run(path: String, jaccard: bool) -> Result<()> {
     println!();
 
     if jaccard {
-        print_jaccard(&tree_path, &ways_root, &files)?;
+        print_jaccard(&names_root, &files)?;
     } else {
-        print_tree(&tree_path, &ways_root, &files)?;
+        print_tree(&tree_path, &names_root, &files)?;
     }
 
     Ok(())
+}
+
+/// The path with symlinks resolved, so the tree and the root its names are
+/// taken against agree; the path as given when it cannot be resolved.
+fn canonical(p: &Path) -> PathBuf {
+    p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
+}
+
+/// The directory way names print relative to: the ways root when the tree is
+/// under it, else the tree's own ways root (the nearest `hooks/ways` above
+/// it), else the tree's parent, so the tree prints under its own name.
+fn names_root(tree_path: &Path, ways_root: &Path) -> PathBuf {
+    if tree_path.starts_with(ways_root) {
+        return ways_root.to_path_buf();
+    }
+    let own_root = tree_path.ancestors().find(|a| {
+        a.file_name().is_some_and(|n| n == "ways")
+            && a.parent().and_then(Path::file_name).is_some_and(|n| n == "hooks")
+    });
+    match own_root {
+        Some(root) => root.to_path_buf(),
+        None => tree_path.parent().unwrap_or(tree_path).to_path_buf(),
+    }
+}
+
+/// A directory's name relative to `root`, joined with '/' on every platform as
+/// the corpus names a way; `.` for the root itself.
+fn way_id(dir: &Path, root: &Path) -> String {
+    let rel = dir.strip_prefix(root).unwrap_or(dir);
+    if rel.as_os_str().is_empty() {
+        ".".to_string()
+    } else {
+        crate::util::path_to_id(rel)
+    }
+}
+
+/// The id of the way a file belongs to: its directory, relative to `root`.
+fn file_way_id(file: &Path, root: &Path) -> String {
+    way_id(file.parent().unwrap_or(file), root)
 }
 
 struct WayInfo {
@@ -43,7 +89,7 @@ struct WayInfo {
     tokens: usize,
 }
 
-fn print_tree(tree_path: &Path, ways_root: &Path, files: &[PathBuf]) -> Result<()> {
+fn print_tree(tree_path: &Path, names_root: &Path, files: &[PathBuf]) -> Result<()> {
     let mut t = Table::new(&["Way", "Depth", "Type", "Thresh", "Vocab", "Tokens"]);
     t.max_width(0, 44);
     t.align(1, Align::Right);
@@ -52,9 +98,8 @@ fn print_tree(tree_path: &Path, ways_root: &Path, files: &[PathBuf]) -> Result<(
     t.align(5, Align::Right);
 
     for file in files {
-        let info = analyze_file(file, tree_path, ways_root)?;
-        let rel = file.strip_prefix(ways_root).unwrap_or(file);
-        let way_id = rel.parent().unwrap_or(rel).display().to_string();
+        let info = analyze_file(file, tree_path)?;
+        let way_id = file_way_id(file, names_root);
         let indent = "  ".repeat(info.depth);
         let ftype = if info.is_check { "check" } else { "way" };
         let thresh = info.threshold.map_or("─".to_string(), |t| format!("{t}"));
@@ -73,7 +118,7 @@ fn print_tree(tree_path: &Path, ways_root: &Path, files: &[PathBuf]) -> Result<(
     Ok(())
 }
 
-fn print_jaccard(_tree_path: &Path, ways_root: &Path, files: &[PathBuf]) -> Result<()> {
+fn print_jaccard(names_root: &Path, files: &[PathBuf]) -> Result<()> {
     let mut by_parent: HashMap<PathBuf, Vec<(PathBuf, String)>> = HashMap::new();
 
     for file in files {
@@ -104,10 +149,8 @@ fn print_jaccard(_tree_path: &Path, ways_root: &Path, files: &[PathBuf]) -> Resu
         for i in 0..siblings.len() {
             for j in (i + 1)..siblings.len() {
                 let score = jaccard_similarity(&siblings[i].1, &siblings[j].1);
-                let rel_a = siblings[i].0.strip_prefix(ways_root).unwrap_or(&siblings[i].0);
-                let rel_b = siblings[j].0.strip_prefix(ways_root).unwrap_or(&siblings[j].0);
-                let a_id = rel_a.parent().unwrap_or(rel_a).display().to_string();
-                let b_id = rel_b.parent().unwrap_or(rel_b).display().to_string();
+                let a_id = file_way_id(&siblings[i].0, names_root);
+                let b_id = file_way_id(&siblings[j].0, names_root);
                 t.add_owned(vec![a_id, b_id, format!("{score:.3}")]);
             }
         }
@@ -117,7 +160,7 @@ fn print_jaccard(_tree_path: &Path, ways_root: &Path, files: &[PathBuf]) -> Resu
     Ok(())
 }
 
-fn analyze_file(file: &Path, tree_path: &Path, _ways_root: &Path) -> Result<WayInfo> {
+fn analyze_file(file: &Path, tree_path: &Path) -> Result<WayInfo> {
     let is_check = file
         .file_name()
         .and_then(|n| n.to_str())
@@ -169,20 +212,22 @@ fn find_way_files(dir: &Path) -> Result<Vec<PathBuf>> {
     let mut files: Vec<PathBuf> = crate::scanner::md_files(dir, crate::scanner::MdKind::All)
         .filter(|p| std::fs::read_to_string(p).is_ok_and(|c| crate::frontmatter::opens_with_fence(&c)))
         .collect();
-    files.sort();
+    // By way directory first, so a parent's row comes before its children's.
+    files.sort_by(|a, b| a.parent().cmp(&b.parent()).then_with(|| a.cmp(b)));
     Ok(files)
 }
 
 fn resolve_path(input: &str, ways_root: &Path) -> Result<PathBuf> {
-    let p = Path::new(input);
-    if p.is_absolute() && p.is_dir() {
-        return Ok(p.to_path_buf());
-    }
-
-    // Try relative to ways_root
+    // A path under ways_root (an absolute path joins as itself), then one
+    // relative to the current directory. Only an input written as a path
+    // reads the current directory: a bare name is a way's, so a same-named
+    // directory in the cwd cannot shadow it.
     let candidate = ways_root.join(input);
     if candidate.is_dir() {
         return Ok(candidate);
+    }
+    if looks_like_path(input) && Path::new(input).is_dir() {
+        return Ok(PathBuf::from(input));
     }
 
     // Search recursively
@@ -212,6 +257,12 @@ fn resolve_path(input: &str, ways_root: &Path) -> Result<PathBuf> {
     }
 }
 
+/// Whether `input` is written as a path rather than a way's name: it holds a
+/// separator or starts with `.` or `~`.
+fn looks_like_path(input: &str) -> bool {
+    input.contains('/') || input.contains(std::path::MAIN_SEPARATOR) || input.starts_with(['.', '~'])
+}
+
 fn extract_vocab_from_content(content: &str) -> String {
     crate::frontmatter::field_in(content, "vocabulary").unwrap_or_default()
 }
@@ -220,3 +271,20 @@ fn extract_threshold_from_content(content: &str) -> Option<f64> {
     crate::frontmatter::field_in(content, "threshold")?.parse().ok()
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn way_id_joins_components_with_slash() {
+        let root: PathBuf = ["hooks", "ways"].iter().collect();
+        let dir: PathBuf = ["hooks", "ways", "prose", "editing", "tone"].iter().collect();
+        let id = way_id(&dir, &root);
+        assert_eq!(id, "prose/editing/tone");
+        assert!(!id.contains('\\'), "platform separator in {id}");
+        let file = dir.join("tone.md");
+        assert_eq!(file_way_id(&file, &root), "prose/editing/tone");
+        assert_eq!(way_id(&root, &root), ".");
+    }
+}
