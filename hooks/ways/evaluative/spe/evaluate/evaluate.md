@@ -2,8 +2,7 @@
 description: the Evaluate step of an SPE round run as one dynamic Workflow; confirm the prediction is saved first, pass the harness gates and a dry run, keep answer keys out of trial reach, cap the budget, and grade with code checks before judges
 vocabulary: workflow script harness gates selftest dry run args.only control regrade answer keys peek detection budget cap credit gate top-up split cells trials judge critic synthesis schema configurations same tasks same graders round constant
 files: (^|/)spe/evals/
-tools: Workflow
-tool_phase: pre
+tool_name: Workflow
 when:
   file_exists: spe/README.md
 scope: agent

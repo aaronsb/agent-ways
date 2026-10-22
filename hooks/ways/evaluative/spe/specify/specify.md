@@ -2,7 +2,7 @@
 description: the Specify step of an SPE round; record the user's prompt verbatim, write a requirement table where each row cites its source and names its test, list disagreements with an owner, and turn last round's proposals and failures into this round's requirements
 vocabulary: requirement table source test column transcript verbatim disagreements owner decides open decision proposals adopted rejected autonomous defaults testability two reviewers failure id cite respec revision history
 files: (^|/)spe/spec/
-tools: EnterPlanMode
+tool_name: EnterPlanMode
 when:
   file_exists: spe/README.md
 scope: agent

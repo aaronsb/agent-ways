@@ -2,8 +2,8 @@
 description: the Predict step of an SPE round, right after the user approves the plan; save the plan and a numeric prediction file and commit them before any harness work or trial, start from the same-as-last-round baseline, give each number a reason, and never edit a saved prediction after the run
 vocabulary: approved plan prediction yaml saved before the run pre-registered commit before trials why line numbers not adjectives baseline-first same as last round naive guess configuration author date never edit adjusted after grader map
 files: (^|/)spe/(predictions|plans)/
-tools: ExitPlanMode
-tool_phase: post
+tool_name: ExitPlanMode
+tool_event: [PostToolUse]
 when:
   file_exists: spe/README.md
 scope: agent

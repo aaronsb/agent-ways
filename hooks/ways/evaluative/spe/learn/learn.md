@@ -2,8 +2,6 @@
 description: the learn step that closes an SPE round after the Workflow eval finishes; compare each prediction with the measured result and the naive same-as-last-round guess, find which reason broke, log new failure types, propose the next round, and keep a long unattended loop within its stop rules
 vocabulary: close out prediction log verdict measured predicted naive closer which why broke failure types failures.md proposals next round draft prediction tag readme refresh unattended overnight halt report ceiling saturated
 files: (^|/)spe/(prediction-log|failures|README)\.md
-tools: Workflow
-tool_phase: post
 when:
   file_exists: spe/README.md
 scope: agent
