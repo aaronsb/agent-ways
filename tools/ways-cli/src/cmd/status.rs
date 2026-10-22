@@ -200,7 +200,7 @@ pub fn run(json_output: bool) -> Result<()> {
         }
         for t in install_targets().0.iter().filter(|t| t.enabled) {
             println!("  mcp:       {} in {}", mcp_registration(&t.dir()), t.path);
-            println!("  mod:       {} in {}", crate::cmd::attend_mod::status_line(&attend_mod_status(t)), t.path);
+            println!("  mod:       {} in {}", crate::cmd::attend_mod::status_line(&crate::cmd::attend_mod::ATTEND, &attend_mod_status(t)), t.path);
         }
         println!();
 
@@ -433,7 +433,7 @@ fn install_json() -> serde_json::Value {
 /// The attend mod in one target (ADR-406 item 8): the installed and the
 /// shipped version.
 fn attend_mod_status(t: &crate::config::Target) -> serde_json::Value {
-    crate::cmd::attend_mod::status(&crate::paths::data_root(), &t.dir(), &crate::paths::projection_root())
+    crate::cmd::attend_mod::status(&crate::cmd::attend_mod::ATTEND, &crate::paths::data_root(), &t.dir(), &crate::paths::projection_root())
 }
 
 /// `bin` with what its `--version` prints, if it answers.
@@ -516,6 +516,26 @@ fn key_phrase(file: Option<&Path>, check: Option<&str>, env_only: Option<&str>) 
     }
 }
 
+/// What the gate line says of a keyless engine (ADR-708): the ways-judge mod,
+/// or the key engine that stands in without it.
+fn keyless_phrase(state: &ways_agent_core::keys::Readiness) -> String {
+    use ways_agent_core::keys::Readiness;
+    match state {
+        Readiness::Ready(..) => "the ways-judge mod judges on Claude Code's own account".to_string(),
+        Readiness::Fallback(p, _) => format!("ways-judge mod not enabled: the {p} key engine judges instead"),
+        Readiness::Unverified(p, None) => format!("ways-judge mod not enabled: the {p} key stands in, not checked yet"),
+        Readiness::Unverified(p, Some(r)) => format!("ways-judge mod not enabled: the {p} key stands in, last check {r}: fails open"),
+        Readiness::Off => "gate.mode off".to_string(),
+        Readiness::ModDisabled => {
+            format!("ways-judge mod disabled and no key: fails open (`{}`)", crate::cmd::judge::enable_command())
+        }
+        Readiness::NoMod | Readiness::NoKey(_) => {
+            "no ways-judge mod and no key: fails open (`ways judge-setup` installs the mod or adds a key)".to_string()
+        }
+        Readiness::Config(e) => format!("agent.yaml does not load: {e}"),
+    }
+}
+
 fn gate_line() -> String {
     use ways_agent_core::profile::Provider;
     match gate_settings() {
@@ -526,8 +546,12 @@ fn gate_line() -> String {
         },
         Ok(Some((s, file))) => {
             let p = s.profile.provider;
-            let check = file.as_deref().and_then(|f| file_check(p, f, &s.profile.model));
-            let key = key_phrase(file.as_deref(), check.as_ref().map(|r| r.result.as_str()), env_only(p));
+            let key = if p.keyless() {
+                keyless_phrase(&crate::cmd::judge::readiness())
+            } else {
+                let check = file.as_deref().and_then(|f| file_check(p, f, &s.profile.model));
+                key_phrase(file.as_deref(), check.as_ref().map(|r| r.result.as_str()), env_only(p))
+            };
             format!(
                 "{} — {} {} at threshold {}, {key}",
                 s.mode.as_str(),
@@ -556,13 +580,30 @@ fn gate_json() -> serde_json::Value {
             "key_check": file.as_deref().and_then(|f| file_check(s.profile.provider, f, &s.profile.model)).map(|r| r.result),
             "key_source": file.map(|f| f.display().to_string()),
             "key_only_in_env": env_only(s.profile.provider),
+            "judge": s.profile.provider.keyless().then(|| keyless_phrase(&crate::cmd::judge::readiness())),
         }),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{install_summary, sidecar_json, sidecar_line};
+    use super::{install_summary, keyless_phrase, sidecar_json, sidecar_line};
+
+    #[test]
+    fn a_keyless_engine_is_never_told_to_add_its_own_key() {
+        use ways_agent_core::keys::Readiness;
+        use ways_agent_core::profile::{Mode, Provider};
+        assert!(keyless_phrase(&Readiness::Ready(Provider::ClaudeCode, Mode::Enforce)).contains("ways-judge mod judges"));
+        assert!(keyless_phrase(&Readiness::Fallback(Provider::Anthropic, Mode::Enforce)).contains("the anthropic key engine judges instead"));
+        let none = keyless_phrase(&Readiness::NoMod);
+        assert!(none.contains("no ways-judge mod and no key") && none.contains("ways judge-setup"), "{none}");
+        for state in [Readiness::NoMod, Readiness::Unverified(Provider::Openrouter, None)] {
+            assert!(!keyless_phrase(&state).contains("--provider claude-code"));
+        }
+        assert!(keyless_phrase(&Readiness::ModDisabled).contains("disabled"));
+        let config = keyless_phrase(&Readiness::Config("bad yaml".into()));
+        assert_eq!(config, "agent.yaml does not load: bad yaml", "a config error is not a missing mod");
+    }
     use crate::cmd::scan::sidecar::Fallback;
     use serde_json::json;
 

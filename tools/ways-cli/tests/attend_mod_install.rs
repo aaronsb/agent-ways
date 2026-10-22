@@ -1,7 +1,9 @@
-//! `ways manage repair` installs, updates and removes the attend mod through
-//! Claude Code's plugin CLI (ADR-406 item 8). A stub `claude` on PATH keeps the
-//! marketplace and plugin lists in files and logs every call, so the test
-//! reads exactly what reconcile asked Claude Code to do.
+//! `ways manage repair` installs, updates and removes the mods through Claude
+//! Code's plugin CLI: attend on every repair (ADR-406 item 8), ways-judge
+//! where setup recorded installing it (ADR-708 §9). A stub `claude` on PATH
+//! keeps the marketplace and plugin lists in files, writes `enabledPlugins`
+//! into the target's settings as Claude Code does, and logs every call, so
+//! the test reads exactly what reconcile asked Claude Code to do.
 #![cfg(unix)]
 
 use std::os::unix::fs::PermissionsExt;
@@ -14,19 +16,40 @@ echo "${CLAUDE_CONFIG_DIR:-unset}|$*" >> "$STUB_STATE/log"
 m="$STUB_STATE/markets.json"; p="$STUB_STATE/plugins.json"
 [ -f "$m" ] || echo '[]' > "$m"
 [ -f "$p" ] || echo '[]' > "$p"
+# A call whose arguments are a line of $STUB_STATE/fail fails.
+if [ -f "$STUB_STATE/fail" ] && grep -qxF -- "$*" "$STUB_STATE/fail"; then
+  echo "stub claude: failing $*" >&2; exit 1
+fi
+# The installed plugins, one JSON object a line.
+entries() { tr -d '[]\n' < "$p" | sed 's/},{/}\
+{/g' | grep -v '^$'; }
+# Objects on stdin become plugins.json, and the target's enabledPlugins.
+save() {
+  objs=$(cat)
+  printf '[%s]\n' "$(printf '%s\n' "$objs" | grep -v '^$' | paste -sd, -)" > "$p"
+  if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
+    ids=$(printf '%s\n' "$objs" | sed -n 's/.*"id":"\([^"]*\)".*/"\1":true/p' | paste -sd, -)
+    printf '{"enabledPlugins":{%s}}\n' "$ids" > "$CLAUDE_CONFIG_DIR/settings.json"
+  fi
+}
+shipped() { case "$1" in attend@*) echo "$STUB_SHIPPED" ;; *) echo "$STUB_JUDGE_SHIPPED" ;; esac; }
 case "$*" in
+  "--version") echo "2.1.309 (Claude Code)" ;;
   "plugin marketplace list --json") cat "$m" ;;
   "plugin list --json") cat "$p" ;;
   "plugin marketplace add "*) printf '[{"name":"agent-ways","source":"directory","path":"%s"}]\n' "$4" > "$m" ;;
   # Claude Code uninstalls a marketplace's plugins when it removes the marketplace.
-  "plugin marketplace remove agent-ways") echo '[]' > "$m"; echo '[]' > "$p" ;;
+  "plugin marketplace remove agent-ways") echo '[]' > "$m"; entries | grep -v '"id":"[^"]*@agent-ways"' | save ;;
   "plugin marketplace update agent-ways") ;;
-  "plugin install attend@agent-ways --scope user"|"plugin update attend@agent-ways --scope user")
-    printf '[{"id":"attend@agent-ways","version":"%s","scope":"user"}]\n' "$STUB_SHIPPED" > "$p" ;;
-  "plugin uninstall attend@agent-ways --scope user") echo '[]' > "$p" ;;
+  "plugin install "*"@agent-ways --scope user"|"plugin update "*"@agent-ways --scope user")
+    { entries | grep -vF "\"id\":\"$3\""; printf '{"id":"%s","version":"%s","scope":"user"}\n' "$3" "$(shipped "$3")"; } | save ;;
+  "plugin uninstall "*"@agent-ways --scope user") entries | grep -vF "\"id\":\"$3\"" | save ;;
   *) echo "stub claude: unexpected: $*" >&2; exit 2 ;;
 esac
 "#;
+
+const ATTEND: &str = "attend@agent-ways";
+const JUDGE: &str = "ways-judge@agent-ways";
 
 struct Fx {
     root: PathBuf,
@@ -44,8 +67,12 @@ impl Fx {
         write(&src.join("skills/wrap/SKILL.md"), "---\nx\n");
         write(&src.join("hooks/ways/meta/a.md"), "---\nx\n");
         write(&src.join("hooks/check-config-updates.sh"), "#!/bin/sh\n");
-        write(&src.join("plugins/.claude-plugin/marketplace.json"), r#"{"name":"agent-ways","plugins":[{"name":"attend","source":"./attend"}]}"#);
+        write(
+            &src.join("plugins/.claude-plugin/marketplace.json"),
+            r#"{"name":"agent-ways","plugins":[{"name":"attend","source":"./attend"},{"name":"ways-judge","source":"./ways-judge"}]}"#,
+        );
         write(&src.join("plugins/attend/.claude-plugin/plugin.json"), r#"{"name":"attend","version":"0.17.0"}"#);
+        write(&src.join("plugins/ways-judge/.claude-plugin/plugin.json"), r#"{"name":"ways-judge","version":"1.42.1"}"#);
         copy_dir(&src, &root.join("moved"));
         let stub = root.join("stubbin/claude");
         write(&stub, STUB);
@@ -79,7 +106,8 @@ impl Fx {
             .env("XDG_CACHE_HOME", self.root.join("cache"))
             .env("PATH", path)
             .env("STUB_STATE", self.state())
-            .env("STUB_SHIPPED", "0.17.0");
+            .env("STUB_SHIPPED", "0.17.0")
+            .env("STUB_JUDGE_SHIPPED", "1.42.1");
         for var in ["CLAUDE_PROJECT_DIR", "CLAUDE_CONFIG_DIR", "CLAUDE_SESSION_ID", "WAYS_CLAUDE_BIN"] {
             cmd.env_remove(var);
         }
@@ -114,6 +142,98 @@ impl Fx {
         let log = std::fs::read_to_string(self.state().join("log")).unwrap_or_default();
         let _ = std::fs::remove_file(self.state().join("log"));
         log.lines().filter(|l| !l.ends_with("list --json")).map(str::to_string).collect()
+    }
+
+    /// The record `ways judge-setup` writes once it installed ways-judge in
+    /// the target, beside the marketplace record; `pending` as this app marks
+    /// it after taking the mod out. Needs a repair first, which writes the
+    /// marketplace record.
+    fn record_judge(&self, pending: bool) {
+        let market = walk(&self.root.join("home"))
+            .into_iter()
+            .find(|p| p.file_name().is_some_and(|n| n == "attend-mod-marketplace"))
+            .expect("a repair has recorded the marketplace");
+        let text = if pending { format!("{JUDGE}\npending\n") } else { format!("{JUDGE}\n") };
+        write(&market.with_file_name("ways-judge-installed"), &text);
+    }
+
+    /// Both mods installed and the judge recorded, as after setup: a repair
+    /// installs attend, then setup installs the judge and records it.
+    fn both(&self) {
+        self.repair();
+        self.by_hand(&["plugin", "install", JUDGE, "--scope", "user"]);
+        self.record_judge(false);
+        self.repair();
+        assert!(self.has(JUDGE) && self.has(ATTEND), "{}", self.plugins());
+        self.changes();
+    }
+
+    /// `repair --commit` against the target once its config disables it.
+    fn repair_disabled(&self) {
+        write(&self.user_config(), &format!("targets:\n  - path: {}\n    enabled: false\n", self.dest().display()));
+        let out = self.ways(&self.stub_path()).args(["manage", "repair", "--commit", "--source"]).arg(self.src()).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    /// The user config: the one target, enabled or not, and whether repair
+    /// installs attend there.
+    fn configure(&self, enabled: bool, attend: bool) {
+        let attend = if attend { String::new() } else { "attend_mod:\n  install: false\n".to_string() };
+        write(&self.user_config(), &format!("{attend}targets:\n  - path: {}\n    enabled: {enabled}\n", self.dest().display()));
+    }
+
+    /// `repair --commit` over the configured targets.
+    fn repair_targets(&self, src: &Path) {
+        let out = self.ways(&self.stub_path()).args(["manage", "repair", "--commit", "--source"]).arg(src).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    /// Both mods installed and recorded, attend kept or not, then the
+    /// operator uninstalls ways-judge by hand.
+    fn judge_removed_by_hand(&self, attend: bool) {
+        self.both();
+        self.configure(true, attend);
+        self.repair_targets(&self.src());
+        self.by_hand(&["plugin", "uninstall", JUDGE, "--scope", "user"]);
+        assert!(!self.has(JUDGE) && self.has(ATTEND) == attend, "{}", self.plugins());
+        assert!(self.judge_record().is_some(), "repair has not run since the removal");
+        self.changes();
+    }
+
+    fn plugins(&self) -> String {
+        std::fs::read_to_string(self.state().join("plugins.json")).unwrap_or_default()
+    }
+
+    fn has(&self, id: &str) -> bool {
+        self.plugins().contains(&format!("\"id\":\"{id}\""))
+    }
+
+    /// The target's settings: the `enabledPlugins` the stub keeps.
+    fn enabled(&self) -> String {
+        std::fs::read_to_string(self.dest().join("settings.json")).unwrap_or_default()
+    }
+
+    /// The record setup writes once it installed the judge mod, if present.
+    fn judge_record(&self) -> Option<PathBuf> {
+        walk(&self.root.join("home")).into_iter().find(|p| p.file_name().is_some_and(|n| n == "ways-judge-installed"))
+    }
+
+    /// The operator's own `claude plugin <args>` against the target.
+    fn by_hand(&self, args: &[&str]) {
+        let out = Command::new(self.root.join("stubbin/claude"))
+            .args(args)
+            .env("STUB_STATE", self.state())
+            .env("CLAUDE_CONFIG_DIR", self.dest())
+            .env("STUB_SHIPPED", "0.17.0")
+            .env("STUB_JUDGE_SHIPPED", "1.42.1")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    /// Calls to fail, by their exact arguments; empty clears them.
+    fn fail(&self, calls: &[&str]) {
+        write(&self.state().join("fail"), &calls.iter().map(|c| format!("{c}\n")).collect::<String>());
     }
 
     fn installed(&self, version: &str) {
@@ -361,4 +481,213 @@ fn a_dev_marketplace_missing_for_now_is_reported_not_claimed() {
     assert_eq!(fx.changes(), Vec::<String>::new());
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains(&plugins.display().to_string()) && err.contains("ways manage repair"), "{err}");
+}
+
+#[test]
+fn repair_leaves_an_unrecorded_judge_mod_alone_and_installs_a_pending_one() {
+    let fx = Fx::new("judge-recorded");
+    fx.repair();
+    let dest = fx.dest().display().to_string();
+    assert!(!fx.changes().iter().any(|c| c.contains(JUDGE)), "no record, no ways-judge call");
+    // Recorded, and marked pending: this app took it out or failed to
+    // install it, so repair puts it back.
+    fx.record_judge(true);
+    fx.repair();
+    assert_eq!(fx.changes(), vec![format!("{dest}|plugin install {JUDGE} --scope user")]);
+    assert!(fx.enabled().contains(&format!("\"{JUDGE}\":true")), "{}", fx.enabled());
+    fx.repair();
+    assert_eq!(fx.changes(), Vec::<String>::new(), "converged");
+}
+
+#[test]
+fn install_false_removes_attend_and_keeps_the_marketplace_the_judge_runs_from() {
+    let fx = Fx::new("judge-install-false");
+    fx.both();
+    write(&fx.user_config(), "attend_mod:\n  install: false\n");
+    fx.repair();
+    let dest = fx.dest().display().to_string();
+    assert_eq!(fx.changes(), vec![format!("{dest}|plugin uninstall {ATTEND} --scope user")]);
+    assert!(fx.has(JUDGE) && !fx.has(ATTEND), "{}", fx.plugins());
+    fx.repair();
+    assert_eq!(fx.changes(), Vec::<String>::new(), "converged");
+}
+
+#[test]
+fn a_disabled_target_holding_both_mods_loses_both_then_the_marketplace() {
+    let fx = Fx::new("judge-disabled");
+    fx.both();
+    fx.repair_disabled();
+    let dest = fx.dest().display().to_string();
+    assert_eq!(
+        fx.changes(),
+        vec![
+            format!("{dest}|plugin uninstall {JUDGE} --scope user"),
+            format!("{dest}|plugin uninstall {ATTEND} --scope user"),
+            format!("{dest}|plugin marketplace remove agent-ways"),
+        ]
+    );
+    assert_eq!(fx.plugins().trim(), "[]");
+}
+
+#[test]
+fn a_disabled_target_loses_the_judge_mod_from_a_source_that_no_longer_ships_it() {
+    let fx = Fx::new("judge-unshipped");
+    fx.both();
+    std::fs::remove_dir_all(fx.src().join("plugins/ways-judge")).unwrap();
+    fx.repair_disabled();
+    let dest = fx.dest().display().to_string();
+    assert_eq!(fx.changes()[0], format!("{dest}|plugin uninstall {JUDGE} --scope user"));
+    assert!(!fx.has(JUDGE), "{}", fx.plugins());
+}
+
+#[test]
+fn a_moved_app_holding_both_mods_reinstalls_both_in_one_repair() {
+    let fx = Fx::new("judge-moved");
+    fx.both();
+    let moved = fx.root.join("moved");
+    fx.repair_from(&moved);
+    let dest = fx.dest().display().to_string();
+    assert_eq!(
+        fx.changes(),
+        vec![
+            format!("{dest}|plugin marketplace remove agent-ways"),
+            format!("{dest}|plugin marketplace add {} --scope user", moved.join("plugins").display()),
+            format!("{dest}|plugin install {ATTEND} --scope user"),
+            format!("{dest}|plugin install {JUDGE} --scope user"),
+        ]
+    );
+    fx.repair_from(&moved);
+    assert_eq!(fx.changes(), Vec::<String>::new(), "converged");
+}
+
+/// Review of #1142, finding 1: the marketplace removal takes ways-judge with
+/// it, and a later call fails. A failed plugin install no longer stops the
+/// plan, and the record brings back a judge mod the failure lost.
+#[test]
+fn a_failed_install_after_a_move_never_loses_the_judge_mod() {
+    let fx = Fx::new("judge-moved-fails");
+    fx.both();
+    let moved = fx.root.join("moved");
+    let dest = fx.dest().display().to_string();
+    // attend's install fails: the judge's still runs in the same pass.
+    fx.fail(&[&format!("plugin install {ATTEND} --scope user")]);
+    let out = fx.repair_from(&moved);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains(&format!("`claude plugin install {ATTEND} --scope user` failed")), "the failure is reported: {err}");
+    // attend's own plan went on past its failed install to the judge's.
+    assert!(err.contains(&format!("attend mod: installed {JUDGE} again")), "{err}");
+    assert!(fx.has(JUDGE) && !fx.has(ATTEND), "{}", fx.plugins());
+    fx.changes();
+    fx.fail(&[]);
+    fx.repair_from(&moved);
+    assert_eq!(fx.changes(), vec![format!("{dest}|plugin install {ATTEND} --scope user")]);
+
+    // The judge's own install fails after another move: the settings no
+    // longer name it, and the record still brings it back.
+    let away = fx.root.join("away");
+    copy_dir(&moved, &away);
+    fx.fail(&[&format!("plugin install {JUDGE} --scope user")]);
+    fx.repair_from(&away);
+    assert!(!fx.has(JUDGE) && !fx.enabled().contains(JUDGE), "lost: {}", fx.plugins());
+    fx.changes();
+    fx.fail(&[]);
+    fx.repair_from(&away);
+    assert_eq!(fx.changes(), vec![format!("{dest}|plugin install {JUDGE} --scope user")]);
+}
+
+/// Re-review of #1142: the operator uninstalls ways-judge by hand while its
+/// marketplace is this app's and current. Repair reads that as their choice:
+/// it clears the record, says so once, and never reinstalls the mod.
+#[test]
+fn a_judge_mod_uninstalled_by_hand_stays_gone_and_its_record_clears() {
+    let fx = Fx::new("judge-by-hand");
+    fx.both();
+    assert!(fx.judge_record().is_some());
+    fx.by_hand(&["plugin", "uninstall", JUDGE, "--scope", "user"]);
+    fx.changes();
+    let out = fx.repair();
+    assert_eq!(fx.changes(), Vec::<String>::new(), "nothing reinstalled");
+    let err = String::from_utf8_lossy(&out.stderr);
+    let said: Vec<&str> = err.lines().filter(|l| l.contains("removed by hand")).collect();
+    assert_eq!(said.len(), 1, "one line says so: {err}");
+    assert!(fx.judge_record().is_none(), "the record is cleared");
+    assert!(!fx.has(JUDGE) && fx.has(ATTEND), "{}", fx.plugins());
+    fx.repair();
+    assert_eq!(fx.changes(), Vec::<String>::new(), "and stays gone");
+}
+
+/// With attend_mod.install false the judge's pass is the one that moves the
+/// marketplace, and its failure is recovered the same way.
+#[test]
+fn install_false_and_a_moved_app_move_the_judge_mod_alone() {
+    let fx = Fx::new("judge-moved-alone");
+    fx.both();
+    write(&fx.user_config(), "attend_mod:\n  install: false\n");
+    fx.repair();
+    fx.changes();
+    let moved = fx.root.join("moved");
+    let dest = fx.dest().display().to_string();
+    fx.fail(&[&format!("plugin install {JUDGE} --scope user")]);
+    fx.repair_from(&moved);
+    assert_eq!(
+        fx.changes(),
+        vec![
+            format!("{dest}|plugin marketplace remove agent-ways"),
+            format!("{dest}|plugin marketplace add {} --scope user", moved.join("plugins").display()),
+            format!("{dest}|plugin install {JUDGE} --scope user"),
+        ]
+    );
+    assert!(!fx.has(JUDGE));
+    fx.fail(&[]);
+    fx.repair_from(&moved);
+    assert_eq!(fx.changes(), vec![format!("{dest}|plugin install {JUDGE} --scope user")]);
+    assert!(fx.has(JUDGE) && !fx.has(ATTEND), "{}", fx.plugins());
+}
+
+/// Review of #1142, round 4: the operator uninstalls ways-judge by hand, then
+/// the target is disabled before any repair. Withdrawing attend removes the
+/// marketplace, which took no ways-judge with it, so the record is not marked
+/// pending and enabling the target again never reinstalls the mod.
+#[test]
+fn a_judge_mod_uninstalled_by_hand_stays_gone_across_a_disable_and_re_enable() {
+    for attend in [true, false] {
+        let fx = Fx::new(&format!("judge-by-hand-disable-{attend}"));
+        fx.judge_removed_by_hand(attend);
+        fx.configure(false, attend);
+        fx.repair_targets(&fx.src());
+        assert!(fx.changes().iter().any(|c| c.ends_with("plugin marketplace remove agent-ways")), "attend {attend}");
+        let record = std::fs::read_to_string(fx.judge_record().expect("the record outlives the disable")).unwrap();
+        assert!(!record.contains("pending"), "attend {attend}: the removal took no ways-judge: {record:?}");
+        fx.configure(true, attend);
+        fx.repair_targets(&fx.src());
+        let changes = fx.changes();
+        assert!(!changes.iter().any(|c| c.contains(JUDGE)), "attend {attend}: not reinstalled: {changes:?}");
+        assert!(!fx.has(JUDGE), "attend {attend}: {}", fx.plugins());
+        assert!(fx.judge_record().is_none(), "attend {attend}: the record is cleared");
+        fx.repair_targets(&fx.src());
+        assert!(!fx.changes().iter().any(|c| c.contains(JUDGE)), "attend {attend}: and stays gone");
+    }
+}
+
+/// Review of #1142, round 4: the operator uninstalls ways-judge by hand, then
+/// the app moves before any repair. The repair that moves the marketplace
+/// installs again only what was installed from it.
+#[test]
+fn a_judge_mod_uninstalled_by_hand_stays_gone_after_the_app_moves() {
+    for attend in [true, false] {
+        let fx = Fx::new(&format!("judge-by-hand-moved-{attend}"));
+        fx.judge_removed_by_hand(attend);
+        let moved = fx.root.join("moved");
+        fx.repair_targets(&moved);
+        let changes = fx.changes();
+        assert!(!changes.iter().any(|c| c.contains(JUDGE)), "attend {attend}: not reinstalled: {changes:?}");
+        assert_eq!(fx.has(ATTEND), attend, "attend {attend}: {}", fx.plugins());
+        assert!(!fx.has(JUDGE), "attend {attend}: {}", fx.plugins());
+        assert!(fx.judge_record().is_none(), "attend {attend}: the record is cleared");
+        fx.repair_targets(&moved);
+        fx.repair_targets(&moved);
+        assert!(!fx.changes().iter().any(|c| c.contains(JUDGE)), "attend {attend}: and stays gone");
+        fx.repair_targets(&moved);
+        assert_eq!(fx.changes(), Vec::<String>::new(), "attend {attend}: converged");
+    }
 }
