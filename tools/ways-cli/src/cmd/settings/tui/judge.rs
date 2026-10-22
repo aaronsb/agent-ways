@@ -98,7 +98,9 @@ pub fn section(state: &JudgeState) -> Node {
 /// session left with no engine has its reason, which names the remedy, as
 /// its finding, and the reason's kind as where it came from.
 fn session_row(l: &LiveSession, labels: &[(String, String)]) -> Node {
-    let unavailable = l.engine.as_ref().filter(|e| e.resolution.engine.is_none() && e.resolution.reason != engine::NO_KEY);
+    // No key with no engine named, or the gate off, is the operator's
+    // setting, not a fault: only an engine that cannot run has a fix.
+    let unavailable = l.engine.as_ref().filter(|e| e.resolution.is_unavailable() || e.resolution.reason.starts_with(engine::CONFIG));
     let (value, source) = match &l.engine {
         None => ("not resolved".to_string(), "no judge request yet".to_string()),
         Some(e) if unavailable.is_some() => ("none".to_string(), e.resolution.reason.split(':').next().unwrap_or_default().to_string()),

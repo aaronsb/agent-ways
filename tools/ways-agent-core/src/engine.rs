@@ -137,8 +137,15 @@ impl SessionEngine {
     }
 }
 
-/// A running Claude Code session and the engine it resolved to; `engine` is
-/// `None` until its first judge request resolves one.
+/// The file whose presence says a Claude Code judge host registered for the
+/// session, in its judge state directory.
+pub const HOST_FILE: &str = "host";
+
+/// A running Claude Code session and its engine. Only a resolution that
+/// names an engine is held in the session's file; a session with none
+/// resolves again at each request, so its `engine` is that resolution,
+/// computed now as the gate computes it. `engine` is `None` while the
+/// session would resolve to an engine and has made no judge request.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LiveSession {
     pub session: String,
@@ -152,26 +159,49 @@ impl LiveSession {
     }
 }
 
-/// The sessions a running Claude Code process holds, each with its
-/// resolution (ADR-708 §8): those Claude Code's session records name, whose
-/// process is alive.
+/// The sessions a running Claude Code process holds, each with its engine
+/// (ADR-708 §8): those Claude Code's session records name, whose process is
+/// alive. A session with no held engine is resolved as the gate resolves it,
+/// from agent.yaml, the key files and its host registration.
 pub fn live_sessions() -> Vec<LiveSession> {
     let records = ways_core::paths::claude_dir().session_records();
     let live = records.iter().filter(|r| process_alive(r.pid)).map(|r| r.session_id.as_str());
-    live_sessions_in(&judge_state_root(), live)
+    let user = profile::UserLayer::load_with_findings(&profile::user_layer_path()).map(|(u, _)| u).unwrap_or_default();
+    let profiles = profile::profiles(&user);
+    let has_key = |p| crate::keys::locate_file(p).is_some();
+    live_sessions_in(&judge_state_root(), live, |host| {
+        if user.mode == Some(profile::Mode::Off) {
+            // The gate judges nothing, so no session resolves.
+            return Resolution { engine: None, reason: OFF.to_string() };
+        }
+        resolve_session(user.engine.as_deref(), &profiles, host, has_key)
+    })
 }
 
-/// [`live_sessions`] for the session ids `live`, reading their resolutions
-/// under `root`. An id that is not a plain directory name is left out, and
-/// each id is listed once, in id order, so a list reads the same however
-/// the records were found.
-pub fn live_sessions_in<'a>(root: &Path, live: impl IntoIterator<Item = &'a str>) -> Vec<LiveSession> {
+/// The reason a session has no engine while `gate.mode` is off.
+pub const OFF: &str = "gate.mode off";
+
+/// [`live_sessions`] for the session ids `live`: each one's held resolution
+/// under `root`, or, with none held, `resolve` given whether a host
+/// registered, kept when it names no engine. An id that is not a plain
+/// directory name is left out, and each id is listed once, in id order, so a
+/// list reads the same however the records were found.
+pub fn live_sessions_in<'a>(root: &Path, live: impl IntoIterator<Item = &'a str>, resolve: impl Fn(bool) -> Resolution) -> Vec<LiveSession> {
     let plain = |id: &str| {
         let ok = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
         id.chars().next().is_some_and(ok) && id.chars().all(|c| ok(c) || c == '.')
     };
     let ids: BTreeSet<&str> = live.into_iter().filter(|id| plain(id)).collect();
-    ids.into_iter().map(|id| LiveSession { session: id.to_string(), engine: SessionEngine::read(&root.join(id)) }).collect()
+    ids.into_iter()
+        .map(|id| {
+            let dir = root.join(id);
+            let engine = SessionEngine::read(&dir).or_else(|| {
+                let now = resolve(dir.join(HOST_FILE).is_file());
+                now.engine.is_none().then_some(SessionEngine { resolution: now, provider: None })
+            });
+            LiveSession { session: id.to_string(), engine }
+        })
+        .collect()
 }
 
 /// Whether a process holds `pid`. Off Unix a session record is taken at its
@@ -332,9 +362,14 @@ mod tests {
         let fallen = resolve_session(Some("claude-code"), &shipped(), false, only(Provider::Anthropic));
         resolved(&root, "3f6c2a91-aaaa", Some("claude-code"), Some(Provider::ClaudeCode), EXPLICIT);
         resolved(&root, "bbbbbbbb-0000", fallen.engine.as_deref(), Some(Provider::Anthropic), &fallen.reason);
-        let none = resolve_session(Some("claude-code"), &shipped(), false, |_| false);
-        resolved(&root, "cccccccc-0000", None, None, &none.reason);
-        let live = live_sessions_in(&root, ["dddddddd-0000", "3f6c2a91-aaaa", "bbbbbbbb-0000", "cccccccc-0000", "3f6c2a91-aaaa", "../x"]);
+        // No engine is not held: cccccccc has no file and resolves now to
+        // none; dddddddd has a host and resolves now to claude-code, which
+        // it has not yet asked for.
+        std::fs::create_dir_all(root.join("dddddddd-0000")).unwrap();
+        std::fs::write(root.join("dddddddd-0000").join(HOST_FILE), "1").unwrap();
+        let now = |host| resolve_session(Some("claude-code"), &shipped(), host, |_| false);
+        let ids = ["dddddddd-0000", "3f6c2a91-aaaa", "bbbbbbbb-0000", "cccccccc-0000", "3f6c2a91-aaaa", "../x"];
+        let live = live_sessions_in(&root, ids, now);
         assert_eq!(live.len(), 4, "each id once, in id order, and no path that is not an id: {live:?}");
         let lines: Vec<String> = live.iter().map(|s| session_line(s, &shipped())).collect();
         assert_eq!(lines[0], "3f6c2a91  claude-code (Claude Code internal) — explicit");

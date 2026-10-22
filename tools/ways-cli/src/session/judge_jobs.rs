@@ -99,7 +99,7 @@ impl Store {
     }
 
     fn host_path(&self) -> PathBuf {
-        self.state.join("host")
+        self.state.join(ways_agent_core::engine::HOST_FILE)
     }
 
     fn jobs(&self) -> PathBuf {
