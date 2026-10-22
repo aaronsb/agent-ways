@@ -21,7 +21,7 @@ When other sessions or agents work in the same checkout, or you were handed a wo
 
 ## When to Branch
 
-This is guidance, not a gate. Use judgment:
+This is guidance. Use judgment:
 
 | Situation | Branch? |
 |-----------|---------|
