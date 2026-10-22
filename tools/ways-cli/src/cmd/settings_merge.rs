@@ -1214,6 +1214,56 @@ mod tests {
     }
 
     #[test]
+    fn a_hook_that_gains_a_timeout_replaces_the_installed_one() {
+        // ADR-704: the check-tool.sh entries shipped without a timeout before
+        // they gained one. An install holding the old entry, with a lost base,
+        // converges on the new entry, once per event, and keeps the user's hook.
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static SEQ: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "ways-setmerge-timeout-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (dest, source, base) = (dir.join("settings.json"), dir.join("source.json"), dir.join("base.json"));
+        let entry = |timeout: Option<u64>| {
+            let mut cmd = json!({ "type": "command", "command": "${HOME}/.claude/hooks/ways/check-tool.sh" });
+            if let Some(t) = timeout {
+                cmd["timeout"] = json!(t);
+            }
+            json!({ "matcher": "EnterPlanMode|ExitPlanMode|Workflow", "hooks": [cmd] })
+        };
+        let user = json!({ "matcher": "Bash", "hooks": [ { "type": "command", "command": "/u/mine" } ] });
+
+        std::fs::write(&source, serde_json::to_string(&json!({
+            "hooks": { "PreToolUse": [entry(Some(10))], "PostToolUse": [entry(Some(10))] }
+        })).unwrap()).unwrap();
+        std::fs::write(&dest, serde_json::to_string(&json!({
+            "hooks": { "PreToolUse": [entry(None), user.clone()], "PostToolUse": [entry(None)] },
+            "permissions": { "allow": WAYS_PERMS }
+        })).unwrap()).unwrap();
+        std::fs::write(&base, serde_json::to_string(&json!({ "hooks": {}, "perms": WAYS_PERMS })).unwrap()).unwrap();
+
+        apply_to_files(&source, &dest, &base).expect("the timeout change must apply");
+
+        let after: Value = serde_json::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
+        for event in ["PreToolUse", "PostToolUse"] {
+            let tool: Vec<&Value> = after["hooks"][event]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|e| e["hooks"][0]["command"].as_str().is_some_and(|c| c.contains("check-tool.sh")))
+                .collect();
+            assert_eq!(tool.len(), 1, "{event}: one check-tool.sh entry: {tool:?}");
+            assert_eq!(tool[0]["hooks"][0]["timeout"], 10, "{event}: the timeout landed");
+        }
+        assert!(after["hooks"]["PreToolUse"].as_array().unwrap().contains(&user), "user hook preserved");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn command_is_ours_examines_the_exe_token_only() {
         // Ours: script + CLI, unquoted and quoted-with-args.
         assert!(command_is_ours("${HOME}/.claude/hooks/ways/check-setup.sh"));

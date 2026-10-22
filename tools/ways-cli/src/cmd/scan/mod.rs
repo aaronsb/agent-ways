@@ -1045,8 +1045,8 @@ fn event_admits(tool_event: Option<&str>, hook_event: &str) -> bool {
     crate::frontmatter::tool_events(tool_event).iter().any(|e| e == hook_event)
 }
 
-/// The tool-lane hits among `candidates` for `tool` at `hook_event`: scope,
-/// `when:`, the event, then the `tool_name:` regex on the tool name.
+/// The tool-lane hits among `candidates` for `tool` at `hook_event`: ways
+/// with a `tool_name:`, then scope, `when:`, the event, and the regex.
 fn tool_hits(
     candidates: &[WayCandidate],
     tool: &str,
@@ -1056,13 +1056,13 @@ fn tool_hits(
 ) -> Vec<Hit<String>> {
     let mut hits: Vec<Hit<String>> = Vec::new();
     for way in candidates {
+        let Some(ref name_pattern) = way.tool_name else { continue };
         if !session::scope_matches(&way.scope, scope) {
             continue;
         }
         if !check_when(&way.when_project, &way.when_file_exists, project_dir) {
             continue;
         }
-        let Some(ref name_pattern) = way.tool_name else { continue };
         if !event_admits(way.tool_event.as_deref(), hook_event) {
             continue;
         }

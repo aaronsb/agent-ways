@@ -153,7 +153,10 @@ mod tests {
     /// schema would make lint warn on a live way, or pass a dead one.
     #[test]
     fn the_tool_lane_wired_lists_match_the_shipped_settings() {
-        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        // Read at run time, as shipped_hooks_are_all_recognized_as_ours does:
+        // a test binary reused from another checkout keeps its build path.
+        let manifest = std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").into());
+        let repo = Path::new(&manifest).join("../..");
         let schema = load(&repo.join("hooks/ways/frontmatter-schema.yaml")).unwrap();
         let settings: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(repo.join("settings.json")).unwrap()).unwrap();

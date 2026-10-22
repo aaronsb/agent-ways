@@ -293,11 +293,7 @@ pub(super) fn lint_file(
         wired_events: &schema.wired_tool_events,
         wired_names: &schema.wired_tool_names,
     };
-    let (lane_errors, lane_warnings) = super::tool_lane::check(
-        &lane,
-        get_field_value(&fm_str, "tool_name").as_deref(),
-        get_field_value(&fm_str, "tool_event").as_deref(),
-    );
+    let (lane_errors, lane_warnings) = super::tool_lane::check(&lane, &fm_str);
     for msg in &lane_errors {
         eprintln!("  ERROR: {rel} — {msg}");
     }
