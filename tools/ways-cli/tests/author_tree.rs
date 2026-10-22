@@ -123,6 +123,17 @@ fn a_short_name_resolves_under_a_relative_ways_dir() {
 }
 
 #[test]
+fn a_bare_name_reads_the_way_over_a_same_named_cwd_directory() {
+    let fx = Fx::new("shadow");
+    // The checkout root holds a `tone/` of its own, as a repo holds `tools/`.
+    let checkout = fx.root.join("checkout");
+    Fx::way(&checkout, "tone", "not a way");
+    let out = fx.run(&checkout, &["--ways-dir", "hooks/ways", "tone"]);
+    assert!(out.contains("prose/tone") && out.contains("(1 files)"), "{out}");
+    assert_relative(&out, &fx.root);
+}
+
+#[test]
 fn a_tree_outside_the_ways_root_prints_relative_to_its_own_hooks_ways() {
     let fx = Fx::new("outside");
     // No --ways-dir: the empty home has no projection, so the tree is named

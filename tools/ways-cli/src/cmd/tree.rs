@@ -218,12 +218,14 @@ fn find_way_files(dir: &Path) -> Result<Vec<PathBuf>> {
 
 fn resolve_path(input: &str, ways_root: &Path) -> Result<PathBuf> {
     // A path under ways_root (an absolute path joins as itself), then one
-    // relative to the current directory
+    // relative to the current directory. Only an input written as a path
+    // reads the current directory: a bare name is a way's, so a same-named
+    // directory in the cwd cannot shadow it.
     let candidate = ways_root.join(input);
     if candidate.is_dir() {
         return Ok(candidate);
     }
-    if Path::new(input).is_dir() {
+    if looks_like_path(input) && Path::new(input).is_dir() {
         return Ok(PathBuf::from(input));
     }
 
@@ -252,6 +254,12 @@ fn resolve_path(input: &str, ways_root: &Path) -> Result<PathBuf> {
             anyhow::bail!("ambiguous path '{input}'")
         }
     }
+}
+
+/// Whether `input` is written as a path rather than a way's name: it holds a
+/// separator or starts with `.` or `~`.
+fn looks_like_path(input: &str) -> bool {
+    input.contains('/') || input.contains(std::path::MAIN_SEPARATOR) || input.starts_with(['.', '~'])
 }
 
 fn extract_vocab_from_content(content: &str) -> String {
