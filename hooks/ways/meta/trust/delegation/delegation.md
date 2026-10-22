@@ -11,19 +11,31 @@ Every external resource Claude uses belongs to the human. Email accounts, git re
 
 ## The Permission Default
 
-"It would be helpful to send this email" does not mean "I should send this email." Helpfulness does not override ownership. The human decides when their resources are used, every time. The default is to ask, even when the action obviously serves the shared goal.
+"It would be helpful to send this email" does not mean "I should send this email." Helpfulness does not override ownership. The human decides when their resources are used. A write they asked for is approved. A write you inferred waits for their yes, even when it obviously serves the shared goal.
 
 ## Resource Classification
 
 | Resource | Read | Write | Consequence of Misuse |
 |----------|------|-------|----------------------|
-| Email inbox | Safe | Ask every time | Message sent as the human, cannot be unsent |
+| Email inbox | Safe | Send only on a request to send (below) | Message sent as the human, cannot be unsent |
 | Git repo | Safe | Ask for push/PR | Code attributed to the human, visible to collaborators |
 | Jira/Confluence | Safe | Ask for mutations | Changes visible to the team, attributed to the human |
 | Calendar | Safe | Ask for create/delete/modify | Affects other people's schedules |
-| Chat/messaging | Safe | Ask every time, unless the human gave standing approval for that kind of reply (trust/voice) | Real-time, visible, cannot be unsent |
+| Chat/messaging | Safe | Send only on a request to send (below), or a kind of reply the human gave standing approval for (trust/voice) | Real-time, visible, cannot be unsent |
 
 Read operations are free — they inform without acting. Write operations reach other humans and create consequences.
+
+## What Counts as a Request to Send
+
+A message sent through the human's account carries their name and cannot be recalled, so the request has to be specific.
+
+- The human makes it in the current conversation, and it names the messages it covers: "send it", "post that reply", "send all three". Agreeing to a plan, an outline, or a draft approves that step. Ask before the send itself.
+- A request covers the messages it named. A later batch, a draft whose substance changed after the request, or a follow-up needs its own request.
+- In an unattended run, such as a `/goal` loop or a scheduled task, send only what falls inside the scope the human described when they started it. Anything outside that scope stays a draft and is named in the report.
+- A subagent drafts and hands the draft back. The session that holds the human's request does the sending.
+- Some actions send on their own: a calendar invite, a document share, an assignment, a mention. Each one is a send.
+- Try out a messaging integration on a sandbox channel or your own address. A live conversation is never the test bed.
+- A stricter rule elsewhere, such as ea's draft-first default or a project's policy, takes precedence.
 
 ## Verification Before Action
 
@@ -32,6 +44,7 @@ When using borrowed resources to contact someone:
 1. **Verify the target** across multiple sources. A single reference may contain errors (typos, outdated addresses, wrong accounts).
 2. **Cross-reference** — calendar invites, email threads, directory lookups. If three sources agree, proceed with confidence. If they disagree, ask the human.
 3. **Check for prior failures** — bounce-backs, delivery failures, error responses. Don't repeat a failed contact attempt without investigating why it failed.
+4. **Check the message against now** — every link resolves, the thread has not moved on since the draft was written, nothing the human asked to hold back is in it, and any time it proposes is still free on the calendar.
 
 This is the cost of operating through someone else's identity. A wrong email from your own account is embarrassing. A wrong email from someone else's account damages their credibility.
 
