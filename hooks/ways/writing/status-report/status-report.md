@@ -14,7 +14,7 @@ A recurring report is read against the previous one. Before drafting, open the l
 
 - Read the records since the last report before writing: meeting transcripts, messages, tracker changes and the git log for the window. Memory misses the latest meeting.
 - Refresh cumulative chart data before redrawing the chart (writing/deliverables).
-- Where a point needs proof, add a short parenthetical link to the transcript, decision record or commit behind it (writing/provenance).
+- Where a point needs proof, add a short parenthetical link to the transcript, decision record or commit behind it (research/provenance).
 
 ## What to report
 
@@ -39,5 +39,5 @@ A recurring report is read against the previous one. Before drafting, open the l
 ## See Also
 
 - writing(writing) — parent: the status update genre
-- writing/provenance(writing) — linking each point to its record
+- research/provenance(research) — linking each point to its record
 - comms/recap(ea) — the transcripts a status report draws on

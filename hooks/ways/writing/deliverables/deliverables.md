@@ -10,7 +10,7 @@ scope: agent, subagent
 <!-- epistemic: convention -->
 # Finished Deliverables
 
-A deck, PDF, document or sheet that goes to a client or to leadership is read without you there to explain it. Write the deliverable itself. Commentary on the notes stays in chat. Lead with checked figures (writing/provenance) and show them visually where a picture reads faster.
+A deck, PDF, document or sheet that goes to a client or to leadership is read without you there to explain it. Write the deliverable itself. Commentary on the notes stays in chat. Lead with checked figures (research/provenance) and show them visually where a picture reads faster.
 
 ## Follow the established work
 
@@ -53,7 +53,7 @@ The pptx, docx, pdf and xlsx skills cover building each format. Before calling t
 ## See Also
 
 - writing(writing) — parent: audience, structure, and genre before formatting
-- writing/provenance(writing) — every figure on the page traced to its source
+- research/provenance(research) — every figure on the page traced to its source
 - writing/client-boundary(writing) — what internal material stays out of the client copy
 - code/testing/evaluation/handoff(softwaredev) — render static output and look before handing it over
 - visualization/charts(softwaredev) — quantitative charts from data

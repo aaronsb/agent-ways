@@ -47,13 +47,13 @@ One word can be chance. Several in one draft are the sign.
 
 1. Delete offers and notes about your edits.
 2. Keep one name for each thing.
-3. Check each name, number, link and quote against its source (writing/provenance).
+3. Check each name, number, link and quote against its source (research/provenance).
 4. Cut each sentence the reader would not miss.
 
 ## See Also
 
 - writing(writing) — parent: audience, structure, and revision passes
-- writing/provenance(writing) — citations, tool tokens, and figures checked against their source
+- research/provenance(research) — citations, tool tokens, and figures checked against their source
 - trust/prose(meta) — significance clauses in long prose you write
 - trust/voice(meta) — whose voice the draft speaks in
 - email/drafting(ea) — calibrating a reply from the user's sent mail

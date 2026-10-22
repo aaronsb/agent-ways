@@ -42,7 +42,7 @@ When the user works for more than one organization, keep each one's material out
 ## See Also
 
 - writing(writing) — parent: audience, genre, and stating limitations
-- writing/provenance(writing) — the open-items list stays with the author
+- research/provenance(research) — the open-items list stays with the author
 - code/security/secrets(softwaredev) — credential scanning before anything is shared
 - knowledge/authoring/pii-free(meta) — the same stripping applied to way content
 - trust/delegation(meta) — outbound artifacts carry the user's name

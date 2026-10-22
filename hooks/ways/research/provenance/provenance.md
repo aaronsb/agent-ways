@@ -54,7 +54,7 @@ End the work with a list for the user or author: unverified numbers, discrepanci
 
 ## See Also
 
-- writing(writing) — parent: structure, audience, and format
-- research(research) — ranking sources and keeping found apart from inferred
+- research(research) — parent: ranking sources and keeping found apart from inferred
+- writing(writing) — structure, audience, and format
 - freshness/groundtruth(softwaredev) — a citation is a claim to verify against the cited artifact
 - delivery/groundwork/claims(softwaredev) — a contribution's account of itself is a claim

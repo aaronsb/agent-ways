@@ -80,7 +80,7 @@ If the format doesn't fit the content (a slide deck for something that needs a d
 - trust/prose(meta) — decoration and self-explanation in your own prose
 - trust/voice(meta) — voice and tone in written communication
 - writing/deliverables(writing) — finished decks, PDFs, documents and sheets for a client or leadership
-- writing/provenance(writing) — every claim, figure and citation traced to its source
+- research/provenance(research) — every claim, figure and citation traced to its source
 - writing/client-boundary(writing) — internal material kept out of outbound documents
 - writing/ai-signs(writing) — a draft that reads as if a model wrote it
 - writing/ai-signs/actors(writing) — sentences that say who did what
