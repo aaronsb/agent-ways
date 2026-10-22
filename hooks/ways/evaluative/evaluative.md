@@ -51,3 +51,4 @@ Some of these sit close together. `sandboxed` isolates a running subject so it c
 - code/testing/evaluation(softwaredev) — reproduce as reported, drive the real path, count what ran
 - code/testing/gates/assertions(softwaredev) — golden baselines and the rapid iteration phase
 - environment/hostparity(softwaredev) — a verdict on the authoring host says nothing about other hosts
+- evaluative/statistics(evaluative) — child: what a pass rate counts, intervals, paired tests, pass@k estimators

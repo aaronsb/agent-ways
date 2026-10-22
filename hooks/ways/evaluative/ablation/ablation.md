@@ -1,6 +1,6 @@
 ---
-description: an ablation evaluative loop for a change to what an agent is given, such as a rewritten system prompt, new instructions, a new tool or trimmed guidance, that seems better but hasn't been measured; compare arms with and without it, graded blind by an independent judge, with a positive control that the change engaged; and when a prompt or skill is tuned round by round against example cases, keep fresh cases and stop when versions tie
-vocabulary: rewrote the system prompt changed the instructions reworded the prompt added a tool trimmed the guidance seems smarter now feels better before and after did it actually help with and without ablation ablate arms baseline arm treatment arm blind judge shuffled order strip the injected text positive control remove-one leave-one-out attribute the effect noise floor three way comparison trials graders run-to-run anecdotal scenario iterate on the skill tweak the prompt until the examples pass expected outputs rounds fresh cases answer keys friction notes stop improving
+description: an ablation evaluative loop for a change to what an agent is given, such as a rewritten system prompt, new instructions, a new tool or trimmed guidance, that seems better but hasn't been measured; compare arms with and without it, graded blind by an independent judge, with a positive control that the change engaged
+vocabulary: rewrote the system prompt changed the instructions reworded the prompt added a tool trimmed the guidance seems smarter now feels better before and after did it actually help with and without ablation ablate arms baseline arm treatment arm blind judge shuffled order strip the injected text positive control remove-one leave-one-out attribute the effect noise floor three way comparison trials graders run-to-run anecdotal scenario
 scope: agent, subagent
 refire: 0.15
 ---
@@ -39,21 +39,10 @@ Run several trials per arm and scenario. Report trial counts, the model and vers
 
 Cost scales as scenarios × arms × trials. The loop runs locally and on demand when a context change is worth measuring, never on every merge.
 
-## Tuning over several rounds
-
-When a prompt, skill or helper is revised round by round against a set of cases:
-
-- Freeze the starting version as the baseline. It runs as the control in every round and is the rollback.
-- Several independent fixes may ship in one round only when the earlier versions run on the same cases in that round. When the score drops, split the round.
-- Cases whose failures or friction notes shaped a version are seen. Write fresh cases before reading a round's results, and report the final score only on cases no version was tuned on (see `evaluative/held-out`).
-- Answer keys computed from live data drift. Date each key, give counts and totals a stated tolerance, re-query a disputed figure before blaming the variant, and recompute keys before reusing cases on a later day.
-- A trial agent's friction notes (a broken command, a stale doc, a missing field) are hypotheses. Check each against the source before it changes the subject.
-- Take time, tokens and tool-call counts from the transcripts, not from the agents' own reports.
-- Stop when two versions score within the noise floor on fresh cases. Between tied versions, prefer the one with fewer failed calls and lower cost.
-
 ## See Also
 
 - evaluative(evaluative) — parent: author and judge, the shared core, choosing the loop
 - evaluative/agent-eval(evaluative) — graders, trials, pass@k
 - evaluative/clean-room(evaluative) — isolated, disposable environments per run
 - evaluative/held-out(evaluative) — scenarios written by someone other than the author
+- evaluative/ablation/rounds(evaluative) — child: tuning a prompt or skill one change per round, kept or reverted

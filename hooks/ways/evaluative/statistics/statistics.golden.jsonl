@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"how do i put a confidence interval on our benchmark accuracy and tell whether the new variant is really better than the old one"}
+{"kind":"situational","prompt":"the new prompt scored 71 percent against 66 for the old one on 60 questions, and half the failed runs were the api throttling us"}

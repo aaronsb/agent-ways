@@ -56,3 +56,4 @@ A capability task the agent now passes reliably graduates to the regression suit
 - evaluative/rubric(evaluative) — scoring a single model answer
 - evaluative/clean-room(evaluative) — a fresh environment per run
 - subagents(meta) — a subagent's report is a claim to grade
+- evaluative/agent-eval/grading(evaluative) — child: graders out of reach, the grader selftest, the regression gate in CI

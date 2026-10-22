@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"we're starting an eval from zero for the support bot, how should we assemble the first batch of test cases and decide what counts as success"}
+{"kind":"situational","prompt":"i have a pile of bad outputs from the extraction model and no idea yet what the categories of mistakes are or which ones to fix first"}

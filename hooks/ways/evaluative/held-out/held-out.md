@@ -41,3 +41,4 @@ Report the held-out score beside the self-written score, with case counts for ea
 - evaluative/probe-set(evaluative) — scoring a sampled set with a metric
 - evaluative/agent-eval(evaluative) — tasks and graders for agents
 - documentation/validate(documentation) — the same fresh-reader move applied to documentation
+- evaluative/held-out/cases(evaluative) — child: criteria, failures read before the score, the first set and synthetic cases
