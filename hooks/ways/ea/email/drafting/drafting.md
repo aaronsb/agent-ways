@@ -7,7 +7,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Email Drafting
 
-Compose draft replies in the user's voice. Send only a message the user asked to send (ea, requested versus inferred writes). Otherwise create a draft for review.
+Compose draft replies in the user's voice, show the draft, and ask whether to send it. Send it on a yes. Without one, leave it as a platform draft (trust/delegation, what counts as a request to send).
 
 ## Workflow
 
@@ -15,8 +15,8 @@ Compose draft replies in the user's voice. Send only a message the user asked to
 2. Study the user's writing style. Read 5-8 recent sent emails from the relevant account. Calibrate tone, length, greeting patterns, sign-off, and vocabulary.
 3. Ask only when the thread leaves the intent open (accepting, declining, requesting, informing), under the asking bar in core.md.
 4. Draft: following the user's observed patterns.
-5. Present for review: and iterate on feedback.
-6. Create as a platform draft: with proper threading (preserve message IDs, references, in-reply-to headers).
+5. Present for review: iterate on feedback, then ask whether to send.
+6. Send it on a yes, or create it as a platform draft. Either way, keep the threading (message IDs, references, in-reply-to headers).
 
 ## Style Calibration
 
