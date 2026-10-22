@@ -53,12 +53,24 @@ pub struct Setting {
     /// Why the value cannot be changed here, when it cannot: its file fails
     /// closed, say. The editor refuses and shows the reason.
     pub locked: Option<String>,
+    /// What a value is called, as (value, name): the detail pane shows the
+    /// name beside the value, and the picker beside each choice.
+    pub labels: Vec<(String, String)>,
 }
 
 impl Setting {
     pub fn new(kind: Kind, value: impl Into<String>, source: impl Into<String>) -> Self {
         let value = value.into();
-        Setting { kind, loaded: value.clone(), value, default: None, source: source.into(), store: None, locked: None }
+        Setting { kind, loaded: value.clone(), value, default: None, source: source.into(), store: None, locked: None, labels: Vec::new() }
+    }
+    /// Name the values in `labels`, as (value, name).
+    pub fn labels(mut self, labels: Vec<(String, String)>) -> Self {
+        self.labels = labels;
+        self
+    }
+    /// What `value` is called, when it has a name.
+    pub fn label_of(&self, value: &str) -> Option<&str> {
+        self.labels.iter().find(|(v, _)| v == value).map(|(_, l)| l.as_str())
     }
     pub fn default(mut self, d: impl Into<String>) -> Self {
         self.default = Some(d.into());

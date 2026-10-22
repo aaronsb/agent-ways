@@ -37,6 +37,8 @@ pub(crate) struct Pick {
     pub(crate) marked: Vec<bool>,
     /// Per option: why it cannot be picked yet, or `None` when it can.
     pub(crate) waits: Vec<Option<String>>,
+    /// Per option: what it is called, or empty when it has no name.
+    pub(crate) notes: Vec<String>,
     /// The value it was opened on.
     pub(crate) was: String,
     /// A pane's picker: the id its choice goes back under, and its title.
@@ -61,7 +63,14 @@ impl Pick {
         let marked: Vec<bool> = options.iter().map(|o| held.contains(o)).collect();
         let sel = marked.iter().position(|m| *m).unwrap_or(0);
         let waits = vec![None; options.len()];
-        Pick { path, options, known, multi, sel, marked, waits, was: value.to_string(), pane: None, dock: None, by_esc: false }
+        let notes = vec![String::new(); options.len()];
+        Pick { path, options, known, multi, sel, marked, waits, notes, was: value.to_string(), pane: None, dock: None, by_esc: false }
+    }
+
+    /// The picker with each option's name from `name_of`, shown beside it.
+    pub(crate) fn named(mut self, name_of: impl Fn(&str) -> Option<String>) -> Pick {
+        self.notes = self.options.iter().map(|o| name_of(o).unwrap_or_default()).collect();
+        self
     }
 
     /// A picker a pane opened over `items`, the current ones marked, the
@@ -76,7 +85,8 @@ impl Pick {
         let open = |i: &usize| waits[*i].is_none();
         let sel = (0..options.len()).find(|i| marked[*i]).or_else(|| (0..options.len()).find(open)).unwrap_or(0);
         let known = options.len();
-        Pick { path: Vec::new(), options, known, multi, sel, marked, waits, was: String::new(), pane: Some((id, title)), dock: None, by_esc: false }
+        let notes = vec![String::new(); options.len()];
+        Pick { path: Vec::new(), options, known, multi, sel, marked, waits, notes, was: String::new(), pane: Some((id, title)), dock: None, by_esc: false }
     }
 
     /// Whether option `i` can be picked.
@@ -104,7 +114,8 @@ impl Pick {
     }
 
     /// The (label, tag) rows the popup draws. An option that cannot be
-    /// picked yet carries why as its tag.
+    /// picked yet carries why as its tag; one with a name carries the name,
+    /// then whether it is current.
     pub(crate) fn items(&self) -> Vec<(String, String)> {
         use crate::wrap::str_width;
         let mark = |m: bool| match (self.multi, m) {
@@ -114,20 +125,28 @@ impl Pick {
             (false, false) => " ",
         };
         let labels: Vec<String> = self.options.iter().zip(&self.marked).map(|(o, m)| format!("{} {o}", mark(*m))).collect();
-        // Where an option says why it waits, the labels pad to the widest, in
-        // screen cells, so each reason starts in one column.
-        let pad = if self.waits.iter().any(Option::is_some) { labels.iter().map(|l| str_width(l)).max().unwrap_or(0) } else { 0 };
+        // Where an option says why it waits, or what it is called, the
+        // labels pad to the widest, in screen cells, so each starts in one
+        // column.
+        let aligned = self.waits.iter().any(Option::is_some) || self.notes.iter().any(|n| !n.is_empty());
+        let pad = if aligned { labels.iter().map(|l| str_width(l)).max().unwrap_or(0) } else { 0 };
         labels
             .into_iter()
             .zip(&self.marked)
             .enumerate()
             .map(|(i, (label, m))| {
-                let tag = match (i >= self.known, !self.multi && *m) {
-                    _ if !self.open(i) => format!("  {}", self.waits[i].as_deref().unwrap_or_default()),
-                    (true, true) => "  current, not a choice".into(),
-                    (true, false) => "  not a choice".into(),
-                    (false, true) => "  current".into(),
-                    (false, false) => String::new(),
+                let state = match (i >= self.known, !self.multi && *m) {
+                    _ if !self.open(i) => self.waits[i].as_deref().unwrap_or_default(),
+                    (true, true) => "current, not a choice",
+                    (true, false) => "not a choice",
+                    (false, true) => "current",
+                    (false, false) => "",
+                };
+                let note = self.notes.get(i).map(String::as_str).unwrap_or_default();
+                let tag = match (note, state) {
+                    ("", "") => String::new(),
+                    ("", s) | (s, "") => format!("  {s}"),
+                    (n, s) => format!("  {n} · {s}"),
                 };
                 (crate::wrap::pad_to(&label, pad), tag)
             })
@@ -145,7 +164,7 @@ impl App {
             self.msg = "no choices to pick from; e edits it as text".into();
             return;
         }
-        self.mode = Mode::Pick(Pick::new(path.to_vec(), options.clone(), *multi, &s.value));
+        self.mode = Mode::Pick(Pick::new(path.to_vec(), options.clone(), *multi, &s.value).named(|o| s.label_of(o).map(str::to_string)));
         // The bottom bar keeps room for why a pick is refused.
         self.msg.clear();
     }
@@ -265,6 +284,16 @@ mod tests {
         assert_eq!((p.sel, p.known, p.options.len()), (3, 3, 4));
         assert_eq!(p.items()[3], ("● gone".to_string(), "  current, not a choice".to_string()));
         assert_eq!(p.value(), "gone", "Enter on it leaves it as it is");
+    }
+
+    #[test]
+    fn a_named_choice_shows_its_name_beside_it_and_the_names_line_up() {
+        let names = |o: &str| (o != "mine").then(|| format!("{o} engine"));
+        let p = Pick::new(vec![0], opts(), false, "openrouter").named(names);
+        assert_eq!(p.items()[0], ("  anthropic ".to_string(), "  anthropic engine".to_string()));
+        assert_eq!(p.items()[1], ("● openrouter".to_string(), "  openrouter engine · current".to_string()));
+        assert_eq!(p.items()[2], ("  mine      ".to_string(), String::new()), "no name, no tag, padded all the same");
+        assert_eq!(p.value(), "openrouter", "the value is the choice, never its name");
     }
 
     #[test]
