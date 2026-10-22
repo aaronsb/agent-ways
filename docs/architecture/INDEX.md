@@ -213,6 +213,7 @@ _The ways engine, continued after the full 100-199 band: matching, disclosure an
 | [ADR-705](./engine/ADR-705-claude-code-s-tool-surface-and-hook-events-surveyed-as-tool-types-for-trigger-lanes-and-session-sensing.md) | Claude Code's tool surface and hook events, surveyed as tool types for trigger lanes and session sensing | proposed |
 | [ADR-706](./engine/ADR-706-a-shipped-tool-catalog-maps-the-harness-s-tool-names-to-abstract-tool-types-so-ways-and-sensors-depend-on-types-and-not-on-claude-code-s-names.md) | A shipped tool catalog maps the harness's tool names to abstract tool types, so ways and sensors depend on types and not on Claude Code's names | proposed |
 | [ADR-707](./engine/ADR-707-measurements-of-the-shell-surface-covering-the-semantic-lane-s-on-topic-rate-alternative-match-surfaces-and-a-judge-reading-the-described-call.md) | Measurements of the shell surface, covering the semantic lane's on-topic rate, alternative match surfaces, and a judge reading the described call | proposed |
+| [ADR-708](./engine/ADR-708-a-claude-code-internal-engine-for-the-relevance-gate-selectable-as-the-only-model-source.md) | A Claude Code internal engine for the relevance gate, selectable as the only model source | proposed |
 
 ## Archived
 
