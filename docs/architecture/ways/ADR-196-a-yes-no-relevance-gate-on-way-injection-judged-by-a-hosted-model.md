@@ -121,3 +121,10 @@ Appended after acceptance; nothing above is changed.
 - **§5.** The mode and the chosen engine live in the user layer beside the profiles rather than as profile fields. The key's source is not a profile field: the agent reads the provider's key file.
 - **§6.** "Once `key check` passes" is held by a recorded check. A key added without a check, or replaced by hand, is checked by the agent on first use; until a check passes, the gate falls back and logs `key_unverified`.
 - **§1.** The hook sends Claude's last reply and the prompt as the turns. Keyword fires on the prompt lane are judged with the semantic ones; only `pattern_strict` ways and ways the refire curve still holds back are not sent.
+
+## Note, 2026-10-22: a model call on the session's own account now exists, and the Bash lane runs ungated
+
+Appended; nothing above is changed.
+
+- **Context.** This record says Claude Code offers no hook-side model call that can gate one hook's output. For a Claude Code mod that no longer holds: the mod API's `$.model.complete` runs one completion through the session's own client and credentials. On 2026-10-22 a probe mod under `claude -p` ran ADR-707 arm E's judge prompts through it, 20 of 20 answered, and its verdicts matched the key path's on 79 of 85 pairs (ADR-708's `observable`, ADR-707's addendum). It is a mod call, not a hook output, so the hook side still cannot gate with it directly; ADR-708 adds it as a selectable engine, `claude-code`, behind a job the hook writes.
+- **§1.** §1 applies the gate to ways the matcher selected semantically. The code calls the gate only on the prompt lane (`tools/ways-cli/src/cmd/scan/mod.rs:402` on main at 7fd6c0de); the semantic lane on the Bash surface injects its fires unjudged. ADR-188 item 3c brings that lane under the gate.

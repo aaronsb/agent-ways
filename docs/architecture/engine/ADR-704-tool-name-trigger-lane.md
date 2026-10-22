@@ -91,3 +91,10 @@ What Claude Code delivers, per the hooks reference (fetched 2026-10-21) and a pr
 - A `when: permission_mode:` gate.
 - Matching `tool_input` fields, with `tool_event:` as defined here.
 - A type-keyed tool-call lane in the rewrite of ADR-188, built on `tool_name:` and `tool_event:`.
+
+## Note, 2026-10-22: ADR-188's rewrite
+
+Appended; nothing above is changed.
+
+- This record cites "ADR-188 item 2" for why `PostToolUseFailure` is out of the default `tool_event:`, as does the doc comment on `scan::tool` (`tools/ways-cli/src/cmd/scan/mod.rs:1084` on main at 7fd6c0de). In ADR-188's rewrite the reason sits in item 2's `tool_event:` bullet, so the citation still finds it; item 8 states the rule this record decided: out of the default, accepted when a way lists it.
+- ADR-188 builds its type-keyed lane on `tool_name:` and `tool_event:` as defined here and amends one part of item 1: lint also accepts `UserPromptExpansion`, the event a typed `/name` skill arrives on, and the default `tool_event:` becomes `[PreToolUse, UserPromptExpansion]`. Event names stay literal and compared exactly.
