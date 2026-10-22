@@ -15,7 +15,16 @@ static ROOT: OnceLock<PathBuf> = OnceLock::new();
 pub fn fixture(name: &str, setup: impl FnOnce(&Path)) -> &'static Path {
     let mut setup = Some(setup);
     ROOT.get_or_init(|| {
-        let root = std::env::temp_dir().join(format!("attend-chat-{name}-{}", std::process::id()));
+        let root = attend_presence::session::fixture_temp_dir().join(format!("attend-chat-{name}-{}", std::process::id()));
+        // A project under the fixture home would resolve to a checkout's
+        // root if the root sat under a managed worktree: fail here, naming
+        // the path, rather than as a screen that shows the wrong agents.
+        assert!(
+            attend_presence::session::origin_kept(&root.join("home")),
+            "fixture root {} sits under a managed worktree (/.claude/worktrees/), so session identity would resolve \
+             its projects to the checkout's root; make fixtures under attend_presence::session::fixture_temp_dir() (#902)",
+            root.display()
+        );
         let _ = std::fs::remove_dir_all(&root);
         for d in ["home", "config", "cache", "state", "data"] {
             std::fs::create_dir_all(root.join(d)).unwrap();

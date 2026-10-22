@@ -30,10 +30,14 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$HERE/../../.." && pwd)
 BIN=${CARGO_TARGET_DIR:-$REPO/tools/target}/debug
 WORK=${SHOTS_DIR:-$REPO/target/tui-verify/attend-chat}
-# The fixture lives outside the checkout: a cwd under a managed worktree
-# (`.claude/worktrees/`) normalizes to the worktree's origin, and every
-# fixture agent would collapse into that one identity.
-F=$(mktemp -d "${TMPDIR:-/tmp}/attend-chat-shots.XXXXXX")
+# The fixture lives outside any managed worktree: a cwd under
+# `.claude/worktrees/` normalizes to the checkout's root, and every fixture
+# agent would collapse into that one identity (#902). A TMPDIR inside an
+# agent's worktree gives way to /tmp, as attend_presence's
+# fixture_temp_dir does.
+TMPROOT=${TMPDIR:-/tmp}
+case "$TMPROOT/" in */.claude/worktrees/*) TMPROOT=/tmp ;; esac
+F=$(mktemp -d "$TMPROOT/attend-chat-shots.XXXXXX")
 SESSION=
 cleanup() {
   [ -z "$SESSION" ] || $TH down "$SESSION" >/dev/null 2>&1 || true

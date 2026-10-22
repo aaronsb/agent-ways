@@ -281,6 +281,49 @@ pub fn normalize_origin(cwd: &str) -> String {
     }
 }
 
+/// Whether [`normalize_origin`] leaves `path` as it is: no managed-worktree
+/// segment in it. A fixture that stands up session projects checks its roots
+/// with this, since a project under a worktree resolves to the checkout's
+/// root, and every such project to the same one (#902).
+pub fn origin_kept(path: &Path) -> bool {
+    let s = path.to_string_lossy();
+    normalize_origin(&s) == s
+}
+
+/// Test support: the temp directory for fixtures that stand up session
+/// projects. It is the system one, or `/tmp` when paths under the system one
+/// sit under a managed worktree (a TMPDIR inside an agent's checkout). The
+/// strip applies to every session record's cwd, a peer's as much as this
+/// session's, so the fixture moves rather than the rule (#902).
+#[doc(hidden)]
+pub fn fixture_temp_dir() -> PathBuf {
+    fixture_temp_dir_for(std::env::temp_dir(), Path::new("/tmp"))
+}
+
+/// [`fixture_temp_dir`] for a given temp dir and fallback. A path under
+/// `tmp` is checked rather than `tmp` itself, so a TMPDIR of
+/// `<root>/.claude/worktrees` with no trailing slash is caught. A fallback
+/// that cannot be written to fails here, naming the cause.
+fn fixture_temp_dir_for(tmp: PathBuf, fallback: &Path) -> PathBuf {
+    if origin_kept(&tmp.join("x")) {
+        return tmp;
+    }
+    // One probe per call: parallel tests each make and remove their own.
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let probe = fallback.join(format!(".attend-fixture-probe-{}-{n}", std::process::id()));
+    if let Err(e) = std::fs::create_dir(&probe) {
+        panic!(
+            "the temp dir {} sits under a managed worktree (/.claude/worktrees/), where session identity would resolve \
+             fixture projects to the checkout's root, and the fallback {} is not writable: {e} (#902)",
+            tmp.display(),
+            fallback.display()
+        );
+    }
+    let _ = std::fs::remove_dir(&probe);
+    fallback.to_path_buf()
+}
+
 /// The sessions directories a session record can be in: the config
 /// directory this process runs under (`CLAUDE_CONFIG_DIR`, which Claude Code
 /// passes to what it runs), then `~/.claude`.
@@ -306,17 +349,32 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    fn tempdir_like() -> PathBuf {
+    /// A fresh directory, removed with its contents when dropped.
+    struct TestDir(PathBuf);
+
+    impl std::ops::Deref for TestDir {
+        type Target = PathBuf;
+        fn deref(&self) -> &PathBuf {
+            &self.0
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn tempdir_like() -> TestDir {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let p = std::env::temp_dir().join(format!(
             "attend-session-test-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
+        let _ = fs::remove_dir_all(&p);
         fs::create_dir_all(&p).unwrap();
-        p
+        TestDir(p)
     }
 
     #[test]
@@ -325,7 +383,6 @@ mod tests {
         let parent = crate::process::parent_pid(std::process::id()).expect("a parent pid");
         write_session(&dir, "sess-parent", parent, "/via/hop");
         assert_eq!(find_session_in(&dir, std::process::id()), Some(("sess-parent".to_string(), parent)));
-        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -347,14 +404,12 @@ mod tests {
         let (target, home) = (tempdir_like(), tempdir_like());
         let pid = std::process::id();
         write_session(&target, "sess-target", pid, "/work/b");
-        let only_home = identity_in_dirs(std::slice::from_ref(&home), pid, |_| false);
+        let only_home = identity_in_dirs(std::slice::from_ref(&*home), pid, |_| false);
         assert!(!only_home.resolved(), "~/.claude alone does not know it");
         let id = identity_in_dirs(&[target.clone(), home.clone()], pid, |_| false);
         assert_eq!((id.session_id.as_str(), id.origin_path.as_str()), ("sess-target", "/work/b"));
         write_session(&home, "sess-home", pid, "/work/a");
         assert_eq!(identity_in_dirs(&[target.clone(), home.clone()], pid, |_| false).session_id, "sess-target");
-        fs::remove_dir_all(&target).ok();
-        fs::remove_dir_all(&home).ok();
     }
 
     /// A session under a non-default config directory, started from inside
@@ -370,12 +425,11 @@ mod tests {
         write_session(&home, "sess-outer", outer, "/work/outer");
         // This process stands for the inner Claude Code process.
         let inner = |pid: u32| pid == own;
-        assert_eq!(find_session_in_dirs(std::slice::from_ref(&home), own, inner), None);
-        assert!(!identity_in_dirs(std::slice::from_ref(&home), own, inner).resolved());
+        assert_eq!(find_session_in_dirs(std::slice::from_ref(&*home), own, inner), None);
+        assert!(!identity_in_dirs(std::slice::from_ref(&*home), own, inner).resolved());
         // The control: with no Claude Code process on the way, the walk
         // climbs to the outer record.
-        assert_eq!(find_session_in_dirs(std::slice::from_ref(&home), own, |_| false), Some(("sess-outer".to_string(), outer)));
-        fs::remove_dir_all(&home).ok();
+        assert_eq!(find_session_in_dirs(std::slice::from_ref(&*home), own, |_| false), Some(("sess-outer".to_string(), outer)));
     }
 
     /// A node or bun hook under a `.claude/hooks/` folder that runs attend is
@@ -391,9 +445,8 @@ mod tests {
             let argv: Vec<String> = hook.iter().map(|s| s.to_string()).collect();
             // This process stands for the hook; its parent for the session.
             let is_claude = |pid: u32| pid == own && crate::process::is_claude_argv(&argv);
-            assert_eq!(find_session_in_dirs(std::slice::from_ref(&home), own, is_claude), Some(("sess-outer".to_string(), session)), "{argv:?}");
+            assert_eq!(find_session_in_dirs(std::slice::from_ref(&*home), own, is_claude), Some(("sess-outer".to_string(), session)), "{argv:?}");
         }
-        fs::remove_dir_all(&home).ok();
     }
 
     #[test]
@@ -585,6 +638,33 @@ mod origin_tests {
             normalize_origin("/.claude/worktrees/x"),
             "/.claude/worktrees/x"
         );
+    }
+
+    #[test]
+    fn a_fixture_temp_dir_is_never_under_a_managed_worktree() {
+        assert!(!origin_kept(Path::new("/home/a/proj/.claude/worktrees/agent-1/tmp")));
+        assert!(origin_kept(Path::new("/tmp")));
+        assert!(origin_kept(&fixture_temp_dir().join("x")));
+        let fallback = std::env::temp_dir();
+        assert_eq!(fixture_temp_dir_for("/home/a/proj/.claude/worktrees/agent-1/tmp".into(), &fallback), fallback);
+        assert_eq!(fixture_temp_dir_for("/var/tmp".into(), &fallback), PathBuf::from("/var/tmp"));
+    }
+
+    /// A TMPDIR naming the worktrees folder itself, with no trailing slash:
+    /// the path is kept, but every fixture made under it would not be.
+    #[test]
+    fn a_temp_dir_of_the_worktrees_folder_itself_falls_back() {
+        let tmp = PathBuf::from("/home/a/proj/.claude/worktrees");
+        assert!(origin_kept(&tmp), "the folder alone has no segment after it");
+        let fallback = std::env::temp_dir();
+        assert_eq!(fixture_temp_dir_for(tmp, &fallback), fallback);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[should_panic(expected = "is not writable")]
+    fn an_unwritable_fallback_fails_naming_the_cause() {
+        fixture_temp_dir_for("/home/a/proj/.claude/worktrees/agent-1/tmp".into(), Path::new("/proc/attend-no-such-dir"));
     }
 
     /// Issue #394 regression: a session record whose cwd sits inside a
