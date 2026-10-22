@@ -19,9 +19,13 @@ flowchart TB
     end
     subgraph LATE["Detached, then the next hook"]
         direction TB
-        J{"Judge gate, ADR-196<br>reads: About to run: description,<br>then segments in order<br>with connectors and descriptions"}
-        J -->|pass| STORE["Deferred result store<br>ADR-606"]
-        J -->|fail or error| DROP["Held back, logged"]
+        J{"Judge gate, ADR-196<br>one interface<br>reads: About to run: description,<br>then segments in order<br>with connectors and descriptions"}
+        J -->|attend mod loaded| MH["Mod-host backend<br>$.model.complete<br>session's own account<br>strict JSON, validated"]
+        J -->|no mod| KB["Key backend<br>ways agent, own API key<br>record_judgements tool"]
+        MH -->|pass| STORE["Deferred result store<br>ADR-606"]
+        KB -->|pass| STORE
+        MH -->|fail or error| DROP["Held back, logged"]
+        KB -->|fail or error| DROP
         STORE --> COL["Collector at the agent's next<br>PostToolUse or UserPromptSubmit"]
         COL -->|within budget| INJ["Inject with deferred header<br>way, Bash lane, segment, age"]
         COL -->|past budget| PTR["One-line pointer<br>to the result file"]
@@ -40,7 +44,7 @@ flowchart TB
     classDef out fill:#475569,stroke:#4a5568,color:#ffffff
     class T,A,O,W,CAT,IDX,REC,STORE data
     class P,RX,MT,JOB,COL,REP step
-    class J judge
+    class J,MH,KB judge
     class B input
     class NOW,INJ,PTR,DROP out
     style BUILD fill:#2d8e5e1a,stroke:#2d8e5e
