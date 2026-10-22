@@ -26,11 +26,32 @@ use serde_json::Value;
 /// simply return the prose we found (still useful) or None.
 const TAIL_BYTES: u64 = 64 * 1024;
 
-/// The assistant's prose since the last human turn, for `session_id`, or `None`.
+/// The calling agent's prose since its last human turn, or `None`.
+///
+/// Read from the calling agent's own transcript ([`session::current_transcript`]).
+/// A subagent's hook carries the parent's session id, so a session-id lookup
+/// would embed the lead's narration into the subagent's surface; a subagent
+/// with no transcript of its own gets no lookbehind.
+///
+/// [`session::current_transcript`]: crate::session::current_transcript
 pub(crate) fn intent(session_id: &str) -> Option<String> {
-    let path = ways_core::paths::claude_dir().find_transcript(None, session_id)?;
-    let tail = read_tail(&path, TAIL_BYTES)?;
-    assistant_prose_since_last_human(&tail)
+    prose_in(&crate::session::current_transcript(session_id)?)
+}
+
+/// [`intent`] against an explicit config dir, hook transcript and agent.
+#[cfg(test)]
+fn intent_in(
+    claude: &claude_sessions::ClaudeDir,
+    hook_transcript: Option<&str>,
+    project_dir: &str,
+    session_id: &str,
+    agent: &str,
+) -> Option<String> {
+    prose_in(&crate::session::transcript_in(claude, hook_transcript, project_dir, session_id, agent)?)
+}
+
+fn prose_in(transcript: &Path) -> Option<String> {
+    assistant_prose_since_last_human(&read_tail(transcript, TAIL_BYTES)?)
 }
 
 /// Read up to `max_bytes` from the end of `path`, lossily decoded (a tail that
@@ -157,6 +178,40 @@ mod tests {
     fn none_when_no_assistant_prose() {
         let t = user_text("just a question with no assistant turn yet");
         assert!(assistant_prose_since_last_human(&t).is_none());
+    }
+
+    /// A subagent's Bash surface is its own reasoning. The hook reports the
+    /// parent's session id (and, per Claude Code's hooks reference, the
+    /// parent's `transcript_path`), so a session-id lookup alone reads the
+    /// lead's narration into the subagent's surface.
+    #[test]
+    fn a_subagent_reads_its_own_prose_never_the_leads() {
+        let root = std::env::temp_dir().join(format!("ways-lookbehind-sub-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let claude = claude_sessions::ClaudeDir::at(root.join(".claude"));
+        let project = "/srv/p";
+        let dir = root.join(".claude/projects/-srv-p");
+        let subagents = dir.join("sess/subagents");
+        std::fs::create_dir_all(subagents.join("workflows/wf_1")).unwrap();
+        let turn = |human: &str, prose: &str| format!("{}\n{}\n", user_text(human), assistant_text(prose));
+        std::fs::write(dir.join("sess.jsonl"), turn("ship it", "lead narration about merging the branch")).unwrap();
+        std::fs::write(subagents.join("agent-atask.jsonl"), turn("brief", "subagent reasoning about the failing test")).unwrap();
+        std::fs::write(subagents.join("workflows/wf_1/agent-awf.jsonl"), turn("brief", "workflow agent reasoning about the index")).unwrap();
+        let parent = dir.join("sess.jsonl");
+
+        let main = intent_in(&claude, None, project, "sess", crate::session::MAIN_AGENT).unwrap();
+        assert!(main.contains("lead narration"), "{main}");
+        for hook_transcript in [None, parent.to_str()] {
+            let sub = intent_in(&claude, hook_transcript, project, "sess", "atask").unwrap_or_default();
+            assert!(sub.contains("subagent reasoning"), "{sub}");
+            assert!(!sub.contains("lead narration"), "{sub}");
+            let wf = intent_in(&claude, hook_transcript, project, "sess", "awf").unwrap_or_default();
+            assert!(wf.contains("workflow agent reasoning"), "{wf}");
+            assert!(!wf.contains("lead narration"), "{wf}");
+            // A subagent with no transcript of its own gets no lookbehind, not the lead's.
+            assert_eq!(intent_in(&claude, hook_transcript, project, "sess", "agone"), None);
+        }
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]
