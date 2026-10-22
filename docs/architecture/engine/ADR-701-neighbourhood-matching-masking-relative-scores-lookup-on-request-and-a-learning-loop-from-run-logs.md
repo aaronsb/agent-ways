@@ -235,3 +235,7 @@ No field becomes required. Configuration keys keep their meaning; the prefix for
 - **Delete expired event lines, with a larger cap.** Rejected: the event history is the learning corpus of §8, the size cap had already deleted six weeks of it (ADR-700 §8), and a deleted line cannot be recovered after a clock or rotation fault.
 - **Hold the graph in a database.** Rejected: the corpus is small, authored and reviewed, and writes arrive through pull requests. ADR-702 records how its integrity is enforced on files.
 - **UUID identity, `parents:` and `related:` in this record.** Moved to ADR-702: nothing here depends on them, and at the measured move rate (12 renames since April, in four commits) they are not needed yet.
+
+## Note (2026-10-22): ADR-188 no longer moves tool-lane matching to PostToolUse
+
+The Neutral consequences say ADR-188's move of tool-lane matching to PostToolUse leaves prompt and task surfaces as the main users of the body corpus. That move belonged to ADR-188's first draft, whose premise #528 overturned on 2026-09-29: PreToolUse context is delivered. ADR-188 was rewritten in place. Tool-lane ways fire on PreToolUse, and the Bash surface keeps a meaning-based lane whose matcher reads the call's verbs and description and whose candidates the relevance judge gates, with approved ways delivered through ADR-606's deferred pipeline. The matcher ADR-707 measured for that lane scores way aliases, not bodies, so the conclusion stands for it: prompt and task surfaces remain the main users of the body corpus.
