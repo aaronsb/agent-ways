@@ -237,13 +237,13 @@ pub fn parse_reply(text: &str, n: usize) -> Result<Vec<f64>, InvalidReply> {
     parse_judgements(&value, n).map_err(|e| InvalidReply(e.to_string()))
 }
 
-/// The body of a reply that is one code fence, untagged or tagged `json`,
-/// and nothing else; any other text as it is, trimmed.
+/// The body of a reply that is one code fence, untagged or tagged `json` in
+/// any case, and nothing else; any other text as it is, trimmed.
 fn unfence(text: &str) -> &str {
     let t = text.trim();
     let Some(inner) = t.strip_prefix("```").and_then(|r| r.strip_suffix("```")) else { return t };
     match inner.split_once('\n') {
-        Some((tag, body)) if matches!(tag.trim(), "" | "json") => body.trim(),
+        Some((tag, body)) if tag.trim().is_empty() || tag.trim().eq_ignore_ascii_case("json") => body.trim(),
         _ => t,
     }
 }
@@ -331,6 +331,8 @@ mod tests {
     fn a_fenced_json_reply_parses() {
         for text in [
             format!("```json\n{REPLY}\n```"),
+            format!("```JSON\n{REPLY}\n```"),
+            format!("```Json\n{REPLY}\n```"),
             format!("```\n{REPLY}\n```"),
             format!("\n```json\n{REPLY}```\n"),
             "```json\n{\n  \"judgements\": [\n    {\"id\": \"g1\", \"relevant\": true, \"confidence\": 0.8},\n    {\"id\": \"g2\", \"relevant\": false, \"confidence\": 0.9}\n  ]\n}\n```".to_string(),
@@ -368,6 +370,8 @@ mod tests {
             (format!(r#"{{"judgements":[{ok}],"note":"x"}}"#), 1),                    // a top-level field the schema lacks
             (format!("[{ok}]"), 1),                                                  // not an object
             (r#"{"judgement":[]}"#.to_string(), 1),                                  // no judgements array
+            (j(r#"{"id":"g01","relevant":true,"confidence":0.8}"#), 1),              // an id that parses to 1, spelled otherwise
+            (j(r#"{"id":"g+1","relevant":true,"confidence":0.8}"#), 1),
         ] {
             assert!(parse_reply(&text, n).is_err(), "{text}");
         }
