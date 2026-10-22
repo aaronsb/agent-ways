@@ -1,6 +1,6 @@
 ---
-description: keeping what was said in a team meeting as the project's record, filing it into the project folder unedited, following the AI notes email to the full version, fixing who said what when names got swapped, and citing its lines for what was decided and who owns each follow-up
-vocabulary: kickoff standup sync design review team meeting record project folder file it unedited no cleanup notes email link tab who said what names swapped misattributed credited wrong person attribution quote the line cite decided decisions owns owner commitments
+description: saving a call or meeting transcript verbatim into the project's transcripts folder, pulling the full text behind the link in the recording email, and fixing swapped speaker labels in it
+vocabulary: kickoff standup sync zoom call transcription captions speaker labels swapped verbatim no cleanup
 pattern: misattribut|\bspeaker labels?\b|\btranscript tab\b
 files: \.vtt$|(^|/)meetings?[-_]?transcripts?/
 refire: 0.15
