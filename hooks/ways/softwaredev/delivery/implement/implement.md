@@ -15,7 +15,7 @@ The discussion that led to the ADR is valuable context. Stay in the same session
 
 ## The Briefing
 
-Before creating any tasks or writing any code, **present the implementation plan to the human as a briefing.** This is not optional. The briefing serves as alignment, not ceremony.
+For substantial ADR-backed work, **present the implementation plan to the human as a briefing** before creating tasks or writing code (ADR-176). Smaller work follows the asking bar in core.md.
 
 ### What the Briefing Covers
 

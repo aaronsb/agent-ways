@@ -20,7 +20,7 @@ Be concrete and concise:
 
 ## Step 2: Ask the User
 
-Present your summary, then use `AskUserQuestion` to check in:
+Put the summary and the questions below in your final message, and keep working while the user reads them. These questions meet the asking bar in core.md:
 
 **Question 1** — "How's the direction?" (header: "Direction")
 - Options covering: on track, needs adjustment, pivot needed

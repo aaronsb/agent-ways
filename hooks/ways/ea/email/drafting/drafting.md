@@ -13,10 +13,7 @@ Compose draft replies in the user's voice. Send only a message the user asked to
 
 1. Read the original thread: to understand full context.
 2. Study the user's writing style. Read 5-8 recent sent emails from the relevant account. Calibrate tone, length, greeting patterns, sign-off, and vocabulary.
-3. Ask clarifying questions before drafting: 
-   - What is the intent? (accepting, declining, requesting, informing)
-   - Any specific points to include?
-   - Tone preference if it differs from their usual?
+3. Ask only when the thread leaves the intent open (accepting, declining, requesting, informing), under the asking bar in core.md.
 4. Draft: following the user's observed patterns.
 5. Present for review: and iterate on feedback.
 6. Create as a platform draft: with proper threading (preserve message IDs, references, in-reply-to headers).
