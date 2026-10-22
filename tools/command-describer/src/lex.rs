@@ -520,17 +520,19 @@ impl Lexer<'_> {
             }
             None => TokenKind::Word,
         };
+        // Only an unquoted `[[` or `]]` opens or closes a test: `"]]"` is a
+        // string inside it.
         if kind == TokenKind::Word {
-            match value.as_str() {
-                "[[" if l
-                    .cur
-                    .tokens
-                    .iter()
-                    .all(|t| LEAD_KEYWORDS.contains(&t.value.as_str())) =>
+            match &self.b[start..self.pos] {
+                b"[["
+                    if l.cur
+                        .tokens
+                        .iter()
+                        .all(|t| LEAD_KEYWORDS.contains(&t.value.as_str())) =>
                 {
                     l.dbracket = true
                 }
-                "]]" => l.dbracket = false,
+                b"]]" => l.dbracket = false,
                 _ => {}
             }
         }

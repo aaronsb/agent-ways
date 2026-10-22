@@ -371,6 +371,29 @@ fn redirect_to_dev_null_and_fd_duplication_write_nothing() {
 }
 
 #[test]
+fn redirects_to_streams_write_nothing() {
+    for cmd in [
+        "echo oops > /dev/stderr",
+        "echo hi >/dev/stdout",
+        "printf x > /dev/tty",
+        "echo note 1>/dev/fd/2",
+    ] {
+        let segs = parse(cmd);
+        assert_eq!(segs[0].role, R::Navigation, "{cmd}");
+        assert_eq!(segs[0].class, None, "{cmd}");
+    }
+    assert_eq!(
+        parse("cat x > /dev/stderr")[0].class,
+        Some(Class::ReadInspect)
+    );
+    // A file under /dev that is not a stream still counts.
+    assert_eq!(
+        parse("echo x > /dev/fdisk.log")[0].class,
+        Some(Class::FileWrite)
+    );
+}
+
+#[test]
 fn heredoc_to_a_file_then_another_command() {
     let cmd = "cat > /tmp/f.txt <<EOF\nline one; rm -rf /\nEOF\ncat /tmp/f.txt";
     let segs = parse(cmd);
@@ -563,6 +586,36 @@ fn a_navigation_program_behind_a_wrapper_is_operative() {
     assert_eq!(operative_texts(&segs)[0], "sudo -n true");
     // An assignment is not a wrapper.
     assert_eq!(parse("FOO=1 echo hi")[0].role, R::Navigation);
+}
+
+#[test]
+fn time_and_builtin_leave_a_navigation_program_navigation() {
+    for cmd in [
+        "time echo hi",
+        "builtin cd /tmp",
+        "/usr/bin/time -p echo hi",
+    ] {
+        let segs = parse(cmd);
+        assert_eq!(segs[0].role, R::Navigation, "{cmd}");
+    }
+    assert_eq!(parse("builtin cd /tmp")[0].program.as_deref(), Some("cd"));
+    assert_eq!(parse("sudo -n true")[0].role, R::Operative);
+    // They still resolve to an operative program.
+    assert_eq!(parse("time cargo build")[0].role, R::Operative);
+}
+
+#[test]
+fn a_quoted_closing_bracket_does_not_close_a_test() {
+    let segs = parse(r#"[[ $x == "]]" && -f y ]] && make test"#);
+    assert_eq!(
+        segs.iter()
+            .map(|s| s.program.as_deref())
+            .collect::<Vec<_>>(),
+        [None, Some("make")]
+    );
+    assert_eq!(segs[1].connector, C::And);
+    // An unquoted `]]` still closes it.
+    assert_eq!(programs("[[ -f y ]] && make test"), ["make"]);
 }
 
 #[test]
