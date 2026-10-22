@@ -61,6 +61,7 @@ Late-interaction reads only the EN corpus. On a localized install the multilingu
 
 - **Bash** (`scan::command`): `commands:` on the command, then `pattern:` on the tool description, fire on the regex alone. Its semantic lane is single-vector only (`semantic:bash:en|multi`, `p ≥ τ_s` after parent-boost) over the command, the description and Claude's prose since the last human turn (`lookbehind::intent`). State-triggered ways are excluded, and nothing is logged as a near-miss.
 - **File** (`scan::file`): `files:` regex only.
+- **Tool** (`scan::tool`): `tool_name:` regex on the tool name, on the hook events `tool_event:` lists (`[PreToolUse]` by default). The envelope names the real event. Lint warns when the regex matches no wired tool or an event is not wired (ADR-704).
 
 Keyword matching is case-insensitive (ADR-157): every trigger regex is compiled by `compile_trigger` with `case_insensitive(true)`, so a lowercase pattern matches the uppercase acronyms users type (`\bssh\b` matches `SSH`). The text keeps its original case, with only code fences and URLs stripped (`mask_nonlinguistic`). A pattern may opt back into case sensitivity with an inline `(?-i)`. Authoring rule: write patterns in lowercase and mean the concept.
 

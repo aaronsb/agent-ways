@@ -256,6 +256,16 @@
             "command": "${HOME}/.claude/hooks/ways/check-task-pre.sh"
           }
         ]
+      },
+      {
+        "matcher": "EnterPlanMode|ExitPlanMode|Workflow",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${HOME}/.claude/hooks/ways/check-tool.sh",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -316,6 +326,16 @@
           {
             "type": "command",
             "command": "${HOME}/.claude/hooks/ways/check-pull.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "EnterPlanMode|ExitPlanMode|Workflow",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${HOME}/.claude/hooks/ways/check-tool.sh",
+            "timeout": 10
           }
         ]
       }

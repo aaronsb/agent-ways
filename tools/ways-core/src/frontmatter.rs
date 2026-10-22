@@ -150,7 +150,22 @@ impl Frontmatter {
 /// `ways author lint`'s fire-eligibility check automatically. The corresponding
 /// dispatch entry point in `cmd/scan/` still needs wiring separately — this
 /// const is the advisory declaration, not the dispatcher.
-pub const FIRE_BEARING_FIELDS: &[&str] = &["pattern", "files", "commands", "trigger"];
+pub const FIRE_BEARING_FIELDS: &[&str] = &["pattern", "files", "commands", "tool_name", "trigger"];
+
+/// The hook events a way's `tool_event:` names (ADR-704). The value is a
+/// one-line YAML flow list, `[PreToolUse, PostToolUse]`, or one bare event
+/// name. A way with no `tool_event:` fires on `PreToolUse` only.
+pub fn tool_events(raw: Option<&str>) -> Vec<String> {
+    let Some(raw) = raw else { return vec!["PreToolUse".to_string()] };
+    let raw = raw.trim();
+    let inner = raw.strip_prefix('[').and_then(|r| r.strip_suffix(']')).unwrap_or(raw);
+    inner
+        .split(',')
+        .map(|e| e.trim().trim_matches(|c| c == '"' || c == '\'').trim())
+        .filter(|e| !e.is_empty())
+        .map(str::to_string)
+        .collect()
+}
 
 /// Does this frontmatter wire the way into any firing channel?
 /// Used by `ways author lint` to flag fire-bearing ways that lack a `refire:` field.
@@ -414,6 +429,15 @@ pub fn extract_way_refs(content: &str) -> Vec<WayRef> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tool_events_read_a_flow_list_or_one_name() {
+        assert_eq!(tool_events(None), ["PreToolUse"]);
+        assert_eq!(tool_events(Some("[PreToolUse, PostToolUse]")), ["PreToolUse", "PostToolUse"]);
+        assert_eq!(tool_events(Some("PostToolUse")), ["PostToolUse"]);
+        assert_eq!(tool_events(Some("[\"PostToolUse\", 'PermissionRequest']")), ["PostToolUse", "PermissionRequest"]);
+        assert!(tool_events(Some("[]")).is_empty());
+    }
 
     #[test]
     fn way_refs_keep_only_name_domain_entries() {

@@ -596,6 +596,7 @@ mod tests {
         // way; the first-segment fallback lands it with the rest of the lane.
         assert_eq!(trigger_channel("bash:semantic:en"), "bash");
         assert_eq!(trigger_channel("file"), "file");
+        assert_eq!(trigger_channel("tool"), "tool");
         assert_eq!(trigger_channel("state"), "state");
         assert_eq!(trigger_channel("attend:context-pressure"), "attend");
         assert_eq!(trigger_channel("check-pull"), "check-pull");

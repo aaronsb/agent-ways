@@ -44,6 +44,7 @@ mod requires;
 mod scanning;
 mod schema;
 mod size;
+mod tool_lane;
 
 use anyhow::{Context, Result};
 use std::path::PathBuf;
