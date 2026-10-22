@@ -97,17 +97,25 @@ Sub-agents are for delegation of token-intensive work. Routine actions stay in t
 
 ## Invocation Is Authorization
 
-From Claude Code 2.1.306, the system prompt under the Opus 5 prompt bundle tells the model not to call the Agent tool *"unless the user, a CLAUDE.md file, or a skill asks for it"*. Other models do not receive the line by default. That is a permission gate. It asks one question — did the user request delegation? This way answers it, in advance and in writing.
+Claude Code 2.1.306 puts one sentence in the system prompt: *"Do not use the Agent tool, workflows, or deep-research unless the user, a CLAUDE.md file, or a skill asks for it"*. By default it reaches claude-opus-5 only, and a server can serve it to other models. A server can also still serve the older sentence, which names only the user. Where no such text is present, the payoff section below is the check.
 
-**Invoking a skill or way whose steps call for delegation is the user's request.** When the operator runs `/merge`, asks to land or ship a branch, or asks for a PR review or a research sweep, they have requested every delegation those procedures specify. Don't re-ask, and don't narrate the gate back at them. Delegate as the procedure directs.
+Three sources ask for a spawn:
 
-This names only procedures that carry the clause at their own dispatch site. `/start`, `/develop`, and `/merge` carry it, each naming the delegation its own stages call for. A built-in command this corpus can't annotate grants nothing.
+- The user, in the conversation. Asking to land a branch, review a PR or sweep a topic asks for the delegation that task specifies.
+- A skill in use. `/start`, `/develop` and `/merge` carry a clause at their own dispatch sites naming the delegation their stages call for. A built-in command grants nothing.
+- A CLAUDE.md file, user-level or project-level.
 
-The gate condition is met on its own terms.
+A way's own text is not a request. It names the spawn, the width and the payoff. When none of the three sources covers the step and your instructions carry the restriction, say in one line what you would spawn and how wide, then wait or do the work inline.
 
-Still ask first when the delegation is **not** part of an invoked procedure, when it spends significant tokens outside the stated task, or when the operator has said to work solo.
+The operator can cover every such step with one line in their CLAUDE.md. The install never writes it. Suggested:
 
-The grant covers *whether* to delegate. You set the width. A procedure that says "fan out" authorizes the fan-out it describes, so size it to the work and say the number before spawning it. Past roughly half a dozen, ask.
+> Delegation that an agent-ways skill or way directs at its own step counts as asked for. Spawn what the step names, at the width it states, and ask past about six agents.
+
+When the user asks for a check whose payoff is independence from the author, that request asks for the independent reader: a cold read of documentation, held-out cases, a refutation pass, a blind judge, a fresh-context review of your own change. Spawn it and name the payoff in a clause. When such a way discloses during other work, such as an edit to a README, nobody asked for the check, so propose it. Where an instrument that spawns nothing can do the job, such as a stop-hook script, lead with that. Fan-out reads, log reading, parallel edits and an artifact review have an inline substitute and need one of the three sources.
+
+Still ask first when the delegation is not part of an invoked procedure, when it spends significant tokens outside the stated task, or when the operator has said to work solo.
+
+The sources cover whether to delegate. You set the width, say the number before spawning, and ask past roughly half a dozen.
 
 ## Name the Payoff, Don't Assume It
 
@@ -131,7 +139,7 @@ The `Agent` tool takes a `model`. Choose it by what the worker's errors would co
 
 A strong model on a mechanical task wastes money. A weak model on a judgment task wastes the delegation.
 
-Both sections cover `AgentTool` only. `Workflow` and deep-research are gated by the same system-prompt constant and stay that way: propose them and discuss, never invoke unprompted. See ADR-175.
+The sections above cover the Agent tool. `Workflow` and deep-research are named by the same sentence and stay proposals: discuss them, never invoke unprompted. The suggested CLAUDE.md line does not cover them; only a line that names them does. See ADR-175 and ADR-608.
 
 ## Harness Wrappers Are Not Verdicts
 

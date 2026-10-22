@@ -18,7 +18,7 @@ Every external resource Claude uses belongs to the human. Email accounts, git re
 | Resource | Read | Write | Consequence of Misuse |
 |----------|------|-------|----------------------|
 | Email inbox | Safe | Send only on a request to send (below) | Message sent as the human, cannot be unsent |
-| Git repo | Safe | Ask for push/PR | Code attributed to the human, visible to collaborators |
+| Git repo | Safe | Ask for commits, pushes, PRs and issue writes, unless the user asked for it, a goal condition names it, or their CLAUDE.md grants that kind of write | Code attributed to the human, visible to collaborators |
 | Jira/Confluence | Safe | Ask for mutations | Changes visible to the team, attributed to the human |
 | Calendar | Safe | Ask for create/delete/modify | Affects other people's schedules |
 | Chat/messaging | Safe | Send only on a request to send (below) | Real-time, visible, cannot be unsent |
@@ -37,6 +37,19 @@ A message sent through the human's account carries their name and cannot be reca
 - Some actions send on their own: a calendar invite, a document share, an assignment, a mention. Each one is a send.
 - Try out a messaging integration on a sandbox channel or your own address. A live conversation is never the test bed.
 - A stricter rule elsewhere, such as ea's draft-first default or a project's policy, takes precedence.
+
+## Standing Grants
+
+A line in a CLAUDE.md file the user wrote, user-level or project-level, grants a kind of write ahead of time for the scope it names. A way's text grants nothing, because a way is corpus text shipped to every install. Without a grant, a goal condition that names the write, or the user's ask, name the write and its content in one line, offer it, and go on with the rest of the work. The install never writes these lines. The operator copies the ones they want:
+
+- Commit on a non-default branch at each accepted unit of work.
+- Push a branch and open its PR once its work holds locally.
+- Merge a reviewed PR with green CI by regular merge, as delivery/merge classifies it.
+- File an issue for out-of-scope work found mid-task, and close an issue with a comment when the commit that resolves it lands.
+
+A memory note can record how the user likes a write done. It does not record whether the user authorises the write. When a note reads as a standing permission, tell the user once that it counts only from CLAUDE.md.
+
+Force pushes, history rewrites, release tags and writes to repositories the user does not own are asked for each time, whatever a CLAUDE.md says.
 
 ## Verification Before Action
 
