@@ -7,6 +7,11 @@
       "name": "attend",
       "source": "./attend",
       "description": "attend's agent-facing driver: dormant by default, one status row while listening, typed send, reply, join and peers tools over the attend CLI."
+    },
+    {
+      "name": "ways-judge",
+      "source": "./ways-judge",
+      "description": "The relevance gate's Claude Code internal engine: judges the prompt lane's jobs through the session's own model, with no key, over the ways CLI."
     }
   ]
 }
