@@ -34,6 +34,9 @@ considered:
     said: "Report, don't block"
     via: multiple-choice question in the agent-ways session, 2026-10-22; options were report don't block, or block the release
     covers: [release]
+  - operator: aaronsb
+    said: "1131 reads as we discussed I am ok with it"
+    via: "chat in the agent-ways session, 2026-10-22, after reading PR #1131 (the PR body listed the three agent-made calls: Bash lane judges every candidate in batches of 8; tool_event default [PreToolUse, UserPromptExpansion]; no-judge setup writes gate.mode off)"
 status: proposed
 date: 2026-10-22
 deciders:

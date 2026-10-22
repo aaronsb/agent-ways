@@ -121,6 +121,9 @@ considered:
     said: "I see the flow and it makes sense. that's an acceptable spend. the only other way I see we could do this is if claude code has a mod hook for an internal evaluator call that would use the authenticated account rather than an independent api token"
     via: chat in the agent-ways session, 2026-10-22, after seeing the ADR-188 figure and the cost probe; figure shown before the probe
     covers: [cost]
+  - operator: aaronsb
+    said: "1131 reads as we discussed I am ok with it"
+    via: "chat in the agent-ways session, 2026-10-22, after reading PR #1131 (the PR body listed the three agent-made calls: Bash lane judges every candidate in batches of 8; tool_event default [PreToolUse, UserPromptExpansion]; no-judge setup writes gate.mode off)"
 status: proposed
 date: 2026-10-22
 deciders:
