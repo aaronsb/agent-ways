@@ -95,6 +95,10 @@ considered:
   - operator: aaronsb
     said: "Parallel, deliver post (Recommended). this can be a use of our late response pipeline"
     via: "multiple-choice question in the agent-ways session, 2026-10-22, after the surface ablation and the judge study; option text: the command runs immediately, the judge runs alongside, approved ways arrive on PostToolUse; the operator then named ADR-606's deferred (late response) pipeline as the carrier"
+  - operator: aaronsb
+    said: "I see the flow and it makes sense. that's an acceptable spend. the only other way I see we could do this is if claude code has a mod hook for an internal evaluator call that would use the authenticated account rather than an independent api token"
+    via: chat in the agent-ways session, 2026-10-22, after seeing the ADR-188 figure and the cost probe; figure shown before the probe
+    covers: [cost]
 status: proposed
 date: 2026-10-22
 deciders:
