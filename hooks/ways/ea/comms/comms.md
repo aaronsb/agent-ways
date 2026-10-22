@@ -15,7 +15,7 @@ Access those platforms for reading conversations, checking unread threads, and c
 
 - **Always safe:** reading chats, browsing channels, checking unread indicators, viewing history.
 - **Requires explicit approval:** posting anything to the platform. Draft it, present it with the target workspace and channel, and wait for the human to approve.
-- **Claude's own account:** a message sent from an account the human gave Claude as its own needs no per-message yes. Posting as the human always waits for their yes (trust/voice).
+- **Without a per-message yes:** only as trust/voice allows, for a disclosed reply as Claude under a session grant or a post from Claude's own account.
 
 ## Chat Triage
 
