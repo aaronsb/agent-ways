@@ -30,12 +30,15 @@
 //! embeddings, the judge or hook events.
 
 mod classify;
+mod describe;
 mod lex;
 // Laid out by hand: one rule or list per block reads as data.
 #[rustfmt::skip]
 pub mod tables;
 
 use std::ops::Range;
+
+pub use describe::{describe, described_block, Described, Summaries};
 
 /// What joins a segment to the one before it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

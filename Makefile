@@ -6,7 +6,7 @@
 #   ways manage update | ways manage repair | ways manage uninstall | make cut-release
 
 .DEFAULT_GOAL := help
-.PHONY: site site-serve explainer-video explainer-stills setup link relink install update sync-to-home update-binaries dev-install dev-restore _unix_only clean help deps way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-hooks test-plugins test-lang test-locales test-multilingual test-live test-live-matrix purge-attend-state
+.PHONY: site site-serve explainer-video explainer-stills setup link relink install update sync-to-home update-binaries dev-install dev-restore _unix_only clean help deps way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-hooks test-plugins test-lang test-locales test-multilingual test-live test-live-matrix purge-attend-state tldr-data
 
 ifeq ($(OS),Windows_NT)
     SHELL := C:/Program Files/Git/usr/bin/bash.exe
@@ -58,6 +58,7 @@ help:
 	@echo "  make test-adr     Run adr tool tests (lint, archive, golden, import, macro)"
 	@echo "  make test-statusline  Test statusline.sh segments against stub attend builds"
 	@echo "  make test-hooks   Test hook scripts against a temp HOME and sessions root"
+	@echo "  make tldr-data    Regenerate catalog/commands/tldr from the pinned tldr-pages release"
 	@echo "  make test-plugins Validate and test the Claude Code mods in plugins/ (needs claude)"
 	@echo "  make test-lang    Validate active language coverage"
 	@echo "  make test-locales Check locale files for gaps and duplicates"
@@ -284,6 +285,12 @@ docs: attend
 	@cargo build --release --manifest-path tools/Cargo.toml -p attend --bin gen-docs --quiet
 	@./tools/target/release/gen-docs > docs/cli/attend.md
 	@echo "Wrote docs/cli/attend.md ($$(wc -l < docs/cli/attend.md) lines)"
+
+# The command describer's tldr summaries (ADR-706 item 7): an extract of the
+# pinned tldr-pages release, committed under catalog/commands/tldr/ with its
+# CC BY 4.0 NOTICE. Fetches over the network; nothing reads tldr at run time.
+tldr-data:
+	python3 -I scripts/tldr-extract.py
 
 # The manual published to GitHub Pages (.github/workflows/pages.yml). MkDocs runs
 # from a venv under .venv-docs so the build needs only python3.

@@ -1,0 +1,22 @@
+tldr-pages extract
+==================
+
+summaries.tsv in this directory is an extract of tldr-pages
+(https://github.com/tldr-pages/tldr), release v2.3 (commit 625d3423127117eed2e1613f4a6566b0c2064f41),
+taken from pages.en/common, pages.en/linux and pages.en/osx.
+
+Copyright (c) 2014-present the tldr-pages team
+(https://github.com/orgs/tldr-pages/people) and contributors
+(https://github.com/tldr-pages/tldr/graphs/contributors).
+
+The tldr-pages work is licensed under the Creative Commons Attribution 4.0
+International License (CC BY 4.0):
+https://creativecommons.org/licenses/by/4.0/
+
+Changes: this file is not the pages themselves. It keeps each page's first
+description line, with an alias page taking its target's line, reformatted
+as one tab-separated line per page for lookup by the command describer
+(ADR-706 item 7). Nothing is taken from tldr-pages' MIT-licensed scripts/
+directory.
+
+Regenerate with `make tldr-data` (scripts/tldr-extract.py).
