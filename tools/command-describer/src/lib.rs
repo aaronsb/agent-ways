@@ -85,7 +85,8 @@ impl Connector {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Role {
     /// Moves or sets up the shell: `cd`, `pushd`, `export`, `echo`, `sleep`,
-    /// an assignment alone, or a word that is not a program name.
+    /// an assignment alone, or a word that is not a program name. One of
+    /// these behind a wrapper (`sudo -n true`) is operative.
     Navigation,
     /// A filter program reading a pipe: `grep`, `head`, `sort`, `jq`, …
     /// (`sed -i` is never a filter).

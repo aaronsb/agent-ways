@@ -269,9 +269,12 @@ impl Lexer<'_> {
     }
 
     /// `(` between words: a subshell, an arithmetic command, or part of the
-    /// segment (`name()`, `for ((…))`).
+    /// segment (`name()`, `for ((…))`). At a segment's start, or after its
+    /// leading keywords, it opens a subshell.
     fn open_paren(&mut self, l: &mut List) {
-        if !l.cur.tokens.is_empty() {
+        // After leading keywords alone (`time (…)`, `! (…)`, `if (…)`) the
+        // `(` still opens a subshell; the keywords are stripped later.
+        if !l.only_keywords() {
             let start = self.pos;
             let end = self.skip_balanced(start, b'(', b')');
             self.pos = end;
