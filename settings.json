@@ -136,31 +136,38 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/check-setup.sh"
+            "command": "${HOME}/.claude/hooks/ways/check-setup.sh",
+            "timeout": 30
           },
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/clear-markers.sh"
+            "command": "${HOME}/.claude/hooks/ways/clear-markers.sh",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/check-config-updates.sh"
+            "command": "${HOME}/.claude/hooks/check-config-updates.sh",
+            "timeout": 30
           },
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/check-state.sh"
+            "command": "${HOME}/.claude/hooks/ways/check-state.sh",
+            "timeout": 30
           },
           {
             "type": "command",
-            "command": "${HOME}/.claude/bin/ways init"
+            "command": "${HOME}/.claude/bin/ways init",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "${HOME}/.claude/bin/ways corpus --if-stale --quiet"
+            "command": "${HOME}/.claude/bin/ways corpus --if-stale --quiet",
+            "timeout": 300
           },
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/issues-pull.sh session-start"
+            "command": "${HOME}/.claude/hooks/ways/issues-pull.sh session-start",
+            "timeout": 30
           }
         ]
       },
@@ -169,15 +176,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/clear-markers.sh"
+            "command": "${HOME}/.claude/hooks/ways/clear-markers.sh",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/check-state.sh"
+            "command": "${HOME}/.claude/hooks/ways/check-state.sh",
+            "timeout": 30
           },
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/issues-pull.sh session-start"
+            "command": "${HOME}/.claude/hooks/ways/issues-pull.sh session-start",
+            "timeout": 30
           }
         ]
       },
@@ -186,11 +196,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/check-state.sh"
+            "command": "${HOME}/.claude/hooks/ways/check-state.sh",
+            "timeout": 30
           },
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/issues-pull.sh session-start"
+            "command": "${HOME}/.claude/hooks/ways/issues-pull.sh session-start",
+            "timeout": 30
           }
         ]
       },
@@ -199,19 +211,23 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/clear-markers.sh"
+            "command": "${HOME}/.claude/hooks/ways/clear-markers.sh",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/check-state.sh"
+            "command": "${HOME}/.claude/hooks/ways/check-state.sh",
+            "timeout": 30
           },
           {
             "type": "command",
-            "command": "${HOME}/.claude/bin/ways init"
+            "command": "${HOME}/.claude/bin/ways init",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/issues-pull.sh session-start"
+            "command": "${HOME}/.claude/hooks/ways/issues-pull.sh session-start",
+            "timeout": 30
           }
         ]
       }
@@ -222,7 +238,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/check-file-pre.sh"
+            "command": "${HOME}/.claude/hooks/ways/check-file-pre.sh",
+            "timeout": 10
           }
         ]
       },
@@ -231,11 +248,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/check-bash-pre.sh"
+            "command": "${HOME}/.claude/hooks/ways/check-bash-pre.sh",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/strip-session-link-pre.sh"
+            "command": "${HOME}/.claude/hooks/ways/strip-session-link-pre.sh",
+            "timeout": 10
           }
         ]
       },
@@ -244,7 +263,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/mark-tasks-active.sh"
+            "command": "${HOME}/.claude/hooks/ways/mark-tasks-active.sh",
+            "timeout": 10
           }
         ]
       },
@@ -253,7 +273,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/check-task-pre.sh"
+            "command": "${HOME}/.claude/hooks/ways/check-task-pre.sh",
+            "timeout": 10
           }
         ]
       },
@@ -273,15 +294,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/check-prompt.sh"
+            "command": "${HOME}/.claude/hooks/ways/check-prompt.sh",
+            "timeout": 30
           },
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/check-state.sh"
+            "command": "${HOME}/.claude/hooks/ways/check-state.sh",
+            "timeout": 30
           },
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/issues-pull.sh prompt"
+            "command": "${HOME}/.claude/hooks/ways/issues-pull.sh prompt",
+            "timeout": 30
           }
         ]
       }
@@ -291,7 +315,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/inject-subagent.sh"
+            "command": "${HOME}/.claude/hooks/ways/inject-subagent.sh",
+            "timeout": 30
           }
         ]
       }
@@ -302,11 +327,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/check-post.sh"
+            "command": "${HOME}/.claude/hooks/ways/check-post.sh",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/check-queued.sh"
+            "command": "${HOME}/.claude/hooks/ways/check-queued.sh",
+            "timeout": 10
           }
         ]
       },
@@ -316,7 +343,8 @@
           {
             "type": "command",
             "if": "Bash(gh issue *)",
-            "command": "${HOME}/.claude/hooks/ways/issues-pull.sh post-gh"
+            "command": "${HOME}/.claude/hooks/ways/issues-pull.sh post-gh",
+            "timeout": 30
           }
         ]
       },
@@ -325,7 +353,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/check-pull.sh"
+            "command": "${HOME}/.claude/hooks/ways/check-pull.sh",
+            "timeout": 10
           }
         ]
       },
@@ -346,7 +375,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/check-post.sh"
+            "command": "${HOME}/.claude/hooks/ways/check-post.sh",
+            "timeout": 10
           }
         ]
       }
@@ -356,11 +386,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/check-response.sh"
+            "command": "${HOME}/.claude/hooks/ways/check-response.sh",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/attend-drain-stop.sh"
+            "command": "${HOME}/.claude/hooks/ways/attend-drain-stop.sh",
+            "timeout": 10
           }
         ]
       }
@@ -370,7 +402,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${HOME}/.claude/hooks/ways/issues-task-created.sh"
+            "command": "${HOME}/.claude/hooks/ways/issues-task-created.sh",
+            "timeout": 10
           }
         ]
       }

@@ -1314,26 +1314,95 @@ mod tests {
         assert_eq!(before, after, "user view preserved");
     }
 
+    /// The `hooks` block of the repo's settings.json, or `None` outside a
+    /// source checkout. Read at run time: a test binary reused from another
+    /// checkout keeps the path it was built at.
+    fn shipped_hooks() -> Option<serde_json::Map<String, Value>> {
+        let repo_settings =
+            std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").into())).join("../../settings.json");
+        let raw = std::fs::read_to_string(&repo_settings).ok()?;
+        let v: Value = serde_json::from_str(&raw).expect("repo settings.json parses");
+        v.get("hooks").and_then(|h| h.as_object()).cloned()
+    }
+
     #[test]
     fn shipped_hooks_are_all_recognized_as_ours() {
         // Guard: every hook agent-ways ships in the repo settings.json must be
         // recognized by `entry_is_ours`. Otherwise structural ownership silently
         // regresses and a stale-base update false-reverts again. Catches a future
         // hook that shells something outside `.claude/hooks/` or `.claude/bin/`.
-        // Read at run time: a test binary reused from another checkout keeps the
-        // path it was built at.
-        let repo_settings =
-            std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").into())).join("../../settings.json");
-        let raw = match std::fs::read_to_string(&repo_settings) {
-            Ok(s) => s,
-            Err(_) => return, // not a source checkout — skip
-        };
-        let v: Value = serde_json::from_str(&raw).expect("repo settings.json parses");
-        let Some(hooks) = v.get("hooks").and_then(|h| h.as_object()) else { return };
-        for (event, entries) in hooks {
+        let Some(hooks) = shipped_hooks() else { return };
+        for (event, entries) in &hooks {
             for e in entries.as_array().into_iter().flatten() {
                 assert!(entry_is_ours(e), "shipped hook in {event} not recognized as ours: {e}");
             }
         }
+    }
+
+    #[test]
+    fn every_shipped_hook_is_time_boxed() {
+        // A command without a `timeout` gets Claude Code's 600 s default, so a
+        // hung binary stalls the tool call, prompt or session start behind it.
+        let Some(hooks) = shipped_hooks() else { return };
+        let mut seen = 0;
+        for (event, entries) in &hooks {
+            for cmd in entries.as_array().into_iter().flatten().flat_map(|e| e["hooks"].as_array().into_iter().flatten()) {
+                seen += 1;
+                let t = cmd["timeout"].as_u64();
+                assert!(t.is_some_and(|t| t > 0 && t < 600), "{event}: {} has no bound below 600 s: {cmd}", cmd["command"]);
+            }
+        }
+        assert!(seen > 20, "read the shipped hooks: {seen} commands");
+    }
+
+    #[test]
+    fn every_shipped_hook_that_gains_a_timeout_replaces_the_installed_one() {
+        // An install whose entries predate their timeouts, with a lost base,
+        // converges on what ships: every entry once, each timeout landed, and
+        // the user's hook kept. The check-tool.sh case above, for every event.
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static SEQ: AtomicU32 = AtomicU32::new(0);
+        let Some(shipped) = shipped_hooks() else { return };
+        let dir = std::env::temp_dir().join(format!(
+            "ways-setmerge-timeouts-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (dest, source, base) = (dir.join("settings.json"), dir.join("source.json"), dir.join("base.json"));
+
+        let mut installed = Value::Object(shipped.clone());
+        let mut stripped = 0;
+        for entries in installed.as_object_mut().unwrap().values_mut() {
+            for e in entries.as_array_mut().unwrap() {
+                for cmd in e["hooks"].as_array_mut().unwrap() {
+                    stripped += usize::from(cmd.as_object_mut().unwrap().remove("timeout").is_some());
+                }
+            }
+        }
+        assert!(stripped > 20, "the old install lacks the timeouts: {stripped}");
+        let user = json!({ "matcher": "Bash", "hooks": [ { "type": "command", "command": "/u/mine" } ] });
+        installed["PreToolUse"].as_array_mut().unwrap().push(user.clone());
+
+        std::fs::write(&source, serde_json::to_string(&json!({ "hooks": shipped })).unwrap()).unwrap();
+        std::fs::write(&dest, serde_json::to_string(&json!({
+            "hooks": installed,
+            "permissions": { "allow": WAYS_PERMS }
+        })).unwrap()).unwrap();
+        std::fs::write(&base, serde_json::to_string(&json!({ "hooks": {}, "perms": WAYS_PERMS })).unwrap()).unwrap();
+
+        apply_to_files(&source, &dest, &base).expect("the timeout change must apply");
+
+        let after: Value = serde_json::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
+        for (event, want) in &shipped {
+            let ours: Vec<&Value> = after["hooks"][event].as_array().unwrap().iter().filter(|e| entry_is_ours(e)).collect();
+            // The merge installs each command with its path quoted.
+            let want: Vec<Value> = want.as_array().unwrap().iter().map(quote_entry_commands).collect();
+            let want: Vec<&Value> = want.iter().collect();
+            assert_eq!(ours, want, "{event}: the shipped entries, once each, timeouts landed");
+        }
+        assert!(after["hooks"]["PreToolUse"].as_array().unwrap().contains(&user), "user hook preserved");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
