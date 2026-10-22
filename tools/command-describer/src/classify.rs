@@ -169,13 +169,13 @@ fn writes_file(tokens: &[Token]) -> bool {
     tokens.windows(2).any(|w| {
         w[0].kind == TokenKind::RedirectOp
             && matches!(w[0].value.as_str(), ">" | ">>" | ">|" | "&>" | "&>>")
-            && !is_terminal_device(&w[1].value)
+            && !is_stream_target(&w[1].value)
     })
 }
 
 /// A redirect target that is a stream, not a file: `/dev/null`,
 /// `/dev/stdout`, `/dev/stderr`, `/dev/tty` and `/dev/fd/N`.
-fn is_terminal_device(target: &str) -> bool {
+fn is_stream_target(target: &str) -> bool {
     matches!(
         target,
         "/dev/null" | "/dev/stdout" | "/dev/stderr" | "/dev/tty"

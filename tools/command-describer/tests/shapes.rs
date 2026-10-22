@@ -1,6 +1,6 @@
 //! Real command shapes from Bash calls, each checked on its segments.
 
-use command_describer::{operative_texts, parse, Class, Connector, Role, Segment};
+use command_describer::{parse, Class, Connector, Role, Segment};
 
 /// `(connector, role, program, subcommand, class)` per segment.
 type Row<'a> = (
@@ -22,6 +22,14 @@ fn rows(segs: &[Segment]) -> Vec<Row<'_>> {
                 s.class,
             )
         })
+        .collect()
+}
+
+/// Each operative segment's text, in order.
+fn operative_texts(segs: &[Segment]) -> Vec<&str> {
+    segs.iter()
+        .filter(|s| s.is_operative())
+        .map(|s| s.text.as_str())
         .collect()
 }
 
