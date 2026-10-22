@@ -73,7 +73,7 @@ pub struct MatchCriteria {
     pub files: Option<String>,
     /// Tool channel — tool names whose call fires the way (ADR-704).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<String>,
+    pub tool_name: Option<String>,
     /// State / explicit trigger channel.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trigger: Option<String>,
@@ -607,7 +607,7 @@ impl MatchCriteria {
             pattern: get("pattern"),
             commands: get("commands"),
             files: get("files"),
-            tools: get("tools"),
+            tool_name: get("tool_name"),
             trigger: get("trigger"),
             vocabulary: get("vocabulary"),
             scope: get("scope"),

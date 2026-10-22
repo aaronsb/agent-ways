@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"i rewrote the changelog skill last night, how do i find out whether it actually does anything the model wouldn't do on its own"}
+{"kind":"situational","prompt":"the deploy helper skill lists six commands with flags and people keep saying the agent ignores half of it, i'm about to ship another edit"}

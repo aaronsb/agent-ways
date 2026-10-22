@@ -42,7 +42,7 @@ use attend_config as config;
 
 use cli::{
     ChannelCmd, ChannelGroup, ChannelListArgs, Cli, Commands, ConfigCmd, InboxArgs, JsonArgs, KeepwarmCmd, ListenCmd,
-    MessageCmd, PeerCmd, PermissionsCmd, ReplyArgs, SendArgs, SensorCmd,
+    MessageCmd, PeerCmd, ReplyArgs, SendArgs, SensorCmd,
 };
 use sensors::Focus;
 
@@ -121,85 +121,7 @@ pub fn cli_main() {
             SensorCmd::Permissions => cmd::permissions::cmd_permissions_audit(),
         },
         Commands::Config { sub } => dispatch_config(sub.unwrap_or(ConfigCmd::Show)),
-
-        // The one-release aliases (ADR-413 item 5), removed by issue #982.
-        Commands::Send(a) => {
-            moved("send", "message send");
-            send(a)
-        }
-        Commands::Reply(a) => {
-            moved("reply", "message reply");
-            reply(a)
-        }
-        Commands::Inbox(a) => {
-            moved("inbox", "message inbox");
-            inbox(a)
-        }
-        Commands::Unread(a) => {
-            moved("unread", "message unread");
-            cmd::listen::cmd_unread(a.json)
-        }
-        Commands::Cleanup(a) => {
-            moved("cleanup", "message cleanup");
-            cmd::cleanup::cmd_cleanup(a.dry_run, a.all)
-        }
-        Commands::Join(a) => {
-            moved("join", "channel join");
-            cmd::channels::cmd_join(&a.name, a.pin, a.json)
-        }
-        Commands::Leave(a) => {
-            moved("leave", "channel leave");
-            cmd::channels::cmd_leave(&a.name, a.json)
-        }
-        Commands::Channels(g) => {
-            moved("channels", "channel");
-            channel(g)
-        }
-        Commands::Dissolve(a) => {
-            moved("dissolve", "channel dissolve");
-            cmd::channels::cmd_dissolve(a.name.trim_start_matches('#'))
-        }
-        Commands::Scene(a) => {
-            moved("scene", "channel scene");
-            cmd::scene::cmd_scene(&a.name)
-        }
-        Commands::Scenes => {
-            moved("scenes", "channel scenes");
-            cmd::scene::cmd_scenes()
-        }
-        Commands::Peers(a) => {
-            moved("peers", "peer list");
-            cmd::peers::cmd_peers(a.json)
-        }
-        Commands::Whoami(a) => {
-            moved("whoami", "peer whoami");
-            cmd::whoami::cmd_whoami(a.machine, a.display)
-        }
-        Commands::Status(a) => {
-            moved("status", "peer status");
-            cmd::status::cmd_status(a.json)
-        }
-        Commands::Sensors => {
-            moved("sensors", "sensor list");
-            cmd::sensors::cmd_sensors()
-        }
-        Commands::Permissions { sub } => {
-            moved("permissions", "sensor permissions");
-            match sub.unwrap_or(PermissionsCmd::Audit) {
-                PermissionsCmd::Audit => cmd::permissions::cmd_permissions_audit(),
-            }
-        }
-        Commands::Tune(a) => {
-            moved("tune", "config tune");
-            cmd::tune::cmd_tune(a.apply)
-        }
     }
-}
-
-/// The one-release alias notice (ADR-413 item 5): the old flat verb, then
-/// the grouped form that replaces it. Removed with the aliases by issue #982.
-fn moved(old: &str, new: &str) {
-    eprintln!("note: `attend {old}` is now `attend {new}`");
 }
 
 fn send(a: SendArgs) {

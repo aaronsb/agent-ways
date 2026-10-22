@@ -34,7 +34,7 @@ pub enum HookEvent {
     /// PreToolUse TaskCreate: write the tasks-active marker (mark-tasks-active.sh). Nothing reads it today.
     TasksActive,
     /// PreToolUse and PostToolUse on the tools the template wires: match the
-    /// tool name against `tools:` (check-tool.sh, ADR-704).
+    /// tool name against `tool_name:` (check-tool.sh, ADR-704).
     Tool,
 }
 
@@ -163,14 +163,15 @@ impl HookInput {
             HookEvent::SubagentStart => Request::SubagentStart { session },
             HookEvent::SessionStart => Request::SessionStart { session: Some(session) },
             HookEvent::TasksActive => Request::TasksActive { session },
-            // A failed call fires nothing: a match there would stamp the way
-            // and hold it back from the retry that succeeds (ADR-188 item 2).
-            HookEvent::Tool => match (self.text("/tool_name"), self.text("/hook_event_name")) {
-                (_, Some(e)) if e == "PostToolUseFailure" => Request::Skip,
-                (Some(tool), hook_event) => {
-                    Request::Tool { session, tool, hook_event: hook_event.unwrap_or_else(|| "PreToolUse".into()) }
-                }
-                (None, _) => Request::Skip,
+            // The event passes through as named: each way's `tool_event:` list
+            // decides whether it fires there (ADR-704).
+            HookEvent::Tool => match self.text("/tool_name") {
+                Some(tool) => Request::Tool {
+                    session,
+                    tool,
+                    hook_event: self.text("/hook_event_name").unwrap_or_else(|| "PreToolUse".into()),
+                },
+                None => Request::Skip,
             },
         }
     }
@@ -326,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_phase_defaults_to_pre() {
+    fn tool_event_defaults_to_pre_tool_use() {
         assert_eq!(
             req(E::Tool, r#"{"session_id":"s","tool_name":"Workflow"}"#),
             Request::Tool { session: "s".into(), tool: "Workflow".into(), hook_event: "PreToolUse".into() }
@@ -334,9 +335,13 @@ mod tests {
     }
 
     #[test]
-    fn post_failure_is_skipped() {
+    fn a_failed_call_passes_its_event_through() {
+        // The way's `tool_event:` list decides; the default leaves it out.
         let raw = r#"{"session_id":"s","hook_event_name":"PostToolUseFailure","tool_name":"Workflow"}"#;
-        assert_eq!(req(E::Tool, raw), Request::Skip);
+        assert_eq!(
+            req(E::Tool, raw),
+            Request::Tool { session: "s".into(), tool: "Workflow".into(), hook_event: "PostToolUseFailure".into() }
+        );
     }
 
     #[test]

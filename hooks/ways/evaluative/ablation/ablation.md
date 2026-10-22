@@ -45,3 +45,4 @@ Cost scales as scenarios × arms × trials. The loop runs locally and on demand 
 - evaluative/agent-eval(evaluative) — graders, trials, pass@k
 - evaluative/clean-room(evaluative) — isolated, disposable environments per run
 - evaluative/held-out(evaluative) — scenarios written by someone other than the author
+- evaluative/ablation/rounds(evaluative) — child: tuning a prompt or skill one change per round, kept or reverted

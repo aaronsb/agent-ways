@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"before we push anything, check which github login is active on this machine, then after the rollout confirm the site is serving the new version"}
+{"kind":"situational","prompt":"the rollout finished green but people still see yesterday's footer, and earlier my push bounced with a permissions error"}

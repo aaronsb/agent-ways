@@ -1,0 +1,5 @@
+{
+  "htmlLabels": false,
+  "flowchart": { "htmlLabels": false, "curve": "basis", "wrappingWidth": 260 },
+  "themeVariables": { "fontFamily": "DejaVu Sans, Arial, sans-serif" }
+}

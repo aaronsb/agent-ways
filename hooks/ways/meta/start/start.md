@@ -33,6 +33,7 @@ Like `wrap` and `/compact`, `start` **cannot** invoke plan mode for you — Clau
 ## See Also
 
 - start (skill) — the procedure this routes to.
+- start/reorient(meta) — child: reorienting without changing anything, and finding what the user wrote before.
 - wrap(meta) — the closing bookend; same gauge, opposite pole.
 - develop(meta) — once oriented, the loop `start` opens into.
 - delivery/issues(softwaredev) — the GitHub issues the session task list mirrors (ADR-180); the continuity check leans on them.

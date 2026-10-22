@@ -36,5 +36,6 @@ A workflow can spawn dozens of agents and burn a large amount of tokens, so it i
 ## See also
 
 - subagents(meta) — single delegation, the rung just below a workflow
+- workflows/fan-out(meta) — child: running a fan-out with shared contracts, serial writes and one report
 - the autonomy design note — the substrate ladder and gate taxonomy in full
 - choices(meta) — surfacing the curated decision at a gate

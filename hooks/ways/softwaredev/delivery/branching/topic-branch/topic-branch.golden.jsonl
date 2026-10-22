@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"before you touch anything for this feature, get us off the default branch"}
+{"kind":"situational","prompt":"you're about to start the refactor but git says we're on master and a couple of modified files aren't yours"}

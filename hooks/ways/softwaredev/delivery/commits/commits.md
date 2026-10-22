@@ -37,3 +37,4 @@ Scopes match the area of change: `ways`, `hooks`, `adr`, `docs`, `config`, `gove
 
 - delivery/github(softwaredev) — commits feed into PRs
 - delivery/release(softwaredev) — commit types drive version bumps
+- delivery/commits/prepare(softwaredev) — when to commit, what to clear before it, what the body records

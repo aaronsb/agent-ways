@@ -159,18 +159,6 @@ enum Commands {
         #[command(subcommand)]
         action: Option<ManageCommand>,
     },
-    // The one-release aliases of ADR-509 §5: each prints the new form on
-    // stderr, then runs it with the same arguments and exit code. Issue #911
-    // removes them in the release after the one that ships `ways manage`.
-    #[command(hide = true)]
-    Update(UpdateArgs),
-    #[command(hide = true)]
-    Uninstall(UninstallArgs),
-    #[command(hide = true)]
-    Target {
-        #[command(subcommand)]
-        action: Option<TargetCommand>,
-    },
     /// The fixed name the previous release's updater spawns on the new binary
     /// (ADR-509 §4): the same code as `ways manage repair`, with no notice.
     #[command(hide = true)]
@@ -525,6 +513,9 @@ enum AuthorCommand {
         /// Show Jaccard similarity between siblings
         #[arg(long)]
         jaccard: bool,
+        /// Ways root directory (default: ~/.claude/hooks/ways)
+        #[arg(long)]
+        ways_dir: Option<String>,
     },
     /// Score way-against-way cosine similarity
     Siblings {
@@ -1208,12 +1199,6 @@ fn settings_screen(tab: &str) -> Result<()> {
     cmd::settings::exit_with(cmd::settings::tui::open(&open))
 }
 
-/// The one-release alias notice (ADR-509 §5): the old top-level name, then
-/// the form that replaces it. Removed with the aliases by issue #911.
-fn moved(old: &str) {
-    eprintln!("note: `ways {old}` is now `ways manage {old}`");
-}
-
 fn update(args: UpdateArgs) -> Result<()> {
     cmd::update::run(args.apply.mode(true), args.git_ref, args.verbose)
 }
@@ -1420,18 +1405,6 @@ fn run() -> Result<()> {
             ManageCommand::Reinstall { apply, purge } => cmd::reinstall::run(apply.mode(false), purge),
             ManageCommand::Target { action } => target(action),
         },
-        Commands::Update(args) => {
-            moved("update");
-            update(args)
-        }
-        Commands::Uninstall(args) => {
-            moved("uninstall");
-            uninstall(args)
-        }
-        Commands::Target { action } => {
-            moved("target");
-            target(action)
-        }
         Commands::Session { action: None } => {
             bare_group(&["session"], || cmd::introspect::replay(None, None, false, None, false, false, &cmd::introspect::Open::default()))
         }
@@ -1473,7 +1446,7 @@ fn run() -> Result<()> {
                     cmd::probe::Eval { body_rank: body_rank.as_deref().and_then(config::BodyRank::parse), unrelated, body_rank_weight, single_section_confirm },
                 )
             }
-            AuthorCommand::Tree { path, jaccard } => cmd::tree::run(path, jaccard),
+            AuthorCommand::Tree { path, jaccard, ways_dir } => cmd::tree::run(path, jaccard, ways_dir),
             AuthorCommand::Siblings { id, threshold, corpus, model } => cmd::siblings::run(id, threshold, corpus, model),
             AuthorCommand::Suggest { file, min_freq } => cmd::suggest::run(file, min_freq),
             AuthorCommand::Graph { ways_dir, output } => cmd::graph::run(ways_dir, output),

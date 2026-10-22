@@ -84,16 +84,18 @@ fn leaving_every_channel_keeps_a_session_that_ran_attend() {
 
 /// #725 re-review, finding 3: `scene private` under a live `attend run`
 /// is recorded, and takes effect once the run is gone.
+// `attend run` ends at once with no sensor to schedule, and the fixture's
+// config leaves it only the peers sensor.
+#[cfg(feature = "sensor-peers")]
 #[test]
 fn scene_private_under_a_live_run_sticks() {
     let f = Fixture::new("privaterun");
     f.ok(&["channel", "join", "a"]);
     {
         let run = f.run();
-        run.wait_for("enrollment by attend run", Duration::from_secs(20), |_| {
-            std::fs::read_to_string(f.marker(&f.sid)).is_ok_and(|m| m.contains("run"))
-        });
+        run.wait_for("enrollment by attend run", Duration::from_secs(20), |_| f.record_has(&f.sid, "run"));
         f.ok(&["channel", "scene", "private"]);
+        assert!(f.record_has(&f.sid, "optout"), "the opt-out is recorded under the live run");
     }
     f.put("_broadcast", "other-1-x", "after opting out", Duration::ZERO);
     assert_eq!(f.drain("plain"), "", "the opt-out holds once the run is gone");

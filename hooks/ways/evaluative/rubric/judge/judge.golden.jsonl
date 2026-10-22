@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"write a prompt for a grader model that decides whether each summary is faithful to its source document"}
+{"kind":"situational","prompt":"we have another model scoring our chatbot's replies and i'm not sure we should believe the numbers it gives us"}

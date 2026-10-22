@@ -18,8 +18,8 @@
 #   keyword   pattern (+ pattern_strict)                   → scan regex lane
 #   bash      commands                                     → scan bash surface
 #   file      files                                        → scan Edit/Write surface
-#   tool      tools (+ tool_phase)                         → scan tool lane (ADR-704)
-#             (PreToolUse/PostToolUse on the tools the settings.json matcher names)
+#   tool      tool_name (+ tool_event)                     → scan tool lane (ADR-704)
+#             (the events and tools the settings.json check-tool.sh entries wire)
 #   state     trigger: session-start|context-threshold|file-exists (flat)  → scan/state.rs
 #             (context-threshold also needs threshold; file-exists needs path)
 #   attend    trigger: { type: attend, signals: [...] } (NESTED)           → attend binary
@@ -99,21 +99,29 @@ way:
       type: regex
       required: optional
       role: Regex matched against bash commands
-    tools:
+    tool_name:
       type: regex
       required: optional
+      # The tools the shipped settings.json matcher on check-tool.sh names.
+      # A user or project way cannot widen it. Keep in step with settings.json;
+      # a lint unit test compares the two.
+      wired: [EnterPlanMode, ExitPlanMode, Workflow]
       role: >
-        Regex matched against the tool name on PreToolUse/PostToolUse (ADR-704).
-        Only tools the shipped settings.json matcher wires reach the lane
-        (today EnterPlanMode, ExitPlanMode, Workflow).
-    tool_phase:
-      type: enum
-      values: [pre, post, both]
+        Regex matched against the payload's tool_name on the tool lane (ADR-704).
+        Only the wired tools reach the lane; lint warns when the regex matches
+        none of them.
+    tool_event:
+      type: array
+      # The hook events Claude Code filters by tool name.
+      values: [PreToolUse, PostToolUse, PostToolUseFailure, PermissionRequest, PermissionDenied]
+      # The events the shipped settings.json wires check-tool.sh on.
+      wired: [PreToolUse, PostToolUse]
       required: optional
-      default: pre
+      default: [PreToolUse]
       role: >
-        When the tool lane fires. pre fires before the tool runs, post after it
-        returns successfully (never on PostToolUseFailure), both on either.
+        The hook events the tool lane fires this way on, as a one-line list of
+        literal event names, e.g. [PreToolUse, PostToolUse]. Lint errors on a
+        name outside values and warns on one that is not wired.
 
   preconditions:
     scope:

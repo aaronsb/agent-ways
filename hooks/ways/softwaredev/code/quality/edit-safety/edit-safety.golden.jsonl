@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"what's the safe way to change output that a build step writes, versus a file a colleague currently has open"}
+{"kind":"situational","prompt":"a codegen step writes our grpc stubs and one of them has a misspelled field, can you patch it"}

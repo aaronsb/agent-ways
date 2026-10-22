@@ -3,12 +3,36 @@
 //! `send --broadcast` was a no-op and `--focus` an alias of `--channel`. Both
 //! are trailing-argument text to clap, so a bare removal would send the flag as
 //! message body; the binary must refuse instead. `attend focus` was a
-//! deprecated alias of the channel verbs and must not parse.
+//! deprecated alias of the channel verbs and must not parse. The flat verbs
+//! ADR-413 item 5 kept as aliases for one release are gone too (#982): each
+//! is a usage error and writes nothing.
 
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
-fn fixture(tag: &str) -> PathBuf {
+/// A fixture home, removed with its contents when dropped.
+struct Home(PathBuf);
+
+impl std::ops::Deref for Home {
+    type Target = PathBuf;
+    fn deref(&self) -> &PathBuf {
+        &self.0
+    }
+}
+
+impl AsRef<std::ffi::OsStr> for Home {
+    fn as_ref(&self) -> &std::ffi::OsStr {
+        self.0.as_os_str()
+    }
+}
+
+impl Drop for Home {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn fixture(tag: &str) -> Home {
     let d = std::env::temp_dir().join(format!("attend-legacy-removed-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
@@ -22,10 +46,10 @@ fn fixture(tag: &str) -> PathBuf {
         format!(r#"{{"pid":{pid},"sessionId":"test-session-{tag}","cwd":"/tmp/fixture-{tag}"}}"#),
     )
     .unwrap();
-    d
+    Home(d)
 }
 
-fn attend(tag: &str, args: &[&str]) -> (Output, PathBuf) {
+fn attend(tag: &str, args: &[&str]) -> (Output, Home) {
     let home = fixture(tag);
     let out = Command::new(env!("CARGO_BIN_EXE_attend"))
         .args(args)
@@ -231,4 +255,32 @@ fn focus_subcommand_is_rejected() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success(), "stderr: {err}");
     assert!(err.contains("unrecognized subcommand"), "stderr: {err}");
+}
+
+/// The flat verbs ADR-413 moved under a group, kept as hidden aliases for one
+/// release and removed by #982.
+const FLAT_VERBS: &[&str] = &[
+    "send", "reply", "inbox", "unread", "cleanup", "join", "leave", "channels", "dissolve", "scene", "scenes", "peers",
+    "whoami", "status", "sensors", "permissions", "tune",
+];
+
+#[test]
+fn each_removed_flat_verb_is_a_usage_error_and_writes_nothing() {
+    for verb in FLAT_VERBS {
+        let (out, home) = attend(&format!("flat-{verb}"), &[verb, "hi"]);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(2), "`attend {verb} hi` stderr: {err}");
+        assert!(err.contains("unrecognized subcommand"), "`attend {verb} hi` stderr: {err}");
+        assert!(!err.contains("is now `attend"), "`attend {verb}` prints no alias notice: {err}");
+        assert_eq!(signals_written(&home), 0, "`attend {verb} hi` wrote a signal");
+    }
+}
+
+#[test]
+fn removed_flat_verbs_are_not_in_the_help() {
+    let (out, _home) = attend("flat-help", &["--help"]);
+    let help = String::from_utf8_lossy(&out.stdout);
+    for verb in FLAT_VERBS {
+        assert!(!help.lines().any(|l| l.trim_start().starts_with(&format!("{verb} "))), "{verb} listed:\n{help}");
+    }
 }

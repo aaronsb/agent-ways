@@ -2603,11 +2603,11 @@ fn scenario_tool_triggers() {
     std::fs::create_dir_all(project.join("spe")).unwrap();
     std::fs::write(project.join("spe/README.md"), "# spe\n").unwrap();
 
-    // The phase filter: a post-only way stays silent before the tool runs,
-    // and another tool name never matches.
+    // The event filter: a way listing only PostToolUse stays silent before
+    // the tool runs, and another tool name never matches.
     assert_eq!(call("PreToolUse", "ExitPlanMode", 1000), "");
     assert_eq!(call("PostToolUse", "Workflow", 1000), "");
-    // A failed call is skipped outright.
+    // A failed call fires only a way that lists PostToolUseFailure.
     assert_eq!(call("PostToolUseFailure", "ExitPlanMode", 1000), "");
 
     // Post on the named tool fires, in the envelope of the real event.

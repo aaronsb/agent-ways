@@ -46,3 +46,7 @@ Invoice creation requires explicit confirmation. Always present:
 - Calculated amount
 
 before creating any invoice.
+
+## See Also
+
+- tasks/time/entries(ea) — writing entries through the time system's tool, and submitting a period

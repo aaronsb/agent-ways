@@ -51,3 +51,4 @@ A validation — a lint rule, an assertion, a schema constraint, a CI check —
 - code/errors(softwaredev) — error handling is a quality signal
 - tooling(softwaredev) — encode enforced conventions in tooling
 - standards(documentation) — standards define quality expectations
+- code/quality/edit-safety(softwaredev) — edit the source of generated output; files someone else is editing

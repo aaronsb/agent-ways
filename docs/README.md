@@ -15,6 +15,9 @@ Map of the documentation tree. For the project overview, see the [main README](.
 | [explanation/](explanation/) | Diátaxis explanation pages: conceptual walkthroughs grounded in real scenarios (localization, the relevance judge, and [how ways works](explanation/how-ways-works/how-ways-works-the-model.md), the observable companion to cognitive-loop.md) |
 | [reference/events.md](reference/events.md) | Reference: every event in events.jsonl, its fields, and the trigger values |
 | [reference/ways-cli.md](reference/ways-cli.md) | Reference: the `ways` command, its subcommands and screens |
+| [reference/contribution-kinds-and-review-evidence.md](reference/contribution-kinds-and-review-evidence.md) | Reference: way, skill, tool knowledge and posture, the phrasing rule for a way, and the evidence that helps review each kind |
+| [how-to/contribute-a-way-or-skill.md](how-to/contribute-a-way-or-skill.md) | How-to: take a way or skill from draft to pull request, with matching hygiene and the ablation |
+| [explanation/where-ways-come-from.md](explanation/where-ways-come-from.md) | Explanation: why outside contributions are welcome, how one is weighed against the corpus, and what can happen to it |
 | [architecture/](architecture/) | Agent Decision Records (managed by `docs/scripts/adr`): decisions, specs, and evidence records (surveys, audits, explorations; the former design notes, ADR-309) |
 
 ## Guides vs Reference
@@ -57,6 +60,5 @@ Same pattern: landing page, reference, how-to, implementation.
 | [development.md](development.md) | Dev checkout, workspace crate map, build plumbing, check scripts |
 | [vocabulary.md](vocabulary.md) | The framing: terminology anchors mapping project terms to established concepts |
 | [reference/statusline.md](reference/statusline.md) | The reference status line, `statusline.sh`: using it as is, or sourcing its segments into your own |
-| [reference/ways-cli-renames.md](reference/ways-cli-renames.md) | Old `ways` command names and their replacements (ADR-507) |
 | [research/yesno-relevance-gate/README.md](research/yesno-relevance-gate/README.md) | The evidence behind the relevance judge (ADR-195) |
 | [images/](images/) | Theme imagery and screenshots |

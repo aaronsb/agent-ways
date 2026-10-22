@@ -20,7 +20,10 @@ pub(crate) fn cmd_peers(json: bool) {
     let scopes = peers::scopes(&roster);
 
     let mut t = agent_fmt::Table::new(&["Focus", "Agent", "Status", "Context"]);
+    // Pinned: [`fit_scope`] already shortened each label to the cap from the
+    // left, and narrowing would cut the tail it kept.
     t.max_width(1, agent_column_cap(&roster, &scopes));
+    t.pin(1);
 
     // Self-row Focus cell: "(self)" identifies which row IS the runner of
     // `attend peer list`, without using the literal string "project" — that

@@ -42,13 +42,14 @@ impl Fixture {
 
     /// A fixture whose peers sensor polls every `secs` seconds.
     pub fn with_peers_interval(tag: &str, secs: u64) -> Self {
-        let home = std::env::temp_dir().join(format!("attend-it-{tag}-{}", std::process::id()));
+        let home = attend_presence::session::fixture_temp_dir().join(format!("attend-it-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         std::fs::create_dir_all(home.join(".claude").join("sessions")).unwrap();
         let config = home.join("config").join("attend");
         std::fs::create_dir_all(&config).unwrap();
         std::fs::write(config.join("config.yaml"), QUIET_CONFIG.replace("{peers}", &secs.to_string())).unwrap();
         let origin = home.join("proj");
+        assert_origin_kept(&origin);
         std::fs::create_dir_all(&origin).unwrap();
         let f = Fixture { origin: origin.to_string_lossy().into_owned(), sid: format!("sess-{tag}"), home };
         f.set_session_id(&f.sid.clone());
@@ -228,7 +229,15 @@ impl Fixture {
     /// Whether session `sid`'s enrollment record holds a way. A record
     /// whose last way went keeps only its process, and enrolls nothing.
     pub fn enrolled(&self, sid: &str) -> bool {
-        std::fs::read_to_string(self.marker(sid)).is_ok_and(|r| r.lines().any(|l| ["run", "join", "listen", "add"].contains(&l)))
+        ["run", "join", "listen", "add"].iter().any(|line| self.record_has(sid, line))
+    }
+
+    /// Whether session `sid`'s enrollment record has `line` as a whole
+    /// line. The record's `claude` key names the host, which may hold any
+    /// of these words (a GitHub runner is `runnervm…`), so a substring
+    /// match is no test of the record.
+    pub fn record_has(&self, sid: &str, line: &str) -> bool {
+        std::fs::read_to_string(self.marker(sid)).is_ok_and(|r| r.lines().any(|l| l == line))
     }
 
     pub fn command(&self) -> Command {
@@ -345,6 +354,19 @@ impl Drop for Fixture {
     }
 }
 
+/// Fail here, naming the path, when session identity would rewrite a fixture
+/// project's path. A project under a managed worktree resolves to the
+/// checkout's root, and the assertions downstream then fail without saying
+/// why (#902).
+pub fn assert_origin_kept(project: &Path) {
+    assert!(
+        attend_presence::session::origin_kept(project),
+        "fixture project {} sits under a managed worktree (/.claude/worktrees/), so session identity would resolve it \
+         to the checkout's root; make fixtures under attend_presence::session::fixture_temp_dir() (#902)",
+        project.display()
+    );
+}
+
 pub fn age_file(path: &Path, age: Duration) {
     let f = std::fs::File::options().write(true).open(path).unwrap();
     f.set_modified(SystemTime::now() - age).unwrap();
@@ -388,9 +410,23 @@ impl Drop for Run {
 pub const MINUTE: Duration = Duration::from_secs(60);
 pub const DAY: Duration = Duration::from_secs(24 * 3600);
 
+/// A program named `claude` in the fixture's home: a link to `/bin/sh`,
+/// which the process scan takes for Claude Code by its program's name, as
+/// it takes a `claude` install. It sits outside the fixture's PATH, so no
+/// call of `claude` finds it.
+fn claude_program(f: &Fixture) -> PathBuf {
+    let dir = f.home.join("claude-code");
+    std::fs::create_dir_all(&dir).unwrap();
+    let program = dir.join("claude");
+    match std::os::unix::fs::symlink("/bin/sh", &program) {
+        Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => panic!("link {}: {e}", program.display()),
+        _ => program,
+    }
+}
+
 /// A live Claude Code session `sid` at `<home>/<project>`: a process whose
-/// argv names claude, with a session record. Killed on drop. Only the peers
-/// sensor's process scan finds it.
+/// program is named claude ([`claude_program`]), with a session record.
+/// Killed on drop. Only the peers sensor's process scan finds it.
 pub struct Peer {
     child: Child,
     pub cwd: String,
@@ -402,9 +438,10 @@ impl Peer {
     /// that moment takes the session for exited.
     pub fn start(f: &Fixture, sid: &str, project: &str) -> Peer {
         let cwd = f.home.join(project);
+        assert_origin_kept(&cwd);
         std::fs::create_dir_all(&cwd).unwrap();
         let cwd = cwd.to_string_lossy().into_owned();
-        let child = Command::new("sh").args(["-c", "sleep 60; :", "claude"]).stdout(Stdio::null()).spawn().unwrap();
+        let child = Command::new(claude_program(f)).args(["-c", "sleep 60; :"]).stdout(Stdio::null()).spawn().unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         while !attend_presence::process::is_claude(child.id()) {
             assert!(Instant::now() < deadline, "the peer process {} never showed its command line", child.id());
@@ -431,10 +468,10 @@ impl Drop for Peer {
 }
 
 /// A Claude Code process of its own in the fixture's project, which runs
-/// attend as its child: a shell whose argv names claude, with a session
-/// record. An add records its process key as the session's own, and
-/// `/clear` ([`Claude::clear`]) gives it a new id under the same process.
-/// Killed on drop.
+/// attend as its child: a shell whose program is named claude
+/// ([`claude_program`]), with a session record. An add records its process
+/// key as the session's own, and `/clear` ([`Claude::clear`]) gives it a new
+/// id under the same process. Killed on drop.
 pub struct Claude {
     child: Child,
     stdin: std::process::ChildStdin,
@@ -448,8 +485,8 @@ impl Claude {
     /// Start it as session `sid`, and return once the process scan sees it.
     pub fn start(f: &Fixture, sid: &str) -> Claude {
         let mut child = f
-            .command_from(Path::new("sh"))
-            .args(["-c", r#"while IFS= read -r line; do eval "$line"; echo "$?"; done"#, "claude"])
+            .command_from(&claude_program(f))
+            .args(["-c", r#"while IFS= read -r line; do eval "$line"; echo "$?"; done"#])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()

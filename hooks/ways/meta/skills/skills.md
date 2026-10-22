@@ -55,4 +55,5 @@ A skill is picked up at Claude Code startup — there's no corpus rebuild (that'
 ## See Also
 
 - knowledge/authoring(meta) — authoring ways (the other half of the skill-vs-way call)
+- skills/evals(meta) — child: measuring whether a skill changes what gets done
 - Canonical SKILL.md reference — https://code.claude.com/docs/en/skills.md

@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"what git habits keep several Claude sessions from trampling each other in one clone of the repo"}
+{"kind":"situational","prompt":"put four workers on this migration at once, one per service, without them stepping on each other's edits"}

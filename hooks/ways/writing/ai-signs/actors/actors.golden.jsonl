@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"rework this incident summary so every step says which person or team took it"}
+{"kind":"situational","prompt":"the incident timeline is all the cache was flushed and a rollback was initiated, and the review board wants to know who did each step"}

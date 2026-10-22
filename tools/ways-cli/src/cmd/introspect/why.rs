@@ -134,7 +134,7 @@ pub(crate) fn detail_lines(way_id: &str, entry: Option<&WhyEntry>, body: Option<
         ("pattern", &c.pattern),
         ("commands", &c.commands),
         ("files", &c.files),
-        ("tools", &c.tools),
+        ("tool_name", &c.tool_name),
         ("trigger", &c.trigger),
         ("vocabulary", &c.vocabulary),
         ("scope", &c.scope),

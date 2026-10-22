@@ -81,6 +81,7 @@ Close the report with what was deliberately left unverified, blocked distinguish
 ## See Also
 
 - code/testing/gates/assertions(softwaredev) — whether an executed assertion can have proved anything
+- code/testing/gates/delegated-runs(softwaredev) — the diff of a delegated run, piloting a bulk run
 - code/testing(softwaredev) — parent: what to cover and what to assert
 - delivery/merge(softwaredev) — review depth and gate depth are chosen together
 - environment/recovery(softwaredev) — a gate red twice means the increment is wrong-sized

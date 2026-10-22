@@ -26,8 +26,8 @@ pub(crate) struct Cli {
     pub(crate) command: Option<Commands>,
 }
 
-/// The nine top-level commands (ADR-413 item 1), then the one-release
-/// aliases of the flat verbs they replace.
+/// The nine top-level commands (ADR-413 item 1). The one-release aliases of
+/// the old flat verbs (item 5) were removed by issue #982.
 #[derive(Subcommand)]
 pub(crate) enum Commands {
     /// Start the sensor loop (use with Monitor for async delivery)
@@ -94,49 +94,6 @@ pub(crate) enum Commands {
         #[command(subcommand)]
         sub: Option<ConfigCmd>,
     },
-
-    // The one-release aliases of ADR-413 item 5: each old flat verb parses
-    // what it parsed, prints the new form on stderr, then runs the new verb
-    // with the same stdout and exit code. Issue #982 removes them in the
-    // release after the one that ships the groups, and adds each name to
-    // tests/legacy_removed.rs.
-    #[command(hide = true)]
-    Send(SendArgs),
-    #[command(hide = true)]
-    Reply(ReplyArgs),
-    #[command(hide = true)]
-    Inbox(InboxArgs),
-    #[command(hide = true)]
-    Unread(JsonArgs),
-    #[command(hide = true)]
-    Cleanup(CleanupArgs),
-    #[command(hide = true)]
-    Join(JoinArgs),
-    #[command(hide = true)]
-    Leave(LeaveArgs),
-    #[command(hide = true)]
-    Channels(ChannelGroup),
-    #[command(hide = true)]
-    Dissolve(NameArg),
-    #[command(hide = true)]
-    Scene(SceneArgs),
-    #[command(hide = true)]
-    Scenes,
-    #[command(hide = true)]
-    Peers(JsonArgs),
-    #[command(hide = true)]
-    Whoami(WhoamiArgs),
-    #[command(hide = true)]
-    Status(JsonArgs),
-    #[command(hide = true)]
-    Sensors,
-    #[command(hide = true)]
-    Permissions {
-        #[command(subcommand)]
-        sub: Option<PermissionsCmd>,
-    },
-    #[command(hide = true)]
-    Tune(TuneArgs),
 }
 
 /// Subcommands for `attend message`. With no subcommand, defaults to `inbox`.
@@ -689,13 +646,6 @@ pub enum ListenHost {
     Mod,
 }
 
-/// Subcommands of the hidden `permissions` alias, which defaulted to `audit`.
-#[derive(Subcommand)]
-pub(crate) enum PermissionsCmd {
-    /// Compare each sensor's `requires:` against settings.json
-    Audit,
-}
-
 /// Subcommands for `attend config`. With no subcommand, defaults to `show`.
 /// `ways settings` edits these settings; `ways settings help attend`
 /// describes every key (ADR-503 §13).
@@ -751,12 +701,12 @@ mod tests {
         }
     }
 
-    /// `attend --help` lists the nine groups and none of the aliases
-    /// (ADR-413 items 1 and 5).
+    /// `attend` has the nine groups and nothing else (ADR-413 item 1; the
+    /// item 5 aliases were removed by #982).
     #[test]
     fn help_lists_the_nine_commands() {
         let cli = Cli::command();
-        let shown: Vec<&str> = cli.get_subcommands().filter(|c| !c.is_hide_set()).map(|c| c.get_name()).collect();
+        let shown: Vec<&str> = cli.get_subcommands().map(|c| c.get_name()).collect();
         assert_eq!(shown, ["run", "listen", "message", "channel", "peer", "keepwarm", "chat", "sensor", "config"]);
     }
 

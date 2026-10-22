@@ -46,7 +46,7 @@ _The ways engine: how ways are matched, disclosed and re-disclosed_
 | [ADR-166](./ways/ADR-166-single-source-of-truth-for-model-context-window-resolution.md) | Single source of truth for model context-window resolution | accepted |
 | [ADR-174](./ways/ADR-174-progressive-core-decoration-guidance-and-the-core-re-disclosure-gap.md) | Progressive core — decoration guidance and the core re-disclosure gap | accepted |
 | [ADR-183](./ways/ADR-183-single-language-localization-tuning-the-english-anchor-as-a-peer.md) | Single-language localization tuning: the English anchor as a peer | accepted |
-| [ADR-188](./ways/ADR-188-posttooluse-delivery-for-tool-lane-ways-and-retirement-of-the-semantic-bash-surface.md) | PostToolUse delivery for tool-lane ways and retirement of the semantic Bash surface | proposed |
+| [ADR-188](./ways/ADR-188-one-tool-call-lane-keyed-by-tool-type-and-a-bash-surface-that-is-parsed-described-and-judged.md) | One tool-call lane keyed by tool type, and a Bash surface that is parsed, described and judged | proposed |
 | [ADR-189](./ways/ADR-189-session-introspection-implementation-plan.md) | Session introspection implementation plan | accepted |
 | [ADR-190](./ways/ADR-190-the-lexical-gate-as-a-conditional-threshold.md) | The lexical gate as a conditional threshold | accepted |
 | [ADR-191](./ways/ADR-191-the-tool-use-channel-is-a-signal-problem-lookbehind-chunk-spread-and-winner-confirmation.md) | The tool-use channel is a signal problem: lookbehind, chunk-spread, and winner confirmation | accepted |
@@ -130,6 +130,7 @@ _Session awareness: sensors, peers, messaging, keepwarm_
 | [ADR-412](./attend/ADR-412-one-message-is-one-signal-and-no-conduit-splits-it.md) | One message is one signal, and no conduit splits it | accepted |
 | [ADR-413](./attend/ADR-413-attend-s-cli-groups-its-verbs-by-noun-the-mod-s-tools-are-the-principal-reply-path.md) | Attend's CLI groups its verbs by noun; the mod's tools are the principal reply path | accepted |
 | [ADR-414](./attend/ADR-414-the-attend-mod-keeps-an-idle-session-warm-for-a-bounded-stretch-after-the-operator-s-last-prompt-then-asks-for-a-wrap-and-lets-the-cache-lapse-while-autocompact-is-off.md) | The attend mod keeps an idle session warm for a bounded stretch after the operator's last prompt, then asks for a wrap and lets the cache lapse, while autocompact is off | accepted |
+| [ADR-415](./attend/ADR-415-a-session-event-record-written-by-the-ways-hooks-to-a-per-session-spool-and-read-by-attend-ways-sensors-and-sensor-conditions.md) | A session event record, written by the ways hooks to a per-session spool and read by attend, ways sensors and sensor conditions | proposed |
 
 ## Platform
 _Install, update, configuration, permissions, the CLI contract, testing_
@@ -198,6 +199,7 @@ _The ways method, way authoring, the development loop_
 | [ADR-604](./practice/ADR-604-ways-defer-to-external-system-enforcement.md) | Ways defer to external system enforcement | accepted |
 | [ADR-605](./practice/ADR-605-an-evaluative-ways-domain-the-agent-authors-the-harness-and-oracle-judge.md) | An evaluative ways domain: the agent authors, the harness and oracle judge | accepted |
 | [ADR-606](./practice/ADR-606-deferred-macros-and-the-pr-awareness-involvement-check-and-pr-feedback-way-built-on-them.md) | Deferred macros, and the PR awareness, involvement check and PR feedback way built on them | accepted |
+| [ADR-607](./practice/ADR-607-children-of-a-loop-type-way-are-loop-types-or-concerns-several-loops-share.md) | Children of a loop-type way are loop types or concerns several loops share | accepted |
 
 ## Ways engine
 _The ways engine, continued after the full 100-199 band: matching, disclosure and the corpus_
@@ -208,6 +210,11 @@ _The ways engine, continued after the full 100-199 band: matching, disclosure an
 | [ADR-701](./engine/ADR-701-neighbourhood-matching-masking-relative-scores-lookup-on-request-and-a-learning-loop-from-run-logs.md) | Neighbourhood matching: masking, relative scores, lookup on request and a learning loop from run logs | accepted |
 | [ADR-702](./engine/ADR-702-way-identity-and-authored-edges-uuids-frontmatter-links-and-an-integrity-checked-graph-index.md) | Way identity and authored edges: UUIDs, frontmatter links and an integrity-checked graph index | proposed |
 | [ADR-703](./engine/ADR-703-self-evaluated-probe-sets-gate-adr-701-s-matching-changes-and-the-body-score-ships-scaled-on-single-sentence-prompts.md) | Self-evaluated probe sets gate ADR-701's matching changes, and the body score ships scaled on prompts that chunk to one piece | accepted |
+| [ADR-704](./engine/ADR-704-tool-name-trigger-lane.md) | A tool-name trigger lane | proposed |
+| [ADR-705](./engine/ADR-705-claude-code-s-tool-surface-and-hook-events-surveyed-as-tool-types-for-trigger-lanes-and-session-sensing.md) | Claude Code's tool surface and hook events, surveyed as tool types for trigger lanes and session sensing | proposed |
+| [ADR-706](./engine/ADR-706-a-shipped-tool-catalog-maps-the-harness-s-tool-names-to-abstract-tool-types-so-ways-and-sensors-depend-on-types-and-not-on-claude-code-s-names.md) | A shipped tool catalog maps the harness's tool names to abstract tool types, so ways and sensors depend on types and not on Claude Code's names | proposed |
+| [ADR-707](./engine/ADR-707-measurements-of-the-shell-surface-covering-the-semantic-lane-s-on-topic-rate-alternative-match-surfaces-and-a-judge-reading-the-described-call.md) | Measurements of the shell surface, covering the semantic lane's on-topic rate, alternative match surfaces, and a judge reading the described call | proposed |
+| [ADR-708](./engine/ADR-708-a-claude-code-internal-engine-for-the-relevance-gate-selectable-with-one-judge-engine-per-session.md) | A Claude Code internal engine for the relevance gate, selectable, with one judge engine per session | proposed |
 
 ## Archived
 

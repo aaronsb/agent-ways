@@ -14,6 +14,55 @@ def parse_adr(path: Path) -> ADRInfo:
         return info
     return parse_text(content, path)
 
+def _duplicate_keys(node, where='', seen=None) -> list:
+    """Each key a mapping in the node tree repeats, as (where, first, second).
+
+    where names the key by its path from the root, such as basis[1].via; the
+    lines are 0-based within the YAML text. A node reached through an alias
+    is walked once.
+    """
+    seen = set() if seen is None else seen
+    if id(node) in seen:
+        return []
+    seen.add(id(node))
+    found = []
+    if isinstance(node, yaml.MappingNode):
+        first_line = {}
+        for key, value in node.value:
+            name = key.value if isinstance(key, yaml.ScalarNode) else None
+            child = f"{where}.{name}" if where else str(name)
+            if name is not None and key.tag != 'tag:yaml.org,2002:merge':
+                ident = (key.tag, name)
+                if ident in first_line:
+                    found.append((child, first_line[ident], key.start_mark.line))
+                else:
+                    first_line[ident] = key.start_mark.line
+            found += _duplicate_keys(value, child, seen)
+    elif isinstance(node, yaml.SequenceNode):
+        for i, item in enumerate(node.value):
+            found += _duplicate_keys(item, f"{where}[{i}]", seen)
+    return found
+
+def load_frontmatter(text: str):
+    """The frontmatter's data and the keys it repeats, from one parse.
+
+    YAML loads a mapping with a repeated key by keeping the last value, so a
+    record would silently lose what the first one said. A repeated key in a
+    record is always an authoring mistake, so the parse reports each one.
+    """
+    loader = yaml.SafeLoader(text)
+    try:
+        node = loader.get_single_node()
+        if node is None:
+            return None, []
+        # Walk before constructing: construction flattens merge keys (<<)
+        # in place, prepending the merged pairs, and an override of a
+        # merged key would then read as a duplicate.
+        duplicates = _duplicate_keys(node)
+        return loader.construct_document(node), duplicates
+    finally:
+        loader.dispose()
+
 def parse_text(content: str, path: Path) -> ADRInfo:
     """Parse ADR text; path places it (domain by folder) and names it."""
     info = ADRInfo(path=path)
@@ -32,7 +81,14 @@ def parse_text(content: str, path: Path) -> ADRInfo:
         if end_idx:
             yaml_content = '\n'.join(lines[1:end_idx])
             try:
-                data = yaml.safe_load(yaml_content) or {}
+                data, duplicates = load_frontmatter(yaml_content)
+                data = data or {}
+                for where, first, second in duplicates:
+                    # The frontmatter's first line is the file's second.
+                    info.issues.append(Issue(
+                        f"Duplicate key {where} in frontmatter (lines {first + 2} "
+                        f"and {second + 2}); YAML keeps the last value and drops the first",
+                        'error', code='duplicate-key'))
                 if not isinstance(data, dict):
                     info.issues.append(Issue(
                         f"Frontmatter is a YAML {type(data).__name__}, not a mapping of fields", 'error'))

@@ -18,7 +18,7 @@ struct Fx {
 impl Fx {
     fn new() -> Fx {
         let n = SEQ.fetch_add(1, Ordering::Relaxed);
-        let home = std::env::temp_dir().join(format!("attend-config-settings-{}-{n}", std::process::id()));
+        let home = attend_presence::session::fixture_temp_dir().join(format!("attend-config-settings-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         for d in ["config", "cache", "data", "proj/.claude", ".claude/projects"] {
             std::fs::create_dir_all(home.join(d)).unwrap();

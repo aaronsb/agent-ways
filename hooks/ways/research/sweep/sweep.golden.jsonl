@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"how should I gather evidence from lots of separate places, like vendor docs, bug trackers and forum threads, before I settle on an answer"}
+{"kind":"situational","prompt":"we need to pick a feature-flag service and I don't trust the marketing pages, dig through what users, maintainers and comparisons actually say first"}

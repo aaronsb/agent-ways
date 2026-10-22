@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"what are the usual mistakes when wiring a hosted model into a product feature or a tool server"}
+{"kind":"situational","prompt":"the reply-drafting endpoint returns the same polite template whenever the anthropic call times out, and my tool server prints debug lines that break the client"}

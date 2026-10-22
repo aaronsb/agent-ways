@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"what should and shouldn't go in the CLAUDE.md for this project"}
+{"kind":"situational","prompt":"the guidance file that loads for every agent in this repo has turned into a diary of past sessions, clean it up so it only says what they need"}

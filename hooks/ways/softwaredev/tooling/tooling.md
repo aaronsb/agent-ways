@@ -35,3 +35,4 @@ The inverse failure is real: not every one-off needs a tool. If an operation run
 - code/overbuild(softwaredev) — the opposite failure: don't reinvent what already exists
 - code/quality(softwaredev) — a validation/invariant earns its place only if its violation is a real defect
 - adr(documentation) — the ADR tool is a worked example of operation-owning tooling
+- tooling/agent-cli(softwaredev) — a wrapper CLI over an API for a skill to call

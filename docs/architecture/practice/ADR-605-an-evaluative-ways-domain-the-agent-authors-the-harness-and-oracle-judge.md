@@ -129,3 +129,7 @@ The corpus covers how to write a test (`softwaredev/code/testing` and its childr
 - **A child of `softwaredev/code/testing`.** Rejected: the operator placed the method outside software development, and the testing subtree is about writing tests, not about separating the author from the judge.
 - **Reparent `softwaredev/code/testing/evaluation` into the new domain.** Rejected for now by the operator's choice: it renames way ids and moves matching data for a gain in tidiness.
 - **Project-level skills only.** Each project already encodes parts of this in its own skills. Rejected as the only carrier: the failure modes recur across projects, and a project learns them only after hitting them.
+
+## Addendum, 2026-10-22: Decision 3 amended by ADR-607
+
+Appended after acceptance; nothing above is changed. ADR-607 amends Decision 3: a child of `evaluative` is a loop type or a shared child, method that several loop types use, and `held-out` is a shared child.

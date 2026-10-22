@@ -182,7 +182,7 @@ pub(super) fn lint_file(
     if !is_check && !is_top_level && !has_firing_path(&fm_str, path.parent()) {
         eprintln!(
             "  WARNING: {rel} — no firing path: none of description+vocabulary, \
-             pattern, commands, files, tools, trigger, or a postcheck.sh sidecar. \
+             pattern, commands, files, tool_name, trigger, or a postcheck.sh sidecar. \
              This way can never fire (dead in the corpus)."
         );
         *warnings += 1;
@@ -286,21 +286,22 @@ pub(super) fn lint_file(
         }
     }
 
-    // Tool phase enum (ADR-704). The tool lane fires on no event for an
-    // unknown phase, so the way would be dead on that lane.
-    if let Some(val) = get_field_value(&fm_str, "tool_phase") {
-        if !schema.valid_tool_phases.iter().any(|v| v == &val) {
-            eprintln!(
-                "  ERROR: {rel} — invalid tool_phase '{val}' (valid: {})",
-                schema.valid_tool_phases.join(", ")
-            );
-            *errors += 1;
-        }
-        if !has_field(&fm_str, "tools") {
-            eprintln!("  WARNING: {rel} — tool_phase without tools: has no effect");
-            *warnings += 1;
-        }
+    // Tool lane (ADR-704): the event names, and whether the way can reach
+    // anything the shipped settings.json wires.
+    let lane = super::tool_lane::ToolLane {
+        valid_events: &schema.valid_tool_events,
+        wired_events: &schema.wired_tool_events,
+        wired_names: &schema.wired_tool_names,
+    };
+    let (lane_errors, lane_warnings) = super::tool_lane::check(&lane, &fm_str);
+    for msg in &lane_errors {
+        eprintln!("  ERROR: {rel} — {msg}");
     }
+    for msg in &lane_warnings {
+        eprintln!("  WARNING: {rel} — {msg}");
+    }
+    *errors += lane_errors.len() as u32;
+    *warnings += lane_warnings.len() as u32;
 
     // requires: field validation (ADR-116)
     let has_macro = has_field(&fm_str, "macro");
@@ -448,7 +449,7 @@ mod tests {
         assert!(has_firing_path("pattern: '^foo'\n", None));
         assert!(has_firing_path("commands: 'git .*'\n", None));
         assert!(has_firing_path("files: '\\.rs$'\n", None));
-        assert!(has_firing_path("tools: ExitPlanMode|Workflow\n", None));
+        assert!(has_firing_path("tool_name: ExitPlanMode|Workflow\n", None));
         assert!(has_firing_path("trigger: session-start\n", None));
         // The nested attend block still presents a top-level `trigger:` line.
         assert!(has_firing_path("trigger:\n  type: attend\n  signals:\n    - x\n", None));
@@ -460,8 +461,8 @@ mod tests {
         // unless a postcheck.sh sidecar rescues it (next test).
         assert!(!has_firing_path("scope: agent\nrefire: 0.2\n", None));
         assert!(!has_firing_path("description: x\n", None)); // half a semantic pair
-        // tool_phase only says when the tool lane fires; alone it fires nothing.
-        assert!(!has_firing_path("tool_phase: post\nrefire: 0.2\n", None));
+        // tool_event only says when the tool lane fires; alone it fires nothing.
+        assert!(!has_firing_path("tool_event: [PostToolUse]\nrefire: 0.2\n", None));
     }
 
     #[test]

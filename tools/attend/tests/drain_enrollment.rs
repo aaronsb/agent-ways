@@ -21,7 +21,7 @@ fn session(tag: &str) -> String {
 /// message from another session waiting in each tray the drain can read:
 /// `#open`, the project's own tray, and the `@side` channel.
 fn fixture(tag: &str) -> PathBuf {
-    let home = std::env::temp_dir().join(format!("attend-drain-enrol-{tag}-{}", std::process::id()));
+    let home = attend_presence::session::fixture_temp_dir().join(format!("attend-drain-enrol-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&home);
     let sessions = home.join(".claude").join("sessions");
     std::fs::create_dir_all(&sessions).unwrap();

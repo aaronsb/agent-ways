@@ -60,10 +60,11 @@ pub(crate) struct WayCandidate {
     pub pattern_strict: bool,
     pub commands: Option<String>,
     pub files: Option<String>,
-    /// Regex matched against the tool name on the tool lane (ADR-704).
-    pub tools: Option<String>,
-    /// When the tool lane fires: `pre` (the default), `post`, or `both`.
-    pub tool_phase: Option<String>,
+    /// Regex matched against the payload's `tool_name` on the tool lane (ADR-704).
+    pub tool_name: Option<String>,
+    /// The raw `tool_event:` value: the hook events the tool lane fires on,
+    /// read by [`crate::frontmatter::tool_events`]. `None` is `[PreToolUse]`.
+    pub tool_event: Option<String>,
     pub description: String,
     pub vocabulary: String,
     /// Context-threshold percentage (only meaningful for trigger: context-threshold).
@@ -1037,22 +1038,15 @@ pub fn file(
 
 // ── Tool lane (ADR-704) ─────────────────────────────────────────
 
-/// Whether a way's `tool_phase:` admits this hook event. A missing phase is
-/// `pre`. An unknown phase admits nothing, and lint names it.
-fn phase_admits(tool_phase: Option<&str>, hook_event: &str) -> bool {
-    let phase = tool_phase.map(|p| p.trim().trim_matches('"').to_ascii_lowercase());
-    let pre = hook_event == "PreToolUse";
-    let post = hook_event == "PostToolUse";
-    match phase.as_deref() {
-        None | Some("pre") => pre,
-        Some("post") => post,
-        Some("both") => pre || post,
-        Some(_) => false,
-    }
+/// Whether a way's `tool_event:` lists this hook event. The names are the
+/// literal hook event names, compared exactly; a missing `tool_event:` is
+/// `[PreToolUse]`. A misspelt name admits nothing, and lint names it.
+fn event_admits(tool_event: Option<&str>, hook_event: &str) -> bool {
+    crate::frontmatter::tool_events(tool_event).iter().any(|e| e == hook_event)
 }
 
-/// The tool-lane hits among `candidates` for `tool` at `hook_event`: scope,
-/// `when:`, the `tools:` regex on the tool name, then the phase.
+/// The tool-lane hits among `candidates` for `tool` at `hook_event`: ways
+/// with a `tool_name:`, then scope, `when:`, the event, and the regex.
 fn tool_hits(
     candidates: &[WayCandidate],
     tool: &str,
@@ -1062,30 +1056,32 @@ fn tool_hits(
 ) -> Vec<Hit<String>> {
     let mut hits: Vec<Hit<String>> = Vec::new();
     for way in candidates {
+        let Some(ref name_pattern) = way.tool_name else { continue };
         if !session::scope_matches(&way.scope, scope) {
             continue;
         }
         if !check_when(&way.when_project, &way.when_file_exists, project_dir) {
             continue;
         }
-        let Some(ref tools_pattern) = way.tools else { continue };
-        if !phase_admits(way.tool_phase.as_deref(), hook_event) {
+        if !event_admits(way.tool_event.as_deref(), hook_event) {
             continue;
         }
-        if let Some(span) = regex_span(tools_pattern, tool) {
-            hits.push(Hit::explicit(&way.id, tools_pattern, &span, span.clone()));
+        if let Some(span) = regex_span(name_pattern, tool) {
+            hits.push(Hit::explicit(&way.id, name_pattern, &span, span.clone()));
         }
     }
     order_hits(&mut hits);
     hits
 }
 
-/// Match a tool call against `tools:` ways and emit their bodies.
+/// Match a tool call against `tool_name:` ways and emit their bodies.
 ///
 /// Wired from PreToolUse and PostToolUse on the tools the settings template
 /// names (check-tool.sh). The envelope carries the real event name, so a
-/// PostToolUse fire lands after the tool returned. A failed call never gets
-/// here: the request reads as Skip (ADR-188 item 2).
+/// PostToolUse fire lands after the tool returned. Which events a way fires
+/// on is its `tool_event:` list; the default leaves out a failed call
+/// (`PostToolUseFailure`), whose stamp would hold the way back from the retry
+/// that succeeds (ADR-188 item 2).
 pub fn tool(
     tool: &str,
     hook_event: &str,
@@ -1538,7 +1534,7 @@ fn mask_nonlinguistic(text: &str) -> String {
 /// text so deliberately-uppercase patterns (`SKILL\.md`) still match and the
 /// captured span keeps its original case. A pattern may override with an inline
 /// `(?-i)` scope if it ever needs case-sensitivity.
-fn compile_trigger(pattern: &str) -> Option<Regex> {
+pub(crate) fn compile_trigger(pattern: &str) -> Option<Regex> {
     regex::RegexBuilder::new(pattern)
         .case_insensitive(true)
         .build()
@@ -2160,8 +2156,8 @@ mod eligibility_tests {
             pattern_strict: false,
             commands: None,
             files: None,
-            tools: None,
-            tool_phase: None,
+            tool_name: None,
+            tool_event: None,
             description: "d".into(),
             vocabulary: "v".into(),
             threshold: 0.0,
@@ -2226,37 +2222,40 @@ mod eligibility_tests {
     }
 
     #[test]
-    fn the_tool_lane_matches_the_name_and_the_phase() {
+    fn the_tool_lane_matches_the_name_and_the_event() {
         let mut pre = way("pre", "agent", None);
-        pre.tools = Some("^exitplanmode$".into());
+        pre.tool_name = Some("^exitplanmode$".into());
         let mut post = way("post", "agent", None);
-        post.tools = Some("ExitPlanMode|Workflow".into());
-        post.tool_phase = Some("post".into());
+        post.tool_name = Some("ExitPlanMode|Workflow".into());
+        post.tool_event = Some("[PostToolUse]".into());
         let mut both = way("both", "agent", None);
-        both.tools = Some("Workflow".into());
-        both.tool_phase = Some("both".into());
+        both.tool_name = Some("Workflow".into());
+        both.tool_event = Some("[PreToolUse, PostToolUse]".into());
         let mut odd = way("odd", "agent", None);
-        odd.tools = Some("Workflow".into());
-        odd.tool_phase = Some("later".into());
-        let sub = { let mut w = way("sub", "subagent", None); w.tools = Some("Workflow".into()); w };
-        let cands = [pre, post, both, odd, sub, way("none", "agent", None)];
+        odd.tool_name = Some("Workflow".into());
+        odd.tool_event = Some("[posttooluse]".into());
+        let mut failed = way("failed", "agent", None);
+        failed.tool_name = Some("Workflow".into());
+        failed.tool_event = Some("PostToolUseFailure".into());
+        let sub = { let mut w = way("sub", "subagent", None); w.tool_name = Some("Workflow".into()); w };
+        let cands = [pre, post, both, odd, failed, sub, way("none", "agent", None)];
         let ids = |tool: &str, event: &str| {
             let mut v: Vec<String> = tool_hits(&cands, tool, event, "agent", "/p").into_iter().map(|h| h.id).collect();
             v.sort();
             v
         };
-        assert_eq!(ids("ExitPlanMode", "PreToolUse"), ["pre"], "case-insensitive, pre by default");
+        assert_eq!(ids("ExitPlanMode", "PreToolUse"), ["pre"], "case-insensitive name, PreToolUse by default");
         assert_eq!(ids("ExitPlanMode", "PostToolUse"), ["post"]);
         assert_eq!(ids("Workflow", "PreToolUse"), ["both"]);
-        assert_eq!(ids("Workflow", "PostToolUse"), ["both", "post"]);
+        assert_eq!(ids("Workflow", "PostToolUse"), ["both", "post"], "event names are exact");
         assert!(ids("Bash", "PreToolUse").is_empty());
-        assert!(ids("Workflow", "PostToolUseFailure").is_empty());
+        assert_eq!(ids("Workflow", "PostToolUseFailure"), ["failed"], "a failed call fires only a way that lists it");
     }
 
     #[test]
     fn the_tool_lane_honours_when() {
         let mut w = way("w", "agent", None);
-        w.tools = Some("Workflow".into());
+        w.tool_name = Some("Workflow".into());
         w.when_file_exists = Some("definitely-not-here/*.md".into());
         assert!(tool_hits(&[w], "Workflow", "PreToolUse", "agent", "/p").is_empty());
     }

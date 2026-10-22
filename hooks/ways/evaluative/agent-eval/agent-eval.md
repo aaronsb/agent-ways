@@ -30,7 +30,7 @@ Record with each trial run the model and version under test and the resource con
 ## Graders, in order of preference
 
 - **Code graders** wherever the criterion can be checked deterministically: reproducible and fast, but brittle to valid variation. This corpus's practice is to compare numbers with a tolerance and normalise formatting, so a correct answer is not rejected for a spurious difference.
-- **Model graders** where judgement is needed. Give each a clear rubric and one dimension to judge, let it reason before it scores, and let it answer "unknown". Allow partial credit on tasks with multiple components. Prefer a different model from the one being evaluated. Calibrate it against human grades on a sample before trusting it at scale.
+- **Model graders** where judgement is needed. Give each a clear rubric and one dimension to judge, let it reason before it scores, and let it answer "unknown". On tasks with multiple components, judge each component pass or fail; partial credit is the share of components passed (`evaluative/statistics`). Prefer a different model from the one being evaluated. Calibrate it against human grades before trusting it at scale (`evaluative/rubric/judge`).
 - **Human grading** is the reference for calibrating model graders, too slow and costly for every trial.
 
 Make graders hard to game: passing should require solving the task, not exploiting a loophole in how it is checked. Test both sides: cases where a behaviour should happen and cases where it should not.
@@ -56,3 +56,4 @@ A capability task the agent now passes reliably graduates to the regression suit
 - evaluative/rubric(evaluative) — scoring a single model answer
 - evaluative/clean-room(evaluative) — a fresh environment per run
 - subagents(meta) — a subagent's report is a claim to grade
+- evaluative/agent-eval/grading(evaluative) — child: graders out of reach, the grader selftest, the regression gate in CI

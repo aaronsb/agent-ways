@@ -49,3 +49,4 @@ The harness killed a foreground command at its bound. Read what it produced befo
 - environment/recovery(softwaredev) — a no-progress attempt is a failed attempt; classify before retrying
 - environment/container-safety(softwaredev) — the container the attached run would hold
 - environment/ssh(softwaredev) — batch mode and key setup for remote shells
+- environment/bounded-execution/watching(softwaredev) — a watcher per background job, progress reports, no leftover watchers

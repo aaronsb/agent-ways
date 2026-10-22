@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"build a small command-line client for our billing api that the assistant can call from its skill instead of composing http calls"}
+{"kind":"situational","prompt":"every run of the support skill rebuilds the same auth header and pagination loop by hand, give it one command to call instead"}

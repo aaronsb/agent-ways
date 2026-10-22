@@ -31,17 +31,9 @@ The user's sent mail is the authority. Study it before every draft. Look for:
 - **Tone** — warm, formal, casual, terse?
 - **Structure** — prose paragraphs vs. bullet points?
 
-## Anti-Patterns to Avoid
+## Generated-Writing Tells
 
-These are common AI-generated tells. Never use them in drafts:
-
-- "I hope this email finds you well"
-- "Just circling back" / "Per my last email"
-- "I'd be happy to" / "Please don't hesitate to"
-- "leverage", "synergy", "circle back"
-- Excessive hedging or qualifiers
-- Numbered lists for non-sequential content
-- Restating what the other person said in a long paragraph
+The draft goes out under the user's name. Before presenting it, check it against writing/ai-signs: stock words, chatbot framing, clerk phrasing and the shapes that mark generated text. Three email habits read as generated too: the opener "I hope this email finds you well", the follow-up "just circling back", and filler words such as "leverage" and "synergy". Where the user's sent mail uses a phrase that list flags, the sent mail wins.
 
 ## Threading
 
@@ -53,3 +45,8 @@ When creating a draft reply, preserve the threading chain:
 ## Iteration Rule
 
 When iterating on draft text with the user, do NOT re-create the platform draft on every revision. Only create the draft once the user approves the final version.
+
+## See Also
+
+- email/drafting/composition(ea) — the shape, tone and handover of a routine email
+- writing/ai-signs(writing) — the phrases and shapes that make a draft read as generated
