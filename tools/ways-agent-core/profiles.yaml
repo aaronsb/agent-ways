@@ -13,10 +13,19 @@
 # second addendum), so a request carries at most max_candidates, in the
 # matcher's order, and keeps under the deadline.
 #
+# `claude-code` judges inside Claude Code, through a ways mod module on the
+# session's own account (ADR-708). It holds no key and keeps the others'
+# settings until measured. Its model is pinned to Haiku 4.5, the key engines'
+# model: under Claude Code the `haiku` alias resolves to Haiku 5.5, which
+# thinks; in the spike its median was 1,938 ms and 23 of 50 calls ran past
+# 2,000 ms, against 1,162 ms and 2 of 20 for Haiku 4.5. An unset engine never
+# picks it: it is chosen only by name.
+#
 # The user layer, $XDG_CONFIG_HOME/agent-ways/agent.yaml, overrides any field
 # of any profile and survives updates. `ways settings set gate.…` writes it.
 
 anthropic:
+  display_name: Anthropic API key
   provider: anthropic
   model: claude-haiku-4-5
   threshold: 0.3
@@ -27,8 +36,20 @@ anthropic:
   max_candidates: 8
 
 openrouter:
+  display_name: OpenRouter API key
   provider: openrouter
   model: anthropic/claude-haiku-4.5
+  threshold: 0.3
+  timeout_ms: 2000
+  turns: 1
+  max_turn_chars: 1200
+  concurrency: 8
+  max_candidates: 8
+
+claude-code:
+  display_name: Claude Code internal
+  provider: claude-code
+  model: claude-haiku-4-5
   threshold: 0.3
   timeout_ms: 2000
   turns: 1
