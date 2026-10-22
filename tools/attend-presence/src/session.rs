@@ -120,14 +120,14 @@ pub fn identity() -> SessionIdentity {
 
 /// Resolve the identity of an arbitrary pid (test seam + tooling).
 pub fn identity_for_pid(pid: u32) -> SessionIdentity {
-    identity_in_dirs(&sessions_dirs(), pid, crate::process::is_claude_program)
+    identity_in_dirs(&sessions_dirs(), pid, crate::process::is_claude)
 }
 
 /// The identity of `pid` when a Claude Code session record owns it, or
 /// `None` without reading anything more. `attend peer status` names each run by
 /// this, and a run with no record costs no working-directory lookup.
 pub fn session_identity_for_pid(pid: u32) -> Option<SessionIdentity> {
-    session_identity_in_dirs(&sessions_dirs(), pid, crate::process::is_claude_program)
+    session_identity_in_dirs(&sessions_dirs(), pid, crate::process::is_claude)
 }
 
 /// The working directory of `pid`, the fallback origin. It is `pid`'s
@@ -180,7 +180,7 @@ fn session_identity_in_dirs(dirs: &[PathBuf], pid: u32, is_claude: impl Fn(u32) 
 /// Find the Claude Code session owning `own_pid` by climbing its
 /// process ancestry against the session records' pids.
 pub fn find_own_session_id(own_pid: u32) -> Option<String> {
-    find_session_in_dirs(&sessions_dirs(), own_pid, crate::process::is_claude_program).map(|(sid, _)| sid)
+    find_session_in_dirs(&sessions_dirs(), own_pid, crate::process::is_claude).map(|(sid, _)| sid)
 }
 
 /// Test-seam counterpart to [`find_own_session_id`].
@@ -191,7 +191,7 @@ pub fn find_session_id_in(dir: &Path, own_pid: u32) -> Option<String> {
 /// The session owning `own_pid` and the ancestor pid whose record matched:
 /// the Claude Code process itself.
 pub fn find_own_session(own_pid: u32) -> Option<(String, u32)> {
-    find_session_in_dirs(&sessions_dirs(), own_pid, crate::process::is_claude_program)
+    find_session_in_dirs(&sessions_dirs(), own_pid, crate::process::is_claude)
 }
 
 /// Test-seam counterpart to [`find_own_session`], over one directory and
@@ -413,7 +413,26 @@ mod tests {
         assert!(!v(&["node", "/app/node_modules/@anthropic-ai/claude-agent-sdk/index.js"]), "an SDK host, not its CLI");
         assert!(!v(&["bash", "-c", "source /home/u/.claude/shell-snapshots/s.sh && attend"]));
         assert!(!v(&["timeout", "240", "claude", "-p"]));
+        assert!(!v(&["/Applications/Claude.app/Contents/MacOS/Claude"]), "the desktop app");
         assert!(!v(&[]));
+        // A path under a `.claude/` folder, whatever the program.
+        assert!(!v(&["/usr/bin/bash", "/home/u/.claude/hooks/x.sh"]), "a hook");
+        assert!(!v(&["/home/u/.claude/bin/ways-mcp"]), "a binary installed there");
+        assert!(
+            !v(&["/home/u/proj/.claude/worktrees/agent-1/tools/target/debug/deps/attend_presence-0123abcd", "--test-threads", "4"]),
+            "a test binary in a worktree there"
+        );
+        assert!(!v(&["node", "/home/u/proj/.claude/worktrees/agent-1/scripts/run.js"]), "a script in a worktree there");
+        assert!(!v(&["sh", "-c", "sleep 60", "claude"]), "a shell whose $0 is claude");
+    }
+
+    /// This process's own command line, read live: a test binary, wherever
+    /// it lives (a worktree under `.claude/` included), is no Claude Code
+    /// process.
+    #[test]
+    fn this_test_binary_is_not_claude_code() {
+        let pid = std::process::id();
+        assert!(!crate::process::is_claude(pid), "{:?}", crate::process::argv(pid));
     }
 
     fn write_session(dir: &Path, sid: &str, pid: u32, cwd: &str) {
