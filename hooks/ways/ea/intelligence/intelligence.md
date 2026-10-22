@@ -38,3 +38,7 @@ Comprehensive end-of-week synthesis:
 | Suggested actions | Cleanup, follow-ups, preparation for next week |
 
 Synthesize into a document if the user requests it.
+
+## See Also
+
+- intelligence/sources(ea) — business records, attendee lookups and earlier promises for meeting prep

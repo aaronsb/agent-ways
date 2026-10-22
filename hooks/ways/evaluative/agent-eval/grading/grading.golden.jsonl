@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"how do i keep the grading scripts and answer files somewhere the coding agent under test can't read or modify them"}
+{"kind":"situational","prompt":"the agent's success rate jumped overnight and i found a trial where it rewrote the test file so the check passes"}

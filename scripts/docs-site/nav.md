@@ -89,6 +89,9 @@
         * [Writing a way](hooks-and-ways/extending.md)
         * [Macros](hooks-and-ways/macros.md)
         * [Scoring and testing](hooks-and-ways/scoring-and-testing.md)
+        * [Contribute a way or skill](how-to/contribute-a-way-or-skill.md)
+        * [Contribution kinds](reference/contribution-kinds-and-review-evidence.md)
+        * [Where ways come from](explanation/where-ways-come-from.md)
     * Domain overviews
         * [Meta](hooks-and-ways/meta.md)
         * [IT operations](hooks-and-ways/itops.md)

@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"the pr is merged, anything left to check before we call it shipped"}
+{"kind":"situational","prompt":"let's not build the retry queue now; put it on github with enough notes that a stranger could take it over"}

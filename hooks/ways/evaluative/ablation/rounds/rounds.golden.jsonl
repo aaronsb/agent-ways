@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"set up a hill-climbing loop for our agent's instructions where each round tries one edit and reverts it if the score doesn't beat the last kept version"}
+{"kind":"situational","prompt":"i've rewritten the triage skill's instructions six times this week chasing the failing examples and can't tell anymore which rewrite actually made it better"}

@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"how should I fix a script that only runs inside a client's hosted instance I have no login for?"}
+{"kind":"situational","prompt":"they host it themselves behind their firewall, here's the version they say is installed and the error they get when they run it"}

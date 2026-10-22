@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"the failed job left its logs and the half-written rows behind, how should we go at this before trying it again"}
+{"kind":"situational","prompt":"we've patched this timeout three separate times for different customers and it keeps coming back"}

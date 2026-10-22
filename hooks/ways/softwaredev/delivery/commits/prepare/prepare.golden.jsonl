@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"before committing, get rid of the throwaway files you made while poking at this and only include what belongs to the fix"}
+{"kind":"situational","prompt":"before we record this step there are leftover debug scripts and output dumps next to the real edits, plus someone else's half-finished change"}

@@ -38,6 +38,7 @@ Before saving, route the fact to its most authoritative home. Memory loads autom
 | Fact type | Best home |
 |---|---|
 | Project convention, pattern, or gotcha | A **way** under `.claude/hooks/ways/` (or `.claude/ways/` for project-local) |
+| Writing style the user wants in every session | The output style or the project's CLAUDE.md (writing/register) |
 | Architectural decision and its rationale | An **ADR** in `docs/architecture/` |
 | Open issue, PR, branch state, session recap | Don't save — query `gh` / `git` at runtime |
 | "User said X this one time" from a single exchange | Usually nothing — one data point isn't a rule |

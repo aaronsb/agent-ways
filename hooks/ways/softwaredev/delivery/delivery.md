@@ -15,8 +15,10 @@ Children of this way cover the journey from local changes to production:
 |-------|-----|
 | Commits, messages | `delivery/commits` |
 | PRs, issues, review, merge strategy | `delivery/github` |
+| Jira tickets and Confluence pages | `delivery/atlassian` |
 | Landing an increment — review gate → merge → cleanup | `delivery/merge` |
 | Releases, tagging, publishing | `delivery/release` |
+| Deploying: the account behind a push, proof the live build changed | `delivery/deploy` |
 | Patch creation | `delivery/patches` |
 | Implementation planning | `delivery/implement` |
 | Readiness of an area before changing it | `delivery/groundwork` |
@@ -33,3 +35,5 @@ see `data/migrations`.
 - delivery/implement(softwaredev) — implementation planning
 - delivery/groundwork(softwaredev) — build, verify, deliver, recover before adding primitives
 - data/migrations(data) — schema migration discipline (moved out of delivery)
+- delivery/atlassian(softwaredev) — Jira transitions and Confluence pages through the API
+- delivery/deploy(softwaredev) — the right account before a push, and proof the live build changed

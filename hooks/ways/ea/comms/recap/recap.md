@@ -40,3 +40,7 @@ AI summaries provide structured action items. Cross-reference with the task syst
 ## Meeting Continuity
 
 For recurring meetings, pull the recap of the previous occurrence to establish continuity — what was discussed last time, what action items were assigned, what's still open.
+
+## See Also
+
+- comms/recap/transcripts(ea) — saving a transcript verbatim and checking who said what

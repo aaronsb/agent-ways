@@ -79,3 +79,11 @@ If the format doesn't fit the content (a slide deck for something that needs a d
 - documentation(documentation) — code documentation is a specialized form of writing
 - trust/prose(meta) — decoration and self-explanation in your own prose
 - trust/voice(meta) — voice and tone in written communication
+- writing/deliverables(writing) — finished decks, PDFs, documents and sheets for a client or leadership
+- research/provenance(research) — every claim, figure and citation traced to its source
+- writing/client-boundary(writing) — internal material kept out of outbound documents
+- writing/ai-signs(writing) — a draft that reads as if a model wrote it
+- writing/ai-signs/actors(writing) — sentences that say who did what
+- writing/status-report(writing) — recurring reports that follow the last approved one
+- writing/own-words(writing) — editing the user's own text in their voice
+- writing/register(writing) — shifting register for a reader, and holding a user's style rules

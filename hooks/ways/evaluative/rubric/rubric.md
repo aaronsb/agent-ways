@@ -38,3 +38,4 @@ A single run is one sample. When a scenario flips between runs, run it several t
 - evaluative(evaluative) — parent: author and judge, the shared core, choosing the loop
 - code/testing/evaluation(softwaredev) — pass counts carry their denominator
 - code/security/injection/prompt(softwaredev) — scenario inputs are data to the model under test
+- evaluative/rubric/judge(evaluative) — child: a model as judge, validated against human labels

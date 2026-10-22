@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"twelve agents are going to draft sections of the same spec in parallel, how do I stop them clobbering each other's files and contradicting the data format"}
+{"kind":"situational","prompt":"the last parallel audit came back as nine separate partial dumps that disagreed with each other, and two workers had already posted to the team channel on their own"}

@@ -15,6 +15,7 @@ Children of this way cover the development environment:
 | Dependencies, packages | `environment/deps` |
 | Debugging | `environment/debugging` |
 | SSH, remote access | `environment/ssh` |
+| Code that runs on a system you cannot reach | `environment/remote-runtime` |
 | Makefile targets | `environment/makefile` |
 | Container build/run safety | `environment/container-safety` |
 | Authoring host versus target host | `environment/hostparity` |
@@ -34,3 +35,4 @@ Children of this way cover the development environment:
 - environment/attend(softwaredev) — the attend awareness sensor loop
 - environment/recovery(softwaredev) — classify a failure, take its one allowed move, escalate after three attempts
 - environment/bounded-execution(softwaredev) — background the never-returning command, flag the interactive one, kill by pid
+- environment/remote-runtime(softwaredev) — changing code that runs where you cannot reach it
