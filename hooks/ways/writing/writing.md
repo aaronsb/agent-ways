@@ -18,11 +18,11 @@ General content creation — proposals, reports, presentations, memos, briefs. F
 1. **Audience** — who reads this and what do they need to walk away with?
 2. **Format** — match the medium to the message. A slide deck argues differently than a report.
 3. **Core message** — every document has one. Find it before outlining.
-4. **Style** — ask the user about voice, tone, and register. Don't assume.
+4. **Style** — the output style sets register (ADR-178). Ask about voice or tone only under the asking bar in core.md.
 
 ## Structure
 
-Outline before drafting. Defend the structure to the user.
+Outline before drafting. State the structure in the reply.
 
 | Content type | Structure |
 |---|---|
@@ -54,8 +54,6 @@ Write prose, not bullet points wearing a trenchcoat. Let ideas develop across se
 - Lead with the conclusion when the audience is busy. Lead with context when the audience needs persuading.
 - Cut filler on revision. "In order to" → "To". "It should be noted that" → delete.
 - Name the real term, then gloss it. For domain vocabulary, give the precise term *and* a plain-language gloss on first use — neither a jargon wall nor analogy-mush. Analogies illustrate; they don't carry the argument.
-
-**Ask the user** about style preferences early. Use literary terms when discussing: register (formal/informal), diction (word choice), syntax (sentence structure), cadence (rhythm), tone (attitude toward subject). These terms are precise and help the user articulate what they want.
 
 **Avoid:**
 - Corporate filler — hollow superlatives, engagement bait, breathless enthusiasm disconnected from substance.

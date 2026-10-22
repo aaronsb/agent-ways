@@ -16,7 +16,7 @@ requires: ["Read", "Bash(awk:*)", "Bash(dirname:*)", "Bash(file:*)", "Bash(git:*
 | Signal | Action |
 |--------|--------|
 | File > 500 lines | Propose a split with specific module boundaries |
-| File > 800 lines | Flag as priority — split before adding more code |
+| File > 800 lines | Flag as priority and propose the split. Split when asked. |
 | Function > 3 nesting levels | Extract inner logic into named helper functions |
 | Class > 7 public methods | Decompose — likely violating Single Responsibility |
 | Function > 30-50 lines | Break into steps with descriptive names |
@@ -37,7 +37,7 @@ When the file length scan (macro output) shows priority files, call them out exp
 |---|---|
 | "Splitting this file would make it harder to follow" | A 900-line file is already hard to follow. Split at natural seam lines. |
 | "There's no good place to split" | Can't find a split point = coupling problem worth solving. |
-| "I'll refactor later" | The file will only grow. Split it now while the logic is fresh. |
+| "I'll refactor later" | The file will only grow. Propose the split now, while the logic is fresh. |
 
 ## What to Enforce
 

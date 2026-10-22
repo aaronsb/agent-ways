@@ -174,9 +174,8 @@ docs/scripts/adr index -y       # Regenerate the index
 
 ## Updating Cross-References
 
-After moving files, search for broken references:
+After moving files, check the citations:
 
 ```bash
-grep -r "ADR-" docs/ --include="*.md" | grep -v architecture/
-# Fix paths in any docs that link to old ADR locations
+docs/scripts/adr cite --check    # every ADR-N citation resolves to a record
 ```

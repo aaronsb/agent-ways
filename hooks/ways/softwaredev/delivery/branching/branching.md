@@ -2,6 +2,7 @@
 description: Git branch awareness and branching guidance when editing files
 vocabulary: branch checkout worktree main trunk feature fix refactor force-push temp tweaks context-switch
 files: \.(md|rs|sh|py|js|ts|json|yaml|yml|toml|go|rb|java|c|cpp|h|hpp|css|html|sql)$
+commands: git (checkout|switch)( -q)? -[bBcC]|git worktree add
 refire: 0.1
 macro: prepend
 scope: agent, subagent
@@ -20,7 +21,7 @@ When other sessions or agents work in the same checkout, or you were handed a wo
 
 ## When to Branch
 
-This is guidance, not a gate. Use judgment:
+This is guidance. Use judgment:
 
 | Situation | Branch? |
 |-----------|---------|

@@ -7,7 +7,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Communications — Chat Platforms
 
-**Scope.** This way covers human chat platforms reached through their own tools: Slack, Microsoft Teams, and the like. Peer messaging between Claude sessions over `attend` is a different surface with its own way, environment/attend(softwaredev). Replies there need no approval, and nothing below applies to them.
+**Scope.** This way covers human chat platforms reached through their own tools: Slack, Microsoft Teams, and the like. Peer messaging between Claude sessions over `attend` is a different surface with its own way, environment/attend(softwaredev). Replies there need no approval (ADR-501 item 4), and nothing below applies to them.
 
 Access those platforms for reading conversations, checking unread threads, and composing posts.
 
@@ -15,7 +15,7 @@ Access those platforms for reading conversations, checking unread threads, and c
 
 - **Always safe:** reading chats, browsing channels, checking unread indicators, viewing history.
 - **Requires explicit approval:** posting anything to the platform. Draft it, present it with the target workspace and channel, and wait for the human to approve.
-- **Standing approval:** a kind of reply the human has asked Claude to send on its own goes out without a per-message approval, within the scope and voice they set (trust/voice).
+- **Without a per-message yes:** only as trust/voice allows, for a disclosed reply as Claude under a session grant or a post from Claude's own account.
 
 ## Chat Triage
 

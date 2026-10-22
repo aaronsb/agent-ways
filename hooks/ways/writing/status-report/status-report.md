@@ -8,7 +8,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Recurring Status Reports
 
-A recurring report is read against the previous one. Before drafting, open the last approved instance and follow its structure, length, depth and markdown. Change the format when the user asks, and then update the template or skill the report is built from so the next one follows the change.
+A recurring report is read against the previous one. Before drafting, open the last approved instance and follow its structure, length, depth and markdown. Change the format when the user asks, and then update the template or skill the report is built from so the next one follows the change. Name the update in your final message.
 
 ## Gather first
 

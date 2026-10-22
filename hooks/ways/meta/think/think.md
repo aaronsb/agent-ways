@@ -31,7 +31,7 @@ Most problems resolve at level 1. The strategies exist for when they don't.
 
 ## External Strategies
 
-**When you decide to escalate, act immediately.** Invoke the skill — don't announce your intention, don't ask permission, don't hedge with "I might want to use..." The decision to escalate IS the decision to act. The human cannot follow your reasoning speed; by the time they'd read a proposal to use a strategy, you should already be working through it.
+**When you decide to escalate, act immediately.** Invoke the skill without asking permission or hedging with "I might want to use..." (the asking bar in core.md). When you escalated on your own, end with the recommendation and its tradeoff. The decision to escalate IS the decision to act. The human cannot follow your reasoning speed; by the time they'd read a proposal to use a strategy, you should already be working through it.
 
 | Problem Shape | Strategy | Invoke |
 |---|---|---|
