@@ -46,7 +46,7 @@ _The ways engine: how ways are matched, disclosed and re-disclosed_
 | [ADR-166](./ways/ADR-166-single-source-of-truth-for-model-context-window-resolution.md) | Single source of truth for model context-window resolution | accepted |
 | [ADR-174](./ways/ADR-174-progressive-core-decoration-guidance-and-the-core-re-disclosure-gap.md) | Progressive core — decoration guidance and the core re-disclosure gap | accepted |
 | [ADR-183](./ways/ADR-183-single-language-localization-tuning-the-english-anchor-as-a-peer.md) | Single-language localization tuning: the English anchor as a peer | accepted |
-| [ADR-188](./ways/ADR-188-one-tool-call-lane-keyed-by-tool-type-and-retirement-of-the-semantic-bash-surface.md) | One tool-call lane keyed by tool type, and retirement of the semantic Bash surface | proposed |
+| [ADR-188](./ways/ADR-188-one-tool-call-lane-keyed-by-tool-type-and-a-bash-surface-that-is-parsed-described-and-judged.md) | One tool-call lane keyed by tool type, and a Bash surface that is parsed, described and judged | proposed |
 | [ADR-189](./ways/ADR-189-session-introspection-implementation-plan.md) | Session introspection implementation plan | accepted |
 | [ADR-190](./ways/ADR-190-the-lexical-gate-as-a-conditional-threshold.md) | The lexical gate as a conditional threshold | accepted |
 | [ADR-191](./ways/ADR-191-the-tool-use-channel-is-a-signal-problem-lookbehind-chunk-spread-and-winner-confirmation.md) | The tool-use channel is a signal problem: lookbehind, chunk-spread, and winner confirmation | accepted |
@@ -212,6 +212,7 @@ _The ways engine, continued after the full 100-199 band: matching, disclosure an
 | [ADR-703](./engine/ADR-703-self-evaluated-probe-sets-gate-adr-701-s-matching-changes-and-the-body-score-ships-scaled-on-single-sentence-prompts.md) | Self-evaluated probe sets gate ADR-701's matching changes, and the body score ships scaled on prompts that chunk to one piece | accepted |
 | [ADR-705](./engine/ADR-705-claude-code-s-tool-surface-and-hook-events-surveyed-as-tool-types-for-trigger-lanes-and-session-sensing.md) | Claude Code's tool surface and hook events, surveyed as tool types for trigger lanes and session sensing | proposed |
 | [ADR-706](./engine/ADR-706-a-shipped-tool-catalog-maps-the-harness-s-tool-names-to-abstract-tool-types-so-ways-and-sensors-depend-on-types-and-not-on-claude-code-s-names.md) | A shipped tool catalog maps the harness's tool names to abstract tool types, so ways and sensors depend on types and not on Claude Code's names | proposed |
+| [ADR-707](./engine/ADR-707-measurements-of-the-shell-surface-covering-the-semantic-lane-s-on-topic-rate-alternative-match-surfaces-and-a-judge-reading-the-described-call.md) | Measurements of the shell surface, covering the semantic lane's on-topic rate, alternative match surfaces, and a judge reading the described call | proposed |
 
 ## Archived
 
