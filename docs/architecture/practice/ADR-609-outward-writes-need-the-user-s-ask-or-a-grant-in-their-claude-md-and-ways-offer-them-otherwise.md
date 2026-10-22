@@ -21,6 +21,9 @@ considered:
   - operator: aaronsb
     said: "(c) Commit + merge, (d) File issues"
     via: AskUserQuestion answer, session 2026-10-22
+  - operator: aaronsb
+    said: "in my opinion only an agent with well known bounds is allowed to impersonate me without asking. this is not claude code. (it could be something claude code dispatches to, but I haven't thought what that could be nor have I a use case for it yet). claude code when given it's own rights and account, generally is acceptable to send without asking. / posting a reply to a git issue that was originally filed is not impersonation, for example."
+    via: "chat, session 2026-10-22; applied to the corpus in #1133"
 status: accepted
 date: 2026-10-22
 deciders:
