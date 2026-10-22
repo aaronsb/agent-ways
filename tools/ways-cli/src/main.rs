@@ -226,6 +226,12 @@ enum Commands {
     /// `ways manage update` runs this; the installer calls it.
     #[command(hide = true)]
     JudgeSetup,
+    /// The verbs a Claude Code judge host runs: host, take, answer (ADR-708)
+    #[command(hide = true)]
+    Judge {
+        #[command(subcommand)]
+        command: cmd::judge_jobs::JudgeCommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1486,5 +1492,6 @@ fn run() -> Result<()> {
         Commands::Agent { args } if args.is_empty() && on_terminal() => settings_screen("gate"),
         Commands::Agent { args } => cmd::agent::run(&args),
         Commands::JudgeSetup => cmd::judge::setup(),
+        Commands::Judge { command } => cmd::judge_jobs::run(command),
     }
 }
