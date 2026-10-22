@@ -39,6 +39,12 @@ pub struct JudgeRequest {
     pub tool: String,
     pub turns: Vec<Turn>,
     pub candidates: Vec<Candidate>,
+    /// The engine the session resolved to (ADR-708 §2), which the agent
+    /// judges with in place of agent.yaml's: a session that took a key
+    /// engine because no Claude Code host registered keeps it. `None` from a
+    /// hook built before ADR-708 leaves agent.yaml's engine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
 }
 
 /// Which agent answered: its version, the version of this shared crate it was
@@ -256,6 +262,7 @@ mod tests {
                 tool: "claude-code".into(),
                 turns: vec![Turn { role: Role::User, text: "hi".into() }],
                 candidates: vec![Candidate { id: "a/b".into(), text: "a › b\nd".into() }],
+                engine: Some("anthropic".into()),
             }),
         };
         let line = serde_json::to_string(&req).unwrap();

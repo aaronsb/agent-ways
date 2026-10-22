@@ -128,6 +128,7 @@ pub fn run(event: HookEvent) -> Result<()> {
                 crate::cmd::reset::clear_session(sid);
             }
             session::prune_subagent_switches(SUBAGENT_SWITCH_MAX_AGE);
+            session::judge_jobs::prune(SUBAGENT_SWITCH_MAX_AGE);
             session::log_event(&[
                 ("event", "session_start"),
                 ("project", common.project.as_deref().unwrap_or("unknown")),

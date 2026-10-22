@@ -567,6 +567,51 @@ check "a macro past the deadline is logged by its way" "slowdom/slow" \
     "$(jq -r 'select(.event=="macro_timeout") | .way' "$XDG_STATE_HOME/agent-ways/events.jsonl" 2>/dev/null)"
 rm -rf "$CORE/slowdom"
 
+# ADR-708 §5: with gate.engine claude-code, check-prompt.sh hands the judge
+# request to the session's Claude Code host as a job. A shell stand-in for
+# the ways mod registers as host, runs `ways judge take --wait` beside the
+# hook as the mod's prompt.submit handler does, and pipes a canned verdict
+# to `ways judge answer`.
+W="$HOME/.claude/bin/ways"
+mkdir -p "$CORE/judgedom/frob"
+printf -- '---\ndescription: frobnication guidance\npattern: \\bfrobnicate\\b\nrefire: 0.15\n---\n# Frob way body\n' \
+    > "$CORE/judgedom/frob/frob.md"
+mkdir -p "$XDG_CONFIG_HOME/agent-ways"
+printf 'engine: claude-code\nmode: enforce\n' > "$XDG_CONFIG_HOME/agent-ways/agent.yaml"
+judged_prompt() {  # session relevant -> the hook's additionalContext
+    "$W" judge host --session "$1"
+    ( "$W" judge take --session "$1" --wait --timeout-ms 8000 > "$WORK/$1.job"
+      printf '{"text":"```json\\n{\\"judgements\\":[{\\"id\\":\\"g1\\",\\"relevant\\":%s,\\"confidence\\":0.95}]}\\n```","usage":{"input_tokens":900,"output_tokens":40,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}' "$2" \
+        | "$W" judge answer --session "$1" --job "$(jq -r .id "$WORK/$1.job")" ) &
+    jq -cn --arg s "$1" --arg c "$WORK/project" '{session_id:$s,cwd:$c,hook_event_name:"UserPromptSubmit",prompt:"please frobnicate the widget"}' \
+        | bash "$HOOKS/check-prompt.sh" | jq -r '.hookSpecificOutput.additionalContext // empty'
+    wait
+}
+check "a host's pass verdict admits the way" "# Frob way body" "$(judged_prompt sess-host-pass true)"
+check "the host took the JSON-only job" "claude-haiku-4-5" "$(jq -r .model "$WORK/sess-host-pass.job")"
+check "a host's block verdict keeps the way out" "" "$(judged_prompt sess-host-block false)"
+check "the judge call names claude-code, with usage and no price" "claude-code 900 none" \
+    "$(jq -r 'select(.event=="judge_call" and .session=="sess-host-block") | "\(.engine) \(.input_tokens) \(.cost_usd // "none")"' "$XDG_STATE_HOME/agent-ways/events.jsonl")"
+# A session that resolved to another engine tells its host to stand by: here
+# a key engine named with no key, which fails open with no judge at all.
+printf 'engine: anthropic\nmode: enforce\n' > "$XDG_CONFIG_HOME/agent-ways/agent.yaml"
+"$W" judge host --session sess-host-key
+check "with no engine the way is shown unjudged" "# Frob way body" \
+    "$(jq -cn --arg c "$WORK/project" '{session_id:"sess-host-key",cwd:$c,hook_event_name:"UserPromptSubmit",prompt:"please frobnicate the widget"}' \
+        | bash "$HOOKS/check-prompt.sh" | jq -r '.hookSpecificOutput.additionalContext // empty')"
+check "take says standby for a session on another engine" "standby" "$("$W" judge take --session sess-host-key --wait --timeout-ms 5000)"
+# The mod stops a take it no longer needs with SIGTERM: a clean exit, no
+# output. Under claude-code with no resolution yet, take waits for a job.
+printf 'engine: claude-code\nmode: enforce\n' > "$XDG_CONFIG_HOME/agent-ways/agent.yaml"
+"$W" judge take --session sess-host-idle --wait --timeout-ms 20000 > "$WORK/idle.out" &
+take_pid=$!
+sleep 0.3
+kill -TERM "$take_pid"
+wait "$take_pid"
+check "take exits 0 and prints nothing on SIGTERM" "0:" "$?:$(cat "$WORK/idle.out")"
+check "a late answer is dropped quietly" "0" "$(echo '{"text":"x","usage":{"input_tokens":0,"output_tokens":0}}' | "$W" judge answer --session sess-host-idle --job 1-2-3; echo $?)"
+rm -rf "$CORE/judgedom" "$XDG_CONFIG_HOME/agent-ways/agent.yaml"
+
 # attend-drain-stop.sh passes the drain's stdout and stdin through, and ends
 # the turn normally (exit 0) on any failure from attend: Claude Code reads a
 # Stop hook's exit 2 as a block, and clap exits 2 on a usage error (ADR-413).

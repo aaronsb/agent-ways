@@ -8,6 +8,7 @@
 use std::path::{Path, PathBuf};
 
 mod engagement;
+pub mod judge_jobs;
 mod log;
 
 // Re-export the ADR-123 firing-dynamics engagement cluster so the rest

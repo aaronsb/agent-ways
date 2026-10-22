@@ -27,6 +27,10 @@ use crate::{keys, net};
 
 /// The longest request line the agent reads.
 const MAX_REQUEST: u64 = 4 * 1024 * 1024;
+
+/// The fallback reason of a request whose engine judges inside Claude Code,
+/// which the hook should have sent to the session's host (ADR-708 §2).
+const NOT_AGENT_ENGINE: &str = "not_agent_engine";
 /// Latency samples kept for the status percentiles.
 const SAMPLES: usize = 200;
 
@@ -281,7 +285,17 @@ impl State {
     /// apply without a restart.
     /// A broken agent.yaml or a bad `mode` fails closed: the gate is off.
     fn settings() -> Result<Option<Settings>> {
-        profile::gate_settings(&profile::user_layer_path(), |p| keys::locate(p).is_some())
+        Self::settings_as(None)
+    }
+
+    /// [`State::settings`] with the session's engine in place of agent.yaml's
+    /// (ADR-708 §2), when the request names one.
+    fn settings_as(engine: Option<&str>) -> Result<Option<Settings>> {
+        Self::settings_at(&profile::user_layer_path(), engine, |p| keys::locate(p).is_some())
+    }
+
+    fn settings_at(path: &std::path::Path, engine: Option<&str>, has_key: impl Fn(Provider) -> bool) -> Result<Option<Settings>> {
+        profile::gate_settings_as(path, engine, has_key)
     }
 
     fn judge(&self, req: JudgeRequest) -> Reply {
@@ -319,7 +333,7 @@ impl State {
         if req.candidates.is_empty() {
             return Err("no_candidates".to_string());
         }
-        let settings = Self::settings().map_err(|e| format!("config: {e:#}"))?;
+        let settings = Self::settings_as(req.engine.as_deref()).map_err(|e| format!("config: {e:#}"))?;
         let Some(settings) = settings else { return Err("off".to_string()) };
         self.prepare_with(req, settings, begun)
     }
@@ -327,14 +341,16 @@ impl State {
     /// [`State::prepare`] once the settings are read. The `claude-code`
     /// engine judges inside Claude Code (ADR-708 §2): the agent refuses it
     /// before reading a key, taking a slot or building a request, so it never
-    /// sends that engine's request to a provider.
+    /// sends that engine's request to a provider. A hook routes a
+    /// claude-code session to its host, so this refusal means a request went
+    /// the wrong way, not a missing key: [`NOT_AGENT_ENGINE`].
     fn prepare_with<'r>(&'r self, req: &'r JudgeRequest, settings: Settings, begun: Instant) -> Result<Prepared<'r>, String> {
         if settings.mode == Mode::Off {
             return Err("off".to_string());
         }
         let p = &settings.profile;
         if p.provider == Provider::ClaudeCode {
-            return Err(format!("{}: {}", crate::engine::ENGINE_UNAVAILABLE, net::NOT_CALLED));
+            return Err(format!("{NOT_AGENT_ENGINE}: {}", net::NOT_CALLED));
         }
         let Some((key, source)) = keys::read(p.provider).map_err(|e| format!("key: {e:#}"))? else {
             return Err("no_key".to_string());
@@ -552,8 +568,38 @@ mod tests {
     #[test]
     fn an_empty_candidate_list_falls_back_without_a_call() {
         let state = State::new();
-        let req = JudgeRequest { session: "s".into(), tool: "t".into(), turns: vec![], candidates: vec![] };
+        let req = JudgeRequest { session: "s".into(), tool: "t".into(), turns: vec![], candidates: vec![], engine: None };
         assert!(matches!(state.judge(req), Reply::Fallback { reason, .. } if reason == "no_candidates"));
+    }
+
+    /// ADR-708 §2's fallback: agent.yaml names claude-code, no host
+    /// registered, an anthropic key is configured, so the session resolved
+    /// to anthropic and says so in the request. The agent judges with that,
+    /// where agent.yaml alone would be refused.
+    #[test]
+    fn a_session_resolved_to_a_key_engine_is_judged_on_it_over_agent_yaml() {
+        let dir = std::env::temp_dir().join(format!("ways-agent-session-engine-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("agent.yaml");
+        std::fs::write(&path, "engine: claude-code\nmode: enforce\n").unwrap();
+        let anthropic_key = |p: Provider| p == Provider::Anthropic;
+        let state = State::new();
+        let req = JudgeRequest {
+            session: "s".into(),
+            tool: "claude-code".into(),
+            turns: vec![],
+            candidates: vec![Candidate { id: "a/b".into(), text: "a › b\nd".into() }],
+            engine: Some("anthropic".into()),
+        };
+        let held = State::settings_at(&path, req.engine.as_deref(), anthropic_key).unwrap().unwrap();
+        // The key path from here on: prepare_with refuses only claude-code
+        // (not called, since it would check this host's real key).
+        assert_eq!((held.engine.as_str(), held.profile.provider), ("anthropic", Provider::Anthropic));
+        // The same request with no engine named reads agent.yaml's and is refused.
+        let unnamed = State::settings_at(&path, None, anthropic_key).unwrap().unwrap();
+        let reason = state.prepare_with(&req, unnamed, Instant::now()).err().expect("refused");
+        assert!(reason.starts_with(NOT_AGENT_ENGINE), "{reason}");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -564,13 +610,14 @@ mod tests {
             tool: "claude-code".into(),
             turns: vec![],
             candidates: vec![Candidate { id: "a/b".into(), text: "a › b\nd".into() }],
+            engine: None,
         };
         for mode in ["enforce", "shadow"] {
             let user: profile::UserLayer = serde_yaml::from_str(&format!("engine: claude-code\nmode: {mode}\n")).unwrap();
             // Every key "present": the refusal is the engine's, not a missing key's.
             let settings = profile::resolve(&user, |_| true).unwrap().unwrap();
             let reason = state.prepare_with(&req, settings, Instant::now()).err().expect("refused");
-            assert_eq!(reason, format!("engine_unavailable: {}", net::NOT_CALLED), "{mode}");
+            assert_eq!(reason, format!("not_agent_engine: {}", net::NOT_CALLED), "{mode}");
             // No slot taken and no key check started: no request was built.
             assert_eq!(state.in_flight(), 0);
             assert!(!state.checking.load(Ordering::SeqCst));
