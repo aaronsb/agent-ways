@@ -24,6 +24,9 @@ considered:
   - operator: aaronsb
     said: "in my opinion only an agent with well known bounds is allowed to impersonate me without asking. this is not claude code. (it could be something claude code dispatches to, but I haven't thought what that could be nor have I a use case for it yet). claude code when given it's own rights and account, generally is acceptable to send without asking. / posting a reply to a git issue that was originally filed is not impersonation, for example."
     via: "chat, session 2026-10-22; applied to the corpus in #1133"
+  - operator: aaronsb
+    said: "so if claude filed it to begin with, on a project we're generally working on, that's not impersonation / we have to be careful not to define the world here."
+    via: chat, session 2026-10-22
 status: accepted
 date: 2026-10-22
 deciders:
