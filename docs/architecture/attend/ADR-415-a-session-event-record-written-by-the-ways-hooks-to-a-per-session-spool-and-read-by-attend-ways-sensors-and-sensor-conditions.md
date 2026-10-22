@@ -21,7 +21,7 @@ basis:
   - evidence: "issue #843: a sensor spec with crate sensors and declarative triggers, whose `where:` conditions select on fields of a record"
   - evidence: "tools/ways-cli/src/session/log.rs `append_jsonl_line`: one `write_all` of record and newline on an O_APPEND handle, adopted after two racing PreToolUse hooks interleaved and corrupted each other's lines (#528)"
   - evidence: "tools/sensor-trait/src/lib.rs: a sensor is polled (`poll`) and persists its own state across restarts (`export_state`, `import_state`); attend's context and disclosure sensors already read ways state through `ways context --json`"
-  - evidence: "plugins/attend/hooks/register.tsx: the attend mod registers in-process `session.start`, `session.end`, `turn.complete` and `tool.call` handlers, which run only with Claude Code's mods preview flag on, off by default"
+  - evidence: "plugins/attend/hooks/register.tsx (lines 877-1067 on main at 7fd6c0de): the attend mod registers in-process `session.start`, `session.end`, `session.measure` and `turn.complete` handlers, and `tool.call` handlers scoped to its own five MCP tools (`attend_listen`, `attend_send`, `attend_reply`, `attend_join`, `attend_peers`); they run only with Claude Code's mods preview flag on, off by default"
   - precedent: ADR-706
   - precedent: ADR-188
 agent:
@@ -127,7 +127,7 @@ The operator asked for a Claude Code sensor crate for attend "in addition to way
 
 7. **#846 and #843 read the same records.** A ways-sensor rule selects by `section` and a `where:` condition over these fields, and its dispatcher reads the spool. Where that dispatcher runs is #846's decision. A #843 condition tests the same fields: `where: { tool_type: shell, value: { like: "git push*" } }`. Neither defines a second shape for a session event.
 
-8. **The attend mod is a fast path.** When the mod is loaded, its in-process handlers may wake attend before the next poll. The spool stays the source of the record, and the sensor drops a duplicate by `seq` or `tool_use_id`.
+8. **The attend mod is a fast path.** When the mod is loaded, in-process handlers may wake attend before the next poll. Its `session.*` and `turn.complete` handlers see those events today; its `tool.call` handlers cover only attend's own tools, so a fast path for other tool calls needs handlers registered on them. The spool stays the source of the record, and the sensor drops a duplicate by `seq` or `tool_use_id`.
 
 ## Consequences
 
@@ -154,7 +154,7 @@ The operator asked for a Claude Code sensor crate for attend "in addition to way
 
 ## Alternatives Considered
 
-- **The attend mod's in-process handlers as the source.** The mod already registers `tool.call`, `turn.complete` and `session.*`. Rejected as the source: mods run only behind Claude Code's preview flag, which is off by default, so most sessions would record nothing. Kept as a fast path (item 8).
+- **The attend mod's in-process handlers as the source.** The mod already registers `session.*` and `turn.complete`, and `tool.call` for its own five tools. Rejected as the source: mods run only behind Claude Code's preview flag, which is off by default, so most sessions would record nothing. Kept as a fast path (item 8).
 - **Hooks call `attend` directly.** Rejected: one more process per event; attend must be installed and running for the event to exist anywhere; the hooks would gain logic; and #846's ways sensors must work with attend absent.
 - **An attend-only spool first.** A narrower format for the sensor alone, with #846 deciding its own later. Not chosen: the operator picked one schema now. Two shapes for the same event would leave #843's conditions written against one of them.
 - **Tail the Claude Code transcript.** It records tool calls, results and messages, but not hook-only events such as PermissionRequest, PostModelSwitch or Notification. Its format is internal to Claude Code and changes between builds, which is the coupling ADR-706 removes for tools.

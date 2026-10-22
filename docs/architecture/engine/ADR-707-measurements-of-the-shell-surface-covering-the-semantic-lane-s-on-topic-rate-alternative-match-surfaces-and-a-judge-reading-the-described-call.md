@@ -67,20 +67,22 @@ Second-pass agreement was 48 of 50 (κ 0.89), from the same grader, who had seen
 
 | surface | fires on 200 uniform calls | ON | ON rate | ON+ADJ | gated to calls with an action segment: fires per call, ON rate |
 |---|---|---|---|---|---|
-| A, today (160 of 1,201 fires graded) | 1,201 | 0 of 160 | 0% | 11% | — |
+| A, today, fresh scan (160 of 1,201 fires graded) | 1,201 | 0 of 160 sampled | 0% of the sample | 11% | — |
 | C | 473 | 36 | 7.6% | 34% | 1.17, 13.3% |
 | G | 447 | 32 | 7.2% | 34% | 1.16, 11.7% |
 | H | 700 | 43 | 6.1% | 32% | 2.08, 9.2% |
 | I | 636 | 32 | 5.0% | 26% | 1.84, 7.6% |
 | I2 | 485 | 25 | 5.2% | 29% | 1.68, 7.2% |
 
-On the 248, removing narration (A to F) cut OFF fires from 167 to 87, and removing paths and arguments (F to C) cut them to 12. The narration was also the only source of 5 of the 248's 7 ON fires. On the 120-call recall set, C found 52 ON fires (10.6%) that nothing semantic had fired. Of the 98 ON fires C found across the uniform and recall sets, 37 were reached by an existing `commands:` regex, 21 belonged to a way whose regex missed the command, and 40 to ways with no `commands:` field.
+ON rate is per fire, not per call: C was on topic in 36 of its 473 fires. Today's surface also fires at least 9 of C's 36 on-topic pairs, outside its graded sample, so its on-topic rate is above zero though none of its 160 sampled fires was graded ON.
+
+On the 248, removing narration (A to F) cut OFF fires from 167 to 87, and removing paths and arguments (F to C) cut them to 12. The narration was also the only source of 5 of the 248's 7 ON fires. On the 120-call recall set, C found 52 ON fires (10.6%) that nothing semantic had fired. Of the 98 ON fires C found across the uniform and recall sets, 37 were reached by an existing `commands:` regex, 21 belonged to a way whose regex missed the command, and 40 to ways with no `commands:` field. Of C's 36 on-topic fires on the uniform calls, about three-quarters were regex-shaped, reachable by a repaired or new `commands:` regex, and about 8 were intent-shaped; beyond what regexes reach, C added about 4 intent-shaped on-topic fires per 100 calls.
 
 **A Bash call is several tools.** A shell splitter (quotes, `;`, `&&`, `||`, pipes, `&`, newlines, subshells, command substitution, loop bodies, heredoc bodies dropped) gives each segment a role: navigation (`cd`, `export`, assignments, `mkdir -p`, `source`, plumbing such as `echo` and `sleep`), filter (a pipe consumer such as `head`, `grep`, `jq`, `awk`, `sed` without `-i`), or operative. On the 200 uniform calls:
 
 - segments per call: mean 6.1, median 5, maximum 24;
 - operative segments per call: mean 3.1, median 3;
-- 126 calls span two or more classes of operative segment;
+- 122 calls span two or more classes of operative segment (71 two, 51 three or more);
 - 62 of the 70 calls with an action segment (publish, version-control write, service, build, file write) also carry a read.
 
 The engine has no shell tokenizer: the `commands:` regex runs on the raw string, so an anchored pattern such as `^gh\ ` misses `gh` after `git push &&`.
@@ -101,9 +103,9 @@ Half the segments reach an action-level example. The misses that matter are this
 
 ## Study 3: the judge reading a described call
 
-**What the judge sees today.** Nothing. The relevance gate (`gate::apply`) has one call site, in the prompt lane (`tools/ways-cli/src/cmd/scan/mod.rs:397`). Bash-lane hits are injected unjudged. The events log's 927 `way_judged` lines are 753 from UserPromptSubmit and 174 from PostToolUse.
+**What the judge sees today.** Nothing. The relevance gate (`gate::apply`) has one call site, in the prompt lane (`tools/ways-cli/src/cmd/scan/mod.rs:402` on main at 7fd6c0de). Bash-lane hits are injected unjudged, which departs from ADR-196 §1: that section applies the gate to every way the matcher selected semantically. The events log's 927 `way_judged` lines are 753 from UserPromptSubmit and 174 from PostToolUse.
 
-**Method.** The production judge request (claude-haiku-4-5, the system prompt, instruction and forced `record_judgements` tool of `tools/ways-agent/src/net.rs`, temperature 0, pass threshold 0.3, eight candidates per request), run twice per arm; a pair passes on the two-trial mean. Grades are the blind grades from studies 1 and 2, plus 575 pairs graded blind by claude-opus-5-5. The ordered described block reads `About to run: <description>`, then each `;`, `&&` or newline unit in order with navigation dropped, pipes inline, and each segment's tldr text.
+**Method.** The production judge request (claude-haiku-4-5, the system prompt, instruction and forced `record_judgements` tool of `tools/ways-agent/src/net.rs`, temperature 0, pass threshold 0.3, eight candidates per request, every candidate judged in as many requests as it takes), run twice per arm; a pair passes on the two-trial mean. Grades are the blind grades from studies 1 and 2, plus 575 pairs graded blind by claude-opus-5-5. The ordered described block reads `About to run: <description>`, then one line per `;`, `&&`, newline, loop or subshell unit, in order, with navigation dropped; segments joined by `|` or `||` stay on one line with the symbol (`git log (…) | grep (…) | head (…)`), and each segment reads `program subcommand (description)`, an operative segment with its matched tldr description and a filter with its tldr summary.
 
 The arms:
 - **A:** today's candidates, judged on the prompt lane's input (one line of narration);
@@ -116,7 +118,7 @@ The arms:
 
 | row | injections | ON / ADJ / OFF | ON per call | OFF per call | off-topic share |
 |---|---|---|---|---|---|
-| today's lane, unjudged | 340 | 5 / 64 / 271 | 0.025 | 1.36 | 80% |
+| today's lane as logged, after refire, unjudged | 340 | 5 / 64 / 271 | 0.025 | 1.36 | 80% |
 | A | 75 | 5 / 21 / 49 | 0.025 | 0.245 | 65% |
 | B | 46 | 8 / 18 / 20 | 0.040 | 0.100 | 43% |
 | surface I, unjudged | 636 | 32 / 133 / 471 | 0.160 | 2.36 | 74% |
@@ -124,19 +126,21 @@ The arms:
 | surface C, unjudged | 473 | 36 / 125 / 312 | 0.180 | 1.56 | 66% |
 | E | 133 | 35 / 70 / 28 | 0.175 | 0.140 | 21% (14–30) |
 
+The rows are not all alike. Today's lane and arms A to C use the fires the events log recorded, after refire held some back. Surfaces I and C and arms D and E are fresh scans with no refire. Fresh against fresh: today's surface fires about 6 ways per call on these calls (1,201 fires, study 2), with on-topic fires between about 0.045 per call (the 9 known) and about 0.14 (the upper bound from 0 of 160 sampled); arm E passes 0.175 on-topic and 0.14 off-topic per call. Refire would lower every fresh row.
+
 The judge's AUC for ON against OFF on its candidates, from prior grades only, was 0.67 for A, 0.92 for B, 0.78 for C, 0.97 for D and 0.98 for E. Adding narration (C) brought off-topic passes back. E beats D on every column; their intervals overlap.
 
-**Cost and time.** About half the uniform calls (96 of 200 for E) carry at least one candidate. E made 0.57 judge requests per Bash call at about $0.00175 per request, about $0.001 per Bash call. Median latency was 1.36 s and p95 5.9 s with eight requests in flight; 13–29% of requests across arms took longer than the prompt lane's 2,000 ms deadline. The two trials agreed on 468 of 471 E verdicts.
+**Cost and time.** About half the uniform calls (96 of 200 for E) carry at least one candidate. E made 0.57 judge requests per Bash call at about $0.00175 per request, about $0.001 per Bash call. Median latency was 1.36 s and p95 5.9 s with eight requests in flight; 9–29% of requests across arms and sets took longer than the prompt lane's 2,000 ms deadline (16–29% on the uniform set, 19% for E). The two trials agreed on 468 of 471 E verdicts.
 
-**API note.** The judge sends `temperature: 0`, so the two trials measure provider nondeterminism only. The claude-api reference (migrating to API version 2026-10-21, change 1) returns 400 for `temperature`, `top_p` and `top_k` on API version `2026-10-21`. The judge sends `anthropic-version: 2023-06-01` (`tools/ways-agent/src/net.rs:275`), where nothing changes, and the study's requests succeeded. The first bump of the version will drop the parameter, and verdict stability at the default temperature is unmeasured (#1130).
+**API note.** The judge sends `temperature: 0`, so the two trials measure provider nondeterminism only. The claude-api skill bundled with Claude Code 2.1.308 (`claude-api/shared/api-version-migration.md`, "Migrating to API version 2026-10-21", change 1) returns 400 for `temperature`, `top_p` and `top_k` on API version `2026-10-21`. The judge sends `anthropic-version: 2023-06-01` (`tools/ways-agent/src/net.rs:275`), where nothing changes, and the study's requests succeeded. The first bump of the version will drop the parameter, and verdict stability at the default temperature is unmeasured (#1130).
 
 ## Limits
 
 - Every grader is a Claude model. Study 1's grader made both passes. Study 2's blind graders were stricter than study 1's: on the original fired ways they agreed on 40 of 40 OFF, 4 of 13 ADJ and 4 of 7 ON. Study 3's Opus grader agreed with prior grades on 80% of 80 control pairs (κ 0.67), never turned OFF into ON, and leaned lenient. Absolute ON rates depend on the grader; comparisons within one grader on the same calls are firmer.
 - ON counts are small: 7 in the 248, 36 for C on the uniform set.
-- Scans were fresh, with no refire gate. The window's real injection rate after refire was 0.71 per call against 6.0 for fresh scans.
+- Study 2's surfaces and study 3's arms D and E were fresh scans, with no refire gate; today's lane and arms A to C in study 3 use logged fires, after refire. The window's real injection rate after refire was 0.71 per call against 6.0 for fresh scans.
 - The segment parser and verb classes are heuristic, and some tldr lookups are wrong (`sed -n '/A/,/B/p'` reads "Print just a first line").
-- Study 3's batches of eight ran in alphabetical order; production judges the first eight in matcher order.
+- Study 3's batches of eight ran in alphabetical order and judged every candidate; production's prompt lane judges the first eight in matcher order and passes the rest unjudged.
 - The 248 favour narration and the recall set favours action calls. The uniform set is the fair comparison, and it is one window on one host.
 
 ## Spend

@@ -50,8 +50,8 @@ Grouping the tool set along those families gives these types. Value is rated H (
 
 | Type | Tools | Primary field | Ways | attend |
 |---|---|---|---|---|
-| shell | Bash, PowerShell | `command` | H: 23 ways use `commands:` | L; a finished background shell is M, seen through Stop |
-| file-modify | Edit, Write, NotebookEdit, MultiEdit (legacy) | `file_path`, `notebook_path` | H: 31 ways use `files:`; NotebookEdit is not wired | N; the git sensor covers it |
+| shell | Bash, PowerShell | `command` | H: 23 way files carry `commands:` (on main at 7fd6c0de) | L; a finished background shell is M, seen through Stop |
+| file-modify | Edit, Write, NotebookEdit, MultiEdit (legacy) | `file_path`, `notebook_path` | H: 30 way files carry `files:` (on main at 7fd6c0de); NotebookEdit is not wired | N; the git sensor covers it |
 | file-read | Read, Glob, Grep, LSP | `file_path`, `path`, `filePath` (LSP is camelCase) | M; the most frequent tool, so the spawn cost is highest | N |
 | web | WebFetch, WebSearch | `url`; WebSearch has `query` and no URL | M: the moment untrusted content enters | N |
 | delegation | Agent, Workflow | `subagent_type`; Workflow `name` | H: the task lane exists | H: subagent and workflow start and finish |
@@ -75,9 +75,9 @@ Grouping the tool set along those families gives these types. Value is rated H (
 | `files:` | file-modify, `file_path`; Edit and Write, NotebookEdit missed | PreToolUse | `check-file-pre.sh`, `ways hook file` |
 | postcheck | Edit, Write, Bash, Task; any predicate over the payload | PostToolUse, PostToolUseFailure | `check-post.sh`, `ways hook post-tool` |
 | task lane | delegation; semantic match on the prompt | PreToolUse on Task, delivered at SubagentStart | `check-task-pre.sh` |
-| `tools:` (ADR-704, proposed on PR #1115's branch) | any wired tool; the name only | PreToolUse and PostToolUse | `check-tool.sh`, `ways hook tool` |
+| `tool_name:` (ADR-704, on main) | the wired tools (EnterPlanMode, ExitPlanMode, Workflow); the name only | the events a way's `tool_event:` lists; PreToolUse and PostToolUse are wired | `check-tool.sh`, `ways hook tool` |
 
-`commands:` and `files:` each name one type and match a regex against that type's primary field. The `tools:` lane matches the name alone. Its scan copies the file lane's hit loop.
+`commands:` and `files:` each name one type and match a regex against that type's primary field. The `tool_name:` lane matches the name alone. Its scan mirrors the file lane's hit loop (ADR-704 item 2).
 
 ## Hook events beyond tool calls
 
@@ -111,7 +111,7 @@ A skill reaches the model by one of two routes, and they fire different hooks.
 - **The transcript of a typed skill.** A session in this project where the operator typed `/attend` records a user entry carrying `<command-message>attend</command-message>` and `<command-name>/attend</command-name>`, then the expanded text, and the model's next action is an ordinary tool call; no Skill `tool_use` appears (read from the session transcript).
 - **Not verified:** whether a Skill tool call also fires UserPromptExpansion. The reference describes the event as covering user-typed commands only (inferred from its wording).
 
-Gaps on tool calls themselves: `EndConversation` fires neither PreToolUse nor PostToolUse. PostToolUseFailure does not fire for a call rejected before it runs. Workflow's PostToolUse fires at launch, with `status: async_launched`, not at completion.
+Gaps on tool calls themselves: `EndConversation` fires neither PreToolUse nor PostToolUse (hooks reference, read: "on every tool call inside the agentic loop: `PreToolUse` and `PostToolUse`, except `EndConversation` calls, which skip both"). PostToolUseFailure does not fire for a call rejected before it runs. Workflow's PostToolUse fires at launch, with `status: async_launched`, not at completion.
 
 ## What a hook entry costs
 
@@ -126,5 +126,5 @@ Gaps on tool calls themselves: `EndConversation` fires neither PreToolUse nor Po
 attend's sensors are polled (`Sensor::poll` in `sensor-trait`), and hooks push one process per event. Three routes join them:
 
 - The ways hooks already receive every payload they are wired for (#846). They could write each event to a file that a sensor reads on its poll. attend already reads ways state this way: its context and disclosure sensors call `ways context --json`.
-- The attend mod registers in-process `tool.call`, `turn.complete` and `session.*` handlers (`plugins/attend/hooks/register.tsx`). It runs only with the mods preview flag on.
+- The attend mod registers in-process `session.*` and `turn.complete` handlers, and `tool.call` handlers scoped to its own five MCP tools (`attend_listen`, `attend_send`, `attend_reply`, `attend_join`, `attend_peers`; `plugins/attend/hooks/register.tsx`, lines 877-1067 on main). It sees other tool calls only if new handlers are registered, and it runs only with the mods preview flag on.
 - A hook could call `attend` itself, one more process per event. The hooks today invoke one binary and add no logic (`attend-drain-stop.sh`).
