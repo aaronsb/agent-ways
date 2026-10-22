@@ -13,9 +13,9 @@ Commit once per accepted unit of work and before any phase change, so each step 
 
 ## Before Committing
 
-1. Leave uncommitted changes you did not make in place. Build on them and do not discard them.
+1. Leave uncommitted changes you did not make in place. Build on them. Do not reset, stash or overwrite them unless their owner calls them disposable.
 2. Remove temp and debug scripts, test outputs, and scratch files.
-3. Stage files by name.
+3. Stage files by name. `git add -A`, `git add .` or a bare `git stash -u` sweep up other sessions' work.
 
 ## The Message Body
 

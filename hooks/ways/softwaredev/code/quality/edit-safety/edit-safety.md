@@ -22,7 +22,7 @@ An edit made against a stale picture of a file loses work. The next build overwr
 
 - Re-read the file from disk right before the edit. A read from earlier in the session may be stale.
 - Keep the other person's changes. Make the edit without reformatting or reordering their parts, and find records by key, not by line position.
-- Build on uncommitted changes in the working tree. Do not reset, stash or overwrite them unless their owner calls them disposable.
+- Uncommitted changes in the working tree: delivery/commits/prepare.
 - When your edit would land in the region they are changing, say so and agree on an order before saving.
 
 ## Common Rationalizations
@@ -37,5 +37,6 @@ An edit made against a stale picture of a file loses work. The next build overwr
 
 - code/quality/integration(softwaredev) — the class sweep, including a generated file per consumer
 - meta/subagents/agent-teams(meta) — several agents in one checkout
+- delivery/commits/prepare(softwaredev) — uncommitted changes you did not make, and staging by name
 - delivery/patches(softwaredev) — patches generated from real file changes
 - freshness(softwaredev) — generated files that fell behind their source

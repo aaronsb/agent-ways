@@ -14,6 +14,10 @@ requires: ["Bash(cut:*)", "Bash(git:*)", "Bash(sed:*)"]
 
 The macro above shows the current git branch and state. Glance at it before writing — if you're on `main` and about to make a non-trivial change, consider branching first.
 
+## In a Shared Checkout
+
+When other sessions or agents work in the same checkout, or you were handed a worktree, do not switch branches there. A switch moves every session in that checkout onto the new branch. Cut the branch in a worktree of your own instead: `git worktree add -b <branch> <path>`.
+
 ## When to Branch
 
 This is guidance, not a gate. Use judgment:
@@ -48,3 +52,4 @@ Keep names short, lowercase, hyphen-separated. The branch name often becomes the
 ## See Also
 
 - delivery/branching/topic-branch(softwaredev) — cutting the branch before the first edit, one branch per piece of work
+- subagents/agent-teams(meta) — git in a checkout several agents share

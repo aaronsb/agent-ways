@@ -28,9 +28,9 @@ Assume another session may be live in the same checkout. A branch switch there m
 |----|-------|
 | Run `git branch --show-current` and `git status` before any git action | Switch branches in the shared checkout |
 | Do parallel task work in a worktree | Run task work in the shared checkout |
-| Stage files by name | Run `git add -A`, `git add .` or a bare `git stash -u`, which sweep up other sessions' work |
-| Leave files you did not change as you found them | Restore, reset or clean another session's changes |
 | Check for other sessions' new commits before a merge | Merge without looking |
+
+Staging by name and leaving other sessions' changes alone: delivery/commits/prepare.
 
 ## Teammate traffic
 
@@ -52,3 +52,4 @@ Assume another session may be live in the same checkout. A branch switch there m
 - subagents/briefs(meta) — what each agent's prompt carries
 - teams(collaboration) — the teammate side of this traffic
 - delivery/branching(softwaredev) — branch awareness before edits
+- delivery/commits/prepare(softwaredev) — uncommitted changes you did not make, and staging by name

@@ -48,3 +48,4 @@ Run each command an instruction describes and confirm it works today (delivery/g
 - knowledge/authoring(meta) — writing a project way for a convention
 - skills(meta) — choosing between a skill and a way
 - readme(documentation) — the human front door, distinct from agent instructions
+- writing/register(writing) — a writing style held across every session goes to the output style or this file

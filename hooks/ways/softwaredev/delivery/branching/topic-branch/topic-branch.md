@@ -12,7 +12,7 @@ When the work calls for a branch, cut it before the first edit. This holds in th
 1. Run `git status` and `git branch --show-current`. Find the default branch with `git symbolic-ref refs/remotes/origin/HEAD` or `gh repo view --json defaultBranchRef`.
 2. On the default branch, pull it, then run `git switch -c <type>/<short-topic>`. Use the name the user gave, if any.
 3. State the branch name in one line and keep going. A local branch is cheap to undo, so there is no need to stop and ask.
-4. Carry uncommitted changes you did not make onto the new branch. Do not stash or discard them.
+4. Carry uncommitted changes you did not make onto the new branch (delivery/commits/prepare).
 
 ## One Branch per Piece of Work
 
@@ -29,3 +29,4 @@ When the work calls for a branch, cut it before the first edit. This holds in th
 
 - delivery/branching(softwaredev) — parent: when to branch and how to name it
 - meta/subagents/agent-teams(meta) — why teammates in a shared checkout do not switch branches
+- delivery/commits/prepare(softwaredev) — uncommitted changes you did not make, and staging by name

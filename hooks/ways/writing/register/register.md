@@ -39,3 +39,4 @@ The session's register comes from the output style (ADR-178). When the user want
 - trust/prose(meta) — decoration and self-editing in long-form prose
 - trust/voice(meta) — whose voice to write in, a separate question from how it reads
 - writing/own-words(writing) — editing the user's text in their voice
+- documentation/instruction-files(documentation) — a convention for one kind of work goes to a project way

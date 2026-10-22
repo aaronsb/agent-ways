@@ -44,6 +44,8 @@ async function processOrder(orderId) {
 - **Programmer errors** (bugs): null reference, type mismatch, assertion failure — fail fast, don't catch
 - **Operational errors** (expected failures): network timeout, file not found, invalid input — handle gracefully: retry, return fallback, or return clear error to user
 
+A failed language-model call takes no fallback. Return an error naming the cause instead of canned or sample output (code/llm-features).
+
 ## At the Boundary
 
 A required config value that is missing or malformed fails at startup, with a non-zero exit naming every offender. A default added to silence that failure turns a loud deploy failure into a silent wrong value in production. An interpolation that substitutes an empty string is the same defect. Optional means the program works without the value, and it is declared where the value is read.
@@ -63,3 +65,4 @@ An error names its cause with a type or status that describes what happened. Whe
 
 - code/security(softwaredev) — error messages can leak information
 - code/testing(softwaredev) — test error paths explicitly
+- code/llm-features(softwaredev) — a failed model call returns an error, never canned output
