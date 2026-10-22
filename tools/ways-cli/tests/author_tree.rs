@@ -43,6 +43,8 @@ impl Fx {
             .args(args)
             .current_dir(cwd)
             .env("NO_COLOR", "1")
+            // The output is piped, so the table fits to $COLUMNS.
+            .env("COLUMNS", "80")
             .env("HOME", self.root.join("home"))
             .env("XDG_CONFIG_HOME", self.root.join("config"))
             .env("XDG_CACHE_HOME", self.root.join("cache"))
@@ -94,6 +96,22 @@ fn jaccard_prints_the_sibling_pair_by_relative_name() {
     // {edit prose revise} and {tone voice prose} share one of five words.
     assert!(pair.contains("0.200"), "{pair}");
     assert_relative(&out, &fx.root);
+}
+
+#[test]
+fn jaccard_prints_the_value_in_full_beside_long_names() {
+    let fx = Fx::new("long");
+    let parent = "prose/a-rather-long-category-name";
+    Fx::way(&fx.ways(), parent, "long names");
+    Fx::way(&fx.ways(), &format!("{parent}/the-first-child-with-a-long-name"), "alpha beta gamma");
+    Fx::way(&fx.ways(), &format!("{parent}/the-second-child-with-a-long-name"), "alpha delta");
+    let out = fx.run(&fx.root, &["--ways-dir", fx.ways().to_str().unwrap(), parent, "--jaccard"]);
+    let pair = out
+        .lines()
+        .find(|l| l.contains("0.") || l.contains("0…"))
+        .unwrap_or_else(|| panic!("no pair row:\n{out}"));
+    // {alpha beta gamma} and {alpha delta} share one of four words.
+    assert!(pair.trim_end().ends_with(" 0.250"), "the value must print in full: {pair:?}\n{out}");
 }
 
 #[test]
