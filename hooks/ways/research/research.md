@@ -16,7 +16,7 @@ Before searching, state what you're trying to learn and why. A vague "research X
 ## Investigation Structure
 
 1. **Scope** — What's in bounds? What would be a tangent?
-2. **Gather** — Use tools (WebSearch, WebFetch, Grep, Read) to collect information. Prefer primary sources over summaries of summaries. When the question spans several independent sources, asking for the research is asking for the sweep: fan `Explore` or `general-purpose` agents across them rather than pausing to request permission, and say why in a clause ("six independent sources; agents return conclusions, not page dumps"). Deep-research and `Workflow` are not covered by that — propose those and discuss. See ADR-175. Put four rules in every fan-out brief:
+2. **Gather** — Use tools (WebSearch, WebFetch, Grep, Read) to collect information. Prefer primary sources over summaries of summaries. When the question spans several independent sources, fan `Explore` or `general-purpose` agents across them if the user asked for breadth, a skill in use directs it, or a CLAUDE.md line covers it, and say why in a clause ("six independent sources; agents return conclusions, not page dumps"). Otherwise, where your instructions restrict the Agent tool, name the fan-out and its width in one line and wait. Deep-research and `Workflow` are proposals to discuss. See meta/subagents. Put four rules in every fan-out brief:
    - Say "not found" rather than guess.
    - Every claim carries a file path or URL and an exact value (version, port, name).
    - Sample rather than bulk-read: name the manifests, entry points, and config files to start from.

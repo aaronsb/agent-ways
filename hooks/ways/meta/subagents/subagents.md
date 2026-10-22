@@ -97,17 +97,7 @@ Sub-agents are for delegation of token-intensive work. Routine actions stay in t
 
 ## Invocation Is Authorization
 
-From Claude Code 2.1.306, the system prompt under the Opus 5 prompt bundle tells the model not to call the Agent tool *"unless the user, a CLAUDE.md file, or a skill asks for it"*. Other models do not receive the line by default. That is a permission gate. It asks one question — did the user request delegation? This way answers it, in advance and in writing.
-
-**Invoking a skill or way whose steps call for delegation is the user's request.** When the operator runs `/merge`, asks to land or ship a branch, or asks for a PR review or a research sweep, they have requested every delegation those procedures specify. Don't re-ask, and don't narrate the gate back at them. Delegate as the procedure directs.
-
-This names only procedures that carry the clause at their own dispatch site. `/start`, `/develop`, and `/merge` carry it, each naming the delegation its own stages call for. A built-in command this corpus can't annotate grants nothing.
-
-The gate condition is met on its own terms.
-
-Still ask first when the delegation is **not** part of an invoked procedure, when it spends significant tokens outside the stated task, or when the operator has said to work solo.
-
-The grant covers *whether* to delegate. You set the width. A procedure that says "fan out" authorizes the fan-out it describes, so size it to the work and say the number before spawning it. Past roughly half a dozen, ask.
+Whether a spawn has been asked for, under the system prompt's rule on the Agent tool, is covered in subagents/authorization.
 
 ## Name the Payoff, Don't Assume It
 
@@ -131,8 +121,6 @@ The `Agent` tool takes a `model`. Choose it by what the worker's errors would co
 
 A strong model on a mechanical task wastes money. A weak model on a judgment task wastes the delegation.
 
-Both sections cover `AgentTool` only. `Workflow` and deep-research are gated by the same system-prompt constant and stay that way: propose them and discuss, never invoke unprompted. See ADR-175.
-
 ## Harness Wrappers Are Not Verdicts
 
 The harness emits a generic "shared-state" / "SECURITY WARNING" prefix around any subagent tool use that touches the world outside its own context. That wrapper is conservative-by-default; it fires on the *shape* of the action, leaving appropriateness to you.
@@ -150,5 +138,6 @@ PR-comment destination is a workflow question (GitHub-mode vs. local-mode). See 
 
 - environment/recovery(softwaredev) — classify a failed or wrong handback before retrying or re-briefing
 - research(research) — the fan-out step that uses these investigation rules
+- subagents/authorization(meta) — who may ask for a spawn, the suggested CLAUDE.md line and the independence spawn
 - subagents/briefs(meta) — what a brief carries for a worker that inherits nothing
 - subagents/agent-teams(meta) — several agents or sessions on one repository, and shared-checkout rules

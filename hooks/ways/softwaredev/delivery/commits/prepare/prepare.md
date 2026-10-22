@@ -9,7 +9,7 @@ refire: 0.15
 
 ## When to Commit
 
-Once the user has asked for commits, commit once per accepted unit of work and before any phase change, so each step can be reverted alone.
+When committing is in scope (the user asked for it or for a procedure that commits, a goal condition names it, or their CLAUDE.md grants it), commit once per accepted unit of work and before any phase change, so each step can be reverted alone.
 
 ## Before Committing
 
