@@ -32,6 +32,7 @@ live = root / 'docs/architecture'
 
 # Bodies edited on purpose after conversion: number -> reason.
 BODY_EDITED = {
+    '188': 'rewritten in place while still proposed, on the operator\'s direction (its considered entries); the earlier draft is in git history',
     '302': 'stray tool-call text removed from the end of the body',
 }
 
