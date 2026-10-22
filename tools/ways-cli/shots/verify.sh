@@ -74,7 +74,7 @@ setup_judge() {
   printf 'engine: claude-code\n' >"$h/.config/agent-ways/agent.yaml"
   mkdir -p "$h/.claude/sessions"
   for id in $JUDGED; do
-    printf '{"pid":%s,"sessionId":"%s","cwd":"/home/dev/shop"}\n' "${pids[$i]}" "$id" >"$h/.claude/sessions/${pids[$i]}.json"
+    printf '{"pid":%s,"sessionId":"%s","cwd":"%s/shop"}\n' "${pids[$i]}" "$id" "$h" >"$h/.claude/sessions/${pids[$i]}.json"
     mkdir -p "$h/.local/state/agent-ways/judge/$id"
     i=$((i + 1))
   done
