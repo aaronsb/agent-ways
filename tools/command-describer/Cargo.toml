@@ -1,0 +1,14 @@
+[package]
+name = "command-describer"
+version = "0.1.0"
+edition = "2021"
+description = "Parses a shell command string into ordered segments with role, program, subcommand, flags and class (ADR-188)"
+license = "AGPL-3.0-or-later"
+
+[lib]
+name = "command_describer"
+path = "src/lib.rs"
+
+# No dependencies: the describer runs on every Bash call's PreToolUse, and it
+# knows nothing of ways, embeddings, the judge or hook events (ADR-188 item 4).
+[dependencies]
