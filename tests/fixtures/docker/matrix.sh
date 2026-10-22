@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tier 2 across a matrix of arms, models and trials: `make test-live-matrix`.
 #
-# An arm is a checkout of this repo (a worktree of a branch), so an ablation
+# An arm is a clone of this repo at one branch, so an ablation
 # compares the corpus with and without a change. Each run is one tier 2
 # invocation of that arm's own test-live.sh, with one model.
 #
