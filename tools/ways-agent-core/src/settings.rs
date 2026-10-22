@@ -99,7 +99,7 @@ const KEYS: &[KeySpec] = &[
     KeySpec {
         name: "gate.profiles.*.timeout_ms",
         path: &["profiles", "*", "timeout_ms"],
-        kind: Kind::Int { min: 1, max: 60_000 },
+        kind: Kind::Int { min: 1, max: crate::profile::MAX_TIMEOUT_MS as i64 },
         default: DefaultValue::Fn(|b| shipped_field(b, "timeout_ms")),
         doc: "The judge call's deadline in milliseconds; past it the gate fails open.",
         long: "A call takes about 0.6 s plus 0.1 s per candidate (ADR-195).",

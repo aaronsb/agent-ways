@@ -446,6 +446,32 @@ mod tests {
         profile::resolve(&user, |p| p == Provider::Anthropic).unwrap().unwrap()
     }
 
+    /// The hooks whose scan runs this gate (the prompt lane and the queued
+    /// messages it scans) must outlast the longest wait a profile allows: the
+    /// deadline, the agent's start and the read grace. Claude Code kills a
+    /// hook at its bound and drops its output, the fail-open record included.
+    #[test]
+    fn the_prompt_lane_hooks_outlast_the_longest_judge_wait() {
+        let repo_settings = std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").into()),
+        )
+        .join("../../settings.json");
+        let Ok(raw) = std::fs::read_to_string(&repo_settings) else { return }; // not a source checkout
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let wait = Duration::from_millis(profile::MAX_TIMEOUT_MS) + ways_agent_core::client::START_WAIT + READ_GRACE;
+        let mut seen = HashSet::new();
+        for entries in v["hooks"].as_object().unwrap().values() {
+            for cmd in entries.as_array().unwrap().iter().flat_map(|e| e["hooks"].as_array().unwrap()) {
+                let command = cmd["command"].as_str().unwrap_or("");
+                let Some(script) = ["check-prompt.sh", "check-queued.sh"].into_iter().find(|s| command.ends_with(s)) else { continue };
+                seen.insert(script);
+                let bound = Duration::from_secs(cmd["timeout"].as_u64().unwrap_or(600));
+                assert!(bound > wait, "{script}: a {bound:?} bound cannot hold a {wait:?} judge wait");
+            }
+        }
+        assert_eq!(seen.len(), 2, "found both prompt-lane hooks: {seen:?}");
+    }
+
     type Events = std::cell::RefCell<Vec<Vec<(String, String)>>>;
 
     fn recorder(events: &Events) -> impl Fn(&[(&str, &str)]) + '_ {

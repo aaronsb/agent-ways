@@ -28,18 +28,22 @@ const TAIL_BYTES: u64 = 64 * 1024;
 
 /// The calling agent's prose since its last human turn, or `None`.
 ///
-/// Read from the calling agent's own transcript ([`session::current_transcript`]).
 /// A subagent's hook carries the parent's session id, so a session-id lookup
-/// would embed the lead's narration into the subagent's surface; a subagent
-/// with no transcript of its own gets no lookbehind.
-///
-/// [`session::current_transcript`]: crate::session::current_transcript
+/// would embed the lead's narration into the subagent's surface. See
+/// [`intent_in`].
 pub(crate) fn intent(session_id: &str) -> Option<String> {
-    prose_in(&crate::session::current_transcript(session_id)?)
+    intent_in(
+        &ways_core::paths::claude_dir(),
+        crate::cmd::show::firing_transcript(),
+        &crate::util::project_dir(),
+        session_id,
+        &crate::session::current_agent(),
+    )
 }
 
-/// [`intent`] against an explicit config dir, hook transcript and agent.
-#[cfg(test)]
+/// [`intent`] against an explicit config dir, hook transcript and agent. Read
+/// from that agent's own transcript ([`crate::session::transcript_in`]); a
+/// subagent with no transcript of its own gets no lookbehind.
 fn intent_in(
     claude: &claude_sessions::ClaudeDir,
     hook_transcript: Option<&str>,
@@ -47,11 +51,8 @@ fn intent_in(
     session_id: &str,
     agent: &str,
 ) -> Option<String> {
-    prose_in(&crate::session::transcript_in(claude, hook_transcript, project_dir, session_id, agent)?)
-}
-
-fn prose_in(transcript: &Path) -> Option<String> {
-    assistant_prose_since_last_human(&read_tail(transcript, TAIL_BYTES)?)
+    let transcript = crate::session::transcript_in(claude, hook_transcript, project_dir, session_id, agent)?;
+    assistant_prose_since_last_human(&read_tail(&transcript, TAIL_BYTES)?)
 }
 
 /// Read up to `max_bytes` from the end of `path`, lossily decoded (a tail that
