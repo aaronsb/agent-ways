@@ -27,6 +27,11 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "Acceptable as written"
+    via: multiple-choice question in the agent-ways session, 2026-10-22; options were acceptable as written, fields only for now, or no excerpts
+    covers: [excerpt]
 status: proposed
 date: 2026-10-22
 deciders:

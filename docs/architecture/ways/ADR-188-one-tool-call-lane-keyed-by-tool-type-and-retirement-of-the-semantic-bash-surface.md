@@ -39,6 +39,11 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "Measure first"
+    via: multiple-choice question in the agent-ways session, 2026-10-22; options were retire it, keep it and repair per ADR-191, or measure first (sample the 5,705 fires for on-topic rate before deciding)
+    covers: [semantic]
 status: proposed
 date: 2026-10-22
 deciders:
