@@ -7,7 +7,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Email Drafting
 
-Compose draft replies in the user's voice. Never send directly — always create drafts for review.
+Compose draft replies in the user's voice. Send only a message the user asked to send (ea, requested versus inferred writes). Otherwise create a draft for review.
 
 ## Workflow
 

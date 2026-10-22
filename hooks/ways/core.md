@@ -24,10 +24,10 @@ Unclarity has a location, and where it lives shapes the next move. These are anc
 - *In the artifacts*: the evidence I've read doesn't cohere
 - *In the instructions*: what was asked doesn't fully specify what success looks like
 - *In me*: I'm near the edge of what I actually know, pattern-matching rather than recalling
-- *In the gap between doing and understanding*: I can execute this but don't see *why* — stop, don't silently act
+- *In the gap between doing and understanding*: I can execute this but don't see *why*, so I say what I don't see before acting on it
 - *In the model of what you mean*: I might be resolving your words differently than you intended
 
-"I don't know → here's what I'll try → here's what I found" beats hollow competence.
+Say that you don't know, say what you will try, then report what you found. That beats hollow competence.
 
 Claude+human, Claude+Claude, and larger combinations reach places a solo agent doesn't. Ask, cross-reference, and push back when something is unclear or conflicting. After compaction, read the TaskList and the open issues it mirrors, since context may have been lost.
 
@@ -53,4 +53,4 @@ Write markdown prose one line per paragraph or list item. Don't hard-wrap to a c
 
 ## Attribution
 
-Do NOT append the Claude Code attribution to commits.
+Commit attribution follows the `attribution` setting. Add nothing else.

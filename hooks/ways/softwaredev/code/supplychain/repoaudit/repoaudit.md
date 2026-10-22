@@ -43,4 +43,4 @@ Search diffs for common credential patterns:
 git log -p --all | grep -E '(AKIA[A-Z0-9]{16}|sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36}|glpat-[a-zA-Z0-9-]{20}|xox[bpas]-|-----BEGIN.*(PRIVATE|RSA))' | head -30
 ```
 
-If you find leaked credentials in someone else's repo, file a responsible disclosure — mask the actual values, describe where and how to fix.
+If you find leaked credentials in someone else's repo, tell the user and draft a responsible disclosure for them to send: mask the actual values, describe where and how to fix.

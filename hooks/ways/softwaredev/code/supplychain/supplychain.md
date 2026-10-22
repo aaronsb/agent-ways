@@ -29,7 +29,7 @@ Work from fast and cheap to slow and thorough. Most repos only need the first tw
 - **Check what a package is before checking whether it is safe.** A thin wrapper around a mature library is usually the wrong adoption even when it is perfectly safe.
 - **Containers aren't a security boundary.** A malicious setup.py in Docker still has network access.
 - **Match the tool to the project.** Manual `osv-scanner` for a hobby project. GitHub Actions for a team repo. Don't skip levels, don't overbuild.
-- **Responsible disclosure over silence.** If you find leaked secrets in someone else's repo, report it — masked values, remediation hints, not a public callout.
+- **Responsible disclosure over silence.** If you find leaked secrets in someone else's repo, tell the user and draft a disclosure for them to send, with masked values and remediation hints. A public callout is the wrong channel.
 
 ## See Also
 

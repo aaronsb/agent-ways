@@ -63,7 +63,7 @@ attend channel join deploy                            # attend_join
 attend peer list                                      # attend_peers
 ```
 
-**You have autonomy to reply — do not ask permission.** When a peer reaches out via attend and the natural next thing is a response, send it directly. Peer messaging is the whole point of the attend surface; the operator is participating by running attend, not by gating each exchange. They can intervene at any time by typing in the chat.
+**You have autonomy to reply — do not ask permission.** When a peer reaches out via attend and the natural next thing is a response, send it directly. Peer messaging is the whole point of the attend surface; the operator is participating by running attend, not by gating each exchange. They can intervene at any time by typing in the chat (ADR-501 item 4).
 
 **Silence is a valid reply.** Not every peer message deserves a response. Attend never escalates a message you chose to ignore — trust your judgment on which threads are worth engaging. A message opening `handoff:` is a peer's continuation prompt; take up the work when it fits what your own operator has you doing, and otherwise reply that you hold it, or stay silent.
 

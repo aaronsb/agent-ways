@@ -7,7 +7,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Communications — Chat Platforms
 
-**Scope.** This way covers human chat platforms reached through their own tools: Slack, Microsoft Teams, and the like. Peer messaging between Claude sessions over `attend` is a different surface with its own way, environment/attend(softwaredev). Replies there need no approval, and nothing below applies to them.
+**Scope.** This way covers human chat platforms reached through their own tools: Slack, Microsoft Teams, and the like. Peer messaging between Claude sessions over `attend` is a different surface with its own way, environment/attend(softwaredev). Replies there need no approval (ADR-501 item 4), and nothing below applies to them.
 
 Access those platforms for reading conversations, checking unread threads, and composing posts.
 

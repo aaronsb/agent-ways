@@ -29,7 +29,7 @@ Scopes match the area of change: `ways`, `hooks`, `adr`, `docs`, `config`, `gove
 
 ## Rules
 
-- Skip "Co-Authored-By" and emoji trailers
+- Attribution trailers follow the `attribution` setting; add no other trailer
 - Focus commit message on the "why" not the "what"
 - Keep commits atomic - one logical change per commit
 
