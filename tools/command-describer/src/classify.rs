@@ -40,7 +40,10 @@ pub(crate) fn build(src: &str, excluded: &[Range<usize>], raw: RawSegment) -> Op
     let rest = &words[at + 1..];
     let (subcommand, flags) = subcommand_and_flags(program, rest);
 
-    let role = if NAVIGATION.contains(&program) {
+    // A navigation program behind a wrapper runs as a process: `sudo -n
+    // true` checks a credential, `sudo mkdir` writes as root.
+    let wrapped = words[..at].iter().any(|w| WRAPPERS.contains(&basename(w)));
+    let role = if NAVIGATION.contains(&program) && !wrapped {
         Role::Navigation
     } else if connector == Connector::Pipe
         && FILTERS.contains(&program)

@@ -14,6 +14,7 @@ pub const NAVIGATION: &[&str] = &[
     "cd", "pushd", "popd", "export", "set", "unset", "source", ".", "local", "declare", "alias",
     "trap", "shift", "echo", "printf", "true", "false", ":", "sleep", "wait", "read", "exit",
     "return", "test", "[", "[[", "umask", "shopt", "eval", "type", "hash", "ulimit", "mkdir",
+    "break", "continue",
 ];
 
 /// Programs that are filters when a pipe feeds them. At the start of a call

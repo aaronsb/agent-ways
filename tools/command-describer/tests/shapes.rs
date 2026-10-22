@@ -632,6 +632,32 @@ fn per_segment_text_lets_an_anchored_regex_match_after_a_connector() {
 }
 
 #[test]
+fn a_navigation_program_behind_a_wrapper_is_operative() {
+    let segs = parse("sudo -n true && yay -S --noconfirm foo");
+    assert_eq!(segs[0].program.as_deref(), Some("true"));
+    assert_eq!(segs[0].role, R::Operative);
+    assert_eq!(operative_texts(&segs)[0], "sudo -n true");
+    // An assignment is not a wrapper.
+    assert_eq!(parse("FOO=1 echo hi")[0].role, R::Navigation);
+}
+
+#[test]
+fn a_subshell_after_a_leading_keyword_is_parsed() {
+    assert_eq!(programs("time (python3 -c pass)"), ["python3"]);
+    assert_eq!(programs("! (git push) && echo no"), ["git", "echo"]);
+    assert_eq!(
+        programs("if (make test); then echo ok; fi"),
+        ["make", "echo"]
+    );
+}
+
+#[test]
+fn loop_control_is_navigation() {
+    let segs = parse("for f in a b; do [ -f $f ] && continue; break; done");
+    assert!(segs.iter().all(|s| s.role == R::Navigation), "{segs:?}");
+}
+
+#[test]
 fn operative_texts_skip_navigation_and_filters() {
     let segs = parse("cd x && git log | grep y | head; echo done");
     assert_eq!(operative_texts(&segs), ["git log"]);
