@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"the plan is approved, save the prediction yaml and commit it before any trials run"}
+{"kind":"situational","prompt":"start every predicted number from same as last round and give each one a reason before the eval"}

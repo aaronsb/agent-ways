@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"write the requirement table for this round with a source and a test for each row"}
+{"kind":"situational","prompt":"turn last round's proposals and failure ids into the new requirements and log the defaults you picked"}
