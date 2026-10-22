@@ -53,6 +53,13 @@ considered:
     said: "Measure first"
     via: multiple-choice question in the agent-ways session, 2026-10-22; options were retire it, keep it and repair per ADR-191, or measure first (sample the 5,705 fires for on-topic rate before deciding)
     covers: [semantic]
+  - operator: aaronsb
+    said: "Rebuild per the flow (Recommended)"
+    via: "multiple-choice question in the agent-ways session, 2026-10-22, after the surface ablation and the judge study; option text: the Bash lane is rebuilt as parse, then match on command verbs + Bash description, then judge reading the ordered tldr-described block, plus per-segment commands: regexes; supersedes 'retire'"
+    covers: [semantic]
+  - operator: aaronsb
+    said: "Parallel, deliver post (Recommended). this can be a use of our late response pipeline"
+    via: "multiple-choice question in the agent-ways session, 2026-10-22, after the surface ablation and the judge study; option text: the command runs immediately, the judge runs alongside, approved ways arrive on PostToolUse; the operator then named ADR-606's deferred (late response) pipeline as the carrier"
 status: proposed
 date: 2026-10-22
 deciders:
