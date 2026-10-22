@@ -228,7 +228,15 @@ impl Fixture {
     /// Whether session `sid`'s enrollment record holds a way. A record
     /// whose last way went keeps only its process, and enrolls nothing.
     pub fn enrolled(&self, sid: &str) -> bool {
-        std::fs::read_to_string(self.marker(sid)).is_ok_and(|r| r.lines().any(|l| ["run", "join", "listen", "add"].contains(&l)))
+        ["run", "join", "listen", "add"].iter().any(|line| self.record_has(sid, line))
+    }
+
+    /// Whether session `sid`'s enrollment record has `line` as a whole
+    /// line. The record's `claude` key names the host, which may hold any
+    /// of these words (a GitHub runner is `runnervm…`), so a substring
+    /// match is no test of the record.
+    pub fn record_has(&self, sid: &str, line: &str) -> bool {
+        std::fs::read_to_string(self.marker(sid)).is_ok_and(|r| r.lines().any(|l| l == line))
     }
 
     pub fn command(&self) -> Command {
