@@ -57,6 +57,5 @@ Same pattern: landing page, reference, how-to, implementation.
 | [development.md](development.md) | Dev checkout, workspace crate map, build plumbing, check scripts |
 | [vocabulary.md](vocabulary.md) | The framing: terminology anchors mapping project terms to established concepts |
 | [reference/statusline.md](reference/statusline.md) | The reference status line, `statusline.sh`: using it as is, or sourcing its segments into your own |
-| [reference/ways-cli-renames.md](reference/ways-cli-renames.md) | Old `ways` command names and their replacements (ADR-507) |
 | [research/yesno-relevance-gate/README.md](research/yesno-relevance-gate/README.md) | The evidence behind the relevance judge (ADR-195) |
 | [images/](images/) | Theme imagery and screenshots |
