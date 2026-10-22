@@ -32,13 +32,13 @@ Write no conclusions until every scout has reported. Say which ones are still ou
 
 ## Check the key claims
 
-- For each claim the answer rests on, have an agent that did not find it try to refute it, and have an independent run recompute the key figures from the source.
+- For each claim the answer rests on, have an agent that did not find it try to refute it, and have an independent run recompute the key figures from the source. The refuter and the recompute run are independence spawns. It is asked for when the user asked for the sweep's claims to be checked, and otherwise you propose it. Name the payoff in a clause: a fresh agent is free of the finder's reading. The scouts follow the fan-out rule in research.
 - Each verdict is refuted, could not refute, or unverifiable, with its evidence. Could not refute is the strongest verdict a check can give (the skeptic agent).
 - Reconcile totals that appear in more than one view, and keep the caveats visible.
 
 ## Output
 
-- Save durable findings where the project keeps its research, with a ledger of each claim, its source and its verdict.
+- The main agent saves durable findings where the project keeps its research, with a ledger of each claim, its source and its verdict. A subagent returns the ledger as text.
 - In chat, give the answer, then the confidence, then the caveats.
 
 ## Common Rationalizations

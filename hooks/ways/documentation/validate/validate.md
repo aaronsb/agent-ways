@@ -12,7 +12,7 @@ Documentation you wrote is documentation you already believe. Reading it back, y
 
 ## Method: a fresh reader with only the entry point
 
-Spawn a new general-purpose or Explore agent. Never a fork: a fork inherits your context and will pass a page a stranger would fail. Give it the entry point alone (the README, the index page, the onboarding guide) and none of the facts you are testing for.
+The reader is a new general-purpose or Explore agent. Never a fork: a fork inherits your context and will pass a page a stranger would fail. Give it the entry point alone (the README, the index page, the onboarding guide) and none of the facts you are testing for. When the user asked for the docs to be validated, the fresh reader is asked for: spawn it and name the payoff in a clause, a reader who has not seen your reasoning. When this way fired on an edit and nobody asked for a check, propose the cold read.
 
 1. **Require a load declaration.** Before each answer the agent lists what it read, in what order, and what it deliberately skipped. The right answer reached by reading half the repository is a navigation failure.
 2. **Ask three to five newcomer questions** whose answers you already know: how do I run it, where does X live, what happens when Y, what must I check before changing Z.

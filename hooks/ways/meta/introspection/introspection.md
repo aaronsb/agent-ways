@@ -41,7 +41,7 @@ If something did stand out, compile a concise summary. For each signal, capture:
 
 ### Part 2: Subagent Reviews Existing Artifacts and Proposes
 
-Spawn a subagent (`subagent_type: "general-purpose"`) with:
+Part 2 is an efficiency spawn with an inline substitute. Where your instructions restrict the Agent tool, it runs when the user asked for the review or a CLAUDE.md line covers it; otherwise do Part 2 inline or propose it. When it runs, name the payoff in a clause and spawn a subagent (`subagent_type: "general-purpose"`) with:
 1. Your summary of human signals from Part 1
 2. The project path so it can find `$PROJECT/.claude/ways/`
 3. Instructions to follow the review process below

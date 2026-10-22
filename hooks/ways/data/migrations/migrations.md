@@ -18,7 +18,7 @@ refire: 0.15
 
 1. Detect the project's migration tool (Prisma, Alembic, Knex, Flyway, ActiveRecord, raw SQL)
 2. Follow its naming convention and directory structure
-3. Include a comment explaining what this migration does and why
+3. Include a comment stating why, when the migration's name does not already say it
 
 ## Warn the User When
 

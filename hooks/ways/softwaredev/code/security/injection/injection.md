@@ -24,7 +24,7 @@ pattern: sql.?injection|command.?injection|\bxss\b|cross.?site.?scripting
 | Rationalization | Counter |
 |---|---|
 | "This input comes from a trusted source" | Trust boundaries shift. Today's internal API becomes tomorrow's public endpoint. |
-| "I'll sanitize at the boundary" | Defense in depth. Sanitize at every layer touching untrusted data. |
+| "I validated it at the boundary, so the query is safe" | Validation at the boundary decides what gets in. Each sink still escapes or parameterizes for its own context. |
 | "This is just a prototype" | Prototypes become production. Security debt compounds. |
 | "The ORM handles it" | ORMs have raw query escape hatches. Verify you're using the safe path. |
 | "It's only used internally" | Internal tools get exposed, shared, and repurposed. Secure by default. |

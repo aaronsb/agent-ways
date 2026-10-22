@@ -52,6 +52,8 @@ make cut-release COMPONENT=<c> LEVEL=<patch|minor|major>   # opens a version-bum
 make publish-release COMPONENT=<c> PUSH=1                  # tags <c>-vX.Y.Z on main
 ```
 
+When anything under `hooks/ways` changed since the last tag, run `cargo test --manifest-path tools/Cargo.toml -p ways -p ways-core` before `cut-release`. The committed probe samples under `tests/probes` derive from the golden sidecars, so a corpus-only change can fail them on the bump PR.
+
 Components are the six suite binaries in `tools/suite-bins`: `ways`, `ways-audit`, `ways-mcp`, `ways-agent`, `attend`, `attend-chat`. `way-embed` versions through its own Makefile.
 
 Pushing the tag is the one outward step. `build-<c>.yml` then builds every platform and creates the GitHub Release with per-platform binaries and `checksums.txt`. A cancelled runner can leave a platform out, so check that the Release lists an asset for each of linux-x86_64, linux-aarch64, darwin-x86_64 and darwin-arm64.

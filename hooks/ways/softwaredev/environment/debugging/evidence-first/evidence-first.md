@@ -29,7 +29,7 @@ When a full run costs real money or a long wait, build a test for only the faili
 
 ## Close the Loop
 
-Add a regression check that reproduces the bug. Where one fits, add a guard or lint that would have blocked it. In incident notes, name the mechanism precisely, for example an ordering issue rather than a frequency issue.
+Add a regression check that reproduces the bug. Where one fits, propose a guard or lint that would have blocked it. In incident notes, name the mechanism precisely, for example an ordering issue rather than a frequency issue.
 
 ## See Also
 

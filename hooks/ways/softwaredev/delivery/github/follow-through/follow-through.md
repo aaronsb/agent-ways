@@ -13,8 +13,8 @@ When a workflow runs on main (CI, Pages, a deploy), confirm it finished green be
 
 ## Issues
 
-- When parking an idea, file the issue before any build, with enough context, files, and decisions to resume from the issue alone.
-- Close an issue with a comment that says what was done and links the commit.
+- When parking an idea, draft the issue before any build, with enough context, files, and decisions to resume from the issue alone, and offer to file it.
+- When you close an issue, close it with a comment that says what was done and links the commit.
 
 ## Contributing to Another Project
 

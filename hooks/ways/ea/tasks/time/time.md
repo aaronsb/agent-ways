@@ -7,7 +7,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Time Tracking & Billing
 
-Log billable hours against clients and projects. Always confirm before logging.
+Log billable hours against clients and projects. Hours the user asked to log are logged as stated. Entries you inferred are proposed first (ea, requested versus inferred writes).
 
 ## Logging Workflow
 
@@ -27,7 +27,7 @@ Suggested time entries for today:
 Log these? Adjust any?
 ```
 
-4. **Log on approval only.** Never auto-log.
+4. **Log on approval.** A proposed entry is logged once the user approves it.
 
 ## Weekly Time Review
 

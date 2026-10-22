@@ -48,6 +48,7 @@ Staging by name and leaving other sessions' changes alone: delivery/commits/prep
 
 ## See Also
 
+- collaboration/teams(collaboration) — the guidance each teammate receives in its own session
 - subagents(meta) — parent: briefs, the return shape and worktree base branches
 - subagents/briefs(meta) — what each agent's prompt carries
 - teams(collaboration) — the teammate side of this traffic
