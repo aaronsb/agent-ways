@@ -134,6 +134,20 @@ impl Fx {
         }
     }
 
+    /// `p` as the binary's fix commands print it, by the rule of
+    /// `lifecycle::shell_word` (bare when every character is plain,
+    /// single-quoted otherwise, as a Windows path with `\` is), then
+    /// normalised as output is.
+    fn word(&self, p: &Path) -> String {
+        let s = p.display().to_string();
+        let w = if !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "/._-~:@+=,".contains(c)) {
+            s
+        } else {
+            format!("'{}'", s.replace('\'', "'\\''"))
+        };
+        self.norm(w.as_bytes())
+    }
+
     fn write(&self, path: &Path, text: &str) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, text).unwrap();
@@ -1304,7 +1318,8 @@ fn fix_keeps_a_value_already_under_mods_attend_and_names_the_one_it_dropped() {
     f.write(&f.overlay(), "mods:\n  attend:\n    listening: dormant\nattend_mod:\n  listening: active\n  keepwarm: off\n");
     let (out, _, code) = f.run(&["settings", "lint", "--project", p.to_str().unwrap()]);
     assert_eq!(code, 3);
-    assert!(out.contains("<ROOT>/proj/.claude/ways.yaml:4: attend_mod: ") && out.contains("`ways settings fix mods.attend --project <ROOT>/proj` moves them"), "{out}");
+    let fix = format!("`ways settings fix mods.attend --project {}` moves them", f.word(&p));
+    assert!(out.contains("<ROOT>/proj/.claude/ways.yaml:4: attend_mod: ") && out.contains(&fix), "{out}");
     let (_, err, code) = f.run(&["settings", "fix", "mods.attend", "--project", p.to_str().unwrap()]);
     assert_eq!(code, 0, "{err}");
     assert!(err.contains("dropped attend_mod.listening: mods.attend.listening already holds a value in <ROOT>/proj/.claude/ways.yaml, which stays"), "{err}");
@@ -1326,8 +1341,10 @@ fn lint_names_every_target_and_known_project_holding_attend_mod() {
     f.write(&target.join("projects").join(&slug).join("s.jsonl"), &format!("{{\"cwd\":\"{}\"}}\n", other.display()));
     let (out, err, code) = f.run(&["settings", "lint"]);
     assert_eq!(code, 3, "{out}{err}");
-    assert!(out.contains("<ROOT>/tcfg/config.yaml:1: attend_mod: ") && out.contains("`ways settings fix mods.attend --target <ROOT>/home/.claude` moves them"), "{out}");
-    assert!(out.contains("<ROOT>/other/.claude/ways.yaml:1: attend_mod: ") && out.contains("`ways settings fix mods.attend --project <ROOT>/other` moves them"), "{out}");
+    let fix = format!("`ways settings fix mods.attend --target {}` moves them", f.word(&target));
+    assert!(out.contains("<ROOT>/tcfg/config.yaml:1: attend_mod: ") && out.contains(&fix), "{out}");
+    let fix = format!("`ways settings fix mods.attend --project {}` moves them", f.word(&other));
+    assert!(out.contains("<ROOT>/other/.claude/ways.yaml:1: attend_mod: ") && out.contains(&fix), "{out}");
     let (_, err, code) = f.run(&["settings", "fix", "mods.attend", "--target", target.to_str().unwrap()]);
     assert_eq!(code, 0, "{err}");
     assert_eq!(err, "target: <ROOT>/tcfg/config.yaml\n");
@@ -1348,7 +1365,8 @@ fn lint_of_one_project_file_names_its_project_fix() {
     f.write(&f.overlay(), "attend_mod:\n  listening: active\n");
     let (out, _, code) = f.run(&["settings", "lint", "--file", f.overlay().to_str().unwrap()]);
     assert_eq!(code, 3, "{out}");
-    assert!(out.contains("`ways settings fix mods.attend --project <ROOT>/proj` moves them"), "{out}");
+    let fix = format!("`ways settings fix mods.attend --project {}` moves them", f.word(&f.root.join("proj")));
+    assert!(out.contains(&fix), "{out}");
     assert_eq!(out.matches("attend_mod").count(), 2, "one finding, not two: {out}");
 }
 

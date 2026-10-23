@@ -85,7 +85,8 @@ pub fn held_by(path: &Path) -> Option<Held> {
     } else if let Some(t) = targets().into_iter().find(|t| canon(&t.config_path()) == me) {
         Kind::Target(t.dir())
     } else if path.file_name().is_some_and(|n| n == "ways.yaml") && path.parent().and_then(Path::file_name).is_some_and(|n| n == ".claude") {
-        Kind::Project(me.parent().and_then(Path::parent).map(Path::to_path_buf).unwrap_or_default())
+        // The root as a person types it, never canonicalize's verbatim form.
+        Kind::Project(ways_core::util::strip_verbatim(me.parent().and_then(Path::parent).unwrap_or(Path::new(""))))
     } else {
         Kind::Other
     };
