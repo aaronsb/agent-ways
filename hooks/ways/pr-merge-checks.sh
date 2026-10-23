@@ -48,7 +48,7 @@ while IFS= read -r a; do
   esac
   stop=""
   case "$a" in
-    *';'|*')'|*'`') a="${a%?}"; stop=1 ;;
+    *[\;\|\&\)\`]*) a="${a%%[;|&)\`]*}"; stop=1 ;;
   esac
   if [[ "$a" =~ $REDIR_BARE ]]; then skip=other
   elif [[ "$a" =~ $REDIR_ATTACHED ]]; then :
