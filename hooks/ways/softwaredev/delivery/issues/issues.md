@@ -48,7 +48,7 @@ A resumed session gets a fresh task list, keyed by an id the hooks never see. Th
 
 ## Residuals
 
-Out-of-scope work discovered mid-task is named in the report and filed as its own issue. A quiet fix or a quiet drop hides it. Name the issue for the finding, assign the owner who carries it, and state the condition that reopens it: a date, a dependency landing, a gate result. Dropping a capability from scope is an explicit decision confirmed by its owner; the same outcome reached by omission is a defect. An option judged legitimate and unneeded is filed the same way, with its trigger, so the case is not argued again. After a remediation pass, list what remains with why it remains, what would close it, and the cost.
+File issues as necessary, amend and re-use an existing issue where one fits, comment on issues as the work moves, and reference each one in the report. Out-of-scope work discovered mid-task gets its issue this way. A quiet fix or a quiet drop hides it. Name the issue for the finding, assign the owner who carries it, and state the condition that reopens it: a date, a dependency landing, a gate result. Dropping a capability from scope is an explicit decision confirmed by its owner; the same outcome reached by omission is a defect. An option judged legitimate and unneeded is filed the same way, with its trigger, so the case is not argued again. After a remediation pass, list what remains with why it remains, what would close it, and the cost.
 
 ## See Also
 

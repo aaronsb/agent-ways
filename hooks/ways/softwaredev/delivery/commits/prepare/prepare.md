@@ -9,7 +9,7 @@ refire: 0.15
 
 ## When to Commit
 
-On a non-default branch, commit once per accepted unit of work and before any phase change, so each step can be reverted alone.
+On a non-default branch, commit accepted units of work so a readback of the commits reveals the reasoning of the work.
 
 ## Before Committing
 
