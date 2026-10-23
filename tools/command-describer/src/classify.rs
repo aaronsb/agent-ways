@@ -134,7 +134,8 @@ fn command_string(program: &str, args: &[&Token]) -> Option<Vec<Token>> {
     let mut dash_c = false;
     let mut i = 0;
     while let Some(v) = args.get(i).map(|t| t.value.as_str()) {
-        if v == "--" {
+        // A lone `-` ends the options as `--` does.
+        if v == "--" || v == "-" {
             i += 1;
             break;
         }

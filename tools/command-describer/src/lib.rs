@@ -250,8 +250,10 @@ impl Segment {
 ///
 /// A command string is parsed as a list of its own: `eval`'s arguments,
 /// joined by spaces, and the string after `bash -c` (or `sh`, `zsh`, `dash`,
-/// `ksh`, through any wrapper). Its segments follow the segment that runs it,
-/// one level deeper, the first carrying [`Connector::CommandString`].
+/// `ksh`, through any wrapper). Its segments follow the segment that runs it
+/// and that segment's substitutions, one level deeper, the first carrying
+/// [`Connector::CommandString`]. A `$( … )` in the string's words is run by
+/// the outer shell and is described once, at the outer shell's depth.
 pub fn parse(command: &str) -> Vec<Segment> {
     parse_at(command, 0)
 }
@@ -259,43 +261,82 @@ pub fn parse(command: &str) -> Vec<Segment> {
 /// [`parse`], with the top-level list at nesting `depth`.
 fn parse_at(command: &str, depth: usize) -> Vec<Segment> {
     let lexed = lex::lex(command, depth);
+    let built = lexed
+        .segments
+        .into_iter()
+        .filter_map(|raw| classify::build(command, &lexed.excluded, raw))
+        .collect();
+    expand(command, built)
+}
+
+/// The built segments in order, each command string's segments placed after
+/// the segment that runs it and the substitutions nested in its words, which
+/// the outer shell runs first.
+fn expand(command: &str, built: Vec<(Segment, Option<Vec<lex::Token>>)>) -> Vec<Segment> {
     let mut out = Vec::new();
-    // The depth and word spans of the last command string parsed. The lexer
-    // has already read any `$( … )` inside those words; the string's own
-    // parse reads it again, so the lexer's segments for it are dropped.
-    let mut reparsed: Option<(usize, Vec<Range<usize>>)> = None;
-    for raw in lexed.segments {
-        let Some((segment, string)) = classify::build(command, &lexed.excluded, raw) else {
-            continue;
-        };
-        if let Some((at, words)) = &reparsed {
-            if segment.depth <= *at {
-                reparsed = None;
-            } else if words
-                .iter()
-                .any(|w| w.start <= segment.span.start && segment.span.end <= w.end)
-            {
-                continue;
-            }
-        }
+    let mut rest = built.into_iter().peekable();
+    while let Some((segment, string)) = rest.next() {
         let at = segment.depth;
         out.push(segment);
-        let Some(words) = string.filter(|_| at + 1 < lex::MAX_DEPTH) else {
-            continue;
+        let Some(words) = string else { continue };
+        // The lexer emits a segment's substitutions right after it, deeper.
+        let mut nested = Vec::new();
+        while let Some(next) = rest.next_if(|(s, _)| s.depth > at) {
+            nested.push(next);
+        }
+        let nested = expand(command, nested);
+        let inner = if at + 1 < lex::MAX_DEPTH {
+            command_string(command, &words, at, &nested)
+        } else {
+            Vec::new()
         };
-        let string = CommandString::new(command, &words);
-        let mut inner = parse_at(&string.text, at + 1);
-        if let Some(first) = inner
-            .first_mut()
-            .filter(|s| s.connector == Connector::Start)
-        {
-            first.connector = Connector::CommandString;
-        }
-        for s in &mut inner {
-            s.span = string.source_span(&s.span);
-        }
+        out.extend(nested);
         out.extend(inner);
-        reparsed = Some((at, words.into_iter().map(|w| w.span).collect()));
     }
     out
+}
+
+/// The segments of the command string in `words`, run by a segment at depth
+/// `at` whose substitutions are `nested`. A substitution inside the words is
+/// run by the outer shell, and `nested` holds it at its true depth. Where
+/// the string's own parse reads it again, that copy is dropped; where the
+/// string quotes or escapes it, the parse never reads it.
+fn command_string(
+    command: &str,
+    words: &[lex::Token],
+    at: usize,
+    nested: &[Segment],
+) -> Vec<Segment> {
+    let string = CommandString::new(command, words);
+    let mut copies: Vec<&str> = nested
+        .iter()
+        .filter(|s| {
+            words
+                .iter()
+                .any(|w| w.span.start <= s.span.start && s.span.end <= w.span.end)
+        })
+        .map(|s| s.text.as_str())
+        .collect();
+    let mut inner = parse_at(&string.text, at + 1);
+    // A substitution's segments sit at least two levels below `at` in the
+    // string's parse.
+    inner.retain(|s| {
+        let copy = (s.depth > at + 1)
+            .then(|| copies.iter().position(|c| *c == s.text))
+            .flatten();
+        if let Some(i) = copy {
+            copies.swap_remove(i);
+        }
+        copy.is_none()
+    });
+    if let Some(first) = inner
+        .first_mut()
+        .filter(|s| s.connector == Connector::Start)
+    {
+        first.connector = Connector::CommandString;
+    }
+    for s in &mut inner {
+        s.span = string.source_span(&s.span);
+    }
+    inner
 }

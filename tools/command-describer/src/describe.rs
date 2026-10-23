@@ -127,34 +127,41 @@ pub fn describe<'a>(segments: &'a [Segment], data: &'a Summaries) -> Vec<Describ
 /// The block ADR-188 item 3c gives the judge, in the form ADR-707 measured:
 /// `About to run: <description>`, then one line per unit the call splits
 /// into at `;`, `&&`, `&`, a newline, a loop body, a subshell, a
-/// substitution or a command string (`eval …`, `bash -c …`), in order. Segments joined by `|` or `||` share a line with
-/// the symbol between them (`git log (…) | grep (…) | head (…)`). Each
-/// segment reads as [`Described::text`]. Navigation segments are dropped;
-/// one still ends the line before it unless it joins by `|` or `||`. The
+/// substitution or a command string (`eval …`, `bash -c …`), in order.
+/// A segment joined by `|` or `||` shares the line of the latest segment at
+/// its own depth, with the symbol between them (`git log (…) | grep (…) |
+/// head (…)`), so the segments nested in `cat $(ls) | grep x` or `bash -c
+/// 'a; b' | grep x` do not come between a pipe's two sides. Each segment
+/// reads as [`Described::text`]. Navigation segments are dropped; one still
+/// ends the line before it at its depth unless it joins by `|` or `||`. The
 /// description's whitespace is collapsed. Nothing is escaped: the judge's
 /// prompt renderer neutralizes markup.
 pub fn described_block(description: &str, segments: &[Segment], data: &Summaries) -> String {
     let mut lines: Vec<String> = Vec::new();
-    let mut cur = String::new();
+    // Per depth, the line a `|` or `||` at that depth joins, if any.
+    let mut open: Vec<Option<usize>> = Vec::new();
     for d in describe(segments, data) {
+        let depth = d.segment.depth;
         let inline = match d.segment.connector {
             Connector::Pipe => Some(" | "),
             Connector::Or => Some(" || "),
             _ => None,
         };
-        if inline.is_none() && !cur.is_empty() {
-            lines.push(std::mem::take(&mut cur));
-        }
         if d.segment.role == Role::Navigation {
+            if inline.is_none() {
+                open.truncate(depth);
+            }
             continue;
         }
-        if let (Some(sym), false) = (inline, cur.is_empty()) {
-            cur.push_str(sym);
+        if let Some((sym, line)) = inline.zip(open.get(depth).copied().flatten()) {
+            lines[line].push_str(sym);
+            lines[line].push_str(&d.text());
+            continue;
         }
-        cur.push_str(&d.text());
-    }
-    if !cur.is_empty() {
-        lines.push(cur);
+        lines.push(d.text());
+        open.truncate(depth);
+        open.resize(depth + 1, None);
+        open[depth] = Some(lines.len() - 1);
     }
     let head = format!(
         "About to run: {}",

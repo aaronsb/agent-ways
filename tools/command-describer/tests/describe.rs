@@ -216,3 +216,25 @@ fn block_shows_the_commands_of_a_command_string() {
     assert!(lines[1].starts_with("bash"), "{shell}");
     assert_eq!(lines[2], "git push (Push commits to a remote repository)");
 }
+
+#[test]
+fn block_joins_a_pipe_to_the_segment_at_its_own_depth() {
+    let grep = "grep (Find patterns in files using regular expressions)";
+    // The pipe reads the shell's output, not the last command in its string.
+    let shell = block("Search", "bash -c 'git status; git log' | grep x");
+    let lines: Vec<&str> = shell.lines().collect();
+    assert_eq!(lines.len(), 4, "{shell}");
+    assert!(lines[1].starts_with("bash"), "{shell}");
+    assert!(lines[1].ends_with(&format!(" | {grep}")), "{shell}");
+    assert!(lines[2].starts_with("git status"), "{shell}");
+    assert!(lines[3].starts_with("git log"), "{shell}");
+    // The same for a substitution.
+    assert_eq!(
+        block("Search", "cat $(ls) | grep x"),
+        format!(
+            "About to run: Search\n\
+             cat (Print and concatenate files) | {grep}\n\
+             ls (List directory contents)"
+        )
+    );
+}

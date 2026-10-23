@@ -618,13 +618,29 @@ impl Lexer<'_> {
                 return;
             }
             Some(b'\'') => {
+                // An ANSI-C string: `\n`, `\t`, `\r`, `\\`, `\'`, `\"` and
+                // `\?` are decoded, so a newline in a command string still
+                // separates its commands. Other escapes are kept as written.
                 self.pos += 2;
                 while let Some(c) = self.peek(0) {
-                    self.pos += if c == b'\\' { 2 } else { 1 };
                     if c == b'\'' {
+                        self.pos += 1;
                         break;
                     }
-                    val.push(c);
+                    if c != b'\\' {
+                        val.push(c);
+                        self.pos += 1;
+                        continue;
+                    }
+                    match self.peek(1) {
+                        Some(b'n') => val.push(b'\n'),
+                        Some(b't') => val.push(b'\t'),
+                        Some(b'r') => val.push(b'\r'),
+                        Some(e @ (b'\\' | b'\'' | b'"' | b'?')) => val.push(e),
+                        Some(e) => val.extend_from_slice(&[b'\\', e]),
+                        None => val.push(b'\\'),
+                    }
+                    self.pos += 2;
                 }
                 self.pos = self.pos.min(self.b.len());
                 return;
