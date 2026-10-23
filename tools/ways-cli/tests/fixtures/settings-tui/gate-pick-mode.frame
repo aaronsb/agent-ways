@@ -6,11 +6,11 @@ agent-tui frame 100x30
 |│▌    mode                      enforce               ││What the gate does with a verdict: enforce,│|
 |│ ▸ profiles · setting          value                 ││shadow or off.                             │|
 |│ ▸ keys · provider             key                   ││                                           │|
-|│                                                     ││enforce blocks candidates judged           │|
-|│                                                     ││irrelevant; shadow judges and logs every   │|
-|│                                                     ││candidate while the matcher decides; off   │|
-|│                                                     ││judges nothing (ADR-196 §6).               │|
-|│                                                     ││                                           │|
+|│ ▾ judge · state               value                 ││enforce blocks candidates judged           │|
+|│     readiness                 degraded !            ││irrelevant; shadow judges and logs every   │|
+|│     unset engine              none                  ││candidate while the matcher decides; off   │|
+|│   ▾ sessions                                        ││judges nothing (ADR-196 §6).               │|
+|│       (none live)             none                  ││                                           │|
 |│                        ┌pick one: gate.mode─────────────────────────────┐                        │|
 |│                        │ ● enforce   current                            │orce | shadow | off     │|
 |│                        │   shadow                                       │                        │|
@@ -70,18 +70,26 @@ styles
   6  54-55  - - DIM
   6  99-99  - - DIM
   7   0-0   - - DIM
+  7   2-8   - - BOLD
+  7   9-16  - - DIM
+  7  32-36  - - DIM
   7  54-55  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
+  8  32-39  - - DIM
+  8  40-41  Red - BOLD
   8  54-55  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
+  9  32-35  - - DIM
   9  54-55  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
+ 10   2-13  - - BOLD
  10  54-55  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
+ 11  32-35  - - DIM
  11  54-55  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM

@@ -3,9 +3,9 @@ agent-tui frame 100x30
 |┌ writes user — ~/proj ───────────────────────────────┐┌detail─────────────────────────────────────┐|
 |│ ▾ settings                    value                 ││gate.profiles.anthropic                    │|
 |│     engine                                          ││                                           │|
-|│     mode                      enforce               ││10 entries, 0 changed                      │|
+|│     mode                      enforce               ││Anthropic API key                          │|
 |│ ▾ profiles · setting          value                 ││                                           │|
-|│▌  ▾ anthropic                                       ││                                           │|
+|│▌  ▾ anthropic                                       ││10 entries, 0 changed                      │|
 |│       provider                anthropic             ││                                           │|
 |│       model                   claude-haiku-4-5      ││                                           │|
 |│       threshold               0.3                   ││                                           │|
@@ -17,13 +17,13 @@ agent-tui frame 100x30
 |│       price_in_per_mtok                             ││                                           │|
 |│       price_out_per_mtok                            ││                                           │|
 |│   ▸ openrouter                                      ││                                           │|
+|│   ▸ claude-code                                     ││                                           │|
 |│ ▸ keys · provider             key                   ││                                           │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
+|│ ▾ judge · state               value                 ││                                           │|
+|│     readiness                 degraded !            ││                                           │|
+|│     unset engine              none                  ││                                           │|
+|│   ▾ sessions                                        ││                                           │|
+|│       (none live)             none                  ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -53,7 +53,7 @@ styles
   3  54-55  - - DIM
   3  99-99  - - DIM
   4   0-0   - - DIM
-  4  54-76  - - DIM
+  4  54-55  - - DIM
   4  99-99  - - DIM
   5   0-0   - - DIM
   5   2-11  - - BOLD
@@ -64,7 +64,7 @@ styles
   6   0-0   - - DIM
   6   1-1   Cyan - BOLD|REVERSED
   6   2-53  - - BOLD|REVERSED
-  6  54-55  - - DIM
+  6  54-76  - - DIM
   6  99-99  - - DIM
   7   0-0   - - DIM
   7  54-55  - - DIM
@@ -101,27 +101,36 @@ styles
  17  54-55  - - DIM
  17  99-99  - - DIM
  18   0-0   - - DIM
- 18   2-7   - - BOLD
- 18   8-18  - - DIM
- 18  32-34  - - DIM
+ 18   2-16  - - BOLD
  18  54-55  - - DIM
  18  99-99  - - DIM
  19   0-0   - - DIM
+ 19   2-7   - - BOLD
+ 19   8-18  - - DIM
+ 19  32-34  - - DIM
  19  54-55  - - DIM
  19  99-99  - - DIM
  20   0-0   - - DIM
+ 20   2-8   - - BOLD
+ 20   9-16  - - DIM
+ 20  32-36  - - DIM
  20  54-55  - - DIM
  20  99-99  - - DIM
  21   0-0   - - DIM
+ 21  32-39  - - DIM
+ 21  40-41  Red - BOLD
  21  54-55  - - DIM
  21  99-99  - - DIM
  22   0-0   - - DIM
+ 22  32-35  - - DIM
  22  54-55  - - DIM
  22  99-99  - - DIM
  23   0-0   - - DIM
+ 23   2-13  - - BOLD
  23  54-55  - - DIM
  23  99-99  - - DIM
  24   0-0   - - DIM
+ 24  32-35  - - DIM
  24  54-55  - - DIM
  24  99-99  - - DIM
  25   0-0   - - DIM

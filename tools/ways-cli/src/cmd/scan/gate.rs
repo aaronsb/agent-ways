@@ -27,7 +27,7 @@ use ways_agent_core::judge::{self, way_text, Candidate, Role, Turn};
 use ways_agent_core::profile::{self, Mode, Provider, Settings, UserLayer};
 use ways_agent_core::protocol::{JudgeAnswer, JudgeJob, JudgeRequest, Judged, Reply, Request, Verdict};
 
-use crate::session::judge_jobs::{SessionEngine, Store, Waited};
+use crate::session::judge_jobs::{Store, Waited};
 
 
 /// Grace beyond the engine's deadline for the hook's read, so the agent's own
@@ -217,11 +217,8 @@ fn apply_from(
         return Gate { status: Status::Idle, ..Gate::default() };
     }
     let profiles = profile::profiles(&user);
-    let resolve = |host: bool| {
-        let resolution = engine::resolve_session(user.engine.as_deref(), &profiles, host, &has_key);
-        let provider = resolution.engine.as_ref().and_then(|e| profiles.get(e)).map(|p| p.provider);
-        SessionEngine { resolution, provider }
-    };
+    // The one resolver `ways status` and the settings screen read too.
+    let resolve = |host: bool| engine::session_engine(&user, host, &has_key);
     // `resolve` borrows only, so it is Copy and still here for the fallback.
     let session = match store.map(|s| s.resolve_once(resolve)) {
         Some(Ok(found)) => found,
@@ -270,11 +267,10 @@ fn settings(
     has_key: impl Fn(Provider) -> bool,
     log: &LogContext<'_>,
 ) -> Result<Option<(UserLayer, Settings)>, String> {
-    let read = profile::gate_layer(path).and_then(|user| Ok(profile::resolve(&user, has_key)?.map(|s| (user, s))));
-    match read {
-        Ok(s) => Ok(s.filter(|(_, s)| s.mode != Mode::Off)),
-        Err(e) => {
-            let reason = format!("config: {e:#}");
+    match engine::read_gate(path, has_key, true) {
+        Ok(engine::GateReading::Judges { user, settings }) => Ok(Some((*user, *settings))),
+        Ok(engine::GateReading::Off | engine::GateReading::NoKey) => Ok(None),
+        Err(reason) => {
             // Logged for the tuning passes, and said on stderr, since a hook
             // shows nothing else: the gate is off until agent.yaml is fixed.
             (log.sink)(&[
@@ -285,7 +281,7 @@ fn settings(
                 ("project", log.project_dir),
                 ("session", log.session_id),
             ]);
-            eprintln!("[ways] settings: {e:#}");
+            eprintln!("[ways] settings: {}", reason.strip_prefix(&format!("{}: ", engine::CONFIG)).unwrap_or(&reason));
             Err(reason)
         }
     }
@@ -935,6 +931,9 @@ mod tests {
             ("mode: off\nengine: anthropic\nprofiles:\n  anthropic: [\n", true),
             ("mode: of\n", true),
             ("mode: off\n", false),
+            // The engine is a configuration error, so the gate says so even
+            // with mode off, as it did before ADR-708.
+            ("mode: off\nengine: nosuch\n", true),
             ("mode: shadow\n", false),
         ] {
             std::fs::write(&path, text).unwrap();

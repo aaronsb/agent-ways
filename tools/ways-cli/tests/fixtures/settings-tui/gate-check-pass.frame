@@ -8,11 +8,11 @@ agent-tui frame 100x30
 |│ ▾ keys · provider             key                   ││Never shown and never passed as an argument│|
 |│▌    anthropic                 present [a]           ││(ADR-503 §12). Add or rotate one with `ways│|
 |│     openrouter                absent [a]            ││agent key add --provider <p>`, which reads │|
-|│                                                     ││it from stdin or a prompt that shows a dot │|
-|│                 ┌check: pass───────────────────────────────────────────────────┐                 │|
-|│                 │ $ ways agent key check --provider anthropic                  │                 │|
-|│                 │                                                              │                 │|
-|│                 │ provider: anthropic                                          │ers it masked)   │|
+|│ ▾ judge · state               value                 ││it from stdin or a prompt that shows a dot │|
+|│     readiness   ┌check: pass───────────────────────────────────────────────────┐                 │|
+|│     unset engine│ $ ways agent key check --provider anthropic                  │                 │|
+|│   ▾ sessions    │                                                              │                 │|
+|│       (none live│ provider: anthropic                                          │ers it masked)   │|
 |│                 │ key:      sk-ant-…ture                                       │                 │|
 |│                 │ model:    claude-haiku-4-5                                   │                 │|
 |│                 │ result:   accepted                                           │                 │|
@@ -81,6 +81,9 @@ styles
   8  54-55  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
+  9   2-8   - - BOLD
+  9   9-16  - - DIM
+  9  32-36  - - DIM
   9  54-55  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
@@ -94,6 +97,7 @@ styles
  11  81-81  Green - -
  11  99-99  - - DIM
  12   0-0   - - DIM
+ 12   2-13  - - BOLD
  12  18-18  Green - -
  12  81-81  Green - -
  12  99-99  - - DIM

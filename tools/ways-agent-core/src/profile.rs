@@ -397,10 +397,7 @@ pub fn gate_settings_as(path: &Path, engine: Option<&str>, has_key: impl Fn(Prov
 /// The layer at `path` as the gate reads it: diagnostics said on stderr, and
 /// a finding that fails closed returned as the error.
 pub fn gate_layer(path: &Path) -> Result<UserLayer> {
-    let (user, findings) = UserLayer::load_with_findings(path)?;
-    if let Some(f) = fails_closed(&findings) {
-        bail!("{f}; the gate is off until it is fixed");
-    }
+    let (user, findings) = load_gate_layer(path)?;
     for f in &findings {
         eprintln!("{}", f.diagnostic("ways"));
     }
@@ -413,6 +410,16 @@ pub fn gate_layer(path: &Path) -> Result<UserLayer> {
         }
     }
     Ok(user)
+}
+
+/// [`gate_layer`] with nothing said: the layer and its findings, a finding
+/// that fails closed returned as the error.
+pub fn load_gate_layer(path: &Path) -> Result<(UserLayer, Vec<agent_settings::Finding>)> {
+    let (user, findings) = UserLayer::load_with_findings(path)?;
+    if let Some(f) = fails_closed(&findings) {
+        bail!("{f}; the gate is off until it is fixed");
+    }
+    Ok((user, findings))
 }
 
 /// The shipped profiles, by name.

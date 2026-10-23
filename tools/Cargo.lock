@@ -2173,6 +2173,7 @@ dependencies = [
  "agent-settings",
  "anyhow",
  "clap",
+ "claude-sessions",
  "libc",
  "serde",
  "serde_json",

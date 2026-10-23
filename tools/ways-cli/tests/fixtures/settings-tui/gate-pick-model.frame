@@ -17,13 +17,13 @@ agent-tui frame 100x30
 |│       price_in_per_mtok│   claude-opus-4-5                              │ku-4-5                  │|
 |│       price_out_per_mto│   claude-sonnet-5-5                            │ude-haiku-4-5 |         │|
 |│   ▸ openrouter         └────────────────────────────────────────────────┘251001 | claude-opus-4-5│|
-|│ ▸ keys · provider             key                   ││| claude-sonnet-5-5 (Enter picks)          │|
-|│                                                     ││default  claude-haiku-4-5                  │|
-|│                                                     ││from     default                           │|
-|│                                                     ││writes   ~/.config/agent-ways/agent.yaml   │|
-|│                                                     ││[gate.profiles.anthropic.model]            │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
+|│   ▸ claude-code                                     ││| claude-sonnet-5-5 (Enter picks)          │|
+|│ ▸ keys · provider             key                   ││default  claude-haiku-4-5                  │|
+|│ ▾ judge · state               value                 ││from     default                           │|
+|│     readiness                 degraded !            ││writes   ~/.config/agent-ways/agent.yaml   │|
+|│     unset engine              none                  ││[gate.profiles.anthropic.model]            │|
+|│   ▾ sessions                                        ││                                           │|
+|│       (none live)             none                  ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -109,27 +109,36 @@ styles
  17  25-74  LightBlue - -
  17  99-99  - - DIM
  18   0-0   - - DIM
- 18   2-7   - - BOLD
- 18   8-18  - - DIM
- 18  32-34  - - DIM
+ 18   2-16  - - BOLD
  18  54-55  - - DIM
  18  99-99  - - DIM
  19   0-0   - - DIM
+ 19   2-7   - - BOLD
+ 19   8-18  - - DIM
+ 19  32-34  - - DIM
  19  54-64  - - DIM
  19  99-99  - - DIM
  20   0-0   - - DIM
+ 20   2-8   - - BOLD
+ 20   9-16  - - DIM
+ 20  32-36  - - DIM
  20  54-64  - - DIM
  20  99-99  - - DIM
  21   0-0   - - DIM
+ 21  32-39  - - DIM
+ 21  40-41  Red - BOLD
  21  54-64  - - DIM
  21  99-99  - - DIM
  22   0-0   - - DIM
+ 22  32-35  - - DIM
  22  54-55  - - DIM
  22  99-99  - - DIM
  23   0-0   - - DIM
+ 23   2-13  - - BOLD
  23  54-55  - - DIM
  23  99-99  - - DIM
  24   0-0   - - DIM
+ 24  32-35  - - DIM
  24  54-55  - - DIM
  24  99-99  - - DIM
  25   0-0   - - DIM

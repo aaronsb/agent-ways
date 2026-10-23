@@ -72,6 +72,15 @@ impl Fx {
         }
     }
 
+    /// A running Claude Code session: its record, held by process `pid`,
+    /// and the resolution its first judge request held, if it named an engine.
+    fn live_session(&self, pid: u32, id: &str, resolution: Option<&str>) {
+        self.file(&format!(".claude/sessions/{pid}.json"), &format!("{{\"pid\":{pid},\"sessionId\":\"{id}\",\"cwd\":\"/home/dev/proj\"}}"));
+        if let Some(r) = resolution {
+            self.file(&format!(".local/state/agent-ways/judge/{id}/resolution.json"), r);
+        }
+    }
+
     fn read(&self, rel: &str) -> Option<String> {
         std::fs::read_to_string(self.path(rel)).ok()
     }
@@ -686,6 +695,20 @@ fn golden_frames() {
     let mine = Fx::new();
     mine.file(".config/agent-ways/agent.yaml", "engine: mine\nprofiles:\n  mine:\n    provider: anthropic\n    model: claude-sonnet-5-5\n");
     g.check_text("gate-pick-engine", &mine.snap("gate", "down enter", "100x30", "16"));
+    // The judge section (ADR-708 §7, §8): claude-code named with neither the
+    // ways-judge mod nor a key, so it reads degraded with the fix; two live
+    // sessions, one judging inside Claude Code and one left with no engine,
+    // whose reason names the remedy: it holds no resolution file and is
+    // resolved as the gate resolves it. A record's process is this test's own,
+    // or its parent's, so both are alive.
+    let judged = Fx::new();
+    judged.file(".config/agent-ways/agent.yaml", "engine: claude-code\n");
+    judged.live_session(std::process::id(), "3f6c2a91-4b7e-4d10-9c55-2e8b7a1d0f42", Some(r#"{"engine":"claude-code","reason":"explicit","provider":"claude-code"}"#));
+    judged.live_session(std::os::unix::process::parent_id(), "cccccccc-0000-4000-8000-000000000003", None);
+    for (size, name) in [("100x30", "gate-judge"), ("80x25", "gate-judge-80x25")] {
+        g.check_text(name, &judged.snap("gate", "end", size, "16"));
+    }
+    g.check_text("gate-judge-readiness", &judged.snap("gate", "end up up up up", "100x30", "16"));
     // The profile's model, a picker once `ways agent models` has cached the
     // provider's list (#795): the tuned model first, an older list as good.
     let cached = Fx::new();

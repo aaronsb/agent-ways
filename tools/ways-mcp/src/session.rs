@@ -93,7 +93,7 @@ mod identity_tests {
     use std::collections::HashMap;
 
     fn record(pid: u32, id: &str, cwd: Option<&str>) -> SessionRecord {
-        SessionRecord { pid, session_id: id.into(), cwd: cwd.map(Into::into), started_at_ms: None, path: Default::default() }
+        SessionRecord { pid, session_id: id.into(), cwd: cwd.map(Into::into), started_at_ms: None, proc_start: None, path: Default::default() }
     }
 
     #[test]

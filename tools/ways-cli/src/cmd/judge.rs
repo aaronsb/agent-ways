@@ -29,6 +29,17 @@ pub fn readiness() -> Readiness {
     })
 }
 
+/// The sessions directories the judge's session lines read: the config
+/// directory this process runs under, `~/.claude`, then each enabled
+/// target's, each once.
+pub fn session_dirs() -> Vec<std::path::PathBuf> {
+    let mut dirs = ways_agent_core::live::sessions_dirs();
+    for dir in enabled_targets() {
+        ways_agent_core::live::push_new(&mut dirs, claude_sessions::ClaudeDir::at(dir).sessions_dir());
+    }
+    dirs
+}
+
 /// The directories of the enabled targets.
 fn enabled_targets() -> Vec<std::path::PathBuf> {
     crate::config::global().targets().into_iter().filter(|t| t.enabled).map(|t| t.dir()).collect()
@@ -36,7 +47,7 @@ fn enabled_targets() -> Vec<std::path::PathBuf> {
 
 /// Why the judge cannot gate, and the fix. None when it gates or the operator
 /// turned it off.
-fn reason(state: &Readiness) -> Option<(String, String)> {
+pub(crate) fn reason(state: &Readiness) -> Option<(String, String)> {
     Some(match state {
         Readiness::Ready(..) | Readiness::Fallback(..) | Readiness::Off => return None,
         // A keyless engine takes no key: its remedies are the mod or a key
@@ -100,6 +111,12 @@ pub fn warning(state: &Readiness) -> Option<String> {
 
 /// The judge's state after setup, wrapped within 80 columns.
 fn outcome(state: &Readiness) -> Option<String> {
+    outcome_text(state).map(|text| wrap(&text, COLUMNS))
+}
+
+/// The judge's state in one unwrapped line, as [`outcome`] gives it and the
+/// settings gate screen shows it, wrapped to its pane.
+pub(crate) fn outcome_text(state: &Readiness) -> Option<String> {
     let shadow = |m: &Mode| if *m == Mode::Shadow { ", shadow: logs verdicts, blocks nothing" } else { "" };
     let text = match state {
         Readiness::Ready(p, m) => format!("Relevance judge on ({}{}).", name(*p), shadow(m)),
@@ -115,7 +132,7 @@ fn outcome(state: &Readiness) -> Option<String> {
         }
         other => format!("Relevance judge still off: {}.", reason(other)?.0),
     };
-    Some(wrap(&text, COLUMNS))
+    Some(text)
 }
 
 /// `text` broken at spaces into lines of at most `width` characters; a word
@@ -132,6 +149,17 @@ fn wrap(text: &str, width: usize) -> String {
         }
     }
     lines.join("\n")
+}
+
+/// The judge's state in a word, for the settings gate screen's value column.
+pub(crate) fn state_word(state: &Readiness) -> &'static str {
+    match state {
+        Readiness::Ready(..) => "ready",
+        Readiness::Fallback(..) => "key stands in",
+        Readiness::Off => "off by choice",
+        Readiness::Config(_) => "config error",
+        Readiness::NoKey(_) | Readiness::NoMod | Readiness::ModDisabled | Readiness::Unverified(..) => "degraded",
+    }
 }
 
 /// The provider's name as the operator knows it.

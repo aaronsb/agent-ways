@@ -86,14 +86,7 @@ pub fn session_dir(session_id: &str) -> PathBuf {
 /// no separator, no leading dot, not empty. Every path that removes a
 /// session's state checks it first, so an id from a hook payload or the
 /// command line never reaches the root itself or a directory beside it.
-pub fn is_plain_session_id(session_id: &str) -> bool {
-    let ok = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
-    let mut chars = session_id.chars();
-    match chars.next() {
-        Some(c) if ok(c) => chars.all(|c| ok(c) || c == '.'),
-        _ => false,
-    }
-}
+pub use ways_agent_core::engine::is_plain_session_id;
 
 /// Path to the per-session queued-message scan mark (ADR-161). Stores the newest
 /// `queue-operation`/`enqueue` transcript timestamp already matched by the

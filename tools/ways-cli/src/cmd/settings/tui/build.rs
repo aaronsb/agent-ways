@@ -390,6 +390,13 @@ impl Ways {
         if let Some(s) = name.strip_prefix("attend.sensors.").filter(|s| !s.contains('.')) {
             return attend_config::schema::sensor_doc(s);
         }
+        if let Some(p) = name.strip_prefix("gate.profiles.").filter(|p| !p.contains('.')) {
+            // A shipped engine's group is headed by the name setup offers it
+            // under.
+            if let Some(shown) = ways_agent_core::profile::shipped().get(p).and_then(|p| p.display_name.clone()) {
+                return shown;
+            }
+        }
         self.reg.section(name).map(|(_, s)| s.doc.to_string()).unwrap_or_default()
     }
 
@@ -442,6 +449,9 @@ impl Ways {
                 }
             }
             let mut s = Setting::new(kind(b.spec.kind, layers, &b.bound), shown, source);
+            if b.spec.name == "gate.engine" {
+                s = s.labels(ways_agent_core::settings::engine_labels(layers));
+            }
             if let Some(d) = r.default.as_ref().or(b.spec.default_for(&b.bound).as_ref()) {
                 s = s.default(display(Some(d), b.spec.kind));
             }
@@ -498,6 +508,10 @@ impl Ways {
             self.other_projects(&mut root);
         }
         self.headers(&mut root, tab.prefix);
+        if tab.name == "gate" {
+            // Last, so the settings keep their rows.
+            root.children.extend((self.ctx.judge)().map(|j| super::judge::section(&j)));
+        }
         let mut found = self.findings(tab, &files, layers);
         if !found.children.is_empty() {
             found.open = true;

@@ -360,7 +360,11 @@ impl App {
         }
         if let Some(s) = &n.setting {
             let field = |k: &str, v: String| Line::from(vec![Span::styled(format!("{k:<9}"), dim), Span::raw(v)]);
-            lines.push(field("value", s.value.clone()));
+            let value = match s.label_of(&s.value) {
+                Some(name) => format!("{} · {name}", s.value),
+                None => s.value.clone(),
+            };
+            lines.push(field("value", value));
             if s.changed() {
                 lines.push(field("was", s.loaded.clone()));
             }

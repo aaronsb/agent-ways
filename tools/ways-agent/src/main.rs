@@ -186,36 +186,77 @@ fn serve(idle_minutes: u64) -> Result<ExitCode> {
 fn agent_status(start: bool) -> Result<ExitCode> {
     use ways_agent::protocol::{Reply, Request};
     let timeout = std::time::Duration::from_secs(5);
-    let status = match ways_agent::client::call(Request::Status, timeout, start) {
-        Ok(Reply::Status(s)) => s,
+    let user = UserLayer::load_with_findings(&profile::user_layer_path()).map(|(u, _)| u).unwrap_or_default();
+    let profiles = profile::profiles(&user);
+    // A claude-code engine judges inside Claude Code: no agent is started
+    // for it, and it takes no key.
+    let keyless = |e: &str| profiles.get(e).is_some_and(|p| p.provider.keyless());
+    match ways_agent::client::call(Request::Status, timeout, start) {
+        Ok(Reply::Status(status)) => {
+            println!("ways-agent {} (pid {}), up {}s, socket {}", status.version, status.pid, status.uptime_s, ways_agent::protocol::socket_path().display());
+            match (&status.engine, &status.model, status.mode) {
+                (Some(e), Some(m), Some(mode)) => {
+                    // The agent says how it chose; an agent built before it could
+                    // say is answered from agent.yaml here.
+                    let set = engine_set(status.engine_set, || engine_set_locally(e));
+                    println!("engine {e} ({}; {m}), mode {}", origin(set), mode.as_str());
+                    if keyless(e) {
+                        println!("{}", keyless_note(e, &profiles));
+                    }
+                }
+                _ => println!("gate off: no engine named and no key found"),
+            }
+            let pct = |v: Option<u64>| v.map(|ms| format!("{ms} ms")).unwrap_or_else(|| "—".into());
+            let cap = if status.concurrency == 0 { "—".to_string() } else { status.concurrency.to_string() };
+            println!(
+                "requests {}, judged {}, in flight {}/{cap}, latency p50 {} p95 {}",
+                status.requests, status.judged, status.in_flight, pct(status.latency_p50_ms), pct(status.latency_p95_ms)
+            );
+            if !status.fallbacks.is_empty() {
+                let list: Vec<String> = status.fallbacks.iter().map(|(k, v)| format!("{k} {v}")).collect();
+                println!("fallbacks: {}", list.join(", "));
+            }
+        }
         Ok(other) => bail!("unexpected reply: {other:?}"),
-        Err(reason) if reason == "agent_absent" => {
-            println!("no agent running; hooks start one on the next gated prompt (or run `ways agent load`)");
-            return Ok(ExitCode::SUCCESS);
-        }
+        Err(reason) if reason == "agent_absent" => match user.engine.as_deref().filter(|e| keyless(e)) {
+            Some(e) => println!("no agent running; {}", keyless_note(e, &profiles)),
+            None => println!("no agent running; hooks start one on the next gated prompt (or run `ways agent load`)"),
+        },
         Err(reason) => bail!("agent unreachable: {reason}"),
-    };
-    println!("ways-agent {} (pid {}), up {}s, socket {}", status.version, status.pid, status.uptime_s, ways_agent::protocol::socket_path().display());
-    match (&status.engine, &status.model, status.mode) {
-        (Some(e), Some(m), Some(mode)) => {
-            // The agent says how it chose; an agent built before it could
-            // say is answered from agent.yaml here.
-            let set = engine_set(status.engine_set, || engine_set_locally(e));
-            println!("engine {e} ({}; {m}), mode {}", origin(set), mode.as_str())
-        }
-        _ => println!("gate off: no engine named and no key found"),
     }
-    let pct = |v: Option<u64>| v.map(|ms| format!("{ms} ms")).unwrap_or_else(|| "—".into());
-    let cap = if status.concurrency == 0 { "—".to_string() } else { status.concurrency.to_string() };
-    println!(
-        "requests {}, judged {}, in flight {}/{cap}, latency p50 {} p95 {}",
-        status.requests, status.judged, status.in_flight, pct(status.latency_p50_ms), pct(status.latency_p95_ms)
-    );
-    if !status.fallbacks.is_empty() {
-        let list: Vec<String> = status.fallbacks.iter().map(|(k, v)| format!("{k} {v}")).collect();
-        println!("fallbacks: {}", list.join(", "));
+    let unset = ways_agent_core::live::unset_engine_line(&profiles, |p| keys::locate_file(p).is_some());
+    for line in judge_lines(&unset, &ways_agent_core::live::live_sessions(&ways_agent_core::live::sessions_dirs()), &profiles) {
+        println!("{line}");
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// What the agent does for a keyless engine: nothing. Its sessions judge
+/// inside Claude Code, and the agent judges only a session that fell back to
+/// a key engine.
+fn keyless_note(engine: &str, profiles: &std::collections::BTreeMap<String, profile::Profile>) -> String {
+    format!(
+        "{} judges inside Claude Code through the ways-judge mod, on the account's own usage, and takes no key; this agent judges only the sessions that fell back to a key engine, and hooks start it for those. `ways status` says whether the mod is installed.",
+        ways_agent_core::live::engine_label(Some(engine), profiles)
+    )
+}
+
+/// The lines after the agent's own (ADR-708 §7, §8): the engine an unset
+/// `gate.engine` resolves to, and each live session's engine and why, which
+/// for a session with no engine names the remedy.
+fn judge_lines(
+    unset: &str,
+    sessions: &[ways_agent_core::live::LiveSession],
+    profiles: &std::collections::BTreeMap<String, profile::Profile>,
+) -> Vec<String> {
+    let mut out = vec![format!("unset engine resolves to {unset}")];
+    if sessions.is_empty() {
+        out.push("sessions: none live".to_string());
+    } else {
+        out.push("sessions:".to_string());
+        out.extend(sessions.iter().map(|s| format!("  {}", ways_agent_core::live::session_line(s, profiles))));
+    }
+    out
 }
 
 // ---------------------------------------------------------------- keys
@@ -664,6 +705,38 @@ fn cost_note(m: &net::ModelInfo, base: Option<&net::ModelInfo>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn status_lists_each_live_session_s_engine_and_why() {
+        use ways_agent_core::engine::{resolve_session, Resolution, SessionEngine, EXPLICIT};
+        use ways_agent_core::live::LiveSession;
+        let shipped = profile::shipped();
+        let session = |id: &str, resolution: Resolution, provider| LiveSession {
+            session: id.into(),
+            held: resolution.engine.is_some(),
+            engine: Some(SessionEngine { resolution, provider }),
+        };
+        let fell = resolve_session(Some("claude-code"), &shipped, false, |p| p == Provider::Anthropic);
+        let none = resolve_session(Some("claude-code"), &shipped, false, |_| false);
+        let sessions = [
+            session("3f6c2a91-4b7e", Resolution { engine: Some("claude-code".into()), reason: EXPLICIT.into() }, Some(Provider::ClaudeCode)),
+            session("bbbbbbbb-0000", fell, Some(Provider::Anthropic)),
+            session("cccccccc-0000", none, None),
+        ];
+        let lines = judge_lines("anthropic (Anthropic API key)", &sessions, &shipped);
+        assert_eq!(lines[0], "unset engine resolves to anthropic (Anthropic API key)");
+        assert_eq!(lines[1], "sessions:");
+        assert_eq!(lines[2], "  3f6c2a91  claude-code (Claude Code internal) — explicit");
+        assert_eq!(lines[3], "  bbbbbbbb  anthropic (Anthropic API key) — claude-code unavailable: no Claude Code host");
+        assert!(lines[4].contains("engine_unavailable") && lines[4].contains("configure an Anthropic or OpenRouter key"), "{}", lines[4]);
+        assert_eq!(judge_lines("x", &[], &shipped)[1], "sessions: none live");
+        // A keyless engine is never offered a key.
+        let all = lines.join("\n") + &keyless_note("claude-code", &shipped);
+        assert!(!all.contains("--provider claude-code"), "{all}");
+        let note = keyless_note("claude-code", &shipped);
+        assert!(note.starts_with("claude-code (Claude Code internal) judges inside Claude Code"), "{note}");
+        assert!(note.contains("fell back to a key engine, and hooks start it for those"), "{note}");
+    }
 
     #[test]
     fn status_takes_the_agent_s_word_on_the_engine_and_reads_the_file_for_an_old_agent() {

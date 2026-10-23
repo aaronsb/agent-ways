@@ -125,6 +125,7 @@ pub fn run(json_output: bool) -> Result<()> {
                 "active": engine,
             },
             "gate": gate_json(),
+            "judge": judge_json(),
             "binaries": {
                 "ways": std::env::current_exe().ok().map(|p| p.display().to_string()),
                 "way_embed": way_embed.as_ref().map(|p| p.display().to_string()),
@@ -180,6 +181,10 @@ pub fn run(json_output: bool) -> Result<()> {
         // Engine & language
         println!("Engine:    {engine}");
         println!("Gate:      {}", gate_line());
+        let (unset, sessions, profiles) = judge_state();
+        for line in judge_text(&unset, &sessions, &profiles) {
+            println!("{line}");
+        }
         println!("Language:  {output_language}");
         println!();
 
@@ -563,6 +568,50 @@ fn gate_line() -> String {
     }
 }
 
+/// What the judge lines report (ADR-708 §8): the engine an unset
+/// `gate.engine` resolves to, the live sessions with their resolutions, and
+/// the profiles, for their display names.
+fn judge_state() -> (String, Vec<ways_agent_core::live::LiveSession>, std::collections::BTreeMap<String, ways_agent_core::profile::Profile>) {
+    use ways_agent_core::{keys, live, profile};
+    let user = profile::UserLayer::load_with_findings(&profile::user_layer_path()).map(|(u, _)| u).unwrap_or_default();
+    let profiles = profile::profiles(&user);
+    let unset = live::unset_engine_line(&profiles, |p| keys::locate_file(p).is_some());
+    (unset, live::live_sessions(&crate::cmd::judge::session_dirs()), profiles)
+}
+
+/// The lines under the Gate line: the unset engine, then each live session's
+/// engine and why, which for a session with no engine names the remedy.
+fn judge_text(
+    unset: &str,
+    sessions: &[ways_agent_core::live::LiveSession],
+    profiles: &std::collections::BTreeMap<String, ways_agent_core::profile::Profile>,
+) -> Vec<String> {
+    let mut out = vec![format!("           unset engine resolves to {unset}")];
+    if sessions.is_empty() {
+        out.push("Sessions:  none live".to_string());
+    }
+    for (i, s) in sessions.iter().enumerate() {
+        let head = if i == 0 { "Sessions:  " } else { "           " };
+        out.push(format!("{head}{}", ways_agent_core::live::session_line(s, profiles)));
+    }
+    out
+}
+
+fn judge_json() -> serde_json::Value {
+    let (unset, sessions, _) = judge_state();
+    json!({
+        "unset_engine": unset,
+        "sessions": sessions.iter().map(|s| json!({
+            "session": s.session,
+            // True only for a resolution the session holds in its judge state.
+            "held": s.held,
+            "engine": s.engine.as_ref().and_then(|e| e.resolution.engine.clone()),
+            "reason": s.engine.as_ref().map(|e| e.resolution.reason.clone()),
+            "provider": s.engine.as_ref().and_then(|e| e.provider).map(|p| p.as_str()),
+        })).collect::<Vec<_>>(),
+    })
+}
+
 fn gate_json() -> serde_json::Value {
     match gate_settings() {
         Err(e) => json!({ "error": format!("{e:#}") }),
@@ -603,6 +652,32 @@ mod tests {
         assert!(keyless_phrase(&Readiness::ModDisabled).contains("disabled"));
         let config = keyless_phrase(&Readiness::Config("bad yaml".into()));
         assert_eq!(config, "agent.yaml does not load: bad yaml", "a config error is not a missing mod");
+    }
+
+    #[test]
+    fn each_live_session_shows_its_engine_and_a_fallback_its_reason() {
+        use ways_agent_core::engine::{resolve_session, Resolution, SessionEngine, EXPLICIT};
+        use ways_agent_core::live::LiveSession;
+        use ways_agent_core::profile::{shipped, Provider};
+        let fell = resolve_session(Some("claude-code"), &shipped(), false, |p| p == Provider::Anthropic);
+        let sessions = [
+            LiveSession {
+                session: "3f6c2a91-4b7e".into(),
+                engine: Some(SessionEngine { resolution: Resolution { engine: Some("claude-code".into()), reason: EXPLICIT.into() }, provider: Some(Provider::ClaudeCode) }),
+                held: true,
+            },
+            LiveSession { session: "bbbbbbbb-0000".into(), engine: Some(SessionEngine { resolution: fell, provider: Some(Provider::Anthropic) }), held: true },
+        ];
+        let text = super::judge_text("anthropic (Anthropic API key)", &sessions, &shipped());
+        assert_eq!(
+            text,
+            [
+                "           unset engine resolves to anthropic (Anthropic API key)",
+                "Sessions:  3f6c2a91  claude-code (Claude Code internal) — explicit",
+                "           bbbbbbbb  anthropic (Anthropic API key) — claude-code unavailable: no Claude Code host",
+            ]
+        );
+        assert_eq!(super::judge_text("x", &[], &shipped())[1], "Sessions:  none live");
     }
     use crate::cmd::scan::sidecar::Fallback;
     use serde_json::json;
