@@ -21,6 +21,7 @@ The hooks are declared in the `hooks` block of the repo's [`settings.json`](../s
 | **SubagentStart** | | `inject-subagent.sh` |
 | **PostToolUse** | `Edit\|Write\|Bash\|Task` | `check-post.sh`, `check-queued.sh` |
 | **PostToolUse** | `Bash`, if `Bash(gh issue *)` | `issues-pull.sh post-gh` |
+| **PostToolUse** | `Bash`, if `Bash(gh pr merge *)` | `pr-merge-checks.sh` |
 | **PostToolUse** | `EnterPlanMode\|ExitPlanMode\|Workflow` | `check-tool.sh` |
 | **PostToolUseFailure** | `Edit\|Write\|Bash\|Task` | `check-post.sh` |
 | **Stop** | | `check-response.sh`, `attend-drain-stop.sh` |
@@ -74,6 +75,7 @@ All lanes respect the `scope:` field and the `when:` preconditions.
 - **`strip-session-link-pre.sh`** - Denies a `git commit` or `gh pr|issue` command that would publish a Claude Code session link as a trailer or footer line (ADR-167).
 - **`attend-drain-stop.sh`** - Runs `attend message inbox --drain --format hook` at the end of each turn, delivering pending peer messages (ADR-172). Does nothing when `attend` is not installed.
 - **`issues-pull.sh`** / **`issues-task-created.sh`** - Mirror GitHub issues into the session's task list and reject unprefixed duplicates of mirrored issues (ADR-180).
+- **`pr-merge-checks.sh`** - After a `gh pr merge`, names any CI check that was not green when the PR merged or was queued for auto-merge, so the model tells the operator. It reports and never blocks (#1168).
 
 ## Session Lifecycle
 

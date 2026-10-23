@@ -46,7 +46,7 @@ A release bump PR whose diff is only the package's version line and its lockfile
 
 ## Green CI is a command
 
-Green CI means `gh pr checks <n> --json bucket -q 'all(.[]; .bucket=="pass" or .bucket=="skipping")'` prints `true`. Run it as its own command and read the result before `gh pr merge`. Parse no text table, and never chain a merge after a pipe, whose exit status is the last command's. A guard script counts once it has been seen refusing a red case. After a merge, a hook names any check that was not green; tell the operator when it does.
+Green CI means `gh pr checks <n> --json bucket -q 'all(.[]; .bucket=="pass" or .bucket=="skipping")'` prints `true`. Run it as its own command and read the result before `gh pr merge`. Do not parse the text table. A pipeline's exit status is its last command's, so `gh pr checks 5 | cut -f1 && gh pr merge 5` merges whatever the checks say. A repository with no checks has no green CI to merge under; `gh pr checks` exits 1 there. A guard script counts once it has been seen refusing a red case. After a merge or an auto-merge request, a hook names any check that was not green; tell the operator when it does.
 
 ## Remediate before you merge
 
