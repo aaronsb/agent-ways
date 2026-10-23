@@ -3,9 +3,10 @@
 //! in the user's ways config, so the two are written in an order that never
 //! leaves `claude-code` chosen without the mod wanted: the mod's setting
 //! first when switching to `claude-code`, the engine first when leaving it.
-//! `ways judge-setup`, the settings gate screen and `ways settings set` and
-//! `unset` of `gate.engine` all write through [`write_engine`], and a direct
-//! write of the mod's setting in the user config is refused ([`refuse`]).
+//! `ways judge-setup`, the settings gate screen, `ways settings set` and
+//! `unset` of `gate.engine`, and `ways settings apply` all write through
+//! [`write_engine`], and a direct write of the mod's setting in the user
+//! config is refused ([`refuse`]).
 
 use super::*;
 
@@ -90,11 +91,13 @@ pub fn report(written: &[(LayerScope, PathBuf)]) {
         touched(*scope, path, false);
     }
     if written.iter().any(|(_, p)| *p == ways_core::paths::user_config()) {
-        eprintln!(
-            "the ways-judge mod follows gate.engine at the next `ways manage mod repair ways-judge --commit` or `ways manage update --commit`"
-        );
+        eprintln!("{REPAIR_HINT}");
     }
 }
+
+/// The line a write of the judge mod's wanted state ends with.
+pub const REPAIR_HINT: &str =
+    "the ways-judge mod follows gate.engine at the next `ways manage mod repair ways-judge --commit` or `ways manage update --commit`";
 
 /// A write of `key` that only the engine choice may make: the user config's
 /// `mods.ways-judge.install`. A project write never reaches the user file,

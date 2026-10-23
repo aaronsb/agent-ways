@@ -236,6 +236,23 @@ impl Fx {
         self.ways(&self.stub_path()).args(args).env("NO_COLOR", "1").env("XDG_DATA_HOME", self.app_home()).output().unwrap()
     }
 
+    /// `ways <args>` with `input` on stdin.
+    fn run_stdin(&self, args: &[&str], input: &str) -> Output {
+        use std::io::Write as _;
+        let mut child = self
+            .ways(&self.stub_path())
+            .args(args)
+            .env("NO_COLOR", "1")
+            .env("XDG_DATA_HOME", self.app_home())
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
+        child.wait_with_output().unwrap()
+    }
+
     /// The directory `ways manage mod` reads the app from: `src` under it.
     fn app_home(&self) -> PathBuf {
         let data = self.root.join("data");
@@ -560,6 +577,57 @@ fn the_old_judge_record_file_is_not_read() {
     fx.repair_targets(&fx.src());
     assert!(!fx.changes().iter().any(|c| c.contains(JUDGE)), "the record file installs nothing");
     assert!(!fx.has(JUDGE));
+    assert!(!market.with_file_name("ways-judge-installed").exists(), "repair deletes the old record");
+}
+
+/// `ways settings apply` writes `gate.engine` through the engine choice, as
+/// `set` does (ADR-512 item 4): claude-code wants the mod first, a key engine
+/// stops wanting it, and the next repair converges the mod.
+#[test]
+fn apply_writes_the_engine_and_the_judge_mods_wanted_state_together() {
+    let fx = Fx::new("apply-engine");
+    fx.configure_mods(true, true, false);
+    fx.repair_targets(&fx.src());
+    fx.changes();
+    let out = fx.run_stdin(&["settings", "apply"], "engine: claude-code\n");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{}\n{err}", String::from_utf8_lossy(&out.stdout));
+    assert!(fx.judge_wanted(), "{}", std::fs::read_to_string(fx.user_config()).unwrap());
+    assert!(std::fs::read_to_string(fx.agent_yaml()).unwrap().contains("engine: claude-code"));
+    assert!(err.contains("ways manage mod repair ways-judge --commit"), "apply names the repair: {err}");
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(report["accepted"].as_array().unwrap().iter().any(|k| k == "gate.engine"), "{report}");
+    fx.repair_targets(&fx.src());
+    assert_eq!(fx.changes(), vec![format!("{}|plugin install {JUDGE} --scope user", fx.dest().display())]);
+
+    let out = fx.run_stdin(&["settings", "apply"], "engine: anthropic\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(!fx.judge_wanted(), "a key engine stops wanting the mod");
+    fx.repair_targets(&fx.src());
+    assert_eq!(fx.changes(), vec![format!("{}|plugin uninstall {JUDGE} --scope user", fx.dest().display())]);
+
+    // An object that clears the engine clears it the same way.
+    write(&fx.agent_yaml(), "engine: claude-code\n");
+    let out = fx.run_stdin(&["settings", "apply"], "engine: null\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(!std::fs::read_to_string(fx.agent_yaml()).unwrap().contains("engine:"), "{}", std::fs::read_to_string(fx.agent_yaml()).unwrap());
+}
+
+/// `ways settings apply` refuses the user config's `mods.ways-judge.install`
+/// as `set` does, and writes nothing.
+#[test]
+fn apply_refuses_the_users_judge_install() {
+    let fx = Fx::new("apply-refused");
+    let out = fx.run_stdin(&["settings", "apply"], "mods:\n  ways-judge:\n    install: true\n");
+    assert_eq!(out.status.code(), Some(3), "{}", String::from_utf8_lossy(&out.stdout));
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let rejected = report["rejected"].to_string();
+    assert!(rejected.contains("mods.ways-judge.install") && rejected.contains("follows gate.engine"), "{rejected}");
+    assert!(!fx.user_config().exists(), "nothing written");
+    // The value in effect, as `ways settings emit` prints it, is passed over.
+    let out = fx.run_stdin(&["settings", "apply"], "mods:\n  ways-judge:\n    install: false\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
+    assert!(!fx.user_config().exists(), "an unchanged value writes nothing");
 }
 
 #[test]

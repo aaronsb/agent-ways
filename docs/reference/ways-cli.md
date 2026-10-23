@@ -759,7 +759,7 @@ Bare `ways manage target` on a terminal opens the settings screens on their inst
 
 `install`, `uninstall` and `repair` print what they would change and change nothing until `--commit` ([ADR-511](../architecture/platform/ADR-511-every-mutating-lifecycle-verb-reports-what-it-would-change-until-commit.md)), and follow `install.manage_mode` as `repair` does. Bare `ways manage mod` on a terminal opens the settings screens on their mod tab. In a pipe it prints its help and exits 2.
 
-The user config's `mods.ways-judge.install` is written only with the engine: `ways judge-setup`, the gate tab and `ways settings set|unset gate.engine` write both, the mod's setting first when the engine becomes `claude-code` and the engine first when it leaves it. `ways settings set mods.ways-judge.install` is refused. `ways settings set gate.engine` writes and names the repair; setup and the gate tab run it.
+The user config's `mods.ways-judge.install` is written only with the engine: `ways judge-setup`, the gate tab, `ways settings set|unset gate.engine` and `ways settings apply` of an object holding `engine` write both, the mod's setting first when the engine becomes `claude-code` and the engine first when it leaves it. `ways settings set` and `apply` refuse `mods.ways-judge.install` in the user config. `set` and `apply` write and name the repair; setup and the gate tab run it.
 
 ```
 ways manage mod list

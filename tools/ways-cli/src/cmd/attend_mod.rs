@@ -367,6 +367,12 @@ impl Record {
         super::reconcile::base_path_for(&crate::paths::state_root(), dest_root).with_file_name("attend-mod-marketplace")
     }
 
+    /// Delete the `ways-judge-installed` file a release before ADR-512 kept
+    /// beside the record; nothing reads it.
+    fn forget_old(dest_root: &Path) {
+        let _ = std::fs::remove_file(Record::path(dest_root).with_file_name("ways-judge-installed"));
+    }
+
     /// The record of the target at `dest_root`; empty where there is none.
     pub fn read(dest_root: &Path) -> Record {
         std::fs::read_to_string(Record::path(dest_root)).map(|t| Record::parse(&t)).unwrap_or_default()
@@ -508,6 +514,9 @@ fn removed_by_hand(m: &Mod, t: &Target, dry_run: bool) -> String {
 pub fn converge_target(source_root: &Path, t: &Target, only: Option<&Mod>, dry_run: bool) -> Vec<String> {
     let mods: Vec<Mod> =
         MODS.into_iter().filter(|m| only.is_none_or(|o| o.id == m.id) && shipped_version(m, source_root).is_some()).collect();
+    if !dry_run {
+        Record::forget_old(t.dest_root);
+    }
     if mods.is_empty() {
         return Vec::new();
     }
@@ -597,6 +606,9 @@ pub fn align_judge(dry_run: bool) -> Vec<String> {
 /// mod goes first, so attend's withdrawal finds no other mod of ours and
 /// removes the marketplace too.
 pub fn withdraw_target(source_root: &Path, dest_root: &Path, default_root: &Path, dry_run: bool) -> Vec<String> {
+    if !dry_run {
+        Record::forget_old(dest_root);
+    }
     let record = Record::read(dest_root);
     let mut lines = Vec::new();
     for m in MODS.iter().rev() {
