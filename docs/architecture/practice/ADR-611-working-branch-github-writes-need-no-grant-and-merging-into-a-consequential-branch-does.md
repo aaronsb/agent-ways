@@ -26,7 +26,11 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
-status: proposed
+observable:
+  - see: with no CLAUDE.md git lines, a session pushes its working branch and opens the pull request without asking, and stops before merging into main with a one-line offer
+  - see: a residual found mid-task is filed with gh issue create and named in the report
+  - see: after the user asks for a release, the agent cuts it and hands over only the step it cannot run, such as a signed tag
+status: accepted
 date: 2026-10-23
 deciders:
   - aaronsb
@@ -40,7 +44,7 @@ related:
 
 ## Summary
 
-- **Decided:** In a repository the user owns, writes that stay on a working branch or in the issue tracker go ahead without an ask or a grant when they are the natural next step of the work: commits on a non-default branch, pushing that branch, opening, editing, reviewing and commenting on its pull request, pushing review fixes to it, and every issue write. Merging into a consequential branch (the default branch, a release branch, or a protected branch) needs the user's ask, a goal condition, or a CLAUDE.md grant, as ADR-609 item 3 sets out. Force pushes, history rewrites, release tags and writes to repositories the user does not own stay asked for each time.
+- **Decided:** In a repository the user owns, writes that stay on a working branch or in the issue tracker go ahead without an ask or a grant when they are the natural next step of the work: commits on a non-default branch, pushing that branch, opening, editing, reviewing, commenting on and closing its pull request, pushing review fixes to it, and every issue write. Merging into, or committing or pushing straight to, a consequential branch (the default branch, a release branch, or a protected branch), and cutting a release or its tag, need the user's ask, a goal condition, or a CLAUDE.md grant, as ADR-609 item 3 sets out. Force pushes, history rewrites and writes to repositories the user does not own stay asked for each time.
 - **Trades away:** Pushes and pull requests appear without a per-write yes, so collaborators and CI see work earlier and more often. A user who wants every push asked for has to say so in their CLAUDE.md.
 - **One-way?** No. Reversible: way text and this record, both changed in one session.
 - **Probes:** *Confident (merge line):* Working-branch pushes, pull requests and issue writes go ahead without asking, and only merging into main, a release branch or a protected branch waits for your word. Is that the line? *Not confident (force push):* Claude Code's current text still says "never force-push or rewrite shared history unprompted", so a force push to the agent's own pull request branch stays asked for each time. Does that settle your condition?
@@ -52,18 +56,17 @@ ADR-609 put every commit, push, pull request write and issue write behind the us
 
 ## Decision
 
-1. **Working writes need no grant.** In a repository the user owns, these go ahead when they are the natural next step of the work: commits on a non-default branch; pushing that branch; opening, editing, reviewing and commenting on its pull request; pushing commits that answer review; and filing, assigning, labelling, commenting on and closing issues.
-2. **Merging into a consequential branch needs a source.** The default branch, a release branch and any branch with protection rules are consequential. A merge into one needs the user's ask in the conversation, a goal condition that names it, or a CLAUDE.md grant, as ADR-609 item 3 states. Without one, the agent offers the merge in one line, as ADR-609 item 5 states.
-3. **ADR-609 item 7 stands.** Force pushes, history rewrites, release tags and writes to repositories the user does not own are asked for each time. This includes a force push to the agent's own pull request branch, because Claude Code's text still says "never force-push or rewrite shared history unprompted".
+1. **Working writes need no grant.** In a repository the user owns, these go ahead when they are the natural next step of the work: commits on a non-default branch; pushing that branch; opening, editing, reviewing, commenting on and closing its pull request; pushing commits that answer review; and filing, assigning, labelling, commenting on and closing issues.
+2. **Writes to a consequential branch, and releases, need a source.** The default branch, a release branch and any branch with protection rules are consequential. A merge into one, a commit or push straight to one, and a release or its tag need the user's ask in the conversation, a goal condition that names it, or a CLAUDE.md grant, as ADR-609 item 3 states. Without one, the agent offers the merge in one line, as ADR-609 item 5 states.
+3. **ADR-609 item 7 stands, without release tags.** Force pushes, history rewrites and writes to repositories the user does not own are asked for each time. Release tags move to item 2: once the user has asked for or granted a release, the agent goes forward with it. This includes a force push to the agent's own pull request branch, because Claude Code's text still says "never force-push or rewrite shared history unprompted".
 4. **A CLAUDE.md line can narrow this.** A user who wants pushes or issue writes asked for each time says so in their CLAUDE.md, and that line wins over the way.
-5. **ADR-609 items 1, 5 and 6 change accordingly.** Item 1's scope of gated writes shrinks to merges into consequential branches plus item 7's list. Item 5's offer applies to those. Item 6's suggested lines reduce to the merge line and a narrowing example.
+5. **ADR-609 items 1, 5 and 6 change accordingly.** Item 1's scope of gated writes shrinks to item 2's list plus item 7's. ADR-609's Summary and observables read as amended here. Item 5's offer applies to those. Item 6's suggested lines reduce to the merge line and a narrowing example.
 
 ## Consequences
 
 ### Positive
 
 - A branch, its pull request, review rounds and issue upkeep run without a stop for permission at each write.
-- The gate sits on the merge, the write other people build on.
 
 ### Negative
 
@@ -72,7 +75,7 @@ ADR-609 put every commit, push, pull request write and issue write behind the us
 
 ### Neutral
 
-- Way edits: `meta/trust/delegation` (the git row and Standing Grants), `meta/codify`, `meta/attend/context-pressure`, `meta/compaction-checkpoint`, `softwaredev/delivery/commits/prepare`, `softwaredev/delivery/issues`, `softwaredev/delivery/github` and `softwaredev/delivery/github/follow-through`. Each returns to making the write it made before ADR-609, where ADR-609 had turned it into an offer. ADR-609's other way edits, such as the regular-merge default and handing over `/compact`, stay. The `wrap` skill saves its continuation prompt to `.claude/handoff.wrap.md`, `start` reads it or `.claude/handoff.local.md`, and compaction-checkpoint keeps its synthesis in the same place when the session has no other convention.
+- Way edits: `meta/trust/delegation` (the git row and Standing Grants), `meta/codify`, `meta/attend/context-pressure`, `meta/compaction-checkpoint`, `softwaredev/delivery/commits/prepare`, `softwaredev/delivery/issues`, `softwaredev/delivery/github` and `softwaredev/delivery/github/follow-through`. Each makes its write instead of offering it; prepare, issues and compaction-checkpoint take the operator's revised text. ADR-609's other way edits, such as the regular-merge default and handing over `/compact`, stay. The `wrap` skill saves its continuation prompt to `.claude/handoff.wrap.md`, `start` reads it or `.claude/handoff.local.md`, and compaction-checkpoint keeps its synthesis in the same place when the session has no other convention.
 
 ## Alternatives Considered
 

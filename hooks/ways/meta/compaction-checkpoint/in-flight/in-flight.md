@@ -1,5 +1,5 @@
 ---
-description: At a compaction or handoff, the background jobs and dev servers still running and whether each survives, and the uncommitted files with a proposed commit split
+description: At a compaction or handoff, the background jobs and dev servers still running and whether each survives, and the uncommitted work committed on the working branch, split by purpose
 vocabulary: background jobs still running watcher dev server survive compaction lost at compaction stray shells uncommitted edits commit split
 trigger: context-threshold
 threshold: 85
@@ -17,7 +17,7 @@ List the background jobs, monitors, and dev servers still running, and whether e
 
 ## Uncommitted work
 
-List the uncommitted files with a proposed commit split, and name any file you are holding back on purpose.
+Commit the uncommitted work on the working branch, split by purpose, and name any file you hold back on purpose.
 
 ## On an unattended run
 

@@ -39,7 +39,7 @@ Frame this as a collaboration checkpoint, not a limitation apology. Something li
 After the user responds, combine your summary with their steering into a synthesis:
 
 1. Keep the synthesis available for the successor session, in the convention this session started with: the task list, a `tasklist` issue (ADR-180), or a handoff file the project already uses
-2. With no known convention, use the wrap skill's handoff file, `.claude/handoff.wrap.md`, and barring that `.claude/handoff.local.md`, in the project's agent directory at the directory the session runs from. Both stay gitignored: add `.claude/handoff.*.md` to `.gitignore` when it is not covered
+2. With no known convention, add the synthesis to `.claude/handoff.wrap.md` when `/wrap` has written one, and otherwise write `.claude/handoff.local.md`, both at the repository root. When `.gitignore` does not cover the file, list it in `.git/info/exclude`
 3. Include the user's priorities and direction — their words, not your paraphrase
 4. **Produce a copy-pastable continuance prompt** — a short block the user can paste into a *fresh* session if this one ends: the goal/intent, what's landed, the immediate next step, and the key files/branches in play. When several tasks remain, add the working mode from the `/wrap` skill: the main session steers, subagents carry implementation and review, and each branch gets its own worktree. Compaction keeps the session alive; a continuance prompt is the handoff that survives even a hard reset.
 

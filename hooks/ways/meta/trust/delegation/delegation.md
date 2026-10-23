@@ -11,14 +11,14 @@ Every external resource Claude uses belongs to the human. Email accounts, git re
 
 ## The Permission Default
 
-"It would be helpful to send this email" does not mean "I should send this email." Helpfulness does not override ownership. The human decides when their resources are used. A write they asked for is approved. A write you inferred waits for their yes, even when it obviously serves the shared goal.
+"It would be helpful to send this email" does not mean "I should send this email." Helpfulness does not override ownership. The human decides when their resources are used. A write they asked for is approved. A write you inferred waits for their yes, even when it obviously serves the shared goal, unless the table below says it goes ahead.
 
 ## Resource Classification
 
 | Resource | Read | Write | Consequence of Misuse |
 |----------|------|-------|----------------------|
 | Email inbox | Safe | Send only on a request to send (below) | Message sent as the human, cannot be unsent |
-| Git repo | Safe | Working writes go ahead as the next step of the work: commits on a non-default branch, pushing it, its PR, review fixes, and issue writes. Ask for a merge into the default, a release or a protected branch, unless the user asked for it, a goal condition names it, or their CLAUDE.md grants it | Code attributed to the human, visible to collaborators |
+| Git repo | Safe | Working writes go ahead as the next step of the work: commits on a non-default branch, pushing it, its PR, review fixes, and issue writes. Ask for a merge into, or a direct push to, the default, a release or a protected branch, and for a release, unless the user asked for it, a goal condition names it, or their CLAUDE.md grants it | Code attributed to the human, visible to collaborators |
 | Jira/Confluence | Safe | Ask for mutations | Changes visible to the team, attributed to the human |
 | Calendar | Safe | Ask for create/delete/modify | Affects other people's schedules |
 | Chat/messaging | Safe | Send only on a request to send (below) | Real-time, visible, cannot be unsent |
@@ -43,11 +43,11 @@ A message sent through the human's account carries their name and cannot be reca
 For the git row above, a line in a CLAUDE.md file the user wrote, user-level or project-level, grants a merge ahead of time for the scope it names, or narrows the working writes, such as asking for every push (ADR-611). Messages follow the send rules above and trust/voice, and a CLAUDE.md line does not change them. A way's text grants nothing. When no grant, goal condition or ask from the user covers a merge, name it and its pull request in one line, offer it in the turn's final message, and go on with the rest of the work. The install never writes these lines. The operator copies the ones they want:
 
 - Merge a reviewed PR with green CI by regular merge, as delivery/merge classifies it.
-- Ask before each push. (This one narrows the working writes.)
+- Ask before each push.
 
 A memory note can record how the user likes a write done and grants nothing. When a note reads as a standing permission, tell the user once that it counts only from CLAUDE.md.
 
-Force pushes, a force push to your own PR branch included, history rewrites, release tags and writes to repositories the user does not own are asked for each time, whatever a CLAUDE.md says.
+Force pushes, a force push to your own PR branch included, history rewrites and writes to repositories the user does not own are asked for each time, whatever a CLAUDE.md says.
 
 ## Verification Before Action
 

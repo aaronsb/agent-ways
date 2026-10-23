@@ -203,7 +203,7 @@ _The ways method, way authoring, the development loop_
 | [ADR-607](./practice/ADR-607-children-of-a-loop-type-way-are-loop-types-or-concerns-several-loops-share.md) | Children of a loop-type way are loop types or concerns several loops share | accepted |
 | [ADR-608](./practice/ADR-608-delegation-is-asked-for-by-the-user-a-skill-or-a-claude-md-file-not-by-a-way-s-own-text.md) | Delegation is asked for by the user, a skill, or a CLAUDE.md file, not by a way's own text | accepted |
 | [ADR-609](./practice/ADR-609-outward-writes-need-the-user-s-ask-or-a-grant-in-their-claude-md-and-ways-offer-them-otherwise.md) | Outward writes need the user's ask or a grant in their CLAUDE.md, and ways offer them otherwise | accepted |
-| [ADR-611](./practice/ADR-611-working-branch-github-writes-need-no-grant-and-merging-into-a-consequential-branch-does.md) | Working-branch GitHub writes need no grant, and merging into a consequential branch does | proposed |
+| [ADR-611](./practice/ADR-611-working-branch-github-writes-need-no-grant-and-merging-into-a-consequential-branch-does.md) | Working-branch GitHub writes need no grant, and merging into a consequential branch does | accepted |
 
 ## Ways engine
 _The ways engine, continued after the full 100-199 band: matching, disclosure and the corpus_

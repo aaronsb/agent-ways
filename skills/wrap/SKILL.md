@@ -116,9 +116,10 @@ summarized description is exactly the content post-reset-you cannot reconstruct.
 
 Produce a single copy-pastable block. Compaction keeps the session alive; this prompt is
 the harder guarantee — it survives even a `/clear` or a brand-new window. Also save it to
-`.claude/handoff.wrap.md` in the project, where `start` and a successor session look for it;
-the file stays gitignored, so add `.claude/handoff.*.md` to `.gitignore` when it is not
-covered. Tailor sections to the work, but cover:
+`.claude/handoff.wrap.md` at the repository root (`git rev-parse --show-toplevel`), where
+`start` and a successor session look for it, with the date and the HEAD commit on its first
+line. When `.gitignore` does not cover it, list it in `.git/info/exclude` so the working tree
+stays clean. Tailor sections to the work, but cover:
 
 ```
 Continue work on <project> (<path>) — <one-line what it is and its purpose>.

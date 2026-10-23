@@ -40,9 +40,10 @@ git log --oneline -5
 ```
 
 Also check for continuity markers: the `TaskList` (via the tool), mirrored from the
-GitHub issues that carry the `tasklist` label (ADR-180), a handoff file in the project's
-`.claude/` (`handoff.wrap.md` from `/wrap`, or `handoff.local.md`), and the `CLAUDE.md`
-where this was invoked. delivery/issues(softwaredev) is the discipline here — read what is already
+GitHub issues that carry the `tasklist` label (ADR-180), a handoff file in `.claude/` at the
+repository root (`handoff.wrap.md` from `/wrap`, `handoff.local.md` from a compaction
+checkpoint; its first line's date and commit, against `git log`, say whether it is stale),
+and the `CLAUDE.md` where this was invoked. delivery/issues(softwaredev) is the discipline here — read what is already
 open before beginning anything.
 
 On a repo too large to read in a few calls, hand the state read to an `Explore` agent
