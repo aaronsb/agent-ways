@@ -29,8 +29,15 @@ impl Enabled {
     }
 }
 
+/// The targets, read from the user config now: the settings screens read
+/// the mods again while open, after a target may have been added or
+/// disabled.
+fn targets() -> Vec<crate::config::Target> {
+    crate::config::Config::load(&crate::util::project_dir()).targets()
+}
+
 fn enabled() -> Vec<Enabled> {
-    crate::config::global().targets().into_iter().filter(|t| t.enabled).map(|t| Enabled { dir: t.dir(), config: t.config_path() }).collect()
+    targets().into_iter().filter(|t| t.enabled).map(|t| Enabled { dir: t.dir(), config: t.config_path() }).collect()
 }
 
 /// The enabled targets, or with `--target` the one it names.
@@ -38,7 +45,7 @@ fn chosen(target: Option<&str>) -> Result<Vec<Enabled>> {
     let all = enabled();
     let Some(dir) = target else { return Ok(all) };
     let dir = crate::config::Target::new(dir).dir();
-    match crate::config::global().targets().into_iter().find(|t| t.matches_dir(&dir)) {
+    match targets().into_iter().find(|t| t.matches_dir(&dir)) {
         Some(t) if t.enabled => Ok(vec![Enabled { dir: t.dir(), config: t.config_path() }]),
         Some(_) => bail!("{} is a disabled target; `ways manage target enable {} --commit` enables it", dir.display(), dir.display()),
         None => bail!("{} is not a target; `ways manage target list` lists them", dir.display()),
@@ -193,6 +200,10 @@ fn checks(m: &Mod, v: &View, shipped: Option<&str>, claude_code: bool, default_r
     if v.wanted {
         match &v.host {
             Ok(version) => out.push((Mark::Ok, format!("Claude Code {version} is at or above the floor, {}", m.min_claude_code))),
+            Err(why) if v.claude_code.is_none() => out.push((
+                Mark::Warn,
+                format!("{why}. Fix: install Claude Code {} or later and put `claude` on PATH, then `ways manage mod repair {name} --commit`", m.min_claude_code),
+            )),
             Err(why) => out.push((
                 Mark::Warn,
                 format!("{why}. Fix: upgrade Claude Code to {} or later, then `ways manage update --commit`", m.min_claude_code),
@@ -489,8 +500,9 @@ pub struct Overview {
     pub m: Mod,
     pub shipped: Option<String>,
     pub word: State,
-    /// Each enabled target, as the tab shows it, with its state in words.
-    pub rows: Vec<(String, String)>,
+    /// Each enabled target as the tab shows it: the directory, the state
+    /// with its deciding word first, and the state in full.
+    pub rows: Vec<(String, String, String)>,
     /// An installed copy is older than the shipped one: repair updates it.
     pub older: bool,
     /// `gate.engine` names a keyless profile, which the ways-judge mod hosts.
@@ -515,7 +527,7 @@ pub fn overview() -> Vec<Overview> {
             Overview {
                 m,
                 word: State::over(&here.iter().map(|v| v.state(shipped.as_deref())).collect::<Vec<_>>()),
-                rows: here.iter().map(|v| (shown(&v.dir), v.describe(&m, shipped.as_deref()))).collect(),
+                rows: here.iter().map(|v| (shown(&v.dir), v.row(&m, shipped.as_deref()), v.describe(&m, shipped.as_deref()))).collect(),
                 shipped,
                 older,
                 claude_code,

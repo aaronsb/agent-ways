@@ -1,8 +1,9 @@
 //! The mod tab's level above the settings (ADR-512 item 6): one node per
 //! shipped mod, labelled with its shipped version and its state in a word,
 //! holding a read-only row per enabled target, the mod's settings, and the
-//! `ways manage mod` commands as actions. The state is read from
-//! [`crate::cmd::mods::overview`] at each build of the tree.
+//! `ways manage mod` commands as actions, on the node and on each target
+//! row. The state is read from [`crate::cmd::mods::overview`] off the
+//! screen's thread ([`super::modread`]).
 
 use agent_tui::tree::{Action, Kind, Node, Setting};
 
@@ -16,10 +17,21 @@ const SOURCE: &str = "Claude Code's plugin lists, repair's record";
 /// target.
 const TOUCHES: &str = "each enabled target's plugin list and settings.json, and the ways config";
 
+/// Where the read of the mods' state stands, as the tab shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Read {
+    /// Read; a mod missing from it is not shipped.
+    Done,
+    /// The first read has not landed yet.
+    Reading,
+    /// The read failed, saying why.
+    Failed(String),
+}
+
 /// Turn the tab's groups, one per mod, into the mod nodes. A mod with no
-/// group gets one, so every shipped mod has its node. `reading` says a read
-/// of the states is still in flight.
-pub fn nodes(root: &mut Node, states: &[Overview], reading: bool) {
+/// group gets one, so every shipped mod has its node. A mod whose state is
+/// not read yet still offers `check`, which reads for itself.
+pub fn nodes(root: &mut Node, states: &[Overview], read: &Read) {
     for m in MODS {
         if !root.children.iter().any(|g| g.name == m.name) {
             root.children.push(Node::group(m.name, "", vec![]));
@@ -29,21 +41,41 @@ pub fn nodes(root: &mut Node, states: &[Overview], reading: bool) {
         g.section = true;
         g.open = true;
         let Some(o) = states.iter().find(|o| o.m.name == g.name) else {
-            g.columns = Some((String::new(), if reading { "reading…" } else { "state not read" }.into()));
+            let label = match read {
+                Read::Reading => "reading…",
+                Read::Failed(_) => "state read failed",
+                Read::Done => "state not read",
+            };
+            g.columns = Some((String::new(), label.into()));
+            if let (Read::Failed(why), Some(m)) = (read, MODS.iter().find(|m| m.name == g.name)) {
+                g.finding = Some(format!("Reading the {} state failed: {why}", m.label));
+            }
+            g.actions = vec![check(g.name.as_str(), &format!("the {} mod", g.name))];
             continue;
         };
         g.columns = Some((String::new(), format!("{}  {}", o.shipped.as_deref().unwrap_or("not shipped"), o.word.word())));
+        let acts = actions(o);
         let rows: Vec<Node> = o
             .rows
             .iter()
-            .map(|(dir, text)| {
-                Node::leaf(dir.clone(), format!("The {} in {dir}, read from Claude Code's plugin lists and repair's record of what it installed there.", o.m.label), Setting::new(Kind::ReadOnly, text.clone(), SOURCE))
+            .map(|(dir, row, full)| {
+                let doc = format!("{full}\n\nThe {} in {dir}, read from Claude Code's plugin lists and repair's record of what it installed there.", o.m.label);
+                Node::leaf(dir.clone(), doc, Setting::new(Kind::ReadOnly, row.clone(), SOURCE))
                     .headed(format!("{} in {dir}", o.m.name))
+                    .with_actions(acts.clone())
             })
             .collect();
         g.children.splice(0..0, rows);
-        g.actions = actions(o);
+        g.actions = acts;
     }
+}
+
+/// The `check` action, which reads for itself.
+fn check(name: &str, label: &str) -> Action {
+    Action::new("check", format!("ways manage mod check {name}"))
+        .reads()
+        .verifies()
+        .doc(format!("Checks {label} in each enabled target and names the fix for each problem. Changes nothing."))
 }
 
 /// The mod's actions: `check`, `install` and `uninstall` where they apply,
@@ -52,11 +84,7 @@ pub fn nodes(root: &mut Node, states: &[Overview], reading: bool) {
 pub fn actions(o: &Overview) -> Vec<Action> {
     let name = o.m.name;
     let judge = o.m == JUDGE;
-    let mut out = vec![Action::new("check", format!("ways manage mod check {name}"))
-        .reads()
-        .verifies()
-        
-        .doc(format!("Checks the {} in each enabled target and names the fix for each problem. Changes nothing.", o.m.label))];
+    let mut out = vec![check(name, &format!("the {}", o.m.label))];
     // An app that does not ship the mod has nothing to install.
     if o.shipped.is_none() {
         return out;
@@ -64,7 +92,9 @@ pub fn actions(o: &Overview) -> Vec<Action> {
     // ways-judge follows the engine: installing it is the claude-code choice,
     // shown only where it would change something.
     if !judge || !o.claude_code || o.word == State::Removed {
-        let doc = if judge {
+        let doc = if judge && o.claude_code {
+            format!("Writes mods.ways-judge.install: true in the user config (gate.engine is already claude-code), removes an install false from each enabled target's config, then installs the {}.", o.m.label)
+        } else if judge {
             format!("Sets gate.engine to claude-code and mods.ways-judge.install to true in the user config, removes an install false from each enabled target's config, then installs the {}.", o.m.label)
         } else {
             format!("Writes mods.{name}.install: true in the user config, removes an install false from each enabled target's config, then installs the {} in every enabled target.", o.m.label)

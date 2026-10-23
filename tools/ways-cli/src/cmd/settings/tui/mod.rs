@@ -12,6 +12,7 @@ pub mod build;
 pub mod flows;
 pub mod judge;
 pub mod mods;
+pub mod modread;
 pub mod others;
 #[cfg(test)]
 mod tests;
@@ -142,21 +143,16 @@ pub struct Ways {
     /// tab: the title is asked at every draw.
     writes: RefCell<std::collections::BTreeMap<String, String>>,
     /// The mod tab's state, read in the background when the context says so.
-    mods: RefCell<ModsRead>,
+    mods: RefCell<modread::ModRead>,
+    /// The files' stamp when the tree was last read: a reload whose files
+    /// moved owes a read of the mods.
+    files: Cell<Option<u64>>,
+    /// A queued command ran since the last reload, which may have moved a
+    /// mod.
+    ran: Cell<bool>,
 }
 
-/// The mod tab's state as last read, and a read in flight. A finished read
-/// moves the stamp, so the tree reloads with it.
-#[derive(Default)]
-struct ModsRead {
-    value: Option<Vec<crate::cmd::mods::Overview>>,
-    rx: Option<std::sync::mpsc::Receiver<Vec<crate::cmd::mods::Overview>>>,
-    started: Option<std::time::Instant>,
-    reads: u64,
-}
-
-/// How soon after a read another may start: a reload that a finished read
-/// caused starts none.
+/// How soon after a read starts another may: a burst of requests reads once.
 const MODS_FRESH: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// How long the first build waits for the read before it shows the tab
@@ -165,6 +161,7 @@ const MODS_WAIT: std::time::Duration = std::time::Duration::from_millis(300);
 
 impl Ways {
     pub fn new(ctx: Ctx) -> Ways {
+        let mods = RefCell::new(modread::ModRead::new(ctx.mods, MODS_FRESH));
         Ways {
             ctx,
             reg: registry(),
@@ -172,64 +169,57 @@ impl Ways {
             all_projects: Cell::new(false),
             others: RefCell::default(),
             writes: RefCell::default(),
-            mods: RefCell::default(),
+            mods,
+            files: Cell::new(None),
+            ran: Cell::new(false),
         }
     }
 
-    /// What the mod tab shows of each mod, and whether a read is still in
-    /// flight. In the background the first call starts the read and the
-    /// tab says so until it lands.
-    pub(super) fn mod_states(&self) -> (Vec<crate::cmd::mods::Overview>, bool) {
+    /// The same screens with another window between mod reads, for tests.
+    #[cfg(test)]
+    pub(super) fn with_mods_fresh(mut self, fresh: std::time::Duration) -> Ways {
+        self.mods = RefCell::new(modread::ModRead::new(self.ctx.mods, fresh));
+        self
+    }
+
+    /// What the mod tab shows of each mod, and where the read stands. In
+    /// the background the first build waits briefly, once, for the read.
+    pub(super) fn mod_states(&self) -> (Vec<crate::cmd::mods::Overview>, mods::Read) {
         if !self.ctx.mods_background {
-            return ((self.ctx.mods)(), false);
+            return ((self.ctx.mods)(), mods::Read::Done);
         }
-        self.poll_mods();
-        if self.mods.borrow().value.is_none() {
-            self.read_mods();
-            // A read that lands quickly (no target calls Claude Code, or it
-            // answers fast) is shown in this build. The shell takes the
-            // stamp once this tree is handed to it, so a read landing later
-            // moves the stamp and reloads the tree.
-            let rx = self.mods.borrow_mut().rx.take();
-            if let Some(rx) = rx {
-                match rx.recv_timeout(MODS_WAIT) {
-                    Ok(v) => {
-                        let mut m = self.mods.borrow_mut();
-                        m.value = Some(v);
-                        m.reads += 1;
-                    }
-                    Err(_) => self.mods.borrow_mut().rx = Some(rx),
+        let mut m = self.mods.borrow_mut();
+        m.pump();
+        // The shell takes the stamp once this tree is handed to it, so a
+        // read landing later moves the stamp and reloads the tree.
+        m.wait_first(MODS_WAIT);
+        m.shown()
+    }
+
+    /// The stamp of the files the tree was read from: metadata only.
+    fn files_stamp(&self) -> u64 {
+        if self.watched.borrow().is_empty() {
+            let _ = self.layers();
+        }
+        let mut seen = Vec::new();
+        for p in self.watched.borrow().iter() {
+            seen.extend_from_slice(p.to_string_lossy().as_bytes());
+            seen.push(0);
+            if let Ok(m) = std::fs::metadata(p) {
+                seen.extend_from_slice(&m.len().to_le_bytes());
+                let at = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
+                seen.extend_from_slice(&at.to_le_bytes());
+            }
+            if p.is_dir() {
+                let mut names: Vec<String> = std::fs::read_dir(p).into_iter().flatten().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+                names.sort();
+                for n in names {
+                    seen.extend_from_slice(n.as_bytes());
+                    seen.push(0);
                 }
             }
         }
-        let m = self.mods.borrow();
-        (m.value.clone().unwrap_or_default(), m.rx.is_some())
-    }
-
-    /// Start a read unless one is in flight or one started moments ago.
-    fn read_mods(&self) {
-        let mut m = self.mods.borrow_mut();
-        if !self.ctx.mods_background || m.rx.is_some() || m.started.is_some_and(|t| t.elapsed() < MODS_FRESH) {
-            return;
-        }
-        let (tx, rx) = std::sync::mpsc::channel();
-        let read = self.ctx.mods;
-        std::thread::spawn(move || {
-            let _ = tx.send(read());
-        });
-        m.rx = Some(rx);
-        m.started = Some(std::time::Instant::now());
-    }
-
-    /// Take a finished read.
-    fn poll_mods(&self) {
-        let mut m = self.mods.borrow_mut();
-        let got = m.rx.as_ref().and_then(|rx| rx.try_recv().ok());
-        if let Some(v) = got {
-            m.value = Some(v);
-            m.rx = None;
-            m.reads += 1;
-        }
+        agent_identity::identity::fnv1a_64(&seen)
     }
 
     pub fn layers(&self) -> Vec<Layer> {
@@ -472,8 +462,10 @@ impl Adapter for Ways {
     /// background; the screens poll it.
     fn start(&mut self, q: &Queued) -> Box<dyn Job> {
         // A command, such as the `ways init` the setup flow queues, may give
-        // a project ways: the other projects are found again.
+        // a project ways: the other projects are found again. It may also
+        // move a mod, read again at the reload after it ends.
         self.forget_others();
+        self.ran.set(true);
         let ended = |r: Result<(), String>| -> Box<dyn Job> { Box::new(Ended(Some(r))) };
         let line = q.command.strip_suffix(" < <stdin>").unwrap_or(&q.command).to_string();
         let argv = match split(&line) {
@@ -530,37 +522,34 @@ impl Adapter for Ways {
     }
 
     fn reload(&mut self) -> Option<Vec<Node>> {
-        // A queued command or a file change may have moved a mod.
-        self.read_mods();
+        // A queued command or a file change may have moved a mod; a read
+        // landing did not, and owes no other.
+        let files = self.files_stamp();
+        if self.ran.replace(false) || self.files.get().is_some_and(|f| f != files) {
+            self.mods.borrow_mut().owe();
+        }
+        self.files.set(Some(files));
         Some(self.roots())
     }
 
+    /// A stamp that moved with the files unchanged moved for a mod read.
+    fn stamp_moved(&mut self) -> Option<String> {
+        (self.ctx.mods_background && self.files.get() == Some(self.files_stamp())).then(|| "mod state updated".to_string())
+    }
+
     /// The size and time of each file the tree was read from, and the names
-    /// in the keys directory: metadata only, nothing parsed.
+    /// in the keys directory: metadata only, nothing parsed; and the mod
+    /// reads that finished, so a landing read reloads the tree.
     fn stamp(&self) -> Option<u64> {
-        if self.watched.borrow().is_empty() {
-            let _ = self.layers();
+        let files = self.files_stamp();
+        if self.files.get().is_none() {
+            self.files.set(Some(files));
         }
-        self.poll_mods();
-        let mut seen = self.mods.borrow().reads.to_le_bytes().to_vec();
-        for p in self.watched.borrow().iter() {
-            seen.extend_from_slice(p.to_string_lossy().as_bytes());
-            seen.push(0);
-            if let Ok(m) = std::fs::metadata(p) {
-                seen.extend_from_slice(&m.len().to_le_bytes());
-                let at = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
-                seen.extend_from_slice(&at.to_le_bytes());
-            }
-            if p.is_dir() {
-                let mut names: Vec<String> = std::fs::read_dir(p).into_iter().flatten().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
-                names.sort();
-                for n in names {
-                    seen.extend_from_slice(n.as_bytes());
-                    seen.push(0);
-                }
-            }
+        let mut m = self.mods.borrow_mut();
+        if self.ctx.mods_background {
+            m.pump();
         }
-        Some(agent_identity::identity::fnv1a_64(&seen))
+        Some(files ^ m.finished().wrapping_mul(0x9e37_79b9_7f4a_7c15))
     }
 
     fn flow(&self, name: &str) -> Option<Flow> {

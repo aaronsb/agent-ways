@@ -30,6 +30,8 @@ struct Probe {
     refuse: Rc<RefCell<Option<String>>>,
     /// The commands run, in order.
     ran: Rc<RefCell<Vec<String>>>,
+    /// Why the stamp moved, when the probe says.
+    moved: Rc<RefCell<Option<String>>>,
 }
 
 impl Adapter for Probe {
@@ -63,6 +65,9 @@ impl Adapter for Probe {
     }
     fn stamp(&self) -> Option<u64> {
         Some(self.stamp.get())
+    }
+    fn stamp_moved(&mut self) -> Option<String> {
+        self.moved.borrow_mut().take()
     }
     fn help(&self, tab: &str) -> Option<String> {
         Some(format!("{tab}: what this tab holds\n  a line of {tab} help\n"))
@@ -733,4 +738,20 @@ fn a_section_is_no_part_of_its_rows_keys_and_a_reload_keeps_its_state() {
     assert!(r.is_clean(), "{}", r.message());
     assert_eq!(app.roots[0].children[0].children[0].setting.as_ref().unwrap().value, "0.4", "the pending edit is kept");
     assert!(!app.roots[0].children[0].open, "the section's open state is kept");
+}
+
+/// A stamp the adapter moved for its own reason (a background read landing)
+/// reloads the tree, and the bottom bar says the adapter's reason instead of
+/// a file changing on disk.
+#[test]
+fn a_stamp_the_adapter_moved_says_why() {
+    let (mut app, p) = probe();
+    *p.moved.borrow_mut() = Some("mod state updated".into());
+    p.stamp.set(7);
+    app.watch();
+    assert_eq!(p.reloads.get(), 1);
+    assert_eq!(app.message(), "mod state updated");
+    p.stamp.set(8);
+    app.watch();
+    assert_eq!(app.message(), "reloaded: a settings file changed on disk", "a file change says so");
 }

@@ -489,6 +489,11 @@ impl Ways {
                 long => format!("{}\n\n{long}", b.spec.doc),
             };
             let mut node = Node::leaf(rest.last().cloned().unwrap_or_default(), doc, s).with_actions(self.actions_for(&b));
+            if tab.name == "mod" {
+                // Each mod's section passes no name to its keys: the
+                // heading says whose setting it is.
+                node = node.headed(b.name());
+            }
             if let Some(f) = finding_for(layers, b.spec.file, b.spec.section, &b.path()) {
                 node = node.with_finding(tilde_text(&f.to_string(), home));
             }
@@ -517,8 +522,8 @@ impl Ways {
         }
         self.headers(&mut root, tab.prefix);
         if tab.name == "mod" {
-            let (states, reading) = self.mod_states();
-            super::mods::nodes(&mut root, &states, reading);
+            let (states, read) = self.mod_states();
+            super::mods::nodes(&mut root, &states, &read);
         }
         if tab.name == "gate" {
             // Last, so the settings keep their rows.

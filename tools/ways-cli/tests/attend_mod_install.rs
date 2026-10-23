@@ -1163,3 +1163,16 @@ fn a_pre_adr_judge_mod_reads_as_wanted_before_any_write() {
     assert_eq!(std::fs::read_to_string(fx.user_config()).unwrap(), before, "what-if and reads write nothing");
     assert_eq!(fx.changes(), Vec::<String>::new());
 }
+
+/// With no `claude` at all, a wanted mod is pending (the host cannot run it
+/// yet) and an unwanted one is off; neither reads as drift.
+#[test]
+fn no_claude_reads_as_pending_not_drift() {
+    let fx = Fx::new("no-claude");
+    fx.configure_mods(true, true, false);
+    let out = fx.ways(&fx.stub_path()).args(["manage", "mod", "list"]).env("NO_COLOR", "1").env("XDG_DATA_HOME", fx.app_home()).env("WAYS_CLAUDE_BIN", fx.root.join("no-such-claude")).output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{text}");
+    assert!(text.contains("attend  0.17.0  pending") && text.contains("ways-judge  1.42.1  off"), "{text}");
+    assert!(text.contains("`claude` is not on PATH") && !text.contains("drift"), "{text}");
+}

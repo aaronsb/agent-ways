@@ -857,6 +857,37 @@ impl View {
         }
     }
 
+    /// The state in a few words, the deciding word first, as the mod tab's
+    /// row shows it so it reads at 80 columns; [`View::describe`] says it in
+    /// full.
+    pub fn row(&self, m: &Mod, shipped: Option<&str>) -> String {
+        if let Some(e) = &self.error {
+            return format!("unknown · {e}");
+        }
+        if !self.foreign.is_empty() {
+            return format!("foreign · {}", self.foreign.join(", "));
+        }
+        let installed = self.installed.as_deref().unwrap_or_default();
+        match self.state(shipped) {
+            State::Converged => format!("installed · {installed}"),
+            State::Disabled => format!("disabled · {installed}"),
+            State::Pending => match &self.claude_code {
+                Some(v) => format!("pending · {v} < {}", m.min_claude_code),
+                None => format!("pending · {}", self.host.as_ref().err().map(String::as_str).unwrap_or_default()),
+            },
+            State::Removed if self.target_off => "removed · install false here".to_string(),
+            State::Removed => "removed · by hand; repair writes install false".to_string(),
+            State::Off => "off · not wanted".to_string(),
+            State::Drift => match (self.wanted, self.installed.as_deref(), &self.market) {
+                (_, _, MarketState::Foreign(from)) => format!("foreign · marketplace {from}"),
+                (true, Some(i), _) => format!("update · {i} → {}", shipped.unwrap_or("?")),
+                (true, None, _) => "missing · repair installs it".to_string(),
+                (false, Some(i), _) => format!("installed · {i}, not wanted"),
+                (false, None, _) => "off · not wanted".to_string(),
+            },
+        }
+    }
+
     /// The state in one line, as `list`, `ways status` and the mod tab show
     /// it.
     pub fn describe(&self, m: &Mod, shipped: Option<&str>) -> String {
@@ -944,7 +975,10 @@ pub fn views(source_root: &Path, t: &Target, only: Option<&Mod>) -> Vec<(Mod, Vi
                     v.installed = have.ours;
                     v.foreign = have.foreign;
                 }
-                Err(e) => v.error = Some(e.clone()),
+                // No `claude` at all is a host that cannot run the mod yet:
+                // pending where wanted, off where not, never unknown.
+                Err(e) if claude.is_some() => v.error = Some(e.clone()),
+                Err(_) => {}
             }
             (m, v)
         })
@@ -1244,6 +1278,27 @@ mod tests {
             error: None,
             runs: None,
         }
+    }
+
+    /// The mod tab's row leads with the deciding word, so it reads at 80
+    /// columns.
+    #[test]
+    fn a_target_row_leads_with_its_word() {
+        let s = Some("0.29.0");
+        assert_eq!(view(true, Some("0.29.0")).row(&ATTEND, s), "installed · 0.29.0");
+        let mut disabled = view(true, Some("0.29.0"));
+        disabled.enabled = Some(false);
+        assert_eq!(disabled.row(&ATTEND, s), "disabled · 0.29.0");
+        let mut pending = view(true, None);
+        pending.recorded = false;
+        pending.host = Err("Claude Code 2.1.300 is older than 2.1.304".into());
+        pending.claude_code = Some("2.1.300".into());
+        assert_eq!(pending.row(&JUDGE, s), "pending · 2.1.300 < 2.1.304");
+        let mut kept = view(false, None);
+        kept.target_off = true;
+        assert_eq!(kept.row(&ATTEND, s), "removed · install false here");
+        assert_eq!(view(true, Some("0.28.0")).row(&ATTEND, s), "update · 0.28.0 → 0.29.0");
+        assert_eq!(view(false, None).row(&ATTEND, s), "off · not wanted");
     }
 
     /// Each target's word, and the mod's over its targets (ADR-512 item 6).

@@ -1058,8 +1058,8 @@ fn mod_states() -> Vec<crate::cmd::mods::Overview> {
             shipped: Some("0.29.0".into()),
             word: State::Removed,
             rows: vec![
-                ("~/.claude".into(), "installed 0.29.0, enabled".into()),
-                ("~/.claude-work".into(), "removed by hand or kept out; install false in this target's config".into()),
+                ("~/.claude".into(), "installed · 0.29.0".into(), "installed 0.29.0, enabled".into()),
+                ("~/.claude-work".into(), "removed · install false here".into(), "removed by hand or kept out; install false in this target's config".into()),
             ],
             older: false,
             claude_code: true,
@@ -1068,7 +1068,7 @@ fn mod_states() -> Vec<crate::cmd::mods::Overview> {
             m: JUDGE,
             shipped: Some("1.43.0".into()),
             word: State::Pending,
-            rows: vec![("~/.claude".into(), "pending: Claude Code 2.1.300 is below 2.1.304".into())],
+            rows: vec![("~/.claude".into(), "pending · 2.1.300 < 2.1.304".into(), "pending: Claude Code 2.1.300 is below 2.1.304".into())],
             older: false,
             claude_code: true,
         },
@@ -1107,7 +1107,8 @@ fn the_mod_tab_has_a_node_per_mod_with_its_state_targets_settings_and_actions() 
     assert_eq!(attend.columns, Some((String::new(), "0.29.0  removed".to_string())));
     // A read-only row per enabled target, first, then the settings.
     let rows: Vec<(&str, &str)> = attend.children[..2].iter().map(|n| (n.name.as_str(), n.setting.as_ref().unwrap().value.as_str())).collect();
-    assert_eq!(rows, [("~/.claude", "installed 0.29.0, enabled"), ("~/.claude-work", "removed by hand or kept out; install false in this target's config")]);
+    assert_eq!(rows, [("~/.claude", "installed · 0.29.0"), ("~/.claude-work", "removed · install false here")]);
+    assert!(attend.children[0].doc.starts_with("installed 0.29.0, enabled"), "the detail pane says it in full");
     assert!(attend.children[..2].iter().all(|n| matches!(n.setting.as_ref().unwrap().kind, agent_tui::tree::Kind::ReadOnly)));
     assert!(leaf(attend, "install").is_some() && leaf(attend, "listening").is_some(), "the settings stay under the mod");
     assert_eq!(labels(attend), ["check", "install", "uninstall", "repair"]);
@@ -1131,7 +1132,7 @@ fn the_mod_tab_has_a_node_per_mod_with_its_state_targets_settings_and_actions() 
     // is wanted; the user config's install follows the engine.
     let judge = &tab.children[1];
     assert_eq!(judge.columns, Some((String::new(), "1.43.0  pending".to_string())));
-    assert_eq!(judge.children[0].setting.as_ref().unwrap().value, "pending: Claude Code 2.1.300 is below 2.1.304");
+    assert_eq!(judge.children[0].setting.as_ref().unwrap().value, "pending · 2.1.300 < 2.1.304");
     assert_eq!(labels(judge), ["check", "repair"]);
     let install = leaf(judge, "install").expect("the judge's install row");
     let s = install.setting.as_ref().unwrap();
@@ -1161,7 +1162,7 @@ fn a_mod_whose_state_was_not_read_says_so() {
     let fx = Fixture::home();
     let tab = mod_tab(&fx, Vec::new);
     assert_eq!(tab.children.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["attend", "ways-judge"]);
-    assert!(tab.children.iter().all(|n| n.columns == Some((String::new(), "state not read".to_string())) && n.actions.is_empty()));
+    assert!(tab.children.iter().all(|n| n.columns == Some((String::new(), "state not read".to_string())) && labels(n) == ["check"]));
 }
 
 #[test]
@@ -1214,4 +1215,60 @@ fn the_mod_tab_reads_its_state_in_the_background() {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     assert_eq!(tab(&ways).children[0].columns, Some((String::new(), "0.29.0  removed".to_string())));
+}
+
+/// Review of the mod tab: every target row carries its mod's actions, both
+/// mods' `install` rows are headed by their full key, and an unread state
+/// still offers `check`.
+#[test]
+fn target_rows_carry_the_actions_and_install_rows_name_their_mod() {
+    let fx = Fixture::home();
+    let tab = mod_tab(&fx, mod_states);
+    for m in &tab.children {
+        let row = &m.children[0];
+        assert_eq!(labels(row), labels(m), "{}: {}", m.name, row.name);
+        let install = leaf(m, "install").unwrap();
+        assert_eq!(install.heading.as_deref(), Some(format!("mods.{}.install", m.name).as_str()));
+    }
+    let unread = mod_tab(&fx, Vec::new);
+    assert!(unread.children.iter().all(|n| labels(n) == ["check"]), "check needs no read");
+}
+
+static SLOW_READS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// A read slower than the window and the first build's wait, counting each
+/// run.
+fn counted_slow_states() -> Vec<crate::cmd::mods::Overview> {
+    SLOW_READS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    mod_states()
+}
+
+/// Review of the mod tab, finding 1: driven as the shell drives it (stamp,
+/// then reload when it moves), a read slower than the window settles at one
+/// read; the reload a landed read causes owes no other, and the bottom bar
+/// is told the stamp moved for the mods, not for a file (finding 4).
+#[test]
+fn a_landed_read_reloads_once_and_starts_no_other() {
+    use agent_tui::Adapter as _;
+    let fx = Fixture::home();
+    let mut ctx = ctx_of(&fx);
+    ctx.mods = counted_slow_states;
+    ctx.mods_background = true;
+    let mut ways = Ways::new(ctx).with_mods_fresh(std::time::Duration::from_millis(20));
+    let _ = ways.build(&[]);
+    let mut last = ways.stamp();
+    let mut said = Vec::new();
+    let start = std::time::Instant::now();
+    while start.elapsed() < std::time::Duration::from_millis(1500) {
+        let now = ways.stamp();
+        if now != last {
+            said.push(ways.stamp_moved());
+            let _ = ways.reload();
+            last = ways.stamp();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(SLOW_READS.load(std::sync::atomic::Ordering::SeqCst), 1, "the read settled at one");
+    assert_eq!(said, [Some("mod state updated".to_string())], "one reload, said as a mod read");
 }

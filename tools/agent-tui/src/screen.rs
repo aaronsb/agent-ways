@@ -60,12 +60,29 @@ pub(crate) fn frame<S: Screen + ?Sized>(s: &mut S, f: &mut Frame) {
 #[doc(hidden)]
 pub type Hook = Box<dyn Fn(&std::panic::PanicHookInfo) + Send + Sync>;
 
+thread_local! {
+    /// Set on a worker thread whose panics its owner catches: the hook then
+    /// leaves the screen and the command in flight alone and prints nothing.
+    static QUIET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Mark this thread as one whose panics are caught and reported by its
+/// owner (`std::panic::catch_unwind`), so a panic there neither restores
+/// the terminal under a running screen nor prints onto it.
+pub fn quiet_panics_here() {
+    QUIET.with(|q| q.set(true));
+}
+
 /// The panic hook every session runs under ([`crate::run`] and
 /// [`run_screen`] alike): end the command in flight and restore the
-/// terminal, then run `prev`, the hook that was in place.
+/// terminal, then run `prev`, the hook that was in place. A thread marked
+/// with [`quiet_panics_here`] passes over all of it.
 #[doc(hidden)]
 pub fn panic_hook(prev: Hook) -> Hook {
     Box::new(move |info| {
+        if QUIET.with(|q| q.get()) {
+            return;
+        }
         // A panic that aborts runs no drop: end the command in flight here.
         kill_job_group();
         restore();

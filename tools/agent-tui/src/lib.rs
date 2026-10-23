@@ -46,6 +46,7 @@ pub use app::theme;
 pub use app::term::{clear_job_group, kill_group, kill_job_group, register_job_group, restore, Signals, TermGuard};
 pub use app::pane::{binding_conflicts, Anchor, Binding, Ctx, Expiry, Item, Keyed, Open, Overlay, Pane, PaneTab, Question, Tone, EXPIRED};
 pub use app::{App, Jump, Session, TabKeys, Themes};
+pub use screen::quiet_panics_here;
 /// The ratatui this crate draws with, so an application names its types
 /// (key events, buffers) without a second dependency to keep in step.
 pub use ratatui;
