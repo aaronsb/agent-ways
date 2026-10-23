@@ -13,7 +13,7 @@ requires: ["Read", "Bash(cat:*)", "Bash(gh:*)", "Bash(git:*)", "Bash(grep:*)", "
 
 ## Pull Requests, Always
 
-When the user asks to land a change, it lands through a PR, solo projects included. A PR with no reviewer is still a decision record and a CI gate.
+Every change lands through a PR, solo projects included. A PR with no reviewer is still a decision record and a CI gate.
 
 - **Solo or pair:** a title and a few bullets.
 - **Team:** context, reviewers, linked issues.

@@ -38,7 +38,7 @@ A grader bug found after the run is a failure entry. Disclose any regrade in the
 - Add a "Proposed for round N+1" table at the end of the spec, with the columns ID, Proposed change, and Why (round N evidence).
 - Write `spe/predictions/rNN-draft.yaml` marked `status: draft`, starting from this round's measured values.
 - Update `spe/README.md` with the round's one-paragraph result and the rerun command.
-- When commits were asked for, commit `SPE rNN learn: ...` and tag `spe-rNN`. The round's commits are `SPE rNN specify`, `SPE rNN predict` (before any harness work), `SPE rNN evaluate (harness)`, `SPE rNN evaluate (results): <headline>`, and `SPE rNN learn`.
+- Commit `SPE rNN learn: ...` and tag `spe-rNN`. The round's commits are `SPE rNN specify`, `SPE rNN predict` (before any harness work), `SPE rNN evaluate (harness)`, `SPE rNN evaluate (results): <headline>`, and `SPE rNN learn`.
 
 ## At a ceiling
 
@@ -52,7 +52,7 @@ When the user has said to keep going without them, run each round to the learn s
 - The stated round or budget cap is reached.
 - A failure needs a decision only the user can make.
 
-Never push, deploy, or send messages unless the user asked for that in this loop. The report gives each round's headline, the prediction accuracy trend, and the open decisions.
+Push only the loop's working branch, and never deploy or send messages unless the user asked for that in this loop. The report gives each round's headline, the prediction accuracy trend, and the open decisions.
 
 ## See Also
 

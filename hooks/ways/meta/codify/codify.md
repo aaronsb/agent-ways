@@ -23,7 +23,7 @@ When the user says "from now on", or corrects the same thing a second time:
 
 - Record the method, with the commands, the order, the account or environment it needs and the gotchas, in the skill or runbook that owns the procedure. Do this only after it has worked end to end.
 - List the approaches that failed, with the date and the reason, so a later session does not retry them.
-- Include the write-up in the work's commit. Offer an issue for any debt it surfaced, or file it where a standing grant covers issues.
+- Include the write-up in the work's commit. File an issue for any debt it surfaced.
 - Keep secrets out: record a key's name and where it lives, never its value.
 
 When the same task has been done by hand about three times, offer to encode it as a skill.

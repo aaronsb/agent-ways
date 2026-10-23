@@ -20,7 +20,7 @@ Do these before writing any grader, task, or Workflow script.
 
 1. Copy the approved plan to `spe/plans/rNN.md`. The plan mode file is overwritten each round, so this copy is the only lasting record.
 2. Write `spe/predictions/rNN.yaml` from the plan's Predict table.
-3. Commit both as `SPE rNN predict: ...` when the user has asked for commits. Otherwise save them and note the time.
+3. Commit both as `SPE rNN predict: ...` on the working branch.
 
 A prediction written after the run is a description. If that happens, say so in the file and in the log.
 
@@ -49,7 +49,7 @@ Start the file with the comment `# Saved before the eval ran. Do not edit after 
 
 ## Then the gates
 
-After the save (and the commit, if the user asked for one), run the gates in order: the grader selftest, last round regraded as a control, and a dry run on 2 or 3 cells. Only then launch the full Workflow (evaluative/spe/evaluate).
+After the commit, run the gates in order: the grader selftest, last round regraded as a control, and a dry run on 2 or 3 cells. Only then launch the full Workflow (evaluative/spe/evaluate).
 
 ## See Also
 

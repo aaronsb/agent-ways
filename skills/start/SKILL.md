@@ -40,8 +40,10 @@ git log --oneline -5
 ```
 
 Also check for continuity markers: the `TaskList` (via the tool), mirrored from the
-GitHub issues that carry the `tasklist` label (ADR-180), and the `CLAUDE.md` where this
-was invoked. delivery/issues(softwaredev) is the discipline here — read what is already
+GitHub issues that carry the `tasklist` label (ADR-180), a handoff file in `.claude/` at the
+repository root (`handoff.wrap.md` from `/wrap`, `handoff.local.md` from a compaction
+checkpoint; its first line's date and commit, against `git log`, say whether it is stale),
+and the `CLAUDE.md` where this was invoked. delivery/issues(softwaredev) is the discipline here — read what is already
 open before beginning anything.
 
 On a repo too large to read in a few calls, hand the state read to an `Explore` agent
@@ -50,8 +52,9 @@ with the investigation-brief rules from subagents(meta), on a cheap model. Invok
 
 ## Step 2 — Branch on what you found
 
-- **Work in flight** (uncommitted changes, an open branch, live TaskList tasks) → this
-  is a *resume*, not a cold start. Summarize where things stand and what the next
+- **Work in flight** (uncommitted changes, an open branch, live TaskList tasks, a
+  handoff file in `.claude/`) → this is a *resume*, not a cold start. Read a handoff
+  file first, unless its commit shows it is stale. Summarize where things stand and what the next
   concrete step is. Read the TaskList to square your understanding before proposing
   work — mutating it is the job of `/wrap` and `/develop`, not start.
 - **Clean `main`, prior history** → a fresh piece of work in an established project.

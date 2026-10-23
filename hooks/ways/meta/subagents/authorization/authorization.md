@@ -45,4 +45,4 @@ The sentence names them with the same three sources. Invoke them only when the u
 ## See Also
 
 - subagents(meta) — parent: how to brief, what comes back, and the payoff clause
-- trust/delegation(meta) — the same sources decide commits, pushes and issue writes (ADR-609)
+- trust/delegation(meta) — the same sources decide merges into a consequential branch and releases (ADR-609, ADR-611)
