@@ -277,11 +277,16 @@ fn expand(command: &str, built: Vec<(Segment, Option<Vec<lex::Token>>)>) -> Vec<
     let mut rest = built.into_iter().peekable();
     while let Some((segment, string)) = rest.next() {
         let at = segment.depth;
+        let span = segment.span.clone();
         out.push(segment);
         let Some(words) = string else { continue };
-        // The lexer emits a segment's substitutions right after it, deeper.
+        // The lexer emits a segment's substitutions right after it, deeper
+        // and inside its span; a subshell after `;`, `&&` or `|` is deeper
+        // too, but outside.
         let mut nested = Vec::new();
-        while let Some(next) = rest.next_if(|(s, _)| s.depth > at) {
+        while let Some(next) = rest
+            .next_if(|(s, _)| s.depth > at && span.start <= s.span.start && s.span.end <= span.end)
+        {
             nested.push(next);
         }
         let nested = expand(command, nested);
@@ -318,12 +323,24 @@ fn command_string(
         .map(|s| s.text.as_str())
         .collect();
     let mut inner = parse_at(&string.text, at + 1);
-    // A substitution's segments sit at least two levels below `at` in the
-    // string's parse.
+    // Only a segment of a substitution in the string can be a re-read copy:
+    // a subshell with the same text is the string's own command. A
+    // substitution's list runs from its `CommandSubstitution` segment over
+    // everything deeper and the rest of its list, and ends at a shallower
+    // segment or a new subshell or command string at its depth.
+    let mut substitution: Option<usize> = None;
     inner.retain(|s| {
-        let copy = (s.depth > at + 1)
-            .then(|| copies.iter().position(|c| *c == s.text))
-            .flatten();
+        if substitution.is_some_and(|k| {
+            s.depth < k
+                || s.depth == k
+                    && matches!(s.connector, Connector::Subshell | Connector::CommandString)
+        }) {
+            substitution = None;
+        }
+        if substitution.is_none() && s.connector == Connector::CommandSubstitution {
+            substitution = Some(s.depth);
+        }
+        let copy = substitution.and_then(|_| copies.iter().position(|c| *c == s.text));
         if let Some(i) = copy {
             copies.swap_remove(i);
         }

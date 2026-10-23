@@ -131,37 +131,55 @@ pub fn describe<'a>(segments: &'a [Segment], data: &'a Summaries) -> Vec<Describ
 /// A segment joined by `|` or `||` shares the line of the latest segment at
 /// its own depth, with the symbol between them (`git log (…) | grep (…) |
 /// head (…)`), so the segments nested in `cat $(ls) | grep x` or `bash -c
-/// 'a; b' | grep x` do not come between a pipe's two sides. Each segment
-/// reads as [`Described::text`]. Navigation segments are dropped; one still
-/// ends the line before it at its depth unless it joins by `|` or `||`. The
-/// description's whitespace is collapsed. Nothing is escaped: the judge's
-/// prompt renderer neutralizes markup.
+/// 'a; b' | grep x` do not come between a pipe's two sides. A subshell's
+/// output is its last line's, so `(cd x && git log) | grep y` shares one
+/// line. Each segment reads as [`Described::text`]. Navigation segments are
+/// dropped; one still ends the line before it at its depth unless it joins
+/// by `|` or `||`. The description's whitespace is collapsed. Nothing is
+/// escaped: the judge's prompt renderer neutralizes markup.
 pub fn described_block(description: &str, segments: &[Segment], data: &Summaries) -> String {
     let mut lines: Vec<String> = Vec::new();
     // Per depth, the line a `|` or `||` at that depth joins, if any.
     let mut open: Vec<Option<usize>> = Vec::new();
+    // Per depth, whether the list there is a subshell's.
+    let mut subshell: Vec<bool> = Vec::new();
     for d in describe(segments, data) {
         let depth = d.segment.depth;
+        let navigation = d.segment.role == Role::Navigation;
         let inline = match d.segment.connector {
             Connector::Pipe => Some(" | "),
             Connector::Or => Some(" || "),
             _ => None,
         };
-        if d.segment.role == Role::Navigation {
-            if inline.is_none() {
-                open.truncate(depth);
+        let in_subshell = match d.segment.connector {
+            Connector::Subshell => true,
+            Connector::CommandSubstitution | Connector::CommandString => false,
+            _ => subshell.get(depth).copied().unwrap_or(false),
+        };
+        subshell.truncate(depth);
+        subshell.resize(depth, false);
+        subshell.push(in_subshell);
+        if let Some(sym) = inline {
+            if navigation {
+                continue;
             }
-            continue;
+            if let Some(line) = open.get(depth).copied().flatten() {
+                lines[line].push_str(sym);
+                lines[line].push_str(&d.text());
+                continue;
+            }
         }
-        if let Some((sym, line)) = inline.zip(open.get(depth).copied().flatten()) {
-            lines[line].push_str(sym);
-            lines[line].push_str(&d.text());
-            continue;
-        }
-        lines.push(d.text());
+        // The segment starts a line at its depth; navigation only ends one.
+        let line = (!navigation).then(|| {
+            lines.push(d.text());
+            lines.len() - 1
+        });
         open.truncate(depth);
         open.resize(depth + 1, None);
-        open[depth] = Some(lines.len() - 1);
+        open[depth] = line;
+        if in_subshell && depth > 0 {
+            open[depth - 1] = line;
+        }
     }
     let head = format!(
         "About to run: {}",

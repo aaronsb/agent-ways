@@ -238,3 +238,58 @@ fn block_joins_a_pipe_to_the_segment_at_its_own_depth() {
         )
     );
 }
+
+#[test]
+fn block_joins_a_pipe_after_a_subshell_to_its_last_line() {
+    let log = "git log (Show a history of commits)";
+    let grep = "grep (Find patterns in files using regular expressions)";
+    let push = "git push (Push commits to a remote repository)";
+    let make = "make (Task runner for targets described in Makefile)";
+    assert_eq!(
+        block("Search", "(cd x && git log) | grep y"),
+        format!("About to run: Search\n{log} | {grep}")
+    );
+    let shell = block("Push", "bash -c 'make'; (cd x && git push) | grep y");
+    let lines: Vec<&str> = shell.lines().collect();
+    assert_eq!(lines.len(), 4, "{shell}");
+    assert!(lines[1].starts_with("bash"), "{shell}");
+    assert_eq!(lines[2..], [make.to_string(), format!("{push} | {grep}")]);
+}
+
+#[test]
+fn block_keeps_plain_pipelines_as_they_were() {
+    let log = "git log (Show a history of commits)";
+    let grep = "grep (Find patterns in files using regular expressions)";
+    let head = "head (Output the first part of files)";
+    let make = "make (Task runner for targets described in Makefile)";
+    let ls = "ls (List directory contents)";
+    for (cmd, lines) in [
+        (
+            "git log | grep x | head",
+            vec![format!("{log} | {grep} | {head}")],
+        ),
+        ("make || ls", vec![format!("{make} || {ls}")]),
+        (
+            "make && git log | grep x",
+            vec![make.to_string(), format!("{log} | {grep}")],
+        ),
+        (
+            "git log | grep x && make || ls",
+            vec![format!("{log} | {grep}"), format!("{make} || {ls}")],
+        ),
+        (
+            "{ git log; ls; } | grep x",
+            vec![log.to_string(), format!("{ls} | {grep}")],
+        ),
+        (
+            "for f in x; do git log; done | grep x",
+            vec![format!("{log} | {grep}")],
+        ),
+    ] {
+        let want = std::iter::once("About to run: Run".to_string())
+            .chain(lines)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(block("Run", cmd), want, "{cmd}");
+    }
+}

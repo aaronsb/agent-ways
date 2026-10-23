@@ -1069,3 +1069,31 @@ fn a_lone_dash_ends_a_shells_options() {
     );
     assert_eq!(git_push(&parse("sh - 'git push'")), None);
 }
+
+#[test]
+fn a_command_strings_segments_come_before_a_later_subshell() {
+    assert_eq!(
+        programs("bash -c 'make' && (git push)"),
+        ["bash", "make", "git"]
+    );
+    assert_eq!(programs("eval 'make'; (git push)"), ["eval", "make", "git"]);
+    assert_eq!(
+        programs("bash -c 'make' | (cd x && git push)"),
+        ["bash", "make", "cd", "git"]
+    );
+}
+
+#[test]
+fn only_a_substitutions_reread_copy_is_dropped() {
+    // The quoted `$( … )` is the outer shell's; the subshell is the string's
+    // own command with the same text.
+    let segs = parse(r#"bash -c "echo '$(git push)'; (git push)""#);
+    assert_eq!(count(&segs, "git"), 2, "{segs:?}");
+    // Every segment of a re-read substitution is a copy, not only its first.
+    let segs = parse(r#"bash -c "echo $(make && git push)""#);
+    assert_eq!(
+        (count(&segs, "make"), count(&segs, "git")),
+        (1, 1),
+        "{segs:?}"
+    );
+}
