@@ -733,6 +733,20 @@ pub fn mod_install(name: &str, target_config: &Path) -> bool {
     mod_install_in(name, &layers)
 }
 
+/// What one file sets for `mods.<name>.install`, if anything: the target's
+/// config, read alone, to tell a per-target override from the user's
+/// setting.
+pub fn mod_install_in_file(name: &str, path: &Path) -> Option<bool> {
+    let layer = Layer::read(&SCHEMA, "file", FILE, LayerScope::Target, path);
+    layer.get(&["mods".to_string(), name.to_string(), "install".to_string()]).and_then(Value::as_bool)
+}
+
+/// What the user config sets for `mods.<name>.install`, if anything.
+pub fn mod_install_in_user(name: &str) -> Option<bool> {
+    let layer = Layer::read(&SCHEMA, "user", FILE, LayerScope::User, &crate::paths::user_config());
+    layer.get(&["mods".to_string(), name.to_string(), "install".to_string()]).and_then(Value::as_bool)
+}
+
 fn mod_install_in(name: &str, layers: &[Layer]) -> bool {
     let key = format!("mods.{name}.install");
     let Some(spec) = SCHEMA.keys.iter().find(|k| k.name == key) else { return false };

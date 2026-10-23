@@ -151,8 +151,9 @@ enum Commands {
     },
     /// Update, repair, reinstall or remove agent-ways (ADR-509)
     ///
-    /// The install's lifecycle: update, repair, uninstall, reinstall and the
-    /// config directories agent-ways is active in. Run bare on a terminal, it
+    /// The install's lifecycle: update, repair, uninstall, reinstall, the
+    /// config directories agent-ways is active in, and the Claude Code mods
+    /// it ships. Run bare on a terminal, it
     /// opens the settings screens on their install tab; in a pipe, it prints
     /// this help.
     Manage {
@@ -1054,6 +1055,73 @@ enum ManageCommand {
         #[command(subcommand)]
         action: Option<TargetCommand>,
     },
+    /// The Claude Code mods agent-ways ships: list, check, install, uninstall, repair (ADR-512)
+    ///
+    /// Each mod has one wanted state, mods.<name>.install, and repair converges
+    /// every enabled target to it. install, uninstall and repair print what
+    /// they would change until --commit. Run bare on a terminal, it opens the
+    /// settings screens on their mod tab; in a pipe, it prints this help.
+    Mod {
+        #[command(subcommand)]
+        action: Option<ModCommand>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ModCommand {
+    /// Each shipped mod: its version, wanted state, and state in each enabled target
+    List,
+    /// Diagnose each mod in each enabled target; exit 3 with any problem
+    ///
+    /// Read-only. Checks Claude Code's version against the mod's floor, the
+    /// agent-ways marketplace, the installed version against the shipped one,
+    /// whether the mod is enabled, installed against wanted, and for
+    /// ways-judge whether gate.engine agrees. Each problem is one ⚠ line
+    /// naming its fix.
+    Check {
+        /// One mod: attend or ways-judge
+        name: Option<String>,
+    },
+    /// Want a mod and install it; without --commit, print the plan only
+    ///
+    /// Writes mods.<mod>.install: true in the user config, removes an
+    /// install: false from each enabled target's config, then converges the
+    /// mod in every enabled target. For ways-judge it is the engine choice:
+    /// it also sets gate.engine to claude-code.
+    Install {
+        /// attend or ways-judge
+        name: String,
+        /// Act on this target's config and this target only
+        #[arg(long, value_name = "DIR")]
+        target: Option<String>,
+        #[command(flatten)]
+        apply: cmd::lifecycle::Apply,
+    },
+    /// Stop wanting a mod and uninstall it; without --commit, print the plan only
+    ///
+    /// Writes mods.<mod>.install: false in the user config, or with --target
+    /// in that target's config, then converges. Refused for ways-judge while
+    /// gate.engine is claude-code without --target: `ways judge-setup` picks
+    /// another engine.
+    Uninstall {
+        /// attend or ways-judge
+        name: String,
+        /// Act on this target's config and this target only
+        #[arg(long, value_name = "DIR")]
+        target: Option<String>,
+        #[command(flatten)]
+        apply: cmd::lifecycle::Apply,
+    },
+    /// Converge the mods, or one, in every enabled target; without --commit, print the plan only
+    ///
+    /// The mod stage of `ways manage repair`, with no projection or settings
+    /// merge.
+    Repair {
+        /// One mod: attend or ways-judge
+        name: Option<String>,
+        #[command(flatten)]
+        apply: cmd::lifecycle::Apply,
+    },
 }
 
 #[derive(clap::Args)]
@@ -1246,6 +1314,19 @@ fn target(action: Option<TargetCommand>) -> Result<()> {
     }
 }
 
+fn mods(action: Option<ModCommand>) -> Result<()> {
+    let Some(action) = action else {
+        return bare_group(&["manage", "mod"], || settings_screen("mod"));
+    };
+    match action {
+        ModCommand::List => cmd::mods::list(),
+        ModCommand::Check { name } => cmd::mods::check(name.as_deref()),
+        ModCommand::Install { name, target, apply } => cmd::mods::install(&name, target.as_deref(), apply.mode(true)),
+        ModCommand::Uninstall { name, target, apply } => cmd::mods::uninstall(&name, target.as_deref(), apply.mode(true)),
+        ModCommand::Repair { name, apply } => cmd::mods::repair(name.as_deref(), apply.mode(true)),
+    }
+}
+
 fn run() -> Result<()> {
     // A bare `ways` prints help, with the banner only on a terminal
     // (ADR-507 §7). `--help` and `help` are clap's and carry no banner. The
@@ -1413,6 +1494,7 @@ fn run() -> Result<()> {
             ManageCommand::Uninstall(args) => uninstall(args),
             ManageCommand::Reinstall { apply, purge } => cmd::reinstall::run(apply.mode(false), purge),
             ManageCommand::Target { action } => target(action),
+            ManageCommand::Mod { action } => mods(action),
         },
         Commands::Session { action: None } => {
             bare_group(&["session"], || cmd::introspect::replay(None, None, false, None, false, false, &cmd::introspect::Open::default()))

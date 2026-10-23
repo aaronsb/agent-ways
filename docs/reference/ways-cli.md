@@ -31,7 +31,7 @@ The settings screens have their own keys, listed under [settings screens](#setti
 
 **Run from:** Anywhere.
 
-**Tells you:** The binary and embedding model paths with their state, the MCP registration and the attend mod's installed and shipped versions in each enabled target, the corpus size split by English and multilingual entries, and the ways each known project holds.
+**Tells you:** The binary and embedding model paths with their state, the MCP registration and each shipped mod's state in each enabled target (installed and running versions, pending with its floor, or removed), the corpus size split by English and multilingual entries, and the ways each known project holds.
 
 ```
 ways status
@@ -638,7 +638,7 @@ The phases, in order: path resolution; the user and core way scans; per-project 
 
 ## `ways manage`
 
-The install's lifecycle, under one group ([ADR-509](../architecture/platform/ADR-509-lifecycle-commands-sit-under-one-ways-manage-group-the-updater-s-reconcile-stays-a-hidden-fixed-name.md)): `update`, `repair`, `uninstall`, `reinstall` and `target`. Bare `ways manage` on a terminal opens the settings screens on their install tab. In a pipe it prints its help and exits 2.
+The install's lifecycle, under one group ([ADR-509](../architecture/platform/ADR-509-lifecycle-commands-sit-under-one-ways-manage-group-the-updater-s-reconcile-stays-a-hidden-fixed-name.md)): `update`, `repair`, `uninstall`, `reinstall`, `target` and `mod`. Bare `ways manage` on a terminal opens the settings screens on their install tab. In a pipe it prints its help and exits 2.
 
 For one release the old top-level names `update`, `uninstall` and `target` still run. Each prints the new form on stderr, then runs it with the same arguments and exit code. The old `reconcile` stays as a hidden fixed name for the previous release's updater (see [Plumbing](#plumbing)).
 
@@ -670,7 +670,16 @@ ways manage update --ref ways-v1.32.0 --commit
 
 With no `--dest`, it runs over every target in the user config ([ADR-184](../architecture/platform/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)). Each enabled target is converged. Each disabled one is withdrawn: our symlinks are unlinked, and our hooks block and permissions are removed from its `settings.json` through the same merge base that wrote them. An explicit `--dest` is a single-target run and leaves the list alone.
 
-Last in each enabled target it installs the attend mod through Claude Code's plugin CLI ([ADR-406](../architecture/attend/ADR-406-attend-reaches-agents-through-a-claude-code-mod-that-agent-ways-installs-dormant-by-default-one-status-row-transport-stays-the-signal-store.md)): it adds the `agent-ways` marketplace from the app's `plugins/` folder and installs `attend@agent-ways` when they are missing, and updates both when the installed version is older than the shipped one. A disabled target, and every target once `mods.attend.install` is false, has the mod uninstalled and the marketplace removed. An `attend` plugin from another marketplace is reported and left alone, and a missing `claude` binary or a failed call is reported without failing the repair. See [the attend mod](../attend-and-monitor/mod.md).
+Last in each enabled target it converges each shipped mod to its wanted state, `mods.<name>.install`, through Claude Code's plugin CLI ([ADR-512](../architecture/platform/ADR-512-each-shipped-claude-code-mod-has-one-wanted-state-in-settings-under-mods-name-and-ways-manage-converges-every-target-to-it.md)). The setting resolves per target, the target's config over the user config. `mods.attend.install` defaults to true, and `mods.ways-judge.install` follows `gate.engine`.
+
+- A wanted mod that is missing is installed: the repair adds the `agent-ways` marketplace from the app's `plugins/` folder, then installs the mod. It installs only where `claude --version` is at or above the mod's floor. Below it the mod is pending: one ⚠ line names the floor and the fix, and every later repair tries again.
+- A wanted mod older than the shipped one is updated.
+- A mod that is not wanted is uninstalled, and the marketplace goes with the last mod of ours.
+- A mod the repair installed and that was later uninstalled by hand, with `claude plugin uninstall` or by removing the marketplace, is not put back. The repair writes `mods.<name>.install: false` in that target's config and reports the write; `ways manage mod install <name> --commit` undoes it. The repair keeps the list of what it installed in the target's `attend-mod-marketplace` state file. A mod that was never installed, or whose install failed, is installed.
+- A mod disabled in Claude Code stays disabled.
+- A disabled target has every mod uninstalled, and its list emptied.
+
+A plugin of a mod's name from another marketplace is reported and left alone, and a missing `claude` binary or a failed call is reported without failing the repair. See [the attend mod](../attend-and-monitor/mod.md).
 
 ```
 ways manage repair                       # what it would do; prints "refused <root>" for real paths, exit 0
@@ -734,6 +743,32 @@ ways manage target remove ~/.claude-work --commit
 
 Bare `ways manage target` on a terminal opens the settings screens on their install tab. In a pipe it prints its help and exits 2.
 
+### `ways manage mod`
+
+**When:** Seeing, checking or changing the Claude Code mods agent-ways ships, `attend` and `ways-judge` ([ADR-512](../architecture/platform/ADR-512-each-shipped-claude-code-mod-has-one-wanted-state-in-settings-under-mods-name-and-ways-manage-converges-every-target-to-it.md)).
+
+**Run from:** Anywhere.
+
+**Tells you:** `list` prints each mod with its shipped version, a one-word state (`converged`, `pending`, `removed`, `disabled`, `off` or `drift`), where its wanted state comes from, and its state in each enabled target. `check [<mod>]` diagnoses each mod in each enabled target: Claude Code's version against the mod's floor, the `agent-ways` marketplace, the installed version against the shipped one, whether the mod is enabled, installed against wanted, and for ways-judge whether `gate.engine` agrees. Each problem is one ⚠ line naming its fix, and `check` exits 3 with any problem, 0 when every check passes.
+
+| Verb | What it changes |
+|---|---|
+| `install <mod>` | Writes `mods.<mod>.install: true` in the user config, removes an `install: false` from each enabled target's config, then installs the mod in every enabled target. `--target <dir>` acts on that target's config and that target only. For ways-judge it is the engine choice: it sets `gate.engine` to `claude-code`, and the report shows the change. |
+| `uninstall <mod>` | Writes `install: false` in the user config, or with `--target <dir>` in that target's config, then uninstalls the mod. For ways-judge while `gate.engine` is `claude-code` it is refused with exit 3, without `--target`: `ways judge-setup` picks another engine. |
+| `repair [<mod>]` | Converges the mods, or one, in every enabled target, as the last stage of `ways manage repair` does, with no projection or settings merge. |
+
+`install`, `uninstall` and `repair` print what they would change and change nothing until `--commit` ([ADR-511](../architecture/platform/ADR-511-every-mutating-lifecycle-verb-reports-what-it-would-change-until-commit.md)), and follow `install.manage_mode` as `repair` does. Bare `ways manage mod` on a terminal opens the settings screens on their mod tab. In a pipe it prints its help and exits 2.
+
+The user config's `mods.ways-judge.install` is written only with the engine: `ways judge-setup`, the gate tab and `ways settings set|unset gate.engine` write both, the mod's setting first when the engine becomes `claude-code` and the engine first when it leaves it. `ways settings set mods.ways-judge.install` is refused. `ways settings set gate.engine` writes and names the repair; setup and the gate tab run it.
+
+```
+ways manage mod list
+ways manage mod check ways-judge
+ways manage mod install attend --commit                  # undoes a removal by hand
+ways manage mod uninstall attend --target ~/.claude-work --commit
+ways manage mod repair --commit
+```
+
 ## Plumbing
 
 The hooks call these. They are hidden from `ways --help`, and their names stay fixed because processes that do not reload with the binary call them ([ADR-507](../architecture/platform/ADR-507-the-ways-commands-regroup-into-operator-commands-and-six-groups-names-another-process-calls-stay-fixed.md)). They are safe to call by hand when testing a way or a custom hook.
@@ -753,7 +788,7 @@ The hooks call these. They are hidden from `ways --help`, and their names stay f
 | `ways events-log-path` | Scripts outside the binary that read the event log. |
 | `ways manifest` | Debugging `ways manage repair`: the projection manifest it converges toward. |
 | `reconcile` | The previous release's updater, which spawns it on the newly installed binary, and the installer. It runs the same code as `ways manage repair`, with the same flags and exit codes, and prints no notice. It applies with no flag, where `ways manage repair` reports until `--commit`, because its callers cannot pass a flag the binary they call may lack ([ADR-511](../architecture/platform/ADR-511-every-mutating-lifecycle-verb-reports-what-it-would-change-until-commit.md), [ADR-509](../architecture/platform/ADR-509-lifecycle-commands-sit-under-one-ways-manage-group-the-updater-s-reconcile-stays-a-hidden-fixed-name.md)). |
-| `ways judge-setup` | The installer and the end of `ways manage update`: checks the judge's keys and, on a terminal, offers to add one. |
+| `ways judge-setup` | The installer and the end of `ways manage update`: checks the judge's keys and, on a terminal, offers the engines. Choosing one writes `gate.engine` and `mods.ways-judge.install` together, then converges the ways-judge mod. |
 
 **Testing a way by hand.** `ways scan prompt` runs the same code as the UserPromptSubmit hook and prints the markdown that would be injected; no output means nothing crossed a threshold. `ways show way` prints a way as Claude receives it. Both need `--session`; any string, such as `dummy`, makes a dry run that touches no real session. Both are session-aware, so a second call with the same session prints nothing for a way already shown. `--project <dir>` adds that project's ways.
 

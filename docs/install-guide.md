@@ -51,6 +51,8 @@ The judge decides which of the ways matched on your prompt are injected ([ADR-19
 
 **Setup.** The installer and `ways manage update --commit` end by checking each stored key with a call that costs nothing. When none passes, they say so and, on a terminal, offer to add an Anthropic or OpenRouter key; the installer reads that answer from `/dev/tty`, so it works under `curl … | bash`. Off a terminal they print the fix instead. `ways --help` repeats the warning until the judge works or you turn it off.
 
+Where Claude Code is 2.1.304 or later, setup also offers Claude Code internal, which judges inside Claude Code through the ways-judge mod and takes no key. Choosing it sets `gate.engine: claude-code` and `mods.ways-judge.install: true`, and repair installs the mod in every enabled target. `ways settings set gate.engine claude-code` makes the same choice on an older Claude Code; the mod then stays pending, and the first `ways manage update --commit` after Claude Code is upgraded installs it. `ways manage mod check ways-judge` says where the mod stands ([ADR-512](architecture/platform/ADR-512-each-shipped-claude-code-mod-has-one-wanted-state-in-settings-under-mods-name-and-ways-manage-converges-every-target-to-it.md)).
+
 ```bash
 ways agent key add --provider anthropic    # or openrouter
 ways agent status                          # engine, model, requests, fallbacks

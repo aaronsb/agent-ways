@@ -237,6 +237,49 @@ impl Ways {
         Ok(())
     }
 
+    /// Write the engine `w` holds, and with it the judge mod's wanted state,
+    /// through their one writer; then start the mod's repair. A file that
+    /// does not parse, or an engine that changed on disk since it was read,
+    /// takes no write.
+    fn write_engine(&self, w: &Write) -> Result<(), String> {
+        self.refuse_broken(&ways_agent_core::profile::user_layer_path())?;
+        self.refuse_broken(&ways_core::paths::user_config())?;
+        let b = lookup(&self.reg, "gate.engine").map_err(|f| f.message)?;
+        let now = display(resolve(b.spec, &b.bound, &live_layers(self.ctx.project_layer())).value.as_ref(), b.spec.kind);
+        if now != w.loaded {
+            return Err(format!(
+                "gate.engine is {now} on disk, not the {} it was read as: it changed since. Review shows it now; apply again to write {}",
+                w.loaded, w.value
+            ));
+        }
+        let engine = (!w.value.is_empty()).then_some(w.value);
+        super::write_engine(engine).map_err(|f| self.short(&f.message))?;
+        self.repair_judge();
+        Ok(())
+    }
+
+    /// `ways manage mod repair ways-judge --commit`, started in the
+    /// background after an engine change, so the screen keeps drawing while
+    /// Claude Code is called; the mod tab shows its result once the files
+    /// change. Under the unit tests only a stand-in runner is started.
+    fn repair_judge(&self) {
+        if cfg!(test) && std::env::var_os("WAYS_SETTINGS_RUNNER").is_none() {
+            return;
+        }
+        let Ok(exe) = Ways::runner() else { return };
+        let child = Command::new(exe)
+            .args(["manage", "mod", "repair", "ways-judge", "--commit"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+        if let Ok(mut c) = child {
+            std::thread::spawn(move || {
+                let _ = c.wait();
+            });
+        }
+    }
+
     /// The binary queued commands run with: this one, or for tests the
     /// stand-in `WAYS_SETTINGS_RUNNER` names.
     fn runner() -> Result<PathBuf, String> {
@@ -262,6 +305,16 @@ impl Adapter for Ways {
     /// `ways settings set` parses its argument. A file that does not parse,
     /// or a key that changed on disk since it was read, takes no write.
     fn write(&mut self, file: &Path, values: &[Write]) -> Result<(), String> {
+        // gate.engine goes through the engine choice, which writes the judge
+        // mod's wanted state with it (ADR-512 item 4).
+        if let Some(engine) = values.iter().find(|w| w.store.key == "gate.engine") {
+            let rest: Vec<Write> =
+                values.iter().filter(|w| w.store.key != "gate.engine").map(|w| Write { store: w.store, value: w.value, loaded: w.loaded }).collect();
+            if !rest.is_empty() {
+                self.write(file, &rest)?;
+            }
+            return self.write_engine(engine);
+        }
         self.refuse_broken(file)?;
         // A project-scope key may be another project's, from the all
         // projects view: one of the projects listed there, whose file it

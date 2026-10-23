@@ -11,7 +11,7 @@ use anyhow::{anyhow, Context, Result};
 use ways_agent_core::keys::{self, JudgeMod, Readiness};
 use ways_agent_core::profile::{Mode, Provider};
 
-use super::attend_mod::{self, Want, JUDGE};
+use super::attend_mod::{self, JUDGE};
 
 /// The judge's readiness now: `keys::judge_ready`, told where the ways-judge
 /// mod stands in the enabled targets: enabled in one, else installed and
@@ -294,12 +294,12 @@ pub fn setup() -> Result<()> {
         return Ok(());
     };
     match (choice, &agent) {
-        (Choice::ClaudeCode, _) => install_mod()?,
+        (Choice::ClaudeCode, _) => engine(Some("claude-code"))?,
         (Choice::Key(provider), Some(bin)) => add_key(bin, provider)?,
         (Choice::Key(_), None) => unreachable!("a key is offered only with ways-agent installed"),
         (Choice::Off, _) => {
             set("gate.mode", "off")?;
-            stop_keeping_mod()?;
+            no_judge()?;
         }
     }
     if let Some(text) = outcome(&readiness()) {
@@ -317,21 +317,38 @@ fn add_key(bin: &std::path::Path, provider: Provider) -> Result<()> {
         .status()
         .with_context(|| format!("running {}", bin.display()))?;
     if keys::key_engine_ready(provider.as_str()) {
-        set("gate.engine", provider.as_str())?;
-        stop_keeping_mod()?;
+        engine(Some(provider.as_str()))?;
     }
     Ok(())
 }
 
-/// Once the operator chose a key engine or no judge, repair stops keeping
-/// the ways-judge mod: every target's record of its install goes, a disabled
-/// target's included, so enabling that target again does not reinstall it.
-/// The mod itself stays as it is, and stands down under any other engine.
-fn stop_keeping_mod() -> Result<()> {
-    for dir in crate::config::global().targets().into_iter().map(|t| t.dir()) {
-        attend_mod::forget_request(&JUDGE, &dir).with_context(|| format!("clearing the ways-judge mod's record for {}", dir.display()))?;
+/// No judge chosen: a `claude-code` engine is cleared, and the ways-judge
+/// mod is no longer wanted. A key engine stays named for when the gate is
+/// turned on again.
+fn no_judge() -> Result<()> {
+    if super::settings::engine::claude_code_chosen() {
+        return engine(None);
     }
+    if ways_core::settings::mod_install_in_user(JUDGE.name) == Some(true) {
+        super::settings::write_mod_install(&ways_core::paths::user_config(), JUDGE.name, Some(false)).map_err(|e| anyhow!("{e}"))?;
+    }
+    repair_judge();
     Ok(())
+}
+
+/// Writes the engine and the ways-judge mod's wanted state through their one
+/// writer (ADR-512 item 4), then converges the mod in every enabled target,
+/// as `ways manage mod repair ways-judge --commit` does.
+fn engine(name: Option<&str>) -> Result<()> {
+    super::settings::write_engine(name).map_err(|f| anyhow!("{}", f.message))?;
+    repair_judge();
+    Ok(())
+}
+
+fn repair_judge() {
+    for line in super::mods::converge(Some(&JUDGE), false) {
+        println!("{line}");
+    }
 }
 
 /// Whether this host can run the ways-judge mod, judged against the first
@@ -340,29 +357,6 @@ fn mod_host() -> Result<(), String> {
     let projection = crate::paths::projection_root();
     let dest = enabled_targets().into_iter().next().unwrap_or_else(|| projection.clone());
     attend_mod::host_can_load(&JUDGE, &dest, &projection)
-}
-
-/// Installs the ways-judge mod in every enabled target and records the
-/// request in each target it is enabled in, so repair keeps it installed;
-/// then names `claude-code` as the engine. A failed install leaves
-/// `gate.engine` as it was.
-fn install_mod() -> Result<()> {
-    let projection = crate::paths::projection_root();
-    let mut enabled = false;
-    for dir in enabled_targets() {
-        for line in attend_mod::converge(&JUDGE, &crate::paths::data_root(), &dir, &projection, Want::Install, false) {
-            println!("{line}");
-        }
-        if attend_mod::enabled_in(&JUDGE, &dir) {
-            enabled = true;
-            attend_mod::record_request(&JUDGE, &dir).with_context(|| format!("recording the ways-judge mod's install for {}", dir.display()))?;
-        }
-    }
-    if !enabled {
-        println!("The ways-judge mod is not enabled in any target, so gate.engine is unchanged.");
-        return Ok(());
-    }
-    set("gate.engine", "claude-code")
 }
 
 /// Writes one gate setting in the user layer, as `ways settings set` does.

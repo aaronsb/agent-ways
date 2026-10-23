@@ -13,6 +13,7 @@
 //! on `agent-tui` (ADR-504 §8). This module holds what they share: the
 //! registry, the layers, where a key is written, and the one write path.
 
+pub mod engine;
 mod help;
 mod maintain;
 mod object;
@@ -24,6 +25,7 @@ pub mod tui;
 pub use help::{help, help_text};
 pub use maintain::{emit, fix, lint};
 pub use object::apply;
+pub use engine::{write_engine, write_mod_install};
 pub use property::{bare, get, list, set, unset};
 
 use agent_settings::exit;

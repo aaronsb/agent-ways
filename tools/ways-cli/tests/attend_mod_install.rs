@@ -1,9 +1,11 @@
-//! `ways manage repair` installs, updates and removes the mods through Claude
-//! Code's plugin CLI: attend on every repair (ADR-406 item 8), ways-judge
-//! where setup recorded installing it (ADR-708 §9). A stub `claude` on PATH
-//! keeps the marketplace and plugin lists in files, writes `enabledPlugins`
-//! into the target's settings as Claude Code does, and logs every call, so
-//! the test reads exactly what reconcile asked Claude Code to do.
+//! `ways manage repair` and `ways manage mod` install, update and remove the
+//! mods through Claude Code's plugin CLI, each to its wanted state
+//! `mods.<name>.install` (ADR-512): attend wanted by default, ways-judge
+//! wanted with `gate.engine: claude-code`. A stub `claude` on PATH keeps the
+//! marketplace and plugin lists in files, one set per config directory,
+//! writes `enabledPlugins` into the target's settings as Claude Code does,
+//! answers `--version` from a file, and logs every call, so the test reads
+//! exactly what was asked of Claude Code.
 #![cfg(unix)]
 
 use std::os::unix::fs::PermissionsExt;
@@ -13,7 +15,13 @@ use std::process::{Command, Output};
 const STUB: &str = r#"#!/bin/sh
 # A stand-in for `claude plugin ...`: state in $STUB_STATE, one log line a call.
 echo "${CLAUDE_CONFIG_DIR:-unset}|$*" >> "$STUB_STATE/log"
-m="$STUB_STATE/markets.json"; p="$STUB_STATE/plugins.json"
+# The fixture's `dest` keeps its lists at the top; any other config dir
+# keeps its own beside them.
+s="$STUB_STATE"
+if [ -n "${CLAUDE_CONFIG_DIR:-}" ] && [ "$(basename "$CLAUDE_CONFIG_DIR")" != dest ]; then
+  s="$STUB_STATE/$(basename "$CLAUDE_CONFIG_DIR")"; mkdir -p "$s"
+fi
+m="$s/markets.json"; p="$s/plugins.json"
 [ -f "$m" ] || echo '[]' > "$m"
 [ -f "$p" ] || echo '[]' > "$p"
 # A call whose arguments are a line of $STUB_STATE/fail fails.
@@ -34,7 +42,7 @@ save() {
 }
 shipped() { case "$1" in attend@*) echo "$STUB_SHIPPED" ;; *) echo "$STUB_JUDGE_SHIPPED" ;; esac; }
 case "$*" in
-  "--version") echo "2.1.309 (Claude Code)" ;;
+  "--version") if [ -f "$STUB_STATE/version" ]; then echo "$(cat "$STUB_STATE/version") (Claude Code)"; else echo "2.1.309 (Claude Code)"; fi ;;
   "plugin marketplace list --json") cat "$m" ;;
   "plugin list --json") cat "$p" ;;
   "plugin marketplace add "*) printf '[{"name":"agent-ways","source":"directory","path":"%s"}]\n' "$4" > "$m" ;;
@@ -137,67 +145,110 @@ impl Fx {
         out
     }
 
-    /// The calls that changed something, without the list queries.
+    /// The calls that changed something, without the list and version
+    /// queries.
     fn changes(&self) -> Vec<String> {
         let log = std::fs::read_to_string(self.state().join("log")).unwrap_or_default();
         let _ = std::fs::remove_file(self.state().join("log"));
-        log.lines().filter(|l| !l.ends_with("list --json")).map(str::to_string).collect()
+        log.lines().filter(|l| !l.ends_with("list --json") && !l.ends_with("|--version")).map(str::to_string).collect()
     }
 
-    /// The record `ways judge-setup` writes once it installed ways-judge in
-    /// the target, beside the marketplace record; `pending` as this app marks
-    /// it after taking the mod out. Needs a repair first, which writes the
-    /// marketplace record.
-    fn record_judge(&self, pending: bool) {
-        let market = walk(&self.root.join("home"))
-            .into_iter()
-            .find(|p| p.file_name().is_some_and(|n| n == "attend-mod-marketplace"))
-            .expect("a repair has recorded the marketplace");
-        let text = if pending { format!("{JUDGE}\npending\n") } else { format!("{JUDGE}\n") };
-        write(&market.with_file_name("ways-judge-installed"), &text);
+    /// The user config: the one target, enabled or not, whether attend is
+    /// wanted, and whether ways-judge is.
+    fn configure_mods(&self, enabled: bool, attend: bool, judge: bool) {
+        write(
+            &self.user_config(),
+            &format!(
+                "mods:\n  attend:\n    install: {attend}\n  ways-judge:\n    install: {judge}\n{}",
+                self.targets(&[(&self.dest(), enabled)])
+            ),
+        );
     }
 
-    /// Both mods installed and the judge recorded, as after setup: a repair
-    /// installs attend, then setup installs the judge and records it.
+    /// The targets list for `dirs`, each enabled or not.
+    fn targets(&self, dirs: &[(&Path, bool)]) -> String {
+        let mut text = "targets:\n".to_string();
+        for (d, on) in dirs {
+            text.push_str(&format!("  - path: {}\n    enabled: {on}\n", d.display()));
+        }
+        text
+    }
+
+    fn judge_wanted(&self) -> bool {
+        std::fs::read_to_string(self.user_config()).unwrap_or_default().contains("ways-judge:\n    install: true")
+    }
+
+    /// Both mods wanted and installed: attend by default, ways-judge as
+    /// `gate.engine: claude-code` wants it.
     fn both(&self) {
-        self.repair();
-        self.by_hand(&["plugin", "install", JUDGE, "--scope", "user"]);
-        self.record_judge(false);
-        self.repair();
+        self.configure_mods(true, true, true);
+        self.repair_targets(&self.src());
         assert!(self.has(JUDGE) && self.has(ATTEND), "{}", self.plugins());
         self.changes();
     }
 
     /// `repair --commit` against the target once its config disables it.
     fn repair_disabled(&self) {
-        write(&self.user_config(), &format!("targets:\n  - path: {}\n    enabled: false\n", self.dest().display()));
-        let out = self.ways(&self.stub_path()).args(["manage", "repair", "--commit", "--source"]).arg(self.src()).output().unwrap();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    }
-
-    /// The user config: the one target, enabled or not, and whether repair
-    /// installs attend there.
-    fn configure(&self, enabled: bool, attend: bool) {
-        let attend = if attend { String::new() } else { "mods:\n  attend:\n    install: false\n".to_string() };
-        write(&self.user_config(), &format!("{attend}targets:\n  - path: {}\n    enabled: {enabled}\n", self.dest().display()));
+        let text = std::fs::read_to_string(self.user_config()).unwrap_or_default();
+        let text = text.replace("enabled: true", "enabled: false");
+        let text = if text.contains("targets:") { text } else { format!("{text}{}", self.targets(&[(&self.dest(), false)])) };
+        write(&self.user_config(), &text);
+        self.repair_targets(&self.src());
     }
 
     /// `repair --commit` over the configured targets.
-    fn repair_targets(&self, src: &Path) {
+    fn repair_targets(&self, src: &Path) -> Output {
         let out = self.ways(&self.stub_path()).args(["manage", "repair", "--commit", "--source"]).arg(src).output().unwrap();
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        out
     }
 
-    /// Both mods installed and recorded, attend kept or not, then the
-    /// operator uninstalls ways-judge by hand.
+    /// Both mods installed, attend kept or not, then the operator uninstalls
+    /// ways-judge by hand.
     fn judge_removed_by_hand(&self, attend: bool) {
         self.both();
-        self.configure(true, attend);
+        self.configure_mods(true, attend, true);
         self.repair_targets(&self.src());
         self.by_hand(&["plugin", "uninstall", JUDGE, "--scope", "user"]);
         assert!(!self.has(JUDGE) && self.has(ATTEND) == attend, "{}", self.plugins());
-        assert!(self.judge_record().is_some(), "repair has not run since the removal");
         self.changes();
+    }
+
+    /// The config of the target at `dir`, where repair writes a removal by
+    /// hand.
+    fn target_config(&self, dir: &Path) -> PathBuf {
+        let real = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+        let key = real.display().to_string().replace(['/', ':'], "-");
+        self.root.join("home/.config/agent-ways/targets").join(key).join("config.yaml")
+    }
+
+    fn target_text(&self, dir: &Path) -> String {
+        std::fs::read_to_string(self.target_config(dir)).unwrap_or_default()
+    }
+
+    /// Claude Code's version as the stub's `--version` reports it.
+    fn claude_code(&self, version: &str) {
+        write(&self.state().join("version"), version);
+    }
+
+    /// `ways <args>` with the stub on PATH.
+    fn run(&self, args: &[&str]) -> Output {
+        self.ways(&self.stub_path()).args(args).env("NO_COLOR", "1").env("XDG_DATA_HOME", self.app_home()).output().unwrap()
+    }
+
+    /// The directory `ways manage mod` reads the app from: `src` under it.
+    fn app_home(&self) -> PathBuf {
+        let data = self.root.join("data");
+        if !data.join("agent-ways").exists() {
+            std::fs::create_dir_all(&data).unwrap();
+            std::os::unix::fs::symlink(self.src(), data.join("agent-ways")).unwrap();
+        }
+        data
+    }
+
+    /// The agent file, where `gate.engine` is written.
+    fn agent_yaml(&self) -> PathBuf {
+        self.root.join("home/.config/agent-ways/agent.yaml")
     }
 
     fn plugins(&self) -> String {
@@ -211,11 +262,6 @@ impl Fx {
     /// The target's settings: the `enabledPlugins` the stub keeps.
     fn enabled(&self) -> String {
         std::fs::read_to_string(self.dest().join("settings.json")).unwrap_or_default()
-    }
-
-    /// The record setup writes once it installed the judge mod, if present.
-    fn judge_record(&self) -> Option<PathBuf> {
-        walk(&self.root.join("home")).into_iter().find(|p| p.file_name().is_some_and(|n| n == "ways-judge-installed"))
     }
 
     /// The operator's own `claude plugin <args>` against the target.
@@ -484,31 +530,48 @@ fn a_dev_marketplace_missing_for_now_is_reported_not_claimed() {
 }
 
 #[test]
-fn repair_leaves_an_unrecorded_judge_mod_alone_and_installs_a_pending_one() {
-    let fx = Fx::new("judge-recorded");
-    fx.repair();
+fn repair_leaves_an_unwanted_judge_mod_alone_and_installs_a_wanted_one() {
+    let fx = Fx::new("judge-wanted");
+    fx.configure_mods(true, true, false);
+    fx.repair_targets(&fx.src());
     let dest = fx.dest().display().to_string();
-    assert!(!fx.changes().iter().any(|c| c.contains(JUDGE)), "no record, no ways-judge call");
-    // Recorded, and marked pending: this app took it out or failed to
-    // install it, so repair puts it back.
-    fx.record_judge(true);
-    fx.repair();
+    assert!(!fx.changes().iter().any(|c| c.contains(JUDGE)), "not wanted, no ways-judge call");
+    fx.configure_mods(true, true, true);
+    fx.repair_targets(&fx.src());
     assert_eq!(fx.changes(), vec![format!("{dest}|plugin install {JUDGE} --scope user")]);
     assert!(fx.enabled().contains(&format!("\"{JUDGE}\":true")), "{}", fx.enabled());
-    fx.repair();
+    fx.repair_targets(&fx.src());
     assert_eq!(fx.changes(), Vec::<String>::new(), "converged");
+}
+
+/// ADR-512's `observable`: the old record file is not read; only the wanted
+/// state installs ways-judge.
+#[test]
+fn the_old_judge_record_file_is_not_read() {
+    let fx = Fx::new("judge-old-record");
+    fx.configure_mods(true, true, false);
+    fx.repair_targets(&fx.src());
+    let market = walk(&fx.root.join("home"))
+        .into_iter()
+        .find(|p| p.file_name().is_some_and(|n| n == "attend-mod-marketplace"))
+        .expect("a repair has kept its record");
+    write(&market.with_file_name("ways-judge-installed"), &format!("{JUDGE}\npending\n"));
+    fx.changes();
+    fx.repair_targets(&fx.src());
+    assert!(!fx.changes().iter().any(|c| c.contains(JUDGE)), "the record file installs nothing");
+    assert!(!fx.has(JUDGE));
 }
 
 #[test]
 fn install_false_removes_attend_and_keeps_the_marketplace_the_judge_runs_from() {
     let fx = Fx::new("judge-install-false");
     fx.both();
-    write(&fx.user_config(), "mods:\n  attend:\n    install: false\n");
-    fx.repair();
+    fx.configure_mods(true, false, true);
+    fx.repair_targets(&fx.src());
     let dest = fx.dest().display().to_string();
     assert_eq!(fx.changes(), vec![format!("{dest}|plugin uninstall {ATTEND} --scope user")]);
     assert!(fx.has(JUDGE) && !fx.has(ATTEND), "{}", fx.plugins());
-    fx.repair();
+    fx.repair_targets(&fx.src());
     assert_eq!(fx.changes(), Vec::<String>::new(), "converged");
 }
 
@@ -527,6 +590,12 @@ fn a_disabled_target_holding_both_mods_loses_both_then_the_marketplace() {
         ]
     );
     assert_eq!(fx.plugins().trim(), "[]");
+    // The settings stay: enabling the target again installs what is wanted,
+    // and the emptied record reads no mod as removed by hand.
+    fx.configure_mods(true, true, true);
+    fx.repair_targets(&fx.src());
+    assert!(fx.has(JUDGE) && fx.has(ATTEND), "{}", fx.plugins());
+    assert_eq!(fx.target_text(&fx.dest()), "", "no install false written");
 }
 
 #[test]
@@ -545,7 +614,7 @@ fn a_moved_app_holding_both_mods_reinstalls_both_in_one_repair() {
     let fx = Fx::new("judge-moved");
     fx.both();
     let moved = fx.root.join("moved");
-    fx.repair_from(&moved);
+    fx.repair_targets(&moved);
     let dest = fx.dest().display().to_string();
     assert_eq!(
         fx.changes(),
@@ -556,64 +625,87 @@ fn a_moved_app_holding_both_mods_reinstalls_both_in_one_repair() {
             format!("{dest}|plugin install {JUDGE} --scope user"),
         ]
     );
-    fx.repair_from(&moved);
+    fx.repair_targets(&moved);
     assert_eq!(fx.changes(), Vec::<String>::new(), "converged");
 }
 
 /// Review of #1142, finding 1: the marketplace removal takes ways-judge with
 /// it, and a later call fails. A failed plugin install no longer stops the
-/// plan, and the record brings back a judge mod the failure lost.
+/// plan, and a failed install is never read as a removal by hand.
 #[test]
 fn a_failed_install_after_a_move_never_loses_the_judge_mod() {
     let fx = Fx::new("judge-moved-fails");
     fx.both();
     let moved = fx.root.join("moved");
     let dest = fx.dest().display().to_string();
-    // attend's install fails: the judge's still runs in the same pass.
     fx.fail(&[&format!("plugin install {ATTEND} --scope user")]);
-    let out = fx.repair_from(&moved);
+    let out = fx.repair_targets(&moved);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains(&format!("`claude plugin install {ATTEND} --scope user` failed")), "the failure is reported: {err}");
-    // attend's own plan went on past its failed install to the judge's.
     assert!(err.contains(&format!("attend mod: installed {JUDGE} again")), "{err}");
     assert!(fx.has(JUDGE) && !fx.has(ATTEND), "{}", fx.plugins());
     fx.changes();
     fx.fail(&[]);
-    fx.repair_from(&moved);
+    fx.repair_targets(&moved);
     assert_eq!(fx.changes(), vec![format!("{dest}|plugin install {ATTEND} --scope user")]);
 
-    // The judge's own install fails after another move: the settings no
-    // longer name it, and the record still brings it back.
     let away = fx.root.join("away");
     copy_dir(&moved, &away);
     fx.fail(&[&format!("plugin install {JUDGE} --scope user")]);
-    fx.repair_from(&away);
+    fx.repair_targets(&away);
     assert!(!fx.has(JUDGE) && !fx.enabled().contains(JUDGE), "lost: {}", fx.plugins());
     fx.changes();
     fx.fail(&[]);
-    fx.repair_from(&away);
+    fx.repair_targets(&away);
     assert_eq!(fx.changes(), vec![format!("{dest}|plugin install {JUDGE} --scope user")]);
+    assert_eq!(fx.target_text(&fx.dest()), "", "no install false written for a failed install");
 }
 
-/// Re-review of #1142: the operator uninstalls ways-judge by hand while its
-/// marketplace is this app's and current. Repair reads that as their choice:
-/// it clears the record, says so once, and never reinstalls the mod.
+/// ADR-512's `observable`: a fresh target where the mod was never installed,
+/// or where its install failed, gets it at the next repair; absence alone is
+/// never a removal by hand.
 #[test]
-fn a_judge_mod_uninstalled_by_hand_stays_gone_and_its_record_clears() {
+fn a_never_installed_or_failed_mod_is_installed_not_read_as_removed() {
+    let fx = Fx::new("never-installed");
+    fx.configure_mods(true, true, false);
+    fx.fail(&[&format!("plugin install {ATTEND} --scope user")]);
+    fx.repair_targets(&fx.src());
+    assert!(!fx.has(ATTEND));
+    fx.changes();
+    fx.fail(&[]);
+    fx.repair_targets(&fx.src());
+    assert_eq!(fx.changes(), vec![format!("{}|plugin install {ATTEND} --scope user", fx.dest().display())]);
+    assert_eq!(fx.target_text(&fx.dest()), "");
+}
+
+/// ADR-512's `observable`: the operator uninstalls ways-judge by hand. Repair
+/// does not reinstall it, writes `mods.ways-judge.install: false` in that
+/// target's config, says so once, and leaves `gate.engine` as it is.
+#[test]
+fn a_judge_mod_uninstalled_by_hand_stays_gone_and_is_written_back_as_install_false() {
     let fx = Fx::new("judge-by-hand");
     fx.both();
-    assert!(fx.judge_record().is_some());
+    write(&fx.agent_yaml(), "engine: claude-code\n");
     fx.by_hand(&["plugin", "uninstall", JUDGE, "--scope", "user"]);
     fx.changes();
-    let out = fx.repair();
+    let out = fx.repair_targets(&fx.src());
     assert_eq!(fx.changes(), Vec::<String>::new(), "nothing reinstalled");
     let err = String::from_utf8_lossy(&out.stderr);
     let said: Vec<&str> = err.lines().filter(|l| l.contains("removed by hand")).collect();
     assert_eq!(said.len(), 1, "one line says so: {err}");
-    assert!(fx.judge_record().is_none(), "the record is cleared");
+    assert!(said[0].contains("mods.ways-judge.install: false") && said[0].contains("ways manage mod install ways-judge"), "{}", said[0]);
+    assert!(fx.target_text(&fx.dest()).contains("ways-judge:\n    install: false"), "{}", fx.target_text(&fx.dest()));
+    assert!(fx.judge_wanted(), "the user config is untouched");
+    assert_eq!(std::fs::read_to_string(fx.agent_yaml()).unwrap(), "engine: claude-code\n", "gate.engine stays");
     assert!(!fx.has(JUDGE) && fx.has(ATTEND), "{}", fx.plugins());
-    fx.repair();
+    fx.repair_targets(&fx.src());
     assert_eq!(fx.changes(), Vec::<String>::new(), "and stays gone");
+
+    // `mod check` reports the disagreement, names both fixes, and exits 3.
+    let out = fx.run(&["manage", "mod", "check", "ways-judge"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(3), "{text}");
+    assert!(text.contains("gate.engine is claude-code") && text.contains("ways manage mod install ways-judge") && text.contains("ways judge-setup"), "{text}");
 }
 
 /// With mods.attend.install false the judge's pass is the one that moves the
@@ -622,13 +714,13 @@ fn a_judge_mod_uninstalled_by_hand_stays_gone_and_its_record_clears() {
 fn install_false_and_a_moved_app_move_the_judge_mod_alone() {
     let fx = Fx::new("judge-moved-alone");
     fx.both();
-    write(&fx.user_config(), "mods:\n  attend:\n    install: false\n");
-    fx.repair();
+    fx.configure_mods(true, false, true);
+    fx.repair_targets(&fx.src());
     fx.changes();
     let moved = fx.root.join("moved");
     let dest = fx.dest().display().to_string();
     fx.fail(&[&format!("plugin install {JUDGE} --scope user")]);
-    fx.repair_from(&moved);
+    fx.repair_targets(&moved);
     assert_eq!(
         fx.changes(),
         vec![
@@ -639,39 +731,35 @@ fn install_false_and_a_moved_app_move_the_judge_mod_alone() {
     );
     assert!(!fx.has(JUDGE));
     fx.fail(&[]);
-    fx.repair_from(&moved);
+    fx.repair_targets(&moved);
     assert_eq!(fx.changes(), vec![format!("{dest}|plugin install {JUDGE} --scope user")]);
     assert!(fx.has(JUDGE) && !fx.has(ATTEND), "{}", fx.plugins());
 }
 
-/// Review of #1142, round 4: the operator uninstalls ways-judge by hand, then
-/// the target is disabled before any repair. Withdrawing attend removes the
-/// marketplace, which took no ways-judge with it, so the record is not marked
-/// pending and enabling the target again never reinstalls the mod.
+/// The operator uninstalls ways-judge by hand and a repair writes the
+/// removal back; the target is then disabled and enabled again. The setting
+/// outlives the disable, so the mod is not reinstalled.
 #[test]
-fn a_judge_mod_uninstalled_by_hand_stays_gone_across_a_disable_and_re_enable() {
+fn a_judge_mod_uninstalled_by_hand_and_seen_by_repair_stays_gone_across_a_disable() {
     for attend in [true, false] {
         let fx = Fx::new(&format!("judge-by-hand-disable-{attend}"));
         fx.judge_removed_by_hand(attend);
-        fx.configure(false, attend);
         fx.repair_targets(&fx.src());
-        assert!(fx.changes().iter().any(|c| c.ends_with("plugin marketplace remove agent-ways")), "attend {attend}");
-        let record = std::fs::read_to_string(fx.judge_record().expect("the record outlives the disable")).unwrap();
-        assert!(!record.contains("pending"), "attend {attend}: the removal took no ways-judge: {record:?}");
-        fx.configure(true, attend);
+        assert!(fx.target_text(&fx.dest()).contains("install: false"), "attend {attend}");
+        fx.configure_mods(false, attend, true);
+        fx.repair_targets(&fx.src());
+        fx.changes();
+        fx.configure_mods(true, attend, true);
         fx.repair_targets(&fx.src());
         let changes = fx.changes();
         assert!(!changes.iter().any(|c| c.contains(JUDGE)), "attend {attend}: not reinstalled: {changes:?}");
         assert!(!fx.has(JUDGE), "attend {attend}: {}", fx.plugins());
-        assert!(fx.judge_record().is_none(), "attend {attend}: the record is cleared");
-        fx.repair_targets(&fx.src());
-        assert!(!fx.changes().iter().any(|c| c.contains(JUDGE)), "attend {attend}: and stays gone");
     }
 }
 
-/// Review of #1142, round 4: the operator uninstalls ways-judge by hand, then
-/// the app moves before any repair. The repair that moves the marketplace
-/// installs again only what was installed from it.
+/// The operator uninstalls ways-judge by hand, then the app moves before any
+/// repair. The repair that moves the marketplace installs again only what was
+/// installed from it, and records the removal.
 #[test]
 fn a_judge_mod_uninstalled_by_hand_stays_gone_after_the_app_moves() {
     for attend in [true, false] {
@@ -683,11 +771,227 @@ fn a_judge_mod_uninstalled_by_hand_stays_gone_after_the_app_moves() {
         assert!(!changes.iter().any(|c| c.contains(JUDGE)), "attend {attend}: not reinstalled: {changes:?}");
         assert_eq!(fx.has(ATTEND), attend, "attend {attend}: {}", fx.plugins());
         assert!(!fx.has(JUDGE), "attend {attend}: {}", fx.plugins());
-        assert!(fx.judge_record().is_none(), "attend {attend}: the record is cleared");
+        assert!(fx.target_text(&fx.dest()).contains("ways-judge:\n    install: false"), "attend {attend}: {}", fx.target_text(&fx.dest()));
         fx.repair_targets(&moved);
         fx.repair_targets(&moved);
         assert!(!fx.changes().iter().any(|c| c.contains(JUDGE)), "attend {attend}: and stays gone");
         fx.repair_targets(&moved);
         assert_eq!(fx.changes(), Vec::<String>::new(), "attend {attend}: converged");
     }
+}
+
+/// ADR-512's `observable`: with Claude Code below the ways-judge floor,
+/// `ways settings set gate.engine claude-code` writes the wanted state and
+/// the engine; repair reports the mod pending with the floor, at every run;
+/// once Claude Code is upgraded the next repair installs it with no other
+/// step.
+#[test]
+fn a_wanted_judge_mod_below_its_floor_is_pending_until_claude_code_is_upgraded() {
+    let fx = Fx::new("judge-floor");
+    fx.configure_mods(true, true, false);
+    fx.claude_code("2.1.300");
+    let out = fx.run(&["settings", "set", "gate.engine", "claude-code"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(fx.judge_wanted(), "{}", std::fs::read_to_string(fx.user_config()).unwrap());
+    assert!(std::fs::read_to_string(fx.agent_yaml()).unwrap().contains("engine: claude-code"));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("ways manage mod repair ways-judge --commit"), "set names the repair: {err}");
+    for _ in 0..2 {
+        let out = fx.repair_targets(&fx.src());
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!fx.changes().iter().any(|c| c.contains(JUDGE)), "nothing for ways-judge");
+        let line = err.lines().find(|l| l.contains("ways-judge mod")).unwrap_or_else(|| panic!("{err}"));
+        assert!(line.contains("pending") && line.contains("2.1.300") && line.contains("2.1.304") && line.contains("ways manage update --commit"), "{line}");
+    }
+    assert_eq!(fx.target_text(&fx.dest()), "", "pending is never a removal");
+
+    // `mod check`: one ⚠ line with the installed version, the floor and the
+    // fix, and exit 3.
+    let out = fx.run(&["manage", "mod", "check"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(3), "{text}");
+    let warns: Vec<&str> = text.lines().filter(|l| l.contains('⚠')).collect();
+    assert_eq!(warns.len(), 1, "{text}");
+    assert!(warns[0].contains("2.1.300") && warns[0].contains("2.1.304") && warns[0].contains("ways manage update --commit"), "{}", warns[0]);
+
+    fx.claude_code("2.1.304");
+    fx.repair_targets(&fx.src());
+    assert_eq!(fx.changes(), vec![format!("{}|plugin install {JUDGE} --scope user", fx.dest().display())]);
+    let out = fx.run(&["manage", "mod", "check"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    assert!(!text.contains('⚠') && text.contains("every check passes"), "{text}");
+}
+
+/// ADR-512's `observable`: a key engine chosen while the engine is
+/// claude-code writes the engine, then `install: false`, and the next repair
+/// uninstalls the mod from every enabled target.
+#[test]
+fn leaving_claude_code_writes_the_engine_then_install_false_and_repair_uninstalls() {
+    let fx = Fx::new("judge-leave");
+    fx.both();
+    write(&fx.agent_yaml(), "engine: claude-code\n");
+    let out = fx.run(&["settings", "set", "gate.engine", "anthropic"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let err = String::from_utf8_lossy(&out.stderr);
+    let agent = err.find("agent.yaml").expect("the agent file is written");
+    let user = err.rfind("config.yaml").expect("then the user config");
+    assert!(agent < user, "engine first, then the wanted state: {err}");
+    assert!(std::fs::read_to_string(fx.agent_yaml()).unwrap().contains("engine: anthropic"));
+    assert!(!fx.judge_wanted());
+    fx.repair_targets(&fx.src());
+    assert_eq!(fx.changes(), vec![format!("{}|plugin uninstall {JUDGE} --scope user", fx.dest().display())]);
+}
+
+/// A direct write of the user config's `mods.ways-judge.install` is refused:
+/// it follows the engine (ADR-512 item 4).
+#[test]
+fn the_user_configs_judge_install_is_set_by_the_engine_only() {
+    let fx = Fx::new("judge-refused");
+    for args in [&["settings", "set", "mods.ways-judge.install", "true"][..], &["settings", "unset", "mods.ways-judge.install"][..]] {
+        let out = fx.run(args);
+        assert_eq!(out.status.code(), Some(3), "{args:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("follows gate.engine") && err.contains("ways judge-setup"), "{err}");
+    }
+    assert!(!fx.user_config().exists(), "nothing written");
+}
+
+/// ADR-512's `observable`: attend removed by hand in one target is written
+/// back as `install: false` in that target's config only; every other target
+/// keeps it; `ways manage mod install attend --commit` removes the override
+/// and installs it again.
+#[test]
+fn attend_removed_by_hand_in_one_target_is_kept_out_of_that_target_only() {
+    let fx = Fx::new("attend-by-hand");
+    let other = fx.root.join("other");
+    std::fs::create_dir_all(&other).unwrap();
+    write(&fx.user_config(), &fx.targets(&[(&fx.dest(), true), (&other, true)]));
+    fx.repair_targets(&fx.src());
+    assert!(fx.has(ATTEND));
+    let other_plugins = || std::fs::read_to_string(fx.state().join("other/plugins.json")).unwrap_or_default();
+    assert!(other_plugins().contains(ATTEND), "{}", other_plugins());
+    fx.by_hand(&["plugin", "uninstall", ATTEND, "--scope", "user"]);
+    fx.changes();
+    let out = fx.repair_targets(&fx.src());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(fx.changes().iter().all(|c| !c.contains("install")), "nothing reinstalled");
+    assert!(err.contains("removed by hand") && err.contains("ways manage mod install attend"), "{err}");
+    assert!(fx.target_text(&fx.dest()).contains("attend:\n    install: false"), "{}", fx.target_text(&fx.dest()));
+    assert_eq!(fx.target_text(&other), "", "the other target's config is untouched");
+    assert!(other_plugins().contains(ATTEND), "the other target keeps attend");
+    assert!(!std::fs::read_to_string(fx.user_config()).unwrap().contains("install"), "the user config is untouched");
+
+    // The way back.
+    let out = fx.run(&["manage", "mod", "install", "attend", "--commit"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(!fx.target_text(&fx.dest()).contains("install: false"), "{}", fx.target_text(&fx.dest()));
+    assert!(fx.has(ATTEND), "{}", fx.plugins());
+}
+
+/// ADR-512's `observable`: `mod uninstall attend` without --commit prints
+/// the calls per target and changes nothing; with --commit it writes
+/// `install: false` in the user config and uninstalls the plugin.
+#[test]
+fn mod_uninstall_attend_reports_until_commit() {
+    let fx = Fx::new("attend-uninstall");
+    fx.configure_mods(true, true, false);
+    fx.repair_targets(&fx.src());
+    fx.changes();
+    let before = std::fs::read_to_string(fx.user_config()).unwrap();
+    let out = fx.run(&["manage", "mod", "uninstall", "attend"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(text.contains(&format!("would run `claude plugin uninstall {ATTEND} --scope user`")) && text.contains("--commit"), "{text}");
+    assert_eq!(fx.changes(), Vec::<String>::new(), "no call made");
+    assert_eq!(std::fs::read_to_string(fx.user_config()).unwrap(), before, "nothing written");
+    let out = fx.run(&["manage", "mod", "uninstall", "attend", "--commit"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(std::fs::read_to_string(fx.user_config()).unwrap().contains("attend:\n    install: false"));
+    assert!(!fx.has(ATTEND), "{}", fx.plugins());
+    assert!(fx.changes().contains(&format!("{}|plugin uninstall {ATTEND} --scope user", fx.dest().display())));
+}
+
+/// ADR-512's `observable`: `mod uninstall ways-judge` while the engine is
+/// claude-code refuses, names `ways judge-setup` and changes nothing.
+#[test]
+fn mod_uninstall_ways_judge_is_refused_under_claude_code() {
+    let fx = Fx::new("judge-uninstall-refused");
+    fx.both();
+    write(&fx.agent_yaml(), "engine: claude-code\n");
+    let before = std::fs::read_to_string(fx.user_config()).unwrap();
+    let out = fx.run(&["manage", "mod", "uninstall", "ways-judge", "--commit"]);
+    assert_eq!(out.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("ways judge-setup"));
+    assert_eq!(std::fs::read_to_string(fx.user_config()).unwrap(), before);
+    assert!(fx.has(JUDGE) && fx.changes().is_empty());
+}
+
+/// ADR-512's `observable`: `mod install ways-judge` without --commit shows
+/// the engine change and changes nothing; with --commit it is the engine
+/// choice and installs the mod.
+#[test]
+fn mod_install_ways_judge_is_the_engine_choice_and_reports_until_commit() {
+    let fx = Fx::new("judge-install");
+    fx.configure_mods(true, true, false);
+    fx.repair_targets(&fx.src());
+    fx.changes();
+    write(&fx.agent_yaml(), "engine: anthropic\n");
+    let config = std::fs::read_to_string(fx.user_config()).unwrap();
+    let out = fx.run(&["manage", "mod", "install", "ways-judge"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(text.contains("gate.engine: anthropic → claude-code") && text.contains("--commit"), "{text}");
+    assert!(text.contains(&format!("would run `claude plugin install {JUDGE} --scope user`")), "{text}");
+    assert_eq!(std::fs::read_to_string(fx.user_config()).unwrap(), config, "nothing written");
+    assert_eq!(std::fs::read_to_string(fx.agent_yaml()).unwrap(), "engine: anthropic\n");
+    assert!(fx.changes().is_empty() && !fx.has(JUDGE));
+    let out = fx.run(&["manage", "mod", "install", "ways-judge", "--commit"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(fx.judge_wanted() && std::fs::read_to_string(fx.agent_yaml()).unwrap().contains("engine: claude-code"));
+    assert!(fx.has(JUDGE), "{}", fx.plugins());
+}
+
+/// ADR-512's `observable`: a mod disabled in Claude Code stays installed and
+/// disabled, and `mod check` names the enable command.
+#[test]
+fn a_disabled_mod_is_left_disabled_and_check_names_the_enable_command() {
+    let fx = Fx::new("attend-disabled");
+    fx.configure_mods(true, true, false);
+    fx.repair_targets(&fx.src());
+    fx.changes();
+    write(&fx.dest().join("settings.json"), &format!("{{\"enabledPlugins\":{{\"{ATTEND}\":false}}}}"));
+    fx.repair_targets(&fx.src());
+    assert_eq!(fx.changes(), Vec::<String>::new(), "left as it is");
+    let out = fx.run(&["manage", "mod", "check", "attend"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(3), "{text}");
+    assert!(text.contains(&format!("claude plugin enable {ATTEND}")), "{text}");
+}
+
+/// A removal of the whole marketplace by hand takes every listed mod with
+/// it, and each is read as removed by hand.
+#[test]
+fn a_marketplace_removed_by_hand_is_a_removal_of_every_mod_on_the_list() {
+    let fx = Fx::new("market-by-hand");
+    fx.both();
+    fx.by_hand(&["plugin", "marketplace", "remove", "agent-ways"]);
+    fx.changes();
+    fx.repair_targets(&fx.src());
+    assert_eq!(fx.changes(), Vec::<String>::new(), "nothing reinstalled");
+    let text = fx.target_text(&fx.dest());
+    assert!(text.contains("attend:\n    install: false") && text.contains("ways-judge:\n    install: false"), "{text}");
+}
+
+/// `mod list` names each mod, its version, its word and each target's state.
+#[test]
+fn mod_list_names_every_shipped_mod() {
+    let fx = Fx::new("mod-list");
+    fx.configure_mods(true, true, false);
+    fx.repair_targets(&fx.src());
+    let out = fx.run(&["manage", "mod", "list"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{text}");
+    assert!(text.contains("attend  0.17.0  converged") && text.contains("ways-judge  1.42.1  off"), "{text}");
+    assert!(text.contains("installed 0.17.0, enabled"), "{text}");
 }

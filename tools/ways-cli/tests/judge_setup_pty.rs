@@ -72,9 +72,19 @@ impl Fx {
         self.root.join("home")
     }
 
-    /// The default target's record that setup installed the judge mod.
-    fn judge_record(&self) -> PathBuf {
-        self.home().join(".local/state/agent-ways/ways-judge-installed")
+    /// The user config, where the ways-judge mod's wanted state lives.
+    fn user_config(&self) -> PathBuf {
+        self.home().join(".config/agent-ways/config.yaml")
+    }
+
+    /// The mod wanted, as `gate.engine: claude-code` wants it (ADR-512 item 4).
+    fn want_judge(&self) {
+        let text = std::fs::read_to_string(self.user_config()).unwrap_or_default();
+        write(&self.user_config(), &format!("{text}mods:\n  ways-judge:\n    install: true\n"));
+    }
+
+    fn judge_wanted(&self) -> bool {
+        std::fs::read_to_string(self.user_config()).unwrap_or_default().contains("ways-judge:\n    install: true")
     }
 
     fn agent_yaml(&self) -> String {
@@ -207,14 +217,15 @@ fn exe(p: &Path, text: &str) {
 
 /// Review of #1142, findings 2 and 5: a Claude Code too old for the mod's
 /// API gets three choices and is told why; picking Anthropic, once its key
-/// is stored and checked, names the anthropic engine.
+/// is stored and checked, names the anthropic engine, and then the mod is no
+/// longer wanted (ADR-512 item 4).
 #[test]
 fn an_old_claude_code_gets_three_choices_and_a_key_choice_names_its_engine() {
     let fx = Fx::new("old-host", true, true);
-    // An earlier setup installed the mod, which is gone now.
-    write(&fx.judge_record(), "ways-judge@agent-ways\n");
+    fx.want_judge();
     let shown = fx.setup("2.1.296", Some("Choice [1-3"), "1\n");
-    assert!(!fx.judge_record().exists(), "a key engine chosen: repair stops keeping the mod");
+    assert!(!fx.judge_wanted(), "a key engine chosen: the mod is no longer wanted");
+    assert!(std::fs::read_to_string(fx.user_config()).unwrap().contains("ways-judge:\n    install: false"));
     // The line wraps at 80 columns.
     for line in shown.lines() {
         assert!(line.chars().count() <= 80, "{line:?}");
@@ -226,39 +237,39 @@ fn an_old_claude_code_gets_three_choices_and_a_key_choice_names_its_engine() {
     assert!(shown.contains("Relevance judge on (Anthropic)."), "{shown}");
 }
 
-/// Re-review of #1142: choosing no judge records gate.mode off and stops
-/// repair keeping the mod.
+/// Re-review of #1142: choosing no judge records gate.mode off, clears the
+/// claude-code engine and stops wanting the mod.
 #[test]
-fn choosing_no_judge_turns_the_gate_off_and_clears_the_record() {
+fn choosing_no_judge_turns_the_gate_off_and_stops_wanting_the_mod() {
     let fx = Fx::new("no-judge", true, true);
-    write(&fx.judge_record(), "ways-judge@agent-ways\n");
+    fx.want_judge();
     let shown = fx.setup("2.1.296", Some("Choice [1-3"), "3\n");
     assert!(fx.agent_yaml().contains("mode: off"), "{}", fx.agent_yaml());
-    assert!(!fx.judge_record().exists());
+    assert!(!fx.agent_yaml().contains("engine: claude-code"), "{}", fx.agent_yaml());
+    assert!(!fx.judge_wanted());
     assert!(shown.replace('\n', " ").contains("Relevance judge off by choice"), "{shown}");
 }
 
-/// Review of #1142, round 4: a disabled target keeps its record through the
-/// disable, so a key engine chosen meanwhile clears it there too; enabling
-/// that target again then does not reinstall the mod.
+/// Review of #1142, round 4: a key engine chosen while a target is disabled
+/// stops wanting the mod in the user config, so enabling that target again
+/// does not install it.
 #[test]
-fn a_key_engine_clears_the_record_of_a_disabled_target_too() {
+fn a_key_engine_stops_wanting_the_mod_for_a_disabled_target_too() {
     let fx = Fx::new("disabled-target", true, true);
     let home = fx.home();
     std::fs::create_dir_all(home.join(".claude-b")).unwrap();
     write(
-        &home.join(".config/agent-ways/config.yaml"),
+        &fx.user_config(),
         &format!(
             "targets:\n  - path: {}\n    enabled: false\n  - path: {}\n",
             home.join(".claude").display(),
             home.join(".claude-b").display()
         ),
     );
-    // The default target, now disabled, holds the record its withdrawal kept.
-    write(&fx.judge_record(), "ways-judge@agent-ways\npending\n");
+    fx.want_judge();
     fx.setup("2.1.296", Some("Choice [1-3"), "1\n");
     assert!(fx.agent_yaml().contains("engine: anthropic"), "{}", fx.agent_yaml());
-    assert!(!fx.judge_record().exists(), "a disabled target's record clears too");
+    assert!(!fx.judge_wanted(), "one setting covers every target, a disabled one included");
 }
 
 /// Finding 2: a Claude Code whose mods can complete and spawn is offered the
