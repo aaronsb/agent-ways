@@ -24,8 +24,10 @@ pub enum Read {
     Done,
     /// The first read has not landed yet.
     Reading,
-    /// The read failed, saying why.
+    /// The read failed, saying why, with nothing read before it.
     Failed(String),
+    /// The last read failed, saying why; the tab shows the one before it.
+    Stale(String),
 }
 
 /// Turn the tab's groups, one per mod, into the mod nodes. A mod with no
@@ -38,13 +40,19 @@ pub fn nodes(root: &mut Node, states: &[Overview], read: &Read) {
         }
     }
     for g in root.children.iter_mut().filter(|g| MODS.iter().any(|m| m.name == g.name)) {
-        g.section = true;
+        // Not a section: the mod's name joins its rows' keys, so attend's
+        // and ways-judge's `install` and target rows stay apart across a
+        // reload, a pending edit and the cursor with them.
+        g.section = false;
         g.open = true;
+        if let Read::Stale(why) = read {
+            g.finding = Some(format!("The last read of the mods' state failed: {why}. This shows the read before it."));
+        }
         let Some(o) = states.iter().find(|o| o.m.name == g.name) else {
             let label = match read {
                 Read::Reading => "reading…",
                 Read::Failed(_) => "state read failed",
-                Read::Done => "state not read",
+                Read::Done | Read::Stale(_) => "state not read",
             };
             g.columns = Some((String::new(), label.into()));
             if let (Read::Failed(why), Some(m)) = (read, MODS.iter().find(|m| m.name == g.name)) {

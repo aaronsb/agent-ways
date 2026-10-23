@@ -68,7 +68,8 @@ thread_local! {
 
 /// Mark this thread as one whose panics are caught and reported by its
 /// owner (`std::panic::catch_unwind`), so a panic there neither restores
-/// the terminal under a running screen nor prints onto it.
+/// the terminal under a running screen nor prints onto it. Under
+/// `panic = "abort"` nothing is caught, and the hook runs in full.
 pub fn quiet_panics_here() {
     QUIET.with(|q| q.set(true));
 }
@@ -80,7 +81,10 @@ pub fn quiet_panics_here() {
 #[doc(hidden)]
 pub fn panic_hook(prev: Hook) -> Hook {
     Box::new(move |info| {
-        if QUIET.with(|q| q.get()) {
+        // Only where a panic unwinds can its owner catch it. Under
+        // `panic = "abort"` the process ends here, so the terminal is put
+        // back and the command in flight ended whatever thread panicked.
+        if cfg!(panic = "unwind") && QUIET.with(|q| q.get()) {
             return;
         }
         // A panic that aborts runs no drop: end the command in flight here.

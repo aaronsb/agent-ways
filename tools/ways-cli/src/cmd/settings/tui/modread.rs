@@ -109,12 +109,18 @@ impl ModRead {
         self.finished
     }
 
+    /// Why the last read failed, when it did.
+    pub fn last_failed(&self) -> Option<&str> {
+        self.failed.as_deref()
+    }
+
     /// What the tab shows: the last states read, and where the read stands.
     pub fn shown(&self) -> (Vec<Overview>, Read) {
         let read = match (&self.value, &self.failed) {
-            (_, Some(e)) if self.value.is_none() => Read::Failed(e.clone()),
-            (Some(_), _) => Read::Done,
-            (None, _) => Read::Reading,
+            (None, Some(e)) => Read::Failed(e.clone()),
+            (Some(_), Some(e)) => Read::Stale(e.clone()),
+            (Some(_), None) => Read::Done,
+            (None, None) => Read::Reading,
         };
         (self.value.clone().unwrap_or_default(), read)
     }
@@ -200,5 +206,29 @@ mod tests {
         r.wait_first(Duration::from_millis(500));
         assert!(start.elapsed() < Duration::from_millis(200), "the second wait returned at once");
         assert_eq!(r.shown().1, Read::Reading);
+    }
+
+    static FLAKY: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    /// Reads once, then panics.
+    fn flaky() -> Vec<Overview> {
+        if FLAKY.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0 {
+            panic!("plugin list unreadable");
+        }
+        Vec::new()
+    }
+
+    /// Re-review finding D: a failed read after a good one is shown beside
+    /// the earlier state, not hidden behind it.
+    #[test]
+    fn a_failed_reread_is_shown_with_the_earlier_state() {
+        let mut r = ModRead::new(flaky, Duration::from_millis(0));
+        r.pump();
+        until(&mut r, |r| r.finished() == 1);
+        assert_eq!(r.shown().1, Read::Done);
+        r.owe();
+        until(&mut r, |r| r.finished() == 2);
+        assert_eq!(r.shown().1, Read::Stale("plugin list unreadable".into()));
+        assert_eq!(r.last_failed(), Some("plugin list unreadable"));
     }
 }

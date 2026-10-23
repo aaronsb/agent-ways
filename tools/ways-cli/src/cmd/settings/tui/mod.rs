@@ -534,7 +534,13 @@ impl Adapter for Ways {
 
     /// A stamp that moved with the files unchanged moved for a mod read.
     fn stamp_moved(&mut self) -> Option<String> {
-        (self.ctx.mods_background && self.files.get() == Some(self.files_stamp())).then(|| "mod state updated".to_string())
+        if !self.ctx.mods_background || self.files.get() != Some(self.files_stamp()) {
+            return None;
+        }
+        Some(match self.mods.borrow().last_failed() {
+            Some(why) => format!("mod state read failed: {why}"),
+            None => "mod state updated".to_string(),
+        })
     }
 
     /// The size and time of each file the tree was read from, and the names

@@ -790,6 +790,10 @@ pub struct View {
     pub host: Result<String, String>,
     /// Claude Code's version, when `claude --version` named one.
     pub claude_code: Option<String>,
+    /// Claude Code's plugin lists were read. Without them (no `claude`)
+    /// nothing is known of what is installed, and repair's record says
+    /// nothing of a removal by hand.
+    pub read: bool,
     /// Why Claude Code's plugins could not be read.
     pub error: Option<String>,
     /// The version sessions run: the shipped one when the mod is installed
@@ -858,6 +862,13 @@ impl View {
     pub fn state(&self, shipped: Option<&str>) -> State {
         if self.error.is_some() || !self.foreign.is_empty() || matches!(self.market, MarketState::Foreign(_)) {
             return State::Drift;
+        }
+        if !self.read {
+            return match (self.wanted, self.target_off) {
+                (true, _) => State::Pending,
+                (false, true) => State::Removed,
+                (false, false) => State::Off,
+            };
         }
         let older = |v: &str| shipped.is_some_and(|s| super::update::version_older(v, s));
         match (self.wanted, self.installed.as_deref()) {
@@ -976,6 +987,7 @@ pub fn views(source_root: &Path, t: &Target, only: Option<&Mod>) -> Vec<(Mod, Vi
                 foreign: Vec::new(),
                 host,
                 claude_code: version.as_ref().and_then(|v| v.as_ref().ok()).and_then(|o| claude_code_version(o)).map(str::to_string),
+                read: lists.is_ok(),
                 error: None,
                 runs: None,
             };
@@ -1291,9 +1303,26 @@ mod tests {
             foreign: vec![],
             host: Ok("2.1.309".into()),
             claude_code: Some("2.1.309".into()),
+            read: true,
             error: None,
             runs: None,
         }
+    }
+
+    /// Re-review finding C: with Claude Code's lists unread (no `claude`), a
+    /// mod on repair's record is pending where wanted and off where not;
+    /// the record alone says nothing about a removal by hand.
+    #[test]
+    fn unread_lists_never_read_as_removed() {
+        let s = Some("0.29.0");
+        let mut v = view(true, None);
+        v.recorded = true;
+        v.read = false;
+        v.host = Err("`claude` is not on PATH".into());
+        v.claude_code = None;
+        assert_eq!(v.state(s), State::Pending);
+        v.wanted = false;
+        assert_eq!(v.state(s), State::Off);
     }
 
     /// The mod tab's row leads with the deciding word, so it reads at 80

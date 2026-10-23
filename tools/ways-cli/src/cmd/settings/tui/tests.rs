@@ -1272,3 +1272,39 @@ fn a_landed_read_reloads_once_and_starts_no_other() {
     assert_eq!(SLOW_READS.load(std::sync::atomic::Ordering::SeqCst), 1, "the read settled at one");
     assert_eq!(said, [Some("mod state updated".to_string())], "one reload, said as a mod read");
 }
+
+/// Re-review finding A: the two mods' rows had one key each (`mod.install`,
+/// `mod.~/.claude`), so a reload kept the later mod's value over a pending
+/// edit to the earlier one and moved the cursor between them. Each mod's
+/// rows now carry the mod in their key, and an edit survives a reload.
+#[test]
+fn each_mods_rows_have_their_own_keys_and_an_edit_survives_a_reload() {
+    let fx = Fixture::home();
+    let mut ctx = ctx_of(&fx);
+    ctx.for_project = false;
+    ctx.mods = mod_states;
+    let ways = Ways::new(ctx);
+    let roots = ways.roots();
+    let t = roots.iter().position(|r| r.name == "mod").unwrap();
+    let path_of = |roots: &[Node], m: usize, name: &str| {
+        let g = roots[t].children.iter().position(|c| c.name == ["attend", "ways-judge"][m]).unwrap();
+        let i = roots[t].children[g].children.iter().position(|c| c.name == name).unwrap_or_else(|| panic!("{name}"));
+        vec![t, g, i]
+    };
+    let keys: Vec<String> = [(0, "install"), (1, "install"), (0, "~/.claude"), (1, "~/.claude")]
+        .iter()
+        .map(|(m, n)| agent_tui::tree::key(&roots, &path_of(&roots, *m, n)))
+        .collect();
+    let mut unique = keys.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), 4, "{keys:?}");
+    let mut app = App::new("t", roots).adapter(ways);
+    let p = path_of(&app.roots, 0, "install");
+    agent_tui::tree::get_mut(&mut app.roots, &p).setting.as_mut().unwrap().value = "false".into();
+    assert_eq!(app.pending(), 1);
+    let _ = app.reload();
+    let p = path_of(&app.roots, 0, "install");
+    assert_eq!(agent_tui::tree::get(&app.roots, &p).setting.as_ref().unwrap().value, "false", "the pending edit is kept");
+    assert_eq!(app.pending(), 1);
+}

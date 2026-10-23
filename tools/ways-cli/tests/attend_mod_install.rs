@@ -1172,6 +1172,8 @@ fn a_pre_adr_judge_mod_reads_as_wanted_before_any_write() {
 fn no_claude_reads_as_pending_not_drift() {
     let fx = Fx::new("no-claude");
     fx.configure_mods(true, true, false);
+    // Repair installed attend, so its record lists it.
+    fx.repair_targets(&fx.src());
     let out = fx.ways(&fx.stub_path()).args(["manage", "mod", "list"]).env("NO_COLOR", "1").env("XDG_DATA_HOME", fx.app_home()).env("WAYS_CLAUDE_BIN", fx.root.join("no-such-claude")).output().unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "{text}");
