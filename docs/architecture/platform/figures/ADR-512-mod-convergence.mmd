@@ -1,0 +1,45 @@
+%% Render: mmdc -i ADR-512-mod-convergence.mmd -o ADR-512-mod-convergence.svg -b transparent -c ../../ways/figures/mermaid-config.json, then add xml:space="preserve" to the root svg element
+flowchart TB
+    subgraph WRITE["Writers of the wanted state"]
+        direction TB
+        E["Engine choice<br>ways judge-setup, the gate screen,<br>ways settings set gate.engine"]
+        E -->|claude-code| W1["1. mods.ways-judge.install: true<br>2. gate.engine: claude-code"]
+        E -->|a key engine, unset, or no judge| W0["1. gate.engine<br>2. mods.ways-judge.install: false"]
+        M["ways manage mod install or uninstall,<br>the mod tab, ways settings set"] --> WA["mods.name.install"]
+        H["Repair, on a mod it installed<br>that was removed by hand"] --> WH["mods.name.install: false<br>in that target's config"]
+    end
+    W1 --> R
+    W0 --> R
+    WA --> R
+    subgraph CONVERGE["Convergence"]
+        direction TB
+        R["ways manage repair, and update and reinstall through it,<br>or ways manage mod repair:<br>each enabled target, each shipped mod"] --> Q{"mods.name.install<br>for this target?"}
+        Q -->|false| X["Uninstall it where it came from agent-ways;<br>drop it from repair's list; remove the<br>marketplace when no mod wants it"]
+        Q -->|true| I{"Installed?"}
+        I -->|yes| U["Update an older copy"]
+        I -->|no| L{"On repair's list<br>for this target?"}
+        L -->|yes: removed by hand| BH["Not reinstalled:<br>write install false, drop it<br>from the list, report it"]
+        L -->|no: never installed,<br>or an install failed| F{"claude on PATH, plugin CLI answers,<br>version at or above the mod's floor?"}
+        F -->|no| P["Pending: reported with the floor<br>and the fix; nothing changed"]
+        F -->|yes| C["Install from the agent-ways<br>marketplace; add it to the list"]
+        U --> D{"Enabled in<br>Claude Code?"}
+        C --> D
+        D -->|yes| OK["Converged"]
+        D -->|no| K["Left disabled: the operator's choice;<br>mod check names the enable command"]
+    end
+    P -.->|tried again at every later repair| R
+    classDef input fill:#fbbf24,stroke:#4a5568,color:#1a1a1a
+    classDef data fill:#2d8e5e,stroke:#4a5568,color:#ffffff
+    classDef step fill:#2d7d9a,stroke:#4a5568,color:#ffffff
+    classDef ask fill:#7c3aed,stroke:#4a5568,color:#ffffff
+    classDef wait fill:#f6821f,stroke:#4a5568,color:#1a1a1a
+    classDef out fill:#475569,stroke:#4a5568,color:#ffffff
+    class E,M,H input
+    class W1,W0,WA,WH data
+    class R,C,U step
+    class Q,I,L,F,D ask
+    class P wait
+    class X,K,BH out
+    class OK data
+    style WRITE fill:#f6821f1a,stroke:#d97706
+    style CONVERGE fill:#7c3aed1a,stroke:#8b5cf6
