@@ -56,18 +56,24 @@ pub fn write_engine(engine: Option<&str>) -> Result<Vec<(LayerScope, PathBuf)>, 
     let agent = ways_agent_core::profile::user_layer_path();
     let user = ways_core::paths::user_config();
     let install = |v: bool| write_mod_install(&user, JUDGE, Some(v)).map_err(|m| fail(exit::WRITE_FAILED, m));
+    // The engine is checked before anything is written.
+    let value = engine
+        .map(|e| b.spec.parse_cli(e, &live_layers(None), &b.bound))
+        .transpose()
+        .map_err(|m| fail(exit::REJECTED, format!("gate.engine: {m}; `ways settings help gate.engine`")))?;
     let mut written = Vec::new();
     let keyless = engine.is_some_and(is_keyless);
     if keyless {
         install(true)?;
         written.push((LayerScope::User, user.clone()));
+        // Choosing the engine is an explicit want: a removal by hand that no
+        // repair has seen yet is not written back as `install: false`.
+        for t in crate::config::global().targets().into_iter().filter(|t| t.enabled) {
+            crate::cmd::attend_mod::forget(&t.dir(), &crate::cmd::attend_mod::JUDGE).map_err(|e| fail(exit::WRITE_FAILED, format!("{e}")))?;
+        }
     }
-    match engine {
-        Some(e) => {
-            let v = b
-                .spec
-                .parse_cli(e, &live_layers(None), &b.bound)
-                .map_err(|m| fail(exit::REJECTED, format!("gate.engine: {m}; `ways settings help gate.engine`")))?;
+    match value {
+        Some(v) => {
             write_file(&agent, &[(b.path(), v)])?;
         }
         None => {

@@ -325,7 +325,7 @@ fn actions(app: &Path, channel: &Channel, relation: Relation, head: Option<&str>
         }
         out.push((Mark::Act, format!("reproject {} (ways manage repair)", dir.display())));
         let config = t.config_path();
-        let wants = |m: &attend_mod::Mod| ways_core::settings::mod_install(m.name, &config);
+        let wants = |m: &attend_mod::Mod| attend_mod::wants_in(m, &config);
         if wants(&attend_mod::ATTEND) {
             out.extend(mod_action(&dir, MOD, attend));
         } else if ways_core::settings::mod_install_in_file(attend_mod::ATTEND.name, &config) == Some(false) {

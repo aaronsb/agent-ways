@@ -150,6 +150,8 @@ The figure shows the writers of each mod's wanted state, and how a repair conver
 
    `install`, `uninstall` and `repair` report what they would change until `--commit`, in ADR-511's report shape, and follow `install.manage_mode` as `repair` and `target` do (ADR-511 items 1 to 4). A bare `ways manage mod` opens the settings screens on the `mod` tab on a terminal, and in a pipe prints its help and exits 2 (ADR-509 item 2). `ways status` and `ways manage update`'s report name every shipped mod, pending ones with their floor and removed ones with the setting repair wrote, where today they name attend's state and ways-judge's version only.
 
+   *Clarification, 2026-10-23:* the refusal of `ways manage mod uninstall ways-judge` while `gate.engine` is `claude-code` applies to the user config only. With `--target <dir>` it writes `install: false` in that target's config, which is item 4's per-target opt-out.
+
 6. **The settings screens' `mod` tab gains a level.** The tab's prefix becomes `mods`. Its top level is one node per shipped mod, labelled with its name, shipped version and a one-word state (`converged`, `pending`, `removed`, `disabled`, `off`, `drift`). Each node holds:
    - a read-only row per enabled target with that target's state and, for pending, the floor;
    - the mod's settings, `install` among them; for ways-judge, the user config's `install` is shown read-only with the gate tab named as where it is set;

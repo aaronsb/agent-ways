@@ -317,9 +317,18 @@ struct Lists {
     plugins: String,
 }
 
+/// Both lists, each a JSON array. Anything else (a notice printed before
+/// the JSON, a changed format) is an error: read as empty, it would make
+/// every mod look removed by hand.
 fn query_lists(claude: &Path, cfg: Option<&Path>) -> Result<Lists, String> {
     let markets = claude_stdout(claude, cfg, &["plugin", "marketplace", "list", "--json"])?;
     let plugins = claude_stdout(claude, cfg, &["plugin", "list", "--json"])?;
+    for (out, what) in [(&markets, "plugin marketplace list --json"), (&plugins, "plugin list --json")] {
+        if !matches!(serde_json::from_str(out), Ok(serde_json::Value::Array(_))) {
+            let first = out.lines().next().unwrap_or_default().trim();
+            return Err(format!("`claude {what}` printed no JSON list (it began {first:?})"));
+        }
+    }
     Ok(Lists { markets, plugins })
 }
 
@@ -378,6 +387,18 @@ impl Record {
         std::fs::read_to_string(Record::path(dest_root)).map(|t| Record::parse(&t)).unwrap_or_default()
     }
 
+    /// Change the record under its lock: a repair the gate screen started in
+    /// the background and an update running beside it never lose each
+    /// other's change.
+    fn update(dest_root: &Path, change: impl FnOnce(&mut Record)) -> std::io::Result<()> {
+        let path = Record::path(dest_root);
+        std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
+        let _lock = agent_settings::writer::Lock::acquire(&path)?;
+        let mut record = Record::read(dest_root);
+        change(&mut record);
+        record.write(dest_root)
+    }
+
     /// Keep the record; an empty one removes the file.
     fn write(&self, dest_root: &Path) -> std::io::Result<()> {
         let path = Record::path(dest_root);
@@ -404,6 +425,17 @@ impl Record {
     fn remove(&mut self, id: &str) {
         self.installed.retain(|i| i != id);
     }
+}
+
+/// Forget that repair installed `m` in the target at `dest_root`: an explicit
+/// want (`ways manage mod install`, the claude-code engine) that follows a
+/// removal by hand no repair has seen yet installs the mod again, rather
+/// than writing the removal back as `install: false`.
+pub fn forget(dest_root: &Path, m: &Mod) -> std::io::Result<()> {
+    if !Record::read(dest_root).has(m.id) {
+        return Ok(());
+    }
+    Record::update(dest_root, |r| r.remove(m.id))
 }
 
 /// The mods of ours `have` reports installed: the one being converged and
@@ -434,8 +466,7 @@ fn execute(m: &Mod, claude: &Path, cfg: Option<&Path>, dest_root: &Path, plan: &
         match claude_stdout(claude, cfg, &call.args(m)) {
             Ok(_) => {
                 lines.push(format!("{label}: {}", call.describe(m)));
-                let mut record = Record::read(dest_root);
-                match call {
+                let kept = Record::update(dest_root, |record| match call {
                     Call::MarketplaceAdd(dir) => record.folder = Some(dir.clone()),
                     Call::MarketplaceRemove => {
                         record.folder = None;
@@ -445,8 +476,8 @@ fn execute(m: &Mod, claude: &Path, cfg: Option<&Path>, dest_root: &Path, plan: &
                     Call::InstallSibling(id) => record.add(id),
                     Call::Uninstall => record.remove(m.id),
                     Call::MarketplaceUpdate | Call::Update => {}
-                }
-                if let Err(e) = record.write(dest_root) {
+                });
+                if let Err(e) = kept {
                     lines.push(format!("{label}: ⚠ could not keep repair's record in {}: {e}", Record::path(dest_root).display()));
                 }
             }
@@ -474,10 +505,23 @@ pub struct Target<'a> {
 
 impl Target<'_> {
     /// Whether `m` is wanted here: `mods.<name>.install`, the target's
-    /// config over the user config.
+    /// config over the user config ([`wants_in`]).
     pub fn wants(&self, m: &Mod) -> bool {
-        ways_core::settings::mod_install(m.name, self.config)
+        wants_in(m, self.config)
     }
+}
+
+/// Whether `m` is wanted in the target whose ways config is `config`:
+/// `mods.<name>.install`, the target's config over the user config. An
+/// install from before ADR-512 may hold `gate.engine: claude-code` and no
+/// `mods.ways-judge.install` at all; that reads as the engine wanting the mod,
+/// and [`align_judge`] writes it down at the next repair that applies.
+pub fn wants_in(m: &Mod, config: &Path) -> bool {
+    use ways_core::settings::{mod_install, mod_install_in_file, mod_install_in_user};
+    if *m == JUDGE && mod_install_in_user(m.name).is_none() && mod_install_in_file(m.name, config).is_none() {
+        return super::settings::engine::claude_code_chosen();
+    }
+    mod_install(m.name, config)
 }
 
 /// The line for a wanted mod the host cannot run yet.
@@ -502,9 +546,7 @@ fn removed_by_hand(m: &Mod, t: &Target, dry_run: bool) -> String {
     if let Err(e) = super::settings::write_mod_install(t.config, name, Some(false)) {
         return format!("{label}: ⚠ removed by hand, and mods.{name}.install: false could not be written in {config}: {e}");
     }
-    let mut record = Record::read(t.dest_root);
-    record.remove(m.id);
-    let kept = record.write(t.dest_root).err().map(|e| format!("; ⚠ the record could not be updated: {e}")).unwrap_or_default();
+    let kept = Record::update(t.dest_root, |r| r.remove(m.id)).err().map(|e| format!("; ⚠ the record could not be updated: {e}")).unwrap_or_default();
     format!("{label}: removed by hand, so repair wrote mods.{name}.install: false in {config} and leaves it out of this target; {back}{kept}")
 }
 
@@ -544,13 +586,19 @@ pub fn converge_target(source_root: &Path, t: &Target, only: Option<&Mod>, dry_r
             }
         };
         let have = parse_installed(m, &now.markets, &now.plugins);
-        let mut record = Record::read(t.dest_root);
+        let record = Record::read(t.dest_root);
         let whose = market(&have, &dir, record.folder.as_deref());
         // A mod of ours installed from this app's marketplace is one repair
-        // keeps, whoever installed it: a lost record heals here.
-        if have.ours.is_some() && whose == Market::Current && !record.has(m.id) && !dry_run {
-            record.add(m.id);
-            if let Err(e) = record.write(t.dest_root) {
+        // keeps, whoever installed it: a lost record heals here. One the
+        // record lists that is gone while not wanted leaves the list, so a
+        // later want does not read it as removed by hand.
+        let heal = match (have.ours.is_some(), record.has(m.id)) {
+            (true, false) if whose == Market::Current => Some(true),
+            (false, true) if !t.wants(m) => Some(false),
+            _ => None,
+        };
+        if let (Some(add), false) = (heal, dry_run) {
+            if let Err(e) = Record::update(t.dest_root, |r| if add { r.add(m.id) } else { r.remove(m.id) }) {
                 lines.push(format!("{}: ⚠ could not keep repair's record in {}: {e}", m.label, Record::path(t.dest_root).display()));
             }
         }
@@ -620,9 +668,7 @@ pub fn withdraw_target(source_root: &Path, dest_root: &Path, default_root: &Path
         lines.extend(withdraw(m, source_root, dest_root, default_root, dry_run));
     }
     if !dry_run {
-        let mut record = Record::read(dest_root);
-        record.installed.clear();
-        if let Err(e) = record.write(dest_root) {
+        if let Err(e) = Record::update(dest_root, |r| r.installed.clear()) {
             lines.push(format!("⚠ could not empty repair's record in {}: {e}", Record::path(dest_root).display()));
         }
     }

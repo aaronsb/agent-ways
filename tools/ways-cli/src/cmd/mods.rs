@@ -125,6 +125,9 @@ fn wanted_line(m: &Mod) -> String {
     let default = m.name == attend_mod::ATTEND.name;
     let base = match user {
         Some(v) => format!("mods.{}.install: {v} (user config)", m.name),
+        None if *m == JUDGE && super::settings::engine::claude_code_chosen() => {
+            format!("mods.{}.install: unset, wanted by gate.engine: claude-code; repair writes it", m.name)
+        }
         None => format!("mods.{}.install: {default} (default)", m.name),
     };
     if *m == JUDGE {
@@ -302,7 +305,8 @@ pub fn install(name: &str, target: Option<&str>, mode: Mode) -> Result<()> {
         }
     }
     if m == JUDGE {
-        if !super::settings::engine::claude_code_chosen() {
+        // The engine choice, unless both halves already hold.
+        if !super::settings::engine::claude_code_chosen() || ways_core::settings::mod_install_in_user(name) != Some(true) {
             plan.engine = Some(Some("claude-code".to_string()));
         }
     } else if target.is_none() && ways_core::settings::mod_install_in_user(name) != Some(true) {
@@ -414,6 +418,13 @@ fn run(m: &Mod, command: &str, targets: &[Enabled], plan: Plan, mode: Mode) -> R
     }
     if plan.engine.is_none() && plan.writes.is_empty() {
         r.item(Mark::Same, "nothing to write");
+    }
+    // An explicit want: a removal by hand no repair has seen yet is not
+    // written back as `install: false` (the engine choice does this itself).
+    if plan.want && plan.engine.is_none() {
+        for t in targets {
+            attend_mod::forget(&t.dir, m).map_err(|e| anyhow::anyhow!("forgetting {} in {}: {e}", m.id, t.dir.display()))?;
+        }
     }
     for (dir, lines) in converge_in(targets, Some(m), false) {
         r.section(shown(&dir));

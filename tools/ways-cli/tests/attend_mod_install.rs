@@ -44,7 +44,8 @@ shipped() { case "$1" in attend@*) echo "$STUB_SHIPPED" ;; *) echo "$STUB_JUDGE_
 case "$*" in
   "--version") if [ -f "$STUB_STATE/version" ]; then echo "$(cat "$STUB_STATE/version") (Claude Code)"; else echo "2.1.309 (Claude Code)"; fi ;;
   "plugin marketplace list --json") cat "$m" ;;
-  "plugin list --json") cat "$p" ;;
+  # A file $STUB_STATE/preamble prints before the plugin list, as a notice would.
+  "plugin list --json") [ -f "$STUB_STATE/preamble" ] && cat "$STUB_STATE/preamble"; cat "$p" ;;
   "plugin marketplace add "*) printf '[{"name":"agent-ways","source":"directory","path":"%s"}]\n' "$4" > "$m" ;;
   # Claude Code uninstalls a marketplace's plugins when it removes the marketplace.
   "plugin marketplace remove agent-ways") echo '[]' > "$m"; entries | grep -v '"id":"[^"]*@agent-ways"' | save ;;
@@ -1062,4 +1063,103 @@ fn mod_list_names_every_shipped_mod() {
     assert!(out.status.success(), "{text}");
     assert!(text.contains("attend  0.17.0  converged") && text.contains("ways-judge  1.42.1  off"), "{text}");
     assert!(text.contains("installed 0.17.0, enabled"), "{text}");
+}
+
+// ── convergence review of the wanted state (follow-up to ADR-512 S2) ──
+
+/// An explicit want after a removal by hand that no repair has seen yet
+/// installs the mod: `mod install` forgets the list entry first, so the
+/// removal is not written back as `install: false`.
+#[test]
+fn mod_install_after_an_unseen_removal_by_hand_installs_it() {
+    let fx = Fx::new("install-unseen");
+    fx.configure_mods(true, true, false);
+    fx.repair_targets(&fx.src());
+    fx.by_hand(&["plugin", "uninstall", ATTEND, "--scope", "user"]);
+    fx.changes();
+    let out = fx.run(&["manage", "mod", "install", "attend", "--commit"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(fx.has(ATTEND), "installed: {}\n{}", fx.plugins(), String::from_utf8_lossy(&out.stdout));
+    assert!(!fx.target_text(&fx.dest()).contains("install: false"), "{}", fx.target_text(&fx.dest()));
+    fx.repair_targets(&fx.src());
+    assert!(fx.has(ATTEND), "and stays: {}", fx.plugins());
+}
+
+/// The same for ways-judge, through `mod install` and through the engine
+/// choice (`ways settings set gate.engine claude-code`) before any repair.
+#[test]
+fn choosing_claude_code_after_an_unseen_removal_by_hand_installs_the_judge_mod() {
+    for via_engine in [false, true] {
+        let fx = Fx::new(&format!("judge-unseen-{via_engine}"));
+        fx.both();
+        write(&fx.agent_yaml(), "engine: claude-code\n");
+        fx.by_hand(&["plugin", "uninstall", JUDGE, "--scope", "user"]);
+        fx.changes();
+        let out = if via_engine {
+            fx.run(&["settings", "set", "gate.engine", "claude-code"])
+        } else {
+            fx.run(&["manage", "mod", "install", "ways-judge", "--commit"])
+        };
+        assert!(out.status.success(), "via engine {via_engine}: {}", String::from_utf8_lossy(&out.stderr));
+        fx.repair_targets(&fx.src());
+        assert!(fx.has(JUDGE), "via engine {via_engine}: {}", fx.plugins());
+        assert!(!fx.target_text(&fx.dest()).contains("install: false"), "via engine {via_engine}: {}", fx.target_text(&fx.dest()));
+    }
+}
+
+/// A mod set to `install: false`, then uninstalled by hand before repair:
+/// the repair that finds it gone drops it from the list, so wanting it again
+/// later installs it instead of reading a removal by hand.
+#[test]
+fn a_stale_list_entry_never_turns_a_later_want_into_a_removal() {
+    let fx = Fx::new("stale-entry");
+    fx.configure_mods(true, true, false);
+    fx.repair_targets(&fx.src());
+    fx.configure_mods(true, false, false);
+    fx.by_hand(&["plugin", "uninstall", ATTEND, "--scope", "user"]);
+    fx.repair_targets(&fx.src());
+    fx.changes();
+    fx.configure_mods(true, true, false);
+    fx.repair_targets(&fx.src());
+    assert!(fx.has(ATTEND), "installed again: {}", fx.plugins());
+    assert!(!fx.target_text(&fx.dest()).contains("install: false"), "{}", fx.target_text(&fx.dest()));
+}
+
+/// A plugin list Claude Code prints with a notice before the JSON is not
+/// read as every mod removed by hand: the target is reported and left.
+#[test]
+fn an_unreadable_plugin_list_changes_nothing() {
+    let fx = Fx::new("preamble");
+    fx.both();
+    write(&fx.state().join("preamble"), "A new version of Claude Code is available.\n");
+    let out = fx.repair_targets(&fx.src());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("could not read Claude Code's plugins"), "{err}");
+    assert_eq!(fx.changes(), Vec::<String>::new());
+    assert_eq!(fx.target_text(&fx.dest()), "", "nothing written");
+    assert!(fx.has(ATTEND) && fx.has(JUDGE));
+}
+
+/// An install from before ADR-512: gate.engine is claude-code, the user
+/// config has no `mods.ways-judge.install`, and the mod is installed. Every
+/// read and every what-if treats it as wanted.
+#[test]
+fn a_pre_adr_judge_mod_reads_as_wanted_before_any_write() {
+    let fx = Fx::new("pre-adr");
+    write(&fx.user_config(), &fx.targets(&[(&fx.dest(), true)]));
+    fx.repair_targets(&fx.src());
+    fx.by_hand(&["plugin", "install", JUDGE, "--scope", "user"]);
+    write(&fx.agent_yaml(), "engine: claude-code\n");
+    let before = std::fs::read_to_string(fx.user_config()).unwrap();
+    fx.changes();
+    for args in [&["manage", "mod", "repair"][..], &["manage", "repair"][..], &["manage", "mod", "check", "ways-judge"][..], &["manage", "mod", "list"][..]] {
+        let out = fx.run(args);
+        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(!text.contains(&format!("uninstall {JUDGE}")), "{args:?}: {text}");
+        assert!(!text.contains("not wanted"), "{args:?}: {text}");
+    }
+    let out = fx.run(&["manage", "mod", "check", "ways-judge"]);
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stdout));
+    assert_eq!(std::fs::read_to_string(fx.user_config()).unwrap(), before, "what-if and reads write nothing");
+    assert_eq!(fx.changes(), Vec::<String>::new());
 }
