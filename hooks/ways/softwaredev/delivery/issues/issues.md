@@ -24,7 +24,7 @@ Issues carrying the `tasklist` label are mirrored into this session's task list 
 
 ## Ownership
 
-GitHub owns subject, description, and open or closed. The session owns `in_progress` and a `completed` request. A mirrored task is owned by `team-lead` so an idle teammate does not claim it; hand one to a teammate by setting its owner. Mark a mirrored task `in_progress` with TaskUpdate when you start it. Mark it `completed` when the work lands, then close the issue with `gh issue close` and a comment when a standing grant covers issue writes, and otherwise offer the close, since pushing status back is not wired yet. A reopen on GitHub returns the task to `pending` on the next pull.
+GitHub owns subject, description, and open or closed. The session owns `in_progress` and a `completed` request. A mirrored task is owned by `team-lead` so an idle teammate does not claim it; hand one to a teammate by setting its owner. Mark a mirrored task `in_progress` with TaskUpdate when you start it, and assign the issue to yourself with `gh issue edit <n> --add-assignee @me`. The task's metadata lists who the issue is assigned to; when it is someone else, raise that with whoever asked for the work before going on. Mark it `completed` when the work lands, then close the issue with `gh issue close` and a comment when a standing grant covers issue writes, and otherwise offer the close, since pushing status back is not wired yet. A reopen on GitHub returns the task to `pending` on the next pull.
 
 Removing the label stops the mirror for that issue: the task stays in the store as it was, the whisper says `unlabeled #n` once, and later closes never reach it. A stale `pending` on an unlabeled issue is expected, and `gh-tasks list` shows the URL to check.
 
