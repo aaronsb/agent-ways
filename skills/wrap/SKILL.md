@@ -115,8 +115,10 @@ summarized description is exactly the content post-reset-you cannot reconstruct.
 ## Step 3 — Write the continuation prompt
 
 Produce a single copy-pastable block. Compaction keeps the session alive; this prompt is
-the harder guarantee — it survives even a `/clear` or a brand-new window. Tailor sections
-to the work, but cover:
+the harder guarantee — it survives even a `/clear` or a brand-new window. Also save it to
+`.claude/handoff.wrap.md` in the project, where `start` and a successor session look for it;
+the file stays gitignored, so add `.claude/handoff.*.md` to `.gitignore` when it is not
+covered. Tailor sections to the work, but cover:
 
 ```
 Continue work on <project> (<path>) — <one-line what it is and its purpose>.
