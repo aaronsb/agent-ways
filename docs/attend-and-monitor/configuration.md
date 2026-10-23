@@ -304,7 +304,7 @@ Removed with the hand-written parser (ADR-506; the release notes say how to move
 
 The attend mod's settings live in the ways config, not in these files ([`mod.md`](mod.md#configuration)). [ADR-512](../architecture/platform/ADR-512-each-shipped-claude-code-mod-has-one-wanted-state-in-settings-under-mods-name-and-ways-manage-converges-every-target-to-it.md) renamed their section from `attend_mod` to `mods.attend`, under the same key names. Nothing reads `attend_mod`, so until a file is moved its values are not read: a project that set `listening: active` starts its sessions dormant, and each other value reads as its default.
 
-`ways settings lint`, `ways manage update --what-if` and `ways manage update --commit` name each file that holds it, with the command that moves it, and change none of them:
+`ways settings lint` names each file that holds it, with the command that moves it, and changes none of them. So do `ways manage update --what-if` and `ways manage update --commit` once this release is installed. The update that installs this release runs the previous release's updater, which does not know the section is retired and reports neither. Run `ways settings lint` after that update to see every file:
 
 ```bash
 ways settings fix mods.attend                      # the user config
@@ -312,7 +312,7 @@ ways settings fix mods.attend --target <dir>       # a target's own config
 ways settings fix mods.attend --project <dir>      # a project's .claude/ways.yaml
 ```
 
-Each value is written under `mods.attend` in the same file and the `attend_mod` section is removed. A value the file already holds under `mods.attend` stays, and fix names each old value it dropped. The file's comments stay.
+Where the file has no `mods` section, fix renames the block in place: `attend_mod:` becomes `mods:` and `attend:`, and every line under it, comments included, moves with its value. Where `mods` exists, each value is written under `mods.attend` one by one and the old block is removed with the comments inside it, which fix says. A value the file already holds under `mods.attend` stays, and so does a value of another shape where a section was expected; fix names each old value it dropped and why. Comments outside the block stay.
 
 ## Related
 

@@ -9,6 +9,7 @@
 //! config is refused ([`refuse`]).
 
 use super::*;
+use std::time::Duration;
 
 /// The mod whose wanted state follows the engine.
 const JUDGE: &str = "ways-judge";
@@ -35,11 +36,16 @@ pub fn claude_code_chosen() -> bool {
 /// whether the file changed; a missing file that has nothing to remove is
 /// not created.
 pub fn write_mod_install(path: &Path, name: &str, value: Option<bool>) -> Result<bool, String> {
+    write_mod_install_within(path, name, value, None)
+}
+
+/// [`write_mod_install`], waiting at most `wait` for the file's lock.
+fn write_mod_install_within(path: &Path, name: &str, value: Option<bool>, wait: Option<Duration>) -> Result<bool, String> {
     let key: Vec<String> = vec!["mods".into(), name.into(), "install".into()];
     match value {
-        Some(v) => write_file(path, &[(key, Value::Bool(v))]).map_err(|f| f.message),
+        Some(v) => write_file_checked(path, &[(key, Value::Bool(v))], wait, |_| Ok(())).map_err(|f| f.message)?,
         None if !path.is_file() => Ok(false),
-        None => agent_settings::writer::edit_file(path, header_for(path), |d| d.unset(&key))
+        None => agent_settings::writer::edit_file_within(path, header_for(path), wait, |d| d.unset(&key))
             .map(|(_, changed)| changed)
             .map_err(|e| write_failed(e).message),
     }
@@ -51,11 +57,19 @@ pub fn write_mod_install(path: &Path, name: &str, value: Option<bool>) -> Result
 /// then a `true` in the user config becomes `false`. Returns each file
 /// written with its layer, in order. Run the judge mod's repair after it.
 pub fn write_engine(engine: Option<&str>) -> Result<Vec<(LayerScope, PathBuf)>, Failure> {
+    write_engine_within(engine, None)
+}
+
+/// [`write_engine`], waiting at most `wait` for each lock it takes: the
+/// settings screens write on their own thread, which must not hang behind
+/// another writer. A lock not taken in time is a write failure that names
+/// it, with nothing after it written.
+pub fn write_engine_within(engine: Option<&str>, wait: Option<Duration>) -> Result<Vec<(LayerScope, PathBuf)>, Failure> {
     let reg = registry();
     let b = lookup(&reg, "gate.engine")?;
     let agent = ways_agent_core::profile::user_layer_path();
     let user = ways_core::paths::user_config();
-    let install = |v: bool| write_mod_install(&user, JUDGE, Some(v)).map_err(|m| fail(exit::WRITE_FAILED, m));
+    let install = |v: bool| write_mod_install_within(&user, JUDGE, Some(v), wait).map_err(|m| fail(exit::WRITE_FAILED, m));
     // The engine is checked before anything is written.
     let value = engine
         .map(|e| b.spec.parse_cli(e, &live_layers(None), &b.bound))
@@ -63,22 +77,29 @@ pub fn write_engine(engine: Option<&str>) -> Result<Vec<(LayerScope, PathBuf)>, 
         .map_err(|m| fail(exit::REJECTED, format!("gate.engine: {m}; `ways settings help gate.engine`")))?;
     let mut written = Vec::new();
     let keyless = engine.is_some_and(is_keyless);
+    // Already chosen: the same keyless engine with the mod already wanted
+    // is no new choice, so a removal by hand that no repair has seen yet
+    // stays respected.
+    let chosen = claude_code_chosen() && ways_core::settings::mod_install_in_user(JUDGE) == Some(true);
     if keyless {
         install(true)?;
         written.push((LayerScope::User, user.clone()));
         // Choosing the engine is an explicit want: a removal by hand that no
         // repair has seen yet is not written back as `install: false`.
-        for t in crate::config::global().targets().into_iter().filter(|t| t.enabled) {
-            crate::cmd::attend_mod::forget(&t.dir(), &crate::cmd::attend_mod::JUDGE).map_err(|e| fail(exit::WRITE_FAILED, format!("{e}")))?;
+        if !chosen {
+            for t in crate::config::Config::load(&crate::util::project_dir()).targets().into_iter().filter(|t| t.enabled) {
+                crate::cmd::attend_mod::forget_within(&t.dir(), &crate::cmd::attend_mod::JUDGE, wait)
+                    .map_err(|e| fail(exit::WRITE_FAILED, format!("{e}; gate.engine is unchanged")))?;
+            }
         }
     }
     match value {
         Some(v) => {
-            write_file(&agent, &[(b.path(), v)])?;
+            write_file_checked(&agent, &[(b.path(), v)], wait, |_| Ok(()))?.map_err(|e| fail(exit::WRITE_FAILED, e))?;
         }
         None => {
             let kp = b.path();
-            agent_settings::writer::edit_file(&agent, None, |d| d.unset(&kp)).map_err(write_failed)?;
+            agent_settings::writer::edit_file_within(&agent, None, wait, |d| d.unset(&kp)).map_err(write_failed)?;
         }
     }
     written.push((LayerScope::User, agent));

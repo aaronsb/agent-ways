@@ -391,9 +391,20 @@ impl Record {
     /// the background and an update running beside it never lose each
     /// other's change.
     fn update(dest_root: &Path, change: impl FnOnce(&mut Record)) -> std::io::Result<()> {
+        Record::update_within(dest_root, None, change)
+    }
+
+    /// [`Record::update`], waiting at most `wait` for the lock when given:
+    /// a writer on a screen's thread must not hang behind another holder.
+    fn update_within(dest_root: &Path, wait: Option<std::time::Duration>, change: impl FnOnce(&mut Record)) -> std::io::Result<()> {
+        use agent_settings::writer::Lock;
         let path = Record::path(dest_root);
         std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
-        let _lock = agent_settings::writer::Lock::acquire(&path)?;
+        let _lock = match wait {
+            None => Lock::acquire(&path)?,
+            Some(limit) => Lock::acquire_within(&path, limit)?
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::TimedOut, format!("another writer holds {}", path.display())))?,
+        };
         let mut record = Record::read(dest_root);
         change(&mut record);
         record.write(dest_root)
@@ -432,10 +443,15 @@ impl Record {
 /// removal by hand no repair has seen yet installs the mod again, rather
 /// than writing the removal back as `install: false`.
 pub fn forget(dest_root: &Path, m: &Mod) -> std::io::Result<()> {
+    forget_within(dest_root, m, None)
+}
+
+/// [`forget`], waiting at most `wait` for the record's lock when given.
+pub fn forget_within(dest_root: &Path, m: &Mod, wait: Option<std::time::Duration>) -> std::io::Result<()> {
     if !Record::read(dest_root).has(m.id) {
         return Ok(());
     }
-    Record::update(dest_root, |r| r.remove(m.id))
+    Record::update_within(dest_root, wait, |r| r.remove(m.id))
 }
 
 /// The mods of ours `have` reports installed: the one being converged and

@@ -1096,6 +1096,8 @@ fn choosing_claude_code_after_an_unseen_removal_by_hand_installs_the_judge_mod()
         fx.by_hand(&["plugin", "uninstall", JUDGE, "--scope", "user"]);
         fx.changes();
         let out = if via_engine {
+            // The engine changes away and back: an explicit choice.
+            assert!(fx.run(&["settings", "set", "gate.engine", "anthropic"]).status.success());
             fx.run(&["settings", "set", "gate.engine", "claude-code"])
         } else {
             fx.run(&["manage", "mod", "install", "ways-judge", "--commit"])
@@ -1175,4 +1177,27 @@ fn no_claude_reads_as_pending_not_drift() {
     assert!(out.status.success(), "{text}");
     assert!(text.contains("attend  0.17.0  pending") && text.contains("ways-judge  1.42.1  off"), "{text}");
     assert!(text.contains("`claude` is not on PATH") && !text.contains("drift"), "{text}");
+}
+
+/// Convergence re-review R1: the engine the files already hold, set again
+/// (an emit then apply round trip, or a same-value `set`), is no new choice:
+/// a removal by hand that no repair has seen yet is still respected.
+#[test]
+fn reasserting_claude_code_respects_an_unseen_removal_by_hand() {
+    for via_apply in [true, false] {
+        let fx = Fx::new(&format!("reassert-{via_apply}"));
+        fx.both();
+        write(&fx.agent_yaml(), "engine: claude-code\n");
+        fx.by_hand(&["plugin", "uninstall", JUDGE, "--scope", "user"]);
+        fx.changes();
+        let out = if via_apply {
+            fx.run_stdin(&["settings", "apply"], "engine: claude-code\n")
+        } else {
+            fx.run(&["settings", "set", "gate.engine", "claude-code"])
+        };
+        assert!(out.status.success(), "apply {via_apply}: {}", String::from_utf8_lossy(&out.stderr));
+        fx.repair_targets(&fx.src());
+        assert!(!fx.has(JUDGE), "apply {via_apply}: not reinstalled: {}", fx.plugins());
+        assert!(fx.target_text(&fx.dest()).contains("ways-judge:\n    install: false"), "apply {via_apply}: {}", fx.target_text(&fx.dest()));
+    }
 }

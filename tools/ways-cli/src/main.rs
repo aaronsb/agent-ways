@@ -164,6 +164,12 @@ enum Commands {
     /// (ADR-509 §4): the same code as `ways manage repair`, with no notice.
     #[command(hide = true)]
     Reconcile(RepairArgs),
+    /// The fixed name an updater runs on the newly installed binary after it
+    /// reprojects (ADR-507 §2): one line per file that still holds a retired
+    /// settings section, with the command that moves it. Prints nothing when
+    /// none does; changes nothing.
+    #[command(hide = true)]
+    RetiredSettings,
     /// Serve one Claude Code hook: read its JSON payload on stdin and print
     /// what the hook returns (ADR-504 §11). The scripts under hooks/ways call
     /// this and nothing else.
@@ -1361,6 +1367,12 @@ fn run() -> Result<()> {
         Commands::Init { project } => cmd::init::run(project.as_deref()),
         Commands::Manifest { source, json } => cmd::manifest::run(json, source),
         Commands::Reconcile(args) => repair(args, true),
+        Commands::RetiredSettings => {
+            for h in cmd::settings::retired::files_holding(None) {
+                println!("{}", h.moved_line());
+            }
+            Ok(())
+        }
         Commands::Status { json } => cmd::status::run(json),
         Commands::Lookup { project, what } => {
             // Every reader below resolves the project as a hook would, from the

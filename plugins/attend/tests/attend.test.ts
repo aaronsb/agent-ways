@@ -26,6 +26,7 @@ import {
   PREAMBLE,
   SILENCE_FIRST,
   configArgv,
+  configNotice,
   defuseFence,
   formatMessage,
   frameInbound,
@@ -2547,5 +2548,18 @@ describe('keepalive policy: the pure pieces', () => {
     expect(rowText({ ...base, keepalive: idle({}) }, 0)).toBe('⟳ 0/1')
     expect(rowText({ ...base, keepalive: idle({ next_at: 41 * 60 }) }, 0)).toBe('⟳ 0/1 · next 41m')
     expect(rowText({ ...base, keepalive: idle({ idle: 7 }) }, 0)).toBe('⟳ 0/1')
+  })
+})
+
+describe('a ways that cannot answer for mods.attend', () => {
+  // Review of the settings rename, finding 2: version skew between ways and
+  // the mod is said once, not passed over in silence.
+  test('is named with its exit and the update that fixes it', () => {
+    expect(configNotice(0)).toBeUndefined()
+    const n = configNotice(2)
+    expect(n).toContain('exited 2')
+    expect(n).toContain('update ways and the attend mod together')
+    expect(n).toContain('dormant')
+    expect(configNotice(127)).toContain('exited 127')
   })
 })

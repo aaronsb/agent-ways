@@ -559,7 +559,7 @@ impl Ways {
         Action::new("lint", format!("ways settings lint{project}"))
             .reads()
             .verifies()
-            .doc("Checks every settings file the screens read against the schema and shows what `ways settings lint` prints. Writes nothing.")
+            .doc("Checks every settings file the screens read against the schema, and names each file that still holds a retired section: the user config, each target's config and every project `ways projects` knows. Shows what `ways settings lint` prints. Writes nothing.")
     }
 
     /// Every way a session here can fire, by id: the project's own, the

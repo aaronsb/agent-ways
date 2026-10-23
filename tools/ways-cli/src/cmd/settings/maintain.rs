@@ -91,7 +91,8 @@ pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
     agent_settings::load::trace("lint");
     let layers = layers_for(file, project)?;
     let held = match file {
-        Some(_) => Vec::new(),
+        // One file: its own line, with the fix command for its kind.
+        Some(f) => retired::held_by(f).into_iter().collect(),
         None => retired::files_holding(read_project(project).as_deref()),
     };
     let mut n = 0;
@@ -100,7 +101,7 @@ pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
     for l in layers.iter().filter(|l| l.present) {
         for f in &l.findings {
             // Reported below with the command for its own file.
-            if file.is_none() && f.section.is_none() && f.key.as_deref() == Some(retired::KEY) {
+            if f.section.is_none() && f.key.as_deref() == Some(retired::KEY) && !held.is_empty() {
                 continue;
             }
             println!("{f}{}", f.lint_note());
@@ -227,6 +228,13 @@ pub fn fix(section: &str, project: Option<&Path>, target: Option<&Path>) -> Out 
     if sections.is_empty() {
         return Err(fail(exit::USAGE, format!("no section {section}; `ways settings help` lists them")));
     }
+    // `mods.<name>` names a mod the app ships.
+    if let Some(m) = section.strip_prefix("mods.").map(|r| r.split('.').next().unwrap_or_default()) {
+        if !ways_core::settings::MODS.iter().any(|(n, _)| *n == m) {
+            let names: Vec<&str> = ways_core::settings::MODS.iter().map(|(n, _)| *n).collect();
+            return Err(fail(exit::USAGE, format!("no mod {m}; the shipped mods are {}", names.join(", "))));
+        }
+    }
     let carry = carries(&sections);
     let mut by_file: Vec<(PathBuf, LayerScope, Vec<Covered>)> = Vec::new();
     for covered in sections {
@@ -263,17 +271,19 @@ pub fn fix(section: &str, project: Option<&Path>, target: Option<&Path>) -> Out 
         let file = list[0].1.file;
         let schema = list[0].0;
         let carry_here = carry && file == ways_core::settings::FILE;
-        let (refused, dropped) = agent_settings::writer::edit_file(path, None, |d| {
-            let dropped = if carry_here { retired::carry(d)? } else { Vec::new() };
-            let raw = d.value().clone();
-            let checked = agent_settings::load::check(schema, file, scope, &raw, Some(&names));
+        let (refused, carried) = agent_settings::writer::edit_file(path, None, |d| {
             // A name the section refuses closes it, and may be an off-switch
             // the schema cannot read: only a hand edit can say what it meant.
-            if checked.has_refused_name() {
+            // Checked before anything moves, so a refusal writes nothing.
+            let before = agent_settings::load::check(schema, file, scope, d.value(), Some(&names));
+            if before.has_refused_name() {
                 let text = d.text();
-                let refused = checked.findings(None, Some(path), &text).into_iter().filter(|f| f.closed).collect::<Vec<_>>();
-                return Ok((refused, dropped));
+                let refused = before.findings(None, Some(path), &text).into_iter().filter(|f| f.closed).collect::<Vec<_>>();
+                return Ok((refused, retired::Carried::default()));
             }
+            let carried = if carry_here { retired::carry(d)? } else { retired::Carried::default() };
+            let raw = d.value().clone();
+            let checked = agent_settings::load::check(schema, file, scope, &raw, Some(&names));
             for (sec, key) in checked.failing() {
                 let Some(sec) = sec else {
                     continue; // a top-level key no section owns; not this fix
@@ -309,7 +319,7 @@ pub fn fix(section: &str, project: Option<&Path>, target: Option<&Path>) -> Out 
                     }
                 }
             }
-            Ok((Vec::new(), dropped))
+            Ok((Vec::new(), carried))
         })
         .map_err(write_failed)?
         .0;
@@ -321,9 +331,14 @@ pub fn fix(section: &str, project: Option<&Path>, target: Option<&Path>) -> Out 
             ));
         }
         touched(scope, path, false);
-        for d in &dropped {
-            let to = d.strip_prefix(retired::KEY).map(|rest| format!("mods.attend{rest}")).unwrap_or_default();
-            eprintln!("dropped {d}: {to} already holds a value in {}, which stays", path.display());
+        for d in &carried.dropped {
+            eprintln!("{}", d.line(path));
+        }
+        if carried.comments_dropped {
+            eprintln!(
+                "dropped the comments inside attend_mod in {}: the file already has a mods section, so the values moved one by one",
+                path.display()
+            );
         }
         // Check again: what fix could not repair is reported, with its command.
         let text = std::fs::read_to_string(path).unwrap_or_default();

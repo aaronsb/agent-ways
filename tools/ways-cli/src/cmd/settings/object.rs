@@ -56,7 +56,17 @@ pub fn apply(file: Option<&Path>, dry_run: bool, project: Option<&Path>) -> Out 
     }
     // The engine is written through the engine choice, with the judge mod's
     // wanted state (ADR-512 item 4), after the rest.
-    let engine = accepted.iter().position(|(b, _)| b.name() == "gate.engine").map(|i| accepted.remove(i));
+    let mut engine = accepted.iter().position(|(b, _)| b.name() == "gate.engine").map(|i| accepted.remove(i));
+    // The engine in effect, set again (an emit then apply round trip),
+    // changes nothing and is no new choice.
+    if let Some((_, v)) = &engine {
+        use ways_agent_core::profile::{user_layer_path, UserLayer};
+        let now = UserLayer::load(&user_layer_path()).ok().and_then(|u| u.engine);
+        if now.as_deref() == v.as_str() {
+            findings.push(json!({ "key": "gate.engine", "ok": true, "message": "unchanged" }));
+            engine = None;
+        }
+    }
     // Group the accepted keys by the file they are written to.
     let mut by_file: Vec<(PathBuf, LayerScope, Accepted)> = Vec::new();
     for (b, v) in accepted {

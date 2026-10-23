@@ -28,6 +28,7 @@ import type { Move } from './move.ts'
 import {
   ACTIVE_TOOLS,
   DEFAULT_CONFIG,
+  configNotice,
   DORMANT_REFUSAL,
   OPERATOR_ORIGINS,
   listenResult,
@@ -160,9 +161,19 @@ async function run($: $, argv: readonly string[], timeoutMs = 15_000, stdin?: st
   }
 }
 
+/** Whether this process has said that ways could not answer for its
+ *  settings: said once, not at every read. */
+let configNoticeShown = false
+
 async function readConfig($: $, cwd: string): Promise<ModConfig> {
   const r = await run($, configArgv(cwd), 10_000)
-  return r.exitCode === 0 ? parseConfig(r.stdout) : { ...DEFAULT_CONFIG }
+  if (r.exitCode === 0) return parseConfig(r.stdout)
+  const notice = configNotice(r.exitCode)
+  if (notice && !configNoticeShown) {
+    configNoticeShown = true
+    await $.ui.toast(notice)
+  }
+  return { ...DEFAULT_CONFIG }
 }
 
 async function registerListen($: $) {

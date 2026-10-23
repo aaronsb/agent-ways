@@ -538,8 +538,12 @@ pub fn render(w: &WhatIf) -> Report {
     lifecycle::dev_links_section(&mut r, &w.dev, "The update", &crate::paths::data_root());
 
     let level = w.relation == Relation::Same || (!on_ref && w.relation == Relation::Ahead);
-    let up_to_date = level && !w.components.iter().any(Component::moves) && w.local.is_empty() && w.dev.is_empty() && w.retired.is_empty();
-    if up_to_date {
+    // A file holding a retired section is the operator's to fix: `--commit`
+    // changes nothing about it.
+    let up_to_date = level && !w.components.iter().any(Component::moves) && w.local.is_empty() && w.dev.is_empty();
+    if up_to_date && !w.retired.is_empty() {
+        r.footer(Mark::Ok, "Up to date; the files above need `ways settings fix mods.attend` (with each one's --target or --project).");
+    } else if up_to_date {
         r.footer(Mark::Ok, "Up to date. Nothing changed.");
     } else {
         r.footer(Mark::Info, lifecycle::commit_hint(&command));
@@ -562,8 +566,7 @@ pub fn retired_section(r: &mut Report, held: &[Held]) {
 
 /// One file's line: where `attend_mod` is, and the command that moves it.
 pub fn retired_line(h: &Held) -> String {
-    let at = h.line.map(|l| format!(":{l}")).unwrap_or_default();
-    format!("{}{at} holds attend_mod, now mods.attend: `{}` moves it", h.path.display(), h.fix())
+    h.moved_line()
 }
 
 #[cfg(test)]
@@ -675,5 +678,32 @@ mod tests {
         assert!(out.1.contains("mods.ways-judge.install is false in this target's config") && out.1.contains("ways manage mod install ways-judge --target /t/claude --commit"), "{}", out.1);
         assert_eq!(judge_mod_action(dir, false, Some(&judge), false), None, "a key engine: nothing to say");
         assert_eq!(judge_mod_action(dir, false, None, true), None, "the app ships no mod");
+    }
+
+    /// Review finding 3: a file holding the retired section is the
+    /// operator's to fix; the update itself is up to date, and the footer
+    /// names the fix rather than `--commit`.
+    #[test]
+    fn retired_settings_alone_leave_the_update_up_to_date() {
+        let w = WhatIf {
+            app: PathBuf::from("/app"),
+            channel: Channel::Ref("main".into()),
+            head: Some("a".into()),
+            target: Some("a".into()),
+            fetch_error: None,
+            relation: Relation::Same,
+            components: vec![comp("ways", Some("1.1.0"), Some("1.1.0"))],
+            notes: Err("offline".into()),
+            delta: None,
+            dropped: None,
+            local: Vec::new(),
+            actions: Vec::new(),
+            dev: Vec::new(),
+            retired: vec![Held { path: PathBuf::from("/u/config.yaml"), line: Some(1), kind: retired::Kind::User }],
+            verbose: false,
+        };
+        let text = render(&w).render(&Painter::plain());
+        assert!(text.contains("Up to date; the files above need `ways settings fix mods.attend`"), "{text}");
+        assert!(!text.contains("--commit` to apply"), "{text}");
     }
 }

@@ -336,7 +336,7 @@ impl Ways {
             ));
         }
         let engine = (!w.value.is_empty()).then_some(w.value);
-        super::write_engine(engine).map_err(|f| self.short(&f.message))?;
+        super::engine::write_engine_within(engine, Some(LOCK_WAIT)).map_err(|f| self.short(&f.message))?;
         self.repair_judge();
         Ok(())
     }

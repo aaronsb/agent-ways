@@ -342,6 +342,18 @@ export const DEFAULT_CONFIG: ModConfig = {
   marginMinutes: 10,
 }
 
+/** The notice when `ways settings list mods.attend` exits non-zero: the mod
+ *  runs on its defaults, and the usual cause is a ways and an attend mod
+ *  from different releases (ADR-512 renamed the section). No alias is
+ *  kept, so the fix is the update. `undefined` for a clean exit. */
+export function configNotice(exitCode: number): string | undefined {
+  if (exitCode === 0) return undefined
+  return (
+    `attend: \`ways settings list mods.attend\` exited ${exitCode}, so the mod runs on its defaults ` +
+    `(dormant, keepalive off); update ways and the attend mod together (\`ways manage update --commit\`)`
+  )
+}
+
 /** Reads `ways settings list mods.attend --json --effective`. A key that is
  *  absent or of the wrong type keeps its default, so a ways CLI that is
  *  missing or older than the section leaves the mod dormant. */

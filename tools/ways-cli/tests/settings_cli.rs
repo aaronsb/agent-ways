@@ -1337,3 +1337,80 @@ fn lint_names_every_target_and_known_project_holding_attend_mod() {
     assert_eq!(f.run(&["settings", "lint"]).2, 0);
     assert_eq!(f.run(&["settings", "fix", "mods.attend", "--target", f.root.join("nope").to_str().unwrap()]).2, 2);
 }
+
+// ── review of the settings rename (3b5dff7b) ───────────────────
+
+/// Finding 5: `lint --file` on a project's `ways.yaml` names that project's
+/// fix command.
+#[test]
+fn lint_of_one_project_file_names_its_project_fix() {
+    let f = Fx::new();
+    f.write(&f.overlay(), "attend_mod:\n  listening: active\n");
+    let (out, _, code) = f.run(&["settings", "lint", "--file", f.overlay().to_str().unwrap()]);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("`ways settings fix mods.attend --project <ROOT>/proj` moves them"), "{out}");
+    assert_eq!(out.matches("attend_mod").count(), 2, "one finding, not two: {out}");
+}
+
+/// Finding 4: a section moved where `mods` is absent keeps every comment in
+/// place, inline ones included.
+#[test]
+fn fix_moves_the_section_with_its_comments() {
+    let f = Fx::new();
+    f.write(&f.user(), "# top\nattend_mod:\n  # why active\n  listening: active # inline\n  keepalive:\n    # weekdays only\n    windows: [\"Mon-Fri 08:00-19:00\"]\nother: 1\n");
+    let (_, err, _) = f.run(&["settings", "fix", "mods.attend"]);
+    assert_eq!(
+        std::fs::read_to_string(f.user()).unwrap(),
+        "# top\nmods:\n  attend:\n    # why active\n    listening: active # inline\n    keepalive:\n      # weekdays only\n      windows: [\"Mon-Fri 08:00-19:00\"]\nother: 1\n",
+        "{err}"
+    );
+}
+
+/// Finding 4, the other case: where `mods` exists the values move one by
+/// one, the comments inside the old section go with it, and fix says so.
+#[test]
+fn fix_into_an_existing_mods_section_drops_the_comments_and_says_so() {
+    let f = Fx::new();
+    f.write(&f.user(), "mods:\n  ways-judge:\n    install: false\nattend_mod:\n  # why active\n  listening: active\nother: 1\n");
+    let (_, err, code) = f.run(&["settings", "fix", "mods.attend"]);
+    assert_eq!(code, 0, "{err}");
+    let text = std::fs::read_to_string(f.user()).unwrap();
+    assert!(!text.contains("# why active"), "{text}");
+    assert_eq!(parsed(&text), parsed("mods: {ways-judge: {install: false}, attend: {listening: active}}\nother: 1"));
+    assert!(err.contains("the comments inside attend_mod"), "{err}");
+}
+
+/// Findings 6 and 7: each dropped value says why.
+#[test]
+fn fix_says_why_each_value_was_dropped() {
+    let f = Fx::new();
+    f.write(&f.user(), "attend_mod: true\n");
+    let (_, err, code) = f.run(&["settings", "fix", "mods.attend"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(err.contains("dropped attend_mod: it is `true`, not a section of keys") && !err.contains("already holds"), "{err}");
+    f.write(&f.user(), "mods:\n  attend:\n    keepalive: off\nattend_mod:\n  keepalive:\n    enabled: true\n");
+    let (_, err, _) = f.run(&["settings", "fix", "mods.attend"]);
+    assert!(err.contains("dropped attend_mod.keepalive.enabled: mods.attend.keepalive is `off`"), "{err}");
+}
+
+/// Finding 9: a mod the app does not ship is no section to fix.
+#[test]
+fn fix_of_an_unknown_mod_is_a_usage_error() {
+    let f = Fx::new();
+    let (_, err, code) = f.run(&["settings", "fix", "mods.nosuch"]);
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("attend") && err.contains("ways-judge"), "{err}");
+}
+
+/// Finding 1: the hidden fixed-name report an updater runs on the newly
+/// installed binary: one line per file holding the retired section.
+#[test]
+fn the_retired_settings_report_names_each_file_and_its_fix() {
+    let f = Fx::new();
+    let (out, _, code) = f.run(&["retired-settings"]);
+    assert_eq!((out.as_str(), code), ("", 0), "nothing held, nothing said");
+    f.write(&f.user(), "attend_mod:\n  listening: active\n");
+    let (out, _, code) = f.run(&["retired-settings"]);
+    assert_eq!(code, 0);
+    assert_eq!(out, "<ROOT>/xdg/config/agent-ways/config.yaml:1 holds attend_mod, now mods.attend: `ways settings fix mods.attend` moves it\n");
+}
