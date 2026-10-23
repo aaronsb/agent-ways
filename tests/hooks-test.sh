@@ -612,6 +612,94 @@ check "take exits 0 and prints nothing on SIGTERM" "0:" "$?:$(cat "$WORK/idle.ou
 check "a late answer is dropped quietly" "0" "$(echo '{"text":"x","usage":{"input_tokens":0,"output_tokens":0}}' | "$W" judge answer --session sess-host-idle --job 1-2-3; echo $?)"
 rm -rf "$CORE/judgedom" "$XDG_CONFIG_HOME/agent-ways/agent.yaml"
 
+# pr-merge-checks.sh names the checks that were not green after a merge or an
+# auto-merge request, and never blocks (#1168). A stub gh answers `pr view`
+# from PV_* variables and `pr checks` from CHECKS, and logs every call into a
+# directory of its own per test.
+merge_run() {  # command -> sets MRES to "exit:context", MRAW to the raw output, MLOG to the call log
+    local dir; dir=$(mktemp -d "$WORK/merge.XXXXXX"); MLOG="$dir/calls"
+    cat > "$dir/gh" <<'STUB'
+#!/bin/bash
+echo "$*" >> "$STUB_LOG"
+[[ "${GH_RC:-0}" -ne 0 ]] && exit "$GH_RC"
+case "$1 $2" in
+  "pr view") jq -n --arg n "${PV_NUM:-5}" --arg s "${PV_STATE:-MERGED}" --arg m "${PV_MERGED-}" --arg a "${PV_AUTO-}" \
+      '{number:($n|tonumber), state:$s, mergedAt:(if $m=="" then null else $m end), autoMergeRequest:(if $a=="" then null else {enabledAt:$a} end)}' ;;
+  "pr checks") printf '%s' "$CHECKS" ;;
+esac
+STUB
+    chmod +x "$dir/gh"
+    local out rc=0
+    out=$(jq -n --arg c "$1" --arg d "$WORK" '{tool_input:{command:$c},cwd:$d}' \
+        | STUB_LOG="$MLOG" PATH="$dir:$PATH" bash "$HOOKS/pr-merge-checks.sh" 2>/dev/null) || rc=$?
+    MRAW="$out"
+    MRES="$rc:$(echo "$out" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)"
+}
+ago() { date -u -d "$1 seconds ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-"$1"S +%Y-%m-%dT%H:%M:%SZ; }
+RED='[{"name":"unit-tests","bucket":"fail"},{"name":"lint","bucket":"pending"},{"name":"build","bucket":"pass"}]'
+GREEN='[{"name":"unit-tests","bucket":"pass"},{"name":"docs","bucket":"skipping"}]'
+MERGED_MSG='0:PR #5 merged while these checks were not green: unit-tests (fail), lint (pending). If you merged under a green-CI grant, this merge fell outside it; tell the operator.'
+export CHECKS="$RED" PV_NUM=5 PV_STATE=MERGED PV_MERGED; PV_MERGED=$(ago 60)
+view_line() { head -1 "$MLOG" 2>/dev/null; }
+
+merge_run 'gh pr merge 5 --merge'
+VIEW_TAIL="--json number,state,mergedAt,autoMergeRequest"
+merge_run 'gh pr merge 5 --merge'
+check "a recent red merge names the failing and pending checks" "$MERGED_MSG" "$MRES"
+check "a red merge carries no decision field" "null" "$(echo "$MRAW" | jq -r '.decision // .hookSpecificOutput.permissionDecision')"
+check "the check query uses the number from the view" "pr checks 5 --json name,bucket" "$(sed -n 2p "$MLOG")"
+PV_NUM=146 merge_run 'gh pr merge https://github.com/o/r/pull/146 --merge'
+check "a URL selector reports the PR number the view returned" "${MERGED_MSG/\#5/#146}" "$MRES"
+check "the URL selector reaches the state query" "pr view https://github.com/o/r/pull/146 $VIEW_TAIL" "$(view_line)"
+check "the check query uses the viewed number, not the URL" "pr checks 146 --json name,bucket" "$(sed -n 2p "$MLOG")"
+CHECKS='[{"name":"ci","bucket":"cancel"}]' merge_run 'gh pr merge 5 --merge'
+check "a cancelled check is named as not green" "0:PR #5 merged while these checks were not green: ci (cancel). If you merged under a green-CI grant, this merge fell outside it; tell the operator." "$MRES"
+CHECKS="$GREEN" merge_run 'gh pr merge 5 --merge'
+check "a green merge prints nothing" "0:" "$MRES"
+PV_MERGED=$(ago 3600) merge_run 'gh pr merge 5 --merge'
+check "a merge from an hour ago prints nothing" "0:" "$MRES"
+
+for form in '-R owner/repo' '-Rowner/repo' '--repo=owner/repo'; do
+    merge_run "gh pr merge 5 $form --merge"
+    check "repo form [$form] reaches gh as -R owner/repo" "pr view 5 -R owner/repo $VIEW_TAIL" "$(view_line)"
+done
+check "the check query carries the repo" "pr checks 5 -R owner/repo --json name,bucket" "$(sed -n 2p "$MLOG")"
+merge_run 'GH_REPO=owner/repo gh pr merge 5'
+check "a leading GH_REPO still resolves the selector" "pr view 5 $VIEW_TAIL" "$(view_line)"
+
+merge_run 'gh pr merge --merge 5'
+check "a flag before the selector is skipped" "pr view 5 $VIEW_TAIL" "$(view_line)"
+merge_run 'gh pr merge --subject "a b" 5'
+check "a quoted flag value is skipped whole" "pr view 5 $VIEW_TAIL" "$(view_line)"
+merge_run 'gh pr merge --body "a; b" 9'
+check "a separator inside quotes does not end the arguments" "pr view 9 $VIEW_TAIL" "$(view_line)"
+merge_run 'gh pr merge "5"'
+check "a quoted selector is unquoted" "pr view 5 $VIEW_TAIL" "$(view_line)"
+merge_run 'gh pr merge 5 --merge && gh pr view 7'
+check "a selector after a separator is not taken" "pr view 5 $VIEW_TAIL" "$(view_line)"
+merge_run 'gh pr checks 5 | cut -f1 && gh pr merge 5 --merge'
+check "a compound command is read as a merge of its PR" "$MERGED_MSG" "$MRES"
+check "the compound command asks about PR 5" "pr view 5 $VIEW_TAIL" "$(view_line)"
+merge_run 'cd /elsewhere && gh pr merge 5 --merge'
+check "a cd before the merge keeps the hook silent" "0:" "$MRES"
+
+PV_STATE=OPEN PV_MERGED= merge_run 'gh pr merge 5 --merge 2>&1 | tail -3'
+check "a failed merge piped to tail, PR still open, prints nothing" "0:" "$MRES"
+check "the redirection is not taken for the selector" "pr view 5 $VIEW_TAIL" "$(view_line)"
+PV_STATE=OPEN PV_MERGED= PV_AUTO=2026-10-23T00:00:00Z CHECKS='[{"name":"ci","bucket":"pending"}]' merge_run 'gh pr merge 5 --auto --merge'
+check "--auto with auto-merge queued names the pending check" "0:PR #5 is queued for auto-merge; GitHub merges it once required checks pass. Not green now: ci (pending)." "$MRES"
+PV_STATE=OPEN PV_MERGED= merge_run 'gh pr merge 5 --disable-auto'
+check "--disable-auto on an open PR with no auto-merge prints nothing" "0:" "$MRES"
+PV_STATE=OPEN PV_MERGED= merge_run $'gh pr create --body "$(cat <<\'EOF\'\nthen run gh pr merge --merge\nEOF\n)"'
+check "a heredoc that only mentions gh pr merge prints nothing" "0:" "$MRES"
+
+merge_run 'gh pr view 5'
+check "a command that is no merge prints nothing" "0:" "$MRES"
+check "a command that is no merge never calls gh" "absent" "$([[ -e $MLOG ]] && echo present || echo absent)"
+GH_RC=1 merge_run 'gh pr merge 5 --merge'
+check "a failing gh prints nothing and exits 0" "0:" "$MRES"
+unset CHECKS PV_NUM PV_STATE PV_MERGED
+
 # attend-drain-stop.sh passes the drain's stdout and stdin through, and ends
 # the turn normally (exit 0) on any failure from attend: Claude Code reads a
 # Stop hook's exit 2 as a block, and clap exits 2 on a usage error (ADR-413).

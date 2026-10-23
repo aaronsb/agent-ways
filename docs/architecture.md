@@ -507,6 +507,7 @@ $XDG_DATA_HOME/agent-ways/hooks/ways/      # shipped ways, projected as ~/.claud
 ├── attend-drain-stop.sh        # Stop → attend message inbox --drain (ADR-172)
 ├── issues-pull.sh              # SessionStart, UserPromptSubmit, PostToolUse:Bash → gh-tasks pull (ADR-180)
 ├── issues-task-created.sh      # TaskCreated → reject unprefixed duplicates of mirrored issues (ADR-180)
+├── pr-merge-checks.sh          # PostToolUse:Bash gh pr merge → name checks that were not green (#1168)
 ├── check-bash-bound.py         # Bash guard (ADR-181), shipped but not wired
 │
 └── {domain}/{way}/{way}.md     # softwaredev, meta, documentation, ea, workstation, data, itops, ...
