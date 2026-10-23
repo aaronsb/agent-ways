@@ -84,7 +84,7 @@ ways settings theme delete glacier
 
 ### Settings screens
 
-Bare `ways settings` on a terminal opens the settings screens. `ways settings <tab>` opens them on a tab: `ways`, `matching`, `gate`, `install`, `attend`, `sensors`, `mod` (the `mods` section, one group per mod) or `theme`. Bare `ways agent` opens the gate tab, and bare `ways manage` or `ways manage target` opens the install tab. The data is what `ways settings list --json` prints.
+Bare `ways settings` on a terminal opens the settings screens. `ways settings <tab>` opens them on a tab: `ways`, `matching`, `gate`, `install`, `attend`, `sensors`, `mod` (a node per shipped mod: its shipped version and state in a word, a row per enabled target, its settings, and the `ways manage mod` commands as actions) or `theme`. Bare `ways agent` opens the gate tab, and bare `ways manage` or `ways manage target` opens the install tab. The data is what `ways settings list --json` prints.
 
 ![the matching tab with one change pending](../images/ways/settings-matching.png)
 

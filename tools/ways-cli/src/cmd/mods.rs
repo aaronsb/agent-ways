@@ -469,3 +469,46 @@ pub fn status_json(dir: &Path, config: &Path) -> serde_json::Value {
     }
     serde_json::Value::Object(out)
 }
+
+/// One mod as the settings screens' mod tab shows it (ADR-512 item 6): its
+/// shipped version, its word over every enabled target, and a row per
+/// target.
+#[derive(Debug, Clone)]
+pub struct Overview {
+    pub m: Mod,
+    pub shipped: Option<String>,
+    pub word: State,
+    /// Each enabled target, as the tab shows it, with its state in words.
+    pub rows: Vec<(String, String)>,
+    /// An installed copy is older than the shipped one: repair updates it.
+    pub older: bool,
+    /// `gate.engine` names a keyless profile, which the ways-judge mod hosts.
+    pub claude_code: bool,
+}
+
+/// Every shipped mod over the enabled targets, read now: Claude Code's
+/// plugin lists and version per target, and repair's record.
+pub fn overview() -> Vec<Overview> {
+    let src = source();
+    let default_root = crate::paths::projection_root();
+    let targets = enabled();
+    let views: Vec<Vec<(Mod, View)>> = targets.iter().map(|t| attend_mod::views(&src, &t.target(&default_root), None)).collect();
+    let claude_code = super::settings::engine::claude_code_chosen();
+    MODS.into_iter()
+        .map(|m| {
+            let shipped = attend_mod::shipped_version(&m, &src);
+            let here: Vec<&View> = views.iter().filter_map(|v| v.iter().find(|(n, _)| *n == m).map(|(_, v)| v)).collect();
+            let older = here
+                .iter()
+                .any(|v| v.installed.as_deref().zip(shipped.as_deref()).is_some_and(|(i, s)| super::update::version_older(i, s)));
+            Overview {
+                m,
+                word: State::over(&here.iter().map(|v| v.state(shipped.as_deref())).collect::<Vec<_>>()),
+                rows: here.iter().map(|v| (shown(&v.dir), v.describe(&m, shipped.as_deref()))).collect(),
+                shipped,
+                older,
+                claude_code,
+            }
+        })
+        .collect()
+}

@@ -714,6 +714,8 @@ pub struct View {
     /// Whether the host can run the mod: Claude Code's version against the
     /// floor, or why it could not be read.
     pub host: Result<String, String>,
+    /// Claude Code's version, when `claude --version` named one.
+    pub claude_code: Option<String>,
     /// Why Claude Code's plugins could not be read.
     pub error: Option<String>,
     /// The version sessions run: the shipped one when the mod is installed
@@ -817,7 +819,10 @@ impl View {
         let name = m.name;
         match self.state(shipped) {
             State::Converged | State::Disabled => format!("{}{enabled}", runs(self.installed.as_deref().unwrap_or_default())),
-            State::Pending => format!("pending: {}", self.host.as_ref().err().map(String::as_str).unwrap_or_default()),
+            State::Pending => match &self.claude_code {
+                Some(v) => format!("pending: Claude Code {v} is below {}", m.min_claude_code),
+                None => format!("pending: {}", self.host.as_ref().err().map(String::as_str).unwrap_or_default()),
+            },
             State::Removed if self.target_off => "removed by hand or kept out; install false in this target's config".to_string(),
             State::Removed => "removed by hand; the next repair writes install false in this target's config".to_string(),
             State::Off => "not installed (not wanted)".to_string(),
@@ -837,6 +842,9 @@ impl View {
 pub fn views(source_root: &Path, t: &Target, only: Option<&Mod>) -> Vec<(Mod, View)> {
     let mods: Vec<Mod> =
         MODS.into_iter().filter(|m| only.is_none_or(|o| o.id == m.id) && shipped_version(m, source_root).is_some()).collect();
+    if mods.is_empty() {
+        return Vec::new();
+    }
     let claude = claude_bin();
     let cfg = config_dir(t.dest_root, t.default_root).0;
     let lists = claude.as_deref().ok_or_else(|| "`claude` is not on PATH".to_string()).and_then(|c| query_lists(c, cfg.as_deref()));
@@ -862,6 +870,7 @@ pub fn views(source_root: &Path, t: &Target, only: Option<&Mod>) -> Vec<(Mod, Vi
                 market: MarketState::Absent,
                 foreign: Vec::new(),
                 host,
+                claude_code: version.as_ref().and_then(|v| v.as_ref().ok()).and_then(|o| claude_code_version(o)).map(str::to_string),
                 error: None,
                 runs: None,
             };
@@ -1173,6 +1182,7 @@ mod tests {
             market: MarketState::Ours,
             foreign: vec![],
             host: Ok("2.1.309".into()),
+            claude_code: Some("2.1.309".into()),
             error: None,
             runs: None,
         }
@@ -1197,8 +1207,12 @@ mod tests {
         assert_eq!(kept.state(s), State::Removed, "install false in the target's config");
         let mut pending = view(true, None);
         pending.host = Err("Claude Code 2.1.300 is older than 2.1.304".into());
+        pending.claude_code = Some("2.1.300".into());
         assert_eq!(pending.state(s), State::Pending);
-        assert!(pending.describe(&JUDGE, s).starts_with("pending: Claude Code 2.1.300 is older than 2.1.304"));
+        assert_eq!(pending.describe(&JUDGE, s), "pending: Claude Code 2.1.300 is below 2.1.304");
+        pending.claude_code = None;
+        pending.host = Err("`claude` is not on PATH".into());
+        assert_eq!(pending.describe(&JUDGE, s), "pending: `claude` is not on PATH");
         assert_eq!(view(true, None).state(s), State::Drift, "never installed: the next repair installs it");
         assert_eq!(State::over(&[State::Converged, State::Pending]), State::Pending);
         assert_eq!(State::over(&[State::Converged, State::Removed, State::Drift]), State::Removed);

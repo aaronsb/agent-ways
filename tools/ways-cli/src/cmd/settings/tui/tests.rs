@@ -50,6 +50,8 @@ fn roots(fx: &Fixture) -> Vec<Node> {
         claude_config_dir: None,
         claude: fx.root.join(".claude"),
         judge: || None,
+        mods: Vec::new,
+        mods_background: false,
     };
     Ways::new(ctx).build(&[])
 }
@@ -468,6 +470,8 @@ fn a_switch_for_a_way_no_root_holds_is_listed_as_not_found() {
         claude_config_dir: None,
         claude: fx.root.join(".claude"),
         judge: || None,
+        mods: Vec::new,
+        mods_background: false,
     };
     let r = Ways::new(ctx).build(&[project]);
     let project = r[0].children.iter().find(|n| n.name == "project").unwrap();
@@ -491,6 +495,8 @@ fn ctx_of(fx: &Fixture) -> Ctx {
         claude_config_dir: None,
         claude: fx.root.join(".claude"),
         judge: || None,
+        mods: Vec::new,
+        mods_background: false,
     }
 }
 
@@ -911,6 +917,8 @@ fn a_prefix_switch_shows_its_ways_off_and_is_not_listed_as_not_found() {
         claude_config_dir: None,
         claude: fx.root.join(".claude"),
         judge: || None,
+        mods: Vec::new,
+        mods_background: false,
     };
     let r = Ways::new(ctx).build(&[project]);
     let project = r[0].children.iter().find(|n| n.name == "project").unwrap();
@@ -1036,4 +1044,174 @@ fn child_takes_a_pasted_key_into_rotate() {
 #[test]
 fn a_pasted_key_reaches_the_rotate_entry() {
     let _ = std::fs::remove_dir_all(in_fixture("child_takes_a_pasted_key_into_rotate"));
+}
+
+// ── the mod tab's level per mod (ADR-512 item 6) ───────────────
+
+/// attend removed by hand in one of two targets, and ways-judge pending
+/// under gate.engine: claude-code.
+fn mod_states() -> Vec<crate::cmd::mods::Overview> {
+    use crate::cmd::attend_mod::{State, ATTEND, JUDGE};
+    vec![
+        crate::cmd::mods::Overview {
+            m: ATTEND,
+            shipped: Some("0.29.0".into()),
+            word: State::Removed,
+            rows: vec![
+                ("~/.claude".into(), "installed 0.29.0, enabled".into()),
+                ("~/.claude-work".into(), "removed by hand or kept out; install false in this target's config".into()),
+            ],
+            older: false,
+            claude_code: true,
+        },
+        crate::cmd::mods::Overview {
+            m: JUDGE,
+            shipped: Some("1.43.0".into()),
+            word: State::Pending,
+            rows: vec![("~/.claude".into(), "pending: Claude Code 2.1.300 is below 2.1.304".into())],
+            older: false,
+            claude_code: true,
+        },
+    ]
+}
+
+/// The same, with attend's installed copy older than the shipped one and
+/// a key engine chosen.
+fn mod_states_older() -> Vec<crate::cmd::mods::Overview> {
+    let mut s = mod_states();
+    s[0].older = true;
+    s[0].word = crate::cmd::attend_mod::State::Drift;
+    for o in s.iter_mut() {
+        o.claude_code = false;
+    }
+    s
+}
+
+fn mod_tab(fx: &Fixture, mods: fn() -> Vec<crate::cmd::mods::Overview>) -> Node {
+    let mut ctx = ctx_of(fx);
+    ctx.mods = mods;
+    Ways::new(ctx).build(&[]).into_iter().find(|t| t.name == "mod").expect("the mod tab")
+}
+
+fn labels(n: &Node) -> Vec<&str> {
+    n.actions.iter().map(|a| a.label.as_str()).collect()
+}
+
+#[test]
+fn the_mod_tab_has_a_node_per_mod_with_its_state_targets_settings_and_actions() {
+    let fx = Fixture::home();
+    let tab = mod_tab(&fx, mod_states);
+    let names: Vec<&str> = tab.children.iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(names, ["attend", "ways-judge"]);
+    let attend = &tab.children[0];
+    assert_eq!(attend.columns, Some((String::new(), "0.29.0  removed".to_string())));
+    // A read-only row per enabled target, first, then the settings.
+    let rows: Vec<(&str, &str)> = attend.children[..2].iter().map(|n| (n.name.as_str(), n.setting.as_ref().unwrap().value.as_str())).collect();
+    assert_eq!(rows, [("~/.claude", "installed 0.29.0, enabled"), ("~/.claude-work", "removed by hand or kept out; install false in this target's config")]);
+    assert!(attend.children[..2].iter().all(|n| matches!(n.setting.as_ref().unwrap().kind, agent_tui::tree::Kind::ReadOnly)));
+    assert!(leaf(attend, "install").is_some() && leaf(attend, "listening").is_some(), "the settings stay under the mod");
+    assert_eq!(labels(attend), ["check", "install", "uninstall", "repair"]);
+    let cmds: Vec<&str> = attend.actions.iter().map(|a| a.command.as_str()).collect();
+    assert_eq!(
+        cmds,
+        [
+            "ways manage mod check attend",
+            "ways manage mod install attend --commit",
+            "ways manage mod uninstall attend --commit",
+            "ways manage mod repair attend --commit"
+        ]
+    );
+    let check = &attend.actions[0];
+    assert!(check.reads && !check.confirm, "check reads and verifies");
+    for a in &attend.actions[1..] {
+        assert!(a.confirm && a.touches.contains("each enabled target"), "{}: {}", a.label, a.touches);
+    }
+
+    // ways-judge under claude-code: no uninstall, and no install while it
+    // is wanted; the user config's install follows the engine.
+    let judge = &tab.children[1];
+    assert_eq!(judge.columns, Some((String::new(), "1.43.0  pending".to_string())));
+    assert_eq!(judge.children[0].setting.as_ref().unwrap().value, "pending: Claude Code 2.1.300 is below 2.1.304");
+    assert_eq!(labels(judge), ["check", "repair"]);
+    let install = leaf(judge, "install").expect("the judge's install row");
+    let s = install.setting.as_ref().unwrap();
+    assert!(!s.editable(), "set with gate.engine");
+    assert!(s.locked.as_deref().is_some_and(|w| w.contains("gate.engine on the gate tab")), "{:?}", s.locked);
+    assert!(agent_tui::tree::key_conflicts(&attend.actions).is_empty() && agent_tui::tree::key_conflicts(&judge.actions).is_empty());
+}
+
+#[test]
+fn repair_reads_update_for_an_older_copy_and_the_judge_install_names_the_engine() {
+    let fx = Fixture::home();
+    let tab = mod_tab(&fx, mod_states_older);
+    let attend = &tab.children[0];
+    assert_eq!(labels(attend), ["check", "install", "uninstall", "update"]);
+    assert_eq!(attend.actions[3].command, "ways manage mod repair attend --commit");
+    assert!(attend.actions[3].doc.contains("older than the shipped 0.29.0"), "{}", attend.actions[3].doc);
+    // Under a key engine ways-judge can be installed (the engine choice)
+    // and uninstalled.
+    let judge = &tab.children[1];
+    assert_eq!(labels(judge), ["check", "install", "uninstall", "repair"]);
+    let install = &judge.actions[1];
+    assert!(install.doc.contains("Sets gate.engine to claude-code") && install.touches.contains("gate.engine in agent.yaml"), "{}", install.doc);
+}
+
+#[test]
+fn a_mod_whose_state_was_not_read_says_so() {
+    let fx = Fixture::home();
+    let tab = mod_tab(&fx, Vec::new);
+    assert_eq!(tab.children.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["attend", "ways-judge"]);
+    assert!(tab.children.iter().all(|n| n.columns == Some((String::new(), "state not read".to_string())) && n.actions.is_empty()));
+}
+
+#[test]
+fn the_mod_tab_s_install_action_queues_its_command_after_a_confirm() {
+    let fx = Fixture::home();
+    let mut ctx = ctx_of(&fx);
+    ctx.mods = mod_states;
+    let roots = Ways::new(ctx).build(&[]);
+    let ran = Rc::new(RefCell::new(Vec::new()));
+    let mut app = App::new("t", roots).adapter(Fixtured { env: fx.env(), ran: ran.clone() });
+    press(&mut app, &[KeyCode::Char('7')]);
+    let t = text(&mut app);
+    assert!(t.contains("attend") && t.contains("0.29.0  removed") && t.contains("1.43.0  pending"), "{t}");
+    press(&mut app, &[KeyCode::Char('i')]);
+    assert!(queue(&app).is_empty(), "install asks first:\n{}", text(&mut app));
+    press(&mut app, &[KeyCode::Char('y')]);
+    assert_eq!(queue(&app), ["ways manage mod install attend --commit"]);
+}
+
+/// A read that takes longer than the first build waits.
+fn slow_mod_states() -> Vec<crate::cmd::mods::Overview> {
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    mod_states()
+}
+
+/// The live read calls Claude Code, so the screens read the mods in the
+/// background: a quick read shows in the first build; a slow one leaves the
+/// tab saying so, and its landing moves the stamp, so the tree reloads with
+/// it.
+#[test]
+fn the_mod_tab_reads_its_state_in_the_background() {
+    let fx = Fixture::home();
+    let tab = |w: &Ways| w.build(&[]).into_iter().find(|t| t.name == "mod").unwrap();
+    let mut ctx = ctx_of(&fx);
+    ctx.mods = mod_states;
+    ctx.mods_background = true;
+    let quick = Ways::new(ctx);
+    assert_eq!(tab(&quick).children[0].columns, Some((String::new(), "0.29.0  removed".to_string())));
+
+    let mut ctx = ctx_of(&fx);
+    ctx.mods = slow_mod_states;
+    ctx.mods_background = true;
+    let ways = Ways::new(ctx);
+    let first = tab(&ways);
+    let before = ways.stamp();
+    assert_eq!(first.children[0].columns, Some((String::new(), "reading…".to_string())));
+    let start = std::time::Instant::now();
+    while ways.stamp() == before {
+        assert!(start.elapsed() < std::time::Duration::from_secs(5), "the read never landed");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(tab(&ways).children[0].columns, Some((String::new(), "0.29.0  removed".to_string())));
 }

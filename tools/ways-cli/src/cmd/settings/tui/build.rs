@@ -461,7 +461,10 @@ impl Ways {
                 s = s.default(display(Some(d), b.spec.kind));
             }
             let settable = !matches!(b.spec.kind, Kind::ReadOnly | Kind::Secret) && b.spec.computed.is_none();
-            if settable && !self.ctx.in_project && super::writes_project(&b, &self.ctx) {
+            if b.spec.name == super::super::engine::JUDGE_INSTALL {
+                // It follows the engine in the user config (ADR-512 item 4).
+                s = s.lock("set with gate.engine on the gate tab: claude-code wants the ways-judge mod, any other engine does not");
+            } else if settable && !self.ctx.in_project && super::writes_project(&b, &self.ctx) {
                 // No project: the key has no file to go to.
                 s = s.lock(format!(
                     "not applicable: no project encloses {}, so a project's file has nowhere to be. Open the screens inside a project, or with --project <dir>",
@@ -514,12 +517,8 @@ impl Ways {
         }
         self.headers(&mut root, tab.prefix);
         if tab.name == "mod" {
-            // A section per mod, its keys shown under its name (ADR-512 item 1).
-            for g in root.children.iter_mut() {
-                g.section = true;
-                g.open = true;
-                g.columns = Some((String::new(), "value".into()));
-            }
+            let (states, reading) = self.mod_states();
+            super::mods::nodes(&mut root, &states, reading);
         }
         if tab.name == "gate" {
             // Last, so the settings keep their rows.

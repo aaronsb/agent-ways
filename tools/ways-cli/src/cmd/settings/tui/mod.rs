@@ -11,6 +11,7 @@
 pub mod build;
 pub mod flows;
 pub mod judge;
+pub mod mods;
 pub mod others;
 #[cfg(test)]
 mod tests;
@@ -64,6 +65,12 @@ pub struct Ctx {
     /// What the gate tab's judge section shows, read at each build of the
     /// tree; `None` leaves the section out.
     pub judge: fn() -> Option<judge::JudgeState>,
+    /// What the mod tab shows of each shipped mod, read at each build of the
+    /// tree; empty leaves each mod's state unread.
+    pub mods: fn() -> Vec<crate::cmd::mods::Overview>,
+    /// Whether `mods` runs off the screen's thread: the live one calls
+    /// Claude Code, which the screens do not wait on.
+    pub mods_background: bool,
 }
 
 /// Whether the screens write `b` to the project's file: a project-scope key,
@@ -100,6 +107,8 @@ impl Ctx {
             claude_config_dir: std::env::var_os("CLAUDE_CONFIG_DIR").filter(|v| !v.is_empty()).map(PathBuf::from),
             claude: ways_core::paths::claude_dir().root().to_path_buf(),
             judge: judge::JudgeState::live,
+            mods: crate::cmd::mods::overview,
+            mods_background: true,
             xdg_config,
             home,
         }
@@ -132,11 +141,95 @@ pub struct Ways {
     /// The files each tab writes, as its title names them, found once per
     /// tab: the title is asked at every draw.
     writes: RefCell<std::collections::BTreeMap<String, String>>,
+    /// The mod tab's state, read in the background when the context says so.
+    mods: RefCell<ModsRead>,
 }
+
+/// The mod tab's state as last read, and a read in flight. A finished read
+/// moves the stamp, so the tree reloads with it.
+#[derive(Default)]
+struct ModsRead {
+    value: Option<Vec<crate::cmd::mods::Overview>>,
+    rx: Option<std::sync::mpsc::Receiver<Vec<crate::cmd::mods::Overview>>>,
+    started: Option<std::time::Instant>,
+    reads: u64,
+}
+
+/// How soon after a read another may start: a reload that a finished read
+/// caused starts none.
+const MODS_FRESH: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// How long the first build waits for the read before it shows the tab
+/// reading.
+const MODS_WAIT: std::time::Duration = std::time::Duration::from_millis(300);
 
 impl Ways {
     pub fn new(ctx: Ctx) -> Ways {
-        Ways { ctx, reg: registry(), watched: RefCell::default(), all_projects: Cell::new(false), others: RefCell::default(), writes: RefCell::default() }
+        Ways {
+            ctx,
+            reg: registry(),
+            watched: RefCell::default(),
+            all_projects: Cell::new(false),
+            others: RefCell::default(),
+            writes: RefCell::default(),
+            mods: RefCell::default(),
+        }
+    }
+
+    /// What the mod tab shows of each mod, and whether a read is still in
+    /// flight. In the background the first call starts the read and the
+    /// tab says so until it lands.
+    pub(super) fn mod_states(&self) -> (Vec<crate::cmd::mods::Overview>, bool) {
+        if !self.ctx.mods_background {
+            return ((self.ctx.mods)(), false);
+        }
+        self.poll_mods();
+        if self.mods.borrow().value.is_none() {
+            self.read_mods();
+            // A read that lands quickly (no target calls Claude Code, or it
+            // answers fast) is shown in this build. The shell takes the
+            // stamp once this tree is handed to it, so a read landing later
+            // moves the stamp and reloads the tree.
+            let rx = self.mods.borrow_mut().rx.take();
+            if let Some(rx) = rx {
+                match rx.recv_timeout(MODS_WAIT) {
+                    Ok(v) => {
+                        let mut m = self.mods.borrow_mut();
+                        m.value = Some(v);
+                        m.reads += 1;
+                    }
+                    Err(_) => self.mods.borrow_mut().rx = Some(rx),
+                }
+            }
+        }
+        let m = self.mods.borrow();
+        (m.value.clone().unwrap_or_default(), m.rx.is_some())
+    }
+
+    /// Start a read unless one is in flight or one started moments ago.
+    fn read_mods(&self) {
+        let mut m = self.mods.borrow_mut();
+        if !self.ctx.mods_background || m.rx.is_some() || m.started.is_some_and(|t| t.elapsed() < MODS_FRESH) {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let read = self.ctx.mods;
+        std::thread::spawn(move || {
+            let _ = tx.send(read());
+        });
+        m.rx = Some(rx);
+        m.started = Some(std::time::Instant::now());
+    }
+
+    /// Take a finished read.
+    fn poll_mods(&self) {
+        let mut m = self.mods.borrow_mut();
+        let got = m.rx.as_ref().and_then(|rx| rx.try_recv().ok());
+        if let Some(v) = got {
+            m.value = Some(v);
+            m.rx = None;
+            m.reads += 1;
+        }
     }
 
     pub fn layers(&self) -> Vec<Layer> {
@@ -437,6 +530,8 @@ impl Adapter for Ways {
     }
 
     fn reload(&mut self) -> Option<Vec<Node>> {
+        // A queued command or a file change may have moved a mod.
+        self.read_mods();
         Some(self.roots())
     }
 
@@ -446,7 +541,8 @@ impl Adapter for Ways {
         if self.watched.borrow().is_empty() {
             let _ = self.layers();
         }
-        let mut seen = Vec::new();
+        self.poll_mods();
+        let mut seen = self.mods.borrow().reads.to_le_bytes().to_vec();
         for p in self.watched.borrow().iter() {
             seen.extend_from_slice(p.to_string_lossy().as_bytes());
             seen.push(0);
