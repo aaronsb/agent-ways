@@ -4,6 +4,8 @@
 #   1. the attend plugin carries attend's version (the plugin is released
 #      with attend, since it depends on attend's verbs), and the mod's
 #      MOD_VERSION constant in hooks/lib.ts equals the plugin's version;
+#      the ways-judge plugin carries ways' version, for the same reason
+#      (it calls `ways judge host|take|answer`, ADR-708);
 #   2. `claude plugin validate` on the marketplace and on each plugin;
 #   3. `claude plugin test` on each plugin;
 #   4. a TypeScript check against Claude Code's declarations, where they can
@@ -41,6 +43,13 @@ MV="$(grep -oE "^export const MOD_VERSION = '[^']*'" plugins/attend/hooks/lib.ts
 [[ "$MV" == "$PV" ]] || fail "MOD_VERSION in plugins/attend/hooks/lib.ts is $MV but the plugin is at $PV; scripts/release.sh bump attend moves both"
 echo "version: MOD_VERSION $MV matches the plugin"
 
+# The ways-judge mod calls ways verbs and is released with ways.
+JV="$(plugin_version plugins/ways-judge/.claude-plugin/plugin.json)"
+WV="$(cargo_version tools/ways-cli/Cargo.toml)"
+[[ -n "$JV" ]] || fail "plugins/ways-judge/.claude-plugin/plugin.json has no version"
+[[ "$JV" == "$WV" ]] || fail "the ways-judge plugin is at $JV but ways is at $WV; they release together (scripts/release.sh bump ways moves both)"
+echo "version: ways-judge plugin $JV matches ways $WV"
+
 # Where an organization manages Claude Code (Team and Enterprise, or a
 # machine with managed settings), the built-in cc-plugin-sec-default sits
 # outermost and sends classic.*, session.compact and other events past the
@@ -65,6 +74,11 @@ for dir in plugins/*/hooks; do
   [ "$found" -eq 1 ] || fail "$plugin has no test that runs its register() through registrationsOf and checks it with passedOverHits"
 done
 [ "$mods" -gt 0 ] || fail "no plugins/*/hooks directory to check"
+# A plugin's tests import only from its own folder, so each mod carries a
+# copy of the passed-over list, held to attend's text.
+for copy in plugins/*/tests/passed-over.ts; do
+  cmp -s "$copy" plugins/attend/tests/passed-over.ts || fail "$copy differs from plugins/attend/tests/passed-over.ts; the passed-over list is kept as one text"
+done
 echo "hooks: $mods mod(s) test their hooks against the events the policy plugin passes over"
 
 command -v claude >/dev/null || fail "claude is not on PATH"

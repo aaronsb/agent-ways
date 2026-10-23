@@ -53,7 +53,7 @@ use crate::session;
 
 use candidates::{check_when, collect_candidates};
 use scoring::EmbedScores;
-use command::{command_hits, CommandSurface};
+use command::{command_hits, CommandSurface, ShellCommand};
 use matching::PromptMatch;
 use prompt::{is_system_envelope, prompt_outcome, PromptSurface};
 
@@ -319,13 +319,16 @@ fn regex_matches(pattern: &str, text: &str) -> bool {
 /// input (a prompt/command/path fragment) lands in local telemetry; the pattern
 /// itself is author-controlled, so a match is normally a bounded keyword.
 fn regex_span(pattern: &str, text: &str) -> Option<String> {
+    Some(capped_span(compile_trigger(pattern)?.find(text)?.as_str()))
+}
+
+/// A matched span cut to the event log's length cap ([`regex_span`]).
+fn capped_span(s: &str) -> String {
     const MAX_SPAN: usize = 120;
-    let m = compile_trigger(pattern)?.find(text)?;
-    let s = m.as_str();
-    Some(match s.char_indices().nth(MAX_SPAN) {
+    match s.char_indices().nth(MAX_SPAN) {
         Some((byte, _)) => format!("{}…", &s[..byte]),
         None => s.to_string(),
-    })
+    }
 }
 
 /// Emit accumulated context in the canonical `hookSpecificOutput` envelope —

@@ -36,6 +36,11 @@ pub const WRAPPERS: &[&str] = &[
     "ionice", "unbuffer", "timeout",
 ];
 
+/// Wrappers that do not start a process of their own for a navigation
+/// program: `time echo hi` and `builtin cd /tmp` stay navigation, where
+/// `sudo -n true` is operative.
+pub const IN_SHELL_WRAPPERS: &[&str] = &["time", "builtin"];
+
 /// Shell keywords stripped from the front of a segment. `do` marks the
 /// segment as a loop body. `time` is a wrapper, so `time -p cmd` resolves.
 pub const LEAD_KEYWORDS: &[&str] = &[

@@ -16,7 +16,7 @@ use super::order::{order_hits, Hit};
 use super::scoring::{batch_embed_score, EmbedScores};
 use super::{
     body_map, collect_candidates, command_hits, eligible, has_shown_ancestor, late_interaction, mask_nonlinguistic,
-    prompt_competitors, prompt_outcome, reduce, CommandSurface, Lane, PromptMatch, PromptSurface, WayCandidate,
+    prompt_competitors, prompt_outcome, reduce, CommandSurface, Lane, ShellCommand, PromptMatch, PromptSurface, WayCandidate,
     BUDGET_COMMAND, BUDGET_PROMPT,
 };
 use crate::config::{Admission, BodyRank};
@@ -147,7 +147,13 @@ pub(crate) fn bash(text: &str, project_dir: &str) -> ProbeScan {
     let reduced = reduce::reduce_for_embed(&format!("  {text}"), BUDGET_COMMAND);
     let embed_matches = batch_embed_score(&reduced);
     let hits = command_hits(
-        &CommandSurface { cmd: "", description: Some(text), session_id: PROBE_SESSION, scope, project_dir },
+        &CommandSurface {
+            command: &ShellCommand::default(),
+            description: Some(text),
+            session_id: PROBE_SESSION,
+            scope,
+            project_dir,
+        },
         &candidates,
         &embed_matches,
     );

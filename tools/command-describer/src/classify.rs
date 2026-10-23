@@ -6,7 +6,8 @@ use std::ops::Range;
 
 use crate::lex::{RawSegment, Token, TokenKind};
 use crate::tables::{
-    self, ClassInput, FILTERS, LEAD_KEYWORDS, NAVIGATION, SKIP_KEYWORDS, WRAPPERS,
+    self, ClassInput, FILTERS, IN_SHELL_WRAPPERS, LEAD_KEYWORDS, NAVIGATION, SKIP_KEYWORDS,
+    WRAPPERS,
 };
 use crate::{Class, Connector, Role, Segment};
 
@@ -50,8 +51,12 @@ pub(crate) fn build(src: &str, excluded: &[Range<usize>], raw: RawSegment) -> Op
     let (subcommand, flags) = subcommand_and_flags(program, rest);
 
     // A navigation program behind a wrapper runs as a process: `sudo -n
-    // true` checks a credential, `sudo mkdir` writes as root.
-    let wrapped = words[..at].iter().any(|w| WRAPPERS.contains(&basename(w)));
+    // true` checks a credential, `sudo mkdir` writes as root. `time` and
+    // `builtin` leave it what it was (`time echo hi`, `builtin cd /tmp`).
+    let wrapped = words[..at].iter().any(|w| {
+        let w = basename(w);
+        WRAPPERS.contains(&w) && !IN_SHELL_WRAPPERS.contains(&w)
+    });
     // A redirect to a file makes any segment operative: `echo x >>
     // ~/.bashrc` and `… | jq . > out.json` write.
     let role = if redirect {
@@ -164,8 +169,17 @@ fn writes_file(tokens: &[Token]) -> bool {
     tokens.windows(2).any(|w| {
         w[0].kind == TokenKind::RedirectOp
             && matches!(w[0].value.as_str(), ">" | ">>" | ">|" | "&>" | "&>>")
-            && w[1].value != "/dev/null"
+            && !is_stream_target(&w[1].value)
     })
+}
+
+/// A redirect target that is a stream, not a file: `/dev/null`,
+/// `/dev/stdout`, `/dev/stderr`, `/dev/tty` and `/dev/fd/N`.
+fn is_stream_target(target: &str) -> bool {
+    matches!(
+        target,
+        "/dev/null" | "/dev/stdout" | "/dev/stderr" | "/dev/tty"
+    ) || target.starts_with("/dev/fd/")
 }
 
 fn is_assignment(w: &str) -> bool {
