@@ -12,7 +12,7 @@ SPE stands for Specify, Predict, Evaluate. The user's plan mode prompt is the sp
 
 ## Scope
 
-These rules apply when the user asks for an SPE step or names the loop. For any other request during a loop, such as a typo fix or a question, do that request and report only that. Do not mention rounds, predictions, evals, or SPE commit names, and do not touch spe/ files or a running Workflow. Commit it only if asked, with a plain message.
+These rules apply when the user asks for an SPE step or names the loop. For any other request during a loop, such as a typo fix or a question, do that request and report only that. Do not mention rounds, predictions, evals, or SPE commit names, and do not touch spe/ files or a running Workflow. Commit it on the working branch with a plain message.
 
 ## Steps and files
 
@@ -31,7 +31,7 @@ These rules apply when the user asks for an SPE step or names the loop. For any 
 
 ## After approval, before anything else
 
-Copy the plan to `spe/plans/rNN.md` and write `spe/predictions/rNN.yaml`, then commit both when the user asked for commits (evaluative/spe/predict). Only then run the gates and launch the Workflow. Never edit a saved prediction after a trial has run.
+Copy the plan to `spe/plans/rNN.md` and write `spe/predictions/rNN.yaml`, then commit both (evaluative/spe/predict). Only then run the gates and launch the Workflow. Never edit a saved prediction after a trial has run.
 
 A Workflow returns at launch. Close out when its completion notice arrives (evaluative/spe/learn).
 
@@ -40,7 +40,7 @@ A Workflow returns at launch. Close out when its completion notice arrives (eval
 - Stop when predictions match results for 3 rounds in a row.
 - At a ceiling, when every config hits the metric's maximum, record each prediction as not scorable, leave the stop streak unchanged, and check once for a leak or a grader bug. Then tell the user in two or three sentences that the tasks no longer separate the configs, propose harder tasks or stricter graders, and let the user decide.
 - Halt and report on a budget cap, a leaked answer key, a broken grader, or a decision only the user can make.
-- In an unattended loop, never push, deploy, or send messages unless the user asked for that in this loop. The final report gives each round's headline, the prediction accuracy trend, and open decisions.
+- In an unattended loop, push only the loop's working branch, and never deploy or send messages unless the user asked for that in this loop. The final report gives each round's headline, the prediction accuracy trend, and open decisions.
 
 ## See Also
 

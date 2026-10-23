@@ -52,8 +52,9 @@ with the investigation-brief rules from subagents(meta), on a cheap model. Invok
 
 ## Step 2 — Branch on what you found
 
-- **Work in flight** (uncommitted changes, an open branch, live TaskList tasks) → this
-  is a *resume*, not a cold start. Summarize where things stand and what the next
+- **Work in flight** (uncommitted changes, an open branch, live TaskList tasks, a
+  handoff file in `.claude/`) → this is a *resume*, not a cold start. Read a handoff
+  file first, unless its commit shows it is stale. Summarize where things stand and what the next
   concrete step is. Read the TaskList to square your understanding before proposing
   work — mutating it is the job of `/wrap` and `/develop`, not start.
 - **Clean `main`, prior history** → a fresh piece of work in an established project.
