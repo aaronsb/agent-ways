@@ -58,7 +58,7 @@ impl Warm {
         // when a test wrote one; anything else is `ways context --json`.
         let settings = f.home.join("settings.json");
         // The keepalive policy runs only where ways says enabled: true.
-        std::fs::write(&settings, r#"{"view":"effective","keys":{"attend_mod.keepalive.enabled":{"value":true}}}"#).unwrap();
+        std::fs::write(&settings, r#"{"view":"effective","keys":{"mods.attend.keepalive.enabled":{"value":true}}}"#).unwrap();
         std::fs::write(
             &ways,
             format!(
@@ -266,7 +266,7 @@ fn a_cold_write_scored_late_arms_from_its_own_time() {
     assert!(status.starts_with("keepwarm    armed, 2h40m left") || status.starts_with("keepwarm    armed, 2h39m left"), "{status}");
 }
 
-/// With `attend_mod.keepwarm: off` the attend mod never runs `keepwarm
+/// With `mods.attend.keepwarm: off` the attend mod never runs `keepwarm
 /// check` (the mod's own test holds that), and only the check and `attend
 /// run`'s sensor arm keepwarm (ADR-406 item 13). So the verbs the mod does
 /// run leave a paid cold write unarmed; the check on the same readings, run
@@ -300,7 +300,7 @@ fn the_verbs_a_mod_with_keepwarm_off_runs_never_arm_after_a_cold_write() {
 }
 
 /// The clean-slate test's finding 6: `status` says "armed" or "not armed",
-/// never the "on" and "off" of the mod's `attend_mod.keepwarm` setting, and
+/// never the "on" and "off" of the mod's `mods.attend.keepwarm` setting, and
 /// in a mod host it shows that setting on a line of its own.
 #[test]
 fn status_says_armed_and_shows_the_mod_setting_in_a_mod_host() {
@@ -321,12 +321,12 @@ fn status_says_armed_and_shows_the_mod_setting_in_a_mod_host() {
     assert!(w.run(&["listen", "on", "--host", "mod"]).status.success());
     std::fs::write(
         w.f.home.join("settings.json"),
-        r#"{"view":"effective","keys":{"attend_mod.keepwarm":{"value":"off","default":"on","layer":"project","file":"/p/.claude/ways.yaml"}}}"#,
+        r#"{"view":"effective","keys":{"mods.attend.keepwarm":{"value":"off","default":"on","layer":"project","file":"/p/.claude/ways.yaml"}}}"#,
     )
     .unwrap();
     let text = card(&w);
     let line = text.lines().find(|l| l.starts_with("mod setting")).unwrap_or_else(|| panic!("{text}"));
-    assert_eq!(line, "mod setting attend_mod.keepwarm off (from /p/.claude/ways.yaml); the mod never runs the keepwarm check in this session");
+    assert_eq!(line, "mod setting mods.attend.keepwarm off (from /p/.claude/ways.yaml); the mod never runs the keepwarm check in this session");
 }
 
 /// `check --policy --json`: the keepalive policy's decision (ADR-414 item
@@ -390,7 +390,7 @@ fn the_settings_bound_the_policy_and_route_the_wrap() {
     let w = Warm::new("ka-settings");
     std::fs::write(
         w.f.home.join("settings.json"),
-        r#"{"view":"effective","keys":{"attend_mod.keepalive.enabled":{"value":true},"attend_mod.keepalive.max_keepalives":{"value":0},"attend_mod.keepalive.wrap":{"value":"file"},"attend_mod.keepalive.wrap_file":{"value":"{state}/wrap/{session}.md"}}}"#,
+        r#"{"view":"effective","keys":{"mods.attend.keepalive.enabled":{"value":true},"mods.attend.keepalive.max_keepalives":{"value":0},"mods.attend.keepalive.wrap":{"value":"file"},"mods.attend.keepalive.wrap_file":{"value":"{state}/wrap/{session}.md"}}}"#,
     )
     .unwrap();
     w.reading(&[(50 * MIN, 200_000, 500)]);
@@ -432,7 +432,7 @@ fn concurrent_checks_decide_one_wrap() {
     let w = Warm::new("ka-lock");
     std::fs::write(
         w.f.home.join("settings.json"),
-        r#"{"view":"effective","keys":{"attend_mod.keepalive.enabled":{"value":true},"attend_mod.keepalive.max_keepalives":{"value":0}}}"#,
+        r#"{"view":"effective","keys":{"mods.attend.keepalive.enabled":{"value":true},"mods.attend.keepalive.max_keepalives":{"value":0}}}"#,
     )
     .unwrap();
     w.reading(&[(50 * MIN, 200_000, 500)]);
@@ -453,7 +453,7 @@ fn unreadable_settings_run_no_policy() {
     assert_eq!((d["action"].as_str(), d["policy"].as_bool()), (Some("none"), Some(false)), "{d}");
     let out = w.run(&["keepwarm", "status"]);
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains("keepalive   off: the attend_mod settings could not be read (armed windows only)"), "{text}");
+    assert!(text.contains("keepalive   off: the mods.attend settings could not be read (armed windows only)"), "{text}");
 }
 
 /// A transcript ways cannot read leaves the policy running: the host is
@@ -524,7 +524,7 @@ fn wrapped_save_writes_the_reply_under_the_state_root_and_refuses_a_link() {
     let w = Warm::new("ka-save");
     std::fs::write(
         w.f.home.join("settings.json"),
-        r#"{"view":"effective","keys":{"attend_mod.keepalive.enabled":{"value":true},"attend_mod.keepalive.max_keepalives":{"value":0}}}"#,
+        r#"{"view":"effective","keys":{"mods.attend.keepalive.enabled":{"value":true},"mods.attend.keepalive.max_keepalives":{"value":0}}}"#,
     )
     .unwrap();
     w.reading(&[(50 * MIN, 200_000, 500)]);
@@ -579,7 +579,7 @@ fn the_kept_settings_read_follows_its_files() {
     assert_eq!(reads(&w), 1);
     let user = w.f.home.join("config").join("agent-ways").join("config.yaml");
     std::fs::create_dir_all(user.parent().unwrap()).unwrap();
-    std::fs::write(&user, "attend_mod:\n  keepwarm: on\n").unwrap();
+    std::fs::write(&user, "mods:\n  attend:\n    keepwarm: on\n").unwrap();
     policy(&w, "off");
     assert_eq!(reads(&w), 2, "a created user file is a change");
     policy(&w, "off");

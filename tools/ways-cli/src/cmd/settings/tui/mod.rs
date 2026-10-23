@@ -11,6 +11,8 @@
 pub mod build;
 pub mod flows;
 pub mod judge;
+pub mod mods;
+pub mod modread;
 pub mod others;
 #[cfg(test)]
 mod tests;
@@ -64,6 +66,12 @@ pub struct Ctx {
     /// What the gate tab's judge section shows, read at each build of the
     /// tree; `None` leaves the section out.
     pub judge: fn() -> Option<judge::JudgeState>,
+    /// What the mod tab shows of each shipped mod, read at each build of the
+    /// tree; empty leaves each mod's state unread.
+    pub mods: fn() -> Vec<crate::cmd::mods::Overview>,
+    /// Whether `mods` runs off the screen's thread: the live one calls
+    /// Claude Code, which the screens do not wait on.
+    pub mods_background: bool,
 }
 
 /// Whether the screens write `b` to the project's file: a project-scope key,
@@ -100,6 +108,8 @@ impl Ctx {
             claude_config_dir: std::env::var_os("CLAUDE_CONFIG_DIR").filter(|v| !v.is_empty()).map(PathBuf::from),
             claude: ways_core::paths::claude_dir().root().to_path_buf(),
             judge: judge::JudgeState::live,
+            mods: crate::cmd::mods::overview,
+            mods_background: true,
             xdg_config,
             home,
         }
@@ -132,11 +142,84 @@ pub struct Ways {
     /// The files each tab writes, as its title names them, found once per
     /// tab: the title is asked at every draw.
     writes: RefCell<std::collections::BTreeMap<String, String>>,
+    /// The mod tab's state, read in the background when the context says so.
+    mods: RefCell<modread::ModRead>,
+    /// The files' stamp when the tree was last read: a reload whose files
+    /// moved owes a read of the mods.
+    files: Cell<Option<u64>>,
+    /// A queued command ran since the last reload, which may have moved a
+    /// mod.
+    ran: Cell<bool>,
 }
+
+/// How soon after a read starts another may: a burst of requests reads once.
+const MODS_FRESH: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// How long the first build waits for the read before it shows the tab
+/// reading.
+const MODS_WAIT: std::time::Duration = std::time::Duration::from_millis(300);
 
 impl Ways {
     pub fn new(ctx: Ctx) -> Ways {
-        Ways { ctx, reg: registry(), watched: RefCell::default(), all_projects: Cell::new(false), others: RefCell::default(), writes: RefCell::default() }
+        let mods = RefCell::new(modread::ModRead::new(ctx.mods, MODS_FRESH));
+        Ways {
+            ctx,
+            reg: registry(),
+            watched: RefCell::default(),
+            all_projects: Cell::new(false),
+            others: RefCell::default(),
+            writes: RefCell::default(),
+            mods,
+            files: Cell::new(None),
+            ran: Cell::new(false),
+        }
+    }
+
+    /// The same screens with another window between mod reads, for tests.
+    #[cfg(test)]
+    pub(super) fn with_mods_fresh(mut self, fresh: std::time::Duration) -> Ways {
+        self.mods = RefCell::new(modread::ModRead::new(self.ctx.mods, fresh));
+        self
+    }
+
+    /// What the mod tab shows of each mod, and where the read stands. In
+    /// the background the first build waits briefly, once, for the read.
+    pub(super) fn mod_states(&self) -> (Vec<crate::cmd::mods::Overview>, mods::Read) {
+        if !self.ctx.mods_background {
+            return ((self.ctx.mods)(), mods::Read::Done);
+        }
+        let mut m = self.mods.borrow_mut();
+        m.pump();
+        // The shell takes the stamp once this tree is handed to it, so a
+        // read landing later moves the stamp and reloads the tree.
+        m.wait_first(MODS_WAIT);
+        m.shown()
+    }
+
+    /// The stamp of the files the tree was read from: metadata only.
+    fn files_stamp(&self) -> u64 {
+        if self.watched.borrow().is_empty() {
+            let _ = self.layers();
+        }
+        let mut seen = Vec::new();
+        for p in self.watched.borrow().iter() {
+            seen.extend_from_slice(p.to_string_lossy().as_bytes());
+            seen.push(0);
+            if let Ok(m) = std::fs::metadata(p) {
+                seen.extend_from_slice(&m.len().to_le_bytes());
+                let at = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
+                seen.extend_from_slice(&at.to_le_bytes());
+            }
+            if p.is_dir() {
+                let mut names: Vec<String> = std::fs::read_dir(p).into_iter().flatten().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+                names.sort();
+                for n in names {
+                    seen.extend_from_slice(n.as_bytes());
+                    seen.push(0);
+                }
+            }
+        }
+        agent_identity::identity::fnv1a_64(&seen)
     }
 
     pub fn layers(&self) -> Vec<Layer> {
@@ -237,6 +320,49 @@ impl Ways {
         Ok(())
     }
 
+    /// Write the engine `w` holds, and with it the judge mod's wanted state,
+    /// through their one writer; then start the mod's repair. A file that
+    /// does not parse, or an engine that changed on disk since it was read,
+    /// takes no write.
+    fn write_engine(&self, w: &Write) -> Result<(), String> {
+        self.refuse_broken(&ways_agent_core::profile::user_layer_path())?;
+        self.refuse_broken(&ways_core::paths::user_config())?;
+        let b = lookup(&self.reg, "gate.engine").map_err(|f| f.message)?;
+        let now = display(resolve(b.spec, &b.bound, &live_layers(self.ctx.project_layer())).value.as_ref(), b.spec.kind);
+        if now != w.loaded {
+            return Err(format!(
+                "gate.engine is {now} on disk, not the {} it was read as: it changed since. Review shows it now; apply again to write {}",
+                w.loaded, w.value
+            ));
+        }
+        let engine = (!w.value.is_empty()).then_some(w.value);
+        super::engine::write_engine_within(engine, Some(LOCK_WAIT)).map_err(|f| self.short(&f.message))?;
+        self.repair_judge();
+        Ok(())
+    }
+
+    /// `ways manage mod repair ways-judge --commit`, started in the
+    /// background after an engine change, so the screen keeps drawing while
+    /// Claude Code is called; the mod tab shows its result once the files
+    /// change. Under the unit tests only a stand-in runner is started.
+    fn repair_judge(&self) {
+        if cfg!(test) && std::env::var_os("WAYS_SETTINGS_RUNNER").is_none() {
+            return;
+        }
+        let Ok(exe) = Ways::runner() else { return };
+        let child = Command::new(exe)
+            .args(["manage", "mod", "repair", "ways-judge", "--commit"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+        if let Ok(mut c) = child {
+            std::thread::spawn(move || {
+                let _ = c.wait();
+            });
+        }
+    }
+
     /// The binary queued commands run with: this one, or for tests the
     /// stand-in `WAYS_SETTINGS_RUNNER` names.
     fn runner() -> Result<PathBuf, String> {
@@ -262,6 +388,16 @@ impl Adapter for Ways {
     /// `ways settings set` parses its argument. A file that does not parse,
     /// or a key that changed on disk since it was read, takes no write.
     fn write(&mut self, file: &Path, values: &[Write]) -> Result<(), String> {
+        // gate.engine goes through the engine choice, which writes the judge
+        // mod's wanted state with it (ADR-512 item 4).
+        if let Some(engine) = values.iter().find(|w| w.store.key == "gate.engine") {
+            let rest: Vec<Write> =
+                values.iter().filter(|w| w.store.key != "gate.engine").map(|w| Write { store: w.store, value: w.value, loaded: w.loaded }).collect();
+            if !rest.is_empty() {
+                self.write(file, &rest)?;
+            }
+            return self.write_engine(engine);
+        }
         self.refuse_broken(file)?;
         // A project-scope key may be another project's, from the all
         // projects view: one of the projects listed there, whose file it
@@ -326,8 +462,10 @@ impl Adapter for Ways {
     /// background; the screens poll it.
     fn start(&mut self, q: &Queued) -> Box<dyn Job> {
         // A command, such as the `ways init` the setup flow queues, may give
-        // a project ways: the other projects are found again.
+        // a project ways: the other projects are found again. It may also
+        // move a mod, read again at the reload after it ends.
         self.forget_others();
+        self.ran.set(true);
         let ended = |r: Result<(), String>| -> Box<dyn Job> { Box::new(Ended(Some(r))) };
         let line = q.command.strip_suffix(" < <stdin>").unwrap_or(&q.command).to_string();
         let argv = match split(&line) {
@@ -384,34 +522,40 @@ impl Adapter for Ways {
     }
 
     fn reload(&mut self) -> Option<Vec<Node>> {
+        // A queued command or a file change may have moved a mod; a read
+        // landing did not, and owes no other.
+        let files = self.files_stamp();
+        if self.ran.replace(false) || self.files.get().is_some_and(|f| f != files) {
+            self.mods.borrow_mut().owe();
+        }
+        self.files.set(Some(files));
         Some(self.roots())
     }
 
+    /// A stamp that moved with the files unchanged moved for a mod read.
+    fn stamp_moved(&mut self) -> Option<String> {
+        if !self.ctx.mods_background || self.files.get() != Some(self.files_stamp()) {
+            return None;
+        }
+        Some(match self.mods.borrow().last_failed() {
+            Some(why) => format!("mod state read failed: {why}"),
+            None => "mod state updated".to_string(),
+        })
+    }
+
     /// The size and time of each file the tree was read from, and the names
-    /// in the keys directory: metadata only, nothing parsed.
+    /// in the keys directory: metadata only, nothing parsed; and the mod
+    /// reads that finished, so a landing read reloads the tree.
     fn stamp(&self) -> Option<u64> {
-        if self.watched.borrow().is_empty() {
-            let _ = self.layers();
+        let files = self.files_stamp();
+        if self.files.get().is_none() {
+            self.files.set(Some(files));
         }
-        let mut seen = Vec::new();
-        for p in self.watched.borrow().iter() {
-            seen.extend_from_slice(p.to_string_lossy().as_bytes());
-            seen.push(0);
-            if let Ok(m) = std::fs::metadata(p) {
-                seen.extend_from_slice(&m.len().to_le_bytes());
-                let at = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
-                seen.extend_from_slice(&at.to_le_bytes());
-            }
-            if p.is_dir() {
-                let mut names: Vec<String> = std::fs::read_dir(p).into_iter().flatten().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
-                names.sort();
-                for n in names {
-                    seen.extend_from_slice(n.as_bytes());
-                    seen.push(0);
-                }
-            }
+        let mut m = self.mods.borrow_mut();
+        if self.ctx.mods_background {
+            m.pump();
         }
-        Some(agent_identity::identity::fnv1a_64(&seen))
+        Some(files ^ m.finished().wrapping_mul(0x9e37_79b9_7f4a_7c15))
     }
 
     fn flow(&self, name: &str) -> Option<Flow> {

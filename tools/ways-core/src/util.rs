@@ -40,15 +40,9 @@ pub fn path_to_id(rel: &Path) -> String {
 /// exist on disk. Both call sites apply this identical rule.
 pub fn encode_project_key(path: &Path) -> String {
     let resolved = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let normalized = normalize_path_sep(&resolved);
+    let normalized = normalize_path_sep(&strip_verbatim(&resolved));
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut s = normalized.to_string_lossy().into_owned();
-
-    // Strip the verbatim prefixes canonicalize() adds on Windows.
-    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
-        s = format!(r"\\{rest}");
-    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
-        s = rest.to_string();
-    }
 
     #[cfg(windows)]
     {
@@ -58,6 +52,21 @@ pub fn encode_project_key(path: &Path) -> String {
     s.chars()
         .map(|c| if c == '\\' || c == '/' || c == ':' { '-' } else { c })
         .collect()
+}
+
+/// `p` without the verbatim prefix `canonicalize()` adds on Windows
+/// (`\\?\C:\…`, `\\?\UNC\server\…`): the form a person types, and the only
+/// form a message or a command line shows. Any other path is returned as it
+/// is.
+pub fn strip_verbatim(p: &Path) -> PathBuf {
+    let s = p.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    if let Some(rest) = s.strip_prefix(r"\\?\") {
+        return PathBuf::from(rest);
+    }
+    p.to_path_buf()
 }
 
 /// Home directory, separator-normalised: [`claude_sessions::home_dir`]
@@ -389,6 +398,13 @@ mod tests {
         let p: PathBuf = ["softwaredev", "code", "quality"].iter().collect();
         assert_eq!(path_to_id(&p), "softwaredev/code/quality");
         assert_eq!(path_to_id(Path::new("")), "");
+    }
+
+    #[test]
+    fn a_verbatim_prefix_is_stripped_and_any_other_path_kept() {
+        assert_eq!(strip_verbatim(Path::new(r"\\?\C:\Users\a\proj")), PathBuf::from(r"C:\Users\a\proj"));
+        assert_eq!(strip_verbatim(Path::new(r"\\?\UNC\server\share\p")), PathBuf::from(r"\\server\share\p"));
+        assert_eq!(strip_verbatim(Path::new("/home/a/proj")), PathBuf::from("/home/a/proj"));
     }
 
     #[test]

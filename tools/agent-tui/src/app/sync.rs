@@ -52,10 +52,16 @@ impl App {
     pub fn watch(&mut self) {
         let now = self.adapter.stamp();
         if now.is_some() && now != self.stamp && matches!(self.mode, Mode::Browse | Mode::Review { run: None, .. }) {
+            let why = self.adapter.stamp_moved();
             let r = self.reload();
             // A reload a check owed keeps the check's outcome: nothing
-            // changed on disk.
-            let said = if std::mem::take(&mut self.owed) { self.msg.clone() } else { "reloaded: a settings file changed on disk".into() };
+            // changed on disk. The adapter may say the stamp moved for
+            // another reason.
+            let said = match (std::mem::take(&mut self.owed), why) {
+                (true, _) => self.msg.clone(),
+                (false, Some(why)) => why,
+                (false, None) => "reloaded: a settings file changed on disk".into(),
+            };
             self.msg = if r.is_clean() { said } else { r.message() };
         }
     }

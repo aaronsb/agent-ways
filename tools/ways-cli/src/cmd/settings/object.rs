@@ -54,6 +54,19 @@ pub fn apply(file: Option<&Path>, dry_run: bool, project: Option<&Path>) -> Out 
             walk(&reg, &layers, sec.file, &mut vec![top], v, &mut accepted, &mut rejected, &mut findings, project);
         }
     }
+    // The engine is written through the engine choice, with the judge mod's
+    // wanted state (ADR-512 item 4), after the rest.
+    let mut engine = accepted.iter().position(|(b, _)| b.name() == "gate.engine").map(|i| accepted.remove(i));
+    // The engine in effect, set again (an emit then apply round trip),
+    // changes nothing and is no new choice.
+    if let Some((_, v)) = &engine {
+        use ways_agent_core::profile::{user_layer_path, UserLayer};
+        let now = UserLayer::load(&user_layer_path()).ok().and_then(|u| u.engine);
+        if now.as_deref() == v.as_str() {
+            findings.push(json!({ "key": "gate.engine", "ok": true, "message": "unchanged" }));
+            engine = None;
+        }
+    }
     // Group the accepted keys by the file they are written to.
     let mut by_file: Vec<(PathBuf, LayerScope, Accepted)> = Vec::new();
     for (b, v) in accepted {
@@ -91,6 +104,27 @@ pub fn apply(file: Option<&Path>, dry_run: bool, project: Option<&Path>) -> Out 
         touched(*scope, path, dry_run);
         written.insert(path.display().to_string(), fragment);
     }
+    if let (Some((b, v)), None) = (&engine, &error) {
+        accepted_names.push(b.name());
+        match engine_write(v, dry_run) {
+            Ok(files) => {
+                for (scope, path, fragment) in files {
+                    touched(scope, &path, dry_run);
+                    let key = path.display().to_string();
+                    match written.get_mut(&key) {
+                        Some(f) => merge_json(f, fragment),
+                        None => {
+                            written.insert(key, fragment);
+                        }
+                    }
+                }
+                if !dry_run && written.contains_key(&ways_core::paths::user_config().display().to_string()) {
+                    eprintln!("{}", super::engine::REPAIR_HINT);
+                }
+            }
+            Err(f) => error = Some(f.message),
+        }
+    }
     let mut over = Vec::new();
     if !dry_run && error.is_none() {
         for (path, _, list) in &by_file {
@@ -123,6 +157,49 @@ pub fn apply(file: Option<&Path>, dry_run: bool, project: Option<&Path>) -> Out 
     Ok(())
 }
 
+/// The engine `v` names (null clears it), written through the engine choice,
+/// or under `dry_run` only described. Returns each file with its layer and
+/// the fragment written there.
+fn engine_write(v: &Value, dry_run: bool) -> Result<Vec<(LayerScope, PathBuf, serde_json::Value)>, Failure> {
+    let engine = v.as_str();
+    let keyless = engine.is_some_and(super::engine::is_keyless);
+    let install = |on: bool| json!({ "mods": { "ways-judge": { "install": on } } });
+    let fragment = |scope: LayerScope, path: PathBuf| {
+        let user = path == ways_core::paths::user_config();
+        let f = if user { install(keyless) } else { json!({ "engine": to_json(v) }) };
+        (scope, path, f)
+    };
+    if !dry_run {
+        return Ok(super::write_engine(engine)?.into_iter().map(|(s, p)| fragment(s, p)).collect());
+    }
+    let agent = (LayerScope::User, ways_agent_core::profile::user_layer_path());
+    let user = (LayerScope::User, ways_core::paths::user_config());
+    let leaving = ways_core::settings::mod_install_in_user("ways-judge") == Some(true);
+    let files = match (keyless, leaving) {
+        (true, _) => vec![user, agent],
+        (false, true) => vec![agent, user],
+        (false, false) => vec![agent],
+    };
+    Ok(files.into_iter().map(|(s, p)| fragment(s, p)).collect())
+}
+
+/// Merge `b` into the object `a`, key by key.
+fn merge_json(a: &mut serde_json::Value, b: serde_json::Value) {
+    match (a, b) {
+        (serde_json::Value::Object(a), serde_json::Value::Object(b)) => {
+            for (k, v) in b {
+                match a.get_mut(&k) {
+                    Some(slot) => merge_json(slot, v),
+                    None => {
+                        a.insert(k, v);
+                    }
+                }
+            }
+        }
+        (a, b) => *a = b,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn walk(
     reg: &Registry,
@@ -137,11 +214,24 @@ pub(super) fn walk(
 ) {
     if let Some(b) = reg.lookup_path(file, path) {
         let name = b.name();
+        // The user config's judge install follows the engine. An object
+        // holding the value in effect, as `emit` prints it, changes nothing
+        // and is passed over; any other value is refused, as `set` refuses it.
+        if name == super::engine::JUDGE_INSTALL && project.is_none() {
+            let r = agent_settings::load::resolve(b.spec, &b.bound, layers);
+            if r.value.or(r.default).as_ref() == Some(v) {
+                findings.push(json!({ "key": name, "ok": true, "message": "unchanged; it follows gate.engine" }));
+                return;
+            }
+        }
         let verdict = match b.spec.kind {
             Kind::ReadOnly => Err("read-only; it is changed by its action command".to_string()),
             Kind::Secret => Err("a secret is never set from a settings object".to_string()),
+            // A null engine clears it, through the engine choice.
+            _ if name == "gate.engine" && v.is_null() => Ok(()),
             _ => b.spec.check_value_in(v, Some(layers), &b.bound),
         }
+        .and_then(|_| super::engine::refuse(&name).map_err(|f| f.message))
         .and_then(|_| target_file(&b, project).map(|_| ()).map_err(|f| f.message));
         match verdict {
             Ok(()) => {

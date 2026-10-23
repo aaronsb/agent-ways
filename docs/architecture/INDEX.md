@@ -172,6 +172,7 @@ _Install, update, configuration, permissions, the CLI contract, testing_
 | [ADR-509](./platform/ADR-509-lifecycle-commands-sit-under-one-ways-manage-group-the-updater-s-reconcile-stays-a-hidden-fixed-name.md) | Lifecycle commands sit under one ways manage group; the updater's reconcile stays a hidden fixed name | accepted |
 | [ADR-510](./platform/ADR-510-settings-project-names-the-enclosing-project-and-a-write-names-its-file.md) | Settings --project names the enclosing project, and a write names its file | accepted |
 | [ADR-511](./platform/ADR-511-every-mutating-lifecycle-verb-reports-what-it-would-change-until-commit.md) | Every mutating lifecycle verb reports what it would change until --commit | accepted |
+| [ADR-512](./platform/ADR-512-each-shipped-claude-code-mod-has-one-wanted-state-in-settings-under-mods-name-and-ways-manage-converges-every-target-to-it.md) | Each shipped Claude Code mod has one wanted state in settings, under mods.<name>, and ways manage converges every target to it | accepted |
 
 ## Practice
 _The ways method, way authoring, the development loop_

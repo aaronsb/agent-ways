@@ -50,6 +50,8 @@ fn roots(fx: &Fixture) -> Vec<Node> {
         claude_config_dir: None,
         claude: fx.root.join(".claude"),
         judge: || None,
+        mods: Vec::new,
+        mods_background: false,
     };
     Ways::new(ctx).build(&[])
 }
@@ -468,6 +470,8 @@ fn a_switch_for_a_way_no_root_holds_is_listed_as_not_found() {
         claude_config_dir: None,
         claude: fx.root.join(".claude"),
         judge: || None,
+        mods: Vec::new,
+        mods_background: false,
     };
     let r = Ways::new(ctx).build(&[project]);
     let project = r[0].children.iter().find(|n| n.name == "project").unwrap();
@@ -491,6 +495,8 @@ fn ctx_of(fx: &Fixture) -> Ctx {
         claude_config_dir: None,
         claude: fx.root.join(".claude"),
         judge: || None,
+        mods: Vec::new,
+        mods_background: false,
     }
 }
 
@@ -911,6 +917,8 @@ fn a_prefix_switch_shows_its_ways_off_and_is_not_listed_as_not_found() {
         claude_config_dir: None,
         claude: fx.root.join(".claude"),
         judge: || None,
+        mods: Vec::new,
+        mods_background: false,
     };
     let r = Ways::new(ctx).build(&[project]);
     let project = r[0].children.iter().find(|n| n.name == "project").unwrap();
@@ -957,7 +965,7 @@ fn leaf<'a>(node: &'a Node, name: &str) -> Option<&'a Node> {
 
 // The write checks the value against the live layers, the user file among
 // them, so it runs in a fixture of its own: the operator's own
-// `attend_mod.listening` must not decide it.
+// `mods.attend.listening` must not decide it.
 #[test]
 #[ignore = "run by the_mod_tab_writes_how_this_project_starts_to_its_own_file"]
 fn child_writes_how_this_project_starts() {
@@ -974,7 +982,7 @@ fn child_writes_how_this_project_starts() {
     assert_ne!(install.file, project_file, "install is set in the user or a target's file, never a project's");
     let listening = store_of("listening");
     ways.write(&project_file, &[Write { store: &listening, value: "active", loaded: "dormant" }]).expect("the project's file takes it");
-    assert!(std::fs::read_to_string(&project_file).unwrap().ends_with("attend_mod:\n  listening: active\n"));
+    assert!(std::fs::read_to_string(&project_file).unwrap().ends_with("mods:\n  attend:\n    listening: active\n"));
     assert_eq!(std::fs::read_to_string(&user).unwrap(), "# the user's own\n", "the user file is untouched");
 }
 
@@ -1036,4 +1044,274 @@ fn child_takes_a_pasted_key_into_rotate() {
 #[test]
 fn a_pasted_key_reaches_the_rotate_entry() {
     let _ = std::fs::remove_dir_all(in_fixture("child_takes_a_pasted_key_into_rotate"));
+}
+
+// ── the mod tab's level per mod (ADR-512 item 6) ───────────────
+
+/// attend removed by hand in one of two targets, and ways-judge pending
+/// under gate.engine: claude-code.
+fn mod_states() -> Vec<crate::cmd::mods::Overview> {
+    use crate::cmd::attend_mod::{State, ATTEND, JUDGE};
+    vec![
+        crate::cmd::mods::Overview {
+            m: ATTEND,
+            shipped: Some("0.29.0".into()),
+            word: State::Removed,
+            rows: vec![
+                ("~/.claude".into(), "installed · 0.29.0".into(), "installed 0.29.0, enabled".into()),
+                ("~/.claude-work".into(), "removed · install false here".into(), "removed by hand or kept out; install false in this target's config".into()),
+            ],
+            older: false,
+            claude_code: true,
+        },
+        crate::cmd::mods::Overview {
+            m: JUDGE,
+            shipped: Some("1.43.0".into()),
+            word: State::Pending,
+            rows: vec![("~/.claude".into(), "pending · 2.1.300 < 2.1.304".into(), "pending: Claude Code 2.1.300 is below 2.1.304".into())],
+            older: false,
+            claude_code: true,
+        },
+    ]
+}
+
+/// The same, with attend's installed copy older than the shipped one and
+/// a key engine chosen.
+fn mod_states_older() -> Vec<crate::cmd::mods::Overview> {
+    let mut s = mod_states();
+    s[0].older = true;
+    s[0].word = crate::cmd::attend_mod::State::Drift;
+    for o in s.iter_mut() {
+        o.claude_code = false;
+    }
+    s
+}
+
+fn mod_tab(fx: &Fixture, mods: fn() -> Vec<crate::cmd::mods::Overview>) -> Node {
+    let mut ctx = ctx_of(fx);
+    ctx.mods = mods;
+    Ways::new(ctx).build(&[]).into_iter().find(|t| t.name == "mod").expect("the mod tab")
+}
+
+fn labels(n: &Node) -> Vec<&str> {
+    n.actions.iter().map(|a| a.label.as_str()).collect()
+}
+
+#[test]
+fn the_mod_tab_has_a_node_per_mod_with_its_state_targets_settings_and_actions() {
+    let fx = Fixture::home();
+    let tab = mod_tab(&fx, mod_states);
+    let names: Vec<&str> = tab.children.iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(names, ["attend", "ways-judge"]);
+    let attend = &tab.children[0];
+    assert_eq!(attend.columns, Some((String::new(), "0.29.0  removed".to_string())));
+    // A read-only row per enabled target, first, then the settings.
+    let rows: Vec<(&str, &str)> = attend.children[..2].iter().map(|n| (n.name.as_str(), n.setting.as_ref().unwrap().value.as_str())).collect();
+    assert_eq!(rows, [("~/.claude", "installed · 0.29.0"), ("~/.claude-work", "removed · install false here")]);
+    assert!(attend.children[0].doc.starts_with("installed 0.29.0, enabled"), "the detail pane says it in full");
+    assert!(attend.children[..2].iter().all(|n| matches!(n.setting.as_ref().unwrap().kind, agent_tui::tree::Kind::ReadOnly)));
+    assert!(leaf(attend, "install").is_some() && leaf(attend, "listening").is_some(), "the settings stay under the mod");
+    assert_eq!(labels(attend), ["check", "install", "uninstall", "repair"]);
+    let cmds: Vec<&str> = attend.actions.iter().map(|a| a.command.as_str()).collect();
+    assert_eq!(
+        cmds,
+        [
+            "ways manage mod check attend",
+            "ways manage mod install attend --commit",
+            "ways manage mod uninstall attend --commit",
+            "ways manage mod repair attend --commit"
+        ]
+    );
+    let check = &attend.actions[0];
+    assert!(check.reads && !check.confirm, "check reads and verifies");
+    for a in &attend.actions[1..] {
+        assert!(a.confirm && a.touches.contains("each enabled target"), "{}: {}", a.label, a.touches);
+    }
+
+    // ways-judge under claude-code: no uninstall, and no install while it
+    // is wanted; the user config's install follows the engine.
+    let judge = &tab.children[1];
+    assert_eq!(judge.columns, Some((String::new(), "1.43.0  pending".to_string())));
+    assert_eq!(judge.children[0].setting.as_ref().unwrap().value, "pending · 2.1.300 < 2.1.304");
+    assert_eq!(labels(judge), ["check", "repair"]);
+    let install = leaf(judge, "install").expect("the judge's install row");
+    let s = install.setting.as_ref().unwrap();
+    assert!(!s.editable(), "set with gate.engine");
+    assert!(s.locked.as_deref().is_some_and(|w| w.contains("gate.engine on the gate tab")), "{:?}", s.locked);
+    assert!(agent_tui::tree::key_conflicts(&attend.actions).is_empty() && agent_tui::tree::key_conflicts(&judge.actions).is_empty());
+}
+
+#[test]
+fn repair_reads_update_for_an_older_copy_and_the_judge_install_names_the_engine() {
+    let fx = Fixture::home();
+    let tab = mod_tab(&fx, mod_states_older);
+    let attend = &tab.children[0];
+    assert_eq!(labels(attend), ["check", "install", "uninstall", "update"]);
+    assert_eq!(attend.actions[3].command, "ways manage mod repair attend --commit");
+    assert!(attend.actions[3].doc.contains("older than the shipped 0.29.0"), "{}", attend.actions[3].doc);
+    // Under a key engine ways-judge can be installed (the engine choice)
+    // and uninstalled.
+    let judge = &tab.children[1];
+    assert_eq!(labels(judge), ["check", "install", "uninstall", "repair"]);
+    let install = &judge.actions[1];
+    assert!(install.doc.contains("Sets gate.engine to claude-code") && install.touches.contains("gate.engine in agent.yaml"), "{}", install.doc);
+}
+
+#[test]
+fn a_mod_whose_state_was_not_read_says_so() {
+    let fx = Fixture::home();
+    let tab = mod_tab(&fx, Vec::new);
+    assert_eq!(tab.children.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["attend", "ways-judge"]);
+    assert!(tab.children.iter().all(|n| n.columns == Some((String::new(), "state not read".to_string())) && labels(n) == ["check"]));
+}
+
+#[test]
+fn the_mod_tab_s_install_action_queues_its_command_after_a_confirm() {
+    let fx = Fixture::home();
+    let mut ctx = ctx_of(&fx);
+    ctx.mods = mod_states;
+    let roots = Ways::new(ctx).build(&[]);
+    let ran = Rc::new(RefCell::new(Vec::new()));
+    let mut app = App::new("t", roots).adapter(Fixtured { env: fx.env(), ran: ran.clone() });
+    press(&mut app, &[KeyCode::Char('7')]);
+    let t = text(&mut app);
+    assert!(t.contains("attend") && t.contains("0.29.0  removed") && t.contains("1.43.0  pending"), "{t}");
+    press(&mut app, &[KeyCode::Char('i')]);
+    assert!(queue(&app).is_empty(), "install asks first:\n{}", text(&mut app));
+    press(&mut app, &[KeyCode::Char('y')]);
+    assert_eq!(queue(&app), ["ways manage mod install attend --commit"]);
+}
+
+/// A read that takes longer than the first build waits.
+fn slow_mod_states() -> Vec<crate::cmd::mods::Overview> {
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    mod_states()
+}
+
+/// The live read calls Claude Code, so the screens read the mods in the
+/// background: a quick read shows in the first build; a slow one leaves the
+/// tab saying so, and its landing moves the stamp, so the tree reloads with
+/// it.
+#[test]
+fn the_mod_tab_reads_its_state_in_the_background() {
+    let fx = Fixture::home();
+    let tab = |w: &Ways| w.build(&[]).into_iter().find(|t| t.name == "mod").unwrap();
+    let mut ctx = ctx_of(&fx);
+    ctx.mods = mod_states;
+    ctx.mods_background = true;
+    let quick = Ways::new(ctx);
+    assert_eq!(tab(&quick).children[0].columns, Some((String::new(), "0.29.0  removed".to_string())));
+
+    let mut ctx = ctx_of(&fx);
+    ctx.mods = slow_mod_states;
+    ctx.mods_background = true;
+    let ways = Ways::new(ctx);
+    let first = tab(&ways);
+    let before = ways.stamp();
+    assert_eq!(first.children[0].columns, Some((String::new(), "reading…".to_string())));
+    let start = std::time::Instant::now();
+    while ways.stamp() == before {
+        assert!(start.elapsed() < std::time::Duration::from_secs(30), "the read never landed");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(tab(&ways).children[0].columns, Some((String::new(), "0.29.0  removed".to_string())));
+}
+
+/// Review of the mod tab: every target row carries its mod's actions, both
+/// mods' `install` rows are headed by their full key, and an unread state
+/// still offers `check`.
+#[test]
+fn target_rows_carry_the_actions_and_install_rows_name_their_mod() {
+    let fx = Fixture::home();
+    let tab = mod_tab(&fx, mod_states);
+    for m in &tab.children {
+        let row = &m.children[0];
+        assert_eq!(labels(row), labels(m), "{}: {}", m.name, row.name);
+        let install = leaf(m, "install").unwrap();
+        assert_eq!(install.heading.as_deref(), Some(format!("mods.{}.install", m.name).as_str()));
+    }
+    let unread = mod_tab(&fx, Vec::new);
+    assert!(unread.children.iter().all(|n| labels(n) == ["check"]), "check needs no read");
+}
+
+static SLOW_READS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// A read slower than the first build's 300 ms wait, counting each run.
+fn counted_slow_states() -> Vec<crate::cmd::mods::Overview> {
+    SLOW_READS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    mod_states()
+}
+
+/// Review of the mod tab, finding 1: driven as the shell drives it (stamp,
+/// then reload when it moves), the read settles at one: the reload its
+/// landing causes owes no other, even with no window at all between reads,
+/// and the bottom bar is told the stamp moved for the mods, not for a file
+/// (finding 4). It waits on the landing, not on the clock.
+#[test]
+fn a_landed_read_reloads_once_and_starts_no_other() {
+    use agent_tui::Adapter as _;
+    let fx = Fixture::home();
+    let mut ctx = ctx_of(&fx);
+    ctx.mods = counted_slow_states;
+    ctx.mods_background = true;
+    let mut ways = Ways::new(ctx).with_mods_fresh(std::time::Duration::ZERO);
+    let _ = ways.build(&[]);
+    let mut last = ways.stamp();
+    let mut said = Vec::new();
+    let mut step = |ways: &mut Ways, said: &mut Vec<Option<String>>| {
+        let now = ways.stamp();
+        if now != last {
+            said.push(ways.stamp_moved());
+            let _ = ways.reload();
+            last = ways.stamp();
+        }
+    };
+    let start = std::time::Instant::now();
+    while said.is_empty() && start.elapsed() < std::time::Duration::from_secs(30) {
+        step(&mut ways, &mut said);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    // Had the reload owed a read, it would have started at once: look again.
+    for _ in 0..50 {
+        step(&mut ways, &mut said);
+    }
+    assert_eq!(SLOW_READS.load(std::sync::atomic::Ordering::SeqCst), 1, "the read settled at one");
+    assert_eq!(said, [Some("mod state updated".to_string())], "one reload, said as a mod read");
+}
+
+/// Re-review finding A: the two mods' rows had one key each (`mod.install`,
+/// `mod.~/.claude`), so a reload kept the later mod's value over a pending
+/// edit to the earlier one and moved the cursor between them. Each mod's
+/// rows now carry the mod in their key, and an edit survives a reload.
+#[test]
+fn each_mods_rows_have_their_own_keys_and_an_edit_survives_a_reload() {
+    let fx = Fixture::home();
+    let mut ctx = ctx_of(&fx);
+    ctx.for_project = false;
+    ctx.mods = mod_states;
+    let ways = Ways::new(ctx);
+    let roots = ways.roots();
+    let t = roots.iter().position(|r| r.name == "mod").unwrap();
+    let path_of = |roots: &[Node], m: usize, name: &str| {
+        let g = roots[t].children.iter().position(|c| c.name == ["attend", "ways-judge"][m]).unwrap();
+        let i = roots[t].children[g].children.iter().position(|c| c.name == name).unwrap_or_else(|| panic!("{name}"));
+        vec![t, g, i]
+    };
+    let keys: Vec<String> = [(0, "install"), (1, "install"), (0, "~/.claude"), (1, "~/.claude")]
+        .iter()
+        .map(|(m, n)| agent_tui::tree::key(&roots, &path_of(&roots, *m, n)))
+        .collect();
+    let mut unique = keys.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), 4, "{keys:?}");
+    let mut app = App::new("t", roots).adapter(ways);
+    let p = path_of(&app.roots, 0, "install");
+    agent_tui::tree::get_mut(&mut app.roots, &p).setting.as_mut().unwrap().value = "false".into();
+    assert_eq!(app.pending(), 1);
+    let _ = app.reload();
+    let p = path_of(&app.roots, 0, "install");
+    assert_eq!(agent_tui::tree::get(&app.roots, &p).setting.as_ref().unwrap().value, "false", "the pending edit is kept");
+    assert_eq!(app.pending(), 1);
 }

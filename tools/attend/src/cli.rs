@@ -591,7 +591,7 @@ pub enum KeepwarmCmd {
 pub struct KeepwarmCheckArgs {
     /// Apply the keepalive policy (ADR-414): from each turn's end, one wake
     /// the margin before the cache lapses, counted from the operator's last
-    /// prompt and bounded by attend_mod.keepalive, then one wrap turn
+    /// prompt and bounded by mods.attend.keepalive, then one wrap turn
     #[arg(long)]
     pub policy: bool,
     /// Print the decision as one JSON object: action (none, keepalive or

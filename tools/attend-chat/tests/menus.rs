@@ -278,7 +278,7 @@ fn settings_lists_each_setting_beside_its_row() {
     click(&mut c, s);
     let ((x, _), shown) = menu(&mut c).expect("the settings list");
     assert!(x > px, "beside the ≡ menu: {:#?}", rows(&mut c));
-    for k in ["attend_mod.listening = ", "attend_mod.keepwarm = ", "attend.chat.mouse = ", "attend.chat.sidebar_key = ", "attend.chat.tabs.jump = "] {
+    for k in ["mods.attend.listening = ", "mods.attend.keepwarm = ", "attend.chat.mouse = ", "attend.chat.sidebar_key = ", "attend.chat.tabs.jump = "] {
         assert!(shown.iter().any(|r| r.contains(k)), "{k}: {shown:#?}");
     }
     assert!(!bar(&mut c).contains("mouse = "), "not on the bar: {}", bar(&mut c));

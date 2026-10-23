@@ -10,14 +10,15 @@ A session starts **dormant** unless its project says otherwise. Dormant is plain
 
 A session becomes **active** in one of two ways:
 
-- Its project resolves `attend_mod.listening: active` through the ways config. Put it in the project's `.claude/ways.yaml`:
+- Its project resolves `mods.attend.listening: active` through the ways config. Put it in the project's `.claude/ways.yaml`:
 
   ```yaml
-  attend_mod:
-    listening: active
+  mods:
+    attend:
+      listening: active
   ```
 
-  The operator sets this, in the file or with `ways settings set attend_mod.listening active --project <dir>` from their own shell. Under auto mode Claude Code refuses an agent's write to its own project's config, `.claude/ways.yaml` included, so an agent asked to make its project listen calls `attend_listen` for the current session and gives the operator that line to add.
+  The operator sets this, in the file or with `ways settings set mods.attend.listening active --project <dir>` from their own shell. Under auto mode Claude Code refuses an agent's write to its own project's config, `.claude/ways.yaml` included, so an agent asked to make its project listen calls `attend_listen` for the current session and gives the operator that line to add.
 
 - The user asks Claude to use attend, and the agent calls `attend_listen`. `/attend` does this in a mod host instead of starting Monitor.
 
@@ -40,7 +41,7 @@ While active, the mod:
 - draws one row above the prompt with the peer count, the unread count (`attend message unread`) and the channels;
 - with keepwarm on, runs `attend keepwarm check` on its poll and submits the `keepwarm:` line it prints as a turn (see [keepwarm](keepwarm.md)).
 
-A `claude -p` run or an SDK session lists `attend_listen` and never polls, whatever the project says, unless `attend_mod.headless_poll` is true.
+A `claude -p` run or an SDK session lists `attend_listen` and never polls, whatever the project says, unless `mods.attend.headless_poll` is true.
 
 ## What the session shows
 
@@ -77,7 +78,7 @@ The row gains one segment while the policy runs: `⟳ 2/8 · next 41m · wrap ~2
 
 ## Configuration
 
-The section is `attend_mod` in the ways config. It resolves through the user file, the target's file and the project's `.claude/ways.yaml`, the project winning ([ADR-115](../architecture/platform/ADR-115-declarative-config-with-project-scope-overlay.md)). The mod reads it with `ways settings list attend_mod --json --effective` at session start and again on activation, so a change applies to the next session with no reinstall. `ways settings mod` opens it in the settings screens. Opened for a project (`--project`, or `CLAUDE_PROJECT_DIR`), they write `listening`, `keepwarm` and the `keepalive.*` keys to that project's `.claude/ways.yaml`; opened without one, to the user file. The home directory is never a project. `install` always goes to the user file. `ways settings set` writes the user file unless `--project` is given.
+The settings are `mods.attend.*`, the `attend` entry of the ways config's `mods` section ([ADR-512](../architecture/platform/ADR-512-each-shipped-claude-code-mod-has-one-wanted-state-in-settings-under-mods-name-and-ways-manage-converges-every-target-to-it.md)). They resolve through the user file, the target's file and the project's `.claude/ways.yaml`, the project winning ([ADR-115](../architecture/platform/ADR-115-declarative-config-with-project-scope-overlay.md)). The mod reads them with `ways settings list mods.attend --json --effective` at session start and again on activation, so a change applies to the next session with no reinstall. `ways settings mod` opens them in the settings screens. Opened for a project (`--project`, or `CLAUDE_PROJECT_DIR`), the screens write `listening`, `keepwarm` and the `keepalive.*` keys to that project's `.claude/ways.yaml`; opened without one, to the user file. The home directory is never a project. `install` always goes to the user file. `ways settings set` writes the user file unless `--project` is given. Before ADR-512 these settings were the `attend_mod` section; [configuration](configuration.md#the-attend-mods-settings) says how to move a file that still holds it.
 
 | Key | Values | Default | Set at | Does |
 |---|---|---|---|---|
@@ -95,15 +96,15 @@ A bad value in a switch reads as its quiet side: `listening` as dormant, `keepwa
 
 ## Install, update and removal
 
-`ways manage repair`, which the installer and `ways manage update` run, installs the mod in each enabled target after the settings merge and the MCP registration:
+`ways manage repair`, which the installer and `ways manage update` run, keeps the mod in each enabled target where `mods.attend.install` is true, after the settings merge and the MCP registration ([ADR-512](../architecture/platform/ADR-512-each-shipped-claude-code-mod-has-one-wanted-state-in-settings-under-mods-name-and-ways-manage-converges-every-target-to-it.md)):
 
 1. `claude plugin marketplace add <app>/plugins --scope user`, when the `agent-ways` marketplace is missing;
-2. `claude plugin install attend@agent-ways --scope user`, when the plugin is missing;
+2. `claude plugin install attend@agent-ways --scope user`, when the plugin is missing and `claude --version` is at least 2.1.296; below that the mod is reported pending, and every later repair tries again;
 3. `claude plugin marketplace update agent-ways` and `claude plugin update attend@agent-ways`, when the installed version is older than the shipped one. This keeps Claude Code's record of the version in step; it does not change what runs.
 
 Sessions run the plugin from the marketplace folder, the app's `plugins/attend/`, never from the copy Claude Code keeps in its plugin cache (ADR-406, addendum of 2026-10-12). So a change there reaches every session that starts after the app source moves, before any repair, and a running session takes it with `/reload-plugins`.
 
-Each call runs with `CLAUDE_CONFIG_DIR` set to the target, except for the default target, as the MCP registration does. A disabled target has the plugin uninstalled and the marketplace removed before its links go. `attend_mod.install: false` and a repair remove it from every target it applies to; `/attend` then falls back to Monitor. The `agent-ways` marketplace counts as this app's when its source is the app's `plugins/` folder, or the folder a repair recorded adding it from, or (with no record) a folder whose app or checkout is gone entirely while `attend@agent-ways` is installed from it. A dev checkout that is only missing `plugins/` for now (a branch without it) is reported rather than claimed; one on an unmounted drive, whose checkout path is gone too, is claimed, and re-adding it by hand (`claude plugin marketplace add <checkout>/plugins`) puts it back; a moved app's marketplace is removed, added again from the new folder, and the plugin installed again in the same repair, since removing a marketplace uninstalls its plugins. Any other `agent-ways` marketplace, and an `attend` plugin from another marketplace, are reported and left alone; the report names the command that hands such a marketplace to this app (`claude plugin marketplace remove agent-ways`, under the target's `CLAUDE_CONFIG_DIR`, then `ways manage repair --commit`). Each `claude` call is killed after 60 seconds, and a missing `claude` binary, a timeout or a failed call is one line in the report. `ways status` shows, per target, the version sessions run (the shipped one, when the plugin is installed from this app's folder) and Claude Code's recorded version where it differs; `claude plugin list` and `/plugin` show the plugin too.
+Each call runs with `CLAUDE_CONFIG_DIR` set to the target, except for the default target, as the MCP registration does. A disabled target has the plugin uninstalled and the marketplace removed before its links go. `mods.attend.install: false` and a repair remove it from every target it applies to; `/attend` then falls back to Monitor. A mod uninstalled by hand (`claude plugin uninstall attend@agent-ways`, or removing the marketplace) after a repair installed it is not put back: the next repair writes `mods.attend.install: false` in that target's config and says so, and `ways manage mod install attend --commit` installs it again. A mod disabled with `/plugin` or `claude plugin disable` stays installed and disabled, and `ways manage mod check attend` names the enable command. The `agent-ways` marketplace counts as this app's when its source is the app's `plugins/` folder, or the folder a repair recorded adding it from, or (with no record) a folder whose app or checkout is gone entirely while `attend@agent-ways` is installed from it. A dev checkout that is only missing `plugins/` for now (a branch without it) is reported rather than claimed; one on an unmounted drive, whose checkout path is gone too, is claimed, and re-adding it by hand (`claude plugin marketplace add <checkout>/plugins`) puts it back; a moved app's marketplace is removed, added again from the new folder, and the plugin installed again in the same repair, since removing a marketplace uninstalls its plugins. Any other `agent-ways` marketplace, and an `attend` plugin from another marketplace, are reported and left alone; the report names the command that hands such a marketplace to this app (`claude plugin marketplace remove agent-ways`, under the target's `CLAUDE_CONFIG_DIR`, then `ways manage repair --commit`). Each `claude` call is killed after 60 seconds, and a missing `claude` binary, a timeout or a failed call is one line in the report. `ways status` shows, per target, the version sessions run (the shipped one, when the plugin is installed from this app's folder) and Claude Code's recorded version where it differs; `claude plugin list` and `/plugin` show the plugin too.
 
 The plugin carries attend's version and is released with attend: `make cut-release COMPONENT=attend` moves both, and every release refuses a change under `plugins/attend/` that did not move the plugin's version. The version labels what a release shipped; it does not decide what a session loads.
 

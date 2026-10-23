@@ -1331,7 +1331,7 @@ fn the_common_menu_leads_the_bar_and_the_operator_view_is_zero() {
     press(&mut c, key(KeyCode::Up));
     press(&mut c, key(KeyCode::Enter));
     let shown = text(&mut c, 80, 25);
-    assert!(shown.contains("attend.chat.mouse = ") && shown.contains("attend_mod.listening = "), "Settings ▸ lists the settings: {shown}");
+    assert!(shown.contains("attend.chat.mouse = ") && shown.contains("mods.attend.listening = "), "Settings ▸ lists the settings: {shown}");
     g.finish();
 }
 

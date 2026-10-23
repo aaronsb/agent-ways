@@ -2,7 +2,7 @@
 //
 // Dormant is plain Claude Code: one tool, `attend_listen`, and no polling,
 // delivery or row of this module's. A session is active from session start
-// when its project resolves `attend_mod.listening: active` through the ways
+// when its project resolves `mods.attend.listening: active` through the ways
 // config, or from the agent's attend_listen call; it stays active until
 // Claude Code exits. While active the mod polls attend, delivers peer
 // messages as framed turns, serves the send/reply/join/peers tools, draws one
@@ -28,6 +28,7 @@ import type { Move } from './move.ts'
 import {
   ACTIVE_TOOLS,
   DEFAULT_CONFIG,
+  configNotice,
   DORMANT_REFUSAL,
   OPERATOR_ORIGINS,
   listenResult,
@@ -160,9 +161,19 @@ async function run($: $, argv: readonly string[], timeoutMs = 15_000, stdin?: st
   }
 }
 
+/** Whether this process has said that ways could not answer for its
+ *  settings: said once, not at every read. */
+let configNoticeShown = false
+
 async function readConfig($: $, cwd: string): Promise<ModConfig> {
   const r = await run($, configArgv(cwd), 10_000)
-  return r.exitCode === 0 ? parseConfig(r.stdout) : { ...DEFAULT_CONFIG }
+  if (r.exitCode === 0) return parseConfig(r.stdout)
+  const notice = configNotice(r.exitCode)
+  if (notice && !configNoticeShown) {
+    configNoticeShown = true
+    await $.ui.toast(notice)
+  }
+  return { ...DEFAULT_CONFIG }
 }
 
 async function registerListen($: $) {
@@ -877,7 +888,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     mod.cwd = e.cwd
     mod.config = await readConfig($, e.cwd)
-    // attend_mod.install false: the mod is unavailable, nothing is listed.
+    // mods.attend.install false: the mod is unavailable, nothing is listed.
     if (!mod.config.install) return next(e)
     mod.canPoll = e.isInteractive || mod.config.headlessPoll
     mod.isInteractive = e.isInteractive

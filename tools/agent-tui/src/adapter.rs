@@ -89,6 +89,14 @@ pub trait Adapter {
         None
     }
 
+    /// Why the stamp moved, when the adapter knows it was not a file
+    /// changing on disk, such as a background read landing: the bottom bar
+    /// says this after the reload instead of naming a changed file. `None`
+    /// keeps the shell's message. Asked before the reload.
+    fn stamp_moved(&mut self) -> Option<String> {
+        None
+    }
+
     /// The guided flow an action's `Arg::Flow` names.
     fn flow(&self, _name: &str) -> Option<Flow> {
         None

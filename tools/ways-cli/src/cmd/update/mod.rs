@@ -143,6 +143,7 @@ pub fn run(mode: Mode, git_ref: Option<String>, verbose: bool) -> Result<()> {
         reproject(&app, &ways_bin)?;
         print_complete(&version_changes(&before, &binary_versions(&app)));
         judge_setup();
+        retired_settings(&ways_bin);
         return Ok(());
     }
 
@@ -222,6 +223,7 @@ pub fn run(mode: Mode, git_ref: Option<String>, verbose: bool) -> Result<()> {
         Steps::info("`ways manage update --commit`, or `make update-binaries` with a toolchain, then restart Claude Code.");
     }
     judge_setup();
+    retired_settings(&ways_bin);
     Ok(())
 }
 
@@ -277,6 +279,26 @@ fn judge_setup() {
     if let Err(e) = super::judge::setup() {
         Steps::warn(format!("judge setup: {e:#}"));
     }
+}
+
+/// The files that still hold a retired settings section, each with the
+/// command that moves it (ADR-512 item 2), as the newly installed binary
+/// knows them: `ways_bin retired-settings`, a fixed name (ADR-507 §2), so a
+/// section a later release retires is reported by the update that installs
+/// it. A binary without the name prints nothing here. The update rewrites
+/// none of the files.
+fn retired_settings(ways_bin: &Path) {
+    let Ok(out) = Command::new(ways_bin).arg("retired-settings").output() else { return };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    if !out.status.success() || lines.is_empty() {
+        return;
+    }
+    Steps::stage("Retired settings");
+    for l in lines {
+        Steps::warn(l);
+    }
+    Steps::info("Nothing reads these, and the update leaves them as they are.");
 }
 
 /// Current HEAD sha of the app checkout, or None if git can't answer.
@@ -662,6 +684,7 @@ fn run_ref_upgrade(app: &Path, git_ref: &str, has_toolchain: bool) -> Result<()>
     Steps::info("Restart Claude Code to pick up the new version. A running session takes the");
     Steps::info("attend mod's new code with /reload-plugins; the attend binary is read at each call.");
     judge_setup();
+    retired_settings(&ways_bin);
     Ok(())
 }
 

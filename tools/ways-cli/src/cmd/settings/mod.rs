@@ -8,20 +8,24 @@
 //! Object mode (`apply`) takes a settings object and answers with JSON.
 //!
 //! `property` holds get, set, unset and list; `object` apply; `maintain`
-//! emit, lint and fix; `help` the schema's text; `tui` the settings screens
+//! emit, lint and fix; `retired` the files that still hold a retired
+//! section; `help` the schema's text; `tui` the settings screens
 //! on `agent-tui` (ADR-504 §8). This module holds what they share: the
 //! registry, the layers, where a key is written, and the one write path.
 
+pub mod engine;
 mod help;
 mod maintain;
 mod object;
 mod property;
+pub mod retired;
 pub mod themes;
 pub mod tui;
 
 pub use help::{help, help_text};
 pub use maintain::{emit, fix, lint};
 pub use object::apply;
+pub use engine::{write_engine, write_mod_install};
 pub use property::{bare, get, list, set, unset};
 
 use agent_settings::exit;
@@ -375,7 +379,7 @@ pub(super) fn overridden(b: &Bound, written: &Path, project: Option<&Path>) -> O
     Some(match agent_settings::load::overridden(b.spec, &b.bound, &layers, written)? {
         Overridden::Fallback(f) => format!(
             "{} falls back to canonical in {}: {f}; `ways settings lint` lists the findings",
-            b.spec.section,
+            f.unit.as_deref().unwrap_or(b.spec.section),
             written.display()
         ),
         Overridden::By { path, name, .. } => format!("{} sets {name}; `ways settings get {name} --json` shows the value in effect", path.display()),

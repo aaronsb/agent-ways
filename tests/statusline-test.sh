@@ -5,6 +5,9 @@
 # binaries stand in for a live session.
 
 set -u
+# A BASH_ENV that composes PATH would put a real attend ahead of the stubs
+# in every `bash -c` below.
+unset BASH_ENV ENV
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT="$ROOT/statusline.sh"
 WORK=$(mktemp -d)

@@ -111,11 +111,13 @@ fn is_executable(p: &Path) -> bool {
     }
 }
 
-/// The `claude` binary: `WAYS_CLAUDE_BIN` when set (tests), else the first
+/// The `claude` binary: `WAYS_CLAUDE_BIN` when set (tests; none when it
+/// names no file), else the first
 /// executable `claude` on PATH.
 pub(crate) fn claude_bin() -> Option<PathBuf> {
+    // Tests name a stand-in; one that is not there means no `claude`.
     if let Some(p) = std::env::var_os("WAYS_CLAUDE_BIN") {
-        return Some(PathBuf::from(p));
+        return Some(PathBuf::from(p)).filter(|p| p.is_file());
     }
     std::env::var_os("PATH").and_then(|paths| {
         std::env::split_paths(&paths).map(|d| d.join("claude")).find(|p| is_executable(p))

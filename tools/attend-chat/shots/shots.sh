@@ -88,7 +88,7 @@ sweep
 # in every project's tray: one the operator sent beta in an earlier
 # session, and the agents' DMs with each other), proj (alpha, where the
 # chat runs, a project whose .claude/ways.yaml sets
-# attend_mod.listening: active, and beta a git checkout), relic (@relic/,
+# mods.attend.listening: active, and beta a git checkout), relic (@relic/,
 # two messages an earlier channel left, that no entry names) or plain (no
 # Nerd Font). An agent's name comes from the temp
 # path, and a long one cuts its project, so the quiet agent is clicked by
@@ -341,7 +341,7 @@ YAML
   printf 'theme:\n  active: nord\n  shape: %s\n' "$shape" > "$F/config/agent-ways/config.yaml"
   if [ "$1" = proj ]; then
     mkdir -p "$F/work/alpha/.claude" "$F/work/beta/.git"
-    printf 'attend_mod:\n  listening: active\n' > "$F/work/alpha/.claude/ways.yaml"
+    printf 'mods:\n  attend:\n    listening: active\n' > "$F/work/alpha/.claude/ways.yaml"
   fi
 }
 

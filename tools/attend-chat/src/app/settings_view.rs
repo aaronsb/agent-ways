@@ -2,8 +2,8 @@
 //! read ([`crate::settings_edit`]), each as `name = value (layer)`. Picking
 //! one walks to a value through the shell's pickers:
 //!
-//! - an attend mod key (`attend_mod.listening`, `attend_mod.keepwarm`,
-//!   `attend_mod.keepalive.*`) first asks where to write it: the user file,
+//! - an attend mod key (`mods.attend.listening`, `mods.attend.keepwarm`,
+//!   `mods.attend.keepalive.*`) first asks where to write it: the user file,
 //!   the project the chat runs in, a live agent's project, or another
 //!   project typed in an entry dialog. Each place says what its file holds.
 //! - a chat key (`attend.chat.*`) is the user file's alone, so it goes

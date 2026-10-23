@@ -26,6 +26,7 @@ import {
   PREAMBLE,
   SILENCE_FIRST,
   configArgv,
+  configNotice,
   defuseFence,
   formatMessage,
   frameInbound,
@@ -81,10 +82,10 @@ const ok = (stdout = ''): ProcessRunResult => ({
   isStderrTruncated: false,
 })
 
-/** `ways settings list attend_mod --json --effective` for these values. */
+/** `ways settings list mods.attend --json --effective` for these values. */
 function configJson(values: Record<string, unknown>): string {
   const keys: Record<string, { value: unknown }> = {}
-  for (const [k, v] of Object.entries(values)) keys[`attend_mod.${k}`] = { value: v }
+  for (const [k, v] of Object.entries(values)) keys[`mods.attend.${k}`] = { value: v }
   return JSON.stringify({ view: 'effective', keys })
 }
 
@@ -276,7 +277,7 @@ function host(on: On, world: World) {
     if (cmd === 'peer list') return ok('...\n  3 agent(s), 0 channel(s)\n')
     if (cmd === 'message unread --json') return ok(world.unread ?? '{"unread":0,"held_back":0,"listening":true,"rooms":[]}')
     if (cmd.startsWith('keepwarm check --policy')) {
-      const q = world.policy ?? [decision({ policy: false, state: 'off', reason: 'attend_mod.keepalive.enabled is false' })]
+      const q = world.policy ?? [decision({ policy: false, state: 'off', reason: 'mods.attend.keepalive.enabled is false' })]
       return ok(q.length > 1 ? q.shift()! : q[0]!)
     }
     if (cmd.startsWith('message send') && world.sendRefused) return { ...ok(), exitCode: 1, stderr: world.sendRefused }
@@ -416,7 +417,7 @@ describe('argv', () => {
   })
 
   test('the config is read through ways for the session directory', () => {
-    expect(configArgv('/p')).toEqual(['ways', 'settings', 'list', 'attend_mod', '--json', '--effective', '--project', '/p'])
+    expect(configArgv('/p')).toEqual(['ways', 'settings', 'list', 'mods.attend', '--json', '--effective', '--project', '/p'])
   })
 })
 
@@ -2547,5 +2548,18 @@ describe('keepalive policy: the pure pieces', () => {
     expect(rowText({ ...base, keepalive: idle({}) }, 0)).toBe('⟳ 0/1')
     expect(rowText({ ...base, keepalive: idle({ next_at: 41 * 60 }) }, 0)).toBe('⟳ 0/1 · next 41m')
     expect(rowText({ ...base, keepalive: idle({ idle: 7 }) }, 0)).toBe('⟳ 0/1')
+  })
+})
+
+describe('a ways that cannot answer for mods.attend', () => {
+  // Review of the settings rename, finding 2: version skew between ways and
+  // the mod is said once, not passed over in silence.
+  test('is named with its exit and the update that fixes it', () => {
+    expect(configNotice(0)).toBeUndefined()
+    const n = configNotice(2)
+    expect(n).toContain('exited 2')
+    expect(n).toContain('update ways and the attend mod together')
+    expect(n).toContain('dormant')
+    expect(configNotice(127)).toContain('exited 127')
   })
 })

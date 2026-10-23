@@ -603,7 +603,7 @@ Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due,
 
 ###### **Options:**
 
-* `--policy` — Apply the keepalive policy (ADR-414): from each turn's end, one wake the margin before the cache lapses, counted from the operator's last prompt and bounded by attend_mod.keepalive, then one wrap turn
+* `--policy` — Apply the keepalive policy (ADR-414): from each turn's end, one wake the margin before the cache lapses, counted from the operator's last prompt and bounded by mods.attend.keepalive, then one wrap turn
 * `--json` — Print the decision as one JSON object: action (none, keepalive or wrap), text, next_at, count, max, wraps_at and reason
 * `--autocompact <AUTOCOMPACT>` — The autocompact gate as the host read it: on, off or unknown. The policy runs only with off; unknown counts as on
 

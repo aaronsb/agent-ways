@@ -500,20 +500,13 @@ fn converge_one(
         eprintln!("{line}");
     }
 
-    // The mods, last, through Claude Code's plugin CLI. The attend mod
-    // (ADR-406) is installed, updated, or with attend_mod.install false
-    // removed. The ways-judge mod (ADR-708 §9) is installed by
-    // `ways judge-setup`, which records the request per target; where the
-    // record is, repair keeps the mod installed and current, so a mod a
-    // failed call lost comes back, and a mod the operator uninstalled by hand
-    // clears the record instead. A target without the record pays no call.
-    use crate::cmd::attend_mod::{self, Want, ATTEND, JUDGE};
-    let target_config = target_config_path(dest_root);
-    let attend = if ways_core::settings::attend_mod_install(&target_config) { Want::Install } else { Want::Withdraw };
-    let mut lines = attend_mod::converge(&ATTEND, source_root, dest_root, &paths::projection_root(), attend, dry_run);
-    if attend_mod::recorded(&JUDGE, dest_root) {
-        lines.extend(attend_mod::converge(&JUDGE, source_root, dest_root, &paths::projection_root(), Want::Keep, dry_run));
-    }
+    // The mods, last, through Claude Code's plugin CLI: each converged to
+    // its wanted state, mods.<name>.install resolved over the user config
+    // and this target's (ADR-512 item 3).
+    let config = target_config_path(dest_root);
+    let target = crate::cmd::attend_mod::Target { dest_root, default_root: &paths::projection_root(), config: &config };
+    let mut lines = crate::cmd::attend_mod::align_judge(dry_run);
+    lines.extend(crate::cmd::attend_mod::converge_target(source_root, &target, None, dry_run));
     for line in lines {
         if !quiet {
             eprintln!("{line}");
@@ -525,7 +518,7 @@ fn converge_one(
 
 /// The config file of the target at `dest_root`: its own `config:` when the
 /// targets list names one, else the default under the target config root.
-fn target_config_path(dest_root: &Path) -> PathBuf {
+pub(crate) fn target_config_path(dest_root: &Path) -> PathBuf {
     crate::config::global()
         .targets()
         .into_iter()
@@ -557,17 +550,9 @@ fn withdraw_one(
         }
     }
     // The MCP registration and the mods go before the links, so none names a
-    // removed path. The ways-judge mod goes first, so attend's withdrawal
-    // finds no other mod of ours and removes the marketplace too.
-    use crate::cmd::attend_mod::{self, ATTEND, JUDGE};
+    // removed path. Every mod goes, whatever its setting (ADR-512 item 3).
     let mcp_line = crate::cmd::mcp_register::withdraw(dest_root, &paths::projection_root(), dry_run);
-    let mut mod_lines = Vec::new();
-    // The record, or the target's settings naming the mod, says it may be
-    // there; the record stays, so enabling the target again reinstalls it.
-    if attend_mod::recorded(&JUDGE, dest_root) || attend_mod::listed_in(&JUDGE, dest_root) {
-        mod_lines.extend(attend_mod::withdraw(&JUDGE, source_root, dest_root, &paths::projection_root(), dry_run));
-    }
-    mod_lines.extend(attend_mod::withdraw(&ATTEND, source_root, dest_root, &paths::projection_root(), dry_run));
+    let mod_lines = crate::cmd::attend_mod::withdraw_target(source_root, dest_root, &paths::projection_root(), dry_run);
     let mut outcomes = Vec::new();
     for root in roots {
         let src = source_root.join(&root.rel);

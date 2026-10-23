@@ -17,14 +17,14 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-/// `attend_mod.keepalive.max_keepalives`.
+/// `mods.attend.keepalive.max_keepalives`.
 pub const DEFAULT_MAX: u32 = 8;
 pub const MAX_RANGE: (u32, u32) = (0, 48);
-/// `attend_mod.keepalive.margin_minutes`: ADR-182's 50-minute point on the
+/// `mods.attend.keepalive.margin_minutes`: ADR-182's 50-minute point on the
 /// hour tier.
 pub const DEFAULT_MARGIN_MIN: u64 = 10;
 pub const MARGIN_RANGE: (u64, u64) = (3, 30);
-/// `attend_mod.keepalive.wrap_file`.
+/// `mods.attend.keepalive.wrap_file`.
 pub const DEFAULT_WRAP_FILE: &str = "{state}/wrap/{session}.md";
 /// How long a wake may go without its turn before the verdict stops the
 /// policy (ADR-182's ten minutes).
@@ -174,13 +174,13 @@ impl Gate {
     }
 }
 
-/// The `attend_mod` keys the policy reads (ADR-414 item 8).
+/// The `mods.attend` keys the policy reads (ADR-414 item 8).
 #[derive(Clone, Debug)]
 pub struct Config {
     /// The settings were read. Unread, the policy is off: `enabled` fails
     /// closed (ADR-414 item 8).
     pub settings_ok: bool,
-    /// `attend_mod.keepwarm`: off turns off every cache wake the mod drives.
+    /// `mods.attend.keepwarm`: off turns off every cache wake the mod drives.
     pub keepwarm_on: bool,
     pub enabled: bool,
     pub max: u32,
@@ -210,7 +210,7 @@ impl Default for Config {
 }
 
 impl Config {
-    /// From `ways settings list attend_mod --json --effective`. A key that
+    /// From `ways settings list mods.attend --json --effective`. A key that
     /// is absent, or of the wrong type or out of range, keeps its default,
     /// except `enabled`, which fails closed: only an explicit true runs the
     /// policy. No document, or one that does not parse, is the policy off.
@@ -219,7 +219,7 @@ impl Config {
         let Some(v) = doc.and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()) else {
             return Config { settings_ok: false, enabled: false, ..d };
         };
-        let key = |k: &str| v.get("keys").and_then(|keys| keys.get(format!("attend_mod.{k}"))).and_then(|e| e.get("value")).cloned();
+        let key = |k: &str| v.get("keys").and_then(|keys| keys.get(format!("mods.attend.{k}"))).and_then(|e| e.get("value")).cloned();
         let text = |k: &str| key(k).and_then(|x| x.as_str().map(str::to_string));
         let int = |k: &str| key(k).and_then(|x| x.as_u64());
         let windows = match key("keepalive.windows") {
@@ -254,11 +254,11 @@ impl Config {
     /// Why the policy does not run with `gate`, or `None` when it runs.
     pub fn why_off(&self, gate: Gate) -> Option<&'static str> {
         if !self.settings_ok {
-            Some("the attend_mod settings could not be read")
+            Some("the mods.attend settings could not be read")
         } else if !self.keepwarm_on {
-            Some("attend_mod.keepwarm is off")
+            Some("mods.attend.keepwarm is off")
         } else if !self.enabled {
-            Some("attend_mod.keepalive.enabled is false")
+            Some("mods.attend.keepalive.enabled is false")
         } else {
             match gate {
                 Gate::Off => None,

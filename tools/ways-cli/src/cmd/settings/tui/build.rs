@@ -38,8 +38,8 @@ impl Tab {
 
 /// The settings tabs, in order; the theme tab follows them. attend's
 /// settings are two tabs beside ways' (ADR-504 §8): its governor, engagement
-/// and cleanup, and its sensors. The attend mod's section, which ways owns
-/// (ADR-406), has a tab of its own after them.
+/// and cleanup, and its sensors. The mods' section, which ways owns (ADR-406,
+/// ADR-512), has a tab of its own after them, with a group per mod.
 pub const TABS: [Tab; 7] = [
     Tab::root("ways"),
     Tab::root("matching"),
@@ -47,7 +47,7 @@ pub const TABS: [Tab; 7] = [
     Tab::root("install"),
     Tab { name: "attend", prefix: "attend", skip: &["attend.sensors"] },
     Tab { name: "sensors", prefix: "attend.sensors", skip: &[] },
-    Tab { name: "mod", prefix: "attend_mod", skip: &[] },
+    Tab { name: "mod", prefix: "mods", skip: &[] },
 ];
 
 /// The tab named `name`.
@@ -384,11 +384,16 @@ impl Ways {
         TABS.iter().map(|tab| self.tab(tab, layers)).collect()
     }
 
-    /// The doc of a group: its section's, or for one of attend's sensors, a
-    /// line on that sensor.
+    /// The doc of a group: its section's, or for one of attend's sensors or
+    /// one mod, a line on it.
     pub(super) fn section_doc(&self, name: &str) -> String {
         if let Some(s) = name.strip_prefix("attend.sensors.").filter(|s| !s.contains('.')) {
             return attend_config::schema::sensor_doc(s);
+        }
+        if let Some(m) = name.strip_prefix("mods.").filter(|m| !m.contains('.')) {
+            if let Some((_, doc)) = ways_core::settings::MODS.iter().find(|(n, _)| *n == m) {
+                return doc.to_string();
+            }
         }
         if let Some(p) = name.strip_prefix("gate.profiles.").filter(|p| !p.contains('.')) {
             // A shipped engine's group is headed by the name setup offers it
@@ -456,7 +461,10 @@ impl Ways {
                 s = s.default(display(Some(d), b.spec.kind));
             }
             let settable = !matches!(b.spec.kind, Kind::ReadOnly | Kind::Secret) && b.spec.computed.is_none();
-            if settable && !self.ctx.in_project && super::writes_project(&b, &self.ctx) {
+            if b.spec.name == super::super::engine::JUDGE_INSTALL {
+                // It follows the engine in the user config (ADR-512 item 4).
+                s = s.lock("set with gate.engine on the gate tab: claude-code wants the ways-judge mod, any other engine does not");
+            } else if settable && !self.ctx.in_project && super::writes_project(&b, &self.ctx) {
                 // No project: the key has no file to go to.
                 s = s.lock(format!(
                     "not applicable: no project encloses {}, so a project's file has nowhere to be. Open the screens inside a project, or with --project <dir>",
@@ -481,6 +489,11 @@ impl Ways {
                 long => format!("{}\n\n{long}", b.spec.doc),
             };
             let mut node = Node::leaf(rest.last().cloned().unwrap_or_default(), doc, s).with_actions(self.actions_for(&b));
+            if tab.name == "mod" {
+                // Each mod's section passes no name to its keys: the
+                // heading says whose setting it is.
+                node = node.headed(b.name());
+            }
             if let Some(f) = finding_for(layers, b.spec.file, b.spec.section, &b.path()) {
                 node = node.with_finding(tilde_text(&f.to_string(), home));
             }
@@ -508,6 +521,10 @@ impl Ways {
             self.other_projects(&mut root);
         }
         self.headers(&mut root, tab.prefix);
+        if tab.name == "mod" {
+            let (states, read) = self.mod_states();
+            super::mods::nodes(&mut root, &states, &read);
+        }
         if tab.name == "gate" {
             // Last, so the settings keep their rows.
             root.children.extend((self.ctx.judge)().map(|j| super::judge::section(&j)));
@@ -542,7 +559,7 @@ impl Ways {
         Action::new("lint", format!("ways settings lint{project}"))
             .reads()
             .verifies()
-            .doc("Checks every settings file the screens read against the schema and shows what `ways settings lint` prints. Writes nothing.")
+            .doc("Checks every settings file the screens read against the schema, and names each file that still holds a retired section: the user config, each target's config and every project `ways projects` knows. Shows what `ways settings lint` prints. Writes nothing.")
     }
 
     /// Every way a session here can fire, by id: the project's own, the

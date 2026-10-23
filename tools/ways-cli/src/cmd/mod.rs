@@ -17,6 +17,7 @@ pub mod lookup;
 pub mod manifest;
 pub mod match_cmd;
 pub mod memory_seed;
+pub mod mods;
 pub mod permissions;
 pub mod probe;
 pub mod projects;
