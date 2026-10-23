@@ -72,7 +72,7 @@ ADR-609 put every commit, push, pull request write and issue write behind the us
 
 ### Neutral
 
-- Way edits: `meta/trust/delegation` (the git row and Standing Grants), `meta/codify`, `softwaredev/delivery/commits/prepare`, `softwaredev/delivery/issues` and `softwaredev/delivery/github/follow-through`, wherever they offer an issue or commit write.
+- Way edits: `meta/trust/delegation` (the git row and Standing Grants), `meta/codify`, `meta/attend/context-pressure`, `meta/compaction-checkpoint`, `softwaredev/delivery/commits/prepare`, `softwaredev/delivery/issues`, `softwaredev/delivery/github` and `softwaredev/delivery/github/follow-through`. Each returns to making the write it made before ADR-609, where ADR-609 had turned it into an offer. ADR-609's other way edits, such as the regular-merge default and handing over `/compact`, stay.
 
 ## Alternatives Considered
 
