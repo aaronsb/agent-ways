@@ -13,7 +13,7 @@ export const ATTEND = 'attend'
  *  scripts/release.sh bump moves both. The beat sends it to attend, which
  *  tells the operator when the session runs an older mod than the installed
  *  one. */
-export const MOD_VERSION = '0.28.4'
+export const MOD_VERSION = '0.29.0'
 export const WAYS = 'ways'
 
 // ── argv ─────────────────────────────────────────────────────────────────
