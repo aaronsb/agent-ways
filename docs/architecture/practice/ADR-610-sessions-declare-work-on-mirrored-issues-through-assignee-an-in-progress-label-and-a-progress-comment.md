@@ -60,6 +60,14 @@ considered:
   - operator: aaronsb
     said: "not necessairly that exactly but thats the gist"
     via: Claude Code session 2026-10-23, relayed verbatim by the lead as a correction to the state-line shape in the previous entry
+  - operator: aaronsb
+    said: "Yes"
+    via: Claude Code session 2026-10-23, choice tool answer to the monday probe
+    covers: [monday]
+  - operator: aaronsb
+    said: "Post the comment"
+    via: Claude Code session 2026-10-23, choice tool answer to the unattended-wrap probe
+    covers: [unattended wrap]
 status: proposed
 date: 2026-10-23
 deciders:
