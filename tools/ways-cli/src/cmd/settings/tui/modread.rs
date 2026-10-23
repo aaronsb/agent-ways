@@ -21,6 +21,8 @@ pub type Reader = fn() -> Vec<Overview>;
 pub struct ModRead {
     read: Reader,
     fresh: Duration,
+    /// The clock the window is measured on: the real one, or a test's.
+    now: Box<dyn Fn() -> Instant>,
     value: Option<Vec<Overview>>,
     failed: Option<String>,
     rx: Option<Receiver<Result<Vec<Overview>, String>>>,
@@ -34,7 +36,12 @@ pub struct ModRead {
 impl ModRead {
     /// A read owed from the start, none running.
     pub fn new(read: Reader, fresh: Duration) -> ModRead {
-        ModRead { read, fresh, value: None, failed: None, rx: None, started: None, finished: 0, owed: true, waited: false }
+        ModRead::with_clock(read, fresh, Box::new(Instant::now))
+    }
+
+    /// [`ModRead::new`] measuring the window on `now`.
+    pub fn with_clock(read: Reader, fresh: Duration, now: Box<dyn Fn() -> Instant>) -> ModRead {
+        ModRead { read, fresh, now, value: None, failed: None, rx: None, started: None, finished: 0, owed: true, waited: false }
     }
 
     /// Ask for a read; it starts when no read runs and `fresh` has passed
@@ -53,7 +60,8 @@ impl ModRead {
                 Err(TryRecvError::Empty) => {}
             }
         }
-        let idle = self.rx.is_none() && self.started.is_none_or(|t| t.elapsed() >= self.fresh);
+        let now = (self.now)();
+        let idle = self.rx.is_none() && self.started.is_none_or(|t| now.saturating_duration_since(t) >= self.fresh);
         if self.owed && idle {
             self.owed = false;
             self.start();
@@ -89,7 +97,7 @@ impl ModRead {
             let _ = tx.send(r);
         });
         self.rx = Some(rx);
-        self.started = Some(Instant::now());
+        self.started = Some((self.now)());
     }
 
     fn land(&mut self, r: Result<Vec<Overview>, String>) {
@@ -129,6 +137,20 @@ impl ModRead {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    /// A clock the test moves by hand, so the window passes only when the
+    /// test says, whatever the runner's speed.
+    fn clock() -> (Rc<Cell<Instant>>, Box<dyn Fn() -> Instant>) {
+        let t = Rc::new(Cell::new(Instant::now()));
+        let read = t.clone();
+        (t, Box::new(move || read.get()))
+    }
+
+    fn advance(t: &Cell<Instant>, by: Duration) {
+        t.set(t.get() + by);
+    }
 
     fn quick() -> Vec<Overview> {
         Vec::new()
@@ -139,29 +161,38 @@ mod tests {
         Vec::new()
     }
 
+    /// A read that outlasts any wait a test makes.
+    fn very_slow() -> Vec<Overview> {
+        std::thread::sleep(Duration::from_secs(2));
+        Vec::new()
+    }
+
     fn broken() -> Vec<Overview> {
         panic!("no plugin list")
     }
 
-    /// Pump until `done` holds or a second passes.
+    /// Pump until `done` holds, waiting on the read's thread for at most ten
+    /// seconds. Only a read landing is waited on; the window is the clock's.
     fn until(r: &mut ModRead, done: impl Fn(&ModRead) -> bool) {
         let start = Instant::now();
-        while !done(r) && start.elapsed() < Duration::from_secs(1) {
+        while !done(r) && start.elapsed() < Duration::from_secs(10) {
             r.pump();
             std::thread::sleep(Duration::from_millis(5));
         }
+        assert!(done(r), "the read never landed");
     }
 
-    /// Review finding 1: a read slower than the window no longer starts
-    /// the next when it lands; only a request does.
+    /// Review finding 1: a read landing starts no other, however long ago
+    /// the last one started; only a request does.
     #[test]
     fn a_slow_read_landing_starts_no_other() {
-        let mut r = ModRead::new(slow, Duration::from_millis(20));
+        let (t, now) = clock();
+        let mut r = ModRead::with_clock(slow, Duration::from_millis(20), now);
         r.pump();
         until(&mut r, |r| r.finished() == 1);
-        for _ in 0..40 {
+        advance(&t, Duration::from_secs(60));
+        for _ in 0..20 {
             r.pump();
-            std::thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(r.finished(), 1, "nothing owed, nothing read");
         assert!(r.rx.is_none());
@@ -171,19 +202,28 @@ mod tests {
     /// kept and starts once both have passed.
     #[test]
     fn a_request_during_a_read_starts_after_it() {
-        let mut r = ModRead::new(slow, Duration::from_millis(300));
+        let (t, now) = clock();
+        let mut r = ModRead::with_clock(slow, Duration::from_millis(300), now);
         r.pump();
         r.owe();
-        assert!(r.owed, "kept while the read runs");
+        assert!(r.owed && r.rx.is_some(), "kept while the read runs");
+        until(&mut r, |r| r.finished() == 1);
+        r.pump();
+        assert!(r.owed && r.rx.is_none(), "landed, and the window has not passed");
+        advance(&t, Duration::from_millis(300));
+        r.pump();
+        assert!(!r.owed && r.rx.is_some(), "the kept request started once the window passed");
         until(&mut r, |r| r.finished() == 2);
-        assert_eq!(r.finished(), 2, "the kept request ran once the window passed");
-        let mut q = ModRead::new(quick, Duration::from_millis(50));
+
+        let (t, now) = clock();
+        let mut q = ModRead::with_clock(quick, Duration::from_millis(50), now);
         q.pump();
         until(&mut q, |q| q.finished() == 1);
         q.owe();
-        assert!(q.owed, "inside the window it waits");
+        assert!(q.owed && q.rx.is_none(), "inside the window it waits");
+        advance(&t, Duration::from_millis(50));
+        q.pump();
         until(&mut q, |q| q.finished() == 2);
-        assert_eq!(q.finished(), 2);
     }
 
     /// Review finding 2: a read that panics is reported and not waited on.
@@ -191,20 +231,22 @@ mod tests {
     fn a_read_that_panics_is_reported() {
         let mut r = ModRead::new(broken, Duration::from_millis(10));
         r.pump();
-        r.wait_first(Duration::from_secs(1));
+        until(&mut r, |r| r.finished() == 1);
         assert_eq!(r.shown().1, Read::Failed("no plugin list".into()));
         assert!(r.rx.is_none(), "no read left running");
     }
 
-    /// Review finding 9: the first build waits once, not at every rebuild.
+    /// Review finding 9: the first build waits once, not at every rebuild:
+    /// the second wait returns with the read still running, where waiting
+    /// would have seen it land.
     #[test]
     fn the_first_build_waits_once() {
-        let mut r = ModRead::new(slow, Duration::from_secs(5));
+        let mut r = ModRead::new(very_slow, Duration::from_secs(5));
         r.pump();
-        let start = Instant::now();
-        r.wait_first(Duration::from_millis(30));
-        r.wait_first(Duration::from_millis(500));
-        assert!(start.elapsed() < Duration::from_millis(200), "the second wait returned at once");
+        r.wait_first(Duration::from_millis(10));
+        assert!(r.rx.is_some() && r.waited);
+        r.wait_first(Duration::from_secs(30));
+        assert!(r.rx.is_some(), "the second call did not wait for the read");
         assert_eq!(r.shown().1, Read::Reading);
     }
 
@@ -222,10 +264,12 @@ mod tests {
     /// the earlier state, not hidden behind it.
     #[test]
     fn a_failed_reread_is_shown_with_the_earlier_state() {
-        let mut r = ModRead::new(flaky, Duration::from_millis(0));
+        let (t, now) = clock();
+        let mut r = ModRead::with_clock(flaky, Duration::from_millis(1), now);
         r.pump();
         until(&mut r, |r| r.finished() == 1);
         assert_eq!(r.shown().1, Read::Done);
+        advance(&t, Duration::from_millis(1));
         r.owe();
         until(&mut r, |r| r.finished() == 2);
         assert_eq!(r.shown().1, Read::Stale("plugin list unreadable".into()));

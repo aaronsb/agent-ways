@@ -1337,8 +1337,11 @@ fn lint_names_every_target_and_known_project_holding_attend_mod() {
     let other = f.root.join("other");
     f.write(&other.join(".claude/ways.yaml"), "attend_mod:\n  listening: active\n");
     f.write(&other.join("CLAUDE.md"), "");
-    let slug = other.to_string_lossy().replace(['/', '.'], "-");
-    f.write(&target.join("projects").join(&slug).join("s.jsonl"), &format!("{{\"cwd\":\"{}\"}}\n", other.display()));
+    // Named as Claude Code names a project's transcripts directory, with
+    // the cwd JSON-escaped (a Windows path holds `\`).
+    let slug = claude_sessions::project_slug(&other.to_string_lossy());
+    let record = serde_json::json!({ "cwd": other.to_string_lossy() });
+    f.write(&target.join("projects").join(&slug).join("s.jsonl"), &format!("{record}\n"));
     let (out, err, code) = f.run(&["settings", "lint"]);
     assert_eq!(code, 3, "{out}{err}");
     let fix = format!("`ways settings fix mods.attend --target {}` moves them", f.word(&target));

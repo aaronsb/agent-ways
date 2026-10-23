@@ -1211,7 +1211,7 @@ fn the_mod_tab_reads_its_state_in_the_background() {
     assert_eq!(first.children[0].columns, Some((String::new(), "reading…".to_string())));
     let start = std::time::Instant::now();
     while ways.stamp() == before {
-        assert!(start.elapsed() < std::time::Duration::from_secs(5), "the read never landed");
+        assert!(start.elapsed() < std::time::Duration::from_secs(30), "the read never landed");
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     assert_eq!(tab(&ways).children[0].columns, Some((String::new(), "0.29.0  removed".to_string())));
@@ -1236,18 +1236,18 @@ fn target_rows_carry_the_actions_and_install_rows_name_their_mod() {
 
 static SLOW_READS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-/// A read slower than the window and the first build's wait, counting each
-/// run.
+/// A read slower than the first build's 300 ms wait, counting each run.
 fn counted_slow_states() -> Vec<crate::cmd::mods::Overview> {
     SLOW_READS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    std::thread::sleep(std::time::Duration::from_millis(400));
+    std::thread::sleep(std::time::Duration::from_secs(1));
     mod_states()
 }
 
 /// Review of the mod tab, finding 1: driven as the shell drives it (stamp,
-/// then reload when it moves), a read slower than the window settles at one
-/// read; the reload a landed read causes owes no other, and the bottom bar
-/// is told the stamp moved for the mods, not for a file (finding 4).
+/// then reload when it moves), the read settles at one: the reload its
+/// landing causes owes no other, even with no window at all between reads,
+/// and the bottom bar is told the stamp moved for the mods, not for a file
+/// (finding 4). It waits on the landing, not on the clock.
 #[test]
 fn a_landed_read_reloads_once_and_starts_no_other() {
     use agent_tui::Adapter as _;
@@ -1255,19 +1255,26 @@ fn a_landed_read_reloads_once_and_starts_no_other() {
     let mut ctx = ctx_of(&fx);
     ctx.mods = counted_slow_states;
     ctx.mods_background = true;
-    let mut ways = Ways::new(ctx).with_mods_fresh(std::time::Duration::from_millis(20));
+    let mut ways = Ways::new(ctx).with_mods_fresh(std::time::Duration::ZERO);
     let _ = ways.build(&[]);
     let mut last = ways.stamp();
     let mut said = Vec::new();
-    let start = std::time::Instant::now();
-    while start.elapsed() < std::time::Duration::from_millis(1500) {
+    let mut step = |ways: &mut Ways, said: &mut Vec<Option<String>>| {
         let now = ways.stamp();
         if now != last {
             said.push(ways.stamp_moved());
             let _ = ways.reload();
             last = ways.stamp();
         }
+    };
+    let start = std::time::Instant::now();
+    while said.is_empty() && start.elapsed() < std::time::Duration::from_secs(30) {
+        step(&mut ways, &mut said);
         std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    // Had the reload owed a read, it would have started at once: look again.
+    for _ in 0..50 {
+        step(&mut ways, &mut said);
     }
     assert_eq!(SLOW_READS.load(std::sync::atomic::Ordering::SeqCst), 1, "the read settled at one");
     assert_eq!(said, [Some("mod state updated".to_string())], "one reload, said as a mod read");
