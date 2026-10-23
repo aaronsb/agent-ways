@@ -203,3 +203,16 @@ fn block_with_only_navigation_is_the_head_line() {
     assert_eq!(block("Move", "cd /tmp && export A=1"), "About to run: Move");
     assert_eq!(block("", ""), "About to run: ");
 }
+
+#[test]
+fn block_shows_the_commands_of_a_command_string() {
+    assert_eq!(
+        block("Force push", "eval \"git push --force\""),
+        "About to run: Force push\ngit push (Push commits to a remote repository)"
+    );
+    let shell = block("Push", "bash -c 'git push origin main'");
+    let lines: Vec<&str> = shell.lines().collect();
+    assert_eq!(lines.len(), 3, "{shell}");
+    assert!(lines[1].starts_with("bash"), "{shell}");
+    assert_eq!(lines[2], "git push (Push commits to a remote repository)");
+}

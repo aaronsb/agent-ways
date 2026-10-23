@@ -278,6 +278,25 @@ mod shell_command_tests {
     }
 
     #[test]
+    fn an_anchored_pattern_matches_inside_eval_and_a_shell_command_string() {
+        for cmd in [
+            "eval \"git push --force\"",
+            "eval git push",
+            "bash -c \"git push origin main\"",
+            "sh -c 'cd /tmp && git push'",
+            "bash -lc 'git push'",
+            "sudo sh -c 'git push'",
+            "env FOO=1 bash -c \"git push\"",
+            "bash -c \"sh -c 'git push'\"",
+        ] {
+            assert_eq!(span(r"^git\ push", cmd).as_deref(), Some("git push"), "{cmd}");
+        }
+        for cmd in ["bash deploy.sh", "eval", "bash", "bash <<EOF\ngit push\nEOF"] {
+            assert_eq!(span(r"^git\ push", cmd), None, "{cmd}");
+        }
+    }
+
+    #[test]
     fn heredoc_text_does_not_match() {
         let body = "cat > notes.md <<'EOF'\nthen git commit and make test\nEOF\nls";
         assert_eq!(span(r"git\ commit", body), None);

@@ -276,3 +276,27 @@ fn find_that_removes_is_a_write() {
         Some(Class::Search)
     );
 }
+
+#[test]
+fn a_command_string_carries_its_commands_class() {
+    let inner = |cmd: &str| {
+        parse(cmd)
+            .into_iter()
+            .filter(|s| s.program.as_deref() == Some("git"))
+            .map(|s| (s.role, s.class))
+            .collect::<Vec<_>>()
+    };
+    let publish = vec![(Role::Operative, Some(Class::Publish))];
+    assert_eq!(inner("eval \"git push --force\""), publish);
+    assert_eq!(inner("eval git push"), publish);
+    assert_eq!(inner("bash -c \"git push origin main\""), publish);
+    assert_eq!(inner("sudo sh -c 'git push'"), publish);
+    assert_eq!(inner("env FOO=1 bash -c \"git push\""), publish);
+    assert_eq!(inner("bash -c \"sh -c 'git push'\""), publish);
+    assert_eq!(class("bash -lc \"make test\""), Some(Class::Other));
+    assert_eq!(
+        parse("bash -lc \"make test\"")[1].class,
+        Some(Class::BuildTest)
+    );
+    assert_eq!(parse("eval")[0].role, Role::Navigation);
+}

@@ -20,7 +20,8 @@
 //!
 //! Quoting is respected, heredoc bodies are dropped, and the bodies of
 //! subshells, `$( )`, backticks, process substitutions and loops become
-//! segments of their own. A segment's [`Segment::text`] and its
+//! segments of their own, as do the command strings that `eval` and
+//! `bash -c` (`sh -c`, …) hand the shell to parse again. A segment's [`Segment::text`] and its
 //! [`Segment::program_text`] are what the `commands:` lane of ADR-188
 //! item 3a matches, for each operative segment.
 //!
@@ -30,6 +31,7 @@
 //! embeddings, the judge or hook events.
 
 mod classify;
+mod command_string;
 mod describe;
 mod lex;
 // Laid out by hand: one rule or list per block reads as data.
@@ -38,6 +40,7 @@ pub mod tables;
 
 use std::ops::Range;
 
+use command_string::CommandString;
 pub use describe::{describe, described_block, Described, Summaries};
 
 /// What joins a segment to the one before it.
@@ -63,11 +66,15 @@ pub enum Connector {
     CommandSubstitution,
     /// The first segment of a loop body, after `do`.
     LoopBody,
+    /// The first segment of a command string the shell parses again: the
+    /// arguments of `eval`, or the string after `bash -c` (and `sh`, `zsh`,
+    /// `dash`, `ksh`).
+    CommandString,
 }
 
 impl Connector {
     /// A short stable label: `start`, `;`, `&&`, `||`, `|`, `&`, `newline`,
-    /// `subshell`, `$()`, `do`.
+    /// `subshell`, `$()`, `do`, `string`.
     pub fn as_str(self) -> &'static str {
         match self {
             Connector::Start => "start",
@@ -80,6 +87,7 @@ impl Connector {
             Connector::Subshell => "subshell",
             Connector::CommandSubstitution => "$()",
             Connector::LoopBody => "do",
+            Connector::CommandString => "string",
         }
     }
 }
@@ -174,8 +182,8 @@ impl Class {
 pub struct Segment {
     /// What joins this segment to the one before it.
     pub connector: Connector,
-    /// Nesting depth: 0 at top level, one more inside each subshell or
-    /// substitution.
+    /// Nesting depth: 0 at top level, one more inside each subshell,
+    /// substitution or command string.
     pub depth: usize,
     pub role: Role,
     /// The program's base name (`/usr/bin/git` gives `git`), after
@@ -190,9 +198,14 @@ pub struct Segment {
     /// The verb class; set only for an operative segment.
     pub class: Option<Class>,
     /// Byte range in the original command, from the segment's first word
-    /// (shell keywords such as `do` or `then` excluded) to its last.
+    /// (shell keywords such as `do` or `then` excluded) to its last. In a
+    /// command string written with escapes (`bash -c "echo \"x\""`), it is
+    /// the range of the words that hold the string.
     pub span: Range<usize>,
-    /// The original text over `span`, with any heredoc body inside it cut out.
+    /// The original text over `span`, with any heredoc body inside it cut
+    /// out. In a command string it is the text the shell parses: the
+    /// string's quotes and escapes are removed, and `eval`'s arguments are
+    /// joined by spaces.
     pub text: String,
     /// Byte offset in `text` where the program word starts, past leading
     /// assignments and wrappers; 0 when `program` is `None`.
@@ -234,11 +247,55 @@ impl Segment {
 /// first segment carries [`Connector::LoopBody`]. Malformed input (an
 /// unclosed quote or parenthesis) never fails: the rest of the string is
 /// read as far as it goes.
+///
+/// A command string is parsed as a list of its own: `eval`'s arguments,
+/// joined by spaces, and the string after `bash -c` (or `sh`, `zsh`, `dash`,
+/// `ksh`, through any wrapper). Its segments follow the segment that runs it,
+/// one level deeper, the first carrying [`Connector::CommandString`].
 pub fn parse(command: &str) -> Vec<Segment> {
-    let lexed = lex::lex(command);
-    lexed
-        .segments
-        .into_iter()
-        .filter_map(|raw| classify::build(command, &lexed.excluded, raw))
-        .collect()
+    parse_at(command, 0)
+}
+
+/// [`parse`], with the top-level list at nesting `depth`.
+fn parse_at(command: &str, depth: usize) -> Vec<Segment> {
+    let lexed = lex::lex(command, depth);
+    let mut out = Vec::new();
+    // The depth and word spans of the last command string parsed. The lexer
+    // has already read any `$( … )` inside those words; the string's own
+    // parse reads it again, so the lexer's segments for it are dropped.
+    let mut reparsed: Option<(usize, Vec<Range<usize>>)> = None;
+    for raw in lexed.segments {
+        let Some((segment, string)) = classify::build(command, &lexed.excluded, raw) else {
+            continue;
+        };
+        if let Some((at, words)) = &reparsed {
+            if segment.depth <= *at {
+                reparsed = None;
+            } else if words
+                .iter()
+                .any(|w| w.start <= segment.span.start && segment.span.end <= w.end)
+            {
+                continue;
+            }
+        }
+        let at = segment.depth;
+        out.push(segment);
+        let Some(words) = string.filter(|_| at + 1 < lex::MAX_DEPTH) else {
+            continue;
+        };
+        let string = CommandString::new(command, &words);
+        let mut inner = parse_at(&string.text, at + 1);
+        if let Some(first) = inner
+            .first_mut()
+            .filter(|s| s.connector == Connector::Start)
+        {
+            first.connector = Connector::CommandString;
+        }
+        for s in &mut inner {
+            s.span = string.source_span(&s.span);
+        }
+        out.extend(inner);
+        reparsed = Some((at, words.into_iter().map(|w| w.span).collect()));
+    }
+    out
 }

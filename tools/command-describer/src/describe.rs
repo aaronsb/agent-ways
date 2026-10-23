@@ -126,8 +126,8 @@ pub fn describe<'a>(segments: &'a [Segment], data: &'a Summaries) -> Vec<Describ
 
 /// The block ADR-188 item 3c gives the judge, in the form ADR-707 measured:
 /// `About to run: <description>`, then one line per unit the call splits
-/// into at `;`, `&&`, `&`, a newline, a loop body, a subshell or a
-/// substitution, in order. Segments joined by `|` or `||` share a line with
+/// into at `;`, `&&`, `&`, a newline, a loop body, a subshell, a
+/// substitution or a command string (`eval …`, `bash -c …`), in order. Segments joined by `|` or `||` share a line with
 /// the symbol between them (`git log (…) | grep (…) | head (…)`). Each
 /// segment reads as [`Described::text`]. Navigation segments are dropped;
 /// one still ends the line before it unless it joins by `|` or `||`. The

@@ -11,8 +11,9 @@ use std::ops::Range;
 use crate::tables::LEAD_KEYWORDS;
 use crate::Connector;
 
-/// Substitutions nested deeper than this are skipped, not parsed.
-const MAX_DEPTH: usize = 32;
+/// Substitutions and command strings nested deeper than this are skipped,
+/// not parsed.
+pub(crate) const MAX_DEPTH: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TokenKind {
@@ -46,14 +47,16 @@ pub(crate) struct Lexed {
     pub excluded: Vec<Range<usize>>,
 }
 
-pub(crate) fn lex(src: &str) -> Lexed {
+/// Lex `src` as a list at nesting `depth`: 0 for a whole command, deeper for
+/// a command string inside one.
+pub(crate) fn lex(src: &str, depth: usize) -> Lexed {
     let mut lexer = Lexer {
         b: src.as_bytes(),
         pos: 0,
         heredocs: Vec::new(),
         excluded: Vec::new(),
     };
-    let segments = lexer.list(0, Connector::Start, Term::Eof);
+    let segments = lexer.list(depth, Connector::Start, Term::Eof);
     Lexed {
         segments,
         excluded: lexer.excluded,
