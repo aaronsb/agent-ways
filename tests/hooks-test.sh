@@ -612,6 +612,38 @@ check "take exits 0 and prints nothing on SIGTERM" "0:" "$?:$(cat "$WORK/idle.ou
 check "a late answer is dropped quietly" "0" "$(echo '{"text":"x","usage":{"input_tokens":0,"output_tokens":0}}' | "$W" judge answer --session sess-host-idle --job 1-2-3; echo $?)"
 rm -rf "$CORE/judgedom" "$XDG_CONFIG_HOME/agent-ways/agent.yaml"
 
+# pr-merge-checks.sh names any check that was not green after a `gh pr merge`
+# and never blocks (#1168). A stub gh first on PATH answers with fixed JSON and
+# logs each call.
+merge_hook() {  # command checks-json [gh-exit] -> "exit:stdout"
+    local dir="$WORK/merge-bin"
+    rm -rf "$dir"; mkdir -p "$dir"
+    cat > "$dir/gh" <<STUB
+#!/bin/bash
+echo "\$*" >> "$dir/calls"
+[[ "\$*" == "pr view"* ]] && { echo 5; exit 0; }
+[[ ${3:-0} -ne 0 ]] && exit ${3:-0}
+echo '$2'
+STUB
+    chmod +x "$dir/gh"
+    local out rc=0
+    out=$(jq -n --arg c "$1" --arg d "$WORK" '{tool_input:{command:$c},cwd:$d}' | PATH="$dir:$PATH" bash "$HOOKS/pr-merge-checks.sh" 2>/dev/null) || rc=$?
+    echo "$rc:$(echo "$out" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)"
+}
+merge_raw() { jq -n --arg c "$1" --arg d "$WORK" '{tool_input:{command:$c},cwd:$d}' | PATH="$WORK/merge-bin:$PATH" bash "$HOOKS/pr-merge-checks.sh"; }
+RED='[{"name":"unit-tests","bucket":"fail"},{"name":"lint","bucket":"pending"},{"name":"build","bucket":"pass"}]'
+GREEN='[{"name":"unit-tests","bucket":"pass"},{"name":"docs","bucket":"skipping"}]'
+MSG5='0:PR #5 merged with checks not green: unit-tests (fail), lint (pending). A grant that says green CI did not cover this merge; say so to the operator in your reply.'
+check "a red merge exits 0 and names the failing and pending checks" "$MSG5" "$(merge_hook 'gh pr merge 5 --merge' "$RED")"
+check "a red merge carries no decision field" "null" "$(merge_raw 'gh pr merge 5 --merge' | jq -r '.decision // .hookSpecificOutput.permissionDecision')"
+check "a green merge prints nothing" "0:" "$(merge_hook 'gh pr merge 5 --merge' "$GREEN")"
+rm -f "$WORK/merge-bin/calls"
+check "a command that is no merge prints nothing" "0:" "$(merge_hook 'gh pr view 5' "$RED")"
+check "a command that is no merge never calls gh" "absent" "$([[ -e $WORK/merge-bin/calls ]] && echo present || echo absent)"
+check "a compound command is read as a merge of its PR" "$MSG5" "$(merge_hook 'gh pr checks 5 | cut -f1 && gh pr merge 5 --merge' "$RED")"
+check "the compound command asks gh about PR 5" "pr checks 5 --json name,bucket" "$(grep '^pr checks' "$WORK/merge-bin/calls" | head -1)"
+check "a failing gh prints nothing and exits 0" "0:" "$(merge_hook 'gh pr merge 5 --merge' "$RED" 1)"
+
 # attend-drain-stop.sh passes the drain's stdout and stdin through, and ends
 # the turn normally (exit 0) on any failure from attend: Claude Code reads a
 # Stop hook's exit 2 as a block, and clap exits 2 on a usage error (ADR-413).

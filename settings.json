@@ -349,6 +349,17 @@
         ]
       },
       {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(gh pr merge *)",
+            "command": "${HOME}/.claude/hooks/ways/pr-merge-checks.sh",
+            "timeout": 15
+          }
+        ]
+      },
+      {
         "matcher": "mcp__agent-ways__ways_read",
         "hooks": [
           {
