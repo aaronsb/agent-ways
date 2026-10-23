@@ -948,8 +948,11 @@ enum SettingsCommand {
     Fix {
         section: String,
         /// Fix the project's .claude/ways.yaml instead of the user file
-        #[arg(long)]
+        #[arg(long, conflicts_with = "target")]
         project: Option<PathBuf>,
+        /// Fix a target's own config instead of the user file
+        #[arg(long)]
+        target: Option<PathBuf>,
     },
     /// The theme tab on a terminal; list, copy, rename and delete themes
     ///
@@ -1391,7 +1394,7 @@ fn run() -> Result<()> {
                 Some(SettingsCommand::Emit { prefix, effective, project }) => st::emit(prefix.as_deref(), effective, project.as_deref()),
                 Some(SettingsCommand::Lint { file, project }) => st::lint(file.as_deref(), project.as_deref()),
                 Some(SettingsCommand::Apply { file, dry_run, project }) => st::apply(file.as_deref(), dry_run, project.as_deref()),
-                Some(SettingsCommand::Fix { section, project }) => st::fix(&section, project.as_deref()),
+                Some(SettingsCommand::Fix { section, project, target }) => st::fix(&section, project.as_deref(), target.as_deref()),
                 Some(SettingsCommand::Theme { action: None, project, keys, snap, depth }) => {
                     st::tui::open(&st::tui::Open { tab: Some("theme".into()), project, keys, snap, depth })
                 }

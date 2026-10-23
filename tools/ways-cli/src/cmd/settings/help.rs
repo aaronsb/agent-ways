@@ -79,6 +79,17 @@ pub fn help_text(topic: Option<&str>) -> Result<String, Failure> {
         }
         return Ok(out);
     }
+    // One entry of a per-entry section, such as `mods.attend`: its keys.
+    if let Some((schema, sec)) = reg.sections().find(|(_, s)| s.per_entry && agent_settings::registry::under(topic, s.name)) {
+        let keys: Vec<_> = schema.keys_of_section(sec.name).filter(|k| agent_settings::registry::under(k.name, topic)).collect();
+        if !keys.is_empty() {
+            let _ = writeln!(out, "{topic}: an entry of {}: {}", sec.name, sec.doc);
+            for k in keys {
+                let _ = writeln!(out, "  {:<40} {}", k.name, k.doc);
+            }
+            return Ok(out);
+        }
+    }
     Err(fail(exit::USAGE, format!("no key or section {topic}; `ways settings help` lists the sections")))
 }
 

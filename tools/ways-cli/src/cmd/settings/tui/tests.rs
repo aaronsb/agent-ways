@@ -957,7 +957,7 @@ fn leaf<'a>(node: &'a Node, name: &str) -> Option<&'a Node> {
 
 // The write checks the value against the live layers, the user file among
 // them, so it runs in a fixture of its own: the operator's own
-// `attend_mod.listening` must not decide it.
+// `mods.attend.listening` must not decide it.
 #[test]
 #[ignore = "run by the_mod_tab_writes_how_this_project_starts_to_its_own_file"]
 fn child_writes_how_this_project_starts() {
@@ -974,7 +974,7 @@ fn child_writes_how_this_project_starts() {
     assert_ne!(install.file, project_file, "install is set in the user or a target's file, never a project's");
     let listening = store_of("listening");
     ways.write(&project_file, &[Write { store: &listening, value: "active", loaded: "dormant" }]).expect("the project's file takes it");
-    assert!(std::fs::read_to_string(&project_file).unwrap().ends_with("attend_mod:\n  listening: active\n"));
+    assert!(std::fs::read_to_string(&project_file).unwrap().ends_with("mods:\n  attend:\n    listening: active\n"));
     assert_eq!(std::fs::read_to_string(&user).unwrap(), "# the user's own\n", "the user file is untouched");
 }
 

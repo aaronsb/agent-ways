@@ -113,15 +113,16 @@ const SECTIONS: &[SectionSpec] = &[
         columns: Some(("way", "enabled")),
         doc: "Per-way switches for one project (ADR-131), in its .claude/ways.yaml. Each entry falls back alone.",
     },
-    // Not in HOOK_SECTIONS: the attend mod reads it through `ways settings
-    // list attend_mod`, and reconcile reads `install` per target.
+    // Not in HOOK_SECTIONS: the attend mod reads its entry through `ways
+    // settings list mods.attend`, and reconcile reads each mod's `install`
+    // per target. Each entry, one per mod, falls back alone (ADR-512 item 1).
     SectionSpec {
-        name: "attend_mod",
+        name: "mods",
         file: FILE,
-        top: &["attend_mod"],
-        per_entry: false, entry: None, repair: None,
+        top: &["mods"],
+        per_entry: true, entry: None, repair: None,
         columns: None,
-        doc: "The attend mod in Claude Code (ADR-406, ADR-414): whether a session starts listening, keepwarm, keepalive, the install and poll timing.",
+        doc: "The Claude Code mods agent-ways ships, one entry per mod (ADR-512): whether repair installs each one, and its other settings.",
     },
     // Not in HOOK_SECTIONS: no hook path reads a theme (ADR-504 §11). Declared
     // in agent-theme, so attend reads the same keys (one source).
@@ -129,9 +130,22 @@ const SECTIONS: &[SectionSpec] = &[
 ];
 
 const RETIRED: &[(&str, &str)] = &[
+    ("attend_mod", ATTEND_MOD_RETIRED),
     ("default_embed_threshold", "`default_embed_threshold` was retired by ADR-156 (calibrated scoring) and is ignored; use `semantic_fire_probability` (a probability in [0,1])"),
     ("default_multi_embed_threshold", "`default_multi_embed_threshold` was retired by ADR-156 (calibrated scoring) and is ignored; use `semantic_fire_probability` (a probability in [0,1])"),
     ("keyword_gate_fraction", "`keyword_gate_fraction` was retired by ADR-156 (calibrated scoring) and is ignored; use `keyword_floor_probability` (a probability in [0,1])"),
+];
+
+/// What a file that still holds `attend_mod` is told: nothing reads it, and
+/// the command that moves its values (ADR-512 item 2).
+pub const ATTEND_MOD_RETIRED: &str = "`attend_mod` was retired by ADR-512 and is ignored; its keys are now under `mods.attend`, and `ways settings fix mods.attend` moves them";
+
+/// The mods agent-ways ships to Claude Code, by the name of their entry
+/// under `mods`, with the doc of that entry. The plugins
+/// `plugins/.claude-plugin/marketplace.json` lists, in its order.
+pub const MODS: &[(&str, &str)] = &[
+    ("attend", "The attend mod in Claude Code (ADR-406, ADR-414): whether a session starts listening, keepwarm, keepalive, the install and poll timing."),
+    ("ways-judge", "The ways-judge mod, the relevance gate's Claude Code internal engine (ADR-708): whether repair installs it."),
 ];
 
 const BASE: KeySpec = KeySpec {
@@ -334,10 +348,10 @@ const KEYS: &[KeySpec] = &[
     agent_theme::settings::ACTIVE,
     agent_theme::settings::SHAPE,
     KeySpec {
-        name: "attend_mod.listening",
-        section: "attend_mod",
+        name: "mods.attend.listening",
+        section: "mods",
         fail_closed: Some(closed_dormant),
-        path: &["attend_mod", "listening"],
+        path: &["mods", "attend", "listening"],
         kind: Kind::Choice(&["active", "dormant"]),
         default: DefaultValue::Yaml("dormant"),
         doc: "How a Claude Code session starts: active (listening over attend) or dormant.",
@@ -345,21 +359,21 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
-        name: "attend_mod.keepwarm",
-        section: "attend_mod",
+        name: "mods.attend.keepwarm",
+        section: "mods",
         fail_closed: Some(closed_keepwarm),
-        path: &["attend_mod", "keepwarm"],
+        path: &["mods", "attend", "keepwarm"],
         kind: Kind::Choice(&["on", "off"]),
         default: DefaultValue::Yaml("on"),
         doc: "Whether the attend mod drives cache wakes: on or off.",
-        long: "on keeps ADR-182's wakes in sessions that are listening: one wake after 50 idle minutes while a window is armed, and the three-hour window a paid cold write arms. It also lets the keepalive policy (attend_mod.keepalive.*) run in every interactive session with the mod, dormant ones included, while autocompact is off (ADR-414). off means no cache wake the mod drives in that project's sessions, the policy included, and arms nothing.",
+        long: "on keeps ADR-182's wakes in sessions that are listening: one wake after 50 idle minutes while a window is armed, and the three-hour window a paid cold write arms. It also lets the keepalive policy (mods.attend.keepalive.*) run in every interactive session with the mod, dormant ones included, while autocompact is off (ADR-414). off means no cache wake the mod drives in that project's sessions, the policy included, and arms nothing.",
         ..BASE
     },
     KeySpec {
-        name: "attend_mod.install",
-        section: "attend_mod",
+        name: "mods.attend.install",
+        section: "mods",
         fail_closed: Some(closed_uninstalled),
-        path: &["attend_mod", "install"],
+        path: &["mods", "attend", "install"],
         kind: Kind::Bool,
         default: DefaultValue::Yaml("true"),
         scope: Scope::Machine,
@@ -368,9 +382,9 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
-        name: "attend_mod.poll_seconds",
-        section: "attend_mod",
-        path: &["attend_mod", "poll_seconds"],
+        name: "mods.attend.poll_seconds",
+        section: "mods",
+        path: &["mods", "attend", "poll_seconds"],
         kind: Kind::Int { min: 1, max: 3600 },
         default: DefaultValue::Yaml("5"),
         doc: "Seconds between polls of attend while an active session is awake.",
@@ -378,9 +392,9 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
-        name: "attend_mod.slow_poll_seconds",
-        section: "attend_mod",
-        path: &["attend_mod", "slow_poll_seconds"],
+        name: "mods.attend.slow_poll_seconds",
+        section: "mods",
+        path: &["mods", "attend", "slow_poll_seconds"],
         kind: Kind::Int { min: 1, max: 3600 },
         default: DefaultValue::Yaml("60"),
         doc: "Seconds between polls once an active session has been quiet.",
@@ -388,9 +402,9 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
-        name: "attend_mod.quiet_minutes",
-        section: "attend_mod",
-        path: &["attend_mod", "quiet_minutes"],
+        name: "mods.attend.quiet_minutes",
+        section: "mods",
+        path: &["mods", "attend", "quiet_minutes"],
         kind: Kind::Int { min: 1, max: 1440 },
         default: DefaultValue::Yaml("20"),
         doc: "Minutes with no delivery, send or turn before the poll slows.",
@@ -398,9 +412,9 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
-        name: "attend_mod.preamble_every_turns",
-        section: "attend_mod",
-        path: &["attend_mod", "preamble_every_turns"],
+        name: "mods.attend.preamble_every_turns",
+        section: "mods",
+        path: &["mods", "attend", "preamble_every_turns"],
         kind: Kind::Int { min: 1, max: 10_000 },
         default: DefaultValue::Yaml("20"),
         doc: "Turns before a delivery carries the preamble line again.",
@@ -408,9 +422,9 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
-        name: "attend_mod.headless_poll",
-        section: "attend_mod",
-        path: &["attend_mod", "headless_poll"],
+        name: "mods.attend.headless_poll",
+        section: "mods",
+        path: &["mods", "attend", "headless_poll"],
         kind: Kind::Bool,
         default: DefaultValue::Yaml("false"),
         doc: "Whether a claude -p run or an SDK session may poll attend.",
@@ -418,10 +432,10 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
-        name: "attend_mod.keepalive.enabled",
-        section: "attend_mod",
+        name: "mods.attend.keepalive.enabled",
+        section: "mods",
         fail_closed: Some(closed_keepalive),
-        path: &["attend_mod", "keepalive", "enabled"],
+        path: &["mods", "attend", "keepalive", "enabled"],
         kind: Kind::Bool,
         default: DefaultValue::Yaml("true"),
         doc: "Whether the attend mod keeps an idle session warm for a bounded stretch, then asks for a wrap.",
@@ -429,9 +443,9 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
-        name: "attend_mod.keepalive.max_keepalives",
-        section: "attend_mod",
-        path: &["attend_mod", "keepalive", "max_keepalives"],
+        name: "mods.attend.keepalive.max_keepalives",
+        section: "mods",
+        path: &["mods", "attend", "keepalive", "max_keepalives"],
         kind: Kind::Int { min: 0, max: 48 },
         default: DefaultValue::Yaml("8"),
         doc: "Keepalives allowed since the operator's last prompt before the wrap.",
@@ -439,9 +453,9 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
-        name: "attend_mod.keepalive.margin_minutes",
-        section: "attend_mod",
-        path: &["attend_mod", "keepalive", "margin_minutes"],
+        name: "mods.attend.keepalive.margin_minutes",
+        section: "mods",
+        path: &["mods", "attend", "keepalive", "margin_minutes"],
         kind: Kind::Int { min: 3, max: 30 },
         default: DefaultValue::Yaml("10"),
         doc: "Minutes before the prompt cache lapses that a keepalive is due.",
@@ -449,19 +463,19 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
-        name: "attend_mod.keepalive.windows",
-        section: "attend_mod",
-        path: &["attend_mod", "keepalive", "windows"],
+        name: "mods.attend.keepalive.windows",
+        section: "mods",
+        path: &["mods", "attend", "keepalive", "windows"],
         kind: Kind::List,
         default: DefaultValue::Yaml("[\"daily 00:00-24:00\"]"),
         doc: "When keepalives may run: entries of `<days> <HH:MM>-<HH:MM>`.",
-        long: "Days are daily, one day (Sat) or a range (Mon-Fri; Fri-Mon wraps the week). 24:00 closes a day; an end before its start crosses midnight and belongs to the start's day. Outside every window the next due point sends the wrap instead. An entry that does not parse is dropped and `attend keepwarm status` names it; an empty list is never inside. Set several with commas: `ways settings set attend_mod.keepalive.windows \"Mon-Fri 08:00-19:00, Sat 10:00-14:00\"`.",
+        long: "Days are daily, one day (Sat) or a range (Mon-Fri; Fri-Mon wraps the week). 24:00 closes a day; an end before its start crosses midnight and belongs to the start's day. Outside every window the next due point sends the wrap instead. An entry that does not parse is dropped and `attend keepwarm status` names it; an empty list is never inside. Set several with commas: `ways settings set mods.attend.keepalive.windows \"Mon-Fri 08:00-19:00, Sat 10:00-14:00\"`.",
         ..BASE
     },
     KeySpec {
-        name: "attend_mod.keepalive.timezone",
-        section: "attend_mod",
-        path: &["attend_mod", "keepalive", "timezone"],
+        name: "mods.attend.keepalive.timezone",
+        section: "mods",
+        path: &["mods", "attend", "keepalive", "timezone"],
         kind: Kind::Text,
         default: DefaultValue::Yaml("\"\""),
         doc: "The IANA zone the windows are read in; empty for the host's zone.",
@@ -469,9 +483,9 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
-        name: "attend_mod.keepalive.wrap",
-        section: "attend_mod",
-        path: &["attend_mod", "keepalive", "wrap"],
+        name: "mods.attend.keepalive.wrap",
+        section: "mods",
+        path: &["mods", "attend", "keepalive", "wrap"],
         kind: Kind::Choice(&["transcript", "file", "send", "off"]),
         default: DefaultValue::Yaml("transcript"),
         doc: "Where the wrap's final reply goes: transcript, file, send or off.",
@@ -479,9 +493,9 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
-        name: "attend_mod.keepalive.wrap_file",
-        section: "attend_mod",
-        path: &["attend_mod", "keepalive", "wrap_file"],
+        name: "mods.attend.keepalive.wrap_file",
+        section: "mods",
+        path: &["mods", "attend", "keepalive", "wrap_file"],
         kind: Kind::Text,
         default: DefaultValue::Yaml("\"{state}/wrap/{session}.md\""),
         doc: "The file the mod writes the wrap's reply to, for file and a refused send.",
@@ -489,9 +503,9 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
-        name: "attend_mod.keepalive.wrap_to",
-        section: "attend_mod",
-        path: &["attend_mod", "keepalive", "wrap_to"],
+        name: "mods.attend.keepalive.wrap_to",
+        section: "mods",
+        path: &["mods", "attend", "keepalive", "wrap_to"],
         kind: Kind::Text,
         default: DefaultValue::Yaml("\"\""),
         doc: "Who receives the wrap with send: empty for the operator.",
@@ -499,13 +513,25 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
-        name: "attend_mod.keepalive.after_wrap",
-        section: "attend_mod",
-        path: &["attend_mod", "keepalive", "after_wrap"],
+        name: "mods.attend.keepalive.after_wrap",
+        section: "mods",
+        path: &["mods", "attend", "keepalive", "after_wrap"],
         kind: Kind::Choice(&["lapse", "compact"]),
         default: DefaultValue::Yaml("lapse"),
         doc: "What follows the wrap: lapse, or compact the conversation.",
         long: "lapse lets the prompt cache lapse an hour after the wrap. compact has the mod compact the conversation once the wrap has answered, with the focus of the wrap's closing /compact line, leaving a small context for the operator's return; it is one more warm request.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.ways-judge.install",
+        section: "mods",
+        fail_closed: Some(closed_uninstalled),
+        path: &["mods", "ways-judge", "install"],
+        kind: Kind::Bool,
+        default: DefaultValue::Yaml("false"),
+        scope: Scope::Machine,
+        doc: "Whether `ways manage repair` installs the ways-judge mod in Claude Code.",
+        long: "The wanted state of the relevance gate's Claude Code internal engine (ADR-512 item 1). Read per target, from the user file and the target's own file, the target winning; a project cannot set it.",
         ..BASE
     },
     KeySpec {
@@ -620,23 +646,23 @@ fn closed_toggle(v: &Value) -> Option<Value> {
     (!on).then_some(Value::Bool(false))
 }
 
-/// `attend_mod.listening`: anything but `active` reads as dormant.
+/// `mods.attend.listening`: anything but `active` reads as dormant.
 fn closed_dormant(v: &Value) -> Option<Value> {
     (v.as_str() != Some("active")).then(|| Value::String("dormant".into()))
 }
 
-/// `attend_mod.keepwarm`: anything but `on` reads as off.
+/// `mods.attend.keepwarm`: anything but `on` reads as off.
 fn closed_keepwarm(v: &Value) -> Option<Value> {
     (v.as_str() != Some("on")).then(|| Value::String("off".into()))
 }
 
-/// `attend_mod.keepalive.enabled`: anything but `true` reads as off, the
+/// `mods.attend.keepalive.enabled`: anything but `true` reads as off, the
 /// side that starts no turn the operator did not type.
 fn closed_keepalive(v: &Value) -> Option<Value> {
     (v != &Value::Bool(true)).then_some(Value::Bool(false))
 }
 
-/// `attend_mod.install`: anything but `true` reads as not installed.
+/// `mods.<name>.install`: anything but `true` reads as not installed.
 fn closed_uninstalled(v: &Value) -> Option<Value> {
     (v != &Value::Bool(true)).then_some(Value::Bool(false))
 }
@@ -683,32 +709,35 @@ pub static SCHEMA: Schema = Schema {
 /// (ADR-414 item 8). `ways settings set` still writes
 /// the user file unless `--project` is given.
 pub const SCREENS_WRITE_PROJECT: &[&str] = &[
-    "attend_mod.listening",
-    "attend_mod.keepwarm",
-    "attend_mod.keepalive.enabled",
-    "attend_mod.keepalive.max_keepalives",
-    "attend_mod.keepalive.margin_minutes",
-    "attend_mod.keepalive.windows",
-    "attend_mod.keepalive.timezone",
-    "attend_mod.keepalive.wrap",
-    "attend_mod.keepalive.wrap_file",
-    "attend_mod.keepalive.wrap_to",
-    "attend_mod.keepalive.after_wrap",
+    "mods.attend.listening",
+    "mods.attend.keepwarm",
+    "mods.attend.keepalive.enabled",
+    "mods.attend.keepalive.max_keepalives",
+    "mods.attend.keepalive.margin_minutes",
+    "mods.attend.keepalive.windows",
+    "mods.attend.keepalive.timezone",
+    "mods.attend.keepalive.wrap",
+    "mods.attend.keepalive.wrap_file",
+    "mods.attend.keepalive.wrap_to",
+    "mods.attend.keepalive.after_wrap",
 ];
 
-/// Whether the attend mod is installed in a target (ADR-406 item 11): the
-/// user file, then the target's own file. A project cannot set it.
-pub fn attend_mod_install(target_config: &Path) -> bool {
+/// Whether the mod `name` (an entry of [`MODS`]) is wanted in a target
+/// (ADR-512 item 1): `mods.<name>.install` from the user file, then the
+/// target's own file. A project cannot set it.
+pub fn mod_install(name: &str, target_config: &Path) -> bool {
     let layers = [
         Layer::read(&SCHEMA, "user", FILE, LayerScope::User, &crate::paths::user_config()),
         Layer::read(&SCHEMA, "target", FILE, LayerScope::Target, target_config),
     ];
-    attend_mod_install_in(&layers)
+    mod_install_in(name, &layers)
 }
 
-fn attend_mod_install_in(layers: &[Layer]) -> bool {
-    let Some(spec) = SCHEMA.keys.iter().find(|k| k.name == "attend_mod.install") else { return true };
-    agent_settings::load::resolve(spec, &[], layers).value.and_then(|v| v.as_bool()).unwrap_or(true)
+fn mod_install_in(name: &str, layers: &[Layer]) -> bool {
+    let key = format!("mods.{name}.install");
+    let Some(spec) = SCHEMA.keys.iter().find(|k| k.name == key) else { return false };
+    let r = agent_settings::load::resolve(spec, &[], layers);
+    r.value.or(r.default).and_then(|v| v.as_bool()).unwrap_or(false)
 }
 
 /// Whether the user config sets `install.manage_mode: commit`, so a
@@ -798,32 +827,32 @@ mod tests {
     }
 
     #[test]
-    fn attend_mod_defaults_dormant_keepwarm_on_installed() {
-        assert_eq!(resolved("attend_mod.listening", &[]), Some(Value::String("dormant".into())));
-        assert_eq!(resolved("attend_mod.keepwarm", &[]), Some(Value::String("on".into())));
-        assert_eq!(resolved("attend_mod.install", &[]), Some(Value::Bool(true)));
-        assert_eq!(resolved("attend_mod.quiet_minutes", &[]), Some(Value::Number(20.into())));
-        assert_eq!(resolved("attend_mod.preamble_every_turns", &[]), Some(Value::Number(20.into())));
-        assert_eq!(resolved("attend_mod.headless_poll", &[]), Some(Value::Bool(false)));
-        assert!(attend_mod_install_in(&[]));
+    fn mods_attend_defaults_dormant_keepwarm_on_installed() {
+        assert_eq!(resolved("mods.attend.listening", &[]), Some(Value::String("dormant".into())));
+        assert_eq!(resolved("mods.attend.keepwarm", &[]), Some(Value::String("on".into())));
+        assert_eq!(resolved("mods.attend.install", &[]), Some(Value::Bool(true)));
+        assert_eq!(resolved("mods.attend.quiet_minutes", &[]), Some(Value::Number(20.into())));
+        assert_eq!(resolved("mods.attend.preamble_every_turns", &[]), Some(Value::Number(20.into())));
+        assert_eq!(resolved("mods.attend.headless_poll", &[]), Some(Value::Bool(false)));
+        assert!(mod_install_in("attend", &[]));
     }
 
     /// ADR-414 item 8: the keepalive policy's defaults, and its switch
     /// falling to off when its section does not load.
     #[test]
-    fn attend_mod_keepalive_defaults_and_its_switch_fails_closed() {
-        assert_eq!(resolved("attend_mod.keepalive.enabled", &[]), Some(Value::Bool(true)));
-        assert_eq!(resolved("attend_mod.keepalive.max_keepalives", &[]), Some(Value::Number(8.into())));
-        assert_eq!(resolved("attend_mod.keepalive.margin_minutes", &[]), Some(Value::Number(10.into())));
+    fn mods_attend_keepalive_defaults_and_its_switch_fails_closed() {
+        assert_eq!(resolved("mods.attend.keepalive.enabled", &[]), Some(Value::Bool(true)));
+        assert_eq!(resolved("mods.attend.keepalive.max_keepalives", &[]), Some(Value::Number(8.into())));
+        assert_eq!(resolved("mods.attend.keepalive.margin_minutes", &[]), Some(Value::Number(10.into())));
         assert_eq!(
-            resolved("attend_mod.keepalive.windows", &[]),
+            resolved("mods.attend.keepalive.windows", &[]),
             Some(Value::Sequence(vec![Value::String("daily 00:00-24:00".into())]))
         );
-        assert_eq!(resolved("attend_mod.keepalive.timezone", &[]), Some(Value::String(String::new())));
-        assert_eq!(resolved("attend_mod.keepalive.wrap", &[]), Some(Value::String("transcript".into())));
-        assert_eq!(resolved("attend_mod.keepalive.wrap_file", &[]), Some(Value::String("{state}/wrap/{session}.md".into())));
-        assert_eq!(resolved("attend_mod.keepalive.wrap_to", &[]), Some(Value::String(String::new())));
-        assert_eq!(resolved("attend_mod.keepalive.after_wrap", &[]), Some(Value::String("lapse".into())));
+        assert_eq!(resolved("mods.attend.keepalive.timezone", &[]), Some(Value::String(String::new())));
+        assert_eq!(resolved("mods.attend.keepalive.wrap", &[]), Some(Value::String("transcript".into())));
+        assert_eq!(resolved("mods.attend.keepalive.wrap_file", &[]), Some(Value::String("{state}/wrap/{session}.md".into())));
+        assert_eq!(resolved("mods.attend.keepalive.wrap_to", &[]), Some(Value::String(String::new())));
+        assert_eq!(resolved("mods.attend.keepalive.after_wrap", &[]), Some(Value::String("lapse".into())));
         assert_eq!(closed_keepalive(&Value::Null), Some(Value::Bool(false)));
         assert_eq!(closed_keepalive(&Value::Bool(true)), None);
     }
@@ -831,33 +860,60 @@ mod tests {
     #[test]
     fn the_project_wins_for_listening_and_keepwarm() {
         let layers = [
-            layer("user", LayerScope::User, "attend_mod:\n  listening: dormant\n  keepwarm: on\n"),
-            layer("target", LayerScope::Target, "attend_mod:\n  keepwarm: off\n"),
-            layer("project", LayerScope::Project, "attend_mod: { listening: active }\n"),
+            layer("user", LayerScope::User, "mods:\n  attend:\n    listening: dormant\n    keepwarm: on\n"),
+            layer("target", LayerScope::Target, "mods:\n  attend:\n    keepwarm: off\n"),
+            layer("project", LayerScope::Project, "mods: { attend: { listening: active } }\n"),
         ];
-        assert_eq!(resolved("attend_mod.listening", &layers), Some(Value::String("active".into())));
-        assert_eq!(resolved("attend_mod.keepwarm", &layers), Some(Value::String("off".into())));
+        assert_eq!(resolved("mods.attend.listening", &layers), Some(Value::String("active".into())));
+        assert_eq!(resolved("mods.attend.keepwarm", &layers), Some(Value::String("off".into())));
     }
 
     #[test]
     fn install_is_read_from_the_user_and_target_files_never_a_project() {
-        let user_off = layer("user", LayerScope::User, "attend_mod:\n  install: false\n");
-        assert!(!attend_mod_install_in(std::slice::from_ref(&user_off)));
-        let target_on = layer("target", LayerScope::Target, "attend_mod:\n  install: true\n");
-        assert!(attend_mod_install_in(&[user_off.clone(), target_on]));
-        let project_off = layer("project", LayerScope::Project, "attend_mod:\n  install: false\n");
+        let user_off = layer("user", LayerScope::User, "mods:\n  attend:\n    install: false\n");
+        assert!(!mod_install_in("attend", std::slice::from_ref(&user_off)));
+        let target_on = layer("target", LayerScope::Target, "mods:\n  attend:\n    install: true\n");
+        assert!(mod_install_in("attend", &[user_off.clone(), target_on]));
+        let project_off = layer("project", LayerScope::Project, "mods:\n  attend:\n    install: false\n");
         assert!(!project_off.findings.is_empty(), "a project file may not set install");
-        assert!(attend_mod_install_in(&[project_off]));
+        assert!(mod_install_in("attend", &[project_off]));
     }
 
     #[test]
     fn a_bad_value_keeps_an_off_switch_off() {
-        // A bad poll interval fails the section; the switches it held keep
+        // A bad poll interval fails the attend entry; the switches it held keep
         // their closed reading, so keepwarm stays off and install false.
-        let l = layer("user", LayerScope::User, "attend_mod:\n  keepwarm: off\n  install: false\n  poll_seconds: soon\n");
-        assert_eq!(resolved("attend_mod.keepwarm", std::slice::from_ref(&l)), Some(Value::String("off".into())));
-        assert!(!attend_mod_install_in(std::slice::from_ref(&l)));
-        let bad = layer("project", LayerScope::Project, "attend_mod:\n  listening: loud\n");
-        assert_eq!(resolved("attend_mod.listening", &[bad]), Some(Value::String("dormant".into())));
+        let l = layer("user", LayerScope::User, "mods:\n  attend:\n    keepwarm: off\n    install: false\n    poll_seconds: soon\n");
+        assert_eq!(resolved("mods.attend.keepwarm", std::slice::from_ref(&l)), Some(Value::String("off".into())));
+        assert!(!mod_install_in("attend", std::slice::from_ref(&l)));
+        let bad = layer("project", LayerScope::Project, "mods:\n  attend:\n    listening: loud\n");
+        assert_eq!(resolved("mods.attend.listening", &[bad]), Some(Value::String("dormant".into())));
+    }
+
+    /// ADR-512 item 1: one entry per mod under `mods`, the ways-judge
+    /// mod's wanted state false unless a file says otherwise, and each entry
+    /// falling back alone.
+    #[test]
+    fn each_mod_has_an_entry_and_one_falls_back_without_the_other() {
+        assert_eq!(resolved("mods.ways-judge.install", &[]), Some(Value::Bool(false)));
+        assert!(!mod_install_in("ways-judge", &[]));
+        let on = layer("target", LayerScope::Target, "mods:\n  ways-judge:\n    install: true\n");
+        assert!(mod_install_in("ways-judge", std::slice::from_ref(&on)));
+        let l = layer("user", LayerScope::User, "mods:\n  attend:\n    listening: active\n  ways-judge:\n    install: maybe\n");
+        assert_eq!(resolved("mods.attend.listening", std::slice::from_ref(&l)), Some(Value::String("active".into())));
+        assert!(!mod_install_in("ways-judge", std::slice::from_ref(&l)));
+        for (name, _) in MODS {
+            assert!(SCHEMA.keys.iter().any(|k| k.name == format!("mods.{name}.install")), "{name} has no install key");
+        }
+    }
+
+    /// ADR-512 item 2: `attend_mod` is retired, so a file holding it
+    /// reports it and configures nothing from it.
+    #[test]
+    fn attend_mod_is_retired_and_read_by_nothing() {
+        let l = layer("user", LayerScope::User, "attend_mod:\n  listening: active\n  install: false\n");
+        assert_eq!(resolved("mods.attend.listening", std::slice::from_ref(&l)), Some(Value::String("dormant".into())));
+        assert!(mod_install_in("attend", std::slice::from_ref(&l)));
+        assert!(l.findings.iter().any(|f| f.message == ATTEND_MOD_RETIRED), "{:?}", l.findings);
     }
 }

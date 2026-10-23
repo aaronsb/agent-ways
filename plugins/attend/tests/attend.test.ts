@@ -81,10 +81,10 @@ const ok = (stdout = ''): ProcessRunResult => ({
   isStderrTruncated: false,
 })
 
-/** `ways settings list attend_mod --json --effective` for these values. */
+/** `ways settings list mods.attend --json --effective` for these values. */
 function configJson(values: Record<string, unknown>): string {
   const keys: Record<string, { value: unknown }> = {}
-  for (const [k, v] of Object.entries(values)) keys[`attend_mod.${k}`] = { value: v }
+  for (const [k, v] of Object.entries(values)) keys[`mods.attend.${k}`] = { value: v }
   return JSON.stringify({ view: 'effective', keys })
 }
 
@@ -276,7 +276,7 @@ function host(on: On, world: World) {
     if (cmd === 'peer list') return ok('...\n  3 agent(s), 0 channel(s)\n')
     if (cmd === 'message unread --json') return ok(world.unread ?? '{"unread":0,"held_back":0,"listening":true,"rooms":[]}')
     if (cmd.startsWith('keepwarm check --policy')) {
-      const q = world.policy ?? [decision({ policy: false, state: 'off', reason: 'attend_mod.keepalive.enabled is false' })]
+      const q = world.policy ?? [decision({ policy: false, state: 'off', reason: 'mods.attend.keepalive.enabled is false' })]
       return ok(q.length > 1 ? q.shift()! : q[0]!)
     }
     if (cmd.startsWith('message send') && world.sendRefused) return { ...ok(), exitCode: 1, stderr: world.sendRefused }
@@ -416,7 +416,7 @@ describe('argv', () => {
   })
 
   test('the config is read through ways for the session directory', () => {
-    expect(configArgv('/p')).toEqual(['ways', 'settings', 'list', 'attend_mod', '--json', '--effective', '--project', '/p'])
+    expect(configArgv('/p')).toEqual(['ways', 'settings', 'list', 'mods.attend', '--json', '--effective', '--project', '/p'])
   })
 })
 

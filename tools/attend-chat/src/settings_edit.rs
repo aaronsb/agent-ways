@@ -1,6 +1,6 @@
 //! What the `≡` menu's Settings ▸ lists and writes: the attend mod's
-//! `attend_mod.listening`, `attend_mod.keepwarm` and keepalive policy
-//! (`attend_mod.keepalive.*`, ADR-414), ways keys a project can set, then
+//! `mods.attend.listening`, `mods.attend.keepwarm` and keepalive policy
+//! (`mods.attend.keepalive.*`, ADR-414), ways keys a project can set, then
 //! the chat's own `attend.chat.*` keys, which only the user
 //! file holds ([`crate::settings`]). Each shows the value in effect and the
 //! layer it comes from. A write goes to the file of the place chosen, the
@@ -18,17 +18,17 @@ use crate::settings::{plain, LOCK_WAIT};
 
 /// The attend mod's keys the menu lists, in its order.
 pub const MOD_KEYS: &[&str] = &[
-    "attend_mod.listening",
-    "attend_mod.keepwarm",
-    "attend_mod.keepalive.enabled",
-    "attend_mod.keepalive.max_keepalives",
-    "attend_mod.keepalive.margin_minutes",
-    "attend_mod.keepalive.windows",
-    "attend_mod.keepalive.timezone",
-    "attend_mod.keepalive.wrap",
-    "attend_mod.keepalive.wrap_file",
-    "attend_mod.keepalive.wrap_to",
-    "attend_mod.keepalive.after_wrap",
+    "mods.attend.listening",
+    "mods.attend.keepwarm",
+    "mods.attend.keepalive.enabled",
+    "mods.attend.keepalive.max_keepalives",
+    "mods.attend.keepalive.margin_minutes",
+    "mods.attend.keepalive.windows",
+    "mods.attend.keepalive.timezone",
+    "mods.attend.keepalive.wrap",
+    "mods.attend.keepalive.wrap_file",
+    "mods.attend.keepalive.wrap_to",
+    "mods.attend.keepalive.after_wrap",
 ];
 
 const CHAT: &str = "attend.chat.";
@@ -333,7 +333,8 @@ fn with_override(mut said: String, key: &Key, at: &Place, file: &Path, higher_on
         // failing there says nothing of it, as `ways settings unset` says.
         Some(Overridden::Fallback(f)) if !higher_only => {
             let what = f.key.as_ref().map_or_else(|| f.message.clone(), |k| format!("{k}: {}", f.message));
-            Some(format!("not in effect: {} falls back to its defaults in {}, {what}", key.spec().section, short(file)))
+            let unit = f.unit.as_deref().unwrap_or(key.spec().section);
+            Some(format!("not in effect: {unit} falls back to its defaults in {}, {what}", short(file)))
         }
         Some(Overridden::By { path, value, .. }) if !higher_only || is_higher(&layers, &path, file) => {
             Some(format!("{} still sets {}", short(&path), value.as_ref().map(plain).unwrap_or_default()))
@@ -430,23 +431,23 @@ mod tests {
         let _env = crate::test_dir::env_lock();
         let home = home();
         let (root, proj) = (home.root().to_path_buf(), home.proj().to_path_buf());
-        write(&ways_core::paths::user_config(), "attend_mod:\n  keepwarm: off\n");
-        write(&proj.join(".claude/ways.yaml"), "attend_mod:\n  listening: active\n");
+        write(&ways_core::paths::user_config(), "mods:\n  attend:\n    keepwarm: off\n");
+        write(&proj.join(".claude/ways.yaml"), "mods:\n  attend:\n    listening: active\n");
         let lines: Vec<String> = settings(&proj.join("src")).iter().map(Setting::line).collect();
         assert_eq!(
             lines,
             [
-                "attend_mod.listening = active (project)",
-                "attend_mod.keepwarm = off (user)",
-                "attend_mod.keepalive.enabled = true (default)",
-                "attend_mod.keepalive.max_keepalives = 8 (default)",
-                "attend_mod.keepalive.margin_minutes = 10 (default)",
-                "attend_mod.keepalive.windows = daily 00:00-24:00 (default)",
-                "attend_mod.keepalive.timezone =  (default)",
-                "attend_mod.keepalive.wrap = transcript (default)",
-                "attend_mod.keepalive.wrap_file = {state}/wrap/{session}.md (default)",
-                "attend_mod.keepalive.wrap_to =  (default)",
-                "attend_mod.keepalive.after_wrap = lapse (default)",
+                "mods.attend.listening = active (project)",
+                "mods.attend.keepwarm = off (user)",
+                "mods.attend.keepalive.enabled = true (default)",
+                "mods.attend.keepalive.max_keepalives = 8 (default)",
+                "mods.attend.keepalive.margin_minutes = 10 (default)",
+                "mods.attend.keepalive.windows = daily 00:00-24:00 (default)",
+                "mods.attend.keepalive.timezone =  (default)",
+                "mods.attend.keepalive.wrap = transcript (default)",
+                "mods.attend.keepalive.wrap_file = {state}/wrap/{session}.md (default)",
+                "mods.attend.keepalive.wrap_to =  (default)",
+                "mods.attend.keepalive.after_wrap = lapse (default)",
                 "attend.chat.tabs.jump = auto (default)",
                 "attend.chat.tabs.menu_on_repeat = true (default)",
                 "attend.chat.tabs.focus_key = both (default)",
@@ -454,10 +455,10 @@ mod tests {
                 "attend.chat.sidebar_key = f3 (default)",
             ]
         );
-        assert_eq!(name_of(&lines[0]), "attend_mod.listening");
+        assert_eq!(name_of(&lines[0]), "mods.attend.listening");
         // Outside any project no project's file is read.
         let outside = settings(&root);
-        assert_eq!(outside[0].line(), "attend_mod.listening = dormant (default)");
+        assert_eq!(outside[0].line(), "mods.attend.listening = dormant (default)");
     }
 
     #[test]
@@ -467,26 +468,26 @@ mod tests {
         let proj = home.proj().to_path_buf();
         let here = Place::Project(proj.clone());
         let user = ways_core::paths::user_config();
-        let said = set_at("attend_mod.listening", "active", &here, &proj).unwrap().said;
+        let said = set_at("mods.attend.listening", "active", &here, &proj).unwrap().said;
         let file = proj.join(".claude/ways.yaml");
-        assert_eq!(read(&file), format!("{}attend_mod:\n  listening: active\n", ways_core::settings::PROJECT_HEADER));
-        assert!(said.contains("attend_mod.listening = active") && said.contains(".claude/ways.yaml"), "{said}");
+        assert_eq!(read(&file), format!("{}mods:\n  attend:\n    listening: active\n", ways_core::settings::PROJECT_HEADER));
+        assert!(said.contains("mods.attend.listening = active") && said.contains(".claude/ways.yaml"), "{said}");
         assert!(!user.exists(), "the user file is not touched");
-        assert_eq!(held("attend_mod.listening", &here).as_deref(), Some("active"));
-        assert_eq!(held("attend_mod.listening", &Place::User), None);
+        assert_eq!(held("mods.attend.listening", &here).as_deref(), Some("active"));
+        assert_eq!(held("mods.attend.listening", &Place::User), None);
 
-        set_at("attend_mod.keepwarm", "off", &Place::User, &proj).unwrap();
-        assert_eq!(read(&user), "attend_mod:\n  keepwarm: off\n");
-        assert_eq!(in_effect("attend_mod.keepwarm", &here), "off", "the project reads the user's value");
+        set_at("mods.attend.keepwarm", "off", &Place::User, &proj).unwrap();
+        assert_eq!(read(&user), "mods:\n  attend:\n    keepwarm: off\n");
+        assert_eq!(in_effect("mods.attend.keepwarm", &here), "off", "the project reads the user's value");
 
         // The project's file still decides what is read there.
-        let said = set_at("attend_mod.listening", "dormant", &Place::User, &proj).unwrap().said;
+        let said = set_at("mods.attend.listening", "dormant", &Place::User, &proj).unwrap().said;
         assert!(said.contains("ways.yaml") && said.contains("active"), "names what still sets it: {said}");
-        assert_eq!(in_effect("attend_mod.listening", &here), "active");
+        assert_eq!(in_effect("mods.attend.listening", &here), "active");
 
-        let said = unset_at("attend_mod.listening", &here, &proj).unwrap().said;
+        let said = unset_at("mods.attend.listening", &here, &proj).unwrap().said;
         assert!(!read(&file).contains("listening"), "{}", read(&file));
-        assert_eq!(in_effect("attend_mod.listening", &here), "dormant");
+        assert_eq!(in_effect("mods.attend.listening", &here), "dormant");
         assert!(said.contains("dormant"), "{said}");
     }
 
@@ -504,13 +505,13 @@ mod tests {
         assert!(refused.contains("user file only"), "{refused}");
         assert!(!proj.join(".claude").exists(), "nothing written in the project");
 
-        let refused = set_at("attend_mod.listening", "loud", &Place::User, &proj).unwrap_err();
+        let refused = set_at("mods.attend.listening", "loud", &Place::User, &proj).unwrap_err();
         assert!(refused.contains("loud"), "{refused}");
         assert!(!ways_core::paths::user_config().exists(), "nothing written");
 
-        assert_eq!(choices("attend_mod.listening"), ["active", "dormant"]);
+        assert_eq!(choices("mods.attend.listening"), ["active", "dormant"]);
         assert_eq!(choices("attend.chat.mouse"), ["true", "false"]);
-        assert!(per_project("attend_mod.keepwarm") && !per_project("attend.chat.mouse"));
+        assert!(per_project("mods.attend.keepwarm") && !per_project("attend.chat.mouse"));
     }
 
     /// A section that fails the schema in the file written falls back to
@@ -522,12 +523,12 @@ mod tests {
         let home = home();
         let proj = home.proj().to_path_buf();
         let here = Place::Project(proj.clone());
-        write(&proj.join(".claude/ways.yaml"), "attend_mod:\n  keepwarm: bogus\n");
-        let done = set_at("attend_mod.listening", "active", &here, &proj).unwrap();
+        write(&proj.join(".claude/ways.yaml"), "mods:\n  attend:\n    keepwarm: bogus\n");
+        let done = set_at("mods.attend.listening", "active", &here, &proj).unwrap();
         assert!(read(&proj.join(".claude/ways.yaml")).contains("listening: active"), "written");
-        assert_eq!(in_effect("attend_mod.listening", &here), "dormant", "and not in effect");
+        assert_eq!(in_effect("mods.attend.listening", &here), "dormant", "and not in effect");
         assert!(done.overridden, "{done:?}");
-        assert!(done.said.contains("attend_mod falls back") && done.said.contains("bogus"), "{}", done.said);
+        assert!(done.said.contains("mods.attend falls back") && done.said.contains("bogus"), "{}", done.said);
     }
 
     /// An unset reports no fallback, as `ways settings unset` does: the key
@@ -538,8 +539,8 @@ mod tests {
         let home = home();
         let proj = home.proj().to_path_buf();
         let here = Place::Project(proj.clone());
-        write(&proj.join(".claude/ways.yaml"), "attend_mod:\n  listening: active\n  keepwarm: bogus\n");
-        let done = unset_at("attend_mod.listening", &here, &proj).unwrap();
+        write(&proj.join(".claude/ways.yaml"), "mods:\n  attend:\n    listening: active\n    keepwarm: bogus\n");
+        let done = unset_at("mods.attend.listening", &here, &proj).unwrap();
         assert!(!read(&proj.join(".claude/ways.yaml")).contains("listening"));
         assert!(!done.overridden && !done.said.contains("not in effect"), "{done:?}");
     }
@@ -551,16 +552,16 @@ mod tests {
         let _env = crate::test_dir::env_lock();
         let home = home();
         let proj = home.proj().to_path_buf();
-        write(&ways_core::paths::user_config(), "attend_mod:\n  listening: dormant\n");
-        write(&proj.join(".claude/ways.yaml"), "attend_mod:\n  listening: active\n");
-        let done = unset_at("attend_mod.listening", &Place::User, &proj.join("src")).unwrap();
+        write(&ways_core::paths::user_config(), "mods:\n  attend:\n    listening: dormant\n");
+        write(&proj.join(".claude/ways.yaml"), "mods:\n  attend:\n    listening: active\n");
+        let done = unset_at("mods.attend.listening", &Place::User, &proj.join("src")).unwrap();
         assert!(!read(&ways_core::paths::user_config()).contains("listening"));
         assert!(done.said.contains("active (project) in effect"), "{}", done.said);
         assert!(done.said.contains("proj/.claude/ways.yaml still sets active"), "{}", done.said);
         assert!(done.overridden, "{done:?}");
         // A lower layer the unset falls through to is no override.
-        write(&ways_core::paths::user_config(), "attend_mod:\n  listening: dormant\n");
-        let done = unset_at("attend_mod.listening", &Place::Project(proj.clone()), &proj).unwrap();
+        write(&ways_core::paths::user_config(), "mods:\n  attend:\n    listening: dormant\n");
+        let done = unset_at("mods.attend.listening", &Place::Project(proj.clone()), &proj).unwrap();
         assert!(done.said.contains("dormant (user) in effect") && !done.overridden, "{done:?}");
     }
 
@@ -576,7 +577,7 @@ mod tests {
         let held = agent_settings::writer::Lock::acquire(&file).unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         let (at, dir) = (here.clone(), proj.clone());
-        std::thread::spawn(move || tx.send(set_at("attend_mod.listening", "active", &at, &dir)).unwrap());
+        std::thread::spawn(move || tx.send(set_at("mods.attend.listening", "active", &at, &dir)).unwrap());
         let got = rx.recv_timeout(std::time::Duration::from_secs(6));
         drop(held);
         let refused = got.expect("the write gave up within the wait").unwrap_err();

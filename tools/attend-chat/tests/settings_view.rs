@@ -87,8 +87,8 @@ fn settings_list_choose_a_place_and_write_to_its_file() {
     open_settings(&mut c);
     let s = shown(&mut c);
     for line in [
-        "attend_mod.listening = dormant (default)",
-        "attend_mod.keepwarm = on (default)",
+        "mods.attend.listening = dormant (default)",
+        "mods.attend.keepwarm = on (default)",
         "attend.chat.tabs.jump = auto (default)",
         "attend.chat.mouse = true (default)",
         "attend.chat.sidebar_key = f3 (default)",
@@ -98,7 +98,7 @@ fn settings_list_choose_a_place_and_write_to_its_file() {
 
     // A mod key asks where to write it: the user, the chat's project, the
     // live agent's project, or another.
-    click_on(&mut c, "attend_mod.listening =");
+    click_on(&mut c, "mods.attend.listening =");
     let s = shown(&mut c);
     for place in ["user: not set", "project ~/work/proj: not set", "project ~/work/other: not set", "Another project…"] {
         assert!(s.contains(place), "{place}: {s}");
@@ -109,22 +109,22 @@ fn settings_list_choose_a_place_and_write_to_its_file() {
     assert!(marked.len() == 1 && marked[0].contains("dormant"), "the value in effect is marked: {marked:#?}");
     click_on(&mut c, "active");
     let file = proj.join(".claude/ways.yaml");
-    assert_eq!(read(&file), format!("{}attend_mod:\n  listening: active\n", ways_core::settings::PROJECT_HEADER));
+    assert_eq!(read(&file), format!("{}mods:\n  attend:\n    listening: active\n", ways_core::settings::PROJECT_HEADER));
     assert!(!ways_core::paths::user_config().exists(), "the user file is not touched");
-    assert!(c.status() == "attend_mod.listening = active · proj/.claude/ways.yaml", "{}", c.status());
+    assert!(c.status() == "mods.attend.listening = active · proj/.claude/ways.yaml", "{}", c.status());
     open_settings(&mut c);
-    assert!(shown(&mut c).contains("attend_mod.listening = active (project)"), "the new value, from the project: {}", shown(&mut c));
+    assert!(shown(&mut c).contains("mods.attend.listening = active (project)"), "the new value, from the project: {}", shown(&mut c));
 
     // To the user file.
-    click_on(&mut c, "attend_mod.keepwarm =");
+    click_on(&mut c, "mods.attend.keepwarm =");
     click_on(&mut c, "user: not set");
     click_on(&mut c, "off");
-    assert_eq!(read(&ways_core::paths::user_config()), "attend_mod:\n  keepwarm: off\n");
+    assert_eq!(read(&ways_core::paths::user_config()), "mods:\n  attend:\n    keepwarm: off\n");
     open_settings(&mut c);
-    assert!(shown(&mut c).contains("attend_mod.keepwarm = off (user)"), "{}", shown(&mut c));
+    assert!(shown(&mut c).contains("mods.attend.keepwarm = off (user)"), "{}", shown(&mut c));
 
     // To the live agent's project, which the chat does not run in.
-    click_on(&mut c, "attend_mod.listening =");
+    click_on(&mut c, "mods.attend.listening =");
     click_on(&mut c, "project ~/work/other:");
     click_on(&mut c, "active");
     assert!(read(&other.join(".claude/ways.yaml")).contains("listening: active"), "{}", read(&other.join(".claude/ways.yaml")));
@@ -143,7 +143,7 @@ fn settings_list_choose_a_place_and_write_to_its_file() {
     assert!(shown(&mut c).contains("attend.chat.tabs.jump = alt (user)"), "{}", shown(&mut c));
 
     // Unset here removes the key from the place's file.
-    click_on(&mut c, "attend_mod.listening =");
+    click_on(&mut c, "mods.attend.listening =");
     click_on(&mut c, "project ~/work/proj: active");
     click_on(&mut c, "Unset here");
     assert!(!read(&file).contains("listening"), "{}", read(&file));
@@ -152,7 +152,7 @@ fn settings_list_choose_a_place_and_write_to_its_file() {
 
     // Another project, typed: a directory no project encloses is refused
     // inside the dialog; one a project encloses goes on to its values.
-    click_on(&mut c, "attend_mod.keepwarm =");
+    click_on(&mut c, "mods.attend.keepwarm =");
     click_on(&mut c, "Another project…");
     typed(&mut c, &home.join("loose").display().to_string());
     keys(&mut c, &[KeyCode::Enter]);
@@ -161,7 +161,7 @@ fn settings_list_choose_a_place_and_write_to_its_file() {
     // `~` is the home directory, as a shell reads it.
     typed(&mut c, "~/work/other/deep");
     keys(&mut c, &[KeyCode::Enter]);
-    assert!(shown(&mut c).contains("attend_mod.keepwarm · project other"), "{}", shown(&mut c));
+    assert!(shown(&mut c).contains("mods.attend.keepwarm · project other"), "{}", shown(&mut c));
     keys(&mut c, &[KeyCode::Up, KeyCode::Enter]);
     assert!(read(&other.join(".claude/ways.yaml")).contains("keepwarm: on"), "{}", read(&other.join(".claude/ways.yaml")));
 
@@ -169,7 +169,7 @@ fn settings_list_choose_a_place_and_write_to_its_file() {
     // bounded wait, and the bar says why.
     let held = agent_settings::writer::Lock::acquire(&file).unwrap();
     open_settings(&mut c);
-    click_on(&mut c, "attend_mod.listening =");
+    click_on(&mut c, "mods.attend.listening =");
     click_on(&mut c, "project ~/work/proj:");
     click_on(&mut c, "active");
     drop(held);
@@ -181,24 +181,24 @@ fn settings_list_choose_a_place_and_write_to_its_file() {
     open_settings(&mut c);
     let s = shown(&mut c);
     for line in [
-        "attend_mod.keepalive.enabled = true (default)",
-        "attend_mod.keepalive.max_keepalives = 8 (default)",
-        "attend_mod.keepalive.windows = daily 00:00-24:00 (default)",
-        "attend_mod.keepalive.wrap = transcript (default)",
-        "attend_mod.keepalive.after_wrap = lapse (default)",
+        "mods.attend.keepalive.enabled = true (default)",
+        "mods.attend.keepalive.max_keepalives = 8 (default)",
+        "mods.attend.keepalive.windows = daily 00:00-24:00 (default)",
+        "mods.attend.keepalive.wrap = transcript (default)",
+        "mods.attend.keepalive.after_wrap = lapse (default)",
     ] {
         assert!(s.contains(line), "{line}: {s}");
     }
-    click_on(&mut c, "attend_mod.keepalive.wrap =");
+    click_on(&mut c, "mods.attend.keepalive.wrap =");
     click_on(&mut c, "project ~/work/proj:");
     click_on(&mut c, "send");
-    assert!(read(&file).contains("keepalive:\n    wrap: send"), "{}", read(&file));
+    assert!(read(&file).contains("keepalive:\n      wrap: send"), "{}", read(&file));
 
     // A number out of range is refused inside the dialog, which keeps it.
     open_settings(&mut c);
-    click_on(&mut c, "attend_mod.keepalive.max_keepalives =");
+    click_on(&mut c, "mods.attend.keepalive.max_keepalives =");
     click_on(&mut c, "project ~/work/proj:");
-    assert!(shown(&mut c).contains("attend_mod.keepalive.max_keepalives · project"), "the entry dialog: {}", shown(&mut c));
+    assert!(shown(&mut c).contains("mods.attend.keepalive.max_keepalives · project"), "the entry dialog: {}", shown(&mut c));
     keys(&mut c, &[KeyCode::Backspace; 4]);
     typed(&mut c, "99");
     keys(&mut c, &[KeyCode::Enter]);
@@ -210,17 +210,17 @@ fn settings_list_choose_a_place_and_write_to_its_file() {
 
     // A list is typed with its entries separated by commas.
     open_settings(&mut c);
-    click_on(&mut c, "attend_mod.keepalive.windows =");
+    click_on(&mut c, "mods.attend.keepalive.windows =");
     click_on(&mut c, "project ~/work/proj:");
     keys(&mut c, &[KeyCode::Backspace; 40]);
     typed(&mut c, "Mon-Fri 08:00-19:00, Sat 10:00-14:00");
     keys(&mut c, &[KeyCode::Enter]);
-    assert!(read(&file).contains("windows:\n      - Mon-Fri 08:00-19:00\n      - Sat 10:00-14:00"), "{}", read(&file));
+    assert!(read(&file).contains("windows:\n        - Mon-Fri 08:00-19:00\n        - Sat 10:00-14:00"), "{}", read(&file));
     open_settings(&mut c);
-    assert!(shown(&mut c).contains("attend_mod.keepalive.windows = Mon-Fri 08:00-19:00, Sat 10:00-14:00 (project)"), "{}", shown(&mut c));
+    assert!(shown(&mut c).contains("mods.attend.keepalive.windows = Mon-Fri 08:00-19:00, Sat 10:00-14:00 (project)"), "{}", shown(&mut c));
 
     // An empty entry removes the key from the place's file.
-    click_on(&mut c, "attend_mod.keepalive.windows =");
+    click_on(&mut c, "mods.attend.keepalive.windows =");
     click_on(&mut c, "project ~/work/proj:");
     keys(&mut c, &[KeyCode::Backspace; 60]);
     keys(&mut c, &[KeyCode::Enter]);
@@ -229,7 +229,7 @@ fn settings_list_choose_a_place_and_write_to_its_file() {
     // `[]` writes an empty list, which overrides a lower layer; the dialog
     // says so.
     open_settings(&mut c);
-    click_on(&mut c, "attend_mod.keepalive.windows =");
+    click_on(&mut c, "mods.attend.keepalive.windows =");
     click_on(&mut c, "project ~/work/proj:");
     assert!(shown(&mut c).contains("[] writes empty"), "the dialog's hint: {}", shown(&mut c));
     keys(&mut c, &[KeyCode::Backspace; 60]);
@@ -237,7 +237,7 @@ fn settings_list_choose_a_place_and_write_to_its_file() {
     keys(&mut c, &[KeyCode::Enter]);
     assert!(read(&file).contains("windows: []"), "{}", read(&file));
     open_settings(&mut c);
-    click_on(&mut c, "attend_mod.keepalive.timezone =");
+    click_on(&mut c, "mods.attend.keepalive.timezone =");
     click_on(&mut c, "project ~/work/proj:");
     typed(&mut c, "\"\"");
     keys(&mut c, &[KeyCode::Enter]);

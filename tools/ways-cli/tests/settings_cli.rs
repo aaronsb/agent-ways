@@ -1103,14 +1103,14 @@ fn run_from(f: &Fx, dir: &str, args: &[&str], input: Option<&str>) -> (String, S
 #[test]
 fn project_dot_from_a_subdirectory_is_the_project_root() {
     let f = Fx::new();
-    let obj = r#"{"attend_mod":{"keepwarm":"off"}}"#;
+    let obj = r#"{"mods":{"attend":{"keepwarm":"off"}}}"#;
     let (out, err, code) = run_from(&f, "proj/tools", &["settings", "apply", "--dry-run", "--project", "."], Some(obj));
     assert_eq!(code, 0, "{err}");
     let report: serde_json::Value = serde_json::from_str(&out).unwrap();
     let written: Vec<&String> = report["written"].as_object().unwrap().keys().collect();
     assert_eq!(written, ["<ROOT>/proj/.claude/ways.yaml"], "the root's file, by its absolute path");
     assert_eq!(err, "project: <ROOT>/proj/.claude/ways.yaml (dry run, nothing written)\n");
-    let (_, err, code) = run_from(&f, "proj/tools", &["settings", "set", "attend_mod.keepwarm", "off", "--project", "."], None);
+    let (_, err, code) = run_from(&f, "proj/tools", &["settings", "set", "mods.attend.keepwarm", "off", "--project", "."], None);
     assert_eq!((err.as_str(), code), ("project: <ROOT>/proj/.claude/ways.yaml\n", 0));
     assert!(std::fs::read_to_string(f.overlay()).unwrap().contains("keepwarm: off"));
     assert!(!f.root.join("proj/tools/.claude").exists(), "nothing is written under the subdirectory");
@@ -1120,9 +1120,9 @@ fn project_dot_from_a_subdirectory_is_the_project_root() {
 fn a_relative_project_path_resolves_against_the_working_directory() {
     let f = Fx::new();
     std::fs::create_dir_all(f.root.join("proj/tools/deep")).unwrap();
-    let (_, err, code) = run_from(&f, "home", &["settings", "set", "attend_mod.keepwarm", "off", "--project", "../proj/tools/deep"], None);
+    let (_, err, code) = run_from(&f, "home", &["settings", "set", "mods.attend.keepwarm", "off", "--project", "../proj/tools/deep"], None);
     assert_eq!((err.as_str(), code), ("project: <ROOT>/proj/.claude/ways.yaml\n", 0));
-    let (_, err, code) = run_from(&f, "proj/tools", &["settings", "unset", "attend_mod.keepwarm", "--project", ".."], None);
+    let (_, err, code) = run_from(&f, "proj/tools", &["settings", "unset", "mods.attend.keepwarm", "--project", ".."], None);
     assert_eq!((err.as_str(), code), ("project: <ROOT>/proj/.claude/ways.yaml\n", 0));
 }
 
@@ -1144,7 +1144,7 @@ fn outside_any_project(f: &Fx) -> bool {
 fn a_write_to_a_project_path_that_is_no_project_is_a_usage_error_and_writes_nothing() {
     let f = Fx::new();
     // A path that does not exist.
-    let (_, err, code) = run_from(&f, "proj", &["settings", "set", "attend_mod.keepwarm", "off", "--project", "nope"], None);
+    let (_, err, code) = run_from(&f, "proj", &["settings", "set", "mods.attend.keepwarm", "off", "--project", "nope"], None);
     assert_eq!(code, 2, "{err}");
     assert!(err.contains("--project nope: no such directory"), "{err}");
     if !outside_any_project(&f) {
@@ -1155,15 +1155,15 @@ fn a_write_to_a_project_path_that_is_no_project_is_a_usage_error_and_writes_noth
     std::fs::create_dir_all(&scratch).unwrap();
     let at = scratch.to_str().unwrap();
     for args in [
-        vec!["settings", "set", "attend_mod.keepwarm", "off", "--project", at],
-        vec!["settings", "unset", "attend_mod.keepwarm", "--project", at],
+        vec!["settings", "set", "mods.attend.keepwarm", "off", "--project", at],
+        vec!["settings", "unset", "mods.attend.keepwarm", "--project", at],
         vec!["settings", "fix", "ways", "--project", at],
     ] {
         let (_, err, code) = run_from(&f, "home", &args, None);
         assert_eq!(code, 2, "{args:?}: {err}");
         assert!(err.contains("no project encloses <ROOT>/scratch; a project root holds .claude/settings.json, .claude/settings.local.json, .claude/ways.yaml, .claude/attend.yaml, or CLAUDE.md beside .claude/; failing those, a .git"), "{args:?}: {err}");
     }
-    let (out, err, code) = run_from(&f, "home", &["settings", "apply", "--project", at], Some("attend_mod:\n  keepwarm: off\n"));
+    let (out, err, code) = run_from(&f, "home", &["settings", "apply", "--project", at], Some("mods:\n  attend:\n    keepwarm: off\n"));
     assert_eq!((out.as_str(), code), ("", 2), "{err}");
     // With no --project, a project-scope key outside any project has no file.
     let (_, err, code) = run_from(&f, "scratch", &["settings", "set", "ways.project.itops/incident", "false"], None);
@@ -1172,30 +1172,30 @@ fn a_write_to_a_project_path_that_is_no_project_is_a_usage_error_and_writes_noth
     assert!(!scratch.join(".claude").exists(), "no .claude/ is made in a directory that is not a project's");
 }
 
-// The attend mod and keepwarm read `list attend_mod --effective --project
+// The attend mod and keepwarm read `list mods.attend --effective --project
 // <session dir>`, and a session may start in the home directory or a
 // scratch one: a read there has no project layer and keeps the user's.
 #[test]
 fn a_read_of_a_project_path_that_is_no_project_keeps_the_user_layer() {
     let f = Fx::new();
-    f.write(&f.user(), "attend_mod:\n  listening: active\n");
+    f.write(&f.user(), "mods:\n  attend:\n    listening: active\n");
     let scratch = f.root.join("scratch");
     std::fs::create_dir_all(&scratch).unwrap();
     let home = f.root.join("home");
     for at in [scratch.to_str().unwrap(), home.to_str().unwrap(), "nope"] {
-        let args = ["settings", "list", "attend_mod", "--json", "--effective", "--project", at];
+        let args = ["settings", "list", "mods.attend", "--json", "--effective", "--project", at];
         let (out, err, code) = run_from(&f, "home", &args, None);
         assert_eq!(code, 0, "{at}: {err}");
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-        let k = &v["keys"]["attend_mod.listening"];
+        let k = &v["keys"]["mods.attend.listening"];
         assert_eq!((k["value"].as_str(), k["layer"].as_str()), (Some("active"), Some("user")), "{at}: {k}");
-        assert_eq!(run_from(&f, "home", &["settings", "get", "attend_mod.listening", "--project", at], None).0, "active\n", "{at}");
+        assert_eq!(run_from(&f, "home", &["settings", "get", "mods.attend.listening", "--project", at], None).0, "active\n", "{at}");
     }
     if !outside_any_project(&f) {
         return;
     }
     let at = scratch.to_str().unwrap();
-    for args in [vec!["settings", "lint", "--project", at], vec!["settings", "emit", "attend_mod", "--effective", "--project", at]] {
+    for args in [vec!["settings", "lint", "--project", at], vec!["settings", "emit", "mods.attend", "--effective", "--project", at]] {
         let (_, err, code) = run_from(&f, "home", &args, None);
         assert_eq!(code, 0, "{args:?}: {err}");
     }
@@ -1217,7 +1217,7 @@ fn a_nested_checkout_under_a_project_resolves_to_the_project() {
     let f = Fx::new();
     std::fs::create_dir_all(f.root.join("proj/vendor/lib/.git")).unwrap();
     std::fs::create_dir_all(f.root.join("proj/vendor/lib/x")).unwrap();
-    let (_, err, code) = run_from(&f, "proj/vendor/lib/x", &["settings", "set", "attend_mod.keepwarm", "off", "--project", "."], None);
+    let (_, err, code) = run_from(&f, "proj/vendor/lib/x", &["settings", "set", "mods.attend.keepwarm", "off", "--project", "."], None);
     assert_eq!((err.as_str(), code), ("project: <ROOT>/proj/.claude/ways.yaml\n", 0));
     assert!(!f.root.join("proj/vendor/lib/.claude").exists());
 }
@@ -1232,25 +1232,108 @@ fn a_repository_with_no_markers_resolves_to_its_top_level() {
     }
     std::fs::create_dir_all(f.root.join("repo/.git")).unwrap();
     std::fs::create_dir_all(f.root.join("repo/src")).unwrap();
-    let (_, err, code) = run_from(&f, "repo/src", &["settings", "set", "attend_mod.keepwarm", "off", "--project", "."], None);
+    let (_, err, code) = run_from(&f, "repo/src", &["settings", "set", "mods.attend.keepwarm", "off", "--project", "."], None);
     assert_eq!((err.as_str(), code), ("project: <ROOT>/repo/.claude/ways.yaml\n", 0));
 }
 
 #[test]
 fn a_project_write_reads_back_from_the_project_layer() {
     let f = Fx::new();
-    let set = run_from(&f, "proj/tools", &["settings", "set", "attend_mod.keepwarm", "off", "--project", "."], None);
+    let set = run_from(&f, "proj/tools", &["settings", "set", "mods.attend.keepwarm", "off", "--project", "."], None);
     assert_eq!(set.2, 0, "{}", set.1);
-    let (out, err, code) = run_from(&f, "proj/tools", &["settings", "list", "attend_mod", "--effective", "--json", "--project", "."], None);
+    let (out, err, code) = run_from(&f, "proj/tools", &["settings", "list", "mods.attend", "--effective", "--json", "--project", "."], None);
     assert_eq!(code, 0, "{err}");
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-    let k = &v["keys"]["attend_mod.keepwarm"];
+    let k = &v["keys"]["mods.attend.keepwarm"];
     assert_eq!((k["value"].as_str(), k["layer"].as_str()), (Some("off"), Some("project")), "{k}");
     assert_eq!(k["file"].as_str(), Some("<ROOT>/proj/.claude/ways.yaml"), "{k}");
     // Without --project, the working directory's project is read the same way.
-    let (out, _, _) = run_from(&f, "proj/tools", &["settings", "get", "attend_mod.keepwarm"], None);
+    let (out, _, _) = run_from(&f, "proj/tools", &["settings", "get", "mods.attend.keepwarm"], None);
     assert_eq!(out, "off\n");
     // And a project-scope key written from the subdirectory lands at the root.
     let (_, err, code) = run_from(&f, "proj/tools", &["settings", "set", "ways.project.itops/incident", "false"], None);
     assert_eq!((err.as_str(), code), ("project: <ROOT>/proj/.claude/ways.yaml\n", 0));
+}
+
+// ── the mods section and the retired attend_mod (ADR-512 items 1 and 2) ──
+
+#[test]
+fn mods_lists_each_mod_and_attend_mod_names_no_section() {
+    let f = Fx::new();
+    let (out, err, code) = f.run(&["settings", "list", "mods.attend", "--json", "--effective"]);
+    assert_eq!(code, 0, "{err}");
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    for k in ["mods.attend.listening", "mods.attend.keepwarm", "mods.attend.install", "mods.attend.keepalive.enabled"] {
+        assert!(v["keys"][k].is_object(), "{k}: {out}");
+    }
+    assert!(v["keys"]["mods.ways-judge.install"].is_null(), "mods.attend is attend's alone: {out}");
+    let (out, _, code) = f.run(&["settings", "list", "mods"]);
+    assert_eq!(code, 0);
+    assert!(out.contains("mods.attend.listening=dormant\n") && out.contains("mods.ways-judge.install=false\n"), "{out}");
+    assert_eq!(f.run(&["settings", "get", "mods.ways-judge.install"]).0, "false\n");
+    assert_eq!(f.run(&["settings", "list", "attend_mod"]).2, 2);
+    let (out, _, code) = f.run(&["settings", "help", "mods.attend"]);
+    assert_eq!(code, 0);
+    assert!(out.contains("mods.attend.listening") && !out.contains("mods.ways-judge.install"), "{out}");
+}
+
+#[test]
+fn a_file_holding_attend_mod_is_linted_with_its_fix_and_moved_by_fix() {
+    let f = Fx::new();
+    f.write(&f.user(), "# mine\nattend_mod:\n  listening: active\n");
+    // Nothing reads it: the session starts dormant until it is moved.
+    assert_eq!(f.run(&["settings", "get", "mods.attend.listening"]).0, "dormant\n");
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!(code, 3, "{out}{err}");
+    assert_eq!(
+        out,
+        "<ROOT>/xdg/config/agent-ways/config.yaml:2: attend_mod: `attend_mod` was retired by ADR-512 and is ignored; its keys are now under `mods.attend`, and `ways settings fix mods.attend` moves them\n"
+    );
+    assert_eq!(std::fs::read_to_string(f.user()).unwrap(), "# mine\nattend_mod:\n  listening: active\n", "lint writes nothing");
+    let (_, err, code) = f.run(&["settings", "fix", "mods.attend"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(std::fs::read_to_string(f.user()).unwrap(), "# mine\nmods:\n  attend:\n    listening: active\n");
+    assert_eq!(f.run(&["settings", "get", "mods.attend.listening"]).0, "active\n");
+    assert_eq!(f.run(&["settings", "lint"]).2, 0);
+}
+
+#[test]
+fn fix_keeps_a_value_already_under_mods_attend_and_names_the_one_it_dropped() {
+    let f = Fx::new();
+    let p = f.root.join("proj");
+    f.write(&f.overlay(), "mods:\n  attend:\n    listening: dormant\nattend_mod:\n  listening: active\n  keepwarm: off\n");
+    let (out, _, code) = f.run(&["settings", "lint", "--project", p.to_str().unwrap()]);
+    assert_eq!(code, 3);
+    assert!(out.contains("<ROOT>/proj/.claude/ways.yaml:4: attend_mod: ") && out.contains("`ways settings fix mods.attend --project <ROOT>/proj` moves them"), "{out}");
+    let (_, err, code) = f.run(&["settings", "fix", "mods.attend", "--project", p.to_str().unwrap()]);
+    assert_eq!(code, 0, "{err}");
+    assert!(err.contains("dropped attend_mod.listening: mods.attend.listening already holds a value in <ROOT>/proj/.claude/ways.yaml, which stays"), "{err}");
+    assert_eq!(parsed(&std::fs::read_to_string(f.overlay()).unwrap()), parsed("mods: {attend: {listening: dormant, keepwarm: 'off'}}"));
+}
+
+#[test]
+fn lint_names_every_target_and_known_project_holding_attend_mod() {
+    let f = Fx::new();
+    let target = f.root.join("home/.claude");
+    let tcfg = f.root.join("tcfg/config.yaml");
+    f.write(&f.user(), &format!("targets:\n  - path: {}\n    config: {}\n", target.display(), tcfg.display()));
+    f.write(&tcfg, "attend_mod:\n  install: false\n");
+    // A project Claude Code knows, other than the one the command runs in.
+    let other = f.root.join("other");
+    f.write(&other.join(".claude/ways.yaml"), "attend_mod:\n  listening: active\n");
+    f.write(&other.join("CLAUDE.md"), "");
+    let slug = other.to_string_lossy().replace(['/', '.'], "-");
+    f.write(&target.join("projects").join(&slug).join("s.jsonl"), &format!("{{\"cwd\":\"{}\"}}\n", other.display()));
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!(code, 3, "{out}{err}");
+    assert!(out.contains("<ROOT>/tcfg/config.yaml:1: attend_mod: ") && out.contains("`ways settings fix mods.attend --target <ROOT>/home/.claude` moves them"), "{out}");
+    assert!(out.contains("<ROOT>/other/.claude/ways.yaml:1: attend_mod: ") && out.contains("`ways settings fix mods.attend --project <ROOT>/other` moves them"), "{out}");
+    let (_, err, code) = f.run(&["settings", "fix", "mods.attend", "--target", target.to_str().unwrap()]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(err, "target: <ROOT>/tcfg/config.yaml\n");
+    assert_eq!(std::fs::read_to_string(&tcfg).unwrap(), "mods:\n  attend:\n    install: false\n");
+    let (_, err, code) = f.run(&["settings", "fix", "mods.attend", "--project", other.to_str().unwrap()]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(f.run(&["settings", "lint"]).2, 0);
+    assert_eq!(f.run(&["settings", "fix", "mods.attend", "--target", f.root.join("nope").to_str().unwrap()]).2, 2);
 }

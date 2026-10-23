@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 const RETRY_SECS: u64 = 300;
 /// The largest wrap reply `wrapped --save` writes.
 const MAX_REPLY_BYTES: u64 = 1024 * 1024;
-/// How long the policy check reuses its read of the attend_mod settings,
+/// How long the policy check reuses its read of the mods.attend settings,
 /// unless a settings file it reads from changed since.
 const SETTINGS_KEPT_SECS: u64 = 300;
 
@@ -170,13 +170,13 @@ fn update_policy(dir: &Path, sid: &str, f: impl FnOnce(&mut Policy)) -> bool {
     }
 }
 
-/// The effective `attend_mod` section for `project`, as the attend mod reads
-/// it: `ways settings list attend_mod --json --effective`. `None` when ways
+/// The effective `mods.attend` entry for `project`, as the attend mod reads
+/// it: `ways settings list mods.attend --json --effective`. `None` when ways
 /// cannot answer within five seconds.
 fn mod_settings(project: &str) -> Option<String> {
     use std::io::Read;
     let mut child = std::process::Command::new("ways")
-        .args(["settings", "list", "attend_mod", "--json", "--effective", "--project", project])
+        .args(["settings", "list", "mods.attend", "--json", "--effective", "--project", project])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -199,16 +199,16 @@ fn mod_settings(project: &str) -> Option<String> {
     status.success().then_some(out)
 }
 
-/// The card's line for the attend mod's `attend_mod.keepwarm` setting, read
-/// from `ways settings list attend_mod --json --effective`: its value and
+/// The card's line for the attend mod's `mods.attend.keepwarm` setting, read
+/// from `ways settings list mods.attend --json --effective`: its value and
 /// the layer that set it. With `off` the mod never runs the check, so
 /// nothing arms or wakes in this session whatever the line above says.
 fn mod_setting_line(settings: Option<&str>) -> String {
     let key = settings
         .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-        .and_then(|doc| doc.get("keys").and_then(|k| k.get("attend_mod.keepwarm")).cloned());
+        .and_then(|doc| doc.get("keys").and_then(|k| k.get("mods.attend.keepwarm")).cloned());
     let Some(key) = key else {
-        return "mod setting attend_mod.keepwarm unknown (ways settings could not be read)".to_string();
+        return "mod setting mods.attend.keepwarm unknown (ways settings could not be read)".to_string();
     };
     // The mod reads anything but `off` as on (plugins/attend/hooks/lib.ts).
     let value = if key.get("value").and_then(|v| v.as_str()) == Some("off") { "off" } else { "on" };
@@ -218,7 +218,7 @@ fn mod_setting_line(settings: Option<&str>) -> String {
         (None, None) => String::new(),
     };
     let effect = if value == "off" { "; the mod never runs the keepwarm check in this session" } else { "" };
-    format!("mod setting attend_mod.keepwarm {value}{from}{effect}")
+    format!("mod setting mods.attend.keepwarm {value}{from}{effect}")
 }
 
 /// What `check --json` prints when nothing was judged: why, and when to ask
@@ -243,7 +243,7 @@ fn site(ident: &attend_presence::session::SessionIdentity) -> Site {
     }
 }
 
-/// The attend_mod settings for the policy check: a read kept beside the
+/// The mods.attend settings for the policy check: a read kept beside the
 /// ledger for a few minutes, so a listening session that asks every minute
 /// does not run ways every minute, unless the user's or the project's
 /// settings file changed since. `None` when ways cannot answer.
@@ -266,7 +266,7 @@ fn policy_settings(dir: &Path, sid: &str, project: &str, now: u64) -> Option<Str
     Some(doc)
 }
 
-/// Each settings file the attend_mod section resolves through (the user's,
+/// Each settings file the mods.attend entry resolves through (the user's,
 /// the active target's, the project's) with its modification time in
 /// milliseconds, or null where it is absent: a kept read is reused only
 /// while these are unchanged, so a file written, created or deleted since
@@ -402,25 +402,25 @@ mod tests {
 
     fn settings(value: &str, layer: &str, file: Option<&str>) -> String {
         let file = file.map_or("null".to_string(), |f| format!("\"{f}\""));
-        format!(r#"{{"view":"effective","keys":{{"attend_mod.keepwarm":{{"value":"{value}","default":"on","layer":"{layer}","file":{file}}}}}}}"#)
+        format!(r#"{{"view":"effective","keys":{{"mods.attend.keepwarm":{{"value":"{value}","default":"on","layer":"{layer}","file":{file}}}}}}}"#)
     }
 
     /// The clean-slate test's finding 6: the card names the mod's setting
     /// apart from whether keepwarm is armed.
     #[test]
     fn the_mod_setting_line_names_the_value_and_where_it_came_from() {
-        assert_eq!(mod_setting_line(Some(&settings("on", "default", None))), "mod setting attend_mod.keepwarm on (default)");
+        assert_eq!(mod_setting_line(Some(&settings("on", "default", None))), "mod setting mods.attend.keepwarm on (default)");
         assert_eq!(
             mod_setting_line(Some(&settings("off", "project", Some("/p/.claude/ways.yaml")))),
-            "mod setting attend_mod.keepwarm off (from /p/.claude/ways.yaml); the mod never runs the keepwarm check in this session"
+            "mod setting mods.attend.keepwarm off (from /p/.claude/ways.yaml); the mod never runs the keepwarm check in this session"
         );
         assert_eq!(
             mod_setting_line(None),
-            "mod setting attend_mod.keepwarm unknown (ways settings could not be read)"
+            "mod setting mods.attend.keepwarm unknown (ways settings could not be read)"
         );
         assert_eq!(
             mod_setting_line(Some("not json")),
-            "mod setting attend_mod.keepwarm unknown (ways settings could not be read)"
+            "mod setting mods.attend.keepwarm unknown (ways settings could not be read)"
         );
     }
 }

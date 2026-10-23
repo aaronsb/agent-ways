@@ -139,7 +139,7 @@ fn reparented(pid: u32) -> bool {
 
 /// Keepwarm's state for session `me` in one line: armed with its time left,
 /// stopped with the sensor's reason, or not armed (ADR-182). "Not armed",
-/// never "off": `off` is a value of the attend mod's `attend_mod.keepwarm`
+/// never "off": `off` is a value of the attend mod's `mods.attend.keepwarm`
 /// setting, which says whether the mod runs the check at all.
 #[cfg(not(feature = "sensor-keepwarm"))]
 fn keepwarm_line(_me: &Session) -> String {

@@ -30,9 +30,9 @@ In an interactive Claude Code session that runs the attend mod and has autocompa
 - **The wrap.** The turn's first line gives the reason (`wrap: 7h30m since the operator's last prompt and 8 keepalives, the most this session allows.`), and its body asks the agent to run the wrap skill with `stay`, ask nothing, land nothing and start nothing. `wrap` routes the final reply: `transcript` (the default) leaves it there; `file` has the mod write it to `wrap_file`; `send` has the mod send it over attend to `wrap_to` (empty for the operator's own member id, a session name, a project path or `#channel`) as one message opening with a `handoff:` line, written to `wrap_file` instead when attend refuses the send. `wrap_file` must name `{session}` in its file name (so `{state}/wrap/{session}/notes.md` falls back) and resolve under `{state}/wrap/` with no `.` or `..` and through no symlink, since a project's checked-in config can set it; anything else goes to `{state}/wrap/<session>.md`, and the card names the refusal. `wrap_to` `#open` is refused, since it reaches every listening session, and the reply goes to the operator. Only the turn the wrap's own text started is routed, and its reply is the answer of the turn's first step that ended it, so a peer message or a notification that continues the turn is not taken for the handoff. attend writes the file (`attend keepwarm wrapped file --path <file> --save`, the reply on stdin), checking the path again and renaming a temp file over it. A wrap turn that ends other than with an answer is written nowhere, and one that never starts, or never answers before the cache lapses, is recorded unfinished. `after_wrap: compact` has the mod compact the conversation once the wrap has answered, with the focus of its closing `/compact` line.
 - **Armed windows.** `attend keepwarm on` overrides the count and the windows while its window is open, so no wrap is sent; `attend keepwarm off` stops the policy until the operator's next prompt. A paid cold write arms nothing where the policy runs.
 - **Autocompact.** The mod reads `isAutoCompactEnabled` from the session's usage breakdown before each check and again just before it submits a keepalive or a wrap, falling back to `autoCompactEnabled` in the merged settings, where only an explicit `false` is off. A gate it cannot read counts as on. With autocompact on the policy does not run: a listening session keeps ADR-182's armed windows, and a dormant one runs nothing, not even at a prompt.
-- **Failing closed.** Only an explicit `enabled: true` runs the policy. Settings ways cannot answer leave it off, and the card says `off: the attend_mod settings could not be read`. A sensor's own three-hour arm after a paid cold write is marked in the arm file, and the policy ignores it. Two processes on one session id take turns under a lock, so the wrap is decided once, and the Monitor-hosted sensor keeps the policy's marks when it writes the ledger.
+- **Failing closed.** Only an explicit `enabled: true` runs the policy. Settings ways cannot answer leave it off, and the card says `off: the mods.attend settings could not be read`. A sensor's own three-hour arm after a paid cold write is marked in the arm file, and the policy ignores it. Two processes on one session id take turns under a lock, so the wrap is decided once, and the Monitor-hosted sensor keeps the policy's marks when it writes the ledger.
 
-The keys sit under `attend_mod.keepalive` in the ways config and are set per project with `ways settings set <key> <value> --project <dir>` or in attend-chat's ☰ Settings ([`mod.md`](mod.md#configuration)), where `""` or `[]` in the entry dialog writes an empty text or list that overrides a lower layer.
+The keys sit under `mods.attend.keepalive` in the ways config and are set per project with `ways settings set <key> <value> --project <dir>` or in attend-chat's ☰ Settings ([`mod.md`](mod.md#configuration)), where `""` or `[]` in the entry dialog writes an empty text or list that overrides a lower layer.
 
 | Key | Values | Default |
 |---|---|---|
@@ -107,13 +107,13 @@ session     1 cold write paid, $1.64
 | `state` | `warm` with the time left on the cache hour, `COLD` with the time since the last request, or no request yet |
 | `cold cost` | what rewriting the current context would cost, and what one warm turn costs |
 | `keepwarm` | `armed` with the window left and the next wake; `stopped` with the reason; or `not armed` |
-| `mod setting` | only in a session the attend mod hosts: the effective `attend_mod.keepwarm` setting and the file that set it. With `off` the mod never runs the check, so nothing arms or wakes in that session |
+| `mod setting` | only in a session the attend mod hosts: the effective `mods.attend.keepwarm` setting and the file that set it. With `off` the mod never runs the check, so nothing arms or wakes in that session |
 | `keepalive` | where the mod has run the keepalive policy: the count of the maximum since your prompt, the next due point, the estimated wrap time and the windows; `off` with why (autocompact on, the policy disabled); `stopped` with why; or `wrapped` with where the reply went, a refused send's target and attend's reason included. Dropped window entries and an unknown timezone get lines of their own |
 | `cost` | with the policy running: what its keepalives have cost since your prompt, the most still to spend in keepalives before the wrap, and a cold re-write now |
 | `break-even` | how many wakes cost the same as one rewrite, and how much idle time that covers; left out for a model with no price |
 | `session` | the cold writes this session has paid and their total |
 
-The `keepwarm` line says `armed` and `not armed`, never `on` and `off`: those are the values of the mod's `attend_mod.keepwarm` setting, which says whether the check runs at all, not whether a window is armed now.
+The `keepwarm` line says `armed` and `not armed`, never `on` and `off`: those are the values of the mod's `mods.attend.keepwarm` setting, which says whether the check runs at all, not whether a window is armed now.
 
 `attend peer status` shows the `keepwarm` line on its own.
 
@@ -141,7 +141,7 @@ sensors:
     enabled: false
 ```
 
-`attend_mod.keepwarm: off` in the ways config (a project's `.claude/ways.yaml` wins) does the same for the attend mod: its sessions run no check, the keepalive policy included, so nothing wakes and a paid cold write arms nothing. `attend_mod.keepalive.enabled: false` turns off the policy alone and returns the project to the armed windows. A dormant mod session never gets an armed window's wake; with autocompact off it gets the policy's keepalives.
+`mods.attend.keepwarm: off` in the ways config (a project's `.claude/ways.yaml` wins) does the same for the attend mod: its sessions run no check, the keepalive policy included, so nothing wakes and a paid cold write arms nothing. `mods.attend.keepalive.enabled: false` turns off the policy alone and returns the project to the armed windows. A dormant mod session never gets an armed window's wake; with autocompact off it gets the policy's keepalives.
 
 A disabled sensor neither wakes nor auto-arms. The arm file and the ledger live under `$XDG_CACHE_HOME/attend/keepwarm/`; only the `attend keepwarm` verbs and the sensor read them.
 

@@ -8,7 +8,7 @@
 //! installs `attend@agent-ways` at user scope through Claude Code's own
 //! plugin CLI, and updates both when the installed version is older than the
 //! shipped one. A disabled target, and every target once
-//! `attend_mod.install` is false, has the plugin uninstalled and the
+//! `mods.attend.install` is false, has the plugin uninstalled and the
 //! marketplace removed. `ways judge-setup` installs `ways-judge@agent-ways`
 //! when the operator picks Claude Code internal and records the request per
 //! target; reconcile then keeps it installed and current in each target that
@@ -73,6 +73,10 @@ pub const JUDGE: Mod = Mod {
     min_claude_code: "2.1.304",
     record: Some("ways-judge-installed"),
 };
+
+/// Every mod the marketplace ships, in its order. Each has an entry under
+/// `mods` in the settings registry (ADR-512 item 1).
+pub const MODS: [Mod; 2] = [ATTEND, JUDGE];
 
 /// The marketplace folder in the app source.
 fn marketplace_dir(source_root: &Path) -> PathBuf {
@@ -365,7 +369,7 @@ fn set_pending(m: &Mod, dest_root: &Path, pending: bool) {
 
 /// The mod a plugin id names, among the ones this marketplace ships.
 fn mod_by_id(id: &str) -> Option<Mod> {
-    [ATTEND, JUDGE].into_iter().find(|m| m.id == id)
+    MODS.into_iter().find(|m| m.id == id)
 }
 
 /// Forgets that `m` was installed on request in the target at `dest_root`,
@@ -381,7 +385,7 @@ pub fn forget_request(m: &Mod, dest_root: &Path) -> std::io::Result<()> {
 /// True when a mod other than `m` is recorded as wanted in the target, so a
 /// withdrawal of `m` from an enabled target leaves the marketplace for it.
 fn wanted_by_other(m: &Mod, dest_root: &Path) -> bool {
-    [ATTEND, JUDGE].iter().any(|o| o.id != m.id && recorded(o, dest_root))
+    MODS.iter().any(|o| o.id != m.id && recorded(o, dest_root))
 }
 
 /// Records that `m` was installed on request in the target at `dest_root`.
@@ -395,7 +399,7 @@ pub fn record_request(m: &Mod, dest_root: &Path) -> std::io::Result<()> {
 /// The mods of ours `have` reports installed: the one being converged and
 /// its siblings. A marketplace removal takes exactly these.
 fn installed_mods(m: &Mod, have: &Installed) -> Vec<Mod> {
-    [ATTEND, JUDGE]
+    MODS
         .into_iter()
         .filter(|o| if o.id == m.id { have.ours.is_some() } else { have.siblings.iter().any(|s| s == o.id) })
         .collect()
@@ -650,6 +654,23 @@ pub fn status_line(m: &Mod, v: &serde_json::Value) -> String {
 mod tests {
     use super::*;
 
+    /// The marketplace file, the mods the binary knows and the registry's
+    /// `mods` entries name the same mods in the same order (ADR-512 item 1).
+    #[test]
+    fn the_marketplace_the_mods_and_the_settings_agree() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/.claude-plugin/marketplace.json");
+        let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let listed: Vec<&str> = json["plugins"].as_array().unwrap().iter().filter_map(|p| p["name"].as_str()).collect();
+        let known: Vec<&str> = MODS.iter().map(|m| m.name).collect();
+        let settings: Vec<&str> = ways_core::settings::MODS.iter().map(|(n, _)| *n).collect();
+        assert_eq!(listed, known, "marketplace.json against the binary's mods");
+        assert_eq!(known, settings, "the binary's mods against the settings' mods entries");
+        for m in MODS {
+            assert_eq!(m.id, format!("{}@{MARKETPLACE}", m.name));
+            assert!(ways_core::settings::SCHEMA.keys.iter().any(|k| k.name == format!("mods.{}.install", m.name)), "{}", m.name);
+        }
+    }
+
     const DIR: &str = "/app/plugins";
 
     fn have(marketplace: Option<&str>, ours: Option<&str>) -> Installed {
@@ -724,7 +745,7 @@ mod tests {
             p.calls,
             vec![Call::MarketplaceRemove, Call::MarketplaceAdd(DIR.into()), Call::Install, Call::InstallSibling("ways-judge@agent-ways".into())]
         );
-        // attend_mod.install false while ways-judge stays: attend goes, the
+        // mods.attend.install false while ways-judge stays: attend goes, the
         // marketplace ways-judge runs from stays.
         let mut h = have(Some(DIR), Some("0.17.0"));
         h.siblings.push("ways-judge@agent-ways".into());

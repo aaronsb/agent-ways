@@ -178,7 +178,7 @@ impl Fx {
     /// The user config: the one target, enabled or not, and whether repair
     /// installs attend there.
     fn configure(&self, enabled: bool, attend: bool) {
-        let attend = if attend { String::new() } else { "attend_mod:\n  install: false\n".to_string() };
+        let attend = if attend { String::new() } else { "mods:\n  attend:\n    install: false\n".to_string() };
         write(&self.user_config(), &format!("{attend}targets:\n  - path: {}\n    enabled: {enabled}\n", self.dest().display()));
     }
 
@@ -308,7 +308,7 @@ fn an_older_installed_version_is_updated() {
 fn install_false_removes_the_mod_and_the_marketplace() {
     let fx = Fx::new("off");
     fx.installed("0.17.0");
-    write(&fx.user_config(), "attend_mod:\n  install: false\n");
+    write(&fx.user_config(), "mods:\n  attend:\n    install: false\n");
     fx.repair();
     let dest = fx.dest().display().to_string();
     assert_eq!(
@@ -503,7 +503,7 @@ fn repair_leaves_an_unrecorded_judge_mod_alone_and_installs_a_pending_one() {
 fn install_false_removes_attend_and_keeps_the_marketplace_the_judge_runs_from() {
     let fx = Fx::new("judge-install-false");
     fx.both();
-    write(&fx.user_config(), "attend_mod:\n  install: false\n");
+    write(&fx.user_config(), "mods:\n  attend:\n    install: false\n");
     fx.repair();
     let dest = fx.dest().display().to_string();
     assert_eq!(fx.changes(), vec![format!("{dest}|plugin uninstall {ATTEND} --scope user")]);
@@ -616,13 +616,13 @@ fn a_judge_mod_uninstalled_by_hand_stays_gone_and_its_record_clears() {
     assert_eq!(fx.changes(), Vec::<String>::new(), "and stays gone");
 }
 
-/// With attend_mod.install false the judge's pass is the one that moves the
+/// With mods.attend.install false the judge's pass is the one that moves the
 /// marketplace, and its failure is recovered the same way.
 #[test]
 fn install_false_and_a_moved_app_move_the_judge_mod_alone() {
     let fx = Fx::new("judge-moved-alone");
     fx.both();
-    write(&fx.user_config(), "attend_mod:\n  install: false\n");
+    write(&fx.user_config(), "mods:\n  attend:\n    install: false\n");
     fx.repair();
     fx.changes();
     let moved = fx.root.join("moved");

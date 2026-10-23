@@ -277,6 +277,21 @@ fn judge_setup() {
     if let Err(e) = super::judge::setup() {
         Steps::warn(format!("judge setup: {e:#}"));
     }
+    retired_settings();
+}
+
+/// The files that still hold a retired settings section, each with the
+/// command that moves it (ADR-512 item 2). The update rewrites none of them.
+fn retired_settings() {
+    let held = super::settings::retired::files_holding(None);
+    if held.is_empty() {
+        return;
+    }
+    Steps::stage("Retired settings");
+    for h in &held {
+        Steps::warn(whatif::retired_line(h));
+    }
+    Steps::info("Nothing reads these, and the update leaves them as they are.");
 }
 
 /// Current HEAD sha of the app checkout, or None if git can't answer.

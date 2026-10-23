@@ -100,10 +100,10 @@ export function isOpenChannel(to: string): boolean {
   return /^#\s*open\s*$/i.test(to)
 }
 
-/** The resolved `attend_mod` section, through the ways config layers: the
+/** The resolved `mods.attend` entry, through the ways config layers: the
  *  user file, the target's file, then the project's `.claude/ways.yaml`. */
 export function configArgv(project: string): string[] {
-  return [WAYS, 'settings', 'list', 'attend_mod', '--json', '--effective', '--project', project]
+  return [WAYS, 'settings', 'list', 'mods.attend', '--json', '--effective', '--project', project]
 }
 
 // ── the module's state ─────────────────────────────────────────────────
@@ -318,9 +318,9 @@ export type ModConfig = {
   preambleEveryTurns: number
   /** Whether a `-p` run or an SDK session may poll. */
   headlessPoll: boolean
-  /** `attend_mod.keepalive.enabled`: the keepalive policy may run (ADR-414). */
+  /** `mods.attend.keepalive.enabled`: the keepalive policy may run (ADR-414). */
   keepalive: boolean
-  /** `attend_mod.keepalive.margin_minutes`: a keepalive is due this long
+  /** `mods.attend.keepalive.margin_minutes`: a keepalive is due this long
    *  before the cache lapses. attend judges; the mod uses it only to set a
    *  dormant session's timer. */
   marginMinutes: number
@@ -342,7 +342,7 @@ export const DEFAULT_CONFIG: ModConfig = {
   marginMinutes: 10,
 }
 
-/** Reads `ways settings list attend_mod --json --effective`. A key that is
+/** Reads `ways settings list mods.attend --json --effective`. A key that is
  *  absent or of the wrong type keeps its default, so a ways CLI that is
  *  missing or older than the section leaves the mod dormant. */
 export function parseConfig(stdout: string): ModConfig {
@@ -353,7 +353,7 @@ export function parseConfig(stdout: string): ModConfig {
   } catch {
     return { ...DEFAULT_CONFIG }
   }
-  const v = (k: string) => keys[`attend_mod.${k}`]?.value
+  const v = (k: string) => keys[`mods.attend.${k}`]?.value
   const num = (k: string, d: number) => {
     const x = v(k)
     return typeof x === 'number' && Number.isFinite(x) && x > 0 ? x : d

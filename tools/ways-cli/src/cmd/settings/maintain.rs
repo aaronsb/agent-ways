@@ -83,14 +83,26 @@ pub(super) fn file_label(file: &str) -> &'static str {
 
 /// Check the files. A finding exits 3; a warning is printed and leaves the
 /// exit alone, since the file is valid and loads as written.
+///
+/// Without `--file`, a retired `attend_mod` section is reported in every
+/// file that holds it ([`retired::files_holding`]), not only the files
+/// layered here, each with its own fix command (ADR-512 item 2).
 pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
     agent_settings::load::trace("lint");
     let layers = layers_for(file, project)?;
+    let held = match file {
+        Some(_) => Vec::new(),
+        None => retired::files_holding(read_project(project).as_deref()),
+    };
     let mut n = 0;
     // Findings `fix` can repair; the others name their own repair.
     let mut fixable = 0;
     for l in layers.iter().filter(|l| l.present) {
         for f in &l.findings {
+            // Reported below with the command for its own file.
+            if file.is_none() && f.section.is_none() && f.key.as_deref() == Some(retired::KEY) {
+                continue;
+            }
             println!("{f}{}", f.lint_note());
             n += 1;
             fixable += f.lint_note().is_empty() as usize;
@@ -98,6 +110,11 @@ pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
         for w in unmatched_toggles(l, &read_project(project).unwrap_or_else(|| PathBuf::from(crate::util::project_dir()))) {
             println!("{w}");
         }
+    }
+    for h in &held {
+        println!("{}", h.line());
+        n += 1;
+        fixable += 1;
     }
     if n > 0 {
         let s = if n == 1 { "" } else { "s" };
@@ -138,15 +155,37 @@ fn unmatched_toggles(l: &Layer, fallback_project: &Path) -> Vec<String> {
         .collect()
 }
 
+/// A section `fix <arg>` covers, and the entry of it `arg` names when it
+/// names one entry of a per-entry section (`mods.attend`).
+type Covered = (&'static agent_settings::Schema, &'static agent_settings::SectionSpec, Option<String>);
+
 /// The sections `fix <arg>` covers: the section named exactly, else every
-/// section under the prefix. `fix gate` is `gate` alone, never `gate.mode`;
-/// `fix install` is both `install.*` sections.
-fn sections_for(reg: &Registry, arg: &str) -> Vec<(&'static agent_settings::Schema, &'static agent_settings::SectionSpec)> {
-    let exact: Vec<_> = reg.sections().filter(|(_, s)| s.name == arg).collect();
+/// section under the prefix, else the per-entry section whose entry `arg`
+/// names. `fix gate` is `gate` alone, never `gate.mode`; `fix install` is
+/// both `install.*` sections; `fix mods.attend` is the `mods` section's
+/// `attend` entry.
+fn sections_for(reg: &Registry, arg: &str) -> Vec<Covered> {
+    let exact: Vec<_> = reg.sections().filter(|(_, s)| s.name == arg).map(|(sc, s)| (sc, s, None)).collect();
     if !exact.is_empty() {
         return exact;
     }
-    reg.sections().filter(|(_, s)| agent_settings::registry::under(s.name, arg)).collect()
+    let under: Vec<_> = reg.sections().filter(|(_, s)| agent_settings::registry::under(s.name, arg)).map(|(sc, s)| (sc, s, None)).collect();
+    if !under.is_empty() {
+        return under;
+    }
+    reg.sections()
+        .filter(|(_, s)| s.per_entry)
+        .filter_map(|(sc, s)| Some((sc, s, Some(arg.strip_prefix(s.name)?.strip_prefix('.')?.to_string()))))
+        .filter(|(_, _, e)| e.as_deref().is_some_and(|e| !e.is_empty()))
+        .collect()
+}
+
+/// Whether `fix <arg>` moves the retired `attend_mod` section: when it
+/// covers the `mods` section's `attend` entry.
+fn carries(covered: &[Covered]) -> bool {
+    covered.iter().any(|(sc, s, e)| {
+        std::ptr::eq(*sc, &ways_core::settings::SCHEMA) && s.name == "mods" && e.as_deref().is_none_or(|e| e == "attend")
+    })
 }
 
 /// `fix <section|prefix>`: repair what the named sections' findings point
@@ -164,6 +203,11 @@ fn sections_for(reg: &Registry, arg: &str) -> Vec<(&'static agent_settings::Sche
 /// - an unknown key, a non-text key, or a value of the wrong shape is
 ///   removed.
 ///
+/// `fix mods.attend` (or `fix mods`) first moves a retired `attend_mod`
+/// section to `mods.attend` (ADR-512 item 2): each value is written under the
+/// new name unless the file already holds one there, which stays; fix names
+/// each value it dropped, and removes the old section.
+///
 /// An entry's name the section refuses is not repaired: it closes its
 /// section, and only a hand edit can say what it meant. fix writes nothing
 /// to that file and exits 5.
@@ -171,48 +215,71 @@ fn sections_for(reg: &Registry, arg: &str) -> Vec<(&'static agent_settings::Sche
 /// A top-level key no section owns is not removed: it may be a typo to
 /// correct by hand. `fix ""` reports it and exits 3.
 ///
-/// The file is checked again after the edit; exit 3 if a finding remains.
-pub fn fix(section: &str, project: Option<&Path>) -> Out {
+/// The file is the user's, the project's with `--project`, or a target's
+/// own config with `--target`. It is checked again after the edit; exit 3
+/// if a finding remains.
+pub fn fix(section: &str, project: Option<&Path>, target: Option<&Path>) -> Out {
     let project = resolve_project(project)?;
     let project = project.as_deref();
+    let target = target.map(target_config).transpose()?;
     let reg = registry();
     let sections = sections_for(&reg, section);
     if sections.is_empty() {
         return Err(fail(exit::USAGE, format!("no section {section}; `ways settings help` lists them")));
     }
-    let mut by_file: Vec<(PathBuf, Vec<(&'static agent_settings::Schema, &'static agent_settings::SectionSpec)>)> = Vec::new();
-    for (schema, sec) in sections {
-        // A section's file: the user's, or with --project the project's. The
-        // agent's sections live in the user file alone, --project or not.
-        let (scope, at) = match sec.file == ways_agent_core::settings::FILE {
-            true => (Scope::User, None),
-            false => (Scope::Both, project),
+    let carry = carries(&sections);
+    let mut by_file: Vec<(PathBuf, LayerScope, Vec<Covered>)> = Vec::new();
+    for covered in sections {
+        let (_, sec, _) = covered;
+        let (path, scope) = match &target {
+            // A target's config holds ways' sections alone.
+            Some(t) if sec.file == ways_core::settings::FILE => (t.clone(), LayerScope::Target),
+            Some(_) => continue,
+            None => {
+                // A section's file: the user's, or with --project the project's.
+                // The agent's sections live in the user file alone, --project or not.
+                let (scope, at) = match sec.file == ways_agent_core::settings::FILE {
+                    true => (Scope::User, None),
+                    false => (Scope::Both, project),
+                };
+                let Some(Ok((path, _))) = file_of(sec.file, scope, at) else { continue };
+                let scope = if is_user_file(&path) { LayerScope::User } else { LayerScope::Project };
+                (path, scope)
+            }
         };
-        let Some(Ok((path, _))) = file_of(sec.file, scope, at) else { continue };
-        match by_file.iter_mut().find(|(p, _)| *p == path) {
-            Some((_, list)) => list.push((schema, sec)),
-            None => by_file.push((path, vec![(schema, sec)])),
+        match by_file.iter_mut().find(|(p, _, _)| *p == path) {
+            Some((_, _, list)) => list.push(covered),
+            None => by_file.push((path, scope, vec![covered])),
         }
     }
+    if by_file.is_empty() {
+        return Err(fail(exit::USAGE, format!("{section} is not kept in a target's config; drop --target")));
+    }
     let mut left = Vec::new();
-    for (path, list) in &by_file {
-        let user_file = is_user_file(path);
-        let scope = if user_file { LayerScope::User } else { LayerScope::Project };
-        let names: Vec<&str> = list.iter().map(|(_, s)| s.name).collect();
+    for (path, scope, list) in &by_file {
+        let (scope, user_file) = (*scope, *scope == LayerScope::User);
+        let names: Vec<&str> = list.iter().map(|(_, s, _)| s.name).collect();
+        let entries: Vec<(&str, Option<&str>)> = list.iter().map(|(_, s, e)| (s.name, e.as_deref())).collect();
         let file = list[0].1.file;
         let schema = list[0].0;
-        let refused = agent_settings::writer::edit_file(path, None, |d| {
+        let carry_here = carry && file == ways_core::settings::FILE;
+        let (refused, dropped) = agent_settings::writer::edit_file(path, None, |d| {
+            let dropped = if carry_here { retired::carry(d)? } else { Vec::new() };
             let raw = d.value().clone();
             let checked = agent_settings::load::check(schema, file, scope, &raw, Some(&names));
             // A name the section refuses closes it, and may be an off-switch
             // the schema cannot read: only a hand edit can say what it meant.
             if checked.has_refused_name() {
                 let text = d.text();
-                return Ok(checked.findings(None, Some(path), &text).into_iter().filter(|f| f.closed).collect::<Vec<_>>());
+                let refused = checked.findings(None, Some(path), &text).into_iter().filter(|f| f.closed).collect::<Vec<_>>();
+                return Ok((refused, dropped));
             }
             for (sec, key) in checked.failing() {
-                if sec.is_none() {
+                let Some(sec) = sec else {
                     continue; // a top-level key no section owns; not this fix
+                };
+                if !in_entry(&entries, sec, &key) {
+                    continue; // another entry of a per-entry section
                 }
                 let at = agent_settings::yaml_edit::value_at(&raw, &key).cloned();
                 let spec = reg.lookup_path(file, &key);
@@ -242,7 +309,7 @@ pub fn fix(section: &str, project: Option<&Path>) -> Out {
                     }
                 }
             }
-            Ok(Vec::new())
+            Ok((Vec::new(), dropped))
         })
         .map_err(write_failed)?
         .0;
@@ -254,13 +321,21 @@ pub fn fix(section: &str, project: Option<&Path>) -> Out {
             ));
         }
         touched(scope, path, false);
+        for d in &dropped {
+            let to = d.strip_prefix(retired::KEY).map(|rest| format!("mods.attend{rest}")).unwrap_or_default();
+            eprintln!("dropped {d}: {to} already holds a value in {}, which stays", path.display());
+        }
         // Check again: what fix could not repair is reported, with its command.
         let text = std::fs::read_to_string(path).unwrap_or_default();
         if let Ok(doc) = agent_settings::load::parse_text(&text, Some(path)) {
             let after = agent_settings::load::check(schema, file, scope, &doc, Some(&names));
             // `fix ""` covers the whole file, so a key no section owns is
             // reported too; fix leaves it, since it may be a typo to correct.
-            left.extend(after.findings(None, Some(path), &text).into_iter().filter(|f| f.section.is_some() || section.is_empty()));
+            left.extend(after.findings(None, Some(path), &text).into_iter().filter(|f| match (&f.section, &f.key) {
+                (Some(s), Some(k)) => in_entry(&entries, s, &k.split('.').map(str::to_string).collect::<Vec<_>>()),
+                (Some(_), None) => true,
+                (None, _) => section.is_empty(),
+            }));
         }
     }
     if !left.is_empty() {
@@ -270,6 +345,27 @@ pub fn fix(section: &str, project: Option<&Path>) -> Out {
         return Err(fail(exit::REJECTED, format!("{} finding(s) fix cannot repair; the line above names the command that can", left.len())));
     }
     Ok(())
+}
+
+/// Whether a failing `key` of section `sec` is one `fix` was asked to
+/// repair: the section is covered whole, or the key sits in the entry
+/// named. A key path's first segment is the section's top-level key, and an
+/// entry's name may hold dots (`gate.profiles.my.fast`), so the rest of the
+/// path is matched as one dotted name.
+fn in_entry(entries: &[(&str, Option<&str>)], sec: &str, key: &[String]) -> bool {
+    entries.iter().any(|(name, entry)| {
+        *name == sec && entry.is_none_or(|e| key.len() > 1 && agent_settings::registry::under(&key[1..].join("."), e))
+    })
+}
+
+/// The config of the target at `dir`, as `targets:` in the user file names
+/// it. A directory that is no target is exit 2.
+fn target_config(dir: &Path) -> Result<PathBuf, Failure> {
+    retired::targets()
+        .into_iter()
+        .find(|t| t.matches_dir(dir))
+        .map(|t| t.config_path())
+        .ok_or_else(|| fail(exit::USAGE, format!("--target {}: not a target; `ways manage target list` lists them", dir.display())))
 }
 
 /// Whether every segment of `key` names a text key in `raw`. A key written

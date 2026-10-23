@@ -212,7 +212,7 @@ mod tests {
     }
 
     /// The three synchronized messaging sources say alike that the operator
-    /// sets `attend_mod.listening: active`, since auto mode refuses an
+    /// sets `mods.attend.listening: active`, since auto mode refuses an
     /// agent's write to its own project config (the clean-slate test's
     /// finding 7).
     #[test]
@@ -233,7 +233,7 @@ mod tests {
             })
             .collect();
         for (name, para) in &paragraphs {
-            assert!(para.contains("attend_mod.listening: active") && para.contains("auto mode"), "{name}: {para}");
+            assert!(para.contains("mods.attend.listening: active") && para.contains("auto mode"), "{name}: {para}");
             assert_eq!(*para, paragraphs[0].1, "{name} differs from messaging.md");
         }
     }

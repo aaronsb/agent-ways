@@ -2,7 +2,7 @@
 //
 // Dormant is plain Claude Code: one tool, `attend_listen`, and no polling,
 // delivery or row of this module's. A session is active from session start
-// when its project resolves `attend_mod.listening: active` through the ways
+// when its project resolves `mods.attend.listening: active` through the ways
 // config, or from the agent's attend_listen call; it stays active until
 // Claude Code exits. While active the mod polls attend, delivers peer
 // messages as framed turns, serves the send/reply/join/peers tools, draws one
@@ -877,7 +877,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     mod.cwd = e.cwd
     mod.config = await readConfig($, e.cwd)
-    // attend_mod.install false: the mod is unavailable, nothing is listed.
+    // mods.attend.install false: the mod is unavailable, nothing is listed.
     if (!mod.config.install) return next(e)
     mod.canPoll = e.isInteractive || mod.config.headlessPoll
     mod.isInteractive = e.isInteractive

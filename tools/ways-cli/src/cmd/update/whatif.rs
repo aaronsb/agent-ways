@@ -12,6 +12,7 @@ use super::notes::{self, Release};
 use super::{classify_build_groups, exe, git_head, installed_version, package_field, suite_bins, version_older, way_embed_source_version};
 use crate::cmd::attend_mod;
 use crate::cmd::lifecycle::{self, DevLink, Mark, Report};
+use crate::cmd::settings::retired::{self, Held};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -75,6 +76,8 @@ pub struct WhatIf {
     pub local: Vec<String>,
     pub actions: Vec<(Mark, String)>,
     pub dev: Vec<DevLink>,
+    /// The files that still hold a retired settings section (ADR-512 item 2).
+    pub retired: Vec<Held>,
     pub verbose: bool,
 }
 
@@ -110,7 +113,8 @@ pub fn gather(app: &Path, channel: Channel, verbose: bool) -> WhatIf {
     let releases: &[Release] = notes.as_ref().map(|f| f.releases.as_slice()).unwrap_or(&[]);
     let actions = actions(app, &channel, relation, head.as_deref(), target.as_deref(), &components, releases, &local);
     let dev = lifecycle::update_dev_links(app);
-    WhatIf { app: app.to_path_buf(), channel, head, target, fetch_error, relation, components, notes, delta, dropped, local, actions, dev, verbose }
+    let retired = retired::files_holding(None);
+    WhatIf { app: app.to_path_buf(), channel, head, target, fetch_error, relation, components, notes, delta, dropped, local, actions, dev, retired, verbose }
 }
 
 /// Where HEAD stands against the target.
@@ -320,7 +324,7 @@ fn actions(app: &Path, channel: &Channel, relation: Relation, head: Option<&str>
             continue;
         }
         out.push((Mark::Act, format!("reproject {} (ways manage repair)", dir.display())));
-        if ways_core::settings::attend_mod_install(&t.config_path()) {
+        if ways_core::settings::mod_install(attend_mod::ATTEND.name, &t.config_path()) {
             out.extend(mod_action(&dir, MOD, attend));
         }
         out.extend(judge_mod_action(&dir, attend_mod::recorded(&attend_mod::JUDGE, &dir), judge, claude_code_chosen));
@@ -513,17 +517,37 @@ pub fn render(w: &WhatIf) -> Report {
     for (mark, text) in &w.actions {
         r.item(*mark, text);
     }
+    retired_section(&mut r, &w.retired);
 
     lifecycle::dev_links_section(&mut r, &w.dev, "The update", &crate::paths::data_root());
 
     let level = w.relation == Relation::Same || (!on_ref && w.relation == Relation::Ahead);
-    let up_to_date = level && !w.components.iter().any(Component::moves) && w.local.is_empty() && w.dev.is_empty();
+    let up_to_date = level && !w.components.iter().any(Component::moves) && w.local.is_empty() && w.dev.is_empty() && w.retired.is_empty();
     if up_to_date {
         r.footer(Mark::Ok, "Up to date. Nothing changed.");
     } else {
         r.footer(Mark::Info, lifecycle::commit_hint(&command));
     }
     r
+}
+
+/// The files that still hold `attend_mod`, one ⚠ line each with the command
+/// that moves it. Nothing in the update rewrites them (ADR-512 item 2).
+pub fn retired_section(r: &mut Report, held: &[Held]) {
+    if held.is_empty() {
+        return;
+    }
+    r.section("Retired settings");
+    r.muted(2, "nothing reads these, and the update leaves them as they are:");
+    for h in held {
+        r.item(Mark::Warn, retired_line(h));
+    }
+}
+
+/// One file's line: where `attend_mod` is, and the command that moves it.
+pub fn retired_line(h: &Held) -> String {
+    let at = h.line.map(|l| format!(":{l}")).unwrap_or_default();
+    format!("{}{at} holds attend_mod, now mods.attend: `{}` moves it", h.path.display(), h.fix())
 }
 
 #[cfg(test)]
@@ -557,16 +581,18 @@ mod tests {
             local: vec![" M settings.json".into()],
             actions: vec![(Mark::Act, "pull: fast-forward aaaaaaaa → bbbbbbbb (origin/main)".into())],
             dev: Vec::new(),
+            retired: vec![Held { path: PathBuf::from("/p/.claude/ways.yaml"), line: Some(3), kind: retired::Kind::Project(PathBuf::from("/p")) }],
             verbose: false,
         };
         let text = render(&w).render(&Painter::plain());
-        let order: Vec<usize> = ["── Versions", "── Release notes", "── Changes", "── Local changes", "── Actions"].iter().map(|h| text.find(h).unwrap_or_else(|| panic!("{h} missing:\n{text}"))).collect();
+        let order: Vec<usize> = ["── Versions", "── Release notes", "── Changes", "── Local changes", "── Actions", "── Retired settings"].iter().map(|h| text.find(h).unwrap_or_else(|| panic!("{h} missing:\n{text}"))).collect();
         assert!(order.windows(2).all(|w| w[0] < w[1]), "{text}");
         assert!(text.contains("↑ ways        1.40.0 → 1.41.0"), "{text}");
         assert!(text.contains("= attend      0.28.1 unchanged"), "{text}");
         assert!(text.contains("    ways-v1.41.0\n      ### Added\n      - a thing (#5)\n"), "{text}");
         assert!(!text.contains("Pre-built"), "the CI tail is dropped");
         assert!(!text.contains("ways-v1.40.0"), "the installed release is not repeated");
+        assert!(text.contains("⚠ /p/.claude/ways.yaml:3 holds attend_mod, now mods.attend: `ways settings fix mods.attend --project /p` moves it"), "{text}");
         assert!(text.ends_with("· Nothing changed. Run `ways manage update --commit` to apply.\n"), "{text}");
     }
 
@@ -586,6 +612,7 @@ mod tests {
             local: Vec::new(),
             actions: Vec::new(),
             dev: Vec::new(),
+            retired: Vec::new(),
             verbose: false,
         };
         let text = render(&w).render(&Painter::plain());

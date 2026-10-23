@@ -274,7 +274,7 @@ fn keepalive_disabled_or_keepwarm_off_turns_the_policy_off() {
     let mut s = Session::new(MONDAY, 200_000);
     let d = s.check(&c, Gate::Off, MONDAY + 50 * MIN);
     assert_eq!((d.action, d.policy), (Action::None, false));
-    assert_eq!(d.reason, "attend_mod.keepalive.enabled is false");
+    assert_eq!(d.reason, "mods.attend.keepalive.enabled is false");
     let mut c = cfg();
     c.keepwarm_on = false;
     let arm = ArmFile { deadline: MONDAY + 2 * 3600, armed_at: MONDAY, window_secs: 7200, auto: false };
@@ -443,15 +443,15 @@ fn the_wrap_sent_over_attend_goes_to_the_operator_by_default_with_a_handoff_line
 #[test]
 fn the_settings_are_read_and_a_wrong_type_keeps_its_default() {
     let doc = r##"{"view":"effective","keys":{
-        "attend_mod.keepwarm":{"value":"on"},
-        "attend_mod.keepalive.enabled":{"value":false},
-        "attend_mod.keepalive.max_keepalives":{"value":3},
-        "attend_mod.keepalive.margin_minutes":{"value":"ten"},
-        "attend_mod.keepalive.windows":{"value":["Mon-Fri 08:00-19:00","bad"]},
-        "attend_mod.keepalive.timezone":{"value":"UTC"},
-        "attend_mod.keepalive.wrap":{"value":"send"},
-        "attend_mod.keepalive.wrap_to":{"value":" #deploy "},
-        "attend_mod.keepalive.after_wrap":{"value":"compact"}}}"##;
+        "mods.attend.keepwarm":{"value":"on"},
+        "mods.attend.keepalive.enabled":{"value":false},
+        "mods.attend.keepalive.max_keepalives":{"value":3},
+        "mods.attend.keepalive.margin_minutes":{"value":"ten"},
+        "mods.attend.keepalive.windows":{"value":["Mon-Fri 08:00-19:00","bad"]},
+        "mods.attend.keepalive.timezone":{"value":"UTC"},
+        "mods.attend.keepalive.wrap":{"value":"send"},
+        "mods.attend.keepalive.wrap_to":{"value":" #deploy "},
+        "mods.attend.keepalive.after_wrap":{"value":"compact"}}}"##;
     let c = Config::from_settings(Some(doc));
     assert!(!c.enabled);
     assert_eq!(c.max, 3);
@@ -460,13 +460,13 @@ fn the_settings_are_read_and_a_wrong_type_keeps_its_default() {
     assert_eq!(c.windows.dropped.len(), 1);
     assert_eq!((c.wrap, c.wrap_to.as_str(), c.after_wrap), (WrapDest::Send, "#deploy", AfterWrap::Compact));
     assert_eq!(c.wrap_file, DEFAULT_WRAP_FILE);
-    let d = Config::from_settings(Some(r#"{"keys":{"attend_mod.keepalive.enabled":{"value":true}}}"#));
+    let d = Config::from_settings(Some(r#"{"keys":{"mods.attend.keepalive.enabled":{"value":true}}}"#));
     assert!(d.enabled && d.keepwarm_on && d.settings_ok);
     assert_eq!((d.max, d.margin_secs, d.wrap), (8, 600, WrapDest::Transcript));
     assert_eq!(d.windows.describe(), "daily 00:00-24:00");
-    let out_of_range = Config::from_settings(Some(r#"{"keys":{"attend_mod.keepalive.max_keepalives":{"value":99}}}"#));
+    let out_of_range = Config::from_settings(Some(r#"{"keys":{"mods.attend.keepalive.max_keepalives":{"value":99}}}"#));
     assert_eq!(out_of_range.max, 8);
-    let off = Config::from_settings(Some(r#"{"keys":{"attend_mod.keepwarm":{"value":"off"}}}"#));
+    let off = Config::from_settings(Some(r#"{"keys":{"mods.attend.keepwarm":{"value":"off"}}}"#));
     assert!(!off.keepwarm_on);
 }
 
@@ -528,10 +528,10 @@ fn the_policy_survives_a_ledger_without_it() {
 #[test]
 fn unreadable_settings_or_no_enabled_key_turn_the_policy_off() {
     for (doc, why) in [
-        (None, "the attend_mod settings could not be read"),
-        (Some("not json"), "the attend_mod settings could not be read"),
-        (Some(r#"{"keys":{}}"#), "attend_mod.keepalive.enabled is false"),
-        (Some(r#"{"keys":{"attend_mod.keepalive.enabled":{"value":"yes"}}}"#), "attend_mod.keepalive.enabled is false"),
+        (None, "the mods.attend settings could not be read"),
+        (Some("not json"), "the mods.attend settings could not be read"),
+        (Some(r#"{"keys":{}}"#), "mods.attend.keepalive.enabled is false"),
+        (Some(r#"{"keys":{"mods.attend.keepalive.enabled":{"value":"yes"}}}"#), "mods.attend.keepalive.enabled is false"),
     ] {
         let c = Config::from_settings(doc);
         assert_eq!(c.why_off(Gate::Off), Some(why), "{doc:?}");

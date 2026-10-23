@@ -38,8 +38,8 @@ impl Tab {
 
 /// The settings tabs, in order; the theme tab follows them. attend's
 /// settings are two tabs beside ways' (ADR-504 §8): its governor, engagement
-/// and cleanup, and its sensors. The attend mod's section, which ways owns
-/// (ADR-406), has a tab of its own after them.
+/// and cleanup, and its sensors. The mods' section, which ways owns (ADR-406,
+/// ADR-512), has a tab of its own after them, with a group per mod.
 pub const TABS: [Tab; 7] = [
     Tab::root("ways"),
     Tab::root("matching"),
@@ -47,7 +47,7 @@ pub const TABS: [Tab; 7] = [
     Tab::root("install"),
     Tab { name: "attend", prefix: "attend", skip: &["attend.sensors"] },
     Tab { name: "sensors", prefix: "attend.sensors", skip: &[] },
-    Tab { name: "mod", prefix: "attend_mod", skip: &[] },
+    Tab { name: "mod", prefix: "mods", skip: &[] },
 ];
 
 /// The tab named `name`.
@@ -384,11 +384,16 @@ impl Ways {
         TABS.iter().map(|tab| self.tab(tab, layers)).collect()
     }
 
-    /// The doc of a group: its section's, or for one of attend's sensors, a
-    /// line on that sensor.
+    /// The doc of a group: its section's, or for one of attend's sensors or
+    /// one mod, a line on it.
     pub(super) fn section_doc(&self, name: &str) -> String {
         if let Some(s) = name.strip_prefix("attend.sensors.").filter(|s| !s.contains('.')) {
             return attend_config::schema::sensor_doc(s);
+        }
+        if let Some(m) = name.strip_prefix("mods.").filter(|m| !m.contains('.')) {
+            if let Some((_, doc)) = ways_core::settings::MODS.iter().find(|(n, _)| *n == m) {
+                return doc.to_string();
+            }
         }
         if let Some(p) = name.strip_prefix("gate.profiles.").filter(|p| !p.contains('.')) {
             // A shipped engine's group is headed by the name setup offers it
@@ -508,6 +513,14 @@ impl Ways {
             self.other_projects(&mut root);
         }
         self.headers(&mut root, tab.prefix);
+        if tab.name == "mod" {
+            // A section per mod, its keys shown under its name (ADR-512 item 1).
+            for g in root.children.iter_mut() {
+                g.section = true;
+                g.open = true;
+                g.columns = Some((String::new(), "value".into()));
+            }
+        }
         if tab.name == "gate" {
             // Last, so the settings keep their rows.
             root.children.extend((self.ctx.judge)().map(|j| super::judge::section(&j)));

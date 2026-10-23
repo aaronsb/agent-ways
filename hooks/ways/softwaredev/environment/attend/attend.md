@@ -32,7 +32,7 @@ requires: ["Bash(attend:*)", "Bash(cut:*)", "Bash(grep:*)", "Bash(head:*)", "Bas
 
 Where the tool is absent, use `/attend` or launch Monitor with `attend run`.
 
-**Starting active is the operator's setting.** A project starts its sessions listening with `attend_mod.listening: active` in its `.claude/ways.yaml`. The operator sets it, in that file or with `ways settings set attend_mod.listening active --project <dir>` from their own shell: under auto mode Claude Code refuses an agent's write to its own project's config. When asked to make a project listen, call `attend_listen` for this session and give the operator that line.
+**Starting active is the operator's setting.** A project starts its sessions listening with `mods.attend.listening: active` in its `.claude/ways.yaml`. The operator sets it, in that file or with `ways settings set mods.attend.listening active --project <dir>` from their own shell: under auto mode Claude Code refuses an agent's write to its own project's config. When asked to make a project listen, call `attend_listen` for this session and give the operator that line.
 
 **Your name.** A join's result, or the `attend run` startup line, says `you are <name>`, such as `you are Chaucer-alpha`. Peers see you by that name. `attend peer whoami --display` prints it at any time.
 

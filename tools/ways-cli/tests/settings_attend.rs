@@ -217,18 +217,18 @@ fn the_chat_keys_are_listed_set_and_refused_like_any_attend_key() {
     assert_ne!(code, 0, "a project cannot set a user key");
 }
 
-// The attend mod and keepwarm read `list attend_mod --json --effective
+// The attend mod and keepwarm read `list mods.attend --json --effective
 // --project <session dir>`. A session started in the home directory or a
 // scratch one is in no project: the read keeps the user's value, exit 0.
 #[test]
 fn a_session_dir_in_no_project_reads_the_user_layer() {
     let fx = Fx::new();
-    fx.write(&fx.root.join("xdg/config/agent-ways/config.yaml"), "attend_mod:\n  listening: active\n");
+    fx.write(&fx.root.join("xdg/config/agent-ways/config.yaml"), "mods:\n  attend:\n    listening: active\n");
     std::fs::create_dir_all(fx.root.join("scratch")).unwrap();
     for dir in ["home", "scratch"] {
         let at = fx.root.join(dir);
-        let (out, err, code) = fx.run(&["settings", "list", "attend_mod", "--json", "--effective", "--project", at.to_str().unwrap()]);
+        let (out, err, code) = fx.run(&["settings", "list", "mods.attend", "--json", "--effective", "--project", at.to_str().unwrap()]);
         assert_eq!(code, 0, "{dir}: {err}");
-        assert!(out.contains("\"attend_mod.listening\": {\n      \"value\": \"active\""), "{dir}: {out}");
+        assert!(out.contains("\"mods.attend.listening\": {\n      \"value\": \"active\""), "{dir}: {out}");
     }
 }

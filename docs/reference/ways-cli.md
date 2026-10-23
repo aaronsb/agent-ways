@@ -54,9 +54,9 @@ ways status --json
 | `list [prefix]` | Print `key=value` lines in effect. `--json` prints a fragment keyed by the file each key lives in, and `--effective` adds the defaults. |
 | `help [topic]` | Say what a key or section does, and list a choice key's options. |
 | `emit [prefix]` | Print the canonical fragment, shaped like its file, with comments. `--effective` prints the values in effect. |
-| `lint` | Check the settings files against the schema. Exits 3 with findings. |
+| `lint` | Check the settings files against the schema. Exits 3 with findings. Without `--file` it also names every file that holds the retired `attend_mod` section: the user config, each target's config and the `.claude/ways.yaml` of every project `ways projects` knows, each with its fix command. |
 | `apply` | Write a settings object (YAML or JSON, from stdin or `--file`) and answer with a JSON report, whose `written` is keyed by each file's absolute path. Stderr names each file, as `set` does. `--dry-run` writes nothing. |
-| `fix <section>` | Rewrite one section of a file from canonical. Stderr names each file, as `set` does. |
+| `fix <section>` | Rewrite one section of a file from canonical. Stderr names each file, as `set` does. `--project` fixes the project file, `--target <dir>` that target's own config. `fix mods.attend` first moves a retired `attend_mod` section to `mods.attend` ([ADR-512](../architecture/platform/ADR-512-each-shipped-claude-code-mod-has-one-wanted-state-in-settings-under-mods-name-and-ways-manage-converges-every-target-to-it.md)). |
 | `theme list` | List the themes: name, source (`bundled`, `user`, or `override` for a user file with a bundled name) and the active one. `--json` adds each one's label and file. |
 | `theme copy <from> <to>` | Copy any theme, bundled or yours, to a new user theme file `<to>`. |
 | `theme rename <old> <new>` | Rename a user theme: its file and its `THEME_NAME`. `theme.active` follows when it named the theme. |
@@ -84,7 +84,7 @@ ways settings theme delete glacier
 
 ### Settings screens
 
-Bare `ways settings` on a terminal opens the settings screens. `ways settings <tab>` opens them on a tab: `ways`, `matching`, `gate`, `install`, `attend`, `sensors`, `mod` (the `attend_mod` section) or `theme`. Bare `ways agent` opens the gate tab, and bare `ways manage` or `ways manage target` opens the install tab. The data is what `ways settings list --json` prints.
+Bare `ways settings` on a terminal opens the settings screens. `ways settings <tab>` opens them on a tab: `ways`, `matching`, `gate`, `install`, `attend`, `sensors`, `mod` (the `mods` section, one group per mod) or `theme`. Bare `ways agent` opens the gate tab, and bare `ways manage` or `ways manage target` opens the install tab. The data is what `ways settings list --json` prints.
 
 ![the matching tab with one change pending](../images/ways/settings-matching.png)
 
@@ -650,7 +650,7 @@ For one release the old top-level names `update`, `uninstall` and `target` still
 
 **Tells you:** Without `--commit`, what the update would change, after a fetch and with nothing else touched ([ADR-511](../architecture/platform/ADR-511-every-mutating-lifecycle-verb-reports-what-it-would-change-until-commit.md)): each component's version installed and at the target, the GitHub release notes of every release in between, the commits grouped by area with features and fixes listed, local changes the pull would stash, the actions `--commit` would take on this machine, and binary links that point into a dev checkout. `--verbose` lists every commit. Offline, the notes are reported as unreachable and the rest still prints. It exits 0.
 
-With `--commit`, each stage under its own header: pull the app source, refresh every binary of the suite (a pre-built download first, a build from source as the fallback), rebuild the corpus, run `ways manage repair`, and check the judge's keys. A command's raw output shows under `--verbose`, or when it fails. A binary that fails to refresh is put back, so a failed update leaves the old install working. `--ref <branch|tag|commit>` pins the install to that ref and builds the whole suite from source, leaving the release channel until `ways manage update --ref main --commit`.
+With `--commit`, each stage under its own header: pull the app source, refresh every binary of the suite (a pre-built download first, a build from source as the fallback), rebuild the corpus, run `ways manage repair`, and check the judge's keys. A command's raw output shows under `--verbose`, or when it fails. A binary that fails to refresh is put back, so a failed update leaves the old install working. `--ref <branch|tag|commit>` pins the install to that ref and builds the whole suite from source, leaving the release channel until `ways manage update --ref main --commit`. Both forms end with a Retired settings section when a file still holds the retired `attend_mod` section: one ⚠ line per file, with the `ways settings fix mods.attend` command that moves it. The update rewrites none of them.
 
 `--dry-run` is accepted for the what-if and `--yes` for `--commit`. `ways settings set install.manage_mode commit` makes the command apply without the flag; `--what-if` then reports.
 
@@ -670,7 +670,7 @@ ways manage update --ref ways-v1.32.0 --commit
 
 With no `--dest`, it runs over every target in the user config ([ADR-184](../architecture/platform/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)). Each enabled target is converged. Each disabled one is withdrawn: our symlinks are unlinked, and our hooks block and permissions are removed from its `settings.json` through the same merge base that wrote them. An explicit `--dest` is a single-target run and leaves the list alone.
 
-Last in each enabled target it installs the attend mod through Claude Code's plugin CLI ([ADR-406](../architecture/attend/ADR-406-attend-reaches-agents-through-a-claude-code-mod-that-agent-ways-installs-dormant-by-default-one-status-row-transport-stays-the-signal-store.md)): it adds the `agent-ways` marketplace from the app's `plugins/` folder and installs `attend@agent-ways` when they are missing, and updates both when the installed version is older than the shipped one. A disabled target, and every target once `attend_mod.install` is false, has the mod uninstalled and the marketplace removed. An `attend` plugin from another marketplace is reported and left alone, and a missing `claude` binary or a failed call is reported without failing the repair. See [the attend mod](../attend-and-monitor/mod.md).
+Last in each enabled target it installs the attend mod through Claude Code's plugin CLI ([ADR-406](../architecture/attend/ADR-406-attend-reaches-agents-through-a-claude-code-mod-that-agent-ways-installs-dormant-by-default-one-status-row-transport-stays-the-signal-store.md)): it adds the `agent-ways` marketplace from the app's `plugins/` folder and installs `attend@agent-ways` when they are missing, and updates both when the installed version is older than the shipped one. A disabled target, and every target once `mods.attend.install` is false, has the mod uninstalled and the marketplace removed. An `attend` plugin from another marketplace is reported and left alone, and a missing `claude` binary or a failed call is reported without failing the repair. See [the attend mod](../attend-and-monitor/mod.md).
 
 ```
 ways manage repair                       # what it would do; prints "refused <root>" for real paths, exit 0
