@@ -20,9 +20,9 @@
 //!
 //! Quoting is respected, heredoc bodies are dropped, and the bodies of
 //! subshells, `$( )`, backticks, process substitutions and loops become
-//! segments of their own. [`operative_texts`] gives each operative segment's
-//! own text, which the `commands:` lane matches its regexes against
-//! (ADR-188 item 3a).
+//! segments of their own. A segment's [`Segment::text`] and its
+//! [`Segment::program_text`] are what the `commands:` lane of ADR-188
+//! item 3a matches, for each operative segment.
 //!
 //! The rules are ported from the Bash-surface study behind ADR-707 (its
 //! segmenter and class tables); the tables live in [`tables`] as data so
@@ -240,15 +240,5 @@ pub fn parse(command: &str) -> Vec<Segment> {
         .segments
         .into_iter()
         .filter_map(|raw| classify::build(command, &lexed.excluded, raw))
-        .collect()
-}
-
-/// Each operative segment's own text, in order: what the `commands:` lane
-/// matches its regexes against (ADR-188 item 3a).
-pub fn operative_texts(segments: &[Segment]) -> Vec<&str> {
-    segments
-        .iter()
-        .filter(|s| s.is_operative())
-        .map(|s| s.text.as_str())
         .collect()
 }

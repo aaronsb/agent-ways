@@ -2130,6 +2130,7 @@ dependencies = [
  "attend-config",
  "clap",
  "claude-sessions",
+ "command-describer",
  "glob",
  "libc",
  "memchr",
