@@ -68,7 +68,7 @@ considered:
     said: "Post the comment"
     via: Claude Code session 2026-10-23, choice tool answer to the unattended-wrap probe
     covers: [unattended wrap]
-status: proposed
+status: accepted
 date: 2026-10-23
 deciders:
   - aaronsb
@@ -126,6 +126,25 @@ An earlier draft of this record treated a wrap as a pause that removed the label
 
 2. **The states.** For an open issue carrying `tasklist`, an assignee has taken it up. The `in-progress` label means it is being worked, across context relays, `/clear`, `/resume` and restarts. A closed issue is done (ADR-180). An issue that is assigned and has no label is parked: the assignee keeps it and is not working it. This uses a label because ADR-180 rejected Projects. The bridge creates the label on a repository at the first declaration that needs it, and `GH_TASKS_LIVE_LABEL` names it, defaulting to `in-progress`.
 
+The states and the moves between them, as one login sees an issue:
+
+```mermaid
+stateDiagram-v2
+    state "Held by another login" as HeldByOther
+    state "Declared: assigned to you, in-progress" as Declared
+    state "Parked: assigned to you, no label" as Parked
+    [*] --> Unassigned
+    Unassigned --> Declared: trigger (spawn, TaskUpdate or claim)
+    HeldByOther --> HeldByOther: trigger, state line only
+    HeldByOther --> Declared: lead runs gh-tasks claim
+    Declared --> Declared: /wrap posts a progress comment
+    Declared --> Parked: release --park
+    Parked --> Declared: trigger, same login
+    Declared --> Unassigned: release --drop
+    Declared --> Closed: issue closed
+    Parked --> Closed: issue closed
+```
+
 3. **What declares.** Three triggers declare work. Each runs on PreToolUse and fires whichever agent made the call:
    - An `Agent` call declares when its `description` starts with `[gh#N]`, #N is mirrored, and the agent type can edit files: its definition grants Edit, Write or NotebookEdit, or it has no tool list. Explore, Plan, and defined agents without those tools, such as code-reviewer and skeptic, never declare. An issue named anywhere else in a brief is never declared.
    - A `TaskUpdate` on `gh-N` declares when it sets status `in_progress` or sets an owner other than `team-lead`. This trigger carries the lead's own work and an in-process teammate's work, since neither starts with an Agent spawn.
@@ -143,6 +162,22 @@ An earlier draft of this record treated a wrap as a pause that removed the label
    - The agent that made a `TaskUpdate` receives the line through PreToolUse `additionalContext`. `gh-tasks claim` prints it.
    - The lead's next whisper carries the same line when nothing was declared.
    - Rewriting the spawn's prompt through PreToolUse `updatedInput` would tie the line to the exact spawn. It replaces SubagentStart delivery once a probe shows that it works on the Agent tool, and that it leaves the spawn's permission outcome and the ways stash's input as they were.
+
+What one trigger does, from the check to the state line:
+
+```mermaid
+flowchart TD
+    T["Trigger: Agent spawn with the gh-N prefix,<br>TaskUpdate on gh-N, or gh-tasks claim"] --> L{"Issue carries<br>tasklist?"}
+    L -->|no| X["Nothing"]
+    L -->|yes| S{"Declared this<br>session?"}
+    S -->|yes| Q["No GitHub call"]
+    S -->|no| R["Read assignees, label<br>and this login"]
+    R -->|gh fails| K["Nothing written<br>line: state unknown"]
+    R -->|another login assigned| H["Nothing written<br>line: not declared, with the next step"]
+    R -->|unassigned or only this login| W{"Write switch<br>on?"}
+    W -->|on| A["Assign this login, add in-progress<br>line: declared"]
+    W -->|off| F["Nothing written<br>line offers the write"]
+```
 
 6. **Another holder is the working agent's to reason about.** With the state line in hand, the agent may go on, or raise it with whoever dispatched it: a subagent asks its lead, and a lead whose work the operator directed asks the operator. A subagent raises it in its hand-back or a message to the lead and writes nothing to GitHub. When the work goes ahead beside the other holder, the lead declares it with `gh-tasks claim <n>`, on the operator's word or its own call under item 13. That manual claim adds this login beside the existing assignees.
 
