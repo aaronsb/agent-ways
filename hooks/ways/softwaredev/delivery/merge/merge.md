@@ -44,6 +44,10 @@ Whichever corner you land in, asking to merge is asking for the review this gate
 
 A release bump PR whose diff is only the package's version line and its lockfile entry merges once CI passes, without a review. The code it releases was reviewed when it merged, and the bump adds nothing to read. A bump that carries anything else, such as a changelog entry or a fix, takes the gate like any other change. It holds only where the repository enforces no review and its policy could be read.
 
+## Green CI is a command
+
+Green CI means `gh pr checks <n> --json bucket -q 'all(.[]; .bucket=="pass" or .bucket=="skipping")'` prints `true`. Run it as its own command and read the result before `gh pr merge`. Parse no text table, and never chain a merge after a pipe, whose exit status is the last command's. A guard script counts once it has been seen refusing a red case. After a merge, a hook names any check that was not green; tell the operator when it does.
+
 ## Remediate before you merge
 
 A review that finds nothing changes nothing; a review that finds something is only worth running if the findings get fixed. **Remediate per finding** before the merge gate — apply the fix, or record why a finding is declined. Don't carry known findings past the gate. This is the step the loop is easy to skip: "reviewed" is not "landed clean."
