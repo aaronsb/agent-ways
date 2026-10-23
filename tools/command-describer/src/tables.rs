@@ -9,7 +9,9 @@
 use crate::Class;
 
 /// Programs whose segment is navigation or setup, never operative.
-/// `mkdir` is here because the study counted `mkdir -p` as setup.
+/// `mkdir` is here because the study counted `mkdir -p` as setup. `eval`'s
+/// own segment is navigation; its arguments are parsed as a command string,
+/// whose segments carry the role of what they run.
 pub const NAVIGATION: &[&str] = &[
     "cd", "pushd", "popd", "export", "set", "unset", "source", ".", "local", "declare", "alias",
     "trap", "shift", "echo", "printf", "true", "false", ":", "sleep", "wait", "read", "exit",
@@ -40,6 +42,18 @@ pub const WRAPPERS: &[&str] = &[
 /// program: `time echo hi` and `builtin cd /tmp` stay navigation, where
 /// `sudo -n true` is operative.
 pub const IN_SHELL_WRAPPERS: &[&str] = &["time", "builtin"];
+
+/// Shells whose `-c` operand is a command string: `bash -c 'git push'`,
+/// `sh -ec '…'`. The describer parses the string as a list of its own. Added
+/// by the port.
+pub const SHELLS: &[&str] = &["bash", "sh", "zsh", "dash", "ksh"];
+
+/// Short shell options that take the next word as their value, alone or in
+/// a cluster: `bash -o pipefail -c …`, `bash -euo pipefail -c …`.
+pub const SHELL_VALUE_OPTIONS: &[char] = &['o', 'O'];
+
+/// Long shell options that take the next word as their value.
+pub const SHELL_VALUE_LONG_OPTIONS: &[&str] = &["--rcfile", "--init-file"];
 
 /// Shell keywords stripped from the front of a segment. `do` marks the
 /// segment as a loop body. `time` is a wrapper, so `time -p cmd` resolves.

@@ -789,3 +789,311 @@ fn dollar_quotes_and_braces_inside_double_quotes_are_literal() {
     // Outside double quotes, $'…' is still an ANSI-C string.
     assert_eq!(programs("echo $'a; rm x' && ls"), ["echo", "ls"]);
 }
+
+/// The operative `git push` segment of a parse: its depth and text.
+fn git_push(segs: &[Segment]) -> Option<(usize, &str)> {
+    segs.iter()
+        .find(|s| {
+            s.is_operative()
+                && s.program.as_deref() == Some("git")
+                && s.subcommand.as_deref() == Some("push")
+        })
+        .map(|s| (s.depth, s.text.as_str()))
+}
+
+#[test]
+fn eval_arguments_are_parsed_as_a_command() {
+    let segs = parse("eval \"git push --force\"");
+    assert_eq!(
+        rows(&segs),
+        vec![
+            (C::Start, R::Navigation, Some("eval"), None, None),
+            (
+                C::CommandString,
+                R::Operative,
+                Some("git"),
+                Some("push"),
+                Some(Class::Publish)
+            ),
+        ]
+    );
+    assert_eq!(git_push(&segs), Some((1, "git push --force")));
+    assert_eq!(segs[1].flags, ["--force"]);
+    // Unquoted arguments are joined with spaces, as bash joins them.
+    assert_eq!(git_push(&parse("eval git push")), Some((1, "git push")));
+    assert_eq!(
+        git_push(&parse("eval git 'push' origin")),
+        Some((1, "git push origin"))
+    );
+    // The string is a list of its own: each command in it is a segment.
+    let segs = parse("cd /x && eval 'make build; git push'");
+    assert_eq!(operative_texts(&segs), ["make build", "git push"]);
+}
+
+#[test]
+fn eval_alone_stays_navigation() {
+    let segs = parse("eval");
+    assert_eq!(
+        rows(&segs),
+        vec![(C::Start, R::Navigation, Some("eval"), None, None)]
+    );
+}
+
+#[test]
+fn a_shell_command_string_is_parsed_as_a_command() {
+    let segs = parse("bash -c \"git push origin main\"");
+    assert_eq!(
+        rows(&segs),
+        vec![
+            (
+                C::Start,
+                R::Operative,
+                Some("bash"),
+                None,
+                Some(Class::Other)
+            ),
+            (
+                C::CommandString,
+                R::Operative,
+                Some("git"),
+                Some("push"),
+                Some(Class::Publish)
+            ),
+        ]
+    );
+    assert_eq!(git_push(&segs), Some((1, "git push origin main")));
+
+    let segs = parse("sh -c 'cd /tmp && rm -rf build'");
+    assert_eq!(
+        rows(&segs),
+        vec![
+            (C::Start, R::Operative, Some("sh"), None, Some(Class::Other)),
+            (C::CommandString, R::Navigation, Some("cd"), None, None),
+            (
+                C::And,
+                R::Operative,
+                Some("rm"),
+                None,
+                Some(Class::FileWrite)
+            ),
+        ]
+    );
+    assert_eq!(segs.iter().map(|s| s.depth).collect::<Vec<_>>(), [0, 1, 1]);
+}
+
+#[test]
+fn a_shell_c_flag_in_a_cluster_or_behind_a_wrapper() {
+    let segs = parse("bash -lc \"make test\"");
+    assert_eq!(
+        operative_texts(&segs),
+        ["bash -lc \"make test\"", "make test"]
+    );
+    assert_eq!(segs[1].class, Some(Class::BuildTest));
+    for cmd in [
+        "bash -ec 'git push'",
+        "sh -xc 'git push'",
+        "zsh -c 'git push'",
+        "dash -c 'git push'",
+        "ksh -c 'git push'",
+        "/bin/bash -c 'git push'",
+        "bash -euo pipefail -c 'git push'",
+        "bash --norc -c 'git push'",
+        "sudo sh -c 'git push'",
+        "sudo -u deploy bash -lc 'git push'",
+        "env FOO=1 bash -c \"git push\"",
+        "nohup bash -c 'git push' &",
+        "ls | xargs -I {} sh -c 'git push'",
+    ] {
+        assert_eq!(git_push(&parse(cmd)), Some((1, "git push")), "{cmd}");
+    }
+    let segs = parse("sudo sh -c 'git push'");
+    assert_eq!(
+        (segs[0].program.as_deref(), segs[1].program.as_deref()),
+        (Some("sh"), Some("git"))
+    );
+}
+
+#[test]
+fn nested_shell_strings_nest_and_terminate() {
+    let segs = parse("bash -c \"sh -c 'git push'\"");
+    assert_eq!(
+        segs.iter()
+            .map(|s| (s.depth, s.program.as_deref()))
+            .collect::<Vec<_>>(),
+        [(0, Some("bash")), (1, Some("sh")), (2, Some("git"))]
+    );
+    assert_eq!(git_push(&segs), Some((2, "git push")));
+    // Escaped quotes inside a double-quoted string.
+    let segs = parse(r#"bash -c "bash -c \"git push\"""#);
+    assert_eq!(git_push(&segs), Some((2, "git push")));
+    // Past the depth cap the string is not parsed, and the parse ends.
+    let deep = format!("{}git push", "eval ".repeat(200));
+    let segs = parse(&deep);
+    assert!(segs.len() <= 32, "{}", segs.len());
+    assert!(segs.iter().all(|s| s.depth < 32));
+    assert_eq!(git_push(&segs), None);
+    let shallow = format!("{}git push", "eval ".repeat(10));
+    assert_eq!(git_push(&parse(&shallow)), Some((10, "git push")));
+}
+
+#[test]
+fn a_shell_without_a_command_string_is_unchanged() {
+    for cmd in [
+        "bash deploy.sh",
+        "bash",
+        "sh -s",
+        "bash -x deploy.sh -c 'git push'",
+        "bash <<EOF\ngit push\nEOF",
+        "echo bash -c 'git push'",
+    ] {
+        let segs = parse(cmd);
+        assert_eq!(segs.len(), 1, "{cmd}: {segs:?}");
+        assert_eq!(git_push(&segs), None, "{cmd}");
+    }
+    assert_eq!(programs("bash deploy.sh && git status"), ["bash", "git"]);
+}
+
+#[test]
+fn a_substitution_in_a_command_string_is_one_segment() {
+    // The outer lexer reads `$( … )` in a double-quoted word; the string's
+    // own parse reads it again. It is described once, where the outer shell
+    // runs it, before the string's own commands.
+    let segs = parse("bash -c \"echo $(git push)\"");
+    let pushes = segs.iter().filter(|s| s.text == "git push").count();
+    assert_eq!(pushes, 1, "{segs:?}");
+    assert_eq!(git_push(&segs), Some((1, "git push")));
+    assert_eq!(
+        programs("bash -c \"echo $(git push)\""),
+        ["bash", "git", "echo"]
+    );
+    let segs = parse("eval \"$(ssh-agent -s)\"");
+    let agents = segs
+        .iter()
+        .filter(|s| s.program.as_deref() == Some("ssh-agent"))
+        .count();
+    assert_eq!(agents, 1, "{segs:?}");
+}
+
+#[test]
+fn command_string_spans_slice_the_original_command() {
+    for cmd in [
+        "bash -c 'git push origin' && ls",
+        "eval \"git push\"",
+        "sudo sh -c 'cd /tmp && rm -rf build'",
+        "bash -c \"sh -c 'git push'\"",
+    ] {
+        for s in parse(cmd) {
+            assert_eq!(&cmd[s.span.clone()], s.text, "{cmd}: {s:?}");
+        }
+    }
+    // An escaped string cannot be sliced: the span covers its word.
+    let cmd = r#"bash -c "echo \"hi\"" && ls"#;
+    let segs = parse(cmd);
+    assert_eq!(segs[1].text, "echo \"hi\"");
+    assert_eq!(&cmd[segs[1].span.clone()], r#""echo \"hi\"""#);
+}
+
+/// How many segments run `program`.
+fn count(segs: &[Segment], program: &str) -> usize {
+    segs.iter()
+        .filter(|s| s.program.as_deref() == Some(program))
+        .count()
+}
+
+#[test]
+fn a_substitution_the_string_does_not_run_again_is_kept() {
+    // The outer shell runs each of these `$( … )`; inside the string it is
+    // quoted, escaped or in a heredoc body, so the string's parse never
+    // reads it. The outer copy is the one segment.
+    for cmd in [
+        r#"bash -c "echo '$(git push)'""#,
+        r#"eval "export T='$(git push)'""#,
+        r#"bash -c "x=\\$(git push)""#,
+        "bash -c \"cat <<EOF\n$(git push)\nEOF\"",
+    ] {
+        let segs = parse(cmd);
+        assert_eq!(count(&segs, "git"), 1, "{cmd}: {segs:?}");
+        assert_eq!(git_push(&segs), Some((1, "git push")), "{cmd}");
+    }
+    // An escaped `$` is the string's own substitution, one level deeper.
+    let segs = parse(r#"bash -c "x=\$(git push)""#);
+    assert_eq!(count(&segs, "git"), 1, "{segs:?}");
+    assert_eq!(git_push(&segs), Some((2, "git push")));
+    // At the depth cap the outer copy still stands.
+    let capped = format!("{}\"$(git push)\"", "eval ".repeat(31));
+    let segs = parse(&capped);
+    assert_eq!(count(&segs, "git"), 1, "{segs:?}");
+}
+
+#[test]
+fn each_command_string_drops_only_its_own_copies() {
+    let segs = parse(r#"bash -o "$(bash -c "$(p1)")" -c "$(a1)""#);
+    assert_eq!(count(&segs, "a1"), 1, "{segs:?}");
+    assert_eq!(count(&segs, "p1"), 1, "{segs:?}");
+    // A substitution holding a command string is described once.
+    let segs = parse(r#"bash -c "echo $(sh -c 'git push')""#);
+    assert_eq!(count(&segs, "git"), 1, "{segs:?}");
+    assert_eq!(count(&segs, "sh"), 1, "{segs:?}");
+}
+
+#[test]
+fn an_ansi_c_string_decodes_its_escapes() {
+    let segs = parse("bash -c $'cd x\\ngit push'");
+    assert_eq!(
+        rows(&segs)[1..],
+        [
+            (C::CommandString, R::Navigation, Some("cd"), None, None),
+            (
+                C::Newline,
+                R::Operative,
+                Some("git"),
+                Some("push"),
+                Some(Class::Publish)
+            ),
+        ]
+    );
+    let segs = parse("bash -c $'make build\\tx'");
+    assert_eq!(operative_texts(&segs)[1], "make build\tx");
+    let segs = parse("eval $'printf a\\\\b'");
+    assert_eq!(segs[1].text, "printf a\\b");
+    let segs = parse(r#"eval $'echo \'a\' \"b\"; git push'"#);
+    assert_eq!(segs[1].text, r#"echo 'a' "b""#);
+    assert_eq!(git_push(&segs), Some((1, "git push")));
+}
+
+#[test]
+fn a_lone_dash_ends_a_shells_options() {
+    assert_eq!(
+        git_push(&parse("bash -c - 'git push'")),
+        Some((1, "git push"))
+    );
+    assert_eq!(git_push(&parse("sh - 'git push'")), None);
+}
+
+#[test]
+fn a_command_strings_segments_come_before_a_later_subshell() {
+    assert_eq!(
+        programs("bash -c 'make' && (git push)"),
+        ["bash", "make", "git"]
+    );
+    assert_eq!(programs("eval 'make'; (git push)"), ["eval", "make", "git"]);
+    assert_eq!(
+        programs("bash -c 'make' | (cd x && git push)"),
+        ["bash", "make", "cd", "git"]
+    );
+}
+
+#[test]
+fn only_a_substitutions_reread_copy_is_dropped() {
+    // The quoted `$( … )` is the outer shell's; the subshell is the string's
+    // own command with the same text.
+    let segs = parse(r#"bash -c "echo '$(git push)'; (git push)""#);
+    assert_eq!(count(&segs, "git"), 2, "{segs:?}");
+    // Every segment of a re-read substitution is a copy, not only its first.
+    let segs = parse(r#"bash -c "echo $(make && git push)""#);
+    assert_eq!(
+        (count(&segs, "make"), count(&segs, "git")),
+        (1, 1),
+        "{segs:?}"
+    );
+}

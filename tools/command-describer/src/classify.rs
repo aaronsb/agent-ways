@@ -6,12 +6,18 @@ use std::ops::Range;
 
 use crate::lex::{RawSegment, Token, TokenKind};
 use crate::tables::{
-    self, ClassInput, FILTERS, IN_SHELL_WRAPPERS, LEAD_KEYWORDS, NAVIGATION, SKIP_KEYWORDS,
-    WRAPPERS,
+    self, ClassInput, FILTERS, IN_SHELL_WRAPPERS, LEAD_KEYWORDS, NAVIGATION, SHELLS,
+    SHELL_VALUE_LONG_OPTIONS, SHELL_VALUE_OPTIONS, SKIP_KEYWORDS, WRAPPERS,
 };
 use crate::{Class, Connector, Role, Segment};
 
-pub(crate) fn build(src: &str, excluded: &[Range<usize>], raw: RawSegment) -> Option<Segment> {
+/// The segment, and the words it runs as a command string, if any (see
+/// [`command_string`]).
+pub(crate) fn build(
+    src: &str,
+    excluded: &[Range<usize>],
+    raw: RawSegment,
+) -> Option<(Segment, Option<Vec<Token>>)> {
     let (connector, tokens) = strip_keywords(raw.connector, &raw.tokens)?;
     let span = tokens.first()?.span.start..tokens.last()?.span.end;
     let text = cut(src, &span, excluded);
@@ -33,7 +39,7 @@ pub(crate) fn build(src: &str, excluded: &[Range<usize>], raw: RawSegment) -> Op
         } else {
             (Role::Navigation, None)
         };
-        return Some(Segment {
+        let segment = Segment {
             connector,
             depth: raw.depth,
             role,
@@ -44,7 +50,8 @@ pub(crate) fn build(src: &str, excluded: &[Range<usize>], raw: RawSegment) -> Op
             span,
             text,
             program_at: 0,
-        });
+        };
+        return Some((segment, None));
     };
     let program_at = text_offset(word_tokens[at].span.start, &span, excluded);
     let rest = &words[at + 1..];
@@ -89,7 +96,8 @@ pub(crate) fn build(src: &str, excluded: &[Range<usize>], raw: RawSegment) -> Op
         }
     });
 
-    Some(Segment {
+    let string = command_string(program, &word_tokens[at + 1..]);
+    let segment = Segment {
         connector,
         depth: raw.depth,
         role,
@@ -100,7 +108,49 @@ pub(crate) fn build(src: &str, excluded: &[Range<usize>], raw: RawSegment) -> Op
         span,
         text,
         program_at,
-    })
+    };
+    Some((segment, string))
+}
+
+/// The words a program runs as a command string: every argument of `eval`
+/// (after a leading `--`), or the first operand of a shell in
+/// [`SHELLS`] whose options include `-c`, alone or in a cluster (`-lc`,
+/// `-ec`, `-euo pipefail -c`). `None` for any other program, for `eval`
+/// alone, and for a shell that runs a script (`bash deploy.sh`) or reads
+/// its input (`sh -s`, `bash <<EOF`).
+fn command_string(program: &str, args: &[&Token]) -> Option<Vec<Token>> {
+    if program == "eval" {
+        let args = match args.first() {
+            Some(t) if t.value == "--" => &args[1..],
+            _ => args,
+        };
+        return (!args.is_empty()).then(|| args.iter().map(|t| (*t).clone()).collect());
+    }
+    if !SHELLS.contains(&program) {
+        return None;
+    }
+    // The shell reads its options, then takes its first operand as the
+    // string when `-c` was among them.
+    let mut dash_c = false;
+    let mut i = 0;
+    while let Some(v) = args.get(i).map(|t| t.value.as_str()) {
+        // A lone `-` ends the options as `--` does.
+        if v == "--" || v == "-" {
+            i += 1;
+            break;
+        }
+        if v.starts_with("--") {
+            i += 1 + usize::from(SHELL_VALUE_LONG_OPTIONS.contains(&v));
+            continue;
+        }
+        let Some(cluster) = v.strip_prefix(['-', '+']).filter(|c| !c.is_empty()) else {
+            break;
+        };
+        dash_c |= v.starts_with('-') && cluster.contains('c');
+        i += 1 + cluster.matches(SHELL_VALUE_OPTIONS).count();
+    }
+    let operand = args.get(i).filter(|_| dash_c)?;
+    Some(vec![(*operand).clone()])
 }
 
 /// Drop leading shell keywords and function headers; `None` when what is
