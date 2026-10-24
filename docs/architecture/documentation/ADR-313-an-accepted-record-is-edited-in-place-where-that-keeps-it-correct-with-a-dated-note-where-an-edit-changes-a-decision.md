@@ -13,6 +13,15 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "accepted should mean what it reads as in the decisions. if something was written as superceded in the adr, then that's considered history. imagine that reading the adr from top to bottom and considering its sections, the total read of a concept in the adr is what is 'accepted'"
+    via: this session, 2026-10-24, answering the agent's question whether an accepted record should read as what is decided now
+    covers: [edit-to-current]
+  - operator: aaronsb
+    said: "when things are reversed or replaced (or rejected) if it is substantially the same topic then I'd rather alter the existing adr. if it is a different direction or concept or less than half overlapping (thats a subjective call but acceptable) then it's a new record. The reason for this is a blanket 'new append' policy would create a bueacratic mess."
+    via: this session, 2026-10-24, answering the agent's question whether a reversed or replaced decision should get its own record; the answer changed Decision 4
+    covers: [new-record-line]
 status: accepted
 date: 2026-10-24
 deciders:
@@ -28,7 +37,7 @@ related:
 
 ## Summary
 
-- **Decided:** an accepted record is edited in place where that keeps it correct and readable, so its text says what is decided now. An edit that changes what a record decided carries a dated note at the edited passage, with the operator's words and what the text said before. Appended dated sections remain for evidence, corrections and amendments that add to a record. A new direction, a decision reversed or replaced, is still a new decision that names what it replaces through `supersedes` or `amends`. Git keeps every earlier version.
+- **Decided:** an accepted record is edited in place where that keeps it correct and readable, so its text says what is decided now. An edit that changes what a record decided carries a dated note at the edited passage, with the operator's words and what the text said before. Appended dated sections remain for evidence, corrections and amendments that add to a record. A decision reversed, replaced or rejected on substantially the same topic is altered in its own record. A different direction or concept, or a change that overlaps the record by less than about half, is a new record that names what it replaces through `supersedes` or `amends`. Git keeps every earlier version.
 - **Trades away:** a record's body is no longer its original text. A reader who wants the record as first accepted reads `git log -p` or the dated notes.
 - **One-way?** No. The rule lives in the ADR way and its neighbours, and an edit made under it is a commit.
 - **Probes:** *Confident (edit-to-current):* you want an accepted record to read as what is decided now, with the earlier wording one dated note or one `git log -p` away. *Not confident (new-record-line):* whether a reversed or replaced decision should still get its own record, or whether you would rather edit the old record in place for those too.
@@ -40,10 +49,12 @@ ADR-311 §4 made "correct an accepted record by appending" a convention, and ADR
 
 ## Decision
 
-1. **Edit to keep a record correct.** An accepted record of any kind is edited in place where that keeps it correct and readable: a wrong fact, a stale path or name, an unclear passage, or a rule the operator revised within the record's direction. Its text then says what is decided now.
+1. **Edit to keep a record correct.** An accepted record of any kind is edited in place where that keeps it correct and readable: a wrong fact, a stale path or name, an unclear passage, or a rule the operator revised within the record's direction. Its text then says what is decided now. The accepted decision is the record read top to bottom, section by section: a passage the record marks as superseded or replaced is history, and the rest is what is accepted.
 2. **Mark an edit that changes a decision.** Where an edit changes what a record decided, the edited passage carries a dated note: the date, the operator's words (or the reason, when no operator spoke), and what the text said before. An edit that changes no decision, such as a typo, a path or a clearer sentence, needs no note.
 3. **Append what adds.** Evidence found later, a correction worth reading as its own event, and an amendment that adds to a record go in an appended dated section, as before.
-4. **A new direction is a new record.** A decision reversed or replaced, or carried to ground its record did not cover, is a new decision that names what it replaces through `supersedes` or `amends`. The passages it replaces are edited to say so, with a dated note citing it.
+4. **Same topic, same record.** When a decision is reversed, replaced or rejected and the change stays on substantially the same topic, its record is altered: the Summary, Decision and Consequences are edited to argue for what is decided now, and the changed passages carry dated notes. A different direction or concept, or a change that overlaps the record by less than about half, is a new decision that names what it replaces through `supersedes` or `amends`, and the passages it replaces are edited to say so, with a dated note citing it. Where the line falls is the agent's judgement.
+
+   > Edited 2026-10-24: the operator said "when things are reversed or replaced (or rejected) if it is substantially the same topic then I'd rather alter the existing adr. if it is a different direction or concept or less than half overlapping (thats a subjective call but acceptable) then it's a new record. The reason for this is a blanket 'new append' policy would create a bueacratic mess.". It read: "**A new direction is a new record.** A decision reversed or replaced, or carried to ground its record did not cover, is a new decision that names what it replaces through `supersedes` or `amends`. The passages it replaces are edited to say so, with a dated note citing it." The Summary said the same, and the Alternatives listed a new record for every reversal as the choice.
 5. **What stays as written.** Quotations of the operator, `basis` and `considered` entries, and `concern:` entries are history of who said what. They are not edited to read current; a later answer is another entry. An evidence record's citations of records superseded since stay as written, since they are true to their moment.
 6. **Git is the backstop.** Every earlier version, and who changed it, is read with `git log -p`.
 
@@ -60,6 +71,7 @@ The ADR way's Conventions, the consider way, the adr skill and the system-archit
 
 - Judging whether an edit changes a decision is left to the agent and to review. An unmarked edit that did change one goes unflagged until someone reads the diff.
 - The record's first accepted text lives only in git and in the dated notes.
+- Whether a change stays on the same topic, and how much it overlaps, is a judgement. Two agents may draw the line differently.
 
 ### Neutral
 
@@ -70,4 +82,5 @@ The ADR way's Conventions, the consider way, the adr skill and the system-archit
 
 - **Keep append-only.** The operator overruled it.
 - **Edit freely with no notes.** Loses, in the record itself, the operator's reason for a changed decision and what was decided before; git keeps the text but not why it changed.
-- **Edit in place for every change, with no new records.** Folds a reversal into a record whose Summary, basis and probes argued the other way, so the record no longer argues for what it says. Left open as the not-confident probe.
+- **A new record for every reversal or replacement.** The operator declined it: a blanket new-record policy leaves one topic spread across a chain of records.
+- **Edit in place for every change, with no new records.** Folds a different concept into a record that argued for another, so the record no longer reads as one decision.

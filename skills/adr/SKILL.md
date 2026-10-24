@@ -249,7 +249,7 @@ downgrade the project.
 - **Always use the CLI** — never create `ADR-*.md` files by hand
 - **Run `domains` first** when working in an unfamiliar project — domain names and ranges vary
 - **Status changes through the tool** — adr/v0: edit the YAML `status:` field; adr/v1: `adr accept`/`reject`/`abandon`/`supersede`/`archive`, which `adr set` refuses without `--force`
-- **Edit to keep correct** — an accepted record is edited in place where that keeps it correct and readable, an edit that changes what it decided carries a dated note with the operator's words or the reason and the earlier text, what adds goes in an appended dated section, a new direction is a new decision that names what it replaces, and the operator is quoted in their own words. The tool checks shape and references, not these; review catches them, and git keeps every earlier version (ADR-311, ADR-313)
+- **Edit to keep correct** — an accepted record is edited in place where that keeps it correct and readable, an edit that changes what it decided carries a dated note with the operator's words or the reason and the earlier text, what adds goes in an appended dated section, a decision reversed, replaced or rejected on substantially the same topic is altered in its own record, a different direction or concept is a new decision that names what it replaces, and the operator is quoted in their own words. The tool checks shape and references, not these; review catches them, and git keeps every earlier version (ADR-311, ADR-313)
 - **Regenerate index** after any ADR changes with `docs/scripts/adr index -y`
 
 ## Not for
