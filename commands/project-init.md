@@ -301,7 +301,7 @@ We adopt the following practices:
 
 On adr/v1, the scaffold record opens with `## Summary` (decided, trades away, one-way?, probes, inversion) instead, and its `basis` names the interview as an `operator` entry, quoting the operator's answers. `docs/scripts/adr new --help` and `adr lint` confirm the fields the chosen kind requires.
 
-**This ADR is created early** (after ADR tooling is installed) and updated as the scaffold progresses. It becomes the first real ADR in the project. On adr/v1 it stays `proposed` while the scaffold changes: at the end, ask the operator its probes, record the answer with `docs/scripts/adr consider <n> --said "..." --via "..."`, then `docs/scripts/adr accept <n>`. After acceptance it is corrected by appending, and a later change is a new decision that names what it replaces.
+**This ADR is created early** (after ADR tooling is installed) and updated as the scaffold progresses. It becomes the first real ADR in the project. On adr/v1 it stays `proposed` while the scaffold changes: at the end, ask the operator its probes, record the answer with `docs/scripts/adr consider <n> --said "..." --via "..."`, then `docs/scripts/adr accept <n>`. After acceptance it is edited in place where that keeps it correct, with a dated note where an edit changes what it decided. A reversal on the same topic alters this record, and a different direction is a new decision that names what it replaces (ADR-313).
 
 ### Sub-Agent Delegation
 

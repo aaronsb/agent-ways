@@ -3,7 +3,7 @@ contract: adr/v1
 kind: decision
 verb: change
 capability: adr
-amends: [ADR-311#decision, ADR-304#1, ADR-309#1]
+amends: [ADR-311#decision, ADR-304#1, ADR-304#4, ADR-304#6, ADR-304#12, ADR-309#1]
 basis:
   - operator: aaronsb
     level: directed
@@ -54,8 +54,8 @@ ADR-311 §4 made "correct an accepted record by appending" a convention, and ADR
 3. **Append what adds.** Evidence found later, a correction worth reading as its own event, and an amendment that adds to a record go in an appended dated section, as before.
 4. **Same topic, same record.** When a decision is reversed, replaced or rejected and the change stays on substantially the same topic, its record is altered: the Summary, Decision and Consequences are edited to argue for what is decided now, and the changed passages carry dated notes. A different direction or concept, or a change that overlaps the record by less than about half, is a new decision that names what it replaces through `supersedes` or `amends`, and the passages it replaces are edited to say so, with a dated note citing it. Where the line falls is the agent's judgement.
 
-   > Edited 2026-10-24: the operator said "when things are reversed or replaced (or rejected) if it is substantially the same topic then I'd rather alter the existing adr. if it is a different direction or concept or less than half overlapping (thats a subjective call but acceptable) then it's a new record. The reason for this is a blanket 'new append' policy would create a bueacratic mess.". It read: "**A new direction is a new record.** A decision reversed or replaced, or carried to ground its record did not cover, is a new decision that names what it replaces through `supersedes` or `amends`. The passages it replaces are edited to say so, with a dated note citing it." The Summary said the same, and the Alternatives listed a new record for every reversal as the choice.
-5. **What stays as written.** Quotations of the operator, `basis` and `considered` entries, and `concern:` entries are history of who said what. They are not edited to read current; a later answer is another entry. An evidence record's citations of records superseded since stay as written, since they are true to their moment.
+   > Edited 2026-10-24: the operator said "when things are reversed or replaced (or rejected) if it is substantially the same topic then I'd rather alter the existing adr. if it is a different direction or concept or less than half overlapping (thats a subjective call but acceptable) then it's a new record. The reason for this is a blanket 'new append' policy would create a bueacratic mess." It read: "**A new direction is a new record.** A decision reversed or replaced, or carried to ground its record did not cover, is a new decision that names what it replaces through `supersedes` or `amends`. The passages it replaces are edited to say so, with a dated note citing it." The Summary said the same, and the Alternatives read: "**Edit in place for every change, with no new records.** Folds a reversal into a record whose Summary, basis and probes argued the other way, so the record no longer argues for what it says. Left open as the not-confident probe."
+5. **What stays as written.** Quotations of the operator, the Summary's probes as asked, `basis` and `considered` entries, and `concern:` entries are history of who said what. They are not edited to read current; a later answer is another entry. An evidence record's citations of records superseded since stay as written, since they are true to their moment.
 6. **Git is the backstop.** Every earlier version, and who changed it, is read with `git log -p`.
 
 The ADR way's Conventions, the consider way, the adr skill and the system-architect agent teach this.
@@ -75,7 +75,7 @@ The ADR way's Conventions, the consider way, the adr skill and the system-archit
 
 ### Neutral
 
-- Amends ADR-311 §4, ADR-304 §1 (decision bodies append-only) and ADR-309 §1 (evidence frozen once accepted). The tool needs no change: ADR-311 already removed the frozen check.
+- Amends ADR-311 §4, ADR-304 §1 (decision bodies append-only), §4 and §6 (the frozen-record field and rule), §12 (a decision append-only and citable) and ADR-309 §1 (evidence frozen once accepted). The tool needs no change: ADR-311 already removed the frozen check.
 - Existing appended notes stay. A record is folded to read current when someone next edits it, not in a sweep.
 
 ## Alternatives Considered

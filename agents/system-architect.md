@@ -50,7 +50,7 @@ Accept when the work calls for it, after the session has put the probes to the o
 ```bash
 docs/scripts/adr accept <n>
 ```
-Use `docs/scripts/adr reject <n> --reason "..."` or `docs/scripts/adr abandon <n> --reason "..."` when the decision doesn't hold. Once accepted, a decision is edited in place where that keeps it correct, an edit that changes what it decided carries a dated note with the operator's words or the reason and the earlier text, a decision reversed or replaced on substantially the same topic is altered in its own record, and a different direction or concept is a new decision that names what it replaces. The tool checks shape and references, not these conventions; review catches them, and git keeps every earlier version (ADR-311, ADR-313). Mark a cut or retire done with `docs/scripts/adr enact <n> <commit>` once the commit lands.
+Use `docs/scripts/adr reject <n> --reason "..."` or `docs/scripts/adr abandon <n> --reason "..."` when the decision doesn't hold. Once accepted, a decision is edited in place where that keeps it correct; an edit that changes what it decided carries a dated note with the operator's words, or the reason, and the earlier text; what adds goes in an appended dated section; a decision reversed, replaced or rejected on substantially the same topic is altered in its own record; and a different direction or concept is a new decision that names what it replaces. The tool checks shape and references, not these conventions; review catches them, and git keeps every earlier version (ADR-311, ADR-313). Mark a cut or retire done with `docs/scripts/adr enact <n> <commit>` once the commit lands.
 
 ## SOLID Principles Evaluation
 

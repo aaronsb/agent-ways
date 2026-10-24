@@ -61,15 +61,14 @@ ADR-304 §1 declared record kinds as data, seeded `decision` and `spec`, and nam
 ```yaml
 kinds:
   evidence:
-    mutable_after_accept: [status, superseded_by, related]
     verb: forbidden
     requires: [capability]
     edges: { supersedes: evidence }
 ```
 
-An evidence record records what was found, measured or reasoned at a point in time. Once accepted, it is edited only to correct an error, with a dated note where a finding changes. Its citations of records superseded since stay as written, since they are true to their moment. A later finding supersedes it or goes in a dated section. It carries no Summary requirement, no verb and no `agent` requirement.
+An evidence record records what was found, measured or reasoned at a point in time. Once accepted, it is edited only to keep it correct, with a dated note where a finding changes. Its citations of records superseded since stay as written, since they are true to their moment. A later finding supersedes it or goes in a dated section. It carries no Summary requirement, no verb and no `agent` requirement.
 
-> Edited 2026-10-24 (ADR-313): the operator said "I don't like append only. I thought it made sense but we need to be able to edit where it makes sense too". It read: "It is frozen once accepted, like a decision. A later finding supersedes it and does not rewrite it." The Summary read "An evidence record is frozen once accepted".
+> Edited 2026-10-24 (ADR-313): the operator said "I don't like append only. I thought it made sense but we need to be able to edit where it makes sense too". It read: "It is frozen once accepted, like a decision. A later finding supersedes it and does not rewrite it." The Summary read "An evidence record is frozen once accepted", and the kind config above listed `mutable_after_accept: [status, superseded_by, related]`, a key ADR-311 had already removed.
 
 ### 2. Decisions cite evidence
 
