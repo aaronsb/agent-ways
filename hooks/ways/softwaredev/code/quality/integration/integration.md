@@ -53,9 +53,9 @@ If the class is too large for this increment, fix the instance, name the remaini
 
 The sweep is bounded by the defect's identity. The scope rule (do the task asked, file the rest) is bounded by relevance. Both bounds hold at once. A sibling carrying the defect you were sent to fix is the same work; a different defect you noticed on the way gets filed. When integration touches files the request did not name, including the seam that should own the fix, list them before editing.
 
-## Append-only artifacts
+## History-keeping artifacts
 
-Changelogs, ADRs, audit logs, and ledgers are deliberately append-only. A stale entry there is struck or superseded. This way governs code and single-current-truth documents, where two copies of a fact is a defect.
+Changelogs, audit logs, and ledgers are deliberately append-only. A stale entry there is struck or superseded. Decision records keep their own convention: edited in place to stay correct, with a dated note where a decision changed (adr). This way governs code and single-current-truth documents, where two copies of a fact is a defect.
 
 ## When it does not apply
 

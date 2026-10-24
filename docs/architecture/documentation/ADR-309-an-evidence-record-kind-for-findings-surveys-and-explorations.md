@@ -42,7 +42,7 @@ related:
 
 ## Summary
 
-- **Decided:** the record corpus gains an `evidence` kind for findings, surveys, audits, measurements and the reasoning that came before a decision. An evidence record is frozen once accepted, takes no verb, names a capability, and may be cited by a decision's basis. The design notes move into the corpus: specifications become `spec` records, and everything else becomes `evidence`.
+- **Decided:** the record corpus gains an `evidence` kind for findings, surveys, audits, measurements and the reasoning that came before a decision. An evidence record is edited once accepted only to keep it correct, takes no verb, names a capability, and may be cited by a decision's basis. The design notes move into the corpus: specifications become `spec` records, and everything else becomes `evidence`.
 - **Trades away:** the looseness of an unnumbered notes folder. A note now needs frontmatter, a number and an accept step.
 - **One-way?** No. A kind is configuration in `adr.yaml`, and evidence records can be moved back out.
 - **Probes:** *Confident (frozen-history):* freezing evidence at acceptance keeps its citations true to their moment, so an exploration citing a record later superseded stays correct as history. *Not confident (exploration-fit):* whether explorations, the reasoning before a decision, belong in the same kind as measurements and surveys, or will want their own kind once there are more of them.
@@ -67,7 +67,9 @@ kinds:
     edges: { supersedes: evidence }
 ```
 
-An evidence record records what was found, measured or reasoned at a point in time. It is frozen once accepted, like a decision. A later finding supersedes it and does not rewrite it. It carries no Summary requirement, no verb and no `agent` requirement.
+An evidence record records what was found, measured or reasoned at a point in time. Once accepted, it is edited only to correct an error, with a dated note where a finding changes. Its citations of records superseded since stay as written, since they are true to their moment. A later finding supersedes it or goes in a dated section.
+
+> Edited 2026-10-24 (ADR-313): the operator said "I don't like append only. I thought it made sense but we need to be able to edit where it makes sense too". It read: "It is frozen once accepted, like a decision. A later finding supersedes it and does not rewrite it." The Summary read "An evidence record is frozen once accepted". It carries no Summary requirement, no verb and no `agent` requirement.
 
 ### 2. Decisions cite evidence
 
@@ -86,7 +88,7 @@ Each design note becomes a record in the area its content belongs to, with a num
 ### Positive
 
 - Findings are numbered and citable, and a decision's basis can point at one.
-- `adr cite` stops flagging historical citations inside evidence, which is frozen by kind.
+- `adr cite` stops flagging historical citations inside evidence, whose citations stay as written.
 
 ### Negative
 

@@ -158,7 +158,7 @@ One record can carry several operator entries at different levels: a call the op
 ## Consequences
 ## Alternatives Considered
 ```
-A `spec` record carries `capability` and no `verb`, and stays mutable in place. An `evidence` record carries no `verb`, is corrected by appending once accepted, and is what a decision's `basis` cites for findings, surveys, audits or explorations (ADR-309).
+A `spec` record carries `capability` and no `verb`, and stays mutable in place. An `evidence` record carries no `verb`, is edited once accepted only to keep it correct, with a dated note where a finding changes, and is what a decision's `basis` cites for findings, surveys, audits or explorations (ADR-309).
 
 **adr/v0** (the legacy contract, unchanged):
 ```markdown
@@ -249,7 +249,7 @@ downgrade the project.
 - **Always use the CLI** — never create `ADR-*.md` files by hand
 - **Run `domains` first** when working in an unfamiliar project — domain names and ranges vary
 - **Status changes through the tool** — adr/v0: edit the YAML `status:` field; adr/v1: `adr accept`/`reject`/`abandon`/`supersede`/`archive`, which `adr set` refuses without `--force`
-- **Correct by appending** — an accepted record is corrected by appending, a change in what the project does is a new decision that names what it replaces, and the operator is quoted in their own words. The tool checks shape and references, not these; review catches them, and git keeps every earlier version (ADR-311)
+- **Edit to keep correct** — an accepted record is edited in place where that keeps it correct and readable, an edit that changes what it decided carries a dated note with the operator's words or the reason and the earlier text, what adds goes in an appended dated section, a new direction is a new decision that names what it replaces, and the operator is quoted in their own words. The tool checks shape and references, not these; review catches them, and git keeps every earlier version (ADR-311, ADR-313)
 - **Regenerate index** after any ADR changes with `docs/scripts/adr index -y`
 
 ## Not for
