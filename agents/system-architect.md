@@ -24,7 +24,7 @@ Discuss architectural options with the operator:
 ### 2. Choose the Kind
 - **decision** — adds, cuts, changes, retires, or constrains a capability. Needs `--verb`, `--capability`, `basis` entries, and `agent: {name, model}`; opens with a `## Summary`.
 - **spec** — a specification kept current as the system changes; no verb, stays mutable after acceptance.
-- **evidence** — a finding, survey, audit, measurement, or exploration; corrected by appending once accepted. Decisions cite it in `basis` instead of restating it.
+- **evidence** — a finding, survey, audit, measurement, or exploration; edited once accepted only to keep it correct, with a dated note where a finding changes. Decisions cite it in `basis` instead of restating it.
 
 ### 3. Create the Record
 ```bash
@@ -50,7 +50,7 @@ Accept when the work calls for it, after the session has put the probes to the o
 ```bash
 docs/scripts/adr accept <n>
 ```
-Use `docs/scripts/adr reject <n> --reason "..."` or `docs/scripts/adr abandon <n> --reason "..."` when the decision doesn't hold. Once accepted, a decision is corrected by appending, and a change in what the project does is a new decision that names what it replaces. The tool checks shape and references, not these conventions; review catches them, and git keeps every earlier version (ADR-311). Mark a cut or retire done with `docs/scripts/adr enact <n> <commit>` once the commit lands.
+Use `docs/scripts/adr reject <n> --reason "..."` or `docs/scripts/adr abandon <n> --reason "..."` when the decision doesn't hold. Once accepted, a decision is edited in place where that keeps it correct; an edit that changes what it decided carries a dated note with the operator's words, or the reason, and the earlier text; what adds goes in an appended dated section; a decision reversed, replaced or rejected on substantially the same topic is altered in its own record; and a different direction or concept is a new decision that names what it replaces. The tool checks shape and references, not these conventions; review catches them, and git keeps every earlier version (ADR-311, ADR-313). Mark a cut or retire done with `docs/scripts/adr enact <n> <commit>` once the commit lands.
 
 ## SOLID Principles Evaluation
 

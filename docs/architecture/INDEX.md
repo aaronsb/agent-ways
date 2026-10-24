@@ -90,6 +90,7 @@ _Documentation structure, tooling, coherence_
 | [ADR-310](./documentation/ADR-310-record-numbers-are-permanent-identity-and-records-live-by-intent.md) | Record numbers are permanent identity, and records live by intent | accepted |
 | [ADR-311](./documentation/ADR-311-the-adr-tool-checks-shape-and-references-git-keeps-the-history.md) | The adr tool checks shape and references; git keeps the history | accepted |
 | [ADR-312](./documentation/ADR-312-seed-the-capability-vocabulary-from-domains-ship-process-and-adr.md) | Seed the capability vocabulary from domains; ship process and adr | accepted |
+| [ADR-313](./documentation/ADR-313-an-accepted-record-is-edited-in-place-where-that-keeps-it-correct-with-a-dated-note-where-an-edit-changes-a-decision.md) | An accepted record is edited in place where that keeps it correct, with a dated note where an edit changes a decision | accepted |
 
 ## Attend
 _Session awareness: sensors, peers, messaging, keepwarm_

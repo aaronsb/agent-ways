@@ -35,7 +35,7 @@ The consider step records the operator's intent (ADR-304 §12 and its notes). Th
 - Record what was said with `adr consider N --said "..." --via "..."`, and `--covers NAME...` for the probes the words settled. The tool refuses a probe name the Summary does not have.
 - If the operator approves or says to accept before the probes were asked, record their words with no `covers`, do what they said, and put the probes to them in the same reply. Do not wait for the answer.
 - Take a short yes as given. A minimal answer, or none, is recorded as said, and you continue without re-asking.
-- A later answer is another `considered` entry. A "no" is corrected by appending: supersede the record or write a new one.
+- A later answer is another `considered` entry. A "no" changes the record. On substantially the same topic, alter the record in place with dated notes; for a different direction or concept, supersede it or write a new record (adr).
 - Accept when the work calls for it. A decision with no operator basis may be accepted directly.
 
 ## When no one is present
@@ -53,7 +53,7 @@ When the operator asks to review the decisions from recent sessions:
 
 - List the records. `adr list --json` gives each record's `date` and `considered` entries. `git log --since=<date> --name-only -- docs/architecture` finds records changed in that span, including ones dated earlier.
 - Walk through each one in plain words from its Summary: what it decided and what it trades. Say whether it was considered by the operator, by an advisor, or not at all.
-- Record each reaction as a `considered` entry in the operator's name, with `via` naming the review. A flag becomes a `concern:` entry. When they want the decision changed, supersede it or write a new record.
+- Record each reaction as a `considered` entry in the operator's name, with `via` naming the review. A flag becomes a `concern:` entry. When they want the decision changed, alter the record in place with dated notes, or supersede it or write a new record when the change is a different direction or concept.
 
 ## Asking in plain words
 

@@ -37,8 +37,8 @@ related:
 ## Summary
 
 - **Decided:** ADR now means Agent Decision Record. Records have declared
-  kinds, starting with decision (append-only) and spec (living), all in one
-  `ADR-N` number space. Decisions carry a verb (add, cut, change, retire,
+  kinds, starting with decision (kept current, changes marked) and spec
+  (living), all in one `ADR-N` number space. Decisions carry a verb (add, cut, change, retire,
   constrain), a capability from a closed list, and a basis that must reach
   outside the corpus. `adr lint` and `doclint` enforce this and tie code
   citations back to the records.
@@ -123,7 +123,7 @@ v1 seeds two kinds:
 
 | Kind | Meaning | Body after acceptance |
 |---|---|---|
-| `decision` | why a choice was made | append-only |
+| `decision` | why a choice was made | edited to stay correct; a changed decision is marked with a dated note |
 | `spec` | how the thing works now | rewritten in place |
 
 Likely later kinds include an evidence kind for #491 notes, if those move
@@ -135,10 +135,9 @@ resolving. A spec record is the ADR-numbered counterpart of an ADR-302
 reference or explanation page. It stays in the ADR series because code cites
 it.
 
-The decision kind is the Agent Decision Record proper. A decision is frozen
-once it leaves proposed. That covers accepted, and also rejected, abandoned,
-superseded and archived. Only the lifecycle fields listed in §4 move after
-that point.
+The decision kind is the Agent Decision Record proper. Once it leaves proposed, a decision is edited to keep it correct and readable, and an edit that changes what it decided carries a dated note (ADR-313). A decision reversed, replaced or rejected on substantially the same topic is altered in its own record; a different direction is a new decision that supersedes or amends it.
+
+> Edited 2026-10-24 (ADR-313): the operator said "I don't like append only. I thought it made sense but we need to be able to edit where it makes sense too". This paragraph read: "A decision is frozen once it leaves proposed. That covers accepted, and also rejected, abandoned, superseded and archived. Only the lifecycle fields listed in §4 move after that point." The table above read `append-only` for a decision, and the Summary read "decision (append-only)". ADR-311 had already removed the check that enforced the freeze.
 
 **Sub-parts.** A record numbered `N.k` (kg has `304.1`, `305.2`, `715.1`) is
 its own record with its own kind, verb and status. A bare `ADR-N` resolves to
@@ -248,10 +247,10 @@ surfaces:
 - **surfaces** declares this project's target namespaces. The inventory
   command is optional. Without one, `retire` targets are checked for syntax
   only. With one, the enactment rule in §5 applies to the inventory as well.
-- **mutable_after_accept** names the lifecycle fields that may still change
-  on a frozen decision (§1). The rest of the frontmatter and the body stay
-  append-only. State lives in the file, so a squash, rebase or severed
-  history cannot lose it.
+- State lives in the file, so a squash, rebase or severed history cannot
+  lose it.
+
+> Edited 2026-10-24 (ADR-313): the operator said "I don't like append only. I thought it made sense but we need to be able to edit where it makes sense too". This item read: "**mutable_after_accept** names the lifecycle fields that may still change on a frozen decision (§1). The rest of the frontmatter and the body stay append-only." ADR-311 had already removed the key.
 
 A decision record's frontmatter:
 
@@ -301,8 +300,7 @@ flow. `cut` and `retire` stay open until their removal is done.
 - An `amends: ADR-N#k` edge names a section that exists.
 - A decision carries `agent`, and its `## Summary` carries probes and an
   inversion.
-- A frozen decision's frontmatter changes only in `mutable_after_accept`
-  fields.
+> Edited 2026-10-24 (ADR-313): this list held "A frozen decision's frontmatter changes only in `mutable_after_accept` fields.", a rule ADR-311 removed.
 - `adr.yaml` itself has no cross-layer word or stem reuse.
 
 `doclint` checks code citations against the records:
@@ -638,7 +636,8 @@ before acceptance. A decision with no operator basis, grounded in `evidence`,
 **Accepted risk.** The flow fails when an operator believes they have skill
 they lack and accepts without real judgement. That failure seldom causes
 immediate harm, and the corpus keeps it recoverable. The decision stays
-append-only and citable, and a later `change` can supersede it. The mitigations are
+citable, and a later change alters or supersedes it (ADR-313; it read
+"stays append-only and citable, and a later `change` can supersede it"). The mitigations are
 the one-way flag, which marks the decisions a rubber-stamp would hurt most,
 and the probes, which ask for judgement on specific points. Recoverability
 also depends on someone noticing later. Supervisory-control research

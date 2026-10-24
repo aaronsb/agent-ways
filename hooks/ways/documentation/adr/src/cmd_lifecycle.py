@@ -129,7 +129,7 @@ def _close(args, status: str):
     if args.dry_run:
         print(f"Would mark ADR-{adr.number} {status}: {reason}")
         return 0
-    # Appended, never inserted: a closed record stays append-only.
+    # Appended, never inserted: a closure is a dated addition to the record.
     closure = f"\n## Closure\n\n{status.capitalize()} {date.today().isoformat()}: {reason}\n"
     error = _write_status(adr, status, closure)
     if error:
