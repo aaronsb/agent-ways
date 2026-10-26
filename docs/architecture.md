@@ -102,7 +102,7 @@ flowchart LR
     PF["PreToolUse<br/>Edit, Write"]:::event
     PT["PreToolUse<br/>Task"]:::event
     PC["PreToolUse<br/>TaskCreate"]:::event
-    PW["PreToolUse, PostToolUse<br/>EnterPlanMode, ExitPlanMode, Workflow"]:::event
+    PW["PreToolUse, PostToolUse<br/>EnterPlanMode, ExitPlanMode, Workflow, WebFetch"]:::event
     SA[SubagentStart]:::event
     PO["PostToolUse<br/>Edit, Write, Bash, Task"]:::event
     PX["PostToolUseFailure<br/>Edit, Write, Bash, Task"]:::event
@@ -495,7 +495,7 @@ $XDG_DATA_HOME/agent-ways/hooks/ways/      # shipped ways, projected as ~/.claud
 ├── check-bash-pre.sh           # PreToolUse:Bash → ways hook command
 ├── check-file-pre.sh           # PreToolUse:Edit|Write → ways hook file
 ├── check-task-pre.sh           # PreToolUse:Task → ways hook task
-├── check-tool.sh               # PreToolUse, PostToolUse:EnterPlanMode|ExitPlanMode|Workflow → ways hook tool
+├── check-tool.sh               # PreToolUse, PostToolUse:EnterPlanMode|ExitPlanMode|Workflow|WebFetch → ways hook tool
 ├── mark-tasks-active.sh        # PreToolUse:TaskCreate → ways hook tasks-active (dormant marker)
 ├── inject-subagent.sh          # SubagentStart → ways hook subagent-start
 ├── check-post.sh               # PostToolUse, PostToolUseFailure → ways hook post-tool

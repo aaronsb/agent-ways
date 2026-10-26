@@ -105,7 +105,7 @@ way:
       # The tools the shipped settings.json matcher on check-tool.sh names.
       # A user or project way cannot widen it. Keep in step with settings.json;
       # a lint unit test compares the two.
-      wired: [EnterPlanMode, ExitPlanMode, Workflow]
+      wired: [EnterPlanMode, ExitPlanMode, Workflow, WebFetch]
       role: >
         Regex matched against the payload's tool_name on the tool lane (ADR-704).
         Only the wired tools reach the lane; lint warns when the regex matches

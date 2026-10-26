@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"curl that api endpoint, but don't send it any of my personal details it doesn't need","surface":"tool"}
+{"kind":"situational","prompt":"the vendor's download page wants my name, email and phone number before it gives me the tarball","surface":"tool"}

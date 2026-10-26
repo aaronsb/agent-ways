@@ -279,7 +279,7 @@
         ]
       },
       {
-        "matcher": "EnterPlanMode|ExitPlanMode|Workflow",
+        "matcher": "EnterPlanMode|ExitPlanMode|Workflow|WebFetch",
         "hooks": [
           {
             "type": "command",
@@ -370,7 +370,7 @@
         ]
       },
       {
-        "matcher": "EnterPlanMode|ExitPlanMode|Workflow",
+        "matcher": "EnterPlanMode|ExitPlanMode|Workflow|WebFetch",
         "hooks": [
           {
             "type": "command",
