@@ -17,12 +17,12 @@ The hooks are declared in the `hooks` block of the repo's [`settings.json`](../s
 | **PreToolUse** | `Bash` | `check-bash-pre.sh`, `strip-session-link-pre.sh` |
 | **PreToolUse** | `TaskCreate` | `mark-tasks-active.sh` |
 | **PreToolUse** | `Task` | `check-task-pre.sh` |
-| **PreToolUse** | `EnterPlanMode\|ExitPlanMode\|Workflow` | `check-tool.sh` |
+| **PreToolUse** | `EnterPlanMode\|ExitPlanMode\|Workflow\|WebFetch` | `check-tool.sh` |
 | **SubagentStart** | | `inject-subagent.sh` |
 | **PostToolUse** | `Edit\|Write\|Bash\|Task` | `check-post.sh`, `check-queued.sh` |
 | **PostToolUse** | `Bash`, if `Bash(gh issue *)` | `issues-pull.sh post-gh` |
 | **PostToolUse** | `Bash`, if `Bash(gh pr merge *)` | `pr-merge-checks.sh` |
-| **PostToolUse** | `EnterPlanMode\|ExitPlanMode\|Workflow` | `check-tool.sh` |
+| **PostToolUse** | `EnterPlanMode\|ExitPlanMode\|Workflow\|WebFetch` | `check-tool.sh` |
 | **PostToolUseFailure** | `Edit\|Write\|Bash\|Task` | `check-post.sh` |
 | **Stop** | | `check-response.sh`, `attend-drain-stop.sh` |
 | **TaskCreated** | | `issues-task-created.sh` |
