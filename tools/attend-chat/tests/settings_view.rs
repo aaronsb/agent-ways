@@ -186,6 +186,8 @@ fn settings_list_choose_a_place_and_write_to_its_file() {
         "mods.attend.keepalive.windows = daily 00:00-24:00 (default)",
         "mods.attend.keepalive.wrap = transcript (default)",
         "mods.attend.keepalive.after_wrap = lapse (default)",
+        "mods.attend.keepalive.after_wrap_keepalives = 0 (default)",
+        "mods.attend.keepalive.wrap_skill = wrap stay (default)",
     ] {
         assert!(s.contains(line), "{line}: {s}");
     }

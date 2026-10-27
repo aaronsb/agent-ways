@@ -42,6 +42,7 @@ This document contains the help content for the `attend` command-line program.
 * [`attend keepwarm check`↴](#attend-keepwarm-check)
 * [`attend keepwarm reset`↴](#attend-keepwarm-reset)
 * [`attend keepwarm wrapped`↴](#attend-keepwarm-wrapped)
+* [`attend keepwarm compacted`↴](#attend-keepwarm-compacted)
 * [`attend chat`↴](#attend-chat)
 * [`attend sensor`↴](#attend-sensor)
 * [`attend sensor list`↴](#attend-sensor-list)
@@ -564,6 +565,7 @@ Keep the prompt cache warm across idle stretches (ADR-182; default: status)
 * `check` — Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due, else nothing (exit 0 either way). For a host that polls without `attend run`; prints nothing while an `attend run` holds the session, since its sensor wakes it
 * `reset` — The operator prompted: the keepalive count starts again, and a sent wrap and a stop are cleared. The attend mod runs it for each prompt typed in the session (ADR-414 item 4)
 * `wrapped` — Record where the keepalive policy's wrap reply went, for the status card. The attend mod runs it once the wrap turn ends (ADR-414 item 6)
+* `compacted` — Record the compaction after the wrap, for the status card and so nothing more follows. The attend mod runs it once the compaction ends (ADR-414 item 6)
 
 
 
@@ -604,13 +606,16 @@ Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due,
 ###### **Options:**
 
 * `--policy` — Apply the keepalive policy (ADR-414): from each turn's end, one wake the margin before the cache lapses, counted from the operator's last prompt and bounded by mods.attend.keepalive, then one wrap turn
-* `--json` — Print the decision as one JSON object: action (none, keepalive or wrap), text, next_at, count, max, wraps_at and reason
+* `--json` — Print the decision as one JSON object: action (none, keepalive, wrap or compact), text, next_at, count, max, wraps_at and reason
 * `--autocompact <AUTOCOMPACT>` — The autocompact gate as the host read it: on, off or unknown. The policy runs only with off; unknown counts as on
 
   Default value: `unknown`
 
   Possible values: `on`, `off`, `unknown`
 
+* `--skills <SKILLS>` — The skills the session lists, comma-separated, as the host read them. The wrap and the compaction after it run only when mods.attend.keepalive.wrap_skill names one of them. Absent, as from a host that predates the flag, the wrap is not held to a listing
+* `--skills-unread` — The host could not read the session's skills: no wrap or compaction
+* `--skills-partial` — The --skills listing was cut short by the host's budget: a skill missing from it is not held against the wrap
 
 
 
@@ -643,6 +648,19 @@ Record where the keepalive policy's wrap reply went, for the status card. The at
   Default value: ``
 * `--path <PATH>` — With --save: the wrap file to write the reply to, checked again under the ways state root's wrap/ directory
 * `--save` — Write the reply read on stdin to --path (outcome file or refused), through a temp file renamed over it
+* `--focus <FOCUS>` — The focus of the wrap's closing `/compact` line, kept for the compaction `after_wrap: compact` asks for after the wrap's keepalives
+
+
+
+## `attend keepwarm compacted`
+
+Record the compaction after the wrap, for the status card and so nothing more follows. The attend mod runs it once the compaction ends (ADR-414 item 6)
+
+**Usage:** `attend keepwarm compacted [OPTIONS]`
+
+###### **Options:**
+
+* `--failed <FAILED>` — Why the compaction failed; absent when it ran
 
 
 

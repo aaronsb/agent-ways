@@ -519,7 +519,27 @@ const KEYS: &[KeySpec] = &[
         kind: Kind::Choice(&["lapse", "compact"]),
         default: DefaultValue::Yaml("lapse"),
         doc: "What follows the wrap: lapse, or compact the conversation.",
-        long: "lapse lets the prompt cache lapse an hour after the wrap. compact has the mod compact the conversation once the wrap has answered, with the focus of the wrap's closing /compact line, leaving a small context for the operator's return; it is one more warm request.",
+        long: "lapse lets the prompt cache lapse an hour after the wrap. compact has the mod compact the conversation with the focus of the wrap's closing /compact line, leaving a small context for the operator's return; it is one more warm request. Either applies once the wrap has answered, or after after_wrap_keepalives more keepalives when that is set.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.attend.keepalive.after_wrap_keepalives",
+        section: "mods",
+        path: &["mods", "attend", "keepalive", "after_wrap_keepalives"],
+        kind: Kind::Int { min: 0, max: 48 },
+        default: DefaultValue::Yaml("0"),
+        doc: "Keepalives after the wrap before after_wrap applies.",
+        long: "The session stays warm with its whole context for this many more keepalives after the wrap, so an operator back within that stretch finds the conversation as it was and the handoff already written. Then after_wrap applies: the cache lapses, or the mod compacts the conversation with the wrap's focus. Outside the windows it applies at the next due point. 0 applies it once the wrap has answered.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.attend.keepalive.wrap_skill",
+        section: "mods",
+        path: &["mods", "attend", "keepalive", "wrap_skill"],
+        kind: Kind::Text,
+        default: DefaultValue::Yaml("\"wrap stay\""),
+        doc: "The skill the wrap turn asks for, with its arguments.",
+        long: "Written `<skill> [arguments]`, as `wrap stay` (the shipped wrap skill) or `handoff`; a leading / is allowed. The skill should square the task list, write a continuation prompt and end with a /compact <focus> line, which after_wrap: compact uses. The wrap and the compaction run only when the session lists this skill: empty, a skill the session does not have, or a value refused leaves them off, and the keepalives stop at max_keepalives. The text goes into a turn nobody watches, so the name is letters, digits and : _ - . and the arguments plain words; `attend keepwarm status` names a refusal.",
         ..BASE
     },
     KeySpec {
@@ -720,6 +740,8 @@ pub const SCREENS_WRITE_PROJECT: &[&str] = &[
     "mods.attend.keepalive.wrap_file",
     "mods.attend.keepalive.wrap_to",
     "mods.attend.keepalive.after_wrap",
+    "mods.attend.keepalive.after_wrap_keepalives",
+    "mods.attend.keepalive.wrap_skill",
 ];
 
 /// Whether the mod `name` (an entry of [`MODS`]) is wanted in a target
@@ -867,6 +889,8 @@ mod tests {
         assert_eq!(resolved("mods.attend.keepalive.wrap_file", &[]), Some(Value::String("{state}/wrap/{session}.md".into())));
         assert_eq!(resolved("mods.attend.keepalive.wrap_to", &[]), Some(Value::String(String::new())));
         assert_eq!(resolved("mods.attend.keepalive.after_wrap", &[]), Some(Value::String("lapse".into())));
+        assert_eq!(resolved("mods.attend.keepalive.after_wrap_keepalives", &[]), Some(Value::Number(0.into())));
+        assert_eq!(resolved("mods.attend.keepalive.wrap_skill", &[]), Some(Value::String("wrap stay".into())));
         assert_eq!(closed_keepalive(&Value::Null), Some(Value::Bool(false)));
         assert_eq!(closed_keepalive(&Value::Bool(true)), None);
     }

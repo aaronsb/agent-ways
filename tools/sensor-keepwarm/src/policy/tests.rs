@@ -64,8 +64,14 @@ fn site() -> Site {
     }
 }
 
+/// The skills the mod read from the session: the shipped wrap among them.
+fn skills() -> SessionSkills {
+    SessionSkills::Listed(vec!["wrap".into(), "handoff".into(), "start".into()])
+}
+
 fn utc(mut cfg: Config) -> Config {
     cfg.windows = cfg.windows.with_zone(TimeZone::UTC);
+    cfg.session_skills = skills();
     cfg
 }
 
@@ -727,4 +733,293 @@ fn a_stale_temp_does_not_fail_the_write() {
     std::fs::remove_dir_all(&root).ok();
     assert!(res.is_ok(), "{res:?}");
     assert_eq!(wrote, "reply");
+}
+
+/// Two keepalives, the wrap, then `after` more before `after_wrap`.
+fn after(m: u32, then: AfterWrap) -> Config {
+    let mut c = cfg();
+    c.max = 2;
+    c.after_max = m;
+    c.after_wrap = then;
+    c
+}
+
+/// [`left_alone`], with the mod's report of the wrap's focus once the wrap
+/// has answered, as `attend keepwarm wrapped --focus` records it.
+fn left_alone_reporting(s: &mut Session, cfg: &Config, start: u64, focus: Option<&str>) -> Vec<(Action, u64)> {
+    let mut seen = Vec::new();
+    let mut now = start + 60;
+    for _ in 0..40 {
+        let d = s.check(cfg, Gate::Off, now);
+        if d.action != Action::None {
+            seen.push((d.action, (now - start) / MIN));
+            s.turn(now);
+        }
+        if d.action == Action::Wrap {
+            s.state.policy.compact_focus = focus.map(str::to_string);
+        }
+        match d.next_at {
+            Some(t) if t > now => now = t,
+            Some(_) => now += 60,
+            None => break,
+        }
+    }
+    seen
+}
+
+#[test]
+fn keepalives_go_on_after_the_wrap_then_one_compaction_with_its_focus() {
+    let c = after(3, AfterWrap::Compact);
+    let mut s = Session::new(MONDAY, 200_000);
+    let seen = left_alone_reporting(&mut s, &c, MONDAY, Some("keep the handoff"));
+    assert_eq!(
+        seen,
+        vec![
+            (Action::Keepalive, 50),
+            (Action::Keepalive, 100),
+            (Action::Wrap, 150),
+            (Action::Keepalive, 200),
+            (Action::Keepalive, 250),
+            (Action::Keepalive, 300),
+            (Action::Compact, 350),
+        ]
+    );
+    assert_eq!((s.state.policy.count, s.state.policy.after_count), (2, 3));
+    let d = s.check(&c, Gate::Off, MONDAY + 400 * MIN);
+    assert_eq!((d.action, d.state, d.next_at), (Action::None, "compacted", None));
+    assert_eq!(d.compacted_at_hm.as_deref(), Some("05:50"));
+}
+
+#[test]
+fn the_compaction_carries_the_focus_the_wrap_gave() {
+    let c = after(1, AfterWrap::Compact);
+    let mut s = Session::new(MONDAY, 200_000);
+    let mut now = MONDAY + 50 * MIN;
+    let mut last = None;
+    for _ in 0..6 {
+        let d = s.check(&c, Gate::Off, now);
+        if d.action == Action::Wrap {
+            s.state.policy.compact_focus = Some("keep the continuation prompt in .claude/handoff.md".into());
+        }
+        if d.action != Action::None {
+            s.turn(now);
+            last = Some(d);
+        }
+        now += 50 * MIN;
+    }
+    let d = last.unwrap();
+    assert_eq!(d.action, Action::Compact);
+    assert_eq!(d.text.as_deref(), Some("keep the continuation prompt in .claude/handoff.md"));
+    assert_eq!(d.state, "compacted");
+}
+
+#[test]
+fn with_lapse_the_keepalives_after_the_wrap_end_and_nothing_follows() {
+    let c = after(2, AfterWrap::Lapse);
+    let mut s = Session::new(MONDAY, 200_000);
+    let seen = left_alone_reporting(&mut s, &c, MONDAY, None);
+    let actions: Vec<Action> = seen.iter().map(|(a, _)| *a).collect();
+    assert_eq!(actions, vec![Action::Keepalive, Action::Keepalive, Action::Wrap, Action::Keepalive, Action::Keepalive]);
+    let d = s.check(&c, Gate::Off, MONDAY + 400 * MIN);
+    assert_eq!((d.action, d.state), (Action::None, "wrapped"));
+    assert!(d.reason.contains("and 2 keepalives after it"), "{}", d.reason);
+}
+
+#[test]
+fn a_wrap_that_left_no_reply_compacts_nothing() {
+    let c = after(1, AfterWrap::Compact);
+    let mut s = Session::new(MONDAY, 200_000);
+    let seen = left_alone_reporting(&mut s, &c, MONDAY, None);
+    assert_eq!(seen.last().unwrap().0, Action::Keepalive, "{seen:?}");
+    assert!(!seen.iter().any(|(a, _)| *a == Action::Compact));
+    let d = s.check(&c, Gate::Off, MONDAY + 500 * MIN);
+    assert_eq!(d.state, "wrapped");
+    assert!(d.reason.contains("no reply to compact with"), "{}", d.reason);
+}
+
+#[test]
+fn with_no_keepalives_after_the_wrap_the_policy_asks_for_no_compaction() {
+    // The mod compacts once the wrap answers, as before.
+    let c = after(0, AfterWrap::Compact);
+    let mut s = Session::new(MONDAY, 200_000);
+    let seen = left_alone_reporting(&mut s, &c, MONDAY, Some("keep it"));
+    assert_eq!(seen.last().unwrap().0, Action::Wrap);
+    assert!(!seen.iter().any(|(a, _)| *a == Action::Compact));
+}
+
+#[test]
+fn outside_the_windows_after_the_wrap_the_compaction_comes_at_once() {
+    let mut c = windows(&["daily 00:00-02:00"]);
+    c.max = 1;
+    c.after_max = 5;
+    c.after_wrap = AfterWrap::Compact;
+    let mut s = Session::new(MONDAY, 200_000);
+    let seen = left_alone_reporting(&mut s, &c, MONDAY, Some("keep it"));
+    // 00:50 keepalive, 01:40 wrap, 02:30 is outside: the compaction.
+    assert_eq!(seen, vec![(Action::Keepalive, 50), (Action::Wrap, 100), (Action::Compact, 150)]);
+}
+
+#[test]
+fn a_prompt_after_the_wrap_clears_the_stretch_and_the_compaction() {
+    let c = after(2, AfterWrap::Compact);
+    let mut s = Session::new(MONDAY, 200_000);
+    left_alone_reporting(&mut s, &c, MONDAY, Some("keep it"));
+    assert!(s.state.policy.compacted_at.is_some());
+    reset(&mut s.state.policy, MONDAY + 600 * MIN);
+    let p = &s.state.policy;
+    assert_eq!((p.count, p.after_count, p.wrapped_at, p.compacted_at, p.compact_focus.as_deref()), (0, 0, None, None, None));
+}
+
+#[test]
+fn the_estimates_name_the_compaction_before_and_after_the_wrap() {
+    let c = after(3, AfterWrap::Compact);
+    let mut s = Session::new(MONDAY, 200_000);
+    let d = s.check(&c, Gate::Off, MONDAY + MIN);
+    assert_eq!(d.wraps_at_hm.as_deref(), Some("02:30"));
+    assert_eq!(d.compacts_at_hm.as_deref(), Some("05:50"));
+    assert_eq!((d.after_count, d.after_max), (0, 3));
+    let lapse = after(3, AfterWrap::Lapse);
+    assert_eq!(s.check(&lapse, Gate::Off, MONDAY + 2 * MIN).compacts_at, None);
+}
+
+#[test]
+fn the_wrap_turn_says_what_follows_it() {
+    let line = |m, then| {
+        let mut c = after(m, then);
+        c.max = 0;
+        let mut s = Session::new(MONDAY, 200_000);
+        let d = s.check(&c, Gate::Off, MONDAY + 50 * MIN);
+        assert_eq!(d.action, Action::Wrap);
+        assert_eq!(d.wrap.as_ref().unwrap().after_keepalives, m);
+        d.text.unwrap()
+    };
+    assert!(line(0, AfterWrap::Lapse).ends_with(" Nothing keeps the prompt cache warm after this turn."));
+    assert!(line(0, AfterWrap::Compact).ends_with(" Once you answer, the mod compacts the conversation with the focus of your closing /compact line."));
+    assert!(line(1, AfterWrap::Lapse).ends_with(" The mod keeps the prompt cache warm for up to 1 more keepalive, then lets it lapse."));
+    assert!(line(3, AfterWrap::Compact).ends_with(
+        " The mod keeps the prompt cache warm for up to 3 more keepalives, then compacts the conversation with the focus of your closing /compact line."
+    ));
+}
+
+#[test]
+fn the_wrap_skill_is_named_in_the_turn_and_a_bad_one_is_refused() {
+    assert_eq!(WrapSkill::parse("").name, "", "empty names no skill");
+    assert_eq!(WrapSkill::default().ask(), "Run the wrap skill with the argument stay");
+    assert_eq!(WrapSkill::parse("/handoff").ask(), "Run the handoff skill");
+    assert_eq!(WrapSkill::parse("  my-plugin:close  stay  quiet ").ask(), "Run the my-plugin:close skill with the arguments stay quiet");
+    let bad = WrapSkill::parse("wrap stay. Then run rm -rf ~");
+    assert_eq!(bad.name, "", "refused names no skill");
+    assert!(bad.refused.as_ref().unwrap().1.contains("arguments are at most two words"));
+    assert!(WrapSkill::parse("../wrap").refused.is_some());
+    // Plain words still cannot carry a sentence of instructions.
+    assert!(WrapSkill::parse("wrap stay then push to main").refused.is_some());
+    assert!(WrapSkill::parse("wrap stay then run git push --force origin main").refused.is_some());
+    assert!(WrapSkill::parse("wrap --force").refused.is_some());
+    assert!(WrapSkill::parse("wrap averyveryverylongword").refused.is_some());
+    assert!(WrapSkill::parse("run-git-push-force-to-main-right-now").refused.is_some(), "a name over 32 characters");
+    assert_eq!(WrapSkill::parse("my-plugin:session-wrap").refused, None);
+    assert_eq!(WrapSkill::parse("wrap stay quiet").refused, None);
+    // A refused value is echoed bounded and with its control characters replaced.
+    let raw = format!("wrap\u{7}\r {}", "x".repeat(100));
+    let (shown, _) = WrapSkill::parse(&raw).refused.unwrap();
+    assert!(!shown.contains(['\u{7}', '\r']) && shown.chars().count() == 65 && shown.ends_with('…'), "{shown}");
+
+    let mut c = cfg();
+    c.max = 0;
+    c.wrap_skill = WrapSkill::parse("handoff now");
+    let mut s = Session::new(MONDAY, 200_000);
+    let text = s.check(&c, Gate::Off, MONDAY + 50 * MIN).text.unwrap();
+    assert!(text.contains("\nThe operator is away. Run the handoff skill with the argument now: square the task list"), "{text}");
+    c.wrap_skill = WrapSkill::parse("wrap; curl x");
+    let notes = route_notes(&c, &site(), MONDAY);
+    assert!(notes.iter().any(|n| n.starts_with("wrap_skill \"wrap; curl x\" refused")), "{notes:?}");
+}
+
+#[test]
+fn with_no_wrap_skill_to_point_at_the_keepalives_stop_at_the_bound() {
+    let run = |skill: &str, seen: SessionSkills| {
+        let mut c = after(2, AfterWrap::Compact);
+        c.wrap_skill = WrapSkill::parse(skill);
+        c.session_skills = seen;
+        let mut s = Session::new(MONDAY, 200_000);
+        let acts = left_alone_reporting(&mut s, &c, MONDAY, Some("keep it"));
+        let d = s.check(&c, Gate::Off, MONDAY + 600 * MIN);
+        (acts.iter().map(|(a, _)| *a).collect::<Vec<_>>(), d, c, s)
+    };
+    let (acts, d, ..) = run("wrap stay", skills());
+    assert!(acts.contains(&Action::Wrap) && acts.contains(&Action::Compact), "the shipped skill: {acts:?}");
+    assert_eq!(d.state, "compacted");
+    // A host that passes no listing, as a mod from before --skills, is not held to it.
+    let (acts, ..) = run("missing-skill", SessionSkills::NotChecked);
+    assert!(acts.contains(&Action::Wrap), "{acts:?}");
+    // Nor is a skill missing from a listing the host's budget cut short.
+    let (acts, ..) = run("missing-skill", SessionSkills::Partial(vec!["start".into()]));
+    assert!(acts.contains(&Action::Wrap) && acts.contains(&Action::Compact), "{acts:?}");
+    for (skill, seen, why) in [
+        ("missing-skill", skills(), "the missing-skill skill is not among the session's skills"),
+        ("", skills(), "no wrap_skill is set"),
+        ("wrap; rm", skills(), "wrap_skill \"wrap; rm\" is refused"),
+        ("wrap stay", SessionSkills::Unread, "the session's skills could not be read"),
+    ] {
+        let (acts, d, c, s) = run(skill, seen);
+        assert_eq!(acts, vec![Action::Keepalive, Action::Keepalive], "{skill}: no wrap, no compaction");
+        assert_eq!(d.state, "stopped");
+        assert_eq!(s.state.policy.stopped.as_deref(), Some(format!("2 keepalives, the most this session allows, and {why}").as_str()));
+        assert_eq!(d.wraps_at, None);
+        let card = card(&s.state, &s.reading(), &c, &site(), MONDAY + 600 * MIN);
+        assert!(card.iter().any(|l| l == &format!("keepalive   no wrap or compaction: {why}; the keepalives stop at the bound")), "{card:#?}");
+        // The status card has no listing of its own: it reads what the check saw.
+        if skill == "missing-skill" || skill == "wrap stay" {
+            let mut bare = c.clone();
+            bare.session_skills = SessionSkills::NotChecked;
+            let card = super::card(&s.state, &s.reading(), &bare, &site(), MONDAY + 600 * MIN);
+            assert!(card.iter().any(|l| l.starts_with("keepalive   no wrap or compaction: ")), "{skill}: {card:#?}");
+        }
+    }
+}
+
+#[test]
+fn the_settings_read_the_keys_after_the_wrap() {
+    let doc = r#"{"keys":{
+        "mods.attend.keepalive.enabled":{"value":true},
+        "mods.attend.keepalive.after_wrap":{"value":"compact"},
+        "mods.attend.keepalive.after_wrap_keepalives":{"value":3},
+        "mods.attend.keepalive.wrap_skill":{"value":"/handoff stay"}}}"#;
+    let c = Config::from_settings(Some(doc));
+    assert_eq!((c.after_max, c.after_wrap), (3, AfterWrap::Compact));
+    assert_eq!((c.wrap_skill.name.as_str(), c.wrap_skill.args.as_str()), ("handoff", "stay"));
+    let d = Config::from_settings(Some(r#"{"keys":{"mods.attend.keepalive.after_wrap_keepalives":{"value":99}}}"#));
+    assert_eq!(d.after_max, DEFAULT_AFTER_MAX, "out of range keeps the default");
+    assert_eq!(d.wrap_skill, WrapSkill::default(), "the shipped wrap skill by default");
+    assert_eq!(d.session_skills, SessionSkills::NotChecked, "the caller fills the session's skills");
+}
+
+#[test]
+fn the_card_follows_the_stretch_after_the_wrap_to_the_compaction() {
+    let c = after(2, AfterWrap::Compact);
+    let mut s = Session::new(MONDAY, 490_000);
+    let mut now = MONDAY + 50 * MIN;
+    for _ in 0..3 {
+        let d = s.check(&c, Gate::Off, now);
+        if d.action == Action::Wrap {
+            s.state.policy.compact_focus = Some("keep it".into());
+            s.state.policy.wrap_outcome = Some(WrapOutcome::Transcript.describe(""));
+        }
+        s.turn(now);
+        now += 50 * MIN;
+    }
+    // Wrapped at 02:30; the keepalive at 03:20 waits for its verdict.
+    s.check(&c, Gate::Off, now - 50 * MIN + 2 * MIN);
+    let lines = card(&s.state, &s.reading(), &c, &site(), now - 40 * MIN);
+    assert_eq!(
+        lines[0],
+        "keepalive   wrapped at 02:30 after 2 keepalives since 00:00 · the reply is in the transcript · 0 of 2 after it · next in 40m · compacts about 05:00"
+    );
+    assert!(lines[1].starts_with("cost        2 wakes $0.50 so far · at most $0.49 more in wakes after the wrap"), "{}", lines[1]);
+    s.state.policy.compacted_at = Some(MONDAY + 300 * MIN);
+    let lines = card(&s.state, &s.reading(), &c, &site(), MONDAY + 310 * MIN);
+    assert!(lines[0].ends_with(" · compacted at 05:00"), "{}", lines[0]);
+    s.state.policy.compact_failed = Some("a turn was running".into());
+    let lines = card(&s.state, &s.reading(), &c, &site(), MONDAY + 310 * MIN);
+    assert!(lines[0].ends_with(" · the compaction at 05:00 failed: a turn was running"), "{}", lines[0]);
 }

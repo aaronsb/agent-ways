@@ -332,7 +332,8 @@ fn status_says_armed_and_shows_the_mod_setting_in_a_mod_host() {
 /// `check --policy --json`: the keepalive policy's decision (ADR-414 item
 /// 7), with the autocompact gate the mod read.
 fn policy(w: &Warm, gate: &str) -> serde_json::Value {
-    let out = w.run(&["keepwarm", "check", "--policy", "--json", "--autocompact", gate]);
+    // The mod passes the skills the session lists; the shipped wrap is one.
+    let out = w.run(&["keepwarm", "check", "--policy", "--json", "--autocompact", gate, "--skills", "wrap,handoff,start"]);
     assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
     serde_json::from_slice(&out.stdout).unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&out.stdout)))
 }
@@ -411,6 +412,90 @@ fn the_settings_bound_the_policy_and_route_the_wrap() {
     w.reading(&[(MIN, 200_000, 500)]);
     let d = policy(&w, "off");
     assert_eq!((d["state"].as_str(), d["count"].as_u64()), (Some("running"), Some(0)), "{d}");
+}
+
+/// `after_wrap: compact` with keepalives after the wrap: the mod reports the
+/// wrap's focus, and the policy's next due point asks for the compaction
+/// with it, here at once because no keepalive hours are set.
+#[test]
+fn the_compaction_after_the_wrap_carries_the_focus_the_mod_reported() {
+    let w = Warm::new("ka-compact");
+    std::fs::write(
+        w.f.home.join("settings.json"),
+        r#"{"view":"effective","keys":{"mods.attend.keepalive.enabled":{"value":true},"mods.attend.keepalive.windows":{"value":[]},"mods.attend.keepalive.after_wrap":{"value":"compact"},"mods.attend.keepalive.after_wrap_keepalives":{"value":2},"mods.attend.keepalive.wrap_skill":{"value":"handoff"}}}"#,
+    )
+    .unwrap();
+    w.reading(&[(50 * MIN, 200_000, 500)]);
+    let d = policy(&w, "off");
+    assert_eq!(d["action"], "wrap", "{d}");
+    assert_eq!(d["wrap"]["after"], "compact");
+    assert_eq!(d["wrap"]["after_keepalives"], 2);
+    assert!(d["text"].as_str().unwrap().contains("Run the handoff skill: square the task list"), "{d}");
+    assert!(w.run(&["keepwarm", "wrapped", "transcript", "--focus", "keep the handoff\nand the tasks"]).status.success());
+    let d = policy(&w, "off");
+    assert_eq!((d["action"].as_str(), d["state"].as_str()), (Some("compact"), Some("compacted")), "{d}");
+    assert_eq!(d["text"], "keep the handoff and the tasks", "one line");
+    assert!(w.run(&["keepwarm", "compacted"]).status.success());
+    assert_eq!(policy(&w, "off")["action"], "none", "one compaction");
+    let card = card_text(&w);
+    assert!(card.lines().any(|l| l.starts_with("keepalive   wrapped at ") && l.contains(" · compacted at ")), "{card}");
+    assert!(w.run(&["keepwarm", "compacted", "--failed", "a turn was running"]).status.success());
+    assert!(card_text(&w).contains("failed: a turn was running"));
+    // A report that lands after the operator's prompt reset the ledger
+    // marks nothing, so the next stretch after a wrap still runs.
+    assert!(w.run(&["keepwarm", "reset"]).status.success());
+    assert!(w.run(&["keepwarm", "compacted", "--failed", "late"]).status.success());
+    w.reading(&[(50 * MIN, 200_000, 500)]);
+    assert_eq!(policy(&w, "off")["action"], "wrap");
+    assert!(w.run(&["keepwarm", "wrapped", "transcript", "--focus", "keep it"]).status.success());
+    let d = policy(&w, "off");
+    assert_eq!(d["action"], "compact", "a stale mark would end the stretch after this wrap: {d}");
+    // An unfinished wrap records no focus.
+    assert!(w.run(&["keepwarm", "reset"]).status.success());
+    assert_eq!(policy(&w, "off")["action"], "wrap");
+    assert!(w.run(&["keepwarm", "wrapped", "unfinished", "--detail", "error", "--focus", "keep it"]).status.success());
+    let d = policy(&w, "off");
+    assert_eq!((d["action"].as_str(), d["state"].as_str()), (Some("none"), Some("wrapped")), "{d}");
+    assert!(d["reason"].as_str().unwrap().contains("no reply to compact with"), "{d}");
+}
+
+/// The --skills handshake: a listing without wrap_skill, or one the host
+/// could not read, stops at the bound; a host that passes no flag (a mod
+/// from before it) keeps its wrap but gets no stretch after it.
+#[test]
+fn the_skills_flag_gates_the_wrap_and_its_absence_is_the_old_protocol() {
+    let run = |tag: &str, flags: &[&str]| {
+        let w = Warm::new(tag);
+        std::fs::write(
+            w.f.home.join("settings.json"),
+            r#"{"view":"effective","keys":{"mods.attend.keepalive.enabled":{"value":true},"mods.attend.keepalive.max_keepalives":{"value":0},"mods.attend.keepalive.windows":{"value":[]},"mods.attend.keepalive.after_wrap":{"value":"compact"},"mods.attend.keepalive.after_wrap_keepalives":{"value":2}}}"#,
+        )
+        .unwrap();
+        w.reading(&[(50 * MIN, 200_000, 500)]);
+        let mut args = vec!["keepwarm", "check", "--policy", "--json", "--autocompact", "off"];
+        args.extend_from_slice(flags);
+        let out = w.run(&args);
+        assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+        let d: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        (w, d)
+    };
+    let (_, d) = run("sk-missing", &["--skills=start"]);
+    assert_eq!((d["action"].as_str(), d["state"].as_str()), (Some("none"), Some("stopped")), "{d}");
+    assert!(d["reason"].as_str().unwrap().contains("the wrap skill is not among the session's skills"), "{d}");
+    let (_, d) = run("sk-unread", &["--skills-unread"]);
+    assert!(d["reason"].as_str().unwrap().contains("could not be read"), "{d}");
+    let (_, d) = run("sk-partial", &["--skills=start", "--skills-partial"]);
+    assert_eq!(d["action"], "wrap", "a partial listing is not held against it: {d}");
+    let (w, d) = run("sk-none", &[]);
+    assert_eq!(d["action"], "wrap", "{d}");
+    assert_eq!(d["wrap"]["after_keepalives"], 0, "the old protocol has no stretch after the wrap: {d}");
+    assert!(w.run(&["keepwarm", "wrapped", "transcript", "--focus", "keep it"]).status.success());
+    let out = w.run(&["keepwarm", "check", "--policy", "--json", "--autocompact", "off"]);
+    let d: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_ne!(d["action"], "compact", "no compact action for an old mod: {d}");
+    // The card, which reads the settings alone, follows what the check saw.
+    let card = card_text(&w);
+    assert!(!card.contains("after it"), "{card}");
 }
 
 /// `attend keepwarm off` stops the policy until the operator's next prompt.

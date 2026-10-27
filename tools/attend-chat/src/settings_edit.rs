@@ -29,6 +29,8 @@ pub const MOD_KEYS: &[&str] = &[
     "mods.attend.keepalive.wrap_file",
     "mods.attend.keepalive.wrap_to",
     "mods.attend.keepalive.after_wrap",
+    "mods.attend.keepalive.after_wrap_keepalives",
+    "mods.attend.keepalive.wrap_skill",
 ];
 
 const CHAT: &str = "attend.chat.";
@@ -448,6 +450,8 @@ mod tests {
                 "mods.attend.keepalive.wrap_file = {state}/wrap/{session}.md (default)",
                 "mods.attend.keepalive.wrap_to =  (default)",
                 "mods.attend.keepalive.after_wrap = lapse (default)",
+                "mods.attend.keepalive.after_wrap_keepalives = 0 (default)",
+                "mods.attend.keepalive.wrap_skill = wrap stay (default)",
                 "attend.chat.tabs.jump = auto (default)",
                 "attend.chat.tabs.menu_on_repeat = true (default)",
                 "attend.chat.tabs.focus_key = both (default)",

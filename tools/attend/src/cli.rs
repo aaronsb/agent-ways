@@ -584,6 +584,19 @@ pub enum KeepwarmCmd {
         /// refused), through a temp file renamed over it
         #[arg(long, requires = "path")]
         save: bool,
+        /// The focus of the wrap's closing `/compact` line, kept for the
+        /// compaction `after_wrap: compact` asks for after the wrap's
+        /// keepalives
+        #[arg(long)]
+        focus: Option<String>,
+    },
+    /// Record the compaction after the wrap, for the status card and so
+    /// nothing more follows. The attend mod runs it once the compaction
+    /// ends (ADR-414 item 6)
+    Compacted {
+        /// Why the compaction failed; absent when it ran
+        #[arg(long)]
+        failed: Option<String>,
     },
 }
 
@@ -594,14 +607,27 @@ pub struct KeepwarmCheckArgs {
     /// prompt and bounded by mods.attend.keepalive, then one wrap turn
     #[arg(long)]
     pub policy: bool,
-    /// Print the decision as one JSON object: action (none, keepalive or
-    /// wrap), text, next_at, count, max, wraps_at and reason
+    /// Print the decision as one JSON object: action (none, keepalive,
+    /// wrap or compact), text, next_at, count, max, wraps_at and reason
     #[arg(long)]
     pub json: bool,
     /// The autocompact gate as the host read it: on, off or unknown. The
     /// policy runs only with off; unknown counts as on
     #[arg(long, requires = "policy", value_parser = ["on", "off", "unknown"], default_value = "unknown")]
     pub autocompact: String,
+    /// The skills the session lists, comma-separated, as the host read them.
+    /// The wrap and the compaction after it run only when
+    /// mods.attend.keepalive.wrap_skill names one of them. Absent, as from a
+    /// host that predates the flag, the wrap is not held to a listing
+    #[arg(long, requires = "policy", value_delimiter = ',')]
+    pub skills: Option<Vec<String>>,
+    /// The host could not read the session's skills: no wrap or compaction
+    #[arg(long, requires = "policy", conflicts_with = "skills")]
+    pub skills_unread: bool,
+    /// The --skills listing was cut short by the host's budget: a skill
+    /// missing from it is not held against the wrap
+    #[arg(long, requires = "skills")]
+    pub skills_partial: bool,
 }
 
 /// Subcommands for `attend listen`. With no subcommand, defaults to `status`.

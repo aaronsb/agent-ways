@@ -47,6 +47,10 @@ import {
   formatMessage,
   frameInbound,
   compactFocus,
+  compactedArgv,
+  isUnknownFlag,
+  skillsFrom,
+  wrapFocus,
   firstCheckMs,
   isContextReset,
   gateFrom,
@@ -660,7 +664,8 @@ async function setKeepaliveRow($: $, f: (k: KeepaliveRow | null) => KeepaliveRow
  *  locally with no request, else `autoCompactEnabled` in the merged
  *  settings, else unknown, which counts as on. `fresh` reads it whatever
  *  was kept, as before a submit. A gate that first reads off sends the
- *  operator's prompt held while it did not. */
+ *  operator's prompt held while it did not. The same breakdown lists the
+ *  session's skills, which attend checks `wrap_skill` against. */
 async function readGate($: $, ka: Keepalive, fresh = false): Promise<Gate> {
   const now = await $.clock.now()
   if (!fresh && gateIsFresh(ka.gate, ka.gateAtMs, now)) return ka.gate
@@ -670,6 +675,7 @@ async function readGate($: $, ka: Keepalive, fresh = false): Promise<Gate> {
   } catch {
     usage = undefined
   }
+  ka.skills = skillsFrom(usage)
   let settings: unknown
   if (gateFrom(usage, undefined) === 'unknown') {
     try {
@@ -711,7 +717,12 @@ async function checkKeepalive($: $, mod: Mod) {
     const gate = await readGate($, ka)
     const isListening = await isOn($, mod)
     if (!isListening && gate !== 'off') return
-    const r = await run($, policyArgv(gate), POLICY_TIMEOUT_MS)
+    let r = await run($, policyArgv(gate, ka.skills, ka.isLegacyAttend), POLICY_TIMEOUT_MS)
+    // An attend from before --skills: ask as before, and keep asking so.
+    if (!ka.isLegacyAttend && isUnknownFlag(r)) {
+      ka.isLegacyAttend = true
+      r = await run($, policyArgv(gate, null, true), POLICY_TIMEOUT_MS)
+    }
     const d: Decision | undefined = r.exitCode === 0 ? parseDecision(r.stdout) : undefined
     const plan = d ? planCheck(d, isListening) : undefined
     if (!d || !plan || plan.retry) {
@@ -727,6 +738,12 @@ async function checkKeepalive($: $, mod: Mod) {
       const gateNow = isPolicy ? await readGate($, ka, true) : gate
       if (!maySubmit({ epochThen: epoch, epochNow: ka.epoch, running: mod.running.size, isPolicy, gate: gateNow })) {
         if (plan.submit.kind === 'wrap') await run($, wrappedArgv('unfinished', 'a turn started before the wrap went in'))
+        if (plan.submit.kind === 'compact') await run($, compactedArgv('a turn started before the compaction'))
+        return
+      }
+      if (plan.submit.kind === 'compact') {
+        // Between turns, and nothing is due after it: attend recorded it.
+        await compactAfterWrap($, plan.submit.text)
         return
       }
       const { text, route } = plan.submit
@@ -798,13 +815,19 @@ async function routeWrap($: $, ka: Keepalive, turnId: string, reason: string, an
   const w = ka.wrap
   if (!w || w.turnId === undefined || w.turnId !== turnId) return
   ka.wrap = undefined
+  // Before the first await: a prompt during the reports or the send below
+  // cancels the compaction scheduled after them.
+  const epoch = ka.epoch
   // The wrap's own answer, from its first ending step, which stands even
   // when a Stop-hook continuation then ends aborted or in error; the
   // turn's final answer only where no step was seen.
   const reply = w.reply ?? answer
-  const report = (o: WrapOutcome, detail = '') => serialize(ka, () => run($, wrappedArgv(o, detail)))
   const plan = wrapPlan(w.route, w.reply !== undefined ? 'answer' : reason, reply)
-  if (plan.kind === 'unfinished') return void (await report('unfinished', plan.detail))
+  // An unfinished wrap wrote no handoff, so it records no focus and
+  // nothing compacts after it.
+  if (plan.kind === 'unfinished') return void (await serialize(ka, () => run($, wrappedArgv('unfinished', plan.detail))))
+  const focus = wrapFocus(w.route, reply)
+  const report = (o: WrapOutcome, detail = '') => serialize(ka, () => run($, wrappedArgv(o, detail, focus)))
   if (plan.kind === 'transcript') await report('transcript')
   // attend writes the file and records the outcome, or why it could not.
   if (plan.kind === 'file') await serialize(ka, () => run($, plan.argv, undefined, reply))
@@ -817,20 +840,37 @@ async function routeWrap($: $, ka: Keepalive, turnId: string, reason: string, an
       // to) or timed out: the reply goes to the file instead.
       const detail = refusalDetail(w.route.to, r)
       if (w.route.file === '') await report('refused', `${detail}; no safe wrap file to keep it in`)
-      else await serialize(ka, () => run($, saveArgv('refused', detail, w.route.file), undefined, reply))
+      else await serialize(ka, () => run($, saveArgv('refused', detail, w.route.file, focus), undefined, reply))
       await setKeepaliveRow($, rowRefused)
     }
   }
-  if (w.route.after === 'compact') {
+  // With keepalives after the wrap, attend asks for the compaction at a
+  // due point instead, with the focus reported above.
+  if (w.route.after === 'compact' && w.route.afterKeepalives === 0) {
     const instructions = compactFocus(reply)
-    // Between turns: a compaction rejects while a turn runs.
+    // Between turns: a compaction rejects while a turn runs. A prompt or a
+    // turn since the wrap answered (the epoch moved) cancels it.
     $.clock.after(1_000, () => {
-      void $.session
-        .compact({ instructions })
-        .then(r => (r.skip === undefined ? markCompacted($) : undefined))
-        .catch(err => $.ui.log(`attend: the compaction after the wrap failed: ${String(err)}`))
+      if (ka.epoch === epoch) void serialize(ka, () => compactAfterWrap($, instructions))
     })
   }
+}
+
+/** The compaction after the wrap, with the wrap's focus; attend records
+ *  that it ran, or why it did not. The caller holds the keepalive chain. */
+async function compactAfterWrap($: $, instructions: string) {
+  let failed: string | undefined
+  try {
+    const r = await $.session.compact({ instructions })
+    if (r.skip === undefined) await markCompacted($)
+    else failed = `skipped: ${String(r.skip)}`
+  } catch (err) {
+    failed = String(err)
+    $.ui.log(`attend: the compaction after the wrap failed: ${failed}`)
+  }
+  // The row took attend's word before the compaction ran.
+  if (failed !== undefined) await setKeepaliveRow($, k => (k?.state === 'compacted' ? { ...k, state: 'wrapped', compactedAt: null } : k))
+  await run($, compactedArgv(failed))
 }
 
 /** A wrap that went in and was never routed: its turn never started or
@@ -876,6 +916,8 @@ export const register: Register = on => {
       applies: false,
       gate: 'unknown',
       gateAtMs: -Infinity,
+      skills: null,
+      isLegacyAttend: false,
       timer: undefined,
       chain: Promise.resolve(),
       epoch: 0,

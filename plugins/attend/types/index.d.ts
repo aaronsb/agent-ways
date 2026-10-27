@@ -1,8 +1,14 @@
 /** The keepalive policy as the row draws it (ADR-414 item 9). */
 export type KeepaliveRow = {
-  state: 'running' | 'wrapped' | 'stopped'
+  state: 'running' | 'wrapped' | 'compacted' | 'stopped'
   count: number
   max: number
+  /** Keepalives since the wrap, of `afterMax` (`after_wrap_keepalives`). */
+  afterCount: number
+  afterMax: number
+  /** When the compaction after the wrap goes out, as attend estimates it. */
+  compactsAt: string | null
+  compactedAt: string | null
   /** Epoch seconds. */
   nextAt: number | null
   wrapsAt: string | null
