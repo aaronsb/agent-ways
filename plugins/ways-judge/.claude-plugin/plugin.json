@@ -1,6 +1,6 @@
 {
   "name": "ways-judge",
-  "version": "1.44.4",
+  "version": "1.45.0",
   "description": "The relevance gate's Claude Code internal engine (ADR-708): judges the prompt lane's jobs through the session's own model, with no key, carried over the ways CLI.",
   "author": { "name": "Aaron Bockelie" }
 }
