@@ -5,6 +5,11 @@ import type { AttendStatus, KeepaliveRow } from '../types/index.d.ts'
 
 import {
   DEFAULT_CONFIG,
+  compactedArgv,
+  keepaliveSegment,
+  policyArgv,
+  skillsFrom,
+  wrapFocus,
   framedPluginPrompt,
   gateIsFresh,
   isOpenChannel,
@@ -130,6 +135,8 @@ type World = {
   /** `isAutoCompactEnabled` in the usage breakdown; null leaves the
    *  breakdown out, and undefined makes the call fail. */
   autocompact?: boolean | null
+  /** The skill listing the usage breakdown carries; absent leaves it out. */
+  skills?: { name: string; pluginName?: string }[]
   /** `autoCompactEnabled` in the merged settings; `throws` makes the read fail. */
   settingsAutoCompact?: boolean | 'absent' | 'throws'
   /** `attend message send` refuses with this reason. */
@@ -244,7 +251,8 @@ function host(on: On, world: World) {
   })
   on('session.usage', () => {
     if (world.autocompact === undefined) throw new Error('usage unavailable')
-    const breakdown = world.autocompact === null ? undefined : { isAutoCompactEnabled: world.autocompact }
+    const skills = world.skills === undefined ? {} : { skills: { totalSkills: world.skills.length, includedSkills: world.skills.length, tokens: 0, skillFrontmatter: world.skills.map(k => ({ source: 'userSettings', tokens: 1, ...k })) } }
+    const breakdown = world.autocompact === null ? undefined : { isAutoCompactEnabled: world.autocompact, ...skills }
     const fill = world.contextTokens === undefined ? {} : { tokens: world.contextTokens }
     return { value: { startedAt: T0, context: { breakdown, ...fill }, rateLimits: [] } } as never
   })
@@ -1902,7 +1910,7 @@ describe('keepalive policy', () => {
     const h = host(on, { config: { listening: 'active' }, autocompact: false, policy: [due(S + 50 * MIN), keepalive(1)] })
     await $.session.start(INTERACTIVE)
     await clock.advance(5_000)
-    expect(policyChecks(h)).toEqual([['attend', 'keepwarm', 'check', '--policy', '--json', '--autocompact', 'off']])
+    expect(policyChecks(h)).toEqual([['attend', 'keepwarm', 'check', '--policy', '--json', '--autocompact', 'off', '--skills-unread']])
     await clock.advance(49 * 60_000)
     expect(policyChecks(h).length).toBe(1)
     expect(h.submitted).toEqual([])
@@ -2268,7 +2276,7 @@ describe('keepalive policy', () => {
     const h = host(on, { autocompact: null, settingsAutoCompact: false, policy: [decision()] })
     await $.session.start(INTERACTIVE)
     await clock.advance(5_000)
-    expect(policyChecks(h)[0]?.at(-1)).toBe('off')
+    expect(policyChecks(h)[0]?.[6]).toBe('off')
   })
 
   test('a listening session with autocompact on asks with the gate on, and submits only an armed window\'s wake', async ($, on) => {
@@ -2277,7 +2285,7 @@ describe('keepalive policy', () => {
     const h = host(on, { config: { listening: 'active' }, autocompact: true, policy: [decision({ policy: false, state: 'off', next_at: S + 61 }), armed, decision({ policy: false, state: 'off' })] })
     await $.session.start(INTERACTIVE)
     await clock.advance(5_000)
-    expect(policyChecks(h)[0]?.at(-1)).toBe('on')
+    expect(policyChecks(h)[0]?.[6]).toBe('on')
     await clock.advance(60_000)
     expect(h.submitted).toEqual([KEEPALIVE])
     expect(await segment($)).toBeUndefined()
@@ -2427,6 +2435,38 @@ describe('keepalive policy', () => {
     expect(h.status()?.afterCompaction).toBe(true)
   })
 
+  test('the check passes the skills the session lists, a plugin\'s by both its names', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { autocompact: false, skills: [{ name: 'wrap' }, { name: 'plugin-authoring', pluginName: 'mods' }], policy: [due(S + 50 * MIN)] })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    expect(policyChecks(h)[0]).toEqual(['attend', 'keepwarm', 'check', '--policy', '--json', '--autocompact', 'off', '--skills=wrap,plugin-authoring,mods:plugin-authoring'])
+  })
+
+  test('with keepalives after the wrap, the wrap reports its focus and nothing compacts at once', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { autocompact: false, policy: [wrap(route('transcript', { after: 'compact', after_keepalives: 2 }))] })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    await wrapTurn($, 'Continuation prompt.\n\n`/compact keep the ADR-414 plan`')
+    await clock.advance(2_000)
+    expect(h.compacts).toEqual([])
+    expect(h.argvs).toContainEqual(['attend', 'keepwarm', 'wrapped', 'transcript', '--detail', '', '--focus', 'keep the ADR-414 plan'])
+  })
+
+  test('attend\'s compact action compacts between turns with its focus, and the mod reports it', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const compact = decision({ action: 'compact', text: 'keep the ADR-414 plan', state: 'compacted', count: 8, wrapped_at_hm: '07:30', compacted_at_hm: '10:50' })
+    const h = host(on, { autocompact: false, policy: [compact, decision({ state: 'compacted', count: 8, compacted_at_hm: '10:50' })] })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    expect(h.compacts).toEqual(['keep the ADR-414 plan'])
+    expect(h.submitted).toEqual([])
+    expect(h.argvs).toContainEqual(['attend', 'keepwarm', 'compacted'])
+    expect(h.status()?.afterCompaction).toBe(true)
+    expect((await segment($))?.text).toMatch(/⟳ compacted 10:50/)
+  })
+
   test('with lapse, nothing follows the wrap', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const h = host(on, { autocompact: false, policy: [wrap(route('transcript')), decision({ state: 'wrapped', count: 8, wrapped_at_hm: '07:30' })] })
@@ -2441,7 +2481,7 @@ describe('keepalive policy', () => {
 
 // The policy's pure pieces in lib.ts, apart from the mod's hooks.
 describe('keepalive policy: the pure pieces', () => {
-  const route = { dest: 'file', file: '/s/wrap/s1.md', to: 'aaron', after: 'lapse', handoff: 'handoff: from A (p), wrapped at 07:30 while its operator was away.' } as const
+  const route = { dest: 'file', file: '/s/wrap/s1.md', to: 'aaron', after: 'lapse', afterKeepalives: 0, handoff: 'handoff: from A (p), wrapped at 07:30 while its operator was away.' } as const
   const d = (o: Record<string, unknown>) => parseKeepaliveDecision(decision(o))!
 
   test('planCheck submits the policy\'s turns, and an armed wake only in a listening session', () => {
@@ -2527,7 +2567,7 @@ describe('keepalive policy: the pure pieces', () => {
   })
 
   test('the row: the segment alone while dormant and shown, beside the peers while active', () => {
-    const k: KeepaliveRow = { state: 'running', count: 2, max: 8, nextAt: 41 * 60, wrapsAt: '21:40', wrappedAt: null, idle: null, isRefused: false, isShown: true }
+    const k: KeepaliveRow = { state: 'running', count: 2, max: 8, afterCount: 0, afterMax: 0, compactsAt: null, compactedAt: null, nextAt: 41 * 60, wrapsAt: '21:40', wrappedAt: null, idle: null, isRefused: false, isShown: true }
     const base: AttendStatus = { mode: 'dormant', listening: null, peers: 3, unread: 1, channels: ['#room'], deliveries: 0, afterCompaction: false, turnsSinceFull: 0, heldNote: null, cacheLapsed: false, keepalive: null, move: null }
     expect(rowText({ ...base, keepalive: k }, 0)).toBe('⟳ 2/8 · next 41m · wrap ~21:40')
     expect(rowText({ ...base, keepalive: rowAfterPrompt(k) }, 0)).toBeUndefined()
@@ -2538,9 +2578,47 @@ describe('keepalive policy: the pure pieces', () => {
     expect(rowAfterTurnEnd({ ...k, state: 'wrapped' }, 3_000_000)?.nextAt).toBe(41 * 60)
   })
 
+  test('the session\'s skills come from the breakdown; none read passes --skills-unread', () => {
+    const usage = (skillFrontmatter: unknown) => ({ context: { breakdown: { isAutoCompactEnabled: false, skills: { skillFrontmatter } } } })
+    expect(skillsFrom(usage([{ name: 'wrap' }, { name: 'x', pluginName: 'p' }, { name: 'p:y', pluginName: 'p' }, { name: 'a,b' }, { name: 3 }]))).toEqual(['wrap', 'x', 'p:x', 'p:y'])
+    expect(skillsFrom(usage([]))).toEqual([])
+    expect(skillsFrom({ context: { breakdown: { isAutoCompactEnabled: false } } })).toBeNull()
+    expect(skillsFrom(undefined)).toBeNull()
+    expect(policyArgv('off', null)).toEqual(['attend', 'keepwarm', 'check', '--policy', '--json', '--autocompact', 'off', '--skills-unread'])
+    expect(policyArgv('off', [])).toEqual(['attend', 'keepwarm', 'check', '--policy', '--json', '--autocompact', 'off', '--skills='])
+  })
+
+  test('the compaction after the wrap: its plan, its focus and its report', () => {
+    expect(planCheck(d({ action: 'compact', text: 'keep it', state: 'compacted' }), false).submit).toEqual({ kind: 'compact', text: 'keep it', route: null })
+    expect(planCheck(d({ action: 'compact', text: 'keep it', policy: false, state: 'off' }), true).submit).toBeNull()
+    const reply = 'Prompt.\n/compact keep the plan'
+    expect(wrapFocus({ ...route, after: 'compact', afterKeepalives: 2 }, reply)).toBe('keep the plan')
+    expect(wrapFocus({ ...route, after: 'compact', afterKeepalives: 0 }, reply)).toBeUndefined()
+    expect(wrapFocus({ ...route, afterKeepalives: 2 }, reply)).toBeUndefined()
+    expect(wrapPlan({ ...route, after: 'compact', afterKeepalives: 1 }, 'answer', reply)).toEqual({
+      kind: 'file', argv: ['attend', 'keepwarm', 'wrapped', 'file', '--detail', '', '--path', '/s/wrap/s1.md', '--save', '--focus', 'keep the plan'],
+    })
+    expect(compactedArgv()).toEqual(['attend', 'keepwarm', 'compacted'])
+    expect(compactedArgv('a turn\nran')).toEqual(['attend', 'keepwarm', 'compacted', '--failed', 'a turn ran'])
+  })
+
+  test('the row after the wrap counts its keepalives and names the compaction', () => {
+    const k: KeepaliveRow = {
+      state: 'wrapped', count: 8, max: 8, afterCount: 1, afterMax: 3, compactsAt: '10:50', compactedAt: null,
+      nextAt: 41 * 60, wrapsAt: null, wrappedAt: '07:30', idle: null, isRefused: false, isShown: true,
+    }
+    expect(keepaliveSegment(k, 0)).toBe('⟳ wrapped 07:30 · 1/3 · next 41m · compact ~10:50')
+    expect(keepaliveSegment({ ...k, afterMax: 0, nextAt: null }, 0)).toBe('⟳ wrapped 07:30')
+    expect(keepaliveSegment({ ...k, state: 'compacted', compactedAt: '10:50' }, 0)).toBe('⟳ compacted 10:50')
+    expect(rowAfterTurnEnd(k, 3_000_000)?.nextAt).toBe(3000)
+    const after = keepaliveRowOf(d({ state: 'wrapped', count: 8, after_count: 2, after_max: 3, next_at: 100, compacts_at_hm: '10:50', wrapped_at_hm: '07:30' }), null)
+    expect(after && keepaliveSegment(after, 0)).toBe('⟳ wrapped 07:30 · 2/3 · next 2m · compact ~10:50')
+    expect(rowAfterPrompt(k)).toMatchObject({ state: 'running', count: 0, afterCount: 0, compactedAt: null })
+  })
+
   test('the row says why the policy is idle: under the 50k floor, the 5m tier, no request yet', () => {
     const base: AttendStatus = { mode: 'dormant', listening: null, peers: 0, unread: 0, channels: [], deliveries: 0, afterCompaction: false, turnsSinceFull: 0, heldNote: null, cacheLapsed: false, keepalive: null, move: null }
-    const idle = (o: Record<string, unknown>) => keepaliveRowOf(parseKeepaliveDecision(decision({ count: 0, max: 1, ...o }))!, { state: 'running', count: 0, max: 1, nextAt: null, wrapsAt: null, wrappedAt: null, idle: null, isRefused: false, isShown: true })
+    const idle = (o: Record<string, unknown>) => keepaliveRowOf(parseKeepaliveDecision(decision({ count: 0, max: 1, ...o }))!, { state: 'running', count: 0, max: 1, afterCount: 0, afterMax: 0, compactsAt: null, compactedAt: null, nextAt: null, wrapsAt: null, wrappedAt: null, idle: null, isRefused: false, isShown: true })
     expect(rowText({ ...base, keepalive: idle({ idle: 'under 50k' }) }, 0)).toBe('⟳ 0/1 · idle: under 50k')
     expect(rowText({ ...base, keepalive: idle({ idle: '5m tier' }) }, 0)).toBe('⟳ 0/1 · idle: 5m tier')
     expect(rowText({ ...base, keepalive: idle({ idle: 'no request yet' }) }, 0)).toBe('⟳ 0/1 · idle: no request yet')

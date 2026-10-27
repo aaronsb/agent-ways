@@ -5,7 +5,7 @@
 
 use crate::cli::{KeepwarmCheckArgs, KeepwarmCmd};
 use crate::util::keepwarm_dir;
-use sensor_keepwarm::policy::{self, Config, Gate, Policy, Site, WrapOutcome};
+use sensor_keepwarm::policy::{self, Config, Gate, Policy, SessionSkills, Site, WrapOutcome};
 use sensor_keepwarm::{
     card, card_state, check_once, fmt_duration, lock_session, parse_duration, read_arm, read_context, read_ledger, settle, write_arm,
     write_ledger, ArmFile, State, DEFAULT_WINDOW_SECS, PING_AFTER_SECS,
@@ -77,7 +77,7 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
             }
             println!("keepalive count reset");
         }
-        KeepwarmCmd::Wrapped { outcome, detail, path, save } => {
+        KeepwarmCmd::Wrapped { outcome, detail, path, save, focus } => {
             let Some(o) = WrapOutcome::parse(&outcome) else {
                 eprintln!("keepwarm wrapped takes transcript, file, sent, refused or unfinished");
                 std::process::exit(2);
@@ -90,11 +90,28 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
                 (true, Some(path)) => saved_outcome(o, &detail, &path, sid),
                 _ => (o.describe(&detail), Ok(())),
             };
-            if !update_policy(&dir, sid, |p| p.wrap_outcome = Some(line)) {
+            let focus = focus.map(|f| f.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|f| !f.is_empty());
+            let recorded = update_policy(&dir, sid, |p| {
+                p.wrap_outcome = Some(line);
+                if focus.is_some() {
+                    p.compact_focus = focus;
+                }
+            });
+            if !recorded {
                 std::process::exit(1);
             }
             if let Err(e) = wrote {
                 eprintln!("keepwarm: {e}");
+                std::process::exit(1);
+            }
+        }
+        KeepwarmCmd::Compacted { failed } => {
+            let failed = failed.map(|f| f.trim().to_string()).filter(|f| !f.is_empty());
+            let recorded = update_policy(&dir, sid, |p| {
+                p.compacted_at.get_or_insert(now);
+                p.compact_failed = failed;
+            });
+            if !recorded {
                 std::process::exit(1);
             }
         }
@@ -228,6 +245,7 @@ fn nothing(reason: &str, next_at: Option<u64>) -> serde_json::Value {
         "action": "none", "text": null, "next_at": next_at, "count": 0, "max": 0,
         "wraps_at": null, "reason": reason, "policy": false, "state": "off",
         "wraps_at_hm": null, "wrapped_at_hm": null, "wrap": null, "retry": false, "idle": null,
+        "after_count": 0, "after_max": 0, "compacts_at": null, "compacts_at_hm": null, "compacted_at_hm": null,
     })
 }
 
@@ -359,7 +377,12 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
 
     let dir = keepwarm_dir();
     let gate = Gate::parse(&args.autocompact);
-    let pcfg = Config::from_settings(policy_settings(&dir, sid, &ident.origin_path, now).as_deref());
+    let mut pcfg = Config::from_settings(policy_settings(&dir, sid, &ident.origin_path, now).as_deref());
+    pcfg.session_skills = match (&args.skills, args.skills_unread) {
+        (_, true) => SessionSkills::Unread,
+        (Some(list), false) => SessionSkills::Listed(list.iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()),
+        (None, false) => SessionSkills::NotChecked,
+    };
     let Some(reading) = read_context(sid, &ident.origin_path) else {
         let why = "could not read the session transcript through `ways context`";
         if args.json {

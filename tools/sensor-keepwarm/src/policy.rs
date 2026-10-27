@@ -3,7 +3,11 @@
 //! wake `margin` before its cache would lapse, counted from the operator's
 //! last prompt and allowed only inside the configured windows. At the first
 //! due point past the count or outside the windows the session gets one
-//! `wrap:` turn, and nothing more until the operator prompts again.
+//! `wrap:` turn. With `after_wrap_keepalives` the keepalives go on that
+//! many more times after the wrap; then the cache lapses, or with
+//! `after_wrap: compact` the session gets one compaction with the focus the
+//! wrap's closing `/compact` line gave. Nothing more follows until the
+//! operator prompts again.
 //!
 //! The judgment lives here; the attend mod supplies what only it can see
 //! (the operator's prompts, through [`reset`], and the autocompact gate) and
@@ -24,6 +28,13 @@ pub const MAX_RANGE: (u32, u32) = (0, 48);
 /// hour tier.
 pub const DEFAULT_MARGIN_MIN: u64 = 10;
 pub const MARGIN_RANGE: (u64, u64) = (3, 30);
+/// `mods.attend.keepalive.after_wrap_keepalives`.
+pub const DEFAULT_AFTER_MAX: u32 = 0;
+pub const AFTER_RANGE: (u32, u32) = (0, 48);
+/// `mods.attend.keepalive.wrap_skill`: the skill's name and its arguments.
+pub const DEFAULT_WRAP_SKILL: &str = "wrap stay";
+/// The longest skill name and argument text `wrap_skill` may give.
+const SKILL_MAX_LEN: usize = 64;
 /// `mods.attend.keepalive.wrap_file`.
 pub const DEFAULT_WRAP_FILE: &str = "{state}/wrap/{session}.md";
 /// How long a wake may go without its turn before the verdict stops the
@@ -39,6 +50,10 @@ fn is_false(b: &bool) -> bool {
 
 fn is_zero(f: &f64) -> bool {
     *f == 0.0
+}
+
+fn is_zero_count(n: &u32) -> bool {
+    *n == 0
 }
 
 /// The policy's part of the ledger (ADR-414 item 7).
@@ -72,6 +87,32 @@ pub struct Policy {
     /// What this count's keepalives cost, from their verdicts.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub spent_usd: f64,
+    /// Keepalives sent since the wrap (`after_wrap_keepalives`).
+    #[serde(default, skip_serializing_if = "is_zero_count")]
+    pub after_count: u32,
+    /// The focus of the wrap's closing `/compact` line, as the mod reported
+    /// it once the wrap answered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compact_focus: Option<String>,
+    /// When the compaction after the wrap was asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compacted_at: Option<u64>,
+    /// Why that compaction failed, as the mod reported it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compact_failed: Option<String>,
+    /// Whether the last check found `wrap_skill` among the session's skills,
+    /// for the status card, which has no listing of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill_seen: Option<SkillSeen>,
+}
+
+/// What the last check found of `wrap_skill` in the session's listing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SkillSeen {
+    Listed,
+    Missing,
+    Unread,
 }
 
 impl Policy {
@@ -147,6 +188,60 @@ impl AfterWrap {
     }
 }
 
+/// `mods.attend.keepalive.wrap_skill`: the skill the wrap turn asks for,
+/// and its arguments. A project's checked-in config can set it, and its
+/// text goes into a turn nobody watches, so it is held to a skill name and
+/// plain argument words. Empty or refused, it names no skill, and no wrap
+/// or compaction runs ([`Config::no_wrap`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WrapSkill {
+    /// Empty where none is set or the value was refused.
+    pub name: String,
+    pub args: String,
+    /// The configured value, refused, and why.
+    pub refused: Option<(String, &'static str)>,
+}
+
+impl Default for WrapSkill {
+    fn default() -> Self {
+        let (name, args) = DEFAULT_WRAP_SKILL.split_once(' ').unwrap_or((DEFAULT_WRAP_SKILL, ""));
+        WrapSkill { name: name.into(), args: args.into(), refused: None }
+    }
+}
+
+impl WrapSkill {
+    /// `<skill> [arguments]`, a leading `/` allowed.
+    pub fn parse(value: &str) -> WrapSkill {
+        let v = value.trim();
+        let v = v.strip_prefix('/').unwrap_or(v);
+        if v.is_empty() {
+            return WrapSkill { name: String::new(), args: String::new(), refused: None };
+        }
+        let (name, args) = v.split_once(char::is_whitespace).map_or((v, ""), |(n, a)| (n, a.trim()));
+        let args = args.split_whitespace().collect::<Vec<_>>().join(" ");
+        let refuse = |why| WrapSkill { name: String::new(), args: String::new(), refused: Some((value.trim().to_string(), why)) };
+        let name_ok = name.len() <= SKILL_MAX_LEN
+            && name.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '_' | '-' | '.'));
+        if !name_ok {
+            return refuse("a skill name is letters, digits and : _ - . only");
+        }
+        if args.len() > SKILL_MAX_LEN || !args.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | ':' | '_' | '-' | '.' | '=' | ',')) {
+            return refuse("its arguments are plain words of letters, digits and : _ - . = , only");
+        }
+        WrapSkill { name: name.into(), args, refused: None }
+    }
+
+    /// `Run the wrap skill with the argument stay`.
+    fn ask(&self) -> String {
+        match self.args.split(' ').filter(|a| !a.is_empty()).count() {
+            0 => format!("Run the {} skill", self.name),
+            1 => format!("Run the {} skill with the argument {}", self.name, self.args),
+            _ => format!("Run the {} skill with the arguments {}", self.name, self.args),
+        }
+    }
+}
+
 /// The autocompact gate as the mod read it (ADR-414 item 2). Unknown counts
 /// as on: the side that starts no unbidden turn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -190,6 +285,24 @@ pub struct Config {
     pub wrap_file: String,
     pub wrap_to: String,
     pub after_wrap: AfterWrap,
+    /// Keepalives after the wrap before `after_wrap` applies.
+    pub after_max: u32,
+    pub wrap_skill: WrapSkill,
+    /// The skills the session lists, as the host read them. Not a setting:
+    /// the caller fills it.
+    pub session_skills: SessionSkills,
+}
+
+/// What the host said of the session's skills (`--skills`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum SessionSkills {
+    /// The host passed nothing, as a mod from before the flag does: the
+    /// wrap is not held to the listing.
+    #[default]
+    NotChecked,
+    /// The host could not read the listing: no wrap.
+    Unread,
+    Listed(Vec<String>),
 }
 
 impl Default for Config {
@@ -205,6 +318,9 @@ impl Default for Config {
             wrap_file: DEFAULT_WRAP_FILE.into(),
             wrap_to: String::new(),
             after_wrap: AfterWrap::Lapse,
+            after_max: DEFAULT_AFTER_MAX,
+            wrap_skill: WrapSkill::default(),
+            session_skills: SessionSkills::NotChecked,
         }
     }
 }
@@ -248,7 +364,58 @@ impl Config {
                 Some("compact") => AfterWrap::Compact,
                 _ => d.after_wrap,
             },
+            after_max: int("keepalive.after_wrap_keepalives")
+                .filter(|n| (AFTER_RANGE.0 as u64..=AFTER_RANGE.1 as u64).contains(n))
+                .map_or(d.after_max, |n| n as u32),
+            wrap_skill: text("keepalive.wrap_skill").map_or(d.wrap_skill, |s| WrapSkill::parse(&s)),
+            session_skills: SessionSkills::NotChecked,
         }
+    }
+
+    /// Why no wrap follows the keepalives, or `None` when one does: `wrap`
+    /// is off, or `wrap_skill` names no skill the session has. Without a
+    /// wrap there is no compaction either, and the policy stops at the bound.
+    pub fn no_wrap(&self) -> Option<String> {
+        if self.wrap == WrapDest::Off {
+            return Some("wrap is off".into());
+        }
+        if let Some((value, _)) = &self.wrap_skill.refused {
+            return Some(format!("wrap_skill \"{value}\" is refused"));
+        }
+        let name = &self.wrap_skill.name;
+        if name.is_empty() {
+            return Some("no wrap_skill is set".into());
+        }
+        match &self.session_skills {
+            SessionSkills::Unread => Some("the session's skills could not be read".into()),
+            SessionSkills::Listed(list) if !list.iter().any(|s| s == name) => Some(format!("the {name} skill is not among the session's skills")),
+            SessionSkills::Listed(_) | SessionSkills::NotChecked => None,
+        }
+    }
+
+    /// What a check with this config finds of `wrap_skill`; `None` where
+    /// the host passed no listing.
+    fn skill_seen(&self) -> Option<SkillSeen> {
+        match &self.session_skills {
+            SessionSkills::NotChecked => None,
+            SessionSkills::Unread => Some(SkillSeen::Unread),
+            SessionSkills::Listed(list) if list.contains(&self.wrap_skill.name) => Some(SkillSeen::Listed),
+            SessionSkills::Listed(_) => Some(SkillSeen::Missing),
+        }
+    }
+
+    /// This config with the listing the last check saw, for a reader such
+    /// as the status card that has none of its own.
+    fn with_seen(&self, seen: Option<SkillSeen>) -> Config {
+        let mut c = self.clone();
+        if c.session_skills == SessionSkills::NotChecked {
+            c.session_skills = match seen {
+                Some(SkillSeen::Unread) => SessionSkills::Unread,
+                Some(SkillSeen::Missing) => SessionSkills::Listed(Vec::new()),
+                Some(SkillSeen::Listed) | None => SessionSkills::NotChecked,
+            };
+        }
+        c
     }
 
     /// Why the policy does not run with `gate`, or `None` when it runs.
@@ -440,16 +607,21 @@ pub fn route_notes(cfg: &Config, site: &Site, now: u64) -> Vec<String> {
     if cfg.wrap == WrapDest::Send && is_open_channel(&cfg.wrap_to) {
         notes.push(format!("wrap_to \"{}\" refused: #open reaches every listening session; the reply goes to {}", cfg.wrap_to, site.operator));
     }
+    if let Some((value, why)) = &cfg.wrap_skill.refused {
+        notes.push(format!("wrap_skill \"{value}\" refused: {why}; no wrap or compaction runs"));
+    }
     notes
 }
 
-/// `none`, `keepalive` or `wrap`.
+/// `none`, `keepalive`, `wrap` or `compact`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Action {
     None,
     Keepalive,
     Wrap,
+    /// Compact the conversation between turns; `text` is the focus.
+    Compact,
 }
 
 /// Where the wrap's reply goes, as the mod routes it (ADR-414 item 6).
@@ -463,6 +635,10 @@ pub struct WrapRoute {
     /// when it is empty; `#name` is a channel.
     pub to: String,
     pub after: &'static str,
+    /// Keepalives after the wrap before `after` applies. With none, the mod
+    /// compacts once the wrap has answered; otherwise the policy asks for
+    /// the compaction at a due point (`Action::Compact`).
+    pub after_keepalives: u32,
     /// The line a `send` body opens with.
     pub handoff: String,
     /// What the route refused of the configuration (a `wrap_file` outside
@@ -474,7 +650,8 @@ pub struct WrapRoute {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Decision {
     pub action: Action,
-    /// The turn to submit, for `keepalive` and `wrap`.
+    /// The turn to submit, for `keepalive` and `wrap`; the compaction's
+    /// focus, for `compact`.
     pub text: Option<String>,
     /// When to ask again, in epoch seconds; `None` when nothing is due
     /// before the next main-loop turn.
@@ -487,10 +664,18 @@ pub struct Decision {
     /// Whether the policy runs in this session; false is ADR-182's armed
     /// windows alone.
     pub policy: bool,
-    /// `running`, `wrapped`, `stopped`, or `off` where the policy does not run.
+    /// `running`, `wrapped`, `compacted`, `stopped`, or `off` where the
+    /// policy does not run.
     pub state: &'static str,
     pub wraps_at_hm: Option<String>,
     pub wrapped_at_hm: Option<String>,
+    /// Keepalives sent since the wrap, of `after_max`.
+    pub after_count: u32,
+    pub after_max: u32,
+    /// When the compaction after the wrap goes out if nothing else happens.
+    pub compacts_at: Option<u64>,
+    pub compacts_at_hm: Option<String>,
+    pub compacted_at_hm: Option<String>,
     pub wrap: Option<WrapRoute>,
     /// The judgment could not be made (the transcript was unreadable): ask
     /// again at `next_at`, a bounded number of times.
@@ -501,6 +686,17 @@ pub struct Decision {
 }
 
 impl Decision {
+    /// The wrap's and the compaction's estimates, from the due point `due`
+    /// of a stretch whose cache lives `ttl`.
+    fn estimate(&mut self, cfg: &Config, p: &Policy, due: u64, ttl: u64) {
+        if p.wrapped_at.is_none() {
+            self.wraps_at = wraps_at(cfg, p.count, due, ttl);
+            self.wraps_at_hm = self.wraps_at.map(|w| cfg.windows.hm(w));
+        }
+        self.compacts_at = compacts_at(cfg, p, due, ttl);
+        self.compacts_at_hm = self.compacts_at.map(|c| cfg.windows.hm(c));
+    }
+
     fn new(cfg: &Config, p: &Policy, policy: bool, state: &'static str, reason: impl Into<String>) -> Self {
         Decision {
             action: Action::None,
@@ -514,6 +710,11 @@ impl Decision {
             state,
             wraps_at_hm: None,
             wrapped_at_hm: p.wrapped_at.map(|t| cfg.windows.hm(t)),
+            after_count: p.after_count,
+            after_max: cfg.after_max,
+            compacts_at: None,
+            compacts_at_hm: None,
+            compacted_at_hm: p.compacted_at.map(|t| cfg.windows.hm(t)),
             wrap: None,
             retry: false,
             idle: None,
@@ -569,7 +770,7 @@ fn due_point(state: &State, reading: &Reading, cfg: &Config) -> Result<(u64, u64
 /// from `due` on, past the count or outside the windows. `None` with no
 /// wrap.
 fn wraps_at(cfg: &Config, count: u32, due: u64, ttl: u64) -> Option<u64> {
-    if cfg.wrap == WrapDest::Off {
+    if cfg.no_wrap().is_some() {
         return None;
     }
     let step = ttl.saturating_sub(cfg.margin_secs).max(60);
@@ -579,6 +780,73 @@ fn wraps_at(cfg: &Config, count: u32, due: u64, ttl: u64) -> Option<u64> {
         t += step;
     }
     Some(t)
+}
+
+/// When the compaction after the wrap goes out if nothing else happens:
+/// the first due point after the wrap past `after_max` keepalives or
+/// outside the windows, from `due` on. `None` where no compaction follows
+/// at a due point.
+fn compacts_at(cfg: &Config, p: &Policy, due: u64, ttl: u64) -> Option<u64> {
+    if cfg.after_wrap != AfterWrap::Compact || cfg.after_max == 0 || p.compacted_at.is_some() {
+        return None;
+    }
+    let step = ttl.saturating_sub(cfg.margin_secs).max(60);
+    let (mut t, mut c) = match p.wrapped_at {
+        Some(_) => (due, p.after_count),
+        // The wrap's turn restarts the clock: the first keepalive after it
+        // is a step on.
+        None => (wraps_at(cfg, p.count, due, ttl)? + step, 0),
+    };
+    while c < cfg.after_max && cfg.windows.contains(t) {
+        c += 1;
+        t += step;
+    }
+    Some(t)
+}
+
+/// Why nothing more follows the wrap, or `None` while keepalives or the
+/// compaction after it are still to come. `None` too before the wrap.
+fn after_wrap_ends(cfg: &Config, p: &Policy) -> Option<String> {
+    let wrapped = format!("wrapped at {}", cfg.windows.hm(p.wrapped_at?));
+    if let Some(c) = p.compacted_at {
+        return Some(match &p.compact_failed {
+            Some(why) => format!("{wrapped}; the compaction at {} failed: {why}", cfg.windows.hm(c)),
+            None => format!("{wrapped} and compacted at {}", cfg.windows.hm(c)),
+        });
+    }
+    if let Some(why) = &p.stopped {
+        return Some(format!("{wrapped}, then stopped: {why}"));
+    }
+    if cfg.after_max == 0 {
+        return Some(wrapped);
+    }
+    if p.after_count < cfg.after_max || (cfg.after_wrap == AfterWrap::Compact && p.compact_focus.is_some()) {
+        return None;
+    }
+    let tail = if cfg.after_wrap == AfterWrap::Compact { "; the wrap left no reply to compact with" } else { "" };
+    Some(format!("{wrapped} and {} after it{tail}", keepalives(p.after_count)))
+}
+
+/// `1 keepalive`, `3 keepalives`.
+fn keepalives(n: u32) -> String {
+    format!("{n} {}", noun(n))
+}
+
+fn noun(n: u32) -> &'static str {
+    if n == 1 { "keepalive" } else { "keepalives" }
+}
+
+/// The wrap turn's last sentence: what the mod does once it has answered.
+fn after_wrap_line(cfg: &Config) -> String {
+    match (cfg.after_max, cfg.after_wrap) {
+        (0, AfterWrap::Lapse) => "Nothing keeps the prompt cache warm after this turn.".into(),
+        (0, AfterWrap::Compact) => "Once you answer, the mod compacts the conversation with the focus of your closing /compact line.".into(),
+        (m, AfterWrap::Lapse) => format!("The mod keeps the prompt cache warm for up to {m} more {}, then lets it lapse.", noun(m)),
+        (m, AfterWrap::Compact) => format!(
+            "The mod keeps the prompt cache warm for up to {m} more {}, then compacts the conversation with the focus of your closing /compact line.",
+            noun(m),
+        ),
+    }
 }
 
 /// The wrap turn's text (ADR-414 item 6).
@@ -591,7 +859,11 @@ fn wrap_text(cfg: &Config, site: &Site, p: &Policy, route: &WrapRoute, at_bound:
     } else {
         format!("wrap: {since}, and the keepalive hours ({}) have ended.", cfg.windows.describe())
     };
-    let mut body = "The operator is away. Run the wrap skill with the argument stay: square the task list and write the continuation prompt. Ask no questions, land nothing and start no new work. Nothing keeps the prompt cache warm after this turn.".to_string();
+    let mut body = format!(
+        "The operator is away. {}: square the task list and write the continuation prompt. Ask no questions, land nothing and start no new work. {}",
+        cfg.wrap_skill.ask(),
+        after_wrap_line(cfg),
+    );
     match cfg.wrap {
         WrapDest::File => body.push_str(&format!(" The mod saves your final reply to {}.", route.file)),
         WrapDest::Send if route.to == site.operator => {
@@ -614,6 +886,7 @@ fn route(cfg: &Config, site: &Site, now: u64) -> WrapRoute {
         notes: route_notes(cfg, site, now),
         to,
         after: cfg.after_wrap.as_str(),
+        after_keepalives: cfg.after_max,
         handoff: format!(
             "handoff: continuation prompt from {} ({}), wrapped at {} while its operator was away.",
             site.name,
@@ -629,6 +902,7 @@ fn route(cfg: &Config, site: &Site, now: u64) -> WrapRoute {
 /// is.
 pub fn step(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &Config, gate: Gate, site: &Site, now: u64) -> (Outcome, Decision) {
     state.policy.gate = Some(gate.as_str().into());
+    state.policy.skill_seen = cfg.skill_seen();
     if let Some(why) = cfg.why_off(gate) {
         let mut d = Decision::new(cfg, &state.policy, false, "off", why);
         if !cfg.keepwarm_on {
@@ -694,34 +968,35 @@ pub fn step(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &C
         });
         return (out, d);
     }
-    if let Some(t) = p.wrapped_at {
-        return (out, Decision::new(cfg, &p, true, "wrapped", format!("wrapped at {}; nothing more until the operator's next prompt", cfg.windows.hm(t))));
+    if let Some(why) = after_wrap_ends(cfg, &p) {
+        let state = if p.compacted_at.is_some() && p.compact_failed.is_none() { "compacted" } else { "wrapped" };
+        return (out, Decision::new(cfg, &p, true, state, format!("{why}; nothing more until the operator's next prompt")));
     }
+    // Wrapped, with keepalives or the compaction after it still to come.
+    let after = if p.wrapped_at.is_some() { "wrapped" } else { "running" };
     if let Some(why) = &p.stopped {
         return (out, Decision::new(cfg, &p, true, "stopped", format!("stopped: {why}; nothing more until the operator's next prompt")));
     }
     if let Some(t) = state.pinged_at {
-        let mut d = Decision::new(cfg, &p, true, "running", "waiting for the keepalive's turn");
+        let mut d = Decision::new(cfg, &p, true, after, "waiting for the keepalive's turn");
         d.next_at = Some(t + VERDICT_SECS + 1);
         if let Ok((_, ttl, _)) = due_point(state, reading, cfg) {
-            d.wraps_at = wraps_at(cfg, p.count, t + ttl.saturating_sub(cfg.margin_secs), ttl);
-            d.wraps_at_hm = d.wraps_at.map(|w| cfg.windows.hm(w));
+            d.estimate(cfg, &p, t + ttl.saturating_sub(cfg.margin_secs), ttl);
         }
         return (out, d);
     }
     let (due, ttl, last_at) = match due_point(state, reading, cfg) {
         Ok(x) => x,
         Err(why) => {
-            let mut d = Decision::new(cfg, &p, true, "running", why.reason());
+            let mut d = Decision::new(cfg, &p, true, after, why.reason());
             d.idle = Some(why.short());
             return (out, d);
         }
     };
     if now < due {
-        let mut d = Decision::new(cfg, &p, true, "running", format!("next due at {}", cfg.windows.hm(due)));
+        let mut d = Decision::new(cfg, &p, true, after, format!("next due at {}", cfg.windows.hm(due)));
         d.next_at = Some(due);
-        d.wraps_at = wraps_at(cfg, p.count, due, ttl);
-        d.wraps_at_hm = d.wraps_at.map(|w| cfg.windows.hm(w));
+        d.estimate(cfg, &p, due, ttl);
         return (out, d);
     }
     let mut out = out;
@@ -731,7 +1006,11 @@ pub fn step(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &C
         state.policy.stopped = Some(why);
         let p = state.policy.clone();
         let reason = format!("stopped: {}; nothing more until the operator's next prompt", p.stopped.as_deref().unwrap_or_default());
-        return (out, Decision::new(cfg, &p, true, "stopped", reason));
+        let state = if p.wrapped_at.is_some() { "wrapped" } else { "stopped" };
+        return (out, Decision::new(cfg, &p, true, state, reason));
+    }
+    if state.policy.wrapped_at.is_some() {
+        return (out, after_wrap_due(state, cfg, ttl, last_at, now));
     }
 
     // A due point.
@@ -748,15 +1027,14 @@ pub fn step(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &C
         d.action = Action::Keepalive;
         d.text = Some(wake_line(now.saturating_sub(last_at), ttl, state.ctx));
         d.next_at = Some(now + VERDICT_SECS + 1);
-        d.wraps_at = wraps_at(cfg, p.count, now + ttl.saturating_sub(cfg.margin_secs), ttl);
-        d.wraps_at_hm = d.wraps_at.map(|w| cfg.windows.hm(w));
+        d.estimate(cfg, &p, now + ttl.saturating_sub(cfg.margin_secs), ttl);
         return (out, d);
     }
-    if cfg.wrap == WrapDest::Off {
+    if let Some(why) = cfg.no_wrap() {
         state.policy.stopped = Some(if at_bound {
-            format!("{} keepalives, the most this session allows, and wrap is off", state.policy.count)
+            format!("{} keepalives, the most this session allows, and {why}", state.policy.count)
         } else {
-            "the keepalive hours have ended, and wrap is off".to_string()
+            format!("the keepalive hours have ended, and {why}")
         });
         let p = state.policy.clone();
         let reason = format!("stopped: {}; nothing more until the operator's next prompt", p.stopped.as_deref().unwrap_or_default());
@@ -768,8 +1046,50 @@ pub fn step(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &C
     let mut d = Decision::new(cfg, &p, true, "wrapped", if at_bound { "the count is spent" } else { "outside the keepalive hours" });
     d.action = Action::Wrap;
     d.text = Some(wrap_text(cfg, site, &p, &r, at_bound, now));
+    // The wrap's turn restarts the clock; with keepalives after it, ask
+    // again when the first of them could be due.
+    if cfg.after_max > 0 {
+        d.next_at = Some(now + ttl.saturating_sub(cfg.margin_secs));
+        d.estimate(cfg, &p, now + ttl.saturating_sub(cfg.margin_secs), ttl);
+    }
     d.wrap = Some(r);
     (out, d)
+}
+
+/// A due point after the wrap, while [`after_wrap_ends`] says more is to
+/// come: a keepalive while `after_max` allows and the windows hold, then the
+/// compaction with the wrap's focus, else a stop.
+fn after_wrap_due(state: &mut State, cfg: &Config, ttl: u64, last_at: u64, now: u64) -> Decision {
+    let inside = cfg.windows.contains(now);
+    if state.policy.after_count < cfg.after_max && inside {
+        state.policy.after_count += 1;
+        state.policy.pending = true;
+        state.pinged_at = Some(now);
+        let p = state.policy.clone();
+        let mut d = Decision::new(cfg, &p, true, "wrapped", format!("keepalive {} of {} after the wrap", p.after_count, cfg.after_max));
+        d.action = Action::Keepalive;
+        d.text = Some(wake_line(now.saturating_sub(last_at), ttl, state.ctx));
+        d.next_at = Some(now + VERDICT_SECS + 1);
+        d.estimate(cfg, &p, now + ttl.saturating_sub(cfg.margin_secs), ttl);
+        return d;
+    }
+    if let (AfterWrap::Compact, Some(focus)) = (cfg.after_wrap, state.policy.compact_focus.clone()) {
+        state.policy.compacted_at = Some(now);
+        let p = state.policy.clone();
+        let why = if inside { format!("{} after the wrap", keepalives(p.after_count)) } else { "the keepalive hours have ended".into() };
+        let mut d = Decision::new(cfg, &p, true, "compacted", format!("compacting with the wrap's focus: {why}"));
+        d.action = Action::Compact;
+        d.text = Some(focus);
+        return d;
+    }
+    state.policy.stopped = Some(if inside {
+        "the wrap left no reply to compact with".into()
+    } else {
+        "the keepalive hours have ended".into()
+    });
+    let p = state.policy.clone();
+    let reason = format!("{}; nothing more until the operator's next prompt", after_wrap_ends(cfg, &p).unwrap_or_default());
+    Decision::new(cfg, &p, true, "wrapped", reason)
 }
 
 /// Where the mod reports the wrap's reply went (`attend keepwarm wrapped`).
@@ -813,6 +1133,7 @@ impl WrapOutcome {
 /// session whose ledger is `state` and whose transcript reads `reading`.
 pub fn card(state: &State, reading: &Reading, cfg: &Config, site: &Site, now: u64) -> Vec<String> {
     let p = &state.policy;
+    let cfg = &cfg.with_seen(p.skill_seen);
     let mut lines = Vec::new();
     let Some(gate) = p.gate.as_deref() else {
         lines.push("keepalive   not run in this session (the attend mod runs it in an interactive session while autocompact is off)".into());
@@ -828,9 +1149,42 @@ pub fn card(state: &State, reading: &Reading, cfg: &Config, site: &Site, now: u6
         (None, Some(t)) => format!(" since {}", cfg.windows.hm(t)),
         (None, None) => String::new(),
     };
+    // The due point the next keepalive or compaction waits for.
+    let next_due = || {
+        due_point(state, reading, cfg).ok().map(|(due, ttl, _)| match state.pinged_at {
+            Some(t) => (t + ttl.saturating_sub(cfg.margin_secs), ttl),
+            None => (due, ttl),
+        })
+    };
     if let Some(t) = p.wrapped_at {
         let outcome = p.wrap_outcome.clone().unwrap_or_else(|| "no answer recorded yet".into());
-        lines.push(format!("keepalive   wrapped at {} after {} keepalives{since} · {outcome}", cfg.windows.hm(t), p.count));
+        let mut line = format!("keepalive   wrapped at {} after {} keepalives{since} · {outcome}", cfg.windows.hm(t), p.count);
+        match (p.compacted_at, &p.compact_failed) {
+            (Some(c), Some(why)) => line.push_str(&format!(" · the compaction at {} failed: {why}", cfg.windows.hm(c))),
+            (Some(c), None) => line.push_str(&format!(" · compacted at {}", cfg.windows.hm(c))),
+            (None, _) if cfg.after_max > 0 => {
+                line.push_str(&format!(" · {} of {} after it", p.after_count, cfg.after_max));
+                match after_wrap_ends(cfg, p) {
+                    Some(_) if p.stopped.is_some() => line.push_str(&format!(" · stopped: {}", p.stopped.as_deref().unwrap_or_default())),
+                    Some(_) => {}
+                    None => {
+                        if state.pinged_at.is_some() {
+                            line.push_str(" · waiting for the keepalive's turn");
+                        }
+                        if let Some((due, ttl)) = next_due() {
+                            if state.pinged_at.is_none() {
+                                line.push_str(&format!(" · next in {}", fmt_duration(due.saturating_sub(now))));
+                            }
+                            if let Some(c) = compacts_at(cfg, p, due, ttl) {
+                                line.push_str(&format!(" · compacts about {}", cfg.windows.hm(c)));
+                            }
+                        }
+                    }
+                }
+            }
+            (None, _) => {}
+        }
+        lines.push(line);
     } else if let Some(why) = &p.stopped {
         lines.push(format!("keepalive   stopped: {why}; your next prompt starts it again"));
     } else {
@@ -839,11 +1193,8 @@ pub fn card(state: &State, reading: &Reading, cfg: &Config, site: &Site, now: u6
             line.push_str(&format!(" · an armed window overrides it for {}", fmt_duration(state.deadline - now)));
         }
         match due_point(state, reading, cfg) {
-            Ok((due, ttl, _)) => {
-                let due = match state.pinged_at {
-                    Some(t) => t + ttl.saturating_sub(cfg.margin_secs),
-                    None => due,
-                };
+            Ok(_) => {
+                let (due, ttl) = next_due().unwrap_or_default();
                 if state.pinged_at.is_some() {
                     line.push_str(" · waiting for the keepalive's turn");
                 } else {
@@ -851,6 +1202,9 @@ pub fn card(state: &State, reading: &Reading, cfg: &Config, site: &Site, now: u6
                 }
                 if let Some(w) = wraps_at(cfg, p.count, due, ttl) {
                     line.push_str(&format!(" · wraps about {}", cfg.windows.hm(w)));
+                }
+                if let Some(c) = compacts_at(cfg, p, due, ttl) {
+                    line.push_str(&format!(" · compacts about {}", cfg.windows.hm(c)));
                 }
             }
             Err(why) => line.push_str(&format!(" · idle: {}", why.reason())),
@@ -868,18 +1222,35 @@ pub fn card(state: &State, reading: &Reading, cfg: &Config, site: &Site, now: u6
         for n in route_notes(cfg, site, now) {
             lines.push(format!("keepalive   {n}"));
         }
+        if let (None, Some(why)) = (p.wrapped_at, cfg.no_wrap()) {
+            lines.push(format!("keepalive   no wrap or compaction: {why}; the keepalives stop at the bound"));
+        }
     }
-    let wakes = if p.count == 1 { "wake" } else { "wakes" };
-    let left = cfg.max.saturating_sub(p.count) as f64;
-    let more = state.warm_usd().map(|w| w * left);
-    let tail = if cfg.wrap == WrapDest::Off {
+    let sent = p.count + p.after_count;
+    let wakes = if sent == 1 { "wake" } else { "wakes" };
+    let no_wrap = p.wrapped_at.is_none() && cfg.no_wrap().is_some();
+    let after_left = match p.wrapped_at {
+        _ if no_wrap => 0,
+        Some(_) if after_wrap_ends(cfg, p).is_some() => 0,
+        _ => cfg.after_max.saturating_sub(p.after_count),
+    };
+    let before_left = if p.wrapped_at.is_some() { 0 } else { cfg.max.saturating_sub(p.count) };
+    let more = state.warm_usd().map(|w| w * (before_left + after_left) as f64);
+    let tail = if no_wrap {
         format!("at most {} more in wakes before the bound", fmt_usd(more))
+    } else if p.wrapped_at.is_some() && cfg.after_max > 0 {
+        format!("at most {} more in wakes after the wrap", fmt_usd(more))
+    } else if cfg.after_max > 0 {
+        format!(
+            "at most {} more in wakes, {after_left} of them after the wrap, and the wrap reads the context once per tool round",
+            fmt_usd(more)
+        )
     } else {
         format!("at most {} more in wakes before the wrap, and the wrap reads the context once per tool round", fmt_usd(more))
     };
     lines.push(format!(
         "cost        {} {wakes} {} so far · {tail} · a cold re-write now {}",
-        p.count,
+        sent,
         fmt_usd(Some(p.spent_usd)),
         fmt_usd(state.cold_usd()),
     ));

@@ -75,15 +75,27 @@ export function resetArgv(atS: number): string[] {
   return [ATTEND, 'keepwarm', 'reset', '--at', String(Math.floor(atS))]
 }
 
-/** The keepalive policy's judgment, once, with the autocompact gate the mod
- *  read (ADR-414 item 7). */
-export function policyArgv(gate: Gate): string[] {
-  return [ATTEND, 'keepwarm', 'check', '--policy', '--json', '--autocompact', gate]
+/** The keepalive policy's judgment, once, with the autocompact gate and the
+ *  session's skills the mod read (ADR-414 item 7). Unread skills pass
+ *  `--skills-unread`, and attend runs no wrap. */
+export function policyArgv(gate: Gate, skills: readonly string[] | null): string[] {
+  const argv = [ATTEND, 'keepwarm', 'check', '--policy', '--json', '--autocompact', gate]
+  return [...argv, skills === null ? '--skills-unread' : `--skills=${skills.join(',')}`]
 }
 
-/** Where the wrap's reply went, for the status card. */
-export function wrappedArgv(outcome: WrapOutcome, detail: string): string[] {
-  return [ATTEND, 'keepwarm', 'wrapped', outcome, '--detail', oneLine(detail)]
+/** Where the wrap's reply went, for the status card; with `focus`, the
+ *  wrap's closing `/compact` focus, which a compaction later uses. */
+export function wrappedArgv(outcome: WrapOutcome, detail: string, focus?: string): string[] {
+  return [ATTEND, 'keepwarm', 'wrapped', outcome, '--detail', oneLine(detail), ...focusArgs(focus)]
+}
+
+function focusArgs(focus: string | undefined): string[] {
+  return focus === undefined ? [] : ['--focus', oneLine(focus)]
+}
+
+/** The compaction after the wrap ran, or why it failed. */
+export function compactedArgv(failed?: string): string[] {
+  return [ATTEND, 'keepwarm', 'compacted', ...(failed === undefined ? [] : ['--failed', oneLine(failed)])]
 }
 
 /** The wrap's reply sent over attend: one message, its first line the
@@ -181,6 +193,8 @@ export type Keepalive = {
   applies: boolean
   gate: Gate
   gateAtMs: number
+  /** The skills the session lists, read with the gate; null where unread. */
+  skills: string[] | null
   /** The one timer: the next check. */
   timer: Timer | undefined
   /** The reset, the check and the wrap's report run one at a time, so a
@@ -431,6 +445,22 @@ export function firstCheckMs(c: ModConfig): number {
 
 // ── the keepalive policy (ADR-414) ───────────────────────────────────────
 
+/** The skills the session lists, from `$.session.usage({ breakdown })`: each
+ *  by its name, and a plugin's also as `plugin:name`. Null where the
+ *  breakdown carries no listing, so attend runs no wrap. */
+export function skillsFrom(usage: unknown): string[] | null {
+  const b = (usage as { context?: { breakdown?: { skills?: { skillFrontmatter?: unknown } } } } | undefined)?.context?.breakdown
+  const list = b?.skills?.skillFrontmatter
+  if (!Array.isArray(list)) return null
+  const names = new Set<string>()
+  for (const s of list as { name?: unknown; pluginName?: unknown }[]) {
+    if (typeof s?.name !== 'string' || s.name === '' || s.name.includes(',')) continue
+    names.add(s.name)
+    if (typeof s.pluginName === 'string' && s.pluginName !== '' && !s.name.includes(':')) names.add(`${s.pluginName}:${s.name}`)
+  }
+  return [...names]
+}
+
 /** The autocompact gate: `off` lets the policy run; `unknown` counts as on,
  *  the side that starts no turn the operator did not type. */
 export type Gate = 'on' | 'off' | 'unknown'
@@ -454,12 +484,16 @@ export type WrapRoute = {
   /** `send`'s recipient; `#name` is a channel. */
   to: string
   after: 'lapse' | 'compact'
+  /** Keepalives after the wrap before `after` applies. With none the mod
+   *  compacts once the wrap answers; otherwise attend asks for it. */
+  afterKeepalives: number
   handoff: string
 }
 
 /** What `attend keepwarm check --policy --json` decided. */
 export type Decision = {
-  action: 'none' | 'keepalive' | 'wrap'
+  /** `compact`: compact the conversation between turns, `text` the focus. */
+  action: 'none' | 'keepalive' | 'wrap' | 'compact'
   text: string | null
   /** When to ask again, in epoch seconds. */
   nextAt: number | null
@@ -469,8 +503,12 @@ export type Decision = {
   wrappedAt: string | null
   /** Whether the policy runs; false is ADR-182's armed windows alone. */
   policy: boolean
-  state: 'running' | 'wrapped' | 'stopped' | 'off'
+  state: 'running' | 'wrapped' | 'compacted' | 'stopped' | 'off'
   reason: string
+  afterCount: number
+  afterMax: number
+  compactsAt: string | null
+  compactedAt: string | null
   wrap: WrapRoute | null
   /** attend could not judge (the transcript was unreadable): ask again. */
   retry: boolean
@@ -492,17 +530,24 @@ export function parseDecision(stdout: string): Decision | undefined {
     return undefined
   }
   const action = d.action
-  if (action !== 'none' && action !== 'keepalive' && action !== 'wrap') return undefined
+  if (action !== 'none' && action !== 'keepalive' && action !== 'wrap' && action !== 'compact') return undefined
   const str = (v: unknown) => (typeof v === 'string' ? v : null)
   const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
-  const states = ['running', 'wrapped', 'stopped', 'off'] as const
+  const states = ['running', 'wrapped', 'compacted', 'stopped', 'off'] as const
   const state = states.find(x => x === d.state) ?? 'off'
   const w = d.wrap as Record<string, unknown> | null | undefined
   const dests = ['transcript', 'file', 'send', 'off'] as const
   const dest = dests.find(x => x === w?.dest)
   const wrap: WrapRoute | null =
     w && dest && typeof w.file === 'string' && typeof w.to === 'string'
-      ? { dest, file: w.file, to: w.to, after: w.after === 'compact' ? 'compact' : 'lapse', handoff: str(w.handoff) ?? 'handoff:' }
+      ? {
+          dest,
+          file: w.file,
+          to: w.to,
+          after: w.after === 'compact' ? 'compact' : 'lapse',
+          afterKeepalives: num(w.after_keepalives) ?? 0,
+          handoff: str(w.handoff) ?? 'handoff:',
+        }
       : null
   return {
     action,
@@ -515,6 +560,10 @@ export function parseDecision(stdout: string): Decision | undefined {
     policy: d.policy === true,
     state,
     reason: str(d.reason) ?? '',
+    afterCount: num(d.after_count) ?? 0,
+    afterMax: num(d.after_max) ?? 0,
+    compactsAt: str(d.compacts_at_hm),
+    compactedAt: str(d.compacted_at_hm),
     wrap,
     retry: d.retry === true,
     idle: str(d.idle),
@@ -543,7 +592,11 @@ export function keepaliveRowOf(d: Decision, was: KeepaliveRow | null): Keepalive
     state: d.state,
     count: d.count,
     max: d.max,
-    nextAt: d.state === 'running' ? d.nextAt : null,
+    afterCount: d.afterCount,
+    afterMax: d.afterMax,
+    compactsAt: d.compactsAt,
+    compactedAt: d.compactedAt,
+    nextAt: d.state === 'running' || isAfterWrap(d) ? d.nextAt : null,
     wrapsAt: d.wrapsAt,
     wrappedAt: d.wrappedAt,
     idle: d.state === 'running' ? d.idle : null,
@@ -552,13 +605,33 @@ export function keepaliveRowOf(d: Decision, was: KeepaliveRow | null): Keepalive
   }
 }
 
+/** Whether a decision is in the stretch after the wrap, with keepalives
+ *  or the compaction still to come. */
+function isAfterWrap(d: Decision): boolean {
+  return d.state === 'wrapped' && d.afterMax > 0 && d.nextAt !== null
+}
+
+function nextIn(nextAt: number, nowMs: number): string {
+  return `next ${Math.max(0, Math.round((nextAt * 1000 - nowMs) / 60_000))}m`
+}
+
 /** `⟳ 2/8 · next 41m · wrap ~21:40`, `⟳ 0/1 · idle: under 50k`,
- *  `⟳ wrapped 21:40`, `⟳ stopped`. */
+ *  `⟳ wrapped 21:40`, `⟳ wrapped 21:40 · 1/3 · next 41m · compact ~00:10`,
+ *  `⟳ compacted 00:10`, `⟳ stopped`. */
 export function keepaliveSegment(k: KeepaliveRow, nowMs: number): string {
-  if (k.state === 'wrapped') return `⟳ wrapped ${k.wrappedAt ?? ''}`.trimEnd() + (k.isRefused ? ' · handoff refused' : '')
+  if (k.state === 'compacted') return `⟳ compacted ${k.compactedAt ?? ''}`.trimEnd()
+  if (k.state === 'wrapped') {
+    const parts = [`⟳ wrapped ${k.wrappedAt ?? ''}`.trimEnd()]
+    if (k.isRefused) parts.push('handoff refused')
+    if (k.afterMax > 0 && k.nextAt !== null) {
+      parts.push(`${k.afterCount}/${k.afterMax}`, nextIn(k.nextAt, nowMs))
+      if (k.compactsAt !== null) parts.push(`compact ~${k.compactsAt}`)
+    }
+    return parts.join(' · ')
+  }
   if (k.state === 'stopped') return '⟳ stopped'
   const parts = [`⟳ ${k.count}/${k.max}`]
-  if (k.nextAt !== null) parts.push(`next ${Math.max(0, Math.round((k.nextAt * 1000 - nowMs) / 60_000))}m`)
+  if (k.nextAt !== null) parts.push(nextIn(k.nextAt, nowMs))
   if (k.wrapsAt !== null) parts.push(`wrap ~${k.wrapsAt}`)
   if (k.idle) parts.push(`idle: ${k.idle}`)
   return parts.join(' · ')
@@ -584,7 +657,8 @@ export function gateIsFresh(gate: Gate, gateAtMs: number, nowMs: number): boolea
  *  armed window's wake, which stays a listening session's (ADR-406 item
  *  13). A retry is the caller's to bound. */
 export type CheckPlan = {
-  submit: { kind: 'keepalive' | 'wrap'; text: string; route: WrapRoute | null } | null
+  /** `compact` is no prompt: the mod compacts with `text` as the focus. */
+  submit: { kind: 'keepalive' | 'wrap' | 'compact'; text: string; route: WrapRoute | null } | null
   armAtMs: number | null
   retry: boolean
 }
@@ -593,6 +667,7 @@ export function planCheck(d: Decision, isListening: boolean): CheckPlan {
   let submit: CheckPlan['submit'] = null
   if (d.action === 'keepalive' && d.text && (isListening || d.policy)) submit = { kind: 'keepalive', text: d.text, route: null }
   if (d.action === 'wrap' && d.text && d.wrap && d.policy) submit = { kind: 'wrap', text: d.text, route: d.wrap }
+  if (d.action === 'compact' && d.text && d.policy) submit = { kind: 'compact', text: d.text, route: null }
   const armAtMs = !d.retry && d.nextAt !== null && (d.policy || isListening) ? d.nextAt * 1000 : null
   return { submit, armAtMs, retry: d.retry }
 }
@@ -658,7 +733,7 @@ export function wrapPlan(route: WrapRoute, reason: string, reply: string): WrapP
   if (reason !== 'answer') return { kind: 'unfinished', detail: `the turn ended: ${reason}` }
   if (reply.trim() === '') return { kind: 'unfinished', detail: 'the reply was empty' }
   if (route.dest === 'file' && route.file === '') return { kind: 'unfinished', detail: 'no safe wrap file: see attend keepwarm status' }
-  if (route.dest === 'file') return { kind: 'file', argv: saveArgv('file', '', route.file) }
+  if (route.dest === 'file') return { kind: 'file', argv: saveArgv('file', '', route.file, wrapFocus(route, reply)) }
   if (route.dest === 'send' && !isOpenChannel(route.to)) return { kind: 'send', argv: wrapSendArgv(route, reply) }
   if (route.dest === 'send') return { kind: 'unfinished', detail: `${route.to} is refused: it reaches every listening session` }
   return { kind: 'transcript' }
@@ -668,8 +743,15 @@ export function wrapPlan(route: WrapRoute, reason: string, reply: string): WrapP
  *  the outcome: it checks the path again and renames a temp file over it,
  *  so a link planted during the wrap turn is never followed (ADR-414 item
  *  6). The mod never writes the file itself. */
-export function saveArgv(outcome: 'file' | 'refused', detail: string, path: string): string[] {
-  return [ATTEND, 'keepwarm', 'wrapped', outcome, '--detail', oneLine(detail), '--path', path, '--save']
+export function saveArgv(outcome: 'file' | 'refused', detail: string, path: string, focus?: string): string[] {
+  return [ATTEND, 'keepwarm', 'wrapped', outcome, '--detail', oneLine(detail), '--path', path, '--save', ...focusArgs(focus)]
+}
+
+/** The focus attend keeps for a compaction it asks for after the wrap's
+ *  keepalives (`after: compact` with keepalives after the wrap); undefined
+ *  where none follows at a due point. */
+export function wrapFocus(route: WrapRoute, reply: string): string | undefined {
+  return route.after === 'compact' && route.afterKeepalives > 0 ? compactFocus(reply) : undefined
 }
 
 /** The card's detail for a send attend refused or that timed out; attend
@@ -682,12 +764,14 @@ export function refusalDetail(to: string, r: { exitCode: number; stderr: string;
 /** The row's segment after the operator's prompt: the count starts again,
  *  and a dormant session stops drawing it. */
 export function rowAfterPrompt(k: KeepaliveRow | null): KeepaliveRow | null {
-  return k && { ...k, state: 'running', count: 0, wrappedAt: null, isRefused: false, isShown: false }
+  return k && { ...k, state: 'running', count: 0, afterCount: 0, compactsAt: null, compactedAt: null, wrappedAt: null, isRefused: false, isShown: false }
 }
 
-/** After a main-loop turn's end: the next check's time, while it runs. */
+/** After a main-loop turn's end: the next check's time, while it runs, the
+ *  stretch after the wrap included. */
 export function rowAfterTurnEnd(k: KeepaliveRow | null, atMs: number): KeepaliveRow | null {
-  return k?.state === 'running' ? { ...k, nextAt: Math.round(atMs / 1000), idle: null } : k
+  const isAfter = k?.state === 'wrapped' && k.afterMax > 0 && k.nextAt !== null
+  return k?.state === 'running' || isAfter ? { ...k!, nextAt: Math.round(atMs / 1000), idle: null } : k
 }
 
 export function rowRefused(k: KeepaliveRow | null): KeepaliveRow | null {
