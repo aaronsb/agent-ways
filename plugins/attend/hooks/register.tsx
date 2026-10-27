@@ -48,6 +48,7 @@ import {
   frameInbound,
   compactFocus,
   compactedArgv,
+  isUnknownFlag,
   skillsFrom,
   wrapFocus,
   firstCheckMs,
@@ -716,7 +717,12 @@ async function checkKeepalive($: $, mod: Mod) {
     const gate = await readGate($, ka)
     const isListening = await isOn($, mod)
     if (!isListening && gate !== 'off') return
-    const r = await run($, policyArgv(gate, ka.skills), POLICY_TIMEOUT_MS)
+    let r = await run($, policyArgv(gate, ka.skills, ka.isLegacyAttend), POLICY_TIMEOUT_MS)
+    // An attend from before --skills: ask as before, and keep asking so.
+    if (!ka.isLegacyAttend && isUnknownFlag(r)) {
+      ka.isLegacyAttend = true
+      r = await run($, policyArgv(gate, null, true), POLICY_TIMEOUT_MS)
+    }
     const d: Decision | undefined = r.exitCode === 0 ? parseDecision(r.stdout) : undefined
     const plan = d ? planCheck(d, isListening) : undefined
     if (!d || !plan || plan.retry) {
@@ -813,10 +819,12 @@ async function routeWrap($: $, ka: Keepalive, turnId: string, reason: string, an
   // when a Stop-hook continuation then ends aborted or in error; the
   // turn's final answer only where no step was seen.
   const reply = w.reply ?? answer
+  const plan = wrapPlan(w.route, w.reply !== undefined ? 'answer' : reason, reply)
+  // An unfinished wrap wrote no handoff, so it records no focus and
+  // nothing compacts after it.
+  if (plan.kind === 'unfinished') return void (await serialize(ka, () => run($, wrappedArgv('unfinished', plan.detail))))
   const focus = wrapFocus(w.route, reply)
   const report = (o: WrapOutcome, detail = '') => serialize(ka, () => run($, wrappedArgv(o, detail, focus)))
-  const plan = wrapPlan(w.route, w.reply !== undefined ? 'answer' : reason, reply)
-  if (plan.kind === 'unfinished') return void (await report('unfinished', plan.detail))
   if (plan.kind === 'transcript') await report('transcript')
   // attend writes the file and records the outcome, or why it could not.
   if (plan.kind === 'file') await serialize(ka, () => run($, plan.argv, undefined, reply))
@@ -837,8 +845,12 @@ async function routeWrap($: $, ka: Keepalive, turnId: string, reason: string, an
   // due point instead, with the focus reported above.
   if (w.route.after === 'compact' && w.route.afterKeepalives === 0) {
     const instructions = compactFocus(reply)
-    // Between turns: a compaction rejects while a turn runs.
-    $.clock.after(1_000, () => void serialize(ka, () => compactAfterWrap($, instructions)))
+    // Between turns: a compaction rejects while a turn runs. A prompt or a
+    // turn since the wrap answered (the epoch moved) cancels it.
+    const epoch = ka.epoch
+    $.clock.after(1_000, () => {
+      if (ka.epoch === epoch) void serialize(ka, () => compactAfterWrap($, instructions))
+    })
   }
 }
 
@@ -854,6 +866,8 @@ async function compactAfterWrap($: $, instructions: string) {
     failed = String(err)
     $.ui.log(`attend: the compaction after the wrap failed: ${failed}`)
   }
+  // The row took attend's word before the compaction ran.
+  if (failed !== undefined) await setKeepaliveRow($, k => (k?.state === 'compacted' ? { ...k, state: 'wrapped', compactedAt: null } : k))
   await run($, compactedArgv(failed))
 }
 
@@ -901,6 +915,7 @@ export const register: Register = on => {
       gate: 'unknown',
       gateAtMs: -Infinity,
       skills: null,
+      isLegacyAttend: false,
       timer: undefined,
       chain: Promise.resolve(),
       epoch: 0,

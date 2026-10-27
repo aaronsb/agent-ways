@@ -624,6 +624,10 @@ pub struct KeepwarmCheckArgs {
     /// The host could not read the session's skills: no wrap or compaction
     #[arg(long, requires = "policy", conflicts_with = "skills")]
     pub skills_unread: bool,
+    /// The --skills listing was cut short by the host's budget: a skill
+    /// missing from it is not held against the wrap
+    #[arg(long, requires = "skills")]
+    pub skills_partial: bool,
 }
 
 /// Subcommands for `attend listen`. With no subcommand, defaults to `status`.

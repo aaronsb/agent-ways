@@ -615,6 +615,7 @@ Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due,
 
 * `--skills <SKILLS>` — The skills the session lists, comma-separated, as the host read them. The wrap and the compaction after it run only when mods.attend.keepalive.wrap_skill names one of them. Absent, as from a host that predates the flag, the wrap is not held to a listing
 * `--skills-unread` — The host could not read the session's skills: no wrap or compaction
+* `--skills-partial` — The --skills listing was cut short by the host's budget: a skill missing from it is not held against the wrap
 
 
 

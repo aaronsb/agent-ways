@@ -77,10 +77,20 @@ export function resetArgv(atS: number): string[] {
 
 /** The keepalive policy's judgment, once, with the autocompact gate and the
  *  session's skills the mod read (ADR-414 item 7). Unread skills pass
- *  `--skills-unread`, and attend runs no wrap. */
-export function policyArgv(gate: Gate, skills: readonly string[] | null): string[] {
+ *  `--skills-unread`, and attend runs no wrap; a listing the host's budget
+ *  cut short adds `--skills-partial`. `legacy` is the form an attend from
+ *  before the flags accepts. */
+export function policyArgv(gate: Gate, skills: Skills | null, legacy = false): string[] {
   const argv = [ATTEND, 'keepwarm', 'check', '--policy', '--json', '--autocompact', gate]
-  return [...argv, skills === null ? '--skills-unread' : `--skills=${skills.join(',')}`]
+  if (legacy) return argv
+  if (skills === null) return [...argv, '--skills-unread']
+  return [...argv, `--skills=${skills.names.join(',')}`, ...(skills.isPartial ? ['--skills-partial'] : [])]
+}
+
+/** Whether a policy check failed because attend predates a flag the mod
+ *  passed (clap's usage error), so the mod asks again in the legacy form. */
+export function isUnknownFlag(r: { exitCode: number; stderr: string }): boolean {
+  return r.exitCode === 2 && /unexpected argument/.test(r.stderr)
 }
 
 /** Where the wrap's reply went, for the status card; with `focus`, the
@@ -194,7 +204,9 @@ export type Keepalive = {
   gate: Gate
   gateAtMs: number
   /** The skills the session lists, read with the gate; null where unread. */
-  skills: string[] | null
+  skills: Skills | null
+  /** attend refused the skills flags as unknown: ask in the legacy form. */
+  isLegacyAttend: boolean
   /** The one timer: the next check. */
   timer: Timer | undefined
   /** The reset, the check and the wrap's report run one at a time, so a
@@ -445,20 +457,30 @@ export function firstCheckMs(c: ModConfig): number {
 
 // ── the keepalive policy (ADR-414) ───────────────────────────────────────
 
+/** The session's skills as the mod read them: their names, and whether the
+ *  listing was cut short by its token budget. */
+export type Skills = { names: string[]; isPartial: boolean }
+
 /** The skills the session lists, from `$.session.usage({ breakdown })`: each
- *  by its name, and a plugin's also as `plugin:name`. Null where the
- *  breakdown carries no listing, so attend runs no wrap. */
-export function skillsFrom(usage: unknown): string[] | null {
-  const b = (usage as { context?: { breakdown?: { skills?: { skillFrontmatter?: unknown } } } } | undefined)?.context?.breakdown
-  const list = b?.skills?.skillFrontmatter
+ *  by its name, and a plugin's also as `plugin:name`. A breakdown with no
+ *  listing is a session with none; null where there is no breakdown, so
+ *  attend runs no wrap. */
+export function skillsFrom(usage: unknown): Skills | null {
+  type Listing = { skillFrontmatter?: unknown; totalSkills?: unknown; includedSkills?: unknown }
+  const b = (usage as { context?: { breakdown?: { skills?: Listing } } } | undefined)?.context?.breakdown
+  if (typeof b !== 'object' || b === null) return null
+  if (b.skills === undefined) return { names: [], isPartial: false }
+  const list = b.skills.skillFrontmatter
   if (!Array.isArray(list)) return null
+  const { totalSkills: total, includedSkills: included } = b.skills
+  const isPartial = typeof total === 'number' && (typeof included === 'number' ? included < total : list.length < total)
   const names = new Set<string>()
   for (const s of list as { name?: unknown; pluginName?: unknown }[]) {
     if (typeof s?.name !== 'string' || s.name === '' || s.name.includes(',')) continue
     names.add(s.name)
     if (typeof s.pluginName === 'string' && s.pluginName !== '' && !s.name.includes(':')) names.add(`${s.pluginName}:${s.name}`)
   }
-  return [...names]
+  return { names: [...names], isPartial }
 }
 
 /** The autocompact gate: `off` lets the policy run; `unknown` counts as on,

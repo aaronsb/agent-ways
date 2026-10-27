@@ -7,6 +7,7 @@ import {
   DEFAULT_CONFIG,
   compactedArgv,
   keepaliveSegment,
+  isUnknownFlag,
   policyArgv,
   skillsFrom,
   wrapFocus,
@@ -135,6 +136,10 @@ type World = {
   /** `isAutoCompactEnabled` in the usage breakdown; null leaves the
    *  breakdown out, and undefined makes the call fail. */
   autocompact?: boolean | null
+  /** An attend from before `--skills`: a policy check that passes it is a usage error. */
+  oldAttend?: boolean
+  /** A hook skips `$.session.compact` with this reason. */
+  compactFails?: string
   /** The skill listing the usage breakdown carries; absent leaves it out. */
   skills?: { name: string; pluginName?: string }[]
   /** `autoCompactEnabled` in the merged settings; `throws` makes the read fail. */
@@ -269,6 +274,7 @@ function host(on: On, world: World) {
   })
   const compacts: string[] = []
   on('session.compact', ($, e) => {
+    if (world.compactFails) return { skip: world.compactFails } as never
     compacts.push((e as { instructions?: string }).instructions ?? '')
     return { messages: [SUMMARY] } as never
   })
@@ -284,6 +290,9 @@ function host(on: On, world: World) {
     if (cmd.startsWith('listen')) return ok(cmd === 'listen off' ? 'not listening\n' : 'listening\n')
     if (cmd === 'peer list') return ok('...\n  3 agent(s), 0 channel(s)\n')
     if (cmd === 'message unread --json') return ok(world.unread ?? '{"unread":0,"held_back":0,"listening":true,"rooms":[]}')
+    if (cmd.startsWith('keepwarm check --policy') && world.oldAttend && cmd.includes('--skills')) {
+      return { ...ok(), exitCode: 2, stderr: "error: unexpected argument '--skills' found" }
+    }
     if (cmd.startsWith('keepwarm check --policy')) {
       const q = world.policy ?? [decision({ policy: false, state: 'off', reason: 'mods.attend.keepalive.enabled is false' })]
       return ok(q.length > 1 ? q.shift()! : q[0]!)
@@ -1910,7 +1919,7 @@ describe('keepalive policy', () => {
     const h = host(on, { config: { listening: 'active' }, autocompact: false, policy: [due(S + 50 * MIN), keepalive(1)] })
     await $.session.start(INTERACTIVE)
     await clock.advance(5_000)
-    expect(policyChecks(h)).toEqual([['attend', 'keepwarm', 'check', '--policy', '--json', '--autocompact', 'off', '--skills-unread']])
+    expect(policyChecks(h)).toEqual([['attend', 'keepwarm', 'check', '--policy', '--json', '--autocompact', 'off', '--skills=']])
     await clock.advance(49 * 60_000)
     expect(policyChecks(h).length).toBe(1)
     expect(h.submitted).toEqual([])
@@ -2454,6 +2463,28 @@ describe('keepalive policy', () => {
     expect(h.argvs).toContainEqual(['attend', 'keepwarm', 'wrapped', 'transcript', '--detail', '', '--focus', 'keep the ADR-414 plan'])
   })
 
+  test('a wrap that ends in error reports no focus, so nothing compacts after its keepalives', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { autocompact: false, policy: [wrap(route('transcript', { after: 'compact', after_keepalives: 2 }))] })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    await wrapTurn($, '', 'error')
+    const reports = h.argvs.filter(a => a.slice(1, 3).join(' ') === 'keepwarm wrapped')
+    expect(reports).toEqual([['attend', 'keepwarm', 'wrapped', 'unfinished', '--detail', 'the turn ended: error']])
+  })
+
+  test('an operator prompt right after the wrap answers cancels the compaction it scheduled', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { autocompact: false, policy: [wrap(route('transcript', { after: 'compact' }))] })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    await wrapTurn($, 'Continuation prompt.\n/compact keep the plan')
+    await typed($, 'back now')
+    await clock.advance(2_000)
+    expect(h.compacts).toEqual([])
+    expect(h.ran('keepwarm compacted')).toBe(false)
+  })
+
   test('attend\'s compact action compacts between turns with its focus, and the mod reports it', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const compact = decision({ action: 'compact', text: 'keep the ADR-414 plan', state: 'compacted', count: 8, wrapped_at_hm: '07:30', compacted_at_hm: '10:50' })
@@ -2465,6 +2496,28 @@ describe('keepalive policy', () => {
     expect(h.argvs).toContainEqual(['attend', 'keepwarm', 'compacted'])
     expect(h.status()?.afterCompaction).toBe(true)
     expect((await segment($))?.text).toMatch(/⟳ compacted 10:50/)
+  })
+
+  test('against an attend from before --skills, the check asks again without it and keeps doing so', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { autocompact: false, oldAttend: true, policy: [due(S + 50 * MIN), keepalive(1)] })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    await clock.advance(50 * 60_000)
+    const base = ['attend', 'keepwarm', 'check', '--policy', '--json', '--autocompact', 'off']
+    expect(policyChecks(h)).toEqual([[...base, '--skills='], base, base])
+    expect(h.submitted).toEqual([KEEPALIVE])
+  })
+
+  test('a compaction that fails puts the row back to wrapped and attend hears why', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const compact = decision({ action: 'compact', text: 'keep it', state: 'compacted', count: 8, wrapped_at_hm: '07:30', compacted_at_hm: '10:50' })
+    const h = host(on, { autocompact: false, compactFails: 'a hook said no', policy: [compact, decision({ state: 'compacted', count: 8 })] })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    expect(h.argvs.filter(a => a[2] === 'compacted')).toEqual([['attend', 'keepwarm', 'compacted', '--failed', 'skipped: a hook said no']])
+    expect(h.compacts).toEqual([])
+    expect(h.status()?.keepalive?.state).toBe('wrapped')
   })
 
   test('with lapse, nothing follows the wrap', async ($, on) => {
@@ -2580,12 +2633,22 @@ describe('keepalive policy: the pure pieces', () => {
 
   test('the session\'s skills come from the breakdown; none read passes --skills-unread', () => {
     const usage = (skillFrontmatter: unknown) => ({ context: { breakdown: { isAutoCompactEnabled: false, skills: { skillFrontmatter } } } })
-    expect(skillsFrom(usage([{ name: 'wrap' }, { name: 'x', pluginName: 'p' }, { name: 'p:y', pluginName: 'p' }, { name: 'a,b' }, { name: 3 }]))).toEqual(['wrap', 'x', 'p:x', 'p:y'])
-    expect(skillsFrom(usage([]))).toEqual([])
-    expect(skillsFrom({ context: { breakdown: { isAutoCompactEnabled: false } } })).toBeNull()
+    expect(skillsFrom(usage([{ name: 'wrap' }, { name: 'x', pluginName: 'p' }, { name: 'p:y', pluginName: 'p' }, { name: 'a,b' }, { name: 3 }]))).toEqual({ names: ['wrap', 'x', 'p:x', 'p:y'], isPartial: false })
+    expect(skillsFrom(usage([]))).toEqual({ names: [], isPartial: false })
+    // A breakdown with no listing is a session with no skills, not an unread one.
+    expect(skillsFrom({ context: { breakdown: { isAutoCompactEnabled: false } } })).toEqual({ names: [], isPartial: false })
+    expect(skillsFrom({ context: {} })).toBeNull()
     expect(skillsFrom(undefined)).toBeNull()
-    expect(policyArgv('off', null)).toEqual(['attend', 'keepwarm', 'check', '--policy', '--json', '--autocompact', 'off', '--skills-unread'])
-    expect(policyArgv('off', [])).toEqual(['attend', 'keepwarm', 'check', '--policy', '--json', '--autocompact', 'off', '--skills='])
+    // A listing its token budget cut short says so.
+    const cut = { context: { breakdown: { skills: { totalSkills: 90, includedSkills: 40, skillFrontmatter: [{ name: 'start' }] } } } }
+    expect(skillsFrom(cut)).toEqual({ names: ['start'], isPartial: true })
+    const base = ['attend', 'keepwarm', 'check', '--policy', '--json', '--autocompact', 'off']
+    expect(policyArgv('off', null)).toEqual([...base, '--skills-unread'])
+    expect(policyArgv('off', { names: [], isPartial: false })).toEqual([...base, '--skills='])
+    expect(policyArgv('off', { names: ['a', 'b'], isPartial: true })).toEqual([...base, '--skills=a,b', '--skills-partial'])
+    expect(policyArgv('off', { names: ['a'], isPartial: false }, true)).toEqual(base)
+    expect(isUnknownFlag({ exitCode: 2, stderr: "error: unexpected argument '--skills' found" })).toBe(true)
+    expect(isUnknownFlag({ exitCode: 1, stderr: 'unexpected argument' })).toBe(false)
   })
 
   test('the compaction after the wrap: its plan, its focus and its report', () => {
