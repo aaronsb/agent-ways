@@ -815,6 +815,9 @@ async function routeWrap($: $, ka: Keepalive, turnId: string, reason: string, an
   const w = ka.wrap
   if (!w || w.turnId === undefined || w.turnId !== turnId) return
   ka.wrap = undefined
+  // Before the first await: a prompt during the reports or the send below
+  // cancels the compaction scheduled after them.
+  const epoch = ka.epoch
   // The wrap's own answer, from its first ending step, which stands even
   // when a Stop-hook continuation then ends aborted or in error; the
   // turn's final answer only where no step was seen.
@@ -847,7 +850,6 @@ async function routeWrap($: $, ka: Keepalive, turnId: string, reason: string, an
     const instructions = compactFocus(reply)
     // Between turns: a compaction rejects while a turn runs. A prompt or a
     // turn since the wrap answered (the epoch moved) cancels it.
-    const epoch = ka.epoch
     $.clock.after(1_000, () => {
       if (ka.epoch === epoch) void serialize(ka, () => compactAfterWrap($, instructions))
     })

@@ -2485,6 +2485,22 @@ describe('keepalive policy', () => {
     expect(h.ran('keepwarm compacted')).toBe(false)
   })
 
+  test('a prompt while the wrap\'s report is still in flight cancels the compaction too', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    let release = () => {}
+    const holdWrapped = new Promise<void>(r => (release = r))
+    const h = host(on, { autocompact: false, holdWrapped, policy: [wrap(route('transcript', { after: 'compact' }))] })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    const ended = wrapTurn($, 'Continuation prompt.\n/compact keep the plan')
+    await clock.advance(10)
+    await typed($, 'back now')
+    release()
+    await ended
+    await clock.advance(2_000)
+    expect(h.compacts).toEqual([])
+  })
+
   test('attend\'s compact action compacts between turns with its focus, and the mod reports it', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const compact = decision({ action: 'compact', text: 'keep the ADR-414 plan', state: 'compacted', count: 8, wrapped_at_hm: '07:30', compacted_at_hm: '10:50' })

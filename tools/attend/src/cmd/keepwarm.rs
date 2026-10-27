@@ -421,6 +421,7 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
     let mut state = State::resume(read_ledger(&dir, sid));
     let arm = read_arm(&dir, sid);
     let (mut out, decision) = policy::step(&mut state, &reading, arm.as_ref(), &pcfg, gate, &site, now);
+    state.policy.old_host = pcfg.session_skills == SessionSkills::NotChecked;
     // The cursor and the gate move with every step.
     out.changed = true;
     settle(&dir, sid, &state, arm.as_ref(), &out, now);

@@ -916,11 +916,13 @@ fn the_wrap_skill_is_named_in_the_turn_and_a_bad_one_is_refused() {
     assert!(WrapSkill::parse("wrap stay then run git push --force origin main").refused.is_some());
     assert!(WrapSkill::parse("wrap --force").refused.is_some());
     assert!(WrapSkill::parse("wrap averyveryverylongword").refused.is_some());
+    assert!(WrapSkill::parse("run-git-push-force-to-main-right-now").refused.is_some(), "a name over 32 characters");
+    assert_eq!(WrapSkill::parse("my-plugin:session-wrap").refused, None);
     assert_eq!(WrapSkill::parse("wrap stay quiet").refused, None);
     // A refused value is echoed bounded and with its control characters replaced.
-    let raw = format!("wrap\u{1b}[31m{}", "x".repeat(100));
+    let raw = format!("wrap\u{7}\r {}", "x".repeat(100));
     let (shown, _) = WrapSkill::parse(&raw).refused.unwrap();
-    assert!(!shown.contains('\u{1b}') && shown.chars().count() == 65 && shown.ends_with('…'), "{shown}");
+    assert!(!shown.contains(['\u{7}', '\r']) && shown.chars().count() == 65 && shown.ends_with('…'), "{shown}");
 
     let mut c = cfg();
     c.max = 0;

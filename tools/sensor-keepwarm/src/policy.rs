@@ -34,7 +34,7 @@ pub const AFTER_RANGE: (u32, u32) = (0, 48);
 /// `mods.attend.keepalive.wrap_skill`: the skill's name and its arguments.
 pub const DEFAULT_WRAP_SKILL: &str = "wrap stay";
 /// The longest skill name `wrap_skill` may give.
-const SKILL_MAX_LEN: usize = 64;
+const SKILL_MAX_LEN: usize = 32;
 /// `wrap_skill`'s arguments: this many words at most, each this long at
 /// most, enough for `stay` and too few for a sentence of instructions.
 const SKILL_MAX_ARGS: usize = 2;
@@ -121,6 +121,11 @@ pub struct Policy {
     /// for the status card, which has no listing of its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skill_seen: Option<SkillSeen>,
+    /// The last check came from a host that passes no skills flag, a mod
+    /// from before it, which gets no stretch after the wrap; the card,
+    /// which reads the settings alone, follows it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub old_host: bool,
 }
 
 /// What the last check found of `wrap_skill` in the session's listing.
@@ -434,12 +439,16 @@ impl Config {
         }
     }
 
-    /// This config with the listing the last check saw, for a reader such
-    /// as the status card that has none of its own.
-    fn with_seen(&self, seen: Option<SkillSeen>) -> Config {
+    /// This config as the last check, recorded in `p`, saw the host: its
+    /// skill listing, and no stretch after the wrap for an older mod. For a
+    /// reader such as the status card that has neither of its own.
+    fn with_seen(&self, p: &Policy) -> Config {
         let mut c = self.clone();
+        if p.old_host {
+            c.after_max = 0;
+        }
         if c.session_skills == SessionSkills::NotChecked {
-            c.session_skills = match seen {
+            c.session_skills = match p.skill_seen {
                 Some(SkillSeen::Unread) => SessionSkills::Unread,
                 Some(SkillSeen::Missing) => SessionSkills::Listed(Vec::new()),
                 Some(SkillSeen::Listed) | None => SessionSkills::NotChecked,
@@ -1112,7 +1121,7 @@ fn after_wrap_due(state: &mut State, cfg: &Config, ttl: u64, last_at: u64, now: 
         d.text = Some(focus);
         return d;
     }
-    state.policy.stopped = Some(if inside {
+    state.policy.stopped = Some(if cfg.after_wrap == AfterWrap::Compact {
         "the wrap left no reply to compact with".into()
     } else {
         "the keepalive hours have ended".into()
@@ -1163,7 +1172,7 @@ impl WrapOutcome {
 /// session whose ledger is `state` and whose transcript reads `reading`.
 pub fn card(state: &State, reading: &Reading, cfg: &Config, site: &Site, now: u64) -> Vec<String> {
     let p = &state.policy;
-    let cfg = &cfg.with_seen(p.skill_seen);
+    let cfg = &cfg.with_seen(p);
     let Some(gate) = p.gate.as_deref() else {
         return vec!["keepalive   not run in this session (the attend mod runs it in an interactive session while autocompact is off)".into()];
     };

@@ -445,13 +445,18 @@ fn the_compaction_after_the_wrap_carries_the_focus_the_mod_reported() {
     // marks nothing, so the next stretch after a wrap still runs.
     assert!(w.run(&["keepwarm", "reset"]).status.success());
     assert!(w.run(&["keepwarm", "compacted", "--failed", "late"]).status.success());
-    assert!(!card_text(&w).contains("late"), "{}", card_text(&w));
-    // An unfinished wrap records no focus.
     w.reading(&[(50 * MIN, 200_000, 500)]);
+    assert_eq!(policy(&w, "off")["action"], "wrap");
+    assert!(w.run(&["keepwarm", "wrapped", "transcript", "--focus", "keep it"]).status.success());
+    let d = policy(&w, "off");
+    assert_eq!(d["action"], "compact", "a stale mark would end the stretch after this wrap: {d}");
+    // An unfinished wrap records no focus.
+    assert!(w.run(&["keepwarm", "reset"]).status.success());
     assert_eq!(policy(&w, "off")["action"], "wrap");
     assert!(w.run(&["keepwarm", "wrapped", "unfinished", "--detail", "error", "--focus", "keep it"]).status.success());
     let d = policy(&w, "off");
-    assert_ne!(d["action"], "compact", "{d}");
+    assert_eq!((d["action"].as_str(), d["state"].as_str()), (Some("none"), Some("wrapped")), "{d}");
+    assert!(d["reason"].as_str().unwrap().contains("no reply to compact with"), "{d}");
 }
 
 /// The --skills handshake: a listing without wrap_skill, or one the host
@@ -488,6 +493,9 @@ fn the_skills_flag_gates_the_wrap_and_its_absence_is_the_old_protocol() {
     let out = w.run(&["keepwarm", "check", "--policy", "--json", "--autocompact", "off"]);
     let d: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_ne!(d["action"], "compact", "no compact action for an old mod: {d}");
+    // The card, which reads the settings alone, follows what the check saw.
+    let card = card_text(&w);
+    assert!(!card.contains("after it"), "{card}");
 }
 
 /// `attend keepwarm off` stops the policy until the operator's next prompt.
