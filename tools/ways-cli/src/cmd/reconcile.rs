@@ -301,6 +301,8 @@ pub struct SettingsPlan {
     pub user_hooks_kept: usize,
     pub perms_added: Vec<String>,
     pub deny_added: Vec<String>,
+    /// The `theme` key's change, as `ways-theme` claims or gives it back.
+    pub theme: Option<String>,
     pub unchanged: bool,
 }
 
@@ -439,6 +441,7 @@ fn diff_settings(
         user_hooks_kept: kept,
         perms_added,
         deny_added,
+        theme: crate::cmd::settings_merge::theme_change(live, merged),
         unchanged: live == merged,
     }
 }
@@ -482,7 +485,13 @@ fn converge_one(
     report(&outcomes, source_root, dest_root, dry_run, quiet, false);
 
     // The settings.json three-way merge — the one shared-write seam (ADR-142).
-    // Skipped in dry-run; backed up + self-audited inside apply_to_files.
+    // A dry run names only the theme key it would move; the write is backed
+    // up + self-audited inside apply_to_files.
+    if dry_run && !quiet && source_root.join("settings.json").exists() {
+        if let Some(line) = theme_plan(&source_root.join("settings.json"), dest_root, base_path)? {
+            eprintln!("would change {line}");
+        }
+    }
     if !dry_run {
         let src_settings = source_root.join("settings.json");
         if src_settings.exists() {
@@ -526,14 +535,43 @@ pub(crate) fn theme_wanted(dest_root: &Path) -> bool {
 /// holds from the first session and the mod's later writes apply live.
 pub(crate) fn merge_settings(src_settings: &Path, dest_root: &Path, base_path: &Path) -> Result<String> {
     let want_theme = theme_wanted(dest_root);
-    if want_theme {
-        let file = dest_root.join("themes").join("ways.json");
-        if !file.exists() {
-            std::fs::create_dir_all(dest_root.join("themes")).with_context(|| format!("creating {}", dest_root.join("themes").display()))?;
-            std::fs::write(&file, crate::cmd::settings_merge::DEFAULT_THEME_FILE).with_context(|| format!("writing {}", file.display()))?;
-        }
+    let file = theme_file(dest_root);
+    if want_theme && !file.exists() {
+        std::fs::create_dir_all(dest_root.join("themes")).with_context(|| format!("creating {}", dest_root.join("themes").display()))?;
+        std::fs::write(&file, crate::cmd::settings_merge::DEFAULT_THEME_FILE).with_context(|| format!("writing {}", file.display()))?;
     }
-    crate::cmd::settings_merge::apply_to_files(src_settings, &dest_root.join("settings.json"), base_path, want_theme)
+    let owned = crate::cmd::settings_merge::owns_theme(base_path);
+    let summary = crate::cmd::settings_merge::apply_to_files(src_settings, &dest_root.join("settings.json"), base_path, want_theme)?;
+    if owned && !want_theme {
+        remove_theme_file(dest_root)?;
+    }
+    Ok(summary)
+}
+
+/// The one Claude Code theme file the ways-theme mod keeps.
+fn theme_file(dest_root: &Path) -> PathBuf {
+    dest_root.join("themes").join("ways.json")
+}
+
+/// Removes the theme file once the merge has given the `theme` key back;
+/// nothing else in the themes folder is touched.
+fn remove_theme_file(dest_root: &Path) -> Result<()> {
+    let file = theme_file(dest_root);
+    if file.exists() {
+        std::fs::remove_file(&file).with_context(|| format!("removing {}", file.display()))?;
+    }
+    Ok(())
+}
+
+/// What the merge would do to the `theme` key, as one line, or none.
+fn theme_plan(src_settings: &Path, dest_root: &Path, base_path: &Path) -> Result<Option<String>> {
+    use crate::cmd::settings_merge as sm;
+    let desired = sm::read_json_or_empty(src_settings)?;
+    let hooks = desired.get("hooks").cloned().unwrap_or(serde_json::Value::Object(Default::default()));
+    let live = sm::read_json_or_empty(&dest_root.join("settings.json"))?;
+    let base = sm::base_for(&live, base_path)?;
+    let merged = sm::merge(&live, &hooks, &base, crate::config::global().secret_path_deny, theme_wanted(dest_root))?;
+    Ok(sm::theme_change(&live, &merged.settings))
 }
 
 /// The config file of the target at `dest_root`: its own `config:` when the
@@ -566,7 +604,11 @@ fn withdraw_one(
         let dest_settings = dest_root.join("settings.json");
         let src_settings = source_root.join("settings.json");
         if dest_settings.exists() {
+            let owned = crate::cmd::settings_merge::owns_theme(base_path);
             settings_summary = Some(crate::cmd::settings_merge::withdraw_from_files(&src_settings, &dest_settings, base_path)?);
+            if owned {
+                remove_theme_file(dest_root)?;
+            }
         }
     }
     // The MCP registration and the mods go before the links, so none names a
@@ -1137,6 +1179,20 @@ mod tests {
         assert!(s.hooks_replaced[0].command.contains("my-own.sh"));
         assert!(plan.blocked, "a claimed user hook blocks activation");
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn giving_the_theme_back_removes_only_ways_json() {
+        let dir = std::env::temp_dir().join(format!("ways-theme-file-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("themes")).unwrap();
+        std::fs::write(dir.join("themes/ways.json"), "{}").unwrap();
+        std::fs::write(dir.join("themes/mine.json"), "{}").unwrap();
+        remove_theme_file(&dir).unwrap();
+        assert!(!dir.join("themes/ways.json").exists());
+        assert!(dir.join("themes/mine.json").exists(), "the person's own theme stays");
+        remove_theme_file(&dir).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

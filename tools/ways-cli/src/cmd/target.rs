@@ -184,6 +184,9 @@ pub fn settings_section(r: &mut Report, heading: &str, settings: &Option<reconci
             if !s.deny_added.is_empty() {
                 r.item(Mark::Add, format!("deny      +{} entries (secret paths, ADR-152)", s.deny_added.len()));
             }
+            if let Some(t) = &s.theme {
+                r.item(Mark::Up, format!("theme     {t}  (ways-theme, ADR-513)"));
+            }
         }
     }
 }
