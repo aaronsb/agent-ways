@@ -261,7 +261,7 @@ fn glyphs(key: &str, value: &str, count: usize, widest: usize) -> Result<Vec<&'s
         let w = cell_width(x);
         if w == 0 || w > widest {
             let must = if widest == 1 { "1".to_string() } else { format!("1 to {widest}") };
-            return Err(format!("`{key}` glyph `{x}` is {w} columns wide; it must be {must}"));
+            return Err(format!("`{key}` glyph `{}` is {w} columns wide; it must be {must}", x.escape_debug()));
         }
     }
     Ok(g.into_iter().map(intern).collect())

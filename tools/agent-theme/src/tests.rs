@@ -1029,6 +1029,8 @@ fn glyph_width_follows_ratatui() {
     let base = theme_src("nord");
     let e = validate(&format!("{base}\nTHEME_MARK=\"ｶﾞ\"\n"));
     assert!(e.iter().any(|x| x.message.contains("is 2 columns wide; it must be 1")), "{e:?}");
+    let e = validate(&format!("{base}\nTHEME_MARK=\"\u{200B}\"\n"));
+    assert!(e.iter().any(|x| x.message.contains("glyph `\\u{200b}` is 0 columns wide")), "the glyph escaped: {e:?}");
 }
 
 #[test]
