@@ -235,5 +235,6 @@ fn the_menu_offers_the_section_only_where_the_adapter_has_one() {
     assert!(!bare.theme_acts().contains(&ThemeAct::ClaudeCode));
     keys(&mut bare, &[KeyCode::Char('c')]);
     assert_eq!(bare.themes.claude, None, "c keeps its old meaning there");
-    assert!(!text(&draw(&mut bare, 100, 30)).contains("claude"));
+    let t = text(&draw(&mut bare, 100, 30));
+    assert!(!t.replace("maximum-claude", "").contains("claude"), "no section, and no claude but the theme of that name:\n{t}");
 }

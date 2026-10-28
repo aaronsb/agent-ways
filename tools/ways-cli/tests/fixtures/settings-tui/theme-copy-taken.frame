@@ -12,10 +12,10 @@ agent-tui frame 100x30
 |│   miami            light                            ││waypoints theme  ● ◆ ■ ▲ ◉ ▶ ★ ◈ ♦ ▪       │|
 |│   tampa            light                            ││                                           │|
 |│   miami-nights     dark                             ││slots                                      │|
-|│▌● mine             dark   user                      ││   bg     #2e3440    info   #81a1c1        │|
-|│                                                     ││   fg     #d8dee9    ok     #a3be8c        │|
-|│                                                     ││   dim    #4c566a    warn   #d08770        │|
-|│                                                     ││   subtle #3b4252    err    #bf616a        │|
+|│   terra            dark                             ││   bg     #2e3440    info   #81a1c1        │|
+|│   crystal-mountain light                            ││   fg     #d8dee9    ok     #a3be8c        │|
+|│   maximum-claude   dark                             ││   dim    #4c566a    warn   #d08770        │|
+|│▌● mine             dark   user                      ││   subtle #3b4252    err    #bf616a        │|
 |│                                                     ││   accent #b48ead    alt    #88c0d0        │|
 |│                                                     ││                                           │|
 |│                                                     ││contrast  ok                               │|
@@ -184,16 +184,14 @@ styles
  12  56-60  - - BOLD
  12  99-99  - - DIM
  13   0-0   - - DIM
- 13   1-1   Cyan - BOLD|REVERSED
- 13   2-3   Green - BOLD|REVERSED
- 13   4-20  - - BOLD|REVERSED
- 13  21-27  - - BOLD|DIM|REVERSED
- 13  28-36  LightBlue - BOLD|REVERSED
- 13  37-37  - Black BOLD|REVERSED
- 13  38-38  - Gray BOLD|REVERSED
- 13  39-43  - DarkGray BOLD|REVERSED
- 13  44-44  - Gray BOLD|REVERSED
- 13  45-53  - - BOLD|REVERSED
+ 13  21-27  - - DIM
+ 13  28-36  LightBlue - -
+ 13  37-37  - Black -
+ 13  38-38  - Gray -
+ 13  39-39  - LightBlue -
+ 13  40-41  - DarkGray -
+ 13  42-42  - Yellow -
+ 13  43-44  - DarkGray -
  13  54-55  - - DIM
  13  56-57  - Black -
  13  58-65  - - DIM
@@ -201,6 +199,15 @@ styles
  13  76-83  - - DIM
  13  99-99  - - DIM
  14   0-0   - - DIM
+ 14  21-27  - - DIM
+ 14  28-36  LightBlue - -
+ 14  37-37  - White -
+ 14  38-38  - Black -
+ 14  39-39  - LightBlue -
+ 14  40-40  - DarkGray -
+ 14  41-41  - Green -
+ 14  42-43  - Red -
+ 14  44-44  - DarkGray -
  14  54-55  - - DIM
  14  56-57  - Gray -
  14  58-65  - - DIM
@@ -208,6 +215,16 @@ styles
  14  76-83  - - DIM
  14  99-99  - - DIM
  15   0-0   - - DIM
+ 15  21-27  - - DIM
+ 15  28-36  LightBlue - -
+ 15  37-37  - Black -
+ 15  38-38  - Gray -
+ 15  39-39  - DarkGray -
+ 15  40-40  - LightBlue -
+ 15  41-41  - DarkGray -
+ 15  42-42  - Yellow -
+ 15  43-43  - DarkGray -
+ 15  44-44  - Gray -
  15  54-55  - - DIM
  15  56-57  - DarkGray -
  15  58-65  - - DIM
@@ -215,6 +232,16 @@ styles
  15  76-83  - - DIM
  15  99-99  - - DIM
  16   0-0   - - DIM
+ 16   1-1   Cyan - BOLD|REVERSED
+ 16   2-3   Green - BOLD|REVERSED
+ 16   4-20  - - BOLD|REVERSED
+ 16  21-27  - - BOLD|DIM|REVERSED
+ 16  28-36  LightBlue - BOLD|REVERSED
+ 16  37-37  - Black BOLD|REVERSED
+ 16  38-38  - Gray BOLD|REVERSED
+ 16  39-43  - DarkGray BOLD|REVERSED
+ 16  44-44  - Gray BOLD|REVERSED
+ 16  45-53  - - BOLD|REVERSED
  16  54-55  - - DIM
  16  56-57  - DarkGray -
  16  58-65  - - DIM
