@@ -11,7 +11,8 @@ use agent_tui::feed::{Entry, Feed};
 use agent_tui::ratatui::layout::{Constraint, Layout, Rect};
 use agent_tui::ratatui::style::{Modifier, Style};
 use agent_tui::ratatui::text::{Line, Span};
-use agent_tui::ratatui::widgets::{Block, BorderType, Padding, Paragraph};
+use agent_tui::ratatui::symbols::border;
+use agent_tui::ratatui::widgets::{Block, Padding, Paragraph};
 use agent_tui::ratatui::Frame;
 use agent_tui::strip::{prefix_match, target};
 use agent_tui::PaneTab;
@@ -42,6 +43,11 @@ fn border(focused: bool) -> Style {
     } else {
         theme::rule()
     }
+}
+
+/// A box in the theme's border glyphs, rounded by default.
+fn bordered(focused: bool) -> Block<'static> {
+    Block::bordered().border_set(theme::border_set(border::ROUNDED)).border_style(border(focused)).padding(Padding::horizontal(1))
 }
 
 /// The pane in `area`, between the shell's tab bar and its bottom bar.
@@ -260,7 +266,7 @@ fn draw_feed(chat: &mut ChatPane, f: &mut Frame, area: Rect, fg: &Tab) {
         chat.entry_members = members;
     }
     let focused = *chat.ix.focus() == super::focus::Focus::Feed && !chat.ix.overlaid();
-    let mut block = Block::bordered().border_type(BorderType::Rounded).border_style(border(focused)).padding(Padding::horizontal(1));
+    let mut block = bordered(focused);
     // A view with nothing to send says so where the compose box would be.
     if !fg.composes() {
         block = block.title_bottom(Line::styled(" read only ", theme::muted()).right_aligned());
@@ -286,7 +292,7 @@ fn draw_feed(chat: &mut ChatPane, f: &mut Frame, area: Rect, fg: &Tab) {
 /// and no caret shows, so the focus is drawn in one place (ADR-405).
 fn draw_compose(chat: &mut ChatPane, f: &mut Frame, area: Rect, lead: &str, rows: Vec<Line<'static>>, files: &[String], fg: &Tab) {
     let focused = chat.ix.owns_text() && !chat.ix.overlaid();
-    let block = Block::bordered().border_type(BorderType::Rounded).border_style(border(focused)).padding(Padding::horizontal(1));
+    let block = bordered(focused);
     let inner = block.inner(area);
     f.render_widget(block, area);
     // Keep the cursor's row in view once the buffer outgrows the box.

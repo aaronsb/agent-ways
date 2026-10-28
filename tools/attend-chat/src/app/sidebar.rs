@@ -243,7 +243,7 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
                 };
                 let mut line = dm_line(chat, &label, n, shown, w, focused);
                 if shown && !focused {
-                    line.spans[0] = Span::styled(theme::SELECTED_MARK, theme::accent());
+                    line.spans[0] = Span::styled(theme::selected_mark(), theme::accent());
                 }
                 line
             }
@@ -252,7 +252,7 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
                 let mark = target(Style::new(), s.identity.is_claude && prefix_match(&s.identity.nickname, agent_partial.as_deref()));
                 let mut line = agent_line(chat, s, w, mark, focused, new_dms.contains(&s.member));
                 if members.contains(&s.member) && !focused {
-                    line.spans[0] = Span::styled(theme::SELECTED_MARK, theme::accent());
+                    line.spans[0] = Span::styled(theme::selected_mark(), theme::accent());
                 }
                 line
             }
@@ -389,8 +389,8 @@ fn at(c: Rgb, depth: agent_theme::ColorDepth) -> Color {
 }
 
 /// An agent's row, a lozenge in the status line's style: the name on the
-/// identity colour, the project on a darker step of it, and `●` live or
-/// `○` not on the darkest. While the agent has a DM to the operator not yet
+/// identity colour, the project on a darker step of it, and the theme's
+/// live or idle mark (`●` or `○` by default) on the darkest. While the agent has a DM to the operator not yet
 /// shown (`new_dm`) the DM mark, bold, takes the dot's place; the colours
 /// still say live or not. An inactive agent wears the desaturated steps.
 /// At 16 colours the name keeps its ANSI colour and the rest is set back.
@@ -398,10 +398,11 @@ fn agent_line(chat: &ChatPane, s: &Seen, w: usize, mark: Style, focused: bool, n
     let depth = chat.palette.depth();
     let k = &s.identity;
     let project = agent_identity::cwd_basename(&k.cwd);
+    let [live, idle] = theme::presence();
     let dot = match (new_dm, s.live) {
         (true, _) => chat.dm_glyph(),
-        (false, true) => "●",
-        (false, false) => "○",
+        (false, true) => live,
+        (false, false) => idle,
     };
     let texts = sized(chat.shape, theme::colourless(), [&k.nickname, &project, dot], w);
     let [name, project, dot] = identity_styles(depth, k.palette, s.live, k.style.bold);
@@ -439,7 +440,7 @@ pub(super) const REVIEW_MARK: &str = "◈ ";
 /// agent's, a member's under its channel's.
 const INDENT: &str = "  ";
 
-/// What marks an invited member's row, before its `●` live or `○` not.
+/// What marks an invited member's row, before its live or idle mark.
 const INVITED: &str = "◌ invited";
 
 /// [`sized`] with no middle text: two segments, the name taking the
@@ -465,9 +466,9 @@ fn dm_line(chat: &ChatPane, label: &str, count: usize, shown: bool, w: usize, fo
 
 /// A member's row, under its channel's: indented, as a DM view's row is. A
 /// participant (`invited` none) is drawn as its Agents row is, its name on
-/// the identity colour and `●` live or `○` not on the darkest step, with no
+/// the identity colour and its live or idle mark on the darkest step, with no
 /// project. An invitee is set back, `label`, the invitation's age `invited`
-/// where the row has room for it, then [`INVITED`] and `●` or `○`, so an
+/// where the row has room for it, then [`INVITED`] and the mark, so an
 /// invitee that has gone reads apart from one that may still answer. `who`
 /// is the agent as the column knows it; one it does not know is set back by
 /// its id, and is not live.
@@ -475,7 +476,7 @@ fn member_line(chat: &ChatPane, label: &str, who: Option<&Seen>, invited: Option
     let bare = theme::colourless();
     let w = w.saturating_sub(INDENT.len());
     let faded = Seg::faded("").style;
-    let dot = if who.is_some_and(|s| s.live) { "●" } else { "○" };
+    let dot = theme::presence()[usize::from(!who.is_some_and(|s| s.live))];
     let (texts, styles) = match (invited, who) {
         (Some(age), _) if !age.is_empty() => (sized(chat.shape, bare, [label, age, &format!("{INVITED} {dot}")], w), [faded; 3]),
         (Some(_), _) => (sized_two(chat.shape, bare, [label, &format!("{INVITED} {dot}")], w), [faded; 3]),
@@ -492,9 +493,9 @@ fn member_line(chat: &ChatPane, label: &str, who: Option<&Seen>, invited: Option
 
 /// A channel's row, the same shape on the accent: its number, glyph and
 /// name, then its member count and the time since its last message, then
-/// `●` when a member is live (where D5's seal marker will go). The shown
-/// channel is marked at the left. A channel with no live member, or none on
-/// disk, is set back. `number` counts the channels from 1, for Ctrl+digit;
+/// the live mark when a member is live (where D5's seal marker will go). The
+/// shown channel is marked at the left. A channel with no live member, or
+/// none on disk, is set back. `number` counts the channels from 1, for Ctrl+digit;
 /// past the ninth a row has none.
 #[allow(clippy::too_many_arguments)]
 fn channel_line(chat: &ChatPane, row: &ChannelRow, live: usize, age: &str, shown: bool, w: usize, mark: Style, focused: bool, number: usize) -> Line<'static> {
@@ -504,7 +505,7 @@ fn channel_line(chat: &ChatPane, row: &ChannelRow, live: usize, age: &str, shown
     let figures = if row.known.is_base { age.to_string() } else { format!("{}{person} {age}", row.known.membership.members.len()).trim_end().to_string() };
     let num = if number <= 9 { format!("{number} ") } else { "  ".to_string() };
     let name = format!("{num}{} #{}", g.glyph, g.name);
-    let dot = if active { "●" } else { "○" };
+    let dot = theme::presence()[usize::from(!active)];
     let texts = sized(chat.shape, theme::colourless(), [&name, &figures, dot], w);
     let styles = if active {
         let name = Seg::on("", Ground::Accent).style;
@@ -513,7 +514,7 @@ fn channel_line(chat: &ChatPane, row: &ChannelRow, live: usize, age: &str, shown
         [Seg::faded("").style.patch(mark), Seg::faded("").style, Seg::faded("").style]
     };
     let styles = focused_styles(styles, focused);
-    let lead = if shown { Span::styled(theme::SELECTED_MARK, theme::accent()) } else { Span::raw(" ") };
+    let lead = if shown { Span::styled(theme::selected_mark(), theme::accent()) } else { Span::raw(" ") };
     let mut spans = vec![lead];
     spans.extend(chat.shape.lozenge(&segs(texts, styles)));
     Line::from(spans)
@@ -596,7 +597,7 @@ impl ChatPane {
         self.width.map_or(self.sidebar, |w| self.side_width(w).is_some())
     }
 
-    /// What takes an agent's `●` place while it has a DM to the operator not
+    /// What takes an agent's live mark while it has a DM to the operator not
     /// yet shown ([`super::dm`]): an envelope, the Nerd Font's in a shape
     /// that needs one.
     pub(super) fn dm_glyph(&self) -> &'static str {
