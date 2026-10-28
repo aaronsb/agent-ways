@@ -159,7 +159,9 @@ The chosen theme reaches the screens only. The plain outputs moved onto `agent-t
    - It is painted only at truecolor depth. At 256 colours the frame is filled with `THEME_BG`, which stays required. Below 256 colours item 9 applies.
    - The ANSI output for plain commands paints no gradient.
 
-3. **Contrast on a gradient.** The grounds the derivation lifts against are bg, the selection, each gradient stop, and seven points evenly spaced between each pair of neighbouring stops. Each text role is lifted to 4.5:1 and each muted role to 3:1 against all of them, by the method of ADR-504 §4. The theme editor's contrast results cover the same grounds and name the ground a failing role fails on.
+3. **Contrast on a gradient.** The grounds the derivation lifts against are bg, the selection, each gradient stop, and the points that cut each segment between neighbouring stops into 64 equal intervals. Each text role is lifted to 4.5:1 and each muted role to 3:1 against bg and the selection, and to those floors plus 0.05 against the gradient's points, by the method of ADR-504 §4. The theme editor's contrast results cover the same grounds and name the ground a failing role fails on.
+
+   > Amended 2026-10-28, from the branch's code review. The item first sampled seven points between neighbouring stops. WCAG luminance is not monotonic along an OKLab segment, so a role could pass every sample and fall below its floor at a cell between two. Sixty-four samples a segment with the 0.05 margin hold the floors at every rendered cell.
 
 4. **The border.** `THEME_BORDER` names a set: `plain`, `rounded`, `double` or `thick`. `THEME_BORDER_GLYPHS` gives eight glyphs in this order: top-left, top-right, bottom-left and bottom-right corners, then the top, bottom, left and right edges. Tampa's `╭╮╰╯~·││` draws a rounded box with waves along the top and a dotted bottom. Setting both keys is a parse error. The theme's border is the one every pane and dialog draws; a dialog that names a border of its own (ADR-504, note of 2026-10-13) keeps it.
 
@@ -170,7 +172,9 @@ The chosen theme reaches the screens only. The plain outputs moved onto `agent-t
 
 6. **The ornament.** `THEME_ORNAMENT` is one grapheme of display width 1 or 2, an emoji included. It is drawn before each pane title, followed by one space. When a title is cut to fit, the ornament is dropped before any of the title's text.
 
-7. **Glyph checks.** Every glyph except the ornament is one grapheme cluster (UAX #29) of display width 1, measured by the width rule ratatui uses. A glyph of any other width, a glyph that is more than one grapheme, or a key with the wrong count of glyphs is a parse error naming its line.
+7. **Glyph checks.** Every glyph except the ornament is one grapheme cluster (UAX #29) of display width 1, measured by the width rule ratatui uses: unicode-width's width, and one cell more for each halfwidth katakana sound mark, U+FF9E and U+FF9F. A glyph that holds a control character, U+2028 or U+2029, the ornament included, a glyph of any other width, a glyph that is more than one grapheme, or a key with the wrong count of glyphs is a parse error naming its line.
+
+   > Amended 2026-10-28, from the branch's code review. unicode-width counts many control characters one column wide, so an escape or a newline passed as a glyph and reached the terminal. The parser had also measured with unicode-width alone, where ratatui draws `ｶﾞ` two cells wide.
 
 8. **Writing back.** `to_text` writes every decoration key the theme carries, after the pinned roles, so a theme saved from the theme editor keeps its decoration. Editing the decoration in the theme editor is outside this decision.
 
@@ -183,7 +187,9 @@ The chosen theme reaches the screens only. The plain outputs moved onto `agent-t
 
 ![Three terminal panes side by side. Miami: a light pane whose ground runs from pale blue at the top to pink at the bottom, double-line borders, a flamingo before the title, diamond presence marks. Tampa: a light pane whose ground runs from pale bay blue on the left through cream to sunset peach on the right, a rounded border with tildes along the top and dots along the bottom, a lightning bolt before the title, a pale-blue selected row, a blue selected rule of `≈`. Miami Nights: a dark pane running from near-black violet at the top to magenta at the bottom, thick borders, a palm before the title, neon pink, cyan and mint text.](figures/ADR-513-decorated-themes.svg)
 
-11. **Every surface follows the active theme.** The settings screens, the session viewer (`ways session live`) and the session screens, a way opened to read, attend-chat, and every plain report draw from the theme named by `theme.active`. Each binary that prints plain output installs that theme as the process painter (`agent_theme::install`) at the start of `main`, after it has found that output is styled. It reads `theme.active` only then, so piped output and the hook commands of ADR-504 §11, whose output is never styled, read no theme file.
+11. **Every surface follows the active theme.** The settings screens, the session viewer (`ways session live`) and the session screens, a way opened to read, attend-chat, and every plain report draw from the theme named by `theme.active`. Each binary that prints plain output installs that theme as the process painter (`agent_theme::install`) at the start of `main`, when stdout is a terminal. It reads `theme.active` only then, so piped output and the hook commands of ADR-504 §11 read no theme file. Forced colour on a pipe (`FORCE_COLOR`, `CLICOLOR_FORCE`) keeps the default painter: its colours, no theme file read, no band. `ways manage` prints through its own painter, the terminal palette, and does not follow the theme.
+
+   > Amended 2026-10-28, from the branch's code review. The item first installed the theme wherever output was styled, which forced colour made true on a pipe, so a hook command under `FORCE_COLOR` read the theme and banded output bound for the model's context. The review also recorded that `ways manage` stays on its own painter.
 
 12. **Report blocks.** Under a theme with `THEME_BACKGROUND="fill"`, a plain report goes through an `agent-theme` `block()` that paints the theme's ground behind every line out to the terminal's width.
    - A vertical gradient spans the block's lines, top to bottom, and a horizontal one spans the terminal's width, left to right.
@@ -206,7 +212,9 @@ The chosen theme reaches the screens only. The plain outputs moved onto `agent-t
 
    The per-way markers in the way table's `◎` column and on the context strip, called pins in the code until now, are waypoints. A waypoint marks a point on a route, and the context strip is the route through the context window.
    - A theme file may carry an optional `[[waypoints]]` array of tables, 1 to 16 entries, each `{ glyph = "…", fg = "#rrggbb" }` with `fg` optional. Clusters take the entries in order, cycling when there are more clusters than entries.
-   - A glyph is one grapheme of display width 1 or 2. An emoji is allowed only where its code point has Emoji_Presentation=Yes, with no variation selector and no zero-width joiner, so the terminal agrees on its width. Anything else is a parse error naming its line.
+   - A glyph is one grapheme of display width 1 or 2, measured and refused for control characters as item 7 has it. A glyph two wide is allowed only where every code point has Emoji_Presentation=Yes in Unicode's emoji-data.txt, with no variation selector and no zero-width joiner, so the terminal agrees on its width. Anything else is a parse error naming its line.
+
+     > Amended 2026-10-28, from the branch's code review. The parser had read Emoji_Presentation from whole Unicode blocks, which took 🈂 and 🈷, both Emoji_Presentation=No and drawn one cell wide by some terminals. It now reads the property itself, from Unicode 17.0's table.
    - An `fg` must reach 3:1 against every ground of item 3, WCAG 1.4.11's floor for graphical objects. The derivation lifts an `fg` that falls short, as it lifts a muted role. An entry without `fg` takes the categorical colour of its position, as a pin does today. A colour emoji draws in its own colours and ignores `fg`.
    - The table column and the context strip take the display width of the set's widest glyph.
    - The setting `theme.waypoints`, beside `theme.active` in ways' settings and offered in the theme tab, is `theme` or `default`, and defaults to `theme`. Under `theme` the active theme's set is used where it has one. Under `default`, and for a theme without a set, the waypoints are today's ten glyphs `●◆■▲◉▶★◈♦▪` in agent-identity's categorical colours.
