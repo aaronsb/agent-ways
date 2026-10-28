@@ -18,7 +18,7 @@ fn bundled_themes_parse_and_match_their_file_names() {
     }
     assert_eq!(bundled()[0].name, "agent-ways", "the default is listed first");
     let light: Vec<String> = bundled().into_iter().filter(|t| t.kind == Kind::Light).map(|t| t.name).collect();
-    assert_eq!(light, ["paper", "miami", "tampa"]);
+    assert_eq!(light, ["paper", "miami", "tampa", "crystal-mountain"]);
     assert!(bundled().iter().any(|t| t.background == Background::Fill));
     assert!(bundled()[..7].iter().all(|t| t.gradient.is_none() && t.decor == Decor::default()), "the first seven set no chrome");
 }
@@ -105,6 +105,8 @@ fn the_chrome_keys_parse() {
     assert_eq!(theme("miami-nights").decor.border, Some(Border::Thick));
     let terra = theme("terra").decor;
     assert_eq!((terra.border, terra.rules, terra.mark, terra.presence, terra.ornament), (Some(Border::Glyphs(["╭", "╮", "╰", "╯", "─", "┈", "│", "│"])), Some(["┈", "∿"]), Some("❧"), Some(["✿", "❀"]), Some("✾")));
+    let crystal = theme("crystal-mountain").decor;
+    assert_eq!((crystal.border, crystal.rules, crystal.mark, crystal.presence, crystal.ornament), (Some(Border::Plain), Some(["⌃", "⋀"]), Some("⧫"), Some(["✦", "✧"]), Some("❄")));
 }
 
 #[test]
@@ -159,6 +161,7 @@ fn event_glyph_keys_parse_round_trip_and_default_to_today_s_set() {
         [e.head, e.mark, e.matched, e.injected, e.suppressed, e.redisclosed]
     };
     assert_eq!(six("terra"), ["☼", "┆", "❁", "⁕", "☙", "↻"]);
+    assert_eq!(six("crystal-mountain"), ["✶", "┊", "❆", "❅", "⋄", "⟲"]);
     let mut t = theme("miami-nights");
     t.decor.events.due = ["◉", "◎"];
     t.decor.events.check = "\"";
@@ -193,6 +196,7 @@ fn the_words_table_parses_and_the_decorated_themes_carry_one() {
     assert_eq!(theme("tampa").words, words(&["Charging", "Striking", "Sailing", "Crossing", "Casting", "Plundering"], &["Struck", "Crossed", "Landed", "Plundered"]));
     assert_eq!(theme("miami").words, words(&["Sunning", "Surfing", "Strolling", "Sipping", "Sparkling", "Drifting"], &["Sunned", "Surfed", "Strolled", "Sipped"]));
     assert_eq!(theme("terra").words, words(&["Growing", "Rooting", "Weathering", "Flowing", "Sprouting", "Settling"], &["Grown", "Rooted", "Weathered", "Settled"]));
+    assert_eq!(theme("crystal-mountain").words, words(&["Climbing", "Ascending", "Glinting", "Traversing", "Crystallizing", "Summiting"], &["Climbed", "Crossed", "Crystallized", "Summited"]));
     assert!(bundled()[..7].iter().all(|t| t.words.is_empty()), "the first seven carry none");
     // One list alone is a table; the other stays empty.
     let t = parse(&format!("{}\n[words]\ndone = [\"Done\"]\n", nord_src())).unwrap();
@@ -1037,6 +1041,7 @@ fn waypoints_parse_from_the_bundled_themes_and_round_trip() {
     assert!(bundled()[..7].iter().all(|t| t.decor.waypoints.is_none()), "the first seven keep the screens' set");
     for (name, want) in [
         ("terra", ["❧", "✿", "⁕", "✾", "❀", "⁂", "❁", "☼", "∿", "☙"]),
+        ("crystal-mountain", ["❆", "⟡", "✶", "⧫", "❅", "✧", "⬡", "⋄", "✦", "❖"]),
     ] {
         let t = theme(name);
         let set = t.decor.waypoints.unwrap();
@@ -1100,7 +1105,7 @@ fn a_waypoint_emoji_has_emoji_presentation() {
     }
     let sets: Vec<(String, usize)> = bundled().into_iter().filter_map(|t| t.decor.waypoints.map(|w| (t.name, w.as_slice().len()))).collect();
     let ten = |n: &str| (n.to_string(), 10);
-    assert_eq!(sets, [ten("miami"), ten("tampa"), ten("miami-nights"), ten("terra")]);
+    assert_eq!(sets, [ten("miami"), ten("tampa"), ten("miami-nights"), ten("terra"), ten("crystal-mountain")]);
 }
 
 #[test]
