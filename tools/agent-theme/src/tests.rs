@@ -137,6 +137,36 @@ fn chrome_errors_name_the_line_and_key() {
     has(miami("THEME_PRESENCE=\"◆◇\"", "THEME_PRESENCE=\"◆\u{301}\u{200b}\""), "`THEME_PRESENCE` glyph `\u{200b}` is 0 columns wide; it must be 1");
 }
 
+#[test]
+fn event_glyph_keys_parse_round_trip_and_default_to_today_s_set() {
+    let d = Events::DEFAULT;
+    let today = [d.head, d.mark, d.matched, d.injected, d.suppressed, d.redisclosed, d.would_block, d.blocked, d.refire_held, d.cap_held, d.due[0], d.due[1], d.approaching, d.halfway, d.check];
+    assert_eq!(today, ["●", "┼", "◆", "◇", "⊝", "↩", "◌", "⊘", "◷", "⊟", "●", "○", "◐", "◔", "✓"]);
+    assert!(bundled()[..7].iter().all(|t| t.decor.events == Events::DEFAULT), "the first seven keep today's set");
+    let tampa = theme("tampa").decor.events;
+    assert_eq!((tampa.head, tampa.mark, tampa.matched, tampa.injected, tampa.suppressed, tampa.redisclosed), ("↯", "┊", "⚔", "✦", "☈", "⟲"));
+    assert_eq!((tampa.blocked, tampa.due), ("⊘", ["●", "○"]), "a key left out keeps the default");
+    let mut t = theme("miami-nights");
+    t.decor.events.due = ["◉", "◎"];
+    t.decor.events.check = "\"";
+    let text = to_text(&t);
+    assert!(text.contains("THEME_EVENT_DUE=\"◉◎\"") && !text.contains("THEME_EVENT_BLOCKED"), "only what differs from the default is written");
+    assert_eq!(parse(&text).unwrap(), t);
+}
+
+#[test]
+fn event_glyph_errors_name_the_line_and_key() {
+    let has = |src: String, needle: &str| {
+        let e = validate(&src);
+        assert!(e.iter().any(|x| x.to_string().contains(needle)), "{needle:?} not in {e:?}");
+    };
+    let nights = |from: &str, to: &str| theme_src("miami-nights").replace(from, to);
+    has(nights("THEME_EVENT_HEAD=\"◓\"", "THEME_EVENT_HEAD=\"◓◓\""), "`THEME_EVENT_HEAD` takes 1 glyph; `◓◓` has 2");
+    has(nights("THEME_EVENT_HEAD=\"◓\"", "THEME_EVENT_DUE=\"●\""), "`THEME_EVENT_DUE` takes 2 glyphs; `●` has 1");
+    has(nights("THEME_EVENT_HEAD=\"◓\"", "THEME_EVENT_HEAD=\"🌴\""), "`THEME_EVENT_HEAD` glyph `🌴` is 2 columns wide; it must be 1");
+    has(nights("THEME_EVENT_HEAD=", "THEME_EVENT_TAIL="), "unknown key `THEME_EVENT_TAIL`");
+}
+
 fn theme_src(name: &str) -> &'static str {
     BUNDLED.iter().find(|(n, _)| *n == name).unwrap().1
 }

@@ -282,6 +282,107 @@ impl Border {
     }
 }
 
+/// The glyphs a session's events draw with, on the replay's scrubber and in
+/// the fire and epoch views (`THEME_EVENT_*`). Every theme has a full set: a
+/// key it leaves out keeps [`Events::DEFAULT`]. Each is one grapheme one
+/// column wide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Events {
+    /// The scrubber's current position.
+    pub head: &'static str,
+    /// A mark on the scrubber.
+    pub mark: &'static str,
+    pub matched: &'static str,
+    pub injected: &'static str,
+    /// Held back by the subagent switch: the scrubber's note and the legend.
+    pub suppressed: &'static str,
+    /// The fate marks before a way's name.
+    pub redisclosed: &'static str,
+    pub would_block: &'static str,
+    pub blocked: &'static str,
+    pub refire_held: &'static str,
+    pub cap_held: &'static str,
+    /// The re-disclose column: due, and not due.
+    pub due: [&'static str; 2],
+    /// Three quarters of the way to re-disclosure.
+    pub approaching: &'static str,
+    /// Half of the way to re-disclosure.
+    pub halfway: &'static str,
+    /// A check's fire.
+    pub check: &'static str,
+}
+
+impl Events {
+    pub const DEFAULT: Events = Events {
+        head: "●",
+        mark: "┼",
+        matched: "◆",
+        injected: "◇",
+        suppressed: "⊝",
+        redisclosed: "↩",
+        would_block: "◌",
+        blocked: "⊘",
+        refire_held: "◷",
+        cap_held: "⊟",
+        due: ["●", "○"],
+        approaching: "◐",
+        halfway: "◔",
+        check: "✓",
+    };
+
+    /// The `THEME_EVENT_*` key suffixes in file order, each with its glyph
+    /// count.
+    pub const KEYS: [(&'static str, usize); 14] = [
+        ("HEAD", 1),
+        ("MARK", 1),
+        ("MATCHED", 1),
+        ("INJECTED", 1),
+        ("SUPPRESSED", 1),
+        ("REDISCLOSED", 1),
+        ("WOULD_BLOCK", 1),
+        ("BLOCKED", 1),
+        ("REFIRE_HELD", 1),
+        ("CAP_HELD", 1),
+        ("DUE", 2),
+        ("APPROACHING", 1),
+        ("HALFWAY", 1),
+        ("CHECK", 1),
+    ];
+
+    /// The glyphs a key suffix names.
+    pub fn get(&self, key: &str) -> Option<Vec<&'static str>> {
+        let mut e = *self;
+        e.slot(key).map(|g| g.to_vec())
+    }
+
+    /// Where a key suffix's glyphs live, to set them.
+    pub(crate) fn slot(&mut self, key: &str) -> Option<&mut [&'static str]> {
+        Some(match key {
+            "HEAD" => std::slice::from_mut(&mut self.head),
+            "MARK" => std::slice::from_mut(&mut self.mark),
+            "MATCHED" => std::slice::from_mut(&mut self.matched),
+            "INJECTED" => std::slice::from_mut(&mut self.injected),
+            "SUPPRESSED" => std::slice::from_mut(&mut self.suppressed),
+            "REDISCLOSED" => std::slice::from_mut(&mut self.redisclosed),
+            "WOULD_BLOCK" => std::slice::from_mut(&mut self.would_block),
+            "BLOCKED" => std::slice::from_mut(&mut self.blocked),
+            "REFIRE_HELD" => std::slice::from_mut(&mut self.refire_held),
+            "CAP_HELD" => std::slice::from_mut(&mut self.cap_held),
+            "DUE" => &mut self.due[..],
+            "APPROACHING" => std::slice::from_mut(&mut self.approaching),
+            "HALFWAY" => std::slice::from_mut(&mut self.halfway),
+            "CHECK" => std::slice::from_mut(&mut self.check),
+            _ => return None,
+        })
+    }
+}
+
+impl Default for Events {
+    fn default() -> Events {
+        Events::DEFAULT
+    }
+}
+
 /// The glyphs a theme draws its chrome with. Each is one grapheme, one
 /// column wide, except the ornament, which may be two. `None` keeps the
 /// surface's own.
@@ -296,10 +397,11 @@ pub struct Decor {
     pub presence: Option<[&'static str; 2]>,
     /// `THEME_ORNAMENT`: drawn before a pane title's text.
     pub ornament: Option<&'static str>,
+    pub events: Events,
 }
 
 impl Decor {
-    pub const NONE: Decor = Decor { border: None, rules: None, mark: None, presence: None, ornament: None };
+    pub const NONE: Decor = Decor { border: None, rules: None, mark: None, presence: None, ornament: None, events: Events::DEFAULT };
 }
 
 /// `s` as a `&'static str`, one allocation per distinct glyph for the life

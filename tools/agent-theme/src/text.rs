@@ -32,6 +32,11 @@
 //! THEME_MARK="▌"                             # the selected row's mark
 //! THEME_PRESENCE="●○"                        # live, idle
 //! THEME_ORNAMENT="🌴"                         # before pane titles; may be two columns
+//! THEME_EVENT_HEAD="◓"                       # a session's event glyphs, each one
+//!                                            # (DUE two): HEAD MARK MATCHED INJECTED
+//!                                            # SUPPRESSED REDISCLOSED WOULD_BLOCK BLOCKED
+//!                                            # REFIRE_HELD CAP_HELD DUE APPROACHING
+//!                                            # HALFWAY CHECK
 //! ```
 //!
 //! Every glyph is one grapheme one column wide, but the ornament, which may
@@ -44,7 +49,7 @@ use toml::Spanned;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use crate::model::{intern, Axis, Background, Border, Decor, Gradient, Kind, Overrides, Rgb, Slots, Theme};
+use crate::model::{intern, Axis, Background, Border, Decor, Events, Gradient, Kind, Overrides, Rgb, Slots, Theme};
 
 /// The dotfiles tool bindings: part of the palette structure, no meaning here.
 const IGNORED: [&str; 3] = ["THEME_VIVID", "THEME_BAT", "THEME_DELTA"];
@@ -278,6 +283,21 @@ pub fn parse(src: &str) -> Result<Theme, Vec<ThemeError>> {
                     _ => decor.mark = Some(g[0]),
                 }
             }
+            k if k.starts_with("THEME_EVENT_") => {
+                let suffix = &k["THEME_EVENT_".len()..];
+                let Some((_, count)) = Events::KEYS.iter().find(|(n, _)| *n == suffix) else {
+                    errs.push(ThemeError::at(n, format!("unknown key `{key}`")));
+                    continue;
+                };
+                match glyphs(key, value, *count, 1) {
+                    Ok(g) => {
+                        if let Some(slot) = decor.events.slot(suffix) {
+                            slot.copy_from_slice(&g);
+                        }
+                    }
+                    Err(e) => errs.push(ThemeError::at(n, e)),
+                }
+            }
             k if IGNORED.contains(&k) => {}
             _ => {
                 let Some(field) = suffix(key) else {
@@ -364,23 +384,29 @@ pub fn to_text(t: &Theme) -> String {
         }
     }
     let d = &t.decor;
-    let mut chrome: Vec<(&str, String)> = Vec::new();
+    let mut chrome: Vec<(String, String)> = Vec::new();
     match d.border {
-        Some(Border::Glyphs(g)) => chrome.push(("BORDER_GLYPHS", g.concat())),
-        Some(b) => chrome.push(("BORDER", b.name().unwrap_or("plain").to_string())),
+        Some(Border::Glyphs(g)) => chrome.push(("BORDER_GLYPHS".into(), g.concat())),
+        Some(b) => chrome.push(("BORDER".into(), b.name().unwrap_or("plain").to_string())),
         None => {}
     }
     if let Some(g) = d.rules {
-        chrome.push(("RULE_GLYPHS", g.concat()));
+        chrome.push(("RULE_GLYPHS".into(), g.concat()));
     }
     if let Some(g) = d.mark {
-        chrome.push(("MARK", g.to_string()));
+        chrome.push(("MARK".into(), g.to_string()));
     }
     if let Some(g) = d.presence {
-        chrome.push(("PRESENCE", g.concat()));
+        chrome.push(("PRESENCE".into(), g.concat()));
     }
     if let Some(g) = d.ornament {
-        chrome.push(("ORNAMENT", g.to_string()));
+        chrome.push(("ORNAMENT".into(), g.to_string()));
+    }
+    for (k, _) in Events::KEYS {
+        let (mine, default) = (d.events.get(k), Events::DEFAULT.get(k));
+        if let Some(g) = mine.filter(|g| Some(g) != default.as_ref()) {
+            chrome.push((format!("EVENT_{k}"), g.concat()));
+        }
     }
     if !chrome.is_empty() {
         out.push('\n');

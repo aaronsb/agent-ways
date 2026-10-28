@@ -43,7 +43,7 @@ pub use bundled::{user_dir, Source, ThemeSet, BUNDLED, EXTENSIONS, TERMINAL};
 pub use color::{index_rgb, nearest_16, nearest_256, Color, ANSI16_RGB};
 pub use depth::ColorDepth;
 pub use derive::{contrast, text_on, Roles, SegPair, MIN_DISTINCT, MIN_MUTED, MIN_TEXT};
-pub use model::{Axis, Background, Border, Decor, Gradient, Kind, Overrides, Rgb, Slots, Theme};
+pub use model::{Axis, Background, Border, Decor, Events, Gradient, Kind, Overrides, Rgb, Slots, Theme};
 pub use oklab::delta_e;
 pub use paint::{install, pair, paint, painter, reset, scoped, sgr, Ground, Ink, Painter, Resolved, Role, Scope, Style, RESET};
 pub use steps::{hsl_at, scale, IdentitySteps, Step};
