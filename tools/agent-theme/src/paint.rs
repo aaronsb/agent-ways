@@ -512,6 +512,23 @@ pub fn install(p: Painter) -> bool {
     GLOBAL.set(p).is_ok()
 }
 
+/// Set the process painter to the theme `choice` names, as
+/// [`Painter::named_in`] resolves it at the environment's depth, when
+/// output is styled. `choice` runs only then, so piped output, a hook's
+/// among it, keeps the plain painter and reads no settings or theme file
+/// (ADR-504 §11). Returns whether a painter was installed.
+pub fn install_from(choice: impl FnOnce() -> Option<String>) -> bool {
+    if !styled_output() {
+        return false;
+    }
+    let depth = ColorDepth::detect();
+    let p = match crate::bundled::user_dir() {
+        Some(dir) => Painter::named_in(choice().as_deref(), &dir, depth).0,
+        None => Painter::terminal(depth),
+    };
+    install(p)
+}
+
 /// Restores this thread's previous painter when dropped.
 pub struct Scope {
     previous: Option<Painter>,

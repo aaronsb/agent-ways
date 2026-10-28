@@ -119,22 +119,27 @@ fn the_chrome_keys_round_trip() {
 
 #[test]
 fn chrome_errors_name_the_line_and_key() {
-    let has = |src: String, needle: &str| {
+    let has = |src: String, needle: String| {
         let e = validate(&src);
-        assert!(e.iter().any(|x| x.to_string().contains(needle)), "{needle:?} not in {e:?}");
+        assert!(e.iter().any(|x| x.to_string().contains(&needle)), "{needle:?} not in {e:?}");
     };
-    let miami = |from: &str, to: &str| theme_src("miami").replace(from, to);
-    has(miami("vertical #d4efff", "diagonal #d4efff"), "line 7: THEME_GRADIENT axis `diagonal` must be vertical or horizontal");
-    has(miami("vertical #d4efff #fff4ee #ffe6ee", "vertical #d4efff"), "line 7: THEME_GRADIENT takes 2 to 4 stops; `vertical #d4efff` has 1");
-    has(miami("#ffe6ee\"", "#ffe6ee #000000 #111111\""), "THEME_GRADIENT takes 2 to 4 stops; `vertical #d4efff #fff4ee #ffe6ee #000000 #111111` has 5");
-    has(miami("#ffe6ee\"", "#ffe6e\""), "line 7: `#ffe6e` is not a #rrggbb colour (key `THEME_GRADIENT`)");
-    has(miami("THEME_BACKGROUND=\"fill\"", "THEME_BACKGROUND=\"terminal\""), "line 7: THEME_GRADIENT needs THEME_BACKGROUND=\"fill\"");
-    has(miami("THEME_BORDER=\"double\"", "THEME_BORDER=\"double\"\nTHEME_BORDER_GLYPHS=\"╭╮╰╯~·││\""), "line 23: THEME_BORDER and THEME_BORDER_GLYPHS cannot both be set");
-    has(miami("THEME_BORDER=\"double\"", "THEME_BORDER=\"dashed\""), "line 22: THEME_BORDER `dashed` must be one of plain, rounded, double, thick");
-    has(miami("THEME_RULE_GLYPHS=\"─═\"", "THEME_RULE_GLYPHS=\"─═━\""), "line 23: `THEME_RULE_GLYPHS` takes 2 glyphs; `─═━` has 3");
-    has(miami("THEME_MARK=\"▌\"", "THEME_MARK=\"🌴\""), "line 24: `THEME_MARK` glyph `🌴` is 2 columns wide; it must be 1");
-    has(miami("THEME_ORNAMENT=\"🦩\"", "THEME_ORNAMENT=\"🦩🌴\""), "line 26: `THEME_ORNAMENT` takes 1 glyph; `🦩🌴` has 2");
-    has(miami("THEME_PRESENCE=\"◆◇\"", "THEME_PRESENCE=\"◆\u{301}\u{200b}\""), "`THEME_PRESENCE` glyph `\u{200b}` is 0 columns wide; it must be 1");
+    let src = theme_src("miami");
+    let miami = |from: &str, to: &str| src.replace(from, to);
+    // The 1-based line a key sits on in miami.theme.
+    let at = |key: &str| src.lines().position(|l| l.starts_with(key)).unwrap() + 1;
+    let g = at("THEME_GRADIENT=");
+    has(miami("vertical #d4efff", "diagonal #d4efff"), format!("line {g}: THEME_GRADIENT axis `diagonal` must be vertical or horizontal"));
+    has(miami("vertical #d4efff #fff4ee #ffe6ee", "vertical #d4efff"), format!("line {g}: THEME_GRADIENT takes 2 to 4 stops; `vertical #d4efff` has 1"));
+    has(miami("#ffe6ee\"", "#ffe6ee #000000 #111111\""), "THEME_GRADIENT takes 2 to 4 stops; `vertical #d4efff #fff4ee #ffe6ee #000000 #111111` has 5".into());
+    has(miami("#ffe6ee\"", "#ffe6e\""), format!("line {g}: `#ffe6e` is not a #rrggbb colour (key `THEME_GRADIENT`)"));
+    has(miami("THEME_BACKGROUND=\"fill\"", "THEME_BACKGROUND=\"terminal\""), format!("line {g}: THEME_GRADIENT needs THEME_BACKGROUND=\"fill\""));
+    let b = at("THEME_BORDER=");
+    has(miami("THEME_BORDER=\"double\"", "THEME_BORDER=\"double\"\nTHEME_BORDER_GLYPHS=\"╭╮╰╯~·││\""), format!("line {}: THEME_BORDER and THEME_BORDER_GLYPHS cannot both be set", b + 1));
+    has(miami("THEME_BORDER=\"double\"", "THEME_BORDER=\"dashed\""), format!("line {b}: THEME_BORDER `dashed` must be one of plain, rounded, double, thick"));
+    has(miami("THEME_RULE_GLYPHS=\"─═\"", "THEME_RULE_GLYPHS=\"─═━\""), format!("line {}: `THEME_RULE_GLYPHS` takes 2 glyphs; `─═━` has 3", at("THEME_RULE_GLYPHS=")));
+    has(miami("THEME_MARK=\"▌\"", "THEME_MARK=\"🌴\""), format!("line {}: `THEME_MARK` glyph `🌴` is 2 columns wide; it must be 1", at("THEME_MARK=")));
+    has(miami("THEME_ORNAMENT=\"🦩\"", "THEME_ORNAMENT=\"🦩🌴\""), format!("line {}: `THEME_ORNAMENT` takes 1 glyph; `🦩🌴` has 2", at("THEME_ORNAMENT=")));
+    has(miami("THEME_PRESENCE=\"◆◇\"", "THEME_PRESENCE=\"◆\u{301}\u{200b}\""), "`THEME_PRESENCE` glyph `\u{200b}` is 0 columns wide; it must be 1".into());
 }
 
 #[test]
@@ -570,4 +575,90 @@ fn a_grey_status_slot_stays_grey() {
     for (name, c) in r.status() {
         assert!(lch(c).c < 0.02, "{name} was tinted: {}", c.hex());
     }
+}
+
+// ── Report blocks ──────────────────────────────────────────────
+
+/// `s` with its escape sequences taken out.
+fn visible(s: &str) -> String {
+    let mut out = String::new();
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            if chars.next() == Some('[') {
+                for c in chars.by_ref() {
+                    if ('\x40'..='\x7e').contains(&c) {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    out
+}
+
+fn bg(c: Rgb) -> String {
+    format!("48;2;{};{};{}m", c.0, c.1, c.2)
+}
+
+#[test]
+fn a_block_is_unchanged_where_no_ground_is_painted() {
+    let report = "Status\n  \x1b[32mok\x1b[0m engine\n";
+    let paper = theme("paper");
+    for p in [
+        Painter::plain(),
+        Painter::terminal(ColorDepth::TrueColor),
+        Painter::themed(&bundled()[1], ColorDepth::TrueColor),
+        Painter::select(Some(&paper), ColorDepth::Ansi16),
+        Painter::select(Some(&paper), ColorDepth::NoColor),
+    ] {
+        assert_eq!(p.block(report, 40), report, "{p:?}");
+    }
+}
+
+#[test]
+fn a_fill_theme_paints_every_line_out_to_the_width() {
+    let paper = theme("paper");
+    let p = Painter::themed(&paper, ColorDepth::TrueColor);
+    let out = p.block("one\n\x1b[1mtwo\x1b[0m end\n", 12);
+    assert!(out.ends_with('\n'), "the trailing newline is kept");
+    let lines: Vec<&str> = out.trim_end_matches('\n').split('\n').collect();
+    assert_eq!(lines.len(), 2);
+    for l in &lines {
+        assert_eq!(visible(l).chars().count(), 12, "{l:?}");
+        assert!(l.contains(&bg(paper.slots.bg)) && l.ends_with(RESET), "{l:?}");
+    }
+    let body = Roles::derive(&paper).body;
+    assert!(lines[0].starts_with(&format!("\x1b[38;2;{};{};{}m", body.0, body.1, body.2)), "text with no colour of its own is body");
+    let after = lines[1].split("\x1b[0m").nth(1).unwrap();
+    assert!(after.starts_with("\x1b[38;2;") && after.contains(&bg(paper.slots.bg)), "a reset mid-line puts the ground back: {after:?}");
+    let flat = Painter::themed(&paper, ColorDepth::Ansi256).block("x", 4);
+    assert!(flat.contains(&format!("48;5;{}m", nearest_256(paper.slots.bg))), "256 colours: the flat bg");
+}
+
+#[test]
+fn a_vertical_gradient_runs_down_the_block_and_a_horizontal_one_across_it() {
+    let nights = theme("miami-nights");
+    let stops = nights.gradient.unwrap().stops().to_vec();
+    let out = Painter::themed(&nights, ColorDepth::TrueColor).block("a\nb\nc", 6);
+    let lines: Vec<&str> = out.split('\n').collect();
+    assert!(lines[0].contains(&bg(stops[0])) && lines[2].contains(&bg(stops[2])), "{lines:?}");
+    assert!(!lines[0].contains(&bg(stops[2])));
+    let tampa = theme("tampa");
+    let stops = tampa.gradient.unwrap().stops().to_vec();
+    let row = Painter::themed(&tampa, ColorDepth::TrueColor).block("ab", 10);
+    assert!(row.contains(&bg(stops[0])) && row.contains(&bg(*stops.last().unwrap())), "both ends of the row");
+    assert_eq!(visible(&row), "ab        ");
+}
+
+#[test]
+fn a_span_with_its_own_ground_keeps_it() {
+    let paper = theme("paper");
+    let p = Painter::themed(&paper, ColorDepth::TrueColor);
+    let out = p.block("\x1b[7;48;5;196mhot\x1b[0m", 8);
+    let span = out.split("\x1b[7;48;5;196m").nth(1).unwrap();
+    assert!(span.starts_with("hot\x1b[0m"), "no theme ground inside the span: {span:?}");
+    assert_eq!(visible(&out), "hot     ");
 }
