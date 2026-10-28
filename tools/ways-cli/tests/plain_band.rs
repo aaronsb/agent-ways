@@ -92,12 +92,17 @@ fn tty(home: &Path, args: &[&str]) -> Command {
     cmd
 }
 
-/// `ways <args>` on a terminal, parsed into cells. The terminal's CRLF is
-/// read back as LF.
-fn run(home: &Path, args: &[&str]) -> tui_harness::Grid {
+/// What `ways <args>` writes to a terminal, the terminal's CRLF read back
+/// as LF.
+fn run_tty(home: &Path, args: &[&str]) -> String {
     let out = tty(home, args).output().expect("run script");
     assert!(out.status.success(), "ways {args:?} failed: {}", String::from_utf8_lossy(&out.stdout));
-    tui_harness::sgr::parse(&String::from_utf8(out.stdout).unwrap().replace("\r\n", "\n"))
+    String::from_utf8(out.stdout).unwrap().replace("\r\n", "\n")
+}
+
+/// `ways <args>` on a terminal, parsed into cells.
+fn run(home: &Path, args: &[&str]) -> tui_harness::Grid {
+    tui_harness::sgr::parse(&run_tty(home, args))
 }
 
 /// Whether `cmd` exits within `limit`; killed when it does not.
@@ -227,5 +232,19 @@ fn a_piped_hook_command_under_forced_colour_reads_no_theme() {
         let args = show("tty");
         let blocked = !exits_within(tty(&home, &args.each_ref().map(String::as_str)), Duration::from_secs(2));
         assert!(blocked, "on a terminal ways reads the active theme, so the FIFO holds it");
+    }
+}
+
+#[test]
+fn json_on_a_terminal_is_plain_json() {
+    if !have_script() {
+        return;
+    }
+    let (home, _root) = home("json");
+    assert!(run_tty(&home, &["projects", "list"]).contains("\x1b[48;2;"), "the report itself is a band");
+    for args in [vec!["projects", "list", "--json"], vec!["projects", "search", "x", "--json"], vec!["projects", "show", "/tmp", "--json"]] {
+        let out = run_tty(&home, &args);
+        assert!(!out.contains('\x1b'), "ways {args:?} on a terminal paints its JSON: {out:?}");
+        serde_json::from_str::<serde_json::Value>(&out).unwrap_or_else(|e| panic!("ways {args:?}: {e}: {out:?}"));
     }
 }

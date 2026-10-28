@@ -146,8 +146,14 @@ pub fn run(command: Option<ProjectsCommand>) -> Result<()> {
         stdin.lock().read_line(&mut line).is_ok() && line.trim().eq_ignore_ascii_case("y")
     };
     // A report prints whole, as a band of a fill theme; a command that asks
-    // for a yes writes as it goes, so its question shows.
-    let report = matches!(command, None | Some(ProjectsCommand::List(_) | ProjectsCommand::Search { .. } | ProjectsCommand::Show { .. } | ProjectsCommand::Stats));
+    // for a yes writes as it goes, so its question shows. JSON is data and
+    // never banded.
+    let report = match &command {
+        None | Some(ProjectsCommand::Stats) => true,
+        Some(ProjectsCommand::List(args)) => !args.json,
+        Some(ProjectsCommand::Search { json, .. } | ProjectsCommand::Show { json, .. }) => !json,
+        _ => false,
+    };
     let ok = if report {
         let mut buf = Vec::new();
         let ok = dispatch(&env, command, &mut buf, &mut confirm)?;
