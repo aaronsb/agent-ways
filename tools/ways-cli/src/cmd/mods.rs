@@ -88,19 +88,30 @@ fn converge_in(targets: &[Enabled], only: Option<&Mod>, dry_run: bool) -> Vec<(P
         let mut lines = if i == 0 { align.clone() } else { Vec::new() };
         lines.extend(attend_mod::converge_target(&src, &t.target(&default_root), only, dry_run));
         // The ways-theme mod's other half is the settings key that selects its
-        // theme, which the settings merge owns while the mod is wanted.
-        if only.is_none_or(|m| *m == attend_mod::THEME) && !dry_run && src.join("settings.json").exists() {
-            let base = super::reconcile::base_path_for(&crate::paths::state_root(), &t.dir);
-            match super::reconcile::merge_settings(&src.join("settings.json"), &t.dir, &base) {
-                Ok(line) if line.contains("up to date") => {}
-                Ok(line) => lines.push(line),
-                Err(e) => lines.push(format!("{}: ⚠ settings.json theme: {e:#}", attend_mod::THEME.label)),
-            }
+        // theme, which the settings merge holds while the mod is installed.
+        if only.is_none_or(|m| *m == attend_mod::THEME) && src.join("settings.json").exists() {
+            lines.extend(theme_lines(&src.join("settings.json"), &t.dir, &default_root, dry_run));
         }
         let prefix = targets.len() > 1;
         out.push((t.dir.clone(), lines.into_iter().map(|l| if prefix { format!("{}: {l}", shown(&t.dir)) } else { l }).collect()));
     }
     out
+}
+
+/// The settings merge's theme lines for one target after its mods have
+/// converged: what it would change, or what it changed.
+fn theme_lines(src_settings: &Path, dir: &Path, default_root: &Path, dry_run: bool) -> Vec<String> {
+    let label = attend_mod::THEME.label;
+    let base = super::reconcile::base_path_for(&crate::paths::state_root(), dir);
+    let done = if dry_run {
+        super::reconcile::theme_plan(src_settings, dir, &base, super::reconcile::theme_claim_ahead(dir, default_root))
+    } else {
+        super::reconcile::merge_settings(src_settings, dir, &base).map(|line| if line.contains("up to date") { Vec::new() } else { vec![line] })
+    };
+    match done {
+        Ok(lines) => lines.into_iter().map(|l| format!("{label}: {l}")).collect(),
+        Err(e) => vec![format!("{label}: ⚠ settings.json theme: {e:#}")],
+    }
 }
 
 /// A line from the convergence as a report item: a ⚠ line is a warning.
