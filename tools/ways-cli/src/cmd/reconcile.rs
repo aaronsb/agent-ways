@@ -314,6 +314,12 @@ pub struct HookRef {
 
 /// Classify every root and dry-run the settings merge in memory.
 pub fn plan_for(state_root: &Path, source_root: &Path, dest_root: &Path, roots: &[ProjectionRoot]) -> Result<Plan> {
+    plan_with(state_root, source_root, dest_root, roots, theme_wanted(dest_root))
+}
+
+/// The plan, with whether the ways-theme mod is wanted given, so a test does
+/// not read the host's own config. A plan writes nothing and runs no command.
+fn plan_with(state_root: &Path, source_root: &Path, dest_root: &Path, roots: &[ProjectionRoot], want_theme: bool) -> Result<Plan> {
     let mut root_plans = Vec::new();
     for root in roots {
         let src = source_root.join(&root.rel);
@@ -343,7 +349,7 @@ pub fn plan_for(state_root: &Path, source_root: &Path, dest_root: &Path, roots: 
         let live: serde_json::Value = sm::read_json_or_empty(&dest_settings)?;
         let base_path = base_path_for(state_root, dest_root);
         let base = sm::base_for(&live, &base_path)?;
-        let merged = sm::merge(&live, &desired_hooks, &base, crate::config::global().secret_path_deny, theme_claim_ahead(dest_root, &paths::projection_root()))?;
+        let merged = sm::merge(&live, &desired_hooks, &base, crate::config::global().secret_path_deny, claim_ahead(want_theme, dest_root))?;
         // Classify against the base as it exists on disk. A first apply's
         // seeded base claims entries by shape, and the plan must show those
         // as claimed rather than as ours from a prior version.
@@ -490,7 +496,7 @@ fn converge_one(
     let src_settings = source_root.join("settings.json");
     let default_root = paths::projection_root();
     if dry_run && !quiet && src_settings.exists() {
-        for line in theme_plan(&src_settings, dest_root, base_path, theme_claim_ahead(dest_root, &default_root))? {
+        for line in theme_plan(&src_settings, dest_root, base_path, theme_claim_ahead(dest_root))? {
             eprintln!("{line}");
         }
     }
@@ -550,12 +556,17 @@ fn claims_theme(wanted: bool, dest_root: &Path) -> bool {
 }
 
 /// The claim a what-if reports: the one the merge will hold once the mods
-/// stage has run, with a wanted mod not yet installed counted in when this
-/// host can install it. Claude Code is asked only in that case.
-pub(crate) fn theme_claim_ahead(dest_root: &Path, default_root: &Path) -> bool {
-    use crate::cmd::attend_mod::{host_can_load, Record, THEME};
-    theme_claimed(dest_root)
-        || (theme_wanted(dest_root) && !Record::read(dest_root).has(THEME.id) && host_can_load(&THEME, dest_root, default_root).is_ok())
+/// stage has run, with a wanted mod not yet installed counted in when
+/// `claude` is on PATH. A what-if runs no `claude` (ADR-511): the CLI rewrites
+/// the target's settings.json as it starts, so the version floor and the
+/// install are checked when the mods stage runs.
+pub(crate) fn theme_claim_ahead(dest_root: &Path) -> bool {
+    claim_ahead(theme_wanted(dest_root), dest_root)
+}
+
+fn claim_ahead(wanted: bool, dest_root: &Path) -> bool {
+    use crate::cmd::attend_mod::{Record, THEME};
+    claims_theme(wanted, dest_root) || (wanted && !Record::read(dest_root).has(THEME.id) && crate::cmd::mcp_register::claude_bin().is_some())
 }
 
 /// The settings merge for the target at `dest_root`. While the ways-theme mod
@@ -1071,7 +1082,7 @@ mod tests {
             r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"${HOME}/.claude/hooks/ways/check-setup.sh --v2"}]}]}}"#,
         )
         .unwrap();
-        let plan = plan_for(&state, &src, &dst, &roots).unwrap();
+        let plan = plan_with(&state, &src, &dst, &roots, false).unwrap();
         let s = plan.settings.as_ref().unwrap();
         assert_eq!(s.hooks_refreshed.len(), 1, "{s:?}");
         assert!(s.hooks_replaced.is_empty(), "{s:?}");
@@ -1175,6 +1186,28 @@ mod tests {
     }
 
     #[test]
+    fn a_plan_with_the_theme_mod_wanted_writes_nothing_and_runs_no_claude() {
+        let base = sandbox("plan-theme");
+        let src = base.join("data");
+        let dst = base.join("proj");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+        fake_source(&src);
+        fake_settings(&src);
+        std::fs::write(dst.join("settings.json"), user_settings()).unwrap();
+        let roots = projection_roots(&src);
+        let plan = plan_with(&base.join("state"), &src, &dst, &roots, true).unwrap();
+        // Claude Code's CLI rewrites the settings it starts under, so this
+        // holds only while the plan runs no `claude`.
+        assert_eq!(std::fs::read_to_string(dst.join("settings.json")).unwrap(), user_settings());
+        assert!(!dst.join("themes").exists());
+        // The claim is reported ahead wherever `claude` is on PATH.
+        let claims = plan.settings.as_ref().unwrap().theme.is_some();
+        assert_eq!(claims, crate::cmd::mcp_register::claude_bin().is_some());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
     fn plan_names_refused_roots_kept_user_hooks_and_added_entries() {
         let base = sandbox("plan");
         let src = base.join("data");
@@ -1187,7 +1220,7 @@ mod tests {
         std::fs::write(dst.join("settings.json"), user_settings()).unwrap();
         let roots = projection_roots(&src);
         let state = base.join("state");
-        let plan = plan_for(&state, &src, &dst, &roots).unwrap();
+        let plan = plan_with(&state, &src, &dst, &roots, false).unwrap();
         let skills = plan.roots.iter().find(|r| r.rel == "skills").unwrap();
         assert_eq!(skills.state, "refused");
         assert!(skills.detail.starts_with("real directory, 1 entries"));
@@ -1224,7 +1257,7 @@ mod tests {
         .unwrap();
         let roots = projection_roots(&src);
         let state = base.join("state");
-        let plan = plan_for(&state, &src, &dst, &roots).unwrap();
+        let plan = plan_with(&state, &src, &dst, &roots, false).unwrap();
         let s = plan.settings.as_ref().unwrap();
         assert_eq!(s.hooks_replaced.len(), 1, "claimed as ours: {s:?}");
         assert!(s.hooks_replaced[0].command.contains("my-own.sh"));

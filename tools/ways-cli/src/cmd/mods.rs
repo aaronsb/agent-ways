@@ -90,7 +90,7 @@ fn converge_in(targets: &[Enabled], only: Option<&Mod>, dry_run: bool) -> Vec<(P
         // The ways-theme mod's other half is the settings key that selects its
         // theme, which the settings merge holds while the mod is installed.
         if only.is_none_or(|m| *m == attend_mod::THEME) && src.join("settings.json").exists() {
-            lines.extend(theme_lines(&src.join("settings.json"), &t.dir, &default_root, dry_run));
+            lines.extend(theme_lines(&src.join("settings.json"), &t.dir, dry_run));
         }
         let prefix = targets.len() > 1;
         out.push((t.dir.clone(), lines.into_iter().map(|l| if prefix { format!("{}: {l}", shown(&t.dir)) } else { l }).collect()));
@@ -100,11 +100,11 @@ fn converge_in(targets: &[Enabled], only: Option<&Mod>, dry_run: bool) -> Vec<(P
 
 /// The settings merge's theme lines for one target after its mods have
 /// converged: what it would change, or what it changed.
-fn theme_lines(src_settings: &Path, dir: &Path, default_root: &Path, dry_run: bool) -> Vec<String> {
+fn theme_lines(src_settings: &Path, dir: &Path, dry_run: bool) -> Vec<String> {
     let label = attend_mod::THEME.label;
     let base = super::reconcile::base_path_for(&crate::paths::state_root(), dir);
     let done = if dry_run {
-        super::reconcile::theme_plan(src_settings, dir, &base, super::reconcile::theme_claim_ahead(dir, default_root))
+        super::reconcile::theme_plan(src_settings, dir, &base, super::reconcile::theme_claim_ahead(dir))
     } else {
         super::reconcile::merge_settings(src_settings, dir, &base).map(|line| if line.contains("up to date") { Vec::new() } else { vec![line] })
     };
