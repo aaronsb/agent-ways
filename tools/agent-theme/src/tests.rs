@@ -139,7 +139,7 @@ fn chrome_errors_name_the_line_and_key() {
     has(miami("THEME_RULE_GLYPHS=\"─═\"", "THEME_RULE_GLYPHS=\"─═━\""), format!("line {}: `THEME_RULE_GLYPHS` takes 2 glyphs; `─═━` has 3", at("THEME_RULE_GLYPHS=")));
     has(miami("THEME_MARK=\"▌\"", "THEME_MARK=\"🌴\""), format!("line {}: `THEME_MARK` glyph `🌴` is 2 columns wide; it must be 1", at("THEME_MARK=")));
     has(miami("THEME_ORNAMENT=\"🦩\"", "THEME_ORNAMENT=\"🦩🌴\""), format!("line {}: `THEME_ORNAMENT` takes 1 glyph; `🦩🌴` has 2", at("THEME_ORNAMENT=")));
-    has(miami("THEME_PRESENCE=\"◆◇\"", "THEME_PRESENCE=\"◆\u{301}\u{200b}\""), "`THEME_PRESENCE` glyph `\u{200b}` is 0 columns wide; it must be 1".into());
+    has(miami("THEME_PRESENCE=\"◆◇\"", "THEME_PRESENCE=\"◆\u{301}\u{200b}\""), "`THEME_PRESENCE` glyph `\\u{200b}` is 0 columns wide; it must be 1".into());
 }
 
 #[test]
