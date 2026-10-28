@@ -241,11 +241,13 @@ impl ModSettings {
 
 /// What the ways-theme mod reads at session start: theme `t` (`None` for
 /// terminal) with the roles Claude Code's grounds take, its gradient, the
-/// words in effect and the render settings.
+/// words in effect and the render settings. Under terminal the words are
+/// the settings' alone.
 pub fn mod_json(t: Option<&Theme>, s: &ModSettings) -> serde_json::Value {
     let render = s.render_under(t);
+    let words = s.words(t).map(|w| json!({ "spinner": w.spinner, "done": w.done }));
     let Some(t) = t else {
-        return json!({ "theme": TERMINAL, "kind": "dark", "roles": null, "gradient": null, "words": null, "render": render });
+        return json!({ "theme": TERMINAL, "kind": "dark", "roles": null, "gradient": null, "words": words, "render": render });
     };
     let r = agent_theme::claude_code_roles(t);
     let roles = hex_map([
@@ -265,7 +267,6 @@ pub fn mod_json(t: Option<&Theme>, s: &ModSettings) -> serde_json::Value {
         ("subtle", r.track),
     ]);
     let gradient = t.gradient.map(|g| json!({ "axis": g.axis.name(), "stops": g.stops().iter().map(|c| c.hex()).collect::<Vec<_>>() }));
-    let words = s.words(Some(t)).map(|w| json!({ "spinner": w.spinner, "done": w.done }));
     json!({
         "theme": t.name,
         "kind": if t.kind == Kind::Dark { "dark" } else { "light" },
@@ -339,7 +340,10 @@ mod tests {
     }
 
     #[test]
-    fn terminal_exports_render_alone() {
+    fn terminal_exports_render_and_the_settings_words_alone() {
+        let mut s = defaults();
+        s.done = vec!["Moored".into()];
+        assert_eq!(mod_json(None, &s)["words"], json!({ "spinner": [], "done": ["Moored"] }));
         let v = mod_json(None, &defaults());
         assert_eq!(
             v,

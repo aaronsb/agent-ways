@@ -1025,7 +1025,8 @@ enum ThemeCommand {
     /// start: the theme's roles on Claude Code's grounds, its gradient, the
     /// words in effect (mods.ways-theme.spinner_words and done_words, else
     /// the theme's [words]) and the mods.ways-theme render settings. For
-    /// terminal only the render settings carry values.
+    /// terminal the roles and gradient are null, and the words come from
+    /// the settings alone.
     #[command(group = clap::ArgGroup::new("form").required(true))]
     Export {
         /// The theme; theme.active when left out

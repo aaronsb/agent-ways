@@ -458,7 +458,7 @@ fn export_mod_prints_what_the_theme_mod_reads_on_one_line() {
     };
     let v = one(&["settings", "theme", "export", "--mod"]);
     assert_eq!((v["theme"].as_str(), v["kind"].as_str()), (Some("terminal"), Some("dark")));
-    assert!(v["roles"].is_null() && v["gradient"].is_null() && v["words"].is_null(), "{v}");
+    assert!(v["roles"].is_null() && v["gradient"].is_null() && v["words"].is_null(), "nothing sets words: {v}");
     assert_eq!(v["render"]["prompt_box"], "frame", "terminal has no gradient");
     let keys: Vec<&str> = v["render"].as_object().unwrap().keys().map(String::as_str).collect();
     assert_eq!(keys, ["rail", "tables", "shimmer", "charts", "markdown", "icons", "frames", "prompt_box", "copy"]);
@@ -475,6 +475,9 @@ fn export_mod_prints_what_the_theme_mod_reads_on_one_line() {
     let v = one(&["settings", "theme", "export", "nord", "--mod"]);
     assert_eq!(v["words"], serde_json::json!({ "spinner": ["Sailing", "Docking"], "done": [] }));
     assert_eq!((v["render"]["rail"].as_bool(), v["render"]["prompt_box"].as_str(), v["render"]["copy"].as_bool()), (Some(false), Some("frame"), Some(false)));
+    assert_eq!(fx.run(&["settings", "set", "theme.active", "terminal"]).2, 0);
+    let v = one(&["settings", "theme", "export", "--mod"]);
+    assert_eq!(v["words"], serde_json::json!({ "spinner": ["Sailing", "Docking"], "done": [] }), "terminal takes the settings' words");
     let (_, err, code) = fx.run(&["settings", "theme", "export", "gone", "--mod"]);
     assert_eq!((code, err.as_str()), (2, "ways settings: no theme `gone`; `ways settings theme list` names the themes\n"));
 }
