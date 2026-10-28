@@ -246,7 +246,6 @@ describe('frames on the terminal', () => {
     ['an expanded tool group', THEMED, GROUP, { isExpanded: true }],
     ['a reply past the length bound', THEMED, REPLY, { text: 'x'.repeat(20001) }],
     ['a block that does not open a reply', THEMED, REPLY, { isFirstOfReply: false }],
-    ['a reply under verbose', { ...THEMED, verbose: true }, REPLY, {}],
     ['a reply under the terminal theme', { active: ok('terminal\n') }, REPLY, {}],
     ['a reply when ways fails', {}, REPLY, {}],
   ]
@@ -351,13 +350,46 @@ describe('frames on the terminal', () => {
     })
   })
 
-  test('turning verbose on in /config hands the rows back', async ($, on) => {
-    host(on, THEMED)
-    await $.session.start(INTERACTIVE)
-    await $.config.set({ key: 'verbose', value: true } as never)
-    const ui = await $.ui.mount({ ...REPLY, surface: 'terminal' } as never)
-    expect(await ui.drawn()).toMatchObject({ type: 'Text' })
-    await ui.unmount()
+  describe('under verbose', () => {
+    // Claude Code reports every row and every turn line expanded under
+    // verbose, the main view included, as a live session showed.
+    const TURN = { plugin: 'ways-theme', component: 'TurnDuration', requestId: 'd1', props: { word: 'Baked', durationMs: 3000, isExpanded: true } } as const
+    const expanded = [REPLY, { ...TOOL, props: { ...TOOL.props, isExpanded: true } }, { ...GROUP, props: { ...GROUP.props, isExpanded: true } }]
+    const framesEach = async ($: Parameters<TestBody>[0]) => {
+      for (const site of expanded) {
+        const ui = await $.ui.mount({ ...site, surface: 'terminal' } as never)
+        expect(await ui.drawn()).toMatchObject({ type: 'Box', props: { borderStyle: 'round' } })
+        await ui.unmount()
+      }
+    }
+
+    test('rows and turn lines that report expanded are framed', async ($, on) => {
+      host(on, { ...THEMED, verbose: true })
+      await $.session.start(INTERACTIVE)
+      const turn = await $.ui.mount({ ...TURN, surface: 'terminal' } as never)
+      await framesEach($)
+      await turn.unmount()
+    })
+
+    test('turning verbose on in /config keeps the frames', async ($, on) => {
+      host(on, THEMED)
+      await $.session.start(INTERACTIVE)
+      await $.config.set({ key: 'verbose', value: true } as never)
+      const turn = await $.ui.mount({ ...TURN, surface: 'terminal' } as never)
+      await framesEach($)
+      await turn.unmount()
+    })
+
+    test('turning it off hands ctrl+o back to the turn line', async ($, on) => {
+      host(on, { ...THEMED, verbose: true })
+      await $.session.start(INTERACTIVE)
+      const turn = await $.ui.mount({ ...TURN, surface: 'terminal' } as never)
+      await $.config.set({ key: 'verbose', value: false } as never)
+      const ui = await $.ui.mount({ ...REPLY, surface: 'terminal' } as never)
+      expect(await ui.drawn()).toMatchObject({ type: 'Text' })
+      await ui.unmount()
+      await turn.unmount()
+    })
   })
 
   for (const surface of ['desktop', 'vscode', 'mobile'] as const) {

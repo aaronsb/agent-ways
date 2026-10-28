@@ -321,9 +321,11 @@ function copier($: EngineInterface, surface: RenderSurface): (text: string) => v
   }
 }
 
-/** What the register module shares: whether the terminal's view is the ctrl+o
- *  transcript, as its TurnDuration hook reads it. */
-export type Shared = { isTranscriptExpanded: () => boolean }
+/** What the register module shares: whether a terminal row draws expanded,
+ *  given the row's own `isExpanded`: the ctrl+o transcript, as its TurnDuration
+ *  hook reads it, or the row opened on its own, and neither under `verbose`
+ *  (isExpandedView). */
+export type Shared = { isExpanded: (row?: boolean) => boolean }
 
 /** Registers the skins layer. Called last in the module's register, so each
  *  hook here sits inside the module's own: the frames wrap what it draws. */
@@ -432,7 +434,7 @@ export function registerSkins(on: On, shared: Shared): void {
     const disclosure = memberOf(disclosureAtom, e)
     const open = isOpen(await read($, disclosure), e.props.isErrored)
     const base = await sessionLook($, e, lookOf($.ui.resolve(e), setup, e.surface, copier($, e.surface)), { touched: typeof path === 'string', folds: open, cwd })
-    const framed = isFramed(setup, e, shared.isTranscriptExpanded() || e.props.isExpanded === true)
+    const framed = isFramed(setup, e, shared.isExpanded(e.props.isExpanded))
     const plain = base.svg === undefined ? base : { ...base, isFirstDraw: await firstDraws($, e) }
     const look = framed ? forFrame(plain) : plain
     const touch = typeof path === 'string' && look.touched !== undefined ? touchOf(look.touched.files, path, cwd) : undefined
@@ -473,7 +475,7 @@ export function registerSkins(on: On, shared: Shared): void {
       if (e.props.isExpanded) return next(e)
     }
     const look = lookOf($.ui.resolve(e), setup, e.surface)
-    return isFramed(setup, e, shared.isTranscriptExpanded()) ? marginRow(look, groupRow(forFrame(look), e.props.calls)) : groupRow(look, e.props.calls)
+    return isFramed(setup, e, shared.isExpanded()) ? marginRow(look, groupRow(forFrame(look), e.props.calls)) : groupRow(look, e.props.calls)
   })
 
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
@@ -530,7 +532,7 @@ export function registerSkins(on: On, shared: Shared): void {
     }
     const ui = $.ui.resolve(e)
     const hasMore = await read($, memberOf(imagesAtom, e))
-    const isExpanded = shared.isTranscriptExpanded() || e.props.isExpanded
+    const isExpanded = shared.isExpanded(e.props.isExpanded)
     const width = (e.viewport?.columns ?? 80) - 1
     const canGradient = setup.promptBox === 'gradient' && !hasMore && !isExpanded && !NOT_PLAIN.test(e.props.text) && width >= MIN_WIDTH
     if (canGradient && setup.ground !== null) {
@@ -555,7 +557,7 @@ export function registerSkins(on: On, shared: Shared): void {
     const base = await sessionLook($, e, lookOf(ui, setup, e.surface, copier($, e.surface)), replyNeeds(text, segments))
     const look = base.svg === undefined ? base : { ...base, isFirstDraw: await firstDraws($, e) }
     const rows = replyRows(look, segments, e.viewport?.columns ?? 100, svg, segments.length > 1 ? text : undefined)
-    const framed = e.props.isFirstOfReply && isFramed(setup, e, shared.isTranscriptExpanded())
+    const framed = e.props.isFirstOfReply && isFramed(setup, e, shared.isExpanded())
     return withSettle($, e, framed ? marginRow(look, rows) : rows)
   })
 

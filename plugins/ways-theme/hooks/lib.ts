@@ -94,15 +94,21 @@ export type FrameCase = {
   isThemed: boolean
   /** Claude Code's `verbose` row is on. */
   isVerbose: boolean
-  /** The row is expanded (ctrl+o). */
+  /** The row reports itself expanded (ctrl+o). */
   isExpanded?: boolean
   /** The reply's length, for a reply. */
   length?: number
 }
 
+/** Whether a row's `isExpanded` names the ctrl+o view or a row opened on its
+ *  own. Under `verbose` Claude Code reports every row and every turn line
+ *  expanded, the main view included, so there the flag names no view and
+ *  reads as false; the ctrl+o transcript then draws as the main view does. */
+export const isExpandedView = (isExpanded: boolean | undefined, isVerbose: boolean): boolean => isExpanded === true && !isVerbose
+
 /** Frames draw only on the terminal, under an agent-ways theme, with the
- *  transcript collapsed and the reply within bounds. */
+ *  view collapsed and the reply within bounds. */
 export function shouldFrame(c: FrameCase): boolean {
-  if (c.surface !== 'terminal' || !c.isThemed || c.isVerbose || c.isExpanded) return false
+  if (c.surface !== 'terminal' || !c.isThemed || isExpandedView(c.isExpanded, c.isVerbose)) return false
   return c.length === undefined || c.length <= MAX_FRAMED_CHARS
 }

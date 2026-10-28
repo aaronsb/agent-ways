@@ -15,10 +15,11 @@
 // a border on the theme's ground, and each tool call and tool group in a
 // border, wrapped around the engine's own drawing. The colours are Claude
 // Code theme keys, so they follow `custom:ways`. The ctrl+o transcript, read
-// from the line that closes a turn, an expanded tool row, `verbose`, a reply
-// longer than MAX_FRAMED_CHARS and every other surface draw the engine's own
-// row. Only a full `borderStyle` is used: a Box's per-side border props are
-// refused.
+// from the line that closes a turn, an expanded tool row, a reply longer than
+// MAX_FRAMED_CHARS and every other surface draw the engine's own row. Under
+// `verbose` every row reports itself expanded, so the frames draw there as
+// with it off (isExpandedView). Only a full `borderStyle` is used: a Box's
+// per-side border props are refused.
 //
 // Every failure does nothing: `ways` missing, a non-zero exit, output that
 // does not parse, a call past its bound, a write refused. The file stays as
@@ -28,7 +29,7 @@
 
 import type { EngineInterface, Register, RenderElement } from 'claude-code'
 
-import { DEFAULT_THEME, FRAME, TERMINAL, WAYS_TIMEOUT_MS, activeArgv, configDir, exportArgv, parseActive, parseTheme, shouldFrame, themeFile, themeText } from './lib.ts'
+import { DEFAULT_THEME, FRAME, TERMINAL, WAYS_TIMEOUT_MS, activeArgv, configDir, exportArgv, isExpandedView, parseActive, parseTheme, shouldFrame, themeFile, themeText } from './lib.ts'
 import type { ClaudeCodeTheme, Run } from './lib.ts'
 import { framesWanted, registerSkins } from './skins/hub.tsx'
 
@@ -155,5 +156,5 @@ export const register: Register = on => {
   })
 
   // The skins layer, after the hooks above so they wrap what it draws.
-  registerSkins(on, { isTranscriptExpanded: () => isTranscriptExpanded })
+  registerSkins(on, { isExpanded: row => isExpandedView(isTranscriptExpanded || row === true, frames.isVerbose) })
 }

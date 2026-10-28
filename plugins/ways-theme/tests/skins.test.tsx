@@ -480,6 +480,18 @@ describe('the gradient prompt box', () => {
     await line.unmount()
   })
 
+  test('under verbose, where every row and turn line reports expanded, the box keeps its gradient', async ($, on) => {
+    host(on, { mod: json(MIAMI_NIGHTS), verbose: true })
+    await $.session.start(INTERACTIVE)
+    const line = await $.ui.mount(at('terminal', 'TurnDuration', { word: 'Baked', durationMs: 4000, isExpanded: true }, 'turn1'))
+    const ui = await $.ui.mount(at('terminal', 'UserMessage', { ...PERSON, isExpanded: true }))
+    const tree = await ui.drawn()
+    expect(borders(tree).length).toBe(0)
+    expect(new Set(grounds(tree)).size).toBeGreaterThanOrEqual(3)
+    await ui.unmount()
+    await line.unmount()
+  })
+
   test('a theme with no gradient draws a flat box in its selection colour', async ($, on) => {
     host(on, { mod: json({ ...MIAMI_NIGHTS, gradient: null }) })
     await $.session.start(INTERACTIVE)
