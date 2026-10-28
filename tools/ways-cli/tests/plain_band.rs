@@ -165,6 +165,16 @@ fn ways_status_under_miami_nights_grounds_every_cell() {
 }
 
 #[test]
+fn the_language_report_s_underline_is_the_theme_s_rule() {
+    if !have_script() {
+        return;
+    }
+    let (home, _root) = home("language");
+    let out = text(&run(&home, &["tune", "language"]));
+    assert!(out.contains(&format!("Language Coverage Report\n{}", "─".repeat(23))) && !out.contains("=="), "{out}");
+}
+
+#[test]
 fn the_session_and_author_reports_are_bands_too() {
     if !have_script() {
         return;
@@ -215,6 +225,8 @@ fn forced_colour_on_a_pipe_paints_no_band() {
     assert!(out.contains("Ways Engine Status\n==================\n"), "the default painter keeps the ASCII underline: {out:?}");
     assert!(!out.contains("48;"), "forced colour paints no ground: {out:?}");
     assert!(out.lines().all(|l| l == l.trim_end()), "and pads nothing: {out:?}");
+    let language = run_raw(&home, &["tune", "language"], true);
+    assert!(language.starts_with("Language Coverage Report\n=======================\n"), "{language:?}");
 }
 
 #[test]

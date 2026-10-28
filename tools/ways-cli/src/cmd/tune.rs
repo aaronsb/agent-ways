@@ -294,7 +294,7 @@ fn emit_report(results: &[FidelityResult], fidelity_threshold: f64, discriminati
         .collect();
 
     println!("Locale Alias Fidelity + Discrimination");
-    println!("======================================");
+    println!("{}", agent_theme::underline("======================================"));
     println!();
 
     let total = results.iter().filter(|r| r.peer_count > 0).count();

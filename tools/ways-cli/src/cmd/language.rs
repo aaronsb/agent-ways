@@ -60,7 +60,7 @@ pub fn run(filter_lang: Option<&str>, audit: bool, json_output: bool) -> Result<
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         println!("Language Coverage Report");
-        println!("=======================");
+        println!("{}", agent_theme::underline("======================="));
         println!();
         println!("Output language:  {resolved}");
         println!("EN model:         {}", if en_model { "available" } else { "MISSING" });
