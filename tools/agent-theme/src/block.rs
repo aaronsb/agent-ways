@@ -32,7 +32,7 @@ impl Painter {
             if y > 0 {
                 out.push('\n');
             }
-            Band { ground: &ground, fg, row: y as u16, width, last: None, own: false, pen: &mut pen, out: &mut out }.line(line);
+            Band { ground: &ground, fg, row: y.min(u16::MAX as usize) as u16, width, last: None, own: false, pen: &mut pen, out: &mut out }.line(line);
         }
         if body.is_some() {
             out.push('\n');

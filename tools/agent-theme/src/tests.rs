@@ -788,6 +788,14 @@ fn a_vertical_gradient_runs_down_the_block_and_a_horizontal_one_across_it() {
 }
 
 #[test]
+fn a_block_past_the_last_row_stays_on_the_last_ground() {
+    let out = Painter::themed(&theme("miami-nights"), ColorDepth::TrueColor).block(&"x\n".repeat(65_537), 4);
+    let lines: Vec<&str> = out.split('\n').collect();
+    assert_eq!(lines[65_536], lines[65_534], "the vertical gradient does not start over");
+    assert_ne!(lines[65_536], lines[0]);
+}
+
+#[test]
 fn a_line_longer_than_the_width_is_padded_to_the_end_of_its_last_row() {
     let tampa = theme("tampa");
     let p = Painter::themed(&tampa, ColorDepth::TrueColor);
