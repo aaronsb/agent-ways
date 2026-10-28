@@ -879,7 +879,7 @@ fn picker_status(p: &Picker) -> String {
         Some(at) => {
             let ago = agent_fmt::when::ago(p.sampler.now().saturating_sub(at) / 1000);
             if p.sampler.live(p.sel) {
-                format!("{} live · written {ago} · {place}", super::picker::LIVE_MARK)
+                format!("{} live · written {ago} · {place}", theme::presence()[0])
             } else {
                 format!("written {ago} · {place}")
             }
@@ -1017,12 +1017,12 @@ fn header(r: &Replay, width: u16) -> Vec<Line<'static>> {
     }
     if r.play.is_live() {
         if r.play.following() {
-            metrics.push((0, Span::styled("  ● LIVE", theme::ok().add_modifier(Modifier::BOLD))));
+            metrics.push((0, Span::styled(format!("  {} LIVE", theme::presence()[0]), theme::ok().add_modifier(Modifier::BOLD))));
             if let Some(then) = agent_fmt::when::parse_utc_iso(&fr.timestamp) {
                 metrics.push((0, Span::styled(format!(" · {}", agent_fmt::when::ago(r.now.saturating_sub(then))), theme::muted())));
             }
         } else {
-            metrics.push((0, Span::styled("  ● LIVE paused", theme::warn().add_modifier(Modifier::BOLD))));
+            metrics.push((0, Span::styled(format!("  {} LIVE paused", theme::presence()[0]), theme::warn().add_modifier(Modifier::BOLD))));
         }
     }
     for drop in [1u8, 3, 2] {

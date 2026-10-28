@@ -17,9 +17,6 @@ use crate::cmd::screen_host::pane;
 use super::live::{Clock, Sampler, Stat, SAMPLE_TICK};
 use super::sessions::SessionInfo;
 
-/// The mark a live session's row carries.
-pub(crate) const LIVE_MARK: &str = "●";
-
 /// The sessions to pick from, newest first.
 pub(crate) struct Picker {
     pub(crate) sessions: Vec<SessionInfo>,
@@ -148,7 +145,7 @@ pub(crate) fn draw_picker(f: &mut Draw, p: &mut Picker, main: Rect) {
                     (false, true) => Span::styled("yes", theme::ok()),
                     (false, false) => Span::styled("gone", theme::muted()),
                 };
-                let mark = if p.sampler.live(i) { Span::styled(LIVE_MARK, theme::ok().add_modifier(Modifier::BOLD)) } else { Span::raw("") };
+                let mark = if p.sampler.live(i) { Span::styled(theme::presence()[0], theme::ok().add_modifier(Modifier::BOLD)) } else { Span::raw("") };
                 Row::new(vec![
                     Cell::from(mark),
                     Cell::from(s.id.chars().take(12).collect::<String>()),
