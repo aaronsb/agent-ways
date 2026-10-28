@@ -242,7 +242,8 @@ fn json_on_a_terminal_is_plain_json() {
         return;
     }
     let (home, _root) = home("json");
-    assert!(run_tty(&home, &["projects", "list"]).contains("\x1b[48;2;"), "the report itself is a band");
+    // The report itself is a band.
+    grounded(&["projects", "list"], &run(&home, &["projects", "list"]));
     for args in [vec!["projects", "list", "--json"], vec!["projects", "search", "x", "--json"], vec!["projects", "show", "/tmp", "--json"]] {
         let out = run_tty(&home, &args);
         assert!(!out.contains('\x1b'), "ways {args:?} on a terminal paints its JSON: {out:?}");
