@@ -156,17 +156,23 @@ pub fn claude_code(t: &Theme) -> ClaudeCode {
     ClaudeCode { name: t.label.clone(), base, overrides }
 }
 
-/// Every exported colour of `t`'s mapping below its floor, as (token,
-/// colour, ground, ratio, floor).
+/// Every exported colour of `t` below its floor, as (token, colour, ground,
+/// ratio, floor). A pin is exported as given and checked at its token's
+/// floor in the mapping; a pin of a token the mapping leaves to the base
+/// has no floor here.
 pub fn claude_code_unreadable(t: &Theme) -> Vec<(&'static str, Rgb, Rgb, f64, f64)> {
     let r = claude_code_roles(t);
     let mut grounds = vec![r.bg, r.selection_bg];
     grounds.extend(ground_band(t.kind));
+    let floors: Vec<(&'static str, Floor)> = claude_code_map(&r).into_iter().map(|(k, _, f)| (k, f)).collect();
+    let exported = claude_code(t).overrides;
+    let body = exported.iter().find(|(k, _)| *k == "text").map_or(r.body, |(_, c)| *c);
     let mut out = Vec::new();
-    for (k, c, floor) in claude_code_map(&r) {
+    for (k, c) in exported {
+        let Some(&(_, floor)) = floors.iter().find(|(f, _)| *f == k) else { continue };
         let checks: Vec<(Rgb, Rgb, f64)> = match floor {
             Floor::Ground(min) => grounds.iter().map(|g| (c, *g, min)).collect(),
-            Floor::Under(min) => vec![(r.body, c, min)],
+            Floor::Under(min) => vec![(body, c, min)],
             Floor::On(g, min) => vec![(c, g, min)],
             Floor::None => vec![],
         };
@@ -213,6 +219,17 @@ THEME_ALT="#b967ff"
         // The check sees a failure: the body is taken as given, not lifted.
         let dim = parse(&PALETTE.replace("#e0e0e0", "#303030")).unwrap();
         assert!(claude_code_unreadable(&dim).iter().any(|(k, ..)| *k == "text"));
+    }
+
+    #[test]
+    fn a_pin_below_its_floor_is_reported() {
+        // The pin is exported as given, and the check reads what is exported.
+        let t = parse(&format!("{PALETTE}\n[target.claude-code]\ntext=\"#151515\"\n")).unwrap();
+        assert_eq!(claude_code(&t).overrides.iter().find(|(k, _)| *k == "text").unwrap().1, Rgb(0x15, 0x15, 0x15));
+        assert!(claude_code_unreadable(&t).iter().any(|(k, c, ..)| *k == "text" && *c == Rgb(0x15, 0x15, 0x15)), "{:?}", claude_code_unreadable(&t));
+        // A readable pin passes.
+        let fine = parse(&format!("{PALETTE}\n[target.claude-code]\ntext=\"#f0f0f0\"\n")).unwrap();
+        assert!(claude_code_unreadable(&fine).is_empty(), "{:?}", claude_code_unreadable(&fine));
     }
 
     #[test]
