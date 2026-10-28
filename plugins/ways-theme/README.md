@@ -4,15 +4,14 @@ Claude Code follows the active agent-ways theme (ADR-513). The theme is chosen i
 
 `ways manage mod install ways-theme --commit`, or the mod tab in `ways settings`, installs it. `mods.ways-theme.install` defaults to false.
 
-## What it does
+## How it works
 
-At an interactive session's start the `session.start` hook:
+Claude Code keeps one custom theme for agent-ways, `custom:ways`, in `${CLAUDE_CONFIG_DIR:-~/.claude}/themes/ways.json`.
 
-1. reads `ways settings get theme.active`;
-2. for an agent-ways theme, runs `ways settings theme export <name> --claude-code`, writes the result to `${CLAUDE_CONFIG_DIR:-~/.claude}/themes/ways-<name>.json` when the file differs, and selects `custom:ways-<name>` when Claude Code's theme row differs;
-3. for `terminal`, moves a `custom:ways-*` theme back to Claude Code's `dark` and leaves any other theme alone.
+- **Selection.** While the mod is wanted, the settings merge that `ways manage repair --commit` and the mod manager run owns `"theme": "custom:ways"` in that target's settings.json, and lays down a default `ways.json` if none is there. Uninstalling removes the key through the merge base. A theme the person chose, before or after, is never claimed or removed.
+- **Colours.** At an interactive session's start the mod reads `ways settings get theme.active` and rewrites `ways.json` when its content changed: `ways settings theme export <name> --claude-code` for a theme, Claude Code's own dark for `terminal`. Claude Code watches its themes folder, so the change applies live.
 
-Each `ways` call is bounded at 1.5 s. A missing `ways`, a non-zero exit, output that does not parse, or a call past its bound changes nothing and leaves one debug-log line. A theme the person picks in `/theme` stays until the next session start. A headless (`-p`) session changes nothing.
+The mod selects nothing itself: in Claude Code 2.1.312 `$.config.set` refuses a `custom:` theme. Each `ways` call is bounded at 1.5 s. A missing `ways`, a non-zero exit, output that does not parse, or a call past its bound leaves the file as it was and one debug-log line. A headless (`-p`) session changes nothing.
 
 Claude Code draws on the terminal's own background, so the exporter lifts every text colour to its contrast floor on the theme's bg and on a band of common terminal grounds of the theme's kind. A theme's gradient, border and rule glyphs, marks, presence and event glyphs and ornament do not reach Claude Code's chrome. A theme file's `[target.claude-code]` table pins any Claude Code colour token over the mapping.
 

@@ -1,20 +1,11 @@
-// What the ways-theme mod reads, writes and decides, apart from the engine
-// calls that carry it (register.ts), so the tests can hold each rule.
+// What the ways-theme mod reads and writes, apart from the engine calls
+// that carry it (register.ts), so the tests can hold each rule.
 
 export const WAYS = 'ways'
 
 /** Each `ways` call's bound. A call past it counts as a failure, and a
- *  failure leaves Claude Code's theme as it is. */
+ *  failure leaves the theme file as it was. */
 export const WAYS_TIMEOUT_MS = 1500
-
-/** The prefix of every Claude Code theme this mod writes. A Claude Code
- *  theme of `custom:ways-*` is the mod's own, and only that one is moved
- *  back to `dark` when no agent-ways theme is active. */
-export const SLUG_PREFIX = 'ways-'
-export const OWN_PREFIX = `custom:${SLUG_PREFIX}`
-
-/** Claude Code's own default, which the mod switches back to. */
-export const DEFAULT_THEME = 'dark'
 
 /** The agent-ways theme that is the terminal's own colours: no export. */
 export const TERMINAL = 'terminal'
@@ -22,12 +13,10 @@ export const TERMINAL = 'terminal'
 export const activeArgv = (): string[] => [WAYS, 'settings', 'get', 'theme.active']
 export const exportArgv = (name: string): string[] => [WAYS, 'settings', 'theme', 'export', name, '--claude-code']
 
-/** The Claude Code theme preference for agent-ways theme `name`. */
-export const preference = (name: string): string => `${OWN_PREFIX}${name}`
-
-/** Where Claude Code reads custom theme `name`: `<config dir>/themes/`. */
-export const themeFile = (configDir: string, name: string): string =>
-  `${configDir.replace(/\/+$/, '')}/themes/${SLUG_PREFIX}${name}.json`
+/** The one Claude Code theme the mod keeps, `custom:ways`. `ways manage
+ *  repair` selects it in settings.json while the mod is wanted; the mod only
+ *  rewrites the file, which Claude Code reloads live. */
+export const themeFile = (configDir: string): string => `${configDir.replace(/\/+$/, '')}/themes/ways.json`
 
 /** The Claude Code config directory: CLAUDE_CONFIG_DIR, else ~/.claude. */
 export function configDir(claudeConfigDir: string | undefined, home: string | undefined): string | undefined {
@@ -53,7 +42,10 @@ export function parseActive(r: Run): string | undefined {
 }
 
 /** A Claude Code custom theme file. */
-export type ClaudeCodeTheme = { name: string; base: string; overrides: Record<string, string> }
+export type ClaudeCodeTheme = { name: string; base: string; overrides?: Record<string, string> }
+
+/** The file while no agent-ways theme is active: Claude Code's own dark. */
+export const DEFAULT_THEME: ClaudeCodeTheme = { name: 'ways', base: 'dark' }
 
 /** `ways settings theme export --claude-code`: the theme, or undefined for a
  *  call that failed or printed anything but a whole, valid theme. */
@@ -76,14 +68,3 @@ export function parseTheme(r: Run): ClaudeCodeTheme | undefined {
 
 /** The file's text as the mod writes it. */
 export const themeText = (t: ClaudeCodeTheme): string => `${JSON.stringify(t, null, 2)}\n`
-
-/** What the session start does, from the active agent-ways theme and
- *  Claude Code's theme row: follow an agent-ways theme, return a theme of
- *  the mod's own to Claude Code's default, or leave the row alone. */
-export type Plan = { kind: 'follow'; name: string } | { kind: 'reset' } | { kind: 'none' }
-
-export function plan(active: string, current: unknown): Plan {
-  if (active !== TERMINAL) return { kind: 'follow', name: active }
-  const isOwn = typeof current === 'string' && current.startsWith(OWN_PREFIX)
-  return isOwn ? { kind: 'reset' } : { kind: 'none' }
-}

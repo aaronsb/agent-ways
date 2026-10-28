@@ -2,10 +2,11 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { On, ProcessRunResult } from 'claude-code'
 
 import { register } from '../hooks/register.ts'
-import { activeArgv, configDir, exportArgv, parseActive, parseTheme, plan, preference, themeFile, themeText } from '../hooks/lib.ts'
+import { DEFAULT_THEME, activeArgv, configDir, exportArgv, parseActive, parseTheme, themeFile, themeText } from '../hooks/lib.ts'
 import { passedOverHits, registrationsOf } from './passed-over.ts'
 
 const INTERACTIVE = { cwd: '/work/proj', surface: 'terminal', isInteractive: true } as const
+const DESKTOP = { cwd: '/work/proj', surface: 'desktop', isInteractive: true } as const
 const HEADLESS = { cwd: '/work/proj', surface: null, isInteractive: false } as const
 
 const MIAMI = {
@@ -13,7 +14,7 @@ const MIAMI = {
   base: 'dark',
   overrides: { claude: '#ff4d93', text: '#f4eaff', success: '#3dffa2', userMessageBackground: '#3d1466' },
 }
-const FILE = '/home/dev/.claude/themes/ways-miami-nights.json'
+const FILE = '/home/dev/.claude/themes/ways.json'
 
 const ok = (stdout: string, exitCode = 0): ProcessRunResult => ({ exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false })
 
@@ -24,16 +25,14 @@ type Answer = ProcessRunResult | Error
 type World = {
   active?: Answer
   exported?: Answer
-  /** Claude Code's theme row now. */
-  theme?: string
   /** Files on disk, by path. */
   files?: Record<string, string>
   env?: Record<string, string>
 }
 
-/** The host beneath the mod: the ways CLI, the file system, the
- *  environment and the /config rows answered from `world`, every call
- *  recorded. */
+/** The host beneath the mod: the ways CLI, the file system and the
+ *  environment answered from `world`, every call recorded. A config.set or
+ *  a toast the mod made would be recorded too; it makes none. */
 function host(on: On, world: World) {
   const argvs: string[][] = []
   const timeouts: (number | undefined)[] = []
@@ -71,7 +70,6 @@ function host(on: On, world: World) {
     files[e.path] = e.text
     return { value: undefined } as never
   })
-  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: world.theme ?? 'dark', provider: { kind: 'engine' }, isLocked: false }] }) as never)
   on('config.set', ($, e) => {
     sets.push({ key: e.key, value: e.value })
     return { value: e.value }
@@ -79,36 +77,36 @@ function host(on: On, world: World) {
   return { argvs, timeouts, writes, sets, logs, toasts, files }
 }
 
-describe('an agent-ways theme is active', () => {
-  test('the export is written to the theme folder and selected', async ($, on) => {
+describe('the theme file follows theme.active', () => {
+  test('a fill theme is exported to themes/ways.json', async ($, on) => {
     const h = host(on, { active: ok('miami-nights\n'), exported: ok(JSON.stringify(MIAMI)) })
     await $.session.start(INTERACTIVE)
     expect(h.argvs).toEqual([activeArgv(), exportArgv('miami-nights')])
     expect(h.timeouts.every(t => t !== undefined && t <= 2000)).toBe(true)
     expect(h.writes).toEqual([{ path: FILE, text: themeText(MIAMI) }])
-    expect(h.sets).toEqual([{ key: 'theme', value: 'custom:ways-miami-nights' }])
+    expect(h.sets).toEqual([])
     expect(h.toasts).toEqual([])
+  })
+
+  test('terminal writes Claude Code\'s own dark, with no export', async ($, on) => {
+    const h = host(on, { active: ok('terminal\n'), files: { [FILE]: themeText(MIAMI) } })
+    await $.session.start(INTERACTIVE)
+    expect(h.argvs).toEqual([activeArgv()])
+    expect(h.writes).toEqual([{ path: FILE, text: themeText(DEFAULT_THEME) }])
+    expect(h.sets).toEqual([])
   })
 
   test('CLAUDE_CONFIG_DIR names the theme folder', async ($, on) => {
     const h = host(on, { active: ok('miami-nights\n'), exported: ok(JSON.stringify(MIAMI)), env: { HOME: '/home/dev', CLAUDE_CONFIG_DIR: '/cfg/cc' } })
     await $.session.start(INTERACTIVE)
-    expect(h.writes.map(w => w.path)).toEqual(['/cfg/cc/themes/ways-miami-nights.json'])
+    expect(h.writes.map(w => w.path)).toEqual(['/cfg/cc/themes/ways.json'])
   })
 
-  test('a current file and a selected theme are left as they are', async ($, on) => {
-    const h = host(on, { active: ok('miami-nights\n'), exported: ok(JSON.stringify(MIAMI)), theme: 'custom:ways-miami-nights', files: { [FILE]: themeText(MIAMI) } })
+  test('a current file is left as it is', async ($, on) => {
+    const h = host(on, { active: ok('miami-nights\n'), exported: ok(JSON.stringify(MIAMI)), files: { [FILE]: themeText(MIAMI) } })
     await $.session.start(INTERACTIVE)
     expect(h.argvs.length).toBe(2)
     expect(h.writes).toEqual([])
-    expect(h.sets).toEqual([])
-  })
-
-  test('a theme the person picked is followed over at the next session start', async ($, on) => {
-    const h = host(on, { active: ok('miami-nights\n'), exported: ok(JSON.stringify(MIAMI)), theme: 'light', files: { [FILE]: themeText(MIAMI) } })
-    await $.session.start(INTERACTIVE)
-    expect(h.writes).toEqual([])
-    expect(h.sets).toEqual([{ key: 'theme', value: 'custom:ways-miami-nights' }])
   })
 
   test('a headless session changes nothing', async ($, on) => {
@@ -116,30 +114,20 @@ describe('an agent-ways theme is active', () => {
     await $.session.start(HEADLESS)
     expect(h.argvs).toEqual([])
     expect(h.writes).toEqual([])
+  })
+
+  // The file is the surface's own to read; a surface that does not read it
+  // is left as it was. The mod writes the same file whatever draws.
+  test('a desktop session writes the same file and nothing else', async ($, on) => {
+    const h = host(on, { active: ok('miami-nights\n'), exported: ok(JSON.stringify(MIAMI)) })
+    await $.session.start(DESKTOP)
+    expect(h.writes).toEqual([{ path: FILE, text: themeText(MIAMI) }])
     expect(h.sets).toEqual([])
+    expect(h.toasts).toEqual([])
   })
 })
 
-describe('the terminal theme is active', () => {
-  test("the mod's own theme goes back to dark", async ($, on) => {
-    const h = host(on, { active: ok('terminal\n'), theme: 'custom:ways-miami-nights' })
-    await $.session.start(INTERACTIVE)
-    expect(h.argvs).toEqual([activeArgv()])
-    expect(h.sets).toEqual([{ key: 'theme', value: 'dark' }])
-    expect(h.writes).toEqual([])
-  })
-
-  for (const theme of ['light', 'custom:dracula', 'dark']) {
-    test(`a theme of the person's own (${theme}) stays`, async ($, on) => {
-      const h = host(on, { active: ok('terminal\n'), theme })
-      await $.session.start(INTERACTIVE)
-      expect(h.sets).toEqual([])
-      expect(h.writes).toEqual([])
-    })
-  }
-})
-
-describe('a ways that fails changes nothing', () => {
+describe('a ways that fails leaves the file as it was', () => {
   const cases: [string, World][] = [
     ['ways is missing', {}],
     ['theme.active exits non-zero', { active: ok('', 2) }],
@@ -152,7 +140,7 @@ describe('a ways that fails changes nothing', () => {
   ]
   for (const [name, world] of cases) {
     test(name, async ($, on) => {
-      const h = host(on, { ...world, theme: 'custom:ways-miami-nights' })
+      const h = host(on, { ...world, files: { [FILE]: themeText(MIAMI) } })
       await $.session.start(INTERACTIVE)
       expect(h.writes).toEqual([])
       expect(h.sets).toEqual([])
@@ -178,19 +166,11 @@ describe('the rules', () => {
     expect(parseTheme(ok('[]'))).toBeUndefined()
   })
 
-  test('the file and the preference share one slug', () => {
-    expect(themeFile('/home/dev/.claude/', 'nord')).toBe('/home/dev/.claude/themes/ways-nord.json')
-    expect(preference('nord')).toBe('custom:ways-nord')
+  test('one file, in the config folder', () => {
+    expect(themeFile('/home/dev/.claude/')).toBe('/home/dev/.claude/themes/ways.json')
     expect(configDir(undefined, '/home/dev')).toBe('/home/dev/.claude')
     expect(configDir('/cfg', '/home/dev')).toBe('/cfg')
     expect(configDir(undefined, undefined)).toBeUndefined()
-  })
-
-  test('the plan follows a theme, resets only its own, and leaves the rest', () => {
-    expect(plan('nord', 'light')).toEqual({ kind: 'follow', name: 'nord' })
-    expect(plan('terminal', 'custom:ways-nord')).toEqual({ kind: 'reset' })
-    expect(plan('terminal', 'custom:nord')).toEqual({ kind: 'none' })
-    expect(plan('terminal', undefined)).toEqual({ kind: 'none' })
   })
 })
 
