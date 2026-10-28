@@ -700,9 +700,10 @@ fn waypoint_errors_name_the_line_and_entry() {
     };
     let base = theme_src("nord");
     let with = |tables: &str| format!("{base}\n{tables}");
-    let line = |tables: &str, n: usize| base.lines().count() + 1 + n;
+    // The 1-based line of row `n` of the tables after the base theme.
+    let line = |n: usize| base.lines().count() + 1 + n;
     let t = "[[waypoints]]\nglyph = \"◆\"\nbg = \"#000000\"\n";
-    has(with(t), &format!("line {}: `bg` is not a waypoint key; an entry takes glyph and fg (waypoints entry 1)", line(t, 3)));
+    has(with(t), &format!("line {}: `bg` is not a waypoint key; an entry takes glyph and fg (waypoints entry 1)", line(3)));
     has(with("[[waypoints]]\nglyph = \"❤\u{fe0f}\"\n"), "is not one character; variation selectors, joiners and combining marks are refused (waypoints entry 1)");
     has(with("[[waypoints]]\nglyph = \"👨\u{200d}👩\"\n"), "is not one character");
     has(with("[[waypoints]]\nglyph = \"字\"\n"), "glyph `字` is neither one column wide nor an emoji drawn two columns wide");
