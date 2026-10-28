@@ -60,8 +60,8 @@ impl App {
         self.own_write();
         self.waypoints = next.to_string();
         Ok(match next {
-            "default" => "waypoints default: the screens' own set".into(),
-            _ => "waypoints theme: the theme's set, or the screens' own where it has none".into(),
+            "default" => "waypoints default (the screens' own set)".into(),
+            _ => "waypoints theme (the theme's set, or the screens' own where it has none)".into(),
         })
     }
 
