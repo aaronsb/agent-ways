@@ -251,7 +251,8 @@ THEME_ALT="#b967ff"
 
     #[test]
     fn bundled_themes_carry_no_target_tables() {
-        // A table line does not source as shell; the bundled files still do.
+        // The bundled themes pin no target; the Florida ones carry [words],
+        // so they no longer source as shell, and the dotfiles palettes still do.
         for t in bundled() {
             assert!(t.targets.is_empty(), "{}", t.name);
         }

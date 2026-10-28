@@ -33,7 +33,9 @@ THEME_EVENT_INJECTED="✦"
 THEME_EVENT_SUPPRESSED="☈"
 THEME_EVENT_REDISCLOSED="⟲"
 
-# The words Claude Code shows under this theme (ways-theme mod).
+# The words Claude Code shows under this theme (ways-theme mod). This file
+# is original to agent-ways, not a dotfiles palette: a table line does not
+# source as shell.
 [words]
 spinner = ["Charging", "Striking", "Sailing", "Crossing", "Casting", "Plundering"]
 done = ["Struck", "Crossed", "Landed", "Plundered"]
