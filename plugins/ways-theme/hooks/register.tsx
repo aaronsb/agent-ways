@@ -8,9 +8,10 @@
 // interactive session's start the mod reads `theme.active` through `ways
 // settings get` and rewrites that file when its content changed: the export
 // of the theme (`ways settings theme export <name> --claude-code`), or Claude
-// Code's own dark for `terminal`. It does the same mid-session when the skins
-// layer's live export names another theme, on that layer's timer. Claude Code
-// watches its themes folder, so the change applies live.
+// Code's own dark for `terminal`. It does the same mid-session whenever the
+// skins layer's live export changes, on that layer's timer, and tries again on
+// each read after a rewrite that failed. Claude Code watches its themes
+// folder, so the change applies live.
 //
 // The frames: on the terminal, under a theme with colours of its own, each
 // reply sits in a border on the theme's ground, and each tool call and tool
@@ -35,14 +36,15 @@
 // Every failure does nothing: `ways` missing, a non-zero exit, output that
 // does not parse, a call past its bound, a write refused, a `theme` row that
 // cannot be read. The file stays as last written, no frame draws, and one
-// debug-log line says why. A headless session changes nothing. The mod hooks
-// no classic.* event, which an organization's policy plugin passes over.
+// debug-log line per distinct reason says why. A headless session changes
+// nothing. The mod hooks no classic.* event, which an organization's policy
+// plugin passes over.
 
 import type { EngineInterface, Register, RenderElement } from 'claude-code'
 
 import { FRAME } from './lib.ts'
-import { configRows, noteRow, rewrite, startRows } from './follow.ts'
-import { activeSetup, isFramed, registerSkins } from './skins/hub.tsx'
+import { configRows, noteRow, startFollow, startRows } from './follow.ts'
+import { activeSetup, currentLook, isFramed, registerSkins } from './skins/hub.tsx'
 import type { View } from './skins/hub.tsx'
 
 /** Whether the terminal's view is the ctrl+o transcript, as the turn line
@@ -70,8 +72,8 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     if (!e.isInteractive) return started
-    await rewrite($)
     await startRows($)
+    await startFollow($, await currentLook($))
     $.ui.invalidate('ui.render')
     return started
   })

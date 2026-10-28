@@ -14,9 +14,8 @@
 // The look comes from one call, `ways settings theme export --mod`, at an
 // interactive session's start and every PICKUP_MS after. Any failure leaves
 // the look as it was (none at the start, so every row is the engine's own) and
-// logs one debug line per distinct reason. Each later read hands follow.ts
-// its turn on the same timer (onPickup), saying whether the export now names
-// another theme. Whether a row is framed is `isFramed`, which the register
+// logs one debug line per distinct reason. After each later read follow.ts
+// takes its turn on the same timer (onPickup), handed the look as it stands. Whether a row is framed is `isFramed`, which the register
 // module's frames ask too; the person's message draws here, in a gradient box,
 // the outline, or not at all, after `render.prompt_box`, and is Claude Code's
 // own while another Claude Code theme than `custom:ways` is selected.
@@ -159,10 +158,14 @@ function marginRow(look: Look, row: ReturnType<Ui['Box']>): ReturnType<Ui['Box']
 /** Why the last read failed, so a reason repeats in the debug log once. */
 let lastFailure: string | undefined
 
+/** The look's text as the export last gave it; empty while none has loaded. */
+export function currentLook($: EngineInterface): Promise<string> {
+  return read($, lookAtom)
+}
+
 /** One bounded read of the export into the look atom. A failure keeps the
- *  look the atom holds. True when the export names another theme than the
- *  look it replaced; false for the first look, an unchanged one or a failure. */
-export async function pickUp($: EngineInterface): Promise<boolean> {
+ *  look the atom holds. */
+export async function pickUp($: EngineInterface): Promise<void> {
   let failure: string
   try {
     const run = await $.process.run([...MOD_EXPORT_ARGV], { timeoutMs: WAYS_TIMEOUT_MS })
@@ -171,12 +174,11 @@ export async function pickUp($: EngineInterface): Promise<boolean> {
       if (typeof parsed !== 'string') {
         lastFailure = undefined
         const text = JSON.stringify(parsed)
-        const held = await read($, lookAtom)
-        if (held === text) return false
-        await settleEntrances($, true)
-        await update($, lookAtom, () => text)
-        const before = held === '' ? 'none' : parseExport(held)
-        return typeof before !== 'string' && before.theme !== parsed.theme
+        if ((await read($, lookAtom)) !== text) {
+          await settleEntrances($, true)
+          await update($, lookAtom, () => text)
+        }
+        return
       }
       failure = parsed
     } else {
@@ -189,7 +191,6 @@ export async function pickUp($: EngineInterface): Promise<boolean> {
     lastFailure = failure
     debug($, `${failure}; the look stays as it was`)
   }
-  return false
 }
 
 // Read once a session or a turn and kept here: each read through `$` is a dispatch, and
@@ -364,7 +365,10 @@ export function registerSkins(on: On, shared: Shared): void {
       if (isWorking) void update($, frameAtom, frame => frame + 1)
       if (settling.size > 0) void settleEntrances($)
     })
-    pickup = $.clock.every(PICKUP_MS, async () => onPickup($, await pickUp($)).catch(quietly($, 'pickup')))
+    pickup = $.clock.every(PICKUP_MS, async () => {
+      await pickUp($)
+      await onPickup($, await read($, lookAtom)).catch(quietly($, 'pickup'))
+    })
     return next(e)
   })
 

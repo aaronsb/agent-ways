@@ -39,6 +39,11 @@ type World = {
   selected?: string | null
   /** `$.config.list` rejects. */
   listFails?: boolean
+  /** `config.set` of the theme row is refused, as a trusted source's lock is. */
+  themeLocked?: boolean
+  /** Holds each `config.list` answer, taken when the call arrives, until
+   *  the gate opens; `listed` resolves when a call arrives. */
+  listGate?: { opened: Promise<void>; listed: () => void }
   /** `$.fs.write` rejects, as a read-only folder does. */
   writeFails?: boolean
   /** `ways settings theme export --mod`, the skins layer's call (skins.test.tsx);
@@ -98,15 +103,21 @@ function host(on: On, world: World) {
     return { value: undefined } as never
   })
   on('config.set', ($, e) => {
+    if (e.key === 'theme' && world.themeLocked) return { deny: 'managed settings own the theme' }
     sets.push({ key: e.key, value: e.value })
     if (e.key === 'theme' && typeof e.value === 'string') world.selected = e.value
     return { value: e.value }
   })
-  on('config.list', () => {
+  on('config.list', async () => {
     if (world.listFails) throw new Error('config unavailable')
     const verbose = { key: 'verbose', label: 'Verbose', kind: 'boolean', value: world.verbose ?? false, provider: { kind: 'engine' }, isLocked: false }
     const selected = world.selected === undefined ? 'custom:ways' : world.selected
     const theme = selected === null ? [] : [{ key: 'theme', label: 'Theme', kind: 'choice', value: selected, provider: { kind: 'engine' }, isLocked: false }]
+    const gate = world.listGate
+    if (gate) {
+      gate.listed()
+      await gate.opened
+    }
     return { value: [verbose, ...theme] } as never
   })
   // The engine's own drawing of every row.
@@ -483,6 +494,32 @@ describe("frames follow Claude Code's selected theme", () => {
     await reply.unmount()
   })
 
+  test('a refused theme change passes the refusal on and leaves the frames as they were', async ($, on) => {
+    const h = host(on, { ...THEMED, themeLocked: true })
+    await $.session.start(INTERACTIVE)
+    expect(await $.config.set({ key: 'theme', value: 'dark' } as never)).toEqual({ deny: 'managed settings own the theme' })
+    await framesEach($, true)
+    expect(h.sets).toEqual([])
+  })
+
+  // A poll's config.list answer taken before a /theme pick resolves after it.
+  test('a config.list answer older than a pick does not overwrite it', async ($, on) => {
+    let open = () => {}
+    let listed = () => {}
+    const arrived = new Promise<void>(resolve => (listed = resolve))
+    const world: World = { ...THEMED }
+    const h = host(on, world)
+    await $.session.start(INTERACTIVE)
+    world.listGate = { opened: new Promise<void>(resolve => (open = resolve)), listed }
+    const polling = h.clock.advance(PICKUP_MS)
+    await arrived
+    world.listGate = undefined
+    await $.config.set({ key: 'theme', value: 'dark' } as never)
+    open()
+    await polling
+    await framesEach($, false)
+  })
+
   const unread: [string, World][] = [
     ['no theme row', { ...THEMED, selected: null }],
     ['config.list rejects', { ...THEMED, listFails: true }],
@@ -539,6 +576,43 @@ describe('the theme file follows a switch made mid-session', () => {
     await h.clock.advance(PICKUP_MS * 2)
     expect(h.writes.map(w => w.text)).toEqual([themeText(MIAMI)])
     expect(h.logs.filter(line => line.includes('tampa'))).toHaveLength(1)
+  })
+
+  test('an export that fails and then recovers brings the file current', async ($, on) => {
+    const world: World = { ...THEMED }
+    const h = host(on, world)
+    await $.session.start(INTERACTIVE)
+    world.active = ok('tampa\n')
+    world.exported = ok('', 3)
+    world.mod = ok(JSON.stringify(TAMPA))
+    await h.clock.advance(PICKUP_MS)
+    expect(h.writes).toHaveLength(1)
+    world.exported = ok(JSON.stringify(TAMPA_CC))
+    await h.clock.advance(PICKUP_MS)
+    expect(h.writes.map(w => w.text)).toEqual([themeText(MIAMI), themeText(TAMPA_CC)])
+  })
+
+  test('ways unreachable at start and then back writes the file', async ($, on) => {
+    const world: World = {}
+    const h = host(on, world)
+    await $.session.start(INTERACTIVE)
+    await h.clock.advance(PICKUP_MS * 2)
+    expect(h.writes).toEqual([])
+    expect(h.logs.filter(line => line.includes('did not run'))).toHaveLength(1)
+    Object.assign(world, THEMED)
+    await h.clock.advance(PICKUP_MS)
+    expect(h.writes).toEqual([{ path: FILE, text: themeText(MIAMI) }])
+  })
+
+  test('new colours under the same theme name rewrite the file', async ($, on) => {
+    const world: World = { ...THEMED }
+    const h = host(on, world)
+    await $.session.start(INTERACTIVE)
+    const edited = { ...MIAMI, overrides: { ...MIAMI.overrides, claude: '#ff2fa0' } }
+    world.exported = ok(JSON.stringify(edited))
+    world.mod = ok(JSON.stringify({ ...MIAMI_NIGHTS, roles: { ...MIAMI_NIGHTS.roles, accent: '#ff2fa0' } }))
+    await h.clock.advance(PICKUP_MS)
+    expect(h.writes.map(w => w.text)).toEqual([themeText(MIAMI), themeText(edited)])
   })
 })
 
