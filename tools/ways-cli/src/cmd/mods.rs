@@ -312,6 +312,19 @@ fn would(m: &Mod, v: &View, want: bool, shipped: Option<&str>) -> (Mark, String)
     }
 }
 
+/// The theme change converging the ways-theme mod to `want` would make in
+/// one target, for the what-if of `install` and `uninstall`: the key's value
+/// before and after, and the theme file written or removed. The merge holds
+/// the key once the mod is installed, so a wanted mod counts as installed
+/// where this host can load it.
+fn would_theme(m: &Mod, v: &View, want: bool, src_settings: &Path, base: &Path) -> Vec<String> {
+    if *m != attend_mod::THEME || !src_settings.exists() {
+        return Vec::new();
+    }
+    let claim = want && (v.installed.is_some() || (v.error.is_none() && v.host.is_ok()));
+    super::reconcile::theme_plan(src_settings, &v.dir, base, claim).unwrap_or_else(|e| vec![format!("⚠ settings.json theme: {e:#}")])
+}
+
 /// A settings write of `install` and the mod's convergence.
 struct Plan {
     /// Each write: the file, `Some(value)` to set or `None` to remove, and
@@ -429,6 +442,10 @@ fn run(m: &Mod, command: &str, targets: &[Enabled], plan: Plan, mode: Mode) -> R
             for (_, v) in attend_mod::views(&src, &t.target(&default_root), Some(m)) {
                 let (mark, text) = would(m, &v, plan.want, shipped.as_deref());
                 r.item(mark, text);
+                let base = super::reconcile::base_path_for(&crate::paths::state_root(), &t.dir);
+                for line in would_theme(m, &v, plan.want, &src.join("settings.json"), &base) {
+                    item(&mut r, &line, Mark::Act);
+                }
             }
         }
         r.footer(Mark::Info, lifecycle::commit_hint(command));
@@ -555,4 +572,56 @@ pub fn overview() -> Vec<Overview> {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use attend_mod::{MarketState, ATTEND, THEME};
+
+    fn view(dir: &Path, installed: Option<&str>, host: Result<String, String>) -> View {
+        View {
+            dir: dir.to_path_buf(),
+            wanted: true,
+            target_off: false,
+            installed: installed.map(str::to_string),
+            enabled: installed.map(|_| true),
+            recorded: installed.is_some(),
+            market: MarketState::Ours,
+            foreign: vec![],
+            claude_code: host.as_ref().ok().cloned(),
+            host,
+            read: true,
+            error: None,
+            runs: None,
+        }
+    }
+
+    #[test]
+    fn the_theme_mod_what_if_names_the_theme_change() {
+        let dir = std::env::temp_dir().join(format!("ways-mod-what-if-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (src, base) = (dir.join("src.json"), dir.join("base.json"));
+        std::fs::write(&src, "{}").unwrap();
+        std::fs::write(dir.join("settings.json"), r#"{"theme":"light"}"#).unwrap();
+        let file = dir.join("themes/ways.json").display().to_string();
+        let ok = || Ok("2.1.309".to_string());
+
+        let install = would_theme(&THEME, &view(&dir, None, ok()), true, &src, &base);
+        assert_eq!(install, vec![r#"would change settings.json theme: "light" → "custom:ways""#.to_string(), format!("would write {file}")]);
+        // A host below the floor installs nothing, so nothing is claimed.
+        assert!(would_theme(&THEME, &view(&dir, None, Err("Claude Code 2.1.300 is older".into())), true, &src, &base).is_empty());
+        // Another mod moves no theme.
+        assert!(would_theme(&ATTEND, &view(&dir, None, ok()), true, &src, &base).is_empty());
+
+        // Claimed over light: uninstalling gives it back.
+        std::fs::write(dir.join("settings.json"), r#"{"theme":"custom:ways"}"#).unwrap();
+        std::fs::write(&base, r#"{"theme":"custom:ways","prior_theme":"light"}"#).unwrap();
+        std::fs::create_dir_all(dir.join("themes")).unwrap();
+        std::fs::write(&file, "{}").unwrap();
+        let uninstall = would_theme(&THEME, &view(&dir, Some("1.45.0"), ok()), false, &src, &base);
+        assert_eq!(uninstall, vec![r#"would change settings.json theme: "custom:ways" → "light""#.to_string(), format!("would remove {file}")]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
