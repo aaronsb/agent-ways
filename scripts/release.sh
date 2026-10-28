@@ -18,7 +18,7 @@
 # Both bump and tag refuse a release whose range, from the component's last tag
 # to HEAD, changed plugins/attend/ without moving the plugin's version; `check`
 # runs that check alone. Bumping attend moves the plugin's version with it;
-# bumping ways moves the ways-judge plugin's version.
+# bumping ways moves the ways-judge and ways-theme plugins' versions.
 #
 # `tag` without --push creates the annotated tag locally and prints the push
 # command (keeps the publish deliberate); `--push` pushes it. way-embed is out of
@@ -60,9 +60,9 @@ PLUGIN_MANIFEST="plugins/attend/.claude-plugin/plugin.json"
 # The mod cannot read its manifest, so it carries its version as a constant
 # the beat sends to attend; the bump moves both.
 PLUGIN_LIB="plugins/attend/hooks/lib.ts"
-# The ways-judge mod (ADR-708) calls ways verbs and carries ways' version;
-# bumping ways moves it.
-JUDGE_MANIFEST="plugins/ways-judge/.claude-plugin/plugin.json"
+# The ways-judge mod (ADR-708) and the ways-theme mod (ADR-513) call ways
+# verbs and carry ways' version; bumping ways moves them.
+WAYS_MANIFESTS=("plugins/ways-judge/.claude-plugin/plugin.json" "plugins/ways-theme/.claude-plugin/plugin.json")
 
 plugin_version_of() {
   # The first "version" field, wherever it sits on its line, so a manifest
@@ -176,9 +176,12 @@ case "$MODE" in
       set_mod_version "$NEXT"
       FILES+=("$PLUGIN_LIB")
     fi
-    if [[ "$COMPONENT" == "ways" && -f "$JUDGE_MANIFEST" ]]; then
-      set_plugin_version "$JUDGE_MANIFEST" "$NEXT"
-      FILES+=("$JUDGE_MANIFEST")
+    if [[ "$COMPONENT" == "ways" ]]; then
+      for m in "${WAYS_MANIFESTS[@]}"; do
+        [[ -f "$m" ]] || continue
+        set_plugin_version "$m" "$NEXT"
+        FILES+=("$m")
+      done
     fi
     git add "${FILES[@]}"
     git commit -q -m "release(${COMPONENT}): bump to ${NEXT}"
@@ -213,9 +216,12 @@ EOF
       PV="$(plugin_version_of < "$PLUGIN_MANIFEST")"
       [[ "$PV" == "$VERSION" ]] || die "$PLUGIN_MANIFEST is $PV but attend is $VERSION; they release together"
     fi
-    if [[ "$COMPONENT" == "ways" && -f "$JUDGE_MANIFEST" ]]; then
-      JV="$(plugin_version_of < "$JUDGE_MANIFEST")"
-      [[ "$JV" == "$VERSION" ]] || die "$JUDGE_MANIFEST is $JV but ways is $VERSION; they release together"
+    if [[ "$COMPONENT" == "ways" ]]; then
+      for m in "${WAYS_MANIFESTS[@]}"; do
+        [[ -f "$m" ]] || continue
+        JV="$(plugin_version_of < "$m")"
+        [[ "$JV" == "$VERSION" ]] || die "$m is $JV but ways is $VERSION; they release together"
+      done
     fi
     check_plugin_bump
 

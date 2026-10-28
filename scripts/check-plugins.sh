@@ -4,8 +4,9 @@
 #   1. the attend plugin carries attend's version (the plugin is released
 #      with attend, since it depends on attend's verbs), and the mod's
 #      MOD_VERSION constant in hooks/lib.ts equals the plugin's version;
-#      the ways-judge plugin carries ways' version, for the same reason
-#      (it calls `ways judge host|take|answer`, ADR-708);
+#      the ways-judge and ways-theme plugins carry ways' version, for the
+#      same reason (they call `ways judge host|take|answer`, ADR-708, and
+#      `ways settings theme export`, ADR-513);
 #   2. `claude plugin validate` on the marketplace and on each plugin;
 #   3. `claude plugin test` on each plugin;
 #   4. a TypeScript check against Claude Code's declarations, where they can
@@ -43,12 +44,14 @@ MV="$(grep -oE "^export const MOD_VERSION = '[^']*'" plugins/attend/hooks/lib.ts
 [[ "$MV" == "$PV" ]] || fail "MOD_VERSION in plugins/attend/hooks/lib.ts is $MV but the plugin is at $PV; scripts/release.sh bump attend moves both"
 echo "version: MOD_VERSION $MV matches the plugin"
 
-# The ways-judge mod calls ways verbs and is released with ways.
-JV="$(plugin_version plugins/ways-judge/.claude-plugin/plugin.json)"
+# The ways-judge and ways-theme mods call ways verbs and are released with ways.
 WV="$(cargo_version tools/ways-cli/Cargo.toml)"
-[[ -n "$JV" ]] || fail "plugins/ways-judge/.claude-plugin/plugin.json has no version"
-[[ "$JV" == "$WV" ]] || fail "the ways-judge plugin is at $JV but ways is at $WV; they release together (scripts/release.sh bump ways moves both)"
-echo "version: ways-judge plugin $JV matches ways $WV"
+for mod in ways-judge ways-theme; do
+  JV="$(plugin_version "plugins/$mod/.claude-plugin/plugin.json")"
+  [[ -n "$JV" ]] || fail "plugins/$mod/.claude-plugin/plugin.json has no version"
+  [[ "$JV" == "$WV" ]] || fail "the $mod plugin is at $JV but ways is at $WV; they release together (scripts/release.sh bump ways moves both)"
+  echo "version: $mod plugin $JV matches ways $WV"
+done
 
 # Where an organization manages Claude Code (Team and Enterprise, or a
 # machine with managed settings), the built-in cc-plugin-sec-default sits
