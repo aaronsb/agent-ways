@@ -879,6 +879,19 @@ fn a_carriage_return_never_reaches_the_band() {
 }
 
 #[test]
+fn an_escape_sequence_is_one_zero_width_unit() {
+    let p = Painter::themed(&theme("paper"), ColorDepth::TrueColor);
+    for cut in ["\x1b", "\x1b[", "\x1b[3", "\x1b[38;5", "\x1b(", "\x1b]8;;http://x", "\x1bP1$r"] {
+        assert_eq!(p.block(&format!("abc{cut}\nd"), 8), p.block("abc\nd", 8), "a sequence the line cuts off is dropped: {cut:?}");
+    }
+    assert_eq!(p.block("a\x1b[3\x1b[1mb", 8), p.block("a\x1b[1mb", 8), "a CSI that an ESC breaks into is dropped");
+    for whole in ["\x1b(B", "\x1b#8", "\x1b]8;;http://x\x1b\\", "\x1b]0;title\x07", "\x1b[?25l"] {
+        let plain = p.block("abc", 8);
+        assert_eq!(p.block(&format!("ab{whole}c"), 8), plain.replacen("abc", &format!("ab{whole}c"), 1), "{whole:?}");
+    }
+}
+
+#[test]
 fn a_wide_character_at_the_row_s_end_moves_to_the_next_row() {
     let tampa = theme("tampa");
     let first = tampa.gradient.unwrap().stops()[0];

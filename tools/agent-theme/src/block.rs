@@ -159,19 +159,34 @@ impl Band<'_> {
     }
 
     fn line(mut self, line: &str) {
-        let mut col = 0usize;
         self.base(0);
         self.replay();
-        let mut chars = line.chars().peekable();
-        while let Some(c) = chars.next() {
-            if c == '\x1b' {
-                let seq = escape(c, &mut chars);
-                match seq.strip_prefix("\x1b[").and_then(|s| s.strip_suffix('m')).filter(|p| p.bytes().all(|b| b.is_ascii_digit() || b == b';' || b == b':')) {
-                    Some(params) => self.style(params, col),
-                    None => self.out.push_str(&seq),
-                }
-                continue;
+        let (mut col, mut rest) = (0, line);
+        while let Some(at) = rest.find('\x1b') {
+            col = self.text(&rest[..at], col);
+            let (n, whole) = escape(&rest[at..]);
+            let seq = &rest[at..at + n];
+            match seq.strip_prefix("\x1b[").and_then(|s| s.strip_suffix('m')).filter(|p| p.bytes().all(|b| b.is_ascii_digit() || b == b';' || b == b':')) {
+                Some(params) => self.style(params, col),
+                None if whole => self.out.push_str(seq),
+                None => {}
             }
+            rest = &rest[at + n..];
+        }
+        col = self.text(rest, col);
+        if self.own {
+            self.own = false;
+            self.base(col);
+        }
+        // Out to the end of the last row the line takes.
+        let end = col.div_ceil(self.width).max(1) * self.width;
+        self.pad(col, end);
+        self.out.push_str(RESET);
+    }
+
+    /// `text`, which holds no escape, from `col`; the column after it.
+    fn text(&mut self, text: &str, mut col: usize) -> usize {
+        for c in text.chars() {
             // A carriage return would send the padding over the line.
             if c == '\r' {
                 continue;
@@ -191,48 +206,42 @@ impl Band<'_> {
             self.out.push_str(&text);
             col += w;
         }
-        if self.own {
-            self.own = false;
-            self.base(col);
-        }
-        // Out to the end of the last row the line takes.
-        let end = col.div_ceil(self.width).max(1) * self.width;
-        self.pad(col, end);
-        self.out.push_str(RESET);
+        col
     }
 }
 
-/// The whole escape sequence that `first` (ESC) opens: a CSI to its final
-/// byte, an OSC to BEL or ST, or ESC and one more character.
-fn escape(first: char, rest: &mut std::iter::Peekable<std::str::Chars>) -> String {
-    let mut seq = String::from(first);
-    match rest.next() {
-        Some('[') => {
-            seq.push('[');
-            for c in rest.by_ref() {
-                seq.push(c);
-                if ('\x40'..='\x7e').contains(&c) {
-                    break;
-                }
+/// The escape sequence at the start of `s`, which opens with ESC: its length
+/// in bytes, and whether it is whole. A CSI runs to its final byte; an OSC,
+/// DCS, SOS, PM or APC to BEL or ST; any other is ESC, its intermediates
+/// (0x20 to 0x2F) and a final byte. A sequence the line's end or a byte it
+/// cannot hold cuts off is not whole, and ends before that byte.
+fn escape(s: &str) -> (usize, bool) {
+    let b = s.as_bytes();
+    let run = |from: usize, keep: fn(u8) -> bool| from + b[from..].iter().take_while(|c| keep(**c)).count();
+    match b.get(1) {
+        Some(b'[') => {
+            let i = run(2, |c| (0x20..=0x3f).contains(&c));
+            match b.get(i) {
+                Some(0x40..=0x7e) => (i + 1, true),
+                _ => (i, false),
             }
         }
-        Some(']') => {
-            seq.push(']');
-            while let Some(c) = rest.next() {
-                seq.push(c);
-                if c == '\x07' {
-                    break;
-                }
-                if c == '\x1b' && rest.peek() == Some(&'\\') {
-                    seq.push(rest.next().unwrap_or('\\'));
-                    break;
-                }
+        Some(b']' | b'P' | b'X' | b'^' | b'_') => {
+            let i = run(2, |c| c != 0x07 && c != 0x1b);
+            match (b.get(i), b.get(i + 1)) {
+                (Some(0x07), _) => (i + 1, true),
+                (Some(0x1b), Some(b'\\')) => (i + 2, true),
+                _ => (i, false),
             }
         }
-        Some(c) => seq.push(c),
-        None => {}
+        _ => {
+            let i = run(1, |c| (0x20..=0x2f).contains(&c));
+            match b.get(i) {
+                Some(0x30..=0x7e) => (i + 1, true),
+                _ => (i, false),
+            }
+        }
     }
-    seq
 }
 
 /// The style the input has open: what each line opens with again, as one
