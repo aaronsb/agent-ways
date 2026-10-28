@@ -31,6 +31,7 @@ mod model;
 mod oklab;
 mod paint;
 mod steps;
+mod target;
 #[cfg(feature = "ratatui")]
 pub mod ratatui;
 #[cfg(feature = "settings")]
@@ -45,8 +46,9 @@ pub use bundled::{user_dir, Source, ThemeSet, BUNDLED, EXTENSIONS, TERMINAL};
 pub use color::{index_rgb, nearest_16, nearest_256, Color, ANSI16_RGB};
 pub use depth::ColorDepth;
 pub use derive::{contrast, text_on, Roles, SegPair, MIN_DISTINCT, MIN_MUTED, MIN_TEXT};
-pub use model::{Axis, Background, Border, Decor, Events, Gradient, Kind, Overrides, Rgb, Slots, Theme, Waypoint, Waypoints};
+pub use model::{Axis, Background, Border, Decor, Events, Gradient, Kind, Overrides, Rgb, Slots, Targets, Theme, Waypoint, Waypoints};
 pub use oklab::delta_e;
 pub use paint::{install, install_from, pair, paint, painter, reset, rule_glyph, scoped, sgr, underline, Ground, Ink, Painter, Resolved, Role, Scope, Style, RESET};
 pub use steps::{hsl_at, scale, IdentitySteps, Step};
+pub use target::{claude_code, claude_code_map, claude_code_roles, claude_code_unreadable, ground_band, ClaudeCode, Floor, CLAUDE_CODE_KEYS, TARGETS};
 pub use text::{parse, to_text, validate, ThemeError};

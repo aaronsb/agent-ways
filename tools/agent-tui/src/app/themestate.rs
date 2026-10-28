@@ -37,6 +37,7 @@ pub fn terminal_theme() -> Theme {
         overrides: Default::default(),
         gradient: None,
         decor: Default::default(),
+        targets: Default::default(),
     }
 }
 

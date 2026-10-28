@@ -2,7 +2,7 @@
 //! The slot names are the dotfiles palette's `THEME_*` keys, lowercased.
 //! A gradient and decoration glyphs are agent-ways' own, and optional.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 
 use crate::oklab::{lab, rgb, Lab};
@@ -473,6 +473,32 @@ pub(crate) fn intern(s: &str) -> &'static str {
     g
 }
 
+/// Colours a theme pins for another program's theme (`[target.<name>]`),
+/// by target, then by that program's own key. A pin wins over the target's
+/// mapping from the roles. Keys are checked against the target's list.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Targets(BTreeMap<String, BTreeMap<String, Rgb>>);
+
+impl Targets {
+    /// The pins for `target`, empty when the theme has none.
+    pub fn pins(&self, target: &str) -> impl Iterator<Item = (&str, Rgb)> {
+        self.0.get(target).into_iter().flatten().map(|(k, c)| (k.as_str(), *c))
+    }
+
+    pub fn set(&mut self, target: &str, key: &str, c: Rgb) {
+        self.0.entry(target.to_string()).or_default().insert(key.to_string(), c);
+    }
+
+    /// Every target with pins, in name order.
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.0.keys().map(String::as_str)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Theme {
     /// File-safe id: `[a-z0-9-]+`.
@@ -485,4 +511,5 @@ pub struct Theme {
     /// Painted under `Background::Fill` only.
     pub gradient: Option<Gradient>,
     pub decor: Decor,
+    pub targets: Targets,
 }

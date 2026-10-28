@@ -59,7 +59,8 @@ use toml::Spanned;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use crate::model::{intern, Axis, Background, Border, Decor, Events, Gradient, Kind, Overrides, Rgb, Slots, Theme, Waypoint, Waypoints};
+use crate::model::{intern, Axis, Background, Border, Decor, Events, Gradient, Kind, Overrides, Rgb, Slots, Targets, Theme, Waypoint, Waypoints};
+use crate::target;
 
 /// The dotfiles tool bindings: part of the palette structure, no meaning here.
 const IGNORED: [&str; 3] = ["THEME_VIVID", "THEME_BAT", "THEME_DELTA"];
@@ -162,8 +163,10 @@ impl<'de> Deserialize<'de> for Leaf {
     }
 }
 
-/// The document's top level, in file order.
-struct Top(Vec<(Spanned<String>, Spanned<Leaf>)>);
+/// The document's top level, in file order. Keys carry their spans and
+/// values do not: toml refuses a span for a table a dotted header opens
+/// (`[target.claude-code]`).
+struct Top(Vec<(Spanned<String>, Leaf)>);
 
 impl<'de> Deserialize<'de> for Top {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Top, D::Error> {
@@ -175,7 +178,7 @@ impl<'de> Deserialize<'de> for Top {
             }
             fn visit_map<A: MapAccess<'de>>(self, mut m: A) -> Result<Top, A::Error> {
                 let mut out = Vec::new();
-                while let Some(kv) = m.next_entry::<Spanned<String>, Spanned<Leaf>>()? {
+                while let Some(kv) = m.next_entry::<Spanned<String>, Leaf>()? {
                     out.push(kv);
                 }
                 Ok(Top(out))
@@ -389,18 +392,27 @@ pub fn parse(src: &str) -> Result<Theme, Vec<ThemeError>> {
     let mut decor = Decor::default();
     let mut grad: Option<(usize, Gradient)> = None;
     let (mut border_at, mut glyphs_at) = (None, None);
+    let mut targets = Targets::default();
 
     for (k, v) in top.0 {
         let (n, key) = (line_of(src, k.span().start), k.get_ref().as_str());
         if key == "waypoints" {
-            match waypoints(src, n, v.get_ref()) {
+            match waypoints(src, n, &v) {
                 Ok(w) => decor.waypoints = Some(w),
                 Err(e) => errs.extend(e),
             }
             continue;
         }
-        let value = match v.get_ref() {
+        let value = match &v {
             Leaf::Str(s) => s.as_str(),
+            // The one dispatch point for tables, by name.
+            Leaf::Table(entries) => {
+                match key {
+                    "target" => target_tables(src, entries, &mut targets, &mut errs),
+                    _ => errs.push(ThemeError::at(n, format!("`{key}` is a table; the tables are `[target.<name>]` and `[[waypoints]]`"))),
+                }
+                continue;
+            }
             other => {
                 errs.push(ThemeError::at(n, format!("`{key}` is {}; a value is a double-quoted string", other.kind())));
                 continue;
@@ -528,7 +540,39 @@ pub fn parse(src: &str) -> Result<Theme, Vec<ThemeError>> {
         overrides,
         gradient: grad.map(|(_, g)| g),
         decor,
+        targets,
     })
+}
+
+/// The `[target.<name>]` tables: each names a target agent-ways knows, and
+/// pins its keys to `#rrggbb` colours.
+fn target_tables(src: &str, entries: &[(Spanned<String>, Spanned<Leaf>)], targets: &mut Targets, errs: &mut Vec<ThemeError>) {
+    for (name, body) in entries {
+        let (n, name) = (line_of(src, name.span().start), name.get_ref());
+        let Some(known) = target::keys(name) else {
+            let names: Vec<&str> = target::TARGETS.iter().map(|(t, _)| *t).collect();
+            errs.push(ThemeError::at(n, format!("unknown target `{name}`; the targets are {}", names.join(", "))));
+            continue;
+        };
+        let Leaf::Table(pins) = body.get_ref() else {
+            errs.push(ThemeError::at(n, format!("`target.{name}` must be a table")));
+            continue;
+        };
+        for (key, v) in pins {
+            let (n, key) = (line_of(src, key.span().start), key.get_ref());
+            if !known.contains(&key.as_str()) {
+                errs.push(ThemeError::at(n, format!("`{key}` is not a {name} key")));
+                continue;
+            }
+            match v.get_ref() {
+                Leaf::Str(s) => match Rgb::from_hex(s) {
+                    Some(c) => targets.set(name, key, c),
+                    None => errs.push(ThemeError::at(n, format!("`{s}` is not a #rrggbb colour (key `target.{name}.{key}`)"))),
+                },
+                _ => errs.push(ThemeError::at(n, format!("`target.{name}.{key}` must be a double-quoted #rrggbb colour"))),
+            }
+        }
+    }
 }
 
 /// The theme as a file `parse` reads back to an equal theme, in the dotfiles
@@ -588,7 +632,13 @@ pub fn to_text(t: &Theme) -> String {
             out.push_str(&format!("THEME_{k}={}\n", toml::Value::String(v)));
         }
     }
-    // A table comes after every bare key.
+    // Tables follow every bare key, as TOML requires.
+    for name in t.targets.names() {
+        out.push_str(&format!("\n[target.{name}]\n"));
+        for (k, c) in t.targets.pins(name) {
+            out.push_str(&format!("{k}=\"{}\"\n", c.hex()));
+        }
+    }
     for w in d.waypoints.iter().flat_map(|w| w.as_slice()) {
         out.push_str(&format!("\n[[waypoints]]\nglyph = {}\n", toml::Value::String(w.glyph.to_string())));
         if let Some(c) = w.fg {

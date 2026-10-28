@@ -198,6 +198,14 @@ fn separate(c: Rgb, settled: &[Rgb], grounds: &Grounds, min: f64) -> Rgb {
 
 impl Roles {
     pub fn derive(t: &Theme) -> Roles {
+        Roles::derive_on(t, &[])
+    }
+
+    /// The roles of `t`, the ground roles also lifted to read on each of
+    /// `grounds`: for a surface that draws them on a ground the theme does
+    /// not paint, such as another program's terminal. The grounds are not
+    /// kept, so `unreadable` checks the theme's own.
+    pub fn derive_on(t: &Theme, extra: &[Rgb]) -> Roles {
         let s = &t.slots;
         let o = &t.overrides;
         // Dark is the segment-ink end, light the text end.
@@ -206,7 +214,9 @@ impl Roles {
             Kind::Light => (s.fg, s.bg),
         };
         let selection_bg = o.selection.unwrap_or_else(|| Rgb::blend(s.accent, s.bg, 13));
-        let grounds = Grounds::new(&[s.bg, selection_bg], t.gradient.as_ref());
+        let mut flat = vec![s.bg, selection_bg];
+        flat.extend_from_slice(extra);
+        let grounds = Grounds::new(&flat, t.gradient.as_ref());
         let up = |c: Rgb, min: f64| lift(c, s.fg, &grounds, min);
         // The status roles, lifted, then settled apart in the order of
         // `Roles::status`: each keeps clear of the ones before it. An override
