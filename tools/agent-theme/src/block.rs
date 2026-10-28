@@ -9,7 +9,8 @@ use crate::paint::{painter, Ground, Painter, RESET};
 impl Painter {
     /// `text` with the theme's ground behind every line, padded with ground
     /// cells to `width` columns, and body as the colour of text that sets
-    /// none. A vertical gradient runs down the block's lines and a
+    /// none. A line longer than `width` is padded out to the end of the row
+    /// it wraps onto. A vertical gradient runs down the block's lines and a
     /// horizontal one across `width`; at 256 colours the ground is flat bg.
     /// A span that sets its own ground keeps it until it resets. Without a
     /// fill theme to paint (a terminal-background theme, 16 colours, no
@@ -19,14 +20,14 @@ impl Painter {
         let lines: Vec<&str> = body.unwrap_or(text).split('\n').collect();
         let cols = width.min(u16::MAX as usize) as u16;
         let rows = lines.len().min(u16::MAX as usize) as u16;
-        let (Some(ground), Some(roles)) = (self.ground(cols, rows), self.roles()) else { return text.to_string() };
+        let (Some(ground), Some(roles)) = (self.ground(cols, rows).filter(|_| cols > 0), self.roles()) else { return text.to_string() };
         let fg = Color::Rgb(roles.body).at(self.depth());
         let mut out = String::with_capacity(text.len() * 2);
         for (y, line) in lines.iter().enumerate() {
             if y > 0 {
                 out.push('\n');
             }
-            Band { ground: &ground, fg, row: y as u16, last: None, out: &mut out }.line(line, width);
+            Band { ground: &ground, fg, row: y as u16, width, last: None, out: &mut out }.line(line);
         }
         if body.is_some() {
             out.push('\n');
@@ -45,6 +46,8 @@ struct Band<'a> {
     ground: &'a Ground,
     fg: Option<Color>,
     row: u16,
+    /// The terminal's columns; a longer line wraps onto further rows.
+    width: usize,
     /// The ground last written.
     last: Option<Color>,
     out: &'a mut String,
@@ -57,15 +60,20 @@ impl Band<'_> {
         self.out.push('m');
     }
 
+    /// The ground under `col` of the line, which wraps every `width` cells.
+    fn colour(&self, col: usize) -> Color {
+        self.ground.at((col % self.width).min(u16::MAX as usize) as u16, self.row)
+    }
+
     fn ground_at(&mut self, col: usize) {
-        let c = self.ground.at(col.min(u16::MAX as usize) as u16, self.row);
+        let c = self.colour(col);
         self.sgr(&c.sgr_params(true));
         self.last = Some(c);
     }
 
     /// The ground at `col`, written only when it differs from the last.
     fn ground_moves(&mut self, col: usize) {
-        if self.last != Some(self.ground.at(col.min(u16::MAX as usize) as u16, self.row)) {
+        if self.last != Some(self.colour(col)) {
             self.ground_at(col);
         }
     }
@@ -78,7 +86,7 @@ impl Band<'_> {
         self.ground_at(col);
     }
 
-    fn line(mut self, line: &str, width: usize) {
+    fn line(mut self, line: &str) {
         let mut col = 0usize;
         // Whether a span has set its own ground.
         let mut own = false;
@@ -118,7 +126,9 @@ impl Band<'_> {
         if own {
             self.base(col);
         }
-        while col < width {
+        // Out to the end of the last row the line takes.
+        let end = col.div_ceil(self.width).max(1) * self.width;
+        while col < end {
             self.ground_moves(col);
             self.out.push(' ');
             col += 1;

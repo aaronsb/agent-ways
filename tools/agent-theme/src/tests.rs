@@ -654,6 +654,17 @@ fn a_vertical_gradient_runs_down_the_block_and_a_horizontal_one_across_it() {
 }
 
 #[test]
+fn a_line_longer_than_the_width_is_padded_to_the_end_of_its_last_row() {
+    let tampa = theme("tampa");
+    let p = Painter::themed(&tampa, ColorDepth::TrueColor);
+    assert_eq!(visible(&p.block("abcdefghijklm", 10)), format!("abcdefghijklm{}", " ".repeat(7)));
+    let first = tampa.gradient.unwrap().stops()[0];
+    let wrapped = p.block("0123456789x", 10);
+    assert!(wrapped.contains(&format!("{}x", bg(first))), "the wrapped row starts the horizontal ground over: {wrapped:?}");
+    assert_eq!(p.block("text", 0), "text", "no width, nothing to paint");
+}
+
+#[test]
 fn a_span_with_its_own_ground_keeps_it() {
     let paper = theme("paper");
     let p = Painter::themed(&paper, ColorDepth::TrueColor);
