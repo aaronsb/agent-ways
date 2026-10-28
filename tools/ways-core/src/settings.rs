@@ -146,6 +146,7 @@ pub const ATTEND_MOD_RETIRED: &str = "`attend_mod` was retired by ADR-512 and is
 pub const MODS: &[(&str, &str)] = &[
     ("attend", "The attend mod in Claude Code (ADR-406, ADR-414): whether a session starts listening, keepwarm, keepalive, the install and poll timing."),
     ("ways-judge", "The ways-judge mod, the relevance gate's Claude Code internal engine (ADR-708): whether repair installs it."),
+    ("ways-theme", "The ways-theme mod, which has Claude Code follow theme.active (ADR-513): whether repair installs it."),
 ];
 
 const BASE: KeySpec = KeySpec {
@@ -553,6 +554,18 @@ const KEYS: &[KeySpec] = &[
         scope: Scope::Machine,
         doc: "Whether `ways manage repair` installs the ways-judge mod in Claude Code.",
         long: "The wanted state of the relevance gate's Claude Code internal engine (ADR-512 item 1). Read per target, from the user file and the target's own file, the target winning; a project cannot set it.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.ways-theme.install",
+        section: "mods",
+        fail_closed: Some(closed_uninstalled),
+        path: &["mods", "ways-theme", "install"],
+        kind: Kind::Bool,
+        default: DefaultValue::Yaml("false"),
+        scope: Scope::Machine,
+        doc: "Whether `ways manage repair` installs the ways-theme mod in Claude Code.",
+        long: "Installed, the mod has Claude Code follow theme.active at each session start: an agent-ways theme is exported to Claude Code's themes folder as ways-<name>.json and selected, and terminal moves a ways theme back to Claude Code's dark. It adds no setting of its own, and when ways fails it changes nothing (ADR-513). Read per target, from the user file and the target's own file, the target winning; a project cannot set it.",
         ..BASE
     },
     KeySpec {

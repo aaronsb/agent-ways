@@ -72,9 +72,14 @@ pub const ATTEND: Mod = Mod { name: "attend", id: "attend@agent-ways", label: "a
 /// `gate.engine` is `claude-code` (ADR-512 item 4).
 pub const JUDGE: Mod = Mod { name: "ways-judge", id: "ways-judge@agent-ways", label: "ways-judge mod", min_claude_code: "2.1.304" };
 
+/// Claude Code follows the active agent-ways theme (ADR-513). Its floor is
+/// the one Claude Code release checked to carry `$.config.set`, `$.fs.write`
+/// and a bounded `$.process.run` together (2.1.312's bundled mod types).
+pub const THEME: Mod = Mod { name: "ways-theme", id: "ways-theme@agent-ways", label: "ways-theme mod", min_claude_code: "2.1.312" };
+
 /// Every mod the marketplace ships, in its order. Each has an entry under
 /// `mods` in the settings registry (ADR-512 item 1).
-pub const MODS: [Mod; 2] = [ATTEND, JUDGE];
+pub const MODS: [Mod; 3] = [ATTEND, JUDGE, THEME];
 
 /// The marketplace folder in the app source.
 fn marketplace_dir(source_root: &Path) -> PathBuf {
