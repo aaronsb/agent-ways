@@ -667,6 +667,18 @@ fn named_in_takes_the_choice_and_warns_when_it_cannot_be_honoured() {
 }
 
 #[test]
+fn an_underline_takes_the_theme_s_rule_glyph() {
+    let ascii = "---  -----  ======";
+    for p in [Painter::plain(), Painter::terminal(ColorDepth::TrueColor), Painter::themed(&bundled()[1], ColorDepth::TrueColor)] {
+        assert_eq!(p.underline(ascii), ascii, "no rule glyph, the ASCII as written: {p:?}");
+    }
+    let tampa = theme("tampa");
+    for depth in [ColorDepth::TrueColor, ColorDepth::Ansi16] {
+        assert_eq!(Painter::select(Some(&tampa), depth).underline(ascii), "~~~  ~~~~~  ~~~~~~", "{depth:?}");
+    }
+}
+
+#[test]
 fn a_frame_with_no_cells_has_no_ground() {
     for name in ["miami-nights", "tampa", "paper"] {
         let p = Painter::themed(&theme(name), ColorDepth::TrueColor);

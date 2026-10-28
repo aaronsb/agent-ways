@@ -80,7 +80,7 @@ pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
     agent_fmt::say!(
         out,
         "  {}",
-        paint(Role::Muted, format!("{:<28} {:<50} -------------", "---", "-------"))
+        paint(Role::Muted, agent_theme::underline(&format!("{:<28} {:<50} -------------", "---", "-------")))
     );
 
     for (way, ctrl, just) in &rows {

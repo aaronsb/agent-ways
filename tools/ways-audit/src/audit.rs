@@ -131,7 +131,7 @@ pub fn active(manifest: &Value, json_out: bool) -> Result<()> {
     agent_fmt::say!(
         out,
         "  {}",
-        paint(Role::Muted, format!("{:<28} {:>5}  ------", "---", "-----"))
+        paint(Role::Muted, agent_theme::underline(&format!("{:<28} {:>5}  ------", "---", "-----")))
     );
 
     for v in with_prov {

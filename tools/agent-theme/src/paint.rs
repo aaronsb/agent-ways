@@ -358,6 +358,21 @@ impl Painter {
         self.decor.rules.map_or("─", |r| r[0])
     }
 
+    /// `ascii`, a heading's or a column's underline drawn in `-` or `=`,
+    /// with each of those in the theme's rule glyph; as written where the
+    /// theme sets none, so default output keeps its ASCII.
+    pub fn underline(&self, ascii: &str) -> String {
+        let Some([rule, _]) = self.decor.rules else { return ascii.to_string() };
+        let mut out = String::with_capacity(ascii.len() * rule.len());
+        for c in ascii.chars() {
+            match c {
+                '-' | '=' => out.push_str(rule),
+                c => out.push(c),
+            }
+        }
+        out
+    }
+
     /// The gradient a filled screen paints, at truecolor only.
     pub fn gradient(&self) -> Option<Gradient> {
         let g = self.roles.and_then(|r| r.gradient)?;
@@ -588,6 +603,11 @@ pub fn pair(style: impl Into<Style>) -> (String, &'static str) {
 /// The rule glyph with the process painter ([`Painter::rule_glyph`]).
 pub fn rule_glyph() -> &'static str {
     painter().rule_glyph()
+}
+
+/// `ascii`'s underline with the process painter ([`Painter::underline`]).
+pub fn underline(ascii: &str) -> String {
+    painter().underline(ascii)
 }
 
 /// The reset with the process painter.

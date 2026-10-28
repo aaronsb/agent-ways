@@ -147,6 +147,7 @@ fn ways_status_under_miami_nights_grounds_every_cell() {
     let (home, _root) = home("status");
     let grid = run(&home, &["status"]);
     assert!(text(&grid).contains("Ways Engine Status"), "{}", text(&grid));
+    assert!(text(&grid).contains(&"─".repeat(18)) && !text(&grid).contains("=="), "the heading's underline is the theme's rule: {}", text(&grid));
     let blank = grid.iter().filter(|row| row.iter().all(|c| c.ch == Some(' '))).count();
     assert!(blank > 0, "the report has blank rows to check");
     let grounds = grounded(&["status"], &grid);
@@ -201,7 +202,7 @@ fn the_same_reports_piped_carry_no_escape_and_no_padding() {
 fn forced_colour_on_a_pipe_paints_no_band() {
     let (home, _root) = home("forced");
     let out = run_raw(&home, &["status"], true);
-    assert!(out.contains("Ways Engine Status"), "{out:?}");
+    assert!(out.contains("Ways Engine Status\n==================\n"), "the default painter keeps the ASCII underline: {out:?}");
     assert!(!out.contains("48;"), "forced colour paints no ground: {out:?}");
     assert!(out.lines().all(|l| l == l.trim_end()), "and pads nothing: {out:?}");
 }

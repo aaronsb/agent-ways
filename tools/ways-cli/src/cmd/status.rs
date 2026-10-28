@@ -174,7 +174,7 @@ pub fn run(json_output: bool) -> Result<()> {
     } else {
         let mut out = String::new();
         agent_fmt::say!(out, "Ways Engine Status");
-        agent_fmt::say!(out, "==================");
+        agent_fmt::say!(out, "{}", agent_theme::underline("=================="));
         agent_fmt::say!(out);
         agent_fmt::say!(out, "Install:   {}", install_line());
         agent_fmt::say!(out);

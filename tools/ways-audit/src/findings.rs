@@ -113,7 +113,7 @@ fn table(findings: &[Finding], title: &str) -> String {
     say!(
         out,
         "  {}",
-        paint(Role::Muted, format!("{:<26} {:<26} {:<8} {:>5}  -------------", "---", "-------", "----", "-----"))
+        paint(Role::Muted, agent_theme::underline(&format!("{:<26} {:<26} {:<8} {:>5}  -------------", "---", "-------", "----", "-----")))
     );
     for f in findings {
         let control = if f.control.len() > 26 { &f.control[..26] } else { &f.control };
