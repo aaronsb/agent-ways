@@ -62,9 +62,19 @@ basis:
     level: directed
     said: "the only ones we want to change would be the florida theme ones for now"
     via: "operator, in the session that commissioned ADR-513"
+  - operator: aaronsb
+    level: directed
+    said: "for the theme selector, we need to call the little glyphs that allow one to map the fire in the context timeline vs the table something. ways charms? waypoints? way references? something. we can then have a callout in themes: use default (the one that has been used so far) or 'use theme' - since we've externalized it, it should be configurable. this way the florida ones can have some theme specficic glyphs emojis. miami nights need to be cool like miami vice, tampa can have it's sort of themes and miami day can have it's related ones. the definition likely needs to carry fg and bg colors too"
+    via: "operator, in the session that commissioned ADR-513"
+  - operator: aaronsb
+    level: directed
+    said: "maybe they don't need to follow the background color, but probably the foreground color should be definable"
+    via: "operator, in the session that commissioned ADR-513"
   - evidence: "the glyphs a theme cannot change, at af0b8bfe: panes are drawn with ratatui's plain border (tools/agent-tui/src/app/render.rs:19-20) and attend-chat's with the rounded one (tools/attend-chat/src/app/view.rs:263, :289); the rule and selected rule are `─` and `━` (tools/agent-tui/src/feed.rs:213, timeline.rs:227-229); the selected-row mark is `▌` (tools/agent-tui/src/app/theme.rs:297); presence is `●` and `○` (tools/attend-chat/src/app/sidebar.rs:403-404, :478, :507)"
   - evidence: "at 613dc9ea nothing outside agent-theme calls `agent_theme::install` (tools/agent-theme/src/paint.rs:511), so plain output paints with `Painter::detect`, the default theme at the environment's depth (paint.rs:505-507); the chosen theme reaches only the screens, which read `theme.active` themselves (tools/ways-cli/src/cmd/screen_host.rs:54, tools/attend-chat/src/theme.rs:46)"
   - evidence: "at 613dc9ea the event glyphs are hard-coded where they are drawn: the timeline's head and mark (tools/agent-tui/src/timeline.rs:221-229), each fate's mark in the introspect table (tools/ways-cli/src/cmd/introspect/table.rs:55-64) and the suppressed and re-disclosed notes (table.rs:296-303)"
+  - evidence: "at 9ac1aefb the per-way markers of the way table's `◎` column and of the context strip are pins: ten fixed glyphs `●◆■▲◉▶★◈♦▪` (tools/ways-cli/src/cmd/render.rs:30) coloured from agent-identity's categorical palette (render.rs:206-223), drawn in the table (render.rs:267, tools/ways-cli/src/cmd/introspect/table.rs:151) and on the strip (render.rs:449)"
+  - standard: "Unicode emoji data (UTS #51): a code point with Emoji_Presentation=Yes draws as emoji by default, two cells wide in terminals, with no variation selector needed"
   - evidence: "at af0b8bfe the contrast derivation lifts text roles against two grounds, bg and the selection (tools/agent-theme/src/derive.rs:178-180), and the parser rejects any key it does not know (tools/agent-theme/src/text.rs:191-200)"
   - evidence: "while the bundled themes were drawn, a saturated blue sky stop for Miami was tried; lifting every status colour to 4.5:1 across it darkened them all to dull values, so the stop was dropped for a pale sky (relayed by the calling session's brief, 2026-10-28)"
   - standard: "WCAG 2.2, success criteria 1.4.3 (text contrast 4.5:1) and 1.4.11 (non-text contrast 3:1): the floors ADR-504 §4 holds text and muted roles to"
@@ -104,6 +114,8 @@ observable:
   - 'see: with Tampa active, `ways status` on a truecolor terminal prints as a band running from bay blue at the left to sunset at the right, its table rules drawn with `~`; `ways status | cat` prints as it did before'
   - 'see: with Tampa active, the session viewer (`ways session live`) and a way opened to read draw on Tampa''s gradient'
   - 'see: with Miami active, the session timeline marks the head with `☀` and an injected way with `❀`, and a blocked way still with `⊘`; with Nord active, the timeline draws the glyphs it draws today'
+  - 'see: with Miami Nights active and `theme.waypoints` at `theme`, the way table''s `◎` column and the context strip mark clusters with `🌴 🦩 🚤`; with `theme.waypoints` set to `default`, or under Nord, they show `● ◆ ■` in the categorical colours'
+  - 'run: cargo test -p agent-theme refuses a `[[waypoints]]` entry whose glyph is three cells wide, carries a variation selector or a zero-width joiner, or is one of 17 entries'
   - 'try: copy Tampa in the theme tab, change one colour and save; the saved file keeps its gradient, wave border, rule glyphs, mark, presence glyphs and ornament'
 status: accepted
 date: 2026-10-28
@@ -116,11 +128,13 @@ related: [ADR-504, ADR-503]
 
 ## Summary
 
-- **Decided:** A theme file may set a ground gradient across the whole frame, the border, the rule, mark and presence glyphs, and an ornament before pane titles. Each key is optional; a key left out keeps the surface's own default, so every existing theme and dotfiles palette draws as it does now. The gradient is painted only at truecolor depth, and every text role must meet its contrast floor on every colour the gradient paints. The glyphs and the ornament draw at every colour depth; below 256 colours they take the default theme's colours. Three bundled themes use the keys: Miami, Tampa and Miami Nights. Every surface that shows content follows the active theme, plain reports included: on a terminal, a report under a theme that paints its own ground prints as a band of that ground, with the theme's rule and presence glyphs. A theme may also replace each event glyph of the session timeline and the introspect screens, and the three Florida themes replace six of them. This extends ADR-504 §4 and §5 and completes §9's move of the plain outputs.
+- **Decided:** A theme file may set a ground gradient across the whole frame, the border, the rule, mark and presence glyphs, and an ornament before pane titles. Each key is optional; a key left out keeps the surface's own default, so every existing theme and dotfiles palette draws as it does now. The gradient is painted only at truecolor depth, and every text role must meet its contrast floor on every colour the gradient paints. The glyphs and the ornament draw at every colour depth; below 256 colours they take the default theme's colours. Three bundled themes use the keys: Miami, Tampa and Miami Nights. Every surface that shows content follows the active theme, plain reports included: on a terminal, a report under a theme that paints its own ground prints as a band of that ground, with the theme's rule and presence glyphs. A theme may also replace each event glyph of the session timeline and the introspect screens, and the three Florida themes replace six of them. A theme may carry its own waypoints, the markers that tie a way in the way table to its place on the context strip, and `theme.waypoints` chooses between the theme's set and the default one. This extends ADR-504 §4 and §5 and completes §9's move of the plain outputs.
 - **Trades away:** A theme file that only sets colours. Decoration is part of the theme a user chooses, so a user who likes Tampa's colours and not its waves edits a copy; no setting overrides a theme's decoration yet. A theme file with the new keys fails to load in a build older than this change. Status colours on a gradient theme may be lifted further from the values written in the file than on a flat ground. Plain reports printed to a terminal change under every chosen theme, including ones without the new keys.
 - **One-way?** No. Reversible now; expensive once user themes carry the keys, because removing a key makes those files fail to parse.
 - **Probes:** *Confident (looks unchanged):* you want a theme without the new keys, bundled or your own, to look exactly as it does today on every surface. *Not confident (lower depths):* on a 256-colour terminal a gradient theme shows its flat THEME_BG and keeps its borders, marks and ornament; on a 16-colour terminal, or under NO_COLOR, the plain default theme is used in its place, so Tampa's waves and lightning bolt disappear along with its colours.
 - **Inversion:** Between decoration as part of a theme's identity, one file and one choice, and decoration as a user preference set apart from the palette, as the status-line segment shape is. This record takes the first end and leaves room for the second as an override.
+
+> Edited 2026-10-28: the operator asked that the markers tying a fire in the table to the context strip be named and carried by themes (item 15). The Decided line gained the waypoints sentence; nothing in it was removed.
 
 ## Context
 
@@ -135,6 +149,8 @@ The chosen theme reaches the screens only. The plain outputs moved onto `agent-t
 ## Decision
 
 1. **Optional keys.** Each key below is optional. A theme that leaves one out gets the surface's own default for it, so a theme with none of them draws exactly as before. The keys follow ADR-504 §4's style: bare uppercase `THEME_*` names with double-quoted values.
+
+   > Edited 2026-10-28: item 15 adds the format's first table. A theme file is now TOML with top-level `THEME_*` keys in the style above, then optional tables. A file that uses a table no longer sources as a shell script; a palette with no table still does, as a dotfiles palette does.
 
 2. **`THEME_GRADIENT`.** The value is a direction, `vertical` or `horizontal`, then two to four `#rrggbb` stops separated by spaces, for example `THEME_GRADIENT="vertical #d4efff #fff4ee #ffe6ee"`.
    - The stops are spaced evenly from the frame's first row to its last (vertical) or its first column to its last (horizontal), and a cell's ground is the colour interpolated in OKLab at its row or column.
@@ -184,6 +200,21 @@ The chosen theme reaches the screens only. The plain outputs moved onto `agent-t
    - Each event has its own key, so a theme names the events it changes and leaves the rest at their defaults.
    - The three Florida themes set the six keys of the first line and leave the warning glyphs (would-block, blocked, the two held, due) at their defaults, so a warning reads the same under every theme. Head, mark, matched, injected, suppressed and re-disclosed are Miami's `☀ ┊ ✿ ❀ ☂ ↻`, Tampa's `↯ ┊ ⚔ ✦ ☈ ⟲`, and Miami Nights' `◓ ┊ ✦ ✧ ☾ ↻`.
 
+15. **Waypoints.**
+
+   > Added 2026-10-28, on the operator's request that the theme selector name these glyphs, that a theme may carry its own and that the definition carry its colours. The operator's later "maybe they don't need to follow the background color, but probably the foreground color should be definable" removed the background from an entry.
+
+   The per-way markers in the way table's `◎` column and on the context strip, called pins in the code until now, are waypoints. A waypoint marks a point on a route, and the context strip is the route through the context window.
+   - A theme file may carry an optional `[[waypoints]]` array of tables, 1 to 16 entries, each `{ glyph = "…", fg = "#rrggbb" }` with `fg` optional. Clusters take the entries in order, cycling when there are more clusters than entries.
+   - A glyph is one grapheme of display width 1 or 2. An emoji is allowed only where its code point has Emoji_Presentation=Yes, with no variation selector and no zero-width joiner, so the terminal agrees on its width. Anything else is a parse error naming its line.
+   - An `fg` must reach 3:1 against every ground of item 3, WCAG 1.4.11's floor for graphical objects. The derivation lifts an `fg` that falls short, as it lifts a muted role. An entry without `fg` takes the categorical colour of its position, as a pin does today. A colour emoji draws in its own colours and ignores `fg`.
+   - The table column and the context strip take the display width of the set's widest glyph.
+   - The setting `theme.waypoints`, beside `theme.active` in ways' settings and offered in the theme tab, is `theme` or `default`, and defaults to `theme`. Under `theme` the active theme's set is used where it has one. Under `default`, and for a theme without a set, the waypoints are today's ten glyphs `●◆■▲◉▶★◈♦▪` in agent-identity's categorical colours.
+   - Below 256 colours the glyphs draw and the colours drop, as item 9 has it for decoration. Piped output keeps the default set.
+   - `to_text` writes the `[[waypoints]]` table back after the keys, so the theme editor keeps it on save (item 8).
+   - The three Florida themes carry sets of ten emoji. Miami Nights, after Miami Vice: 🌴 🦩 🚤 🐊 🌆 🎷 📼 🎹 🌃 🍸. Tampa: ⚡ ⚓ 🦜 🐓 🏈 🏒 ⚾ 🌉 🌇 🐢. Miami: 🦩 🌺 🐬 🍹 🌴 🏄 🐚 🍊 🌞 🥥.
+   - A theme's waypoint colours replace the categorical palette for its waypoints, which narrows ADR-504 §6, where categorical colours stay outside themes.
+
 ## Consequences
 
 ### Positive
@@ -194,6 +225,7 @@ The chosen theme reaches the screens only. The plain outputs moved onto `agent-t
 - A bad glyph is refused when the file is read, so a frame never misaligns from a theme.
 - A report reads in a light theme on a dark terminal, because its text sits on the ground the theme was tuned for.
 - One theme choice reaches the screens and the plain reports alike.
+- The way table and the context strip can carry a theme's character in their markers, and `theme.waypoints` returns them to the familiar set without changing theme.
 
 ### Negative
 
@@ -208,12 +240,15 @@ The chosen theme reaches the screens only. The plain outputs moved onto `agent-t
 - A report under a vertical gradient is painted only once its line count is known, so the block holds its lines until the report ends. A report under a horizontal gradient or a flat ground can print line by line.
 - A report painted to the terminal's width leaves a band that a terminal resized later does not repaint.
 - Each binary with plain output reads the settings and the theme directory once when its output is styled, which adds that read to the start of an interactive command.
+- Colour emoji waypoints ignore `fg` and depend on the terminal's font; a font without colour emoji draws them as outlines or blanks, and two waypoints can then be told apart by shape only.
+- A set with a two-cell glyph doubles the width of each marker, which halves the context strip's resolution at a given terminal width.
+- A theme file with a `[[waypoints]]` table no longer sources as a shell script, so a tool that sources dotfiles palettes cannot read it.
 
 ### Neutral
 
 - A surface reads the chosen theme's decoration at every depth, including where its colours are unused, so below 256 colours a frame takes its glyphs and its colours from two themes.
 - The new keys are agent-ways' own in the dotfiles style. ADR-504's warning stands: a later dotfiles key of the same name would collide.
-- A named glyph set that themes refer to, shared between themes, can be added later in the same way as a user decoration setting; the event keys stay as they are.
+- A named glyph set that themes refer to, shared between themes, can be added later in the same way as a user decoration setting; the event keys and the `[[waypoints]]` table stay as they are.
 - A user decoration setting that overrides the theme's, as `theme.shape` does for the lozenge caps (ADR-504, note of 2026-10-01), can be added later without changing these keys.
 
 ## Alternatives Considered
@@ -227,3 +262,6 @@ The chosen theme reaches the screens only. The plain outputs moved onto `agent-t
 - **One positional string for every event glyph,** as `THEME_BORDER_GLYPHS` is for the border. A position names no event, a theme must restate every default to change one glyph, and adding an event later shifts or extends every theme's string. One key per event names its event and lets a theme change a subset.
 - **A registry of named glyph sets that themes refer to.** Deferred, like the user decoration setting: the Florida themes are the only ones that change event glyphs, and a registry can sit over the keys later.
 - **Free-width glyphs, measured at draw time.** A two-cell border glyph breaks every box it sits in, and catching it at draw time means each surface handles a bad theme. One check when the file is read covers every surface.
+- **"Way charms" or "way references" for the markers** (added 2026-10-28). Both were among the operator's candidates. "Charms" reads as ornament, where the markers carry meaning, and "references" collides with the See Also edges between ways. "Waypoints" names a point on a route, and the context strip is that route.
+- **A background chip behind each waypoint, `{glyph, fg, bg}`** (added 2026-10-28). Dropped on the operator's word: "maybe they don't need to follow the background color, but probably the foreground color should be definable". A waypoint sits on the theme's ground, and its `fg` is checked against every ground.
+- **A theme's waypoints with no setting to turn them off** (added 2026-10-28). The operator asked for a choice between the default set and the theme's, and the default set is the one a user already reads.
