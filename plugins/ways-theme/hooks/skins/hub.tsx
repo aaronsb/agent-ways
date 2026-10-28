@@ -44,7 +44,7 @@ import { countdownsOf, limitLabel, metersOf } from './svg-usage.ts'
 import { kindOf, summarize, toolLabel } from './tools.ts'
 import { commandOf, errorLine, isQuiet, quietLabel } from './quiet.ts'
 import { MAX_MARKDOWN, replySegments } from './reply.ts'
-import { hyperlinksFrom, touchOf } from './links.ts'
+import { fileHref, hyperlinksFrom, touchOf } from './links.ts'
 import { MIN_WIDTH, axisFor, boxLines, canMeasure, gradientBox, gradientRuns } from './prompt-box.tsx'
 import type { Touch, TurnStats, UsageSnap } from '../../types'
 
@@ -217,7 +217,8 @@ type Needs = { links?: boolean; touched?: boolean; folds?: boolean; cwd?: string
 async function sessionLook($: EngineInterface, e: { requestId: string; surface: RenderSurface }, look: Look, needs: Needs): Promise<Look> {
   const folds = memberOf(foldsAtom, e)
   const links = needs.links === true && look.prefs.links && (e.surface !== 'terminal' || hyperlinks)
-  const paths = links ? { cwd: needs.cwd ?? (await cwdOf($)), ...(home === undefined ? {} : { home }) } : undefined
+  // A `file://` URL names this machine, which only the terminal is on.
+  const paths = links && e.surface === 'terminal' ? { cwd: needs.cwd ?? (await cwdOf($)), ...(home === undefined ? {} : { home }) } : undefined
   const touched = needs.touched === true && hasTouched ? { files: await read($, touchedAtom), cwd: needs.cwd ?? (await cwdOf($)) } : undefined
   const open = needs.folds === true && look.prefs.fold ? new Set(await read($, folds)) : undefined
 
@@ -237,8 +238,8 @@ async function sessionLook($: EngineInterface, e: { requestId: string; surface: 
   }
 }
 
-// Text that may hold a path: one slash between names, or a file name.
-const hasPathish = (text: string): boolean => /[\w.-]\/[\w.-]|\w\.[A-Za-z]{1,5}\b/.test(text)
+// Text that may hold a path: one slash between names, a file name, or a home path.
+const hasPathish = (text: string): boolean => /[\w.-]\/[\w.-]|\w\.[A-Za-z]{1,5}\b|~\//.test(text)
 
 const replyNeeds = (text: string, segments: readonly { kind: string }[]): Needs => ({
   links: /https?:\/\//.test(text) || hasPathish(text),
@@ -461,13 +462,14 @@ export function registerSkins(on: On, shared: Shared): void {
     const path = fields.file_path ?? fields.notebook_path
     const disclosure = memberOf(disclosureAtom, e)
     const open = isOpen(await read($, disclosure), e.props.isErrored)
-    const base = await sessionLook($, e, lookOf($.ui.resolve(e), setup, e.surface, copier($, e.surface)), { links: open, touched: typeof path === 'string', folds: open, cwd })
+    const base = await sessionLook($, e, lookOf($.ui.resolve(e), setup, e.surface, copier($, e.surface)), { links: open || typeof path === 'string', touched: typeof path === 'string', folds: open, cwd })
     const framed = isFramed(setup, e, shared.view())
     const plain = base.svg === undefined ? base : { ...base, isFirstDraw: await firstDraws($, e) }
     const look = framed ? forFrame(plain) : plain
     const touch = typeof path === 'string' && look.touched !== undefined ? touchOf(look.touched.files, path, cwd) : undefined
     const label = setup.prefs.quiet && isQuiet(e.props.tool, e.props.input) ? quietLabel(e.props.tool) : toolLabel(e.props.tool)
-    const row = toolRow(look, e.props, kind, target, meta, label, touch)
+    const href = typeof path === 'string' && look.links === true && look.paths !== undefined ? fileHref(path, look.paths) : null
+    const row = toolRow(look, e.props, kind, target, meta, label, touch, href)
     const toggle = () => void update($, disclosure, () => (open ? 'closed' : 'open'))
 
     const drawn = (row: ReturnType<Ui['Box']>) => withSettle($, e, framed ? marginRow(look, row) : row)

@@ -24,6 +24,10 @@ export type World = {
   selected?: string | null
   /** `$.config.list` rejects. */
   listFails?: boolean
+  /** The environment `$.env.get` reads; HOME is `/home/dev` when not given. */
+  env?: Readonly<Record<string, string>>
+  /** The session's folder; `/work/proj` when not given. */
+  cwd?: string
 }
 
 export const INTERACTIVE = { cwd: '/work/proj', surface: 'terminal', isInteractive: true } as const
@@ -38,7 +42,7 @@ export function host(on: On, world: World) {
   const toasts: unknown[] = []
   const stripped: string[] = []
   on('session.start', ($, e) => ({ cwd: e.cwd }))
-  on('session.cwd', () => ({ value: '/work/proj' }) as never)
+  on('session.cwd', () => ({ value: world.cwd ?? '/work/proj' }) as never)
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent: 42 }, rateLimits: [] } }) as never)
   on('ui.log', ($, e) => {
     if (String(e.text).startsWith('ways-theme skins:')) logs.push(String(e.text))
@@ -65,7 +69,7 @@ export function host(on: On, world: World) {
     if (argv === 'ways settings get theme.active') return { value: ok('miami-nights\n') } as never
     return { value: json(CLAUDE_CODE_MIAMI) } as never
   })
-  on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/home/dev' : undefined }) as never)
+  on('env.get', ($, e) => ({ value: world.env === undefined ? (e.name === 'HOME' ? '/home/dev' : undefined) : world.env[e.name] }) as never)
   on('fs.read', () => {
     throw new Error('ENOENT')
   })

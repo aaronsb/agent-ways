@@ -37,8 +37,9 @@ const FENCE = /^\s*(```|~~~)/
 const INLINE = /(`+)([^`]+?)\1|\*\*(?=\S)(.+?)(?<=\S)\*\*|__(?=\S)(.+?)(?<=\S)__|~~(?=\S)(.+?)(?<=\S)~~|(?<![\w*])\*(?=\S)(.+?)(?<=\S)\*(?![\w*])|(?<![\w_])_(?=\S)(.+?)(?<=\S)_(?![\w_])/g
 
 // A path: absolute, `~/`, `./` or `../`, a drive, or a relative one of two or more segments
-// ending in a file name (`a.d.ts` whole). It keeps a `:line` or `:line:col` after it.
-const PATH = /(?:(?:[A-Za-z]:[\\/]|~\/|\.{1,2}\/|(?<![\w)])\/(?=[\w.@-]+\/))[\w.@-]+(?:[\\/][\w.@-]+)*\/?|(?<![\w/.-])[\w@-]+(?:\/[\w.@-]+)*\/[\w-]+(?:\.[\w-]+)*\.[A-Za-z][A-Za-z0-9]{0,5}\b)(?::\d+(?::\d+)?\b)?/
+// ending in a file name (`a.d.ts` whole). It keeps a `:line` or `:line:col` after it. None
+// starts inside a remote one: `host:/var/x`, `user@host:~/x`, `s3://b/x`, `//cdn/x`.
+const PATH = /(?:(?:(?<![\w@.-])[A-Za-z]:[\\/]|(?<![\w:@])~\/|\.{1,2}\/|(?<![\w):/~])\/(?=[\w.@-]+\/))[\w.@-]+(?:[\\/][\w.@-]+)*\/?|(?<![\w/.@:-])[\w@-]+(?:\/[\w.@-]+)*\/[\w-]+(?:\.[\w-]+)*\.[A-Za-z][A-Za-z0-9]{0,5}\b)(?::\d+(?::\d+)?\b)?/
 
 const WHOLE_PATH = new RegExp(`^(?:${PATH.source})$`)
 

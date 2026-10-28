@@ -204,11 +204,21 @@ function iconRow(look: Look, Svg: SvgElement, kind: Kind, calls: readonly Call[]
   )
 }
 
-// `touch` colours the target of a file this turn created (ok) or edited (warn).
-export function toolRow(look: Look, call: Call, kind: Kind, target: string, meta: Meta, label = toolLabel(call.tool), touch?: Touch) {
-  const { Text } = look.ui
+// `touch` colours the target of a file this turn created (ok) or edited (warn); `href`, the
+// file's link where the surface draws one, makes the target a link drawn the same.
+export function toolRow(look: Look, call: Call, kind: Kind, target: string, meta: Meta, label = toolLabel(call.tool), touch?: Touch, href?: string | null) {
+  const { Link, Text } = look.ui
   const { palette } = look.skin
   const targetColor = call.isErrored ? palette.err : touch === 'created' ? palette.ok : touch === 'edited' ? palette.warn : palette.muted
+  const targetText =
+    href === undefined || href === null ? (
+      <Text color={targetColor}>{`  ${target}`}</Text>
+    ) : (
+      <Text color={targetColor}>
+        {'  '}
+        <Link href={href}>{target}</Link>
+      </Text>
+    )
 
   if (look.svg !== undefined) {
     const line = (
@@ -216,7 +226,7 @@ export function toolRow(look: Look, call: Call, kind: Kind, target: string, meta
         <Text color={palette[kind]} bold>
           {label}
         </Text>
-        <Text color={targetColor}>{`  ${target}`}</Text>
+        {targetText}
       </Text>
     )
 
@@ -227,7 +237,7 @@ export function toolRow(look: Look, call: Call, kind: Kind, target: string, meta
     <Text wrap="truncate-end">
       {node(look, [call])}
       <Text color={palette[kind]}>{label}</Text>
-      <Text color={targetColor}>{`  ${target}`}</Text>
+      {targetText}
     </Text>
   )
 

@@ -1,66 +1,24 @@
-import { describe, expect, mock, test } from 'claude-code/testing'
+import { describe, expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { On, ProcessRunResult, RenderElement } from 'claude-code'
+import type { On, RenderElement } from 'claude-code'
 
-import { MOD_EXPORT_ARGV } from '../hooks/skins/config.ts'
 import { MIAMI_NIGHTS } from './fixtures.ts'
-
-const ok = (stdout: string): ProcessRunResult => ({ exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false })
-
-// Claude Code's export of the active theme, for the register module's frames.
-const CLAUDE_CODE_MIAMI = { name: 'Miami Nights', base: 'dark', overrides: { claude: '#ff4d93', userMessageBackground: '#3d1466' } }
+import { INTERACTIVE, host, json, walk } from './host.tsx'
 
 type Env = Readonly<Record<string, string>>
 
 const KITTY: Env = { TERM: 'xterm-kitty', HOME: '/home/dev' }
 
-/** The host a reply draws in: Miami Nights exported and selected, the session in
- *  `cwd`, the environment `env`, every other render the engine's. */
-function host(on: On, env: Env, cwd = '/work/proj') {
-  mock.clock(on, { now: 1_000 })
-  on('session.start', ($, e) => ({ cwd: e.cwd }))
-  on('session.cwd', () => ({ value: cwd }) as never)
-  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent: 42 }, rateLimits: [] } }) as never)
-  on('ui.log', () => ({ value: undefined }) as never)
-  on('process.run', ($, e) => {
-    const argv = e.argv.join(' ')
-    if (argv === MOD_EXPORT_ARGV.join(' ')) return { value: ok(JSON.stringify(MIAMI_NIGHTS)) } as never
-    if (argv === 'ways settings get theme.active') return { value: ok('miami-nights\n') } as never
-    return { value: ok(JSON.stringify(CLAUDE_CODE_MIAMI)) } as never
-  })
-  on('env.get', ($, e) => ({ value: env[e.name] }) as never)
-  on('fs.read', () => {
-    throw new Error('ENOENT')
-  })
-  on('fs.write', () => ({ value: undefined }) as never)
-  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: 'custom:ways', provider: { kind: 'engine' }, isLocked: false }] }) as never)
-  on('ui.render', ($, e) => {
-    const { Text } = $.ui.resolve(e)
-    return <Text>engine</Text>
-  })
-  return { start: { cwd, surface: 'terminal', isInteractive: true } as const }
-}
-
-type Node = { type?: string; props?: Record<string, unknown>; children?: unknown[] }
-
-function walk(tree: unknown, out: Node[] = []): Node[] {
-  if (tree === null || typeof tree !== 'object') return out
-  const node = tree as Node
-  if (typeof node.type === 'string') out.push(node)
-  for (const child of node.children ?? []) walk(child, out)
-  return out
-}
-
 const hrefs = (tree: RenderElement): string[] => walk(tree).filter(n => n.type === 'Link').map(n => String(n.props?.href))
 
 const VIEW = { columns: 100, rows: 30 }
-const at = (component: string, props: Record<string, unknown>) => ({ plugin: 'ways-theme', surface: 'terminal', component, requestId: 'r1', viewport: VIEW, props }) as never
+const at = (component: string, props: Record<string, unknown>, surface = 'terminal') => ({ plugin: 'ways-theme', surface, component, requestId: 'r1', viewport: VIEW, props }) as never
 const reply = (text: string) => at('AssistantMessage', { text, isFirstOfReply: true })
 
 /** The links a reply of `text` draws, in a session with `env` under `cwd`. */
-async function linksOf($: Engine, on: On, text: string, env: Env = KITTY, cwd?: string) {
-  const h = host(on, env, cwd)
-  await $.session.start(h.start)
+async function linksOf($: Engine, on: On, text: string, env: Env = KITTY, cwd: string = INTERACTIVE.cwd) {
+  host(on, { mod: json(MIAMI_NIGHTS), env, cwd })
+  await $.session.start({ ...INTERACTIVE, cwd })
   const ui = await $.ui.mount(reply(text))
   const tree = await ui.drawn()
   await ui.unmount()
@@ -109,10 +67,45 @@ describe('paths in a reply link to the file', () => {
     expect(links).toEqual([])
   })
 
+  test('a lone home path is linked', async ($, on) => {
+    const { links } = await linksOf($, on, 'Then reload ~/.bashrc')
+    expect(links).toEqual(['file:///home/dev/.bashrc'])
+  })
+
+  const REMOTE: [string, string][] = [
+    ['an scp target', 'scp user@host:/var/log/app.log .'],
+    ['an rsync target', 'rsync box:/srv/data/a.db here'],
+    ['a home path on another host', 'scp me@box:~/notes/a.txt .'],
+    ['an s3 URL', 'Copy s3://bucket/dir/a.json down.'],
+    ['an ftp URL', 'Fetch ftp://mirror.example.org/pub/x.tar.gz first.'],
+    ['an ssh URL', 'Clone ssh://git@host/org/r.git now.'],
+    ['a scheme-relative URL', 'Load //cdn.example.com/lib/x.js here.'],
+  ]
+  for (const [name, text] of REMOTE) {
+    test(`${name} is not a local path`, async ($, on) => {
+      const { links, tree } = await linksOf($, on, text)
+      expect(links).toEqual([])
+      // Nor is any part of it coloured as a path.
+      expect(walk(tree).some(n => n.type === 'Text' && n.props?.color === MIAMI_NIGHTS.roles.info)).toBe(false)
+    })
+  }
+
+  test('a drive path keeps its drive when .. folds past its root', async ($, on) => {
+    const { links } = await linksOf($, on, 'See C:/x/../../y.txt and D:/a/./b.rs:7 now.')
+    expect(links).toEqual(['file:///C:/y.txt', 'file:///D:/a/b.rs#7'])
+  })
+
+  test('a relative path under a network or WSL folder stays text', async ($, on) => {
+    const { links, tree } = await linksOf($, on, 'See src/a.ts and `src/b.ts:4`.', KITTY, '\\\\wsl$\\Ubuntu\\home\\me\\proj')
+    expect(links).toEqual([])
+    expect(JSON.stringify(tree)).toContain('src/a.ts')
+  })
+
   const NO_LINKS: [string, Env][] = [
     ['a terminal not known to draw them', { HOME: '/home/dev' }],
     ['tmux', { ...KITTY, TMUX: '/tmp/tmux-1000/default,1,0' }],
     ['FORCE_HYPERLINK=0', { ...KITTY, FORCE_HYPERLINK: '0' }],
+    ['CI', { ...KITTY, CI: 'true' }],
   ]
   for (const [name, env] of NO_LINKS) {
     test(`under ${name} a path stays text, drawn as before`, async ($, on) => {
@@ -130,13 +123,46 @@ describe('paths in a reply link to the file', () => {
   })
 })
 
-describe('an opened tool row links its path', () => {
-  test('the path field of an opened Read links to the file', async ($, on) => {
-    const h = host(on, KITTY)
-    await $.session.start(h.start)
-    const READ = { tool_use_id: 't1', tool: 'Read', input: { file_path: '/work/proj/src/a.ts' }, isRunning: false, isErrored: true, isInterrupted: false, isExpanded: false, output: 'File does not exist.' }
+describe('a tool row links its file', () => {
+  const READ = { tool_use_id: 't1', tool: 'Read', input: { file_path: '/work/proj/src/a.ts' }, isRunning: false, isErrored: false, isInterrupted: false, isExpanded: false, output: undefined }
+  const FAILED = { ...READ, isErrored: true, output: 'File does not exist.' }
+
+  test('the collapsed row links its target, drawn as before', async ($, on) => {
+    host(on, { mod: json(MIAMI_NIGHTS), env: KITTY })
+    await $.session.start(INTERACTIVE)
     const ui = await $.ui.mount(at('ToolUse', READ))
-    expect(hrefs(await ui.drawn())).toEqual(['file:///work/proj/src/a.ts'])
+    const tree = await ui.drawn()
+    expect(hrefs(tree)).toEqual(['file:///work/proj/src/a.ts'])
+    const link = walk(tree).find(n => n.type === 'Link')
+    expect(link?.children).toEqual(['src/a.ts'])
     await ui.unmount()
   })
+
+  test('an opened row links its target and its path field', async ($, on) => {
+    host(on, { mod: json(MIAMI_NIGHTS), env: KITTY })
+    await $.session.start(INTERACTIVE)
+    const ui = await $.ui.mount(at('ToolUse', FAILED))
+    expect(hrefs(await ui.drawn())).toEqual(['file:///work/proj/src/a.ts', 'file:///work/proj/src/a.ts'])
+    await ui.unmount()
+  })
+
+  test('a row where links are off links nothing', async ($, on) => {
+    host(on, { mod: json(MIAMI_NIGHTS), env: { ...KITTY, TMUX: '/tmp/tmux-1000/default,1,0' } })
+    await $.session.start(INTERACTIVE)
+    const ui = await $.ui.mount(at('ToolUse', FAILED))
+    const tree = await ui.drawn()
+    expect(hrefs(tree)).toEqual([])
+    expect(JSON.stringify(tree)).toContain('  src/a.ts')
+    await ui.unmount()
+  })
+
+  for (const surface of ['desktop', 'vscode', 'mobile'] as const) {
+    test(`on ${surface} a row gets no file link: file:// names the terminal's machine`, async ($, on) => {
+      host(on, { mod: json(MIAMI_NIGHTS), env: KITTY })
+      await $.session.start({ ...INTERACTIVE, surface })
+      const ui = await $.ui.mount(at('ToolUse', FAILED, surface))
+      expect(hrefs(await ui.drawn()).filter(href => href.startsWith('file:'))).toEqual([])
+      await ui.unmount()
+    })
+  }
 })

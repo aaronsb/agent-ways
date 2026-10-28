@@ -71,11 +71,12 @@ const slashed = (path: string): string => path.replace(/\\/g, '/')
 // Where a path in text is placed from: the session's folder, and home for `~/`.
 export type PathBase = { cwd: string; home?: string }
 
-// `/a/./b/../c` as `/a/c`; a `..` past the root stays at the root.
+// `/a/./b/../c` as `/a/c`; a `..` past the root, or past a drive's root, stays there.
 function folded(path: string): string {
+  const drive = /^\/([A-Za-z]:)(?:\/|$)/.exec(path)?.[1]
   const kept: string[] = []
 
-  for (const segment of path.split('/').slice(1)) {
+  for (const segment of path.split('/').slice(drive === undefined ? 1 : 2)) {
     if (segment === '..') {
       kept.pop()
     } else if (segment !== '.' && segment !== '') {
@@ -83,11 +84,14 @@ function folded(path: string): string {
     }
   }
 
-  return `/${kept.join('/')}${path.endsWith('/') && kept.length > 0 ? '/' : ''}`
+  const parts = drive === undefined ? kept : [drive, ...kept]
+
+  return `/${parts.join('/')}${path.endsWith('/') && kept.length > 0 ? '/' : ''}`
 }
 
 // A path as the `file://` URL a terminal opens, or null where it cannot be placed or the
 // URL runs past the bound. Relative paths are under the session's folder, `~/` under home.
+// A network path (`\\server\share`, a WSL folder) is not placed: its host is not this one.
 // The host is left empty, which kitty and the other terminals read as this machine. A
 // `:line` becomes `#line`, the fragment kitty's open actions match and ripgrep's kitty
 // hyperlink format writes; a column is dropped. Each segment is percent-encoded.
@@ -99,7 +103,7 @@ export function fileHref(text: string, base: PathBase): string | null {
   const isRooted = /^[A-Za-z]:\//.test(path) || path.startsWith('/')
   const full = isRooted ? path : path.startsWith('~/') ? (home === null ? null : `${home}/${path.slice(2)}`) : cwd === '' ? null : `${cwd}/${path}`
 
-  if (full === null) {
+  if (full === null || full.startsWith('//')) {
     return null
   }
 
