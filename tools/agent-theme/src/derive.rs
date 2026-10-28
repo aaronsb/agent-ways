@@ -20,29 +20,56 @@ fn luminance(c: Rgb) -> f64 {
 
 /// WCAG contrast ratio, 1.0 to 21.0.
 pub fn contrast(a: Rgb, b: Rgb) -> f64 {
-    let (la, lb) = (luminance(a), luminance(b));
-    let (hi, lo) = if la > lb { (la, lb) } else { (lb, la) };
+    ratio(luminance(a), luminance(b))
+}
+
+/// WCAG contrast ratio of two relative luminances.
+fn ratio(a: f64, b: f64) -> f64 {
+    let (hi, lo) = if a > b { (a, b) } else { (b, a) };
     (hi + 0.05) / (lo + 0.05)
 }
 
-fn passes(c: Rgb, bgs: &[Rgb], min: f64) -> bool {
-    bgs.iter().all(|b| contrast(c, *b) >= min)
+/// What a gradient's samples are held to above a floor. WCAG luminance is
+/// not monotonic along an OKLab segment, so a cell between two samples can
+/// dip below both; the margin covers that dip.
+const GRADIENT_MARGIN: f64 = 0.05;
+
+/// The grounds a colour is lifted against, by luminance, each with the
+/// margin it is held to above the floor.
+struct Grounds {
+    first: Rgb,
+    lum: Vec<(f64, f64)>,
+}
+
+impl Grounds {
+    /// `flat` held to the floor and `gradient`'s samples to the floor and
+    /// [`GRADIENT_MARGIN`].
+    fn new(flat: &[Rgb], gradient: Option<&Gradient>) -> Grounds {
+        let mut lum: Vec<(f64, f64)> = flat.iter().map(|c| (luminance(*c), 0.0)).collect();
+        lum.extend(gradient.iter().flat_map(|g| g.samples()).map(|c| (luminance(c), GRADIENT_MARGIN)));
+        Grounds { first: flat[0], lum }
+    }
+
+    fn passes(&self, c: Rgb, min: f64) -> bool {
+        let l = luminance(c);
+        self.lum.iter().all(|(g, margin)| ratio(l, *g) >= min + margin)
+    }
 }
 
 /// `c`, made lighter or darker in OKLCH until it reaches `min` on every
-/// background: toward `toward`'s side of the first background, hue kept, and
+/// ground: toward `toward`'s side of the first ground, hue kept, and
 /// saturation (chroma over lightness) kept as far as sRGB can show it. Returns `c`
 /// unchanged when it already reads. When lightness alone cannot get there,
 /// it blends toward `toward` in 1% steps, as dottheme does.
 ///
 /// The OKLCH move replaces the blend toward fg as the first resort: on Nord
 /// the blend greyed err, hot, warn and accent into one dusty pink.
-fn lift(c: Rgb, toward: Rgb, bgs: &[Rgb], min: f64) -> Rgb {
-    if passes(c, bgs, min) {
+fn lift(c: Rgb, toward: Rgb, grounds: &Grounds, min: f64) -> Rgb {
+    if grounds.passes(c, min) {
         return c;
     }
     let p = lch(c);
-    let up = lch(toward).l >= bgs.first().map_or(0.0, |b| lch(*b).l);
+    let up = lch(toward).l >= lch(grounds.first).l;
     let step = if up { 0.004 } else { -0.004 };
     let mut l = p.l;
     while (0.0..=1.0).contains(&(l + step)) {
@@ -50,11 +77,11 @@ fn lift(c: Rgb, toward: Rgb, bgs: &[Rgb], min: f64) -> Rgb {
         // Lighter at the same chroma reads paler; chroma grows with
         // lightness so the colour keeps its saturation, as far as sRGB allows.
         let x = clip_chroma(Lch { l, c: p.c * (l / p.l.max(0.01)).max(1.0), ..p });
-        if passes(x, bgs, min) {
+        if grounds.passes(x, min) {
             return x;
         }
     }
-    (0..=100).map(|p| Rgb::blend(toward, c, p)).find(|x| passes(*x, bgs, min)).unwrap_or(toward)
+    (0..=100).map(|p| Rgb::blend(toward, c, p)).find(|x| grounds.passes(*x, min)).unwrap_or(toward)
 }
 
 /// The first of `prefer` that reads on `bg`, else black or white, whichever
@@ -78,7 +105,8 @@ pub struct SegPair {
 ///
 /// Text roles meant for the ground (`body`, `muted`, `accent`, `accent_dim`,
 /// `info`, `ok`, `warn`, `err`, `alt`, `hot`) are lifted toward `fg` until
-/// they read on `bg`, `selection_bg` and every sampled point of the gradient. `ink`, `text`, `faded_ink` and
+/// they read on `bg`, `selection_bg` and every sampled point of the gradient,
+/// the samples with `GRADIENT_MARGIN` to spare. `ink`, `text`, `faded_ink` and
 /// `faded_text` keep dottheme's values: they are lozenge text, read on
 /// `dark_seg`. `rule`, `track` and `track_past` are decorative and carry no
 /// contrast floor.
@@ -141,13 +169,13 @@ const GREY_CHROMA: f64 = 0.02;
 /// colour in `settled` while still reading at `min` on `grounds`: hue turned
 /// up to 60°, lightness pushed away from the ground, chroma raised. Returns
 /// `c` when it is already clear, and `c` again when nothing in reach is.
-fn separate(c: Rgb, settled: &[Rgb], grounds: &[Rgb], min: f64) -> Rgb {
-    let clear = |x: Rgb| settled.iter().all(|f| delta_e(x, *f) >= MIN_DISTINCT) && passes(x, grounds, min);
+fn separate(c: Rgb, settled: &[Rgb], grounds: &Grounds, min: f64) -> Rgb {
+    let clear = |x: Rgb| settled.iter().all(|f| delta_e(x, *f) >= MIN_DISTINCT) && grounds.passes(x, min);
     if clear(c) {
         return c;
     }
     let p = lch(c);
-    let away = if p.l >= grounds.first().map_or(0.0, |g| lch(*g).l) { 1.0 } else { -1.0 };
+    let away = if p.l >= lch(grounds.first).l { 1.0 } else { -1.0 };
     // A grey's hue is rounding noise; turning it or adding chroma would
     // tint it an arbitrary colour, so a grey moves in lightness only.
     let grey = p.c < GREY_CHROMA;
@@ -178,8 +206,7 @@ impl Roles {
             Kind::Light => (s.fg, s.bg),
         };
         let selection_bg = o.selection.unwrap_or_else(|| Rgb::blend(s.accent, s.bg, 13));
-        let mut grounds = vec![s.bg, selection_bg];
-        grounds.extend(t.gradient.iter().flat_map(Gradient::samples));
+        let grounds = Grounds::new(&[s.bg, selection_bg], t.gradient.as_ref());
         let up = |c: Rgb, min: f64| lift(c, s.fg, &grounds, min);
         // The status roles, lifted, then settled apart in the order of
         // `Roles::status`: each keeps clear of the ones before it. An override
@@ -219,8 +246,8 @@ impl Roles {
             muted: up(s.dim, MIN_MUTED),
             ink,
             text,
-            faded_ink: lift(Rgb::blend(light, s.dim, 75), text, &[dark_seg], MIN_MUTED),
-            faded_text: o.faded.unwrap_or_else(|| lift(Rgb::blend(light, s.dim, 45), text, &[dark_seg], MIN_MUTED)),
+            faded_ink: lift(Rgb::blend(light, s.dim, 75), text, &Grounds::new(&[dark_seg], None), MIN_MUTED),
+            faded_text: o.faded.unwrap_or_else(|| lift(Rgb::blend(light, s.dim, 45), text, &Grounds::new(&[dark_seg], None), MIN_MUTED)),
             rule: o.rule.unwrap_or_else(|| Rgb::blend(s.dim, s.subtle, 50)),
             track: s.subtle,
             track_past: Rgb::blend(s.dim, s.subtle, 45),
@@ -281,7 +308,7 @@ impl Roles {
     /// `c` lifted to the graphical-object floor, 3:1, on every ground: a
     /// mark that carries meaning by colour, such as a waypoint.
     pub fn graphic(&self, c: Rgb) -> Rgb {
-        lift(c, self.body, &self.grounds(), MIN_MUTED)
+        lift(c, self.body, &Grounds::new(&[self.bg, self.selection_bg], self.gradient.as_ref()), MIN_MUTED)
     }
 
     /// Every (name, colour, ground set, minimum ratio) the contrast test and

@@ -204,8 +204,8 @@ pub struct Gradient {
 impl Gradient {
     pub const MIN_STOPS: usize = 2;
     pub const MAX_STOPS: usize = 4;
-    /// Samples per segment the contrast floors check.
-    const SAMPLES: usize = 8;
+    /// Intervals per segment the contrast floors sample.
+    const SAMPLES: usize = 64;
 
     /// `None` unless there are two to four stops.
     pub fn new(axis: Axis, stops: &[Rgb]) -> Option<Gradient> {
@@ -236,8 +236,8 @@ impl Gradient {
         self.at(if cells > 1 { n as f64 / (cells - 1) as f64 } else { 0.0 })
     }
 
-    /// Every stop and eight points across each segment: the grounds the
-    /// contrast floors hold text to.
+    /// Every stop and the points that cut each segment into 64 equal
+    /// intervals: the grounds the contrast floors hold text to.
     pub fn samples(&self) -> Vec<Rgb> {
         let segments = self.stops().len() - 1;
         let n = segments * Gradient::SAMPLES;

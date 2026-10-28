@@ -184,7 +184,7 @@ fn a_gradient_runs_from_its_first_stop_to_its_last_through_oklab() {
     let two = Gradient::new(Axis::Horizontal, &[Rgb(0, 0, 0), Rgb(255, 255, 255)]).unwrap();
     assert_eq!(two.at(0.5), Rgb(99, 99, 99), "OKLab's middle grey, not sRGB's 127");
     assert_eq!((g.cell(0, 35), g.cell(34, 35), g.cell(0, 1)), (a, c, a));
-    assert_eq!(g.samples().len(), 2 * 8 + 1);
+    assert_eq!(g.samples().len(), 2 * 64 + 1);
     assert!(Gradient::new(Axis::Vertical, &[a]).is_none() && Gradient::new(Axis::Vertical, &[a; 5]).is_none());
 }
 
@@ -310,6 +310,117 @@ fn every_role_reads_on_its_ground_in_every_bundled_theme() {
             }
         }
     }
+}
+
+/// The roles lifted for the ground, with their floors. Body is the theme's
+/// fg as written.
+fn lifted(r: &Roles) -> [(&'static str, Rgb, f64); 9] {
+    [
+        ("accent", r.accent, MIN_TEXT),
+        ("accent_dim", r.accent_dim, MIN_TEXT),
+        ("info", r.info, MIN_TEXT),
+        ("ok", r.ok, MIN_TEXT),
+        ("warn", r.warn, MIN_TEXT),
+        ("err", r.err, MIN_TEXT),
+        ("alt", r.alt, MIN_TEXT),
+        ("hot", r.hot, MIN_TEXT),
+        ("muted", r.muted, MIN_MUTED),
+    ]
+}
+
+/// The first cell along the gradient of a frame `cells` long where a lifted
+/// role falls below its floor.
+fn first_dip(p: &Painter, cells: u16) -> Option<(&'static str, u16, f64)> {
+    let ground = p.ground(cells, cells).unwrap();
+    for n in 0..cells {
+        let Color::Rgb(g) = ground.at(n, n) else { panic!("truecolor ground") };
+        for (name, fg, min) in lifted(p.roles().unwrap()) {
+            let c = contrast(fg, g);
+            if c < min {
+                return Some((name, n, c));
+            }
+        }
+    }
+    None
+}
+
+#[test]
+fn a_role_reads_between_the_gradient_s_samples() {
+    // Luminance dips between two OKLab samples here: as first sampled, warn
+    // passed every sample and fell to 4.49:1 at row 64 of 128.
+    let mut t = parse(nord_src()).unwrap();
+    t.background = Background::Fill;
+    t.slots.fg = Rgb::from_hex("#f4f4f4").unwrap();
+    t.slots.warn = Rgb::from_hex("#7814d2").unwrap();
+    t.gradient = Gradient::new(Axis::Vertical, &["#02442a", "#327a48", "#632f73"].map(|h| Rgb::from_hex(h).unwrap()));
+    let p = Painter::themed(&t, ColorDepth::TrueColor);
+    assert_eq!(first_dip(&p, 128), None);
+}
+
+/// A seeded xorshift, for themes drawn at random but the same every run.
+struct Xs(u64);
+
+impl Xs {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+    fn rgb(&mut self) -> Rgb {
+        let v = self.next();
+        Rgb(v as u8, (v >> 8) as u8, (v >> 16) as u8)
+    }
+    /// A colour in the dark or the light third of each channel.
+    fn ground(&mut self, dark: bool) -> Rgb {
+        let v = self.next();
+        let c = |x: u64| if dark { (x % 110) as u8 } else { 145 + (x % 111) as u8 };
+        Rgb(c(v), c(v >> 8), c(v >> 16))
+    }
+}
+
+#[test]
+fn every_rendered_cell_of_a_gradient_holds_where_its_samples_do() {
+    let mut x = Xs(0x9e37_79b9_7f4a_7c15);
+    let (mut themes, mut held) = (0, 0);
+    while themes < 200 {
+        let mut t = parse(nord_src()).unwrap();
+        let dark = x.next() % 2 == 0;
+        t.kind = if dark { Kind::Dark } else { Kind::Light };
+        t.background = Background::Fill;
+        t.slots.bg = x.ground(dark);
+        t.slots.fg = x.ground(!dark);
+        for n in ["dim", "subtle", "accent", "info", "ok", "warn", "err", "alt"] {
+            t.slots.set(n, x.rgb());
+        }
+        let stops: Vec<Rgb> = (0..2 + x.next() % 3).map(|_| x.ground(dark)).collect();
+        let axis = if x.next() % 2 == 0 { Axis::Vertical } else { Axis::Horizontal };
+        t.gradient = Gradient::new(axis, &stops);
+        themes += 1;
+        let p = Painter::themed(&t, ColorDepth::TrueColor);
+        // Where a sample fails, the floor was out of reach; the samples
+        // promise nothing about the cells between.
+        if lifted(p.roles().unwrap()).iter().any(|(_, fg, min)| p.roles().unwrap().grounds().iter().any(|g| contrast(*fg, *g) < *min)) {
+            continue;
+        }
+        held += 1;
+        // Every cell of every frame 1 to 200 cells long, each colour once.
+        let mut seen = std::collections::HashSet::new();
+        for cells in 1..=200u16 {
+            let ground = p.ground(cells, cells).unwrap();
+            for n in 0..cells {
+                let Color::Rgb(g) = ground.at(n, n) else { panic!("truecolor ground") };
+                if !seen.insert(g) {
+                    continue;
+                }
+                for (name, fg, min) in lifted(p.roles().unwrap()) {
+                    let c = contrast(fg, g);
+                    assert!(c >= min, "theme {themes}: {name} is {c:.3}:1 on cell {n} of {cells}\n{}", to_text(&t));
+                }
+            }
+        }
+    }
+    assert!(held >= 150, "{held} of {themes} themes reach their floors, too few to show the bound");
 }
 
 #[test]
