@@ -80,6 +80,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: install Claude Code
-        run: npm install -g @anthropic-ai/claude-code@2.1.296
+        run: npm install -g @anthropic-ai/claude-code@2.1.312
       - name: validate and test
         run: make test-plugins
