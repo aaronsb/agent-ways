@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { On, ProcessRunResult } from 'claude-code'
 
-import { register } from '../hooks/register.ts'
+import { register } from '../hooks/register.tsx'
 import { DEFAULT_THEME, activeArgv, configDir, exportArgv, parseActive, parseTheme, themeFile, themeText } from '../hooks/lib.ts'
 import { passedOverHits, registrationsOf } from './passed-over.ts'
 
@@ -28,6 +28,8 @@ type World = {
   /** Files on disk, by path. */
   files?: Record<string, string>
   env?: Record<string, string>
+  /** Claude Code's `verbose` row. */
+  verbose?: boolean
 }
 
 /** The host beneath the mod: the ways CLI, the file system and the
@@ -73,6 +75,12 @@ function host(on: On, world: World) {
   on('config.set', ($, e) => {
     sets.push({ key: e.key, value: e.value })
     return { value: e.value }
+  })
+  on('config.list', () => ({ value: [{ key: 'verbose', label: 'Verbose', kind: 'boolean', value: world.verbose ?? false, provider: { kind: 'engine' }, isLocked: false }] }) as never)
+  // The engine's own drawing of every row.
+  on('ui.render', ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>engine</Text>
   })
   return { argvs, timeouts, writes, sets, logs, toasts, files }
 }
@@ -174,11 +182,88 @@ describe('the rules', () => {
   })
 })
 
+const REPLY = { plugin: 'ways-theme', component: 'AssistantMessage', requestId: 'm1', props: { text: 'hello', isFirstOfReply: true } } as const
+const TOOL = { plugin: 'ways-theme', component: 'ToolUse', requestId: 't1', props: { tool: 'Bash', input: {}, isRunning: false, isErrored: false, isInterrupted: false, isExpanded: false } } as const
+const GROUP = { plugin: 'ways-theme', component: 'ToolGroup', requestId: 'g1', props: { calls: [], isActive: false, isExpanded: false } } as const
+const THEMED: World = { active: ok('miami-nights\n'), exported: ok(JSON.stringify(MIAMI)) }
+
+describe('frames on the terminal', () => {
+  test('a reply sits on the theme ground inside a border, in theme keys', async ($, on) => {
+    host(on, THEMED)
+    await $.session.start(INTERACTIVE)
+    const ui = await $.ui.mount({ ...REPLY, surface: 'terminal' } as never)
+    expect(await ui.drawn()).toMatchObject({ type: 'Box', props: { marginTop: 1, borderStyle: 'round', backgroundColor: 'userMessageBackground', borderColor: 'claude' } })
+    expect((await ui.find({ type: 'Text', text: /engine/ }))?.text).toBe('engine')
+    await ui.unmount()
+  })
+
+  test('a light theme frames a reply without the ground', async ($, on) => {
+    host(on, { active: ok('tampa\n'), exported: ok(JSON.stringify({ ...MIAMI, name: 'Tampa', base: 'light' })) })
+    await $.session.start(INTERACTIVE)
+    const ui = await $.ui.mount({ ...REPLY, surface: 'terminal' } as never)
+    const drawn = (await ui.drawn()) as { props: Record<string, unknown> }
+    expect(drawn).toMatchObject({ type: 'Box', props: { borderStyle: 'round', borderColor: 'claude' } })
+    expect(drawn.props.backgroundColor).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('a tool call and a tool group take a border; an errored call takes the error colour', async ($, on) => {
+    host(on, THEMED)
+    await $.session.start(INTERACTIVE)
+    for (const [site, colour] of [[TOOL, 'suggestion'], [GROUP, 'suggestion'], [{ ...TOOL, props: { ...TOOL.props, isErrored: true } }, 'error']] as const) {
+      const ui = await $.ui.mount({ ...site, surface: 'terminal' } as never)
+      expect(await ui.drawn()).toMatchObject({ type: 'Box', props: { borderStyle: 'round', borderColor: colour } })
+      await ui.unmount()
+    }
+  })
+
+  const unchanged: [string, World, Record<string, unknown>, unknown][] = [
+    ['an expanded tool call', THEMED, TOOL, { isExpanded: true }],
+    ['an expanded tool group', THEMED, GROUP, { isExpanded: true }],
+    ['a reply past the length bound', THEMED, REPLY, { text: 'x'.repeat(20001) }],
+    ['a block that does not open a reply', THEMED, REPLY, { isFirstOfReply: false }],
+    ['a reply under verbose', { ...THEMED, verbose: true }, REPLY, {}],
+    ['a reply under the terminal theme', { active: ok('terminal\n') }, REPLY, {}],
+    ['a reply when ways fails', {}, REPLY, {}],
+  ]
+  for (const [name, world, site, props] of unchanged) {
+    test(`${name} is the engine's own`, async ($, on) => {
+      host(on, world)
+      await $.session.start(INTERACTIVE)
+      const s = site as typeof REPLY
+      const ui = await $.ui.mount({ ...s, props: { ...s.props, ...(props as object) }, surface: 'terminal' } as never)
+      expect(await ui.drawn()).toMatchObject({ type: 'Text' })
+      await ui.unmount()
+    })
+  }
+
+  test('turning verbose on in /config hands the rows back', async ($, on) => {
+    host(on, THEMED)
+    await $.session.start(INTERACTIVE)
+    await $.config.set({ key: 'verbose', value: true } as never)
+    const ui = await $.ui.mount({ ...REPLY, surface: 'terminal' } as never)
+    expect(await ui.drawn()).toMatchObject({ type: 'Text' })
+    await ui.unmount()
+  })
+
+  for (const surface of ['desktop', 'vscode', 'mobile'] as const) {
+    test(`${surface} draws every row as the engine does`, async ($, on) => {
+      host(on, THEMED)
+      await $.session.start({ ...INTERACTIVE, surface })
+      for (const site of [REPLY, TOOL, GROUP]) {
+        const ui = await $.ui.mount({ ...site, surface } as never)
+        expect(await ui.drawn()).toMatchObject({ type: 'Text' })
+        await ui.unmount()
+      }
+    })
+  }
+})
+
 describe('what the mod hooks reaches it on every host', () => {
   test("no hook is on an event an organization's policy plugin passes over, and none is classic", () => {
     const regs = registrationsOf(register as never)
-    // The recording saw the module's hook: the control for the empty lists below.
-    expect(regs.map(r => r.pattern)).toEqual(['session.start'])
+    // The recording saw the module's hooks: the control for the empty lists below.
+    expect(regs.map(r => r.pattern)).toEqual(['session.start', 'config.set', 'ui.render', 'ui.render', 'ui.render'])
     expect(regs.filter(r => r.pattern.startsWith('classic.'))).toEqual([])
     expect(passedOverHits(regs)).toEqual([])
   })

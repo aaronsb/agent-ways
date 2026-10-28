@@ -68,7 +68,7 @@ for dir in plugins/*/hooks; do
   mods=$((mods + 1))
   plugin="${dir%/hooks}"
   found=0
-  for t in "$plugin"/tests/*.test.ts; do
+  for t in "$plugin"/tests/*.test.ts "$plugin"/tests/*.test.tsx; do
     [ -f "$t" ] || continue
     if grep -q -F -e 'registrationsOf(register' "$t" && grep -q -F -e 'passedOverHits(' "$t"; then
       found=1

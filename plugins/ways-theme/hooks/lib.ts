@@ -68,3 +68,44 @@ export function parseTheme(r: Run): ClaudeCodeTheme | undefined {
 
 /** The file's text as the mod writes it. */
 export const themeText = (t: ClaudeCodeTheme): string => `${JSON.stringify(t, null, 2)}\n`
+
+/** A reply longer than this is drawn by the engine alone. The hook's cost
+ *  measured flat from 1k to 200k characters (the engine's tree is opaque to
+ *  it), so the bound keeps a painted ground off replies many screens tall. */
+export const MAX_FRAMED_CHARS = 20000
+
+/** The colours of the frames, as Claude Code theme keys, so a frame
+ *  follows `custom:ways` with no colour in the mod. */
+export const FRAME = {
+  reply: { borderColor: 'claude' },
+  tool: { borderColor: 'suggestion' },
+  toolErrored: { borderColor: 'error' },
+} as const
+
+/** The reply's ground. Claude Code draws a reply's body in the terminal's
+ *  own foreground, so the ground goes under a dark theme only, where that
+ *  foreground is light; under a light theme it would wash the body out. */
+export const REPLY_GROUND = { backgroundColor: 'userMessageBackground' } as const
+
+/** Whether a theme's replies take the ground. */
+export const hasGround = (t: ClaudeCodeTheme): boolean => t.base.startsWith('dark')
+
+/** What a render site knows when it decides whether to frame. */
+export type FrameCase = {
+  surface: string
+  /** An agent-ways theme is active and its file is written. */
+  isThemed: boolean
+  /** Claude Code's `verbose` row is on. */
+  isVerbose: boolean
+  /** The row is expanded (ctrl+o). */
+  isExpanded?: boolean
+  /** The reply's length, for a reply. */
+  length?: number
+}
+
+/** Frames draw only on the terminal, under an agent-ways theme, with the
+ *  transcript collapsed and the reply within bounds. */
+export function shouldFrame(c: FrameCase): boolean {
+  if (c.surface !== 'terminal' || !c.isThemed || c.isVerbose || c.isExpanded) return false
+  return c.length === undefined || c.length <= MAX_FRAMED_CHARS
+}
