@@ -654,8 +654,8 @@ const KEYS: &[KeySpec] = &[
         path: &["mods", "ways-theme", "copy"],
         kind: Kind::Bool,
         default: DefaultValue::Yaml("true"),
-        doc: "Whether the ways-theme mod shows its copy labels.",
-        long: "On labels what the mod draws for copying; off draws no copy label. The mod reads it at each session start, through `ways settings theme export --mod`.",
+        doc: "Draw the Copy, as text and copy reply labels on cards and replies.",
+        long: "Off draws neither label. The mod reads it at each session start, through `ways settings theme export --mod`.",
         ..BASE
     },
     KeySpec {
