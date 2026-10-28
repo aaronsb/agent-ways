@@ -1582,7 +1582,7 @@ fn a_check_without_an_agent_counts_against_the_last_firer() {
 #[test]
 fn a_gradient_theme_grounds_every_cell_of_the_session_screens() {
     let mut s = picker(miami_nights());
-    let mut shot = |s: &mut Introspect, name: &str| {
+    let shot = |s: &mut Introspect, name: &str| {
         for (w, h) in [(80, 25), (120, 35)] {
             assert_eq!(agent_tui::testkit::ungrounded(&render(s, w, h)), None, "{name} {w}x{h}: a cell off the theme's ground");
         }
