@@ -4,7 +4,7 @@ import type { On, ProcessRunResult, RenderElement } from 'claude-code'
 import { register } from '../hooks/register.tsx'
 import { MOD_EXPORT_ARGV, gradientAt, mix, paletteOf, parseExport, setupOf, toOklab } from '../hooks/skins/config.ts'
 import { PICKUP_MS, WAYS_TIMEOUT_MS } from '../hooks/skins/hub.tsx'
-import { MIN_WIDTH, PAD_X, VERTICAL_FROM_LINES, axisFor, boxLines, gradientRuns, wrapCells } from '../hooks/skins/prompt-box.tsx'
+import { MIN_WIDTH, PAD_X, VERTICAL_FROM_LINES, axisFor, boxLines, canMeasure, cellsOf, gradientRuns, graphemes, wrapCells } from '../hooks/skins/prompt-box.tsx'
 import { MIAMI_NIGHTS, TAMPA, TERMINAL_THEME } from './fixtures.ts'
 import { registrationsOf } from './passed-over.ts'
 
@@ -124,6 +124,11 @@ describe('the export contract', () => {
     ['a gradient stop by name', { ...MIAMI_NIGHTS, gradient: { axis: 'vertical', stops: ['#000000', 'pink'] } }],
     ['a word list that is not a list', { ...MIAMI_NIGHTS, words: { spinner: 'Cruising', done: [] } }],
     ['a word with a control character', { ...MIAMI_NIGHTS, words: { spinner: ['Cru\u001bising'], done: ['Docked'] } }],
+    ['a word with a line separator', { ...MIAMI_NIGHTS, words: { spinner: ['Cru\u2028ising'], done: ['Docked'] } }],
+    ['a word with a bidi override', { ...MIAMI_NIGHTS, words: { spinner: ['\u202eCruising'], done: ['Docked'] } }],
+    ['a word with a bidi isolate', { ...MIAMI_NIGHTS, words: { spinner: ['Cruising'], done: ['\u2067Docked'] } }],
+    ['a word that is only spaces', { ...MIAMI_NIGHTS, words: { spinner: ['   '], done: ['Docked'] } }],
+    ['render.copy that is null', { ...MIAMI_NIGHTS, render: { ...MIAMI_NIGHTS.render, copy: null } }],
     ['tables that are neither', { ...MIAMI_NIGHTS, render: { ...MIAMI_NIGHTS.render, tables: 'cards' } }],
     ['icons that are neither', { ...MIAMI_NIGHTS, render: { ...MIAMI_NIGHTS.render, icons: 'emoji' } }],
     ['a prompt box that is neither', { ...MIAMI_NIGHTS, render: { ...MIAMI_NIGHTS.render, prompt_box: 'glow' } }],
@@ -404,6 +409,32 @@ describe('the gradient prompt box', () => {
     expect(lines.slice(1, -1).every(l => l.startsWith(' '.repeat(PAD_X)))).toBe(true)
     expect(wrapCells('abcdefghij', 4)).toEqual(['abcd', 'efgh', 'ij'])
     expect(boxLines('a\n\nb', 20).length).toBe(5)
+  })
+
+  test('a paragraph keeps its indentation; a line a wrap began drops its opening spaces', () => {
+    expect(wrapCells('    return 1', 40)).toEqual(['    return 1'])
+    expect(boxLines('def f():\n\treturn 1', 30)[2]).toBe(`${' '.repeat(PAD_X)}  return 1${' '.repeat(30 - PAD_X * 2 - 10)}${' '.repeat(PAD_X)}`)
+    expect(wrapCells('aaa    bbb', 3)).toEqual(['aaa', 'bbb'])
+  })
+
+  test('an emoji sequence is one grapheme two cells wide, never split across runs', () => {
+    const family = '\u{1f468}\u200d\u{1f469}\u200d\u{1f467}'
+    expect(graphemes(family)).toEqual([family])
+    expect(cellsOf(family)).toBe(2)
+    expect(cellsOf('\u2764\ufe0f')).toBe(2)
+    const text = `${family.repeat(6)} \u{1f44d}\u{1f3fd} \u{1f1ef}\u{1f1f5}`
+    const lines = boxLines(text, 24)
+    const runs = gradientRuns(lines, 24, V.stops, 'horizontal')
+    expect(runs.map(line => line.map(r => r.text).join(''))).toEqual(lines)
+    expect(runs.flat().every(r => !/^[\u200d\ufe0f\u{1f3fb}-\u{1f3ff}]/u.test(r.text))).toBe(true)
+    expect(lines.every(l => graphemes(l).reduce((n, g) => n + cellsOf(g), 0) === 24)).toBe(true)
+  })
+
+  test('without grapheme segmentation, text holding an emoji sequence takes the outline', () => {
+    expect(canMeasure('plain words', false)).toBe(true)
+    expect(canMeasure('a \u2764\ufe0f', false)).toBe(false)
+    expect(canMeasure('a \u{1f1ef}\u{1f1f5}', false)).toBe(false)
+    expect(canMeasure('a \u2764\ufe0f', true)).toBe(true)
   })
 
   test('a vertical gradient runs down the lines, one ground a line', () => {

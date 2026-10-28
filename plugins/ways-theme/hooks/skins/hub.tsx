@@ -43,7 +43,7 @@ import { kindOf, summarize, toolLabel } from './tools.ts'
 import { commandOf, errorLine, isQuiet, quietLabel } from './quiet.ts'
 import { MAX_MARKDOWN, replySegments } from './reply.ts'
 import { hyperlinksFrom, touchOf } from './links.ts'
-import { MIN_WIDTH, axisFor, boxLines, gradientBox, gradientRuns } from './prompt-box.tsx'
+import { MIN_WIDTH, axisFor, boxLines, canMeasure, gradientBox, gradientRuns } from './prompt-box.tsx'
 import type { Touch, TurnStats, UsageSnap } from '../../types'
 
 /** Each export call's bound. */
@@ -542,7 +542,7 @@ export function registerSkins(on: On, shared: Shared): void {
     const hasMore = await read($, memberOf(imagesAtom, e))
     const isRowOpen = isExpanded(shared.view(), e.props.isExpanded)
     const width = (e.viewport?.columns ?? 80) - 1
-    const canGradient = setup.promptBox === 'gradient' && !hasMore && !isRowOpen && !NOT_PLAIN.test(e.props.text) && width >= MIN_WIDTH
+    const canGradient = setup.promptBox === 'gradient' && !hasMore && !isRowOpen && !NOT_PLAIN.test(e.props.text) && canMeasure(e.props.text) && width >= MIN_WIDTH
     if (canGradient && setup.ground !== null) {
       const lines = boxLines(e.props.text, width)
       const runs = gradientRuns(lines, width, setup.ground.stops, axisFor(lines.length - 2))

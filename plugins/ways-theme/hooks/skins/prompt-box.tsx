@@ -29,25 +29,51 @@ export const axisFor = (textLines: number): Axis => (textLines >= VERTICAL_FROM_
 /** One stretch of a line on one ground. */
 export type Run = { text: string; ground: string }
 
+type Segmenter = { segment: (text: string) => Iterable<{ segment: string }> }
+const SEGMENTER: Segmenter | undefined = (() => {
+  const Make = (Intl as { Segmenter?: new (locale: undefined, options: { granularity: 'grapheme' }) => Segmenter }).Segmenter
+  return Make === undefined ? undefined : new Make(undefined, { granularity: 'grapheme' })
+})()
+
+/** `text` a grapheme at a time where the engine segments text, else a code
+ *  point at a time. */
+export const graphemes = (text: string): string[] => (SEGMENTER === undefined ? [...text] : Array.from(SEGMENTER.segment(text), s => s.segment))
+
+/** A joiner, an emoji variation selector, a skin-tone modifier or a regional
+ *  indicator: a sequence whose code points do not add up to its width. */
+const EMOJI_SEQUENCE = /[\u200d\ufe0f\u{1f3fb}-\u{1f3ff}\u{1f1e6}-\u{1f1ff}]/u
+
+/** A grapheme's cells: two for an emoji sequence, else its code points'. */
+export const cellsOf = (grapheme: string): number => (EMOJI_SEQUENCE.test(grapheme) ? 2 : widthOf(grapheme))
+
+const textCells = (text: string): number => graphemes(text).reduce((sum, g) => sum + cellsOf(g), 0)
+
+/** Whether the box can lay `text` out: always where the engine segments
+ *  graphemes; without that, only text that holds no emoji sequence. */
+export const canMeasure = (text: string, isSegmented = SEGMENTER !== undefined): boolean => isSegmented || !EMOJI_SEQUENCE.test(text)
+
 /** `paragraph` cut into lines of at most `width` cells: at spaces where it
- *  can, inside a word longer than a line where it must. */
+ *  can, inside a word longer than a line where it must, never inside a
+ *  grapheme. The paragraph keeps its indentation; a line a wrap began drops
+ *  the spaces it would open with. */
 export function wrapCells(paragraph: string, width: number): string[] {
   const lines: string[] = []
   let line = ''
   let used = 0
+  let isWrapped = false
   const push = () => {
     lines.push(line.replace(/ +$/, ''))
     line = ''
     used = 0
+    isWrapped = true
   }
   for (const word of paragraph.split(/(?<= )/)) {
-    const w = widthOf(word.trimEnd())
-    if (used > 0 && used + w > width) push()
-    for (const char of word) {
-      const c = widthOf(char)
-      if (used + c > width && !(char === ' ')) push()
-      if (used === 0 && char === ' ') continue
-      line += char
+    if (used > 0 && used + textCells(word.trimEnd()) > width) push()
+    for (const g of graphemes(word)) {
+      const c = cellsOf(g)
+      if (used + c > width) push()
+      if (used === 0 && isWrapped && g === ' ') continue
+      line += g
       used += c
     }
   }
@@ -64,11 +90,12 @@ export function boxLines(text: string, width: number): string[] {
     .split('\n')
     .flatMap(p => wrapCells(p, inner))
   const pad = ' '.repeat(PAD_X)
-  return ['', ...body, ''].map(line => `${pad}${line}${' '.repeat(Math.max(0, inner - widthOf(line)))}${pad}`)
+  return ['', ...body, ''].map(line => `${pad}${line}${' '.repeat(Math.max(0, inner - textCells(line)))}${pad}`)
 }
 
 /** Each line as runs of ground: one run a line down a vertical gradient,
- *  a run per change of colour across a horizontal one. */
+ *  a run per change of colour across a horizontal one, a grapheme on the
+ *  ground of its first cell. */
 export function gradientRuns(lines: readonly string[], width: number, stops: readonly string[], axis: Axis): Run[][] {
   // Each line or cell takes the colour at its centre, so the box spans the
   // gradient's middle rather than landing on its two end stops.
@@ -79,12 +106,12 @@ export function gradientRuns(lines: readonly string[], width: number, stops: rea
   return lines.map(line => {
     const runs: Run[] = []
     let at = 0
-    for (const char of line) {
+    for (const g of graphemes(line)) {
       const ground = cells[Math.min(at, width - 1)]!
       const tail = runs[runs.length - 1]
-      if (tail !== undefined && tail.ground === ground) tail.text += char
-      else runs.push({ text: char, ground })
-      at += widthOf(char)
+      if (tail !== undefined && tail.ground === ground) tail.text += g
+      else runs.push({ text: g, ground })
+      at += cellsOf(g)
     }
     return runs
   })
