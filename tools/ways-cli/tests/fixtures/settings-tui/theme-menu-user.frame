@@ -9,10 +9,10 @@ agent-tui frame 100x30
 |│   gruvbox-dark     dark                             ││active    yes                              │|
 |│   tokyonight-night dark                             ││saves to  ~/.config/agent-ways/themes      │|
 |│   paper            light                            ││shape     plain (a: shape cycles it)       │|
-|│▌● mine             dark   user                      ││                                           │|
-|│                        ┌actions: theme mine─────────────────────────────┐                        │|
-|│                        │ new       from agent-ways                      │  info   #81a1c1        │|
-|│                        │ copy      of mine, then edit it                │  ok     #a3be8c        │|
+|│   miami            light                            ││                                           │|
+|│   tampa            ligh┌actions: theme mine─────────────────────────────┐                        │|
+|│   miami-nights     dark│ new       from agent-ways                      │  info   #81a1c1        │|
+|│▌● mine             dark│ copy      of mine, then edit it                │  ok     #a3be8c        │|
 |│                        │ rename    the active choice follows            │  warn   #d08770        │|
 |│                        │ delete    asks first                           │  err    #bf616a        │|
 |│                        │ edit                                           │  alt    #88c0d0        │|
@@ -137,24 +137,24 @@ styles
   9  54-65  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
- 10   1-1   Cyan - BOLD|REVERSED
- 10   2-3   Green - BOLD|REVERSED
- 10   4-20  - - BOLD|REVERSED
- 10  21-27  - - BOLD|DIM|REVERSED
- 10  28-36  LightBlue - BOLD|REVERSED
- 10  37-37  - Black BOLD|REVERSED
- 10  38-38  - Gray BOLD|REVERSED
- 10  39-43  - DarkGray BOLD|REVERSED
- 10  44-44  - Gray BOLD|REVERSED
- 10  45-53  - - BOLD|REVERSED
+ 10  21-27  - - DIM
+ 10  28-36  LightBlue - -
+ 10  37-37  - White -
+ 10  38-38  - Black -
+ 10  39-39  - Magenta -
+ 10  40-41  - Cyan -
+ 10  42-43  - Red -
+ 10  44-44  - LightBlue -
  10  54-55  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
+ 11  21-24  - - DIM
  11  25-25  LightBlue - -
  11  26-44  LightBlue - BOLD
  11  45-74  LightBlue - -
  11  99-99  - - DIM
  12   0-0   - - DIM
+ 12  21-24  - - DIM
  12  25-25  LightBlue - -
  12  26-73  - - BOLD|REVERSED
  12  74-74  LightBlue - -
@@ -162,6 +162,10 @@ styles
  12  76-83  - - DIM
  12  99-99  - - DIM
  13   0-0   - - DIM
+ 13   1-1   Cyan - BOLD|REVERSED
+ 13   2-3   Green - BOLD|REVERSED
+ 13   4-20  - - BOLD|REVERSED
+ 13  21-24  - - BOLD|DIM|REVERSED
  13  25-25  LightBlue - -
  13  74-74  LightBlue - -
  13  75-75  - DarkGray -
