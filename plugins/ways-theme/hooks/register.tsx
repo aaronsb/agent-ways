@@ -1,4 +1,4 @@
-// Claude Code follows the active agent-ways theme (ADR-513).
+// Claude Code follows the active agent-ways theme (ADR-514).
 //
 // Two layers. The theme file: Claude Code keeps one custom theme for
 // agent-ways, `custom:ways`, at `<config dir>/themes/ways.json`. `ways manage
@@ -12,12 +12,13 @@
 // the change applies live.
 //
 // The frames: on the terminal, under an agent-ways theme, each reply sits in
-// a border on the theme's ground, and each tool call
-// and tool group in a border, wrapped around the engine's own drawing. The colours are Claude
-// Code theme keys, so they follow `custom:ways`. An expanded transcript or row (ctrl+o),
-// `verbose`, a reply longer than MAX_FRAMED_CHARS and every other surface
-// draw the engine's own row. Only a full `borderStyle` is used: a Box's
-// per-side border props are refused.
+// a border on the theme's ground, and each tool call and tool group in a
+// border, wrapped around the engine's own drawing. The colours are Claude
+// Code theme keys, so they follow `custom:ways`. The ctrl+o transcript, read
+// from the line that closes a turn, an expanded tool row, `verbose`, a reply
+// longer than MAX_FRAMED_CHARS and every other surface draw the engine's own
+// row. Only a full `borderStyle` is used: a Box's per-side border props are
+// refused.
 //
 // Every failure does nothing: `ways` missing, a non-zero exit, output that
 // does not parse, a call past its bound, a write refused. The file stays as
@@ -33,9 +34,11 @@ import type { ClaudeCodeTheme, Run } from './lib.ts'
 const debug = ($: EngineInterface, text: string) => $.ui.log(`ways-theme: ${text}`, { to: 'debug' })
 
 /** What the frames read: set at session start, when `verbose` changes, and
- *  when the transcript is expanded or collapsed (ctrl+o). */
+ *  when the terminal's view enters or leaves the ctrl+o transcript. */
 const frames = { isThemed: false, isVerbose: false }
 let isTranscriptExpanded = false
+/** Each terminal turn line's last `isExpanded`, by row. */
+const turnLines = new Map<string, boolean>()
 
 /** One bounded `ways` call; undefined when it could not start or ran past
  *  its bound. */
@@ -116,14 +119,19 @@ export const register: Register = on => {
     return result
   })
 
-  // A reply carries no `isExpanded` of its own; a person's message does, and
-  // reads ctrl+o for the whole transcript. Only a composer row is read: other
-  // origins expand for their own reasons. The row is drawn as the engine
-  // draws it; a change redraws the framed rows.
-  on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
-    if (e.props.origin.kind === 'composer' && e.props.isExpanded !== isTranscriptExpanded) {
-      isTranscriptExpanded = e.props.isExpanded
-      $.ui.invalidate('ui.render')
+  // A reply carries no `isExpanded` of its own. The line that closes a turn
+  // reports whether the whole view is the ctrl+o transcript, where a
+  // person's row reports only its own drawing. A line moves the state when
+  // its own value changed, so lines that disagree settle in one redraw. The
+  // line is drawn as the engine draws it.
+  on('ui.render', { component: 'TurnDuration' }, async ($, e, next) => {
+    const isExpanded = e.props.isExpanded
+    if (e.surface === 'terminal' && isExpanded !== undefined && turnLines.get(e.requestId) !== isExpanded) {
+      turnLines.set(e.requestId, isExpanded)
+      if (isExpanded !== isTranscriptExpanded) {
+        isTranscriptExpanded = isExpanded
+        $.ui.invalidate('ui.render')
+      }
     }
     return next(e)
   })

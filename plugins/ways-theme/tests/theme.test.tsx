@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
+import type { TestBody } from 'claude-code/testing'
 import type { On, ProcessRunResult } from 'claude-code'
 
 import { register } from '../hooks/register.tsx'
@@ -30,6 +31,8 @@ type World = {
   env?: Record<string, string>
   /** Claude Code's `verbose` row. */
   verbose?: boolean
+  /** `$.fs.write` rejects, as a read-only folder does. */
+  writeFails?: boolean
 }
 
 /** The host beneath the mod: the ways CLI, the file system and the
@@ -42,6 +45,8 @@ function host(on: On, world: World) {
   const sets: unknown[] = []
   const logs: string[] = []
   const toasts: unknown[] = []
+  /** How often the engine drew each component. */
+  const draws: Record<string, number> = {}
   const files = { ...(world.files ?? {}) }
   const env = world.env ?? { HOME: '/home/dev' }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
@@ -68,6 +73,7 @@ function host(on: On, world: World) {
     return { value: text } as never
   })
   on('fs.write', ($, e) => {
+    if (world.writeFails) throw new Error(`EACCES: ${e.path}`)
     writes.push({ path: e.path, text: e.text })
     files[e.path] = e.text
     return { value: undefined } as never
@@ -79,10 +85,11 @@ function host(on: On, world: World) {
   on('config.list', () => ({ value: [{ key: 'verbose', label: 'Verbose', kind: 'boolean', value: world.verbose ?? false, provider: { kind: 'engine' }, isLocked: false }] }) as never)
   // The engine's own drawing of every row.
   on('ui.render', ($, e) => {
+    draws[e.component] = (draws[e.component] ?? 0) + 1
     const { Text } = $.ui.resolve(e)
     return <Text>engine</Text>
   })
-  return { argvs, timeouts, writes, sets, logs, toasts, files }
+  return { argvs, timeouts, writes, sets, logs, toasts, files, draws }
 }
 
 describe('the theme file follows theme.active', () => {
@@ -146,6 +153,16 @@ describe('a ways that fails leaves the file as it was', () => {
     ['the export is cut short', { active: ok('miami-nights\n'), exported: ok(JSON.stringify(MIAMI).slice(0, 40)) }],
     ['the export runs past its bound', { active: ok('miami-nights\n'), exported: new Error('timed out after 1500 ms') }],
   ]
+  test('a refused write throws nothing and draws no frame', async ($, on) => {
+    const h = host(on, { active: ok('miami-nights\n'), exported: ok(JSON.stringify(MIAMI)), writeFails: true })
+    await $.session.start(INTERACTIVE)
+    expect(h.writes).toEqual([])
+    expect(h.logs.length).toBe(1)
+    const ui = await $.ui.mount({ ...REPLY, surface: 'terminal' } as never)
+    expect(await ui.drawn()).toMatchObject({ type: 'Text' })
+    await ui.unmount()
+  })
+
   for (const [name, world] of cases) {
     test(name, async ($, on) => {
       const h = host(on, { ...world, files: { [FILE]: themeText(MIAMI) } })
@@ -236,48 +253,92 @@ describe('frames on the terminal', () => {
   }
 
   describe('ctrl+o on the transcript', () => {
+    // A turn's closing line reports whether the view is the ctrl+o
+    // transcript, for the whole view.
+    const TURN = { plugin: 'ways-theme', component: 'TurnDuration', requestId: 'd1', props: { word: 'Baked', durationMs: 3000, isExpanded: false } } as const
     const PERSON = { plugin: 'ways-theme', component: 'UserMessage', requestId: 'u1', props: { text: 'hi', origin: { kind: 'composer' }, isExpanded: false } } as const
     const sites = [REPLY, TOOL, GROUP]
+    const drawnAs = async ($: Parameters<TestBody>[0], type: string) => {
+      for (const site of sites) {
+        const ui = await $.ui.mount({ ...site, surface: 'terminal' } as never)
+        expect(await ui.drawn()).toMatchObject({ type })
+        await ui.unmount()
+      }
+    }
 
-    test('expanding unframes replies and tool rows; collapsing frames them again', async ($, on) => {
+    test('the ctrl+o view unframes replies and tool rows; leaving it frames them again', async ($, on) => {
       host(on, THEMED)
       await $.session.start(INTERACTIVE)
-      const person = await $.ui.mount({ ...PERSON, surface: 'terminal' } as never)
-      const drawnAs = async (type: string) => {
-        for (const site of sites) {
-          const ui = await $.ui.mount({ ...site, surface: 'terminal' } as never)
-          expect(await ui.drawn()).toMatchObject({ type })
-          await ui.unmount()
-        }
-      }
-      await drawnAs('Box')
-      await person.unmount()
-      const expanded = await $.ui.mount({ ...PERSON, props: { ...PERSON.props, isExpanded: true }, surface: 'terminal' } as never)
-      await drawnAs('Text')
-      await expanded.unmount()
-      const collapsed = await $.ui.mount({ ...PERSON, props: { ...PERSON.props, isExpanded: false }, surface: 'terminal' } as never)
-      await drawnAs('Box')
-      await collapsed.unmount()
+      const turn = await $.ui.mount({ ...TURN, surface: 'terminal' } as never)
+      await drawnAs($, 'Box')
+      await turn.redraw({ ...TURN.props, isExpanded: true } as never)
+      await drawnAs($, 'Text')
+      await turn.redraw({ ...TURN.props, isExpanded: false } as never)
+      await drawnAs($, 'Box')
+      await turn.unmount()
     })
 
-    test("the person's row is the engine's own", async ($, on) => {
+    test("the turn line is the engine's own", async ($, on) => {
       host(on, THEMED)
       await $.session.start(INTERACTIVE)
       for (const isExpanded of [true, false]) {
-        const ui = await $.ui.mount({ ...PERSON, props: { ...PERSON.props, isExpanded }, surface: 'terminal' } as never)
+        const ui = await $.ui.mount({ ...TURN, props: { ...TURN.props, isExpanded }, surface: 'terminal' } as never)
         expect(await ui.drawn()).toMatchObject({ type: 'Text' })
         await ui.unmount()
       }
     })
 
-    test('a row of another origin does not move the transcript state', async ($, on) => {
+    test('two turn lines that disagree settle and do not flip the view back', async ($, on) => {
+      const h = host(on, THEMED)
+      await $.session.start(INTERACTIVE)
+      const a = await $.ui.mount({ ...TURN, props: { ...TURN.props, isExpanded: true }, surface: 'terminal' } as never)
+      const b = await $.ui.mount({ ...TURN, requestId: 'd2', surface: 'terminal' } as never)
+      // b's first report is the latest change: collapsed.
+      await drawnAs($, 'Box')
+      // a drawn again with its value unchanged moves nothing.
+      await a.redraw({ ...TURN.props, isExpanded: true } as never)
+      await drawnAs($, 'Box')
+      expect(h.draws.TurnDuration).toBeLessThanOrEqual(8)
+      await a.unmount()
+      await b.unmount()
+    })
+
+    test("a person's row does not move the view", async ($, on) => {
       host(on, THEMED)
       await $.session.start(INTERACTIVE)
-      const ui = await $.ui.mount({ ...PERSON, props: { ...PERSON.props, origin: { kind: 'sdk' }, isExpanded: true }, surface: 'terminal' } as never)
+      // A row under a speaker label reports its own isExpanded.
+      const ui = await $.ui.mount({ ...PERSON, props: { ...PERSON.props, isExpanded: true }, surface: 'terminal' } as never)
+      expect(await ui.drawn()).toMatchObject({ type: 'Text' })
+      await drawnAs($, 'Box')
       await ui.unmount()
-      const reply = await $.ui.mount({ ...REPLY, surface: 'terminal' } as never)
-      expect(await reply.drawn()).toMatchObject({ type: 'Box' })
-      await reply.unmount()
+    })
+
+    test('a composer row on another surface does not change terminal framing', async ($, on) => {
+      host(on, THEMED)
+      await $.session.start(INTERACTIVE)
+      const ui = await $.ui.mount({ ...PERSON, props: { ...PERSON.props, isExpanded: true }, surface: 'desktop' } as never)
+      await drawnAs($, 'Box')
+      await ui.unmount()
+    })
+
+    test('two composer rows that disagree leave the view as it was', async ($, on) => {
+      const h = host(on, THEMED)
+      await $.session.start(INTERACTIVE)
+      const open = await $.ui.mount({ ...PERSON, props: { ...PERSON.props, isExpanded: true }, surface: 'terminal' } as never)
+      const shut = await $.ui.mount({ ...PERSON, requestId: 'u2', surface: 'terminal' } as never)
+      await open.redraw({ ...PERSON.props, isExpanded: true } as never)
+      await drawnAs($, 'Box')
+      expect(h.draws.UserMessage).toBeLessThanOrEqual(4)
+      await open.unmount()
+      await shut.unmount()
+    })
+
+    test('a turn line on another surface does not change terminal framing', async ($, on) => {
+      host(on, THEMED)
+      await $.session.start(INTERACTIVE)
+      const ui = await $.ui.mount({ ...TURN, props: { ...TURN.props, isExpanded: true }, surface: 'desktop' } as never)
+      await drawnAs($, 'Box')
+      await ui.unmount()
     })
   })
 
