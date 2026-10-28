@@ -1,6 +1,6 @@
 //! The replay's ways table and its context lines on agent-tui: the columns
-//! `ways session ways` prints (Way, Agent, Epoch, Dist, Trigger, the pin,
-//! Re-disclose) as ratatui rows, and the token gauge, forecast and re-disclosure zones
+//! `ways session ways` prints (Way, Agent, Epoch, Dist, Trigger, the
+//! waypoint, Re-disclose) as ratatui rows, and the token gauge, forecast and re-disclosure zones
 //! below them. The values and their colours come from `cmd::render`, the
 //! same as `ways session ways`; only the drawing differs.
 
@@ -12,7 +12,7 @@ use agent_tui::theme;
 
 use super::agents::Agents;
 use super::model::{ActiveWay, Fate, Frame};
-use crate::cmd::render::{self, PIN_SYMBOLS};
+use crate::cmd::render::{self, WaypointSet};
 
 /// The Agent column's width in a table `inner` cells wide: the widest name
 /// of the session's agents, so it holds still across frames, from the
@@ -21,7 +21,7 @@ use crate::cmd::render::{self, PIN_SYMBOLS};
 /// Agent has ten and Way eighteen.
 pub(super) fn agent_width(agents: &Agents, inner: usize) -> u16 {
     let widest = agents.widest();
-    let room = inner.saturating_sub(HIGHLIGHT + WAY_KEEP + FIXED + GAPS).max(AGENT_MIN);
+    let room = inner.saturating_sub(HIGHLIGHT + WAY_KEEP + fixed() + GAPS).max(AGENT_MIN);
     widest.clamp(5, AGENT_MAX).min(room) as u16
 }
 
@@ -29,8 +29,17 @@ const WAY_MIN: usize = 12;
 const WAY_KEEP: usize = 18;
 const AGENT_MIN: usize = 8;
 const AGENT_MAX: usize = 16;
-/// Epoch, Dist, Trigger, the pin and Re-disclose.
-const FIXED: usize = 5 + 5 + 13 + 1 + 13;
+/// The waypoints this frame draws: the palette's theme set, which the
+/// screen's look already dropped where `theme.waypoints` is `default`.
+pub(super) fn waypoints() -> WaypointSet {
+    let p = theme::current().painter;
+    WaypointSet::new(p.waypoints(), p.depth())
+}
+
+/// Epoch, Dist, Trigger, the waypoint and Re-disclose.
+fn fixed() -> usize {
+    5 + 5 + 13 + waypoints().width() + 13
+}
 /// Two cells between each of the seven columns.
 const GAPS: usize = 6 * 2;
 /// The selection mark's column.
@@ -44,7 +53,7 @@ pub(super) fn widths(agent: u16) -> [Constraint; 7] {
         Constraint::Length(5),
         Constraint::Length(5),
         Constraint::Length(13),
-        Constraint::Length(1),
+        Constraint::Length(waypoints().width() as u16),
         Constraint::Length(13),
     ]
 }
@@ -101,7 +110,7 @@ pub(super) fn keep_tail(id: &str, width: usize) -> String {
 
 /// The Way column's width beside an Agent column `agent_w` wide.
 pub(super) fn way_width(inner: usize, agent_w: u16) -> usize {
-    inner.saturating_sub(HIGHLIGHT + agent_w as usize + FIXED + GAPS).max(WAY_MIN)
+    inner.saturating_sub(HIGHLIGHT + agent_w as usize + fixed() + GAPS).max(WAY_MIN)
 }
 
 /// An agent's name in its colour, cut to `width` display cells: a
@@ -143,16 +152,18 @@ fn ink(s: agent_theme::Style) -> Style {
 
 pub(super) fn header() -> Row<'static> {
     let right = |t: &'static str| Cell::from(Line::from(t).alignment(Alignment::Right));
-    Row::new(vec![Cell::from("Way"), Cell::from("Agent"), right("Epoch"), right("Dist"), Cell::from("Trigger"), Cell::from(render::PIN_HEADER), Cell::from("Re-disclose")])
+    Row::new(vec![Cell::from("Way"), Cell::from("Agent"), right("Epoch"), right("Dist"), Cell::from("Trigger"), Cell::from(render::WAYPOINT_HEADER), Cell::from("Re-disclose")])
         .style(Style::new().add_modifier(Modifier::BOLD))
 }
 
-/// The pin of a way's cluster, in its categorical colour.
-fn pin(cluster: usize) -> Span<'static> {
-    let symbol = PIN_SYMBOLS[cluster % PIN_SYMBOLS.len()].to_string();
-    match render::pin_color(cluster, theme::current().depth()) {
-        Some(c) => Span::styled(symbol, Style::new().fg(agent_theme::ratatui::color(c))),
-        None => Span::raw(symbol),
+/// The waypoint of a way's cluster, in its colour, padded to the set's
+/// width.
+fn waypoint(set: &WaypointSet, cluster: usize) -> Span<'static> {
+    let glyph = set.glyph(cluster);
+    let text = format!("{glyph}{}", " ".repeat(set.width().saturating_sub(agent_tui::wrap::str_width(glyph))));
+    match set.color(cluster) {
+        Some(c) => Span::styled(text, Style::new().fg(agent_theme::ratatui::color(c))),
+        None => Span::raw(text),
     }
 }
 
@@ -171,6 +182,7 @@ pub(super) fn clusters(frame: &Frame, window_k: u64, bar: usize) -> (Vec<Option<
 pub(super) fn rows(frame: &Frame, agents: &Agents, agent_w: u16, window_k: u64, bar: usize) -> Vec<Row<'static>> {
     let (pos, unique) = clusters(frame, window_k, bar);
     let way_w = way_width(bar, agent_w);
+    let set = waypoints();
     frame
         .ways
         .iter()
@@ -180,7 +192,7 @@ pub(super) fn rows(frame: &Frame, agents: &Agents, agent_w: u16, window_k: u64, 
             let epoch = frame.epoch_of(&w.agent);
             let distance = epoch.saturating_sub(w.epoch_fired);
             let (next, next_style) = render::next_cell(w, epoch, frame.tokens_k_of(&w.agent), &theme::events());
-            let pin = pos.get(i).copied().flatten().map_or(Span::raw(" "), |p| pin(render::cluster_of(p, &unique)));
+            let mark = pos.get(i).copied().flatten().map_or(Span::raw(" "), |p| waypoint(&set, render::cluster_of(p, &unique, set.len())));
             let mut way = vec![Line::from(way_name(w, way_w))];
             let mut agent = vec![agent_cell(agents, &w.agent, agent_w)];
             if w.check_fires > 0 {
@@ -195,7 +207,7 @@ pub(super) fn rows(frame: &Frame, agents: &Agents, agent_w: u16, window_k: u64, 
                 Cell::from(Line::from(w.epoch_fired.to_string()).alignment(Alignment::Right)),
                 Cell::from(Line::styled(distance.to_string(), ink(render::distance_style(distance, epoch))).alignment(Alignment::Right)),
                 Cell::from(render::format_trigger(&w.trigger)),
-                Cell::from(pin),
+                Cell::from(mark),
                 Cell::from(Span::styled(next, ink(next_style))),
             ])
             .height(height)
@@ -231,6 +243,7 @@ pub(super) fn context(frame: &Frame, window_k: u64, width: usize) -> Vec<(u8, Li
         out.push((0, Line::from(vec![Span::styled(format!("{}{}", "█".repeat(filled), "░".repeat(bar - filled)), style), Span::raw(label)])));
 
         let (_, unique) = clusters(frame, window_k, bar);
+        let set = waypoints();
         let (mut now, mut soon, mut later) = (0, 0, 0);
         let mut future: Vec<(u64, usize)> = Vec::new();
         for w in &frame.ways {
@@ -246,7 +259,7 @@ pub(super) fn context(frame: &Frame, window_k: u64, width: usize) -> Vec<(u8, Li
                 later += 1;
             }
             let full = ((at * bar as u64).checked_div(window_k).unwrap_or(0) as usize).min(bar - 1);
-            future.push((at, render::cluster_of(full, &unique)));
+            future.push((at, render::cluster_of(full, &unique, set.len())));
         }
         let mut zones: Vec<Span<'static>> = Vec::new();
         for (n, text, style) in [
@@ -281,15 +294,19 @@ pub(super) fn context(frame: &Frame, window_k: u64, width: usize) -> Vec<(u8, Li
             let end = (max + (max - min) / 4).min(window_k).max(lo + 1);
             let label = format!(" forecast {lo}K → {end}K");
             let strip = width.saturating_sub(label.chars().count()).max(1);
-            let mut cells: Vec<Option<usize>> = vec![None; strip];
+            // A waypoint takes the set's width, so the strip has that many
+            // fewer slots.
+            let slots = (strip / set.width()).max(1);
+            let mut cells: Vec<Option<usize>> = vec![None; slots];
             for (at, c) in &future {
-                let x = ((at.saturating_sub(lo) * strip as u64) / (end - lo)) as usize;
-                let x = x.min(strip - 1);
+                let x = ((at.saturating_sub(lo) * slots as u64) / (end - lo)) as usize;
+                let x = x.min(slots - 1);
                 if cells[x].is_none() {
                     cells[x] = Some(*c);
                 }
             }
-            let mut spans: Vec<Span<'static>> = cells.into_iter().map(|c| c.map_or(Span::styled("·", theme::muted()), pin)).collect();
+            let empty = format!("{:<w$}", '·', w = set.width());
+            let mut spans: Vec<Span<'static>> = cells.into_iter().map(|c| c.map_or(Span::styled(empty.clone(), theme::muted()), |c| waypoint(&set, c))).collect();
             spans.push(Span::styled(label, theme::muted()));
             out.push((3, Line::from(spans)));
         }

@@ -346,6 +346,12 @@ impl Painter {
         self.decor.waypoints
     }
 
+    /// This painter with the theme's waypoints set aside, for a screen told
+    /// to draw its own (`theme.waypoints: default`).
+    pub fn without_waypoints(self) -> Painter {
+        Painter { decor: Decor { waypoints: None, ..self.decor }, ..self }
+    }
+
     /// The glyph a plain report's rules are drawn with: the theme's rule,
     /// else `─`.
     pub fn rule_glyph(&self) -> &'static str {
