@@ -70,10 +70,15 @@ fn run_raw(home: &Path, args: &[&str], forced: bool) -> String {
 }
 
 /// Whether util-linux `script` is here to give a command a terminal. BSD
-/// `script`, which has no `-c`, counts as missing. A missing one fails the
-/// test under `CI`; elsewhere it fails the test unless
-/// `WAYS_ALLOW_PTY_SKIP=1`, which skips it with a line on stdout.
+/// `script`, which has no `-c`, counts as missing. Off Linux there is no
+/// util-linux, so the terminal tests skip with a line on stdout. On Linux a
+/// missing one fails the test under `CI`; elsewhere it fails the test unless
+/// `WAYS_ALLOW_PTY_SKIP=1`, which skips it.
 fn have_script() -> bool {
+    if !cfg!(target_os = "linux") {
+        println!("skipped: the terminal tests drive util-linux `script`, which only Linux has");
+        return false;
+    }
     let run = |args: &[&str]| Command::new("script").args(args).stdin(Stdio::null()).output().ok().filter(|o| o.status.success());
     let util_linux = run(&["--version"]).is_some_and(|o| String::from_utf8_lossy(&o.stdout).contains("util-linux"));
     if util_linux && run(&["-qec", "true", "/dev/null"]).is_some() {
