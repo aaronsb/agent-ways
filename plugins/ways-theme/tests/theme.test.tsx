@@ -237,6 +237,52 @@ describe('frames on the terminal', () => {
     })
   }
 
+  describe('ctrl+o on the transcript', () => {
+    const PERSON = { plugin: 'ways-theme', component: 'UserMessage', requestId: 'u1', props: { text: 'hi', origin: { kind: 'composer' }, isExpanded: false } } as const
+    const sites = [REPLY, TOOL, GROUP]
+
+    test('expanding unframes replies and tool rows; collapsing frames them again', async ($, on) => {
+      host(on, THEMED)
+      await $.session.start(INTERACTIVE)
+      const person = await $.ui.mount({ ...PERSON, surface: 'terminal' } as never)
+      const drawnAs = async (type: string) => {
+        for (const site of sites) {
+          const ui = await $.ui.mount({ ...site, surface: 'terminal' } as never)
+          expect(await ui.drawn()).toMatchObject({ type })
+          await ui.unmount()
+        }
+      }
+      await drawnAs('Box')
+      await person.unmount()
+      const expanded = await $.ui.mount({ ...PERSON, props: { ...PERSON.props, isExpanded: true }, surface: 'terminal' } as never)
+      await drawnAs('Text')
+      await expanded.unmount()
+      const collapsed = await $.ui.mount({ ...PERSON, props: { ...PERSON.props, isExpanded: false }, surface: 'terminal' } as never)
+      await drawnAs('Box')
+      await collapsed.unmount()
+    })
+
+    test("the person's row is the engine's own", async ($, on) => {
+      host(on, THEMED)
+      await $.session.start(INTERACTIVE)
+      for (const isExpanded of [true, false]) {
+        const ui = await $.ui.mount({ ...PERSON, props: { ...PERSON.props, isExpanded }, surface: 'terminal' } as never)
+        expect(await ui.drawn()).toMatchObject({ type: 'Text' })
+        await ui.unmount()
+      }
+    })
+
+    test('a row of another origin does not move the transcript state', async ($, on) => {
+      host(on, THEMED)
+      await $.session.start(INTERACTIVE)
+      const ui = await $.ui.mount({ ...PERSON, props: { ...PERSON.props, origin: { kind: 'sdk' }, isExpanded: true }, surface: 'terminal' } as never)
+      await ui.unmount()
+      const reply = await $.ui.mount({ ...REPLY, surface: 'terminal' } as never)
+      expect(await reply.drawn()).toMatchObject({ type: 'Box' })
+      await reply.unmount()
+    })
+  })
+
   test('turning verbose on in /config hands the rows back', async ($, on) => {
     host(on, THEMED)
     await $.session.start(INTERACTIVE)
@@ -263,7 +309,7 @@ describe('what the mod hooks reaches it on every host', () => {
   test("no hook is on an event an organization's policy plugin passes over, and none is classic", () => {
     const regs = registrationsOf(register as never)
     // The recording saw the module's hooks: the control for the empty lists below.
-    expect(regs.map(r => r.pattern)).toEqual(['session.start', 'config.set', 'ui.render', 'ui.render', 'ui.render'])
+    expect(regs.map(r => r.pattern)).toEqual(['session.start', 'config.set', 'ui.render', 'ui.render', 'ui.render', 'ui.render'])
     expect(regs.filter(r => r.pattern.startsWith('classic.'))).toEqual([])
     expect(passedOverHits(regs)).toEqual([])
   })

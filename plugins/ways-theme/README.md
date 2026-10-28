@@ -15,7 +15,7 @@ Claude Code draws on the terminal's own background, so the exporter lifts every 
 
 ## Frames
 
-On the terminal, under an agent-ways theme, each reply sits inside a round border, and each tool call and tool group inside a round border, wrapped around Claude Code's own drawing. Under a dark theme the reply also sits on the theme's ground; Claude Code draws a reply's body in the terminal's own foreground, which a light theme's ground would wash out. The colours are Claude Code theme keys (`userMessageBackground`, `claude`, `suggestion`, `error`), so the frames follow `custom:ways`. Claude Code draws its own row, unframed, for a row expanded with ctrl+o, under `verbose`, for a reply longer than 20,000 characters, for a block that does not open a reply, and on every surface other than the terminal. A frame costs four columns of width.
+On the terminal, under an agent-ways theme, each reply sits inside a round border, and each tool call and tool group inside a round border, wrapped around Claude Code's own drawing. Under a dark theme the reply also sits on the theme's ground; Claude Code draws a reply's body in the terminal's own foreground, which a light theme's ground would wash out. The colours are Claude Code theme keys (`userMessageBackground`, `claude`, `suggestion`, `error`), so the frames follow `custom:ways`. Claude Code draws its own row, unframed, while the transcript is expanded with ctrl+o, for a row expanded on its own, under `verbose`, for a reply longer than 20,000 characters, for a block that does not open a reply, and on every surface other than the terminal. A frame costs four columns of width.
 
 ## Failures
 

@@ -14,7 +14,7 @@
 // The frames: on the terminal, under an agent-ways theme, each reply sits in
 // a border, on the theme's ground when the theme is dark, and each tool call
 // and tool group in a border, wrapped around the engine's own drawing. The colours are Claude
-// Code theme keys, so they follow `custom:ways`. An expanded row (ctrl+o),
+// Code theme keys, so they follow `custom:ways`. An expanded transcript or row (ctrl+o),
 // `verbose`, a reply longer than MAX_FRAMED_CHARS and every other surface
 // draw the engine's own row. Only a full `borderStyle` is used: a Box's
 // per-side border props are refused.
@@ -32,8 +32,10 @@ import type { ClaudeCodeTheme, Run } from './lib.ts'
 
 const debug = ($: EngineInterface, text: string) => $.ui.log(`ways-theme: ${text}`, { to: 'debug' })
 
-/** What the frames read: set at session start and when `verbose` changes. */
+/** What the frames read: set at session start, when `verbose` changes, and
+ *  when the transcript is expanded or collapsed (ctrl+o). */
 const frames = { isThemed: false, isVerbose: false }
+let isTranscriptExpanded = false
 let replyFrame: Record<string, string> = FRAME.reply
 
 /** One bounded `ways` call; undefined when it could not start or ran past
@@ -116,18 +118,31 @@ export const register: Register = on => {
     return result
   })
 
+  // A reply carries no `isExpanded` of its own; a person's message does, and
+  // reads ctrl+o for the whole transcript. Only a composer row is read: other
+  // origins expand for their own reasons. The row is drawn as the engine
+  // draws it; a change redraws the framed rows.
+  on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
+    if (e.props.origin.kind === 'composer' && e.props.isExpanded !== isTranscriptExpanded) {
+      isTranscriptExpanded = e.props.isExpanded
+      $.ui.invalidate('ui.render')
+    }
+    return next(e)
+  })
+
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
-    if (!shouldFrame({ surface: e.surface, ...frames, length: e.props.text.length }) || !e.props.isFirstOfReply) return next(e)
+    const c = { surface: e.surface, ...frames, isExpanded: isTranscriptExpanded, length: e.props.text.length }
+    if (!shouldFrame(c) || !e.props.isFirstOfReply) return next(e)
     return framed($, e, await next(e), replyFrame)
   })
 
   on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
-    if (!shouldFrame({ surface: e.surface, ...frames, isExpanded: e.props.isExpanded })) return next(e)
+    if (!shouldFrame({ surface: e.surface, ...frames, isExpanded: isTranscriptExpanded || e.props.isExpanded })) return next(e)
     return framed($, e, await next(e), e.props.isErrored ? FRAME.toolErrored : FRAME.tool)
   })
 
   on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
-    if (!shouldFrame({ surface: e.surface, ...frames, isExpanded: e.props.isExpanded })) return next(e)
+    if (!shouldFrame({ surface: e.surface, ...frames, isExpanded: isTranscriptExpanded || e.props.isExpanded })) return next(e)
     return framed($, e, await next(e), FRAME.tool)
   })
 }
