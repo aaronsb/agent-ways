@@ -2,10 +2,12 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 import type { RenderElement } from 'claude-code'
 
+import { sessionPasteId } from '../hooks/skins/hub.tsx'
 import { PAD_X } from '../hooks/skins/prompt-box.tsx'
-import { pasteIdOf, pieces, shownText } from '../hooks/skins/pastes.ts'
+import { MAX_DEPTH, pasteIdOf, pieces, shownText } from '../hooks/skins/pastes.ts'
 import { MIAMI_NIGHTS } from './fixtures.ts'
 import { INTERACTIVE, borders, grounds, host, json, walk } from './host.tsx'
+import type { World } from './host.tsx'
 
 const VIEW = { columns: 100, rows: 30 }
 const at = (props: Record<string, unknown>) => ({ plugin: 'ways-theme', surface: 'terminal', component: 'UserMessage', requestId: 'r1', viewport: VIEW, props: { origin: { kind: 'composer' }, isExpanded: false, ...props } }) as never
@@ -116,8 +118,76 @@ describe('text that is not a whole paste of the session draws as it came', () =>
     await ui.unmount()
   })
 
-  test('with no session id the text draws as it came', () => {
-    expect(shownText(`Here: ${paste('a\nb')}`, null)).toBe(`Here: ${paste('a\nb')}`)
+  test('a typed block of another id beside a drawn paste is kept exactly', async ($, on) => {
+    host(on, { mod: json(MIAMI_NIGHTS), sessionId: SESSION })
+    await $.session.start(INTERACTIVE)
+    const typed = 'mine <pasted_content id="abcd">\nx\n</pasted_content id="abcd">'
+    expect(await drawn($, `${typed} and ${paste('p1\np2')} end`)).toEqual(['mine <pasted_content id="abcd">', 'x', '</pasted_content id="abcd"> and', 'p1', 'p2', 'end'])
+  })
+})
+
+describe('without the session paste id, a message with a paste is Claude Code\'s', () => {
+  test('$.session.id() rejecting: the paste goes to Claude Code, a message with none keeps the box', async ($, on) => {
+    host(on, { mod: json(MIAMI_NIGHTS), sessionId: null })
+    await $.session.start(INTERACTIVE)
+    const ui = await $.ui.mount(at({ text: `Here: ${paste('a\nb')}` }))
+    expect(await ui.drawn()).toMatchObject({ type: 'Text' })
+    await ui.unmount()
+    expect(await drawn($, 'no paste here')).toEqual(['no paste here'])
+  })
+
+  // The hooks run in an environment of their own, which a test cannot reach to
+  // make `crypto.subtle.digest` reject; the hub's lookup takes the digest as an
+  // argument instead. A null from it is the rejection path the test above drives.
+  test('the digest rejecting: the lookup answers null and keeps nothing', async () => {
+    const $ = { session: { id: async () => 'session-3' } } as never
+    expect(await sessionPasteId($, () => Promise.reject(new Error('no digest')))).toBe(null)
+    expect(await sessionPasteId($)).toBe('eb27')
+  })
+
+  test('a new session id gets its own paste id', async ($, on) => {
+    const world: World = { mod: json(MIAMI_NIGHTS), sessionId: SESSION }
+    host(on, world)
+    await $.session.start(INTERACTIVE)
+    expect(await drawn($, `x ${paste('a\nb')}`)).toEqual(['x', 'a', 'b'])
+    world.sessionId = 'session-2'
+    const old = `x ${paste('a\nb')}`
+    expect(await drawn($, old)).toEqual(old.split('\n').map(line => line.trimEnd()))
+    expect(await drawn($, `x ${paste('a\nb', '5d90')}`)).toEqual(['x', 'a', 'b'])
+  })
+})
+
+/** `body` wrapped as a paste the copied text carried: its tags escaped, as
+ *  Claude Code escapes them at every depth. */
+const carried = (id: string, body: string) => `<\\pasted_content id="${id}">\n${body}\n<\\/pasted_content id="${id}">`
+/** `core` inside `levels` carried pastes, a000 the innermost. */
+const nest = (levels: number, core = 'core') => Array.from({ length: levels }, (_, i) => `a${String(i).padStart(3, '0')}`).reduce((body, id) => carried(id, body), core)
+
+describe('pastes inside a paste', () => {
+  test('two deep: each inner paste loses only its tag lines', () => {
+    const body = ['a', carried('1111', ['b', carried('2222', 'c'), 'd'].join('\n')), 'e'].join('\n')
+    expect(shownText(paste(body), ID)).toBe('a\nb\nc\nd\ne')
+  })
+
+  test('three deep', () => {
+    const body = ['a', carried('1111', ['b', carried('2222', ['c', carried('3333', 'X'), 'd'].join('\n')), 'e'].join('\n')), 'f'].join('\n')
+    expect(shownText(paste(body), ID)).toBe('a\nb\nc\nX\nd\ne\nf')
+  })
+
+  test(`unwrapped to ${MAX_DEPTH} levels; deeper tags stay, unescaped`, () => {
+    expect(shownText(paste(nest(MAX_DEPTH - 1)), ID)).toBe('core')
+    expect(shownText(paste(nest(MAX_DEPTH)), ID)).toBe('<pasted_content id="a000">\ncore\n</pasted_content id="a000">')
+  })
+
+  test('a fenced example of the tag format keeps its fence, its line breaks and its spaces', async ($, on) => {
+    host(on, { mod: json(MIAMI_NIGHTS), sessionId: SESSION })
+    await $.session.start(INTERACTIVE)
+    const body = ['```', carried('1234', '  example'), '```'].join('\n')
+    expect(await drawn($, `look ${paste(body)}`)).toEqual(['look', '```', '  example', '```'])
+  })
+
+  test('blank lines around an inner paste stay', () => {
+    expect(shownText(paste(`one\n\n${carried('1234', 'two')}\n\nthree`), ID)).toBe('one\n\ntwo\n\nthree')
   })
 })
 

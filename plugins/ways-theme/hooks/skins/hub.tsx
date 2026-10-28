@@ -46,7 +46,7 @@ import { commandOf, errorLine, isQuiet, quietLabel } from './quiet.ts'
 import { MAX_MARKDOWN, replySegments } from './reply.ts'
 import { fileHref, hyperlinksFrom, touchOf } from './links.ts'
 import { MIN_WIDTH, axisFor, boxLines, canMeasure, gradientBox, gradientRuns } from './prompt-box.tsx'
-import { pasteIdOf, shownText } from './pastes.ts'
+import { holdsPaste, pasteIdOf, shownText } from './pastes.ts'
 import type { Touch, TurnStats, UsageSnap } from '../../types'
 
 /** Each export call's bound. */
@@ -203,13 +203,17 @@ let hasTouched = false
 
 const cwdOf = async ($: EngineInterface): Promise<string> => sessionCwd ?? (await $.session.cwd())
 
-// The id Claude Code gives this session's pastes, worked out once per session id.
+// The id Claude Code gives this session's pastes, worked out by `idOf` once per
+// session id; null when the session id or its digest cannot be had.
 let pastes: { session: string; id: string } | undefined
-async function sessionPasteId($: EngineInterface): Promise<string | null> {
-  const session = await $.session.id().catch(() => null)
-  if (session === null) return null
-  if (pastes?.session !== session) pastes = { session, id: await pasteIdOf(session) }
-  return pastes.id
+export async function sessionPasteId($: Pick<EngineInterface, 'session'>, idOf = pasteIdOf): Promise<string | null> {
+  try {
+    const session = await $.session.id()
+    if (pastes?.session !== session) pastes = { session, id: await idOf(session) }
+    return pastes.id
+  } catch {
+    return null
+  }
 }
 
 const lookOf = (ui: Ui & { Svg?: SvgElement }, setup: Setup, surface: RenderSurface, copy?: (text: string) => void): Look => ({
@@ -571,8 +575,14 @@ export function registerSkins(on: On, shared: Shared): void {
     if (setup === null || setup.promptBox === 'off' || e.surface !== 'terminal' || !shared.view().isWaysTheme || !TYPED.has(e.props.origin.kind) || e.props.text.length > MAX_PROMPT || CONTROL.test(e.props.text)) {
       return next(e)
     }
+    // A paste is unwrapped by the session's paste id; without it, Claude Code draws.
+    let text = e.props.text
+    if (holdsPaste(text)) {
+      const pasteId = await sessionPasteId($)
+      if (pasteId === null) return next(e)
+      text = shownText(text, pasteId)
+    }
     const ui = $.ui.resolve(e)
-    const text = shownText(e.props.text, await sessionPasteId($))
     const hasMore = await read($, memberOf(imagesAtom, e))
     const isRowOpen = isExpanded(shared.view(), e.props.isExpanded)
     const width = (e.viewport?.columns ?? 80) - 1

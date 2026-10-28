@@ -9,12 +9,15 @@
 //
 // Inside a paste, a tag of a paste the copied text carried arrives escaped
 // (`<\pasted_content`, `<\/pasted_content`), whatever its id. The skin takes
-// one level of escape off and draws a whole inner paste by the same rules, so
-// no wrapper of any depth shows. Claude Code leaves the escaped tags in.
+// one level of escape off and cuts the two tag lines of each whole inner
+// paste, so no wrapper of any depth shows. Every other character of the
+// paste, its line breaks and spaces included, stays as pasted. Claude Code
+// leaves the escaped tags in.
 //
-// Nothing is dropped but the wrappers and the whitespace beside a paste that
-// Claude Code drops too. A tag left open, or closed under another id, is text:
-// the split stops there and the rest of the message draws as it came.
+// Around the session's pastes the wrappers go, and so does the whitespace
+// beside a paste that Claude Code drops too. Inside a paste only the inner
+// tag lines go. A tag left open, or closed under another id, is text: the
+// split stops there and the rest of the text draws as it came.
 
 const OPEN = '<pasted_content id="'
 const OPEN_END = '">\n'
@@ -23,8 +26,9 @@ const ID_LENGTH = 4
 const ID = /^[0-9a-f]{4}$/
 /** One level of escape on a nested paste's tag. */
 const ESCAPED_TAG = /<\\(?=\/?pasted_content)/g
-/** How deep inner pastes are drawn; deeper ones keep their tags. */
-const MAX_DEPTH = 8
+/** How many levels of paste are unwrapped, the session's own the first; the
+ *  tags of a paste nested deeper stay, unescaped. */
+export const MAX_DEPTH = 8
 /** Marks a paste may sit after, with no space, on its own line. */
 const OPENERS = /[([{"'`]/
 /** Marks that may follow a paste on its line. */
@@ -32,6 +36,9 @@ const CLOSERS = /[)\]}"'`.,;:!?]/
 
 /** A stretch of the message: typed text, or a whole paste. */
 export type Piece = { kind: 'text'; text: string } | { kind: 'paste'; id: string; body: string; raw: string }
+
+/** Whether `text` holds an opening tag, so that drawing it needs the paste id. */
+export const holdsPaste = (text: string): boolean => text.includes(OPEN)
 
 /** `text` cut into typed stretches and whole pastes. A paste takes up to two
  *  newlines either side of it; an opening tag with no closing tag of its id
@@ -73,12 +80,12 @@ const endsLine = (after: string): boolean => {
   return at >= after.length || /\s/.test(after[at]!)
 }
 
-/** The message as drawn: each paste `isPaste` accepts unwrapped, on lines of
- *  its own when it spans lines or sits against typed text, its body drawn by
- *  `bodyOf`; every other block stays as it came. */
-function laidOut(text: string, isPaste: (id: string) => boolean, depth: number): string {
+/** The message as drawn: each paste of `pasteId` unwrapped, on lines of its
+ *  own when it spans lines or sits against typed text; every other block
+ *  stays as it came. */
+function laidOut(text: string, pasteId: string): string {
   const all = pieces(text)
-  const drawnBody = (p: Piece | undefined): string | null => (p?.kind === 'paste' && isPaste(p.id) ? p.body : null)
+  const drawnBody = (p: Piece | undefined): string | null => (p?.kind === 'paste' && p.id === pasteId ? p.body : null)
   if (all.every(p => drawnBody(p) === null)) return text
   let out = ''
   let isBroken = false
@@ -100,25 +107,29 @@ function laidOut(text: string, isPaste: (id: string) => boolean, depth: number):
     while (end > 0 && OPENERS.test(out[end - 1]!)) end--
     const isSpaced = end === 0 || /\s/.test(out[end - 1]!)
     if ((spansLines || isBroken || !isSpaced) && out !== '') out += '\n'
-    out += bodyOf(body, depth)
+    out += inside(body, 1)
     const after = next === undefined ? '' : next.kind === 'text' ? next.text : next.raw
     isBroken = spansLines || drawnBody(next) !== null || /^\s\s/.test(after) || !endsLine(after)
   })
   return out
 }
 
-/** A paste's body as drawn: one level of escape off, and the pastes it
- *  carried drawn whole, whatever their id. */
-const bodyOf = (body: string, depth: number): string => {
+/** A paste's body as drawn, the paste `depth` levels in: one level of escape
+ *  off, and each whole paste it carried, whatever its id, with its two tag
+ *  lines cut and nothing else changed. From MAX_DEPTH on the tags stay. */
+function inside(body: string, depth: number): string {
   const unescaped = body.replace(ESCAPED_TAG, '<')
-  return depth >= MAX_DEPTH ? unescaped : laidOut(unescaped, () => true, depth + 1)
+  if (depth >= MAX_DEPTH) return unescaped
+  const untagged = (p: Extract<Piece, { kind: 'paste' }>) => `${p.raw.slice(0, p.raw.indexOf(OPEN))}${inside(p.body, depth + 1)}${p.raw.slice(p.raw.lastIndexOf('">') + 2)}`
+  return pieces(unescaped)
+    .map(p => (p.kind === 'text' ? p.text : untagged(p)))
+    .join('')
 }
 
-/** The person's message as Claude Code shows it: the session's pastes
- *  unwrapped. With no paste id, or no paste of it, the text as it came. */
-export function shownText(text: string, pasteId: string | null): string {
-  if (pasteId === null || !text.includes(OPEN)) return text
-  return laidOut(text, id => id === pasteId, 0)
+/** The person's message as Claude Code shows it: the pastes of `pasteId`,
+ *  the session's, unwrapped. With no paste of it, the text as it came. */
+export function shownText(text: string, pasteId: string): string {
+  return holdsPaste(text) ? laidOut(text, pasteId) : text
 }
 
 /** The id Claude Code gives the session's pastes: the first four hex digits

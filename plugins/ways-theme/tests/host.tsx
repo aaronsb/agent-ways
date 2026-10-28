@@ -28,8 +28,9 @@ export type World = {
   env?: Readonly<Record<string, string>>
   /** The session's folder; `/work/proj` when not given. */
   cwd?: string
-  /** What `$.session.id()` answers; `session-1` when not given. */
-  sessionId?: string
+  /** What `$.session.id()` answers; `session-1` when not given, a rejection
+   *  when null. */
+  sessionId?: string | null
 }
 
 export const INTERACTIVE = { cwd: '/work/proj', surface: 'terminal', isInteractive: true } as const
@@ -45,7 +46,10 @@ export function host(on: On, world: World) {
   const stripped: string[] = []
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: world.cwd ?? '/work/proj' }) as never)
-  on('session.id', () => ({ value: world.sessionId ?? 'session-1' }) as never)
+  on('session.id', () => {
+    if (world.sessionId === null) throw new Error('no session id')
+    return { value: world.sessionId ?? 'session-1' } as never
+  })
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent: 42 }, rateLimits: [] } }) as never)
   on('ui.log', ($, e) => {
     if (String(e.text).startsWith('ways-theme skins:')) logs.push(String(e.text))
