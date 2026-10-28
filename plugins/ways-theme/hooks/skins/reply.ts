@@ -3,7 +3,7 @@
 
 import type { RenderSurface } from 'claude-code'
 
-import type { Prefs } from './types.ts'
+import type { Prefs } from '../../types'
 import { drawsBlocks, hasBlocks } from './blocks'
 import { isShell, splitReply } from './markdown'
 import type { Segment } from './markdown'

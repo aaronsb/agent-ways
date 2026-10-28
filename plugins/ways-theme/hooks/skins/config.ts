@@ -3,7 +3,7 @@
 // prefs, the skin's colours mapped from the theme's roles, the gradient prompt
 // box's grounds and the frame switch. Nothing here calls the engine.
 
-import type { Prefs } from './types.ts'
+import type { Prefs } from '../../types'
 import type { Palette, Skin } from './skin.ts'
 
 export const MOD_EXPORT_ARGV: readonly string[] = ['ways', 'settings', 'theme', 'export', '--mod']

@@ -1,7 +1,7 @@
 // Ported from skins by hellosverre (MIT; LICENSE beside this file),
 // https://github.com/hellosverre/claude-skins at 985ad63, hooks/svg-usage.ts.
 
-import type { UsageSnap } from './types.ts'
+import type { UsageSnap } from '../../types'
 import type { Palette } from './skin'
 import { escape, FONT, measure } from './svg-kit'
 

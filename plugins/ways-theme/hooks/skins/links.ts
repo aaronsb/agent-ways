@@ -1,7 +1,7 @@
 // Ported from skins by hellosverre (MIT; LICENSE beside this file),
 // https://github.com/hellosverre/claude-skins at 985ad63, hooks/links.ts.
 
-import type { Touch } from './types.ts'
+import type { Touch } from '../../types'
 import { shortenPath } from './format'
 
 // Links and touched files: which terminals draw OSC 8 hyperlinks, which URLs the engine's

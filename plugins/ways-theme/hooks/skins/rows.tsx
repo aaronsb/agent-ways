@@ -3,7 +3,7 @@
 
 import type { ElementTable, RenderSurface } from 'claude-code'
 
-import type { Prefs, Touch, TurnStats } from './types.ts'
+import type { Prefs, Touch, TurnStats } from '../../types'
 import { formatDuration, formatMs } from './format'
 import { columnWidths, isShell, tableArt, widthOf, wrapLines } from './markdown'
 import { diffFenceTag, diffRows, fenceDiff, newOnly } from './diff-fence'

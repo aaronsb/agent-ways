@@ -1,7 +1,7 @@
 // Ported from skins by hellosverre (MIT; LICENSE beside this file),
 // https://github.com/hellosverre/claude-skins at 985ad63, hooks/skin.ts.
 
-import type { SkinSlot } from './types.ts'
+import type { SkinSlot } from '../../types'
 
 // Shapes shared by the skins and the row builders.
 

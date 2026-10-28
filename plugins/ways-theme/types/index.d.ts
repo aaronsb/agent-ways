@@ -1,9 +1,13 @@
-// Ported from skins by hellosverre (MIT; LICENSE beside this file),
+// The ways-theme mod's types contract: the skins layer's shapes and the
+// session state its hooks keep.
+//
+// Adapted from skins by hellosverre (MIT; hooks/skins/LICENSE),
 // https://github.com/hellosverre/claude-skins at 985ad63, types/index.d.ts.
-// The prefs no longer come from a settings store or a slash command: the hub
-// builds them from `ways settings theme export --mod` (config.ts). The `$.skins`
-// API for other mods and the skin-code bridge are gone, and the session state
-// lives under this mod's own name.
+// The prefs no longer come from a settings store or a slash command: the
+// skins layer builds them from `ways settings theme export --mod`
+// (hooks/skins/config.ts). The `$.skins` API for other mods and the
+// skin-code bridge are gone, and the session state lives under this mod's
+// own name.
 
 // Every colour a skin names. `fg` is body text, `muted` secondary text, `surface` the
 // band behind a table header, `zebra` every other table row.

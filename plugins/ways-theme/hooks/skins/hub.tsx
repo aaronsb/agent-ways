@@ -41,7 +41,7 @@ import { commandOf, errorLine, isQuiet, quietLabel } from './quiet.ts'
 import { MAX_MARKDOWN, replySegments } from './reply.ts'
 import { hyperlinksFrom, touchOf } from './links.ts'
 import { MIN_WIDTH, axisFor, boxLines, gradientBox, gradientRuns } from './prompt-box.tsx'
-import type { Touch, TurnStats, UsageSnap } from './types.ts'
+import type { Touch, TurnStats, UsageSnap } from '../../types'
 
 /** Each export call's bound. */
 export const WAYS_TIMEOUT_MS = 1500
