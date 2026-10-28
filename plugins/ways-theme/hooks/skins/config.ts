@@ -43,8 +43,10 @@ export type ModExport = {
 
 const HEX = /^#[0-9a-fA-F]{6}$/
 const NAME = /^[a-z0-9-]+$/
-// A spinner or footer word: printable, one line, short enough for the spinner's row.
-const WORD = /^[^\p{Cc}]{1,24}$/u
+// A spinner or footer word: printable, one line, short enough for the spinner's
+// row, and not blank. The line and paragraph separators and the bidi controls
+// would break or reorder the row it is drawn in, as a control character would.
+const WORD = /^[^\p{Cc}\u2028\u2029\u202a-\u202e\u2066-\u2069]{1,24}$/u
 const MAX_WORDS = 64
 const MAX_STOPS = 16
 
@@ -56,7 +58,7 @@ const hasExactly = (v: Record<string, unknown>, keys: readonly string[]): boolea
 const isHex = (v: unknown): v is string => typeof v === 'string' && HEX.test(v)
 // An empty list keeps Claude Code's own words for that slot.
 const isWords = (v: unknown): v is string[] =>
-  Array.isArray(v) && v.length <= MAX_WORDS && v.every(w => typeof w === 'string' && WORD.test(w))
+  Array.isArray(v) && v.length <= MAX_WORDS && v.every(w => typeof w === 'string' && WORD.test(w) && w.trim() !== '')
 const oneOf = <T extends string>(v: unknown, of: readonly T[]): v is T => typeof v === 'string' && (of as readonly string[]).includes(v)
 
 const RENDER_KEYS = ['rail', 'tables', 'shimmer', 'charts', 'markdown', 'icons', 'frames', 'prompt_box'] as const
@@ -66,7 +68,7 @@ function parseRender(v: unknown): Render | string {
   const keys = Object.hasOwn(v, 'copy') ? [...RENDER_KEYS, 'copy'] : RENDER_KEYS
   if (!hasExactly(v, keys)) return 'render is not the eight keys and an optional copy'
   const { rail, tables, shimmer, charts, markdown, icons, frames, prompt_box } = v
-  const copy = v.copy ?? true
+  const copy = Object.hasOwn(v, 'copy') ? v.copy : true
   if (![rail, shimmer, charts, markdown, frames, copy].every(b => typeof b === 'boolean')) return 'a render switch is not a boolean'
   if (!oneOf(tables, ['on', 'text', 'off'] as const)) return 'render.tables is not on, text or off'
   if (!oneOf(icons, ['unicode', 'ascii'] as const)) return 'render.icons is not unicode or ascii'
