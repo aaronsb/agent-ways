@@ -30,6 +30,7 @@ import type { EngineInterface, Register, RenderElement } from 'claude-code'
 
 import { DEFAULT_THEME, FRAME, TERMINAL, WAYS_TIMEOUT_MS, activeArgv, configDir, exportArgv, parseActive, parseTheme, shouldFrame, themeFile, themeText } from './lib.ts'
 import type { ClaudeCodeTheme, Run } from './lib.ts'
+import { framesWanted, registerSkins } from './skins/hub.tsx'
 
 const debug = ($: EngineInterface, text: string) => $.ui.log(`ways-theme: ${text}`, { to: 'debug' })
 
@@ -90,6 +91,7 @@ async function readVerbose($: EngineInterface): Promise<boolean> {
  *  the inner Box takes it back and the frame keeps the gap outside, so the
  *  ground starts at the first line of text. */
 function framed($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0], inner: RenderElement, frame: Record<string, string>): RenderElement {
+  if (!framesWanted(e)) return inner
   const { Box } = $.ui.resolve(e)
   return (
     <Box marginTop={1} borderStyle="round" paddingX={1} {...frame}>
@@ -151,4 +153,7 @@ export const register: Register = on => {
     if (!shouldFrame({ surface: e.surface, ...frames, isExpanded: isTranscriptExpanded || e.props.isExpanded })) return next(e)
     return framed($, e, await next(e), FRAME.tool)
   })
+
+  // The skins layer, after the hooks above so they wrap what it draws.
+  registerSkins(on, { isTranscriptExpanded: () => isTranscriptExpanded })
 }

@@ -5,6 +5,7 @@ import type { On, ProcessRunResult } from 'claude-code'
 import { register } from '../hooks/register.tsx'
 import { DEFAULT_THEME, activeArgv, configDir, exportArgv, parseActive, parseTheme, themeFile, themeText } from '../hooks/lib.ts'
 import { passedOverHits, registrationsOf } from './passed-over.ts'
+import { MOD_EXPORT_ARGV } from '../hooks/skins/config.ts'
 
 const INTERACTIVE = { cwd: '/work/proj', surface: 'terminal', isInteractive: true } as const
 const DESKTOP = { cwd: '/work/proj', surface: 'desktop', isInteractive: true } as const
@@ -33,6 +34,9 @@ type World = {
   verbose?: boolean
   /** `$.fs.write` rejects, as a read-only folder does. */
   writeFails?: boolean
+  /** `ways settings theme export --mod`, the skins layer's call (skins.test.tsx);
+   *  exit 1 when not given. */
+  mod?: Answer
 }
 
 /** The host beneath the mod: the ways CLI, the file system and the
@@ -51,6 +55,7 @@ function host(on: On, world: World) {
   const env = world.env ?? { HOME: '/home/dev' }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('ui.log', ($, e) => {
+    if (String((e as { text?: unknown }).text).startsWith('ways-theme skins:')) return { value: undefined } as never
     logs.push(String((e as { text?: unknown }).text ?? JSON.stringify(e)))
     return { value: undefined } as never
   })
@@ -59,6 +64,10 @@ function host(on: On, world: World) {
     return { value: undefined } as never
   })
   on('process.run', ($, e) => {
+    if (e.argv.join(' ') === MOD_EXPORT_ARGV.join(' ')) {
+      if (world.mod instanceof Error) throw world.mod
+      return { value: world.mod ?? ok('', 1) } as never
+    }
     argvs.push([...e.argv])
     timeouts.push(e.init?.timeoutMs)
     const a = e.argv.join(' ') === activeArgv().join(' ') ? world.active : world.exported
@@ -368,7 +377,8 @@ describe('what the mod hooks reaches it on every host', () => {
   test("no hook is on an event an organization's policy plugin passes over, and none is classic", () => {
     const regs = registrationsOf(register as never)
     // The recording saw the module's hooks: the control for the empty lists below.
-    expect(regs.map(r => r.pattern)).toEqual(['session.start', 'config.set', 'ui.render', 'ui.render', 'ui.render', 'ui.render'])
+    const skins = ['session.start', 'ui.invalidate', 'turn.start', 'session.append', 'session.measure', 'turn.complete', 'tool.call', ...Array(10).fill('ui.render')]
+    expect(regs.map(r => r.pattern)).toEqual(['session.start', 'config.set', 'ui.render', 'ui.render', 'ui.render', 'ui.render', ...skins])
     expect(regs.filter(r => r.pattern.startsWith('classic.'))).toEqual([])
     expect(passedOverHits(regs)).toEqual([])
   })
