@@ -189,14 +189,34 @@ fn text_roles_read_on_every_point_of_the_gradient() {
 }
 
 #[test]
-fn chrome_goes_with_the_theme_s_colours() {
+fn the_painter_hands_out_the_theme_s_chrome() {
     use ratatui_core::symbols::border;
     let tampa = theme("tampa");
     let set = Painter::themed(&tampa, ColorDepth::TrueColor).ratatui_border().unwrap();
     assert_eq!((set.top_left, set.horizontal_top, set.horizontal_bottom, set.vertical_right), ("╭", "~", "·", "│"));
     assert_eq!(Painter::themed(&theme("miami"), ColorDepth::Ansi256).ratatui_border(), Some(border::DOUBLE));
-    assert_eq!(Painter::select(Some(&tampa), ColorDepth::Ansi16).decor(), Decor::NONE, "the 16-colour fallback is the terminal palette whole");
     assert_eq!(Painter::themed(&bundled()[1], ColorDepth::TrueColor).ratatui_border(), None);
+}
+
+#[test]
+fn decoration_survives_16_colours_and_no_color_without_the_theme_s_colours() {
+    use ratatui_core::symbols::border;
+    let miami = theme("miami");
+    for depth in [ColorDepth::Ansi16, ColorDepth::NoColor] {
+        let p = Painter::select(Some(&miami), depth);
+        assert_eq!(p.decor(), miami.decor, "{depth:?}");
+        assert_eq!(p.ratatui_border(), Some(border::DOUBLE), "{depth:?}");
+        assert!(p.roles().is_none() && p.gradient().is_none() && p.ground(80, 25).is_none(), "{depth:?}: no theme colour");
+        let bare = Painter::terminal(depth);
+        for r in [Role::Body, Role::Accent, Role::Ok, Role::Err, Role::Muted, Role::Selection] {
+            assert_eq!(p.sgr(r), bare.sgr(r), "{depth:?} {r:?}: the terminal palette's");
+        }
+    }
+    assert_eq!(Painter::select(Some(&miami), ColorDepth::NoColor).sgr(Role::Ok), "", "no colour at all");
+    let nord = &bundled()[1];
+    for depth in [ColorDepth::Ansi16, ColorDepth::NoColor] {
+        assert_eq!(Painter::select(Some(nord), depth), Painter::terminal(depth), "an undecorated theme is the terminal palette whole");
+    }
 }
 
 fn scratch_dir(tag: &str) -> std::path::PathBuf {

@@ -696,6 +696,23 @@ fn no_color_draws_no_colour_anywhere() {
 }
 
 #[test]
+fn a_decorated_theme_keeps_its_glyphs_and_drops_its_colours_below_256() {
+    let d = dir("decor-depth");
+    std::fs::write(d.join("choice"), "miami\n").unwrap();
+    let no_color = ColorDepth::from_env(|k| match k { "NO_COLOR" => Some("1".into()), "TERM" => Some("xterm-256color".into()), _ => None });
+    let named = |c: Color| !matches!(c, Color::Rgb(..) | Color::Indexed(_));
+    for depth in [ColorDepth::Ansi16, no_color] {
+        let buf = draw(&mut app_in(&d, depth), 100, 24);
+        let t = text(&buf);
+        assert!(t.contains('╔') && t.contains('═') && t.contains("🦩"), "{depth:?}: miami's border and ornament\n{t}");
+        assert!(buf.content().iter().all(|c| named(c.fg) && named(c.bg)), "{depth:?}: no theme colour");
+        if depth == no_color {
+            assert!(buf.content().iter().all(|c| c.fg == Color::Reset && c.bg == Color::Reset), "no colour at all");
+        }
+    }
+}
+
+#[test]
 fn depth_brings_roles_down_to_the_terminal() {
     let d = dir("depth");
     // The default is the terminal's own named colours at any depth.

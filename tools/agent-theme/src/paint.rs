@@ -251,11 +251,13 @@ impl Painter {
     /// The painter for a chosen theme at `depth` (ADR-504, note of
     /// 2026-10-01): the theme where the terminal shows 256 colours or more,
     /// else the 16-colour terminal palette whole, not the theme reduced to
-    /// 16. With no theme chosen, the terminal palette.
+    /// 16. The theme's decoration glyphs hold at every depth. With no theme
+    /// chosen, the terminal palette.
     pub fn select(theme: Option<&Theme>, depth: ColorDepth) -> Painter {
         match (theme, depth) {
             (Some(t), ColorDepth::TrueColor | ColorDepth::Ansi256) => Painter::themed(t, depth),
-            _ => Painter::terminal(depth),
+            (Some(t), _) => Painter { decor: t.decor, ..Painter::terminal(depth) },
+            (None, _) => Painter::terminal(depth),
         }
     }
 
@@ -328,9 +330,8 @@ impl Painter {
         self.fill && self.roles.is_some() && self.depth.has_color()
     }
 
-    /// The theme's decoration glyphs. A theme's chrome goes with its
-    /// colours: the terminal palette, a chosen theme's 16-colour fallback
-    /// included, sets none.
+    /// The theme's decoration glyphs, at every depth [`Painter::select`]
+    /// keeps the theme for; none for the terminal palette alone.
     pub fn decor(&self) -> Decor {
         self.decor
     }
