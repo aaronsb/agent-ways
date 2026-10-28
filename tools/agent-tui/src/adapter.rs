@@ -5,6 +5,8 @@
 
 use std::path::Path;
 
+use ratatui::text::Line;
+
 use crate::app::flow::Flow;
 use crate::tree::{Node, Queued, Store};
 
@@ -131,6 +133,18 @@ pub trait Adapter {
     /// Keep `name` as the lozenge shape, one of [`crate::theme::Shape::NAMES`].
     fn choose_shape(&mut self, _name: &str) -> Result<(), String> {
         Err("this application keeps no shape choice".into())
+    }
+
+    /// Keep `name` as whose waypoints the screens draw: `theme` or
+    /// `default` (`agent_theme::settings::WAYPOINT_SETS`).
+    fn choose_waypoints(&mut self, _name: &str) -> Result<(), String> {
+        Err("this application keeps no waypoints choice".into())
+    }
+
+    /// The waypoints `theme` draws under `setting`, each in its colour, for
+    /// the theme tab to show beside the choice. `None` shows none.
+    fn waypoints_preview(&self, _theme: &agent_theme::Theme, _setting: &str) -> Option<Line<'static>> {
+        None
     }
 }
 

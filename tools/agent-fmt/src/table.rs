@@ -30,6 +30,13 @@ pub struct Table {
     auto_fit: bool,
 }
 
+/// Print `text` to stdout as a band of the process painter's theme
+/// ([`agent_theme::block`]) at the terminal's width; as it is where no
+/// ground is painted, piped output among it.
+pub fn print_block(text: &str) {
+    print!("{}", agent_theme::block(text, terminal_width()));
+}
+
 /// Detect terminal width via ioctl. Tries stderr first (most reliable when
 /// stdout is piped), then stdout, then stdin. Falls back to $COLUMNS, then 80.
 pub fn terminal_width() -> usize {
@@ -140,8 +147,15 @@ impl Table {
         self.rows.push(cells);
     }
 
-    /// Print the table to stdout.
+    /// Print the table to stdout, as a band of a fill theme
+    /// ([`print_block`]).
     pub fn print(&self) {
+        print_block(&self.render());
+    }
+
+    /// The table as text, a line per row under the header and its rule.
+    pub fn render(&self) -> String {
+        let mut out = String::new();
         let pad = " ".repeat(self.indent);
         let ncols = self.headers.len();
         let widths = self.widths(self.auto_fit.then(terminal_width));
@@ -155,11 +169,11 @@ impl Table {
             let w = widths.get(i).copied().unwrap_or(10);
             header.push_str(&pad_cell(h, w, self.aligns.get(i).copied().unwrap_or(Align::Left)));
         }
-        println!("{pad}{}", agent_theme::paint(agent_theme::Style::new().bold(), header));
+        out.push_str(&format!("{pad}{}\n", agent_theme::paint(agent_theme::Style::new().bold(), header)));
 
         // Separator
         let total_width: usize = widths.iter().sum::<usize>() + ncols.saturating_sub(1);
-        println!("{pad}{}", agent_theme::paint(agent_theme::Role::Muted, "─".repeat(total_width)));
+        out.push_str(&format!("{pad}{}\n", agent_theme::paint(agent_theme::Role::Muted, agent_theme::rule_glyph().repeat(total_width))));
 
         // Rows
         for row in &self.rows {
@@ -173,8 +187,9 @@ impl Table {
                 let truncated = truncate_visible(cell, w);
                 line.push_str(&pad_cell(&truncated, w, align));
             }
-            println!("{pad}{line}");
+            out.push_str(&format!("{pad}{line}\n"));
         }
+        out
     }
 
     /// Column widths: each column's widest cell within its cap, then, with a

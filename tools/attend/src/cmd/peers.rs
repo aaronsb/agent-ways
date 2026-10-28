@@ -63,21 +63,23 @@ pub(crate) fn cmd_peers(json: bool) {
         }
     }
 
-    t.print();
+    let mut out = t.render();
 
     // Who is in each of this session's channels, so a member sees who
     // joined before anyone posts.
     for c in &p.channels {
-        println!("  #{}: {}", c.name, c.members.join(", "));
+        agent_fmt::say!(out, "  #{}: {}", c.name, c.members.join(", "));
     }
 
     // The channel count is the explicit channels this session joined; the
     // "(self)" row is not one.
-    println!(
+    agent_fmt::say!(
+        out,
         "  {} agent(s), {} channel(s)",
         p.peers.len() + 1,
         p.channels.len()
     );
+    agent_fmt::print_block(&out);
 }
 
 /// The "Agent" column's width cap. 28 holds a name and a basename; a row

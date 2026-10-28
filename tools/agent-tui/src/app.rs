@@ -238,6 +238,8 @@ pub struct App {
     /// terminal's own text selection works.
     mouse: bool,
     shape: theme::Shape,
+    /// Whose waypoints the screens draw: `theme` or `default`.
+    waypoints: String,
     hits: Hits,
     /// Does the writes and commands an apply asks for, and supplies flows,
     /// help and the theme choice.
@@ -309,6 +311,7 @@ impl App {
             mouse: true,
             // Plain needs no Nerd Font; an application that wants caps asks.
             shape: theme::Shape::PLAIN,
+            waypoints: "theme".into(),
             hits: Hits::default(),
             adapter: Box::new(Unwired),
             stamp: None,
@@ -396,6 +399,13 @@ impl App {
 
     pub fn shape(mut self, shape: theme::Shape) -> Self {
         self.shape = shape;
+        self
+    }
+
+    /// Whose waypoints the screens draw, `theme` or `default`, as the theme
+    /// tab shows and switches it.
+    pub fn waypoints(mut self, setting: &str) -> Self {
+        self.waypoints = setting.to_string();
         self
     }
 

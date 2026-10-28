@@ -12,6 +12,20 @@ mod width;
 
 pub use banner::{Banner, GRADIENT_CORAL, GRADIENT_TEAL};
 pub use pipe::{exit_quietly_on_closed_pipe, write_to_child};
-pub use table::{Align, Table, terminal_width};
+pub use table::{print_block, Align, Table, terminal_width};
 pub use width::{clip_visible, fit_visible, pad_visible, truncate_visible, visible_len};
 pub use when::{compact_time, compact_time_with_offset};
+
+/// A line of a report built up in `out`, a `String`, before it prints
+/// through [`print_block`]: `say!(out)` for an empty line,
+/// `say!(out, "fmt", args)` as `println!` takes them.
+#[macro_export]
+macro_rules! say {
+    ($out:expr) => {
+        $out.push('\n')
+    };
+    ($out:expr, $($arg:tt)*) => {{
+        $out.push_str(&format!($($arg)*));
+        $out.push('\n');
+    }};
+}

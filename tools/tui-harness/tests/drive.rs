@@ -59,6 +59,9 @@ fn drives_fixture_through_tmux() {
     let img = session.capture_image_with(&renderer).unwrap();
     assert_eq!(img.dimensions(), (40 * 8, 6 * 16));
     assert_eq!(img.get_pixel(11 * 8 + 4, 8).0, BASIC[4]);
+    // Spaces with a ground run to the right edge: tmux drops trailing
+    // spaces from a capture unless asked to keep them.
+    assert_eq!(img.get_pixel(39 * 8 + 4, 8).0, BASIC[2], "the last column keeps its ground");
 
     let shot = session.shot(Some(&scratch.path("fixture.png"))).unwrap();
     assert!(shot.is_file());

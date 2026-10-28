@@ -60,6 +60,8 @@ dependencies = [
  "serde",
  "serde_yaml",
  "toml",
+ "unicode-segmentation",
+ "unicode-width",
 ]
 
 [[package]]

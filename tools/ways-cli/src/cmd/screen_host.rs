@@ -5,6 +5,8 @@
 
 use anyhow::{bail, Result};
 use agent_theme::ColorDepth;
+use agent_tui::ratatui::layout::Rect;
+use agent_tui::ratatui::symbols::border;
 use agent_tui::ratatui::text::Line;
 use agent_tui::ratatui::widgets::{Block, Borders};
 use agent_tui::theme::{self, Palette, Shape};
@@ -38,21 +40,30 @@ pub(crate) fn depth_of(s: Option<&str>) -> Result<ColorDepth> {
     })
 }
 
+/// A `theme` setting (`active`, `shape`) for this project.
+pub(crate) fn theme_setting(key: &str) -> Option<String> {
+    ways_core::settings::theme_setting(std::path::Path::new(&crate::util::project_dir()), key)
+}
+
 /// The palette and lozenge shape the settings choose (`theme.active`,
-/// `theme.shape`, ADR-504 note of 2026-10-01), at `depth`.
+/// `theme.shape`, ADR-504 note of 2026-10-01), at `depth`. With
+/// `theme.waypoints: default` the palette carries no theme waypoints, so the
+/// screens draw their own.
 pub(crate) fn look(depth: ColorDepth) -> (Palette, Shape) {
-    let project = std::path::PathBuf::from(crate::util::project_dir());
-    let layers = ways_core::settings::layers(&project);
-    let value = |path: &[&str]| -> Option<String> {
-        let path: Vec<String> = path.iter().map(|s| s.to_string()).collect();
-        layers.iter().rev().find_map(|l| l.get(&path).and_then(|v| v.as_str().map(str::to_string)))
-    };
-    let shape = value(&["theme", "shape"]).map_or(Shape::PLAIN, |s| Shape::named(&s));
-    let painter = match agent_theme::user_dir() {
-        Some(dir) => agent_theme::Painter::named_in(value(&["theme", "active"]).as_deref(), &dir, depth).0,
-        None => agent_theme::Painter::terminal(depth),
-    };
+    let shape = theme_setting("shape").map_or(Shape::PLAIN, |s| Shape::named(&s));
+    let painter = agent_theme::Painter::named_in(theme_setting("active").as_deref(), agent_theme::user_dir().as_deref(), depth).0;
+    let painter = if painter.waypoints().is_some() { waypoints_as(painter, theme_setting("waypoints").as_deref()) } else { painter };
     (Palette { painter }, shape)
+}
+
+/// `painter` as `theme.waypoints` has it: `default` sets the theme's
+/// waypoints aside; `theme` or no setting keeps them.
+pub(crate) fn waypoints_as(painter: agent_theme::Painter, setting: Option<&str>) -> agent_theme::Painter {
+    if setting == Some("default") {
+        painter.without_waypoints()
+    } else {
+        painter
+    }
 }
 
 /// Show a screen on agent-tui's shell: on the terminal until it closes,
@@ -88,7 +99,13 @@ pub(crate) fn show(mut app: agent_tui::App, open: &Open) -> Result<()> {
     Ok(())
 }
 
-/// A bordered pane in the theme, as the settings screens draw theirs.
-pub(crate) fn pane(title: impl Into<Line<'static>>) -> Block<'static> {
-    Block::default().borders(Borders::ALL).border_style(theme::rule()).title(title).title_style(theme::title())
+/// A bordered pane in the theme, drawn in `area`, as the settings screens
+/// draw theirs.
+pub(crate) fn pane(title: impl Into<Line<'static>>, area: Rect) -> Block<'static> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_set(theme::border_set(border::PLAIN))
+        .border_style(theme::rule())
+        .title(theme::ornamented(title.into(), area.width.saturating_sub(2)))
+        .title_style(theme::title())
 }

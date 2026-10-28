@@ -480,13 +480,14 @@ impl ChatPane {
     /// Draw with the theme `active` names (`None`: the terminal's own
     /// palette) at the chat's depth, and remember the theme in use for the
     /// Theme menu to mark: the name kept is what the screen shows. A theme
-    /// is drawn only where its roles are, so a theme that did not load (a
-    /// warning returned), one below 256 colours, or any where no theme
-    /// directory exists, keeps `terminal`; a rejected file shadowing a
-    /// bundled theme keeps the name, the bundled one being drawn.
+    /// is drawn where its roles or its decoration are, so a theme that did
+    /// not load (a warning returned), or one with no decoration below 256
+    /// colours, keeps `terminal`; a decorated theme below 256 colours draws
+    /// its glyphs and keeps its name; a rejected file shadowing a bundled
+    /// theme keeps the name, the bundled one being drawn.
     pub(super) fn use_theme(&mut self, active: Option<&str>) -> Option<String> {
         let (palette, warning) = crate::theme::palette(active, self.palette.depth());
-        let drawn = palette.roles().is_some();
+        let drawn = palette.roles().is_some() || palette.painter.decor() != agent_theme::Decor::NONE;
         self.theme = active.filter(|_| drawn).unwrap_or("terminal").to_string();
         self.palette = palette;
         self.invalidate();

@@ -1,0 +1,66 @@
+# Tampa — original to agent-ways: the bay at left, the sunset at right.
+# Lightning blue, Ybor tile teal, creamsicle orange, Buccaneers red,
+# Gasparilla purple, and Skyway-cable gold underneath.
+THEME_NAME="tampa"
+THEME_LABEL="Tampa"
+THEME_KIND="light"
+THEME_BACKGROUND="fill"
+THEME_GRADIENT="horizontal #e8f3fb #fff6e8 #ffe4d2"
+
+THEME_BG="#fff6e8"
+THEME_FG="#22262e"
+THEME_DIM="#6f6a66"
+THEME_SUBTLE="#f5d98a"
+THEME_ACCENT="#0057b8"
+THEME_INFO="#00818a"
+THEME_OK="#2c7a2e"
+THEME_WARN="#e35200"
+THEME_ERR="#c8102e"
+THEME_ALT="#6c2c91"
+
+THEME_SELECTION="#d8e8f8"
+
+THEME_BORDER_GLYPHS="╭╮╰╯~·││"
+THEME_RULE_GLYPHS="~≈"
+THEME_MARK="›"
+THEME_PRESENCE="✹◦"
+THEME_ORNAMENT="⚡"
+
+THEME_EVENT_HEAD="↯"
+THEME_EVENT_MARK="┊"
+THEME_EVENT_MATCHED="⚔"
+THEME_EVENT_INJECTED="✦"
+THEME_EVENT_SUPPRESSED="☈"
+THEME_EVENT_REDISCLOSED="⟲"
+
+# Waypoints: the marks a way's cluster wears on the replay.
+
+[[waypoints]]
+glyph = "⚡"
+
+[[waypoints]]
+glyph = "⚓"
+
+[[waypoints]]
+glyph = "🦜"
+
+[[waypoints]]
+glyph = "🐓"
+
+[[waypoints]]
+glyph = "🏈"
+
+[[waypoints]]
+glyph = "🏒"
+
+[[waypoints]]
+glyph = "⚾"
+
+[[waypoints]]
+glyph = "🌉"
+
+[[waypoints]]
+glyph = "🌇"
+
+[[waypoints]]
+glyph = "🐢"

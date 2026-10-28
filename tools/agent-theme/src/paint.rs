@@ -21,7 +21,7 @@ use std::sync::OnceLock;
 use crate::color::Color;
 use crate::depth::ColorDepth;
 use crate::derive::Roles;
-use crate::model::{Background, Theme};
+use crate::model::{Axis, Background, Decor, Gradient, Theme, Waypoints};
 
 /// Select Graphic Rendition reset: every attribute and colour off.
 pub const RESET: &str = "\x1b[0m";
@@ -225,12 +225,14 @@ pub struct Painter {
     fill: bool,
     /// No attributes either: every style is plain text.
     plain: bool,
+    /// The theme's glyphs; none set under the terminal palette.
+    decor: Decor,
 }
 
 impl Painter {
     /// The built-in default at `depth`: the terminal palette.
     pub const fn terminal(depth: ColorDepth) -> Painter {
-        Painter { depth, roles: None, fill: false, plain: false }
+        Painter { depth, roles: None, fill: false, plain: false, decor: Decor::NONE }
     }
 
     /// The built-in default at the environment's depth. Reads no file.
@@ -249,37 +251,42 @@ impl Painter {
     /// The painter for a chosen theme at `depth` (ADR-504, note of
     /// 2026-10-01): the theme where the terminal shows 256 colours or more,
     /// else the 16-colour terminal palette whole, not the theme reduced to
-    /// 16. With no theme chosen, the terminal palette.
+    /// 16. The theme's decoration glyphs hold at every depth. With no theme
+    /// chosen, the terminal palette.
     pub fn select(theme: Option<&Theme>, depth: ColorDepth) -> Painter {
         match (theme, depth) {
             (Some(t), ColorDepth::TrueColor | ColorDepth::Ansi256) => Painter::themed(t, depth),
-            _ => Painter::terminal(depth),
+            // The colours drop with the theme; its waypoints keep their glyphs.
+            (Some(t), _) => Painter { decor: Decor { waypoints: t.decor.waypoints.map(|w| w.map_fg(|_| None)), ..t.decor }, ..Painter::terminal(depth) },
+            (None, _) => Painter::terminal(depth),
         }
     }
 
     /// No colour and no attributes: every style renders as plain text.
     pub const fn plain() -> Painter {
-        Painter { depth: ColorDepth::NoColor, roles: None, fill: false, plain: true }
+        Painter { plain: true, ..Painter::terminal(ColorDepth::NoColor) }
     }
 
     /// A theme's derived roles at `depth`.
     pub fn themed(theme: &Theme, depth: ColorDepth) -> Painter {
-        Painter { depth, roles: Some(Roles::derive(theme)), fill: theme.background == Background::Fill, plain: false }
+        let roles = Roles::derive(theme);
+        // A waypoint's colour is held to 3:1 on every ground, as muted text is.
+        let waypoints = theme.decor.waypoints.map(|w| w.map_fg(|c| Some(roles.graphic(c))));
+        Painter { depth, roles: Some(roles), fill: theme.background == Background::Fill, plain: false, decor: Decor { waypoints, ..theme.decor } }
     }
 
     /// The theme named `name`, the active choice its caller read from the
     /// settings registry (`theme.active`, ADR-503), at the environment's
-    /// depth, chosen by [`Painter::select`]; plain when output is not a
-    /// terminal, as [`Painter::detect`]. A warning from [`Painter::named_in`]
-    /// goes to stderr. This reads the theme directory, so hook paths never
-    /// call it (ADR-504 §11).
+    /// depth, chosen by [`Painter::select`], when stdout is a terminal; else
+    /// [`Painter::detect`]'s default, so forced colour on a pipe reads no
+    /// theme file. A warning from [`Painter::named_in`] goes to stderr. This
+    /// reads the theme directory, so hook paths never call it (ADR-504 §11).
     pub fn named(name: Option<&str>) -> Painter {
-        if !styled_output() {
-            return Painter::plain();
+        use std::io::IsTerminal;
+        if !std::io::stdout().is_terminal() {
+            return Painter::detect();
         }
-        let depth = ColorDepth::detect();
-        let Some(dir) = crate::bundled::user_dir() else { return Painter::terminal(depth) };
-        let (p, warning) = Painter::named_in(name, &dir, depth);
+        let (p, warning) = Painter::named_in(name, crate::bundled::user_dir().as_deref(), ColorDepth::detect());
         if let Some(w) = warning {
             eprintln!("agent-ways theme: {w}");
         }
@@ -287,15 +294,16 @@ impl Painter {
     }
 
     /// The theme `name` from the bundled themes and the user themes in
-    /// `dir`, at `depth`, and a warning when the choice could not be
-    /// honoured as written: the named theme does not exist, or a user file
-    /// meant to override it failed to load. No name, or the default's
-    /// ([`crate::TERMINAL`]), is the terminal palette.
-    pub fn named_in(name: Option<&str>, dir: &std::path::Path, depth: ColorDepth) -> (Painter, Option<String>) {
+    /// `dir`, the bundled alone when there is no `dir`, at `depth`, and a
+    /// warning when the choice could not be honoured as written: the named
+    /// theme does not exist, or a user file meant to override it failed to
+    /// load. No name, or the default's ([`crate::TERMINAL`]), is the
+    /// terminal palette.
+    pub fn named_in(name: Option<&str>, dir: Option<&std::path::Path>, depth: ColorDepth) -> (Painter, Option<String>) {
         let Some(name) = name.map(str::trim).filter(|n| !n.is_empty() && *n != crate::bundled::TERMINAL) else {
             return (Painter::terminal(depth), None);
         };
-        let set = crate::bundled::ThemeSet::load(Some(dir));
+        let set = crate::bundled::ThemeSet::load(dir);
         let rejected = set.rejected.iter().find(|(file, _)| {
             std::path::Path::new(file).file_stem().and_then(|s| s.to_str()) == Some(name)
         });
@@ -324,6 +332,69 @@ impl Painter {
     /// (`THEME_BACKGROUND="fill"`). Screens honour it; plain output does not.
     pub fn fills_background(&self) -> bool {
         self.fill && self.roles.is_some() && self.depth.has_color()
+    }
+
+    /// The theme's decoration glyphs, at every depth [`Painter::select`]
+    /// keeps the theme for; none for the terminal palette alone.
+    pub fn decor(&self) -> Decor {
+        self.decor
+    }
+
+    /// The theme's waypoints, each fg lifted to 3:1 on the theme's grounds,
+    /// and with no fg where the theme's colours are not drawn.
+    pub fn waypoints(&self) -> Option<Waypoints> {
+        self.decor.waypoints
+    }
+
+    /// This painter with the theme's waypoints set aside, for a screen told
+    /// to draw its own (`theme.waypoints: default`).
+    pub fn without_waypoints(self) -> Painter {
+        Painter { decor: Decor { waypoints: None, ..self.decor }, ..self }
+    }
+
+    /// The glyph a plain report's rules are drawn with: the theme's rule,
+    /// else `─`.
+    pub fn rule_glyph(&self) -> &'static str {
+        self.decor.rules.map_or("─", |r| r[0])
+    }
+
+    /// `ascii`, a heading's or a column's underline drawn in `-` or `=`,
+    /// with each of those in the theme's rule glyph; as written where the
+    /// theme sets none, so default output keeps its ASCII.
+    pub fn underline(&self, ascii: &str) -> String {
+        let Some([rule, _]) = self.decor.rules else { return ascii.to_string() };
+        let mut out = String::with_capacity(ascii.len() * rule.len());
+        for c in ascii.chars() {
+            match c {
+                '-' | '=' => out.push_str(rule),
+                c => out.push(c),
+            }
+        }
+        out
+    }
+
+    /// The gradient a filled screen paints, at truecolor only.
+    pub fn gradient(&self) -> Option<Gradient> {
+        let g = self.roles.and_then(|r| r.gradient)?;
+        (self.fills_background() && self.depth == ColorDepth::TrueColor).then_some(g)
+    }
+
+    /// The ground of a `width` by `height` frame under
+    /// `THEME_BACKGROUND="fill"`, reduced to the depth: the gradient at
+    /// truecolor, else bg. None where the terminal keeps its own, and for a
+    /// frame with no cells.
+    pub fn ground(&self, width: u16, height: u16) -> Option<Ground> {
+        if width == 0 || height == 0 {
+            return None;
+        }
+        let bg = Color::Rgb(self.roles?.bg).at(self.depth).filter(|_| self.fills_background())?;
+        Some(match self.gradient() {
+            Some(g) => {
+                let cells = if g.axis == Axis::Vertical { height } else { width };
+                Ground { axis: Some(g.axis), colours: (0..cells).map(|n| Color::Rgb(g.cell(n, cells))).collect() }
+            }
+            None => Ground { axis: None, colours: vec![bg] },
+        })
     }
 
     fn draw(&self, r: Role) -> Drawn {
@@ -434,6 +505,27 @@ impl Painter {
     }
 }
 
+/// A filled screen's ground, cell by cell ([`Painter::ground`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Ground {
+    /// None for a flat ground.
+    axis: Option<Axis>,
+    /// One colour per row or column along the axis; one for a flat ground.
+    colours: Vec<Color>,
+}
+
+impl Ground {
+    /// The colour under column `x`, row `y`.
+    pub fn at(&self, x: u16, y: u16) -> Color {
+        let n = match self.axis {
+            Some(Axis::Vertical) => y,
+            Some(Axis::Horizontal) => x,
+            None => 0,
+        };
+        self.colours[(n as usize).min(self.colours.len() - 1)]
+    }
+}
+
 /// Whether output should be styled: stdout is a terminal, or a caller
 /// forces colour with `CLICOLOR_FORCE` or `FORCE_COLOR`.
 fn styled_output() -> bool {
@@ -459,6 +551,20 @@ pub fn painter() -> Painter {
 /// has already used one. Call it first thing in `main`.
 pub fn install(p: Painter) -> bool {
     GLOBAL.set(p).is_ok()
+}
+
+/// Set the process painter to the theme `choice` names, as
+/// [`Painter::named_in`] resolves it at the environment's depth, when
+/// stdout is a terminal. `choice` runs only then, so piped output, a hook's
+/// among it, reads no settings or theme file (ADR-504 §11), and forced
+/// colour on a pipe keeps [`Painter::detect`]'s default. Returns whether a
+/// painter was installed.
+pub fn install_from(choice: impl FnOnce() -> Option<String>) -> bool {
+    use std::io::IsTerminal;
+    if !std::io::stdout().is_terminal() {
+        return false;
+    }
+    install(Painter::named_in(choice().as_deref(), crate::bundled::user_dir().as_deref(), ColorDepth::detect()).0)
 }
 
 /// Restores this thread's previous painter when dropped.
@@ -492,6 +598,16 @@ pub fn sgr(style: impl Into<Style>) -> String {
 /// On and off sequences for `style` with the process painter.
 pub fn pair(style: impl Into<Style>) -> (String, &'static str) {
     painter().pair(style)
+}
+
+/// The rule glyph with the process painter ([`Painter::rule_glyph`]).
+pub fn rule_glyph() -> &'static str {
+    painter().rule_glyph()
+}
+
+/// `ascii`'s underline with the process painter ([`Painter::underline`]).
+pub fn underline(ascii: &str) -> String {
+    painter().underline(ascii)
 }
 
 /// The reset with the process painter.

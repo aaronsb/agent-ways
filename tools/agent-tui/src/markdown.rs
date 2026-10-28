@@ -198,7 +198,7 @@ impl Renderer {
                 self.flush();
                 let w = self.width.saturating_sub(runs_width(&self.prefix(false)));
                 let mut l = self.prefix(true);
-                l.push(("─".repeat(w), theme::rule()));
+                l.push((theme::rule_glyphs()[0].repeat(w), theme::rule()));
                 self.out.push(to_line(l));
                 self.blank();
             }

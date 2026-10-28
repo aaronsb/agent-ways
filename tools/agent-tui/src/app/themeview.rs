@@ -94,6 +94,7 @@ impl App {
             ThemeAct::Edit if src == Source::Bundled => "bundled: edits a copy".into(),
             ThemeAct::Edit => String::new(),
             ThemeAct::Shape => format!("{} now; the next is {}", self.shape.name(), self.shape.next().name()),
+            ThemeAct::Waypoints => format!("{} now; the next is {}", self.waypoints, self.next_waypoints_name()),
         }
     }
 
@@ -155,12 +156,12 @@ impl App {
                 ListItem::new(Line::from(spans)).style(theme::selected_text())
             })
             .collect();
-        let block = pane(" themes ");
+        let block = pane(" themes ", area);
         self.hits.list = block.inner(area);
         let list = List::new(items)
             .block(block)
             .highlight_style(theme::selected())
-            .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()))
+            .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()))
             .highlight_spacing(HighlightSpacing::Always);
         self.list.select(Some(self.themes.cursor));
         f.render_stateful_widget(list, area, &mut self.list);
@@ -187,6 +188,12 @@ impl App {
         let dir = self.themes.dir.as_ref().map_or("none: nothing saves".to_string(), |d| self.themes.show(d));
         lines.extend(field("saves to", &dir));
         lines.extend(field("shape", &format!("{} (a: shape cycles it)", self.shape.name())));
+        let mut wp = vec![Span::styled(format!("{:<LABEL$}", "waypoints"), dim), Span::raw(format!("{}  ", self.waypoints))];
+        match self.adapter.waypoints_preview(t, &self.waypoints) {
+            Some(preview) => wp.extend(preview.spans),
+            None => wp.push(Span::styled("(a: switches it)", dim)),
+        }
+        lines.push(Line::from(wp));
         lines.push(Line::raw(""));
         lines.push(Line::styled("slots", Style::new().add_modifier(Modifier::BOLD)));
         let inner = area.width.saturating_sub(2) as usize;
@@ -212,7 +219,7 @@ impl App {
                 lines.extend(fields("rejected", &format!("{file}: {}", errs.first().map(|e| e.to_string()).unwrap_or_default()), theme::err(), room, dim));
             }
         }
-        f.render_widget(Paragraph::new(lines).block(pane("theme")), area);
+        f.render_widget(Paragraph::new(lines).block(pane("theme", area)), area);
     }
 
     fn draw_slot_rows(&mut self, f: &mut Frame, area: Rect) {
@@ -239,13 +246,13 @@ impl App {
             (Some(o), false) => format!(" (copy of {o}, unwritten)"),
             _ => String::new(),
         };
-        let block = pane(format!(" edit {}{mark}{note} ", e.theme.name));
+        let block = pane(format!(" edit {}{mark}{note} ", e.theme.name), area);
         self.hits.list = block.inner(area);
         let row = e.row;
         let list = List::new(items)
             .block(block)
             .highlight_style(theme::selected())
-            .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()))
+            .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()))
             .highlight_spacing(HighlightSpacing::Always);
         self.list.select(Some(row));
         f.render_stateful_widget(list, area, &mut self.list);
@@ -318,7 +325,7 @@ impl App {
                 ]));
                 let row = Style::new().bg(sel);
                 lines.push(Line::from(vec![
-                    Span::styled("▌", row.patch(theme::accent())),
+                    Span::styled(theme::selected_mark(), row.patch(theme::accent())),
                     Span::styled(" model  ", row.patch(theme::body()).add_modifier(Modifier::BOLD)),
                     Span::styled("opus ", row.patch(theme::accent_dim())),
                     Span::styled("changed ", row.patch(theme::warn()).add_modifier(Modifier::BOLD)),
@@ -357,7 +364,7 @@ impl App {
         lines.push(Line::raw(""));
         let path = self.themes.path_of(&e.theme.name).map_or("no themes directory".into(), |p| self.themes.show(&p));
         lines.extend(fields("writes", &path, dim, room, dim));
-        f.render_widget(Paragraph::new(lines).block(pane("slot")), area);
+        f.render_widget(Paragraph::new(lines).block(pane("slot", area)), area);
         if save_at.y < inner.y + inner.height {
             let state = if e.dirty() { Span::styled("unsaved", theme::changed()) } else { Span::styled("saved", theme::ok()) };
             let mut line = button_row(self.shape, save_at, None, &[(Btn::Save, "Save ^S".into(), Ground::Ok)], &mut self.hits.buttons);

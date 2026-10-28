@@ -1022,8 +1022,9 @@ impl Session {
         tmux(&args).map(drop)
     }
 
-    /// The pane contents. With `ansi`, SGR escapes are kept. Refuses a
-    /// session of another root.
+    /// The pane contents. With `ansi`, SGR escapes are kept, and so are a
+    /// row's trailing spaces, which tmux otherwise drops with the ground
+    /// they were drawn on. Refuses a session of another root.
     pub fn text(&self, ansi: bool) -> Result<String> {
         self.ensure_owned()?;
         let mut args = vec![
@@ -1033,7 +1034,7 @@ impl Session {
             self.pane(),
         ];
         if ansi {
-            args.push("-e".into());
+            args.extend(["-e".into(), "-N".into()]);
         }
         tmux(&args)
     }

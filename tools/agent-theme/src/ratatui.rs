@@ -4,9 +4,11 @@
 //! `ratatui-core`, whose types `ratatui` re-exports.
 
 use ratatui_core::style as rs;
+use ratatui_core::symbols::border;
 
 use crate::color::Color;
-use crate::paint::{Painter, Style};
+use crate::model::Border;
+use crate::paint::{Ground, Painter, Style};
 
 /// The ANSI colours by index, as ratatui names them.
 const NAMED: [rs::Color; 16] = [
@@ -66,6 +68,27 @@ impl Painter {
         out
     }
 
+    /// The theme's border glyphs as a ratatui set; none where the theme
+    /// sets none, and the surface keeps its own.
+    pub fn ratatui_border(&self) -> Option<border::Set<'static>> {
+        Some(match self.decor().border? {
+            Border::Plain => border::PLAIN,
+            Border::Rounded => border::ROUNDED,
+            Border::Double => border::DOUBLE,
+            Border::Thick => border::THICK,
+            Border::Glyphs([top_left, top_right, bottom_left, bottom_right, horizontal_top, horizontal_bottom, vertical_left, vertical_right]) => border::Set {
+                top_left,
+                top_right,
+                bottom_left,
+                bottom_right,
+                vertical_left,
+                vertical_right,
+                horizontal_top,
+                horizontal_bottom,
+            },
+        })
+    }
+
     /// The style a screen paints every cell with first: the theme's ground
     /// and body text under `THEME_BACKGROUND="fill"`, else nothing, which
     /// keeps the terminal's own.
@@ -85,5 +108,12 @@ impl Painter {
             }
             _ => rs::Style::new(),
         }
+    }
+}
+
+impl Ground {
+    /// The colour under column `x`, row `y`, as ratatui takes it.
+    pub fn ratatui(&self, x: u16, y: u16) -> rs::Color {
+        color(self.at(x, y))
     }
 }

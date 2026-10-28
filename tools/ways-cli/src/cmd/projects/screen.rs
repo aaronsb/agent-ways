@@ -164,12 +164,12 @@ impl Pane for ProjectsPane {
         let title = self.list_command();
         if self.shown.is_empty() {
             let none = if self.filter.is_empty() { "No projects found." } else { "No matching projects found." };
-            f.render_widget(Paragraph::new(Line::styled(none, theme::muted())).block(pane(title)), list);
+            f.render_widget(Paragraph::new(Line::styled(none, theme::muted())).block(pane(title, list)), list);
         } else {
             let right = |t: &str| Cell::from(Line::from(t.to_string()).alignment(Alignment::Right));
             let header = Row::new(vec![Cell::from("Project"), right("Sessions"), right("Size"), right("Last"), right("Memory")])
                 .style(Style::new().add_modifier(Modifier::BOLD));
-            let mark = Span::raw(theme::SELECTED_MARK).width();
+            let mark = Span::raw(theme::selected_mark()).width();
             // Borders, the mark, the fixed columns and the gaps between all five.
             let path_w = (list.width as usize).saturating_sub(2 + mark + 27 + 4).max(8);
             let rows: Vec<Row> = self
@@ -185,9 +185,9 @@ impl Pane for ProjectsPane {
             let t = Table::new(rows, widths)
                 .header(header)
                 .column_spacing(1)
-                .block(pane(title))
+                .block(pane(title, list))
                 .row_highlight_style(theme::selected())
-                .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()))
+                .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()))
                 .highlight_spacing(HighlightSpacing::Always);
             self.table.select(Some(self.sel));
             f.render_stateful_widget(t, list, &mut self.table);
@@ -210,7 +210,7 @@ impl Pane for ProjectsPane {
         let rows: usize = lines.iter().map(|l| l.width().max(1)).map(|w| w.div_ceil(inner) + usize::from(w > inner)).sum();
         let visible = detail.height.saturating_sub(2) as usize;
         self.scroll = self.scroll.min(rows.saturating_sub(visible) as u16);
-        let mut block = pane(title);
+        let mut block = pane(title, detail);
         if rows > visible + self.scroll as usize {
             block = block.title_bottom(Line::styled(" more ↓ ", theme::muted()).right_aligned());
         }

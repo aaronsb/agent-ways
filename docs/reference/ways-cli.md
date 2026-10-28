@@ -315,7 +315,7 @@ The table has one row per way and agent that fired it:
 | Epoch | The epoch it fired in. |
 | Dist | Epochs since then, coloured by distance. |
 | Trigger | What fired it: `keyword`, `embed:en`, `file`, `bash`, `check-pull` and so on. A row the judge blocked shows `judge` and its P(yes). |
-| ◎ | A pin for where the way's next re-disclosure falls on the forecast line, one symbol and colour per cluster. |
+| ◎ | A waypoint for where the way's next re-disclosure falls on the forecast line, one symbol and colour per cluster. |
 | Re-disclose | The re-disclosure forecast: `● now` past its refire window, `◐ N%` at 75% of the window or more, `◔ N%` at 50% or more, `↩ epoch N` when a check's decay holds it back until epoch N, `↩ suppressed` when that is more than 500 epochs off, else `─`. A row that injected nothing reads `not injected`. |
 
 A way whose check has fired has a second line, `✓ ×N decay D`: the check's fires and its decay, 1/(N+1).
@@ -334,7 +334,7 @@ The mark before a way's name and the name's colour say what happened to it. The 
 
 By default the table shows the ways injected into the session. `f` widens it to every matched candidate and back, and the header names the filter (`◇ injected`, with a count of the ways the judge kept out, or `◆ matched`). A session the judge never saw is all injected, and its header leaves the filter unnamed. A withheld row injected nothing, so it appears only in the frame it was judged or held in; a way already active keeps its own row beside it. A way blocked because the judge blocked its ancestor shows the ancestor's P(yes) and names it: `⊘ <way> (with <ancestor>)`.
 
-Under the table, the context lines give the token gauge, the re-disclosure zones (`● now`, `◐ approaching`, `○ distant`) with the refire intervals, the forecast line with each cluster's pin, and what changed in this frame. A `⊝ suppressed:` line names a Task dispatch or agent whose ways the subagent switch held back.
+Under the table, the context lines give the token gauge, the re-disclosure zones (`● now`, `◐ approaching`, `○ distant`) with the refire intervals, the forecast line with each cluster's waypoint, and what changed in this frame. A `⊝ suppressed:` line names a Task dispatch or agent whose ways the subagent switch held back.
 
 | Key | Does |
 |---|---|

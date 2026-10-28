@@ -42,8 +42,7 @@ pub fn choice() -> Choice {
 /// bundled and user themes under the rule above. A warning names a
 /// choice that could not be honoured.
 pub fn palette(active: Option<&str>, depth: ColorDepth) -> (Palette, Option<String>) {
-    let Some(dir) = agent_theme::user_dir() else { return (Palette::terminal(depth), None) };
-    let (painter, warning) = Painter::named_in(active, &dir, depth);
+    let (painter, warning) = Painter::named_in(active, agent_theme::user_dir().as_deref(), depth);
     (Palette { painter }, warning)
 }
 
@@ -71,7 +70,7 @@ mod tests {
     #[test]
     fn a_chosen_theme_applies_only_at_256_colours_or_more() {
         let dir = scratch("themes");
-        let nord = |depth| Painter::named_in(Some("nord"), &dir, depth).0;
+        let nord = |depth| Painter::named_in(Some("nord"), Some(&dir), depth).0;
         assert!(nord(ColorDepth::TrueColor).roles().is_some());
         assert!(nord(ColorDepth::Ansi256).roles().is_some());
         assert_eq!(nord(ColorDepth::Ansi16), Painter::terminal(ColorDepth::Ansi16), "16 colours: the terminal palette whole");

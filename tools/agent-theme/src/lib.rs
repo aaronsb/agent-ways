@@ -22,6 +22,7 @@
 //! `settings` feature declares the `theme` settings section against
 //! `agent-settings`' schema types.
 
+mod block;
 mod bundled;
 mod color;
 mod depth;
@@ -39,12 +40,13 @@ mod text;
 #[cfg(test)]
 mod tests;
 
+pub use block::block;
 pub use bundled::{user_dir, Source, ThemeSet, BUNDLED, EXTENSIONS, TERMINAL};
 pub use color::{index_rgb, nearest_16, nearest_256, Color, ANSI16_RGB};
 pub use depth::ColorDepth;
 pub use derive::{contrast, text_on, Roles, SegPair, MIN_DISTINCT, MIN_MUTED, MIN_TEXT};
-pub use model::{Background, Kind, Overrides, Rgb, Slots, Theme};
+pub use model::{Axis, Background, Border, Decor, Events, Gradient, Kind, Overrides, Rgb, Slots, Theme, Waypoint, Waypoints};
 pub use oklab::delta_e;
-pub use paint::{install, pair, paint, painter, reset, scoped, sgr, Ink, Painter, Resolved, Role, Scope, Style, RESET};
+pub use paint::{install, install_from, pair, paint, painter, reset, rule_glyph, scoped, sgr, underline, Ground, Ink, Painter, Resolved, Role, Scope, Style, RESET};
 pub use steps::{hsl_at, scale, IdentitySteps, Step};
 pub use text::{parse, to_text, validate, ThemeError};

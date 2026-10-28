@@ -210,7 +210,7 @@ impl<'a> Feed<'a> {
             Paragraph::new(band(&e.header, self.shape, usize::from(area.width))).render(at(0), buf);
         }
         if (from..to).contains(&1) {
-            let glyph = if selected { "━" } else { "─" };
+            let glyph = theme::rule_glyphs()[usize::from(selected)];
             Paragraph::new(Line::styled(glyph.repeat(usize::from(area.width)), rule)).render(at(1), buf);
         }
         // The body: its rows HEAD_ROWS.., only those on screen.

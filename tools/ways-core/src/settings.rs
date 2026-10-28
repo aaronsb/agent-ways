@@ -347,6 +347,7 @@ const KEYS: &[KeySpec] = &[
     },
     agent_theme::settings::ACTIVE,
     agent_theme::settings::SHAPE,
+    agent_theme::settings::WAYPOINTS,
     KeySpec {
         name: "mods.attend.listening",
         section: "mods",
@@ -816,6 +817,13 @@ pub fn project_root(start: &Path) -> Option<PathBuf> {
 pub fn is_home(dir: &Path, home: &Path) -> bool {
     let canon = |q: &Path| std::fs::canonicalize(q).unwrap_or_else(|_| q.to_path_buf());
     canon(dir) == canon(home)
+}
+
+/// A `theme` setting (`active`, `shape`) as the layers resolve it for
+/// `project_dir`, the highest layer that sets it winning.
+pub fn theme_setting(project_dir: &Path, key: &str) -> Option<String> {
+    let path = vec!["theme".to_string(), key.to_string()];
+    layers(project_dir).iter().rev().find_map(|l| l.get(&path).and_then(|v| v.as_str().map(str::to_string)))
 }
 
 /// Every layer a ways key resolves through, lowest first: the user file,

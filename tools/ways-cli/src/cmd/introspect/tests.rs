@@ -157,6 +157,10 @@ fn nord() -> Palette {
     Palette::new(ThemeSet::bundled().get("nord"), ColorDepth::TrueColor)
 }
 
+fn miami_nights() -> Palette {
+    Palette::new(ThemeSet::bundled().get("miami-nights"), ColorDepth::TrueColor)
+}
+
 fn picker(palette: Palette) -> Introspect {
     let open = Box::new(|id: &str, live: bool| if id == SESSION { Ok(replay(live)) } else { Err(format!("no events for session {}", &id[..12])) });
     Introspect::picking(Picker::new(sessions(), PROJECT.into()), open, no_spend(), palette, Shape::PLAIN)
@@ -1573,4 +1577,101 @@ fn a_check_without_an_agent_counts_against_the_last_firer() {
     let last = frames.last().unwrap();
     assert_eq!(last.window, 2);
     assert_eq!(counts(last), [("main".to_string(), 1)], "after the boundary the bare check is main's");
+}
+
+#[test]
+fn a_gradient_theme_grounds_every_cell_of_the_session_screens() {
+    let mut s = picker(miami_nights());
+    let shot = |s: &mut Introspect, name: &str| {
+        for (w, h) in [(80, 25), (120, 35)] {
+            assert_eq!(agent_tui::testkit::ungrounded(&render(s, w, h)), None, "{name} {w}x{h}: a cell off the theme's ground");
+        }
+    };
+    shot(&mut s, "picker");
+    let mut s = showing(replay(false), miami_nights(), Shape::ROUND);
+    shot(&mut s, "timeline");
+    for (key, name) in [(KeyCode::Char('2'), "fires"), (KeyCode::Char('3'), "spend"), (KeyCode::Char('1'), "timeline again")] {
+        press(&mut s, &[key]);
+        shot(&mut s, name);
+    }
+    press(&mut s, &[KeyCode::End, KeyCode::Down, KeyCode::Enter]);
+    shot(&mut s, "why");
+}
+
+/// The cell column of the first `needle` on row `y` of `buf`, counting the
+/// second column of a wide glyph.
+fn cell_of(buf: &agent_tui::ratatui::buffer::Buffer, y: u16, needle: &str) -> Option<u16> {
+    let w = buf.area.width;
+    let first = needle.chars().next()?.to_string();
+    (0..w).find(|&x| buf[(x, y)].symbol() == first && (0..needle.chars().count() as u16).all(|i| x + i < w && buf[(x + i, y)].symbol() == needle.chars().nth(i as usize).unwrap().to_string()))
+}
+
+fn header_row(buf: &agent_tui::ratatui::buffer::Buffer) -> u16 {
+    (0..buf.area.height).find(|&y| cell_of(buf, y, "Re-disclose").is_some()).expect("the table's header")
+}
+
+#[test]
+fn a_two_cell_waypoint_set_widens_its_column_and_keeps_the_columns_aligned() {
+    let gap = |palette: Palette| {
+        let mut s = showing(replay(false), palette, Shape::PLAIN);
+        press(&mut s, &[KeyCode::End]);
+        let buf = render(&mut s, 120, 35);
+        let y = header_row(&buf);
+        let (wp, rd) = (cell_of(&buf, y, "◎").unwrap(), cell_of(&buf, y, "Re-disclose").unwrap());
+        // Every row's waypoint starts under the header's and leaves the
+        // two-cell gap before Re-disclose blank.
+        let rows: Vec<u16> = (y + 1..buf.area.height).take_while(|&r| !buf[(wp, r)].symbol().trim().is_empty() || buf[(1, r)].symbol().trim() != "").collect();
+        let marked = rows.iter().filter(|&&r| !buf[(wp, r)].symbol().trim().is_empty()).count();
+        for r in rows {
+            assert!(buf[(rd - 1, r)].symbol().trim().is_empty() && buf[(rd - 2, r)].symbol().trim().is_empty(), "row {r} runs into Re-disclose");
+        }
+        (rd - wp, marked)
+    };
+    let (default_gap, marked) = gap(nord());
+    assert_eq!(default_gap, 3, "one cell and the gap");
+    assert!(marked > 0, "rows carry waypoints");
+    let (wide_gap, marked) = gap(miami_nights());
+    assert_eq!(wide_gap, 4, "two cells and the gap");
+    assert!(marked > 0);
+}
+
+#[test]
+fn a_two_cell_waypoint_set_halves_the_forecast_slots() {
+    let strip = |palette: Palette| {
+        let mut s = showing(replay(false), palette, Shape::PLAIN);
+        press(&mut s, &[KeyCode::End]);
+        let buf = render(&mut s, 120, 35);
+        let y = (0..buf.area.height).find(|&y| cell_of(&buf, y, "forecast").is_some()).expect("the forecast line");
+        (0..buf.area.width).map(|x| buf[(x, y)].symbol().to_string()).collect::<Vec<_>>()
+    };
+    let wide = |c: &String| agent_tui::wrap::str_width(c) == 2;
+    let nights = strip(miami_nights());
+    assert!(nights.iter().any(wide), "the strip draws the theme's emoji: {}", nights.concat());
+    for (i, c) in nights.iter().enumerate() {
+        if c == "·" {
+            assert_eq!(nights[i + 1], " ", "an empty slot is two cells: {nights:?}");
+        }
+    }
+    let default = strip(nord()).concat();
+    assert!(default.contains("··"), "one-cell slots sit side by side");
+}
+
+#[test]
+fn theme_waypoints_default_draws_the_screens_own_set() {
+    let theme = ThemeSet::bundled().get("miami-nights").cloned().unwrap();
+    let painter = agent_theme::Painter::themed(&theme, ColorDepth::TrueColor);
+    assert!(crate::cmd::screen_host::waypoints_as(painter, None).waypoints().is_some(), "unset is theme");
+    assert!(crate::cmd::screen_host::waypoints_as(painter, Some("theme")).waypoints().is_some());
+    let own = crate::cmd::screen_host::waypoints_as(painter, Some("default"));
+    assert!(own.waypoints().is_none());
+    // The first row's waypoint, under the column's header.
+    let first = |painter| {
+        let mut s = showing(replay(false), Palette { painter }, Shape::PLAIN);
+        press(&mut s, &[KeyCode::End]);
+        let buf = render(&mut s, 120, 35);
+        let y = header_row(&buf);
+        buf[(cell_of(&buf, y, "◎").unwrap(), y + 1)].symbol().to_string()
+    };
+    assert_eq!(first(painter), "🌴", "the theme's set");
+    assert_eq!(first(own), crate::cmd::render::WAYPOINT_GLYPHS[0], "the screens' own set");
 }

@@ -526,7 +526,7 @@ impl<'a> Dialog<'a> {
             Some((long, _)) => format!("{} · {long}", self.title),
             None => self.title.clone(),
         };
-        let mut block = pane(title).border_style(border).padding(Padding::horizontal(self.padding));
+        let mut block = pane(title, r).border_style(border).padding(Padding::horizontal(self.padding));
         if let Some(s) = self.title_style {
             block = block.title_style(s);
         }

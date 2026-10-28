@@ -21,21 +21,24 @@ pub fn gaps(manifest: &Value, json_out: bool) -> Result<()> {
     let total = manifest["ways_scanned"].as_u64().unwrap_or(0);
     let count = manifest["ways_without_provenance"].as_u64().unwrap_or(0);
 
-    println!();
-    println!(
+    let mut out = String::new();
+    agent_fmt::say!(out);
+    agent_fmt::say!(
+        out,
         "{} {}",
         paint(BOLD, "Ways Without a Claim"),
         paint(WARN, format!("({count} of {total})"))
     );
-    println!();
+    agent_fmt::say!(out);
     if let Some(arr) = without.as_array() {
         for way in arr {
             if let Some(s) = way.as_str() {
-                println!("  {s}");
+                agent_fmt::say!(out, "  {s}");
             }
         }
     }
 
+    agent_fmt::print_block(&out);
     Ok(())
 }
 
@@ -57,25 +60,28 @@ pub fn stale(manifest: &Value, days: u32, json_out: bool) -> Result<()> {
     }
 
     let cutoff = cutoff_date(days);
-    println!();
-    println!(
+    let mut out = String::new();
+    agent_fmt::say!(out);
+    agent_fmt::say!(
+        out,
         "{} {}",
         paint(BOLD, "Stale Claims"),
         paint(Role::Muted, format!("(verified > {days} days ago, cutoff: {cutoff})"))
     );
-    println!();
+    agent_fmt::say!(out);
 
     if stale_ways.is_empty() {
-        println!("  {}", paint(Role::Ok, "All claim dates are current."));
+        agent_fmt::say!(out, "  {}", paint(Role::Ok, "All claim dates are current."));
     } else {
         for way in &stale_ways {
             let verified = manifest["ways"][way.as_str()]["provenance"]["verified"]
                 .as_str()
                 .unwrap_or("?");
-            println!("  {way}  (verified: {verified})");
+            agent_fmt::say!(out, "  {way}  (verified: {verified})");
         }
     }
 
+    agent_fmt::print_block(&out);
     Ok(())
 }
 
@@ -86,7 +92,7 @@ pub fn active(manifest: &Value, json_out: bool) -> Result<()> {
     let with_prov = match manifest["coverage"]["with_provenance"].as_array() {
         Some(a) => a,
         None => {
-            println!("No claim data.");
+            agent_fmt::print_block("No claim data.\n");
             return Ok(());
         }
     };
@@ -107,21 +113,25 @@ pub fn active(manifest: &Value, json_out: bool) -> Result<()> {
     let total_governed = manifest["ways_with_provenance"].as_u64().unwrap_or(0);
     let total_ways = manifest["ways_scanned"].as_u64().unwrap_or(0);
 
-    println!();
-    println!("{}", paint(BOLD, "Active Claims Report"));
-    println!();
-    println!(
+    let mut out = String::new();
+    agent_fmt::say!(out);
+    agent_fmt::say!(out, "{}", paint(BOLD, "Active Claims Report"));
+    agent_fmt::say!(out);
+    agent_fmt::say!(
+        out,
         "  Ways with claims: {} of {total_ways}",
         paint(Role::Ok, total_governed)
     );
-    println!();
-    println!(
+    agent_fmt::say!(out);
+    agent_fmt::say!(
+        out,
         "  {}",
         paint(BOLD, format!("{:<28} {:>5}  Status", "Way", "Fires"))
     );
-    println!(
+    agent_fmt::say!(
+        out,
         "  {}",
-        paint(Role::Muted, format!("{:<28} {:>5}  ------", "---", "-----"))
+        paint(Role::Muted, agent_theme::underline(&format!("{:<28} {:>5}  ------", "---", "-----")))
     );
 
     for v in with_prov {
@@ -135,12 +145,13 @@ pub fn active(manifest: &Value, json_out: bool) -> Result<()> {
         } else {
             paint(Role::Muted, "dormant")
         };
-        println!("  {:<28} {:>5}  {}", way, fires, status);
+        agent_fmt::say!(out, "  {:<28} {:>5}  {}", way, fires, status);
     }
 
     // Ways without a claim, ranked by fire count.
-    println!();
-    println!(
+    agent_fmt::say!(out);
+    agent_fmt::say!(
+        out,
         "{} {}",
         paint(BOLD, "Ways without a claim"),
         paint(Role::Muted, "(top by fire count):")
@@ -161,10 +172,11 @@ pub fn active(manifest: &Value, json_out: bool) -> Result<()> {
         ungov_fires.sort_by_key(|e| std::cmp::Reverse(e.1));
 
         if ungov_fires.is_empty() {
-            println!("  (no firing data for ways without a claim)");
+            agent_fmt::say!(out, "  (no firing data for ways without a claim)");
         } else {
             for (way, fires) in ungov_fires.iter().take(5) {
-                println!(
+                agent_fmt::say!(
+                    out,
                     "  {:<28} {:>5} fires {}",
                     way, fires, paint(WARN, "(no claim)")
                 );
@@ -172,5 +184,6 @@ pub fn active(manifest: &Value, json_out: bool) -> Result<()> {
         }
     }
 
+    agent_fmt::print_block(&out);
     Ok(())
 }

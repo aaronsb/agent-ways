@@ -867,7 +867,7 @@ mod tests {
         assert_eq!(row("d/sub-a").token_pos, 5_000);
         assert_eq!(last.tokens_k_of("a1"), 50);
         assert_eq!(last.tokens_k_of(MAIN), 20);
-        let (cell, _) = render::next_cell(row("d/sub-a"), last.epoch_of("a1"), last.tokens_k_of("a1"));
+        let (cell, _) = render::next_cell(row("d/sub-a"), last.epoch_of("a1"), last.tokens_k_of("a1"), &agent_theme::Events::DEFAULT);
         assert_eq!(cell, "● now");
     }
 

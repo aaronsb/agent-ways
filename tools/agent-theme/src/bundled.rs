@@ -7,7 +7,7 @@ use crate::model::Theme;
 use crate::text::{parse, ThemeError};
 
 /// (file stem, source), in listing order. The default comes first.
-pub const BUNDLED: [(&str, &str); 7] = [
+pub const BUNDLED: [(&str, &str); 10] = [
     ("agent-ways", include_str!("../themes/agent-ways.theme")),
     ("nord", include_str!("../themes/nord.theme")),
     ("catppuccin-mocha", include_str!("../themes/catppuccin-mocha.theme")),
@@ -15,6 +15,9 @@ pub const BUNDLED: [(&str, &str); 7] = [
     ("gruvbox-dark", include_str!("../themes/gruvbox-dark.theme")),
     ("tokyonight-night", include_str!("../themes/tokyonight-night.theme")),
     ("paper", include_str!("../themes/paper.theme")),
+    ("miami", include_str!("../themes/miami.theme")),
+    ("tampa", include_str!("../themes/tampa.theme")),
+    ("miami-nights", include_str!("../themes/miami-nights.theme")),
 ];
 
 /// The file extensions a user theme may have: the dotfiles palettes' own,

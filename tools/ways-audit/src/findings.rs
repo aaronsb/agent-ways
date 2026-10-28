@@ -4,6 +4,7 @@
 //! firing log; `findings` reads the ledger back. Neither writes a determination —
 //! that boundary is enforced here by simply having no code that does.
 
+use agent_fmt::say;
 use anyhow::Result;
 use serde_json::Value;
 use std::io::Write;
@@ -35,10 +36,11 @@ pub fn assemble(manifest: &Value, way: Option<&str>, write: bool, json_out: bool
         return Ok(());
     }
 
-    render_table(&findings, "Assembled Findings");
+    let mut out = table(&findings, "Assembled Findings");
     let outcome = findings.iter().filter(|f| f.criterion.is_some()).count();
-    println!();
-    println!(
+    say!(out);
+    say!(
+        out,
         "  {}",
         paint(
             Role::Muted,
@@ -52,8 +54,9 @@ pub fn assemble(manifest: &Value, way: Option<&str>, write: bool, json_out: bool
         ),
     );
     if write {
-        println!("  {}", paint(Role::Muted, format!("Appended to {}", paths::findings_ledger().display())));
+        say!(out, "  {}", paint(Role::Muted, format!("Appended to {}", paths::findings_ledger().display())));
     }
+    agent_fmt::print_block(&out);
     Ok(())
 }
 
@@ -73,14 +76,14 @@ pub fn list(json_out: bool) -> Result<()> {
     }
 
     if findings.is_empty() {
-        println!();
-        println!("  {}", paint(Role::Muted, "No findings assembled yet. Run `ways-audit assemble --write`."));
+        agent_fmt::print_block(&format!("\n  {}\n", paint(Role::Muted, "No findings assembled yet. Run `ways-audit assemble --write`.")));
         return Ok(());
     }
-    render_table(&findings, "Finding Ledger");
+    let mut out = table(&findings, "Finding Ledger");
     let labeled = findings.iter().filter(|f| f.determination.is_some()).count();
-    println!();
-    println!(
+    say!(out);
+    say!(
+        out,
         "  {}",
         paint(
             Role::Muted,
@@ -92,20 +95,25 @@ pub fn list(json_out: bool) -> Result<()> {
             )
         ),
     );
+    agent_fmt::print_block(&out);
     Ok(())
 }
 
-fn render_table(findings: &[Finding], title: &str) {
-    println!();
-    println!("{}", paint(Style::new().bold(), title));
-    println!();
-    println!(
+/// The findings under `title`, a line per finding.
+fn table(findings: &[Finding], title: &str) -> String {
+    let mut out = String::new();
+    say!(out);
+    say!(out, "{}", paint(Style::new().bold(), title));
+    say!(out);
+    say!(
+        out,
         "  {}",
         paint(Style::new().bold(), format!("{:<26} {:<26} {:<8} {:>5}  DETERMINATION", "WAY", "CONTROL", "TIER", "FIRES"))
     );
-    println!(
+    say!(
+        out,
         "  {}",
-        paint(Role::Muted, format!("{:<26} {:<26} {:<8} {:>5}  -------------", "---", "-------", "----", "-----"))
+        paint(Role::Muted, agent_theme::underline(&format!("{:<26} {:<26} {:<8} {:>5}  -------------", "---", "-------", "----", "-----")))
     );
     for f in findings {
         let control = if f.control.len() > 26 { &f.control[..26] } else { &f.control };
@@ -117,11 +125,13 @@ fn render_table(findings: &[Finding], title: &str) {
             Some(d) => d.as_str().to_string(),
             None => paint(Role::Muted, "(unset)"),
         };
-        println!(
+        say!(
+            out,
             "  {:<26} {:<26} {:<8} {:>5}  {}",
             f.way, control, tier, f.evidence.total, det
         );
     }
+    out
 }
 
 fn append_to_ledger(findings: &[Finding]) -> Result<()> {

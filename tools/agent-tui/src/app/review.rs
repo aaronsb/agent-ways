@@ -107,7 +107,7 @@ impl App {
                 ListItem::new(Line::from(spans)).style(if i == cursor { theme::selected_text() } else { Style::new() })
             })
             .collect();
-        let block = pane(format!("{} — review ", self.title.trim_end()));
+        let block = pane(format!("{} — review ", self.title.trim_end()), area);
         let inner = block.inner(area);
         self.hits.list = inner;
         if rows.is_empty() {
@@ -118,7 +118,7 @@ impl App {
         let list = List::new(items)
             .block(block)
             .highlight_style(theme::selected())
-            .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()))
+            .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()))
             .highlight_spacing(HighlightSpacing::Always);
         self.list.select(Some(cursor));
         f.render_stateful_widget(list, area, &mut self.list);
@@ -135,7 +135,7 @@ impl App {
         let mut lines = Vec::new();
         let Some(r) = rows.get(self.rcursor[tab]) else {
             lines.push(Line::styled(format!("nothing pending in {}", self.roots[tab].name), theme::hint()));
-            return f.render_widget(Paragraph::new(lines).block(pane("detail")), area);
+            return f.render_widget(Paragraph::new(lines).block(pane("detail", area)), area);
         };
         match &r.kind {
             RKind::Node { own, below, files } => {
@@ -209,6 +209,6 @@ impl App {
                 lines.extend(fields("step", &text, theme::accent(), room, dim));
             }
         }
-        f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }).block(pane("detail")), area);
+        f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }).block(pane("detail", area)), area);
     }
 }

@@ -65,6 +65,21 @@ pub fn drive<S: Screen + ?Sized>(screen: &mut S, keys: &[KeyEvent]) -> bool {
 }
 
 /// The glyphs of a frame, one line per row.
+/// The first cell of `buf` whose ground is not a theme's: the terminal's
+/// own (reset), or a named or indexed colour such as `Black`. The column
+/// after a two-cell glyph is skipped, as the terminal draws it with the
+/// glyph. Under a truecolor fill theme every cell has an RGB ground; a
+/// swatch may be RGB black on purpose.
+pub fn ungrounded(buf: &Buffer) -> Option<(u16, u16, Color)> {
+    let w = usize::from(buf.area.width.max(1));
+    let cells = buf.content();
+    cells.iter().enumerate().find_map(|(i, c)| {
+        let covered = i % w > 0 && unicode_width::UnicodeWidthStr::width(cells[i - 1].symbol()) == 2;
+        let theme = matches!(c.bg, Color::Rgb(..));
+        (!covered && !theme).then_some(((i % w) as u16, (i / w) as u16, c.bg))
+    })
+}
+
 pub fn text(buf: &Buffer) -> String {
     rows(buf).join("\n")
 }
@@ -512,6 +527,23 @@ mod tests {
     use super::*;
     use ratatui::layout::Rect;
     use ratatui::style::Style;
+
+    #[test]
+    fn ungrounded_finds_a_cell_on_the_terminal_s_ground_or_a_named_colour() {
+        let mut b = Buffer::empty(Rect::new(0, 0, 4, 2));
+        for c in b.content.iter_mut() {
+            c.bg = Color::Rgb(1, 2, 3);
+        }
+        assert_eq!(ungrounded(&b), None);
+        b.content[5].bg = Color::Reset;
+        assert_eq!(ungrounded(&b), Some((1, 1, Color::Reset)));
+        b.content[5].bg = Color::Black;
+        assert_eq!(ungrounded(&b), Some((1, 1, Color::Black)));
+        b.content[5].bg = Color::Rgb(1, 2, 3);
+        b.content[0].set_symbol("🌴");
+        b.content[1].bg = Color::Reset;
+        assert_eq!(ungrounded(&b), None, "the second column of a wide glyph is the terminal's to draw");
+    }
 
     fn buf(lines: &[&str]) -> Buffer {
         Buffer::with_lines(lines.iter().copied())

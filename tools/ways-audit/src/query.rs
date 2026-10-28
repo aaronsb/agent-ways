@@ -34,21 +34,24 @@ pub fn control(manifest: &Value, pattern: &str, json_out: bool) -> Result<()> {
         return Ok(());
     }
 
-    println!(
+    let mut out = String::new();
+    agent_fmt::say!(
+        out,
         "{} '{}':",
         paint(Style::new().bold(), "Controls matching"),
         paint(Role::Accent, pattern)
     );
-    println!();
+    agent_fmt::say!(out);
     for (cid, ways) in &matches {
-        println!("  {cid}");
+        agent_fmt::say!(out, "  {cid}");
         if let Some(arr) = ways.as_array() {
             let names: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).collect();
-            println!("    implementing: {}", names.join(", "));
+            agent_fmt::say!(out, "    implementing: {}", names.join(", "));
         }
-        println!();
+        agent_fmt::say!(out);
     }
 
+    agent_fmt::print_block(&out);
     Ok(())
 }
 
@@ -82,20 +85,23 @@ pub fn policy(manifest: &Value, pattern: &str, json_out: bool) -> Result<()> {
         return Ok(());
     }
 
-    println!(
+    let mut out = String::new();
+    agent_fmt::say!(
+        out,
         "{} '{}':",
         paint(Style::new().bold(), "Policies matching"),
         paint(Role::Accent, pattern)
     );
-    println!();
+    agent_fmt::say!(out);
     for (uri, ways) in &matches {
-        println!("  {uri}");
+        agent_fmt::say!(out, "  {uri}");
         if let Some(arr) = ways.as_array() {
             let names: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).collect();
-            println!("    implementing ways: {}", names.join(", "));
+            agent_fmt::say!(out, "    implementing ways: {}", names.join(", "));
         }
-        println!();
+        agent_fmt::say!(out);
     }
 
+    agent_fmt::print_block(&out);
     Ok(())
 }

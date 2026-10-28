@@ -1334,6 +1334,9 @@ fn mods(action: Option<ModCommand>) -> Result<()> {
 }
 
 fn run() -> Result<()> {
+    // Plain output on a terminal draws in the chosen theme; piped output,
+    // a hook's among it, reads no theme (ADR-504 §11).
+    agent_theme::install_from(|| cmd::screen_host::theme_setting("active"));
     // A bare `ways` prints help, with the banner only on a terminal
     // (ADR-507 §7). `--help` and `help` are clap's and carry no banner. The
     // top-level help ends with the judge's warning when it cannot gate; only
@@ -1453,22 +1456,22 @@ fn run() -> Result<()> {
         Commands::Show { what } => match what {
             ShowCommand::Way { id, session, trigger } => {
                 let out = cmd::show::way(&id, &session, &trigger)?;
-                if !out.is_empty() { print!("{out}"); }
+                if !out.is_empty() { agent_fmt::print_block(&out); }
                 Ok(())
             }
             ShowCommand::Check { id, session, trigger, score } => {
                 let out = cmd::show::check(&id, &session, &trigger, score)?;
-                if !out.is_empty() { print!("{out}"); }
+                if !out.is_empty() { agent_fmt::print_block(&out); }
                 Ok(())
             }
             ShowCommand::Core { session } => {
                 let out = cmd::show::core(&session)?;
-                if !out.is_empty() { print!("{out}"); }
+                if !out.is_empty() { agent_fmt::print_block(&out); }
                 Ok(())
             }
             ShowCommand::Attend { signal, session } => {
                 let out = cmd::show::attend(&signal, &session)?;
-                if !out.is_empty() { print!("{out}"); }
+                if !out.is_empty() { agent_fmt::print_block(&out); }
                 Ok(())
             }
         },

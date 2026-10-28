@@ -2,10 +2,10 @@
 //!
 //! `list` prints the table as ANSI text into a String buffer. The replay
 //! screens draw the same columns on agent-tui and take the cell values and
-//! their styles from here ([`next_cell`], [`traffic`], [`pin_color`]).
+//! their styles from here ([`next_cell`], [`traffic`], [`WaypointSet`]).
 
 use std::fmt::Write;
-use agent_theme::{pair, paint, painter, Role, Style};
+use agent_theme::{pair, paint, painter, Events, Role, Style};
 
 // ── Way trait ─────────────────────────────────────────────────
 
@@ -27,7 +27,81 @@ pub trait WayRow {
 
 // ── Constants ─────────────────────────────────────────────────
 
-pub const PIN_SYMBOLS: [char; 10] = ['●', '◆', '■', '▲', '◉', '▶', '★', '◈', '♦', '▪'];
+/// The screens' own waypoints: the marks a way's cluster wears where the
+/// theme sets none or `theme.waypoints` is `default`, each in its cluster's
+/// categorical colour.
+pub const WAYPOINT_GLYPHS: [&str; 10] = ["●", "◆", "■", "▲", "◉", "▶", "★", "◈", "♦", "▪"];
+
+/// The waypoint column's header: a glyph the bundled terminal fonts draw.
+pub const WAYPOINT_HEADER: &str = "◎";
+
+/// The waypoints a screen draws: a theme's set, or the screens' own.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WaypointSet {
+    theme: Option<agent_theme::Waypoints>,
+    depth: agent_theme::ColorDepth,
+}
+
+impl Default for WaypointSet {
+    /// The screens' own set at truecolor.
+    fn default() -> WaypointSet {
+        WaypointSet { theme: None, depth: agent_theme::ColorDepth::TrueColor }
+    }
+}
+
+impl WaypointSet {
+    /// `theme`'s set, or the screens' own where it is none, at `depth`.
+    pub fn new(theme: Option<agent_theme::Waypoints>, depth: agent_theme::ColorDepth) -> WaypointSet {
+        WaypointSet { theme, depth }
+    }
+
+    /// The set plain output draws: the process painter's theme's, unless
+    /// `theme.waypoints` is `default`. The setting is read only when there
+    /// is a theme set to refuse.
+    pub fn plain() -> WaypointSet {
+        let p = painter();
+        let theme = p.waypoints().filter(|_| crate::cmd::screen_host::theme_setting("waypoints").as_deref() != Some("default"));
+        WaypointSet::new(theme, p.depth())
+    }
+
+    pub fn len(&self) -> usize {
+        self.theme.map_or(WAYPOINT_GLYPHS.len(), |w| w.as_slice().len())
+    }
+
+    /// The cells every waypoint is drawn in: the widest glyph's.
+    pub fn width(&self) -> usize {
+        self.theme.map_or(1, |w| w.width())
+    }
+
+    pub fn glyph(&self, cluster: usize) -> &'static str {
+        match self.theme {
+            Some(w) => w.of(cluster).glyph,
+            None => WAYPOINT_GLYPHS[cluster % WAYPOINT_GLYPHS.len()],
+        }
+    }
+
+    /// A cluster's colour at the depth: the theme's fg for its waypoint,
+    /// else agent-identity's categorical palette (ADR-504 §6).
+    pub fn color(&self, cluster: usize) -> Option<agent_theme::Color> {
+        match self.theme.and_then(|w| w.of(cluster).fg) {
+            Some(fg) => agent_theme::Color::Rgb(fg).at(self.depth),
+            None => agent_identity::categorical(cluster).color(self.depth),
+        }
+    }
+
+    /// A cluster's waypoint as plain text, in its colour, padded to the
+    /// set's width.
+    pub fn text(&self, cluster: usize) -> String {
+        let g = self.glyph(cluster);
+        // visible_len counts characters; an emoji takes two cells.
+        let pad = " ".repeat(self.width().saturating_sub(agent_tui::wrap::str_width(g)));
+        let p = painter();
+        match self.color(cluster) {
+            Some(c) => format!("{}{pad}", p.paint(c, g)),
+            None => format!("{g}{pad}"),
+        }
+    }
+}
 
 
 // ── Layout ───────────────────────────────────────────────────
@@ -38,7 +112,6 @@ pub const PIN_SYMBOLS: [char; 10] = ['●', '◆', '■', '▲', '◉', '▶', '
 const EPOCH_W: usize = 5;
 const DIST_W: usize = 5;
 const TRIG_W: usize = 13;
-const PIN_W: usize = 1;
 const RD_W: usize = 13;
 const AGENT_W: usize = 12;
 /// Blank columns between every pair of table columns — the breathing room that
@@ -59,8 +132,10 @@ const GAUGE_LABEL_W: usize = 21;
 /// that fits; over-width content drifts equally in both. (Pre-existing
 /// behaviour; documented here because the reservation reads like a guarantee
 /// otherwise.)
-const TRAILING_W: usize = COL_GAP + EPOCH_W + COL_GAP + DIST_W + COL_GAP + TRIG_W
-    + COL_GAP + PIN_W + COL_GAP + RD_W + COL_GAP + AGENT_W;
+/// The waypoint column is as wide as the set's widest glyph.
+const fn trailing_w(waypoint_w: usize) -> usize {
+    COL_GAP + EPOCH_W + COL_GAP + DIST_W + COL_GAP + TRIG_W + COL_GAP + waypoint_w + COL_GAP + RD_W + COL_GAP + AGENT_W
+}
 
 /// The Way column grows in fixed steps of this many columns: its width snaps up
 /// to the next stop past the longest id, so a name a few characters longer than
@@ -98,13 +173,15 @@ pub struct Layout {
     /// The terminal width the layout was made for; the timeline's text lines
     /// fit within it
     pub width: usize,
+    /// The waypoints the rows and the forecast draw
+    pub waypoints: WaypointSet,
 }
 
 impl Layout {
     /// Reactive layout sized to `max_id_width` (the widest rendered way id),
     /// using the detected terminal width. See [`Layout::for_id_width_in`].
     pub fn for_id_width(max_id_width: usize) -> Self {
-        Self::for_id_width_in(max_id_width, agent_fmt::terminal_width())
+        Self::for_id_width_in(max_id_width, agent_fmt::terminal_width(), WaypointSet::plain())
     }
 
     /// Reactive layout for an explicit `term_w`: the Way column snaps to a tab
@@ -120,13 +197,13 @@ impl Layout {
     /// still agree (both read this one `way_col`), so alignment is preserved;
     /// only the frame-to-frame stability degrades. Taking the width as a
     /// parameter also keeps the layout tests independent of the ambient terminal.
-    pub fn for_id_width_in(max_id_width: usize, term_w: usize) -> Self {
+    pub fn for_id_width_in(max_id_width: usize, term_w: usize, waypoints: WaypointSet) -> Self {
         // Never let the Way column crowd the trailing columns off the terminal.
-        let ceiling = term_w.saturating_sub(INDENT + TRAILING_W).max(WAY_MIN);
+        let ceiling = term_w.saturating_sub(INDENT + trailing_w(waypoints.width())).max(WAY_MIN);
         let way_col = snap_up(max_id_width + 1, WAY_TAB).clamp(WAY_MIN, ceiling);
         let bar_width = term_w.saturating_sub(INDENT + GAUGE_LABEL_W).clamp(10, 200);
         let separator = term_w.saturating_sub(INDENT + 2);
-        Layout { way_col, bar_width, separator, width: term_w }
+        Layout { way_col, bar_width, separator, width: term_w, waypoints }
     }
 
     /// Reactive layout sized to the widest way id in `ways` (depth-indent prefix
@@ -193,47 +270,23 @@ pub fn unique_positions(bar_positions: &[Option<usize>]) -> Vec<usize> {
     positions
 }
 
-/// Map a bar position to its cluster index.
-pub fn cluster_of(bar_pos: usize, unique_positions: &[usize]) -> usize {
-    unique_positions
-        .iter()
-        .position(|&p| p == bar_pos)
-        .unwrap_or(0)
-        % PIN_SYMBOLS.len()
-}
-
-/// The pin column's header: a glyph the bundled terminal fonts draw.
-pub const PIN_HEADER: &str = "◎";
-
-/// Render pin symbol for a cluster index. Clusters are told apart by colour
-/// alone, so the colour is agent-identity's categorical palette (ADR-504
-/// §6), at the terminal's depth.
-pub fn pin_str(cluster_idx: usize) -> String {
-    let symbol = PIN_SYMBOLS[cluster_idx % PIN_SYMBOLS.len()];
-    let p = painter();
-    match pin_color(cluster_idx, p.depth()) {
-        Some(c) => p.paint(c, symbol),
-        None => symbol.to_string(),
-    }
-}
-
-/// A cluster's pin colour at `depth`: agent-identity's categorical palette.
-pub fn pin_color(cluster_idx: usize, depth: agent_theme::ColorDepth) -> Option<agent_theme::Color> {
-    agent_identity::categorical(cluster_idx).color(depth)
+/// Map a bar position to its cluster index, among `set` waypoints.
+pub fn cluster_of(bar_pos: usize, unique_positions: &[usize], set: usize) -> usize {
+    unique_positions.iter().position(|&p| p == bar_pos).unwrap_or(0) % set.max(1)
 }
 
 /// Render table header against a content-sized layout (`Layout::for_rows`).
 pub fn write_table_header_with(out: &mut String, layout: &Layout) {
     let g = " ".repeat(COL_GAP);
     let head = format!(
-        "{way:<way_w$}{g}{ep:>ep_w$}{g}{di:>di_w$}{g}{tr:<tr_w$}{g}{pin:^pin_w$}{g}{rd:<rd_w$}{g}Agent",
+        "{way:<way_w$}{g}{ep:>ep_w$}{g}{di:>di_w$}{g}{tr:<tr_w$}{g}{wp:<wp_w$}{g}{rd:<rd_w$}{g}Agent",
         way = "Way", ep = "Epoch", di = "Dist", tr = "Trigger",
-        pin = PIN_HEADER, rd = "Re-disclose",
+        wp = WAYPOINT_HEADER, rd = "Re-disclose",
         way_w = layout.way_col, ep_w = EPOCH_W, di_w = DIST_W,
-        tr_w = TRIG_W, pin_w = PIN_W, rd_w = RD_W,
+        tr_w = TRIG_W, wp_w = layout.waypoints.width(), rd_w = RD_W,
     );
     let _ = writeln!(out, "  {}", paint(Style::new().bold(), head));
-    let _ = writeln!(out, "  {}", paint(Role::Muted, "─".repeat(layout.separator)));
+    let _ = writeln!(out, "  {}", paint(Role::Muted, agent_theme::rule_glyph().repeat(layout.separator)));
 }
 
 /// Render a single way row against a content-sized layout (`Layout::for_rows`).
@@ -263,10 +316,10 @@ pub fn write_way_row_with<W: WayRow>(
 
     let (dist_on, dist_off) = pair(distance_style(distance, current_epoch));
 
-    let pin = if let Some(bar_pos) = bar_positions.get(index).copied().flatten() {
-        pin_str(cluster_of(bar_pos, unique_pos))
-    } else {
-        " ".to_string()
+    let wp = &layout.waypoints;
+    let waypoint = match bar_positions.get(index).copied().flatten() {
+        Some(bar_pos) => wp.text(cluster_of(bar_pos, unique_pos, wp.len())),
+        None => " ".repeat(wp.width()),
     };
 
     let agent_display = if w.agent_id() == "main" {
@@ -280,14 +333,14 @@ pub fn write_way_row_with<W: WayRow>(
 
     let g = " ".repeat(COL_GAP);
     let cells = format!(
-        "{way:<way_w$}{g}{ep:>ep_w$}{g}{dc}{di:>di_w$}{dc_off}{g}{tr:<tr_w$}{g}{pin}{g}{rd}{g}{agent}",
+        "{way:<way_w$}{g}{ep:>ep_w$}{g}{dc}{di:>di_w$}{dc_off}{g}{tr:<tr_w$}{g}{waypoint}{g}{rd}{g}{agent}",
         way = agent_fmt::truncate_visible(&display_id, layout.way_col),
         ep = w.epoch_fired(),
         dc = dist_on,
         dc_off = dist_off,
         di = distance,
         tr = trigger_display,
-        pin = pin,
+        waypoint = waypoint,
         rd = next_padded,
         agent = agent_display,
         way_w = layout.way_col, ep_w = EPOCH_W, di_w = DIST_W, tr_w = TRIG_W,
@@ -306,7 +359,7 @@ pub fn write_way_row_with<W: WayRow>(
         let _ = writeln!(
             out,
             "  {}",
-            paint(Role::Muted, format!("  ✓ check ({} fires, decay={:.2})", w.check_fires(), decay))
+            paint(Role::Muted, format!("  {} check ({} fires, decay={:.2})", painter().decor().events.check, w.check_fires(), decay))
         );
     }
 }
@@ -349,7 +402,7 @@ pub fn write_token_timeline<W: WayRow>(
             .unwrap_or(0) as usize)
             .min(bar_width - 1);
 
-        let ci = cluster_of(full_bar_pos, unique_pos);
+        let ci = cluster_of(full_bar_pos, unique_pos, layout.waypoints.len());
 
         points.push(RdPoint {
             at_k: redisclose_at_k,
@@ -425,11 +478,15 @@ pub fn write_token_timeline<W: WayRow>(
 
     // Forecast
     if !future_points.is_empty() {
-        let mut zoom_markers: Vec<Option<usize>> = vec![None; bar_width];
+        // A waypoint takes the set's width, so the strip has that many
+        // fewer slots.
+        let wp = &layout.waypoints;
+        let slots = (bar_width / wp.width()).max(1);
+        let mut zoom_markers: Vec<Option<usize>> = vec![None; slots];
         for p in &future_points {
             let offset = p.at_k.saturating_sub(zoom_start);
-            let pos = ((offset * bar_width as u64) / zoom_span) as usize;
-            let pos = pos.min(bar_width - 1);
+            let pos = ((offset * slots as u64) / zoom_span) as usize;
+            let pos = pos.min(slots - 1);
             if zoom_markers[pos].is_none() {
                 zoom_markers[pos] = Some(p.cluster);
             }
@@ -444,10 +501,10 @@ pub fn write_token_timeline<W: WayRow>(
         );
 
         let mut marker_str = String::from("  ");
-        for marker in &zoom_markers[..bar_width] {
+        for marker in &zoom_markers {
             match marker {
-                Some(ci) => marker_str.push_str(&pin_str(*ci)),
-                None => marker_str.push('·'),
+                Some(ci) => marker_str.push_str(&wp.text(*ci)),
+                None => marker_str.push_str(&format!("{:<w$}", '·', w = wp.width())),
             }
         }
         let _ = writeln!(out, "{marker_str}");
@@ -472,14 +529,15 @@ pub fn write_token_timeline<W: WayRow>(
 
     // Zone summary
     let mut zones = Vec::new();
+    let ev = painter().decor().events;
     if zone_past > 0 {
-        zones.push(paint(Role::Ok, format!("● {zone_past} re-disclose now")));
+        zones.push(paint(Role::Ok, format!("{} {zone_past} re-disclose now", ev.due[0])));
     }
     if zone_soon > 0 {
-        zones.push(paint(WARN, format!("◐ {zone_soon} approaching")));
+        zones.push(paint(WARN, format!("{} {zone_soon} approaching", ev.approaching)));
     }
     if zone_later > 0 {
-        zones.push(paint(Role::Muted, format!("○ {zone_later} distant")));
+        zones.push(paint(Role::Muted, format!("{} {zone_later} distant", ev.due[1])));
     }
 
     if !zones.is_empty() {
@@ -572,18 +630,20 @@ pub fn predict_next<W: WayRow>(
     current_epoch: u64,
     current_tokens_k: u64,
 ) -> String {
-    let (text, style) = next_cell(w, current_epoch, current_tokens_k);
+    let (text, style) = next_cell(w, current_epoch, current_tokens_k, &painter().decor().events);
     paint(style, text)
 }
 
 /// The Re-disclose cell's text and style: when a way will next
 /// re-disclose against its own curve. Every form fits the column's
 /// [`RD_W`] cells: `● now`, `◐ 80%`, `↩ epoch 43` for the epoch its check
-/// re-discloses it at, `↩ suppressed` when that is past reach.
+/// re-discloses it at, `↩ suppressed` when that is past reach, each mark
+/// the theme's event glyph (`ev`).
 pub fn next_cell<W: WayRow>(
     w: &W,
     current_epoch: u64,
     current_tokens_k: u64,
+    ev: &Events,
 ) -> (String, Style) {
     let threshold_k = w.refire_threshold_k();
     let token_pos_k = w.token_pos() / 1000;
@@ -592,13 +652,13 @@ pub fn next_cell<W: WayRow>(
     let muted = Style::new().role(Role::Muted);
 
     if token_pct >= 100 {
-        return ("● now".into(), Style::new().role(Role::Ok));
+        return (format!("{} now", ev.due[0]), Style::new().role(Role::Ok));
     }
     if token_pct >= 75 {
-        return (format!("◐ {token_pct}%"), WARN);
+        return (format!("{} {token_pct}%", ev.approaching), WARN);
     }
     if token_pct >= 50 {
-        return (format!("◔ {token_pct}%"), muted);
+        return (format!("{} {token_pct}%", ev.halfway), muted);
     }
 
     let epoch_distance = current_epoch.saturating_sub(w.epoch_fired());
@@ -609,9 +669,9 @@ pub fn next_cell<W: WayRow>(
         let next_epoch = w.epoch_fired() + needed_distance;
         if epoch_distance < needed_distance {
             if needed_distance > 500 {
-                return ("↩ suppressed".into(), muted);
+                return (format!("{} suppressed", ev.redisclosed), muted);
             }
-            return (format!("↩ epoch {}", short_epoch(next_epoch)), muted);
+            return (format!("{} epoch {}", ev.redisclosed, short_epoch(next_epoch)), muted);
         }
     }
 
@@ -663,12 +723,53 @@ mod tests {
         fn refire_threshold_k(&self) -> u64 { 40 }
     }
 
+    fn nights() -> Option<agent_theme::Waypoints> {
+        agent_theme::ThemeSet::bundled().get("miami-nights").and_then(|t| t.decor.waypoints)
+    }
+
+    #[test]
+    fn a_two_cell_waypoint_set_keeps_the_plain_table_aligned() {
+        let _g = agent_theme::scoped(agent_theme::Painter::plain());
+        for (set, wide) in [(WaypointSet::default(), 1), (WaypointSet::new(nights(), agent_theme::ColorDepth::TrueColor), 2)] {
+            let layout = Layout::for_id_width_in(3, 120, set);
+            let mut out = String::new();
+            write_table_header_with(&mut out, &layout);
+            write_way_row_with(&mut out, &MockWay { id: "adr", depth: 0 }, 9, 0, &[Some(0)], &[0], 0, "", "", &layout);
+            let lines: Vec<&str> = out.lines().collect();
+            let (head, row) = (lines[0], lines[2]);
+            // The display column `needle` starts at.
+            let col = |line: &str, needle: &str| agent_tui::wrap::str_width(&line[..line.find(needle).unwrap()]);
+            assert_eq!(col(row, set.glyph(0)), col(head, WAYPOINT_HEADER), "width {wide}: the waypoint under its header");
+            assert_eq!(col(row, "─"), col(head, "Re-disclose"), "width {wide}: Re-disclose under its header");
+            assert_eq!(col(head, "Re-disclose") - col(head, WAYPOINT_HEADER), wide + COL_GAP);
+        }
+    }
+
+    #[test]
+    fn a_two_cell_waypoint_set_halves_the_plain_forecast_slots() {
+        let _g = agent_theme::scoped(agent_theme::Painter::plain());
+        let strip = |set: WaypointSet| {
+            let layout = Layout::for_id_width_in(3, 80, set);
+            let mut out = String::new();
+            write_token_timeline(&mut out, &[MockWay { id: "adr", depth: 0 }], &[], 10, 200, &layout);
+            let lines: Vec<String> = out.lines().map(str::to_string).collect();
+            let at = lines.iter().position(|l| l.contains("Forecast")).expect("a forecast");
+            (lines[at + 1].clone(), layout.bar_width)
+        };
+        let (one, bar) = strip(WaypointSet::default());
+        assert_eq!(agent_tui::wrap::str_width(&one), 2 + bar, "one cell a slot");
+        assert!(one.contains("··"));
+        let (two, bar) = strip(WaypointSet::new(nights(), agent_theme::ColorDepth::TrueColor));
+        assert_eq!(agent_tui::wrap::str_width(&two), 2 + bar / 2 * 2, "two cells a slot, half as many");
+        assert!(two.contains('🌴') && !two.contains("··"), "{two}");
+    }
+
     #[test]
     fn a_row_style_survives_the_cells_own_resets() {
         let p = agent_theme::Painter::terminal(agent_theme::ColorDepth::TrueColor);
         let _g = agent_theme::scoped(p);
         let (on, off) = p.pair(Role::Selection);
-        let layout = Layout::for_id_width_in(3, 120);
+        let layout = Layout::for_id_width_in(3, 120, WaypointSet::default());
         let mut row = String::new();
         write_way_row_with(&mut row, &MockWay { id: "adr", depth: 0 }, 9, 0, &[None], &[], 0, &on, off, &layout);
         let line = row.lines().next().unwrap();
@@ -702,7 +803,7 @@ mod tests {
     /// epoch at the largest epochs, `↩ suppressed`, and the percentages.
     #[test]
     fn every_re_disclose_cell_fits_its_column() {
-        let cell = |w: Due, epoch: u64, tokens_k: u64| next_cell(&w, epoch, tokens_k).0;
+        let cell = |w: Due, epoch: u64, tokens_k: u64| next_cell(&w, epoch, tokens_k, &Events::DEFAULT).0;
         // Two check fires put the next one epoch on; nine put it the
         // farthest short of suppression, 288 on.
         let mut cells = vec![
@@ -761,7 +862,7 @@ mod tests {
             Fired { token_k: 540, window_k: 400 },
         ];
         for width in [80, 100, 160] {
-            let layout = Layout::for_id_width_in(3, width);
+            let layout = Layout::for_id_width_in(3, width, WaypointSet::default());
             for (ways, current, gauge) in [(&ways, 1000, "100% (1000K / 1000K)"), (&mid, 550, "55% (550K / 1000K)")] {
                 let pos = compute_bar_positions_in(ways, 1000, layout.bar_width);
                 let unique = unique_positions(&pos);
@@ -809,7 +910,7 @@ mod tests {
         // A 25-char id snaps to the next stop above 25 (+1 gap) → 28, a multiple
         // of WAY_TAB and strictly wider than the id, so there's always a gap. Pin
         // the terminal width so the ceiling clamp doesn't bind (see `for_id_width_in`).
-        let layout = Layout::for_id_width_in(25, 200);
+        let layout = Layout::for_id_width_in(25, 200, WaypointSet::default());
         assert_eq!(layout.way_col % WAY_TAB, 0, "way_col lands on a tab stop");
         assert!(layout.way_col > 25, "column is wider than the longest id");
         assert!(layout.way_col <= 28, "but only snaps to the next stop, not beyond");
@@ -820,8 +921,8 @@ mod tests {
         // When the terminal can't fit a full-width id, `way_col` clamps to the
         // ceiling (which reserves room for the trailing columns) rather than
         // snapping — the "tabbed" property yields to "use all the room there is".
-        let layout = Layout::for_id_width_in(50, 80);
-        let ceiling = 80 - (INDENT + TRAILING_W);
+        let layout = Layout::for_id_width_in(50, 80, WaypointSet::default());
+        let ceiling = 80 - (INDENT + trailing_w(1));
         assert_eq!(layout.way_col, ceiling, "clamped to the ceiling, not the snap");
         assert!(layout.way_col >= WAY_MIN, "still at least the floor");
     }
@@ -830,15 +931,15 @@ mod tests {
     fn way_col_never_collapses_below_the_floor() {
         // An empty frame (max id 0) still renders a real column, even on a narrow
         // terminal where the ceiling itself bottoms out at the floor.
-        assert_eq!(Layout::for_id_width_in(0, 200).way_col, WAY_MIN);
-        assert_eq!(Layout::for_id_width_in(0, 40).way_col, WAY_MIN);
+        assert_eq!(Layout::for_id_width_in(0, 200, WaypointSet::default()).way_col, WAY_MIN);
+        assert_eq!(Layout::for_id_width_in(0, 40, WaypointSet::default()).way_col, WAY_MIN);
     }
 
     #[test]
     fn header_and_row_columns_align() {
         // The Epoch column must begin at the same visible offset in the header and
         // in a data row — that's the guarantee the shared constants exist to keep.
-        let layout = Layout::for_id_width_in(20, 200);
+        let layout = Layout::for_id_width_in(20, 200, WaypointSet::default());
         let ways = [MockWay { id: "documentation/adr", depth: 0 }];
         let bar_positions = compute_bar_positions(&ways, 1000);
         let unique_pos = unique_positions(&bar_positions);
@@ -870,7 +971,7 @@ mod tests {
     fn a_long_multibyte_way_id_truncates_on_a_char_boundary() {
         // Two-byte chars, offset by one byte in the second id, so whatever the
         // column width, one of the two cuts lands inside a char if counted in bytes.
-        let layout = Layout::for_id_width_in(0, 40);
+        let layout = Layout::for_id_width_in(0, 40, WaypointSet::default());
         let ids = ["é".repeat(60), format!("a{}", "é".repeat(60))];
         for id in &ids {
             let way = MockWay { id: Box::leak(id.clone().into_boxed_str()), depth: 0 };

@@ -172,48 +172,49 @@ pub fn run(json_output: bool) -> Result<()> {
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
-        println!("Ways Engine Status");
-        println!("==================");
-        println!();
-        println!("Install:   {}", install_line());
-        println!();
+        let mut out = String::new();
+        agent_fmt::say!(out, "Ways Engine Status");
+        agent_fmt::say!(out, "{}", agent_theme::underline("=================="));
+        agent_fmt::say!(out);
+        agent_fmt::say!(out, "Install:   {}", install_line());
+        agent_fmt::say!(out);
 
         // Engine & language
-        println!("Engine:    {engine}");
-        println!("Gate:      {}", gate_line());
+        agent_fmt::say!(out, "Engine:    {engine}");
+        agent_fmt::say!(out, "Gate:      {}", gate_line());
         let (unset, sessions, profiles) = judge_state();
         for line in judge_text(&unset, &sessions, &profiles) {
-            println!("{line}");
+            agent_fmt::say!(out, "{line}");
         }
-        println!("Language:  {output_language}");
-        println!();
+        agent_fmt::say!(out, "Language:  {output_language}");
+        agent_fmt::say!(out);
 
         // Binaries
-        println!("Binaries:");
+        agent_fmt::say!(out, "Binaries:");
         if let Ok(exe) = std::env::current_exe() {
-            println!("  ways:      {}", exe.display());
+            agent_fmt::say!(out, "  ways:      {}", exe.display());
         }
         if let Some(ref embed) = way_embed {
-            println!("  way-embed: {}", binary_with_version(embed));
+            agent_fmt::say!(out, "  way-embed: {}", binary_with_version(embed));
         } else {
-            println!("  way-embed: not found");
+            agent_fmt::say!(out, "  way-embed: not found");
         }
-        println!("  ways-mcp:  {}", mcp_binary_line());
+        agent_fmt::say!(out, "  ways-mcp:  {}", mcp_binary_line());
         match crate::cmd::agent::resolve() {
-            Some(p) => println!("  ways-agent: {}", p.display()),
-            None => println!("  ways-agent: not found — the relevance gate is off until `ways manage update --commit` installs it"),
+            Some(p) => agent_fmt::say!(out, "  ways-agent: {}", p.display()),
+            None => agent_fmt::say!(out, "  ways-agent: not found — the relevance gate is off until `ways manage update --commit` installs it"),
         }
         for t in install_targets().0.iter().filter(|t| t.enabled) {
-            println!("  mcp:       {} in {}", mcp_registration(&t.dir()), t.path);
+            agent_fmt::say!(out, "  mcp:       {} in {}", mcp_registration(&t.dir()), t.path);
             for line in crate::cmd::mods::status_lines(&t.dir(), &t.config_path()) {
-                println!("  mod:       {line} in {}", t.path);
+                agent_fmt::say!(out, "  mod:       {line} in {}", t.path);
             }
         }
-        println!();
+        agent_fmt::say!(out);
 
         // Model
         let model_status = if model_exists { "OK" } else { "MISSING" };
-        println!("Model:     {} ({})", model_path.display(), model_status);
+        agent_fmt::say!(out, "Model:     {} ({})", model_path.display(), model_status);
 
         // Corpus
         if corpus_exists {
@@ -222,7 +223,7 @@ pub fn run(json_output: bool) -> Result<()> {
             } else {
                 ""
             };
-            println!(
+            agent_fmt::say!(out, 
                 "Corpus:    {} ({} entries, {} embedded){}",
                 corpus_path.display(),
                 corpus_count,
@@ -240,10 +241,10 @@ pub fn run(json_output: bool) -> Result<()> {
                     .as_ref()
                     .and_then(|m| m["reason"].as_str())
                     .unwrap_or("reason not recorded");
-                println!("           last build did not fully embed: {reason}; run `ways corpus`");
+                agent_fmt::say!(out, "           last build did not fully embed: {reason}; run `ways corpus`");
             }
         } else {
-            println!("Corpus:    MISSING — run `ways corpus` to generate");
+            agent_fmt::say!(out, "Corpus:    MISSING — run `ways corpus` to generate");
         }
 
         // Dual corpus status
@@ -253,15 +254,15 @@ pub fn run(json_output: bool) -> Result<()> {
         let en_count = if en_corpus.is_file() { count_lines(&en_corpus) } else { 0 };
         let multi_count = if multi_corpus.is_file() { count_lines(&multi_corpus) } else { 0 };
         if en_count > 0 || multi_count > 0 {
-            println!("  EN corpus:    {} ways", en_count);
-            println!("  Multi corpus: {} ways", multi_count);
+            agent_fmt::say!(out, "  EN corpus:    {} ways", en_count);
+            agent_fmt::say!(out, "  Multi corpus: {} ways", multi_count);
             if multi_count > 0 && !multi_model_path.is_file() {
-                println!("  ⚠ {} multilingual ways but model missing — run: make setup", multi_count);
+                agent_fmt::say!(out, "  ⚠ {} multilingual ways but model missing — run: make setup", multi_count);
             }
         }
 
         if corpus_exists {
-            println!("{}", sidecar_line(&sidecar));
+            agent_fmt::say!(out, "{}", sidecar_line(&sidecar));
         }
 
         // Calibration (ADR-156): without it the semantic lane cannot fire.
@@ -271,33 +272,33 @@ pub fn run(json_output: bool) -> Result<()> {
                     let multi = cal_multi_auc
                         .map(|a| format!(", multi AUC {a:.3}"))
                         .unwrap_or_default();
-                    println!("Calibration: EN AUC {auc:.3}{multi}");
+                    agent_fmt::say!(out, "Calibration: EN AUC {auc:.3}{multi}");
                 }
-                None => println!(
+                None => agent_fmt::say!(out, 
                     "Calibration: MISSING — semantic lane disabled (keyword-only); run `ways corpus`"
                 ),
             }
         }
-        println!();
+        agent_fmt::say!(out);
 
         // Ways
-        println!("Core ways: {} total, {} semantic", global_total, global_semantic);
+        agent_fmt::say!(out, "Core ways: {} total, {} semantic", global_total, global_semantic);
         if user_total > 0 {
-            println!("User ways: {} total, {} semantic", user_total, user_semantic);
+            agent_fmt::say!(out, "User ways: {} total, {} semantic", user_total, user_semantic);
         }
 
         if !disabled.is_empty() {
-            println!("Disabled domains: {}", disabled.join(", "));
+            agent_fmt::say!(out, "Disabled domains: {}", disabled.join(", "));
         }
         if !disabled_ways.is_empty() {
-            println!("Disabled ways:    {} (project scope, ADR-131; `dir/*` covers every way under it)", disabled_ways.join(", "));
+            agent_fmt::say!(out, "Disabled ways:    {} (project scope, ADR-131; `dir/*` covers every way under it)", disabled_ways.join(", "));
             let on = &enabled_ways;
             if !on.is_empty() {
-                println!("Enabled by name:  {} (overrides a disabled prefix, ADR-701)", on.join(", "));
+                agent_fmt::say!(out, "Enabled by name:  {} (overrides a disabled prefix, ADR-701)", on.join(", "));
             }
         }
         if !toggles_checked {
-            println!("Way toggles: not checked, because the shipped ways were not found");
+            agent_fmt::say!(out, "Way toggles: not checked, because the shipped ways were not found");
         }
         if !unmatched.is_empty() {
             let keys: Vec<String> = unmatched
@@ -307,29 +308,30 @@ pub fn run(json_output: bool) -> Result<()> {
                     None => u.key.clone(),
                 })
                 .collect();
-            println!("Toggles naming no way: {} in {} switch nothing", keys.join("; "), project_file.display());
+            agent_fmt::say!(out, "Toggles naming no way: {} in {} switch nothing", keys.join("; "), project_file.display());
         }
         if !settings_findings.is_empty() {
-            println!("Settings:  {} finding(s); `ways settings lint` lists them, `ways settings fix <section>` repairs one", settings_findings.len());
+            agent_fmt::say!(out, "Settings:  {} finding(s); `ways settings lint` lists them, `ways settings fix <section>` repairs one", settings_findings.len());
             for f in &settings_findings {
-                println!("  {f}");
+                agent_fmt::say!(out, "  {f}");
             }
         }
-        println!();
+        agent_fmt::say!(out);
 
         // Projects
         if !projects.is_empty() {
-            println!("Projects:");
+            agent_fmt::say!(out, "Projects:");
             for proj in &projects {
                 let path = proj["path"].as_str().unwrap_or("?");
                 let count = proj["ways_count"].as_u64().unwrap_or(0);
                 // Shorten home prefix
                 let display = path.replace(&home_dir().display().to_string(), "~");
-                println!("  {display}: {count} ways");
+                agent_fmt::say!(out, "  {display}: {count} ways");
             }
         } else {
-            println!("Projects: none in manifest");
+            agent_fmt::say!(out, "Projects: none in manifest");
         }
+        agent_fmt::print_block(&out);
     }
 
     Ok(())

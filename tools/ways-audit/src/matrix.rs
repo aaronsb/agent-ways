@@ -8,7 +8,7 @@ pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
     let ways = match manifest["ways"].as_object() {
         Some(m) => m,
         None => {
-            println!("No ways data.");
+            agent_fmt::print_block("No ways data.\n");
             return Ok(());
         }
     };
@@ -68,29 +68,34 @@ pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
         return Ok(());
     }
 
-    println!();
-    println!("{}", paint(Style::new().bold(), "Claim Traceability Matrix"));
-    println!();
-    println!(
+    let mut out = String::new();
+    agent_fmt::say!(out);
+    agent_fmt::say!(out, "{}", paint(Style::new().bold(), "Claim Traceability Matrix"));
+    agent_fmt::say!(out);
+    agent_fmt::say!(
+        out,
         "  {}",
         paint(Style::new().bold(), format!("{:<28} {:<50} JUSTIFICATION", "WAY", "CONTROL"))
     );
-    println!(
+    agent_fmt::say!(
+        out,
         "  {}",
-        paint(Role::Muted, format!("{:<28} {:<50} -------------", "---", "-------"))
+        paint(Role::Muted, agent_theme::underline(&format!("{:<28} {:<50} -------------", "---", "-------")))
     );
 
     for (way, ctrl, just) in &rows {
-        println!("  {:<28} {:<50} {}", way, &ctrl[..ctrl.len().min(50)], just);
+        agent_fmt::say!(out, "  {:<28} {:<50} {}", way, &ctrl[..ctrl.len().min(50)], just);
     }
 
     let total_c = rows.len();
     let total_j = rows.iter().filter(|(_, _, j)| !j.starts_with('(')).count();
-    println!();
-    println!(
+    agent_fmt::say!(out);
+    agent_fmt::say!(
+        out,
         "  {}",
         paint(Role::Muted, format!("Total: {total_c} control claims, {total_j} justifications"))
     );
 
+    agent_fmt::print_block(&out);
     Ok(())
 }

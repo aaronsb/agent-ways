@@ -23,7 +23,7 @@ pub fn run(manifest: &Value, project_root: Option<&std::path::Path>, json_out: b
     let ways = match manifest["ways"].as_object() {
         Some(m) => m,
         None => {
-            println!("No ways data.");
+            agent_fmt::print_block("No ways data.\n");
             return Ok(());
         }
     };
@@ -138,37 +138,43 @@ pub fn run(manifest: &Value, project_root: Option<&std::path::Path>, json_out: b
         return Ok(());
     }
 
-    println!();
-    println!("{}", paint(BOLD, "Claim Lint Report"));
-    println!();
+    let mut out = String::new();
+    agent_fmt::say!(out);
+    agent_fmt::say!(out, "{}", paint(BOLD, "Claim Lint Report"));
+    agent_fmt::say!(out);
 
     for (way, msg) in &errors {
-        println!(
+        agent_fmt::say!(
+            out,
             "  {} [{:<28}] {}",
             paint(Role::Err, format!("{:<6}", "ERROR")), way, msg
         );
     }
     for (way, msg) in &warnings {
-        println!(
+        agent_fmt::say!(
+            out,
             "  {} [{:<28}] {}",
             paint(WARN, format!("{:<6}", "WARN")), way, msg
         );
     }
 
     if error_count == 0 && warning_count == 0 {
-        println!("  {}", paint(Role::Ok, "All claim checks passed."));
+        agent_fmt::say!(out, "  {}", paint(Role::Ok, "All claim checks passed."));
     } else {
-        println!();
-        println!(
+        agent_fmt::say!(out);
+        agent_fmt::say!(
+            out,
             "  Results: {}, {}",
             paint(Role::Err, format!("{error_count} error(s)")),
             paint(WARN, format!("{warning_count} warning(s)"))
         );
         if error_count > 0 {
-            println!("  {}", paint(Role::Err, "Lint FAILED — errors must be resolved."));
+            agent_fmt::say!(out, "  {}", paint(Role::Err, "Lint FAILED — errors must be resolved."));
+            agent_fmt::print_block(&out);
             std::process::exit(1);
         }
     }
 
+    agent_fmt::print_block(&out);
     Ok(())
 }

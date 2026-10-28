@@ -139,7 +139,7 @@ status: accepted
 date: 2026-10-01
 deciders:
   - aaronsb
-related: [ADR-503, ADR-153, ADR-189, ADR-501, ADR-502, ADR-184, ADR-505, ADR-408, ADR-409]
+related: [ADR-503, ADR-153, ADR-189, ADR-501, ADR-502, ADR-184, ADR-505, ADR-408, ADR-409, ADR-513]
 ---
 
 # ADR-504: One TUI engine on ratatui and one theme for every interactive surface
@@ -200,6 +200,9 @@ A dry-run spike (`tools/spikes/settings-tui` on `spike/settings-tui`) built the 
    - *`ways projects`.* The commands of `tools/claude-projects` are reimplemented in Rust over `claude-sessions` as the `ways projects` subcommand group: `list` (with `--active`, `--memory`, `--stale`), `search`, `show`, `stats`, `cleanup` (with `--dry-run`) and `relocate` (a preview by default, `--execute` to move). A group in `ways` over a binary of its own because `ways` already links `claude-sessions` and `agent-theme`, and a separate binary would need its own release, download script and install link. The change that lands the port deletes the Python file and its link in `scripts/install.sh`, and updates `docs/migration-1.0.md`. The command regrouping (ADR-503 §14) may move the group under `ways session`. `cleanup` and `relocate` keep their confirmation; they are the only writers into `~/.claude/projects`, which `claude-sessions` itself only reads.
    - *Terminal capability.* `agent-theme` detects colour depth (truecolor, 256, 16, none) and `NO_COLOR`. `TERM=dumb`, an empty `TERM` and a non-empty `NO_COLOR` mean no colour. agent-identity's `TermCaps` is removed; its callers in `agent-identity`, `attend`, `attend-chat` and `attend-identity-view` take the depth from `agent-theme`, and agent-identity chooses between its rich and basic palettes from it.
    - *Categorical colour.* agent-identity's identity colours are the one categorical palette. `ways show` pins its clusters from it, and its ten `PIN_COLORS` are removed. Categorical colours stay outside themes (§4).
+
+     > Note, 2026-10-28: ADR-513 item 15 names these markers waypoints and lets a theme carry its own set, each glyph with an optional colour, chosen by the `theme.waypoints` setting. Under that setting a theme's waypoint colours replace this palette for its waypoints; a theme without a set, and the `default` setting, keep it. The text above is left as it was decided.
+
    - *Every coloured output goes through `agent-theme`.* Status colours are theme roles; categorical colours and the banner gradient are written by the same outputs. Plain CLIs use the ANSI output and screens the ratatui output. `ways-cli`, `agent-fmt` (tables, banner and permissions), `ways-audit`, agent-identity's ANSI rendering, `attend-identity-view` and `attend` move to it. A raw SGR literal (`\x1b[`, `\033[`, `\u{1b}[`) in a Rust source under `tools/` outside `agent-theme` and `tools/spikes` is a finding: a test in `agent-theme`, run by `cargo test` and `make test`, scans the workspace sources and fails naming each one with its file and line. A second test plants a literal in a fixture file and requires the scan to report it. Until the plain outputs move (§9), the scan reads an allowlist of the files that still carry literals; each step of §9 removes its files, and a file not on the list fails from the first change.
    - *Rust.* New tooling on these paths is Rust: the crates above, the `ways projects` port, the SGR check and the test kit's PNG renderer (§12). Once the port lands no Python remains on them, and no shim keeps the `claude-projects` name. Existing non-Rust tools on these paths are follow-ups outside this decision: the bash hook adapters in `hooks/ways/`, whose remaining logic moves into the binaries under §11.
    - *Note, 2026-10-02 (PR #714 review).* Attend's signal trays and instance registries are not named by the bare encoder. `claude-sessions::attend_key` names them: the project slug, `-`, then base 36 of Claude Code's 32-bit path hash over the full path.
@@ -290,6 +293,8 @@ A dry-run spike (`tools/spikes/settings-tui` on `spike/settings-tui`) built the 
 The operator, on the review of PR #711: "the default theme should be something that works on a conventional 16 color terminal, then any other theme can be chosen (with the 16 color theme as a fallback if the terminal isn't 256 or true color)".
 
 The default theme is the 16-colour terminal palette: the status roles are the terminal's own ANSI colours, muted text is dim and selection is reverse video. Any other theme can be chosen. A chosen theme is used only where the detected depth is 256 or truecolor; on a 16-colour terminal the whole default theme is used in its place, not the chosen theme reduced to 16 colours. Without colour, behaviour is as §4 and §6 state. `agent_theme::Painter::select` holds the rule.
+
+> Note, 2026-10-28: ADR-513 item 9 narrows this note to colours. Below 256 colours, on a 16-colour terminal or under `NO_COLOR`, the default theme's colours are used in place of the chosen theme's, and the chosen theme's border, rule, mark and presence glyphs and its ornament keep drawing. The operator chose "Keep glyphs" when asked whether decoration should survive there. The note above put the whole default theme in place of the chosen one, and its text is left as it was decided.
 
 ## Note (2026-10-02): the hooks call `ways hook <event>`
 

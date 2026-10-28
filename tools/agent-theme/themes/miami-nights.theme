@@ -1,0 +1,65 @@
+# Miami Nights — original to agent-ways: retro-future. A violet sky falling
+# to a magenta horizon, neon pink, cyan and mint, palms in the titles.
+THEME_NAME="miami-nights"
+THEME_LABEL="Miami Nights"
+THEME_KIND="dark"
+THEME_BACKGROUND="fill"
+THEME_GRADIENT="vertical #0d0221 #241046 #4a0e4e"
+
+THEME_BG="#160634"
+THEME_FG="#f4eaff"
+THEME_DIM="#8f7cb3"
+THEME_SUBTLE="#3a1d63"
+THEME_ACCENT="#ff2a8a"
+THEME_INFO="#2de2e6"
+THEME_OK="#3dffa2"
+THEME_WARN="#ffd319"
+THEME_ERR="#ff5b3a"
+THEME_ALT="#b967ff"
+
+THEME_SELECTION="#3d1466"
+
+THEME_BORDER="thick"
+THEME_RULE_GLYPHS="─━"
+THEME_MARK="▌"
+THEME_PRESENCE="●○"
+THEME_ORNAMENT="🌴"
+
+THEME_EVENT_HEAD="◓"
+THEME_EVENT_MARK="┊"
+THEME_EVENT_MATCHED="✦"
+THEME_EVENT_INJECTED="✧"
+THEME_EVENT_SUPPRESSED="☾"
+THEME_EVENT_REDISCLOSED="↻"
+
+# Waypoints: the marks a way's cluster wears on the replay.
+
+[[waypoints]]
+glyph = "🌴"
+
+[[waypoints]]
+glyph = "🦩"
+
+[[waypoints]]
+glyph = "🚤"
+
+[[waypoints]]
+glyph = "🐊"
+
+[[waypoints]]
+glyph = "🌆"
+
+[[waypoints]]
+glyph = "🎷"
+
+[[waypoints]]
+glyph = "📼"
+
+[[waypoints]]
+glyph = "🎹"
+
+[[waypoints]]
+glyph = "🌃"
+
+[[waypoints]]
+glyph = "🍸"

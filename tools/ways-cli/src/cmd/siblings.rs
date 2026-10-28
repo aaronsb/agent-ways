@@ -39,26 +39,27 @@ pub fn run(id: String, threshold: f64, corpus: Option<String>, _model: Option<St
                 .iter()
                 .partition(|(id, _)| !id.starts_with('-'));
 
-            println!();
+            let mut out = String::new();
+            agent_fmt::say!(out);
 
             if !global.is_empty() {
-                println!("{}", agent_theme::paint(agent_theme::Style::new().bold(), "Global ways"));
-                println!();
+                agent_fmt::say!(out, "{}", agent_theme::paint(agent_theme::Style::new().bold(), "Global ways"));
+                agent_fmt::say!(out);
                 let mut t = Table::new(&["Sibling", "Cosine"]);
                 t.max_width(0, 50);
                 t.align(1, Align::Right);
                 for (other_id, score) in &global {
                     t.add_owned(vec![other_id.to_string(), format!("{score:.4}")]);
                 }
-                t.print();
+                out.push_str(&t.render());
             }
 
             if !project.is_empty() {
                 if !global.is_empty() {
-                    println!();
+                    agent_fmt::say!(out);
                 }
-                println!("{}", agent_theme::paint(agent_theme::Style::new().bold(), "Project-local ways"));
-                println!();
+                agent_fmt::say!(out, "{}", agent_theme::paint(agent_theme::Style::new().bold(), "Project-local ways"));
+                agent_fmt::say!(out);
                 let mut t = Table::new(&["Sibling", "Cosine"]);
                 t.max_width(0, 50);
                 t.align(1, Align::Right);
@@ -66,10 +67,11 @@ pub fn run(id: String, threshold: f64, corpus: Option<String>, _model: Option<St
                     let display = format_project_way(other_id);
                     t.add_owned(vec![display, format!("{score:.4}")]);
                 }
-                t.print();
+                out.push_str(&t.render());
             }
 
-            println!();
+            agent_fmt::say!(out);
+            agent_fmt::print_block(&out);
         }
     }
 
@@ -115,9 +117,7 @@ fn print_matrix(entries: &[CorpusEntry], threshold: f64) {
         }
     }
 
-    println!();
-    t.print();
-    println!();
+    agent_fmt::print_block(&format!("\n{}\n", t.render()));
 }
 
 /// Format a project-local way ID for display.

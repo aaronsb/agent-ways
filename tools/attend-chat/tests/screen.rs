@@ -140,7 +140,7 @@ fn transcript() -> Vec<Signal> {
 fn chat_at(depth: ColorDepth, theme: Option<&str>) -> Chat {
     let f = fixture();
     let dir = f.root.join("config/agent-ways/themes");
-    let (painter, _) = agent_theme::Painter::named_in(theme, &dir, depth);
+    let (painter, _) = agent_theme::Painter::named_in(theme, Some(&dir), depth);
     // The frames before the left column (ADR-405) keep the legend row;
     // the column's own tests turn it on (`chat_side`). Each chat keeps its
     // Hide messages here watermarks to itself: one test's hide never
@@ -1519,7 +1519,7 @@ fn golden_the_column_draws_lozenges_in_the_round_shape() {
     let mut g = goldens();
     let f = fixture();
     let dir = f.root.join("config/agent-ways/themes");
-    let (painter, _) = agent_theme::Painter::named_in(Some("nord"), &dir, ColorDepth::TrueColor);
+    let (painter, _) = agent_theme::Painter::named_in(Some("nord"), Some(&dir), ColorDepth::TrueColor);
     let mut c = Chat::new(None, Palette { painter }, Shape::ROUND).heartbeat(false).pinned(UNIX_EPOCH + Duration::from_secs(NOW), 0);
     for s in transcript() {
         c.push(s);
@@ -1877,4 +1877,14 @@ fn a_channel_menu_joins_a_channel_the_human_is_not_in() {
     press(&mut c, key(KeyCode::Up));
     press(&mut c, key(KeyCode::Enter));
     assert_eq!(c.status(), "dry run: /join not run");
+}
+
+#[test]
+fn a_gradient_theme_grounds_every_cell_of_the_chat() {
+    for side in [false, true] {
+        let mut c = chat_at(ColorDepth::TrueColor, Some("miami-nights")).sidebar(side);
+        for (w, h) in [(80, 25), (120, 35)] {
+            assert_eq!(testkit::ungrounded(&testkit::render_screen(&mut c, w, h)), None, "sidebar {side}, {w}x{h}: a cell off the theme's ground");
+        }
+    }
 }

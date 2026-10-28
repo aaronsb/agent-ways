@@ -589,7 +589,7 @@ impl Flow {
         // The selection is the item's own style, not the list's highlight, which
         // would repaint the badge's background.
         let list = List::new(items)
-            .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()))
+            .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()))
             .highlight_spacing(HighlightSpacing::Always);
         self.list.select(if rows == 0 { None } else { Some(self.cursor) });
         self.hits.list = body;
