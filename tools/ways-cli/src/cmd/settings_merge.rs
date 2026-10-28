@@ -2,7 +2,7 @@
 //!
 //! `settings.json` is owned by Claude Code; agent-ways co-owns only its
 //! slices: the **hook entries** it ships, its **permission strings**, and the
-//! **`theme`** key while the ways-theme mod is wanted (ADR-513), whose earlier
+//! **`theme`** key while the ways-theme mod is wanted (ADR-514), whose earlier
 //! value it keeps and restores. Everything else (model, plugins, env,
 //! credentials) is the user's and must survive untouched. This is the `kubectl apply` problem — multiple writers, one
 //! declarative object, field-level ownership — solved the same way: a **three-way
@@ -72,7 +72,7 @@ pub const WAYS_DENY: &[&str] = &[
 ];
 
 /// The Claude Code theme the ways-theme mod keeps current: one custom theme
-/// file, `themes/ways.json`, whose colours follow `theme.active` (ADR-513).
+/// file, `themes/ways.json`, whose colours follow `theme.active` (ADR-514).
 pub const WAYS_THEME: &str = "custom:ways";
 
 /// That file before the mod first writes it, and whenever no agent-ways theme
@@ -1525,7 +1525,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // --- the theme key, owned while the ways-theme mod is wanted (ADR-513) ---
+    // --- the theme key, owned while the ways-theme mod is wanted (ADR-514) ---
 
     #[test]
     fn a_wanted_theme_mod_selects_its_theme_and_unwanted_removes_it() {

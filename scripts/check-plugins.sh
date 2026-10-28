@@ -6,7 +6,7 @@
 #      MOD_VERSION constant in hooks/lib.ts equals the plugin's version;
 #      the ways-judge and ways-theme plugins carry ways' version, for the
 #      same reason (they call `ways judge host|take|answer`, ADR-708, and
-#      `ways settings theme export`, ADR-513);
+#      `ways settings theme export`, ADR-514);
 #   2. `claude plugin validate` on the marketplace and on each plugin;
 #   3. `claude plugin test` on each plugin;
 #   4. a TypeScript check against Claude Code's declarations, where they can

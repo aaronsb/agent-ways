@@ -146,7 +146,7 @@ pub const ATTEND_MOD_RETIRED: &str = "`attend_mod` was retired by ADR-512 and is
 pub const MODS: &[(&str, &str)] = &[
     ("attend", "The attend mod in Claude Code (ADR-406, ADR-414): whether a session starts listening, keepwarm, keepalive, the install and poll timing."),
     ("ways-judge", "The ways-judge mod, the relevance gate's Claude Code internal engine (ADR-708): whether repair installs it."),
-    ("ways-theme", "The ways-theme mod, which has Claude Code follow theme.active (ADR-513): whether repair installs it."),
+    ("ways-theme", "The ways-theme mod, which has Claude Code follow theme.active (ADR-514): whether repair installs it."),
 ];
 
 const BASE: KeySpec = KeySpec {
@@ -565,7 +565,7 @@ const KEYS: &[KeySpec] = &[
         default: DefaultValue::Yaml("false"),
         scope: Scope::Machine,
         doc: "Whether `ways manage repair` installs the ways-theme mod in Claude Code.",
-        long: "Installed, Claude Code follows theme.active: the settings merge selects the custom theme custom:ways in the target's settings.json, keeping the theme it replaces, and the mod rewrites themes/ways.json from theme.active at each session start, Claude Code's own dark for terminal, and frames replies and tool calls in the theme's colours on the terminal. Uninstalled, the earlier theme comes back and themes/ways.json goes; a theme the person chose meanwhile is kept. It adds no setting of its own, and when ways fails it changes nothing (ADR-513). Read per target, from the user file and the target's own file, the target winning; a project cannot set it.",
+        long: "Installed, Claude Code follows theme.active: the settings merge selects the custom theme custom:ways in the target's settings.json, keeping the theme it replaces, and the mod rewrites themes/ways.json from theme.active at each session start, Claude Code's own dark for terminal, and frames replies and tool calls in the theme's colours on the terminal. Uninstalled, the earlier theme comes back and themes/ways.json goes; a theme the person chose meanwhile is kept. It adds no setting of its own, and when ways fails it changes nothing (ADR-514). Read per target, from the user file and the target's own file, the target winning; a project cannot set it.",
         ..BASE
     },
     KeySpec {

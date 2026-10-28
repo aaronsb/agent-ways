@@ -1,4 +1,4 @@
-//! Other programs' themes, made from a theme's roles (ADR-513). Each target
+//! Other programs' themes, made from a theme's roles (ADR-514). Each target
 //! maps roles to its own keys; a theme pins any of those keys in its
 //! `[target.<name>]` table, and a pin wins over the mapping.
 //!

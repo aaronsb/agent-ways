@@ -60,7 +60,7 @@ PLUGIN_MANIFEST="plugins/attend/.claude-plugin/plugin.json"
 # The mod cannot read its manifest, so it carries its version as a constant
 # the beat sends to attend; the bump moves both.
 PLUGIN_LIB="plugins/attend/hooks/lib.ts"
-# The ways-judge mod (ADR-708) and the ways-theme mod (ADR-513) call ways
+# The ways-judge mod (ADR-708) and the ways-theme mod (ADR-514) call ways
 # verbs and carry ways' version; bumping ways moves them.
 WAYS_MANIFESTS=("plugins/ways-judge/.claude-plugin/plugin.json" "plugins/ways-theme/.claude-plugin/plugin.json")
 

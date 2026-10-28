@@ -1,6 +1,6 @@
 # ways-theme
 
-Claude Code follows the active agent-ways theme (ADR-513). The theme is chosen in one place, `theme.active` in ways settings, and the mod adds no setting of its own.
+Claude Code follows the active agent-ways theme (ADR-514). The theme is chosen in one place, `theme.active` in ways settings, and the mod adds no setting of its own.
 
 `ways manage mod install ways-theme --commit`, or the mod tab in `ways settings`, installs it. `mods.ways-theme.install` defaults to false.
 

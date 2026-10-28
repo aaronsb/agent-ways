@@ -1,6 +1,6 @@
 {
   "name": "ways-theme",
   "version": "1.45.0",
-  "description": "Claude Code follows the active agent-ways theme (ADR-513): at session start, theme.active exported to the custom theme custom:ways, over the ways CLI.",
+  "description": "Claude Code follows the active agent-ways theme (ADR-514): at session start, theme.active exported to the custom theme custom:ways, over the ways CLI.",
   "author": { "name": "Aaron Bockelie" }
 }

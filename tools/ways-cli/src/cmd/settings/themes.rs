@@ -5,7 +5,7 @@
 //! they refuse and report alike.
 //!
 //! `ways settings theme export` prints a theme for readers outside
-//! agent-ways (ADR-513): the resolved roles, or a target program's own
+//! agent-ways (ADR-514): the resolved roles, or a target program's own
 //! theme mapped from them in agent-theme.
 
 use agent_settings::exit;
