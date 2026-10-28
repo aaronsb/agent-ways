@@ -75,37 +75,36 @@ impl<'a> Banner<'a> {
     }
 
     pub fn print(&self) {
-        let font = match FIGlet::from_content(ANSI_SHADOW_FLF) {
-            Ok(f) => f,
-            Err(_) => {
-                // Fallback: just print the text bold
-                println!("\n  {}\n", paint(Style::new().bold(), self.text));
-                return;
-            }
-        };
-        let figure = match font.convert(self.text) {
-            Some(f) => f,
-            None => {
-                println!("\n  {}\n", paint(Style::new().bold(), self.text));
-                return;
-            }
+        crate::print_block(&self.render());
+    }
+
+    /// The banner as text: the title, the figure a gradient line at a time,
+    /// then the subtitle and version.
+    pub fn render(&self) -> String {
+        let mut out = String::new();
+        let font = FIGlet::from_content(ANSI_SHADOW_FLF).ok();
+        let Some(figure) = font.as_ref().and_then(|f| f.convert(self.text)) else {
+            // Fallback: just the text, bold
+            crate::say!(out, "\n  {}\n", paint(Style::new().bold(), self.text));
+            return out;
         };
 
-        println!();
-        println!("  {}", paint(Style::new().role(Role::Muted).underline(), self.title));
-        println!();
+        crate::say!(out);
+        crate::say!(out, "  {}", paint(Style::new().role(Role::Muted).underline(), self.title));
+        crate::say!(out);
 
         for (i, line) in figure.to_string().lines().enumerate() {
             let color = self.gradient[i % self.gradient.len()];
-            println!("{}", paint(color, line));
+            crate::say!(out, "{}", paint(color, line));
         }
 
         if let Some(sub) = self.subtitle {
-            println!("  {}", paint(Role::Muted, sub));
+            crate::say!(out, "  {}", paint(Role::Muted, sub));
         }
         if let Some(ver) = self.version {
-            println!("  {}", paint(Role::Muted, ver));
+            crate::say!(out, "  {}", paint(Role::Muted, ver));
         }
-        println!();
+        crate::say!(out);
+        out
     }
 }

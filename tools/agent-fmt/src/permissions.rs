@@ -202,16 +202,18 @@ pub fn display_audit(
     results: &[AuditResult],
     has_tpm: bool,
 ) {
-    use crate::{Align, Table};
+    use crate::{print_block, say, Align, Table};
     use agent_theme::{paint, Role, Style};
 
-    println!();
-    println!("  {} (ADR-116)", paint(Style::new().bold(), title));
-    println!();
+    let mut out = String::new();
+    say!(out);
+    say!(out, "  {} (ADR-116)", paint(Style::new().bold(), title));
+    say!(out);
 
     if results.is_empty() {
-        println!("  No {source_header}s declare requires: fields.");
-        println!();
+        say!(out, "  No {source_header}s declare requires: fields.");
+        say!(out);
+        print_block(&out);
         return;
     }
 
@@ -236,26 +238,27 @@ pub fn display_audit(
         table.add(vec![&r.source, &r.requirement, &status]);
     }
 
-    table.print();
-    println!();
+    out.push_str(&table.render());
+    say!(out);
 
     if missing_count > 0 {
-        println!("  {} Add to settings.json:", paint(Role::Warn, format!("{missing_count} missing permission(s).")));
+        say!(out, "  {} Add to settings.json:", paint(Role::Warn, format!("{missing_count} missing permission(s).")));
         for p in &missing_perms {
-            println!("    \"{p}\"");
+            say!(out, "    \"{p}\"");
         }
     } else {
-        println!("  {}", paint(Role::Ok, "All permissions granted."));
+        say!(out, "  {}", paint(Role::Ok, "All permissions granted."));
     }
 
     if has_tpm {
-        println!();
-        println!("  {} ~/.claude/trusted-project-macros found.", paint(Role::Warn, "Deprecation:"));
-        println!("  This file is deprecated — use requires: fields in way frontmatter instead.");
-        println!("  See ADR-116 for migration guidance.");
+        say!(out);
+        say!(out, "  {} ~/.claude/trusted-project-macros found.", paint(Role::Warn, "Deprecation:"));
+        say!(out, "  This file is deprecated — use requires: fields in way frontmatter instead.");
+        say!(out, "  See ADR-116 for migration guidance.");
     }
 
-    println!();
+    say!(out);
+    print_block(&out);
 }
 
 #[cfg(test)]
