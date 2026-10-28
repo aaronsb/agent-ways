@@ -57,7 +57,7 @@ export type Prefs = {
   shell: boolean
   // Fenced code on the terminal and shell output in the skin's colours.
   highlight: boolean
-  // Bare URLs as links: OSC 8 where the terminal draws it, anchors on the desktop.
+  // Bare URLs and paths as links: OSC 8 where the terminal draws it, anchors on the desktop.
   links: boolean
   // Copy buttons on tables, code, diagrams and whole replies.
   copy: boolean

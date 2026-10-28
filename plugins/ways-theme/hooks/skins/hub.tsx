@@ -196,6 +196,7 @@ export async function pickUp($: EngineInterface): Promise<void> {
 // Read once a session or a turn and kept here: each read through `$` is a dispatch, and
 // every row draws often.
 let hyperlinks = false
+let home: string | undefined
 let sessionCwd: string | undefined
 let hasTouched = false
 
@@ -216,12 +217,14 @@ type Needs = { links?: boolean; touched?: boolean; folds?: boolean; cwd?: string
 async function sessionLook($: EngineInterface, e: { requestId: string; surface: RenderSurface }, look: Look, needs: Needs): Promise<Look> {
   const folds = memberOf(foldsAtom, e)
   const links = needs.links === true && look.prefs.links && (e.surface !== 'terminal' || hyperlinks)
+  const paths = links ? { cwd: needs.cwd ?? (await cwdOf($)), ...(home === undefined ? {} : { home }) } : undefined
   const touched = needs.touched === true && hasTouched ? { files: await read($, touchedAtom), cwd: needs.cwd ?? (await cwdOf($)) } : undefined
   const open = needs.folds === true && look.prefs.fold ? new Set(await read($, folds)) : undefined
 
   return {
     ...look,
     links,
+    ...(paths === undefined ? {} : { paths }),
     ...(touched === undefined ? {} : { touched }),
     ...(open === undefined
       ? {}
@@ -234,13 +237,17 @@ async function sessionLook($: EngineInterface, e: { requestId: string; surface: 
   }
 }
 
+// Text that may hold a path: one slash between names, or a file name.
+const hasPathish = (text: string): boolean => /[\w.-]\/[\w.-]|\w\.[A-Za-z]{1,5}\b/.test(text)
+
 const replyNeeds = (text: string, segments: readonly { kind: string }[]): Needs => ({
-  links: /https?:\/\//.test(text),
-  touched: /[\w.-]\/[\w.-]|\w\.[A-Za-z]{1,5}\b/.test(text),
+  links: /https?:\/\//.test(text) || hasPathish(text),
+  touched: hasPathish(text),
   folds: segments.some(segment => segment.kind === 'code' || segment.kind === 'table'),
 })
 
-async function readHyperlinks($: EngineInterface): Promise<void> {
+// Whether the terminal draws links, and the home a `~/` path links under.
+async function readLinkEnv($: EngineInterface): Promise<void> {
   // Each name spelled out: the engine lists the variables a module reads from its source.
   hyperlinks = hyperlinksFrom({
     FORCE_HYPERLINK: await $.env.get('FORCE_HYPERLINK'),
@@ -253,6 +260,7 @@ async function readHyperlinks($: EngineInterface): Promise<void> {
     TMUX: await $.env.get('TMUX'),
     CI: await $.env.get('CI'),
   })
+  home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
 }
 
 // A drawing's cards animate on their first draw only, keyed by the drawing's instance.
@@ -357,7 +365,7 @@ export function registerSkins(on: On, shared: Shared): void {
     lastFailure = undefined
     await pickUp($)
     sessionCwd = e.cwd
-    await readHyperlinks($).catch(quietly($, 'hyperlink check'))
+    await readLinkEnv($).catch(quietly($, 'link check'))
     await refreshUsage($).catch(quietly($, 'usage'))
     ticker?.cancel()
     pickup?.cancel()
@@ -453,7 +461,7 @@ export function registerSkins(on: On, shared: Shared): void {
     const path = fields.file_path ?? fields.notebook_path
     const disclosure = memberOf(disclosureAtom, e)
     const open = isOpen(await read($, disclosure), e.props.isErrored)
-    const base = await sessionLook($, e, lookOf($.ui.resolve(e), setup, e.surface, copier($, e.surface)), { touched: typeof path === 'string', folds: open, cwd })
+    const base = await sessionLook($, e, lookOf($.ui.resolve(e), setup, e.surface, copier($, e.surface)), { links: open, touched: typeof path === 'string', folds: open, cwd })
     const framed = isFramed(setup, e, shared.view())
     const plain = base.svg === undefined ? base : { ...base, isFirstDraw: await firstDraws($, e) }
     const look = framed ? forFrame(plain) : plain

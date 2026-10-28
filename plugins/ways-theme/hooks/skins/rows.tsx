@@ -5,6 +5,7 @@ import type { ElementTable, RenderSurface } from 'claude-code'
 
 import type { Prefs, Touch, TurnStats } from '../../types'
 import { formatDuration, formatMs } from './format'
+import type { PathBase } from './links'
 import { columnWidths, isShell, tableArt, widthOf, wrapLines } from './markdown'
 import { diffFenceTag, diffRows, fenceDiff, newOnly } from './diff-fence'
 import { FOLD_CODE, FOLD_ROWS, foldButton, shownCount } from './fold'
@@ -55,8 +56,10 @@ export type Look = {
   // True the first time this drawing shows the card by that key; a card drawn again is
   // drawn settled. Absent, every card animates.
   isFirstDraw?: (key: string, entranceMs: number) => boolean
-  // Bare URLs drawn as links: the terminal's OSC 8, the desktop's anchors. Absent, text.
+  // Bare URLs and paths drawn as links: the terminal's OSC 8, the desktop's anchors. Absent, text.
   links?: boolean
+  // Where a path links from: the session's folder, and home for `~/`. Absent, paths stay text.
+  paths?: PathBase
   // The files this turn created or edited, by absolute path, and the folder paths are under.
   touched?: { files: Readonly<Record<string, Touch>>; cwd: string }
   // The blocks the person unfolded, by key, and how to flip one. Absent, nothing folds.

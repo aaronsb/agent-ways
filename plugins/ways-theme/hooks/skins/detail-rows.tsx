@@ -6,6 +6,7 @@ import type { RenderElement } from 'claude-code'
 import { chunksOf, DETAIL_LINES, MAX_BLOCK, unifiedDiff } from './detail'
 import type { Body, Field } from './detail'
 import { shortenPath } from './format'
+import { fileHref } from './links'
 import { diffCard, terminalCard } from './rows'
 import type { Look } from './rows'
 import { OUTPUT_FOLD, shellRows } from './shell-rows'
@@ -53,16 +54,22 @@ export function disclosedRow(look: Look, row: RenderElement, isOpen: boolean, to
   )
 }
 
+// The input, a field a row; a path field links to its file where the surface draws links.
 function fieldRows(look: Look, fields: readonly Field[]) {
-  const { Text } = look.ui
+  const { Link, Text } = look.ui
   const { palette } = look.skin
 
-  return fields.map(field => (
-    <Text>
-      <Text color={palette.muted}>{`${field.label}  `}</Text>
-      <Text color={palette.fg}>{field.value.length > MAX_BLOCK ? `${field.value.slice(0, MAX_BLOCK)}…` : field.value}</Text>
-    </Text>
-  ))
+  return fields.map(field => {
+    const isWhole = field.value.length <= MAX_BLOCK
+    const href = isWhole && field.label === 'path' && look.links === true && look.paths !== undefined ? fileHref(field.value, look.paths) : null
+
+    return (
+      <Text>
+        <Text color={palette.muted}>{`${field.label}  `}</Text>
+        <Text color={palette.fg}>{href !== null ? <Link href={href}>{field.value}</Link> : isWhole ? field.value : `${field.value.slice(0, MAX_BLOCK)}…`}</Text>
+      </Text>
+    )
+  })
 }
 
 // `show all 120 lines` under a folded answer, `show less` once it is open.
