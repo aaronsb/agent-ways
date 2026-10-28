@@ -42,6 +42,17 @@
 //! Every glyph is one grapheme one column wide, but the ornament, which may
 //! be two.
 //!
+//! Three tables may follow the bare keys, each optional. `[target.<name>]`
+//! pins a target's keys (see `target`). `[words]` holds the words Claude
+//! Code shows under the theme: each list is 1 to 12 entries of 1 to 24
+//! characters, no control characters, and either may be left out.
+//!
+//! ```toml
+//! [words]
+//! spinner = ["Cruising", "Gliding"]  # while a turn runs
+//! done = ["Cruised", "Docked"]       # the turn's done line
+//! ```
+//!
 //! Waypoints, the marks a way's cluster wears on the replay, come last, as
 //! an array of tables; each fg is held to 3:1 on the theme's grounds when
 //! the theme is drawn:
@@ -59,7 +70,8 @@ use toml::Spanned;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use crate::model::{intern, Axis, Background, Border, Decor, Events, Gradient, Kind, Overrides, Rgb, Slots, Theme, Waypoint, Waypoints};
+use crate::model::{intern, Axis, Background, Border, Decor, Events, Gradient, Kind, Overrides, Rgb, Slots, Targets, Theme, Waypoint, Waypoints, Words};
+use crate::target;
 
 /// The dotfiles tool bindings: part of the palette structure, no meaning here.
 const IGNORED: [&str; 3] = ["THEME_VIVID", "THEME_BAT", "THEME_DELTA"];
@@ -162,8 +174,10 @@ impl<'de> Deserialize<'de> for Leaf {
     }
 }
 
-/// The document's top level, in file order.
-struct Top(Vec<(Spanned<String>, Spanned<Leaf>)>);
+/// The document's top level, in file order. Keys carry their spans and
+/// values do not: toml refuses a span for a table a dotted header opens
+/// (`[target.claude-code]`).
+struct Top(Vec<(Spanned<String>, Leaf)>);
 
 impl<'de> Deserialize<'de> for Top {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Top, D::Error> {
@@ -175,7 +189,7 @@ impl<'de> Deserialize<'de> for Top {
             }
             fn visit_map<A: MapAccess<'de>>(self, mut m: A) -> Result<Top, A::Error> {
                 let mut out = Vec::new();
-                while let Some(kv) = m.next_entry::<Spanned<String>, Spanned<Leaf>>()? {
+                while let Some(kv) = m.next_entry::<Spanned<String>, Leaf>()? {
                     out.push(kv);
                 }
                 Ok(Top(out))
@@ -206,6 +220,19 @@ fn syntax(src: &str, e: &toml::de::Error) -> ThemeError {
         let key = text.split_once('=').map_or("", |(k, _)| k.trim());
         return ThemeError::at(n, format!("`{key}` is a date; a value is a double-quoted string"));
     }
+    // toml cannot span a table a dotted key or a deeper header opens
+    // (`target.claude-code.claude = ...`, `[target.claude-code.extra]`), and
+    // its message names its own internals.
+    if first.contains("borrowed string") {
+        let path = text.split_once('=').map_or(text, |(k, _)| k).trim().trim_matches(['[', ']']).trim();
+        let mut parts = path.split('.').map(str::trim);
+        let head = parts.next().unwrap_or("");
+        let table = match (head, parts.next()) {
+            ("target", Some(name)) => format!("target.{name}"),
+            _ => head.to_string(),
+        };
+        return ThemeError::at(n, format!("`{head}` is a table; write `[{table}]` and put each key under it"));
+    }
     let hint = match text.split_once('=').map(|(_, v)| v.trim()) {
         Some(v) if !v.starts_with('"') => "; values are double-quoted strings",
         _ => "",
@@ -233,10 +260,11 @@ fn gradient(value: &str) -> Result<Gradient, String> {
     Gradient::new(axis, &stops).ok_or_else(|| format!("THEME_GRADIENT takes 2 to 4 stops; `{value}` has {}", stops.len()))
 }
 
-/// The control characters and the line and paragraph separators: a glyph
-/// holding one would move the cursor or break the line it is drawn in.
-fn unprintable(g: &str) -> bool {
-    g.chars().any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}'))
+/// The control characters, the line and paragraph separators and the bidi
+/// embeddings, overrides and isolates: text holding one would move the
+/// cursor, break the line it is drawn in or reorder it.
+pub(crate) fn unprintable(g: &str) -> bool {
+    g.chars().any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'))
 }
 
 /// `g`'s width in cells by ratatui's rule (ratatui-core 0.1.2,
@@ -256,7 +284,7 @@ fn glyphs(key: &str, value: &str, count: usize, widest: usize) -> Result<Vec<&'s
     }
     for x in &g {
         if unprintable(x) {
-            return Err(format!("`{key}` glyph `{}` is a control character or a line separator", x.escape_debug()));
+            return Err(format!("`{key}` glyph `{}` is a control character, a line separator or a bidi control", x.escape_debug()));
         }
         let w = cell_width(x);
         if w == 0 || w > widest {
@@ -303,7 +331,7 @@ fn emoji_presentation(c: char) -> bool {
 /// width to the font, so none is taken.
 fn waypoint_glyph(g: &str) -> Result<&'static str, String> {
     if unprintable(g) {
-        return Err(format!("glyph `{}` is a control character or a line separator", g.escape_debug()));
+        return Err(format!("glyph `{}` is a control character, a line separator or a bidi control", g.escape_debug()));
     }
     let n = g.graphemes(true).count();
     if n != 1 {
@@ -389,18 +417,29 @@ pub fn parse(src: &str) -> Result<Theme, Vec<ThemeError>> {
     let mut decor = Decor::default();
     let mut grad: Option<(usize, Gradient)> = None;
     let (mut border_at, mut glyphs_at) = (None, None);
+    let mut targets = Targets::default();
+    let mut words = Words::default();
 
     for (k, v) in top.0 {
         let (n, key) = (line_of(src, k.span().start), k.get_ref().as_str());
         if key == "waypoints" {
-            match waypoints(src, n, v.get_ref()) {
+            match waypoints(src, n, &v) {
                 Ok(w) => decor.waypoints = Some(w),
                 Err(e) => errs.extend(e),
             }
             continue;
         }
-        let value = match v.get_ref() {
+        let value = match &v {
             Leaf::Str(s) => s.as_str(),
+            // The one dispatch point for tables, by name.
+            Leaf::Table(entries) => {
+                match key {
+                    "target" => target_tables(src, entries, &mut targets, &mut errs),
+                    "words" => words_table(src, n, entries, &mut words, &mut errs),
+                    _ => errs.push(ThemeError::at(n, format!("`{key}` is a table; the tables are `[target.<name>]`, `[words]` and `[[waypoints]]`"))),
+                }
+                continue;
+            }
             other => {
                 errs.push(ThemeError::at(n, format!("`{key}` is {}; a value is a double-quoted string", other.kind())));
                 continue;
@@ -528,7 +567,70 @@ pub fn parse(src: &str) -> Result<Theme, Vec<ThemeError>> {
         overrides,
         gradient: grad.map(|(_, g)| g),
         decor,
+        targets,
+        words,
     })
+}
+
+/// The `[target.<name>]` tables: each names a target agent-ways knows, and
+/// pins its keys to `#rrggbb` colours.
+fn target_tables(src: &str, entries: &[(Spanned<String>, Spanned<Leaf>)], targets: &mut Targets, errs: &mut Vec<ThemeError>) {
+    for (name, body) in entries {
+        let (n, name) = (line_of(src, name.span().start), name.get_ref());
+        let Some(known) = target::keys(name) else {
+            let names: Vec<&str> = target::TARGETS.iter().map(|(t, _)| *t).collect();
+            errs.push(ThemeError::at(n, format!("unknown target `{name}`; the targets are {}", names.join(", "))));
+            continue;
+        };
+        let Leaf::Table(pins) = body.get_ref() else {
+            errs.push(ThemeError::at(n, format!("`target.{name}` must be a table")));
+            continue;
+        };
+        for (key, v) in pins {
+            let (n, key) = (line_of(src, key.span().start), key.get_ref());
+            if !known.contains(&key.as_str()) {
+                errs.push(ThemeError::at(n, format!("`{key}` is not a {name} key")));
+                continue;
+            }
+            match v.get_ref() {
+                Leaf::Str(s) => match Rgb::from_hex(s) {
+                    Some(c) => targets.set(name, key, c),
+                    None => errs.push(ThemeError::at(n, format!("`{s}` is not a #rrggbb colour (key `target.{name}.{key}`)"))),
+                },
+                _ => errs.push(ThemeError::at(n, format!("`target.{name}.{key}` must be a double-quoted #rrggbb colour"))),
+            }
+        }
+    }
+}
+
+/// The `[words]` table, its header on line `at`: `spinner` and `done`,
+/// each a list of 1 to 12 strings of 1 to 24 characters with no control
+/// character.
+fn words_table(src: &str, at: usize, entries: &[(Spanned<String>, Spanned<Leaf>)], words: &mut Words, errs: &mut Vec<ThemeError>) {
+    if entries.is_empty() {
+        errs.push(ThemeError::at(at, "`[words]` sets neither spinner nor done"));
+    }
+    for (key, v) in entries {
+        let (n, key) = (line_of(src, key.span().start), key.get_ref());
+        let err = |message: String| ThemeError::at(n, message);
+        if !Words::KEYS.contains(&key.as_str()) {
+            errs.push(err(format!("unknown key `words.{key}`; the keys are spinner and done")));
+            continue;
+        }
+        let strings: Option<Vec<String>> = match v.get_ref() {
+            Leaf::Array(items) => items.iter().map(|i| if let Leaf::Str(s) = i.get_ref() { Some(s.clone()) } else { None }).collect(),
+            _ => None,
+        };
+        let Some(list) = strings else {
+            errs.push(err(format!("`words.{key}` must be an array of double-quoted strings")));
+            continue;
+        };
+        match Words::check(&list) {
+            Ok(()) if key == "spinner" => words.spinner = list,
+            Ok(()) => words.done = list,
+            Err(e) => errs.push(err(format!("`words.{key}` {e}"))),
+        }
+    }
 }
 
 /// The theme as a file `parse` reads back to an equal theme, in the dotfiles
@@ -588,7 +690,23 @@ pub fn to_text(t: &Theme) -> String {
             out.push_str(&format!("THEME_{k}={}\n", toml::Value::String(v)));
         }
     }
-    // A table comes after every bare key.
+    // Tables follow every bare key, as TOML requires.
+    if !t.words.is_empty() {
+        out.push_str("\n[words]\n");
+        for key in Words::KEYS {
+            let list = t.words.get(key).unwrap_or_default();
+            if !list.is_empty() {
+                let quoted: Vec<String> = list.iter().map(|w| toml::Value::String(w.clone()).to_string()).collect();
+                out.push_str(&format!("{key} = [{}]\n", quoted.join(", ")));
+            }
+        }
+    }
+    for name in t.targets.names() {
+        out.push_str(&format!("\n[target.{name}]\n"));
+        for (k, c) in t.targets.pins(name) {
+            out.push_str(&format!("{k}=\"{}\"\n", c.hex()));
+        }
+    }
     for w in d.waypoints.iter().flat_map(|w| w.as_slice()) {
         out.push_str(&format!("\n[[waypoints]]\nglyph = {}\n", toml::Value::String(w.glyph.to_string())));
         if let Some(c) = w.fg {

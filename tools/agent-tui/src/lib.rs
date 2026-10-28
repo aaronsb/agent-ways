@@ -40,7 +40,7 @@ use std::io;
 
 use ratatui::DefaultTerminal;
 
-pub use adapter::{Adapter, Unwired, Write};
+pub use adapter::{Adapter, ClaudeCode, Render, Unwired, Write};
 pub use app::flow;
 pub use app::theme;
 pub use app::term::{clear_job_group, kill_group, kill_job_group, register_job_group, restore, Signals, TermGuard};

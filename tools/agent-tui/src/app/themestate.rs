@@ -37,6 +37,8 @@ pub fn terminal_theme() -> Theme {
         overrides: Default::default(),
         gradient: None,
         decor: Default::default(),
+        targets: Default::default(),
+        words: Default::default(),
     }
 }
 
@@ -52,11 +54,15 @@ pub struct Themes {
     /// The list cursor; the theme under it is previewed while the tab shows.
     pub cursor: usize,
     pub editor: Option<Editor>,
+    /// The Claude Code section's rows are open, with the cursor on this one.
+    pub claude: Option<usize>,
     /// Derived palettes, most recent first: deriving settles the status
     /// roles by search, too slow to repeat every frame.
     cache: RefCell<Vec<(Theme, Palette)>>,
     /// Derived roles by theme, for the checks, whatever the depth.
     roles: RefCell<Vec<(Theme, Roles)>>,
+    /// The roles Claude Code draws a theme with, by theme.
+    cc_roles: RefCell<Vec<(Theme, Roles)>>,
 }
 
 impl Themes {
@@ -64,7 +70,7 @@ impl Themes {
     /// adapter keeps (the default when absent or unknown).
     pub fn new(dir: Option<PathBuf>, depth: ColorDepth, active: Option<String>) -> Themes {
         let set = ThemeSet::load(dir.as_deref());
-        let mut t = Themes { dir, home: None, set, terminal: terminal_theme(), active: DEFAULT.into(), depth, cursor: 0, editor: None, cache: RefCell::default(), roles: RefCell::default() };
+        let mut t = Themes { dir, home: None, set, terminal: terminal_theme(), active: DEFAULT.into(), depth, cursor: 0, editor: None, claude: None, cache: RefCell::default(), roles: RefCell::default(), cc_roles: RefCell::default() };
         if let Some(a) = active.filter(|a| t.get(a).is_some()) {
             t.active = a;
         }
@@ -159,6 +165,19 @@ impl Themes {
         r
     }
 
+    /// The roles `t` takes in Claude Code: on the terminal grounds of its
+    /// kind, with no gradient ([`agent_theme::claude_code_roles`]).
+    pub fn claude_code_roles(&self, t: &Theme) -> Roles {
+        let mut cache = self.cc_roles.borrow_mut();
+        if let Some((_, r)) = cache.iter().find(|(c, _)| c == t) {
+            return *r;
+        }
+        let r = agent_theme::claude_code_roles(t);
+        cache.insert(0, (t.clone(), r));
+        cache.truncate(16);
+        r
+    }
+
     /// A name a new theme may take: the shared rules of
     /// [`named::check_name`], `[a-z0-9-]+`, and not already a theme's name.
     pub fn check_name(&self, name: &str) -> Result<(), String> {
@@ -174,6 +193,7 @@ impl Themes {
         self.cursor = self.cursor.min(self.list().len() - 1);
         self.cache.borrow_mut().clear();
         self.roles.borrow_mut().clear();
+        self.cc_roles.borrow_mut().clear();
     }
 
     pub fn focus(&mut self, name: &str) {
@@ -438,6 +458,8 @@ pub enum ThemeAct {
     /// Whose waypoints the screens draw, switched between the theme's and
     /// the screens' own.
     Waypoints,
+    /// The Claude Code section's settings, opened in place of the list.
+    ClaudeCode,
 }
 
 impl ThemeAct {
@@ -448,6 +470,7 @@ impl ThemeAct {
             ThemeAct::Edit => "edit",
             ThemeAct::Shape => "shape",
             ThemeAct::Waypoints => "waypoints",
+            ThemeAct::ClaudeCode => "claude",
         }
     }
 }

@@ -38,6 +38,7 @@ const KEYS: &[&str] = &[
     "yellow = changed · blue = differs from default · grey = read-only",
     "[a] = has actions · orange = queued · ! = a finding · y/n answers a confirm",
     "theme tab    ↑↓ preview · Enter use · a actions · e edit (^S saves)",
+    "             c Claude Code: Enter or ←→ changes a render setting",
 ];
 
 /// One modal: the dialog it shows and what its answers do. [`App::modal`]

@@ -21,7 +21,7 @@ agent-tui frame 100x30
 |│                                                     ││contrast  ok                               │|
 |│                                                     ││distinct  ok, err/warn ΔE 0.084            │|
 |│                                                     ││                                           │|
-|│                                                     ││                                           │|
+|│                                                     ││claude                      not active     │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -242,7 +242,14 @@ styles
  21  54-55  - - DIM
  21  99-99  - - DIM
  22   0-0   - - DIM
- 22  54-55  - - DIM
+ 22  54-65  - - DIM
+ 22  66-67  - Gray -
+ 22  69-70  - Gray -
+ 22  72-73  - DarkGray -
+ 22  75-76  - DarkGray -
+ 22  78-79  - Gray -
+ 22  81-82  - DarkGray -
+ 22  84-93  - - DIM
  22  99-99  - - DIM
  23   0-0   - - DIM
  23  54-55  - - DIM

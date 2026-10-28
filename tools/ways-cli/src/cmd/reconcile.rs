@@ -20,7 +20,7 @@
 
 use crate::cmd::manifest::{projection_roots, ProjectionRoot, RootKind};
 use crate::paths;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 
 /// Materialization strategy.
@@ -301,6 +301,8 @@ pub struct SettingsPlan {
     pub user_hooks_kept: usize,
     pub perms_added: Vec<String>,
     pub deny_added: Vec<String>,
+    /// The `theme` key's change, as `ways-theme` claims or gives it back.
+    pub theme: Option<String>,
     pub unchanged: bool,
 }
 
@@ -312,6 +314,12 @@ pub struct HookRef {
 
 /// Classify every root and dry-run the settings merge in memory.
 pub fn plan_for(state_root: &Path, source_root: &Path, dest_root: &Path, roots: &[ProjectionRoot]) -> Result<Plan> {
+    plan_with(state_root, source_root, dest_root, roots, theme_wanted(dest_root))
+}
+
+/// The plan, with whether the ways-theme mod is wanted given, so a test does
+/// not read the host's own config. A plan writes nothing and runs no command.
+fn plan_with(state_root: &Path, source_root: &Path, dest_root: &Path, roots: &[ProjectionRoot], want_theme: bool) -> Result<Plan> {
     let mut root_plans = Vec::new();
     for root in roots {
         let src = source_root.join(&root.rel);
@@ -341,7 +349,7 @@ pub fn plan_for(state_root: &Path, source_root: &Path, dest_root: &Path, roots: 
         let live: serde_json::Value = sm::read_json_or_empty(&dest_settings)?;
         let base_path = base_path_for(state_root, dest_root);
         let base = sm::base_for(&live, &base_path)?;
-        let merged = sm::merge(&live, &desired_hooks, &base, crate::config::global().secret_path_deny)?;
+        let merged = sm::merge(&live, &desired_hooks, &base, crate::config::global().secret_path_deny, claim_ahead(want_theme, dest_root))?;
         // Classify against the base as it exists on disk. A first apply's
         // seeded base claims entries by shape, and the plan must show those
         // as claimed rather than as ours from a prior version.
@@ -439,6 +447,7 @@ fn diff_settings(
         user_hooks_kept: kept,
         perms_added,
         deny_added,
+        theme: crate::cmd::settings_merge::theme_change(live, merged),
         unchanged: live == merged,
     }
 }
@@ -482,21 +491,25 @@ fn converge_one(
     report(&outcomes, source_root, dest_root, dry_run, quiet, false);
 
     // The settings.json three-way merge — the one shared-write seam (ADR-142).
-    // Skipped in dry-run; backed up + self-audited inside apply_to_files.
-    if !dry_run {
-        let src_settings = source_root.join("settings.json");
-        if src_settings.exists() {
-            let dest_settings = dest_root.join("settings.json");
-            let summary =
-                crate::cmd::settings_merge::apply_to_files(&src_settings, &dest_settings, base_path)?;
-            if !quiet {
-                eprintln!("{summary}");
-            }
+    // A dry run names only the theme change it would make; the write is
+    // backed up + self-audited inside apply_to_files.
+    let src_settings = source_root.join("settings.json");
+    let default_root = paths::projection_root();
+    if dry_run && !quiet && src_settings.exists() {
+        for line in theme_plan(&src_settings, dest_root, base_path, theme_claim_ahead(dest_root))? {
+            eprintln!("{line}");
+        }
+    }
+    let claimed = theme_claimed(dest_root);
+    if !dry_run && src_settings.exists() {
+        let summary = merge_settings(&src_settings, dest_root, base_path)?;
+        if !quiet {
+            eprintln!("{summary}");
         }
     }
 
     // The MCP server registration (ADR-501), after the links it points at.
-    if let (Some(line), false) = (crate::cmd::mcp_register::converge(source_root, dest_root, &paths::projection_root(), dry_run), quiet) {
+    if let (Some(line), false) = (crate::cmd::mcp_register::converge(source_root, dest_root, &default_root, dry_run), quiet) {
         eprintln!("{line}");
     }
 
@@ -504,7 +517,7 @@ fn converge_one(
     // its wanted state, mods.<name>.install resolved over the user config
     // and this target's (ADR-512 item 3).
     let config = target_config_path(dest_root);
-    let target = crate::cmd::attend_mod::Target { dest_root, default_root: &paths::projection_root(), config: &config };
+    let target = crate::cmd::attend_mod::Target { dest_root, default_root: &default_root, config: &config };
     let mut lines = crate::cmd::attend_mod::align_judge(dry_run);
     lines.extend(crate::cmd::attend_mod::converge_target(source_root, &target, None, dry_run));
     for line in lines {
@@ -513,7 +526,114 @@ fn converge_one(
         }
     }
 
+    // The theme claim follows the mod's install, which the mods stage has
+    // just moved: the merge runs again for the `theme` key alone.
+    if !dry_run && src_settings.exists() && theme_claimed(dest_root) != claimed {
+        let summary = merge_settings(&src_settings, dest_root, base_path)?;
+        if !quiet {
+            eprintln!("{summary}");
+        }
+    }
+
     Ok(())
+}
+
+/// Whether the ways-theme mod is wanted in the target at `dest_root`.
+pub(crate) fn theme_wanted(dest_root: &Path) -> bool {
+    crate::cmd::attend_mod::wants_in(&crate::cmd::attend_mod::THEME, &target_config_path(dest_root))
+}
+
+/// Whether the settings merge holds the `theme` key in the target at
+/// `dest_root` (ADR-514 item 5): the ways-theme mod is wanted there and
+/// Claude Code lists it installed. A wanted mod still pending, on a Claude
+/// Code below its floor or with no `claude` on PATH, claims nothing.
+pub(crate) fn theme_claimed(dest_root: &Path) -> bool {
+    claims_theme(theme_wanted(dest_root), dest_root)
+}
+
+fn claims_theme(wanted: bool, dest_root: &Path) -> bool {
+    wanted && crate::cmd::attend_mod::listed_in(&crate::cmd::attend_mod::THEME, dest_root)
+}
+
+/// The claim a what-if reports: the one the merge will hold once the mods
+/// stage has run, with a wanted mod not yet installed counted in when
+/// `claude` is on PATH. A what-if runs no `claude` (ADR-511): the CLI rewrites
+/// the target's settings.json as it starts, so the version floor and the
+/// install are checked when the mods stage runs.
+pub(crate) fn theme_claim_ahead(dest_root: &Path) -> bool {
+    claim_ahead(theme_wanted(dest_root), dest_root)
+}
+
+fn claim_ahead(wanted: bool, dest_root: &Path) -> bool {
+    use crate::cmd::attend_mod::{Record, THEME};
+    claims_theme(wanted, dest_root) || (wanted && !Record::read(dest_root).has(THEME.id) && crate::cmd::mcp_register::claude_bin().is_some())
+}
+
+/// The settings merge for the target at `dest_root`. While the ways-theme mod
+/// holds the `theme` key, the theme file the merge selects is laid down
+/// first, a default one when none is there yet, so Claude Code's watch on
+/// its themes folder holds from the first session and the mod's later writes
+/// apply live.
+pub(crate) fn merge_settings(src_settings: &Path, dest_root: &Path, base_path: &Path) -> Result<String> {
+    merge_settings_for(src_settings, dest_root, base_path, theme_wanted(dest_root))
+}
+
+fn merge_settings_for(src_settings: &Path, dest_root: &Path, base_path: &Path, want_theme: bool) -> Result<String> {
+    let claim = claims_theme(want_theme, dest_root);
+    let file = theme_file(dest_root);
+    if claim && !file.exists() {
+        std::fs::create_dir_all(dest_root.join("themes")).with_context(|| format!("creating {}", dest_root.join("themes").display()))?;
+        std::fs::write(&file, crate::cmd::settings_merge::DEFAULT_THEME_FILE).with_context(|| format!("writing {}", file.display()))?;
+    }
+    let owned = holds_theme(base_path, &dest_root.join("settings.json"));
+    let summary = crate::cmd::settings_merge::apply_to_files(src_settings, &dest_root.join("settings.json"), base_path, claim)?;
+    if owned && !claim {
+        remove_theme_file(dest_root)?;
+    }
+    Ok(summary)
+}
+
+/// Whether the theme file is ours to remove once the key is given back: the
+/// merge base records the claim, or settings.json selects `custom:ways`
+/// with the record lost.
+fn holds_theme(base_path: &Path, dest_settings: &Path) -> bool {
+    crate::cmd::settings_merge::owns_theme(base_path) || crate::cmd::settings_merge::selects_ways_theme(dest_settings)
+}
+
+/// The one Claude Code theme file the ways-theme mod keeps.
+fn theme_file(dest_root: &Path) -> PathBuf {
+    dest_root.join("themes").join("ways.json")
+}
+
+/// Removes the theme file once the merge has given the `theme` key back;
+/// nothing else in the themes folder is touched.
+fn remove_theme_file(dest_root: &Path) -> Result<()> {
+    let file = theme_file(dest_root);
+    if file.exists() {
+        std::fs::remove_file(&file).with_context(|| format!("removing {}", file.display()))?;
+    }
+    Ok(())
+}
+
+/// What the merge would do with the theme once its claim is `claim`, a line
+/// each: the `theme` key's change, with its value before and after, and the
+/// theme file written or removed.
+pub(crate) fn theme_plan(src_settings: &Path, dest_root: &Path, base_path: &Path, claim: bool) -> Result<Vec<String>> {
+    use crate::cmd::settings_merge as sm;
+    let desired = sm::read_json_or_empty(src_settings)?;
+    let hooks = desired.get("hooks").cloned().unwrap_or(serde_json::Value::Object(Default::default()));
+    let dest_settings = dest_root.join("settings.json");
+    let live = sm::read_json_or_empty(&dest_settings)?;
+    let base = sm::base_for(&live, base_path)?;
+    let merged = sm::merge(&live, &hooks, &base, crate::config::global().secret_path_deny, claim)?;
+    let mut out: Vec<String> = sm::theme_change(&live, &merged.settings).map(|c| format!("would change {c}")).into_iter().collect();
+    let file = theme_file(dest_root);
+    if claim && !file.exists() {
+        out.push(format!("would write {}", file.display()));
+    } else if !claim && file.exists() && holds_theme(base_path, &dest_settings) {
+        out.push(format!("would remove {}", file.display()));
+    }
+    Ok(out)
 }
 
 /// The config file of the target at `dest_root`: its own `config:` when the
@@ -546,7 +666,11 @@ fn withdraw_one(
         let dest_settings = dest_root.join("settings.json");
         let src_settings = source_root.join("settings.json");
         if dest_settings.exists() {
+            let owned = holds_theme(base_path, &dest_settings);
             settings_summary = Some(crate::cmd::settings_merge::withdraw_from_files(&src_settings, &dest_settings, base_path)?);
+            if owned {
+                remove_theme_file(dest_root)?;
+            }
         }
     }
     // The MCP registration and the mods go before the links, so none names a
@@ -958,7 +1082,7 @@ mod tests {
             r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"${HOME}/.claude/hooks/ways/check-setup.sh --v2"}]}]}}"#,
         )
         .unwrap();
-        let plan = plan_for(&state, &src, &dst, &roots).unwrap();
+        let plan = plan_with(&state, &src, &dst, &roots, false).unwrap();
         let s = plan.settings.as_ref().unwrap();
         assert_eq!(s.hooks_refreshed.len(), 1, "{s:?}");
         assert!(s.hooks_replaced.is_empty(), "{s:?}");
@@ -1062,6 +1186,28 @@ mod tests {
     }
 
     #[test]
+    fn a_plan_with_the_theme_mod_wanted_writes_nothing_and_runs_no_claude() {
+        let base = sandbox("plan-theme");
+        let src = base.join("data");
+        let dst = base.join("proj");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+        fake_source(&src);
+        fake_settings(&src);
+        std::fs::write(dst.join("settings.json"), user_settings()).unwrap();
+        let roots = projection_roots(&src);
+        let plan = plan_with(&base.join("state"), &src, &dst, &roots, true).unwrap();
+        // Claude Code's CLI rewrites the settings it starts under, so this
+        // holds only while the plan runs no `claude`.
+        assert_eq!(std::fs::read_to_string(dst.join("settings.json")).unwrap(), user_settings());
+        assert!(!dst.join("themes").exists());
+        // The claim is reported ahead wherever `claude` is on PATH.
+        let claims = plan.settings.as_ref().unwrap().theme.is_some();
+        assert_eq!(claims, crate::cmd::mcp_register::claude_bin().is_some());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
     fn plan_names_refused_roots_kept_user_hooks_and_added_entries() {
         let base = sandbox("plan");
         let src = base.join("data");
@@ -1074,7 +1220,7 @@ mod tests {
         std::fs::write(dst.join("settings.json"), user_settings()).unwrap();
         let roots = projection_roots(&src);
         let state = base.join("state");
-        let plan = plan_for(&state, &src, &dst, &roots).unwrap();
+        let plan = plan_with(&state, &src, &dst, &roots, false).unwrap();
         let skills = plan.roots.iter().find(|r| r.rel == "skills").unwrap();
         assert_eq!(skills.state, "refused");
         assert!(skills.detail.starts_with("real directory, 1 entries"));
@@ -1111,12 +1257,58 @@ mod tests {
         .unwrap();
         let roots = projection_roots(&src);
         let state = base.join("state");
-        let plan = plan_for(&state, &src, &dst, &roots).unwrap();
+        let plan = plan_with(&state, &src, &dst, &roots, false).unwrap();
         let s = plan.settings.as_ref().unwrap();
         assert_eq!(s.hooks_replaced.len(), 1, "claimed as ours: {s:?}");
         assert!(s.hooks_replaced[0].command.contains("my-own.sh"));
         assert!(plan.blocked, "a claimed user hook blocks activation");
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_wanted_theme_mod_claims_the_theme_only_once_installed() {
+        let dir = std::env::temp_dir().join(format!("ways-theme-claim-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (src, settings, base) = (dir.join("src.json"), dir.join("settings.json"), dir.join("base.json"));
+        std::fs::write(&src, "{}").unwrap();
+        let theme = || crate::cmd::settings_merge::read_json_or_empty(&settings).unwrap().get("theme").cloned();
+        let with_plugin = |listed: bool| {
+            let mut v = crate::cmd::settings_merge::read_json_or_empty(&settings).unwrap();
+            v["enabledPlugins"] = if listed { serde_json::json!({ "ways-theme@agent-ways": true }) } else { serde_json::json!({}) };
+            crate::cmd::settings_merge::save_json(&settings, &v).unwrap();
+        };
+        std::fs::write(&settings, r#"{"theme":"light"}"#).unwrap();
+        // Wanted, and pending: Claude Code below the floor, or no `claude`,
+        // installed nothing.
+        merge_settings_for(&src, &dir, &base, true).unwrap();
+        assert_eq!(theme(), Some(serde_json::json!("light")));
+        assert!(!theme_file(&dir).exists(), "a pending mod writes no theme file");
+        // Installed: claimed, and the default file laid down.
+        with_plugin(true);
+        merge_settings_for(&src, &dir, &base, true).unwrap();
+        assert_eq!(theme(), Some(serde_json::json!(crate::cmd::settings_merge::WAYS_THEME)));
+        assert!(theme_file(&dir).exists());
+        // Gone from Claude Code while still wanted: given back.
+        with_plugin(false);
+        merge_settings_for(&src, &dir, &base, true).unwrap();
+        assert_eq!(theme(), Some(serde_json::json!("light")));
+        assert!(!theme_file(&dir).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn giving_the_theme_back_removes_only_ways_json() {
+        let dir = std::env::temp_dir().join(format!("ways-theme-file-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("themes")).unwrap();
+        std::fs::write(dir.join("themes/ways.json"), "{}").unwrap();
+        std::fs::write(dir.join("themes/mine.json"), "{}").unwrap();
+        remove_theme_file(&dir).unwrap();
+        assert!(!dir.join("themes/ways.json").exists());
+        assert!(dir.join("themes/mine.json").exists(), "the person's own theme stays");
+        remove_theme_file(&dir).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

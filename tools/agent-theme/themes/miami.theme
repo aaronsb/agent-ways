@@ -33,6 +33,13 @@ THEME_EVENT_INJECTED="❀"
 THEME_EVENT_SUPPRESSED="☂"
 THEME_EVENT_REDISCLOSED="↻"
 
+# The words Claude Code shows under this theme (ways-theme mod). This file
+# is original to agent-ways, not a dotfiles palette: a table line does not
+# source as shell.
+[words]
+spinner = ["Sunning", "Surfing", "Strolling", "Sipping", "Sparkling", "Drifting"]
+done = ["Sunned", "Surfed", "Strolled", "Sipped"]
+
 # Waypoints: the marks a way's cluster wears on the replay.
 
 [[waypoints]]

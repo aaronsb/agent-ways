@@ -12,6 +12,11 @@
       "name": "ways-judge",
       "source": "./ways-judge",
       "description": "The relevance gate's Claude Code internal engine: judges the prompt lane's jobs through the session's own model, with no key, over the ways CLI."
+    },
+    {
+      "name": "ways-theme",
+      "source": "./ways-theme",
+      "description": "Claude Code follows the active agent-ways theme: theme.active exported to the custom theme custom:ways at session start, over the ways CLI, and the transcript drawn by a headless port of skins (MIT)."
     }
   ]
 }

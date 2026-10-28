@@ -2,7 +2,7 @@
 //! The slot names are the dotfiles palette's `THEME_*` keys, lowercased.
 //! A gradient and decoration glyphs are agent-ways' own, and optional.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 
 use crate::oklab::{lab, rgb, Lab};
@@ -473,6 +473,81 @@ pub(crate) fn intern(s: &str) -> &'static str {
     g
 }
 
+/// Colours a theme pins for another program's theme (`[target.<name>]`),
+/// by target, then by that program's own key. A pin wins over the target's
+/// mapping from the roles. Keys are checked against the target's list.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Targets(BTreeMap<String, BTreeMap<String, Rgb>>);
+
+impl Targets {
+    /// The pins for `target`, empty when the theme has none.
+    pub fn pins(&self, target: &str) -> impl Iterator<Item = (&str, Rgb)> {
+        self.0.get(target).into_iter().flatten().map(|(k, c)| (k.as_str(), *c))
+    }
+
+    pub fn set(&mut self, target: &str, key: &str, c: Rgb) {
+        self.0.entry(target.to_string()).or_default().insert(key.to_string(), c);
+    }
+
+    /// Every target with pins, in name order.
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.0.keys().map(String::as_str)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+/// The words Claude Code shows under a theme (`[words]`): the spinner's
+/// verbs while a turn runs, and the verb its done line uses. An empty list
+/// leaves Claude Code's own.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Words {
+    pub spinner: Vec<String>,
+    pub done: Vec<String>,
+}
+
+impl Words {
+    /// The two lists, by their key in the table.
+    pub const KEYS: [&str; 2] = ["spinner", "done"];
+    /// Entries a list takes, and characters an entry takes.
+    pub const MAX_ENTRIES: usize = 12;
+    pub const MAX_CHARS: usize = 24;
+
+    pub fn is_empty(&self) -> bool {
+        self.spinner.is_empty() && self.done.is_empty()
+    }
+
+    pub fn get(&self, key: &str) -> Option<&[String]> {
+        match key {
+            "spinner" => Some(&self.spinner),
+            "done" => Some(&self.done),
+            _ => None,
+        }
+    }
+
+    /// Why `entries` cannot be one of the lists, if it cannot.
+    pub fn check(entries: &[String]) -> Result<(), String> {
+        if entries.is_empty() || entries.len() > Self::MAX_ENTRIES {
+            return Err(format!("takes 1 to {} entries; it has {}", Self::MAX_ENTRIES, entries.len()));
+        }
+        for e in entries {
+            let n = e.chars().count();
+            if n == 0 || n > Self::MAX_CHARS {
+                return Err(format!("entry `{e}` is {n} characters; an entry is 1 to {}", Self::MAX_CHARS));
+            }
+            if crate::text::unprintable(e) {
+                return Err(format!("entry {e:?} has a control character, a line separator or a bidi control"));
+            }
+            if e.trim().is_empty() {
+                return Err(format!("entry {e:?} is blank"));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Theme {
     /// File-safe id: `[a-z0-9-]+`.
@@ -485,4 +560,6 @@ pub struct Theme {
     /// Painted under `Background::Fill` only.
     pub gradient: Option<Gradient>,
     pub decor: Decor,
+    pub targets: Targets,
+    pub words: Words,
 }

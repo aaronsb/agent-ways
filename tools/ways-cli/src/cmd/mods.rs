@@ -87,10 +87,31 @@ fn converge_in(targets: &[Enabled], only: Option<&Mod>, dry_run: bool) -> Vec<(P
     for (i, t) in targets.iter().enumerate() {
         let mut lines = if i == 0 { align.clone() } else { Vec::new() };
         lines.extend(attend_mod::converge_target(&src, &t.target(&default_root), only, dry_run));
+        // The ways-theme mod's other half is the settings key that selects its
+        // theme, which the settings merge holds while the mod is installed.
+        if only.is_none_or(|m| *m == attend_mod::THEME) && src.join("settings.json").exists() {
+            lines.extend(theme_lines(&src.join("settings.json"), &t.dir, dry_run));
+        }
         let prefix = targets.len() > 1;
         out.push((t.dir.clone(), lines.into_iter().map(|l| if prefix { format!("{}: {l}", shown(&t.dir)) } else { l }).collect()));
     }
     out
+}
+
+/// The settings merge's theme lines for one target after its mods have
+/// converged: what it would change, or what it changed.
+fn theme_lines(src_settings: &Path, dir: &Path, dry_run: bool) -> Vec<String> {
+    let label = attend_mod::THEME.label;
+    let base = super::reconcile::base_path_for(&crate::paths::state_root(), dir);
+    let done = if dry_run {
+        super::reconcile::theme_plan(src_settings, dir, &base, super::reconcile::theme_claim_ahead(dir))
+    } else {
+        super::reconcile::merge_settings(src_settings, dir, &base).map(|line| if line.contains("up to date") { Vec::new() } else { vec![line] })
+    };
+    match done {
+        Ok(lines) => lines.into_iter().map(|l| format!("{label}: {l}")).collect(),
+        Err(e) => vec![format!("{label}: ⚠ settings.json theme: {e:#}")],
+    }
 }
 
 /// A line from the convergence as a report item: a ⚠ line is a warning.
@@ -291,6 +312,19 @@ fn would(m: &Mod, v: &View, want: bool, shipped: Option<&str>) -> (Mark, String)
     }
 }
 
+/// The theme change converging the ways-theme mod to `want` would make in
+/// one target, for the what-if of `install` and `uninstall`: the key's value
+/// before and after, and the theme file written or removed. The merge holds
+/// the key once the mod is installed, so a wanted mod counts as installed
+/// where this host can load it.
+fn would_theme(m: &Mod, v: &View, want: bool, src_settings: &Path, base: &Path) -> Vec<String> {
+    if *m != attend_mod::THEME || !src_settings.exists() {
+        return Vec::new();
+    }
+    let claim = want && (v.installed.is_some() || (v.error.is_none() && v.host.is_ok()));
+    super::reconcile::theme_plan(src_settings, &v.dir, base, claim).unwrap_or_else(|e| vec![format!("⚠ settings.json theme: {e:#}")])
+}
+
 /// A settings write of `install` and the mod's convergence.
 struct Plan {
     /// Each write: the file, `Some(value)` to set or `None` to remove, and
@@ -408,6 +442,10 @@ fn run(m: &Mod, command: &str, targets: &[Enabled], plan: Plan, mode: Mode) -> R
             for (_, v) in attend_mod::views(&src, &t.target(&default_root), Some(m)) {
                 let (mark, text) = would(m, &v, plan.want, shipped.as_deref());
                 r.item(mark, text);
+                let base = super::reconcile::base_path_for(&crate::paths::state_root(), &t.dir);
+                for line in would_theme(m, &v, plan.want, &src.join("settings.json"), &base) {
+                    item(&mut r, &line, Mark::Act);
+                }
             }
         }
         r.footer(Mark::Info, lifecycle::commit_hint(command));
@@ -534,4 +572,56 @@ pub fn overview() -> Vec<Overview> {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use attend_mod::{MarketState, ATTEND, THEME};
+
+    fn view(dir: &Path, installed: Option<&str>, host: Result<String, String>) -> View {
+        View {
+            dir: dir.to_path_buf(),
+            wanted: true,
+            target_off: false,
+            installed: installed.map(str::to_string),
+            enabled: installed.map(|_| true),
+            recorded: installed.is_some(),
+            market: MarketState::Ours,
+            foreign: vec![],
+            claude_code: host.as_ref().ok().cloned(),
+            host,
+            read: true,
+            error: None,
+            runs: None,
+        }
+    }
+
+    #[test]
+    fn the_theme_mod_what_if_names_the_theme_change() {
+        let dir = std::env::temp_dir().join(format!("ways-mod-what-if-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (src, base) = (dir.join("src.json"), dir.join("base.json"));
+        std::fs::write(&src, "{}").unwrap();
+        std::fs::write(dir.join("settings.json"), r#"{"theme":"light"}"#).unwrap();
+        let file = dir.join("themes").join("ways.json").display().to_string();
+        let ok = || Ok("2.1.309".to_string());
+
+        let install = would_theme(&THEME, &view(&dir, None, ok()), true, &src, &base);
+        assert_eq!(install, vec![r#"would change settings.json theme: "light" → "custom:ways""#.to_string(), format!("would write {file}")]);
+        // A host below the floor installs nothing, so nothing is claimed.
+        assert!(would_theme(&THEME, &view(&dir, None, Err("Claude Code 2.1.300 is older".into())), true, &src, &base).is_empty());
+        // Another mod moves no theme.
+        assert!(would_theme(&ATTEND, &view(&dir, None, ok()), true, &src, &base).is_empty());
+
+        // Claimed over light: uninstalling gives it back.
+        std::fs::write(dir.join("settings.json"), r#"{"theme":"custom:ways"}"#).unwrap();
+        std::fs::write(&base, r#"{"theme":"custom:ways","prior_theme":"light"}"#).unwrap();
+        std::fs::create_dir_all(dir.join("themes")).unwrap();
+        std::fs::write(&file, "{}").unwrap();
+        let uninstall = would_theme(&THEME, &view(&dir, Some("1.45.0"), ok()), false, &src, &base);
+        assert_eq!(uninstall, vec![r#"would change settings.json theme: "custom:ways" → "light""#.to_string(), format!("would remove {file}")]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

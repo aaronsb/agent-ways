@@ -146,6 +146,51 @@ pub trait Adapter {
     fn waypoints_preview(&self, _theme: &agent_theme::Theme, _setting: &str) -> Option<Line<'static>> {
         None
     }
+
+    /// What the theme tab's Claude Code section shows: the mod that draws
+    /// the theme in Claude Code, its render settings and its words. `None`
+    /// leaves the section out.
+    fn claude_code(&self) -> Option<ClaudeCode> {
+        None
+    }
+
+    /// Keep `value` for the Claude Code setting `key`, one of
+    /// [`ClaudeCode::render`]'s.
+    fn set_claude_code(&mut self, key: &str, _value: &str) -> Result<(), String> {
+        Err(format!("this application keeps no {key}"))
+    }
+}
+
+/// The theme tab's Claude Code section, as the application reads it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ClaudeCode {
+    /// The mod in each target: the target as shown, whether the mod is
+    /// installed and active there, and its state in a few words.
+    pub targets: Vec<(String, bool, String)>,
+    /// The render settings, in the order the section lists them.
+    pub render: Vec<Render>,
+    /// The spinner's and the done line's words the settings set; an empty
+    /// list leaves the theme's.
+    pub spinner: Vec<String>,
+    pub done: Vec<String>,
+    /// The file a change is written to, as shown.
+    pub file: String,
+}
+
+/// One render setting: changed in place by stepping through `options`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Render {
+    /// The settings key a change is kept under.
+    pub key: String,
+    /// The row's name.
+    pub label: String,
+    pub value: String,
+    pub default: String,
+    pub options: Vec<String>,
+    pub doc: String,
+    /// The project file that sets the value, as shown: a change is written
+    /// to the user config, which this file still overrides.
+    pub project: Option<String>,
 }
 
 /// The adapter of an application that wired none: nothing is written or

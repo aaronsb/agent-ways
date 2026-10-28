@@ -1292,6 +1292,39 @@ fn mods_lists_each_mod_and_attend_mod_names_no_section() {
 }
 
 #[test]
+fn the_theme_mod_s_render_settings_are_set_like_every_other_key() {
+    let f = Fx::new();
+    let cases = [
+        ("rail", "true", "false"),
+        ("tables", "on", "text"),
+        ("shimmer", "true", "false"),
+        ("charts", "true", "false"),
+        ("markdown", "true", "false"),
+        ("icons", "unicode", "ascii"),
+        ("frames", "true", "false"),
+        ("prompt_box", "gradient", "off"),
+        ("copy", "true", "false"),
+        ("spinner_words", "[]", "Sailing, Docking"),
+        ("done_words", "[]", "Docked"),
+    ];
+    for (k, default, to) in cases {
+        let key = format!("mods.ways-theme.{k}");
+        assert_eq!(f.run(&["settings", "get", &key]).0.trim(), default, "{key}");
+        let (_, err, code) = f.run(&["settings", "set", &key, to]);
+        assert_eq!(code, 0, "{key}: {err}");
+    }
+    let (out, _, _) = f.run(&["settings", "get", "mods.ways-theme.spinner_words", "--json"]);
+    assert!(out.contains("Sailing") && out.contains("Docking"), "{out}");
+    assert_eq!(f.run(&["settings", "get", "mods.ways-theme.prompt_box"]).0, "off\n");
+    // Refused, nothing written: a value off the list, a word too long, thirteen words.
+    let before = std::fs::read_to_string(f.user()).unwrap();
+    assert_eq!(f.run(&["settings", "set", "mods.ways-theme.prompt_box", "neon"]).2, 3);
+    assert_eq!(f.run(&["settings", "set", "mods.ways-theme.done_words", &"x".repeat(25)]).2, 3);
+    assert_eq!(f.run(&["settings", "set", "mods.ways-theme.spinner_words", &vec!["a"; 13].join(",")]).2, 3);
+    assert_eq!(std::fs::read_to_string(f.user()).unwrap(), before);
+}
+
+#[test]
 fn a_file_holding_attend_mod_is_linted_with_its_fix_and_moved_by_fix() {
     let f = Fx::new();
     f.write(&f.user(), "# mine\nattend_mod:\n  listening: active\n");

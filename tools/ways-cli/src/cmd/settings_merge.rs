@@ -1,9 +1,10 @@
 //! The `settings.json` three-way merge (ADR-142's shared-write seam).
 //!
-//! `settings.json` is owned by Claude Code; agent-ways co-owns only two slices:
-//! the **hook entries** it ships and its **permission strings**. Everything else
-//! (model, theme, plugins, env, credentials) is the user's and must survive
-//! untouched. This is the `kubectl apply` problem — multiple writers, one
+//! `settings.json` is owned by Claude Code; agent-ways co-owns only its
+//! slices: the **hook entries** it ships, its **permission strings**, and the
+//! **`theme`** key while the ways-theme mod is wanted (ADR-514), whose earlier
+//! value it keeps and restores. Everything else (model, plugins, env,
+//! credentials) is the user's and must survive untouched. This is the `kubectl apply` problem — multiple writers, one
 //! declarative object, field-level ownership — solved the same way: a **three-way
 //! merge** keyed on a persisted *last-applied base*.
 //!
@@ -70,6 +71,61 @@ pub const WAYS_DENY: &[&str] = &[
     "Read(./.env.local)",
 ];
 
+/// The Claude Code theme the ways-theme mod keeps current: one custom theme
+/// file, `themes/ways.json`, whose colours follow `theme.active` (ADR-514).
+pub const WAYS_THEME: &str = "custom:ways";
+
+/// That file before the mod first writes it, and whenever no agent-ways theme
+/// is active: Claude Code's own dark preset, unchanged.
+pub const DEFAULT_THEME_FILE: &str = "{\n  \"name\": \"ways\",\n  \"base\": \"dark\"\n}\n";
+
+/// Whether the last-applied base at `base_path` holds the `theme` key, so a
+/// give-back is ours to clean up after.
+pub fn owns_theme(base_path: &Path) -> bool {
+    base_path.exists() && read_json_or_empty(base_path).map(|v| Owned::from_value(&v).theme.is_some()).unwrap_or(false)
+}
+
+/// Whether the settings file at `dest_settings` selects `custom:ways`.
+pub fn selects_ways_theme(dest_settings: &Path) -> bool {
+    read_json_or_empty(dest_settings).is_ok_and(|v| v.get("theme").and_then(Value::as_str) == Some(WAYS_THEME))
+}
+
+/// Whether a merge from `live` over these bases may move the `theme` key:
+/// one of them owns it, or the live file selects `custom:ways`.
+fn theme_may_move(live: &Value, bases: &[&Owned]) -> bool {
+    bases.iter().any(|b| b.theme.is_some()) || live.get("theme").and_then(Value::as_str) == Some(WAYS_THEME)
+}
+
+/// `strip` with the `theme` key marked ours when the merge may move it, so
+/// the self-audit leaves the key out of both views.
+fn theme_stripped(mut strip: Owned, theme_moves: bool) -> Owned {
+    if theme_moves {
+        strip.theme = Some(WAYS_THEME.into());
+    }
+    strip
+}
+
+/// Saves `merged` at `base_path` when it differs from `base`, for a merge
+/// that leaves settings.json as it was. A base not yet on disk is written
+/// only when the theme record moved.
+fn save_moved_base(base_path: &Path, base: &Owned, merged: &Owned) -> Result<()> {
+    let theme_moved = (&merged.theme, &merged.prior_theme) != (&base.theme, &base.prior_theme);
+    if !theme_moved && !(base_path.exists() && merged.to_value() != base.to_value()) {
+        return Ok(());
+    }
+    if let Some(parent) = base_path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    save_json(base_path, &merged.to_value())
+}
+
+/// The `theme` key's change from `live` to `merged`, as `from → to`, or none.
+pub fn theme_change(live: &Value, merged: &Value) -> Option<String> {
+    let (from, to) = (live.get("theme"), merged.get("theme"));
+    let shown = |v: Option<&Value>| v.and_then(Value::as_str).map_or("unset".to_string(), |s| format!("\"{s}\""));
+    (from != to).then(|| format!("settings.json theme: {} → {}", shown(from), shown(to)))
+}
+
 /// The slices agent-ways last applied — the merge base.
 #[derive(Debug, Clone, Default)]
 pub struct Owned {
@@ -79,6 +135,11 @@ pub struct Owned {
     pub perms: Vec<String>,
     /// `permissions.deny` strings we added (ADR-152).
     pub deny: Vec<String>,
+    /// The `theme` value we wrote, while we own the key.
+    pub theme: Option<String>,
+    /// The `theme` value the key held when we claimed it, restored when we
+    /// give it back; none when the key was unset.
+    pub prior_theme: Option<String>,
 }
 
 impl Owned {
@@ -90,7 +151,9 @@ impl Owned {
                 .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
                 .unwrap_or_default()
         };
-        Owned { hooks, perms: str_vec("perms"), deny: str_vec("deny") }
+        let theme = v.get("theme").and_then(|t| t.as_str()).map(String::from);
+        let prior_theme = v.get("prior_theme").and_then(|t| t.as_str()).map(String::from);
+        Owned { hooks, perms: str_vec("perms"), deny: str_vec("deny"), theme, prior_theme }
     }
 
     fn to_value(&self) -> Value {
@@ -98,6 +161,8 @@ impl Owned {
             "hooks": Value::Object(self.hooks.clone()),
             "perms": self.perms,
             "deny": self.deny,
+            "theme": self.theme,
+            "prior_theme": self.prior_theme,
         })
     }
 }
@@ -109,14 +174,16 @@ pub struct Merged {
 }
 
 /// Three-way merge of our owned slices into `live`, given the desired hooks and
-/// the prior base. Pure: no I/O, fully testable.
+/// the prior base. `want_theme` says the ways-theme mod is wanted here. Pure:
+/// no I/O, fully testable.
 pub fn merge(
     live: &Value,
     desired_hooks: &Value,
     base: &Owned,
     deny_secrets: bool,
+    want_theme: bool,
 ) -> Result<Merged> {
-    merge_impl(live, desired_hooks, base, deny_secrets, false)
+    merge_impl(live, desired_hooks, base, deny_secrets, want_theme, false)
 }
 
 /// The inverse merge (ADR-184 item 4). Hooks are removed by content: an entry
@@ -126,7 +193,7 @@ pub fn merge(
 /// base, which is the only record of what we added there. The result's base
 /// is empty. Pure, like `merge`.
 pub fn withdraw(live: &Value, shipped_hooks: &Value, base: &Owned) -> Result<Merged> {
-    merge_impl(live, shipped_hooks, base, false, true)
+    merge_impl(live, shipped_hooks, base, false, false, true)
 }
 
 fn merge_impl(
@@ -134,6 +201,7 @@ fn merge_impl(
     desired_hooks: &Value,
     base: &Owned,
     deny_secrets: bool,
+    want_theme: bool,
     withdrawing: bool,
 ) -> Result<Merged> {
     let mut out = live.as_object().cloned().unwrap_or_default();
@@ -283,6 +351,39 @@ fn merge_impl(
         out.insert("permissions".into(), Value::Object(perms_obj));
     }
 
+    // --- theme: one scalar, ours while the ways-theme mod is wanted ---
+    // Wanting the mod claims the key, keeping what it held to give back. A
+    // value set after the claim is the person's later choice: kept, and
+    // neither claimed again nor replaced when the key is given back. A live
+    // `custom:ways` is the mod's own theme, never a value to give back, so a
+    // base lost while it was selected still gives the key up.
+    let theirs_theme = live.get("theme").and_then(|t| t.as_str());
+    let not_ours = |t: &str| t != WAYS_THEME;
+    let changed_since = base.theme.is_some() && theirs_theme.is_some() && theirs_theme != base.theme.as_deref();
+    let (theme, prior_theme) = match (want_theme && !withdrawing, &base.theme) {
+        (true, None) => {
+            out.insert("theme".into(), Value::String(WAYS_THEME.into()));
+            (Some(WAYS_THEME.to_string()), theirs_theme.filter(|t| not_ours(t)).map(String::from))
+        }
+        (true, Some(_)) if !changed_since => {
+            out.insert("theme".into(), Value::String(WAYS_THEME.into()));
+            (Some(WAYS_THEME.to_string()), base.prior_theme.clone())
+        }
+        (true, Some(_)) => (base.theme.clone(), base.prior_theme.clone()),
+        (false, Some(_)) if !changed_since => {
+            match base.prior_theme.as_deref().filter(|p| not_ours(p)) {
+                Some(p) => out.insert("theme".into(), Value::String(p.into())),
+                None => out.remove("theme"),
+            };
+            (None, None)
+        }
+        (false, None) if theirs_theme == Some(WAYS_THEME) => {
+            out.remove("theme");
+            (None, None)
+        }
+        (false, _) => (None, None),
+    };
+
     Ok(Merged {
         settings: Value::Object(out),
         // The base records what we added, so withdrawal removes only that:
@@ -300,6 +401,8 @@ fn merge_impl(
                 .filter(|d| base.deny.contains(d) || !theirs_deny_strs.contains(d))
                 .cloned()
                 .collect(),
+            theme,
+            prior_theme,
         },
     })
 }
@@ -360,6 +463,12 @@ pub fn stripped_user_view(settings: &Value, base: &Owned) -> Value {
         }
     }
 
+    // While we own the key, its value is ours to change: claiming it and
+    // giving it back each move the person's view by design.
+    if base.theme.is_some() {
+        obj.remove("theme");
+    }
+
     Value::Object(obj)
 }
 
@@ -394,6 +503,8 @@ fn union_owned(a: &Owned, b: &Owned) -> Owned {
         hooks,
         perms: union_vec(&a.perms, &b.perms),
         deny: union_vec(&a.deny, &b.deny),
+        theme: b.theme.clone().or_else(|| a.theme.clone()),
+        prior_theme: b.prior_theme.clone().or_else(|| a.prior_theme.clone()),
     }
 }
 
@@ -520,7 +631,7 @@ pub fn base_for(live: &Value, base_path: &Path) -> Result<Owned> {
     // withdrawal remove it. The merge dedups against the constants anyway,
     // so nothing is duplicated; what is lost is only the cleanup of an entry
     // a legacy install added that a later version stops shipping.
-    Ok(Owned { hooks: seed_ours_from_live(live), perms: Vec::new(), deny: Vec::new() })
+    Ok(Owned { hooks: seed_ours_from_live(live), perms: Vec::new(), deny: Vec::new(), theme: None, prior_theme: None })
 }
 
 /// Apply the merge to the live files: back up, merge, atomic-write, persist the
@@ -528,21 +639,26 @@ pub fn base_for(live: &Value, base_path: &Path) -> Result<Owned> {
 ///
 /// `source_settings` is the app's settings.json (for the desired hooks).
 /// `dest_settings` is the live `~/.claude/settings.json`. `base_path` is the
-/// persisted last-applied record. Returns a one-line summary.
+/// persisted last-applied record. `want_theme` says the ways-theme mod is
+/// wanted in this target. Returns a one-line summary.
 pub fn apply_to_files(
     source_settings: &Path,
     dest_settings: &Path,
     base_path: &Path,
+    want_theme: bool,
 ) -> Result<String> {
     let desired: Value = read_json_or_empty(source_settings)?;
     let desired_hooks = desired.get("hooks").cloned().unwrap_or(Value::Object(Map::new()));
 
     let live: Value = read_json_or_empty(dest_settings)?;
     let base = base_for(&live, base_path)?;
-    let merged = merge(&live, &desired_hooks, &base, crate::config::global().secret_path_deny)?;
+    let merged = merge(&live, &desired_hooks, &base, crate::config::global().secret_path_deny, want_theme)?;
 
-    // Idempotent: if nothing changed, don't churn the file or a backup.
+    // Idempotent: if nothing changed, don't churn the file or a backup. The
+    // base can still move: a give-back of a theme the person replaced, or a
+    // claim recorded over a live `custom:ways`.
     if merged.settings == live {
+        save_moved_base(base_path, &base, &merged.base)?;
         return Ok("settings.json already up to date".into());
     }
 
@@ -562,8 +678,9 @@ pub fn apply_to_files(
     // hooks were lost) would otherwise leave our entries in the pre-write view,
     // which `after` correctly drops — a false "unmanaged field changed" revert.
     let after: Value = read_json_or_empty(dest_settings)?;
-    let user_before = stripped_user_view(&live, &union_owned(&base, &merged.base));
-    let user_after = stripped_user_view(&after, &merged.base);
+    let theme_moves = theme_may_move(&live, &[&base, &merged.base]);
+    let user_before = stripped_user_view(&live, &theme_stripped(union_owned(&base, &merged.base), theme_moves));
+    let user_after = stripped_user_view(&after, &theme_stripped(merged.base.clone(), theme_moves));
     if user_before != user_after {
         // Revert and fail loud — we must never corrupt the user's settings.
         if backup.exists() {
@@ -600,6 +717,7 @@ pub fn withdraw_from_files(source_settings: &Path, dest_settings: &Path, base_pa
     let base = base_for(&live, base_path)?;
     let merged = withdraw(&live, &shipped_hooks, &base)?;
     if merged.settings == live {
+        save_moved_base(base_path, &base, &merged.base)?;
         return Ok("settings.json holds nothing of ours".into());
     }
 
@@ -626,8 +744,9 @@ pub fn withdraw_from_files(source_settings: &Path, dest_settings: &Path, base_pa
         }
     }
     let after: Value = read_json_or_empty(dest_settings)?;
-    let before_strip = Owned { hooks: shipped_strip.clone(), perms: base.perms.clone(), deny: base.deny.clone() };
-    let after_strip = Owned { hooks: shipped_strip, perms: Vec::new(), deny: Vec::new() };
+    let theme_moves = theme_may_move(&live, &[&base]);
+    let before_strip = theme_stripped(Owned { hooks: shipped_strip.clone(), perms: base.perms.clone(), deny: base.deny.clone(), ..Owned::default() }, theme_moves);
+    let after_strip = theme_stripped(Owned { hooks: shipped_strip, ..Owned::default() }, theme_moves);
     let user_before = stripped_user_view(&live, &before_strip);
     let user_after = stripped_user_view(&after, &after_strip);
     if user_before != user_after {
@@ -736,7 +855,7 @@ mod tests {
     #[test]
     fn fresh_merge_adds_hooks_and_perms() {
         let live = json!({});
-        let m = merge(&live, &ours_hooks(), &Owned::default(), false).unwrap();
+        let m = merge(&live, &ours_hooks(), &Owned::default(), false, false).unwrap();
         assert!(m.settings["hooks"]["SessionStart"].is_array());
         let allow = m.settings["permissions"]["allow"].as_array().unwrap();
         assert_eq!(allow.len(), WAYS_PERMS.len());
@@ -746,16 +865,16 @@ mod tests {
     #[test]
     fn merge_is_idempotent() {
         let live = json!({});
-        let m1 = merge(&live, &ours_hooks(), &Owned::default(), false).unwrap();
+        let m1 = merge(&live, &ours_hooks(), &Owned::default(), false, false).unwrap();
         // Second apply, with the first run's base and its output as the live file.
-        let m2 = merge(&m1.settings, &ours_hooks(), &m1.base, false).unwrap();
+        let m2 = merge(&m1.settings, &ours_hooks(), &m1.base, false, false).unwrap();
         assert_eq!(m1.settings, m2.settings, "merge must be idempotent");
     }
 
     #[test]
     fn preserves_unrelated_user_keys() {
         let live = json!({ "model": "opus", "theme": "dark", "permissions": { "deny": ["Bash(rm:*)"] } });
-        let m = merge(&live, &ours_hooks(), &Owned::default(), false).unwrap();
+        let m = merge(&live, &ours_hooks(), &Owned::default(), false, false).unwrap();
         assert_eq!(m.settings["model"], "opus");
         assert_eq!(m.settings["theme"], "dark");
         // permissions.deny (user's) survives alongside our allow additions.
@@ -780,7 +899,7 @@ mod tests {
                 .collect(),
             ..Owned::default()
         };
-        let m = merge(&live, &ours_hooks(), &base, false).unwrap();
+        let m = merge(&live, &ours_hooks(), &base, false, false).unwrap();
         let allow: Vec<String> = m.settings["permissions"]["allow"]
             .as_array()
             .unwrap()
@@ -802,7 +921,7 @@ mod tests {
 
     #[test]
     fn deny_baseline_added_when_enabled() {
-        let m = merge(&json!({}), &ours_hooks(), &Owned::default(), true).unwrap();
+        let m = merge(&json!({}), &ours_hooks(), &Owned::default(), true, false).unwrap();
         let deny = deny_list(&m.settings);
         for want in WAYS_DENY {
             assert!(deny.iter().any(|d| d == want), "missing deny entry {want}");
@@ -813,7 +932,7 @@ mod tests {
     #[test]
     fn deny_baseline_absent_when_opted_out() {
         // Opted out + no user deny → no `deny` key written at all.
-        let m = merge(&json!({}), &ours_hooks(), &Owned::default(), false).unwrap();
+        let m = merge(&json!({}), &ours_hooks(), &Owned::default(), false, false).unwrap();
         assert!(m.settings["permissions"].get("deny").is_none());
         assert!(m.base.deny.is_empty());
     }
@@ -821,7 +940,7 @@ mod tests {
     #[test]
     fn deny_preserves_user_deny_entries() {
         let live = json!({ "permissions": { "deny": ["Bash(rm:*)"] } });
-        let m = merge(&live, &ours_hooks(), &Owned::default(), true).unwrap();
+        let m = merge(&live, &ours_hooks(), &Owned::default(), true, false).unwrap();
         let deny = deny_list(&m.settings);
         assert!(deny.iter().any(|d| d == "Bash(rm:*)"), "user deny must survive");
         assert!(deny.iter().any(|d| d == "Read(~/.ssh/**)"), "ours added alongside");
@@ -845,7 +964,7 @@ mod tests {
                 .collect(),
             ..Owned::default()
         };
-        let m = merge(&live, &ours_hooks(), &base, true).unwrap();
+        let m = merge(&live, &ours_hooks(), &base, true, false).unwrap();
         let deny = deny_list(&m.settings);
         assert!(!deny.iter().any(|d| d == "Write(~/.ssh/**)"), "deprecated ssh Write must be removed: {deny:?}");
         assert!(deny.iter().any(|d| d == "Bash(rm:*)"), "user deny must survive");
@@ -857,9 +976,9 @@ mod tests {
     #[test]
     fn opt_out_removes_previously_owned_deny_keeps_user() {
         // A settled install: our baseline is present and recorded in the base.
-        let enabled = merge(&json!({ "permissions": { "deny": ["Bash(rm:*)"] } }), &ours_hooks(), &Owned::default(), true).unwrap();
+        let enabled = merge(&json!({ "permissions": { "deny": ["Bash(rm:*)"] } }), &ours_hooks(), &Owned::default(), true, false).unwrap();
         // Now the operator opts out — our owned deny must vanish, the user's stays.
-        let opted = merge(&enabled.settings, &ours_hooks(), &enabled.base, false).unwrap();
+        let opted = merge(&enabled.settings, &ours_hooks(), &enabled.base, false, false).unwrap();
         let deny = deny_list(&opted.settings);
         assert_eq!(deny, vec!["Bash(rm:*)"], "only the user's own deny remains");
         assert!(opted.base.deny.is_empty());
@@ -873,7 +992,7 @@ mod tests {
         // base with WAYS_DENY instead of empty deleted it silently AND passed the
         // self-audit. Owned::default() here stands in for the empty-deny seed.
         let live = json!({ "permissions": { "deny": ["Read(~/.ssh/**)"] } });
-        let m = merge(&live, &ours_hooks(), &Owned::default(), false).unwrap();
+        let m = merge(&live, &ours_hooks(), &Owned::default(), false, false).unwrap();
         assert_eq!(
             deny_list(&m.settings),
             vec!["Read(~/.ssh/**)"],
@@ -888,8 +1007,8 @@ mod tests {
 
     #[test]
     fn deny_is_idempotent() {
-        let m1 = merge(&json!({}), &ours_hooks(), &Owned::default(), true).unwrap();
-        let m2 = merge(&m1.settings, &ours_hooks(), &m1.base, true).unwrap();
+        let m1 = merge(&json!({}), &ours_hooks(), &Owned::default(), true, false).unwrap();
+        let m2 = merge(&m1.settings, &ours_hooks(), &m1.base, true, false).unwrap();
         assert_eq!(m1.settings, m2.settings, "re-applying the deny baseline is stable");
     }
 
@@ -897,7 +1016,7 @@ mod tests {
     fn user_view_invariant_holds_with_deny() {
         // The self-audit: stripping our owned slices from before/after must match.
         let live = json!({ "model": "opus", "permissions": { "deny": ["Bash(rm:*)"] } });
-        let m = merge(&live, &ours_hooks(), &Owned::default(), true).unwrap();
+        let m = merge(&live, &ours_hooks(), &Owned::default(), true, false).unwrap();
         assert_eq!(
             stripped_user_view(&live, &Owned::default()),
             stripped_user_view(&m.settings, &m.base),
@@ -910,7 +1029,7 @@ mod tests {
         // The key three-way property: a user's own hook entry is NOT clobbered.
         let user_hook = json!({ "matcher": "startup", "hooks": [ { "type": "command", "command": "/usr/local/bin/my-thing" } ] });
         let live = json!({ "hooks": { "SessionStart": [ user_hook.clone() ] } });
-        let m = merge(&live, &ours_hooks(), &Owned::default(), false).unwrap();
+        let m = merge(&live, &ours_hooks(), &Owned::default(), false, false).unwrap();
         let entries = m.settings["hooks"]["SessionStart"].as_array().unwrap();
         assert!(entries.contains(&user_hook), "user hook must survive the merge");
         assert!(entries.len() >= 2, "both user and our hook present");
@@ -925,7 +1044,7 @@ mod tests {
         let mut base = Owned::default();
         base.hooks.insert("SessionStart".into(), json!([ old.clone() ]));
 
-        let m = merge(&live, &ours_hooks(), &base, false).unwrap();
+        let m = merge(&live, &ours_hooks(), &base, false, false).unwrap();
         let ss = m.settings["hooks"]["SessionStart"].as_array().unwrap();
         assert!(!ss.contains(&old), "our deprecated hook must be removed");
         // User's unrelated hook on another event is untouched.
@@ -939,7 +1058,7 @@ mod tests {
             "hooks": { "SessionStart": [ { "matcher": "startup", "hooks": [ { "type": "command", "command": "/u/mine" } ] } ] },
             "permissions": { "allow": ["Bash(git:*)"], "deny": ["Bash(rm:*)"] }
         });
-        let m = merge(&live, &ours_hooks(), &Owned::default(), false).unwrap();
+        let m = merge(&live, &ours_hooks(), &Owned::default(), false, false).unwrap();
         // Stripping our slices from before and after must yield identical user views.
         let before = stripped_user_view(&live, &Owned::default());
         let after = stripped_user_view(&m.settings, &m.base);
@@ -997,7 +1116,7 @@ mod tests {
         })).unwrap()).unwrap();
         std::fs::write(&source, serde_json::to_string(&ours_hooks_doc()).unwrap()).unwrap();
 
-        apply_to_files(&source, &dest, &base).expect("first apply must not abort");
+        apply_to_files(&source, &dest, &base, false).expect("first apply must not abort");
 
         let after: Value = serde_json::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
         // Every user hook survives, by identity, in its own event.
@@ -1072,7 +1191,7 @@ mod tests {
         })).unwrap()).unwrap();
 
         // Must NOT abort — the self-audit must pass.
-        apply_to_files(&source, &dest, &base).expect("migration settings merge must not abort");
+        apply_to_files(&source, &dest, &base, false).expect("migration settings merge must not abort");
 
         let after: Value = serde_json::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
         // User content preserved.
@@ -1135,7 +1254,7 @@ mod tests {
             "perms": WAYS_PERMS
         })).unwrap()).unwrap();
 
-        apply_to_files(&source, &dest, &base)
+        apply_to_files(&source, &dest, &base, false)
             .expect("re-apply with lost base hooks must not abort");
 
         let after: Value = serde_json::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
@@ -1197,7 +1316,7 @@ mod tests {
             "perms": WAYS_PERMS
         })).unwrap()).unwrap();
 
-        apply_to_files(&source, &dest, &base)
+        apply_to_files(&source, &dest, &base, false)
             .expect("update that changes our hooks must not abort on a stale base");
 
         let after: Value = serde_json::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
@@ -1245,7 +1364,7 @@ mod tests {
         })).unwrap()).unwrap();
         std::fs::write(&base, serde_json::to_string(&json!({ "hooks": {}, "perms": WAYS_PERMS })).unwrap()).unwrap();
 
-        apply_to_files(&source, &dest, &base).expect("the timeout change must apply");
+        apply_to_files(&source, &dest, &base, false).expect("the timeout change must apply");
 
         let after: Value = serde_json::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
         for event in ["PreToolUse", "PostToolUse"] {
@@ -1305,7 +1424,7 @@ mod tests {
         let user_hook = json!({ "matcher": "startup", "hooks": [ { "type": "command",
             "command": "tail -f ${HOME}/.claude/hooks/ways/debug.log" } ] });
         let live = json!({ "hooks": { "SessionStart": [ user_hook.clone() ] } });
-        let m = merge(&live, &ours_hooks(), &Owned::default(), false).unwrap();
+        let m = merge(&live, &ours_hooks(), &Owned::default(), false, false).unwrap();
         let ss = m.settings["hooks"]["SessionStart"].as_array().unwrap();
         assert!(ss.contains(&user_hook), "user hook (path-as-arg) must survive: {ss:?}");
         // And the self-audit view agrees it's user content on both sides.
@@ -1391,7 +1510,7 @@ mod tests {
         })).unwrap()).unwrap();
         std::fs::write(&base, serde_json::to_string(&json!({ "hooks": {}, "perms": WAYS_PERMS })).unwrap()).unwrap();
 
-        apply_to_files(&source, &dest, &base).expect("the timeout change must apply");
+        apply_to_files(&source, &dest, &base, false).expect("the timeout change must apply");
 
         let after: Value = serde_json::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
         for (event, want) in &shipped {
@@ -1404,5 +1523,184 @@ mod tests {
         assert!(after["hooks"]["PreToolUse"].as_array().unwrap().contains(&user), "user hook preserved");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- the theme key, owned while the ways-theme mod is wanted (ADR-514) ---
+
+    #[test]
+    fn a_wanted_theme_mod_selects_its_theme_and_unwanted_removes_it() {
+        let on = merge(&json!({ "model": "opus" }), &ours_hooks(), &Owned::default(), false, true).unwrap();
+        assert_eq!(on.settings["theme"], WAYS_THEME);
+        assert_eq!(on.base.theme.as_deref(), Some(WAYS_THEME));
+        assert_eq!(on.settings["model"], "opus");
+        // Applied again: nothing moves.
+        let again = merge(&on.settings, &ours_hooks(), &on.base, false, true).unwrap();
+        assert_eq!(again.settings, on.settings);
+        // Uninstalled: the key goes through the base, and the rest stays.
+        let off = merge(&on.settings, &ours_hooks(), &on.base, false, false).unwrap();
+        assert!(off.settings.get("theme").is_none());
+        assert_eq!((off.base.theme, &off.settings["model"]), (None, &json!("opus")));
+    }
+
+    #[test]
+    fn install_claims_a_theme_the_person_set_and_uninstall_gives_it_back() {
+        let live = json!({ "theme": "light", "model": "opus" });
+        let on = merge(&live, &ours_hooks(), &Owned::default(), false, true).unwrap();
+        assert_eq!(on.settings["theme"], WAYS_THEME);
+        assert_eq!(on.base.prior_theme.as_deref(), Some("light"));
+        // Applied again: the prior value is kept, nothing moves.
+        let again = merge(&on.settings, &ours_hooks(), &on.base, false, true).unwrap();
+        assert_eq!((again.settings.clone(), again.base.prior_theme.clone()), (on.settings.clone(), Some("light".into())));
+        let off = merge(&again.settings, &ours_hooks(), &again.base, false, false).unwrap();
+        assert_eq!((&off.settings["theme"], &off.settings["model"]), (&json!("light"), &json!("opus")));
+        assert_eq!((off.base.theme, off.base.prior_theme), (None, None));
+    }
+
+    #[test]
+    fn a_theme_chosen_after_the_claim_is_kept_through_uninstall() {
+        let on = merge(&json!({}), &ours_hooks(), &Owned::default(), false, true).unwrap();
+        let mut changed = on.settings.clone();
+        changed["theme"] = json!("custom:dracula");
+        let kept = merge(&changed, &ours_hooks(), &on.base, false, true).unwrap();
+        assert_eq!(kept.settings["theme"], "custom:dracula", "not claimed again");
+        let off = merge(&kept.settings, &ours_hooks(), &kept.base, false, false).unwrap();
+        assert_eq!(off.settings["theme"], "custom:dracula");
+        let gone = withdraw(&changed, &ours_hooks(), &on.base).unwrap();
+        assert_eq!(gone.settings["theme"], "custom:dracula");
+    }
+
+    #[test]
+    fn the_theme_change_is_named_for_the_plan() {
+        assert_eq!(theme_change(&json!({ "theme": "light" }), &json!({ "theme": WAYS_THEME })).as_deref(), Some("settings.json theme: \"light\" → \"custom:ways\""));
+        assert_eq!(theme_change(&json!({}), &json!({ "theme": WAYS_THEME })).as_deref(), Some("settings.json theme: unset → \"custom:ways\""));
+        assert_eq!(theme_change(&json!({ "theme": "dark" }), &json!({ "theme": "dark" })), None);
+    }
+
+    #[test]
+    fn owns_theme_reads_the_base_on_disk() {
+        let dir = std::env::temp_dir().join(format!("ways-owns-theme-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("base.json");
+        assert!(!owns_theme(&path));
+        save_json(&path, &Owned { theme: Some(WAYS_THEME.into()), ..Owned::default() }.to_value()).unwrap();
+        assert!(owns_theme(&path));
+        save_json(&path, &Owned::default().to_value()).unwrap();
+        assert!(!owns_theme(&path));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn withdrawal_removes_the_theme_it_wrote() {
+        let on = merge(&json!({}), &ours_hooks(), &Owned::default(), false, true).unwrap();
+        let out = withdraw(&on.settings, &ours_hooks(), &on.base).unwrap();
+        assert!(out.settings.get("theme").is_none());
+    }
+
+    #[test]
+    fn the_user_view_strips_the_theme_only_while_it_is_ours() {
+        let base = Owned { theme: Some(WAYS_THEME.into()), ..Owned::default() };
+        assert!(stripped_user_view(&json!({ "theme": WAYS_THEME }), &base).get("theme").is_none());
+        assert_eq!(stripped_user_view(&json!({ "theme": WAYS_THEME }), &Owned::default())["theme"], WAYS_THEME);
+    }
+
+    #[test]
+    fn the_base_round_trips_the_theme_and_its_prior_value() {
+        let base = Owned { theme: Some(WAYS_THEME.into()), prior_theme: Some("light".into()), ..Owned::default() };
+        let back = Owned::from_value(&base.to_value());
+        assert_eq!((back.theme.as_deref(), back.prior_theme.as_deref()), (Some(WAYS_THEME), Some("light")));
+        assert_eq!(Owned::from_value(&Owned::default().to_value()).prior_theme, None);
+    }
+
+    #[test]
+    fn applying_with_the_theme_passes_the_self_audit_on_disk() {
+        let dir = std::env::temp_dir().join(format!("ways-theme-merge-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (src, dest, base) = (dir.join("src.json"), dir.join("settings.json"), dir.join("base.json"));
+        std::fs::write(&src, serde_json::to_string(&json!({ "hooks": ours_hooks() })).unwrap()).unwrap();
+        // No earlier value: claimed, then the key goes.
+        std::fs::write(&dest, r#"{"model":"opus"}"#).unwrap();
+        apply_to_files(&src, &dest, &base, true).unwrap();
+        assert_eq!(read_json_or_empty(&dest).unwrap()["theme"], WAYS_THEME);
+        apply_to_files(&src, &dest, &base, false).unwrap();
+        let after = read_json_or_empty(&dest).unwrap();
+        assert!(after.get("theme").is_none() && after["model"] == "opus", "{after}");
+        // An earlier value: claimed over, then given back, the self-audit
+        // passing both ways.
+        std::fs::write(&dest, r#"{"model":"opus","theme":"light-daltonized"}"#).unwrap();
+        apply_to_files(&src, &dest, &base, true).unwrap();
+        assert_eq!(read_json_or_empty(&dest).unwrap()["theme"], WAYS_THEME);
+        apply_to_files(&src, &dest, &base, false).unwrap();
+        assert_eq!(read_json_or_empty(&dest).unwrap()["theme"], "light-daltonized");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A settings dir whose settings.json already holds our hooks and
+    /// permissions, so a later apply that moves only the theme is the one
+    /// that changes the file.
+    fn settled(name: &str, extra: Value) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("ways-theme-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (src, dest, base) = (dir.join("src.json"), dir.join("settings.json"), dir.join("base.json"));
+        std::fs::write(&src, serde_json::to_string(&json!({ "hooks": ours_hooks() })).unwrap()).unwrap();
+        std::fs::write(&dest, serde_json::to_string(&extra).unwrap()).unwrap();
+        apply_to_files(&src, &dest, &base, false).unwrap();
+        (dir, src, dest, base)
+    }
+
+    fn set_theme(dest: &Path, theme: &str) {
+        let mut v = read_json_or_empty(dest).unwrap();
+        v["theme"] = json!(theme);
+        save_json(dest, &v).unwrap();
+    }
+
+    #[test]
+    fn a_give_back_that_leaves_the_file_alone_still_moves_the_base() {
+        let (dir, src, dest, base) = settled("stale-base", json!({ "theme": "light" }));
+        apply_to_files(&src, &dest, &base, true).unwrap();
+        assert_eq!(read_json_or_empty(&dest).unwrap()["theme"], WAYS_THEME);
+        // The person picks dark after the claim: kept while installed.
+        set_theme(&dest, "dark");
+        apply_to_files(&src, &dest, &base, true).unwrap();
+        assert_eq!(read_json_or_empty(&dest).unwrap()["theme"], "dark");
+        // Uninstalled: dark stays, and the base no longer holds the key.
+        apply_to_files(&src, &dest, &base, false).unwrap();
+        assert_eq!(read_json_or_empty(&dest).unwrap()["theme"], "dark");
+        assert!(!owns_theme(&base), "the base still claims the theme: {}", read_json_or_empty(&base).unwrap());
+        // Installed again: claimed over dark, which is the value to give back.
+        apply_to_files(&src, &dest, &base, true).unwrap();
+        assert_eq!(read_json_or_empty(&dest).unwrap()["theme"], WAYS_THEME);
+        assert_eq!(Owned::from_value(&read_json_or_empty(&base).unwrap()).prior_theme.as_deref(), Some("dark"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_live_ways_theme_with_no_base_is_ours_to_give_back() {
+        // The base is lost while the mod is installed: repair records the
+        // claim over the live custom:ways, with no prior of its own.
+        let (dir, src, dest, base) = settled("lost-base", json!({ "model": "opus" }));
+        set_theme(&dest, WAYS_THEME);
+        std::fs::remove_file(&base).unwrap();
+        apply_to_files(&src, &dest, &base, true).unwrap();
+        let recorded = Owned::from_value(&read_json_or_empty(&base).unwrap());
+        assert_eq!((recorded.theme.as_deref(), recorded.prior_theme.as_deref()), (Some(WAYS_THEME), None));
+        apply_to_files(&src, &dest, &base, false).unwrap();
+        let after = read_json_or_empty(&dest).unwrap();
+        assert!(after.get("theme").is_none() && after["model"] == "opus", "{after}");
+        // Lost again, and the mod uninstalled before any repair saw it.
+        set_theme(&dest, WAYS_THEME);
+        std::fs::remove_file(&base).unwrap();
+        apply_to_files(&src, &dest, &base, false).unwrap();
+        assert!(read_json_or_empty(&dest).unwrap().get("theme").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_prior_of_custom_ways_is_never_given_back() {
+        let base = Owned { theme: Some(WAYS_THEME.into()), prior_theme: Some(WAYS_THEME.into()), ..Owned::default() };
+        let off = merge(&json!({ "theme": WAYS_THEME }), &ours_hooks(), &base, false, false).unwrap();
+        assert!(off.settings.get("theme").is_none(), "{}", off.settings);
     }
 }

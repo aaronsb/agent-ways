@@ -420,6 +420,69 @@ fn the_cli_refuses_bundled_taken_bad_and_missing_names() {
 }
 
 #[test]
+fn export_prints_the_roles_or_a_claude_code_theme_of_the_active_theme() {
+    let fx = Fx::new();
+    let (out, err, code) = fx.run(&["settings", "theme", "export", "--claude-code"]);
+    assert_eq!((code, err.as_str(), out.as_str()), (3, "ways settings: terminal is the terminal's own colours; it has nothing to export\n", ""));
+    assert_eq!(fx.run(&["settings", "set", "theme.active", "miami-nights"]).2, 0);
+    let (out, err, code) = fx.run(&["settings", "theme", "export", "--claude-code"]);
+    assert_eq!(code, 0, "{err}");
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!((v["name"].as_str(), v["base"].as_str()), (Some("Miami Nights"), Some("dark")));
+    let o = v["overrides"].as_object().unwrap();
+    assert!(o.values().all(|c| c.as_str().is_some_and(|c| c.len() == 7 && c.starts_with('#'))), "{o:?}");
+    assert_eq!(o["text"], "#f4eaff");
+    let nord = fx.run(&["settings", "theme", "export", "nord", "--roles"]).0;
+    let roles: serde_json::Value = serde_json::from_str(&nord).unwrap();
+    assert_eq!((roles["name"].as_str(), roles["roles"]["bg"].as_str()), (Some("nord"), Some("#2e3440")));
+    assert!(roles["roles"]["badge.fg"].is_string() && roles["gradient"].is_null(), "{roles}");
+    // A user theme's pin wins over the mapping.
+    assert_eq!(fx.run(&["settings", "theme", "copy", "nord", "pinned"]).2, 0);
+    let file = format!("{THEMES}/pinned.theme");
+    fx.file(&file, &format!("{}\n[target.claude-code]\nclaude=\"#123456\"\n", fx.read(&file).unwrap()));
+    let (out, err, code) = fx.run(&["settings", "theme", "export", "pinned", "--claude-code"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&out).unwrap()["overrides"]["claude"], "#123456");
+    let (_, err, code) = fx.run(&["settings", "theme", "export", "gone", "--roles"]);
+    assert_eq!((code, err.as_str()), (2, "ways settings: no theme `gone`; `ways settings theme list` names the themes\n"));
+}
+
+#[test]
+fn export_mod_prints_what_the_theme_mod_reads_on_one_line() {
+    let fx = Fx::new();
+    let one = |args: &[&str]| {
+        let (out, err, code) = fx.run(args);
+        assert_eq!(code, 0, "{err}");
+        assert_eq!(out.lines().count(), 1, "{out}");
+        serde_json::from_str::<serde_json::Value>(&out).unwrap()
+    };
+    let v = one(&["settings", "theme", "export", "--mod"]);
+    assert_eq!((v["theme"].as_str(), v["kind"].as_str()), (Some("terminal"), Some("dark")));
+    assert!(v["roles"].is_null() && v["gradient"].is_null() && v["words"].is_null(), "nothing sets words: {v}");
+    assert_eq!(v["render"]["prompt_box"], "frame", "terminal has no gradient");
+    let keys: Vec<&str> = v["render"].as_object().unwrap().keys().map(String::as_str).collect();
+    assert_eq!(keys, ["rail", "tables", "shimmer", "charts", "markdown", "icons", "frames", "prompt_box", "copy"]);
+    assert_eq!(fx.run(&["settings", "set", "theme.active", "miami-nights"]).2, 0);
+    let v = one(&["settings", "theme", "export", "--mod"]);
+    assert_eq!(v["theme"], "miami-nights");
+    assert_eq!(v["render"]["prompt_box"], "gradient");
+    assert_eq!(v["words"]["done"][0], "Cruised");
+    assert_eq!(v["roles"].as_object().unwrap().len(), 14);
+    // The settings reach the export: a word list, a render switch.
+    assert_eq!(fx.run(&["settings", "set", "mods.ways-theme.spinner_words", "Sailing, Docking"]).2, 0);
+    assert_eq!(fx.run(&["settings", "set", "mods.ways-theme.rail", "false"]).2, 0);
+    assert_eq!(fx.run(&["settings", "set", "mods.ways-theme.copy", "false"]).2, 0);
+    let v = one(&["settings", "theme", "export", "nord", "--mod"]);
+    assert_eq!(v["words"], serde_json::json!({ "spinner": ["Sailing", "Docking"], "done": [] }));
+    assert_eq!((v["render"]["rail"].as_bool(), v["render"]["prompt_box"].as_str(), v["render"]["copy"].as_bool()), (Some(false), Some("frame"), Some(false)));
+    assert_eq!(fx.run(&["settings", "set", "theme.active", "terminal"]).2, 0);
+    let v = one(&["settings", "theme", "export", "--mod"]);
+    assert_eq!(v["words"], serde_json::json!({ "spinner": ["Sailing", "Docking"], "done": [] }), "terminal takes the settings' words");
+    let (_, err, code) = fx.run(&["settings", "theme", "export", "gone", "--mod"]);
+    assert_eq!((code, err.as_str()), (2, "ways settings: no theme `gone`; `ways settings theme list` names the themes\n"));
+}
+
+#[test]
 fn a_file_that_is_no_loaded_theme_is_never_overwritten() {
     let fx = Fx::new();
     fx.file(&format!("{THEMES}/precious.theme"), "not a theme\n");
@@ -539,7 +602,7 @@ fn the_help_overlay_shows_the_text_settings_help_prints() {
     for tab in ["ways", "matching", "gate", "install", "attend", "sensors", "mod", "theme"] {
         let (help, _, code) = fx.run(&["settings", "help", tab]);
         assert_eq!(code, 0);
-        let f = glyphs(&fx.snap(tab, "?", "160x60", "16"));
+        let f = glyphs(&fx.snap(tab, "?", "160x80", "16"));
         assert!(f.contains(&format!("help: {tab}")), "{f}");
         for line in help.lines().filter(|l| !l.trim().is_empty()) {
             assert!(f.contains(line.trim_end()), "{tab}: `{line}` is not in the overlay:\n{f}");

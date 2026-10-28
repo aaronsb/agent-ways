@@ -72,9 +72,19 @@ pub const ATTEND: Mod = Mod { name: "attend", id: "attend@agent-ways", label: "a
 /// `gate.engine` is `claude-code` (ADR-512 item 4).
 pub const JUDGE: Mod = Mod { name: "ways-judge", id: "ways-judge@agent-ways", label: "ways-judge mod", min_claude_code: "2.1.304" };
 
+/// Claude Code follows the active agent-ways theme (ADR-514). The mod calls
+/// `ui.render` on AssistantMessage, ToolUse, ToolGroup and TurnDuration,
+/// `$.ui.invalidate`, `$.config.list`, the `config.set` hook,
+/// `$.process.run` with `timeoutMs`, `$.fs` and `$.env`. Its floor is
+/// 2.1.309, the release the mod was seen running on, whose engine wrote the
+/// mod's type declarations carrying every one of them; nothing older is
+/// claimed. As for every mod, the floor is checked when the mod is
+/// installed, so a Claude Code downgraded afterwards is not caught.
+pub const THEME: Mod = Mod { name: "ways-theme", id: "ways-theme@agent-ways", label: "ways-theme mod", min_claude_code: "2.1.309" };
+
 /// Every mod the marketplace ships, in its order. Each has an entry under
 /// `mods` in the settings registry (ADR-512 item 1).
-pub const MODS: [Mod; 2] = [ATTEND, JUDGE];
+pub const MODS: [Mod; 3] = [ATTEND, JUDGE, THEME];
 
 /// The marketplace folder in the app source.
 fn marketplace_dir(source_root: &Path) -> PathBuf {
@@ -1240,6 +1250,14 @@ mod tests {
         assert!(old.contains("Claude Code 2.1.296 is older than 2.1.304"), "{old}");
         assert!(new_enough(&ATTEND, "2.1.296 (Claude Code)").is_ok(), "attend's floor is the modules release");
         assert!(new_enough(&JUDGE, "garbage").unwrap_err().contains("printed no version"));
+    }
+
+    #[test]
+    fn the_theme_mod_runs_on_the_claude_code_it_was_seen_on() {
+        assert!(new_enough(&THEME, "2.1.309 (Claude Code)").is_ok());
+        assert!(new_enough(&THEME, "2.1.312 (Claude Code)").is_ok());
+        let old = new_enough(&THEME, "2.1.308 (Claude Code)").unwrap_err();
+        assert!(old.contains("older than 2.1.309"), "{old}");
     }
 
     #[test]

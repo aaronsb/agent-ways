@@ -14,6 +14,7 @@ pub mod judge;
 pub mod mods;
 pub mod modread;
 pub mod others;
+mod themecc;
 #[cfg(test)]
 mod tests;
 
@@ -242,7 +243,7 @@ impl Ways {
     }
 
     /// The value of a key as resolved now.
-    fn value(&self, key: &str, layers: &[Layer]) -> Option<Value> {
+    pub(crate) fn value(&self, key: &str, layers: &[Layer]) -> Option<Value> {
         let b = self.reg.lookup(key)?;
         resolve(b.spec, &b.bound, layers).value
     }
@@ -621,6 +622,17 @@ impl Adapter for Ways {
             spans.push(Span::raw(" "));
         }
         Some(Line::from(spans))
+    }
+
+    fn claude_code(&self) -> Option<agent_tui::ClaudeCode> {
+        Some(themecc::section(self))
+    }
+
+    fn set_claude_code(&mut self, key: &str, value: &str) -> Result<(), String> {
+        if !themecc::owns(key) {
+            return Err(format!("{key} is not a Claude Code render setting"));
+        }
+        self.set_one(key, value)
     }
 }
 
