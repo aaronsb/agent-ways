@@ -21,6 +21,11 @@ type World = {
   /** `ways settings theme export --mod`; ways missing when not given. */
   mod?: Answer
   verbose?: boolean
+  /** Claude Code's `theme` row: `custom:ways` when not given, null for no
+   *  row. A `config.set` of the row changes it, as the engine's writer does. */
+  selected?: string | null
+  /** `$.config.list` rejects. */
+  listFails?: boolean
 }
 
 const INTERACTIVE = { cwd: '/work/proj', surface: 'terminal', isInteractive: true } as const
@@ -67,7 +72,17 @@ function host(on: On, world: World) {
     throw new Error('ENOENT')
   })
   on('fs.write', () => ({ value: undefined }) as never)
-  on('config.list', () => ({ value: [{ key: 'verbose', label: 'Verbose', kind: 'boolean', value: world.verbose ?? false, provider: { kind: 'engine' }, isLocked: false }] }) as never)
+  on('config.set', ($, e) => {
+    if (e.key === 'theme' && typeof e.value === 'string') world.selected = e.value
+    return { value: e.value }
+  })
+  on('config.list', () => {
+    if (world.listFails) throw new Error('config unavailable')
+    const verbose = { key: 'verbose', label: 'Verbose', kind: 'boolean', value: world.verbose ?? false, provider: { kind: 'engine' }, isLocked: false }
+    const selected = world.selected === undefined ? 'custom:ways' : world.selected
+    const theme = selected === null ? [] : [{ key: 'theme', label: 'Theme', kind: 'choice', value: selected, provider: { kind: 'engine' }, isLocked: false }]
+    return { value: [verbose, ...theme] } as never
+  })
   on('ui.render', ($, e) => {
     // The dialog's tree holds the engine's own node.
     if (e.component === 'AskUserQuestion') return { type: 'engine', ref: 0 } as never
@@ -560,6 +575,18 @@ describe('the gradient prompt box', () => {
     expect(new Set(grounds(tree)).size).toBeGreaterThanOrEqual(3)
     await ui.unmount()
     await line.unmount()
+  })
+
+  test("another Claude Code theme than custom:ways leaves the person's message to the engine, live", async ($, on) => {
+    host(on, { mod: json(MIAMI_NIGHTS), selected: 'dark' })
+    await $.session.start(INTERACTIVE)
+    const ui = await $.ui.mount(at('terminal', 'UserMessage', PERSON))
+    expect(await ui.drawn()).toMatchObject({ type: 'Text' })
+    await $.config.set({ key: 'theme', value: 'custom:ways' } as never)
+    const tree = await ui.drawn()
+    expect(borders(tree).length).toBe(0)
+    expect(new Set(grounds(tree)).size).toBeGreaterThanOrEqual(3)
+    await ui.unmount()
   })
 
   test('a theme with no gradient draws a flat box in its selection colour', async ($, on) => {
