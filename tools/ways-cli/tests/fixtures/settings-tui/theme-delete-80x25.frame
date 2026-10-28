@@ -11,8 +11,9 @@ agent-tui frame 80x25
 |│   paper            light                 ││          mes                     │|
 |│   miami            light                 ││shape     plain (a: shape cycles i│|
 |│   tampa            light                 ││          t)                      │|
-|│   miami-nights     dark                  ││                                  │|
-|│▌● mine             dark   user           ││slots                             │|
+|│   miami-nights     dark                  ││waypoints theme  ● ◆ ■ ▲ ◉ ▶ ★ ◈ ♦│|
+|│▌● mine             dark   user           ││                                  │|
+|│                                          ││slots                             │|
 |│                                          ││  bg     #2e3440   info   #81a1c1 │|
 |│                                          ││  fg     #d8dee9   ok     #a3be8c │|
 |│                                          ││  dim    #4c566a   warn   #d08770 │|
@@ -21,7 +22,6 @@ agent-tui frame 80x25
 |│                                          ││                                  │|
 |│                                          ││contrast  ok                      │|
 |│                                          ││distinct  ok, err/warn ΔE 0.084   │|
-|│                                          ││                                  │|
 |└──────────────────────────────────────────┘└──────────────────────────────────┘|
 | confirm  delete theme mine?                                 y delete   n keep  |
 styles
@@ -148,7 +148,16 @@ styles
  12  39-39  - Magenta -
  12  40-41  - Cyan -
  12  42-42  - LightYellow -
- 12  43-44  - - DIM
+ 12  43-54  - - DIM
+ 12  62-62  LightCyan - -
+ 12  64-64  LightGreen - -
+ 12  66-66  LightRed - -
+ 12  68-68  LightBlue - -
+ 12  70-70  LightYellow - -
+ 12  72-72  LightMagenta - -
+ 12  74-74  LightCyan - -
+ 12  76-76  LightGreen - -
+ 12  78-78  LightYellow - -
  12  79-79  - - DIM
  13   0-0   - - DIM
  13   1-1   Cyan - BOLD|REVERSED
@@ -160,25 +169,21 @@ styles
  13  38-38  - Gray BOLD|REVERSED
  13  39-42  - DarkGray BOLD|REVERSED
  13  43-44  - - DIM
- 13  45-49  - - BOLD
  13  79-79  - - DIM
  14   0-0   - - DIM
  14  43-44  - - DIM
- 14  45-45  - Black -
- 14  46-53  - - DIM
- 14  62-62  - DarkGray -
- 14  63-70  - - DIM
+ 14  45-49  - - BOLD
  14  79-79  - - DIM
  15   0-0   - - DIM
  15  43-44  - - DIM
- 15  45-45  - Gray -
+ 15  45-45  - Black -
  15  46-53  - - DIM
  15  62-62  - DarkGray -
  15  63-70  - - DIM
  15  79-79  - - DIM
  16   0-0   - - DIM
  16  43-44  - - DIM
- 16  45-45  - DarkGray -
+ 16  45-45  - Gray -
  16  46-53  - - DIM
  16  62-62  - DarkGray -
  16  63-70  - - DIM
@@ -194,22 +199,26 @@ styles
  18  43-44  - - DIM
  18  45-45  - DarkGray -
  18  46-53  - - DIM
- 18  62-62  - Gray -
+ 18  62-62  - DarkGray -
  18  63-70  - - DIM
  18  79-79  - - DIM
  19   0-0   - - DIM
  19  43-44  - - DIM
+ 19  45-45  - DarkGray -
+ 19  46-53  - - DIM
+ 19  62-62  - Gray -
+ 19  63-70  - - DIM
  19  79-79  - - DIM
  20   0-0   - - DIM
- 20  43-54  - - DIM
- 20  55-56  Green - -
+ 20  43-44  - - DIM
  20  79-79  - - DIM
  21   0-0   - - DIM
  21  43-54  - - DIM
- 21  55-75  Green - -
+ 21  55-56  Green - -
  21  79-79  - - DIM
  22   0-0   - - DIM
- 22  43-44  - - DIM
+ 22  43-54  - - DIM
+ 22  55-75  Green - -
  22  79-79  - - DIM
  23   0-79  - - DIM
  24   0-8   Black Yellow BOLD
