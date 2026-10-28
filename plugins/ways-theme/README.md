@@ -25,7 +25,7 @@ One call configures it: `ways settings theme export --mod`, at an interactive se
 
 The skin's colours come from the theme's roles: `accent` for the person's marks and the rail, `body` for text, `muted` for secondary text, `ok`, `err` and `warn` for outcomes, `info` for reads, `hot` for writes, `warn` for shell runs, `alt` for searches, `accent_dim` for web calls, `muted` for MCP calls and `rule` for the rest. A table's header band and its zebra rows are steps from `bg` toward `subtle`. Under the `terminal` theme the drawing takes skins' own terminal look, the terminal's sixteen colours.
 
-Each reply, tool row and tool group sits in one frame, the one described above, and `render.frames` switches them off. A shell call's card is that call's frame, so its row goes unframed. Inside a frame the rail draws no connector.
+Each reply, tool row and tool group sits in one frame, the one described above, and `render.frames` switches them off. Whether a row is framed follows this export alone: a theme with colours, not `terminal`, and `frames` on. The frame and the row inside it read the same look, so a theme switched mid-session reframes the rows already drawn, and a session whose export has not loaded draws no frame. A shell call's card is that call's frame, so its row goes unframed. Inside a frame the rail draws no connector.
 
 The person's message, with `prompt_box` at `gradient`, sits on the theme's gradient in `body` text, mixed in OKLab. A message under 4 lines runs the gradient across each line, padding rows included; one of 4 lines or more runs it down the lines. A message with an image or a pasted block, a row in the ctrl+o transcript (under `verbose`, as for the frames, no row counts as one), a view under 12 columns and the `terminal` theme take a plain outline instead. So does every message under a theme with no gradient: `ways` exports its `prompt_box` of `gradient` as `frame`. A message holding a control character is Claude Code's own. With `copy` off, the Copy, `as text` and `copy reply` controls are not drawn.
 
@@ -33,7 +33,7 @@ On the desktop, VS Code and mobile the rows skins draws there are its own (the d
 
 ## Failures
 
-Each `ways` call is bounded at 1.5 s. A missing `ways`, a non-zero exit, output that does not parse, or a call past its bound leaves the file as it was, draws no frame, and leaves one debug-log line. A headless (`-p`) session changes nothing.
+Each `ways` call is bounded at 1.5 s. A missing `ways`, a non-zero exit, output that does not parse, or a call past its bound leaves the file or the look as it was, and leaves one debug-log line. A headless (`-p`) session changes nothing.
 
 A theme's gradient, border and rule glyphs, marks, presence and event glyphs and ornament do not reach Claude Code's chrome.
 

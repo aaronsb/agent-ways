@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'claude-code/testing'
+import { describe, expect, mock, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 import type { On, ProcessRunResult } from 'claude-code'
 
@@ -6,6 +6,8 @@ import { register } from '../hooks/register.tsx'
 import { DEFAULT_THEME, activeArgv, configDir, exportArgv, parseActive, parseTheme, themeFile, themeText } from '../hooks/lib.ts'
 import { passedOverHits, registrationsOf } from './passed-over.ts'
 import { MOD_EXPORT_ARGV } from '../hooks/skins/config.ts'
+import { PICKUP_MS } from '../hooks/skins/hub.tsx'
+import { MIAMI_NIGHTS, TAMPA, TERMINAL_THEME } from './fixtures.ts'
 
 const INTERACTIVE = { cwd: '/work/proj', surface: 'terminal', isInteractive: true } as const
 const DESKTOP = { cwd: '/work/proj', surface: 'desktop', isInteractive: true } as const
@@ -53,7 +55,10 @@ function host(on: On, world: World) {
   const draws: Record<string, number> = {}
   const files = { ...(world.files ?? {}) }
   const env = world.env ?? { HOME: '/home/dev' }
+  const clock = mock.clock(on, { now: 1_000 })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.cwd', () => ({ value: '/work/proj' }) as never)
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent: 42 }, rateLimits: [] } }) as never)
   on('ui.log', ($, e) => {
     if (String((e as { text?: unknown }).text).startsWith('ways-theme skins:')) return { value: undefined } as never
     logs.push(String((e as { text?: unknown }).text ?? JSON.stringify(e)))
@@ -98,7 +103,7 @@ function host(on: On, world: World) {
     const { Text } = $.ui.resolve(e)
     return <Text>engine</Text>
   })
-  return { argvs, timeouts, writes, sets, logs, toasts, files, draws }
+  return { argvs, timeouts, writes, sets, logs, toasts, files, draws, clock }
 }
 
 describe('the theme file follows theme.active', () => {
@@ -162,14 +167,11 @@ describe('a ways that fails leaves the file as it was', () => {
     ['the export is cut short', { active: ok('miami-nights\n'), exported: ok(JSON.stringify(MIAMI).slice(0, 40)) }],
     ['the export runs past its bound', { active: ok('miami-nights\n'), exported: new Error('timed out after 1500 ms') }],
   ]
-  test('a refused write throws nothing and draws no frame', async ($, on) => {
+  test('a refused write throws nothing', async ($, on) => {
     const h = host(on, { active: ok('miami-nights\n'), exported: ok(JSON.stringify(MIAMI)), writeFails: true })
     await $.session.start(INTERACTIVE)
     expect(h.writes).toEqual([])
     expect(h.logs.length).toBe(1)
-    const ui = await $.ui.mount({ ...REPLY, surface: 'terminal' } as never)
-    expect(await ui.drawn()).toMatchObject({ type: 'Text' })
-    await ui.unmount()
   })
 
   for (const [name, world] of cases) {
@@ -211,7 +213,12 @@ describe('the rules', () => {
 const REPLY = { plugin: 'ways-theme', component: 'AssistantMessage', requestId: 'm1', props: { text: 'hello', isFirstOfReply: true } } as const
 const TOOL = { plugin: 'ways-theme', component: 'ToolUse', requestId: 't1', props: { tool: 'Bash', input: {}, isRunning: false, isErrored: false, isInterrupted: false, isExpanded: false } } as const
 const GROUP = { plugin: 'ways-theme', component: 'ToolGroup', requestId: 'g1', props: { calls: [], isActive: false, isExpanded: false } } as const
-const THEMED: World = { active: ok('miami-nights\n'), exported: ok(JSON.stringify(MIAMI)) }
+// The frames read the look the skins layer's export gives; the theme file's
+// calls only write the file.
+const THEMED: World = { active: ok('miami-nights\n'), exported: ok(JSON.stringify(MIAMI)), mod: ok(JSON.stringify(MIAMI_NIGHTS)) }
+
+/** Whether the drawn row is wrapped in a frame. */
+const isFrame = (tree: unknown): boolean => (tree as { props?: { borderStyle?: unknown } }).props?.borderStyle === 'round'
 
 describe('frames on the terminal', () => {
   test('a reply sits on the theme ground inside a border, in theme keys', async ($, on) => {
@@ -219,12 +226,12 @@ describe('frames on the terminal', () => {
     await $.session.start(INTERACTIVE)
     const ui = await $.ui.mount({ ...REPLY, surface: 'terminal' } as never)
     expect(await ui.drawn()).toMatchObject({ type: 'Box', props: { marginTop: 1, borderStyle: 'round', backgroundColor: 'userMessageBackground', borderColor: 'claude' } })
-    expect((await ui.find({ type: 'Text', text: /engine/ }))?.text).toBe('engine')
+    expect(JSON.stringify(await ui.drawn())).toContain('hello')
     await ui.unmount()
   })
 
   test('a light theme frames a reply on the same ground', async ($, on) => {
-    host(on, { active: ok('tampa\n'), exported: ok(JSON.stringify({ ...MIAMI, name: 'Tampa', base: 'light' })) })
+    host(on, { active: ok('tampa\n'), exported: ok(JSON.stringify({ ...MIAMI, name: 'Tampa', base: 'light' })), mod: ok(JSON.stringify(TAMPA)) })
     await $.session.start(INTERACTIVE)
     const ui = await $.ui.mount({ ...REPLY, surface: 'terminal' } as never)
     expect(await ui.drawn()).toMatchObject({ type: 'Box', props: { borderStyle: 'round', backgroundColor: 'userMessageBackground', borderColor: 'claude' } })
@@ -246,16 +253,16 @@ describe('frames on the terminal', () => {
     ['an expanded tool group', THEMED, GROUP, { isExpanded: true }],
     ['a reply past the length bound', THEMED, REPLY, { text: 'x'.repeat(20001) }],
     ['a block that does not open a reply', THEMED, REPLY, { isFirstOfReply: false }],
-    ['a reply under the terminal theme', { active: ok('terminal\n') }, REPLY, {}],
+    ['a reply under the terminal theme', { active: ok('terminal\n'), mod: ok(JSON.stringify(TERMINAL_THEME)) }, REPLY, {}],
     ['a reply when ways fails', {}, REPLY, {}],
   ]
   for (const [name, world, site, props] of unchanged) {
-    test(`${name} is the engine's own`, async ($, on) => {
+    test(`${name} is not framed`, async ($, on) => {
       host(on, world)
       await $.session.start(INTERACTIVE)
       const s = site as typeof REPLY
       const ui = await $.ui.mount({ ...s, props: { ...s.props, ...(props as object) }, surface: 'terminal' } as never)
-      expect(await ui.drawn()).toMatchObject({ type: 'Text' })
+      expect(isFrame(await ui.drawn())).toBe(false)
       await ui.unmount()
     })
   }
@@ -269,7 +276,7 @@ describe('frames on the terminal', () => {
     const drawnAs = async ($: Parameters<TestBody>[0], type: string) => {
       for (const site of sites) {
         const ui = await $.ui.mount({ ...site, surface: 'terminal' } as never)
-        expect(await ui.drawn()).toMatchObject({ type })
+        expect(isFrame(await ui.drawn())).toBe(type === 'Box')
         await ui.unmount()
       }
     }
@@ -286,12 +293,12 @@ describe('frames on the terminal', () => {
       await turn.unmount()
     })
 
-    test("the turn line is the engine's own", async ($, on) => {
+    test('the turn line is not framed', async ($, on) => {
       host(on, THEMED)
       await $.session.start(INTERACTIVE)
       for (const isExpanded of [true, false]) {
         const ui = await $.ui.mount({ ...TURN, props: { ...TURN.props, isExpanded }, surface: 'terminal' } as never)
-        expect(await ui.drawn()).toMatchObject({ type: 'Text' })
+        expect(isFrame(await ui.drawn())).toBe(false)
         await ui.unmount()
       }
     })
@@ -299,14 +306,17 @@ describe('frames on the terminal', () => {
     test('two turn lines that disagree settle and do not flip the view back', async ($, on) => {
       const h = host(on, THEMED)
       await $.session.start(INTERACTIVE)
+      // The skins layer draws the turn lines; an errored command's output, which
+      // the engine draws, counts the redraws.
+      const reply = await $.ui.mount({ plugin: 'ways-theme', component: 'CommandOutput', requestId: 'c9', props: { command: 'x', args: '', text: 'x', isErrored: true }, surface: 'terminal' } as never)
       const a = await $.ui.mount({ ...TURN, props: { ...TURN.props, isExpanded: true }, surface: 'terminal' } as never)
       const b = await $.ui.mount({ ...TURN, requestId: 'd2', surface: 'terminal' } as never)
-      // b's first report is the latest change: collapsed.
-      await drawnAs($, 'Box')
       // a drawn again with its value unchanged moves nothing.
       await a.redraw({ ...TURN.props, isExpanded: true } as never)
+      expect(h.draws.CommandOutput).toBeLessThanOrEqual(4)
+      // b's first report is the latest change: collapsed.
       await drawnAs($, 'Box')
-      expect(h.draws.TurnDuration).toBeLessThanOrEqual(8)
+      await reply.unmount()
       await a.unmount()
       await b.unmount()
     })
@@ -316,7 +326,6 @@ describe('frames on the terminal', () => {
       await $.session.start(INTERACTIVE)
       // A row under a speaker label reports its own isExpanded.
       const ui = await $.ui.mount({ ...PERSON, props: { ...PERSON.props, isExpanded: true }, surface: 'terminal' } as never)
-      expect(await ui.drawn()).toMatchObject({ type: 'Text' })
       await drawnAs($, 'Box')
       await ui.unmount()
     })
@@ -330,7 +339,8 @@ describe('frames on the terminal', () => {
     })
 
     test('two composer rows that disagree leave the view as it was', async ($, on) => {
-      const h = host(on, THEMED)
+      // prompt_box off hands the rows to the engine, which counts them.
+      const h = host(on, { ...THEMED, mod: ok(JSON.stringify({ ...MIAMI_NIGHTS, render: { ...MIAMI_NIGHTS.render, prompt_box: 'off' } })) })
       await $.session.start(INTERACTIVE)
       const open = await $.ui.mount({ ...PERSON, props: { ...PERSON.props, isExpanded: true }, surface: 'terminal' } as never)
       const shut = await $.ui.mount({ ...PERSON, requestId: 'u2', surface: 'terminal' } as never)
@@ -386,19 +396,19 @@ describe('frames on the terminal', () => {
       const turn = await $.ui.mount({ ...TURN, surface: 'terminal' } as never)
       await $.config.set({ key: 'verbose', value: false } as never)
       const ui = await $.ui.mount({ ...REPLY, surface: 'terminal' } as never)
-      expect(await ui.drawn()).toMatchObject({ type: 'Text' })
+      expect(isFrame(await ui.drawn())).toBe(false)
       await ui.unmount()
       await turn.unmount()
     })
   })
 
   for (const surface of ['desktop', 'vscode', 'mobile'] as const) {
-    test(`${surface} draws every row as the engine does`, async ($, on) => {
+    test(`${surface} frames no row`, async ($, on) => {
       host(on, THEMED)
       await $.session.start({ ...INTERACTIVE, surface })
       for (const site of [REPLY, TOOL, GROUP]) {
         const ui = await $.ui.mount({ ...site, surface } as never)
-        expect(await ui.drawn()).toMatchObject({ type: 'Text' })
+        expect(isFrame(await ui.drawn())).toBe(false)
         await ui.unmount()
       }
     })

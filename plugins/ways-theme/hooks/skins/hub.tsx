@@ -14,12 +14,15 @@
 // The look comes from one call, `ways settings theme export --mod`, at an
 // interactive session's start and every PICKUP_MS after. Any failure leaves
 // the look as it was (none at the start, so every row is the engine's own) and
-// logs one debug line per distinct reason. The register module's frames ask
-// `framesWanted` whether to draw; the person's message draws here, in a
-// gradient box, the outline, or not at all, after `render.prompt_box`.
+// logs one debug line per distinct reason. Whether a row is framed is
+// `isFramed`, which the register module's frames ask too; the person's message
+// draws here, in a gradient box, the outline, or not at all, after
+// `render.prompt_box`.
 
 import { atom, memberOf, read, update } from 'claude-code'
 import type { EngineInterface, On, RenderSurface, Timer } from 'claude-code'
+
+import { isExpandedView, shouldFrame } from '../lib.ts'
 
 import { MOD_EXPORT_ARGV, parseExport, setupOf } from './config.ts'
 import type { Setup } from './config.ts'
@@ -94,7 +97,9 @@ const debug = ($: EngineInterface, text: string) => $.ui.log(`ways-theme skins: 
 // The look last decoded, keyed by the atom's text, so a draw parses nothing.
 let decoded: { text: string; setup: Setup | null } = { text: '', setup: null }
 
-async function activeSetup($: EngineInterface): Promise<Setup | null> {
+/** The look the export last gave, or null while none has loaded. A row that
+ *  reads it redraws when it changes. */
+export async function activeSetup($: EngineInterface): Promise<Setup | null> {
   const text = await read($, lookAtom)
   if (text !== decoded.text) {
     const parsed = text === '' ? 'none' : parseExport(text)
@@ -103,25 +108,31 @@ async function activeSetup($: EngineInterface): Promise<Setup | null> {
   return decoded.setup
 }
 
-/** Whether the register module's reply and tool frames draw: `render.frames`,
- *  and true while no export has loaded, so a failed export leaves them as they
- *  were. A row whose result skins draws as a shell card is that card's to
- *  frame. */
-export function framesWanted(e: object): boolean {
-  const setup = decoded.setup
-  if (setup === null) return true
-  if (!setup.frames) return false
-  const row = e as { component?: unknown; props?: { tool?: unknown; output?: unknown; isErrored?: unknown } }
-  if (row.component === 'ToolUse' && typeof row.props?.tool === 'string' && SHELLS.has(row.props.tool) && setup.prefs.shell) {
-    return keepsOwnRow(row.props.output) || shellResultOf(row.props.output, row.props.isErrored === true) === null
+/** What the register module knows of the terminal's view: `verbose`, and
+ *  whether the view is the ctrl+o transcript, as its TurnDuration hook reads it. */
+export type View = { isVerbose: boolean; isTranscriptExpanded: boolean }
+
+/** Whether a row draws expanded: the ctrl+o transcript, or the row opened on
+ *  its own, and neither under `verbose` (isExpandedView). */
+const isExpanded = (view: View, row: unknown): boolean => isExpandedView(view.isTranscriptExpanded || row === true, view.isVerbose)
+
+type Row = { component: string; surface: RenderSurface; props: object }
+
+/** Whether the frame wraps this row. The register module asks it to draw the
+ *  frame and this layer to draw the row inside it, of the same look and view,
+ *  so the two never disagree. No look loaded, `render.frames` off or the
+ *  `terminal` theme draws none. A reply is framed at the block that opens it;
+ *  a row whose result skins draws as a shell card is that card's to frame. */
+export function isFramed(setup: Setup | null, e: Row, view: View): boolean {
+  if (setup === null) return false
+  const props = e.props as { isExpanded?: unknown; isFirstOfReply?: unknown; text?: unknown; tool?: unknown; output?: unknown; isErrored?: unknown }
+  if (e.component === 'AssistantMessage' && props.isFirstOfReply !== true) return false
+  const length = e.component === 'AssistantMessage' && typeof props.text === 'string' ? props.text.length : undefined
+  if (!shouldFrame({ surface: e.surface, isThemed: setup.frames && setup.themed, isVerbose: view.isVerbose, isExpanded: isExpanded(view, props.isExpanded), ...(length === undefined ? {} : { length }) })) return false
+  if (e.component === 'ToolUse' && typeof props.tool === 'string' && SHELLS.has(props.tool) && setup.prefs.shell) {
+    return keepsOwnRow(props.output) || shellResultOf(props.output, props.isErrored === true) === null
   }
   return true
-}
-
-/** Whether the register module's frame will wrap this row: the same reading
- *  of the theme, the surface and ctrl+o that its own hooks make. */
-function isFramed(setup: Setup, e: { component: string; surface: RenderSurface }, isExpanded: boolean): boolean {
-  return setup.frames && setup.themed && e.surface === 'terminal' && !isExpanded && framesWanted(e)
 }
 
 /** A row the frame wraps opens on a blank line, as the engine's own does, for
@@ -321,11 +332,8 @@ function copier($: EngineInterface, surface: RenderSurface): (text: string) => v
   }
 }
 
-/** What the register module shares: whether a terminal row draws expanded,
- *  given the row's own `isExpanded`: the ctrl+o transcript, as its TurnDuration
- *  hook reads it, or the row opened on its own, and neither under `verbose`
- *  (isExpandedView). */
-export type Shared = { isExpanded: (row?: boolean) => boolean }
+/** What the register module shares: the terminal's view. */
+export type Shared = { view: () => View }
 
 /** Registers the skins layer. Called last in the module's register, so each
  *  hook here sits inside the module's own: the frames wrap what it draws. */
@@ -434,7 +442,7 @@ export function registerSkins(on: On, shared: Shared): void {
     const disclosure = memberOf(disclosureAtom, e)
     const open = isOpen(await read($, disclosure), e.props.isErrored)
     const base = await sessionLook($, e, lookOf($.ui.resolve(e), setup, e.surface, copier($, e.surface)), { touched: typeof path === 'string', folds: open, cwd })
-    const framed = isFramed(setup, e, shared.isExpanded(e.props.isExpanded))
+    const framed = isFramed(setup, e, shared.view())
     const plain = base.svg === undefined ? base : { ...base, isFirstDraw: await firstDraws($, e) }
     const look = framed ? forFrame(plain) : plain
     const touch = typeof path === 'string' && look.touched !== undefined ? touchOf(look.touched.files, path, cwd) : undefined
@@ -475,7 +483,7 @@ export function registerSkins(on: On, shared: Shared): void {
       if (e.props.isExpanded) return next(e)
     }
     const look = lookOf($.ui.resolve(e), setup, e.surface)
-    return isFramed(setup, e, shared.isExpanded()) ? marginRow(look, groupRow(forFrame(look), e.props.calls)) : groupRow(look, e.props.calls)
+    return isFramed(setup, e, shared.view()) ? marginRow(look, groupRow(forFrame(look), e.props.calls)) : groupRow(look, e.props.calls)
   })
 
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
@@ -532,9 +540,9 @@ export function registerSkins(on: On, shared: Shared): void {
     }
     const ui = $.ui.resolve(e)
     const hasMore = await read($, memberOf(imagesAtom, e))
-    const isExpanded = shared.isExpanded(e.props.isExpanded)
+    const isRowOpen = isExpanded(shared.view(), e.props.isExpanded)
     const width = (e.viewport?.columns ?? 80) - 1
-    const canGradient = setup.promptBox === 'gradient' && !hasMore && !isExpanded && !NOT_PLAIN.test(e.props.text) && width >= MIN_WIDTH
+    const canGradient = setup.promptBox === 'gradient' && !hasMore && !isRowOpen && !NOT_PLAIN.test(e.props.text) && width >= MIN_WIDTH
     if (canGradient && setup.ground !== null) {
       const lines = boxLines(e.props.text, width)
       const runs = gradientRuns(lines, width, setup.ground.stops, axisFor(lines.length - 2))
@@ -557,7 +565,7 @@ export function registerSkins(on: On, shared: Shared): void {
     const base = await sessionLook($, e, lookOf(ui, setup, e.surface, copier($, e.surface)), replyNeeds(text, segments))
     const look = base.svg === undefined ? base : { ...base, isFirstDraw: await firstDraws($, e) }
     const rows = replyRows(look, segments, e.viewport?.columns ?? 100, svg, segments.length > 1 ? text : undefined)
-    const framed = e.props.isFirstOfReply && isFramed(setup, e, shared.isExpanded())
+    const framed = isFramed(setup, e, shared.view())
     return withSettle($, e, framed ? marginRow(look, rows) : rows)
   })
 

@@ -90,7 +90,8 @@ export const FRAME = {
 /** What a render site knows when it decides whether to frame. */
 export type FrameCase = {
   surface: string
-  /** An agent-ways theme is active and its file is written. */
+  /** The look has `render.frames` on, under a theme with colours of its
+   *  own: the live export's, read again as it changes (hub.tsx). */
   isThemed: boolean
   /** Claude Code's `verbose` row is on. */
   isVerbose: boolean

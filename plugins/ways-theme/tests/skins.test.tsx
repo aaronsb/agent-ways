@@ -312,6 +312,45 @@ describe('one frame per row', () => {
     await ui.unmount()
   })
 
+  // The frame and the row inside it read one predicate of one look: a frame
+  // always holds a row without its rail, and an unframed row keeps its rail.
+  const framedOnce = (tree: RenderElement) => borders(tree).length === 1 && !shows(tree, '┃')
+  const bare = (tree: RenderElement) => borders(tree).length === 0 && shows(tree, '┃')
+
+  test('under verbose, rows that report expanded are framed once, the rail stripped', async ($, on) => {
+    host(on, { mod: json(MIAMI_NIGHTS), verbose: true })
+    await $.session.start(INTERACTIVE)
+    const line = await $.ui.mount(at('terminal', 'TurnDuration', { word: 'Baked', durationMs: 4000, isExpanded: true }, 'turn1'))
+    const row = await $.ui.mount(at('terminal', 'ToolUse', { ...READ, isExpanded: true }))
+    expect(framedOnce(await row.drawn())).toBe(true)
+    const reply = await $.ui.mount(at('terminal', 'AssistantMessage', REPLY, 'm1'))
+    expect(borders(await reply.drawn()).length).toBe(1)
+    await reply.unmount()
+    await row.unmount()
+    await line.unmount()
+  })
+
+  const switches: [string, Answer, Answer, boolean, boolean][] = [
+    ['a themed session switched to terminal', json(MIAMI_NIGHTS), json(TERMINAL_THEME), true, false],
+    ['a terminal session switched to a theme', json(TERMINAL_THEME), json(MIAMI_NIGHTS), false, true],
+    ['an export that failed at start and then loads', new Error('timed out after 1500 ms'), json(MIAMI_NIGHTS), false, true],
+  ]
+  for (const [name, before, after, wasFramed, isFramedAfter] of switches) {
+    test(`${name} reframes the rows it has drawn`, async ($, on) => {
+      const world: World = { mod: before }
+      const h = host(on, world)
+      await $.session.start(INTERACTIVE)
+      const row = await $.ui.mount(at('terminal', 'ToolUse', READ))
+      const first = await row.drawn()
+      expect(wasFramed ? framedOnce(first) : borders(first).length === 0).toBe(true)
+      world.mod = after
+      await h.clock.advance(PICKUP_MS)
+      const second = await row.drawn()
+      expect(isFramedAfter ? framedOnce(second) : bare(second)).toBe(true)
+      await row.unmount()
+    })
+  }
+
   test('a shell call is its card: the row goes unframed and the card holds the one border', async ($, on) => {
     host(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)

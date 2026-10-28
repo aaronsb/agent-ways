@@ -11,10 +11,13 @@
 // Code's own dark for `terminal`. Claude Code watches its themes folder, so
 // the change applies live.
 //
-// The frames: on the terminal, under an agent-ways theme, each reply sits in
-// a border on the theme's ground, and each tool call and tool group in a
-// border, wrapped around the engine's own drawing. The colours are Claude
-// Code theme keys, so they follow `custom:ways`. The ctrl+o transcript, read
+// The frames: on the terminal, under a theme with colours of its own, each
+// reply sits in a border on the theme's ground, and each tool call and tool
+// group in a border, wrapped around the engine's own drawing. Whether a row is
+// framed is one question, `isFramed` (hub.tsx), which this module and the
+// skins layer ask of the same look, the live export's, so a theme switch
+// mid-session reframes both. The colours are Claude Code theme keys, so they
+// follow `custom:ways`. The ctrl+o transcript, read
 // from the line that closes a turn, an expanded tool row, a reply longer than
 // MAX_FRAMED_CHARS and every other surface draw the engine's own row. Under
 // `verbose` every row reports itself expanded, so the frames draw there as
@@ -29,16 +32,18 @@
 
 import type { EngineInterface, Register, RenderElement } from 'claude-code'
 
-import { DEFAULT_THEME, FRAME, TERMINAL, WAYS_TIMEOUT_MS, activeArgv, configDir, exportArgv, isExpandedView, parseActive, parseTheme, shouldFrame, themeFile, themeText } from './lib.ts'
+import { DEFAULT_THEME, FRAME, TERMINAL, WAYS_TIMEOUT_MS, activeArgv, configDir, exportArgv, parseActive, parseTheme, themeFile, themeText } from './lib.ts'
 import type { ClaudeCodeTheme, Run } from './lib.ts'
-import { framesWanted, registerSkins } from './skins/hub.tsx'
+import { activeSetup, isFramed, registerSkins } from './skins/hub.tsx'
+import type { View } from './skins/hub.tsx'
 
 const debug = ($: EngineInterface, text: string) => $.ui.log(`ways-theme: ${text}`, { to: 'debug' })
 
-/** What the frames read: set at session start, when `verbose` changes, and
- *  when the terminal's view enters or leaves the ctrl+o transcript. */
-const frames = { isThemed: false, isVerbose: false }
+/** What the frames read of the view: `verbose`, set at session start and
+ *  when it changes, and whether the terminal's view is the ctrl+o transcript. */
+let isVerbose = false
 let isTranscriptExpanded = false
+const view = (): View => ({ isVerbose, isTranscriptExpanded })
 /** Each terminal turn line's last `isExpanded`, by row. */
 const turnLines = new Map<string, boolean>()
 
@@ -79,7 +84,6 @@ export async function follow($: EngineInterface): Promise<void> {
   const text = themeText(theme)
   const old = await $.fs.read(file).catch(() => undefined)
   if (old !== text) await $.fs.write(file, text)
-  frames.isThemed = theme.overrides !== undefined
 }
 
 /** Claude Code's `verbose` row, read once; off when it cannot be read. */
@@ -92,7 +96,6 @@ async function readVerbose($: EngineInterface): Promise<boolean> {
  *  the inner Box takes it back and the frame keeps the gap outside, so the
  *  ground starts at the first line of text. */
 function framed($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0], inner: RenderElement, frame: Record<string, string>): RenderElement {
-  if (!framesWanted(e)) return inner
   const { Box } = $.ui.resolve(e)
   return (
     <Box marginTop={1} borderStyle="round" paddingX={1} {...frame}>
@@ -106,7 +109,7 @@ export const register: Register = on => {
     const started = await next(e)
     if (!e.isInteractive) return started
     await follow($).catch(err => debug($, `left the theme file as it was: ${String(err)}`))
-    frames.isVerbose = await readVerbose($)
+    isVerbose = await readVerbose($)
     $.ui.invalidate('ui.render')
     return started
   })
@@ -116,7 +119,7 @@ export const register: Register = on => {
   on('config.set', { key: 'verbose' }, async ($, e, next) => {
     const result = await next(e)
     if (!result.deny) {
-      frames.isVerbose = result.value === true
+      isVerbose = result.value === true
       $.ui.invalidate('ui.render')
     }
     return result
@@ -140,21 +143,20 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
-    const c = { surface: e.surface, ...frames, isExpanded: isTranscriptExpanded, length: e.props.text.length }
-    if (!shouldFrame(c) || !e.props.isFirstOfReply) return next(e)
+    if (!isFramed(await activeSetup($), e, view())) return next(e)
     return framed($, e, await next(e), FRAME.reply)
   })
 
   on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
-    if (!shouldFrame({ surface: e.surface, ...frames, isExpanded: isTranscriptExpanded || e.props.isExpanded })) return next(e)
+    if (!isFramed(await activeSetup($), e, view())) return next(e)
     return framed($, e, await next(e), e.props.isErrored ? FRAME.toolErrored : FRAME.tool)
   })
 
   on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
-    if (!shouldFrame({ surface: e.surface, ...frames, isExpanded: isTranscriptExpanded || e.props.isExpanded })) return next(e)
+    if (!isFramed(await activeSetup($), e, view())) return next(e)
     return framed($, e, await next(e), FRAME.tool)
   })
 
   // The skins layer, after the hooks above so they wrap what it draws.
-  registerSkins(on, { isExpanded: row => isExpandedView(isTranscriptExpanded || row === true, frames.isVerbose) })
+  registerSkins(on, { view })
 }
