@@ -2,7 +2,8 @@
 // https://github.com/hellosverre/claude-skins at 985ad63, hooks/prose.tsx.
 
 import type { AlertType, Block, Line, Run, RunStyle, Task } from './blocks'
-import { safeHref, touchOf } from './links'
+import { isPath } from './blocks'
+import { fileHref, safeHref, touchOf } from './links'
 import type { Look } from './rows'
 import type { Palette } from './skin'
 
@@ -36,20 +37,28 @@ function pathSlot(look: Look, text: string): keyof Palette {
   return touch === 'created' ? 'ok' : touch === 'edited' ? 'warn' : 'read'
 }
 
+// Where a run links to, on a surface that draws links: a URL the engine's `Link` takes, and
+// a path, or a code span that is one whole path, as its file. Null leaves the run text.
+function hrefOf(look: Look, run: Run): string | null {
+  if (look.links !== true) {
+    return null
+  }
+
+  if (run.style === 'url') {
+    return safeHref(run.text)
+  }
+
+  const isFile = run.style === 'path' || (run.style === 'code' && isPath(run.text))
+
+  return isFile && look.paths !== undefined ? fileHref(run.text, look.paths) : null
+}
+
+// A linked run is drawn as it would be unlinked; a linked URL is underlined besides.
 function runText(look: Look, run: Run) {
   const { Link, Text } = look.ui
   const { palette } = look.skin
   const slot = run.style === 'path' ? pathSlot(look, run.text) : SLOTS[run.style]
-  const href = run.style === 'url' && look.links === true ? safeHref(run.text) : null
-
-  // A URL the engine's Link takes is one where the surface draws links; any other is text.
-  if (href !== null) {
-    return (
-      <Text color={palette.web} underline>
-        <Link href={href}>{run.text}</Link>
-      </Text>
-    )
-  }
+  const href = hrefOf(look, run)
 
   return (
     <Text
@@ -57,9 +66,10 @@ function runText(look: Look, run: Run) {
       bold={run.style === 'bold'}
       italic={run.style === 'italic'}
       strikethrough={run.style === 'strike'}
+      {...(run.style === 'url' && href !== null ? { underline: true } : {})}
       {...(run.style === 'code' ? { backgroundColor: palette.surface } : {})}
     >
-      {run.text}
+      {href === null ? run.text : <Link href={href}>{run.text}</Link>}
     </Text>
   )
 }

@@ -36,13 +36,22 @@ const FENCE = /^\s*(```|~~~)/
 
 const INLINE = /(`+)([^`]+?)\1|\*\*(?=\S)(.+?)(?<=\S)\*\*|__(?=\S)(.+?)(?<=\S)__|~~(?=\S)(.+?)(?<=\S)~~|(?<![\w*])\*(?=\S)(.+?)(?<=\S)\*(?![\w*])|(?<![\w_])_(?=\S)(.+?)(?<=\S)_(?![\w_])/g
 
+// A path: absolute, `~/`, `./` or `../`, a drive, or a relative one of two or more segments
+// ending in a file name (`a.d.ts` whole). It keeps a `:line` or `:line:col` after it. None
+// starts inside a remote one: `host:/var/x`, `user@host:~/x`, `s3://b/x`, `//cdn/x`.
+const PATH = /(?:(?:(?<![\w@.-])[A-Za-z]:[\\/]|(?<![\w:@])~\/|\.{1,2}\/|(?<![\w):/~])\/(?=[\w.@-]+\/))[\w.@-]+(?:[\\/][\w.@-]+)*\/?|(?<![\w/.@:-])[\w@-]+(?:\/[\w.@-]+)*\/[\w-]+(?:\.[\w-]+)*\.[A-Za-z][A-Za-z0-9]{0,5}\b)(?::\d+(?::\d+)?\b)?/
+
+const WHOLE_PATH = new RegExp(`^(?:${PATH.source})$`)
+
+// Whether `text` is one path, whole: a code span that is one links to the file.
+export const isPath = (text: string): boolean => WHOLE_PATH.test(text)
+
 // Ordered so a URL wins over the path inside it, and a path over its version or number. A
-// path keeps a `:line` or `:line:col` after it. A number is not one when a word, a dot or a
-// hyphen sits against it (`gpt-4`, `x86-64`), except the second of a pair of plain numbers
-// (`10-20`, `2026-10-20`).
+// number is not one when a word, a dot or a hyphen sits against it (`gpt-4`, `x86-64`),
+// except the second of a pair of plain numbers (`10-20`, `2026-10-20`).
 const HIGHLIGHT: readonly (readonly [RunStyle, RegExp])[] = [
   ['url', /\bhttps?:\/\/[^\s<>()"'`]*[^\s<>()"'`.,;:!?]/g],
-  ['path', /(?:(?:[A-Za-z]:[\\/]|~\/|\.{1,2}\/|(?<![\w)])\/(?=[\w.@-]+\/))[\w.@-]+(?:[\\/][\w.@-]+)*\/?|(?<![\w/.-])[\w@-]+(?:\/[\w.@-]+)*\/[\w-]+\.[A-Za-z][A-Za-z0-9]{0,5}\b)(?::\d+(?::\d+)?\b)?/g],
+  ['path', new RegExp(PATH.source, 'g')],
   ['version', /(?<![\w.-])v\d+(?:\.\d+)*(?:-[\w.]+)?\b|(?<![\w.-])\d+\.\d+\.\d+(?:-[\w.]+)?\b/g],
   ['duration', /(?<![\w.-])\d+(?:\.\d+)?(?:ns|µs|us|ms|s|min|h)\b/g],
   ['number', /(?<![\w.]|(?<!\b\d+)-)\d[\d,_]*(?:\.\d+)?%?(?![\w])/g],
