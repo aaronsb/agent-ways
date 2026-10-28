@@ -169,7 +169,7 @@ impl Pane for ProjectsPane {
             let right = |t: &str| Cell::from(Line::from(t.to_string()).alignment(Alignment::Right));
             let header = Row::new(vec![Cell::from("Project"), right("Sessions"), right("Size"), right("Last"), right("Memory")])
                 .style(Style::new().add_modifier(Modifier::BOLD));
-            let mark = Span::raw(theme::SELECTED_MARK).width();
+            let mark = Span::raw(theme::selected_mark()).width();
             // Borders, the mark, the fixed columns and the gaps between all five.
             let path_w = (list.width as usize).saturating_sub(2 + mark + 27 + 4).max(8);
             let rows: Vec<Row> = self
@@ -187,7 +187,7 @@ impl Pane for ProjectsPane {
                 .column_spacing(1)
                 .block(pane(title))
                 .row_highlight_style(theme::selected())
-                .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()))
+                .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()))
                 .highlight_spacing(HighlightSpacing::Always);
             self.table.select(Some(self.sel));
             f.render_stateful_widget(t, list, &mut self.table);

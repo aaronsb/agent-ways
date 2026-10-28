@@ -97,7 +97,7 @@ impl Fires {
                 .column_spacing(1)
                 .block(pane(title).title_bottom(agent_hint("ways session fires --json")))
                 .row_highlight_style(theme::selected())
-                .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()))
+                .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()))
                 .highlight_spacing(HighlightSpacing::Always);
             f.render_stateful_widget(t, body, &mut self.table);
         }

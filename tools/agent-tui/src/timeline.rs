@@ -216,6 +216,7 @@ impl Scrubber<'_> {
             let head = cell(self.pos.min(self.len.saturating_sub(1)));
             let marks: Vec<usize> = self.marks.iter().filter(|m| **m < self.len).map(|m| cell(*m)).collect();
             let notes: Vec<usize> = self.notes.iter().filter(|m| **m < self.len).map(|m| cell(*m)).collect();
+            let [rule, past] = theme::rule_glyphs();
             for x in 0..track {
                 let (glyph, style) = if x == head {
                     ("●", theme::accent().add_modifier(Modifier::BOLD))
@@ -224,9 +225,9 @@ impl Scrubber<'_> {
                 } else if marks.contains(&x) {
                     ("┼", theme::muted())
                 } else if x < head {
-                    ("━", theme::accent())
+                    (past, theme::accent())
                 } else {
-                    ("─", theme::rule())
+                    (rule, theme::rule())
                 };
                 spans.push(Span::styled(glyph, style));
             }

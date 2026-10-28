@@ -1102,7 +1102,7 @@ fn draw_timeline(f: &mut Draw, r: &mut Replay, area: Rect) {
             .column_spacing(2)
             .block(pane(title))
             .row_highlight_style(theme::selected())
-            .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()))
+            .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()))
             .highlight_spacing(HighlightSpacing::Always);
         // The scroll is kept between frames, so a row stays under the
         // pointer for a second click, but never past where the last rows
@@ -1188,7 +1188,7 @@ fn draw_why(f: &mut Draw, r: &mut Replay, area: Rect) {
     let list = List::new(items)
         .block(pane(if r.has_subagents() { " ways · epoch per agent " } else { " ways · epoch " }))
         .highlight_style(theme::selected())
-        .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()))
+        .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()))
         .highlight_spacing(HighlightSpacing::Always);
     // Kept between frames, as the table's is, and clamped so the last ways
     // fill the view.

@@ -5,6 +5,7 @@
 
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
+use ratatui::symbols::border;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
@@ -15,9 +16,15 @@ use super::{App, Btn, Mode};
 use crate::tree::{self, Arg, Kind, Row};
 use crate::wrap::str_width;
 
-/// A bordered pane in the theme: rule-coloured border, accent title.
+/// A bordered pane in the theme: rule-coloured border in the theme's
+/// glyphs, plain by default, and an accent title after the theme's ornament.
 pub(super) fn pane(title: impl Into<Line<'static>>) -> Block<'static> {
-    Block::default().borders(Borders::ALL).border_style(theme::rule()).title(title).title_style(theme::title())
+    Block::default()
+        .borders(Borders::ALL)
+        .border_set(theme::border_set(border::PLAIN))
+        .border_style(theme::rule())
+        .title(theme::ornamented(title.into()))
+        .title_style(theme::title())
 }
 
 pub(super) fn width(spans: &[Span]) -> u16 {
@@ -334,7 +341,7 @@ impl App {
         let list = List::new(items)
             .block(block)
             .highlight_style(theme::selected())
-            .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()))
+            .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()))
             .highlight_spacing(ratatui::widgets::HighlightSpacing::Always);
         self.list.select(if rows.is_empty() { None } else { Some(self.cursor) });
         f.render_stateful_widget(list, area, &mut self.list);

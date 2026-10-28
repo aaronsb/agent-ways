@@ -118,7 +118,7 @@ impl App {
         let list = List::new(items)
             .block(block)
             .highlight_style(theme::selected())
-            .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()))
+            .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()))
             .highlight_spacing(HighlightSpacing::Always);
         self.list.select(Some(cursor));
         f.render_stateful_widget(list, area, &mut self.list);

@@ -243,7 +243,7 @@ impl Spend {
             .column_spacing(1)
             .block(pane(title).title_bottom(agent_hint(&self.hint)))
             .row_highlight_style(theme::selected())
-            .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()));
+            .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()));
         f.render_stateful_widget(t, body, &mut self.table);
     }
 }
@@ -386,7 +386,7 @@ impl Precision {
             .column_spacing(1)
             .block(pane(title).title_bottom(agent_hint(&self.hint)))
             .row_highlight_style(theme::selected())
-            .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()));
+            .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()));
         f.render_stateful_widget(t, body, &mut self.table);
         let remedy_text = Line::from(vec![Span::styled("remedy ", theme::muted()), Span::raw(self.rows[self.sel].flag.remedy())]);
         f.render_widget(Paragraph::new(remedy_text), remedy);
@@ -466,7 +466,7 @@ impl Stats {
                 .column_spacing(1)
                 .block(pane(title).title_bottom(agent_hint(&self.hint)))
                 .row_highlight_style(theme::selected())
-                .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()));
+                .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()));
             f.render_stateful_widget(t, left, &mut self.table);
         }
 

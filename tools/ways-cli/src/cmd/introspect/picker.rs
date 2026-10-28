@@ -176,7 +176,7 @@ pub(crate) fn draw_picker(f: &mut Draw, p: &mut Picker, main: Rect) {
             .column_spacing(1)
             .block(pane(title))
             .row_highlight_style(theme::selected())
-            .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()))
+            .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()))
             .highlight_spacing(HighlightSpacing::Always);
         p.table.select(Some(p.sel));
         f.render_stateful_widget(t, main, &mut p.table);

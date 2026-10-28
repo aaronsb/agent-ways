@@ -14,7 +14,8 @@ use std::cell::Cell;
 use agent_theme::{ColorDepth, Painter, Rgb, Role, Roles, Theme, MIN_TEXT};
 use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Span;
+use ratatui::symbols::border;
+use ratatui::text::{Line, Span};
 
 /// What a frame draws with: a painter, which is a chosen theme's roles at
 /// a colour depth, or the terminal palette.
@@ -200,17 +201,17 @@ impl Ground {
 }
 
 /// With background=fill, give every cell the frame left on the terminal's
-/// default its theme colour instead: bg behind, body for text.
+/// default its theme colour instead: the ground behind, the theme's
+/// gradient at that cell where one is painted, and body for text.
 pub fn fill(buf: &mut Buffer) {
     let p = current().painter;
-    if !p.fills_background() {
-        return;
-    }
-    let base = p.ratatui_base();
-    let (bg, fg) = (base.bg.unwrap_or(Color::Reset), base.fg.unwrap_or(Color::Reset));
-    for cell in buf.content.iter_mut() {
+    let (w, h) = (buf.area.width, buf.area.height);
+    let Some(ground) = p.ground(w, h) else { return };
+    let fg = p.ratatui_base().fg.unwrap_or(Color::Reset);
+    for (i, cell) in buf.content.iter_mut().enumerate() {
         if cell.bg == Color::Reset {
-            cell.bg = bg;
+            let (x, y) = (i % usize::from(w.max(1)), i / usize::from(w.max(1)));
+            cell.bg = ground.ratatui(x as u16, y as u16);
         }
         if cell.fg == Color::Reset {
             cell.fg = fg;
@@ -294,7 +295,43 @@ pub fn badge(g: Ground) -> Style {
     }
     Style::new().fg(g.fg()).bg(g.bg())
 }
+/// The selected row's mark where the theme sets none.
 pub const SELECTED_MARK: &str = "▌";
+
+/// The selected row's mark: the theme's, else [`SELECTED_MARK`].
+pub fn selected_mark() -> &'static str {
+    current().painter.decor().mark.unwrap_or(SELECTED_MARK)
+}
+
+/// The rule and the selected rule: the theme's glyphs, else `─` and `━`.
+pub fn rule_glyphs() -> [&'static str; 2] {
+    current().painter.decor().rules.unwrap_or(["─", "━"])
+}
+
+/// The live and idle marks: the theme's glyphs, else `●` and `○`.
+pub fn presence() -> [&'static str; 2] {
+    current().painter.decor().presence.unwrap_or(["●", "○"])
+}
+
+/// A pane's border glyphs: the theme's, else `default`, the surface's own.
+pub fn border_set(default: border::Set<'static>) -> border::Set<'static> {
+    current().painter.ratatui_border().unwrap_or(default)
+}
+
+/// `title` with the theme's ornament and a space before its text, after
+/// any leading spaces. An empty title stays empty.
+pub fn ornamented(title: Line<'static>) -> Line<'static> {
+    let Some(ornament) = current().painter.decor().ornament else { return title };
+    let Some(i) = title.spans.iter().position(|s| !s.content.trim().is_empty()) else { return title };
+    let mut title = title;
+    let first = &title.spans[i];
+    let text = first.content.trim_start();
+    let pad = &first.content[..first.content.len() - text.len()];
+    let lead = format!("{pad}{ornament} ");
+    let rest = Span::styled(text.to_string(), first.style);
+    title.spans.splice(i..=i, [Span::styled(lead, first.style), rest]);
+    title
+}
 
 /// One segment of a lozenge: its text and style. The style's background is
 /// the segment's ground, which the joins carry on.

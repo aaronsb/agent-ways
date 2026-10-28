@@ -160,7 +160,7 @@ impl App {
         let list = List::new(items)
             .block(block)
             .highlight_style(theme::selected())
-            .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()))
+            .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()))
             .highlight_spacing(HighlightSpacing::Always);
         self.list.select(Some(self.themes.cursor));
         f.render_stateful_widget(list, area, &mut self.list);
@@ -245,7 +245,7 @@ impl App {
         let list = List::new(items)
             .block(block)
             .highlight_style(theme::selected())
-            .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()))
+            .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()))
             .highlight_spacing(HighlightSpacing::Always);
         self.list.select(Some(row));
         f.render_stateful_widget(list, area, &mut self.list);
@@ -318,7 +318,7 @@ impl App {
                 ]));
                 let row = Style::new().bg(sel);
                 lines.push(Line::from(vec![
-                    Span::styled("▌", row.patch(theme::accent())),
+                    Span::styled(theme::selected_mark(), row.patch(theme::accent())),
                     Span::styled(" model  ", row.patch(theme::body()).add_modifier(Modifier::BOLD)),
                     Span::styled("opus ", row.patch(theme::accent_dim())),
                     Span::styled("changed ", row.patch(theme::warn()).add_modifier(Modifier::BOLD)),
