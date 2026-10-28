@@ -52,21 +52,20 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool, matched: bool) -> 
         Some(s) => s.to_string(),
         None => match detect_session() {
             Ok(s) => s,
-            Err(NoSession::NoMarkers) => {
-                println!("No session markers found. Ways will appear after the first hook fires.");
-                if matched {
-                    println!("{NO_SESSION_BLOCKS}");
+            Err(why) => {
+                let mut out = String::new();
+                match why {
+                    NoSession::NoMarkers => agent_fmt::say!(out, "No session markers found. Ways will appear after the first hook fires."),
+                    NoSession::AllOrphaned => agent_fmt::say!(
+                        out,
+                        "Session markers found, but no matching transcript. List candidates with \
+                         `ways session list`, then pass --session <id> to inspect one directly."
+                    ),
                 }
-                return Ok(());
-            }
-            Err(NoSession::AllOrphaned) => {
-                println!(
-                    "Session markers found, but no matching transcript. List candidates with \
-                     `ways session list`, then pass --session <id> to inspect one directly."
-                );
                 if matched {
-                    println!("{NO_SESSION_BLOCKS}");
+                    agent_fmt::say!(out, "{NO_SESSION_BLOCKS}");
                 }
+                agent_fmt::print_block(&out);
                 return Ok(());
             }
         },
@@ -112,10 +111,11 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool, matched: bool) -> 
             print_json(&ways, current_epoch, current_tokens_k, context_window_k, blocks.as_deref());
             return Ok(());
         }
-        println!("No ways triggered yet this session.");
+        let mut out = String::from("No ways triggered yet this session.\n");
         if let Some(b) = &blocks {
-            crate::cmd::introspect::print_judge_blocks(b);
+            out.push_str(&crate::cmd::introspect::judge_blocks_text(b));
         }
+        agent_fmt::print_block(&out);
         return Ok(());
     }
 
@@ -179,10 +179,10 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool, matched: bool) -> 
     }
 
     let _ = writeln!(out);
-    agent_fmt::print_block(&out);
     if let Some(b) = &blocks {
-        crate::cmd::introspect::print_judge_blocks(b);
+        out.push_str(&crate::cmd::introspect::judge_blocks_text(b));
     }
+    agent_fmt::print_block(&out);
     Ok(())
 }
 

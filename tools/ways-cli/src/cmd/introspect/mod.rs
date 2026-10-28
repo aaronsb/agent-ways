@@ -301,7 +301,7 @@ pub fn fires(
         if json {
             println!("{}", empty_fires_json(matched));
         } else {
-            println!("No events recorded yet.");
+            agent_fmt::print_block("No events recorded yet.\n");
         }
         return Ok(());
     }
@@ -315,7 +315,7 @@ pub fn fires(
                 if json {
                     println!("{}", empty_fires_json(matched));
                 } else {
-                    println!("No sessions found in scope.");
+                    agent_fmt::print_block("No sessions found in scope.\n");
                 }
                 return Ok(());
             }
@@ -325,7 +325,7 @@ pub fn fires(
     if json {
         println!("{}", serde_json::to_string_pretty(&fires_json(&content, &session_id, max_score, limit, matched))?);
     } else {
-        print!("{}", fires_report(&content, &session_id, max_score, limit, matched));
+        agent_fmt::print_block(&fires_report(&content, &session_id, max_score, limit, matched));
     }
     Ok(())
 }
@@ -444,11 +444,7 @@ fn fires_report(content: &str, session_id: &str, max_score: Option<f64>, limit: 
 
 /// The ways the relevance judge kept out, each with its P(yes) against the
 /// threshold: `--matched` adds them to a listing of what fired.
-pub(crate) fn print_judge_blocks(blocks: &[ways_core::introspection::JudgeBlock]) {
-    print!("{}", judge_blocks_text(blocks));
-}
-
-fn judge_blocks_text(blocks: &[ways_core::introspection::JudgeBlock]) -> String {
+pub(crate) fn judge_blocks_text(blocks: &[ways_core::introspection::JudgeBlock]) -> String {
     if blocks.is_empty() {
         return "No way was kept out by the relevance judge in this session.\n".into();
     }

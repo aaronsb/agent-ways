@@ -225,7 +225,8 @@ pub fn run(project: Option<&str>, session: Option<&str>, json_out: bool) -> Resu
     let total_k = ctx.tokens_total / 1000;
     let remaining_k = ctx.tokens_remaining / 1000;
 
-    println!();
+    let mut out = String::new();
+    agent_fmt::say!(out);
 
     // Token bar
     let bar_width = 60;
@@ -252,18 +253,21 @@ pub fn run(project: Option<&str>, session: Option<&str>, json_out: bool) -> Resu
         }
     }
 
-    println!("  {} {}%", paint(bar_style, &bar), ctx.pct_used);
-    println!();
-    println!(
+    agent_fmt::say!(out, "  {} {}%", paint(bar_style, &bar), ctx.pct_used);
+    agent_fmt::say!(out);
+    agent_fmt::say!(
+        out,
         "  {} / {total_k}K tokens used  {}",
         paint(Style::new().bold(), format!("{used_k}K")),
         paint(Role::Muted, format!("({remaining_k}K remaining)"))
     );
-    println!(
+    agent_fmt::say!(
+        out,
         "  {}",
         paint(Role::Muted, format!("Model: {}  Method: {}", ctx.model, ctx.method))
     );
-    println!();
+    agent_fmt::say!(out);
+    agent_fmt::print_block(&out);
 
     Ok(())
 }

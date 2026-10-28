@@ -23,20 +23,17 @@ pub fn run(path: String, jaccard: bool, ways_dir: Option<String>) -> Result<()> 
 
     let files = find_way_files(&tree_path)?;
 
-    println!();
-    println!(
+    let mut out = String::new();
+    agent_fmt::say!(out);
+    agent_fmt::say!(
+        out,
         "{}  {}",
         agent_theme::paint(agent_theme::Style::new().bold(), rel_root),
         agent_theme::paint(agent_theme::Role::Muted, format!("({} files)", files.len()))
     );
-    println!();
-
-    if jaccard {
-        print_jaccard(&names_root, &files)?;
-    } else {
-        print_tree(&tree_path, &names_root, &files)?;
-    }
-
+    agent_fmt::say!(out);
+    out.push_str(&if jaccard { jaccard_table(&names_root, &files)? } else { tree_table(&tree_path, &names_root, &files)? });
+    agent_fmt::print_block(&out);
     Ok(())
 }
 
@@ -89,7 +86,7 @@ struct WayInfo {
     tokens: usize,
 }
 
-fn print_tree(tree_path: &Path, names_root: &Path, files: &[PathBuf]) -> Result<()> {
+fn tree_table(tree_path: &Path, names_root: &Path, files: &[PathBuf]) -> Result<String> {
     let mut t = Table::new(&["Way", "Depth", "Type", "Thresh", "Vocab", "Tokens"]);
     t.max_width(0, 44);
     t.align(1, Align::Right);
@@ -114,11 +111,10 @@ fn print_tree(tree_path: &Path, names_root: &Path, files: &[PathBuf]) -> Result<
         ]);
     }
 
-    t.print();
-    Ok(())
+    Ok(t.render())
 }
 
-fn print_jaccard(names_root: &Path, files: &[PathBuf]) -> Result<()> {
+fn jaccard_table(names_root: &Path, files: &[PathBuf]) -> Result<String> {
     let mut by_parent: HashMap<PathBuf, Vec<(PathBuf, String)>> = HashMap::new();
 
     for file in files {
@@ -156,8 +152,7 @@ fn print_jaccard(names_root: &Path, files: &[PathBuf]) -> Result<()> {
         }
     }
 
-    t.print();
-    Ok(())
+    Ok(t.render())
 }
 
 fn analyze_file(file: &Path, tree_path: &Path) -> Result<WayInfo> {

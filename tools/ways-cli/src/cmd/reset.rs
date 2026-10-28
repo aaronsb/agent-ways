@@ -9,7 +9,8 @@ use anyhow::Result;
 use std::path::Path;
 
 use crate::session;
-use agent_theme::{pair, paint, Role, Style};
+use agent_fmt::say;
+use agent_theme::{paint, Role, Style};
 
 /// Remove one session's state directory. Returns the number of files it held,
 /// `None` when the id is not a plain session id ([`session::is_plain_session_id`])
@@ -45,7 +46,7 @@ pub fn run(session: Option<&str>, all: bool, confirm: bool) -> Result<()> {
     } else {
         let all_sessions = session::list_sessions();
         if all_sessions.is_empty() {
-            println!("No session state found.");
+            agent_fmt::print_block("No session state found.\n");
             return Ok(());
         }
         if all_sessions.len() == 1 {
@@ -63,49 +64,55 @@ pub fn run(session: Option<&str>, all: bool, confirm: bool) -> Result<()> {
     };
 
     if sessions.is_empty() {
-        println!("No session state found.");
+        agent_fmt::print_block("No session state found.\n");
         return Ok(());
     }
 
     let mut total = 0;
+    let mut out = String::new();
 
     for sid in &sessions {
         let short_id = &sid[..sid.len().min(12)];
         if dry_run {
             let Some(dir) = session_state(sid) else { continue };
-            println!("Session {short_id}... ({} state files)", count_files(&dir));
+            say!(out, "Session {short_id}... ({} state files)", count_files(&dir));
             let ways = session::list_fired_ways(sid);
             if !ways.is_empty() {
-                println!("  ways: {}", ways.len());
+                say!(out, "  ways: {}", ways.len());
             }
             let epoch = session::get_epoch(sid);
             if epoch > 0 {
-                println!("  epoch: {epoch}");
+                say!(out, "  epoch: {epoch}");
             }
         } else if let Some(count) = clear_session(sid) {
-            println!("Session {short_id}...: cleared ({count} state files)");
+            say!(out, "Session {short_id}...: cleared ({count} state files)");
             total += count;
         }
     }
 
     if dry_run {
-        println!();
-        println!(
+        say!(out);
+        say!(
+            out,
             "{} — no files removed. Add {} to execute.",
             paint(Style::new().role(Role::Warn).bold(), "Dry run"),
             paint(Style::new().bold(), "--confirm")
         );
-        println!();
-        let (dim, off) = pair(Role::Muted);
-        println!("{dim}Note: resetting mid-session causes all ways to re-fire on the next");
-        println!("hook invocation. Core guidance, checks, and progressive disclosure");
-        println!("state will restart from scratch. This is safe but noisy — best used");
-        println!("when the session feels jammed or after significant context shifts.{off}");
+        say!(out);
+        for line in [
+            "Note: resetting mid-session causes all ways to re-fire on the next",
+            "hook invocation. Core guidance, checks, and progressive disclosure",
+            "state will restart from scratch. This is safe but noisy — best used",
+            "when the session feels jammed or after significant context shifts.",
+        ] {
+            say!(out, "{}", paint(Role::Muted, line));
+        }
     } else if total > 0 {
-        println!("\nReset complete. Ways will re-disclose on next hook invocation.");
+        say!(out, "\nReset complete. Ways will re-disclose on next hook invocation.");
     } else {
-        println!("Nothing to clear.");
+        say!(out, "Nothing to clear.");
     }
+    agent_fmt::print_block(&out);
 
     Ok(())
 }
