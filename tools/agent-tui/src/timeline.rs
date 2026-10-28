@@ -217,13 +217,14 @@ impl Scrubber<'_> {
             let marks: Vec<usize> = self.marks.iter().filter(|m| **m < self.len).map(|m| cell(*m)).collect();
             let notes: Vec<usize> = self.notes.iter().filter(|m| **m < self.len).map(|m| cell(*m)).collect();
             let [rule, past] = theme::rule_glyphs();
+            let ev = theme::events();
             for x in 0..track {
                 let (glyph, style) = if x == head {
-                    ("●", theme::accent().add_modifier(Modifier::BOLD))
+                    (ev.head, theme::accent().add_modifier(Modifier::BOLD))
                 } else if notes.contains(&x) {
-                    ("⊝", theme::warn())
+                    (ev.suppressed, theme::warn())
                 } else if marks.contains(&x) {
-                    ("┼", theme::muted())
+                    (ev.mark, theme::muted())
                 } else if x < head {
                     (past, theme::accent())
                 } else {
@@ -414,6 +415,15 @@ mod tests {
         let noted = |pos| glyphs(&Scrubber { len: 5, pos, marks: &[2], notes: &[2, 3] }.line(14));
         assert_eq!(noted(0), "●───⊝─⊝─── 1/5");
         assert_eq!(noted(3), "━━━━⊝━●─── 4/5");
+    }
+
+    #[test]
+    fn the_scrubber_draws_the_theme_s_event_and_rule_glyphs() {
+        let tampa = agent_theme::ThemeSet::bundled().get("tampa").cloned().expect("tampa is bundled");
+        set(Palette::new(Some(&tampa), ColorDepth::TrueColor));
+        let line = glyphs(&Scrubber { len: 5, pos: 3, marks: &[1], notes: &[2] }.line(14));
+        assert_eq!(line, "≈≈┊≈☈≈↯~~~ 4/5", "head ↯, mark ┊, suppressed ☈, past ≈, future ~");
+        set(Palette::default());
     }
 
     #[test]

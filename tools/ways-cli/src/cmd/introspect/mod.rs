@@ -430,7 +430,7 @@ fn fires_report(content: &str, session_id: &str, max_score: Option<f64>, limit: 
         max_score.map(|c| format!(" · ≤ {c:.2}")).unwrap_or_default(),
     );
     for f in rows.into_iter().take(shown) {
-        let mark = if f.redisclosed { "↩" } else { " " };
+        let mark = if f.redisclosed { agent_theme::painter().decor().events.redisclosed } else { " " };
         let _ = writeln!(out, "  {:.3} {mark} {:<44}  {}", f.score, f.way, f.surface);
     }
     if shown < total {

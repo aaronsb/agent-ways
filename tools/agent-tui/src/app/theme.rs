@@ -308,6 +308,11 @@ pub fn rule_glyphs() -> [&'static str; 2] {
     current().painter.decor().rules.unwrap_or(["─", "━"])
 }
 
+/// The theme's event glyphs: the scrubber's, and the fire and epoch views'.
+pub fn events() -> agent_theme::Events {
+    current().painter.decor().events
+}
+
 /// The live and idle marks: the theme's glyphs, else `●` and `○`.
 pub fn presence() -> [&'static str; 2] {
     current().painter.decor().presence.unwrap_or(["●", "○"])

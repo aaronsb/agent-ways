@@ -49,26 +49,29 @@ pub(super) fn widths(agent: u16) -> [Constraint; 7] {
     ]
 }
 
-/// Each fate's mark before a way's name and the name's colour: the one
-/// table both come from, so they agree. Without colour the mark carries
-/// it; a fired way has none, and a check's fire has its `✓ check` line.
-pub(super) fn look(fate: Fate) -> (&'static str, Style) {
-    match fate {
+/// Each fate's mark before a way's name, the theme's event glyph and a
+/// space, and the name's colour: the one table both come from, so they
+/// agree. Without colour the mark carries it; a fired way has none, and a
+/// check's fire has its `✓ check` line.
+pub(super) fn look(fate: Fate) -> (String, Style) {
+    let ev = theme::events();
+    let (mark, style) = match fate {
         Fate::Injected => ("", theme::ok()),
-        Fate::Redisclosed => ("↩ ", theme::accent()),
+        Fate::Redisclosed => (ev.redisclosed, theme::accent()),
         Fate::CheckFired => ("", theme::info()),
-        Fate::WouldBlock => ("◌ ", theme::warn()),
-        Fate::Blocked => ("⊘ ", theme::err()),
-        Fate::RefireHeld => ("◷ ", theme::muted()),
-        Fate::CapHeld => ("⊟ ", ink(agent_theme::Style::new().role(agent_theme::Role::Alt))),
-    }
+        Fate::WouldBlock => (ev.would_block, theme::warn()),
+        Fate::Blocked => (ev.blocked, theme::err()),
+        Fate::RefireHeld => (ev.refire_held, theme::muted()),
+        Fate::CapHeld => (ev.cap_held, ink(agent_theme::Style::new().role(agent_theme::Role::Alt))),
+    };
+    (if mark.is_empty() { String::new() } else { format!("{mark} ") }, style)
 }
 
 /// A way's name with its fate's mark, in its fate's colour, cut to `width`
 /// cells from the left so the leaf stays.
 pub(super) fn way_name(w: &ActiveWay, width: usize) -> Span<'static> {
     let (mark, style) = look(Fate::of(w));
-    let room = width.saturating_sub(agent_fmt::visible_len(mark));
+    let room = width.saturating_sub(agent_fmt::visible_len(&mark));
     Span::styled(format!("{mark}{}", keep_tail(&w.id, room)), style)
 }
 
@@ -176,12 +179,12 @@ pub(super) fn rows(frame: &Frame, agents: &Agents, agent_w: u16, window_k: u64, 
             // Distance and re-disclosure count in the agent's own context.
             let epoch = frame.epoch_of(&w.agent);
             let distance = epoch.saturating_sub(w.epoch_fired);
-            let (next, next_style) = render::next_cell(w, epoch, frame.tokens_k_of(&w.agent));
+            let (next, next_style) = render::next_cell(w, epoch, frame.tokens_k_of(&w.agent), &theme::events());
             let pin = pos.get(i).copied().flatten().map_or(Span::raw(" "), |p| pin(render::cluster_of(p, &unique)));
             let mut way = vec![Line::from(way_name(w, way_w))];
             let mut agent = vec![agent_cell(agents, &w.agent, agent_w)];
             if w.check_fires > 0 {
-                way.push(Line::styled(format!("  ✓ ×{} decay {:.2}", w.check_fires, decay(w.check_fires)), theme::muted()));
+                way.push(Line::styled(format!("  {} ×{} decay {:.2}", theme::events().check, w.check_fires, decay(w.check_fires)), theme::muted()));
                 agent.push(agent_cell(agents, &w.agent, agent_w));
             }
             let height = way.len() as u16;
@@ -252,10 +255,11 @@ pub(super) fn context(frame: &Frame, window_k: u64, width: usize) -> Vec<(u8, Li
             (later, "distant", theme::muted()),
         ] {
             if n > 0 {
+                let ev = theme::events();
                 let mark = match text {
-                    "re-disclose now" => "●",
-                    "approaching" => "◐",
-                    _ => "○",
+                    "re-disclose now" => ev.due[0],
+                    "approaching" => ev.approaching,
+                    _ => ev.due[1],
                 };
                 if !zones.is_empty() {
                     zones.push(Span::raw("  "));
@@ -291,17 +295,30 @@ pub(super) fn context(frame: &Frame, window_k: u64, width: usize) -> Vec<(u8, Li
         }
     }
     if !frame.new_events.is_empty() {
-        // The notes keep `↻` in JSON; the screen draws the re-disclosure
-        // mark the rows use, which the terminal fonts have.
-        let notes: Vec<String> = frame.new_events.iter().map(|e| e.strip_prefix("↻ ").map_or_else(|| e.clone(), |w| format!("↩ {w}"))).collect();
+        // The notes keep `↻`, `✓` and `◌` in JSON; the screen draws the
+        // theme's event glyph for each, as the rows do.
+        let ev = theme::events();
+        let notes: Vec<String> = frame.new_events.iter().map(|e| event_note(e, &ev)).collect();
         let text = agent_fmt::truncate_visible(&format!("+ {}", notes.join(", ")), width);
         out.push((2, Line::styled(text, theme::ok().add_modifier(Modifier::BOLD))));
     }
     // #786: the subagent switch held ways back here, one mark each.
     if !frame.suppressed.is_empty() {
         let each: Vec<String> = frame.suppressed.iter().map(|s| s.label()).collect();
-        let text = agent_fmt::truncate_visible(&format!("⊝ suppressed: {}", each.join(", ")), width);
+        let text = agent_fmt::truncate_visible(&format!("{} suppressed: {}", theme::events().suppressed, each.join(", ")), width);
         out.push((2, Line::styled(text, theme::warn())));
     }
     out
+}
+
+/// A frame's event note as the screen draws it: the `↻`, `✓` and `◌` the
+/// notes are recorded with become the theme's re-disclosure, check and
+/// would-block glyphs.
+fn event_note(note: &str, ev: &agent_theme::Events) -> String {
+    for (tag, glyph) in [("↻ ", ev.redisclosed), ("✓ ", ev.check), ("◌ ", ev.would_block)] {
+        if let Some(rest) = note.strip_prefix(tag) {
+            return format!("{glyph} {rest}");
+        }
+    }
+    note.to_string()
 }

@@ -5,7 +5,7 @@
 //! their styles from here ([`next_cell`], [`traffic`], [`pin_color`]).
 
 use std::fmt::Write;
-use agent_theme::{pair, paint, painter, Role, Style};
+use agent_theme::{pair, paint, painter, Events, Role, Style};
 
 // ── Way trait ─────────────────────────────────────────────────
 
@@ -306,7 +306,7 @@ pub fn write_way_row_with<W: WayRow>(
         let _ = writeln!(
             out,
             "  {}",
-            paint(Role::Muted, format!("  ✓ check ({} fires, decay={:.2})", w.check_fires(), decay))
+            paint(Role::Muted, format!("  {} check ({} fires, decay={:.2})", painter().decor().events.check, w.check_fires(), decay))
         );
     }
 }
@@ -472,14 +472,15 @@ pub fn write_token_timeline<W: WayRow>(
 
     // Zone summary
     let mut zones = Vec::new();
+    let ev = painter().decor().events;
     if zone_past > 0 {
-        zones.push(paint(Role::Ok, format!("● {zone_past} re-disclose now")));
+        zones.push(paint(Role::Ok, format!("{} {zone_past} re-disclose now", ev.due[0])));
     }
     if zone_soon > 0 {
-        zones.push(paint(WARN, format!("◐ {zone_soon} approaching")));
+        zones.push(paint(WARN, format!("{} {zone_soon} approaching", ev.approaching)));
     }
     if zone_later > 0 {
-        zones.push(paint(Role::Muted, format!("○ {zone_later} distant")));
+        zones.push(paint(Role::Muted, format!("{} {zone_later} distant", ev.due[1])));
     }
 
     if !zones.is_empty() {
@@ -572,18 +573,20 @@ pub fn predict_next<W: WayRow>(
     current_epoch: u64,
     current_tokens_k: u64,
 ) -> String {
-    let (text, style) = next_cell(w, current_epoch, current_tokens_k);
+    let (text, style) = next_cell(w, current_epoch, current_tokens_k, &painter().decor().events);
     paint(style, text)
 }
 
 /// The Re-disclose cell's text and style: when a way will next
 /// re-disclose against its own curve. Every form fits the column's
 /// [`RD_W`] cells: `● now`, `◐ 80%`, `↩ epoch 43` for the epoch its check
-/// re-discloses it at, `↩ suppressed` when that is past reach.
+/// re-discloses it at, `↩ suppressed` when that is past reach, each mark
+/// the theme's event glyph (`ev`).
 pub fn next_cell<W: WayRow>(
     w: &W,
     current_epoch: u64,
     current_tokens_k: u64,
+    ev: &Events,
 ) -> (String, Style) {
     let threshold_k = w.refire_threshold_k();
     let token_pos_k = w.token_pos() / 1000;
@@ -592,13 +595,13 @@ pub fn next_cell<W: WayRow>(
     let muted = Style::new().role(Role::Muted);
 
     if token_pct >= 100 {
-        return ("● now".into(), Style::new().role(Role::Ok));
+        return (format!("{} now", ev.due[0]), Style::new().role(Role::Ok));
     }
     if token_pct >= 75 {
-        return (format!("◐ {token_pct}%"), WARN);
+        return (format!("{} {token_pct}%", ev.approaching), WARN);
     }
     if token_pct >= 50 {
-        return (format!("◔ {token_pct}%"), muted);
+        return (format!("{} {token_pct}%", ev.halfway), muted);
     }
 
     let epoch_distance = current_epoch.saturating_sub(w.epoch_fired());
@@ -609,9 +612,9 @@ pub fn next_cell<W: WayRow>(
         let next_epoch = w.epoch_fired() + needed_distance;
         if epoch_distance < needed_distance {
             if needed_distance > 500 {
-                return ("↩ suppressed".into(), muted);
+                return (format!("{} suppressed", ev.redisclosed), muted);
             }
-            return (format!("↩ epoch {}", short_epoch(next_epoch)), muted);
+            return (format!("{} epoch {}", ev.redisclosed, short_epoch(next_epoch)), muted);
         }
     }
 
@@ -702,7 +705,7 @@ mod tests {
     /// epoch at the largest epochs, `↩ suppressed`, and the percentages.
     #[test]
     fn every_re_disclose_cell_fits_its_column() {
-        let cell = |w: Due, epoch: u64, tokens_k: u64| next_cell(&w, epoch, tokens_k).0;
+        let cell = |w: Due, epoch: u64, tokens_k: u64| next_cell(&w, epoch, tokens_k, &Events::DEFAULT).0;
         // Two check fires put the next one epoch on; nine put it the
         // farthest short of suppression, 288 on.
         let mut cells = vec![

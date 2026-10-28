@@ -833,17 +833,18 @@ impl Pane for Sessions {
     }
 
     fn help(&self) -> Option<String> {
-        Some(
+        let ev = theme::events();
+        Some(format!(
             "Sessions lists the sessions in scope; Enter opens one on the timeline,\n\
              following it when it is being written to. On the timeline ←→ step a\n\
              frame, space plays or follows, Enter or Tab opens why the selected way\n\
              fired, and f widens the table to every matched way. A way's mark and\n\
-             colour say what happened to it: the ok colour fired, ↩ re-disclosed,\n\
-             the info colour its check fired, ◌ shadow-judged, ⊘ judged out, ◷ held\n\
-             by its refire window, ⊟ over the context cap; bold is this frame. A click on the\n\
-             track seeks there. `ways session replay --json` prints the timeline."
-                .into(),
-        )
+             colour say what happened to it: the ok colour fired, {} re-disclosed,\n\
+             the info colour its check fired, {} shadow-judged, {} judged out, {} held\n\
+             by its refire window, {} over the context cap; bold is this frame. A click on the\n\
+             track seeks there. `ways session replay --json` prints the timeline.",
+            ev.redisclosed, ev.would_block, ev.blocked, ev.refire_held, ev.cap_held
+        ))
     }
 
     /// A replay plays only while its timeline is shown; a live one reads
@@ -1002,9 +1003,9 @@ fn header(r: &Replay, width: u16) -> Vec<Line<'static>> {
     // The filter, named as the follow state is: which ways the table holds.
     // A session the judge never saw is all injected, and keeps the room.
     if r.matched {
-        metrics.push((0, Span::styled("  ◆ matched", theme::accent().add_modifier(Modifier::BOLD))));
+        metrics.push((0, Span::styled(format!("  {} matched", theme::events().matched), theme::accent().add_modifier(Modifier::BOLD))));
     } else if r.judged {
-        metrics.push((0, Span::styled("  ◇ injected", theme::accent())));
+        metrics.push((0, Span::styled(format!("  {} injected", theme::events().injected), theme::accent())));
         let blocked = fr.blocked();
         if blocked > 0 {
             metrics.push((2, Span::styled(format!(" · {blocked} judged out"), theme::muted())));
@@ -1013,7 +1014,7 @@ fn header(r: &Replay, width: u16) -> Vec<Line<'static>> {
     // The session's suppressions, counted as the JSON summary counts them.
     let suppressed = r.suppressed_total();
     if suppressed > 0 {
-        metrics.push((3, Span::styled(format!(" · ⊝ {suppressed} suppressed"), theme::warn())));
+        metrics.push((3, Span::styled(format!(" · {} {suppressed} suppressed", theme::events().suppressed), theme::warn())));
     }
     if r.play.is_live() {
         if r.play.following() {
@@ -1210,7 +1211,7 @@ fn draw_why(f: &mut Draw, r: &mut Replay, area: Rect) {
     // The table's `✓ ×N decay` line in full, under the way's name.
     if let Some(w) = fr.ways.get(r.sel).filter(|w| w.check_fires > 0) {
         let n = w.check_fires;
-        let line = format!("✓ check fired {n} time{} in {}, decay={:.2}", if n == 1 { "" } else { "s" }, r.agents.label(&w.agent), table::decay(n));
+        let line = format!("{} check fired {n} time{} in {}, decay={:.2}", theme::events().check, if n == 1 { "" } else { "s" }, r.agents.label(&w.agent), table::decay(n));
         lines.insert(1.min(lines.len()), Line::styled(line, theme::muted()));
     }
     let inner_h = right.height.saturating_sub(2) as usize;
