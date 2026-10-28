@@ -85,6 +85,40 @@ pub fn owns_theme(base_path: &Path) -> bool {
     base_path.exists() && read_json_or_empty(base_path).map(|v| Owned::from_value(&v).theme.is_some()).unwrap_or(false)
 }
 
+/// Whether the settings file at `dest_settings` selects `custom:ways`.
+pub fn selects_ways_theme(dest_settings: &Path) -> bool {
+    read_json_or_empty(dest_settings).is_ok_and(|v| v.get("theme").and_then(Value::as_str) == Some(WAYS_THEME))
+}
+
+/// Whether a merge from `live` over these bases may move the `theme` key:
+/// one of them owns it, or the live file selects `custom:ways`.
+fn theme_may_move(live: &Value, bases: &[&Owned]) -> bool {
+    bases.iter().any(|b| b.theme.is_some()) || live.get("theme").and_then(Value::as_str) == Some(WAYS_THEME)
+}
+
+/// `strip` with the `theme` key marked ours when the merge may move it, so
+/// the self-audit leaves the key out of both views.
+fn theme_stripped(mut strip: Owned, theme_moves: bool) -> Owned {
+    if theme_moves {
+        strip.theme = Some(WAYS_THEME.into());
+    }
+    strip
+}
+
+/// Saves `merged` at `base_path` when it differs from `base`, for a merge
+/// that leaves settings.json as it was. A base not yet on disk is written
+/// only when the theme record moved.
+fn save_moved_base(base_path: &Path, base: &Owned, merged: &Owned) -> Result<()> {
+    let theme_moved = (&merged.theme, &merged.prior_theme) != (&base.theme, &base.prior_theme);
+    if !theme_moved && !(base_path.exists() && merged.to_value() != base.to_value()) {
+        return Ok(());
+    }
+    if let Some(parent) = base_path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    save_json(base_path, &merged.to_value())
+}
+
 /// The `theme` key's change from `live` to `merged`, as `from → to`, or none.
 pub fn theme_change(live: &Value, merged: &Value) -> Option<String> {
     let (from, to) = (live.get("theme"), merged.get("theme"));
@@ -320,13 +354,16 @@ fn merge_impl(
     // --- theme: one scalar, ours while the ways-theme mod is wanted ---
     // Wanting the mod claims the key, keeping what it held to give back. A
     // value set after the claim is the person's later choice: kept, and
-    // neither claimed again nor replaced when the key is given back.
+    // neither claimed again nor replaced when the key is given back. A live
+    // `custom:ways` is the mod's own theme, never a value to give back, so a
+    // base lost while it was selected still gives the key up.
     let theirs_theme = live.get("theme").and_then(|t| t.as_str());
+    let not_ours = |t: &str| t != WAYS_THEME;
     let changed_since = base.theme.is_some() && theirs_theme.is_some() && theirs_theme != base.theme.as_deref();
     let (theme, prior_theme) = match (want_theme && !withdrawing, &base.theme) {
         (true, None) => {
             out.insert("theme".into(), Value::String(WAYS_THEME.into()));
-            (Some(WAYS_THEME.to_string()), theirs_theme.map(String::from))
+            (Some(WAYS_THEME.to_string()), theirs_theme.filter(|t| not_ours(t)).map(String::from))
         }
         (true, Some(_)) if !changed_since => {
             out.insert("theme".into(), Value::String(WAYS_THEME.into()));
@@ -334,10 +371,14 @@ fn merge_impl(
         }
         (true, Some(_)) => (base.theme.clone(), base.prior_theme.clone()),
         (false, Some(_)) if !changed_since => {
-            match &base.prior_theme {
-                Some(p) => out.insert("theme".into(), Value::String(p.clone())),
+            match base.prior_theme.as_deref().filter(|p| not_ours(p)) {
+                Some(p) => out.insert("theme".into(), Value::String(p.into())),
                 None => out.remove("theme"),
             };
+            (None, None)
+        }
+        (false, None) if theirs_theme == Some(WAYS_THEME) => {
+            out.remove("theme");
             (None, None)
         }
         (false, _) => (None, None),
@@ -613,8 +654,11 @@ pub fn apply_to_files(
     let base = base_for(&live, base_path)?;
     let merged = merge(&live, &desired_hooks, &base, crate::config::global().secret_path_deny, want_theme)?;
 
-    // Idempotent: if nothing changed, don't churn the file or a backup.
+    // Idempotent: if nothing changed, don't churn the file or a backup. The
+    // base can still move: a give-back of a theme the person replaced, or a
+    // claim recorded over a live `custom:ways`.
     if merged.settings == live {
+        save_moved_base(base_path, &base, &merged.base)?;
         return Ok("settings.json already up to date".into());
     }
 
@@ -634,12 +678,9 @@ pub fn apply_to_files(
     // hooks were lost) would otherwise leave our entries in the pre-write view,
     // which `after` correctly drops — a false "unmanaged field changed" revert.
     let after: Value = read_json_or_empty(dest_settings)?;
-    let user_before = stripped_user_view(&live, &union_owned(&base, &merged.base));
-    // A claim or a give-back of the theme moves its value on purpose, so
-    // the key is out of both views whenever either side owned it.
-    let mut after_strip = merged.base.clone();
-    after_strip.theme = after_strip.theme.or_else(|| base.theme.clone());
-    let user_after = stripped_user_view(&after, &after_strip);
+    let theme_moves = theme_may_move(&live, &[&base, &merged.base]);
+    let user_before = stripped_user_view(&live, &theme_stripped(union_owned(&base, &merged.base), theme_moves));
+    let user_after = stripped_user_view(&after, &theme_stripped(merged.base.clone(), theme_moves));
     if user_before != user_after {
         // Revert and fail loud — we must never corrupt the user's settings.
         if backup.exists() {
@@ -676,6 +717,7 @@ pub fn withdraw_from_files(source_settings: &Path, dest_settings: &Path, base_pa
     let base = base_for(&live, base_path)?;
     let merged = withdraw(&live, &shipped_hooks, &base)?;
     if merged.settings == live {
+        save_moved_base(base_path, &base, &merged.base)?;
         return Ok("settings.json holds nothing of ours".into());
     }
 
@@ -702,8 +744,9 @@ pub fn withdraw_from_files(source_settings: &Path, dest_settings: &Path, base_pa
         }
     }
     let after: Value = read_json_or_empty(dest_settings)?;
-    let before_strip = Owned { hooks: shipped_strip.clone(), perms: base.perms.clone(), deny: base.deny.clone(), theme: base.theme.clone(), prior_theme: None };
-    let after_strip = Owned { hooks: shipped_strip, perms: Vec::new(), deny: Vec::new(), theme: base.theme.clone(), prior_theme: None };
+    let theme_moves = theme_may_move(&live, &[&base]);
+    let before_strip = theme_stripped(Owned { hooks: shipped_strip.clone(), perms: base.perms.clone(), deny: base.deny.clone(), ..Owned::default() }, theme_moves);
+    let after_strip = theme_stripped(Owned { hooks: shipped_strip, ..Owned::default() }, theme_moves);
     let user_before = stripped_user_view(&live, &before_strip);
     let user_after = stripped_user_view(&after, &after_strip);
     if user_before != user_after {
@@ -1591,5 +1634,73 @@ mod tests {
         apply_to_files(&src, &dest, &base, false).unwrap();
         assert_eq!(read_json_or_empty(&dest).unwrap()["theme"], "light-daltonized");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A settings dir whose settings.json already holds our hooks and
+    /// permissions, so a later apply that moves only the theme is the one
+    /// that changes the file.
+    fn settled(name: &str, extra: Value) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("ways-theme-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (src, dest, base) = (dir.join("src.json"), dir.join("settings.json"), dir.join("base.json"));
+        std::fs::write(&src, serde_json::to_string(&json!({ "hooks": ours_hooks() })).unwrap()).unwrap();
+        std::fs::write(&dest, serde_json::to_string(&extra).unwrap()).unwrap();
+        apply_to_files(&src, &dest, &base, false).unwrap();
+        (dir, src, dest, base)
+    }
+
+    fn set_theme(dest: &Path, theme: &str) {
+        let mut v = read_json_or_empty(dest).unwrap();
+        v["theme"] = json!(theme);
+        save_json(dest, &v).unwrap();
+    }
+
+    #[test]
+    fn a_give_back_that_leaves_the_file_alone_still_moves_the_base() {
+        let (dir, src, dest, base) = settled("stale-base", json!({ "theme": "light" }));
+        apply_to_files(&src, &dest, &base, true).unwrap();
+        assert_eq!(read_json_or_empty(&dest).unwrap()["theme"], WAYS_THEME);
+        // The person picks dark after the claim: kept while installed.
+        set_theme(&dest, "dark");
+        apply_to_files(&src, &dest, &base, true).unwrap();
+        assert_eq!(read_json_or_empty(&dest).unwrap()["theme"], "dark");
+        // Uninstalled: dark stays, and the base no longer holds the key.
+        apply_to_files(&src, &dest, &base, false).unwrap();
+        assert_eq!(read_json_or_empty(&dest).unwrap()["theme"], "dark");
+        assert!(!owns_theme(&base), "the base still claims the theme: {}", read_json_or_empty(&base).unwrap());
+        // Installed again: claimed over dark, which is the value to give back.
+        apply_to_files(&src, &dest, &base, true).unwrap();
+        assert_eq!(read_json_or_empty(&dest).unwrap()["theme"], WAYS_THEME);
+        assert_eq!(Owned::from_value(&read_json_or_empty(&base).unwrap()).prior_theme.as_deref(), Some("dark"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_live_ways_theme_with_no_base_is_ours_to_give_back() {
+        // The base is lost while the mod is installed: repair records the
+        // claim over the live custom:ways, with no prior of its own.
+        let (dir, src, dest, base) = settled("lost-base", json!({ "model": "opus" }));
+        set_theme(&dest, WAYS_THEME);
+        std::fs::remove_file(&base).unwrap();
+        apply_to_files(&src, &dest, &base, true).unwrap();
+        let recorded = Owned::from_value(&read_json_or_empty(&base).unwrap());
+        assert_eq!((recorded.theme.as_deref(), recorded.prior_theme.as_deref()), (Some(WAYS_THEME), None));
+        apply_to_files(&src, &dest, &base, false).unwrap();
+        let after = read_json_or_empty(&dest).unwrap();
+        assert!(after.get("theme").is_none() && after["model"] == "opus", "{after}");
+        // Lost again, and the mod uninstalled before any repair saw it.
+        set_theme(&dest, WAYS_THEME);
+        std::fs::remove_file(&base).unwrap();
+        apply_to_files(&src, &dest, &base, false).unwrap();
+        assert!(read_json_or_empty(&dest).unwrap().get("theme").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_prior_of_custom_ways_is_never_given_back() {
+        let base = Owned { theme: Some(WAYS_THEME.into()), prior_theme: Some(WAYS_THEME.into()), ..Owned::default() };
+        let off = merge(&json!({ "theme": WAYS_THEME }), &ours_hooks(), &base, false, false).unwrap();
+        assert!(off.settings.get("theme").is_none(), "{}", off.settings);
     }
 }

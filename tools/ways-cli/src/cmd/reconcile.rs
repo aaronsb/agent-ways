@@ -540,12 +540,19 @@ pub(crate) fn merge_settings(src_settings: &Path, dest_root: &Path, base_path: &
         std::fs::create_dir_all(dest_root.join("themes")).with_context(|| format!("creating {}", dest_root.join("themes").display()))?;
         std::fs::write(&file, crate::cmd::settings_merge::DEFAULT_THEME_FILE).with_context(|| format!("writing {}", file.display()))?;
     }
-    let owned = crate::cmd::settings_merge::owns_theme(base_path);
+    let owned = holds_theme(base_path, &dest_root.join("settings.json"));
     let summary = crate::cmd::settings_merge::apply_to_files(src_settings, &dest_root.join("settings.json"), base_path, want_theme)?;
     if owned && !want_theme {
         remove_theme_file(dest_root)?;
     }
     Ok(summary)
+}
+
+/// Whether the theme file is ours to remove once the key is given back: the
+/// merge base records the claim, or settings.json selects `custom:ways`
+/// with the record lost.
+fn holds_theme(base_path: &Path, dest_settings: &Path) -> bool {
+    crate::cmd::settings_merge::owns_theme(base_path) || crate::cmd::settings_merge::selects_ways_theme(dest_settings)
 }
 
 /// The one Claude Code theme file the ways-theme mod keeps.
@@ -604,7 +611,7 @@ fn withdraw_one(
         let dest_settings = dest_root.join("settings.json");
         let src_settings = source_root.join("settings.json");
         if dest_settings.exists() {
-            let owned = crate::cmd::settings_merge::owns_theme(base_path);
+            let owned = holds_theme(base_path, &dest_settings);
             settings_summary = Some(crate::cmd::settings_merge::withdraw_from_files(&src_settings, &dest_settings, base_path)?);
             if owned {
                 remove_theme_file(dest_root)?;
