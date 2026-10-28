@@ -174,6 +174,7 @@ _Install, update, configuration, permissions, the CLI contract, testing_
 | [ADR-510](./platform/ADR-510-settings-project-names-the-enclosing-project-and-a-write-names-its-file.md) | Settings --project names the enclosing project, and a write names its file | accepted |
 | [ADR-511](./platform/ADR-511-every-mutating-lifecycle-verb-reports-what-it-would-change-until-commit.md) | Every mutating lifecycle verb reports what it would change until --commit | accepted |
 | [ADR-512](./platform/ADR-512-each-shipped-claude-code-mod-has-one-wanted-state-in-settings-under-mods-name-and-ways-manage-converges-every-target-to-it.md) | Each shipped Claude Code mod has one wanted state in settings, under mods.<name>, and ways manage converges every target to it | accepted |
+| [ADR-513](./platform/ADR-513-themes-reach-every-surface-with-gradients-glyphs-and-painted-report-bands.md) | Themes reach every surface, with gradients, glyphs and painted report bands | accepted |
 
 ## Practice
 _The ways method, way authoring, the development loop_

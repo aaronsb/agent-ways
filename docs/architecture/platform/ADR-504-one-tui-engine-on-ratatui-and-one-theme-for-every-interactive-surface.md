@@ -139,7 +139,7 @@ status: accepted
 date: 2026-10-01
 deciders:
   - aaronsb
-related: [ADR-503, ADR-153, ADR-189, ADR-501, ADR-502, ADR-184, ADR-505, ADR-408, ADR-409]
+related: [ADR-503, ADR-153, ADR-189, ADR-501, ADR-502, ADR-184, ADR-505, ADR-408, ADR-409, ADR-513]
 ---
 
 # ADR-504: One TUI engine on ratatui and one theme for every interactive surface
@@ -290,6 +290,8 @@ A dry-run spike (`tools/spikes/settings-tui` on `spike/settings-tui`) built the 
 The operator, on the review of PR #711: "the default theme should be something that works on a conventional 16 color terminal, then any other theme can be chosen (with the 16 color theme as a fallback if the terminal isn't 256 or true color)".
 
 The default theme is the 16-colour terminal palette: the status roles are the terminal's own ANSI colours, muted text is dim and selection is reverse video. Any other theme can be chosen. A chosen theme is used only where the detected depth is 256 or truecolor; on a 16-colour terminal the whole default theme is used in its place, not the chosen theme reduced to 16 colours. Without colour, behaviour is as §4 and §6 state. `agent_theme::Painter::select` holds the rule.
+
+> Note, 2026-10-28: ADR-513 item 9 narrows this note to colours. Below 256 colours, on a 16-colour terminal or under `NO_COLOR`, the default theme's colours are used in place of the chosen theme's, and the chosen theme's border, rule, mark and presence glyphs and its ornament keep drawing. The operator chose "Keep glyphs" when asked whether decoration should survive there. The note above put the whole default theme in place of the chosen one, and its text is left as it was decided.
 
 ## Note (2026-10-02): the hooks call `ways hook <event>`
 
