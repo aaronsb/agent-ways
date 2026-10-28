@@ -141,8 +141,9 @@ styles
  10  28-36  LightBlue - -
  10  37-37  - White -
  10  38-38  - Black -
- 10  39-39  - Magenta -
- 10  40-41  - Cyan -
+ 10  39-39  - Red -
+ 10  40-40  - DarkGray -
+ 10  41-41  - Black -
  10  42-43  - Red -
  10  44-44  - LightBlue -
  10  54-65  - - DIM
@@ -163,8 +164,8 @@ styles
  11  37-37  - White -
  11  38-38  - Black -
  11  39-39  - Blue -
- 11  40-40  - Cyan -
- 11  41-41  - Green -
+ 11  40-40  - DarkGray -
+ 11  41-41  - Black -
  11  42-43  - Red -
  11  44-44  - DarkGray -
  11  54-55  - - DIM
