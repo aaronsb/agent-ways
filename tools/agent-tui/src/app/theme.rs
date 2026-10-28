@@ -319,9 +319,14 @@ pub fn border_set(default: border::Set<'static>) -> border::Set<'static> {
 }
 
 /// `title` with the theme's ornament and a space before its text, after
-/// any leading spaces. An empty title stays empty.
-pub fn ornamented(title: Line<'static>) -> Line<'static> {
+/// any leading spaces, where both fit in `room` columns. When they do not,
+/// the ornament goes before any of the title's text is cut. An empty title
+/// stays empty.
+pub fn ornamented(title: Line<'static>, room: u16) -> Line<'static> {
     let Some(ornament) = current().painter.decor().ornament else { return title };
+    if title.width() + unicode_width::UnicodeWidthStr::width(ornament) + 1 > usize::from(room) {
+        return title;
+    }
     let Some(i) = title.spans.iter().position(|s| !s.content.trim().is_empty()) else { return title };
     let mut title = title;
     let first = &title.spans[i];
@@ -457,6 +462,18 @@ mod tests {
         assert_eq!(plain, " a ");
         assert_eq!(Shape::named("anything"), Shape::PLAIN, "an unknown shape draws no Nerd Font glyphs");
         assert!(Shape::NAMES.iter().all(|n| Shape::named(n).name() == *n), "every name maps to its own shape");
+        set(Palette::default());
+    }
+
+    #[test]
+    fn a_title_too_long_for_its_ornament_drops_the_ornament_before_any_text() {
+        let miami = agent_theme::ThemeSet::bundled().get("miami").cloned().expect("miami is bundled");
+        set(Palette::new(Some(&miami), ColorDepth::TrueColor));
+        let text = |l: Line| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>();
+        // " themes " is 8 columns; the flamingo takes 2 and its space 1.
+        assert_eq!(text(ornamented(Line::from(" themes "), 11)), " 🦩 themes ");
+        assert_eq!(text(ornamented(Line::from(" themes "), 10)), " themes ", "one column short: the ornament goes");
+        assert_eq!(text(ornamented(Line::from(" themes "), 4)), " themes ", "the text is left whole for the border to cut");
         set(Palette::default());
     }
 

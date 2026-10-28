@@ -711,7 +711,7 @@ impl Pane for Sessions {
             // A session tab before a session is open.
             (tab, ..) => {
                 let hint = Line::styled("no session open: pick one on the sessions tab", theme::muted());
-                f.render_widget(Paragraph::new(hint).block(pane(format!(" {} ", tab.name()))), area);
+                f.render_widget(Paragraph::new(hint).block(pane(format!(" {} ", tab.name()), area)), area);
             }
         }
     }
@@ -1085,7 +1085,7 @@ fn draw_timeline(f: &mut Draw, r: &mut Replay, area: Rect) {
     let title = if r.has_subagents() { format!(" ways at main's epoch {} ", fr.epoch) } else { format!(" ways at epoch {} ", fr.epoch) };
     let shown = all.shown(r.matched);
     if shown.ways.is_empty() {
-        f.render_widget(Paragraph::new(Line::styled("no ways fired yet", theme::muted())).block(pane(title)), ways);
+        f.render_widget(Paragraph::new(Line::styled("no ways fired yet", theme::muted())).block(pane(title, ways)), ways);
     } else {
         // The injected rows, then, in the matched view, the rows the judge,
         // the refire window or the context cap kept out: the order
@@ -1100,7 +1100,7 @@ fn draw_timeline(f: &mut Draw, r: &mut Replay, area: Rect) {
         let t = Table::new(rows, table::widths(agent_w))
             .header(table::header())
             .column_spacing(2)
-            .block(pane(title))
+            .block(pane(title, ways))
             .row_highlight_style(theme::selected())
             .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()))
             .highlight_spacing(HighlightSpacing::Always);
@@ -1125,7 +1125,7 @@ fn draw_timeline(f: &mut Draw, r: &mut Replay, area: Rect) {
     }
     if ctx_h > 0 {
         let lines: Vec<Line> = ctx.into_iter().map(|(_, l)| l).collect();
-        f.render_widget(Paragraph::new(lines).block(pane(" context ")), context);
+        f.render_widget(Paragraph::new(lines).block(pane(" context ", context)), context);
     }
 }
 
@@ -1186,7 +1186,7 @@ fn draw_why(f: &mut Draw, r: &mut Replay, area: Rect) {
         })
         .collect();
     let list = List::new(items)
-        .block(pane(if r.has_subagents() { " ways · epoch per agent " } else { " ways · epoch " }))
+        .block(pane(if r.has_subagents() { " ways · epoch per agent " } else { " ways · epoch " }, left))
         .highlight_style(theme::selected())
         .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()))
         .highlight_spacing(HighlightSpacing::Always);
@@ -1221,7 +1221,7 @@ fn draw_why(f: &mut Draw, r: &mut Replay, area: Rect) {
         title.push(Span::styled(format!("{}–{}/{} ", r.scroll + 1, (r.scroll + inner_h).min(lines.len()), lines.len()), theme::muted()));
     }
     f.render_stateful_widget(list, left, &mut r.list);
-    f.render_widget(Paragraph::new(lines).scroll((r.scroll as u16, 0)).block(pane(Line::from(title))), right);
+    f.render_widget(Paragraph::new(lines).scroll((r.scroll as u16, 0)).block(pane(Line::from(title), right)), right);
     r.hits.rows = left;
     r.hits.text = right;
 }

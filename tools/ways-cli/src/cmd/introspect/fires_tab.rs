@@ -73,7 +73,7 @@ impl Fires {
         let title = format!(" {} semantic fires ", self.list.len());
         if self.list.is_empty() {
             let none = Line::styled("no semantic fires: keyword and state fires carry no score or surface", theme::muted());
-            f.render_widget(Paragraph::new(none).block(pane(title)), body);
+            f.render_widget(Paragraph::new(none).block(pane(title, body)), body);
         } else {
             let right = |t: String| Cell::from(Line::from(t).alignment(Alignment::Right));
             let header = Row::new(vec![right("Score".into()), Cell::from(""), Cell::from("Way"), Cell::from("Surface")]).style(Style::new().add_modifier(Modifier::BOLD));
@@ -95,7 +95,7 @@ impl Fires {
             let t = Table::new(rows, widths)
                 .header(header)
                 .column_spacing(1)
-                .block(pane(title).title_bottom(agent_hint("ways session fires --json")))
+                .block(pane(title, body).title_bottom(agent_hint("ways session fires --json")))
                 .row_highlight_style(theme::selected())
                 .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()))
                 .highlight_spacing(HighlightSpacing::Always);

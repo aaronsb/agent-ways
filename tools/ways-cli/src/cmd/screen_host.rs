@@ -5,6 +5,7 @@
 
 use anyhow::{bail, Result};
 use agent_theme::ColorDepth;
+use agent_tui::ratatui::layout::Rect;
 use agent_tui::ratatui::symbols::border;
 use agent_tui::ratatui::text::Line;
 use agent_tui::ratatui::widgets::{Block, Borders};
@@ -89,12 +90,13 @@ pub(crate) fn show(mut app: agent_tui::App, open: &Open) -> Result<()> {
     Ok(())
 }
 
-/// A bordered pane in the theme, as the settings screens draw theirs.
-pub(crate) fn pane(title: impl Into<Line<'static>>) -> Block<'static> {
+/// A bordered pane in the theme, drawn in `area`, as the settings screens
+/// draw theirs.
+pub(crate) fn pane(title: impl Into<Line<'static>>, area: Rect) -> Block<'static> {
     Block::default()
         .borders(Borders::ALL)
         .border_set(theme::border_set(border::PLAIN))
         .border_style(theme::rule())
-        .title(theme::ornamented(title.into()))
+        .title(theme::ornamented(title.into(), area.width.saturating_sub(2)))
         .title_style(theme::title())
 }

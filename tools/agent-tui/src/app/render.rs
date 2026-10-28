@@ -16,14 +16,15 @@ use super::{App, Btn, Mode};
 use crate::tree::{self, Arg, Kind, Row};
 use crate::wrap::str_width;
 
-/// A bordered pane in the theme: rule-coloured border in the theme's
-/// glyphs, plain by default, and an accent title after the theme's ornament.
-pub(super) fn pane(title: impl Into<Line<'static>>) -> Block<'static> {
+/// A bordered pane in the theme, drawn in `area`: rule-coloured border in
+/// the theme's glyphs, plain by default, and an accent title after the
+/// theme's ornament where both fit inside the border.
+pub(super) fn pane(title: impl Into<Line<'static>>, area: Rect) -> Block<'static> {
     Block::default()
         .borders(Borders::ALL)
         .border_set(theme::border_set(border::PLAIN))
         .border_style(theme::rule())
-        .title(theme::ornamented(title.into()))
+        .title(theme::ornamented(title.into(), area.width.saturating_sub(2)))
         .title_style(theme::title())
 }
 
@@ -174,7 +175,7 @@ impl App {
                 self.draw_detail(f, top, &r.path);
                 let title = if n.about_title.is_empty() { "about".to_string() } else { n.about_title.clone() };
                 let lines: Vec<Line> = n.about.lines().map(|l| Line::raw(l.to_string())).collect();
-                f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }).block(pane(title)), bottom);
+                f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }).block(pane(title, bottom)), bottom);
             }
         }
         if let Mode::Flow(flow) = &mut self.mode {
@@ -336,7 +337,7 @@ impl App {
         let own = self.roots.get(self.tab).and_then(|t| self.adapter.title(&t.name)).unwrap_or_else(|| self.title.clone());
         let title = if self.filter.is_empty() { own } else { format!("{own} — /{}", self.filter) };
         // The border would clip a long title mid-word: cut it between the corners with `…`.
-        let block = pane(crate::wrap::truncate(&title, area.width.saturating_sub(2) as usize));
+        let block = pane(crate::wrap::truncate(&title, area.width.saturating_sub(2) as usize), area);
         self.hits.list = block.inner(area);
         let list = List::new(items)
             .block(block)
@@ -404,7 +405,7 @@ impl App {
                 lines.push(Line::styled(format!("    {}", a.render("<arg>")), dim));
             }
         }
-        let p = Paragraph::new(lines).wrap(Wrap { trim: false }).block(pane("detail"));
+        let p = Paragraph::new(lines).wrap(Wrap { trim: false }).block(pane("detail", area));
         f.render_widget(p, area);
     }
 
@@ -442,7 +443,7 @@ impl App {
         lines.push(Line::raw(""));
         lines.push(Line::styled("w reviews and applies one tab", theme::hint()));
         let title = format!("pending ({} changes, {} actions)", ch.len(), self.queue.len());
-        let p = Paragraph::new(lines).wrap(Wrap { trim: false }).block(pane(title));
+        let p = Paragraph::new(lines).wrap(Wrap { trim: false }).block(pane(title, area));
         f.render_widget(p, area);
     }
 

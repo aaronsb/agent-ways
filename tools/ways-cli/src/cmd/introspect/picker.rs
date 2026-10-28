@@ -121,7 +121,7 @@ pub(crate) fn draw_picker(f: &mut Draw, p: &mut Picker, main: Rect) {
     // The counts first: a long scope is cut at its end, never a count.
     let title = title(p, main.width.saturating_sub(2) as usize);
     if p.sessions.is_empty() {
-        f.render_widget(Paragraph::new(Line::styled("no sessions recorded", theme::muted())).block(pane(title)), main);
+        f.render_widget(Paragraph::new(Line::styled("no sessions recorded", theme::muted())).block(pane(title, main)), main);
     } else {
         let right = |t: String| Cell::from(Line::from(t).alignment(Alignment::Right));
         let header = Row::new(vec![
@@ -174,7 +174,7 @@ pub(crate) fn draw_picker(f: &mut Draw, p: &mut Picker, main: Rect) {
         let t = Table::new(rows, widths)
             .header(header)
             .column_spacing(1)
-            .block(pane(title))
+            .block(pane(title, main))
             .row_highlight_style(theme::selected())
             .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()))
             .highlight_spacing(HighlightSpacing::Always);

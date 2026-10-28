@@ -155,7 +155,7 @@ impl App {
                 ListItem::new(Line::from(spans)).style(theme::selected_text())
             })
             .collect();
-        let block = pane(" themes ");
+        let block = pane(" themes ", area);
         self.hits.list = block.inner(area);
         let list = List::new(items)
             .block(block)
@@ -212,7 +212,7 @@ impl App {
                 lines.extend(fields("rejected", &format!("{file}: {}", errs.first().map(|e| e.to_string()).unwrap_or_default()), theme::err(), room, dim));
             }
         }
-        f.render_widget(Paragraph::new(lines).block(pane("theme")), area);
+        f.render_widget(Paragraph::new(lines).block(pane("theme", area)), area);
     }
 
     fn draw_slot_rows(&mut self, f: &mut Frame, area: Rect) {
@@ -239,7 +239,7 @@ impl App {
             (Some(o), false) => format!(" (copy of {o}, unwritten)"),
             _ => String::new(),
         };
-        let block = pane(format!(" edit {}{mark}{note} ", e.theme.name));
+        let block = pane(format!(" edit {}{mark}{note} ", e.theme.name), area);
         self.hits.list = block.inner(area);
         let row = e.row;
         let list = List::new(items)
@@ -357,7 +357,7 @@ impl App {
         lines.push(Line::raw(""));
         let path = self.themes.path_of(&e.theme.name).map_or("no themes directory".into(), |p| self.themes.show(&p));
         lines.extend(fields("writes", &path, dim, room, dim));
-        f.render_widget(Paragraph::new(lines).block(pane("slot")), area);
+        f.render_widget(Paragraph::new(lines).block(pane("slot", area)), area);
         if save_at.y < inner.y + inner.height {
             let state = if e.dirty() { Span::styled("unsaved", theme::changed()) } else { Span::styled("saved", theme::ok()) };
             let mut line = button_row(self.shape, save_at, None, &[(Btn::Save, "Save ^S".into(), Ground::Ok)], &mut self.hits.buttons);

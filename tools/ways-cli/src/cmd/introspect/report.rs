@@ -197,7 +197,7 @@ impl Spend {
         self.area = body;
         let groups = self.groups();
         if groups.is_empty() {
-            f.render_widget(Paragraph::new(Line::styled("no judge calls recorded", theme::muted())).block(pane(title).title_bottom(agent_hint(&self.hint))), body);
+            f.render_widget(Paragraph::new(Line::styled("no judge calls recorded", theme::muted())).block(pane(title, body).title_bottom(agent_hint(&self.hint))), body);
             return;
         }
         let right = |t: String| Cell::from(Line::from(t).alignment(Alignment::Right));
@@ -241,7 +241,7 @@ impl Spend {
         let t = Table::new(rows, widths)
             .header(header)
             .column_spacing(1)
-            .block(pane(title).title_bottom(agent_hint(&self.hint)))
+            .block(pane(title, body).title_bottom(agent_hint(&self.hint)))
             .row_highlight_style(theme::selected())
             .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()));
         f.render_stateful_widget(t, body, &mut self.table);
@@ -346,7 +346,7 @@ impl Precision {
         let title = format!(" {} ways fired in {} ", self.rows.len(), self.scope);
         self.area = body;
         if self.rows.is_empty() {
-            f.render_widget(Paragraph::new(Line::styled("no ways fired", theme::muted())).block(pane(title).title_bottom(agent_hint(&self.hint))), body);
+            f.render_widget(Paragraph::new(Line::styled("no ways fired", theme::muted())).block(pane(title, body).title_bottom(agent_hint(&self.hint))), body);
             return;
         }
         // Below 100 columns the trigger is shortened and the spread is left
@@ -384,7 +384,7 @@ impl Precision {
         let t = Table::new(rows, widths)
             .header(Row::new(header).style(Style::new().add_modifier(Modifier::BOLD)))
             .column_spacing(1)
-            .block(pane(title).title_bottom(agent_hint(&self.hint)))
+            .block(pane(title, body).title_bottom(agent_hint(&self.hint)))
             .row_highlight_style(theme::selected())
             .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()));
         f.render_stateful_widget(t, body, &mut self.table);
@@ -454,7 +454,7 @@ impl Stats {
         let title = format!(" {} ways in {} ", r.by_way.len(), self.scope);
         self.area = left;
         if r.by_way.is_empty() {
-            f.render_widget(Paragraph::new(Line::styled("no ways fired", theme::muted())).block(pane(title).title_bottom(agent_hint(&self.hint))), left);
+            f.render_widget(Paragraph::new(Line::styled("no ways fired", theme::muted())).block(pane(title, left).title_bottom(agent_hint(&self.hint))), left);
         } else {
             let rows: Vec<Row> =
                 r.by_way.iter().map(|(way, n)| Row::new(vec![Cell::from(way.clone()), Cell::from(Line::from(n.to_string()).alignment(Alignment::Right))])).collect();
@@ -464,7 +464,7 @@ impl Stats {
             let t = Table::new(rows, [Constraint::Min(10), Constraint::Length(5)])
                 .header(header)
                 .column_spacing(1)
-                .block(pane(title).title_bottom(agent_hint(&self.hint)))
+                .block(pane(title, left).title_bottom(agent_hint(&self.hint)))
                 .row_highlight_style(theme::selected())
                 .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()));
             f.render_stateful_widget(t, left, &mut self.table);
@@ -488,6 +488,6 @@ impl Stats {
             lines.push(bold("Selected way by model"));
             lines.extend(split.iter().map(|(m, n)| count(*n, m)));
         }
-        f.render_widget(Paragraph::new(lines).block(pane(" how they fired ")), side);
+        f.render_widget(Paragraph::new(lines).block(pane(" how they fired ", side)), side);
     }
 }
