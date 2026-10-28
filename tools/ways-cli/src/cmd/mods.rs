@@ -87,6 +87,16 @@ fn converge_in(targets: &[Enabled], only: Option<&Mod>, dry_run: bool) -> Vec<(P
     for (i, t) in targets.iter().enumerate() {
         let mut lines = if i == 0 { align.clone() } else { Vec::new() };
         lines.extend(attend_mod::converge_target(&src, &t.target(&default_root), only, dry_run));
+        // The ways-theme mod's other half is the settings key that selects its
+        // theme, which the settings merge owns while the mod is wanted.
+        if only.is_none_or(|m| *m == attend_mod::THEME) && !dry_run && src.join("settings.json").exists() {
+            let base = super::reconcile::base_path_for(&crate::paths::state_root(), &t.dir);
+            match super::reconcile::merge_settings(&src.join("settings.json"), &t.dir, &base) {
+                Ok(line) if line.contains("up to date") => {}
+                Ok(line) => lines.push(line),
+                Err(e) => lines.push(format!("{}: ⚠ settings.json theme: {e:#}", attend_mod::THEME.label)),
+            }
+        }
         let prefix = targets.len() > 1;
         out.push((t.dir.clone(), lines.into_iter().map(|l| if prefix { format!("{}: {l}", shown(&t.dir)) } else { l }).collect()));
     }

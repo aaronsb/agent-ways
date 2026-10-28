@@ -20,7 +20,7 @@
 
 use crate::cmd::manifest::{projection_roots, ProjectionRoot, RootKind};
 use crate::paths;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 
 /// Materialization strategy.
@@ -341,7 +341,7 @@ pub fn plan_for(state_root: &Path, source_root: &Path, dest_root: &Path, roots: 
         let live: serde_json::Value = sm::read_json_or_empty(&dest_settings)?;
         let base_path = base_path_for(state_root, dest_root);
         let base = sm::base_for(&live, &base_path)?;
-        let merged = sm::merge(&live, &desired_hooks, &base, crate::config::global().secret_path_deny)?;
+        let merged = sm::merge(&live, &desired_hooks, &base, crate::config::global().secret_path_deny, theme_wanted(dest_root))?;
         // Classify against the base as it exists on disk. A first apply's
         // seeded base claims entries by shape, and the plan must show those
         // as claimed rather than as ours from a prior version.
@@ -486,9 +486,7 @@ fn converge_one(
     if !dry_run {
         let src_settings = source_root.join("settings.json");
         if src_settings.exists() {
-            let dest_settings = dest_root.join("settings.json");
-            let summary =
-                crate::cmd::settings_merge::apply_to_files(&src_settings, &dest_settings, base_path)?;
+            let summary = merge_settings(&src_settings, dest_root, base_path)?;
             if !quiet {
                 eprintln!("{summary}");
             }
@@ -514,6 +512,28 @@ fn converge_one(
     }
 
     Ok(())
+}
+
+/// Whether the ways-theme mod is wanted in the target at `dest_root`, so the
+/// settings merge owns its `theme` key (ADR-513).
+pub(crate) fn theme_wanted(dest_root: &Path) -> bool {
+    crate::cmd::attend_mod::wants_in(&crate::cmd::attend_mod::THEME, &target_config_path(dest_root))
+}
+
+/// The settings merge for the target at `dest_root`. While the ways-theme mod
+/// is wanted, the theme file the merge selects is laid down first, a default
+/// one when none is there yet, so Claude Code's watch on its themes folder
+/// holds from the first session and the mod's later writes apply live.
+pub(crate) fn merge_settings(src_settings: &Path, dest_root: &Path, base_path: &Path) -> Result<String> {
+    let want_theme = theme_wanted(dest_root);
+    if want_theme {
+        let file = dest_root.join("themes").join("ways.json");
+        if !file.exists() {
+            std::fs::create_dir_all(dest_root.join("themes")).with_context(|| format!("creating {}", dest_root.join("themes").display()))?;
+            std::fs::write(&file, crate::cmd::settings_merge::DEFAULT_THEME_FILE).with_context(|| format!("writing {}", file.display()))?;
+        }
+    }
+    crate::cmd::settings_merge::apply_to_files(src_settings, &dest_root.join("settings.json"), base_path, want_theme)
 }
 
 /// The config file of the target at `dest_root`: its own `config:` when the
