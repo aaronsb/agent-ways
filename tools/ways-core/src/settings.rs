@@ -649,6 +649,16 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
+        name: "mods.ways-theme.copy",
+        section: "mods",
+        path: &["mods", "ways-theme", "copy"],
+        kind: Kind::Bool,
+        default: DefaultValue::Yaml("true"),
+        doc: "Whether the ways-theme mod shows its copy labels.",
+        long: "On labels what the mod draws for copying; off draws no copy label. The mod reads it at each session start, through `ways settings theme export --mod`.",
+        ..BASE
+    },
+    KeySpec {
         name: "mods.ways-theme.spinner_words",
         section: "mods",
         path: &["mods", "ways-theme", "spinner_words"],
@@ -1090,13 +1100,14 @@ mod tests {
             ("icons", s("unicode")),
             ("frames", Some(Value::Bool(true))),
             ("prompt_box", s("gradient")),
+            ("copy", Some(Value::Bool(true))),
             ("spinner_words", Some(Value::Sequence(vec![]))),
             ("done_words", Some(Value::Sequence(vec![]))),
         ];
         for (k, want) in &defaults {
             assert_eq!(&resolved(&format!("mods.ways-theme.{k}"), &[]), want, "{k}");
         }
-        let text = "mods:\n  ways-theme:\n    rail: false\n    tables: text\n    shimmer: false\n    charts: false\n    markdown: false\n    icons: ascii\n    frames: false\n    prompt_box: frame\n    spinner_words: [Sailing]\n    done_words: [Docked, Moored]\n";
+        let text = "mods:\n  ways-theme:\n    rail: false\n    tables: text\n    shimmer: false\n    charts: false\n    markdown: false\n    icons: ascii\n    frames: false\n    prompt_box: frame\n    copy: false\n    spinner_words: [Sailing]\n    done_words: [Docked, Moored]\n";
         let l = [layer("user", LayerScope::User, text)];
         assert!(l[0].findings.is_empty(), "{:?}", l[0].findings);
         let set = [
@@ -1108,6 +1119,7 @@ mod tests {
             ("icons", s("ascii")),
             ("frames", Some(Value::Bool(false))),
             ("prompt_box", s("frame")),
+            ("copy", Some(Value::Bool(false))),
             ("spinner_words", Some(Value::Sequence(vec!["Sailing".into()]))),
             ("done_words", Some(Value::Sequence(vec!["Docked".into(), "Moored".into()]))),
         ];

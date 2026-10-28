@@ -460,6 +460,8 @@ fn export_mod_prints_what_the_theme_mod_reads_on_one_line() {
     assert_eq!((v["theme"].as_str(), v["kind"].as_str()), (Some("terminal"), Some("dark")));
     assert!(v["roles"].is_null() && v["gradient"].is_null() && v["words"].is_null(), "{v}");
     assert_eq!(v["render"]["prompt_box"], "frame", "terminal has no gradient");
+    let keys: Vec<&str> = v["render"].as_object().unwrap().keys().map(String::as_str).collect();
+    assert_eq!(keys, ["rail", "tables", "shimmer", "charts", "markdown", "icons", "frames", "prompt_box", "copy"]);
     assert_eq!(fx.run(&["settings", "set", "theme.active", "miami-nights"]).2, 0);
     let v = one(&["settings", "theme", "export", "--mod"]);
     assert_eq!(v["theme"], "miami-nights");
@@ -469,9 +471,10 @@ fn export_mod_prints_what_the_theme_mod_reads_on_one_line() {
     // The settings reach the export: a word list, a render switch.
     assert_eq!(fx.run(&["settings", "set", "mods.ways-theme.spinner_words", "Sailing, Docking"]).2, 0);
     assert_eq!(fx.run(&["settings", "set", "mods.ways-theme.rail", "false"]).2, 0);
+    assert_eq!(fx.run(&["settings", "set", "mods.ways-theme.copy", "false"]).2, 0);
     let v = one(&["settings", "theme", "export", "nord", "--mod"]);
     assert_eq!(v["words"], serde_json::json!({ "spinner": ["Sailing", "Docking"], "done": [] }));
-    assert_eq!((v["render"]["rail"].as_bool(), v["render"]["prompt_box"].as_str()), (Some(false), Some("frame")));
+    assert_eq!((v["render"]["rail"].as_bool(), v["render"]["prompt_box"].as_str(), v["render"]["copy"].as_bool()), (Some(false), Some("frame"), Some(false)));
     let (_, err, code) = fx.run(&["settings", "theme", "export", "gone", "--mod"]);
     assert_eq!((code, err.as_str()), (2, "ways settings: no theme `gone`; `ways settings theme list` names the themes\n"));
 }
@@ -596,7 +599,7 @@ fn the_help_overlay_shows_the_text_settings_help_prints() {
     for tab in ["ways", "matching", "gate", "install", "attend", "sensors", "mod", "theme"] {
         let (help, _, code) = fx.run(&["settings", "help", tab]);
         assert_eq!(code, 0);
-        let f = glyphs(&fx.snap(tab, "?", "160x60", "16"));
+        let f = glyphs(&fx.snap(tab, "?", "160x80", "16"));
         assert!(f.contains(&format!("help: {tab}")), "{f}");
         for line in help.lines().filter(|l| !l.trim().is_empty()) {
             assert!(f.contains(line.trim_end()), "{tab}: `{line}` is not in the overlay:\n{f}");
