@@ -32,76 +32,80 @@ pub fn run(manifest: &Value, way_id: &str, json_out: bool) -> Result<()> {
         return Ok(());
     }
 
-    println!();
-    println!(
+    let mut out = String::new();
+    agent_fmt::say!(out);
+    agent_fmt::say!(
+        out,
         "{}{}",
         paint(BOLD, "Claim Trace: "),
         paint(Role::Accent, way_id)
     );
-    println!();
+    agent_fmt::say!(out);
     if let Some(path) = way_data["path"].as_str() {
-        println!("  File: {}", paint(Role::Muted, path));
+        agent_fmt::say!(out, "  File: {}", paint(Role::Muted, path));
     }
-    println!();
+    agent_fmt::say!(out);
 
     let prov = &way_data["provenance"];
     if prov.is_null() {
-        println!("  {}", paint(WARN, "(no claim)"));
+        agent_fmt::say!(out, "  {}", paint(WARN, "(no claim)"));
+        agent_fmt::print_block(&out);
         return Ok(());
     }
 
     // Policies
-    println!("{}", paint(BOLD, "Policy sources:"));
+    agent_fmt::say!(out, "{}", paint(BOLD, "Policy sources:"));
     if let Some(policies) = prov["policy"].as_array() {
         for p in policies {
             let ptype = p["type"].as_str().unwrap_or("unknown");
             let uri = p["uri"].as_str().unwrap_or("");
-            println!("  {ptype}: {uri}");
+            agent_fmt::say!(out, "  {ptype}: {uri}");
         }
     }
-    println!();
+    agent_fmt::say!(out);
 
     // Controls
-    println!("{}", paint(BOLD, "Controls:"));
+    agent_fmt::say!(out, "{}", paint(BOLD, "Controls:"));
     if let Some(controls) = prov["controls"].as_array() {
         for c in controls {
             if let Some(obj) = c.as_object() {
                 let cid = obj.get("id").and_then(|v| v.as_str()).unwrap_or("?");
-                println!("  {cid}");
+                agent_fmt::say!(out, "  {cid}");
                 if let Some(justifications) = obj.get("justifications").and_then(|v| v.as_array()) {
                     for j in justifications {
                         if let Some(s) = j.as_str() {
-                            println!("    ✓ {s}");
+                            agent_fmt::say!(out, "    ✓ {s}");
                         }
                     }
                 }
             } else if let Some(s) = c.as_str() {
-                println!("  {s}");
+                agent_fmt::say!(out, "  {s}");
             }
         }
     }
-    println!();
+    agent_fmt::say!(out);
 
     // Verified
     match prov["verified"].as_str() {
-        Some(v) => println!("  Verified: {}", paint(Role::Ok, v)),
-        None => println!("  Verified: {}", paint(WARN, "not set")),
+        Some(v) => agent_fmt::say!(out, "  Verified: {}", paint(Role::Ok, v)),
+        None => agent_fmt::say!(out, "  Verified: {}", paint(WARN, "not set")),
     }
-    println!();
+    agent_fmt::say!(out);
 
     // Rationale
     if let Some(rationale) = prov["rationale"].as_str() {
-        println!("{}", paint(BOLD, "Rationale:"));
-        println!("  {rationale}");
+        agent_fmt::say!(out, "{}", paint(BOLD, "Rationale:"));
+        agent_fmt::say!(out, "  {rationale}");
     }
 
     // Firing history
-    print_firing_history(way_id);
+    firing_history(&mut out, way_id);
 
+    agent_fmt::print_block(&out);
     Ok(())
 }
 
-fn print_firing_history(way_id: &str) {
+fn firing_history(out: &mut String, way_id: &str) {
     let events = load_events();
     let fires: Vec<&str> = events
         .iter()
@@ -114,7 +118,7 @@ fn print_firing_history(way_id: &str) {
     if !fires.is_empty() {
         let first = fires.first().map(|s| &s[..10.min(s.len())]).unwrap_or("?");
         let last = fires.last().map(|s| &s[..10.min(s.len())]).unwrap_or("?");
-        println!();
-        println!("Firing history: {} times ({first} → {last})", fires.len());
+        agent_fmt::say!(out);
+        agent_fmt::say!(out, "Firing history: {} times ({first} → {last})", fires.len());
     }
 }
