@@ -901,6 +901,20 @@ fn a_wide_character_at_the_row_s_end_moves_to_the_next_row() {
 }
 
 #[test]
+fn a_grapheme_is_measured_and_grounded_whole() {
+    let p = Painter::themed(&theme("tampa"), ColorDepth::TrueColor);
+    for g in ["👍🏽", "⚠\u{fe0f}", "👨\u{200d}👩\u{200d}👧"] {
+        let mid = p.block(&format!("a{g}b"), 8);
+        assert!(mid.contains(g), "no SGR inside {g:?}: {mid:?}");
+        assert_eq!(visible(&mid), format!("a{g}b    "), "{g:?} is two cells");
+        let edge = p.block(&format!("abc{g}"), 4);
+        assert!(edge.contains(g), "no SGR inside {g:?}: {edge:?}");
+        assert_eq!(visible(&edge), format!("abc {g}  "), "{g:?} does not fit the row's last cell");
+    }
+    assert_eq!(visible(&p.block("warn ⚠\u{fe0f} here", 20)), format!("warn ⚠\u{fe0f} here{}", " ".repeat(8)));
+}
+
+#[test]
 fn empty_input_is_an_empty_band() {
     let p = Painter::themed(&theme("paper"), ColorDepth::TrueColor);
     assert_eq!(p.block("", 8), "");

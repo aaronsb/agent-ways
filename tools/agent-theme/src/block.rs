@@ -1,10 +1,11 @@
 //! A report printed as a band of the theme: under `THEME_BACKGROUND="fill"`
 //! every line of it sits on the theme's ground, out to the terminal's width.
 
-use unicode_width::UnicodeWidthChar;
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::color::Color;
 use crate::paint::{painter, Ground, Painter, RESET};
+use crate::text::cell_width;
 
 impl Painter {
     /// `text` with the theme's ground behind every line, padded with ground
@@ -184,15 +185,20 @@ impl Band<'_> {
         self.out.push_str(RESET);
     }
 
-    /// `text`, which holds no escape, from `col`; the column after it.
+    /// `text`, which holds no escape, from `col`, a grapheme at a time;
+    /// the column after it.
     fn text(&mut self, text: &str, mut col: usize) -> usize {
-        for c in text.chars() {
+        for g in text.graphemes(true) {
             // A carriage return would send the padding over the line.
-            if c == '\r' {
+            if g == "\r" {
                 continue;
             }
-            let (text, w) = if c == '\t' { (" ".repeat(8 - col % 8), 8 - col % 8) } else { (c.to_string(), c.width().unwrap_or(0)) };
-            // A wide character that does not fit the row's end goes to the
+            let w = match g {
+                "\t" => 8 - col % 8,
+                g if g.starts_with(char::is_control) => 0,
+                g => cell_width(g),
+            };
+            // A wide grapheme that does not fit the row's end goes to the
             // next row, as the terminal puts it.
             if w <= self.width && col % self.width + w > self.width {
                 let end = col.div_ceil(self.width) * self.width;
@@ -203,7 +209,10 @@ impl Band<'_> {
             if !self.own && w > 0 {
                 self.ground_moves(col);
             }
-            self.out.push_str(&text);
+            match g {
+                "\t" => self.out.extend(std::iter::repeat_n(' ', w)),
+                g => self.out.push_str(g),
+            }
             col += w;
         }
         col
