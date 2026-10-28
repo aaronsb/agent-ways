@@ -122,7 +122,7 @@ describe('the export contract', () => {
     ['a gradient axis that is neither', { ...MIAMI_NIGHTS, gradient: { axis: 'radial', stops: ['#000000', '#ffffff'] } }],
     ['one gradient stop', { ...MIAMI_NIGHTS, gradient: { axis: 'vertical', stops: ['#000000'] } }],
     ['a gradient stop by name', { ...MIAMI_NIGHTS, gradient: { axis: 'vertical', stops: ['#000000', 'pink'] } }],
-    ['no spinner words', { ...MIAMI_NIGHTS, words: { spinner: [], done: ['Docked'] } }],
+    ['a word list that is not a list', { ...MIAMI_NIGHTS, words: { spinner: 'Cruising', done: [] } }],
     ['a word with a control character', { ...MIAMI_NIGHTS, words: { spinner: ['Cru\u001bising'], done: ['Docked'] } }],
     ['tables that are neither', { ...MIAMI_NIGHTS, render: { ...MIAMI_NIGHTS.render, tables: 'cards' } }],
     ['icons that are neither', { ...MIAMI_NIGHTS, render: { ...MIAMI_NIGHTS.render, icons: 'emoji' } }],
@@ -232,6 +232,27 @@ describe('roles map to the skin', () => {
     expect(drawn).toContain(MIAMI_NIGHTS.roles.info)
     expect(drawn).toContain(MIAMI_NIGHTS.roles.ok)
     await ui.unmount()
+  })
+
+  test('an empty word list keeps Claude Code\'s words for that slot, and null for both', async ($, on) => {
+    const world: World = { mod: json({ ...MIAMI_NIGHTS, words: { spinner: MIAMI_NIGHTS.words.spinner, done: [] } }) }
+    const h = host(on, world)
+    await $.session.start(INTERACTIVE)
+    const footer = await $.ui.mount(at('terminal', 'TurnDuration', { word: 'Baked', durationMs: 4000, isExpanded: false }))
+    expect(JSON.stringify(await footer.drawn())).toContain('Baked')
+    await footer.unmount()
+    const spinner = await $.ui.mount(at('terminal', 'Spinner', { word: 'Working', message: null, suffix: '', mode: 'requesting' }))
+    const spun = JSON.stringify(await spinner.drawn()).replace(/[^A-Za-z]/g, '')
+    expect(MIAMI_NIGHTS.words.spinner.some(w => spun.includes(w))).toBe(true)
+    await spinner.unmount()
+    world.mod = json({ ...MIAMI_NIGHTS, words: null })
+    await h.clock.advance(PICKUP_MS)
+    const plain = await $.ui.mount(at('terminal', 'Spinner', { word: 'Working', message: null, suffix: '', mode: 'requesting' }))
+    expect(JSON.stringify(await plain.drawn()).replace(/[^A-Za-z]/g, '')).toContain('Working')
+    await plain.unmount()
+    const done = await $.ui.mount(at('terminal', 'TurnDuration', { word: 'Baked', durationMs: 4000, isExpanded: false }))
+    expect(JSON.stringify(await done.drawn())).toContain('Baked')
+    await done.unmount()
   })
 
   test('the spinner and the footer take the theme\'s words', async ($, on) => {

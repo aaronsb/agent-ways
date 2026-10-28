@@ -54,8 +54,9 @@ const hasExactly = (v: Record<string, unknown>, keys: readonly string[]): boolea
   return own.length === keys.length && keys.every(k => Object.hasOwn(v, k))
 }
 const isHex = (v: unknown): v is string => typeof v === 'string' && HEX.test(v)
+// An empty list keeps Claude Code's own words for that slot.
 const isWords = (v: unknown): v is string[] =>
-  Array.isArray(v) && v.length > 0 && v.length <= MAX_WORDS && v.every(w => typeof w === 'string' && WORD.test(w))
+  Array.isArray(v) && v.length <= MAX_WORDS && v.every(w => typeof w === 'string' && WORD.test(w))
 const oneOf = <T extends string>(v: unknown, of: readonly T[]): v is T => typeof v === 'string' && (of as readonly string[]).includes(v)
 
 const RENDER_KEYS = ['rail', 'tables', 'shimmer', 'charts', 'markdown', 'icons', 'frames', 'prompt_box'] as const

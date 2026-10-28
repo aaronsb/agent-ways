@@ -1,6 +1,7 @@
-// `ways settings theme export --mod` as the contract states it, for the
-// themes the tests and the screenshots use. The role values stand in for the
-// exporter's derivation until `ways` ships the verb.
+// `ways settings theme export --mod` for the themes the tests and the
+// screenshots use: the roles and words as the ways build of
+// feature/ways-theme-controller derived them. TAMPA's words are dropped, to
+// test a theme with none.
 
 export const MIAMI_NIGHTS = {
   theme: 'miami-nights',
@@ -8,16 +9,16 @@ export const MIAMI_NIGHTS = {
   roles: {
     bg: '#160634',
     body: '#f4eaff',
-    accent: '#ff2a8a',
-    accent_dim: '#b0397f',
+    accent: '#ff4d93',
+    accent_dim: '#ff46aa',
     info: '#2de2e6',
     ok: '#3dffa2',
     warn: '#ffd319',
     err: '#ff5b3a',
-    alt: '#b967ff',
-    hot: '#ff972a',
+    alt: '#bb6eff',
+    hot: '#ff9729',
     muted: '#8f7cb3',
-    rule: '#4a2d78',
+    rule: '#644c8b',
     selection_bg: '#3d1466',
     subtle: '#3a1d63',
   },
@@ -36,15 +37,15 @@ export const TAMPA = {
     bg: '#fff6e8',
     body: '#22262e',
     accent: '#0057b8',
-    accent_dim: '#4f7fbf',
-    info: '#00818a',
-    ok: '#2c7a2e',
-    warn: '#c24600',
+    accent_dim: '#3b699c',
+    info: '#00727a',
+    ok: '#28762a',
+    warn: '#ab4300',
     err: '#c8102e',
     alt: '#6c2c91',
-    hot: '#d43117',
+    hot: '#a30003',
     muted: '#6f6a66',
-    rule: '#d9cdb8',
+    rule: '#b2a178',
     selection_bg: '#d8e8f8',
     subtle: '#f5d98a',
   },
