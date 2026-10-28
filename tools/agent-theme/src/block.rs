@@ -26,12 +26,12 @@ impl Painter {
         let (Some(ground), Some(roles)) = (self.ground(cols, rows), self.roles()) else { return text.to_string() };
         let fg = Color::Rgb(roles.body).at(self.depth());
         let mut out = String::with_capacity(text.len() * 2);
-        let mut open = Vec::new();
+        let mut pen = Pen::default();
         for (y, line) in lines.iter().enumerate() {
             if y > 0 {
                 out.push('\n');
             }
-            Band { ground: &ground, fg, row: y as u16, width, last: None, own: false, open: &mut open, out: &mut out }.line(line);
+            Band { ground: &ground, fg, row: y as u16, width, last: None, own: false, pen: &mut pen, out: &mut out }.line(line);
         }
         if body.is_some() {
             out.push('\n');
@@ -56,9 +56,8 @@ struct Band<'a> {
     last: Option<Color>,
     /// Whether a span has set its own ground.
     own: bool,
-    /// The input's SGR parameters since its last reset, which the next line
-    /// opens with again.
-    open: &'a mut Vec<String>,
+    /// The style the input has open, which the next line opens with again.
+    pen: &'a mut Pen,
     out: &'a mut String,
 }
 
@@ -115,11 +114,10 @@ impl Band<'_> {
     /// the parameters after it; 49 brings the theme's ground back and 39 the
     /// body colour.
     fn style(&mut self, params: &str, col: usize) {
-        let e = sgr_effect(params);
+        let e = self.pen.apply(params);
         let rest = match e.reset {
             Some(at) => {
                 self.out.push_str(RESET);
-                self.open.clear();
                 self.own = false;
                 self.base(col);
                 &params[at..]
@@ -130,29 +128,40 @@ impl Band<'_> {
             return;
         }
         self.sgr(rest);
-        self.open.push(rest.to_string());
-        match e.bg {
-            Chan::Default => {
-                self.own = false;
-                self.ground_at(col);
-            }
-            Chan::Own => {
-                self.own = true;
-                self.last = None;
-            }
-            Chan::Untouched => {}
+        if e.bg {
+            self.own(col);
         }
-        if e.fg == Chan::Default {
+        if e.fg && self.pen.fg.is_none() {
             self.body();
+        }
+    }
+
+    /// Whether the pen holds a ground of its own; the theme's comes back at
+    /// `col` when it does not.
+    fn own(&mut self, col: usize) {
+        self.own = self.pen.bg.is_some();
+        if self.own {
+            self.last = None;
+        } else {
+            self.ground_at(col);
+        }
+    }
+
+    /// The pen the line before left open, as one SGR.
+    fn replay(&mut self) {
+        let params = self.pen.params();
+        if !params.is_empty() {
+            self.sgr(&params);
+            if self.pen.bg.is_some() {
+                self.own(0);
+            }
         }
     }
 
     fn line(mut self, line: &str) {
         let mut col = 0usize;
         self.base(0);
-        for params in std::mem::take(self.open) {
-            self.style(&params, 0);
-        }
+        self.replay();
         let mut chars = line.chars().peekable();
         while let Some(c) = chars.next() {
             if c == '\x1b' {
@@ -226,58 +235,88 @@ fn escape(first: char, rest: &mut std::iter::Peekable<std::str::Chars>) -> Strin
     seq
 }
 
-/// What an SGR leaves on one channel, foreground or ground.
-#[derive(Debug, PartialEq)]
-enum Chan {
-    /// The terminal's own colour (39, 49): the theme's goes back.
-    Default,
-    /// A colour of the span's own.
-    Own,
-    Untouched,
+/// The style the input has open: what each line opens with again, as one
+/// SGR. Each part holds the parameters that set it.
+#[derive(Debug, Default, PartialEq)]
+struct Pen {
+    fg: Option<String>,
+    bg: Option<String>,
+    /// The underline's colour, 58.
+    ul: Option<String>,
+    /// Bold, dim, italic, underline, blink, reverse, hidden, strike.
+    attrs: [Option<String>; 8],
 }
 
-/// What an SGR's parameters do: where the parameters after its last reset
-/// begin, and what those leave on each channel.
+/// What an SGR's parameters did: where those after its last reset begin,
+/// and whether those touched the foreground or the ground.
 #[derive(Debug, PartialEq)]
 struct Effect {
     reset: Option<usize>,
-    fg: Chan,
-    bg: Chan,
+    fg: bool,
+    bg: bool,
 }
 
-fn sgr_effect(params: &str) -> Effect {
-    let mut e = Effect { reset: None, fg: Chan::Untouched, bg: Chan::Untouched };
-    let ps: Vec<&str> = params.split(';').collect();
-    let (mut i, mut at) = (0, 0);
-    while i < ps.len() {
-        let p = ps[i];
-        at += p.len() + 1;
-        i += 1;
-        let head = p.split(':').next().unwrap_or("");
-        match head.parse::<u16>().ok().or(head.is_empty().then_some(0)) {
-            Some(0) => e = Effect { reset: Some(at.min(params.len())), fg: Chan::Untouched, bg: Chan::Untouched },
-            Some(39) => e.fg = Chan::Default,
-            Some(49) => e.bg = Chan::Default,
-            Some(n @ (38 | 48)) => {
+impl Pen {
+    /// The parameters that open this style again, empty for none.
+    fn params(&self) -> String {
+        let parts = self.attrs.iter().chain([&self.fg, &self.bg, &self.ul]);
+        parts.flatten().map(String::as_str).collect::<Vec<_>>().join(";")
+    }
+
+    /// The pen after `params`.
+    fn apply(&mut self, params: &str) -> Effect {
+        let mut e = Effect { reset: None, fg: false, bg: false };
+        let ps: Vec<&str> = params.split(';').collect();
+        let (mut i, mut at) = (0, 0);
+        while i < ps.len() {
+            let (start, p) = (i, ps[i]);
+            at += p.len() + 1;
+            i += 1;
+            let mut sub = p.split(':');
+            let head = sub.next().unwrap_or("");
+            let Some(n) = head.parse::<u16>().ok().or(head.is_empty().then_some(0)) else { continue };
+            if matches!(n, 38 | 48 | 58) && !p.contains(':') {
                 // An extended colour: 5;n or 2;r;g;b, unless its colon form
                 // carries them in this parameter.
-                if !p.contains(':') {
-                    let skip = if ps.get(i) == Some(&"5") { 2 } else { 4 };
-                    for p in ps.iter().skip(i).take(skip) {
-                        at += p.len() + 1;
-                    }
-                    i += skip;
+                let skip = if ps.get(i) == Some(&"5") { 2 } else { 4 };
+                for p in ps.iter().skip(i).take(skip) {
+                    at += p.len() + 1;
                 }
-                if n == 38 {
-                    e.fg = Chan::Own;
-                } else {
-                    e.bg = Chan::Own;
-                }
+                i = (i + skip).min(ps.len());
             }
-            Some(30..=37 | 90..=97) => e.fg = Chan::Own,
-            Some(40..=47 | 100..=107) => e.bg = Chan::Own,
-            _ => {}
+            let set = Some(ps[start..i].join(";"));
+            match n {
+                0 => {
+                    *self = Pen::default();
+                    e = Effect { reset: Some(at.min(params.len())), fg: false, bg: false };
+                }
+                1..=9 | 21 => {
+                    // 4:0 is underline off.
+                    let off = n == 4 && sub.next() == Some("0");
+                    self.attrs[attr(n)] = if off { None } else { set };
+                }
+                22 => self.attrs[..2].fill(None),
+                23..=25 | 27..=29 => self.attrs[attr(n - 20)] = None,
+                30..=38 | 90..=97 => (e.fg, self.fg) = (true, set),
+                39 => (e.fg, self.fg) = (true, None),
+                40..=48 | 100..=107 => (e.bg, self.bg) = (true, set),
+                49 => (e.bg, self.bg) = (true, None),
+                58 => self.ul = set,
+                59 => self.ul = None,
+                _ => {}
+            }
         }
+        e
     }
-    e
+}
+
+/// The slot of attribute `n` in [`Pen::attrs`]: 6 is the fast blink and 21
+/// the double underline.
+fn attr(n: u16) -> usize {
+    match n {
+        1..=5 => n as usize - 1,
+        6 => 4,
+        7..=9 => n as usize - 2,
+        _ => 3,
+    }
 }

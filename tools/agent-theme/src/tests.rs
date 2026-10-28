@@ -834,6 +834,34 @@ fn a_reset_keeps_the_parameters_after_it() {
 }
 
 #[test]
+fn a_line_opens_with_the_net_style_in_one_sgr() {
+    let p = Painter::themed(&theme("paper"), ColorDepth::Ansi256);
+    let second = |s: &str| p.block(s, 8).split('\n').nth(1).unwrap().to_string();
+    assert_eq!(sgr_before(&second("\x1b[1m\x1b[3m\x1b[31ma\nb"), "b"), "1;3;31");
+    assert_eq!(sgr_before(&second("\x1b[1;31ma\x1b[22m\nb"), "b"), "31", "22 closes bold");
+    assert_eq!(sgr_before(&second("\x1b[1;0;31ma\nb"), "b"), "31", "a reset closes what came before it");
+    assert_eq!(sgr_before(&second("\x1b[31m\x1b[38;5;2ma\nb"), "b"), "38;5;2", "a later colour replaces the first");
+    assert_eq!(sgr_before(&second("\x1b[4:3;58;5;1ma\nb"), "b"), "4:3;58;5;1", "the underline's style and colour");
+    let closed = second("\x1b[1;2;3;4;5;7;8;9;31;48;5;1;58;5;1ma\x1b[22;23;24;25;27;28;29;39;49;59m\nb");
+    assert!(!closed.contains("\x1b[1") && !closed.contains("48;5;1m"), "every closer closes its own: {closed:?}");
+}
+
+#[test]
+fn a_style_opened_and_closed_on_every_line_costs_each_line_the_same() {
+    let p = Painter::themed(&theme("paper"), ColorDepth::TrueColor);
+    let n = 10_000;
+    let plain = p.block(&"  red text\n".repeat(n), 80);
+    let styled = "  \x1b[31mred\x1b[39m text\n".repeat(n);
+    let start = std::time::Instant::now();
+    let out = p.block(&styled, 80);
+    let took = start.elapsed();
+    assert!(out.len() < plain.len() + 3_000_000, "{} bytes over the plain band", out.len() - plain.len());
+    if !cfg!(debug_assertions) {
+        assert!(took < std::time::Duration::from_millis(200), "{n} lines took {took:?}");
+    }
+}
+
+#[test]
 fn the_default_foreground_is_the_body_colour() {
     let paper = theme("paper");
     let p = Painter::themed(&paper, ColorDepth::Ansi256);
