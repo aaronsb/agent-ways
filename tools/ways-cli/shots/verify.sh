@@ -59,7 +59,7 @@ item-delete | ways settings theme --project $PS             | a Enter text:scrat
 action-menu | ways settings install --project $PS           | a Down
 theme-menu | ways settings theme --project $PS              | a Down
 theme-claude | ways settings theme --project $PS            | End
-theme-claude-nights | ways settings theme --project $PS     | End c End
+theme-claude-nights | ways settings theme --project $PS     | End c End Up
 theme-claude-tampa | ways settings theme --project $PS      | End Up c Right | Left
 flow-pick  | ways settings install --project $PS            | t
 flow-other | ways settings install --project $PS            | t Down Enter text:~/work Enter
