@@ -605,7 +605,7 @@ mod tests {
         let (src, base) = (dir.join("src.json"), dir.join("base.json"));
         std::fs::write(&src, "{}").unwrap();
         std::fs::write(dir.join("settings.json"), r#"{"theme":"light"}"#).unwrap();
-        let file = dir.join("themes/ways.json").display().to_string();
+        let file = dir.join("themes").join("ways.json").display().to_string();
         let ok = || Ok("2.1.309".to_string());
 
         let install = would_theme(&THEME, &view(&dir, None, ok()), true, &src, &base);
