@@ -69,13 +69,23 @@ fn run_raw(home: &Path, args: &[&str], forced: bool) -> String {
     String::from_utf8(out.stdout).unwrap()
 }
 
-/// Whether util-linux `script` is here to give a command a terminal.
+/// Whether util-linux `script` is here to give a command a terminal. BSD
+/// `script`, which has no `-c`, counts as missing. A missing one fails the
+/// test under `CI`; elsewhere it fails the test unless
+/// `WAYS_ALLOW_PTY_SKIP=1`, which skips it with a line on stdout.
 fn have_script() -> bool {
-    let ok = Command::new("script").args(["-qec", "true", "/dev/null"]).stdin(Stdio::null()).output().is_ok_and(|o| o.status.success());
-    if !ok {
-        eprintln!("skipped: util-linux `script` is not available to give ways a terminal");
+    let run = |args: &[&str]| Command::new("script").args(args).stdin(Stdio::null()).output().ok().filter(|o| o.status.success());
+    let util_linux = run(&["--version"]).is_some_and(|o| String::from_utf8_lossy(&o.stdout).contains("util-linux"));
+    if util_linux && run(&["-qec", "true", "/dev/null"]).is_some() {
+        return true;
     }
-    ok
+    let why = "util-linux `script` is not available to give ways a terminal";
+    let ci = std::env::var_os("CI").is_some_and(|v| !v.is_empty());
+    if !ci && std::env::var("WAYS_ALLOW_PTY_SKIP").as_deref() == Ok("1") {
+        println!("skipped: {why} (WAYS_ALLOW_PTY_SKIP=1)");
+        return false;
+    }
+    panic!("{why}; install util-linux, or outside CI set WAYS_ALLOW_PTY_SKIP=1 to skip the terminal tests");
 }
 
 fn quote(s: &str) -> String {
