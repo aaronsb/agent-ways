@@ -94,6 +94,7 @@ impl App {
             ThemeAct::Edit if src == Source::Bundled => "bundled: edits a copy".into(),
             ThemeAct::Edit => String::new(),
             ThemeAct::Shape => format!("{} now; the next is {}", self.shape.name(), self.shape.next().name()),
+            ThemeAct::Waypoints => format!("{} now; the next is {}", self.waypoints, self.next_waypoints_name()),
         }
     }
 
@@ -187,6 +188,12 @@ impl App {
         let dir = self.themes.dir.as_ref().map_or("none: nothing saves".to_string(), |d| self.themes.show(d));
         lines.extend(field("saves to", &dir));
         lines.extend(field("shape", &format!("{} (a: shape cycles it)", self.shape.name())));
+        let mut wp = vec![Span::styled(format!("{:<LABEL$}", "waypoints"), dim), Span::raw(format!("{}  ", self.waypoints))];
+        match self.adapter.waypoints_preview(t, &self.waypoints) {
+            Some(preview) => wp.extend(preview.spans),
+            None => wp.push(Span::styled("(a: switches it)", dim)),
+        }
+        lines.push(Line::from(wp));
         lines.push(Line::raw(""));
         lines.push(Line::styled("slots", Style::new().add_modifier(Modifier::BOLD)));
         let inner = area.width.saturating_sub(2) as usize;

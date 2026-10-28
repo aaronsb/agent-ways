@@ -39,13 +39,30 @@ impl App {
 
     /// The menu's entries for the theme under the cursor: new, the
     /// named-item actions (rename and delete only for a user file), edit
-    /// and shape.
+    /// shape and waypoints.
     pub(super) fn theme_acts(&self) -> Vec<ThemeAct> {
         let name = &self.themes.under_cursor().0.name;
         let mut v = vec![ThemeAct::New];
         v.extend(named::acts(&self.themes, name).into_iter().map(ThemeAct::Item));
-        v.extend([ThemeAct::Edit, ThemeAct::Shape]);
+        v.extend([ThemeAct::Edit, ThemeAct::Shape, ThemeAct::Waypoints]);
         v
+    }
+
+    /// The waypoints choice after the one in use.
+    pub(super) fn next_waypoints_name(&self) -> &'static str {
+        if self.waypoints == "default" { "theme" } else { "default" }
+    }
+
+    /// Switch whose waypoints the screens draw; the adapter keeps it.
+    fn next_waypoints(&mut self) -> Result<String, String> {
+        let next = self.next_waypoints_name();
+        self.adapter.choose_waypoints(next)?;
+        self.own_write();
+        self.waypoints = next.to_string();
+        Ok(match next {
+            "default" => "waypoints default: the screens' own set".into(),
+            _ => "waypoints theme: the theme's set, or the screens' own where it has none".into(),
+        })
     }
 
     /// Make the next lozenge shape the one in use; the adapter keeps it.
@@ -106,6 +123,10 @@ impl App {
             ThemeAct::Edit if src == Source::Bundled => self.mode = Mode::Name { op: NameFor::Theme(NameOp::EditCopy(name)), buf: String::new() },
             ThemeAct::Shape => {
                 let r = self.next_shape();
+                self.report(r);
+            }
+            ThemeAct::Waypoints => {
+                let r = self.next_waypoints();
                 self.report(r);
             }
             ThemeAct::Edit => {

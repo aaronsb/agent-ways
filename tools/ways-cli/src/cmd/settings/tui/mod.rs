@@ -600,6 +600,28 @@ impl Adapter for Ways {
     fn choose_shape(&mut self, name: &str) -> Result<(), String> {
         self.set_one("theme.shape", name)
     }
+
+    fn choose_waypoints(&mut self, name: &str) -> Result<(), String> {
+        self.set_one("theme.waypoints", name)
+    }
+
+    /// The set the replay would draw for `theme` under `setting`, each glyph
+    /// in its colour at the frame's depth.
+    fn waypoints_preview(&self, theme: &agent_theme::Theme, setting: &str) -> Option<agent_tui::ratatui::text::Line<'static>> {
+        use agent_tui::ratatui::style::Style;
+        use agent_tui::ratatui::text::{Line, Span};
+        let depth = agent_tui::theme::current().depth();
+        let own = agent_theme::Painter::select(Some(theme), depth);
+        let painter = crate::cmd::screen_host::waypoints_as(own, Some(setting));
+        let set = crate::cmd::render::WaypointSet::new(painter.waypoints(), depth);
+        let mut spans = Vec::new();
+        for i in 0..set.len() {
+            let style = set.color(i).map_or(Style::new(), |c| Style::new().fg(agent_theme::ratatui::color(c)));
+            spans.push(Span::styled(set.glyph(i).to_string(), style));
+            spans.push(Span::raw(" "));
+        }
+        Some(Line::from(spans))
+    }
 }
 
 /// A queued command running in the background, its output read on threads
@@ -788,6 +810,7 @@ pub fn app(ways: Ways, tab: Option<&str>, depth: ColorDepth) -> Result<App, Fail
     let layers = ways.layers();
     let roots = ways.build(&layers);
     let shape = ways.value("theme.shape", &layers).and_then(|v| v.as_str().map(Shape::named)).unwrap_or(Shape::PLAIN);
+    let waypoints = ways.value("theme.waypoints", &layers).and_then(|v| v.as_str().map(str::to_string)).unwrap_or_else(|| "theme".into());
     let themes = themes(&ways, &layers, depth);
     let names = tab_names();
     let at = match tab {
@@ -795,7 +818,7 @@ pub fn app(ways: Ways, tab: Option<&str>, depth: ColorDepth) -> Result<App, Fail
         Some(t) => names.iter().position(|n| *n == t).ok_or_else(|| fail(exit::USAGE, format!("no tab {t}; the tabs are {}", names.join(", "))))?,
     };
     let title = ways.title(names[at]).unwrap_or_else(|| title(&ways.ctx, None, ""));
-    Ok(App::new(title, roots).shape(shape).themes(themes).adapter(ways).on_tab(at))
+    Ok(App::new(title, roots).shape(shape).waypoints(&waypoints).themes(themes).adapter(ways).on_tab(at))
 }
 
 /// Open the screens: on the terminal, or headless with `keys` and `snap`.

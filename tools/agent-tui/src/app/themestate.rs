@@ -435,6 +435,9 @@ pub enum ThemeAct {
     Edit,
     /// The lozenge shape, a setting of its own, cycled.
     Shape,
+    /// Whose waypoints the screens draw, switched between the theme's and
+    /// the screens' own.
+    Waypoints,
 }
 
 impl ThemeAct {
@@ -444,6 +447,7 @@ impl ThemeAct {
             ThemeAct::Item(a) => a.label(),
             ThemeAct::Edit => "edit",
             ThemeAct::Shape => "shape",
+            ThemeAct::Waypoints => "waypoints",
         }
     }
 }

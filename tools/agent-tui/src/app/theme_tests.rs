@@ -35,6 +35,16 @@ impl Adapter for Choice {
     fn choose_shape(&mut self, name: &str) -> Result<(), String> {
         std::fs::write(self.0.join("shape"), name).map_err(|e| e.to_string())
     }
+    fn choose_waypoints(&mut self, name: &str) -> Result<(), String> {
+        std::fs::write(self.0.join("waypoints"), name).map_err(|e| e.to_string())
+    }
+    fn waypoints_preview(&self, theme: &agent_theme::Theme, setting: &str) -> Option<ratatui::text::Line<'static>> {
+        let glyphs: Vec<&str> = match theme.decor.waypoints {
+            Some(w) if setting == "theme" => w.as_slice().iter().map(|w| w.glyph).collect(),
+            _ => vec!["own"],
+        };
+        Some(ratatui::text::Line::raw(glyphs.join(" ")))
+    }
     /// The choice file stands in for the settings file the tree is read
     /// from: its stamp moves when a choice is kept.
     fn stamp(&self) -> Option<u64> {
@@ -104,6 +114,23 @@ fn the_theme_tab_shows_the_shape_and_its_menu_cycles_it() {
     assert_eq!(std::fs::read_to_string(d.join("shape")).unwrap(), "flame", "the adapter keeps the next shape");
     assert_eq!(app.shape, super::theme::Shape::named("flame"));
     assert!(app.msg.contains("shape flame"), "{}", app.msg);
+}
+
+#[test]
+fn the_theme_tab_shows_the_waypoints_choice_with_a_preview_and_switches_it() {
+    let d = dir("waypoints");
+    let mut app = app_in(&d, ColorDepth::TrueColor);
+    keys(&mut app, &[KeyCode::Char('3'), KeyCode::End]);
+    assert_eq!(shown(&app), "miami-nights");
+    let t = text(&draw(&mut app, 100, 30));
+    let line = t.lines().find(|l| l.contains("waypoints theme")).unwrap_or_else(|| panic!("the choice:\n{t}"));
+    assert!(line.contains('🌴') && line.contains('🚤'), "the theme's set beside the choice: {line}");
+    act(&mut app, "waypoints");
+    assert_eq!(std::fs::read_to_string(d.join("waypoints")).unwrap(), "default", "the adapter keeps the other choice");
+    assert!(app.msg.contains("the screens' own set"), "{}", app.msg);
+    assert!(text(&draw(&mut app, 100, 30)).contains("waypoints default  own"));
+    act(&mut app, "waypoints");
+    assert_eq!(std::fs::read_to_string(d.join("waypoints")).unwrap(), "theme", "and back");
 }
 
 /// The choice the adapter holds, if any.
@@ -267,7 +294,7 @@ fn new_copy_rename_and_delete_write_the_themes_dir() {
     let d = dir("files");
     let mut app = app_in(&d, ColorDepth::TrueColor);
     keys(&mut app, &[KeyCode::Char('3')]);
-    assert_eq!(app.theme_acts().len(), 4, "a bundled theme offers new, copy, edit and shape");
+    assert_eq!(app.theme_acts().len(), 5, "a bundled theme offers new, copy, edit, shape and waypoints");
     act(&mut app, "new");
     type_str(&mut app, "mine");
     keys(&mut app, &[KeyCode::Enter]);
@@ -297,7 +324,7 @@ fn new_copy_rename_and_delete_write_the_themes_dir() {
     // Rename the active theme: the file moves and the active choice follows.
     keys(&mut app, &[KeyCode::Enter]);
     assert_eq!(app.themes.active, "nord-2");
-    assert_eq!(app.theme_acts().len(), 6, "a user theme adds rename and delete");
+    assert_eq!(app.theme_acts().len(), 7, "a user theme adds rename and delete");
     act(&mut app, "rename");
     type_str(&mut app, "arctic");
     keys(&mut app, &[KeyCode::Enter]);
@@ -366,7 +393,7 @@ fn a_bundled_theme_is_never_renamed_or_deleted() {
     keys(&mut app, &[KeyCode::Char('3'), KeyCode::Down, KeyCode::Down]);
     assert_eq!(shown(&app), "nord");
     let labels: Vec<&str> = app.theme_acts().iter().map(|a| a.label()).collect();
-    assert_eq!(labels, ["new", "copy", "edit", "shape"], "the menu leaves rename and delete out");
+    assert_eq!(labels, ["new", "copy", "edit", "shape", "waypoints"], "the menu leaves rename and delete out");
     // Reached anyway, the flow refuses with the reason and asks nothing.
     app.item_act(ItemAct::Delete, "nord".into());
     assert!(matches!(app.mode, Mode::Browse) && app.msg == "rejected: nord is a bundled theme, which is never deleted; copy it to change it", "{}", app.msg);
