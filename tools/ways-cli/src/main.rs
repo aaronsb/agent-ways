@@ -1014,6 +1014,24 @@ enum ThemeCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Print a theme for another reader, as JSON: its resolved roles, or a target's own theme
+    ///
+    /// --roles prints the roles every surface draws from, contrast floors
+    /// applied. --claude-code prints a Claude Code custom theme file, for
+    /// ~/.claude/themes/<slug>.json: the roles mapped to Claude Code's
+    /// colour tokens, lifted to read on the theme's bg and on common terminal
+    /// grounds of its kind, then the theme's own [target.claude-code] pins.
+    #[command(group = clap::ArgGroup::new("form").required(true))]
+    Export {
+        /// The theme; theme.active when left out
+        name: Option<String>,
+        /// The resolved roles
+        #[arg(long, group = "form")]
+        roles: bool,
+        /// A Claude Code custom theme
+        #[arg(long, group = "form")]
+        claude_code: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1499,6 +1517,10 @@ fn run() -> Result<()> {
                     ThemeCommand::Copy { from, to, json } => st::themes::run(st::themes::Op::Copy { from: &from, to: &to }, json),
                     ThemeCommand::Rename { from, to, json } => st::themes::run(st::themes::Op::Rename { from: &from, to: &to }, json),
                     ThemeCommand::Delete { name, json } => st::themes::run(st::themes::Op::Delete { name: &name }, json),
+                    ThemeCommand::Export { name, roles, .. } => {
+                        let form = if roles { st::themes::Form::Roles } else { st::themes::Form::ClaudeCode };
+                        st::themes::export(name.as_deref(), form)
+                    }
                 },
             })
         }

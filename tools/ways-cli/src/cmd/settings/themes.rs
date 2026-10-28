@@ -3,9 +3,13 @@
 //! two ways in). Both go through `agent_tui::named` over the same
 //! `Themes`, and keep the active choice through the same adapter call, so
 //! they refuse and report alike.
+//!
+//! `ways settings theme export` prints a theme for readers outside
+//! agent-ways (ADR-513): the resolved roles, or a target program's own
+//! theme mapped from them in agent-theme.
 
 use agent_settings::exit;
-use agent_theme::{ColorDepth, Source};
+use agent_theme::{Background, ColorDepth, Kind, Rgb, Roles, Source, Theme, TERMINAL};
 use agent_tui::named::{self, Done, Refusal, Refused};
 use agent_tui::{Adapter, Themes};
 use serde_json::json;
@@ -100,5 +104,80 @@ pub fn run(op: Op, as_json: bool) -> Out {
     if !kept {
         return Err(fail(exit::WRITE_FAILED, "theme.active was not moved; `ways settings set theme.active <name>` sets it"));
     }
+    Ok(())
+}
+
+/// What `ways settings theme export` prints.
+pub enum Form {
+    /// The roles from `Roles::derive`, floors applied.
+    Roles,
+    /// A Claude Code custom theme file.
+    ClaudeCode,
+}
+
+fn hex_map<'a>(pairs: impl IntoIterator<Item = (&'a str, Rgb)>) -> serde_json::Map<String, serde_json::Value> {
+    pairs.into_iter().map(|(k, c)| (k.to_string(), json!(c.hex()))).collect()
+}
+
+/// The roles of `t` as JSON: every colour role, a segment pair as `.fg`
+/// and `.bg`, and the gradient when the theme has one.
+fn roles_json(t: &Theme) -> serde_json::Value {
+    let r = Roles::derive(t);
+    let mut roles = hex_map([
+        ("bg", r.bg),
+        ("body", r.body),
+        ("accent", r.accent),
+        ("accent_dim", r.accent_dim),
+        ("info", r.info),
+        ("ok", r.ok),
+        ("warn", r.warn),
+        ("err", r.err),
+        ("alt", r.alt),
+        ("hot", r.hot),
+        ("muted", r.muted),
+        ("ink", r.ink),
+        ("text", r.text),
+        ("faded_ink", r.faded_ink),
+        ("faded_text", r.faded_text),
+        ("rule", r.rule),
+        ("track", r.track),
+        ("track_past", r.track_past),
+        ("selection_bg", r.selection_bg),
+        ("dark_seg", r.dark_seg),
+    ]);
+    for (n, p) in [("badge", r.badge), ("mode_browse", r.mode_browse), ("mode_edit", r.mode_edit), ("mode_review", r.mode_review), ("mode_apply", r.mode_apply)] {
+        roles.insert(format!("{n}.fg"), json!(p.fg.hex()));
+        roles.insert(format!("{n}.bg"), json!(p.bg.hex()));
+    }
+    let gradient = r.gradient.map(|g| json!({ "axis": g.axis.name(), "stops": g.stops().iter().map(|c| c.hex()).collect::<Vec<_>>() }));
+    json!({
+        "name": t.name,
+        "label": t.label,
+        "kind": if t.kind == Kind::Dark { "dark" } else { "light" },
+        "background": if t.background == Background::Fill { "fill" } else { "terminal" },
+        "roles": roles,
+        "gradient": gradient,
+    })
+}
+
+/// Print theme `name`, or the active theme, in `form`. The terminal theme
+/// is the terminal's own colours, which have no value to print.
+pub fn export(name: Option<&str>, form: Form) -> Out {
+    let (_, themes) = load();
+    let name = name.unwrap_or(&themes.active);
+    if name == TERMINAL {
+        return Err(fail(exit::REJECTED, "terminal is the terminal's own colours; it has nothing to export"));
+    }
+    let Some(t) = themes.get(name) else {
+        return Err(fail(exit::USAGE, format!("no theme `{name}`; `ways settings theme list` names the themes")));
+    };
+    let out = match form {
+        Form::Roles => roles_json(t),
+        Form::ClaudeCode => {
+            let cc = agent_theme::claude_code(t);
+            json!({ "name": cc.name, "base": cc.base, "overrides": hex_map(cc.overrides) })
+        }
+    };
+    println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
     Ok(())
 }

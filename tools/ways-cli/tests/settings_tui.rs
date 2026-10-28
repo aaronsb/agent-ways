@@ -420,6 +420,34 @@ fn the_cli_refuses_bundled_taken_bad_and_missing_names() {
 }
 
 #[test]
+fn export_prints_the_roles_or_a_claude_code_theme_of_the_active_theme() {
+    let fx = Fx::new();
+    let (out, err, code) = fx.run(&["settings", "theme", "export", "--claude-code"]);
+    assert_eq!((code, err.as_str(), out.as_str()), (3, "ways settings: terminal is the terminal's own colours; it has nothing to export\n", ""));
+    assert_eq!(fx.run(&["settings", "set", "theme.active", "miami-nights"]).2, 0);
+    let (out, err, code) = fx.run(&["settings", "theme", "export", "--claude-code"]);
+    assert_eq!(code, 0, "{err}");
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!((v["name"].as_str(), v["base"].as_str()), (Some("Miami Nights"), Some("dark")));
+    let o = v["overrides"].as_object().unwrap();
+    assert!(o.values().all(|c| c.as_str().is_some_and(|c| c.len() == 7 && c.starts_with('#'))), "{o:?}");
+    assert_eq!(o["text"], "#f4eaff");
+    let nord = fx.run(&["settings", "theme", "export", "nord", "--roles"]).0;
+    let roles: serde_json::Value = serde_json::from_str(&nord).unwrap();
+    assert_eq!((roles["name"].as_str(), roles["roles"]["bg"].as_str()), (Some("nord"), Some("#2e3440")));
+    assert!(roles["roles"]["badge.fg"].is_string() && roles["gradient"].is_null(), "{roles}");
+    // A user theme's pin wins over the mapping.
+    assert_eq!(fx.run(&["settings", "theme", "copy", "nord", "pinned"]).2, 0);
+    let file = format!("{THEMES}/pinned.theme");
+    fx.file(&file, &format!("{}\n[target.claude-code]\nclaude=\"#123456\"\n", fx.read(&file).unwrap()));
+    let (out, err, code) = fx.run(&["settings", "theme", "export", "pinned", "--claude-code"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&out).unwrap()["overrides"]["claude"], "#123456");
+    let (_, err, code) = fx.run(&["settings", "theme", "export", "gone", "--roles"]);
+    assert_eq!((code, err.as_str()), (2, "ways settings: no theme `gone`; `ways settings theme list` names the themes\n"));
+}
+
+#[test]
 fn a_file_that_is_no_loaded_theme_is_never_overwritten() {
     let fx = Fx::new();
     fx.file(&format!("{THEMES}/precious.theme"), "not a theme\n");
