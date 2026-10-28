@@ -172,6 +172,66 @@ fn event_glyph_errors_name_the_line_and_key() {
     has(nights("THEME_EVENT_HEAD=", "THEME_EVENT_TAIL="), "unknown key `THEME_EVENT_TAIL`");
 }
 
+// ── Words ─────────────────────────────────────────────────────
+
+fn words(spinner: &[&str], done: &[&str]) -> Words {
+    let own = |l: &[&str]| l.iter().map(|s| s.to_string()).collect();
+    Words { spinner: own(spinner), done: own(done) }
+}
+
+#[test]
+fn the_words_table_parses_and_three_bundled_themes_carry_one() {
+    assert_eq!(theme("miami-nights").words, words(&["Cruising", "Gliding", "Glowing", "Pulsing", "Racing", "Drifting"], &["Cruised", "Glowed", "Docked", "Landed"]));
+    assert_eq!(theme("tampa").words, words(&["Charging", "Striking", "Sailing", "Crossing", "Casting", "Plundering"], &["Struck", "Crossed", "Landed", "Plundered"]));
+    assert_eq!(theme("miami").words, words(&["Sunning", "Surfing", "Strolling", "Sipping", "Sparkling", "Drifting"], &["Sunned", "Surfed", "Strolled", "Sipped"]));
+    assert!(bundled()[..7].iter().all(|t| t.words.is_empty()), "the first seven carry none");
+    // One list alone is a table; the other stays empty.
+    let t = parse(&format!("{}\n[words]\ndone = [\"Done\"]\n", nord_src())).unwrap();
+    assert_eq!(t.words, words(&[], &["Done"]));
+}
+
+#[test]
+fn the_words_table_round_trips() {
+    let mut t = theme("tampa");
+    let long = "x".repeat(24);
+    t.words = words(&["Quote \" in", "Back\\slash", "Ünïcødé ⚡", &long], &["Done"]);
+    let text = to_text(&t);
+    assert!(text.contains("\n[words]\nspinner = ["), "{text}");
+    assert_eq!(parse(&text).unwrap(), t);
+    t.words = words(&["Only"], &[]);
+    assert!(!to_text(&t).contains("done ="), "an empty list is left out");
+    assert_eq!(parse(&to_text(&t)).unwrap(), t);
+    t.words = Words::default();
+    assert!(!to_text(&t).contains("[words]"));
+    assert_eq!(parse(&to_text(&t)).unwrap(), t);
+}
+
+#[test]
+fn words_errors_name_the_line() {
+    let has = |table: &str, needle: &str| {
+        let src = format!("{}\n{table}", nord_src());
+        let e = validate(&src);
+        assert!(e.iter().any(|x| x.to_string().contains(needle)), "{needle:?} not in {e:?}");
+    };
+    // The table's header is the line after the blank one the test adds.
+    let n = nord_src().lines().count() + 2;
+    let at = |k: usize| format!("line {}: ", n + k);
+    has("[words]\nspinner = []\n", &format!("{}`words.spinner` takes 1 to 12 entries; it has 0", at(1)));
+    let thirteen = vec!["\"a\""; 13].join(", ");
+    has(&format!("[words]\ndone = [{thirteen}]\n"), &format!("{}`words.done` takes 1 to 12 entries; it has 13", at(1)));
+    let long = "y".repeat(25);
+    has(&format!("[words]\nspinner = [\"Go\", \"{long}\"]\n"), &format!("{}`words.spinner` entry `{long}` is 25 characters", at(1)));
+    has("[words]\nspinner = [\"\"]\n", "`words.spinner` entry `` is 0 characters");
+    has("[words]\nspinner = [\"Tab\\there\"]\n", &format!("{}`words.spinner` entry \"Tab\\there\" has a control character", at(1)));
+    has("[words]\nspinner = [\"Go\", 3]\n", &format!("{}`words.spinner` must be an array of double-quoted strings", at(1)));
+    has("[words]\nspinner = \"Go\"\n", "`words.spinner` must be an array of double-quoted strings");
+    has("[words]\nspinner = [\"Go\"]\nverbs = [\"Go\"]\n", &format!("{}unknown key `words.verbs`; the keys are spinner and done", at(2)));
+    has("[words]\n", &format!("{}`[words]` sets neither spinner nor done", at(0)));
+    // An array outside the table is a value of the wrong type.
+    let e = validate(&nord_src().replace("THEME_LABEL=\"Nord\"", "THEME_LABEL=[\"Nord\"]"));
+    assert!(e.iter().any(|x| x.to_string().contains("`THEME_LABEL` is an array; a value is a double-quoted string")), "{e:?}");
+}
+
 fn theme_src(name: &str) -> &'static str {
     BUNDLED.iter().find(|(n, _)| *n == name).unwrap().1
 }

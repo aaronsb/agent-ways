@@ -42,6 +42,17 @@
 //! Every glyph is one grapheme one column wide, but the ornament, which may
 //! be two.
 //!
+//! Three tables may follow the bare keys, each optional. `[target.<name>]`
+//! pins a target's keys (see `target`). `[words]` holds the words Claude
+//! Code shows under the theme: each list is 1 to 12 entries of 1 to 24
+//! characters, no control characters, and either may be left out.
+//!
+//! ```toml
+//! [words]
+//! spinner = ["Cruising", "Gliding"]  # while a turn runs
+//! done = ["Cruised", "Docked"]       # the turn's done line
+//! ```
+//!
 //! Waypoints, the marks a way's cluster wears on the replay, come last, as
 //! an array of tables; each fg is held to 3:1 on the theme's grounds when
 //! the theme is drawn:
@@ -59,7 +70,7 @@ use toml::Spanned;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use crate::model::{intern, Axis, Background, Border, Decor, Events, Gradient, Kind, Overrides, Rgb, Slots, Targets, Theme, Waypoint, Waypoints};
+use crate::model::{intern, Axis, Background, Border, Decor, Events, Gradient, Kind, Overrides, Rgb, Slots, Targets, Theme, Waypoint, Waypoints, Words};
 use crate::target;
 
 /// The dotfiles tool bindings: part of the palette structure, no meaning here.
@@ -393,6 +404,7 @@ pub fn parse(src: &str) -> Result<Theme, Vec<ThemeError>> {
     let mut grad: Option<(usize, Gradient)> = None;
     let (mut border_at, mut glyphs_at) = (None, None);
     let mut targets = Targets::default();
+    let mut words = Words::default();
 
     for (k, v) in top.0 {
         let (n, key) = (line_of(src, k.span().start), k.get_ref().as_str());
@@ -409,7 +421,8 @@ pub fn parse(src: &str) -> Result<Theme, Vec<ThemeError>> {
             Leaf::Table(entries) => {
                 match key {
                     "target" => target_tables(src, entries, &mut targets, &mut errs),
-                    _ => errs.push(ThemeError::at(n, format!("`{key}` is a table; the tables are `[target.<name>]` and `[[waypoints]]`"))),
+                    "words" => words_table(src, n, entries, &mut words, &mut errs),
+                    _ => errs.push(ThemeError::at(n, format!("`{key}` is a table; the tables are `[target.<name>]`, `[words]` and `[[waypoints]]`"))),
                 }
                 continue;
             }
@@ -541,6 +554,7 @@ pub fn parse(src: &str) -> Result<Theme, Vec<ThemeError>> {
         gradient: grad.map(|(_, g)| g),
         decor,
         targets,
+        words,
     })
 }
 
@@ -571,6 +585,36 @@ fn target_tables(src: &str, entries: &[(Spanned<String>, Spanned<Leaf>)], target
                 },
                 _ => errs.push(ThemeError::at(n, format!("`target.{name}.{key}` must be a double-quoted #rrggbb colour"))),
             }
+        }
+    }
+}
+
+/// The `[words]` table, its header on line `at`: `spinner` and `done`,
+/// each a list of 1 to 12 strings of 1 to 24 characters with no control
+/// character.
+fn words_table(src: &str, at: usize, entries: &[(Spanned<String>, Spanned<Leaf>)], words: &mut Words, errs: &mut Vec<ThemeError>) {
+    if entries.is_empty() {
+        errs.push(ThemeError::at(at, "`[words]` sets neither spinner nor done"));
+    }
+    for (key, v) in entries {
+        let (n, key) = (line_of(src, key.span().start), key.get_ref());
+        let err = |message: String| ThemeError::at(n, message);
+        if !Words::KEYS.contains(&key.as_str()) {
+            errs.push(err(format!("unknown key `words.{key}`; the keys are spinner and done")));
+            continue;
+        }
+        let strings: Option<Vec<String>> = match v.get_ref() {
+            Leaf::Array(items) => items.iter().map(|i| if let Leaf::Str(s) = i.get_ref() { Some(s.clone()) } else { None }).collect(),
+            _ => None,
+        };
+        let Some(list) = strings else {
+            errs.push(err(format!("`words.{key}` must be an array of double-quoted strings")));
+            continue;
+        };
+        match Words::check(&list) {
+            Ok(()) if key == "spinner" => words.spinner = list,
+            Ok(()) => words.done = list,
+            Err(e) => errs.push(err(format!("`words.{key}` {e}"))),
         }
     }
 }
@@ -633,6 +677,16 @@ pub fn to_text(t: &Theme) -> String {
         }
     }
     // Tables follow every bare key, as TOML requires.
+    if !t.words.is_empty() {
+        out.push_str("\n[words]\n");
+        for key in Words::KEYS {
+            let list = t.words.get(key).unwrap_or_default();
+            if !list.is_empty() {
+                let quoted: Vec<String> = list.iter().map(|w| toml::Value::String(w.clone()).to_string()).collect();
+                out.push_str(&format!("{key} = [{}]\n", quoted.join(", ")));
+            }
+        }
+    }
     for name in t.targets.names() {
         out.push_str(&format!("\n[target.{name}]\n"));
         for (k, c) in t.targets.pins(name) {

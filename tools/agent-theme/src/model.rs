@@ -499,6 +499,52 @@ impl Targets {
     }
 }
 
+/// The words Claude Code shows under a theme (`[words]`): the spinner's
+/// verbs while a turn runs, and the verb its done line uses. An empty list
+/// leaves Claude Code's own.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Words {
+    pub spinner: Vec<String>,
+    pub done: Vec<String>,
+}
+
+impl Words {
+    /// The two lists, by their key in the table.
+    pub const KEYS: [&str; 2] = ["spinner", "done"];
+    /// Entries a list takes, and characters an entry takes.
+    pub const MAX_ENTRIES: usize = 12;
+    pub const MAX_CHARS: usize = 24;
+
+    pub fn is_empty(&self) -> bool {
+        self.spinner.is_empty() && self.done.is_empty()
+    }
+
+    pub fn get(&self, key: &str) -> Option<&[String]> {
+        match key {
+            "spinner" => Some(&self.spinner),
+            "done" => Some(&self.done),
+            _ => None,
+        }
+    }
+
+    /// Why `entries` cannot be one of the lists, if it cannot.
+    pub fn check(entries: &[String]) -> Result<(), String> {
+        if entries.is_empty() || entries.len() > Self::MAX_ENTRIES {
+            return Err(format!("takes 1 to {} entries; it has {}", Self::MAX_ENTRIES, entries.len()));
+        }
+        for e in entries {
+            let n = e.chars().count();
+            if n == 0 || n > Self::MAX_CHARS {
+                return Err(format!("entry `{e}` is {n} characters; an entry is 1 to {}", Self::MAX_CHARS));
+            }
+            if e.chars().any(char::is_control) {
+                return Err(format!("entry {e:?} has a control character"));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Theme {
     /// File-safe id: `[a-z0-9-]+`.
@@ -512,4 +558,5 @@ pub struct Theme {
     pub gradient: Option<Gradient>,
     pub decor: Decor,
     pub targets: Targets,
+    pub words: Words,
 }

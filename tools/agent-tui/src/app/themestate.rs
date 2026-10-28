@@ -38,6 +38,7 @@ pub fn terminal_theme() -> Theme {
         gradient: None,
         decor: Default::default(),
         targets: Default::default(),
+        words: Default::default(),
     }
 }
 
