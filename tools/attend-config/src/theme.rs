@@ -13,10 +13,10 @@ use std::path::{Path, PathBuf};
 
 use agent_settings::schema::{FileSpec, LayerScope, Schema};
 use agent_settings::Layer;
-use agent_theme::settings::{ACTIVE, FILE, SECTION, SHAPE};
+use agent_theme::settings::{ACTIVE, FILE, SECTION, SHAPE, WAYPOINTS};
 
 /// ways' user file, as far as the `theme` section goes.
-static SCHEMA: Schema = Schema { component: "ways", files: &[FileSpec { id: FILE, retired: &[] }], sections: &[SECTION], keys: &[ACTIVE, SHAPE] };
+static SCHEMA: Schema = Schema { component: "ways", files: &[FileSpec { id: FILE, retired: &[] }], sections: &[SECTION], keys: &[ACTIVE, SHAPE, WAYPOINTS] };
 
 /// What the user file chose. `None` is the default: the terminal palette,
 /// and the plain shape.
@@ -70,6 +70,8 @@ mod tests {
         // Every other ways key is someone else's: it changes nothing here.
         let d = dir("set", Some("language: es\ntheme:\n  active: nord\n  shape: flame\n"));
         assert_eq!(choice_in(&d), Choice { active: Some("nord".into()), shape: Some("flame".into()) });
+        let d = dir("waypoints", Some("theme:\n  active: nord\n  waypoints: default\n"));
+        assert_eq!(choice_in(&d).active.as_deref(), Some("nord"), "ways' waypoints key keeps the section readable");
         let d = dir("bad", Some("theme:\n  active: Nord!\n  shape: flame\n"));
         assert_eq!(choice_in(&d), Choice::default(), "the section falls back whole, as in ways");
         let d = dir("broken", Some("theme: [\n"));

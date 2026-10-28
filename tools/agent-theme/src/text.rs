@@ -41,6 +41,16 @@
 //!
 //! Every glyph is one grapheme one column wide, but the ornament, which may
 //! be two.
+//!
+//! Waypoints, the marks a way's cluster wears on the replay, come last, as
+//! an array of tables; each fg is held to 3:1 on the theme's grounds when
+//! the theme is drawn:
+//!
+//! ```toml
+//! [[waypoints]]
+//! glyph = "🌴"      # one column, or an emoji two wide
+//! fg = "#3dffa2"    # optional; a colour emoji ignores it
+//! ```
 
 use std::fmt;
 
@@ -49,7 +59,7 @@ use toml::Spanned;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use crate::model::{intern, Axis, Background, Border, Decor, Events, Gradient, Kind, Overrides, Rgb, Slots, Theme};
+use crate::model::{intern, Axis, Background, Border, Decor, Events, Gradient, Kind, Overrides, Rgb, Slots, Theme, Waypoint, Waypoints};
 
 /// The dotfiles tool bindings: part of the palette structure, no meaning here.
 const IGNORED: [&str; 3] = ["THEME_VIVID", "THEME_BAT", "THEME_DELTA"];
@@ -79,12 +89,29 @@ impl fmt::Display for ThemeError {
     }
 }
 
-/// A value as the theme format sees it: a string, or the name of the TOML
-/// type it has instead.
+/// A value as the theme format sees it: a string, a table or an array of
+/// values with their spans, or the name of the TOML type it has instead.
 enum Leaf {
     Str(String),
+    Table(Vec<(Spanned<String>, Spanned<Leaf>)>),
+    Array(Vec<Spanned<Leaf>>),
     Other(&'static str),
 }
+
+impl Leaf {
+    /// What a value that should have been a string is, for its error.
+    fn kind(&self) -> &'static str {
+        match self {
+            Leaf::Str(_) => "a string",
+            Leaf::Table(_) => "a table",
+            Leaf::Array(_) => "an array",
+            Leaf::Other(t) => t,
+        }
+    }
+}
+
+/// toml hands a date or time over as a one-entry table under this key.
+const DATETIME: &str = "$__toml_private_datetime";
 
 struct LeafVisitor;
 
@@ -109,12 +136,23 @@ impl<'de> Visitor<'de> for LeafVisitor {
         Ok(Leaf::Other("a number"))
     }
     fn visit_seq<A: de::SeqAccess<'de>>(self, mut s: A) -> Result<Leaf, A::Error> {
-        while s.next_element::<IgnoredAny>()?.is_some() {}
-        Ok(Leaf::Other("an array"))
+        let mut out = Vec::new();
+        while let Some(v) = s.next_element::<Spanned<Leaf>>()? {
+            out.push(v);
+        }
+        Ok(Leaf::Array(out))
     }
     fn visit_map<A: MapAccess<'de>>(self, mut m: A) -> Result<Leaf, A::Error> {
-        while m.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
-        Ok(Leaf::Other("a table or date"))
+        let mut out = Vec::new();
+        while let Some(k) = m.next_key::<Spanned<String>>()? {
+            if k.get_ref() == DATETIME {
+                m.next_value::<IgnoredAny>()?;
+                while m.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+                return Ok(Leaf::Other("a date"));
+            }
+            out.push((k, m.next_value::<Spanned<Leaf>>()?));
+        }
+        Ok(Leaf::Table(out))
     }
 }
 
@@ -208,6 +246,75 @@ fn glyphs(key: &str, value: &str, count: usize, widest: usize) -> Result<Vec<&'s
     Ok(g.into_iter().map(intern).collect())
 }
 
+/// A waypoint's glyph: one code point, one column wide, or an emoji whose
+/// default presentation is two columns. A variation selector, a joiner or
+/// a combining mark would leave the width to the font, so none is taken.
+fn waypoint_glyph(g: &str) -> Result<&'static str, String> {
+    let mut cs = g.chars();
+    let (Some(c), None) = (cs.next(), cs.next()) else {
+        return Err(format!("glyph `{g}` is not one character; variation selectors, joiners and combining marks are refused"));
+    };
+    // unicode-width counts these blocks two columns wide only for code
+    // points with Emoji_Presentation=Yes.
+    let emoji = matches!(c as u32, 0x231A..=0x23FF | 0x2600..=0x27BF | 0x2B00..=0x2BFF | 0x1F000..=0x1FAFF);
+    match unicode_width::UnicodeWidthChar::width(c) {
+        Some(1) => Ok(intern(g)),
+        Some(2) if emoji => Ok(intern(g)),
+        _ => Err(format!("glyph `{g}` is neither one column wide nor an emoji drawn two columns wide")),
+    }
+}
+
+/// `[[waypoints]]`: one to sixteen tables, each a glyph and an optional fg.
+fn waypoints(src: &str, v: &Leaf) -> Result<Waypoints, Vec<ThemeError>> {
+    let Leaf::Array(entries) = v else {
+        return Err(vec![ThemeError::whole(format!("`waypoints` is {}; it is an array of tables, `[[waypoints]]`", v.kind()))]);
+    };
+    let mut errs = Vec::new();
+    let mut out = Vec::new();
+    for (i, e) in entries.iter().enumerate() {
+        let (at, entry) = (line_of(src, e.span().start), i + 1);
+        if entry > Waypoints::MAX {
+            errs.push(ThemeError::at(at, format!("waypoints takes 1 to {} entries; this is entry {entry}", Waypoints::MAX)));
+            break;
+        }
+        let Leaf::Table(keys) = e.get_ref() else {
+            errs.push(ThemeError::at(at, format!("waypoints entry {entry} is {}; each is a table", e.get_ref().kind())));
+            continue;
+        };
+        let (mut glyph, mut fg) = (None, None);
+        for (k, val) in keys {
+            let n = line_of(src, k.span().start);
+            let Leaf::Str(s) = val.get_ref() else {
+                errs.push(ThemeError::at(n, format!("`{}` is {} (waypoints entry {entry}); a value is a double-quoted string", k.get_ref(), val.get_ref().kind())));
+                continue;
+            };
+            match k.get_ref().as_str() {
+                "glyph" => match waypoint_glyph(s) {
+                    Ok(g) => glyph = Some(g),
+                    Err(e) => errs.push(ThemeError::at(n, format!("{e} (waypoints entry {entry})"))),
+                },
+                "fg" => match Rgb::from_hex(s) {
+                    Some(c) => fg = Some(c),
+                    None => errs.push(ThemeError::at(n, format!("`{s}` is not a #rrggbb colour (waypoints entry {entry}, key `fg`)"))),
+                },
+                other => errs.push(ThemeError::at(n, format!("`{other}` is not a waypoint key; an entry takes glyph and fg (waypoints entry {entry})"))),
+            }
+        }
+        match glyph {
+            Some(glyph) => out.push(Waypoint { glyph, fg }),
+            None if keys.iter().all(|(k, _)| k.get_ref() != "glyph") => errs.push(ThemeError::at(at, format!("waypoints entry {entry} has no glyph"))),
+            None => {}
+        }
+    }
+    if entries.is_empty() {
+        errs.push(ThemeError::whole(format!("waypoints takes 1 to {} entries; it has none", Waypoints::MAX)));
+    }
+    match Waypoints::new(&out) {
+        Some(w) if errs.is_empty() => Ok(w),
+        _ => Err(errs),
+    }
+}
+
 /// Every error in `src`, empty when it is a valid theme.
 pub fn validate(src: &str) -> Vec<ThemeError> {
     parse(src).err().unwrap_or_default()
@@ -226,10 +333,17 @@ pub fn parse(src: &str) -> Result<Theme, Vec<ThemeError>> {
 
     for (k, v) in top.0 {
         let (n, key) = (line_of(src, k.span().start), k.get_ref().as_str());
+        if key == "waypoints" {
+            match waypoints(src, v.get_ref()) {
+                Ok(w) => decor.waypoints = Some(w),
+                Err(e) => errs.extend(e),
+            }
+            continue;
+        }
         let value = match v.get_ref() {
             Leaf::Str(s) => s.as_str(),
-            Leaf::Other(t) => {
-                errs.push(ThemeError::at(n, format!("`{key}` is {t}; a value is a double-quoted string")));
+            other => {
+                errs.push(ThemeError::at(n, format!("`{key}` is {}; a value is a double-quoted string", other.kind())));
                 continue;
             }
         };
@@ -413,6 +527,13 @@ pub fn to_text(t: &Theme) -> String {
         for (k, v) in chrome {
             // A glyph may be a quote or a backslash; toml escapes it.
             out.push_str(&format!("THEME_{k}={}\n", toml::Value::String(v)));
+        }
+    }
+    // A table comes after every bare key.
+    for w in d.waypoints.iter().flat_map(|w| w.as_slice()) {
+        out.push_str(&format!("\n[[waypoints]]\nglyph = {}\n", toml::Value::String(w.glyph.to_string())));
+        if let Some(c) = w.fg {
+            out.push_str(&format!("fg = \"{}\"\n", c.hex()));
         }
     }
     out

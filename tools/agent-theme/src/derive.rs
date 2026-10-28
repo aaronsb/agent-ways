@@ -270,11 +270,24 @@ impl Roles {
         out
     }
 
+    /// Every ground text sits on: bg, the selection's, and the gradient's
+    /// sampled points.
+    pub fn grounds(&self) -> Vec<Rgb> {
+        let mut ground = vec![self.bg, self.selection_bg];
+        ground.extend(self.gradient.iter().flat_map(Gradient::samples));
+        ground
+    }
+
+    /// `c` lifted to the graphical-object floor, 3:1, on every ground: a
+    /// mark that carries meaning by colour, such as a waypoint.
+    pub fn graphic(&self, c: Rgb) -> Rgb {
+        lift(c, self.body, &self.grounds(), MIN_MUTED)
+    }
+
     /// Every (name, colour, ground set, minimum ratio) the contrast test and
     /// the swatch sheet check.
     pub fn readable(&self) -> Vec<(&'static str, Rgb, Vec<Rgb>, f64)> {
-        let mut ground = vec![self.bg, self.selection_bg];
-        ground.extend(self.gradient.iter().flat_map(Gradient::samples));
+        let ground = self.grounds();
         let mut v = vec![
             ("body", self.body, ground.clone(), MIN_TEXT),
             ("accent", self.accent, ground.clone(), MIN_TEXT),

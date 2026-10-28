@@ -347,6 +347,7 @@ const KEYS: &[KeySpec] = &[
     },
     agent_theme::settings::ACTIVE,
     agent_theme::settings::SHAPE,
+    agent_theme::settings::WAYPOINTS,
     KeySpec {
         name: "mods.attend.listening",
         section: "mods",

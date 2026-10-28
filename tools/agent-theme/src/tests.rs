@@ -673,3 +673,62 @@ fn a_span_with_its_own_ground_keeps_it() {
     assert!(span.starts_with("hot\x1b[0m"), "no theme ground inside the span: {span:?}");
     assert_eq!(visible(&out), "hot     ");
 }
+
+// ── Waypoints ──────────────────────────────────────────────────
+
+#[test]
+fn waypoints_parse_from_the_florida_themes_and_round_trip() {
+    let nights = theme("miami-nights").decor.waypoints.unwrap();
+    let glyphs: Vec<&str> = nights.as_slice().iter().map(|w| w.glyph).collect();
+    assert_eq!(glyphs, ["🌴", "🦩", "🚤", "🐊", "🌆", "🎷", "📼", "🎹", "🌃", "🍸"]);
+    assert!(nights.as_slice().iter().all(|w| w.fg.is_none()), "colour emoji carry no fg");
+    assert_eq!((nights.width(), nights.of(12).glyph), (2, "🚤"), "two columns wide, cycled by cluster");
+    assert!(bundled()[..7].iter().all(|t| t.decor.waypoints.is_none()), "the first seven keep the screens' set");
+    let mut t = theme("tampa");
+    t.decor.waypoints = Waypoints::new(&[Waypoint { glyph: "◆", fg: Some(Rgb(1, 2, 3)) }, Waypoint { glyph: "\"", fg: None }]);
+    let text = to_text(&t);
+    assert!(text.contains("[[waypoints]]\nglyph = \"◆\"\nfg = \"#010203\"\n"), "{text}");
+    assert_eq!(parse(&text).unwrap(), t);
+    assert_eq!(Waypoints::new(&[Waypoint { glyph: "◆", fg: None }]).unwrap().width(), 1);
+}
+
+#[test]
+fn waypoint_errors_name_the_line_and_entry() {
+    let has = |src: String, needle: &str| {
+        let e = validate(&src);
+        assert!(e.iter().any(|x| x.to_string().contains(needle)), "{needle:?} not in {e:?}");
+    };
+    let base = theme_src("nord");
+    let with = |tables: &str| format!("{base}\n{tables}");
+    let line = |tables: &str, n: usize| base.lines().count() + 1 + n;
+    let t = "[[waypoints]]\nglyph = \"◆\"\nbg = \"#000000\"\n";
+    has(with(t), &format!("line {}: `bg` is not a waypoint key; an entry takes glyph and fg (waypoints entry 1)", line(t, 3)));
+    has(with("[[waypoints]]\nglyph = \"❤\u{fe0f}\"\n"), "is not one character; variation selectors, joiners and combining marks are refused (waypoints entry 1)");
+    has(with("[[waypoints]]\nglyph = \"👨\u{200d}👩\"\n"), "is not one character");
+    has(with("[[waypoints]]\nglyph = \"字\"\n"), "glyph `字` is neither one column wide nor an emoji drawn two columns wide");
+    has(with("[[waypoints]]\nglyph = \"◆\"\nfg = \"#12345\"\n"), "`#12345` is not a #rrggbb colour (waypoints entry 1, key `fg`)");
+    has(with("[[waypoints]]\nfg = \"#123456\"\n"), "waypoints entry 1 has no glyph");
+    has(with("waypoints = []\n"), "waypoints takes 1 to 16 entries; it has none");
+    has(with(&"[[waypoints]]\nglyph = \"◆\"\n".repeat(17)), "waypoints takes 1 to 16 entries; this is entry 17");
+    has(with("waypoints = \"◆\"\n"), "`waypoints` is a string; it is an array of tables");
+    assert!(validate(&with(&"[[waypoints]]\nglyph = \"◆\"\n".repeat(16))).is_empty(), "sixteen is the most");
+}
+
+#[test]
+fn a_waypoint_fg_below_3_to_1_comes_out_lifted_and_drops_below_256_colours() {
+    let mut t = theme("miami-nights");
+    let faint = Rgb(0x20, 0x10, 0x40);
+    t.decor.waypoints = Waypoints::new(&[Waypoint { glyph: "◆", fg: Some(faint) }, Waypoint { glyph: "▲", fg: None }]);
+    let roles = Roles::derive(&t);
+    assert!(roles.grounds().iter().any(|g| contrast(faint, *g) < MIN_MUTED), "the fg fails as written");
+    let p = Painter::themed(&t, ColorDepth::TrueColor);
+    let lifted = p.waypoints().unwrap().of(0).fg.unwrap();
+    for g in roles.grounds() {
+        assert!(contrast(lifted, g) >= MIN_MUTED, "{} on {} is {:.2}", lifted.hex(), g.hex(), contrast(lifted, g));
+    }
+    assert_eq!(p.waypoints().unwrap().of(1).fg, None, "no fg stays none");
+    for depth in [ColorDepth::Ansi16, ColorDepth::NoColor] {
+        let w = Painter::select(Some(&t), depth).waypoints().unwrap();
+        assert_eq!((w.of(0).glyph, w.of(0).fg), ("◆", None), "{depth:?}: the glyph stays, the colour drops");
+    }
+}

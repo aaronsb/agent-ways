@@ -25,7 +25,7 @@ pub const SECTION: SectionSpec = SectionSpec {
     entry: None,
     repair: None,
     columns: None,
-    doc: "The look of the interactive screens: the active theme and the lozenge shape (ADR-504).",
+    doc: "The look of the interactive screens: the active theme, the lozenge shape and the waypoints (ADR-504).",
 };
 
 /// `theme.active`: the one user-level theme choice.
@@ -53,6 +53,21 @@ pub const SHAPE: KeySpec = KeySpec {
     default: DefaultValue::Yaml("plain"),
     doc: "The lozenge caps of tabs and the bottom bar.",
     long: "plain, the default, lets the coloured segments abut and works on any terminal font. Every other shape draws Nerd Font glyphs.",
+    check: None,
+    ..ACTIVE
+};
+
+/// The values `theme.waypoints` takes.
+pub const WAYPOINT_SETS: [&str; 2] = ["theme", "default"];
+
+/// `theme.waypoints`: whose marks a way's cluster wears on the replay.
+pub const WAYPOINTS: KeySpec = KeySpec {
+    name: "theme.waypoints",
+    path: &["theme", "waypoints"],
+    kind: Kind::Choice(&WAYPOINT_SETS),
+    default: DefaultValue::Yaml("theme"),
+    doc: "The marks a way's cluster wears on the replay: the theme's, or the default set.",
+    long: "theme, the default, draws the active theme's `[[waypoints]]`, or the default set when it has none. default draws ● ◆ ■ ▲ ◉ ▶ ★ ◈ ♦ ▪ in the categorical colours. The theme tab of `ways settings` previews and switches it.",
     check: None,
     ..ACTIVE
 };
@@ -92,6 +107,8 @@ mod tests {
         assert!(ACTIVE.check_value(&Value::from(3)).is_err());
         assert!(SHAPE.check_value(&Value::from("flame")).is_ok());
         assert!(SHAPE.check_value(&Value::from("star")).is_err());
+        assert!(WAYPOINTS.check_value(&Value::from("default")).is_ok());
+        assert!(WAYPOINTS.check_value(&Value::from("emoji")).is_err());
         assert_eq!(SHAPE.section, "theme");
     }
 

@@ -383,6 +383,59 @@ impl Default for Events {
     }
 }
 
+/// One of a theme's waypoints: the mark a way's cluster wears on the replay
+/// table and the forecast strip, and the colour a text glyph takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Waypoint {
+    /// One code point, one column wide, or an emoji two wide.
+    pub glyph: &'static str,
+    /// A colour emoji draws its own colours and ignores this.
+    pub fg: Option<Rgb>,
+}
+
+/// A theme's waypoints (`[[waypoints]]`): one to sixteen, cycled by cluster.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Waypoints {
+    items: [Waypoint; Waypoints::MAX],
+    len: u8,
+}
+
+impl Waypoints {
+    pub const MAX: usize = 16;
+
+    /// `None` unless there are one to sixteen.
+    pub fn new(items: &[Waypoint]) -> Option<Waypoints> {
+        if items.is_empty() || items.len() > Waypoints::MAX {
+            return None;
+        }
+        let mut all = [items[0]; Waypoints::MAX];
+        all[..items.len()].copy_from_slice(items);
+        Some(Waypoints { items: all, len: items.len() as u8 })
+    }
+
+    pub fn as_slice(&self) -> &[Waypoint] {
+        &self.items[..self.len as usize]
+    }
+
+    /// The waypoint of cluster `n`, the set cycled.
+    pub fn of(&self, n: usize) -> Waypoint {
+        self.items[n % self.len as usize]
+    }
+
+    /// The widest glyph's columns: the cell every waypoint is drawn in.
+    pub fn width(&self) -> usize {
+        self.as_slice().iter().map(|w| unicode_width::UnicodeWidthStr::width(w.glyph)).max().unwrap_or(1)
+    }
+
+    /// The set with each fg set by `f`.
+    pub fn map_fg(mut self, f: impl Fn(Rgb) -> Option<Rgb>) -> Waypoints {
+        for w in &mut self.items {
+            w.fg = w.fg.and_then(&f);
+        }
+        self
+    }
+}
+
 /// The glyphs a theme draws its chrome with. Each is one grapheme, one
 /// column wide, except the ornament, which may be two. `None` keeps the
 /// surface's own.
@@ -398,10 +451,12 @@ pub struct Decor {
     /// `THEME_ORNAMENT`: drawn before a pane title's text.
     pub ornament: Option<&'static str>,
     pub events: Events,
+    /// `[[waypoints]]`; none keeps the screens' own set.
+    pub waypoints: Option<Waypoints>,
 }
 
 impl Decor {
-    pub const NONE: Decor = Decor { border: None, rules: None, mark: None, presence: None, ornament: None, events: Events::DEFAULT };
+    pub const NONE: Decor = Decor { border: None, rules: None, mark: None, presence: None, ornament: None, events: Events::DEFAULT, waypoints: None };
 }
 
 /// `s` as a `&'static str`, one allocation per distinct glyph for the life

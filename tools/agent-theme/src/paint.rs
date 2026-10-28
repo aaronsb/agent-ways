@@ -21,7 +21,7 @@ use std::sync::OnceLock;
 use crate::color::Color;
 use crate::depth::ColorDepth;
 use crate::derive::Roles;
-use crate::model::{Axis, Background, Decor, Gradient, Theme};
+use crate::model::{Axis, Background, Decor, Gradient, Theme, Waypoints};
 
 /// Select Graphic Rendition reset: every attribute and colour off.
 pub const RESET: &str = "\x1b[0m";
@@ -256,7 +256,8 @@ impl Painter {
     pub fn select(theme: Option<&Theme>, depth: ColorDepth) -> Painter {
         match (theme, depth) {
             (Some(t), ColorDepth::TrueColor | ColorDepth::Ansi256) => Painter::themed(t, depth),
-            (Some(t), _) => Painter { decor: t.decor, ..Painter::terminal(depth) },
+            // The colours drop with the theme; its waypoints keep their glyphs.
+            (Some(t), _) => Painter { decor: Decor { waypoints: t.decor.waypoints.map(|w| w.map_fg(|_| None)), ..t.decor }, ..Painter::terminal(depth) },
             (None, _) => Painter::terminal(depth),
         }
     }
@@ -268,7 +269,10 @@ impl Painter {
 
     /// A theme's derived roles at `depth`.
     pub fn themed(theme: &Theme, depth: ColorDepth) -> Painter {
-        Painter { depth, roles: Some(Roles::derive(theme)), fill: theme.background == Background::Fill, plain: false, decor: theme.decor }
+        let roles = Roles::derive(theme);
+        // A waypoint's colour is held to 3:1 on every ground, as muted text is.
+        let waypoints = theme.decor.waypoints.map(|w| w.map_fg(|c| Some(roles.graphic(c))));
+        Painter { depth, roles: Some(roles), fill: theme.background == Background::Fill, plain: false, decor: Decor { waypoints, ..theme.decor } }
     }
 
     /// The theme named `name`, the active choice its caller read from the
@@ -334,6 +338,12 @@ impl Painter {
     /// keeps the theme for; none for the terminal palette alone.
     pub fn decor(&self) -> Decor {
         self.decor
+    }
+
+    /// The theme's waypoints, each fg lifted to 3:1 on the theme's grounds,
+    /// and with no fg where the theme's colours are not drawn.
+    pub fn waypoints(&self) -> Option<Waypoints> {
+        self.decor.waypoints
     }
 
     /// The glyph a plain report's rules are drawn with: the theme's rule,

@@ -32,3 +32,35 @@ THEME_EVENT_MATCHED="✿"
 THEME_EVENT_INJECTED="❀"
 THEME_EVENT_SUPPRESSED="☂"
 THEME_EVENT_REDISCLOSED="↻"
+
+# Waypoints: the marks a way's cluster wears on the replay.
+
+[[waypoints]]
+glyph = "🦩"
+
+[[waypoints]]
+glyph = "🌺"
+
+[[waypoints]]
+glyph = "🐬"
+
+[[waypoints]]
+glyph = "🍹"
+
+[[waypoints]]
+glyph = "🌴"
+
+[[waypoints]]
+glyph = "🏄"
+
+[[waypoints]]
+glyph = "🐚"
+
+[[waypoints]]
+glyph = "🍊"
+
+[[waypoints]]
+glyph = "🌞"
+
+[[waypoints]]
+glyph = "🥥"
