@@ -50,6 +50,7 @@ fn render(k: &str, value: &str, options: &[&str]) -> Render {
         default: value.into(),
         options: options.iter().map(|o| o.to_string()).collect(),
         doc: format!("What {k} does."),
+        project: None,
     }
 }
 
@@ -181,6 +182,38 @@ fn the_settings_words_win_over_the_theme_s() {
     keys(&mut app, &[KeyCode::Char('c')]);
     let t = text(&draw(&mut app, 120, 35));
     assert!(t.contains("from Claude Code's own"), "a theme with no [words] and no setting: {t}");
+}
+
+#[test]
+fn a_project_value_names_its_file_and_a_change_says_the_project_still_wins() {
+    let cc = held(true);
+    cc.borrow_mut().render[0].project = Some("~/shop/.claude/ways.yaml".into());
+    let mut app = app_on("tampa", &cc);
+    keys(&mut app, &[KeyCode::Char('c')]);
+    let t = text(&draw(&mut app, 120, 35));
+    assert!(t.lines().any(|l| l.contains("rail") && l.contains("true  project: ~/shop/.claude/ways.yaml")), "{t}");
+    // The detail pane's text, its rows joined.
+    let flat: String = t.lines().filter_map(|l| l.split('│').nth(3)).flat_map(str::split_whitespace).collect::<Vec<_>>().join(" ");
+    assert!(flat.contains("project: ~/shop/.claude/ways.yaml sets it; a change here writes the user config, which the project value still overrides"), "{t}");
+    keys(&mut app, &[KeyCode::Enter]);
+    assert_eq!(app.msg, "mods.ways-theme.rail = false in the user config; project: ~/shop/.claude/ways.yaml still sets true");
+    keys(&mut app, &[KeyCode::Down]);
+    assert!(!text(&draw(&mut app, 120, 35)).contains("which the project value still overrides"), "a row no project sets says nothing of one");
+}
+
+#[test]
+fn the_section_wraps_on_word_boundaries() {
+    let cc = held(true);
+    cc.borrow_mut().render[0].doc = "Whether the ways-theme mod draws the rail beside replies and tool calls in the theme's accent colour.".into();
+    let mut app = app_on("miami-nights", &cc);
+    keys(&mut app, &[KeyCode::Char('c')]);
+    let t = text(&draw(&mut app, 80, 25));
+    // Each word of the doc and of the words in effect is whole on one row.
+    let pane: Vec<&str> = t.lines().map(|l| l.split('│').nth(3).or_else(|| l.split('┃').nth(3)).unwrap_or("")).collect();
+    let words: Vec<&str> = pane.iter().flat_map(|l| l.split_whitespace()).collect();
+    for w in ["Whether", "ways-theme", "beside", "replies", "accent", "colour.", "Cruising", "Gliding", "Glowing", "Pulsing", "Racing", "Drifting", "Landed"] {
+        assert!(words.contains(&w), "{w:?} is split in\n{t}");
+    }
 }
 
 #[test]

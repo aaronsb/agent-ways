@@ -14,12 +14,13 @@ use ratatui::widgets::{HighlightSpacing, List, ListItem, Paragraph};
 use ratatui::Frame;
 
 use super::render::pane;
-use super::review::{fields, LABEL};
+use super::review::LABEL;
 use super::theme;
 use super::themestate::DEFAULT;
 use super::themeview::swatch;
 use super::App;
 use crate::adapter::ClaudeCode;
+use crate::wrap::wrap_line;
 use agent_theme::{text_on, Rgb, Roles, Theme, MIN_TEXT};
 
 /// The roles the palette preview shows, in its order.
@@ -34,6 +35,19 @@ fn role(r: &Roles, name: &str) -> Rgb {
         "info" => r.info,
         _ => r.body,
     }
+}
+
+/// `value` after `label`, wrapped at word boundaries to `room` columns;
+/// the rows after the first are indented past the label.
+fn fields(label: &str, value: &str, style: Style, room: usize, dim: Style) -> Vec<Line<'static>> {
+    let rows = wrap_line(&Line::styled(value.to_string(), style), room.max(1));
+    rows.into_iter()
+        .enumerate()
+        .map(|(i, row)| {
+            let head = if i == 0 { Span::styled(format!("{label:<LABEL$}"), dim) } else { Span::raw(" ".repeat(LABEL)) };
+            Line::from([vec![head], row.spans].concat())
+        })
+        .collect()
 }
 
 /// The words in effect under `t`, each list the setting's when set, else
@@ -91,7 +105,10 @@ impl App {
             Ok(()) => {
                 self.own_write();
                 self.refresh_claude_code();
-                self.msg = format!("{} = {next}", r.key);
+                self.msg = match &r.project {
+                    Some(p) => format!("{} = {next} in the user config; project: {p} still sets {}", r.key, r.value),
+                    None => format!("{} = {next}", r.key),
+                };
             }
             Err(e) => self.msg = format!("rejected: {e}"),
         }
@@ -179,7 +196,11 @@ impl App {
             .iter()
             .map(|r| {
                 let st = if r.value == r.default { Style::new() } else { theme::non_default() };
-                ListItem::new(Line::from(vec![Span::raw(format!(" {:<w$}", r.label)), Span::styled(r.value.clone(), st)])).style(theme::selected_text())
+                let mut spans = vec![Span::raw(format!(" {:<w$}", r.label)), Span::styled(r.value.clone(), st)];
+                if let Some(p) = &r.project {
+                    spans.push(Span::styled(format!("  project: {p}"), theme::muted()));
+                }
+                ListItem::new(Line::from(spans)).style(theme::selected_text())
             })
             .collect();
         let block = pane(" claude code ", area);
@@ -215,6 +236,10 @@ impl App {
         if let Some(r) = self.themes.claude.and_then(|i| cc.render.get(i)) {
             lines.push(Line::from(vec![Span::styled(r.label.clone(), bold), Span::raw(format!("  {}  ", r.value)), Span::styled(r.options.join(" | "), dim)]));
             lines.extend(fields("", &r.doc, dim, room, dim));
+            if let Some(p) = &r.project {
+                let says = format!("project: {p} sets it; a change here writes the user config, which the project value still overrides");
+                lines.extend(fields("", &says, theme::warn(), room, dim));
+            }
             if r.key.ends_with("prompt_box") && r.value == "gradient" && t.gradient.is_none() {
                 lines.extend(fields("", &format!("{} has no gradient, so it draws as frame", t.name), theme::warn(), room, dim));
             }

@@ -188,6 +188,9 @@ pub struct Render {
     pub default: String,
     pub options: Vec<String>,
     pub doc: String,
+    /// The project file that sets the value, as shown: a change is written
+    /// to the user config, which this file still overrides.
+    pub project: Option<String>,
 }
 
 /// The adapter of an application that wired none: nothing is written or
