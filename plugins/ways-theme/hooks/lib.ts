@@ -90,6 +90,14 @@ export const FRAME = {
   toolErrored: { borderColor: 'error' },
 } as const
 
+/** Cells of ground between a frame's border and the row inside it. */
+export const FRAME_PAD_X = 1
+
+/** Cells a frame takes from a row's width: a border and its padding on
+ *  each side. What the skins layer draws inside one is laid out in the
+ *  rest, or the engine squeezes it to fit. */
+export const FRAME_INSET = 2 * (1 + FRAME_PAD_X)
+
 /** What a render site knows when it decides whether to frame. */
 export type FrameCase = {
   surface: string

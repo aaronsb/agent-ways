@@ -342,13 +342,23 @@ const NATURAL_SHARE = 0.55
 // top border at the right, as ╭──── Copy ─╮.
 // Past FOLD_ROWS rows it folds under `foldKey`. Long cells wrap within their column in
 // full: unlike the desktop card, the terminal has no tooltip to read a cut cell by (#59).
+// `maxWidth` is the room the table is drawn in, not the terminal's width: in a frame it
+// is the frame's inside.
+//
+// On the terminal every column is drawn exactly as wide as its text is wrapped to, so a
+// line that fills its column is drawn whole and a row is as tall as its tallest cell's
+// lines. Elsewhere the font is proportional, so the cells' lines wrap again where the
+// surface needs them to, and a wide table splits its container between columns; so does
+// a terminal table of more columns than its room holds at one cell each.
 export function tableRows(look: Look, table: Table, maxWidth: number, control?: ReturnType<Ui['Button']>, foldKey = 'fold-table') {
   const { Box, Text } = look.ui
   const rows = table.rows.slice(0, shownCount(look, foldKey, table.rows.length, FOLD_ROWS))
   const { palette } = look.skin
   const widths = columnWidths(table, maxWidth - 4, CELL_PAD * 2)
   const natural = widths.reduce((sum, width) => sum + width + CELL_PAD * 2, 2)
-  const isFluid = natural > maxWidth * NATURAL_SHARE
+  const isTerminal = look.surface === 'terminal'
+  // On the terminal only a table wider than the room even at one cell a column goes fluid.
+  const isFluid = isTerminal ? natural > maxWidth : natural > maxWidth * NATURAL_SHARE
   // A fluid column grows from nothing, padding included, so its share counts the padding
   // too: by text width alone a narrow column gets less than it needs, or no room at all.
   const size = (i: number) =>
@@ -360,7 +370,7 @@ export function tableRows(look: Look, table: Table, maxWidth: number, control?: 
       {cells.map((cell, i) => (
         <Box {...size(i)} flexDirection="column" paddingX={CELL_PAD} alignItems={JUSTIFY[table.align[i] ?? 'left']}>
           {wrapLines(cell, widths[i] ?? 0, Infinity).map(line => (
-            <Text color={palette.fg} bold={isHeader} wrap="truncate-end">
+            <Text color={palette.fg} bold={isHeader} wrap={isTerminal && !isFluid ? 'truncate-end' : 'wrap'}>
               {line}
             </Text>
           ))}
