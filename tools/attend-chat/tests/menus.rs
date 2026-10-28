@@ -203,7 +203,8 @@ fn custom_keys_show_as_the_current_row_and_enter_keeps_them() {
 /// A theme that did not load is not marked: the menu marks what the screen
 /// shows, the terminal's palette it fell back to. One that loads is marked
 /// where it is drawn, at 256 colours or more; at 16 the terminal's own
-/// palette is what shows, with no warning, and that is what is marked.
+/// palette is what shows, with no warning, and that is what is marked. A
+/// decorated theme at 16 colours still draws its glyphs, and is marked.
 #[test]
 fn the_theme_menu_marks_the_theme_in_use_not_one_that_failed() {
     let mut c = chat().theme(Some("no-such-theme"));
@@ -220,6 +221,12 @@ fn the_theme_menu_marks_the_theme_in_use_not_one_that_failed() {
     let shown = submenu(&mut c, "Theme");
     let marked: Vec<&String> = shown.iter().filter(|r| r.contains('●')).collect();
     assert!(marked.len() == 1 && marked[0].contains("terminal"), "16 colours draw no theme: {shown:#?}");
+    assert_eq!(c.status(), "", "and nothing failed");
+
+    let mut c = chat().theme(Some("miami"));
+    let shown = submenu(&mut c, "Theme");
+    let marked: Vec<&String> = shown.iter().filter(|r| r.contains('●')).collect();
+    assert!(marked.len() == 1 && marked[0].contains("miami"), "16 colours draw miami's glyphs: {shown:#?}");
     assert_eq!(c.status(), "", "and nothing failed");
 }
 
