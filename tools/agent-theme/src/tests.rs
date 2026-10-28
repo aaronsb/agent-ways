@@ -974,6 +974,9 @@ fn waypoint_errors_name_the_line_and_entry() {
     has(with(t), &format!("line {}: `bg` is not a waypoint key; an entry takes glyph and fg (waypoints entry 1)", line(3)));
     has(with("[[waypoints]]\nglyph = \"❤\u{fe0f}\"\n"), "carries a variation selector or a joiner, which leave its width to the font (waypoints entry 1)");
     has(with("[[waypoints]]\nglyph = \"👨\u{200d}👩\"\n"), "carries a variation selector or a joiner");
+    for g in ["👍🏽", "🇺🇸", "\u{1F3FD}", "\u{1F1FA}"] {
+        has(with(&format!("[[waypoints]]\nglyph = \"{g}\"\n")), "carries an emoji modifier or a regional indicator, which leave its width to the font");
+    }
     has(with("[[waypoints]]\nglyph = \"ab\"\n"), "glyph `ab` is 2 graphemes; it takes one");
     has(with("[[waypoints]]\nglyph = \"字\"\n"), "glyph `字` is neither one column wide nor an emoji drawn two columns wide");
     has(with("[[waypoints]]\nglyph = \"◆\"\nfg = \"#12345\"\n"), "`#12345` is not a #rrggbb colour (waypoints entry 1, key `fg`)");

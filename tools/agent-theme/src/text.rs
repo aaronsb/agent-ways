@@ -298,8 +298,9 @@ fn emoji_presentation(c: char) -> bool {
 }
 
 /// A waypoint's glyph: one grapheme one column wide, or two wide where
-/// every code point has Emoji_Presentation=Yes. A variation selector or a
-/// joiner would leave the width to the font, so neither is taken.
+/// every code point has Emoji_Presentation=Yes. A variation selector, a
+/// joiner, a skin-tone modifier or a regional indicator would leave the
+/// width to the font, so none is taken.
 fn waypoint_glyph(g: &str) -> Result<&'static str, String> {
     if unprintable(g) {
         return Err(format!("glyph `{}` is a control character or a line separator", g.escape_debug()));
@@ -310,6 +311,9 @@ fn waypoint_glyph(g: &str) -> Result<&'static str, String> {
     }
     if g.contains(['\u{FE0F}', '\u{200D}']) {
         return Err(format!("glyph `{g}` carries a variation selector or a joiner, which leave its width to the font"));
+    }
+    if g.contains(|c| matches!(c, '\u{1F3FB}'..='\u{1F3FF}' | '\u{1F1E6}'..='\u{1F1FF}')) {
+        return Err(format!("glyph `{g}` carries an emoji modifier or a regional indicator, which leave its width to the font"));
     }
     match cell_width(g) {
         1 => Ok(intern(g)),
