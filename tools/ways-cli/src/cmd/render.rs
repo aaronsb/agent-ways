@@ -233,7 +233,7 @@ pub fn write_table_header_with(out: &mut String, layout: &Layout) {
         tr_w = TRIG_W, pin_w = PIN_W, rd_w = RD_W,
     );
     let _ = writeln!(out, "  {}", paint(Style::new().bold(), head));
-    let _ = writeln!(out, "  {}", paint(Role::Muted, "─".repeat(layout.separator)));
+    let _ = writeln!(out, "  {}", paint(Role::Muted, agent_theme::rule_glyph().repeat(layout.separator)));
 }
 
 /// Render a single way row against a content-sized layout (`Layout::for_rows`).

@@ -336,6 +336,12 @@ impl Painter {
         self.decor
     }
 
+    /// The glyph a plain report's rules are drawn with: the theme's rule,
+    /// else `─`.
+    pub fn rule_glyph(&self) -> &'static str {
+        self.decor.rules.map_or("─", |r| r[0])
+    }
+
     /// The gradient a filled screen paints, at truecolor only.
     pub fn gradient(&self) -> Option<Gradient> {
         let g = self.roles.and_then(|r| r.gradient)?;
@@ -560,6 +566,11 @@ pub fn sgr(style: impl Into<Style>) -> String {
 /// On and off sequences for `style` with the process painter.
 pub fn pair(style: impl Into<Style>) -> (String, &'static str) {
     painter().pair(style)
+}
+
+/// The rule glyph with the process painter ([`Painter::rule_glyph`]).
+pub fn rule_glyph() -> &'static str {
+    painter().rule_glyph()
 }
 
 /// The reset with the process painter.

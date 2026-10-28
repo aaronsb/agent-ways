@@ -117,15 +117,16 @@ pub(super) fn list_sessions(content: &str, project_filter: Option<&str>) -> Resu
         return Ok(());
     }
 
-    println!();
-    println!(
+    let mut out = String::new();
+    agent_fmt::say!(out);
+    agent_fmt::say!(out, 
         "{}",
         paint(
             Style::new().bold(),
             format!("{:<14} {:<20} {:<30} {:>6} {:>6} {:>8}  {}", "Session", "Date", "Project", "Events", "Ways", "Duration", "Transcript")
         )
     );
-    println!("{}", paint(Role::Muted, "─".repeat(102)));
+    agent_fmt::say!(out, "{}", paint(Role::Muted, agent_theme::rule_glyph().repeat(102)));
 
     for s in sessions.iter().rev().take(50) {
         let short_id = super::short_id(&s.id);
@@ -133,20 +134,21 @@ pub(super) fn list_sessions(content: &str, project_filter: Option<&str>) -> Resu
         let project_short = s.project.split('/').next_back().unwrap_or(&s.project);
         let duration = agent_fmt::when::duration(s.duration_secs);
         let transcript = if s.transcript { paint(Role::Ok, "yes") } else { paint(Role::Muted, "gone") };
-        println!(
+        agent_fmt::say!(out, 
             "  {:<12} {:<20} {:<30} {:>6} {:>6} {:>8}  {transcript}",
             short_id, date, project_short, s.event_count, s.way_fires, duration
         );
     }
-    println!();
-    println!(
+    agent_fmt::say!(out);
+    agent_fmt::say!(out, 
         "{}",
         paint(
             Role::Muted,
             format!("  {} sessions total. `ways session replay --session <id>` replays one; without --session it opens the picker.", sessions.len())
         )
     );
-    println!();
+    agent_fmt::say!(out);
+    agent_fmt::print_block(&out);
     Ok(())
 }
 

@@ -40,18 +40,17 @@ pub(crate) fn depth_of(s: Option<&str>) -> Result<ColorDepth> {
     })
 }
 
+/// A `theme` setting (`active`, `shape`) for this project.
+pub(crate) fn theme_setting(key: &str) -> Option<String> {
+    ways_core::settings::theme_setting(std::path::Path::new(&crate::util::project_dir()), key)
+}
+
 /// The palette and lozenge shape the settings choose (`theme.active`,
 /// `theme.shape`, ADR-504 note of 2026-10-01), at `depth`.
 pub(crate) fn look(depth: ColorDepth) -> (Palette, Shape) {
-    let project = std::path::PathBuf::from(crate::util::project_dir());
-    let layers = ways_core::settings::layers(&project);
-    let value = |path: &[&str]| -> Option<String> {
-        let path: Vec<String> = path.iter().map(|s| s.to_string()).collect();
-        layers.iter().rev().find_map(|l| l.get(&path).and_then(|v| v.as_str().map(str::to_string)))
-    };
-    let shape = value(&["theme", "shape"]).map_or(Shape::PLAIN, |s| Shape::named(&s));
+    let shape = theme_setting("shape").map_or(Shape::PLAIN, |s| Shape::named(&s));
     let painter = match agent_theme::user_dir() {
-        Some(dir) => agent_theme::Painter::named_in(value(&["theme", "active"]).as_deref(), &dir, depth).0,
+        Some(dir) => agent_theme::Painter::named_in(theme_setting("active").as_deref(), &dir, depth).0,
         None => agent_theme::Painter::terminal(depth),
     };
     (Palette { painter }, shape)

@@ -90,6 +90,8 @@ enum Command {
 
 fn main() -> Result<()> {
     agent_fmt::exit_quietly_on_closed_pipe();
+    // A report on a terminal draws in the chosen theme; piped, it reads none.
+    agent_theme::install_from(|| ways_core::settings::theme_setting(std::path::Path::new(&ways_core::util::project_root().unwrap_or_default()), "active"));
     let cli = Cli::parse();
 
     // Determine ways directory: project-local first, then global.

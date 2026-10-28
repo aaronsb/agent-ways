@@ -164,7 +164,7 @@ pub fn run_late(query: String, project: Option<&str>, unfiltered: bool, json: bo
     println!("reduced surface: {reduced}");
     println!();
     println!("  {:<34}  {:>5}  {:>5}  {:>7}  {:<8}  won chunk", "way", "peak", "share", "confirm", "outcome");
-    println!("  {}", "─".repeat(96));
+    println!("  {}", agent_theme::rule_glyph().repeat(96));
 
     for r in rows {
         let confirm = match r.confirm {

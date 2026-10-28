@@ -179,7 +179,7 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool, matched: bool) -> 
     }
 
     let _ = writeln!(out);
-    print!("{out}");
+    agent_fmt::print_block(&out);
     if let Some(b) = &blocks {
         crate::cmd::introspect::print_judge_blocks(b);
     }

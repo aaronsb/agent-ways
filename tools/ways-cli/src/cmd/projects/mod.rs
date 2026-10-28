@@ -145,7 +145,17 @@ pub fn run(command: Option<ProjectsCommand>) -> Result<()> {
         let mut line = String::new();
         stdin.lock().read_line(&mut line).is_ok() && line.trim().eq_ignore_ascii_case("y")
     };
-    let ok = dispatch(&env, command, &mut out, &mut confirm)?;
+    // A report prints whole, as a band of a fill theme; a command that asks
+    // for a yes writes as it goes, so its question shows.
+    let report = matches!(command, None | Some(ProjectsCommand::List(_) | ProjectsCommand::Search { .. } | ProjectsCommand::Show { .. } | ProjectsCommand::Stats));
+    let ok = if report {
+        let mut buf = Vec::new();
+        let ok = dispatch(&env, command, &mut buf, &mut confirm)?;
+        agent_fmt::print_block(&String::from_utf8_lossy(&buf));
+        ok
+    } else {
+        dispatch(&env, command, &mut out, &mut confirm)?
+    };
     out.flush()?;
     if !ok {
         std::process::exit(1);
@@ -461,7 +471,8 @@ fn list(env: &Env, args: &ListArgs, out: &mut dyn Write) -> Result<()> {
     let path_w = agent_fmt::terminal_width().saturating_sub(36).max(20);
     writeln!(out, "\nClaude Code Projects  ({} shown)\n", projects.len())?;
     writeln!(out, "  {:<path_w$} {:>8} {:>6} {:>7} {:>6}", "Project", "Sessions", "Size", "Last", "Memory")?;
-    writeln!(out, "  {} {} {} {} {}", "─".repeat(path_w), "─".repeat(8), "─".repeat(6), "─".repeat(7), "─".repeat(6))?;
+    let rule = agent_theme::rule_glyph();
+    writeln!(out, "  {} {} {} {} {}", rule.repeat(path_w), rule.repeat(8), rule.repeat(6), rule.repeat(7), rule.repeat(6))?;
 
     for p in &projects {
         let [sess, size, last, mem] = list_cells(env, p);
