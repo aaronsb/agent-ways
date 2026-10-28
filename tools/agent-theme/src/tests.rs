@@ -207,6 +207,16 @@ fn the_words_table_round_trips() {
 }
 
 #[test]
+fn a_dotted_target_key_names_the_table() {
+    let n = nord_src().lines().count() + 2;
+    for extra in ["target.claude-code.claude = \"#ff0000\"\n", "[target.claude-code.extra]\nclaude = \"#ff0000\"\n"] {
+        let e = validate(&format!("{}\n{extra}", nord_src()));
+        let want = format!("line {n}: `target` is a table; write `[target.claude-code]` and put each key under it");
+        assert!(e.iter().any(|x| x.to_string() == want), "{want:?} not in {e:?}");
+    }
+}
+
+#[test]
 fn words_errors_name_the_line() {
     let has = |table: &str, needle: &str| {
         let src = format!("{}\n{table}", nord_src());
@@ -223,6 +233,10 @@ fn words_errors_name_the_line() {
     has(&format!("[words]\nspinner = [\"Go\", \"{long}\"]\n"), &format!("{}`words.spinner` entry `{long}` is 25 characters", at(1)));
     has("[words]\nspinner = [\"\"]\n", "`words.spinner` entry `` is 0 characters");
     has("[words]\nspinner = [\"Tab\\there\"]\n", &format!("{}`words.spinner` entry \"Tab\\there\" has a control character", at(1)));
+    has("[words]\nspinner = [\"Go\\u2028on\"]\n", &format!("{}`words.spinner` entry \"Go\\u{{2028}}on\" has a control character, a line separator or a bidi control", at(1)));
+    has("[words]\ndone = [\"\\u202EDone\"]\n", &format!("{}`words.done` entry \"\\u{{202e}}Done\" has a control character, a line separator or a bidi control", at(1)));
+    has("[words]\ndone = [\"Ok\\u2066\"]\n", "has a control character, a line separator or a bidi control");
+    has("[words]\nspinner = [\"   \"]\n", &format!("{}`words.spinner` entry \"   \" is blank", at(1)));
     has("[words]\nspinner = [\"Go\", 3]\n", &format!("{}`words.spinner` must be an array of double-quoted strings", at(1)));
     has("[words]\nspinner = \"Go\"\n", "`words.spinner` must be an array of double-quoted strings");
     has("[words]\nspinner = [\"Go\"]\nverbs = [\"Go\"]\n", &format!("{}unknown key `words.verbs`; the keys are spinner and done", at(2)));
@@ -1073,10 +1087,10 @@ fn control_characters_are_refused_in_every_glyph() {
         for (key, count) in keys {
             let value = format!("{bad}{}", "x".repeat(count - 1));
             let e = validate(&format!("{base}\n{key}={}\n", toml::Value::String(value)));
-            assert!(e.iter().any(|x| x.message.contains("is a control character or a line separator")), "{key} {bad:?}: {e:?}");
+            assert!(e.iter().any(|x| x.message.contains("is a control character, a line separator or a bidi control")), "{key} {bad:?}: {e:?}");
         }
         let e = validate(&format!("{base}\n[[waypoints]]\nglyph = {}\n", toml::Value::String(bad.into())));
-        assert!(e.iter().any(|x| x.message.contains("is a control character or a line separator")), "waypoint {bad:?}: {e:?}");
+        assert!(e.iter().any(|x| x.message.contains("is a control character, a line separator or a bidi control")), "waypoint {bad:?}: {e:?}");
     }
 }
 

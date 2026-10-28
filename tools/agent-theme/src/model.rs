@@ -537,8 +537,11 @@ impl Words {
             if n == 0 || n > Self::MAX_CHARS {
                 return Err(format!("entry `{e}` is {n} characters; an entry is 1 to {}", Self::MAX_CHARS));
             }
-            if e.chars().any(char::is_control) {
-                return Err(format!("entry {e:?} has a control character"));
+            if crate::text::unprintable(e) {
+                return Err(format!("entry {e:?} has a control character, a line separator or a bidi control"));
+            }
+            if e.trim().is_empty() {
+                return Err(format!("entry {e:?} is blank"));
             }
         }
         Ok(())

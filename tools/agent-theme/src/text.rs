@@ -220,6 +220,19 @@ fn syntax(src: &str, e: &toml::de::Error) -> ThemeError {
         let key = text.split_once('=').map_or("", |(k, _)| k.trim());
         return ThemeError::at(n, format!("`{key}` is a date; a value is a double-quoted string"));
     }
+    // toml cannot span a table a dotted key or a deeper header opens
+    // (`target.claude-code.claude = ...`, `[target.claude-code.extra]`), and
+    // its message names its own internals.
+    if first.contains("borrowed string") {
+        let path = text.split_once('=').map_or(text, |(k, _)| k).trim().trim_matches(['[', ']']).trim();
+        let mut parts = path.split('.').map(str::trim);
+        let head = parts.next().unwrap_or("");
+        let table = match (head, parts.next()) {
+            ("target", Some(name)) => format!("target.{name}"),
+            _ => head.to_string(),
+        };
+        return ThemeError::at(n, format!("`{head}` is a table; write `[{table}]` and put each key under it"));
+    }
     let hint = match text.split_once('=').map(|(_, v)| v.trim()) {
         Some(v) if !v.starts_with('"') => "; values are double-quoted strings",
         _ => "",
@@ -247,10 +260,11 @@ fn gradient(value: &str) -> Result<Gradient, String> {
     Gradient::new(axis, &stops).ok_or_else(|| format!("THEME_GRADIENT takes 2 to 4 stops; `{value}` has {}", stops.len()))
 }
 
-/// The control characters and the line and paragraph separators: a glyph
-/// holding one would move the cursor or break the line it is drawn in.
-fn unprintable(g: &str) -> bool {
-    g.chars().any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}'))
+/// The control characters, the line and paragraph separators and the bidi
+/// embeddings, overrides and isolates: text holding one would move the
+/// cursor, break the line it is drawn in or reorder it.
+pub(crate) fn unprintable(g: &str) -> bool {
+    g.chars().any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'))
 }
 
 /// `g`'s width in cells by ratatui's rule (ratatui-core 0.1.2,
@@ -270,7 +284,7 @@ fn glyphs(key: &str, value: &str, count: usize, widest: usize) -> Result<Vec<&'s
     }
     for x in &g {
         if unprintable(x) {
-            return Err(format!("`{key}` glyph `{}` is a control character or a line separator", x.escape_debug()));
+            return Err(format!("`{key}` glyph `{}` is a control character, a line separator or a bidi control", x.escape_debug()));
         }
         let w = cell_width(x);
         if w == 0 || w > widest {
@@ -317,7 +331,7 @@ fn emoji_presentation(c: char) -> bool {
 /// width to the font, so none is taken.
 fn waypoint_glyph(g: &str) -> Result<&'static str, String> {
     if unprintable(g) {
-        return Err(format!("glyph `{}` is a control character or a line separator", g.escape_debug()));
+        return Err(format!("glyph `{}` is a control character, a line separator or a bidi control", g.escape_debug()));
     }
     let n = g.graphemes(true).count();
     if n != 1 {
