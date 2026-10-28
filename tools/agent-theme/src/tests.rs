@@ -674,6 +674,65 @@ fn a_span_with_its_own_ground_keeps_it() {
     assert_eq!(visible(&out), "hot     ");
 }
 
+/// The parameters of the last SGR in `s` before `needle`.
+fn sgr_before<'a>(s: &'a str, needle: &str) -> &'a str {
+    let head = &s[..s.find(needle).unwrap_or_else(|| panic!("{needle:?} not in {s:?}"))];
+    head.rsplit("\x1b[").next().unwrap().strip_suffix('m').unwrap_or_else(|| panic!("no SGR right before {needle:?}: {head:?}"))
+}
+
+#[test]
+fn styled_text_keeps_its_style_across_a_line_break() {
+    let p = Painter::themed(&theme("paper"), ColorDepth::Ansi256);
+    let out = p.block("\x1b[31mred\nstill\x1b[0m\n", 8);
+    assert_eq!(sgr_before(out.split('\n').nth(1).unwrap(), "still"), "31", "{out:?}");
+    let own = p.block("\x1b[48;5;196mhot\nstill hot\x1b[0m", 12);
+    let second = own.split('\n').nth(1).unwrap();
+    assert_eq!(sgr_before(second, "still"), "48;5;196", "a span's own ground carries too: {second:?}");
+    assert_eq!(visible(&own), format!("hot{}\nstill hot   ", " ".repeat(9)));
+}
+
+#[test]
+fn a_reset_keeps_the_parameters_after_it() {
+    let p = Painter::themed(&theme("paper"), ColorDepth::Ansi256);
+    assert_eq!(sgr_before(&p.block("a\x1b[0;31mred", 8), "red"), "31");
+    assert_eq!(sgr_before(&p.block("a\x1b[1;0;4;31mred", 8), "red"), "4;31", "only what follows the last reset");
+    assert_eq!(sgr_before(&p.block("a\x1b[38;5;0;31mred", 8), "red"), "38;5;0;31", "a 0 inside a colour is no reset");
+}
+
+#[test]
+fn the_default_foreground_is_the_body_colour() {
+    let paper = theme("paper");
+    let p = Painter::themed(&paper, ColorDepth::Ansi256);
+    let body = Color::Rgb(Roles::derive(&paper).body).at(ColorDepth::Ansi256).unwrap().sgr_params(false);
+    assert_eq!(sgr_before(&p.block("\x1b[31ma\x1b[39mb", 8), "b"), body);
+    assert_eq!(sgr_before(&p.block("\x1b[39;31mb", 8), "b"), "39;31", "a later colour wins");
+}
+
+#[test]
+fn a_carriage_return_never_reaches_the_band() {
+    let p = Painter::themed(&theme("paper"), ColorDepth::TrueColor);
+    let out = p.block("ab\r\nc\rd\n", 6);
+    assert!(!out.contains('\r'), "{out:?}");
+    assert_eq!(visible(&out), "ab    \ncd    \n");
+}
+
+#[test]
+fn a_wide_character_at_the_row_s_end_moves_to_the_next_row() {
+    let tampa = theme("tampa");
+    let first = tampa.gradient.unwrap().stops()[0];
+    let out = Painter::themed(&tampa, ColorDepth::TrueColor).block("abc中\n", 4);
+    assert_eq!(visible(&out), "abc 中  \n");
+    assert!(out.contains(&format!("{}中", bg(first))), "the next row starts the horizontal ground over: {out:?}");
+}
+
+#[test]
+fn empty_input_is_an_empty_band() {
+    let p = Painter::themed(&theme("paper"), ColorDepth::TrueColor);
+    assert_eq!(p.block("", 8), "");
+    let blank = p.block("\n", 4);
+    assert_eq!(visible(&blank), "    \n", "one blank line is a painted row");
+}
+
 // ── Waypoints ──────────────────────────────────────────────────
 
 #[test]
