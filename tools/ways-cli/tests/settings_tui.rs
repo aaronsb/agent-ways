@@ -448,6 +448,35 @@ fn export_prints_the_roles_or_a_claude_code_theme_of_the_active_theme() {
 }
 
 #[test]
+fn export_mod_prints_what_the_theme_mod_reads_on_one_line() {
+    let fx = Fx::new();
+    let one = |args: &[&str]| {
+        let (out, err, code) = fx.run(args);
+        assert_eq!(code, 0, "{err}");
+        assert_eq!(out.lines().count(), 1, "{out}");
+        serde_json::from_str::<serde_json::Value>(&out).unwrap()
+    };
+    let v = one(&["settings", "theme", "export", "--mod"]);
+    assert_eq!((v["theme"].as_str(), v["kind"].as_str()), (Some("terminal"), Some("dark")));
+    assert!(v["roles"].is_null() && v["gradient"].is_null() && v["words"].is_null(), "{v}");
+    assert_eq!(v["render"]["prompt_box"], "frame", "terminal has no gradient");
+    assert_eq!(fx.run(&["settings", "set", "theme.active", "miami-nights"]).2, 0);
+    let v = one(&["settings", "theme", "export", "--mod"]);
+    assert_eq!(v["theme"], "miami-nights");
+    assert_eq!(v["render"]["prompt_box"], "gradient");
+    assert_eq!(v["words"]["done"][0], "Cruised");
+    assert_eq!(v["roles"].as_object().unwrap().len(), 14);
+    // The settings reach the export: a word list, a render switch.
+    assert_eq!(fx.run(&["settings", "set", "mods.ways-theme.spinner_words", "Sailing, Docking"]).2, 0);
+    assert_eq!(fx.run(&["settings", "set", "mods.ways-theme.rail", "false"]).2, 0);
+    let v = one(&["settings", "theme", "export", "nord", "--mod"]);
+    assert_eq!(v["words"], serde_json::json!({ "spinner": ["Sailing", "Docking"], "done": [] }));
+    assert_eq!((v["render"]["rail"].as_bool(), v["render"]["prompt_box"].as_str()), (Some(false), Some("frame")));
+    let (_, err, code) = fx.run(&["settings", "theme", "export", "gone", "--mod"]);
+    assert_eq!((code, err.as_str()), (2, "ways settings: no theme `gone`; `ways settings theme list` names the themes\n"));
+}
+
+#[test]
 fn a_file_that_is_no_loaded_theme_is_never_overwritten() {
     let fx = Fx::new();
     fx.file(&format!("{THEMES}/precious.theme"), "not a theme\n");

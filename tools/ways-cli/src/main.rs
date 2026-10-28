@@ -1021,6 +1021,11 @@ enum ThemeCommand {
     /// ~/.claude/themes/<slug>.json: the roles mapped to Claude Code's
     /// colour tokens, lifted to read on the theme's bg and on common terminal
     /// grounds of its kind, then the theme's own [target.claude-code] pins.
+    /// --mod prints, on one line, what the ways-theme mod reads at session
+    /// start: the theme's roles on Claude Code's grounds, its gradient, the
+    /// words in effect (mods.ways-theme.spinner_words and done_words, else
+    /// the theme's [words]) and the mods.ways-theme render settings. For
+    /// terminal only the render settings carry values.
     #[command(group = clap::ArgGroup::new("form").required(true))]
     Export {
         /// The theme; theme.active when left out
@@ -1031,6 +1036,9 @@ enum ThemeCommand {
         /// A Claude Code custom theme
         #[arg(long, group = "form")]
         claude_code: bool,
+        /// What the ways-theme mod reads
+        #[arg(long = "mod", group = "form")]
+        for_mod: bool,
     },
 }
 
@@ -1517,6 +1525,7 @@ fn run() -> Result<()> {
                     ThemeCommand::Copy { from, to, json } => st::themes::run(st::themes::Op::Copy { from: &from, to: &to }, json),
                     ThemeCommand::Rename { from, to, json } => st::themes::run(st::themes::Op::Rename { from: &from, to: &to }, json),
                     ThemeCommand::Delete { name, json } => st::themes::run(st::themes::Op::Delete { name: &name }, json),
+                    ThemeCommand::Export { name, for_mod: true, .. } => st::themes::export_mod(name.as_deref()),
                     ThemeCommand::Export { name, roles, .. } => {
                         let form = if roles { st::themes::Form::Roles } else { st::themes::Form::ClaudeCode };
                         st::themes::export(name.as_deref(), form)

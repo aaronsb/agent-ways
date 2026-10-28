@@ -242,7 +242,7 @@ impl Ways {
     }
 
     /// The value of a key as resolved now.
-    fn value(&self, key: &str, layers: &[Layer]) -> Option<Value> {
+    pub(crate) fn value(&self, key: &str, layers: &[Layer]) -> Option<Value> {
         let b = self.reg.lookup(key)?;
         resolve(b.spec, &b.bound, layers).value
     }

@@ -181,3 +181,190 @@ pub fn export(name: Option<&str>, form: Form) -> Out {
     println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
     Ok(())
 }
+
+/// The ways-theme mod's render keys under `mods.ways-theme`, in the order
+/// the export and the theme tab show them.
+pub const RENDER: [&str; 8] = ["rail", "tables", "shimmer", "charts", "markdown", "icons", "frames", "prompt_box"];
+
+/// The `mods.ways-theme` settings the mod reads, as resolved.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ModSettings {
+    /// Each of [`RENDER`] with its value: a bool or a choice's word.
+    pub render: Vec<(&'static str, serde_json::Value)>,
+    /// `spinner_words` and `done_words`; empty leaves the theme's.
+    pub spinner: Vec<String>,
+    pub done: Vec<String>,
+}
+
+impl ModSettings {
+    /// The settings as `layers` resolve them.
+    pub fn read(ways: &Ways, layers: &[agent_settings::Layer]) -> ModSettings {
+        let get = |k: &str| ways.value(&format!("mods.ways-theme.{k}"), layers);
+        let words = |k: &str| -> Vec<String> {
+            get(k).and_then(|v| v.as_sequence().map(|s| s.iter().filter_map(|w| w.as_str().map(str::to_string)).collect())).unwrap_or_default()
+        };
+        let render = RENDER
+            .iter()
+            .map(|k| {
+                let v = match get(k) {
+                    Some(serde_yaml::Value::Bool(b)) => json!(b),
+                    Some(serde_yaml::Value::String(s)) => json!(s),
+                    _ => serde_json::Value::Null,
+                };
+                (*k, v)
+            })
+            .collect();
+        ModSettings { render, spinner: words("spinner_words"), done: words("done_words") }
+    }
+
+    /// The words in effect under `t`: each list the setting's when set,
+    /// else the theme's; `None` when both come out empty.
+    pub fn words(&self, t: Option<&Theme>) -> Option<agent_theme::Words> {
+        let pick = |own: &[String], theme: Option<&[String]>| if own.is_empty() { theme.unwrap_or_default().to_vec() } else { own.to_vec() };
+        let w = agent_theme::Words { spinner: pick(&self.spinner, t.map(|t| t.words.spinner.as_slice())), done: pick(&self.done, t.map(|t| t.words.done.as_slice())) };
+        (!w.is_empty()).then_some(w)
+    }
+
+    /// The render settings as the mod takes them under `t`: `prompt_box`
+    /// gradient draws as frame where the theme has no gradient.
+    pub fn render_under(&self, t: Option<&Theme>) -> serde_json::Map<String, serde_json::Value> {
+        let flat = t.is_none_or(|t| t.gradient.is_none());
+        self.render
+            .iter()
+            .map(|(k, v)| {
+                let v = if *k == "prompt_box" && flat && v == "gradient" { json!("frame") } else { v.clone() };
+                (k.to_string(), v)
+            })
+            .collect()
+    }
+}
+
+/// What the ways-theme mod reads at session start: theme `t` (`None` for
+/// terminal) with the roles Claude Code's grounds take, its gradient, the
+/// words in effect and the render settings.
+pub fn mod_json(t: Option<&Theme>, s: &ModSettings) -> serde_json::Value {
+    let render = s.render_under(t);
+    let Some(t) = t else {
+        return json!({ "theme": TERMINAL, "kind": "dark", "roles": null, "gradient": null, "words": null, "render": render });
+    };
+    let r = agent_theme::claude_code_roles(t);
+    let roles = hex_map([
+        ("bg", r.bg),
+        ("body", r.body),
+        ("accent", r.accent),
+        ("accent_dim", r.accent_dim),
+        ("info", r.info),
+        ("ok", r.ok),
+        ("warn", r.warn),
+        ("err", r.err),
+        ("alt", r.alt),
+        ("hot", r.hot),
+        ("muted", r.muted),
+        ("rule", r.rule),
+        ("selection_bg", r.selection_bg),
+        ("subtle", r.track),
+    ]);
+    let gradient = t.gradient.map(|g| json!({ "axis": g.axis.name(), "stops": g.stops().iter().map(|c| c.hex()).collect::<Vec<_>>() }));
+    let words = s.words(Some(t)).map(|w| json!({ "spinner": w.spinner, "done": w.done }));
+    json!({
+        "theme": t.name,
+        "kind": if t.kind == Kind::Dark { "dark" } else { "light" },
+        "roles": roles,
+        "gradient": gradient,
+        "words": words,
+        "render": render,
+    })
+}
+
+/// Print what the ways-theme mod reads for theme `name`, or the active
+/// theme, on one line.
+pub fn export_mod(name: Option<&str>) -> Out {
+    let (ways, themes) = load();
+    let name = name.unwrap_or(&themes.active);
+    let t = if name == TERMINAL {
+        None
+    } else {
+        Some(themes.get(name).ok_or_else(|| fail(exit::USAGE, format!("no theme `{name}`; `ways settings theme list` names the themes")))?)
+    };
+    let s = ModSettings::read(&ways, &ways.layers());
+    println!("{}", mod_json(t, &s));
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agent_theme::ThemeSet;
+
+    fn theme(name: &str) -> Theme {
+        ThemeSet::bundled().get(name).cloned().unwrap()
+    }
+
+    fn defaults() -> ModSettings {
+        let render = RENDER
+            .iter()
+            .map(|k| {
+                let v = match *k {
+                    "tables" => json!("on"),
+                    "icons" => json!("unicode"),
+                    "prompt_box" => json!("gradient"),
+                    _ => json!(true),
+                };
+                (*k, v)
+            })
+            .collect();
+        ModSettings { render, ..Default::default() }
+    }
+
+    #[test]
+    fn a_theme_exports_its_claude_code_roles_gradient_words_and_render() {
+        let t = theme("miami-nights");
+        let v = mod_json(Some(&t), &defaults());
+        let keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(keys, ["theme", "kind", "roles", "gradient", "words", "render"]);
+        assert_eq!((v["theme"].as_str(), v["kind"].as_str()), (Some("miami-nights"), Some("dark")));
+        let roles: Vec<&str> = v["roles"].as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(roles, ["bg", "body", "accent", "accent_dim", "info", "ok", "warn", "err", "alt", "hot", "muted", "rule", "selection_bg", "subtle"]);
+        // The roles are the Claude Code export's: lifted onto the ground band.
+        let cc = agent_theme::claude_code_roles(&t);
+        assert_eq!(v["roles"]["body"], json!(cc.body.hex()));
+        assert_eq!(v["roles"]["accent"], json!(cc.accent.hex()));
+        assert_eq!(v["gradient"], json!({ "axis": "vertical", "stops": ["#0d0221", "#241046", "#4a0e4e"] }));
+        assert_eq!(v["words"], json!({ "spinner": ["Cruising", "Gliding", "Glowing", "Pulsing", "Racing", "Drifting"], "done": ["Cruised", "Glowed", "Docked", "Landed"] }));
+        assert_eq!(
+            v["render"],
+            json!({ "rail": true, "tables": "on", "shimmer": true, "charts": true, "markdown": true, "icons": "unicode", "frames": true, "prompt_box": "gradient" })
+        );
+        assert!(!v.to_string().contains('\n'), "one line");
+    }
+
+    #[test]
+    fn terminal_exports_render_alone() {
+        let v = mod_json(None, &defaults());
+        assert_eq!(
+            v,
+            json!({ "theme": "terminal", "kind": "dark", "roles": null, "gradient": null, "words": null,
+                    "render": { "rail": true, "tables": "on", "shimmer": true, "charts": true, "markdown": true, "icons": "unicode", "frames": true, "prompt_box": "frame" } })
+        );
+    }
+
+    #[test]
+    fn the_settings_words_win_list_by_list_and_none_is_null() {
+        let mut s = defaults();
+        s.spinner = vec!["Sailing".into()];
+        let v = mod_json(Some(&theme("tampa")), &s);
+        assert_eq!(v["words"], json!({ "spinner": ["Sailing"], "done": ["Struck", "Crossed", "Landed", "Plundered"] }));
+        s.done = vec!["Moored".into()];
+        assert_eq!(mod_json(Some(&theme("nord")), &s)["words"], json!({ "spinner": ["Sailing"], "done": ["Moored"] }));
+        assert_eq!(mod_json(Some(&theme("nord")), &defaults())["words"], serde_json::Value::Null, "a theme with no [words] and no setting");
+    }
+
+    #[test]
+    fn prompt_box_gradient_draws_as_frame_without_a_gradient() {
+        assert_eq!(mod_json(Some(&theme("tampa")), &defaults())["render"]["prompt_box"], json!("gradient"));
+        assert_eq!(mod_json(Some(&theme("nord")), &defaults())["render"]["prompt_box"], json!("frame"));
+        let mut s = defaults();
+        s.render.iter_mut().find(|(k, _)| *k == "prompt_box").unwrap().1 = json!("off");
+        assert_eq!(mod_json(Some(&theme("nord")), &s)["render"]["prompt_box"], json!("off"), "only gradient moves");
+    }
+}
