@@ -826,6 +826,18 @@ fn styled_text_keeps_its_style_across_a_line_break() {
 }
 
 #[test]
+fn the_padding_is_ground_alone() {
+    let p = Painter::themed(&theme("paper"), ColorDepth::Ansi256);
+    for open in ["7", "4", "9", "1;31", "4:3;58;5;1"] {
+        let out = p.block(&format!("ab\x1b[{open}m\ncd"), 8);
+        let first = out.split('\n').next().unwrap();
+        let gap = &first[first.find(&format!("\x1b[{open}m")).unwrap()..first.find(' ').unwrap()];
+        assert!(gap.contains(RESET), "{open} runs over the padding: {first:?}");
+        assert_eq!(sgr_before(out.split('\n').nth(1).unwrap(), "cd"), open, "the next line opens with it again");
+    }
+}
+
+#[test]
 fn a_reset_keeps_the_parameters_after_it() {
     let p = Painter::themed(&theme("paper"), ColorDepth::Ansi256);
     assert_eq!(sgr_before(&p.block("a\x1b[0;31mred", 8), "red"), "31");

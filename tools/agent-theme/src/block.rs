@@ -175,7 +175,11 @@ impl Band<'_> {
             rest = &rest[at + n..];
         }
         col = self.text(rest, col);
-        if self.own {
+        // The padding is ground alone; the pen stays open for the next line.
+        if self.pen.inked() {
+            self.out.push_str(RESET);
+        }
+        if self.pen.inked() || self.own {
             self.own = false;
             self.base(col);
         }
@@ -275,6 +279,11 @@ struct Effect {
 }
 
 impl Pen {
+    /// Whether anything but a ground of its own is open.
+    fn inked(&self) -> bool {
+        self.fg.is_some() || self.ul.is_some() || self.attrs.iter().any(Option::is_some)
+    }
+
     /// The parameters that open this style again, empty for none.
     fn params(&self) -> String {
         let parts = self.attrs.iter().chain([&self.fg, &self.bg, &self.ul]);
