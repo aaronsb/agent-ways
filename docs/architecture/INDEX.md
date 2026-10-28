@@ -175,6 +175,7 @@ _Install, update, configuration, permissions, the CLI contract, testing_
 | [ADR-511](./platform/ADR-511-every-mutating-lifecycle-verb-reports-what-it-would-change-until-commit.md) | Every mutating lifecycle verb reports what it would change until --commit | accepted |
 | [ADR-512](./platform/ADR-512-each-shipped-claude-code-mod-has-one-wanted-state-in-settings-under-mods-name-and-ways-manage-converges-every-target-to-it.md) | Each shipped Claude Code mod has one wanted state in settings, under mods.<name>, and ways manage converges every target to it | accepted |
 | [ADR-513](./platform/ADR-513-themes-reach-every-surface-with-gradients-glyphs-and-painted-report-bands.md) | Themes reach every surface, with gradients, glyphs and painted report bands | accepted |
+| [ADR-514](./platform/ADR-514-claude-code-follows-the-active-theme-through-the-ways-theme-mod-over-externalised-theme-layers.md) | Claude Code follows the active theme through the ways-theme mod, over externalised theme layers | accepted |
 
 ## Practice
 _The ways method, way authoring, the development loop_

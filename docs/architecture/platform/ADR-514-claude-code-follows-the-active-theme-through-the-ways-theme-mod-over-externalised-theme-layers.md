@@ -141,7 +141,7 @@ observable:
   - 'try: with a session open, run `ways settings set mods.ways-theme.copy false`; within 5 seconds the Copy, `as text` and `copy reply` labels are gone, with no restart'
   - 'see: under Miami Nights a one-line message sweeps the gradient left to right, a message of 4 lines or more runs it top to bottom, and a message with a pasted block takes the outline'
   - 'see: with the mod installed, Claude Code lists no `/skin` command and has no skins settings or gallery pane'
-status: proposed
+status: accepted
 date: 2026-10-28
 deciders:
   - aaronsb
