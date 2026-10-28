@@ -4,6 +4,7 @@
 //! The drain, `attend message inbox --drain`, is CLI machinery the Stop hook runs
 //! and stays here whole (ADR-172).
 
+use agent_fmt::say;
 use attend_groups::Room;
 use attend_instances::view::render_sender_label;
 use attend_instances::SnapshotCache;
@@ -42,13 +43,15 @@ pub(crate) fn cmd_inbox_read(msg_id: &str, json: bool) {
     }
     // The process painter is plain on a pipe (#388).
     let sender = render_sender_label(&msg.from, &msg.source, &agent_theme::painter(), &SnapshotCache::new());
-    println!("From: {sender}");
-    println!("ID:   {msg_id}");
+    let mut out = String::new();
+    say!(out, "From: {sender}");
+    say!(out, "ID:   {msg_id}");
     if let Some(re_id) = &msg.re {
-        println!("Re:   {re_id}");
+        say!(out, "Re:   {re_id}");
     }
-    println!();
-    println!("{}", msg.message);
+    say!(out);
+    say!(out, "{}", msg.message);
+    agent_fmt::print_block(&out);
 }
 
 pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>, json: bool) {
@@ -61,11 +64,11 @@ pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>, json: bo
         return;
     }
     if listing.total == 0 {
-        println!("no messages");
+        agent_fmt::print_block("no messages\n");
         return;
     }
     if listing.messages.is_empty() {
-        println!("no messages on page {} ({} total, {} page(s))", listing.page, listing.total, listing.pages);
+        agent_fmt::print_block(&format!("no messages on page {} ({} total, {} page(s))\n", listing.page, listing.total, listing.pages));
         return;
     }
     // The process painter is plain on a pipe (#388); a TTY keeps the
@@ -82,6 +85,7 @@ pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>, json: bo
     // Mirrors the behavior of `ls` switching to one-per-line output when
     // it detects a pipe.
     use std::io::IsTerminal;
+    let mut out = String::new();
     if std::io::stdout().is_terminal() {
         let mut t = agent_fmt::Table::new(&["When", "Scope", "From", "ID", "Re", "Message", "Source"]);
         t.max_width(1, 10);
@@ -99,29 +103,31 @@ pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>, json: bo
                 &m.source,
             ]);
         }
-        t.print();
+        out.push_str(&t.render());
     } else {
         // Non-TTY: one block per message, full-width fields.
         for m in &listing.messages {
-            println!("[{}] {}", m.scope, sender(m));
-            println!("  when:    {}", agent_fmt::compact_time(m.mtime, now));
-            println!("  id:      {}", m.id);
+            say!(out, "[{}] {}", m.scope, sender(m));
+            say!(out, "  when:    {}", agent_fmt::compact_time(m.mtime, now));
+            say!(out, "  id:      {}", m.id);
             if let Some(re) = m.re.as_deref().filter(|re| !re.is_empty()) {
-                println!("  re:      {}", re);
+                say!(out, "  re:      {}", re);
             }
-            println!("  source:  {}", m.source);
-            println!("  message: {}", m.message);
-            println!();
+            say!(out, "  source:  {}", m.source);
+            say!(out, "  message: {}", m.message);
+            say!(out);
         }
     }
-    print_inbox_footer(listing.page, listing.total, listing.messages.len(), listing.older, cursor_ts);
+    inbox_footer(&mut out, listing.page, listing.total, listing.messages.len(), listing.older, cursor_ts);
+    agent_fmt::print_block(&out);
 }
 
 /// Pagination footer: what page this is, and how to walk further back.
-fn print_inbox_footer(page: usize, total: usize, shown: usize, older: usize, cursor_ts: u64) {
-    println!("page {page} · showing {shown} of {total} message(s)");
+fn inbox_footer(out: &mut String, page: usize, total: usize, shown: usize, older: usize, cursor_ts: u64) {
+    say!(out, "page {page} · showing {shown} of {total} message(s)");
     if older > 0 {
-        println!(
+        say!(
+            out,
             "  ↑ {older} older — attend message inbox --page {} (or --before {cursor_ts})",
             page + 1
         );
