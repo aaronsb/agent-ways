@@ -157,6 +157,10 @@ fn nord() -> Palette {
     Palette::new(ThemeSet::bundled().get("nord"), ColorDepth::TrueColor)
 }
 
+fn miami_nights() -> Palette {
+    Palette::new(ThemeSet::bundled().get("miami-nights"), ColorDepth::TrueColor)
+}
+
 fn picker(palette: Palette) -> Introspect {
     let open = Box::new(|id: &str, live: bool| if id == SESSION { Ok(replay(live)) } else { Err(format!("no events for session {}", &id[..12])) });
     Introspect::picking(Picker::new(sessions(), PROJECT.into()), open, no_spend(), palette, Shape::PLAIN)
@@ -1573,4 +1577,23 @@ fn a_check_without_an_agent_counts_against_the_last_firer() {
     let last = frames.last().unwrap();
     assert_eq!(last.window, 2);
     assert_eq!(counts(last), [("main".to_string(), 1)], "after the boundary the bare check is main's");
+}
+
+#[test]
+fn a_gradient_theme_grounds_every_cell_of_the_session_screens() {
+    let mut s = picker(miami_nights());
+    let mut shot = |s: &mut Introspect, name: &str| {
+        for (w, h) in [(80, 25), (120, 35)] {
+            assert_eq!(agent_tui::testkit::ungrounded(&render(s, w, h)), None, "{name} {w}x{h}: a cell off the theme's ground");
+        }
+    };
+    shot(&mut s, "picker");
+    let mut s = showing(replay(false), miami_nights(), Shape::ROUND);
+    shot(&mut s, "timeline");
+    for (key, name) in [(KeyCode::Char('2'), "fires"), (KeyCode::Char('3'), "spend"), (KeyCode::Char('1'), "timeline again")] {
+        press(&mut s, &[key]);
+        shot(&mut s, name);
+    }
+    press(&mut s, &[KeyCode::End, KeyCode::Down, KeyCode::Enter]);
+    shot(&mut s, "why");
 }

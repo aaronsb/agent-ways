@@ -682,6 +682,16 @@ fn fill_leaves_no_cell_on_the_terminal_default() {
 }
 
 #[test]
+fn a_gradient_theme_grounds_every_cell_of_every_screen() {
+    let d = dir("gradient");
+    std::fs::write(d.join("choice"), "miami-nights\n").unwrap();
+    let mut app = app_in(&d, ColorDepth::TrueColor);
+    every_screen(&mut app, |name, b| {
+        assert_eq!(crate::testkit::ungrounded(b), None, "{name}: a cell off the theme's ground");
+    });
+}
+
+#[test]
 fn no_color_draws_no_colour_anywhere() {
     let d = dir("nocolor");
     std::fs::write(d.join("choice"), "nord\n").unwrap();

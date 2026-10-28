@@ -1878,3 +1878,13 @@ fn a_channel_menu_joins_a_channel_the_human_is_not_in() {
     press(&mut c, key(KeyCode::Enter));
     assert_eq!(c.status(), "dry run: /join not run");
 }
+
+#[test]
+fn a_gradient_theme_grounds_every_cell_of_the_chat() {
+    for side in [false, true] {
+        let mut c = chat_at(ColorDepth::TrueColor, Some("miami-nights")).sidebar(side);
+        for (w, h) in [(80, 25), (120, 35)] {
+            assert_eq!(testkit::ungrounded(&testkit::render_screen(&mut c, w, h)), None, "sidebar {side}, {w}x{h}: a cell off the theme's ground");
+        }
+    }
+}
