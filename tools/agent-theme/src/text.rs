@@ -201,6 +201,11 @@ fn syntax(src: &str, e: &toml::de::Error) -> ThemeError {
     let Some(span) = e.span() else { return ThemeError::whole(format!("not valid TOML: {first}")) };
     let n = line_of(src, span.start);
     let text = src.lines().nth(n - 1).unwrap_or("");
+    // toml's own message for a date names its private datetime key.
+    if first.contains(DATETIME) {
+        let key = text.split_once('=').map_or("", |(k, _)| k.trim());
+        return ThemeError::at(n, format!("`{key}` is a date; a value is a double-quoted string"));
+    }
     let hint = match text.split_once('=').map(|(_, v)| v.trim()) {
         Some(v) if !v.starts_with('"') => "; values are double-quoted strings",
         _ => "",
@@ -228,16 +233,32 @@ fn gradient(value: &str) -> Result<Gradient, String> {
     Gradient::new(axis, &stops).ok_or_else(|| format!("THEME_GRADIENT takes 2 to 4 stops; `{value}` has {}", stops.len()))
 }
 
+/// The control characters and the line and paragraph separators: a glyph
+/// holding one would move the cursor or break the line it is drawn in.
+fn unprintable(g: &str) -> bool {
+    g.chars().any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}'))
+}
+
+/// `g`'s width in cells by ratatui's rule (ratatui-core 0.1.2,
+/// `buffer/cell_width.rs`): unicode-width's, and one more for each halfwidth
+/// katakana sound mark, U+FF9E and U+FF9F, which terminals draw a cell wide.
+pub(crate) fn cell_width(g: &str) -> usize {
+    g.width() + g.chars().filter(|c| matches!(c, '\u{FF9E}' | '\u{FF9F}')).count()
+}
+
 /// `value` as `count` glyphs for `key`, each one grapheme one column wide,
 /// or up to `widest` columns.
 fn glyphs(key: &str, value: &str, count: usize, widest: usize) -> Result<Vec<&'static str>, String> {
     let g: Vec<&str> = value.graphemes(true).collect();
     if g.len() != count {
         let noun = if count == 1 { "glyph" } else { "glyphs" };
-        return Err(format!("`{key}` takes {count} {noun}; `{value}` has {}", g.len()));
+        return Err(format!("`{key}` takes {count} {noun}; `{}` has {}", value.escape_debug(), g.len()));
     }
     for x in &g {
-        let w = x.width();
+        if unprintable(x) {
+            return Err(format!("`{key}` glyph `{}` is a control character or a line separator", x.escape_debug()));
+        }
+        let w = cell_width(x);
         if w == 0 || w > widest {
             let must = if widest == 1 { "1".to_string() } else { format!("1 to {widest}") };
             return Err(format!("`{key}` glyph `{x}` is {w} columns wide; it must be {must}"));
@@ -246,28 +267,62 @@ fn glyphs(key: &str, value: &str, count: usize, widest: usize) -> Result<Vec<&'s
     Ok(g.into_iter().map(intern).collect())
 }
 
-/// A waypoint's glyph: one code point, one column wide, or an emoji whose
-/// default presentation is two columns. A variation selector, a joiner or
-/// a combining mark would leave the width to the font, so none is taken.
+/// The code points with Emoji_Presentation=Yes, from Unicode's
+/// emoji-data.txt, version 17.0 (https://www.unicode.org/Public/17.0.0/emoji/emoji-data.txt),
+/// the version unicode-width 0.2.2 measures by.
+const EMOJI_PRESENTATION: [(u32, u32); 81] = [
+    (0x231A, 0x231B), (0x23E9, 0x23EC), (0x23F0, 0x23F0), (0x23F3, 0x23F3), (0x25FD, 0x25FE),
+    (0x2614, 0x2615), (0x2648, 0x2653), (0x267F, 0x267F), (0x2693, 0x2693), (0x26A1, 0x26A1),
+    (0x26AA, 0x26AB), (0x26BD, 0x26BE), (0x26C4, 0x26C5), (0x26CE, 0x26CE), (0x26D4, 0x26D4),
+    (0x26EA, 0x26EA), (0x26F2, 0x26F3), (0x26F5, 0x26F5), (0x26FA, 0x26FA), (0x26FD, 0x26FD),
+    (0x2705, 0x2705), (0x270A, 0x270B), (0x2728, 0x2728), (0x274C, 0x274C), (0x274E, 0x274E),
+    (0x2753, 0x2755), (0x2757, 0x2757), (0x2795, 0x2797), (0x27B0, 0x27B0), (0x27BF, 0x27BF),
+    (0x2B1B, 0x2B1C), (0x2B50, 0x2B50), (0x2B55, 0x2B55), (0x1F004, 0x1F004), (0x1F0CF, 0x1F0CF),
+    (0x1F18E, 0x1F18E), (0x1F191, 0x1F19A), (0x1F1E6, 0x1F1FF), (0x1F201, 0x1F201),
+    (0x1F21A, 0x1F21A), (0x1F22F, 0x1F22F), (0x1F232, 0x1F236), (0x1F238, 0x1F23A),
+    (0x1F250, 0x1F251), (0x1F300, 0x1F320), (0x1F32D, 0x1F335), (0x1F337, 0x1F37C),
+    (0x1F37E, 0x1F393), (0x1F3A0, 0x1F3CA), (0x1F3CF, 0x1F3D3), (0x1F3E0, 0x1F3F0),
+    (0x1F3F4, 0x1F3F4), (0x1F3F8, 0x1F43E), (0x1F440, 0x1F440), (0x1F442, 0x1F4FC),
+    (0x1F4FF, 0x1F53D), (0x1F54B, 0x1F54E), (0x1F550, 0x1F567), (0x1F57A, 0x1F57A),
+    (0x1F595, 0x1F596), (0x1F5A4, 0x1F5A4), (0x1F5FB, 0x1F64F), (0x1F680, 0x1F6C5),
+    (0x1F6CC, 0x1F6CC), (0x1F6D0, 0x1F6D2), (0x1F6D5, 0x1F6D8), (0x1F6DC, 0x1F6DF),
+    (0x1F6EB, 0x1F6EC), (0x1F6F4, 0x1F6FC), (0x1F7E0, 0x1F7EB), (0x1F7F0, 0x1F7F0),
+    (0x1F90C, 0x1F93A), (0x1F93C, 0x1F945), (0x1F947, 0x1F9FF), (0x1FA70, 0x1FA7C),
+    (0x1FA80, 0x1FA8A), (0x1FA8E, 0x1FAC6), (0x1FAC8, 0x1FAC8), (0x1FACD, 0x1FADC),
+    (0x1FADF, 0x1FAEA), (0x1FAEF, 0x1FAF8),
+];
+
+fn emoji_presentation(c: char) -> bool {
+    let c = c as u32;
+    EMOJI_PRESENTATION.binary_search_by(|&(lo, hi)| if hi < c { std::cmp::Ordering::Less } else if lo > c { std::cmp::Ordering::Greater } else { std::cmp::Ordering::Equal }).is_ok()
+}
+
+/// A waypoint's glyph: one grapheme one column wide, or two wide where
+/// every code point has Emoji_Presentation=Yes. A variation selector or a
+/// joiner would leave the width to the font, so neither is taken.
 fn waypoint_glyph(g: &str) -> Result<&'static str, String> {
-    let mut cs = g.chars();
-    let (Some(c), None) = (cs.next(), cs.next()) else {
-        return Err(format!("glyph `{g}` is not one character; variation selectors, joiners and combining marks are refused"));
-    };
-    // unicode-width counts these blocks two columns wide only for code
-    // points with Emoji_Presentation=Yes.
-    let emoji = matches!(c as u32, 0x231A..=0x23FF | 0x2600..=0x27BF | 0x2B00..=0x2BFF | 0x1F000..=0x1FAFF);
-    match unicode_width::UnicodeWidthChar::width(c) {
-        Some(1) => Ok(intern(g)),
-        Some(2) if emoji => Ok(intern(g)),
+    if unprintable(g) {
+        return Err(format!("glyph `{}` is a control character or a line separator", g.escape_debug()));
+    }
+    let n = g.graphemes(true).count();
+    if n != 1 {
+        return Err(format!("glyph `{g}` is {n} graphemes; it takes one"));
+    }
+    if g.contains(['\u{FE0F}', '\u{200D}']) {
+        return Err(format!("glyph `{g}` carries a variation selector or a joiner, which leave its width to the font"));
+    }
+    match cell_width(g) {
+        1 => Ok(intern(g)),
+        2 if g.chars().all(emoji_presentation) => Ok(intern(g)),
         _ => Err(format!("glyph `{g}` is neither one column wide nor an emoji drawn two columns wide")),
     }
 }
 
-/// `[[waypoints]]`: one to sixteen tables, each a glyph and an optional fg.
-fn waypoints(src: &str, v: &Leaf) -> Result<Waypoints, Vec<ThemeError>> {
+/// `[[waypoints]]`, its key on line `line`: one to sixteen tables, each a
+/// glyph and an optional fg.
+fn waypoints(src: &str, line: usize, v: &Leaf) -> Result<Waypoints, Vec<ThemeError>> {
     let Leaf::Array(entries) = v else {
-        return Err(vec![ThemeError::whole(format!("`waypoints` is {}; it is an array of tables, `[[waypoints]]`", v.kind()))]);
+        return Err(vec![ThemeError::at(line, format!("`waypoints` is {}; it is an array of tables, `[[waypoints]]`", v.kind()))]);
     };
     let mut errs = Vec::new();
     let mut out = Vec::new();
@@ -307,7 +362,7 @@ fn waypoints(src: &str, v: &Leaf) -> Result<Waypoints, Vec<ThemeError>> {
         }
     }
     if entries.is_empty() {
-        errs.push(ThemeError::whole(format!("waypoints takes 1 to {} entries; it has none", Waypoints::MAX)));
+        errs.push(ThemeError::at(line, format!("waypoints takes 1 to {} entries; it has none", Waypoints::MAX)));
     }
     match Waypoints::new(&out) {
         Some(w) if errs.is_empty() => Ok(w),
@@ -334,7 +389,7 @@ pub fn parse(src: &str) -> Result<Theme, Vec<ThemeError>> {
     for (k, v) in top.0 {
         let (n, key) = (line_of(src, k.span().start), k.get_ref().as_str());
         if key == "waypoints" {
-            match waypoints(src, v.get_ref()) {
+            match waypoints(src, n, v.get_ref()) {
                 Ok(w) => decor.waypoints = Some(w),
                 Err(e) => errs.extend(e),
             }

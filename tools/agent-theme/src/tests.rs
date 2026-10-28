@@ -763,15 +763,69 @@ fn waypoint_errors_name_the_line_and_entry() {
     let line = |n: usize| base.lines().count() + 1 + n;
     let t = "[[waypoints]]\nglyph = \"◆\"\nbg = \"#000000\"\n";
     has(with(t), &format!("line {}: `bg` is not a waypoint key; an entry takes glyph and fg (waypoints entry 1)", line(3)));
-    has(with("[[waypoints]]\nglyph = \"❤\u{fe0f}\"\n"), "is not one character; variation selectors, joiners and combining marks are refused (waypoints entry 1)");
-    has(with("[[waypoints]]\nglyph = \"👨\u{200d}👩\"\n"), "is not one character");
+    has(with("[[waypoints]]\nglyph = \"❤\u{fe0f}\"\n"), "carries a variation selector or a joiner, which leave its width to the font (waypoints entry 1)");
+    has(with("[[waypoints]]\nglyph = \"👨\u{200d}👩\"\n"), "carries a variation selector or a joiner");
+    has(with("[[waypoints]]\nglyph = \"ab\"\n"), "glyph `ab` is 2 graphemes; it takes one");
     has(with("[[waypoints]]\nglyph = \"字\"\n"), "glyph `字` is neither one column wide nor an emoji drawn two columns wide");
     has(with("[[waypoints]]\nglyph = \"◆\"\nfg = \"#12345\"\n"), "`#12345` is not a #rrggbb colour (waypoints entry 1, key `fg`)");
     has(with("[[waypoints]]\nfg = \"#123456\"\n"), "waypoints entry 1 has no glyph");
-    has(with("waypoints = []\n"), "waypoints takes 1 to 16 entries; it has none");
+    has(with("waypoints = []\n"), &format!("line {}: waypoints takes 1 to 16 entries; it has none", line(1)));
     has(with(&"[[waypoints]]\nglyph = \"◆\"\n".repeat(17)), "waypoints takes 1 to 16 entries; this is entry 17");
-    has(with("waypoints = \"◆\"\n"), "`waypoints` is a string; it is an array of tables");
+    has(with("waypoints = \"◆\"\n"), &format!("line {}: `waypoints` is a string; it is an array of tables", line(1)));
     assert!(validate(&with(&"[[waypoints]]\nglyph = \"◆\"\n".repeat(16))).is_empty(), "sixteen is the most");
+}
+
+#[test]
+fn a_waypoint_emoji_has_emoji_presentation() {
+    let base = theme_src("nord");
+    let glyph = |g: &str| validate(&format!("{base}\n[[waypoints]]\nglyph = {}\n", toml::Value::String(g.into())));
+    for g in ["\u{1F202}", "\u{1F237}"] {
+        let e = glyph(g);
+        assert!(e.iter().any(|x| x.message.contains("neither one column wide nor an emoji drawn two columns wide")), "{g}: Emoji_Presentation=No: {e:?}");
+    }
+    assert!(!glyph("中").is_empty(), "two columns wide and no emoji");
+    assert!(glyph("a\u{301}").is_empty(), "a combining sequence is one grapheme one column wide");
+    for t in bundled() {
+        for w in t.decor.waypoints.iter().flat_map(|w| w.as_slice()) {
+            assert!(glyph(w.glyph).is_empty(), "{}: {}", t.name, w.glyph);
+        }
+    }
+    assert_eq!(bundled().iter().filter_map(|t| t.decor.waypoints).map(|w| w.as_slice().len()).sum::<usize>(), 30, "the Florida sets");
+}
+
+#[test]
+fn control_characters_are_refused_in_every_glyph() {
+    let base = theme_src("nord");
+    let keys = [("THEME_MARK", 1), ("THEME_ORNAMENT", 1), ("THEME_RULE_GLYPHS", 2), ("THEME_PRESENCE", 2), ("THEME_BORDER_GLYPHS", 8), ("THEME_EVENT_HEAD", 1), ("THEME_EVENT_DUE", 2)];
+    for bad in ["\u{1b}", "\n", "\t", "\u{7f}", "\u{85}", "\u{2028}", "\u{2029}"] {
+        for (key, count) in keys {
+            let value = format!("{bad}{}", "x".repeat(count - 1));
+            let e = validate(&format!("{base}\n{key}={}\n", toml::Value::String(value)));
+            assert!(e.iter().any(|x| x.message.contains("is a control character or a line separator")), "{key} {bad:?}: {e:?}");
+        }
+        let e = validate(&format!("{base}\n[[waypoints]]\nglyph = {}\n", toml::Value::String(bad.into())));
+        assert!(e.iter().any(|x| x.message.contains("is a control character or a line separator")), "waypoint {bad:?}: {e:?}");
+    }
+}
+
+#[test]
+fn glyph_width_follows_ratatui() {
+    use ratatui_core::buffer::CellWidth;
+    for g in ["a", "ｶﾞ", "\u{FF9E}", "中", "🌴", "a\u{301}", "◆"] {
+        assert_eq!(crate::text::cell_width(g), g.cell_width() as usize, "{g}");
+    }
+    let base = theme_src("nord");
+    let e = validate(&format!("{base}\nTHEME_MARK=\"ｶﾞ\"\n"));
+    assert!(e.iter().any(|x| x.message.contains("is 2 columns wide; it must be 1")), "{e:?}");
+}
+
+#[test]
+fn a_date_value_says_what_a_value_is() {
+    let base = theme_src("nord");
+    let src = format!("{base}\nTHEME_MARK=1979-05-27\n");
+    let e = validate(&src);
+    let line = base.lines().count() + 2;
+    assert_eq!(e.iter().map(|x| x.to_string()).collect::<Vec<_>>(), [format!("line {line}: `THEME_MARK` is a date; a value is a double-quoted string")]);
 }
 
 #[test]
