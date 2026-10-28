@@ -12,7 +12,7 @@
 // the change applies live.
 //
 // The frames: on the terminal, under an agent-ways theme, each reply sits in
-// a border, on the theme's ground when the theme is dark, and each tool call
+// a border on the theme's ground, and each tool call
 // and tool group in a border, wrapped around the engine's own drawing. The colours are Claude
 // Code theme keys, so they follow `custom:ways`. An expanded transcript or row (ctrl+o),
 // `verbose`, a reply longer than MAX_FRAMED_CHARS and every other surface
@@ -27,7 +27,7 @@
 
 import type { EngineInterface, Register, RenderElement } from 'claude-code'
 
-import { DEFAULT_THEME, FRAME, REPLY_GROUND, TERMINAL, WAYS_TIMEOUT_MS, activeArgv, configDir, exportArgv, hasGround, parseActive, parseTheme, shouldFrame, themeFile, themeText } from './lib.ts'
+import { DEFAULT_THEME, FRAME, TERMINAL, WAYS_TIMEOUT_MS, activeArgv, configDir, exportArgv, parseActive, parseTheme, shouldFrame, themeFile, themeText } from './lib.ts'
 import type { ClaudeCodeTheme, Run } from './lib.ts'
 
 const debug = ($: EngineInterface, text: string) => $.ui.log(`ways-theme: ${text}`, { to: 'debug' })
@@ -36,7 +36,6 @@ const debug = ($: EngineInterface, text: string) => $.ui.log(`ways-theme: ${text
  *  when the transcript is expanded or collapsed (ctrl+o). */
 const frames = { isThemed: false, isVerbose: false }
 let isTranscriptExpanded = false
-let replyFrame: Record<string, string> = FRAME.reply
 
 /** One bounded `ways` call; undefined when it could not start or ran past
  *  its bound. */
@@ -76,7 +75,6 @@ export async function follow($: EngineInterface): Promise<void> {
   const old = await $.fs.read(file).catch(() => undefined)
   if (old !== text) await $.fs.write(file, text)
   frames.isThemed = theme.overrides !== undefined
-  replyFrame = hasGround(theme) ? { ...FRAME.reply, ...REPLY_GROUND } : FRAME.reply
 }
 
 /** Claude Code's `verbose` row, read once; off when it cannot be read. */
@@ -133,7 +131,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     const c = { surface: e.surface, ...frames, isExpanded: isTranscriptExpanded, length: e.props.text.length }
     if (!shouldFrame(c) || !e.props.isFirstOfReply) return next(e)
-    return framed($, e, await next(e), replyFrame)
+    return framed($, e, await next(e), FRAME.reply)
   })
 
   on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {

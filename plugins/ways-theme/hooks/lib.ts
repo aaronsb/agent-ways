@@ -75,20 +75,17 @@ export const themeText = (t: ClaudeCodeTheme): string => `${JSON.stringify(t, nu
 export const MAX_FRAMED_CHARS = 20000
 
 /** The colours of the frames, as Claude Code theme keys, so a frame
- *  follows `custom:ways` with no colour in the mod. */
+ *  follows `custom:ways` with no colour in the mod. A reply also takes the
+ *  theme's ground. The exporter writes the theme's kind as the base: a dark
+ *  theme pairs with Claude Code's dark base and a terminal whose foreground
+ *  is light, a light theme with the light base and a dark foreground, and the
+ *  body Claude Code draws in the terminal's own foreground reads on either
+ *  ground. A light theme in a dark terminal is a mismatched setup. */
 export const FRAME = {
-  reply: { borderColor: 'claude' },
+  reply: { borderColor: 'claude', backgroundColor: 'userMessageBackground' },
   tool: { borderColor: 'suggestion' },
   toolErrored: { borderColor: 'error' },
 } as const
-
-/** The reply's ground. Claude Code draws a reply's body in the terminal's
- *  own foreground, so the ground goes under a dark theme only, where that
- *  foreground is light; under a light theme it would wash the body out. */
-export const REPLY_GROUND = { backgroundColor: 'userMessageBackground' } as const
-
-/** Whether a theme's replies take the ground. */
-export const hasGround = (t: ClaudeCodeTheme): boolean => t.base.startsWith('dark')
 
 /** What a render site knows when it decides whether to frame. */
 export type FrameCase = {

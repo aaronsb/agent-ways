@@ -197,13 +197,11 @@ describe('frames on the terminal', () => {
     await ui.unmount()
   })
 
-  test('a light theme frames a reply without the ground', async ($, on) => {
+  test('a light theme frames a reply on the same ground', async ($, on) => {
     host(on, { active: ok('tampa\n'), exported: ok(JSON.stringify({ ...MIAMI, name: 'Tampa', base: 'light' })) })
     await $.session.start(INTERACTIVE)
     const ui = await $.ui.mount({ ...REPLY, surface: 'terminal' } as never)
-    const drawn = (await ui.drawn()) as { props: Record<string, unknown> }
-    expect(drawn).toMatchObject({ type: 'Box', props: { borderStyle: 'round', borderColor: 'claude' } })
-    expect(drawn.props.backgroundColor).toBeUndefined()
+    expect(await ui.drawn()).toMatchObject({ type: 'Box', props: { borderStyle: 'round', backgroundColor: 'userMessageBackground', borderColor: 'claude' } })
     await ui.unmount()
   })
 
