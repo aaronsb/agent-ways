@@ -13,7 +13,9 @@ import type { ElementTable } from 'claude-code'
 
 import { gradientAt } from './config.ts'
 import type { Axis } from './config.ts'
-import { widthOf } from './markdown.ts'
+import { IS_SEGMENTED, graphemes, widthOf } from './markdown.ts'
+
+export { graphemes }
 
 /** Cells of ground left and right of the text. */
 export const PAD_X = 2
@@ -29,16 +31,6 @@ export const axisFor = (textLines: number): Axis => (textLines >= VERTICAL_FROM_
 /** One stretch of a line on one ground. */
 export type Run = { text: string; ground: string }
 
-type Segmenter = { segment: (text: string) => Iterable<{ segment: string }> }
-const SEGMENTER: Segmenter | undefined = (() => {
-  const Make = (Intl as { Segmenter?: new (locale: undefined, options: { granularity: 'grapheme' }) => Segmenter }).Segmenter
-  return Make === undefined ? undefined : new Make(undefined, { granularity: 'grapheme' })
-})()
-
-/** `text` a grapheme at a time where the engine segments text, else a code
- *  point at a time. */
-export const graphemes = (text: string): string[] => (SEGMENTER === undefined ? [...text] : Array.from(SEGMENTER.segment(text), s => s.segment))
-
 /** A joiner, an emoji variation selector, a skin-tone modifier or a regional
  *  indicator: a sequence whose code points do not add up to its width. */
 const EMOJI_SEQUENCE = /[\u200d\ufe0f\u{1f3fb}-\u{1f3ff}\u{1f1e6}-\u{1f1ff}]/u
@@ -50,7 +42,7 @@ const textCells = (text: string): number => graphemes(text).reduce((sum, g) => s
 
 /** Whether the box can lay `text` out: always where the engine segments
  *  graphemes; without that, only text that holds no emoji sequence. */
-export const canMeasure = (text: string, isSegmented = SEGMENTER !== undefined): boolean => isSegmented || !EMOJI_SEQUENCE.test(text)
+export const canMeasure = (text: string, isSegmented = IS_SEGMENTED): boolean => isSegmented || !EMOJI_SEQUENCE.test(text)
 
 /** `paragraph` cut into lines of at most `width` cells: at spaces where it
  *  can, inside a word longer than a line where it must, never inside a

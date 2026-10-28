@@ -24,7 +24,7 @@ import { atom, memberOf, read, update } from 'claude-code'
 import type { EngineInterface, On, RenderSurface, Timer } from 'claude-code'
 
 import { onPickup } from '../follow.ts'
-import { isExpandedView, shouldFrame } from '../lib.ts'
+import { FRAME_INSET, isExpandedView, shouldFrame } from '../lib.ts'
 
 import { MOD_EXPORT_ARGV, parseExport, setupOf } from './config.ts'
 import type { Setup } from './config.ts'
@@ -576,8 +576,10 @@ export function registerSkins(on: On, shared: Shared): void {
     const svg = e.surface !== 'terminal' && setup.prefs.tables === 'on' && 'Svg' in ui ? ui.Svg : undefined
     const base = await sessionLook($, e, lookOf(ui, setup, e.surface, copier($, e.surface)), replyNeeds(text, segments))
     const look = base.svg === undefined ? base : { ...base, isFirstDraw: await firstDraws($, e) }
-    const rows = replyRows(look, segments, e.viewport?.columns ?? 100, svg, segments.length > 1 ? text : undefined)
+    // A framed reply is laid out inside the frame the register module draws around it.
     const framed = isFramed(setup, e, shared.view())
+    const columns = (e.viewport?.columns ?? 100) - (framed ? FRAME_INSET : 0)
+    const rows = replyRows(look, segments, columns, svg, segments.length > 1 ? text : undefined)
     return withSettle($, e, framed ? marginRow(look, rows) : rows)
   })
 

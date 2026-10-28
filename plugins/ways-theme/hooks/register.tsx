@@ -42,7 +42,7 @@
 
 import type { EngineInterface, Register, RenderElement } from 'claude-code'
 
-import { FRAME } from './lib.ts'
+import { FRAME, FRAME_PAD_X } from './lib.ts'
 import { configRows, noteRow, startFollow, startRows } from './follow.ts'
 import { activeSetup, currentLook, isFramed, registerSkins } from './skins/hub.tsx'
 import type { View } from './skins/hub.tsx'
@@ -62,7 +62,7 @@ const turnLines = new Map<string, boolean>()
 function framed($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0], inner: RenderElement, frame: Record<string, string>): RenderElement {
   const { Box } = $.ui.resolve(e)
   return (
-    <Box marginTop={1} borderStyle="round" paddingX={1} {...frame}>
+    <Box marginTop={1} borderStyle="round" paddingX={FRAME_PAD_X} {...frame}>
       <Box marginTop={-1}>{inner}</Box>
     </Box>
   )

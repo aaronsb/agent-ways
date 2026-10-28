@@ -259,21 +259,33 @@ const cutTo = (text: string, width: number): string => {
   return `${kept}…`
 }
 
-// Natural column widths, narrowed from the widest down until the table fits.
+// The narrowest a column is narrowed to once its words no longer fit whole.
+const MIN_COLUMN = 3
+
+// The cells of the widest word in `text`: the narrowest it wraps to without breaking one.
+const longestWord = (text: string): number => Math.max(0, ...text.split(/\s+/).map(widthOf))
+
+// Natural column widths, narrowed from the widest down until the table fits: first no
+// column below its longest word, the header's included, so cells wrap between words;
+// then, when the words alone are too wide for `maxWidth`, down to MIN_COLUMN, and the
+// words that no longer fit break inside.
 export function columnWidths(table: Table, maxWidth: number, gap: number): number[] {
-  const widths = table.header.map((cell, col) =>
-    Math.max(widthOf(cell), ...table.rows.map(row => widthOf(row[col] ?? ''))),
-  )
+  const cells = (col: number) => [table.header[col] ?? '', ...table.rows.map(row => row[col] ?? '')]
+  const widths = table.header.map((_, col) => Math.max(...cells(col).map(widthOf)))
+  const words = table.header.map((_, col) => Math.max(...cells(col).map(longestWord)))
   const budget = maxWidth - gap * (widths.length - 1)
 
-  while (widths.reduce((sum, width) => sum + width, 0) > budget) {
-    const widest = widths.indexOf(Math.max(...widths))
+  for (const floor of [(col: number) => words[col] ?? 0, () => MIN_COLUMN]) {
+    while (widths.reduce((sum, width) => sum + width, 0) > budget) {
+      const narrowable = widths.map((width, col) => (width > Math.max(floor(col), MIN_COLUMN) ? width : -1))
+      const widest = narrowable.indexOf(Math.max(...narrowable))
 
-    if ((widths[widest] ?? 0) <= 3) {
-      break
+      if ((narrowable[widest] ?? -1) < 0) {
+        break
+      }
+
+      widths[widest] = (widths[widest] ?? 0) - 1
     }
-
-    widths[widest] = (widths[widest] ?? 0) - 1
   }
 
   return widths
@@ -284,12 +296,24 @@ export function cutCell(text: string, width: number): string {
   return cutTo(text, width)
 }
 
-// Splits a word too long for its column into pieces that each fit.
+type Segmenter = { segment: (text: string) => Iterable<{ segment: string }> }
+const SEGMENTER: Segmenter | undefined = (() => {
+  const Make = (Intl as { Segmenter?: new (locale: undefined, options: { granularity: 'grapheme' }) => Segmenter }).Segmenter
+  return Make === undefined ? undefined : new Make(undefined, { granularity: 'grapheme' })
+})()
+
+// Whether the engine segments text into graphemes.
+export const IS_SEGMENTED = SEGMENTER !== undefined
+
+// `text` a grapheme at a time where the engine segments text, else a code point at a time.
+export const graphemes = (text: string): string[] => (SEGMENTER === undefined ? [...text] : Array.from(SEGMENTER.segment(text), s => s.segment))
+
+// Splits a word too long for its column into pieces that each fit, never inside a grapheme.
 function breakWord(word: string, width: number, measure: (text: string) => number): string[] {
   const pieces: string[] = []
   let piece = ''
 
-  for (const char of word) {
+  for (const char of graphemes(word)) {
     if (piece !== '' && measure(piece + char) > width) {
       pieces.push(piece)
       piece = char
