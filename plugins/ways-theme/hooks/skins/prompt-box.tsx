@@ -35,8 +35,8 @@ export type Run = { text: string; ground: string }
  *  indicator: a sequence whose code points do not add up to its width. */
 const EMOJI_SEQUENCE = /[\u200d\ufe0f\u{1f3fb}-\u{1f3ff}\u{1f1e6}-\u{1f1ff}]/u
 
-/** A grapheme's cells: two for an emoji sequence, else its code points'. */
-export const cellsOf = (grapheme: string): number => (EMOJI_SEQUENCE.test(grapheme) ? 2 : widthOf(grapheme))
+/** A grapheme's cells: two for an emoji, else its code points'. */
+export const cellsOf = (grapheme: string): number => widthOf(grapheme)
 
 const textCells = (text: string): number => graphemes(text).reduce((sum, g) => sum + cellsOf(g), 0)
 

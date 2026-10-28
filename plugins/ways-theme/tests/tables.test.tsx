@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { RenderElement } from 'claude-code'
 
-import { columnWidths, splitReply, widthOf, wrapLines } from '../hooks/skins/markdown.ts'
+import { columnWidths, graphemes, splitReply, widthOf, wrapLines } from '../hooks/skins/markdown.ts'
 import type { Table } from '../hooks/skins/markdown.ts'
 import { MIAMI_NIGHTS } from './fixtures.ts'
 import { INTERACTIVE, host, json, walk } from './host.tsx'
@@ -24,7 +24,6 @@ const DECISIONS = [
 
 const TABLE = splitReply(DECISIONS)[0] as Table
 
-const reply = (isFirstOfReply: boolean) => ({ text: DECISIONS, isFirstOfReply })
 const at = (columns: number, props: Record<string, unknown>) =>
   ({ plugin: 'ways-theme', surface: 'terminal', component: 'AssistantMessage', requestId: 'r1', viewport: { columns, rows: 50 }, props }) as never
 
@@ -34,14 +33,17 @@ const kids = (node: Node): Node[] => (node.children ?? []).filter((child): child
 
 // A cell, as the kit hands it: a column Box with the table's padding.
 const isCell = (node: Node) => node.type === 'Box' && node.props?.flexDirection === 'column' && node.props?.paddingX !== undefined
-const isRow = (node: Node) => node.type === 'Box' && node.props?.flexDirection === 'row' && kids(node).length === TABLE.header.length && kids(node).every(isCell)
+const isRow = (node: Node) => node.type === 'Box' && node.props?.flexDirection === 'row' && kids(node).length > 1 && kids(node).every(isCell)
 
 // The kit hands the tree, not the terminal's paint. This lays the table out the way the
 // terminal does, to the cell: the room is the viewport's columns less the reply's frame;
-// a column of fixed width takes it, a fluid one (width 0, flexGrow) takes its share of
-// what the table's border leaves, rounded down; a line wider than its column is cut to
-// it with `…`, as `wrap="truncate-end"` cuts it.
-type Painted = { room: number; drawn: number; rows: { cells: string[][]; height: number }[] }
+// a column of fixed width takes it; a fluid one (width 0, flexGrow) starts, as Yoga lays
+// it out, from its padding and takes its share of what the border and every column's
+// padding leave, rounded down. A line wider than its column is cut to it with `…`, as
+// `wrap="truncate-end"` cuts it, or wrapped again under `wrap="wrap"`. The model measures
+// with the `widthOf` the code wraps with, so it cannot catch a wrong measure; the width
+// tests below hold `widthOf` to the terminal's cells.
+type Painted = { room: number; drawn: number; isFluid: boolean; columns: number[]; rows: { cells: string[][]; height: number }[] }
 
 function paint(tree: RenderElement, columns: number): Painted {
   const nodes = walk(tree)
@@ -51,13 +53,14 @@ function paint(tree: RenderElement, columns: number): Painted {
   const first = kids(rows[0] ?? {})
   const isFluid = first.some(cell => cell.props?.flexGrow !== undefined)
   const grows = first.reduce((sum, cell) => sum + num(cell.props?.flexGrow), 0)
-  const inside = room - 2
-  const widthAt = (cell: Node) => (isFluid ? Math.floor((num(cell.props?.flexGrow) / grows) * inside) : num(cell.props?.width))
+  const basis = (cell: Node) => 2 * num(cell.props?.paddingX)
+  const free = room - 2 - first.reduce((sum, cell) => sum + basis(cell), 0)
+  const widthAt = (cell: Node) => (isFluid ? basis(cell) + Math.floor((num(cell.props?.flexGrow) / grows) * free) : num(cell.props?.width))
   const drawn = first.reduce((sum, cell) => sum + widthAt(cell), 2)
   const cut = (line: string, width: number) => {
     if (widthOf(line) <= width) return line
     let kept = ''
-    for (const char of line) {
+    for (const char of graphemes(line)) {
       if (widthOf(kept + char) > width - 1) break
       kept += char
     }
@@ -66,12 +69,14 @@ function paint(tree: RenderElement, columns: number): Painted {
   return {
     room,
     drawn,
+    isFluid,
+    columns: first.map(cell => widthAt(cell) - basis(cell)),
     rows: rows.map(row => {
       const cells = kids(row).map(cell => {
         const inner = widthAt(cell) - 2 * num(cell.props?.paddingX)
         return kids(cell)
           .filter(n => n.type === 'Text')
-          .map(text => cut(textOf(text), inner))
+          .flatMap(text => (text.props?.wrap === 'wrap' ? wrapLines(textOf(text), inner, Infinity) : [cut(textOf(text), inner)]))
       })
       return { cells, height: Math.max(...cells.map(lines => lines.length)) }
     }),
@@ -83,8 +88,8 @@ const words = (text: string) => text.split(/\s+/).filter(Boolean)
 // The part of a test's engine this file uses: mount a component, read its tree.
 type Kit = { ui: { mount: (input: never) => Promise<{ drawn: () => Promise<RenderElement>; unmount: () => Promise<unknown> }> } }
 
-async function drawn($: Kit, columns: number, isFirstOfReply: boolean): Promise<Painted> {
-  const ui = await $.ui.mount(at(columns, reply(isFirstOfReply)))
+async function drawn($: Kit, columns: number, isFirstOfReply: boolean, text = DECISIONS): Promise<Painted> {
+  const ui = await $.ui.mount(at(columns, { text, isFirstOfReply }))
   const painted = paint(await ui.drawn(), columns)
   await ui.unmount()
   return painted
@@ -172,4 +177,70 @@ describe('column widths', () => {
     expect(lines.join('').replace(/\s/g, '')).toBe(`see${word}here`)
     expect(lines.some(line => line.includes('👩‍👩‍👧'))).toBe(true)
   })
+
+  test('a break never lands inside an emoji sequence', () => {
+    expect(wrapLines('abcd👩‍👩‍👧', 6, Infinity)).toEqual(['abcd👩‍👩‍👧'])
+    // Each fills the line but for its last code point, so a break between code points
+    // would leave the selector or the keycap mark on a line of its own.
+    expect(wrapLines('abcd❤️', 5, Infinity)).toEqual(['abcd', '❤️'])
+    expect(wrapLines('abcd1️⃣', 5, Infinity)).toEqual(['abcd', '1️⃣'])
+  })
+})
+
+describe('terminal cells', () => {
+  test('an emoji takes two cells: its own presentation, a variation selector, a joined sequence', () => {
+    for (const emoji of ['✅', '⭐', '⚡', '⚠️', '❤️', '👩‍👩‍👧', '👍🏽', '🇯🇵', '1️⃣']) expect(widthOf(emoji)).toBe(2)
+  })
+
+  test('text presentation, combining marks and East Asian width keep their cells', () => {
+    expect(widthOf('⚠')).toBe(1)
+    expect(widthOf('e\u0301')).toBe(1)
+    expect(widthOf('漢字')).toBe(4)
+    expect(widthOf('ｗｉｄｅ')).toBe(8)
+    expect(widthOf('plain text')).toBe(10)
+  })
+
+  test('a cell with an emoji is sized for it and drawn whole', async ($, on) => {
+    host(on, { mod: json(MIAMI_NIGHTS) })
+    await $.session.start(INTERACTIVE)
+    const painted = await drawn($, 80, true, '| Feature | Status |\n|---|---|\n| Tables | ✅ Done |')
+    expect(painted.rows.map(row => row.cells.map(lines => lines.join(' ')))).toEqual([
+      ['Feature', 'Status'],
+      ['Tables', '✅ Done'],
+    ])
+    expect(painted.columns[1]).toBeGreaterThanOrEqual(7)
+  })
+})
+
+describe('a table of many columns', () => {
+  const wide = (count: number, cell: string) =>
+    [
+      `| ${Array.from({ length: count }, (_, i) => `C${i + 1}`).join(' | ')} |`,
+      `|${'---|'.repeat(count)}`,
+      `| ${Array.from({ length: count }, () => cell).join(' | ')} |`,
+    ].join('\n')
+
+  const CASES: [string, number, string][] = [
+    ['16 columns framed at 80', 80, wide(16, 'alpha beta')],
+    ['7 columns framed in a 40-column pane', 40, wide(7, 'gamma delta')],
+  ]
+
+  for (const [name, columns, text] of CASES) {
+    test(`${name}: fits its room at fixed widths and draws every word`, async ($, on) => {
+      host(on, { mod: json(MIAMI_NIGHTS) })
+      await $.session.start(INTERACTIVE)
+      const painted = await drawn($, columns, true, text)
+      expect(painted.drawn).toBeLessThanOrEqual(painted.room)
+      // Columns narrow to one cell before the table goes fluid, so the cells keep the
+      // lines they were wrapped to.
+      expect(painted.isFluid).toBe(false)
+      const table = splitReply(text)[0] as Table
+      painted.rows.forEach((row, r) => {
+        row.cells.forEach((lines, c) => {
+          for (const line of lines) expect(line).not.toContain('…')
+          expect(lines.join('')).toBe(([table.header, ...table.rows][r]?.[c] ?? '').replace(/\s/g, ''))
+        })
+      })
+    })
+  }
 })
