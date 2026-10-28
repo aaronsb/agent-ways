@@ -385,7 +385,7 @@ fn every_rendered_cell_of_a_gradient_holds_where_its_samples_do() {
     let (mut themes, mut held) = (0, 0);
     while themes < 200 {
         let mut t = parse(nord_src()).unwrap();
-        let dark = x.next() % 2 == 0;
+        let dark = x.next().is_multiple_of(2);
         t.kind = if dark { Kind::Dark } else { Kind::Light };
         t.background = Background::Fill;
         t.slots.bg = x.ground(dark);
@@ -394,7 +394,7 @@ fn every_rendered_cell_of_a_gradient_holds_where_its_samples_do() {
             t.slots.set(n, x.rgb());
         }
         let stops: Vec<Rgb> = (0..2 + x.next() % 3).map(|_| x.ground(dark)).collect();
-        let axis = if x.next() % 2 == 0 { Axis::Vertical } else { Axis::Horizontal };
+        let axis = if x.next().is_multiple_of(2) { Axis::Vertical } else { Axis::Horizontal };
         t.gradient = Gradient::new(axis, &stops);
         themes += 1;
         let p = Painter::themed(&t, ColorDepth::TrueColor);
