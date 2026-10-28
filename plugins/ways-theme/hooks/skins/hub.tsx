@@ -14,14 +14,17 @@
 // The look comes from one call, `ways settings theme export --mod`, at an
 // interactive session's start and every PICKUP_MS after. Any failure leaves
 // the look as it was (none at the start, so every row is the engine's own) and
-// logs one debug line per distinct reason. Whether a row is framed is
-// `isFramed`, which the register module's frames ask too; the person's message
-// draws here, in a gradient box, the outline, or not at all, after
-// `render.prompt_box`.
+// logs one debug line per distinct reason. Each later read hands follow.ts
+// its turn on the same timer (onPickup), saying whether the export now names
+// another theme. Whether a row is framed is `isFramed`, which the register
+// module's frames ask too; the person's message draws here, in a gradient box,
+// the outline, or not at all, after `render.prompt_box`, and is Claude Code's
+// own while another Claude Code theme than `custom:ways` is selected.
 
 import { atom, memberOf, read, update } from 'claude-code'
 import type { EngineInterface, On, RenderSurface, Timer } from 'claude-code'
 
+import { onPickup } from '../follow.ts'
 import { isExpandedView, shouldFrame } from '../lib.ts'
 
 import { MOD_EXPORT_ARGV, parseExport, setupOf } from './config.ts'
@@ -108,9 +111,10 @@ export async function activeSetup($: EngineInterface): Promise<Setup | null> {
   return decoded.setup
 }
 
-/** What the register module knows of the terminal's view: `verbose`, and
- *  whether the view is the ctrl+o transcript, as its TurnDuration hook reads it. */
-export type View = { isVerbose: boolean; isTranscriptExpanded: boolean }
+/** What the register module knows of the terminal's view: `verbose`,
+ *  whether the view is the ctrl+o transcript, as its TurnDuration hook reads
+ *  it, and whether Claude Code's selected theme is `custom:ways`. */
+export type View = { isVerbose: boolean; isTranscriptExpanded: boolean; isWaysTheme: boolean }
 
 /** Whether a row draws expanded: the ctrl+o transcript, or the row opened on
  *  its own, and neither under `verbose` (isExpandedView). */
@@ -120,15 +124,16 @@ type Row = { component: string; surface: RenderSurface; props: object }
 
 /** Whether the frame wraps this row. The register module asks it to draw the
  *  frame and this layer to draw the row inside it, of the same look and view,
- *  so the two never disagree. No look loaded, `render.frames` off or the
- *  `terminal` theme draws none. A reply is framed at the block that opens it;
- *  a row whose result skins draws as a shell card is that card's to frame. */
+ *  so the two never disagree. No look loaded, `render.frames` off, the
+ *  `terminal` theme or another Claude Code theme than `custom:ways` draws
+ *  none. A reply is framed at the block that opens it; a row whose result
+ *  skins draws as a shell card is that card's to frame. */
 export function isFramed(setup: Setup | null, e: Row, view: View): boolean {
   if (setup === null) return false
   const props = e.props as { isExpanded?: unknown; isFirstOfReply?: unknown; text?: unknown; tool?: unknown; output?: unknown; isErrored?: unknown }
   if (e.component === 'AssistantMessage' && props.isFirstOfReply !== true) return false
   const length = e.component === 'AssistantMessage' && typeof props.text === 'string' ? props.text.length : undefined
-  if (!shouldFrame({ surface: e.surface, isThemed: setup.frames && setup.themed, isVerbose: view.isVerbose, isExpanded: isExpanded(view, props.isExpanded), ...(length === undefined ? {} : { length }) })) return false
+  if (!shouldFrame({ surface: e.surface, isThemed: setup.frames && setup.themed, isWaysTheme: view.isWaysTheme, isVerbose: view.isVerbose, isExpanded: isExpanded(view, props.isExpanded), ...(length === undefined ? {} : { length }) })) return false
   if (e.component === 'ToolUse' && typeof props.tool === 'string' && SHELLS.has(props.tool) && setup.prefs.shell) {
     return keepsOwnRow(props.output) || shellResultOf(props.output, props.isErrored === true) === null
   }
@@ -155,8 +160,9 @@ function marginRow(look: Look, row: ReturnType<Ui['Box']>): ReturnType<Ui['Box']
 let lastFailure: string | undefined
 
 /** One bounded read of the export into the look atom. A failure keeps the
- *  look the atom holds. */
-export async function pickUp($: EngineInterface): Promise<void> {
+ *  look the atom holds. True when the export names another theme than the
+ *  look it replaced; false for the first look, an unchanged one or a failure. */
+export async function pickUp($: EngineInterface): Promise<boolean> {
   let failure: string
   try {
     const run = await $.process.run([...MOD_EXPORT_ARGV], { timeoutMs: WAYS_TIMEOUT_MS })
@@ -165,11 +171,12 @@ export async function pickUp($: EngineInterface): Promise<void> {
       if (typeof parsed !== 'string') {
         lastFailure = undefined
         const text = JSON.stringify(parsed)
-        if ((await read($, lookAtom)) !== text) {
-          await settleEntrances($, true)
-          await update($, lookAtom, () => text)
-        }
-        return
+        const held = await read($, lookAtom)
+        if (held === text) return false
+        await settleEntrances($, true)
+        await update($, lookAtom, () => text)
+        const before = held === '' ? 'none' : parseExport(held)
+        return typeof before !== 'string' && before.theme !== parsed.theme
       }
       failure = parsed
     } else {
@@ -182,6 +189,7 @@ export async function pickUp($: EngineInterface): Promise<void> {
     lastFailure = failure
     debug($, `${failure}; the look stays as it was`)
   }
+  return false
 }
 
 // Read once a session or a turn and kept here: each read through `$` is a dispatch, and
@@ -356,7 +364,7 @@ export function registerSkins(on: On, shared: Shared): void {
       if (isWorking) void update($, frameAtom, frame => frame + 1)
       if (settling.size > 0) void settleEntrances($)
     })
-    pickup = $.clock.every(PICKUP_MS, () => void pickUp($))
+    pickup = $.clock.every(PICKUP_MS, async () => onPickup($, await pickUp($)).catch(quietly($, 'pickup')))
     return next(e)
   })
 
@@ -535,7 +543,7 @@ export function registerSkins(on: On, shared: Shared): void {
   // selectable text, which a drawing of the mod's would lose.
   on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
     const setup = await activeSetup($)
-    if (setup === null || setup.promptBox === 'off' || e.surface !== 'terminal' || !TYPED.has(e.props.origin.kind) || e.props.text.length > MAX_PROMPT || CONTROL.test(e.props.text)) {
+    if (setup === null || setup.promptBox === 'off' || e.surface !== 'terminal' || !shared.view().isWaysTheme || !TYPED.has(e.props.origin.kind) || e.props.text.length > MAX_PROMPT || CONTROL.test(e.props.text)) {
       return next(e)
     }
     const ui = $.ui.resolve(e)

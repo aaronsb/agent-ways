@@ -13,9 +13,12 @@ export const TERMINAL = 'terminal'
 export const activeArgv = (): string[] => [WAYS, 'settings', 'get', 'theme.active']
 export const exportArgv = (name: string): string[] => [WAYS, 'settings', 'theme', 'export', name, '--claude-code']
 
-/** The one Claude Code theme the mod keeps, `custom:ways`. `ways manage
- *  repair` selects it in settings.json while the mod is wanted; the mod only
- *  rewrites the file, which Claude Code reloads live. */
+/** The one Claude Code theme the mod keeps, `custom:ways`, as the `theme`
+ *  row of `/config` holds it. `ways manage repair` selects it in settings.json
+ *  while the mod is wanted; the mod only rewrites the file, which Claude Code
+ *  reloads live, and draws its frames only while the person keeps it selected. */
+export const WAYS_THEME = 'custom:ways'
+
 export const themeFile = (configDir: string): string => `${configDir.replace(/\/+$/, '')}/themes/ways.json`
 
 /** The Claude Code config directory: CLAUDE_CONFIG_DIR, else ~/.claude. */
@@ -93,6 +96,10 @@ export type FrameCase = {
   /** The look has `render.frames` on, under a theme with colours of its
    *  own: the live export's, read again as it changes (hub.tsx). */
   isThemed: boolean
+  /** Claude Code's selected theme is `custom:ways`, whose keys the frame's
+   *  colours name. Under any other theme those keys resolve to that theme's
+   *  colours, so the frames step aside. Unread counts as not selected. */
+  isWaysTheme: boolean
   /** Claude Code's `verbose` row is on. */
   isVerbose: boolean
   /** The row reports itself expanded (ctrl+o). */
@@ -107,9 +114,10 @@ export type FrameCase = {
  *  reads as false; the ctrl+o transcript then draws as the main view does. */
 export const isExpandedView = (isExpanded: boolean | undefined, isVerbose: boolean): boolean => isExpanded === true && !isVerbose
 
-/** Frames draw only on the terminal, under an agent-ways theme, with the
- *  view collapsed and the reply within bounds. */
+/** Frames draw only on the terminal, under an agent-ways theme that Claude
+ *  Code has selected as `custom:ways`, with the view collapsed and the reply
+ *  within bounds. */
 export function shouldFrame(c: FrameCase): boolean {
-  if (c.surface !== 'terminal' || !c.isThemed || isExpandedView(c.isExpanded, c.isVerbose)) return false
+  if (c.surface !== 'terminal' || !c.isThemed || !c.isWaysTheme || isExpandedView(c.isExpanded, c.isVerbose)) return false
   return c.length === undefined || c.length <= MAX_FRAMED_CHARS
 }

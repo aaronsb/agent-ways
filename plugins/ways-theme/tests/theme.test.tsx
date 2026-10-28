@@ -34,6 +34,11 @@ type World = {
   env?: Record<string, string>
   /** Claude Code's `verbose` row. */
   verbose?: boolean
+  /** Claude Code's `theme` row: `custom:ways` when not given, null for no
+   *  row. A `config.set` of the row changes it, as the engine's writer does. */
+  selected?: string | null
+  /** `$.config.list` rejects. */
+  listFails?: boolean
   /** `$.fs.write` rejects, as a read-only folder does. */
   writeFails?: boolean
   /** `ways settings theme export --mod`, the skins layer's call (skins.test.tsx);
@@ -94,9 +99,16 @@ function host(on: On, world: World) {
   })
   on('config.set', ($, e) => {
     sets.push({ key: e.key, value: e.value })
+    if (e.key === 'theme' && typeof e.value === 'string') world.selected = e.value
     return { value: e.value }
   })
-  on('config.list', () => ({ value: [{ key: 'verbose', label: 'Verbose', kind: 'boolean', value: world.verbose ?? false, provider: { kind: 'engine' }, isLocked: false }] }) as never)
+  on('config.list', () => {
+    if (world.listFails) throw new Error('config unavailable')
+    const verbose = { key: 'verbose', label: 'Verbose', kind: 'boolean', value: world.verbose ?? false, provider: { kind: 'engine' }, isLocked: false }
+    const selected = world.selected === undefined ? 'custom:ways' : world.selected
+    const theme = selected === null ? [] : [{ key: 'theme', label: 'Theme', kind: 'choice', value: selected, provider: { kind: 'engine' }, isLocked: false }]
+    return { value: [verbose, ...theme] } as never
+  })
   // The engine's own drawing of every row.
   on('ui.render', ($, e) => {
     draws[e.component] = (draws[e.component] ?? 0) + 1
@@ -413,6 +425,121 @@ describe('frames on the terminal', () => {
       }
     })
   }
+})
+
+describe("frames follow Claude Code's selected theme", () => {
+  const SITES = [REPLY, TOOL, GROUP]
+  const framesEach = async ($: Parameters<TestBody>[0], isFramed: boolean) => {
+    for (const site of SITES) {
+      const ui = await $.ui.mount({ ...site, surface: 'terminal' } as never)
+      expect(isFrame(await ui.drawn())).toBe(isFramed)
+      await ui.unmount()
+    }
+  }
+
+  test('custom:ways selected frames each row', async ($, on) => {
+    host(on, { ...THEMED, selected: 'custom:ways' })
+    await $.session.start(INTERACTIVE)
+    await framesEach($, true)
+  })
+
+  // The defect: under `dark`, `claude` and `userMessageBackground` are dark's
+  // orange and gray, whatever the ways theme.
+  test("Claude Code's own dark selected frames no row", async ($, on) => {
+    host(on, { ...THEMED, selected: 'dark' })
+    await $.session.start(INTERACTIVE)
+    await framesEach($, false)
+  })
+
+  test('a switch in /config steps aside and a switch back reframes, live, with the choice passed on', async ($, on) => {
+    const h = host(on, THEMED)
+    await $.session.start(INTERACTIVE)
+    const reply = await $.ui.mount({ ...REPLY, requestId: 'm-live', surface: 'terminal' } as never)
+    expect(isFrame(await reply.drawn())).toBe(true)
+    expect(await $.config.set({ key: 'theme', value: 'dark' } as never)).toEqual({ value: 'dark' })
+    expect(isFrame(await reply.drawn())).toBe(false)
+    await framesEach($, false)
+    expect(await $.config.set({ key: 'theme', value: 'custom:ways' } as never)).toEqual({ value: 'custom:ways' })
+    expect(isFrame(await reply.drawn())).toBe(true)
+    await framesEach($, true)
+    expect(h.sets).toEqual([{ key: 'theme', value: 'dark' }, { key: 'theme', value: 'custom:ways' }])
+    await reply.unmount()
+  })
+
+  // `ways manage repair` writes settings.json, which no config.set reports.
+  test('a selection changed outside /config is read on the next pickup', async ($, on) => {
+    const world: World = { ...THEMED, selected: 'dark' }
+    const h = host(on, world)
+    await $.session.start(INTERACTIVE)
+    const reply = await $.ui.mount({ ...REPLY, surface: 'terminal' } as never)
+    expect(isFrame(await reply.drawn())).toBe(false)
+    world.selected = 'custom:ways'
+    await h.clock.advance(PICKUP_MS)
+    expect(isFrame(await reply.drawn())).toBe(true)
+    world.selected = 'light'
+    await h.clock.advance(PICKUP_MS)
+    expect(isFrame(await reply.drawn())).toBe(false)
+    expect(h.sets).toEqual([])
+    await reply.unmount()
+  })
+
+  const unread: [string, World][] = [
+    ['no theme row', { ...THEMED, selected: null }],
+    ['config.list rejects', { ...THEMED, listFails: true }],
+  ]
+  for (const [name, world] of unread) {
+    test(`${name}: no row is framed, and one debug line says so across polls`, async ($, on) => {
+      const h = host(on, world)
+      await $.session.start(INTERACTIVE)
+      await framesEach($, false)
+      await h.clock.advance(PICKUP_MS * 3)
+      await framesEach($, false)
+      expect(h.logs.filter(line => line.includes('theme row'))).toHaveLength(1)
+      expect(h.sets).toEqual([])
+    })
+  }
+})
+
+describe('the theme file follows a switch made mid-session', () => {
+  const TAMPA_CC = { name: 'Tampa', base: 'light', overrides: { claude: '#0057b8', text: '#22262e', success: '#28762a', userMessageBackground: '#d8e8f8' } }
+
+  test('a switch rewrites the file once; a poll with no change writes nothing', async ($, on) => {
+    const world: World = { ...THEMED }
+    const h = host(on, world)
+    await $.session.start(INTERACTIVE)
+    expect(h.writes).toEqual([{ path: FILE, text: themeText(MIAMI) }])
+    world.active = ok('tampa\n')
+    world.exported = ok(JSON.stringify(TAMPA_CC))
+    world.mod = ok(JSON.stringify(TAMPA))
+    await h.clock.advance(PICKUP_MS)
+    expect(h.writes).toEqual([{ path: FILE, text: themeText(MIAMI) }, { path: FILE, text: themeText(TAMPA_CC) }])
+    const calls = h.argvs.length
+    await h.clock.advance(PICKUP_MS * 3)
+    expect(h.writes).toHaveLength(2)
+    expect(h.argvs).toHaveLength(calls)
+  })
+
+  test('a switch to terminal writes Claude Code\'s own dark', async ($, on) => {
+    const world: World = { ...THEMED }
+    const h = host(on, world)
+    await $.session.start(INTERACTIVE)
+    world.active = ok('terminal\n')
+    world.mod = ok(JSON.stringify(TERMINAL_THEME))
+    await h.clock.advance(PICKUP_MS)
+    expect(h.writes.map(w => w.text)).toEqual([themeText(MIAMI), themeText(DEFAULT_THEME)])
+  })
+
+  test('a switch whose export fails leaves the file as it was, with one debug line', async ($, on) => {
+    const world: World = { ...THEMED }
+    const h = host(on, world)
+    await $.session.start(INTERACTIVE)
+    world.active = ok('tampa\n')
+    world.exported = ok('', 3)
+    world.mod = ok(JSON.stringify(TAMPA))
+    await h.clock.advance(PICKUP_MS * 2)
+    expect(h.writes.map(w => w.text)).toEqual([themeText(MIAMI)])
+    expect(h.logs.filter(line => line.includes('tampa'))).toHaveLength(1)
+  })
 })
 
 describe('what the mod hooks reaches it on every host', () => {
