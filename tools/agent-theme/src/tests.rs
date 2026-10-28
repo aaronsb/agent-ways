@@ -161,9 +161,11 @@ fn the_ground_is_the_gradient_at_truecolor_and_flat_below() {
     let ground = p.ground(120, 35).unwrap();
     assert_eq!((ground.at(7, 0), ground.at(7, 34)), (Color::Rgb(stops[0]), Color::Rgb(stops[2])));
     assert_eq!(ground.at(0, 17), ground.at(119, 17), "a vertical gradient is flat across a row");
-    let tampa = Painter::themed(&theme("tampa"), ColorDepth::TrueColor).ground(80, 25).unwrap();
-    assert_eq!(tampa.at(0, 3), Color::Rgb(Rgb(0xff, 0xf7, 0xe8)));
-    assert_eq!(tampa.at(79, 3), Color::Rgb(Rgb(0xff, 0xe3, 0xd3)));
+    let tampa = theme("tampa");
+    let (first, last) = { let s = tampa.gradient.unwrap(); (s.stops()[0], *s.stops().last().unwrap()) };
+    let ground = Painter::themed(&tampa, ColorDepth::TrueColor).ground(80, 25).unwrap();
+    assert_eq!((ground.at(0, 3), ground.at(79, 3)), (Color::Rgb(first), Color::Rgb(last)), "a horizontal gradient runs left to right");
+    assert_eq!(ground.at(40, 0), ground.at(40, 24), "and is flat down a column");
     let p256 = Painter::themed(&nights, ColorDepth::Ansi256);
     assert!(p256.gradient().is_none());
     let flat = p256.ground(120, 35).unwrap();
