@@ -146,7 +146,7 @@ pub const ATTEND_MOD_RETIRED: &str = "`attend_mod` was retired by ADR-512 and is
 pub const MODS: &[(&str, &str)] = &[
     ("attend", "The attend mod in Claude Code (ADR-406, ADR-414): whether a session starts listening, keepwarm, keepalive, the install and poll timing."),
     ("ways-judge", "The ways-judge mod, the relevance gate's Claude Code internal engine (ADR-708): whether repair installs it."),
-    ("ways-theme", "The ways-theme mod, which has Claude Code follow theme.active (ADR-514): whether repair installs it."),
+    ("ways-theme", "The ways-theme mod, which has Claude Code follow theme.active (ADR-514): whether repair installs it, what it draws, and the words it shows."),
 ];
 
 const BASE: KeySpec = KeySpec {
@@ -565,7 +565,109 @@ const KEYS: &[KeySpec] = &[
         default: DefaultValue::Yaml("false"),
         scope: Scope::Machine,
         doc: "Whether `ways manage repair` installs the ways-theme mod in Claude Code.",
-        long: "Installed, Claude Code follows theme.active: the settings merge selects the custom theme custom:ways in the target's settings.json, keeping the theme it replaces, and the mod rewrites themes/ways.json from theme.active at each session start, Claude Code's own dark for terminal, and frames replies and tool calls in the theme's colours on the terminal. Uninstalled, the earlier theme comes back and themes/ways.json goes; a theme the person chose meanwhile is kept. It adds no setting of its own, and when ways fails it changes nothing (ADR-514). Read per target, from the user file and the target's own file, the target winning; a project cannot set it.",
+        long: "Installed, Claude Code follows theme.active: the settings merge selects the custom theme custom:ways in the target's settings.json, keeping the theme it replaces, and the mod rewrites themes/ways.json from theme.active at each session start, Claude Code's own dark for terminal, and frames replies and tool calls in the theme's colours on the terminal. Uninstalled, the earlier theme comes back and themes/ways.json goes; a theme the person chose meanwhile is kept. What it draws is set by the other mods.ways-theme keys, and when ways fails it changes nothing (ADR-514). Read per target, from the user file and the target's own file, the target winning; a project cannot set it.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.ways-theme.rail",
+        section: "mods",
+        path: &["mods", "ways-theme", "rail"],
+        kind: Kind::Bool,
+        default: DefaultValue::Yaml("true"),
+        doc: "Whether the ways-theme mod draws the rail beside replies and tool calls.",
+        long: "The coloured rail at the left of each reply and tool call, in the theme's accent. Off draws them without it. The mod reads it at each session start, through `ways settings theme export --mod`.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.ways-theme.tables",
+        section: "mods",
+        path: &["mods", "ways-theme", "tables"],
+        kind: Kind::Choice(&["on", "text", "off"]),
+        default: DefaultValue::Yaml("on"),
+        doc: "How the ways-theme mod draws a markdown table: on, text or off.",
+        long: "on paints the table in the theme's colours with a ruled frame; text keeps its cells aligned in plain text; off leaves Claude Code's own drawing. The mod reads it at each session start, through `ways settings theme export --mod`.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.ways-theme.shimmer",
+        section: "mods",
+        path: &["mods", "ways-theme", "shimmer"],
+        kind: Kind::Bool,
+        default: DefaultValue::Yaml("true"),
+        doc: "Whether the spinner's words shimmer in the theme's colours.",
+        long: "Off keeps the spinner's words in one colour. The mod reads it at each session start, through `ways settings theme export --mod`.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.ways-theme.charts",
+        section: "mods",
+        path: &["mods", "ways-theme", "charts"],
+        kind: Kind::Bool,
+        default: DefaultValue::Yaml("true"),
+        doc: "Whether the ways-theme mod draws a fenced chart as a chart.",
+        long: "On draws a fenced chart block in the theme's colours; off shows its source. The mod reads it at each session start, through `ways settings theme export --mod`.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.ways-theme.markdown",
+        section: "mods",
+        path: &["mods", "ways-theme", "markdown"],
+        kind: Kind::Bool,
+        default: DefaultValue::Yaml("true"),
+        doc: "Whether the ways-theme mod styles markdown in replies.",
+        long: "On gives headings, emphasis, quotes and code the theme's roles; off leaves Claude Code's own styling. The mod reads it at each session start, through `ways settings theme export --mod`.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.ways-theme.icons",
+        section: "mods",
+        path: &["mods", "ways-theme", "icons"],
+        kind: Kind::Choice(&["unicode", "ascii"]),
+        default: DefaultValue::Yaml("unicode"),
+        doc: "The ways-theme mod's glyphs: unicode or ascii.",
+        long: "ascii suits a terminal font that lacks the unicode glyphs. The mod reads it at each session start, through `ways settings theme export --mod`.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.ways-theme.frames",
+        section: "mods",
+        path: &["mods", "ways-theme", "frames"],
+        kind: Kind::Bool,
+        default: DefaultValue::Yaml("true"),
+        doc: "Whether the ways-theme mod frames replies and tool calls.",
+        long: "On draws a frame in the theme's colours around each reply and tool call; off draws none. The mod reads it at each session start, through `ways settings theme export --mod`.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.ways-theme.prompt_box",
+        section: "mods",
+        path: &["mods", "ways-theme", "prompt_box"],
+        kind: Kind::Choice(&["off", "frame", "gradient"]),
+        default: DefaultValue::Yaml("gradient"),
+        doc: "How the ways-theme mod draws the prompt box: off, frame or gradient.",
+        long: "gradient paints the box with the theme's gradient, and draws it as frame under a theme with none; frame draws its border in the theme's colours; off leaves Claude Code's own. The mod reads it at each session start, through `ways settings theme export --mod`.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.ways-theme.spinner_words",
+        section: "mods",
+        path: &["mods", "ways-theme", "spinner_words"],
+        kind: Kind::List,
+        default: DefaultValue::Yaml("[]"),
+        check: Some(check_words),
+        doc: "The spinner's words while a turn runs; empty takes the theme's [words].",
+        long: "Up to 12 entries of 1 to 24 characters, no control characters. Set, the list wins over the theme's [words]; empty, the theme's list is used, and Claude Code's own where the theme has none. Set several with commas: `ways settings set mods.ways-theme.spinner_words \"Sailing, Docking\"`.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.ways-theme.done_words",
+        section: "mods",
+        path: &["mods", "ways-theme", "done_words"],
+        kind: Kind::List,
+        default: DefaultValue::Yaml("[]"),
+        check: Some(check_words),
+        doc: "The verbs a turn's done line takes; empty takes the theme's [words].",
+        long: "Up to 12 entries of 1 to 24 characters, no control characters. Set, the list wins over the theme's [words]; empty, the theme's list is used, and Claude Code's own where the theme has none. Set several with commas: `ways settings set mods.ways-theme.done_words \"Sailing, Docking\"`.",
         ..BASE
     },
     KeySpec {
@@ -726,6 +828,16 @@ fn closed_targets(v: &Value) -> Option<Value> {
 }
 
 /// A theme name as a theme file names itself: `[a-z0-9-]+`.
+/// A word list for the ways-theme mod: empty, or what a theme's `[words]`
+/// list takes.
+fn check_words(v: &Value) -> Result<(), String> {
+    let list: Vec<String> = serde_yaml::from_value(v.clone()).map_err(|_| "expected a list of text".to_string())?;
+    if list.is_empty() {
+        return Ok(());
+    }
+    agent_theme::Words::check(&list)
+}
+
 fn check_targets(v: &Value) -> Result<(), String> {
     serde_yaml::from_value::<Vec<crate::config::Target>>(v.clone()).map(|_| ()).map_err(|e| e.to_string())
 }
@@ -964,6 +1076,51 @@ mod tests {
         for (name, _) in MODS {
             assert!(SCHEMA.keys.iter().any(|k| k.name == format!("mods.{name}.install")), "{name} has no install key");
         }
+    }
+
+    #[test]
+    fn the_theme_mod_s_render_settings_default_on_and_take_a_file_s_value() {
+        let s = |v: &str| Some(Value::String(v.into()));
+        let defaults = [
+            ("rail", Some(Value::Bool(true))),
+            ("tables", s("on")),
+            ("shimmer", Some(Value::Bool(true))),
+            ("charts", Some(Value::Bool(true))),
+            ("markdown", Some(Value::Bool(true))),
+            ("icons", s("unicode")),
+            ("frames", Some(Value::Bool(true))),
+            ("prompt_box", s("gradient")),
+            ("spinner_words", Some(Value::Sequence(vec![]))),
+            ("done_words", Some(Value::Sequence(vec![]))),
+        ];
+        for (k, want) in &defaults {
+            assert_eq!(&resolved(&format!("mods.ways-theme.{k}"), &[]), want, "{k}");
+        }
+        let text = "mods:\n  ways-theme:\n    rail: false\n    tables: text\n    shimmer: false\n    charts: false\n    markdown: false\n    icons: ascii\n    frames: false\n    prompt_box: frame\n    spinner_words: [Sailing]\n    done_words: [Docked, Moored]\n";
+        let l = [layer("user", LayerScope::User, text)];
+        assert!(l[0].findings.is_empty(), "{:?}", l[0].findings);
+        let set = [
+            ("rail", Some(Value::Bool(false))),
+            ("tables", s("text")),
+            ("shimmer", Some(Value::Bool(false))),
+            ("charts", Some(Value::Bool(false))),
+            ("markdown", Some(Value::Bool(false))),
+            ("icons", s("ascii")),
+            ("frames", Some(Value::Bool(false))),
+            ("prompt_box", s("frame")),
+            ("spinner_words", Some(Value::Sequence(vec!["Sailing".into()]))),
+            ("done_words", Some(Value::Sequence(vec!["Docked".into(), "Moored".into()]))),
+        ];
+        for (k, want) in &set {
+            assert_eq!(&resolved(&format!("mods.ways-theme.{k}"), &l), want, "{k}");
+        }
+        // The words take what a theme's [words] list takes.
+        assert!(check_words(&serde_yaml::from_str("[]").unwrap()).is_ok());
+        assert!(check_words(&serde_yaml::from_str("[\"\"]").unwrap()).is_err());
+        assert!(check_words(&serde_yaml::from_str(&format!("[{}]", vec!["a"; 13].join(", "))).unwrap()).is_err());
+        assert!(check_words(&Value::String("x".repeat(25))).is_err());
+        let bad = layer("user", LayerScope::User, "mods:\n  ways-theme:\n    prompt_box: neon\n");
+        assert_eq!(resolved("mods.ways-theme.prompt_box", &[bad]), s("gradient"), "a bad value falls back to the default");
     }
 
     /// ADR-512 item 2: `attend_mod` is retired, so a file holding it
