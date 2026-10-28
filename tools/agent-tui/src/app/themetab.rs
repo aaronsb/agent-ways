@@ -45,6 +45,9 @@ impl App {
         let mut v = vec![ThemeAct::New];
         v.extend(named::acts(&self.themes, name).into_iter().map(ThemeAct::Item));
         v.extend([ThemeAct::Edit, ThemeAct::Shape, ThemeAct::Waypoints]);
+        if self.claude_code.is_some() {
+            v.push(ThemeAct::ClaudeCode);
+        }
         v
     }
 
@@ -87,7 +90,7 @@ impl App {
     /// files, so a change from elsewhere that landed just before this write
     /// is read too, and it keeps the message that says what was done
     /// instead of reporting the screen's own write as a change on disk.
-    fn own_write(&mut self) {
+    pub(super) fn own_write(&mut self) {
         if self.adapter.stamp() != self.stamp {
             self.owed = true;
         }
@@ -129,6 +132,7 @@ impl App {
                 let r = self.next_waypoints();
                 self.report(r);
             }
+            ThemeAct::ClaudeCode => self.open_claude_code(),
             ThemeAct::Edit => {
                 let t = t.clone();
                 self.themes.editor = Some(Editor::new(t, true));
@@ -195,6 +199,9 @@ impl App {
         if self.themes.editor.is_some() {
             return self.editor_key(k, ctrl);
         }
+        if self.themes.claude.is_some() {
+            return self.claude_code_key(k);
+        }
         let n = self.themes.list().len();
         let cur = self.themes.cursor;
         match k.code {
@@ -226,6 +233,7 @@ impl App {
             }
             KeyCode::Char('a') => self.mode = Mode::ThemeMenu { sel: 0 },
             KeyCode::Char('e') => self.theme_act(ThemeAct::Edit),
+            KeyCode::Char('c') if self.claude_code.is_some() => self.open_claude_code(),
             KeyCode::Char('m') => self.toggle_mouse(),
             KeyCode::Char('?') => self.mode = Mode::Help { scroll: 0 },
             KeyCode::Char('w' | 'c' | '/') => {
@@ -374,6 +382,9 @@ impl App {
         }
         let i = self.list.offset() + (at.y - list.y) as usize;
         let n = self.themes.list().len();
+        if self.themes.claude.is_some() {
+            return self.claude_code_click(i);
+        }
         match self.themes.editor.as_mut() {
             Some(e) if i < ROWS => {
                 if i == e.row && e.slot().is_none() {

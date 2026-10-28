@@ -28,6 +28,7 @@ pub use sync::Reloaded;
 pub mod term;
 mod themetab;
 mod themeview;
+mod themecc;
 
 use std::collections::{BTreeSet, HashMap};
 use std::io;
@@ -248,6 +249,8 @@ pub struct App {
     stamp: Option<u64>,
     /// The theme tab: themes on offer, the active one, the editor.
     pub themes: Themes,
+    /// The theme tab's Claude Code section as the adapter last read it.
+    claude_code: Option<crate::adapter::ClaudeCode>,
     /// The slider channel a mouse drag holds.
     drag: Option<usize>,
     /// A reading action running outside the queue: what ran, and its job.
@@ -319,6 +322,7 @@ impl App {
             held: None,
             owed: false,
             themes: Themes::new(None, agent_theme::ColorDepth::TrueColor, None),
+            claude_code: None,
             drag: None,
             pane: None,
             strip: None,
@@ -364,6 +368,7 @@ impl App {
     /// What applies the tree's changes and queued commands.
     pub fn adapter(mut self, a: impl Adapter + 'static) -> Self {
         self.stamp = a.stamp();
+        self.claude_code = a.claude_code();
         self.adapter = Box::new(a);
         self
     }
@@ -728,6 +733,8 @@ impl App {
 
 #[cfg(test)]
 mod theme_tests;
+#[cfg(test)]
+mod themecc_tests;
 
 #[cfg(test)]
 mod tests;

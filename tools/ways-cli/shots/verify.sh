@@ -58,6 +58,9 @@ review-discard | ways settings matching --project $PS       | Down Down e C-u te
 item-delete | ways settings theme --project $PS             | a Enter text:scratch Enter a Down Down Down Enter | y
 action-menu | ways settings install --project $PS           | a Down
 theme-menu | ways settings theme --project $PS              | a Down
+theme-claude | ways settings theme --project $PS            | End
+theme-claude-nights | ways settings theme --project $PS     | End c End
+theme-claude-tampa | ways settings theme --project $PS      | End Up c Right | Left
 flow-pick  | ways settings install --project $PS            | t
 flow-other | ways settings install --project $PS            | t Down Enter text:~/work Enter
 "
@@ -121,6 +124,19 @@ teardown_mod_actions() {
   rm -f "$F/home/.config/agent-ways/agent.yaml" "$F/home/.config/agent-ways/config.yaml"
   unset WAYS_CLAUDE_BIN
 }
+
+# The theme tab's Claude Code section (ADR-514): the ways-theme mod wanted
+# and listed in the target's enabledPlugins, so installed and active.
+setup_theme_claude() {
+  local h=$F/home
+  printf 'mods:\n  ways-theme:\n    install: true\n' >"$h/.config/agent-ways/config.yaml"
+  printf '{"enabledPlugins":{"ways-theme@agent-ways":true}}\n' >"$h/.claude/settings.json"
+}
+teardown_theme_claude() { rm -f "$F/home/.config/agent-ways/config.yaml" "$F/home/.claude/settings.json"; }
+setup_theme_claude_nights() { setup_theme_claude; }
+teardown_theme_claude_nights() { teardown_theme_claude; }
+setup_theme_claude_tampa() { setup_theme_claude; }
+teardown_theme_claude_tampa() { teardown_theme_claude; }
 
 setup_mod_states() { setup_mod_actions; }
 teardown_mod_states() { teardown_mod_actions; }

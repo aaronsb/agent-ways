@@ -28,7 +28,7 @@ fn bg_name(b: Background) -> &'static str {
 }
 
 /// `n` cells of `c` as a background: a swatch. Without colour, a block glyph.
-fn swatch(c: Rgb, n: usize) -> Span<'static> {
+pub(super) fn swatch(c: Rgb, n: usize) -> Span<'static> {
     if theme::colourless() {
         return Span::raw("▒".repeat(n));
     }
@@ -95,6 +95,7 @@ impl App {
             ThemeAct::Edit => String::new(),
             ThemeAct::Shape => format!("{} now; the next is {}", self.shape.name(), self.shape.next().name()),
             ThemeAct::Waypoints => format!("{} now; the next is {}", self.waypoints, self.next_waypoints_name()),
+            ThemeAct::ClaudeCode => "Claude Code: the mod's render settings".into(),
         }
     }
 
@@ -102,6 +103,11 @@ impl App {
     pub(super) fn theme_status(&self, sh: Shape) -> Vec<Span<'static>> {
         let hint = |t: &str| Span::styled(t.to_string(), theme::hint());
         let mut spans = Vec::new();
+        if self.themes.claude.is_some() {
+            spans.extend(sh.lozenge(&[Seg::on(" claude code ", Ground::Info).bold()]));
+            spans.push(hint(self.claude_code_hint()));
+            return spans;
+        }
         match &self.themes.editor {
             Some(e) => {
                 spans.extend(sh.lozenge(&[Seg::on(if e.hex.is_some() { " hex " } else { " edit " }, Ground::Warn).bold()]));
@@ -113,14 +119,18 @@ impl App {
             }
             None => {
                 spans.extend(sh.lozenge(&[Seg::on(" theme ", Ground::Accent).bold()]));
-                spans.push(hint("  ↑↓ preview · Enter use · a actions · e edit · Esc back"));
+                let c = if self.claude_code.is_some() { " · c claude code" } else { "" };
+                spans.push(hint(&format!("  ↑↓ preview · Enter use · a actions · e edit{c} · Esc back")));
             }
         }
         spans
     }
 
     pub(super) fn draw_theme_tab(&mut self, f: &mut Frame, left: Rect, right: Rect) {
-        if self.themes.editor.is_some() {
+        if self.themes.claude.is_some() && self.claude_code.is_some() {
+            self.draw_claude_code_rows(f, left);
+            self.draw_claude_code_detail(f, right);
+        } else if self.themes.editor.is_some() {
             self.draw_slot_rows(f, left);
             self.draw_slot_editor(f, right);
         } else {
@@ -213,6 +223,7 @@ impl App {
         }
         lines.push(Line::raw(""));
         lines.extend(checks(&self.themes.roles(t), room));
+        lines.extend(self.claude_code_brief(t, room));
         if !self.themes.set.rejected.is_empty() {
             lines.push(Line::raw(""));
             for (file, errs) in &self.themes.set.rejected {

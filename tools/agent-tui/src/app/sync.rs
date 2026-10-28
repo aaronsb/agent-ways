@@ -72,6 +72,7 @@ impl App {
     /// key.
     pub fn reload(&mut self) -> Reloaded {
         self.stamp = self.adapter.stamp();
+        self.refresh_claude_code();
         let Some(mut fresh) = self.adapter.reload() else { return Reloaded::default() };
 
         // Where things are now, by key.
