@@ -1,21 +1,24 @@
-# Tampa — original to agent-ways: sunset across the bay, left to right;
-# creamsicle orange, Ybor brick red and pewter ink. Waves on top, sand below.
+# Tampa — original to agent-ways: the bay at left, the sunset at right.
+# Lightning blue, Ybor tile teal, creamsicle orange, Buccaneers red,
+# Gasparilla purple, and Skyway-cable gold underneath.
 THEME_NAME="tampa"
 THEME_LABEL="Tampa"
 THEME_KIND="light"
 THEME_BACKGROUND="fill"
-THEME_GRADIENT="horizontal #fff7e8 #ffeedd #ffe3d3"
+THEME_GRADIENT="horizontal #e8f3fb #fff6e8 #ffe4d2"
 
-THEME_BG="#fff7e8"
-THEME_FG="#2a2a30"
-THEME_DIM="#7a6e66"
-THEME_SUBTLE="#f2dcc0"
-THEME_ACCENT="#e35200"
-THEME_INFO="#00609e"
+THEME_BG="#fff6e8"
+THEME_FG="#22262e"
+THEME_DIM="#6f6a66"
+THEME_SUBTLE="#f5d98a"
+THEME_ACCENT="#0057b8"
+THEME_INFO="#00818a"
 THEME_OK="#2c7a2e"
-THEME_WARN="#a07400"
+THEME_WARN="#e35200"
 THEME_ERR="#c8102e"
-THEME_ALT="#4b2fc9"
+THEME_ALT="#6c2c91"
+
+THEME_SELECTION="#d8e8f8"
 
 THEME_BORDER_GLYPHS="╭╮╰╯~·││"
 THEME_RULE_GLYPHS="~≈"
