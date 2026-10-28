@@ -17,8 +17,9 @@ fn bundled_themes_parse_and_match_their_file_names() {
         assert_eq!(*stem, t.name);
     }
     assert_eq!(bundled()[0].name, "agent-ways", "the default is listed first");
-    assert_eq!(bundled().iter().filter(|t| t.kind == Kind::Light).count(), 1);
+    assert_eq!(bundled().iter().filter(|t| t.kind == Kind::Light).count(), 3);
     assert!(bundled().iter().any(|t| t.background == Background::Fill));
+    assert!(bundled()[..7].iter().all(|t| t.gradient.is_none() && t.decor == Decor::default()), "the first seven set no chrome");
 }
 
 #[test]
@@ -81,6 +82,121 @@ fn round_trip_every_bundled_theme_and_an_override() {
     for t in all {
         assert_eq!(parse(&to_text(&t)).unwrap(), t, "{}", t.name);
     }
+}
+
+// ── Gradient and decoration ────────────────────────────────────
+
+fn theme(name: &str) -> Theme {
+    bundled().into_iter().find(|t| t.name == name).unwrap()
+}
+
+#[test]
+fn the_chrome_keys_parse() {
+    let miami = theme("miami");
+    let g = miami.gradient.unwrap();
+    assert_eq!((g.axis, g.stops()), (Axis::Vertical, &[Rgb(0xd4, 0xef, 0xff), Rgb(0xff, 0xf4, 0xee), Rgb(0xff, 0xe6, 0xee)][..]));
+    let d = miami.decor;
+    assert_eq!((d.border, d.rules, d.mark, d.presence, d.ornament), (Some(Border::Double), Some(["─", "═"]), Some("▌"), Some(["◆", "◇"]), Some("🦩")));
+    let tampa = theme("tampa");
+    assert_eq!(tampa.gradient.unwrap().axis, Axis::Horizontal);
+    assert_eq!(tampa.decor.border, Some(Border::Glyphs(["╭", "╮", "╰", "╯", "~", "·", "│", "│"])));
+    assert_eq!(tampa.decor.ornament, Some("⚡"));
+    assert_eq!(theme("miami-nights").decor.border, Some(Border::Thick));
+}
+
+#[test]
+fn the_chrome_keys_round_trip() {
+    let mut t = theme("tampa");
+    t.decor.mark = Some("\"");
+    t.decor.presence = Some(["\\", "'"]);
+    t.gradient = Gradient::new(Axis::Vertical, &[Rgb(1, 2, 3), Rgb(4, 5, 6), Rgb(7, 8, 9), Rgb(10, 11, 12)]);
+    assert_eq!(parse(&to_text(&t)).unwrap(), t);
+    for b in Border::NAMES {
+        t.decor.border = Border::named(b);
+        assert_eq!(parse(&to_text(&t)).unwrap(), t, "{b}");
+    }
+}
+
+#[test]
+fn chrome_errors_name_the_line_and_key() {
+    let has = |src: String, needle: &str| {
+        let e = validate(&src);
+        assert!(e.iter().any(|x| x.to_string().contains(needle)), "{needle:?} not in {e:?}");
+    };
+    let miami = |from: &str, to: &str| theme_src("miami").replace(from, to);
+    has(miami("vertical #d4efff", "diagonal #d4efff"), "line 7: THEME_GRADIENT axis `diagonal` must be vertical or horizontal");
+    has(miami("vertical #d4efff #fff4ee #ffe6ee", "vertical #d4efff"), "line 7: THEME_GRADIENT takes 2 to 4 stops; `vertical #d4efff` has 1");
+    has(miami("#ffe6ee\"", "#ffe6ee #000000 #111111\""), "THEME_GRADIENT takes 2 to 4 stops; `vertical #d4efff #fff4ee #ffe6ee #000000 #111111` has 5");
+    has(miami("#ffe6ee\"", "#ffe6e\""), "line 7: `#ffe6e` is not a #rrggbb colour (key `THEME_GRADIENT`)");
+    has(miami("THEME_BACKGROUND=\"fill\"", "THEME_BACKGROUND=\"terminal\""), "line 7: THEME_GRADIENT needs THEME_BACKGROUND=\"fill\"");
+    has(miami("THEME_BORDER=\"double\"", "THEME_BORDER=\"double\"\nTHEME_BORDER_GLYPHS=\"╭╮╰╯~·││\""), "line 23: THEME_BORDER and THEME_BORDER_GLYPHS cannot both be set");
+    has(miami("THEME_BORDER=\"double\"", "THEME_BORDER=\"dashed\""), "line 22: THEME_BORDER `dashed` must be one of plain, rounded, double, thick");
+    has(miami("THEME_RULE_GLYPHS=\"─═\"", "THEME_RULE_GLYPHS=\"─═━\""), "line 23: `THEME_RULE_GLYPHS` takes 2 glyphs; `─═━` has 3");
+    has(miami("THEME_MARK=\"▌\"", "THEME_MARK=\"🌴\""), "line 24: `THEME_MARK` glyph `🌴` is 2 columns wide; it must be 1");
+    has(miami("THEME_ORNAMENT=\"🦩\"", "THEME_ORNAMENT=\"🦩🌴\""), "line 26: `THEME_ORNAMENT` takes 1 glyph; `🦩🌴` has 2");
+    has(miami("THEME_PRESENCE=\"◆◇\"", "THEME_PRESENCE=\"◆\u{301}\u{200b}\""), "`THEME_PRESENCE` glyph `\u{200b}` is 0 columns wide; it must be 1");
+}
+
+fn theme_src(name: &str) -> &'static str {
+    BUNDLED.iter().find(|(n, _)| *n == name).unwrap().1
+}
+
+#[test]
+fn a_gradient_runs_from_its_first_stop_to_its_last_through_oklab() {
+    let (a, b, c) = (Rgb(0x0d, 0x02, 0x21), Rgb(0x24, 0x10, 0x46), Rgb(0x4a, 0x0e, 0x4e));
+    let g = Gradient::new(Axis::Vertical, &[a, b, c]).unwrap();
+    assert_eq!((g.at(0.0), g.at(0.5), g.at(1.0)), (a, b, c), "evenly spaced stops");
+    let two = Gradient::new(Axis::Horizontal, &[Rgb(0, 0, 0), Rgb(255, 255, 255)]).unwrap();
+    assert_eq!(two.at(0.5), Rgb(99, 99, 99), "OKLab's middle grey, not sRGB's 127");
+    assert_eq!((g.cell(0, 35), g.cell(34, 35), g.cell(0, 1)), (a, c, a));
+    assert_eq!(g.samples().len(), 2 * 8 + 1);
+    assert!(Gradient::new(Axis::Vertical, &[a]).is_none() && Gradient::new(Axis::Vertical, &[a; 5]).is_none());
+}
+
+#[test]
+fn the_ground_is_the_gradient_at_truecolor_and_flat_below() {
+    let nights = theme("miami-nights");
+    let stops = nights.gradient.unwrap().stops().to_vec();
+    let p = Painter::themed(&nights, ColorDepth::TrueColor);
+    let ground = p.ground(120, 35).unwrap();
+    assert_eq!((ground.at(7, 0), ground.at(7, 34)), (Color::Rgb(stops[0]), Color::Rgb(stops[2])));
+    assert_eq!(ground.at(0, 17), ground.at(119, 17), "a vertical gradient is flat across a row");
+    let tampa = Painter::themed(&theme("tampa"), ColorDepth::TrueColor).ground(80, 25).unwrap();
+    assert_eq!(tampa.at(0, 3), Color::Rgb(Rgb(0xff, 0xf7, 0xe8)));
+    assert_eq!(tampa.at(79, 3), Color::Rgb(Rgb(0xff, 0xe3, 0xd3)));
+    let p256 = Painter::themed(&nights, ColorDepth::Ansi256);
+    assert!(p256.gradient().is_none());
+    let flat = p256.ground(120, 35).unwrap();
+    assert_eq!((flat.at(0, 0), flat.at(119, 34)), (Color::Indexed(nearest_256(nights.slots.bg)), Color::Indexed(nearest_256(nights.slots.bg))));
+    assert!(Painter::themed(&bundled()[1], ColorDepth::TrueColor).ground(10, 10).is_none(), "nord keeps the terminal's ground");
+}
+
+#[test]
+fn text_roles_read_on_every_point_of_the_gradient() {
+    // A ground that runs from nord's bg up to its dim slot: roles that read
+    // on bg alone fall short toward the light end, and the floors lift them.
+    // Body is the theme's own fg and is never lifted; it reads there as written.
+    let mut t = parse(nord_src()).unwrap();
+    t.background = Background::Fill;
+    let flat = Roles::derive(&t);
+    let g = Gradient::new(Axis::Vertical, &[t.slots.bg, Rgb(0x4c, 0x56, 0x6a)]).unwrap();
+    assert!(flat.readable().iter().any(|(_, fg, _, min)| contrast(*fg, Rgb(0x4c, 0x56, 0x6a)) < *min), "the light end fails some role as derived without it");
+    t.gradient = Some(g);
+    let r = Roles::derive(&t);
+    let (_, _, grounds, _) = &r.readable()[0];
+    assert!(g.samples().iter().all(|s| grounds.contains(s)), "the gradient is part of the ground the floors check");
+    assert!(r.unreadable().is_empty(), "{:?}", r.unreadable());
+}
+
+#[test]
+fn chrome_goes_with_the_theme_s_colours() {
+    use ratatui_core::symbols::border;
+    let tampa = theme("tampa");
+    let set = Painter::themed(&tampa, ColorDepth::TrueColor).ratatui_border().unwrap();
+    assert_eq!((set.top_left, set.horizontal_top, set.horizontal_bottom, set.vertical_right), ("╭", "~", "·", "│"));
+    assert_eq!(Painter::themed(&theme("miami"), ColorDepth::Ansi256).ratatui_border(), Some(border::DOUBLE));
+    assert_eq!(Painter::select(Some(&tampa), ColorDepth::Ansi16).decor(), Decor::NONE, "the 16-colour fallback is the terminal palette whole");
+    assert_eq!(Painter::themed(&bundled()[1], ColorDepth::TrueColor).ratatui_border(), None);
 }
 
 fn scratch_dir(tag: &str) -> std::path::PathBuf {

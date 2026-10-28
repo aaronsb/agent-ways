@@ -35,6 +35,8 @@ pub fn terminal_theme() -> Theme {
         background: Background::Terminal,
         slots: Slots { bg: a(0), fg: a(7), dim: a(8), subtle: a(0), accent: a(6), info: a(4), ok: a(2), warn: a(3), err: a(1), alt: a(5) },
         overrides: Default::default(),
+        gradient: None,
+        decor: Default::default(),
     }
 }
 

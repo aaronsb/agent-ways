@@ -21,7 +21,7 @@ use std::sync::OnceLock;
 use crate::color::Color;
 use crate::depth::ColorDepth;
 use crate::derive::Roles;
-use crate::model::{Background, Theme};
+use crate::model::{Axis, Background, Decor, Gradient, Theme};
 
 /// Select Graphic Rendition reset: every attribute and colour off.
 pub const RESET: &str = "\x1b[0m";
@@ -225,12 +225,14 @@ pub struct Painter {
     fill: bool,
     /// No attributes either: every style is plain text.
     plain: bool,
+    /// The theme's glyphs; none set under the terminal palette.
+    decor: Decor,
 }
 
 impl Painter {
     /// The built-in default at `depth`: the terminal palette.
     pub const fn terminal(depth: ColorDepth) -> Painter {
-        Painter { depth, roles: None, fill: false, plain: false }
+        Painter { depth, roles: None, fill: false, plain: false, decor: Decor::NONE }
     }
 
     /// The built-in default at the environment's depth. Reads no file.
@@ -259,12 +261,12 @@ impl Painter {
 
     /// No colour and no attributes: every style renders as plain text.
     pub const fn plain() -> Painter {
-        Painter { depth: ColorDepth::NoColor, roles: None, fill: false, plain: true }
+        Painter { plain: true, ..Painter::terminal(ColorDepth::NoColor) }
     }
 
     /// A theme's derived roles at `depth`.
     pub fn themed(theme: &Theme, depth: ColorDepth) -> Painter {
-        Painter { depth, roles: Some(Roles::derive(theme)), fill: theme.background == Background::Fill, plain: false }
+        Painter { depth, roles: Some(Roles::derive(theme)), fill: theme.background == Background::Fill, plain: false, decor: theme.decor }
     }
 
     /// The theme named `name`, the active choice its caller read from the
@@ -324,6 +326,33 @@ impl Painter {
     /// (`THEME_BACKGROUND="fill"`). Screens honour it; plain output does not.
     pub fn fills_background(&self) -> bool {
         self.fill && self.roles.is_some() && self.depth.has_color()
+    }
+
+    /// The theme's decoration glyphs. A theme's chrome goes with its
+    /// colours: the terminal palette, a chosen theme's 16-colour fallback
+    /// included, sets none.
+    pub fn decor(&self) -> Decor {
+        self.decor
+    }
+
+    /// The gradient a filled screen paints, at truecolor only.
+    pub fn gradient(&self) -> Option<Gradient> {
+        let g = self.roles.and_then(|r| r.gradient)?;
+        (self.fills_background() && self.depth == ColorDepth::TrueColor).then_some(g)
+    }
+
+    /// The ground of a `width` by `height` frame under
+    /// `THEME_BACKGROUND="fill"`, reduced to the depth: the gradient at
+    /// truecolor, else bg. None where the terminal keeps its own.
+    pub fn ground(&self, width: u16, height: u16) -> Option<Ground> {
+        let bg = Color::Rgb(self.roles?.bg).at(self.depth).filter(|_| self.fills_background())?;
+        Some(match self.gradient() {
+            Some(g) => {
+                let cells = if g.axis == Axis::Vertical { height } else { width };
+                Ground { axis: Some(g.axis), colours: (0..cells).map(|n| Color::Rgb(g.cell(n, cells))).collect() }
+            }
+            None => Ground { axis: None, colours: vec![bg] },
+        })
     }
 
     fn draw(&self, r: Role) -> Drawn {
@@ -431,6 +460,27 @@ impl Painter {
     /// Whether this painter writes no escapes at all.
     pub fn is_plain(&self) -> bool {
         self.plain
+    }
+}
+
+/// A filled screen's ground, cell by cell ([`Painter::ground`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Ground {
+    /// None for a flat ground.
+    axis: Option<Axis>,
+    /// One colour per row or column along the axis; one for a flat ground.
+    colours: Vec<Color>,
+}
+
+impl Ground {
+    /// The colour under column `x`, row `y`.
+    pub fn at(&self, x: u16, y: u16) -> Color {
+        let n = match self.axis {
+            Some(Axis::Vertical) => y,
+            Some(Axis::Horizontal) => x,
+            None => 0,
+        };
+        self.colours[(n as usize).min(self.colours.len() - 1)]
     }
 }
 

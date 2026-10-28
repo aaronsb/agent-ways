@@ -204,7 +204,7 @@ fn preview_follows_the_cursor_and_reverts_on_leaving_or_esc() {
     keys(&mut app, &[KeyCode::Char('3'), KeyCode::Down, KeyCode::Down]);
     assert_eq!(shown(&app), "nord");
     // Paper fills: the whole frame, tab bar and status line too, is on its bg.
-    keys(&mut app, &[KeyCode::End]);
+    keys(&mut app, &[KeyCode::Down; 5]);
     assert_eq!(shown(&app), "paper");
     let buf = draw(&mut app, 100, 24);
     assert_eq!((buf[(99, 0)].bg, buf[(99, 23)].bg), (bg_of("paper"), bg_of("paper")));
@@ -670,6 +670,11 @@ fn fill_leaves_no_cell_on_the_terminal_default() {
     let mut app = app_in(&d, ColorDepth::TrueColor);
     every_screen(&mut app, |name, b| {
         for (i, c) in b.content().iter().enumerate() {
+            // The terminal draws a wide glyph's second column with its first,
+            // so the backend never writes that cell.
+            if i > 0 && unicode_width::UnicodeWidthStr::width(b.content()[i - 1].symbol()) == 2 {
+                continue;
+            }
             assert_ne!(c.bg, Color::Reset, "{name}: cell {} of row {} has the terminal's background", i % 100, i / 100);
             assert_ne!(c.fg, Color::Reset, "{name}: cell {} of row {} has the terminal's foreground", i % 100, i / 100);
         }

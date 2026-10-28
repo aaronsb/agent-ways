@@ -20,13 +20,31 @@
 //!                              # (HOT, RULE, FADED, SELECTION)
 //! THEME_VIVID="nord"           # dotfiles tool bindings: accepted, ignored
 //! ```
+//!
+//! agent-ways' optional chrome, each key absent by default:
+//!
+//! ```toml
+//! THEME_GRADIENT="vertical #0d0221 #4a0e4e"  # vertical | horizontal, 2-4 stops; fill only
+//! THEME_BORDER="rounded"                     # plain | rounded | double | thick
+//! THEME_BORDER_GLYPHS="╭╮╰╯~·││"             # or eight glyphs: corners TL TR BL BR,
+//!                                            # then edges top bottom left right
+//! THEME_RULE_GLYPHS="─━"                     # the rule, the selected rule
+//! THEME_MARK="▌"                             # the selected row's mark
+//! THEME_PRESENCE="●○"                        # live, idle
+//! THEME_ORNAMENT="🌴"                         # before pane titles; may be two columns
+//! ```
+//!
+//! Every glyph is one grapheme one column wide, but the ornament, which may
+//! be two.
 
 use std::fmt;
 
 use serde::de::{self, Deserialize, Deserializer, IgnoredAny, MapAccess, Visitor};
 use toml::Spanned;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
-use crate::model::{Background, Kind, Overrides, Rgb, Slots, Theme};
+use crate::model::{intern, Axis, Background, Border, Decor, Gradient, Kind, Overrides, Rgb, Slots, Theme};
 
 /// The dotfiles tool bindings: part of the palette structure, no meaning here.
 const IGNORED: [&str; 3] = ["THEME_VIVID", "THEME_BAT", "THEME_DELTA"];
@@ -152,6 +170,39 @@ fn suffix(key: &str) -> Option<String> {
     key.strip_prefix("THEME_").map(str::to_ascii_lowercase)
 }
 
+/// `THEME_GRADIENT`'s value: an axis, then two to four stops.
+fn gradient(value: &str) -> Result<Gradient, String> {
+    let mut words = value.split_whitespace();
+    let axis = match words.next() {
+        Some("vertical") => Axis::Vertical,
+        Some("horizontal") => Axis::Horizontal,
+        w => return Err(format!("THEME_GRADIENT axis `{}` must be vertical or horizontal", w.unwrap_or(""))),
+    };
+    let mut stops = Vec::new();
+    for w in words {
+        stops.push(Rgb::from_hex(w).ok_or_else(|| format!("`{w}` is not a #rrggbb colour (key `THEME_GRADIENT`)"))?);
+    }
+    Gradient::new(axis, &stops).ok_or_else(|| format!("THEME_GRADIENT takes 2 to 4 stops; `{value}` has {}", stops.len()))
+}
+
+/// `value` as `count` glyphs for `key`, each one grapheme one column wide,
+/// or up to `widest` columns.
+fn glyphs(key: &str, value: &str, count: usize, widest: usize) -> Result<Vec<&'static str>, String> {
+    let g: Vec<&str> = value.graphemes(true).collect();
+    if g.len() != count {
+        let noun = if count == 1 { "glyph" } else { "glyphs" };
+        return Err(format!("`{key}` takes {count} {noun}; `{value}` has {}", g.len()));
+    }
+    for x in &g {
+        let w = x.width();
+        if w == 0 || w > widest {
+            let must = if widest == 1 { "1".to_string() } else { format!("1 to {widest}") };
+            return Err(format!("`{key}` glyph `{x}` is {w} columns wide; it must be {must}"));
+        }
+    }
+    Ok(g.into_iter().map(intern).collect())
+}
+
 /// Every error in `src`, empty when it is a valid theme.
 pub fn validate(src: &str) -> Vec<ThemeError> {
     parse(src).err().unwrap_or_default()
@@ -164,6 +215,9 @@ pub fn parse(src: &str) -> Result<Theme, Vec<ThemeError>> {
     let (mut name, mut label, mut kind, mut background) = (None, None, None, Background::Terminal);
     let mut slots: [Option<Rgb>; 10] = [None; 10];
     let mut overrides = Overrides::default();
+    let mut decor = Decor::default();
+    let mut grad: Option<(usize, Gradient)> = None;
+    let (mut border_at, mut glyphs_at) = (None, None);
 
     for (k, v) in top.0 {
         let (n, key) = (line_of(src, k.span().start), k.get_ref().as_str());
@@ -188,6 +242,42 @@ pub fn parse(src: &str) -> Result<Theme, Vec<ThemeError>> {
                 "fill" => background = Background::Fill,
                 _ => errs.push(ThemeError::at(n, format!("THEME_BACKGROUND `{value}` must be terminal or fill"))),
             },
+            "THEME_GRADIENT" => match gradient(value) {
+                Ok(g) => grad = Some((n, g)),
+                Err(e) => errs.push(ThemeError::at(n, e)),
+            },
+            "THEME_BORDER" => match Border::named(value) {
+                Some(b) => {
+                    decor.border = Some(b);
+                    border_at = Some(n);
+                }
+                None => errs.push(ThemeError::at(n, format!("THEME_BORDER `{value}` must be one of {}", Border::NAMES.join(", ")))),
+            },
+            "THEME_BORDER_GLYPHS" | "THEME_RULE_GLYPHS" | "THEME_MARK" | "THEME_PRESENCE" | "THEME_ORNAMENT" => {
+                let (count, widest) = match key {
+                    "THEME_BORDER_GLYPHS" => (8, 1),
+                    "THEME_RULE_GLYPHS" | "THEME_PRESENCE" => (2, 1),
+                    "THEME_ORNAMENT" => (1, 2),
+                    _ => (1, 1),
+                };
+                let g = match glyphs(key, value, count, widest) {
+                    Ok(g) => g,
+                    Err(e) => {
+                        errs.push(ThemeError::at(n, e));
+                        continue;
+                    }
+                };
+                match key {
+                    "THEME_BORDER_GLYPHS" => {
+                        decor.border = Some(Border::Glyphs([g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7]]));
+                        glyphs_at = Some(n);
+                    }
+                    "THEME_RULE_GLYPHS" => decor.rules = Some([g[0], g[1]]),
+                    "THEME_PRESENCE" => decor.presence = Some([g[0], g[1]]),
+                    "THEME_ORNAMENT" => decor.ornament = Some(g[0]),
+                    _ => decor.mark = Some(g[0]),
+                }
+            }
             k if IGNORED.contains(&k) => {}
             _ => {
                 let Some(field) = suffix(key) else {
@@ -214,6 +304,12 @@ pub fn parse(src: &str) -> Result<Theme, Vec<ThemeError>> {
         }
     }
 
+    if let (Some(a), Some(b)) = (border_at, glyphs_at) {
+        errs.push(ThemeError::at(a.max(b), "THEME_BORDER and THEME_BORDER_GLYPHS cannot both be set"));
+    }
+    if let Some((n, _)) = grad.filter(|_| background != Background::Fill) {
+        errs.push(ThemeError::at(n, "THEME_GRADIENT needs THEME_BACKGROUND=\"fill\""));
+    }
     if name.is_none() {
         errs.push(ThemeError::whole("missing `THEME_NAME`"));
     }
@@ -237,6 +333,8 @@ pub fn parse(src: &str) -> Result<Theme, Vec<ThemeError>> {
         background,
         slots: Slots { bg: s[0], fg: s[1], dim: s[2], subtle: s[3], accent: s[4], info: s[5], ok: s[6], warn: s[7], err: s[8], alt: s[9] },
         overrides,
+        gradient: grad.map(|(_, g)| g),
+        decor,
     })
 }
 
@@ -247,7 +345,12 @@ pub fn to_text(t: &Theme) -> String {
     let bg = if t.background == Background::Fill { "fill" } else { "terminal" };
     // The label is the one free-text field; toml quotes and escapes it.
     let label = toml::Value::String(t.label.clone());
-    let mut out = format!("THEME_NAME=\"{}\"\nTHEME_LABEL={label}\nTHEME_KIND=\"{kind}\"\nTHEME_BACKGROUND=\"{bg}\"\n\n", t.name);
+    let mut out = format!("THEME_NAME=\"{}\"\nTHEME_LABEL={label}\nTHEME_KIND=\"{kind}\"\nTHEME_BACKGROUND=\"{bg}\"\n", t.name);
+    if let Some(g) = &t.gradient {
+        let stops: Vec<String> = g.stops().iter().map(|c| c.hex()).collect();
+        out.push_str(&format!("THEME_GRADIENT=\"{} {}\"\n", g.axis.name(), stops.join(" ")));
+    }
+    out.push('\n');
     for n in Slots::NAMES {
         if let Some(c) = t.slots.get(n) {
             out.push_str(&format!("THEME_{}=\"{}\"\n", n.to_ascii_uppercase(), c.hex()));
@@ -258,6 +361,32 @@ pub fn to_text(t: &Theme) -> String {
         out.push('\n');
         for (n, c) in pinned {
             out.push_str(&format!("THEME_{}=\"{}\"\n", n.to_ascii_uppercase(), c.hex()));
+        }
+    }
+    let d = &t.decor;
+    let mut chrome: Vec<(&str, String)> = Vec::new();
+    match d.border {
+        Some(Border::Glyphs(g)) => chrome.push(("BORDER_GLYPHS", g.concat())),
+        Some(b) => chrome.push(("BORDER", b.name().unwrap_or("plain").to_string())),
+        None => {}
+    }
+    if let Some(g) = d.rules {
+        chrome.push(("RULE_GLYPHS", g.concat()));
+    }
+    if let Some(g) = d.mark {
+        chrome.push(("MARK", g.to_string()));
+    }
+    if let Some(g) = d.presence {
+        chrome.push(("PRESENCE", g.concat()));
+    }
+    if let Some(g) = d.ornament {
+        chrome.push(("ORNAMENT", g.to_string()));
+    }
+    if !chrome.is_empty() {
+        out.push('\n');
+        for (k, v) in chrome {
+            // A glyph may be a quote or a backslash; toml escapes it.
+            out.push_str(&format!("THEME_{k}={}\n", toml::Value::String(v)));
         }
     }
     out

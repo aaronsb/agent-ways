@@ -1,5 +1,11 @@
 //! The theme data: slots, kind, background mode, optional role overrides.
 //! The slot names are the dotfiles palette's `THEME_*` keys, lowercased.
+//! A gradient and decoration glyphs are agent-ways' own, and optional.
+
+use std::collections::BTreeSet;
+use std::sync::Mutex;
+
+use crate::oklab::{lab, rgb, Lab};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Rgb(pub u8, pub u8, pub u8);
@@ -170,6 +176,146 @@ impl Overrides {
     }
 }
 
+/// The direction a gradient runs: top to bottom, or left to right.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Axis {
+    Vertical,
+    Horizontal,
+}
+
+impl Axis {
+    pub fn name(self) -> &'static str {
+        match self {
+            Axis::Vertical => "vertical",
+            Axis::Horizontal => "horizontal",
+        }
+    }
+}
+
+/// A background gradient (`THEME_GRADIENT`): two to four stops, evenly
+/// spaced over the whole frame along `axis`, interpolated in OKLab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Gradient {
+    pub axis: Axis,
+    stops: [Rgb; 4],
+    len: u8,
+}
+
+impl Gradient {
+    pub const MIN_STOPS: usize = 2;
+    pub const MAX_STOPS: usize = 4;
+    /// Samples per segment the contrast floors check.
+    const SAMPLES: usize = 8;
+
+    /// `None` unless there are two to four stops.
+    pub fn new(axis: Axis, stops: &[Rgb]) -> Option<Gradient> {
+        if !(Gradient::MIN_STOPS..=Gradient::MAX_STOPS).contains(&stops.len()) {
+            return None;
+        }
+        let mut s = [stops[0]; 4];
+        s[..stops.len()].copy_from_slice(stops);
+        Some(Gradient { axis, stops: s, len: stops.len() as u8 })
+    }
+
+    pub fn stops(&self) -> &[Rgb] {
+        &self.stops[..self.len as usize]
+    }
+
+    /// The colour at `t`, 0.0 at the first stop and 1.0 at the last.
+    pub fn at(&self, t: f64) -> Rgb {
+        let s = self.stops();
+        let span = t.clamp(0.0, 1.0) * (s.len() - 1) as f64;
+        let i = (span.floor() as usize).min(s.len() - 2);
+        let f = span - i as f64;
+        let (a, b) = (lab(s[i]), lab(s[i + 1]));
+        rgb(Lab { l: a.l + (b.l - a.l) * f, a: a.a + (b.a - a.a) * f, b: a.b + (b.b - a.b) * f })
+    }
+
+    /// The colour of cell `n` of `cells` along the axis.
+    pub fn cell(&self, n: u16, cells: u16) -> Rgb {
+        self.at(if cells > 1 { n as f64 / (cells - 1) as f64 } else { 0.0 })
+    }
+
+    /// Every stop and eight points across each segment: the grounds the
+    /// contrast floors hold text to.
+    pub fn samples(&self) -> Vec<Rgb> {
+        let segments = self.stops().len() - 1;
+        let n = segments * Gradient::SAMPLES;
+        (0..=n).map(|k| self.at(k as f64 / n as f64)).collect()
+    }
+}
+
+/// A border's glyphs: one of ratatui's sets by name (`THEME_BORDER`), or
+/// eight of the theme's own (`THEME_BORDER_GLYPHS`): top-left, top-right,
+/// bottom-left, bottom-right, top edge, bottom edge, left edge, right edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Border {
+    Plain,
+    Rounded,
+    Double,
+    Thick,
+    Glyphs([&'static str; 8]),
+}
+
+impl Border {
+    pub const NAMES: [&'static str; 4] = ["plain", "rounded", "double", "thick"];
+
+    pub fn named(name: &str) -> Option<Border> {
+        Some(match name {
+            "plain" => Border::Plain,
+            "rounded" => Border::Rounded,
+            "double" => Border::Double,
+            "thick" => Border::Thick,
+            _ => return None,
+        })
+    }
+
+    /// The name [`Border::named`] takes; none for the theme's own glyphs.
+    pub fn name(&self) -> Option<&'static str> {
+        match self {
+            Border::Plain => Some("plain"),
+            Border::Rounded => Some("rounded"),
+            Border::Double => Some("double"),
+            Border::Thick => Some("thick"),
+            Border::Glyphs(_) => None,
+        }
+    }
+}
+
+/// The glyphs a theme draws its chrome with. Each is one grapheme, one
+/// column wide, except the ornament, which may be two. `None` keeps the
+/// surface's own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Decor {
+    pub border: Option<Border>,
+    /// `THEME_RULE_GLYPHS`: the rule, and the selected rule.
+    pub rules: Option<[&'static str; 2]>,
+    /// `THEME_MARK`: the selected row's mark.
+    pub mark: Option<&'static str>,
+    /// `THEME_PRESENCE`: live, and idle.
+    pub presence: Option<[&'static str; 2]>,
+    /// `THEME_ORNAMENT`: drawn before a pane title's text.
+    pub ornament: Option<&'static str>,
+}
+
+impl Decor {
+    pub const NONE: Decor = Decor { border: None, rules: None, mark: None, presence: None, ornament: None };
+}
+
+/// `s` as a `&'static str`, one allocation per distinct glyph for the life
+/// of the process, so [`Decor`] stays `Copy` and ratatui's border sets can
+/// borrow it.
+pub(crate) fn intern(s: &str) -> &'static str {
+    static GLYPHS: Mutex<BTreeSet<&'static str>> = Mutex::new(BTreeSet::new());
+    let mut set = GLYPHS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(g) = set.get(s) {
+        return g;
+    }
+    let g: &'static str = Box::leak(s.to_owned().into_boxed_str());
+    set.insert(g);
+    g
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Theme {
     /// File-safe id: `[a-z0-9-]+`.
@@ -179,4 +325,7 @@ pub struct Theme {
     pub background: Background,
     pub slots: Slots,
     pub overrides: Overrides,
+    /// Painted under `Background::Fill` only.
+    pub gradient: Option<Gradient>,
+    pub decor: Decor,
 }

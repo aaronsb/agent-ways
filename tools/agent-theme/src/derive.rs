@@ -2,7 +2,7 @@
 //! readable (ADR-504 §4). The blend formulas follow the dotfiles `dottheme`
 //! tool's status-line generator; the `SL_*` names below are its own.
 
-use crate::model::{Kind, Rgb, Theme};
+use crate::model::{Gradient, Kind, Rgb, Theme};
 use crate::oklab::{clip_chroma, delta_e, lch, Lch};
 
 /// WCAG 2.x relative luminance.
@@ -78,7 +78,7 @@ pub struct SegPair {
 ///
 /// Text roles meant for the ground (`body`, `muted`, `accent`, `accent_dim`,
 /// `info`, `ok`, `warn`, `err`, `alt`, `hot`) are lifted toward `fg` until
-/// they read on both `bg` and `selection_bg`. `ink`, `text`, `faded_ink` and
+/// they read on `bg`, `selection_bg` and every sampled point of the gradient. `ink`, `text`, `faded_ink` and
 /// `faded_text` keep dottheme's values: they are lozenge text, read on
 /// `dark_seg`. `rule`, `track` and `track_past` are decorative and carry no
 /// contrast floor.
@@ -121,6 +121,8 @@ pub struct Roles {
     pub mode_edit: SegPair,
     pub mode_review: SegPair,
     pub mode_apply: SegPair,
+    /// The theme's background gradient, which the ground roles must read on.
+    pub gradient: Option<Gradient>,
 }
 
 pub const MIN_TEXT: f64 = 4.5;
@@ -176,7 +178,8 @@ impl Roles {
             Kind::Light => (s.fg, s.bg),
         };
         let selection_bg = o.selection.unwrap_or_else(|| Rgb::blend(s.accent, s.bg, 13));
-        let grounds = [s.bg, selection_bg];
+        let mut grounds = vec![s.bg, selection_bg];
+        grounds.extend(t.gradient.iter().flat_map(Gradient::samples));
         let up = |c: Rgb, min: f64| lift(c, s.fg, &grounds, min);
         // The status roles, lifted, then settled apart in the order of
         // `Roles::status`: each keeps clear of the ones before it. An override
@@ -228,6 +231,7 @@ impl Roles {
             mode_edit: seg(s.warn),
             mode_review: seg(s.info),
             mode_apply: seg(s.ok),
+            gradient: t.gradient,
         }
     }
 
@@ -269,7 +273,8 @@ impl Roles {
     /// Every (name, colour, ground set, minimum ratio) the contrast test and
     /// the swatch sheet check.
     pub fn readable(&self) -> Vec<(&'static str, Rgb, Vec<Rgb>, f64)> {
-        let ground = vec![self.bg, self.selection_bg];
+        let mut ground = vec![self.bg, self.selection_bg];
+        ground.extend(self.gradient.iter().flat_map(Gradient::samples));
         let mut v = vec![
             ("body", self.body, ground.clone(), MIN_TEXT),
             ("accent", self.accent, ground.clone(), MIN_TEXT),

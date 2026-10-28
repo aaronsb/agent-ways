@@ -1,0 +1,26 @@
+# Miami — original to agent-ways: Ocean Drive by day. Deco pastels on the
+# ground (a Nagai sky to blush stucco), neon flamingo and pool turquoise.
+THEME_NAME="miami"
+THEME_LABEL="Miami"
+THEME_KIND="light"
+THEME_BACKGROUND="fill"
+THEME_GRADIENT="vertical #d4efff #fff4ee #ffe6ee"
+
+THEME_BG="#fff4ee"
+THEME_FG="#12233d"
+THEME_DIM="#76677a"
+THEME_SUBTLE="#ffd3e1"
+THEME_ACCENT="#e5006e"
+THEME_INFO="#0094c8"
+THEME_OK="#00876a"
+THEME_WARN="#d06000"
+THEME_ERR="#c8102e"
+THEME_ALT="#6b2fd6"
+
+THEME_SELECTION="#c8f1ee"
+
+THEME_BORDER="double"
+THEME_RULE_GLYPHS="─═"
+THEME_MARK="▌"
+THEME_PRESENCE="◆◇"
+THEME_ORNAMENT="🦩"

@@ -23,6 +23,9 @@ settings = ["dep:agent-settings", "dep:serde_yaml"]
 [dependencies]
 serde = "1"
 toml = "0.8"
+# A decoration glyph must be one grapheme of a known display width.
+unicode-segmentation = "1"
+unicode-width = "0.2"
 ratatui-core = { version = "0.1", optional = true }
 agent-settings = { path = "../agent-settings", optional = true }
 serde_yaml = { version = "0.9", optional = true }

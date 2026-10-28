@@ -1,0 +1,24 @@
+# Tampa — original to agent-ways: sunset across the bay, left to right;
+# creamsicle orange, Ybor brick red and pewter ink. Waves on top, sand below.
+THEME_NAME="tampa"
+THEME_LABEL="Tampa"
+THEME_KIND="light"
+THEME_BACKGROUND="fill"
+THEME_GRADIENT="horizontal #fff7e8 #ffeedd #ffe3d3"
+
+THEME_BG="#fff7e8"
+THEME_FG="#2a2a30"
+THEME_DIM="#7a6e66"
+THEME_SUBTLE="#f2dcc0"
+THEME_ACCENT="#e35200"
+THEME_INFO="#00609e"
+THEME_OK="#2c7a2e"
+THEME_WARN="#a07400"
+THEME_ERR="#c8102e"
+THEME_ALT="#4b2fc9"
+
+THEME_BORDER_GLYPHS="╭╮╰╯~·││"
+THEME_RULE_GLYPHS="~≈"
+THEME_MARK="›"
+THEME_PRESENCE="✹◦"
+THEME_ORNAMENT="⚡"
