@@ -277,17 +277,16 @@ impl Painter {
 
     /// The theme named `name`, the active choice its caller read from the
     /// settings registry (`theme.active`, ADR-503), at the environment's
-    /// depth, chosen by [`Painter::select`]; plain when output is not a
-    /// terminal, as [`Painter::detect`]. A warning from [`Painter::named_in`]
-    /// goes to stderr. This reads the theme directory, so hook paths never
-    /// call it (ADR-504 §11).
+    /// depth, chosen by [`Painter::select`], when stdout is a terminal; else
+    /// [`Painter::detect`]'s default, so forced colour on a pipe reads no
+    /// theme file. A warning from [`Painter::named_in`] goes to stderr. This
+    /// reads the theme directory, so hook paths never call it (ADR-504 §11).
     pub fn named(name: Option<&str>) -> Painter {
-        if !styled_output() {
-            return Painter::plain();
+        use std::io::IsTerminal;
+        if !std::io::stdout().is_terminal() {
+            return Painter::detect();
         }
-        let depth = ColorDepth::detect();
-        let Some(dir) = crate::bundled::user_dir() else { return Painter::terminal(depth) };
-        let (p, warning) = Painter::named_in(name, &dir, depth);
+        let (p, warning) = Painter::named_in(name, crate::bundled::user_dir().as_deref(), ColorDepth::detect());
         if let Some(w) = warning {
             eprintln!("agent-ways theme: {w}");
         }
@@ -295,15 +294,16 @@ impl Painter {
     }
 
     /// The theme `name` from the bundled themes and the user themes in
-    /// `dir`, at `depth`, and a warning when the choice could not be
-    /// honoured as written: the named theme does not exist, or a user file
-    /// meant to override it failed to load. No name, or the default's
-    /// ([`crate::TERMINAL`]), is the terminal palette.
-    pub fn named_in(name: Option<&str>, dir: &std::path::Path, depth: ColorDepth) -> (Painter, Option<String>) {
+    /// `dir`, the bundled alone when there is no `dir`, at `depth`, and a
+    /// warning when the choice could not be honoured as written: the named
+    /// theme does not exist, or a user file meant to override it failed to
+    /// load. No name, or the default's ([`crate::TERMINAL`]), is the
+    /// terminal palette.
+    pub fn named_in(name: Option<&str>, dir: Option<&std::path::Path>, depth: ColorDepth) -> (Painter, Option<String>) {
         let Some(name) = name.map(str::trim).filter(|n| !n.is_empty() && *n != crate::bundled::TERMINAL) else {
             return (Painter::terminal(depth), None);
         };
-        let set = crate::bundled::ThemeSet::load(Some(dir));
+        let set = crate::bundled::ThemeSet::load(dir);
         let rejected = set.rejected.iter().find(|(file, _)| {
             std::path::Path::new(file).file_stem().and_then(|s| s.to_str()) == Some(name)
         });
@@ -366,8 +366,12 @@ impl Painter {
 
     /// The ground of a `width` by `height` frame under
     /// `THEME_BACKGROUND="fill"`, reduced to the depth: the gradient at
-    /// truecolor, else bg. None where the terminal keeps its own.
+    /// truecolor, else bg. None where the terminal keeps its own, and for a
+    /// frame with no cells.
     pub fn ground(&self, width: u16, height: u16) -> Option<Ground> {
+        if width == 0 || height == 0 {
+            return None;
+        }
         let bg = Color::Rgb(self.roles?.bg).at(self.depth).filter(|_| self.fills_background())?;
         Some(match self.gradient() {
             Some(g) => {
@@ -536,19 +540,16 @@ pub fn install(p: Painter) -> bool {
 
 /// Set the process painter to the theme `choice` names, as
 /// [`Painter::named_in`] resolves it at the environment's depth, when
-/// output is styled. `choice` runs only then, so piped output, a hook's
-/// among it, keeps the plain painter and reads no settings or theme file
-/// (ADR-504 §11). Returns whether a painter was installed.
+/// stdout is a terminal. `choice` runs only then, so piped output, a hook's
+/// among it, reads no settings or theme file (ADR-504 §11), and forced
+/// colour on a pipe keeps [`Painter::detect`]'s default. Returns whether a
+/// painter was installed.
 pub fn install_from(choice: impl FnOnce() -> Option<String>) -> bool {
-    if !styled_output() {
+    use std::io::IsTerminal;
+    if !std::io::stdout().is_terminal() {
         return false;
     }
-    let depth = ColorDepth::detect();
-    let p = match crate::bundled::user_dir() {
-        Some(dir) => Painter::named_in(choice().as_deref(), &dir, depth).0,
-        None => Painter::terminal(depth),
-    };
-    install(p)
+    install(Painter::named_in(choice().as_deref(), crate::bundled::user_dir().as_deref(), ColorDepth::detect()).0)
 }
 
 /// Restores this thread's previous painter when dropped.

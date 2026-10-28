@@ -23,7 +23,7 @@ impl Painter {
         let lines: Vec<&str> = body.unwrap_or(text).split('\n').collect();
         let cols = width.min(u16::MAX as usize) as u16;
         let rows = lines.len().min(u16::MAX as usize) as u16;
-        let (Some(ground), Some(roles)) = (self.ground(cols, rows).filter(|_| cols > 0), self.roles()) else { return text.to_string() };
+        let (Some(ground), Some(roles)) = (self.ground(cols, rows), self.roles()) else { return text.to_string() };
         let fg = Color::Rgb(roles.body).at(self.depth());
         let mut out = String::with_capacity(text.len() * 2);
         let mut open = Vec::new();

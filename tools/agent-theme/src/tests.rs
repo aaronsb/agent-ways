@@ -292,7 +292,7 @@ fn user_files_add_and_override_bundled_themes() {
     assert_eq!(ThemeSet::load(None).list().count(), BUNDLED.len());
     assert_eq!(ThemeSet::load(Some(&dir.join("missing"))).list().count(), BUNDLED.len());
     // With the old choice file present and no name given, the default.
-    assert_eq!(Painter::named_in(None, &dir, ColorDepth::TrueColor), (Painter::terminal(ColorDepth::TrueColor), None));
+    assert_eq!(Painter::named_in(None, Some(&dir), ColorDepth::TrueColor), (Painter::terminal(ColorDepth::TrueColor), None));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -644,24 +644,35 @@ fn named_in_takes_the_choice_and_warns_when_it_cannot_be_honoured() {
     let dir = scratch_dir("active");
     let tc = ColorDepth::TrueColor;
     // No choice, or the default's name: the default, silently.
-    assert_eq!(Painter::named_in(None, &dir, tc), (Painter::terminal(tc), None));
-    assert_eq!(Painter::named_in(Some(TERMINAL), &dir, tc), (Painter::terminal(tc), None));
+    assert_eq!(Painter::named_in(None, Some(&dir), tc), (Painter::terminal(tc), None));
+    assert_eq!(Painter::named_in(Some(TERMINAL), Some(&dir), tc), (Painter::terminal(tc), None));
     // A bundled theme by name, and its 16-colour fallback.
     let dracula = ThemeSet::bundled().get("dracula").unwrap().clone();
-    assert_eq!(Painter::named_in(Some("dracula"), &dir, tc), (Painter::themed(&dracula, tc), None));
-    assert_eq!(Painter::named_in(Some("dracula"), &dir, ColorDepth::Ansi16).0, Painter::terminal(ColorDepth::Ansi16));
+    assert_eq!(Painter::named_in(Some("dracula"), Some(&dir), tc), (Painter::themed(&dracula, tc), None));
+    assert_eq!(Painter::named_in(Some("dracula"), Some(&dir), ColorDepth::Ansi16).0, Painter::terminal(ColorDepth::Ansi16));
     // A name that does not exist.
-    let (p, w) = Painter::named_in(Some("nope"), &dir, tc);
+    let (p, w) = Painter::named_in(Some("nope"), Some(&dir), tc);
     assert_eq!(p, Painter::terminal(tc));
     assert!(w.unwrap().contains("`nope` not found"));
     // A broken user override of a bundled name: the bundled one, with a warning.
     std::fs::write(dir.join("nord.theme"), "THEME_NAME=\"nord\"\n").unwrap();
     let nord = ThemeSet::bundled().get("nord").unwrap().clone();
-    let (p, w) = Painter::named_in(Some("nord"), &dir, tc);
+    let (p, w) = Painter::named_in(Some("nord"), Some(&dir), tc);
     assert_eq!(p, Painter::themed(&nord, tc));
     let w = w.unwrap();
     assert!(w.contains("nord.theme did not load") && w.contains("bundled"), "{w}");
     let _ = std::fs::remove_dir_all(&dir);
+    // No user directory, as with HOME unset: the bundled themes alone.
+    assert_eq!(Painter::named_in(Some("dracula"), None, tc), (Painter::themed(&dracula, tc), None));
+}
+
+#[test]
+fn a_frame_with_no_cells_has_no_ground() {
+    for name in ["miami-nights", "tampa", "paper"] {
+        let p = Painter::themed(&theme(name), ColorDepth::TrueColor);
+        assert_eq!((p.ground(80, 0), p.ground(0, 25)), (None, None), "{name}");
+        assert_eq!(p.block("x\n", 0), "x\n", "{name}");
+    }
 }
 
 #[test]

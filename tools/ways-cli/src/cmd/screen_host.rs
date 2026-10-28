@@ -51,10 +51,7 @@ pub(crate) fn theme_setting(key: &str) -> Option<String> {
 /// screens draw their own.
 pub(crate) fn look(depth: ColorDepth) -> (Palette, Shape) {
     let shape = theme_setting("shape").map_or(Shape::PLAIN, |s| Shape::named(&s));
-    let painter = match agent_theme::user_dir() {
-        Some(dir) => agent_theme::Painter::named_in(theme_setting("active").as_deref(), &dir, depth).0,
-        None => agent_theme::Painter::terminal(depth),
-    };
+    let painter = agent_theme::Painter::named_in(theme_setting("active").as_deref(), agent_theme::user_dir().as_deref(), depth).0;
     let painter = if painter.waypoints().is_some() { waypoints_as(painter, theme_setting("waypoints").as_deref()) } else { painter };
     (Palette { painter }, shape)
 }

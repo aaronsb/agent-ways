@@ -140,7 +140,7 @@ fn transcript() -> Vec<Signal> {
 fn chat_at(depth: ColorDepth, theme: Option<&str>) -> Chat {
     let f = fixture();
     let dir = f.root.join("config/agent-ways/themes");
-    let (painter, _) = agent_theme::Painter::named_in(theme, &dir, depth);
+    let (painter, _) = agent_theme::Painter::named_in(theme, Some(&dir), depth);
     // The frames before the left column (ADR-405) keep the legend row;
     // the column's own tests turn it on (`chat_side`). Each chat keeps its
     // Hide messages here watermarks to itself: one test's hide never
@@ -1519,7 +1519,7 @@ fn golden_the_column_draws_lozenges_in_the_round_shape() {
     let mut g = goldens();
     let f = fixture();
     let dir = f.root.join("config/agent-ways/themes");
-    let (painter, _) = agent_theme::Painter::named_in(Some("nord"), &dir, ColorDepth::TrueColor);
+    let (painter, _) = agent_theme::Painter::named_in(Some("nord"), Some(&dir), ColorDepth::TrueColor);
     let mut c = Chat::new(None, Palette { painter }, Shape::ROUND).heartbeat(false).pinned(UNIX_EPOCH + Duration::from_secs(NOW), 0);
     for s in transcript() {
         c.push(s);
