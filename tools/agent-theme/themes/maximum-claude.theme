@@ -1,0 +1,83 @@
+# Maximum Claude — original to agent-ways: Claude Code's coral on espresso
+# and cocoa, a ground warming toward burnt sienna, ivory text, and pops of
+# teal, sky, olive, plum and gold. Asterisks and sparks for the marks.
+THEME_NAME="maximum-claude"
+THEME_LABEL="Maximum Claude"
+THEME_KIND="dark"
+THEME_BACKGROUND="fill"
+THEME_GRADIENT="vertical #17100c #21140e #301a10"
+
+THEME_BG="#21140e"
+THEME_FG="#f6ecd9"
+THEME_DIM="#ab9682"
+THEME_SUBTLE="#3d2a1e"
+THEME_ACCENT="#d97757"
+THEME_INFO="#6cbde8"
+THEME_OK="#a9bd5c"
+THEME_WARN="#ebbd4f"
+THEME_ERR="#f0647e"
+THEME_ALT="#c597de"
+
+THEME_SELECTION="#3a2218"
+
+THEME_BORDER="rounded"
+THEME_RULE_GLYPHS="╌━"
+THEME_MARK="❯"
+THEME_PRESENCE="✻✼"
+THEME_ORNAMENT="✻"
+
+THEME_EVENT_HEAD="✺"
+THEME_EVENT_MARK="┊"
+THEME_EVENT_MATCHED="❋"
+THEME_EVENT_INJECTED="✱"
+THEME_EVENT_SUPPRESSED="✧"
+THEME_EVENT_REDISCLOSED="↻"
+
+# The words Claude Code shows under this theme (ways-theme mod). This file
+# is original to agent-ways, not a dotfiles palette: a table line does not
+# source as shell.
+[words]
+spinner = ["Pondering", "Brewing", "Simmering", "Sparking", "Crafting", "Musing"]
+done = ["Brewed", "Crafted", "Pondered", "Sparked"]
+
+# Waypoints: the marks a way's cluster wears on the replay.
+
+[[waypoints]]
+glyph = "✻"
+fg = "#d97757"
+
+[[waypoints]]
+glyph = "✺"
+fg = "#ebbd4f"
+
+[[waypoints]]
+glyph = "❋"
+fg = "#4fc4b0"
+
+[[waypoints]]
+glyph = "✱"
+fg = "#6cbde8"
+
+[[waypoints]]
+glyph = "✼"
+fg = "#a9bd5c"
+
+[[waypoints]]
+glyph = "❊"
+fg = "#c597de"
+
+[[waypoints]]
+glyph = "✲"
+fg = "#e89a6a"
+
+[[waypoints]]
+glyph = "✢"
+fg = "#f6ecd9"
+
+[[waypoints]]
+glyph = "✣"
+fg = "#f0647e"
+
+[[waypoints]]
+glyph = "✥"
+fg = "#d9b98a"

@@ -120,7 +120,7 @@ fn the_theme_tab_shows_the_shape_and_its_menu_cycles_it() {
 fn the_theme_tab_shows_the_waypoints_choice_with_a_preview_and_switches_it() {
     let d = dir("waypoints");
     let mut app = app_in(&d, ColorDepth::TrueColor);
-    keys(&mut app, &[KeyCode::Char('3'), KeyCode::End]);
+    keys(&mut app, &[KeyCode::Char('3'), KeyCode::End, KeyCode::Up, KeyCode::Up, KeyCode::Up]);
     assert_eq!(shown(&app), "miami-nights");
     let t = text(&draw(&mut app, 100, 30));
     let line = t.lines().find(|l| l.contains("waypoints theme")).unwrap_or_else(|| panic!("the choice:\n{t}"));

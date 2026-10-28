@@ -1,0 +1,83 @@
+# Terra — original to agent-ways: loam and river. A ground that falls from
+# deep river water through forest floor to soil, river blue, moss and fern,
+# ochre, rust and sandstone, and fleurons in place of shapes.
+THEME_NAME="terra"
+THEME_LABEL="Terra"
+THEME_KIND="dark"
+THEME_BACKGROUND="fill"
+THEME_GRADIENT="vertical #0c1a22 #0e1c15 #1f150d"
+
+THEME_BG="#0e1c15"
+THEME_FG="#f3ebd9"
+THEME_DIM="#a19a83"
+THEME_SUBTLE="#2b3a2c"
+THEME_ACCENT="#6fb3d9"
+THEME_INFO="#74c2a6"
+THEME_OK="#a3c46a"
+THEME_WARN="#e0ad4f"
+THEME_ERR="#e2734d"
+THEME_ALT="#d3b38a"
+
+THEME_SELECTION="#182a23"
+
+THEME_BORDER_GLYPHS="╭╮╰╯─┈││"
+THEME_RULE_GLYPHS="┈∿"
+THEME_MARK="❧"
+THEME_PRESENCE="✿❀"
+THEME_ORNAMENT="✾"
+
+THEME_EVENT_HEAD="☼"
+THEME_EVENT_MARK="┆"
+THEME_EVENT_MATCHED="❁"
+THEME_EVENT_INJECTED="⁕"
+THEME_EVENT_SUPPRESSED="☙"
+THEME_EVENT_REDISCLOSED="↻"
+
+# The words Claude Code shows under this theme (ways-theme mod). This file
+# is original to agent-ways, not a dotfiles palette: a table line does not
+# source as shell.
+[words]
+spinner = ["Growing", "Rooting", "Weathering", "Flowing", "Sprouting", "Settling"]
+done = ["Grown", "Rooted", "Weathered", "Settled"]
+
+# Waypoints: the marks a way's cluster wears on the replay.
+
+[[waypoints]]
+glyph = "❧"
+fg = "#6fb3d9"
+
+[[waypoints]]
+glyph = "✿"
+fg = "#a3c46a"
+
+[[waypoints]]
+glyph = "⁕"
+fg = "#e0ad4f"
+
+[[waypoints]]
+glyph = "✾"
+fg = "#74c2a6"
+
+[[waypoints]]
+glyph = "❀"
+fg = "#e2734d"
+
+[[waypoints]]
+glyph = "⁂"
+fg = "#d3b38a"
+
+[[waypoints]]
+glyph = "❁"
+fg = "#9cc8e6"
+
+[[waypoints]]
+glyph = "☼"
+fg = "#c9d98f"
+
+[[waypoints]]
+glyph = "∿"
+fg = "#f0c870"
+
+[[waypoints]]
+glyph = "☙"
+fg = "#c08a6a"
