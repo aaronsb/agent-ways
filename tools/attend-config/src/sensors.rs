@@ -88,6 +88,9 @@ pub struct SensorFile {
     pub path: Option<PathBuf>,
     /// A project file the allow-list refused: it is not merged.
     pub refused: bool,
+    /// The file sets nothing but `enabled`, so it defines no sensor of its
+    /// own ([`only_switches`]).
+    pub switch: bool,
 }
 
 /// A problem, and the file it is in when one file holds the field.
@@ -112,14 +115,20 @@ pub struct Loaded {
 }
 
 impl Loaded {
-    /// The highest layer that has a file for the sensor.
+    /// The highest layer whose file is merged, or the refused file's when
+    /// nothing else loads.
     pub fn origin(&self) -> Origin {
-        self.files.iter().map(|f| f.origin).max().unwrap_or(Origin::Builtin)
+        self.merged_files().map(|f| f.origin).max().unwrap_or(Origin::Builtin)
     }
 
-    /// The file of the highest layer, if it has a path.
+    /// The file of [`Loaded::origin`]'s layer, if it has a path.
     pub fn path(&self) -> Option<&Path> {
-        self.files.iter().rev().find_map(|f| f.path.as_deref())
+        self.merged_files().rev().find_map(|f| f.path.as_deref())
+    }
+
+    fn merged_files(&self) -> impl DoubleEndedIterator<Item = &SensorFile> {
+        let whole = self.is_refused();
+        self.files.iter().filter(move |f| whole || !f.refused)
     }
 
     /// Whether a problem keeps the sensor from running.
@@ -127,9 +136,10 @@ impl Loaded {
         self.spec.is_none() && self.refused.is_none()
     }
 
-    /// Whether every file is refused, so nothing of the sensor loads.
+    /// Whether nothing of the sensor loads: every file that defines it is
+    /// refused.
     pub fn is_refused(&self) -> bool {
-        self.refused.is_some() && self.files.iter().all(|f| f.refused)
+        self.refused.is_some() && self.files.iter().all(|f| f.refused || f.switch)
     }
 }
 
@@ -174,10 +184,12 @@ pub fn from_layers(layers: &[Layer], project: &Path, trusted: &[String]) -> Vec<
 /// settings screens keep in the user's file for a project's sensor, read in
 /// a project that has no such sensor. It defines none.
 fn only_switches(reads: &[Read]) -> bool {
-    reads.iter().all(|r| match serde_yaml::from_str::<Value>(&r.text) {
-        Ok(Value::Mapping(m)) => m.keys().all(|k| k.as_str() == Some("enabled")),
-        _ => false,
-    })
+    reads.iter().all(|r| serde_yaml::from_str::<Value>(&r.text).is_ok_and(|v| is_switch(&v)))
+}
+
+/// Whether a sensor file sets nothing but `enabled`.
+fn is_switch(doc: &Value) -> bool {
+    doc.as_mapping().is_some_and(|m| m.keys().all(|k| k.as_str() == Some("enabled")))
 }
 
 /// The `.yaml` files in `dir`, by stem, sorted: the files a sensor layer
@@ -230,7 +242,9 @@ fn layer(name: String, reads: Vec<Read>, trust: bool, project: &Path) -> Loaded 
         }
     }
     let files_of = |refused: bool, docs: &[(Origin, Option<PathBuf>, Value)]| {
-        docs.iter().map(|(o, p, _)| SensorFile { origin: *o, path: p.clone(), refused: refused && *o == Origin::Project }).collect::<Vec<_>>()
+        docs.iter()
+            .map(|(o, p, v)| SensorFile { origin: *o, path: p.clone(), refused: refused && *o == Origin::Project, switch: is_switch(v) })
+            .collect::<Vec<_>>()
     };
     if findings.iter().any(|f| f.problem.severity == Severity::Invalid) {
         return Loaded { files: files_of(false, &docs), name, spec: None, findings, refused: None };
@@ -253,9 +267,10 @@ fn layer(name: String, reads: Vec<Read>, trust: bool, project: &Path) -> Loaded 
         ));
         let lower: Vec<_> = docs.iter().filter(|(o, _, _)| *o != Origin::Project).cloned().collect();
         let files = files_of(true, &docs);
-        // With nothing beneath, the refused file is still read, so the list
-        // can say what it is; it never runs.
-        let shown = if lower.is_empty() { &docs } else { &lower };
+        // With nothing beneath that defines the sensor, a switch at most,
+        // the refused file is still read, so the list can say what it is;
+        // it never runs.
+        let shown = if lower.iter().all(|(_, _, v)| is_switch(v)) { &docs } else { &lower };
         let mut l = check(name, files, shown, &merged(shown), findings);
         l.refused = refused;
         return l;
@@ -450,12 +465,17 @@ pub fn file_layer(name: &str, origin: Origin, path: Option<&Path>, text: &str) -
 /// The sensor a file at `path` holds, and the layer it is: a `.yaml` file in
 /// the user's sensor directory, or in a project's, with that project.
 pub fn file_at(path: &Path) -> Option<(String, Origin, Option<PathBuf>)> {
+    file_under(&user_dir(), path)
+}
+
+/// [`file_at`], with the user's sensor directory at `user`.
+fn file_under(user: &Path, path: &Path) -> Option<(String, Origin, Option<PathBuf>)> {
     let name = path.file_stem()?.to_str()?.to_string();
     if path.extension()? != "yaml" {
         return None;
     }
     let dir = path.parent()?;
-    if dir == user_dir() {
+    if dir == user {
         return Some((name, Origin::User, None));
     }
     let project = dir.parent()?.parent()?.parent()?;
@@ -468,10 +488,15 @@ pub fn file_at(path: &Path) -> Option<(String, Origin, Option<PathBuf>)> {
 /// over the shipped and user ones. A file of switches alone defines no
 /// sensor and is always taken.
 pub fn check_edit(path: &Path, text: &str) -> Result<(), String> {
-    let Some((name, origin, project)) = file_at(path) else { return Ok(()) };
+    check_edit_under(&user_dir(), path, text)
+}
+
+/// [`check_edit`], with the user's sensor directory at `user`.
+fn check_edit_under(user: &Path, path: &Path, text: &str) -> Result<(), String> {
+    let Some((name, origin, project)) = file_under(user, path) else { return Ok(()) };
     let mut reads: Vec<Read> = SHIPPED.iter().filter(|(n, _)| *n == name).map(|(_, t)| Read { origin: Origin::Builtin, path: None, text: t.to_string() }).collect();
     if origin == Origin::Project {
-        let user = user_dir().join(format!("{name}.yaml"));
+        let user = user.join(format!("{name}.yaml"));
         if let Ok(t) = std::fs::read_to_string(&user) {
             reads.push(Read { origin: Origin::User, path: Some(user), text: t });
         }
@@ -604,14 +629,37 @@ mod tests {
     #[test]
     fn an_edit_that_makes_a_sensor_invalid_is_refused_with_the_reason() {
         let dir = std::env::temp_dir().join(format!("attend-sensors-edit-{}", std::process::id()));
+        let user = dir.join("user");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&user).unwrap();
         let path = project_dir(&dir).join("git.yaml");
-        assert!(check_edit(&path, "interval: 90\n").is_ok(), "an override of a shipped field");
-        let e = check_edit(&path, "interval: 5\nmin_interval: 50\n").unwrap_err();
+        let check = |p: &Path, text: &str| check_edit_under(&user, p, text);
+        assert!(check(&path, "interval: 90\n").is_ok(), "an override of a shipped field");
+        let e = check(&path, "interval: 5\nmin_interval: 50\n").unwrap_err();
         assert!(e.contains("would make the sensor git invalid") && e.contains("min_interval"), "{e}");
+        assert!(check(&path, "min_interval: 200\n").is_err(), "over the shipped interval of 30");
+        std::fs::write(user.join("git.yaml"), "interval: 300\n").unwrap();
+        assert!(check(&path, "min_interval: 200\n").is_ok(), "over the user's interval of 300");
+        assert!(check(&user.join("git.yaml"), "min_interval: 200\n").is_err(), "a user file is read over the shipped one alone");
         let mine = project_dir(&dir).join("mine.yaml");
-        assert!(check_edit(&mine, "interval: 90\n").unwrap_err().contains("kind is required"));
-        assert!(check_edit(&mine, "enabled: false\n").is_ok(), "a switch alone defines nothing to refuse");
-        assert!(check_edit(&dir.join("elsewhere.yaml"), "kind: [").is_ok(), "not a sensor file");
+        assert!(check(&mine, "interval: 90\n").unwrap_err().contains("kind is required"));
+        assert!(check(&mine, "enabled: false\n").is_ok(), "a switch alone defines nothing to refuse");
+        assert!(check(&dir.join("elsewhere.yaml"), "kind: [").is_ok(), "not a sensor file");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A project command sensor the allow-list refuses, over the user's
+    /// switch for it, is refused: the switch defines nothing beneath it.
+    /// The origin and file shown are the merged ones.
+    #[test]
+    fn a_refused_project_sensor_over_a_user_switch_is_refused_and_the_origin_skips_refused_files() {
+        let cmd = "kind: command\nargv: [/bin/true]\noutput: lines\n";
+        let l = layer("chk".into(), vec![read(Origin::User, "enabled: false\n"), read(Origin::Project, cmd)], false, Path::new("/p"));
+        assert!(l.is_refused(), "{l:?}");
+        assert_eq!(l.origin(), Origin::Project, "nothing else loads, so the refused file is shown");
+        let l = layer("chk".into(), vec![read(Origin::User, cmd), read(Origin::Project, "argv: [rm, -rf, x]\n")], false, Path::new("/p"));
+        assert!(!l.is_refused());
+        assert_eq!(l.origin(), Origin::User, "the refused project file is not merged");
     }
 
     /// peers and keepwarm keep the message lane under any file name, and a
