@@ -178,6 +178,7 @@ _Install, update, configuration, permissions, the CLI contract, testing_
 | [ADR-514](./platform/ADR-514-claude-code-follows-the-active-theme-through-the-ways-theme-mod-over-externalised-theme-layers.md) | Claude Code follows the active theme through the ways-theme mod, over externalised theme layers | accepted |
 | [ADR-515](./platform/ADR-515-item-origin-across-store-screens-and-cli-audited-2026-10-29.md) | How themes, mods, sensors, ways and judge profiles are kept and shown across the store, the settings screens and the CLI, audited 2026-10-29 | proposed |
 | [ADR-516](./platform/ADR-516-one-item-descriptor-shared-by-the-store-the-settings-screens-and-the-cli.md) | One item descriptor of kind, origin, path, source, version and state for themes, mods, sensors, ways and judge profiles, shared by the store, the settings screens and the CLI | accepted |
+| [ADR-517](./platform/ADR-517-the-images-mod-ships-from-agent-ways-as-a-fourth-mod-installed-by-default-its-history-moved-from-the-operator-s-dotfiles.md) | The images mod ships from agent-ways as a fourth mod, installed by default, its history moved from the operator's dotfiles | accepted |
 
 ## Practice
 _The ways method, way authoring, the development loop_
