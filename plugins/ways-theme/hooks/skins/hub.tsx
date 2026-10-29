@@ -46,6 +46,7 @@ import { commandOf, errorLine, isQuiet, quietLabel } from './quiet.ts'
 import { MAX_MARKDOWN, replySegments } from './reply.ts'
 import { fileHref, hyperlinksFrom, touchOf } from './links.ts'
 import { MIN_WIDTH, axisFor, boxLines, canMeasure, gradientBox, gradientRuns } from './prompt-box.tsx'
+import { holdsPaste, pasteIdOf, shownText } from './pastes.ts'
 import type { Touch, TurnStats, UsageSnap } from '../../types'
 
 /** Each export call's bound. */
@@ -201,6 +202,19 @@ let sessionCwd: string | undefined
 let hasTouched = false
 
 const cwdOf = async ($: EngineInterface): Promise<string> => sessionCwd ?? (await $.session.cwd())
+
+// The id Claude Code gives this session's pastes, worked out by `idOf` once per
+// session id; null when the session id or its digest cannot be had.
+let pastes: { session: string; id: string } | undefined
+export async function sessionPasteId($: Pick<EngineInterface, 'session'>, idOf = pasteIdOf): Promise<string | null> {
+  try {
+    const session = await $.session.id()
+    if (pastes?.session !== session) pastes = { session, id: await idOf(session) }
+    return pastes.id
+  } catch {
+    return null
+  }
+}
 
 const lookOf = (ui: Ui & { Svg?: SvgElement }, setup: Setup, surface: RenderSurface, copy?: (text: string) => void): Look => ({
   ui,
@@ -552,27 +566,35 @@ export function registerSkins(on: On, shared: Shared): void {
     return stdout === output.stdout ? next(e) : next({ ...e, props: { ...e.props, output: { ...output, stdout } } })
   })
 
-  // The person's message, after `render.prompt_box`. Off the terminal it keeps Claude
-  // Code's own component: it carries the copy and rewind buttons, the context menu and
-  // selectable text, which a drawing of the mod's would lose.
+  // The person's message, after `render.prompt_box`, its pastes unwrapped as Claude Code
+  // shows them (pastes.ts). Off the terminal it keeps Claude Code's own component: it
+  // carries the copy and rewind buttons, the context menu and selectable text, which a
+  // drawing of the mod's would lose.
   on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
     const setup = await activeSetup($)
     if (setup === null || setup.promptBox === 'off' || e.surface !== 'terminal' || !shared.view().isWaysTheme || !TYPED.has(e.props.origin.kind) || e.props.text.length > MAX_PROMPT || CONTROL.test(e.props.text)) {
       return next(e)
     }
+    // A paste is unwrapped by the session's paste id; without it, Claude Code draws.
+    let text = e.props.text
+    if (holdsPaste(text)) {
+      const pasteId = await sessionPasteId($)
+      if (pasteId === null) return next(e)
+      text = shownText(text, pasteId)
+    }
     const ui = $.ui.resolve(e)
     const hasMore = await read($, memberOf(imagesAtom, e))
     const isRowOpen = isExpanded(shared.view(), e.props.isExpanded)
     const width = (e.viewport?.columns ?? 80) - 1
-    const canGradient = setup.promptBox === 'gradient' && !hasMore && !isRowOpen && !NOT_PLAIN.test(e.props.text) && canMeasure(e.props.text) && width >= MIN_WIDTH
+    const canGradient = setup.promptBox === 'gradient' && !hasMore && !isRowOpen && !NOT_PLAIN.test(text) && canMeasure(text) && width >= MIN_WIDTH
     if (canGradient && setup.ground !== null) {
-      const lines = boxLines(e.props.text, width)
+      const lines = boxLines(text, width)
       const runs = gradientRuns(lines, width, setup.ground.stops, axisFor(lines.length - 2))
       return gradientBox(ui, runs, setup.ground.text)
     }
     const look = lookOf(ui, setup, e.surface)
     // Claude Code draws the images; the text is already in the outline above them.
-    return promptRow(look, e.props.text, hasMore ? await next({ ...e, props: { ...e.props, text: '' } }) : undefined)
+    return promptRow(look, text, hasMore ? await next({ ...e, props: { ...e.props, text: '' } }) : undefined)
   })
 
   // A reply keeps Claude Code's own drawing unless it holds a card or markdown skins draws.
