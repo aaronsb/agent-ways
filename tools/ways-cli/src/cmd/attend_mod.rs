@@ -1312,8 +1312,8 @@ mod tests {
         assert_eq!(h.settings_only, vec!["images@dotfiles".to_string()]);
         let p = plan_converge(&IMAGES, &h, DIR, None, "1.48.0", "CMD");
         let want = format!(
-            "images@dotfiles is enabled in {}/settings.json (enabledPlugins) from a marketplace Claude Code has not recorded",
-            dir.display()
+            "images@dotfiles is enabled in {} (enabledPlugins) from a marketplace Claude Code has not recorded",
+            dir.join("settings.json").display()
         );
         assert_eq!(p.notes.len(), 1, "{p:?}");
         assert!(p.notes[0].starts_with(&want) && p.notes[0].contains("remove that enabledPlugins entry, then `ways manage mod repair`"), "{p:?}");

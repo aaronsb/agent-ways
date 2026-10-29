@@ -770,8 +770,12 @@ mod tests {
         };
         let lines: Vec<String> = checks(&IMAGES, &v, Some("1.48.0"), false, dir).into_iter().map(|(_, t)| t).collect();
         let only = lines.iter().find(|t| t.starts_with("images@dotfiles")).unwrap();
+        let want = format!(
+            "images@dotfiles is enabled in {} (enabledPlugins) from a marketplace Claude Code has not recorded",
+            dir.join("settings.json").display()
+        );
         assert!(
-            only.starts_with("images@dotfiles is enabled in /home/u/.claude/settings.json (enabledPlugins) from a marketplace Claude Code has not recorded")
+            only.starts_with(&want)
                 && only.contains("Fix: remove that enabledPlugins entry, then `ways manage mod repair images --commit`"),
             "{only}"
         );
