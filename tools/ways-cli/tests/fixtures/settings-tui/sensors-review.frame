@@ -7,8 +7,7 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││origin    builtin                          │|
 |│                                                     ││kind      crate                            │|
-|│                                                     ││source    unknown: attend absent           │|
-|│                                                     ││state     enabled                          │|
+|│                                                     ││state     enabled; attend absent           │|
 |│                                                     ││interval  30s quiet, 5s busy               │|
 |│                                                     ││threshold 2                                │|
 |│                                                     ││lane      event                            │|
@@ -17,6 +16,7 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││file it writes                             │|
 |│                                                     ││  ~/.config/attend/sensors/processes.yaml  │|
+|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -75,7 +75,6 @@ styles
   8  99-99  - - DIM
   9   0-0   - - DIM
   9  54-65  - - DIM
-  9  66-72  Green - -
   9  99-99  - - DIM
  10   0-0   - - DIM
  10  54-65  - - DIM
@@ -84,20 +83,20 @@ styles
  11  54-65  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM
- 12  54-65  - - DIM
+ 12  54-55  - - DIM
  12  99-99  - - DIM
  13   0-0   - - DIM
- 13  54-55  - - DIM
+ 13  54-80  - - DIM
  13  99-99  - - DIM
  14   0-0   - - DIM
- 14  54-80  - - DIM
+ 14  54-55  - - DIM
  14  99-99  - - DIM
  15   0-0   - - DIM
  15  54-55  - - DIM
+ 15  56-69  - - BOLD
  15  99-99  - - DIM
  16   0-0   - - DIM
  16  54-55  - - DIM
- 16  56-69  - - BOLD
  16  99-99  - - DIM
  17   0-0   - - DIM
  17  54-55  - - DIM

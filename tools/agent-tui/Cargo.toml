@@ -15,6 +15,8 @@ path = "src/lib.rs"
 [dependencies]
 ratatui = { version = "0.30", default-features = false, features = ["crossterm", "layout-cache"] }
 agent-theme = { path = "../agent-theme", features = ["ratatui"] }
+# The item descriptor a card draws (ADR-516 §4).
+agent-settings = { path = "../agent-settings" }
 # The termination signals the run loop restores the terminal on.
 signal-hook = "0.3"
 # Markdown to styled text (`markdown`).

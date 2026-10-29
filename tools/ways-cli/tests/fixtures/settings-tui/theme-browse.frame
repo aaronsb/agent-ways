@@ -5,22 +5,22 @@ agent-tui frame 100x30
 |│   agent-ways       dark                             ││nord · dark · background terminal          │|
 |│▌  nord             dark                             ││                                           │|
 |│   catppuccin-mocha dark                             ││origin    builtin · inactive               │|
-|│   dracula          dark                             ││source    bundled (read-only)              │|
-|│   gruvbox-dark     dark                             ││saves to  ~/.config/agent-ways/themes      │|
-|│   tokyonight-night dark                             ││shape     plain (a: shape cycles it)       │|
-|│   paper            light                            ││waypoints theme  ● ◆ ■ ▲ ◉ ▶ ★ ◈ ♦ ▪       │|
-|│   miami            light                            ││                                           │|
-|│   tampa            light                            ││slots                                      │|
-|│   miami-nights     dark                             ││   bg     #2e3440    info   #81a1c1        │|
-|│   terra            dark                             ││   fg     #d8dee9    ok     #a3be8c        │|
-|│   crystal-mountain light                            ││   dim    #4c566a    warn   #d08770        │|
-|│   maximum-claude   dark                             ││   subtle #3b4252    err    #bf616a        │|
-|│                                                     ││   accent #b48ead    alt    #88c0d0        │|
+|│   dracula          dark                             ││saves to  ~/.config/agent-ways/themes      │|
+|│   gruvbox-dark     dark                             ││shape     plain (a: shape cycles it)       │|
+|│   tokyonight-night dark                             ││waypoints theme  ● ◆ ■ ▲ ◉ ▶ ★ ◈ ♦ ▪       │|
+|│   paper            light                            ││                                           │|
+|│   miami            light                            ││slots                                      │|
+|│   tampa            light                            ││   bg     #2e3440    info   #81a1c1        │|
+|│   miami-nights     dark                             ││   fg     #d8dee9    ok     #a3be8c        │|
+|│   terra            dark                             ││   dim    #4c566a    warn   #d08770        │|
+|│   crystal-mountain light                            ││   subtle #3b4252    err    #bf616a        │|
+|│   maximum-claude   dark                             ││   accent #b48ead    alt    #88c0d0        │|
 |│                                                     ││                                           │|
 |│                                                     ││contrast  ok                               │|
 |│                                                     ││distinct  ok, err/warn ΔE 0.084            │|
 |│                                                     ││                                           │|
 |│                                                     ││claude                      not active     │|
+|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -127,6 +127,16 @@ styles
   8  43-43  - DarkGray -
   8  44-44  - Gray -
   8  54-65  - - DIM
+  8  73-73  LightCyan - -
+  8  75-75  LightGreen - -
+  8  77-77  LightRed - -
+  8  79-79  LightBlue - -
+  8  81-81  LightYellow - -
+  8  83-83  LightMagenta - -
+  8  85-85  LightCyan - -
+  8  87-87  LightGreen - -
+  8  89-89  LightYellow - -
+  8  91-91  LightBlue - -
   8  99-99  - - DIM
   9   0-0   - - DIM
   9  21-27  - - DIM
@@ -138,17 +148,7 @@ styles
   9  41-41  - Green -
   9  42-43  - Red -
   9  44-44  - DarkGray -
-  9  54-65  - - DIM
-  9  73-73  LightCyan - -
-  9  75-75  LightGreen - -
-  9  77-77  LightRed - -
-  9  79-79  LightBlue - -
-  9  81-81  LightYellow - -
-  9  83-83  LightMagenta - -
-  9  85-85  LightCyan - -
-  9  87-87  LightGreen - -
-  9  89-89  LightYellow - -
-  9  91-91  LightBlue - -
+  9  54-55  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
  10  21-27  - - DIM
@@ -161,6 +161,7 @@ styles
  10  42-43  - Red -
  10  44-44  - LightBlue -
  10  54-55  - - DIM
+ 10  56-60  - - BOLD
  10  99-99  - - DIM
  11   0-0   - - DIM
  11  21-27  - - DIM
@@ -173,7 +174,10 @@ styles
  11  42-43  - Red -
  11  44-44  - DarkGray -
  11  54-55  - - DIM
- 11  56-60  - - BOLD
+ 11  56-57  - Black -
+ 11  58-65  - - DIM
+ 11  74-75  - DarkGray -
+ 11  76-83  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM
  12  21-27  - - DIM
@@ -186,7 +190,7 @@ styles
  12  43-43  - LightRed -
  12  44-44  - LightBlue -
  12  54-55  - - DIM
- 12  56-57  - Black -
+ 12  56-57  - Gray -
  12  58-65  - - DIM
  12  74-75  - DarkGray -
  12  76-83  - - DIM
@@ -201,7 +205,7 @@ styles
  13  42-42  - Yellow -
  13  43-44  - DarkGray -
  13  54-55  - - DIM
- 13  56-57  - Gray -
+ 13  56-57  - DarkGray -
  13  58-65  - - DIM
  13  74-75  - DarkGray -
  13  76-83  - - DIM
@@ -236,39 +240,35 @@ styles
  15  54-55  - - DIM
  15  56-57  - DarkGray -
  15  58-65  - - DIM
- 15  74-75  - DarkGray -
+ 15  74-75  - Gray -
  15  76-83  - - DIM
  15  99-99  - - DIM
  16   0-0   - - DIM
  16  54-55  - - DIM
- 16  56-57  - DarkGray -
- 16  58-65  - - DIM
- 16  74-75  - Gray -
- 16  76-83  - - DIM
  16  99-99  - - DIM
  17   0-0   - - DIM
- 17  54-55  - - DIM
+ 17  54-65  - - DIM
+ 17  66-67  Green - -
  17  99-99  - - DIM
  18   0-0   - - DIM
  18  54-65  - - DIM
- 18  66-67  Green - -
+ 18  66-86  Green - -
  18  99-99  - - DIM
  19   0-0   - - DIM
- 19  54-65  - - DIM
- 19  66-86  Green - -
+ 19  54-55  - - DIM
  19  99-99  - - DIM
  20   0-0   - - DIM
- 20  54-55  - - DIM
+ 20  54-65  - - DIM
+ 20  66-67  - Gray -
+ 20  69-70  - Gray -
+ 20  72-73  - DarkGray -
+ 20  75-76  - DarkGray -
+ 20  78-79  - Gray -
+ 20  81-82  - DarkGray -
+ 20  84-93  - - DIM
  20  99-99  - - DIM
  21   0-0   - - DIM
- 21  54-65  - - DIM
- 21  66-67  - Gray -
- 21  69-70  - Gray -
- 21  72-73  - DarkGray -
- 21  75-76  - DarkGray -
- 21  78-79  - Gray -
- 21  81-82  - DarkGray -
- 21  84-93  - - DIM
+ 21  54-55  - - DIM
  21  99-99  - - DIM
  22   0-0   - - DIM
  22  54-55  - - DIM

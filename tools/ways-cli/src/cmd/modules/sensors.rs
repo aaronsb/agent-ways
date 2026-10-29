@@ -1,14 +1,17 @@
-//! A sensor as a [`Module`]: one per sensor its files declare (ADR-403),
-//! read through attend's own loader ([`attend_config::sensors`]), with what
-//! only attend knows (a crate's version, whether a poll failed) from
-//! `attend sensor list --json`.
+//! A sensor as an item: one per sensor its files declare (ADR-403), read
+//! through attend's own loader ([`attend_config::sensors`]), with what only
+//! attend knows (a crate's version, whether a poll failed) from
+//! `attend sensor list --json`. The lowest file that defines a sensor is its
+//! origin, and each file above it extends it.
 
 use std::time::{Duration, Instant};
 
+use agent_settings::item::{Family, How, Item, ItemKind, Origin, Override, SensorState};
+use agent_tui::tree::Card;
 use attend_config::sensors::Loaded;
 use sensor_spec::Severity;
 
-use super::{Health, Kind, Module, Origin, Row, State};
+use super::row;
 
 /// One sensor as `attend sensor list --json` describes it.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -127,78 +130,111 @@ pub fn parse(json: &str) -> Option<Vec<Described>> {
     Some(rows.collect())
 }
 
-/// How a state attend reports stands.
-fn health(state: &str) -> Health {
-    match state {
-        "active" => Health::Running,
-        "off" => Health::Idle,
-        "failed" | "invalid" => Health::Broken,
-        _ => Health::Attention,
+/// A state as attend reports it, in the sensor family's words. attend's
+/// `failed`, `not hosted` and `not compiled` read `failing`, `missing` and
+/// `not-compiled`.
+fn state_of(word: &str) -> Option<SensorState> {
+    Some(match word {
+        "active" => SensorState::Active,
+        "off" => SensorState::Off,
+        "not compiled" | "not-compiled" => SensorState::NotCompiled,
+        "not hosted" | "missing" => SensorState::Missing,
+        "refused" => SensorState::Refused,
+        "failed" | "failing" => SensorState::Failing,
+        "invalid" => SensorState::Invalid,
+        _ => return None,
+    })
+}
+
+fn kind_of(k: sensor_spec::Kind) -> ItemKind {
+    match k {
+        sensor_spec::Kind::Crate => ItemKind::Crate,
+        sensor_spec::Kind::Command => ItemKind::Command,
+        sensor_spec::Kind::Mcp => ItemKind::Mcp,
+        sensor_spec::Kind::Ways => ItemKind::Ways,
+    }
+}
+
+fn origin_of(o: sensor_spec::Origin) -> Origin {
+    match o {
+        sensor_spec::Origin::Builtin => Origin::Builtin,
+        sensor_spec::Origin::User => Origin::User,
+        sensor_spec::Origin::Project => Origin::Project,
     }
 }
 
 /// The state of `l` as its files say, for an attend that did not describe
-/// it, and why when the files say why.
-fn local_state(l: &Loaded) -> (State, Option<String>) {
+/// it, and why. A sensor its files enable has no state until attend says
+/// whether it runs, which `unknown` says it has not.
+fn local_state(l: &Loaded, unknown: &str) -> (Option<SensorState>, Option<String>) {
     if l.is_refused() {
-        return (State::new("refused", Health::Attention), l.refused.clone());
+        return (Some(SensorState::Refused), l.refused.clone());
     }
     let Some(spec) = &l.spec else {
         let why = l.findings.iter().find(|f| f.problem.severity == Severity::Invalid).map(|f| f.problem.to_string());
-        return (State::new("invalid", Health::Broken), why);
+        return (Some(SensorState::Invalid), why);
     };
     match spec.enabled {
-        true => (State::new("enabled", Health::Running), None),
-        false => (State::new("off", Health::Idle), None),
+        true => (None, Some(format!("enabled; {unknown}"))),
+        false => (Some(SensorState::Off), None),
     }
 }
 
-/// The sensor `l`, its files layered, as a card: its kind, the layer and
-/// file it comes from, and its state, source and version as `attend`
-/// reports them. With no account from attend, the files alone say what
-/// they can: a crate's source is then unknown.
-pub fn of_sensor(l: &Loaded, attend: &Attend) -> Module {
+/// The sensor `l`, its files layered, as a card: its kind, the file that
+/// defines it and each file that extends it, and its state, source and
+/// version as `attend` reports them. With no account from attend, the files
+/// alone say what they can: a crate's source is then unknown.
+pub fn of_sensor(l: &Loaded, attend: &Attend) -> Card {
     let spec = l.spec.as_ref();
     let d = attend.find(&l.name);
-    let kind = spec.map(|s| Kind::from(s.kind)).or_else(|| d.and_then(|d| sensor_spec::Kind::parse(&d.kind)).map(Kind::from));
-    let unknown = match (attend, d) {
-        (_, Some(_)) => None,
-        (Attend::Absent, _) => Some("unknown: attend absent"),
-        (Attend::Unlisted, _) => Some("unknown: attend did not list its sensors"),
-        (Attend::Listed(_), None) => Some("unknown: attend does not list it"),
+    let kind = spec.map(|s| s.kind).or_else(|| d.and_then(|d| sensor_spec::Kind::parse(&d.kind))).map(kind_of);
+    // The files merged into it: every one when nothing else loads, else
+    // all but a refused project file.
+    let whole = l.is_refused();
+    let files: Vec<_> = l.files.iter().filter(|f| whole || !f.refused).collect();
+    let base = files.iter().position(|f| !f.switch).unwrap_or(0);
+    let (origin, path) = files.get(base).map_or((Origin::Builtin, None), |f| (origin_of(f.origin), f.path.clone()));
+    let overrides = files
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != base)
+        .filter_map(|(_, f)| Some(Override { origin: origin_of(f.origin), how: How::Extends, path: f.path.clone()? }))
+        .collect();
+    let unknown = match attend {
+        Attend::Absent => "attend absent",
+        Attend::Unlisted => "attend did not list its sensors",
+        Attend::Listed(_) => "attend does not list it",
     };
-    let (state, why) = match d {
-        Some(d) => (State::new(d.state.clone(), health(&d.state)), d.detail.clone()),
-        None => local_state(l),
+    let (state, detail) = match d {
+        Some(d) => match state_of(&d.state) {
+            Some(s) => (Some(s), d.detail.clone()),
+            None => (None, Some(d.detail.clone().map_or(d.state.clone(), |why| format!("{} · {why}", d.state)))),
+        },
+        None => local_state(l, unknown),
     };
-    let (source, version) = match (d, kind, unknown) {
-        (Some(d), _, _) if d.state == "not compiled" => ("not compiled into this attend".to_string(), None),
-        (Some(d), _, _) => (d.source.clone(), d.version.clone()),
-        (None, Some(Kind::Crate) | None, Some(u)) => (u.to_string(), None),
-        (None, _, _) => (spec.map(|s| s.source()).unwrap_or_default(), None),
+    let (source, version) = match (d, kind) {
+        (Some(d), _) if !d.source.is_empty() => (Some(d.source.clone()), d.version.clone()),
+        (None, Some(ItemKind::Crate) | None) => (None, None),
+        _ => (spec.map(|s| s.source()), None),
     };
     let summary = spec.map(|s| s.description.clone()).filter(|s| !s.is_empty()).or_else(|| d.map(|d| d.description.clone()).filter(|s| !s.is_empty()));
     let mut rows = Vec::new();
     if let Some(s) = spec {
         let c = s.cadence;
-        rows.push(Row::new("interval", format!("{}s quiet, {}s busy", c.interval, c.min_interval)));
-        rows.push(Row::new("threshold", c.threshold.to_string()));
-        rows.push(Row::new("lane", s.lane().as_str()));
+        rows.push(row("interval", format!("{}s quiet, {}s busy", c.interval, c.min_interval)));
+        rows.push(row("threshold", c.threshold.to_string()));
+        rows.push(row("lane", s.lane().as_str()));
     }
-    rows.extend(why.map(|w| Row::new("why", w)));
-    Module {
-        name: l.name.clone(),
+    let mut item = Item { kind, path, overrides, source, version, detail, ..Item::new(Family::Sensor, l.name.clone(), origin) };
+    if let Some(state) = state {
+        item = item.with_state(state);
+    }
+    Card {
+        title: l.name.clone(),
         summary: summary.unwrap_or_else(|| kind.map_or("a sensor file".into(), |k| format!("a {} sensor", k.word()))),
-        kind,
-        origin: match l.origin() {
-            sensor_spec::Origin::Builtin => Origin::Builtin,
-            sensor_spec::Origin::User => Origin::User,
-            sensor_spec::Origin::Project => Origin::Project,
-        },
-        path: l.path().map(std::path::Path::to_path_buf),
-        source,
-        version,
-        state,
+        item,
+        fold_state: false,
         rows,
     }
 }
+

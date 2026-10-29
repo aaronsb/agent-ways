@@ -1,8 +1,11 @@
-//! A mod as a [`Module`]: shipped with agent-ways, read from its marketplace
-//! folder, its state in the words the bottom bar's notice uses when it is
-//! critical and does not run.
+//! A mod as an item: shipped with agent-ways in its marketplace folder, its
+//! state in ADR-512's words, and a critical mod that does not run saying so
+//! as the bottom bar's notice does.
 
-use super::{Health, Kind, Module, Origin, Row, State};
+use agent_settings::item::{Family, Item, ItemKind, ModState, Origin};
+use agent_tui::tree::Card;
+
+use super::row;
 use crate::cmd::attend_mod::{self, Mod, JUDGE};
 use crate::cmd::mods::Overview;
 
@@ -17,53 +20,53 @@ pub enum Unread {
     Missing,
 }
 
+fn state(s: attend_mod::State) -> ModState {
+    use attend_mod::State as S;
+    match s {
+        S::Converged => ModState::Converged,
+        S::Drift => ModState::Drift,
+        S::Pending => ModState::Pending,
+        S::Disabled => ModState::Disabled,
+        S::Removed => ModState::Removed,
+        S::Off => ModState::Off,
+    }
+}
+
 /// `m` as its overview `o` reads it, or as far as an unread state tells.
-pub fn of_mod(m: &Mod, o: Result<&Overview, Unread>) -> Module {
+pub fn of_mod(m: &Mod, o: Result<&Overview, Unread>) -> Card {
     let critical = match (m.critical, *m == JUDGE, o.is_ok_and(|o| o.claude_code)) {
         (false, _, _) => "no",
         (true, false, _) => "yes",
         (true, true, true) => "yes: gate.engine is claude-code",
         (true, true, false) => "no: only while gate.engine is claude-code",
     };
-    let rows = vec![Row::new("critical", critical), Row::new("needs", format!("Claude Code {} or later", m.min_claude_code))];
-    let base = |source: String, version, state| Module {
-        name: m.name.into(),
-        summary: "Claude Code mod".into(),
-        kind: Some(Kind::Plugin),
-        origin: Origin::Builtin,
-        path: None,
-        source,
-        version,
-        state,
-        rows: rows.clone(),
-    };
-    let o = match o {
-        Ok(o) => o,
+    let mut rows = vec![row("critical", critical), row("needs", format!("Claude Code {} or later", m.min_claude_code))];
+    let mut item = Item { kind: Some(ItemKind::Plugin), source: Some(m.id.into()), ..Item::new(Family::Mod, m.name, Origin::Builtin) };
+    match o {
         Err(why) => {
-            let state = match why {
-                Unread::Reading => State::new("reading…", Health::Idle),
-                Unread::Failed => State::new("state read failed", Health::Broken),
-                Unread::Missing => State::new("state not read", Health::Attention),
+            let said = match why {
+                Unread::Reading => "reading…",
+                Unread::Failed => "state read failed",
+                Unread::Missing => "state not read",
             };
-            return base(m.id.into(), None, state);
+            item.detail = Some(said.into());
         }
-    };
-    let version = match (o.shipped.as_deref(), o.installed.as_slice()) {
-        (None, []) => None,
-        (Some(s), []) => Some(format!("shipped {s}")),
-        (None, i) => Some(format!("installed {}", i.join(", "))),
-        (Some(s), i) => Some(format!("shipped {s} · installed {}", i.join(", "))),
-    };
-    use attend_mod::State as S;
-    let state = match (o.attention.first(), o.word) {
-        (Some(a), _) => State::new(format!("{} · critical", a.why.word()), Health::Broken),
-        (None, S::Converged) => State::new("installed · enabled", Health::Running),
-        (None, S::Drift) if o.older => State::new("update · an installed copy is older", Health::Attention),
-        (None, S::Drift) => State::new("drift · repair converges it", Health::Attention),
-        (None, S::Pending) => State::new("pending", Health::Attention),
-        (None, S::Disabled) => State::new("disabled", Health::Attention),
-        (None, S::Removed) => State::new("removed", Health::Idle),
-        (None, S::Off) => State::new("off · not wanted", Health::Idle),
-    };
-    base(format!("{} · {}", m.id, o.folder.display()), version, state)
+        Ok(o) => {
+            use attend_mod::State as S;
+            item.path = Some(o.folder.join(m.name));
+            item.version = o.shipped.clone();
+            item = item.with_state(state(o.word));
+            item.detail = match (o.attention.first(), o.word) {
+                (Some(a), _) => Some(format!("critical: {}", a.why.word())),
+                (None, S::Drift) if o.older => Some("an installed copy is older".into()),
+                (None, S::Drift) => Some("repair converges it".into()),
+                (None, S::Off) => Some("not wanted".into()),
+                _ => None,
+            };
+            if !o.installed.is_empty() {
+                rows.insert(0, row("installed", o.installed.join(", ")));
+            }
+        }
+    }
+    Card { title: m.name.into(), summary: "Claude Code mod".into(), item, fold_state: false, rows }
 }

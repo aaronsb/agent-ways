@@ -1,22 +1,23 @@
-//! Modules and their cards: sensors of each kind and layer (attend present,
+//! Items and their cards: sensors of each kind and layer (attend present,
 //! absent and unlisted), a mod in each state, and a bundled, a user and an
 //! overriding theme.
 
 use std::path::{Path, PathBuf};
 
+use agent_settings::item::{How, ItemKind, ModState, Origin, Override, SensorState, State as Word, ThemeState};
 use agent_settings::load::Layer;
 use agent_settings::LayerScope;
-use agent_tui::tree::{Card, Node, Origin, StateTone};
+use agent_tui::tree::{Card, Node};
 use attend_config::sensors::{file_layer, SHIPPED};
 use sensor_spec::Origin as From;
 
+use super::card::shown;
 use super::mods;
 use super::{Ctx, Ways};
 use crate::cmd::attend_mod::{Degraded, State, ATTEND, JUDGE, THEME};
 use crate::cmd::modules::mods::{of_mod, Unread};
 use crate::cmd::modules::sensors::{self, Attend, Described};
 use crate::cmd::modules::themes::of_theme;
-use crate::cmd::modules::{self, Health, Kind, Row};
 use crate::cmd::mods::{Attention, Overview};
 
 fn home(tag: &str) -> PathBuf {
@@ -98,26 +99,38 @@ fn row<'a>(c: &'a Card, label: &str) -> Option<&'a str> {
     c.rows.iter().find(|(l, _)| l == label).map(|(_, v)| v.as_str())
 }
 
+/// A card's state word, or what it says while it has none.
+fn said(c: &Card) -> String {
+    c.item.state.map_or_else(|| c.item.detail.clone().unwrap_or_default(), |s| s.word().to_string())
+}
+
+fn sensor(s: SensorState) -> Option<Word> {
+    Some(s.into())
+}
+
 #[test]
 fn a_shipped_crate_sensor_s_card_names_its_crate_version_and_cadence() {
     let h = home("builtin");
     let tab = sensors_tab(&h, described, &shipped());
-    let git = card(&tab, "git");
-    assert_eq!((git.origin, git.kind.as_deref(), git.source.as_str(), git.version.as_deref()), (Origin::Builtin, Some("crate"), "attend", Some("0.33.0")));
-    assert_eq!(git.summary, "tracks dirty files, branch changes, and upstream divergence");
-    assert_eq!(git.state, ("active".to_string(), StateTone::Ok));
-    assert_eq!(git.rows, [("interval".into(), "30s quiet, 10s busy".into()), ("threshold".into(), "2".into()), ("lane".into(), "event".into())]);
-    let peers = card(&tab, "peers");
-    assert_eq!((peers.source.as_str(), peers.version.as_deref()), ("sensor-peers", Some("0.6.0")));
-    assert_eq!(card(&tab, "processes").state, ("not compiled".to_string(), StateTone::Warn));
-    assert_eq!(card(&tab, "processes").source, "not compiled into this attend");
-    let failed = card(&tab, "context");
-    assert_eq!((failed.state.clone(), row(failed, "why")), (("failed".to_string(), StateTone::Err), Some("poll timed out after 10 s")));
+    let git = &card(&tab, "git").item;
+    assert_eq!((git.origin, git.kind, git.source.as_deref(), git.version.as_deref()), (Origin::Builtin, Some(ItemKind::Crate), Some("attend"), Some("0.33.0")));
+    assert_eq!((git.path.as_deref(), git.overrides.as_slice()), (None, &[][..]), "a shipped file read from the build has no path");
+    assert_eq!(card(&tab, "git").summary, "tracks dirty files, branch changes, and upstream divergence");
+    assert_eq!((git.state, git.state.map(Word::tone)), (sensor(SensorState::Active), Some(agent_settings::item::Tone::Ok)));
+    assert_eq!(card(&tab, "git").rows, [("interval".into(), "30s quiet, 10s busy".into()), ("threshold".into(), "2".into()), ("lane".into(), "event".into())]);
+    let peers = &card(&tab, "peers").item;
+    assert_eq!((peers.source.as_deref(), peers.version.as_deref()), (Some("sensor-peers"), Some("0.6.0")));
+    // attend's words read in the family's: `not compiled` and `failed`.
+    let processes = &card(&tab, "processes").item;
+    assert_eq!((processes.state, processes.source.as_deref()), (sensor(SensorState::NotCompiled), Some("processes")));
+    let failed = &card(&tab, "context").item;
+    assert_eq!((failed.state, failed.detail.as_deref()), (sensor(SensorState::Failing), Some("poll timed out after 10 s")));
     // The examples ship off. One attend does not list reads from its file:
     // a command's program, where a crate's source is attend's to say.
-    let example = card(&tab, "example-command");
-    assert_eq!((example.state.clone(), example.source.as_str()), (("off".to_string(), StateTone::Plain), "sh"));
-    assert_eq!(card(&tab, "keepwarm").source, "unknown: attend does not list it");
+    let example = &card(&tab, "example-command").item;
+    assert_eq!((example.state, example.source.as_deref()), (sensor(SensorState::Off), Some("sh")));
+    let keepwarm = &card(&tab, "keepwarm").item;
+    assert_eq!((keepwarm.source.as_deref(), keepwarm.state, keepwarm.detail.as_deref()), (None, None, Some("enabled; attend does not list it")));
     let _ = std::fs::remove_dir_all(&h);
 }
 
@@ -129,7 +142,7 @@ fn every_sensor_file_is_a_node_in_name_order_with_the_keys_each_sensor_has() {
     let mut want: Vec<&str> = SHIPPED.iter().map(|(n, _)| *n).collect();
     want.sort();
     assert_eq!(names, want);
-    assert!(tab.children.iter().all(|n| n.card.as_ref().is_some_and(|c| c.origin == Origin::Builtin)));
+    assert!(tab.children.iter().all(|n| n.card.as_ref().is_some_and(|c| c.item.origin == Origin::Builtin)));
     let rows = |name: &str| tab.children.iter().find(|n| n.name == name).unwrap().children.iter().map(|n| n.name.clone()).collect::<Vec<_>>();
     assert_eq!(rows("git"), ["enabled", "interval", "min_interval", "threshold", "decay_threshold", "lane", "requires"]);
     assert_eq!(rows("processes").last().map(String::as_str), Some("watch"), "a processes crate sensor takes a watch list");
@@ -143,12 +156,13 @@ fn a_user_command_sensor_is_listed_with_its_file_and_its_rows_write_that_file() 
     let tab = sensors_tab(&h, described, &layers);
     let node = tab.children.iter().find(|n| n.name == "weather").unwrap();
     let c = node.card.as_ref().unwrap();
-    assert_eq!((c.origin, c.kind.as_deref(), c.version.as_deref()), (Origin::User, Some("command"), None));
-    assert_eq!(c.at.as_deref(), Some("~/.config/attend/sensors/weather.yaml"));
-    assert_eq!((c.summary.as_str(), c.source.as_str()), ("the wind at home", "curl"));
-    assert_eq!(c.state, ("not hosted".to_string(), StateTone::Warn));
+    let i = &c.item;
+    assert_eq!((i.origin, i.kind, i.version.as_deref(), i.overrides.as_slice()), (Origin::User, Some(ItemKind::Command), None, &[][..]));
+    assert_eq!(i.path.as_deref(), Some(Path::new("~/.config/attend/sensors/weather.yaml")));
+    assert_eq!((c.summary.as_str(), i.source.as_deref()), ("the wind at home", Some("curl")));
+    // attend's `not hosted` reads `missing`.
+    assert_eq!((i.state, i.detail.as_deref()), (sensor(SensorState::Missing), Some("kind command not yet hosted")));
     assert_eq!(row(c, "interval"), Some("120s quiet, 15s busy"));
-    assert_eq!(row(c, "why"), Some("kind command not yet hosted"));
     let interval = node.children.iter().find(|n| n.name == "interval").and_then(|n| n.setting.as_ref()).unwrap();
     assert_eq!(interval.value, "120");
     let store = interval.store.as_ref().unwrap();
@@ -156,8 +170,8 @@ fn a_user_command_sensor_is_listed_with_its_file_and_its_rows_write_that_file() 
     assert_eq!(store.file, attend_config::sensors::user_dir().join("weather.yaml"));
     // With attend absent the file says what it can.
     let absent = sensors_tab(&h, || Attend::Absent, &layers);
-    let c = card(&absent, "weather");
-    assert_eq!((c.source.as_str(), c.state.clone()), ("curl", ("enabled".to_string(), StateTone::Ok)));
+    let c = &card(&absent, "weather").item;
+    assert_eq!((c.source.as_deref(), c.state, c.detail.as_deref()), (Some("curl"), None, Some("enabled; attend absent")));
     let _ = std::fs::remove_dir_all(&h);
 }
 
@@ -167,13 +181,28 @@ fn a_project_mcp_sensor_is_refused_until_the_project_is_trusted() {
     let mut layers = shipped();
     layers.push(project_file(&h, "inbox", "kind: mcp\nserver: slack\ntool: list_unread\n"));
     let tab = sensors_tab(&h, || Attend::Absent, &layers);
-    let c = card(&tab, "inbox");
-    assert_eq!((c.origin, c.kind.as_deref(), c.at.as_deref()), (Origin::Project, Some("mcp"), Some("~/proj/.claude/attend/sensors/inbox.yaml")));
-    assert_eq!(c.state, ("refused".to_string(), StateTone::Warn));
-    assert!(row(c, "why").is_some_and(|w| w.contains("attend.project_sensors")), "{:?}", c.rows);
-    assert_eq!(c.source, "slack/list_unread");
+    let c = &card(&tab, "inbox").item;
+    assert_eq!((c.origin, c.kind, c.path.as_deref()), (Origin::Project, Some(ItemKind::Mcp), Some(Path::new("~/proj/.claude/attend/sensors/inbox.yaml"))));
+    assert_eq!(c.state, sensor(SensorState::Refused));
+    assert!(c.detail.as_deref().is_some_and(|w| w.contains("attend.project_sensors")), "{:?}", c.detail);
+    assert_eq!(c.source.as_deref(), Some("slack list_unread"));
     layers.push(attend_layer(&h, &format!("project_sensors: [{}]\n", h.join("proj").display())));
-    assert_eq!(card(&sensors_tab(&h, || Attend::Absent, &layers), "inbox").state, ("enabled".to_string(), StateTone::Ok));
+    let trusted = card(&sensors_tab(&h, || Attend::Absent, &layers), "inbox").item.clone();
+    assert_eq!((trusted.state, trusted.detail.as_deref()), (None, Some("enabled; attend absent")));
+    let _ = std::fs::remove_dir_all(&h);
+}
+
+#[test]
+fn characterizes_a_user_switch_under_a_project_sensor() {
+    // ADR-516 §1 decision pending: whether a lower switch lists as an override
+    let h = home("switch-under-project");
+    let mut layers = with_user(&h, "inbox", "enabled: false\n");
+    layers.push(project_file(&h, "inbox", "kind: mcp\nserver: slack\ntool: list_unread\n"));
+    layers.push(attend_layer(&h, &format!("project_sensors: [{}]\n", h.join("proj").display())));
+    let tab = sensors_tab(&h, || Attend::Absent, &layers);
+    let c = &card(&tab, "inbox").item;
+    let user = Override { origin: Origin::User, how: How::Extends, path: "~/.config/attend/sensors/inbox.yaml".into() };
+    assert_eq!((c.origin, c.overrides.as_slice()), (Origin::Project, std::slice::from_ref(&user)));
     let _ = std::fs::remove_dir_all(&h);
 }
 
@@ -182,19 +211,26 @@ fn an_invalid_sensor_file_shows_why_and_no_kind() {
     let h = home("invalid");
     let tab = sensors_tab(&h, || Attend::Absent, &with_user(&h, "broken", "interval: 30\n"));
     let c = card(&tab, "broken");
-    assert_eq!((c.kind.as_deref(), c.state.clone()), (None, ("invalid".to_string(), StateTone::Err)));
-    assert!(row(c, "why").is_some_and(|w| w.contains("kind is required")), "{:?}", c.rows);
+    assert_eq!((c.item.kind, c.item.state), (None, sensor(SensorState::Invalid)));
+    assert!(c.item.detail.as_deref().is_some_and(|w| w.contains("kind is required")), "{:?}", c.item.detail);
     assert_eq!(c.summary, "a sensor file");
     let _ = std::fs::remove_dir_all(&h);
 }
 
 #[test]
-fn a_user_override_of_a_shipped_sensor_reads_as_the_user_s() {
+fn a_file_over_a_shipped_sensor_reads_builtin_extended_by_it() {
     let h = home("override");
     let tab = sensors_tab(&h, || Attend::Absent, &with_user(&h, "git", "enabled: false\n"));
-    let git = card(&tab, "git");
-    assert_eq!((git.origin, git.at.as_deref()), (Origin::User, Some("~/.config/attend/sensors/git.yaml")));
-    assert_eq!(git.state, ("off".to_string(), StateTone::Plain));
+    let git = &card(&tab, "git").item;
+    let user = Override { origin: Origin::User, how: How::Extends, path: "~/.config/attend/sensors/git.yaml".into() };
+    assert_eq!((git.origin, git.path.as_deref(), git.overrides.as_slice()), (Origin::Builtin, None, std::slice::from_ref(&user)));
+    assert_eq!(git.state, sensor(SensorState::Off));
+    // A project's file extends it too, above the user's.
+    let mut layers = with_user(&h, "git", "enabled: false\n");
+    layers.push(project_file(&h, "git", "interval: 90\n"));
+    let git = card(&sensors_tab(&h, || Attend::Absent, &layers), "git").item.clone();
+    let project = Override { origin: Origin::Project, how: How::Extends, path: "~/proj/.claude/attend/sensors/git.yaml".into() };
+    assert_eq!((git.origin, git.overrides), (Origin::Builtin, vec![user, project]));
     let _ = std::fs::remove_dir_all(&h);
 }
 
@@ -225,65 +261,77 @@ fn overview(m: crate::cmd::attend_mod::Mod, word: State, installed: &[&str], att
 }
 
 #[test]
-fn a_mod_s_module_reads_each_state_as_the_notice_does() {
-    let m = of_mod(&ATTEND, Ok(&overview(ATTEND, State::Converged, &["0.29.0"], None)));
-    assert_eq!((m.kind, m.origin, m.path.as_deref()), (Some(Kind::Plugin), modules::Origin::Builtin, None));
-    assert_eq!(m.source, "attend@agent-ways · /home/u/.local/share/agent-ways/plugins");
-    assert_eq!(m.version.as_deref(), Some("shipped 0.29.0 · installed 0.29.0"));
-    assert_eq!(m.state, modules::State::new("installed · enabled", Health::Running));
-    assert_eq!(m.rows, [Row::new("critical", "yes"), Row::new("needs", "Claude Code 2.1.296 or later")]);
-    let c = super::card::card(&m, Path::new("/home/u"));
-    assert_eq!((c.origin, c.kind.as_deref(), c.at.as_deref()), (Origin::Builtin, Some("plugin"), None));
-    assert_eq!((c.source.as_str(), &c.state), ("attend@agent-ways · ~/.local/share/agent-ways/plugins", &("installed · enabled".to_string(), StateTone::Ok)));
+fn a_mod_s_card_reads_each_state_as_the_notice_does() {
+    let c = of_mod(&ATTEND, Ok(&overview(ATTEND, State::Converged, &["0.29.0"], None)));
+    let m = &c.item;
+    let folder = Path::new("/home/u/.local/share/agent-ways/plugins/attend");
+    assert_eq!((m.kind, m.origin, m.path.as_deref()), (Some(ItemKind::Plugin), Origin::Builtin, Some(folder)));
+    assert_eq!((m.source.as_deref(), m.version.as_deref()), (Some("attend@agent-ways"), Some("0.29.0")));
+    assert_eq!((m.state, m.detail.as_deref()), (Some(ModState::Converged.into()), None));
+    let row = |l: &str, v: &str| (l.to_string(), v.to_string());
+    assert_eq!(c.rows, [row("installed", "0.29.0"), row("critical", "yes"), row("needs", "Claude Code 2.1.296 or later")]);
+    let c = shown(c, Path::new("/home/u"));
+    assert_eq!(c.item.path.as_deref(), Some(Path::new("~/.local/share/agent-ways/plugins/attend")));
 
-    for (word, why, said) in [(State::Drift, Degraded::Missing, "not installed"), (State::Disabled, Degraded::Disabled, "disabled"), (State::Pending, Degraded::Pending, "pending")] {
+    for (word, why, said, state) in [
+        (State::Drift, Degraded::Missing, "not installed", ModState::Drift),
+        (State::Disabled, Degraded::Disabled, "disabled", ModState::Disabled),
+        (State::Pending, Degraded::Pending, "pending", ModState::Pending),
+    ] {
         let o = overview(ATTEND, word, &[], Some(why));
-        let m = of_mod(&ATTEND, Ok(&o));
-        assert_eq!(m.state, modules::State::new(format!("{said} · critical"), Health::Broken));
+        let m = of_mod(&ATTEND, Ok(&o)).item;
+        assert_eq!((m.state, m.detail), (Some(state.into()), Some(format!("critical: {said}"))));
         assert!(mods::notice(std::slice::from_ref(&o))[1].contains(said), "the card and the notice agree");
-        assert_eq!(m.version.as_deref(), Some("shipped 0.29.0"));
+        assert_eq!(m.version.as_deref(), Some("0.29.0"));
     }
     let removed = of_mod(&THEME, Ok(&overview(THEME, State::Removed, &[], None)));
-    assert_eq!((removed.state.word.as_str(), removed.rows[0].value.as_str()), ("removed", "no"));
+    assert_eq!((said(&removed), row_of(&removed, "critical")), ("removed".to_string(), Some("no")));
     let older = Overview { older: true, ..overview(ATTEND, State::Drift, &["0.28.0"], None) };
-    assert_eq!(of_mod(&ATTEND, Ok(&older)).state, modules::State::new("update · an installed copy is older", Health::Attention));
-    assert_eq!(of_mod(&THEME, Ok(&overview(THEME, State::Off, &[], None))).state.word, "off · not wanted");
+    assert_eq!(of_mod(&ATTEND, Ok(&older)).item.detail.as_deref(), Some("an installed copy is older"));
+    let off = of_mod(&THEME, Ok(&overview(THEME, State::Off, &[], None))).item;
+    assert_eq!((off.state, off.detail.as_deref()), (Some(ModState::Off.into()), Some("not wanted")));
 
     // ways-judge is critical only under the claude-code engine.
     let keyed = Overview { claude_code: false, ..overview(JUDGE, State::Off, &[], None) };
-    assert_eq!(of_mod(&JUDGE, Ok(&keyed)).rows[0].value, "no: only while gate.engine is claude-code");
-    assert_eq!(of_mod(&JUDGE, Ok(&overview(JUDGE, State::Converged, &["0.29.0"], None))).rows[0].value, "yes: gate.engine is claude-code");
+    assert_eq!(row_of(&of_mod(&JUDGE, Ok(&keyed)), "critical"), Some("no: only while gate.engine is claude-code"));
+    assert_eq!(row_of(&of_mod(&JUDGE, Ok(&overview(JUDGE, State::Converged, &["0.29.0"], None))), "critical"), Some("yes: gate.engine is claude-code"));
 
-    // Unread: the module says where the read stands.
-    let reading = of_mod(&ATTEND, Err(Unread::Reading));
-    assert_eq!((reading.state.word.as_str(), reading.source.as_str(), reading.version.as_deref()), ("reading…", "attend@agent-ways", None));
-    assert_eq!(of_mod(&ATTEND, Err(Unread::Failed)).state.health, Health::Broken);
-    assert_eq!(of_mod(&ATTEND, Err(Unread::Missing)).state.word, "state not read");
+    // Unread: no state yet, and the detail says where the read stands.
+    let reading = of_mod(&ATTEND, Err(Unread::Reading)).item;
+    assert_eq!((reading.state, reading.detail.as_deref(), reading.source.as_deref(), reading.version.as_deref()), (None, Some("reading…"), Some("attend@agent-ways"), None));
+    assert_eq!(said(&of_mod(&ATTEND, Err(Unread::Failed))), "state read failed");
+    assert_eq!(said(&of_mod(&ATTEND, Err(Unread::Missing))), "state not read");
+}
+
+fn row_of<'a>(c: &'a Card, label: &str) -> Option<&'a str> {
+    row(c, label)
 }
 
 #[test]
-fn a_theme_s_module_names_where_it_comes_from() {
+fn a_theme_s_card_names_where_it_comes_from() {
     use agent_theme::Source;
     let nord = agent_theme::BUNDLED.iter().find(|(n, _)| *n == "nord").map(|(_, s)| agent_theme::parse(s).unwrap()).unwrap();
     let dir = Path::new("/home/u/.config/agent-ways/themes");
     let bundled = of_theme(&nord, Source::Bundled, None, false, Some(dir), "plain");
-    assert_eq!((bundled.kind, bundled.origin, bundled.path.as_deref(), bundled.source.as_str()), (Some(Kind::Theme), modules::Origin::Builtin, None, "bundled (read-only)"));
-    assert_eq!(bundled.state, modules::State::new("inactive", Health::Idle));
-    assert_eq!(bundled.rows, [Row::new("saves to", dir.display().to_string()), Row::new("shape", "plain (a: shape cycles it)")]);
+    let b = &bundled.item;
+    assert_eq!((b.kind, b.origin, b.path.as_deref(), b.source.as_deref(), b.overrides.as_slice()), (None, Origin::Builtin, None, None, &[][..]));
+    assert_eq!((b.name.as_str(), b.state), ("nord", Some(ThemeState::Inactive.into())));
+    assert_eq!(bundled.rows, [("saves to".into(), dir.display().to_string()), ("shape".into(), "plain (a: shape cycles it)".into())]);
     assert_eq!(bundled.summary, "nord · dark · background terminal");
 
     let file = dir.join("mine.theme");
-    let user = of_theme(&nord, Source::User, Some(&file), true, Some(dir), "plain");
-    assert_eq!((user.origin, user.path.as_deref(), user.source.as_str()), (modules::Origin::User, Some(file.as_path()), file.to_str().unwrap()));
-    assert_eq!(user.state.health, Health::Running);
-    let c = super::card::card(&user, Path::new("/home/u"));
-    assert_eq!((c.at.as_deref(), c.source.as_str()), (None, "~/.config/agent-ways/themes/mine.theme"), "a source naming the file it was added in says it once");
+    let user = shown(of_theme(&nord, Source::User, Some(&file), true, Some(dir), "plain"), Path::new("/home/u"));
+    assert_eq!((user.item.origin, user.item.path.as_deref()), (Origin::User, Some(Path::new("~/.config/agent-ways/themes/mine.theme"))));
+    assert_eq!(user.item.state, Some(ThemeState::Active.into()));
     // The theme tab says it is a theme, and the state rides the origin line.
-    assert_eq!((c.kind.as_deref(), c.fold_state), (None, true));
+    assert!(user.fold_state);
 
+    // A user file that takes a bundled theme's name is that builtin,
+    // replaced by the file.
     let over = of_theme(&nord, Source::Override, Some(&dir.join("nord.theme")), false, None, "plain");
-    assert_eq!(over.rows[0], Row::new("overrides", "the bundled nord"));
-    assert_eq!(over.rows[1], Row::new("saves to", "none: nothing saves"));
+    let replaced = Override { origin: Origin::User, how: How::Replaces, path: dir.join("nord.theme") };
+    assert_eq!((over.item.origin, over.item.path.as_deref(), over.item.overrides.as_slice()), (Origin::Builtin, None, std::slice::from_ref(&replaced)));
+    assert_eq!(over.rows[0], ("saves to".into(), "none: nothing saves".into()));
 }
 
 #[test]
@@ -292,8 +340,9 @@ fn the_mod_tab_puts_the_card_on_each_mod_node() {
     let mut c = ctx(&h, || Attend::Absent);
     c.mods = || vec![overview(ATTEND, State::Converged, &["0.29.0"], None)];
     let tab = Ways::new(c).build(&[]).into_iter().find(|t| t.name == "mod").unwrap();
-    let names: Vec<(&str, &str)> = tab.children.iter().map(|n| (n.name.as_str(), n.card.as_ref().map_or("", |c| c.state.0.as_str()))).collect();
-    assert_eq!(names, [("attend", "installed · enabled"), ("ways-judge", "state not read"), ("ways-theme", "state not read")]);
+    let names: Vec<(&str, String)> = tab.children.iter().map(|n| (n.name.as_str(), n.card.as_ref().map_or(String::new(), said))).collect();
+    let want = |n: &'static str, s: &str| (n, s.to_string());
+    assert_eq!(names, [want("attend", "converged"), want("ways-judge", "state not read"), want("ways-theme", "state not read")]);
     let _ = std::fs::remove_dir_all(&h);
 }
 
@@ -326,11 +375,11 @@ fn an_attend_that_does_not_list_its_sensors_is_told_from_none() {
 
     let h = home("unlisted");
     let tab = sensors_tab(&h, || Attend::Unlisted, &shipped());
-    let git = card(&tab, "git");
-    assert_eq!((git.source.as_str(), git.version.as_deref()), ("unknown: attend did not list its sensors", None));
-    assert_eq!(git.state, ("enabled".to_string(), StateTone::Ok), "the file's own switch");
+    let git = &card(&tab, "git").item;
+    assert_eq!((git.source.as_deref(), git.version.as_deref(), git.state), (None, None, None));
+    assert_eq!(git.detail.as_deref(), Some("enabled; attend did not list its sensors"), "the file's own switch");
     let absent = sensors_tab(&h, || Attend::Absent, &shipped());
-    assert_eq!(card(&absent, "git").source, "unknown: attend absent");
+    assert_eq!(card(&absent, "git").item.detail.as_deref(), Some("enabled; attend absent"));
     let _ = std::fs::remove_dir_all(&h);
 }
 

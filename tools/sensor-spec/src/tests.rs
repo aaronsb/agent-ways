@@ -35,7 +35,7 @@ fn the_adr_slack_example_parses_on_the_message_lane() {
     let p = parse("slack-unread", &y(SLACK));
     assert!(p.problems.is_empty(), "{:?}", p.problems);
     let s = p.spec.unwrap();
-    assert_eq!((s.kind, s.lane(), s.source()), (Kind::Mcp, Lane::Message, "slack/list_unread".to_string()));
+    assert_eq!((s.kind, s.lane(), s.source()), (Kind::Mcp, Lane::Message, "slack list_unread".to_string()));
     assert_eq!(s.state["unread"].ty, StateType::Number);
     assert_eq!(s.state["text"].max, 512);
     let Test::State(t) = &s.triggers[0].test else { panic!() };

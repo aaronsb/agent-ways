@@ -235,7 +235,7 @@ impl SensorSpec {
         match &self.block {
             Block::Crate(c) => c.id.clone(),
             Block::Command(c) => c.argv.first().cloned().unwrap_or_default(),
-            Block::Mcp(m) => format!("{}/{}", m.server.label(), m.tool),
+            Block::Mcp(m) => format!("{} {}", m.server.label(), m.tool),
             Block::Ways(_) => "ways".into(),
         }
     }

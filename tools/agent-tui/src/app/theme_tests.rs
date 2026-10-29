@@ -39,16 +39,13 @@ impl Adapter for Choice {
         std::fs::write(self.0.join("waypoints"), name).map_err(|e| e.to_string())
     }
     fn theme_card(&self, theme: &agent_theme::Theme, source: agent_theme::Source, _file: Option<&std::path::Path>, active: bool, shape: &str) -> Option<crate::tree::Card> {
-        use crate::tree::{Card, Origin, StateTone};
-        Some(Card {
+        use agent_settings::item::{Family, Item, Origin, ThemeState};
+        let origin = if source == agent_theme::Source::User { Origin::User } else { Origin::Builtin };
+        let state = if active { ThemeState::Active } else { ThemeState::Inactive };
+        Some(crate::tree::Card {
             title: theme.label.clone(),
-            summary: theme.name.clone(),
-            origin: if source == agent_theme::Source::Bundled { Origin::Builtin } else { Origin::User },
-            at: None,
-            kind: Some("theme".into()),
-            source: format!("{source:?}"),
-            version: None,
-            state: if active { ("active".into(), StateTone::Ok) } else { ("inactive".into(), StateTone::Plain) },
+            summary: format!("{} · {source:?}", theme.name),
+            item: Item { state: Some(state.into()), ..Item::new(Family::Theme, theme.name.clone(), origin) },
             fold_state: false,
             rows: vec![("saves to".into(), self.0.display().to_string()), ("shape".into(), shape.into())],
         })
@@ -792,11 +789,11 @@ fn the_theme_detail_heads_with_the_adapter_s_card() {
     let mut app = app_in(&d, ColorDepth::TrueColor);
     keys(&mut app, &[KeyCode::Char('3')]);
     let shot = text(&draw(&mut app, 120, 35));
-    for row in ["origin    builtin", "kind      theme", "source    Bundled", "state     active", "shape     plain", "waypoints "] {
+    for row in ["terminal · Bundled", "origin    builtin", "state     active", "shape     plain", "waypoints "] {
         assert!(shot.contains(row), "{row} missing:\n{shot}");
     }
     let at = |s: &str| shot.find(s).unwrap();
-    assert!(at("origin") < at("source") && at("source") < at("state") && at("state") < at("shape") && at("shape") < at("waypoints"), "the card leads:\n{shot}");
+    assert!(at("Bundled") < at("origin") && at("origin") < at("state") && at("state") < at("shape") && at("shape") < at("waypoints"), "the card leads:\n{shot}");
     keys(&mut app, &[KeyCode::Down]);
     assert!(text(&draw(&mut app, 120, 35)).contains("state     inactive"), "the card follows the cursor");
 }

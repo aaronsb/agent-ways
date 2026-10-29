@@ -1,14 +1,18 @@
 //! Settings registry machinery shared by ways and attend (ADR-503). It owns the
 //! schema types, the registry, layered loading with per-section fallback, lint,
-//! fragment emit and the file writer. Each component keeps its own schema in
-//! its own crate; this crate depends on none of them.
+//! fragment emit, the file writer, and the item descriptor every surface
+//! describes a theme, mod, sensor, way or profile with (ADR-516). Each
+//! component keeps its own schema in its own crate; this crate depends on none
+//! of them.
 
+pub mod item;
 pub mod load;
 pub mod registry;
 pub mod schema;
 pub mod writer;
 pub mod yaml_edit;
 
+pub use item::Item;
 pub use load::{Finding, Layer, Resolved};
 pub use registry::{Bound, Registry};
 pub use schema::{Choices, DefaultValue, FileSpec, Kind, KeySpec, LayerScope, Options, Schema, Scope, SectionSpec};

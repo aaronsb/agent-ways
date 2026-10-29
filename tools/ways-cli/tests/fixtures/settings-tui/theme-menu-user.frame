@@ -4,24 +4,24 @@ agent-tui frame 100x30
 |│   terminal         dark                             ││mine                                       │|
 |│   agent-ways       dark                             ││mine · dark · background terminal          │|
 |│   nord             dark                             ││                                           │|
-|│   catppuccin-mocha dark                             ││origin    user · active                    │|
-|│   dracula          dark                             ││source    ~/.config/agent-ways/themes/mine.│|
-|│   gruvbox-dark     dark                             ││          theme                            │|
-|│   tokyonight-night dark                             ││saves to  ~/.config/agent-ways/themes      │|
-|│   paper            light                            ││shape     plain (a: shape cycles it)       │|
-|│   miami            ligh┌actions: theme mine─────────────────────────────┐◆ ■ ▲ ◉ ▶ ★ ◈ ♦ ▪       │|
+|│   catppuccin-mocha dark                             ││origin    user · ~/.config/agent-ways/theme│|
+|│   dracula          dark                             ││          s/mine.theme · active            │|
+|│   gruvbox-dark     dark                             ││saves to  ~/.config/agent-ways/themes      │|
+|│   tokyonight-night dark                             ││shape     plain (a: shape cycles it)       │|
+|│   paper            light                            ││waypoints theme  ● ◆ ■ ▲ ◉ ▶ ★ ◈ ♦ ▪       │|
+|│   miami            ligh┌actions: theme mine─────────────────────────────┐                        │|
 |│   tampa            ligh│ new       from agent-ways                      │                        │|
-|│   miami-nights     dark│ copy      of mine, then edit it                │                        │|
-|│   terra            dark│ rename    the active choice follows            │  info   #81a1c1        │|
-|│   crystal-mountain ligh│ delete    asks first                           │  ok     #a3be8c        │|
-|│   maximum-claude   dark│ edit                                           │  warn   #d08770        │|
-|│▌● mine             dark│ shape     plain now; the next is flame         │  err    #bf616a        │|
-|│                        │ waypoints theme now; the next is default       │  alt    #88c0d0        │|
+|│   miami-nights     dark│ copy      of mine, then edit it                │  info   #81a1c1        │|
+|│   terra            dark│ rename    the active choice follows            │  ok     #a3be8c        │|
+|│   crystal-mountain ligh│ delete    asks first                           │  warn   #d08770        │|
+|│   maximum-claude   dark│ edit                                           │  err    #bf616a        │|
+|│▌● mine             dark│ shape     plain now; the next is flame         │  alt    #88c0d0        │|
+|│                        │ waypoints theme now; the next is default       │                        │|
 |│                        │ claude    Claude Code: the mod's render setting│                        │|
-|│                        └────────────────────────────────────────────────┘                        │|
-|│                                                     ││distinct  ok, err/warn ΔE 0.084            │|
+|│                        └────────────────────────────────────────────────┘arn ΔE 0.084            │|
 |│                                                     ││                                           │|
 |│                                                     ││claude                      not active     │|
+|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -88,7 +88,6 @@ styles
   5  41-44  - Gray -
   5  54-65  - - DIM
   5  66-69  LightBlue - BOLD
-  5  73-78  Green - -
   5  99-99  - - DIM
   6   0-0   - - DIM
   6  21-27  - - DIM
@@ -100,7 +99,8 @@ styles
   6  42-42  - Yellow -
   6  43-43  - LightRed -
   6  44-44  - Gray -
-  6  54-65  - - DIM
+  6  54-55  - - DIM
+  6  81-86  Green - -
   6  99-99  - - DIM
   7   0-0   - - DIM
   7  21-27  - - DIM
@@ -111,7 +111,7 @@ styles
   7  41-42  - Yellow -
   7  43-43  - LightRed -
   7  44-44  - DarkGray -
-  7  54-55  - - DIM
+  7  54-65  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
   8  21-27  - - DIM
@@ -136,21 +136,22 @@ styles
   9  42-43  - Red -
   9  44-44  - DarkGray -
   9  54-65  - - DIM
+  9  73-73  LightCyan - -
+  9  75-75  LightGreen - -
+  9  77-77  LightRed - -
+  9  79-79  LightBlue - -
+  9  81-81  LightYellow - -
+  9  83-83  LightMagenta - -
+  9  85-85  LightCyan - -
+  9  87-87  LightGreen - -
+  9  89-89  LightYellow - -
+  9  91-91  LightBlue - -
   9  99-99  - - DIM
  10   0-0   - - DIM
  10  21-24  - - DIM
  10  25-25  LightBlue - -
  10  26-44  LightBlue - BOLD
  10  45-74  LightBlue - -
- 10  75-75  LightGreen - -
- 10  77-77  LightRed - -
- 10  79-79  LightBlue - -
- 10  81-81  LightYellow - -
- 10  83-83  LightMagenta - -
- 10  85-85  LightCyan - -
- 10  87-87  LightGreen - -
- 10  89-89  LightYellow - -
- 10  91-91  LightBlue - -
  10  99-99  - - DIM
  11   0-0   - - DIM
  11  21-24  - - DIM
@@ -162,6 +163,8 @@ styles
  12  21-24  - - DIM
  12  25-25  LightBlue - -
  12  74-74  LightBlue - -
+ 12  75-75  - DarkGray -
+ 12  76-83  - - DIM
  12  99-99  - - DIM
  13   0-0   - - DIM
  13  21-24  - - DIM
@@ -191,14 +194,12 @@ styles
  16  21-24  - - BOLD|DIM|REVERSED
  16  25-25  LightBlue - -
  16  74-74  LightBlue - -
- 16  75-75  - DarkGray -
+ 16  75-75  - Gray -
  16  76-83  - - DIM
  16  99-99  - - DIM
  17   0-0   - - DIM
  17  25-25  LightBlue - -
  17  74-74  LightBlue - -
- 17  75-75  - Gray -
- 17  76-83  - - DIM
  17  99-99  - - DIM
  18   0-0   - - DIM
  18  25-25  LightBlue - -
@@ -206,23 +207,23 @@ styles
  18  99-99  - - DIM
  19   0-0   - - DIM
  19  25-74  LightBlue - -
+ 19  75-86  Green - -
  19  99-99  - - DIM
  20   0-0   - - DIM
- 20  54-65  - - DIM
- 20  66-86  Green - -
+ 20  54-55  - - DIM
  20  99-99  - - DIM
  21   0-0   - - DIM
- 21  54-55  - - DIM
+ 21  54-65  - - DIM
+ 21  66-67  - Gray -
+ 21  69-70  - Gray -
+ 21  72-73  - DarkGray -
+ 21  75-76  - DarkGray -
+ 21  78-79  - Gray -
+ 21  81-82  - DarkGray -
+ 21  84-93  - - DIM
  21  99-99  - - DIM
  22   0-0   - - DIM
- 22  54-65  - - DIM
- 22  66-67  - Gray -
- 22  69-70  - Gray -
- 22  72-73  - DarkGray -
- 22  75-76  - DarkGray -
- 22  78-79  - Gray -
- 22  81-82  - DarkGray -
- 22  84-93  - - DIM
+ 22  54-55  - - DIM
  22  99-99  - - DIM
  23   0-0   - - DIM
  23  54-55  - - DIM
