@@ -333,6 +333,9 @@ impl Ways {
     fn keys_of(&self, tab: &Tab, layers: &[Layer], scopes: &BTreeMap<String, Located>) -> Vec<Bound> {
         let mut keys = self.reg.concrete(tab.prefix, layers);
         keys.retain(|b| tab.holds(&b.name()));
+        if tab.name == "sensors" {
+            keys = super::sensors::with_user_keys(&self.reg, keys, layers, &self.ctx.project);
+        }
         if tab.name == "ways" {
             if let Some(b) = self.reg.lookup("ways.project.x") {
                 // The ways a file names and the ways of the corpus, as one
@@ -384,12 +387,9 @@ impl Ways {
         TABS.iter().map(|tab| self.tab(tab, layers)).collect()
     }
 
-    /// The doc of a group: its section's, or for one of attend's sensors or
-    /// one mod, a line on it.
+    /// The doc of a group: its section's, or for one mod, a line on it. A
+    /// sensor's group has none: its card says what it is.
     pub(super) fn section_doc(&self, name: &str) -> String {
-        if let Some(s) = name.strip_prefix("attend.sensors.").filter(|s| !s.contains('.')) {
-            return attend_config::schema::sensor_doc(s);
-        }
         if let Some(m) = name.strip_prefix("mods.").filter(|m| !m.contains('.')) {
             if let Some((_, doc)) = ways_core::settings::MODS.iter().find(|(n, _)| *n == m) {
                 return doc.to_string();
@@ -521,6 +521,9 @@ impl Ways {
             self.other_projects(&mut root);
         }
         self.headers(&mut root, tab.prefix);
+        if tab.name == "sensors" {
+            super::sensors::cards(&mut root, layers, &self.ctx.project, &self.ctx.home, self.described());
+        }
         if tab.name == "mod" {
             let (states, read) = self.mod_states();
             super::mods::nodes(&mut root, &states, &read);

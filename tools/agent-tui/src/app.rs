@@ -5,6 +5,7 @@
 //! does the writes and commands an apply asks for.
 
 mod apply;
+mod card;
 mod dialog;
 mod entry;
 pub mod flow;
@@ -731,6 +732,8 @@ impl App {
 
 }
 
+#[cfg(test)]
+mod card_tests;
 #[cfg(test)]
 mod theme_tests;
 #[cfg(test)]

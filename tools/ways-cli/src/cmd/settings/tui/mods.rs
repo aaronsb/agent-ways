@@ -5,11 +5,12 @@
 //! row. The state is read from [`crate::cmd::mods::overview`] off the
 //! screen's thread ([`super::modread`]). A critical mod that does not run
 //! carries a finding on its node and on the row of each target where it
-//! does not run, and puts a notice on the bottom bar.
+//! does not run, and puts a notice on the bottom bar. Each node carries the
+//! mod's card, whose state agrees with that notice.
 
-use agent_tui::tree::{Action, Kind, Node, Setting};
+use agent_tui::tree::{Action, Card, Kind, Node, Origin, Setting, StateTone};
 
-use crate::cmd::attend_mod::{State, JUDGE, MODS};
+use crate::cmd::attend_mod::{Mod, State, JUDGE, MODS};
 use crate::cmd::mods::{Attention, Overview};
 
 /// What the target rows' value column comes from.
@@ -50,7 +51,11 @@ pub fn nodes(root: &mut Node, states: &[Overview], read: &Read) {
         if let Read::Stale(why) = read {
             g.finding = Some(format!("The last read of the mods' state failed: {why}. This shows the read before it."));
         }
-        let Some(o) = states.iter().find(|o| o.m.name == g.name) else {
+        let found = states.iter().find(|o| o.m.name == g.name);
+        if let Some(m) = MODS.iter().find(|m| m.name == g.name) {
+            g.card = Some(card(m, found, read));
+        }
+        let Some(o) = found else {
             let label = match read {
                 Read::Reading => "reading…",
                 Read::Failed(_) => "state read failed",
@@ -82,6 +87,53 @@ pub fn nodes(root: &mut Node, states: &[Overview], read: &Read) {
         if g.finding.is_none() && !o.attention.is_empty() {
             g.finding = Some(o.attention.iter().map(|a| attention_line(o, a, &format!("in {}", a.dir))).collect::<Vec<_>>().join("\n"));
         }
+    }
+}
+
+/// The mod's card: shipped with agent-ways, read from its marketplace
+/// folder, its state in the words the notice uses when it does not run.
+pub fn card(m: &Mod, o: Option<&Overview>, read: &Read) -> Card {
+    let critical = match (m.critical, *m == JUDGE, o.is_some_and(|o| o.claude_code)) {
+        (false, _, _) => "no".to_string(),
+        (true, false, _) => "yes".to_string(),
+        (true, true, true) => "yes: gate.engine is claude-code".to_string(),
+        (true, true, false) => "no: only while gate.engine is claude-code".to_string(),
+    };
+    let rows = vec![("critical".to_string(), critical), ("needs".to_string(), format!("Claude Code {} or later", m.min_claude_code))];
+    let Some(o) = o else {
+        let state = match read {
+            Read::Reading => ("reading…".to_string(), StateTone::Plain),
+            Read::Failed(_) => ("state read failed".to_string(), StateTone::Err),
+            Read::Done | Read::Stale(_) => ("state not read".to_string(), StateTone::Warn),
+        };
+        return Card { title: m.name.into(), summary: "Claude Code mod".into(), origin: Origin::Builtin, at: None, kind: Some("plugin".into()), source: m.id.into(), version: None, state, rows };
+    };
+    let version = match (o.shipped.as_deref(), o.installed.as_slice()) {
+        (None, []) => None,
+        (Some(s), []) => Some(format!("shipped {s}")),
+        (None, i) => Some(format!("installed {}", i.join(", "))),
+        (Some(s), i) => Some(format!("shipped {s} · installed {}", i.join(", "))),
+    };
+    let state = match (o.attention.first(), o.word) {
+        (Some(a), _) => (format!("{} · critical", a.why.word()), StateTone::Err),
+        (None, State::Converged) => ("installed · enabled".to_string(), StateTone::Ok),
+        (None, State::Drift) if o.older => ("update · an installed copy is older".to_string(), StateTone::Warn),
+        (None, State::Drift) => ("drift · repair converges it".to_string(), StateTone::Warn),
+        (None, State::Pending) => ("pending".to_string(), StateTone::Warn),
+        (None, State::Disabled) => ("disabled".to_string(), StateTone::Warn),
+        (None, State::Removed) => ("removed".to_string(), StateTone::Plain),
+        (None, State::Off) => ("off · not wanted".to_string(), StateTone::Plain),
+    };
+    Card {
+        title: m.name.into(),
+        summary: "Claude Code mod".into(),
+        origin: Origin::Builtin,
+        at: None,
+        kind: Some("plugin".into()),
+        source: format!("{} · {}", m.id, o.folder),
+        version,
+        state,
+        rows,
     }
 }
 

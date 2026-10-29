@@ -182,14 +182,63 @@ pub struct Node {
     /// What the detail pane heads the row with in place of its key: for a
     /// row that stands for no setting, whose key would read as one.
     pub heading: Option<String>,
+    /// The module the row stands for, drawn at the top of the detail pane
+    /// in place of its heading: a mod, a sensor, a theme.
+    pub card: Option<Card>,
+}
+
+/// Whether agent-ways ships a module or the operator added it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    Builtin,
+    User,
+}
+
+impl Origin {
+    pub fn word(self) -> &'static str {
+        match self {
+            Origin::Builtin => "builtin",
+            Origin::User => "user",
+        }
+    }
+}
+
+/// How a module's state reads: running, idle, wanting a look, or broken.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StateTone {
+    Ok,
+    Plain,
+    Warn,
+    Err,
+}
+
+/// One module as the detail pane heads it, the same on every tab: its
+/// name and a line on it, then where it comes from, what it is read from,
+/// its version and state, then the rows of its kind.
+#[derive(Debug, Clone)]
+pub struct Card {
+    pub title: String,
+    /// A dim line under the title.
+    pub summary: String,
+    pub origin: Origin,
+    /// Where the module was added, after the origin word.
+    pub at: Option<String>,
+    /// What implements it, such as `crate`, `script` or `plugin`.
+    pub kind: Option<String>,
+    /// What it is read from: a file, a crate, a plugin.
+    pub source: String,
+    pub version: Option<String>,
+    pub state: (String, StateTone),
+    /// The rows of its kind, as (label, value).
+    pub rows: Vec<(String, String)>,
 }
 
 impl Node {
     pub fn group(name: impl Into<String>, doc: impl Into<String>, children: Vec<Node>) -> Self {
-        Node { name: name.into(), doc: doc.into(), finding: None, setting: None, children, open: false, actions: vec![], columns: None, section: false, about: String::new(), about_title: String::new(), heading: None }
+        Node { name: name.into(), doc: doc.into(), finding: None, setting: None, children, open: false, actions: vec![], columns: None, section: false, about: String::new(), about_title: String::new(), heading: None, card: None }
     }
     pub fn leaf(name: impl Into<String>, doc: impl Into<String>, setting: Setting) -> Self {
-        Node { name: name.into(), doc: doc.into(), finding: None, setting: Some(setting), children: vec![], open: false, actions: vec![], columns: None, section: false, about: String::new(), about_title: String::new(), heading: None }
+        Node { name: name.into(), doc: doc.into(), finding: None, setting: Some(setting), children: vec![], open: false, actions: vec![], columns: None, section: false, about: String::new(), about_title: String::new(), heading: None, card: None }
     }
     /// Rows gathered under a header that names their columns, keyed as if
     /// they sat in the parent.
@@ -199,6 +248,10 @@ impl Node {
     pub fn about(mut self, title: impl Into<String>, text: impl Into<String>) -> Self {
         self.about_title = title.into();
         self.about = text.into();
+        self
+    }
+    pub fn carded(mut self, card: Card) -> Self {
+        self.card = Some(card);
         self
     }
     pub fn headed(mut self, heading: impl Into<String>) -> Self {

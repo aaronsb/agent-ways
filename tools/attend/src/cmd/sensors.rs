@@ -9,7 +9,7 @@ use crate::config::Config;
 use crate::sensors::{enumerate_sensors, Focus, SensorEntry, SensorState};
 use std::time::Duration;
 
-pub(crate) fn cmd_sensors() {
+pub(crate) fn cmd_sensors(json: bool) {
     // Same config scope as the running loop (issue #378 / PR #380
     // review finding 4): a sensors listing must describe the sensor
     // set `attend run` would actually start.
@@ -17,6 +17,10 @@ pub(crate) fn cmd_sensors() {
     focus.working_dir = crate::util::own_origin_cwd();
     let cfg = Config::load(&focus.working_dir);
     let entries = enumerate_sensors(&cfg, &focus);
+    if json {
+        println!("{}", serde_json::Value::Array(entries.iter().map(entry_json).collect()));
+        return;
+    }
 
     let mut t = agent_fmt::Table::new(&["Sensor", "Kind", "State", "Interval", "Description", "Source"]);
     t.align(0, agent_fmt::Align::Left);
@@ -38,6 +42,20 @@ pub(crate) fn cmd_sensors() {
 
     t.print();
     print_legend(&entries);
+}
+
+/// One sensor as `--json` prints it: the table's columns, the intervals in
+/// seconds.
+fn entry_json(e: &SensorEntry) -> serde_json::Value {
+    serde_json::json!({
+        "name": e.name,
+        "kind": e.kind.label(),
+        "state": e.state.label(),
+        "description": e.description,
+        "source": e.source,
+        "interval": e.interval.as_secs(),
+        "min_interval": e.min_interval.as_secs(),
+    })
 }
 
 fn format_interval(e: &SensorEntry) -> String {

@@ -110,6 +110,7 @@ mod tests {
             claude: home.join(".claude"),
             judge: || None,
             mods: Vec::new,
+            sensors: || None,
             mods_background: false,
         })
     }

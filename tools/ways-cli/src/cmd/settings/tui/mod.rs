@@ -14,7 +14,10 @@ pub mod judge;
 pub mod mods;
 pub mod modread;
 pub mod others;
+pub mod sensors;
 mod themecc;
+#[cfg(test)]
+mod card_tests;
 #[cfg(test)]
 mod tests;
 
@@ -73,6 +76,9 @@ pub struct Ctx {
     /// Whether `mods` runs off the screen's thread: the live one calls
     /// Claude Code, which the screens do not wait on.
     pub mods_background: bool,
+    /// attend's account of its sensors, read once for the sensors tab's
+    /// cards; `None` when no attend answers.
+    pub sensors: fn() -> Option<Vec<sensors::Described>>,
 }
 
 /// Whether the screens write `b` to the project's file: a project-scope key,
@@ -111,6 +117,7 @@ impl Ctx {
             judge: judge::JudgeState::live,
             mods: crate::cmd::mods::overview,
             mods_background: true,
+            sensors: sensors::described,
             xdg_config,
             home,
         }
@@ -151,6 +158,8 @@ pub struct Ways {
     /// A queued command ran since the last reload, which may have moved a
     /// mod.
     ran: Cell<bool>,
+    /// What attend says of its sensors, asked at the first build.
+    described: std::cell::OnceCell<Option<Vec<sensors::Described>>>,
 }
 
 /// How soon after a read starts another may: a burst of requests reads once.
@@ -173,6 +182,7 @@ impl Ways {
             mods,
             files: Cell::new(None),
             ran: Cell::new(false),
+            described: std::cell::OnceCell::new(),
         }
     }
 
@@ -195,6 +205,11 @@ impl Ways {
         // read landing later moves the stamp and reloads the tree.
         m.wait_first(MODS_WAIT);
         m.shown()
+    }
+
+    /// What attend says of its sensors, asked once.
+    pub(super) fn described(&self) -> Option<&[sensors::Described]> {
+        self.described.get_or_init(|| (self.ctx.sensors)()).as_deref()
     }
 
     /// The stamp of the files the tree was read from: metadata only.

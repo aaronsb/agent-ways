@@ -51,6 +51,7 @@ fn roots(fx: &Fixture) -> Vec<Node> {
         claude: fx.root.join(".claude"),
         judge: || None,
         mods: Vec::new,
+        sensors: || None,
         mods_background: false,
     };
     Ways::new(ctx).build(&[])
@@ -471,6 +472,7 @@ fn a_switch_for_a_way_no_root_holds_is_listed_as_not_found() {
         claude: fx.root.join(".claude"),
         judge: || None,
         mods: Vec::new,
+        sensors: || None,
         mods_background: false,
     };
     let r = Ways::new(ctx).build(&[project]);
@@ -496,6 +498,7 @@ fn ctx_of(fx: &Fixture) -> Ctx {
         claude: fx.root.join(".claude"),
         judge: || None,
         mods: Vec::new,
+        sensors: || None,
         mods_background: false,
     }
 }
@@ -918,6 +921,7 @@ fn a_prefix_switch_shows_its_ways_off_and_is_not_listed_as_not_found() {
         claude: fx.root.join(".claude"),
         judge: || None,
         mods: Vec::new,
+        sensors: || None,
         mods_background: false,
     };
     let r = Ways::new(ctx).build(&[project]);
@@ -1065,6 +1069,8 @@ fn mod_states() -> Vec<crate::cmd::mods::Overview> {
             older: false,
             claude_code: true,
             attention: vec![Attention { dir: "~/.claude-work".into(), why: Degraded::Missing, fix: "the install action, `ways manage mod install attend --commit`, installs it".into() }],
+            installed: vec!["0.29.0".into()],
+            folder: "~/.local/share/agent-ways/plugins".into(),
         },
         crate::cmd::mods::Overview {
             m: JUDGE,
@@ -1078,6 +1084,8 @@ fn mod_states() -> Vec<crate::cmd::mods::Overview> {
                 why: Degraded::Pending,
                 fix: "upgrade Claude Code to 2.1.304 or later, then `ways manage update --commit`".into(),
             }],
+            installed: vec![],
+            folder: "~/.local/share/agent-ways/plugins".into(),
         },
         crate::cmd::mods::Overview {
             m: THEME,
@@ -1087,6 +1095,8 @@ fn mod_states() -> Vec<crate::cmd::mods::Overview> {
             older: false,
             claude_code: true,
             attention: vec![],
+            installed: vec![],
+            folder: "~/.local/share/agent-ways/plugins".into(),
         },
     ]
 }

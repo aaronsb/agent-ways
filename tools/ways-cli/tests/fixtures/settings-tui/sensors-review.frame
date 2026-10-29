@@ -3,14 +3,14 @@ agent-tui frame 100x30
 |┌ writes user — ~/proj — review ──────────────────────┐┌detail─────────────────────────────────────┐|
 |│▌  ▾ processes             ●1                        ││sensors.processes                          │|
 |│       enabled             true → false              ││                                           │|
-|│                                                     ││The built-in processes sensor. `attend     │|
-|│                                                     ││sensor list` shows what it watches and     │|
-|│                                                     ││whether it runs.                           │|
-|│                                                     ││                                           │|
 |│                                                     ││1 change under this group                  │|
 |│                                                     ││                                           │|
 |│                                                     ││file it writes                             │|
 |│                                                     ││  ~/.config/attend/config.yaml             │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -58,26 +58,26 @@ styles
   3  54-55  - - DIM
   3  99-99  - - DIM
   4   0-0   - - DIM
-  4  54-55  - - DIM
+  4  54-80  - - DIM
   4  99-99  - - DIM
   5   0-0   - - DIM
   5  54-55  - - DIM
   5  99-99  - - DIM
   6   0-0   - - DIM
   6  54-55  - - DIM
+  6  56-69  - - BOLD
   6  99-99  - - DIM
   7   0-0   - - DIM
   7  54-55  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
-  8  54-80  - - DIM
+  8  54-55  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
   9  54-55  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
  10  54-55  - - DIM
- 10  56-69  - - BOLD
  10  99-99  - - DIM
  11   0-0   - - DIM
  11  54-55  - - DIM

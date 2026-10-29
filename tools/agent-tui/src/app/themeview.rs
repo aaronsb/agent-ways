@@ -8,12 +8,14 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{HighlightSpacing, List, ListItem, Paragraph};
 use ratatui::Frame;
 
+use super::card::card_lines;
 use super::render::{button_row, pane};
 use super::review::{fields, LABEL};
 use super::theme::{self, Ground, Seg, Shape};
 use super::themestate::{Editor, Focus, ThemeAct, CHANNELS};
 use super::{App, Btn};
 use crate::named::ItemAct;
+use crate::tree::{Card, Origin, StateTone};
 use agent_theme::{contrast, Background, Kind, Rgb, Roles, Slots, Source, MIN_DISTINCT};
 
 /// The slots a list row shows as a strip, in this order.
@@ -177,27 +179,35 @@ impl App {
         f.render_stateful_widget(list, area, &mut self.list);
     }
 
+    /// The theme's card: bundled themes are builtin, a file of the user's
+    /// is user, an override of a bundled name saying so.
+    pub(super) fn theme_card(&self, t: &agent_theme::Theme, src: Source) -> Card {
+        let path = self.themes.path_of(&t.name).map(|p| self.themes.show(&p)).unwrap_or_default();
+        let (origin, at, source) = match src {
+            Source::Bundled => (Origin::Builtin, None, "bundled (read-only)".to_string()),
+            Source::User => (Origin::User, None, path),
+            Source::Override => (Origin::User, Some(format!("overrides the bundled {}", t.name)), path),
+        };
+        let state = if t.name == self.themes.active { ("active".to_string(), StateTone::Ok) } else { ("inactive (Enter uses it)".to_string(), StateTone::Plain) };
+        let dir = self.themes.dir.as_ref().map_or("none: nothing saves".to_string(), |d| self.themes.show(d));
+        Card {
+            title: t.label.clone(),
+            summary: format!("{} · {} · background {}", t.name, kind_name(t.kind), bg_name(t.background)),
+            origin,
+            at,
+            kind: None,
+            source,
+            version: None,
+            state,
+            rows: vec![("saves to".into(), dir), ("shape".into(), format!("{} (a: shape cycles it)", self.shape.name()))],
+        }
+    }
+
     fn draw_theme_detail(&self, f: &mut Frame, area: Rect) {
         let (t, src) = self.themes.under_cursor();
         let room = (area.width as usize).saturating_sub(2 + LABEL);
         let dim = theme::muted();
-        let field = |k: &str, v: &str| fields(k, v, Style::new(), room, dim);
-        let mut lines = vec![
-            Line::styled(t.label.clone(), Style::new().add_modifier(Modifier::BOLD)),
-            Line::styled(format!("{} · {} · background {}", t.name, kind_name(t.kind), bg_name(t.background)), dim),
-            Line::raw(""),
-        ];
-        let path = self.themes.path_of(&t.name).map(|p| self.themes.show(&p)).unwrap_or_default();
-        lines.extend(match src {
-            Source::Bundled => field("source", "bundled (read-only)"),
-            Source::User => field("source", &format!("user  {path}")),
-            Source::Override => field("source", &format!("override  {path}")),
-        });
-        let active = t.name == self.themes.active;
-        lines.extend(fields("active", if active { "yes" } else { "no (Enter)" }, if active { theme::ok() } else { Style::new() }, room, dim));
-        let dir = self.themes.dir.as_ref().map_or("none: nothing saves".to_string(), |d| self.themes.show(d));
-        lines.extend(field("saves to", &dir));
-        lines.extend(field("shape", &format!("{} (a: shape cycles it)", self.shape.name())));
+        let mut lines = card_lines(&self.theme_card(t, src), room);
         let mut wp = vec![Span::styled(format!("{:<LABEL$}", "waypoints"), dim), Span::raw(format!("{}  ", self.waypoints))];
         match self.adapter.waypoints_preview(t, &self.waypoints) {
             Some(preview) => wp.extend(preview.spans),

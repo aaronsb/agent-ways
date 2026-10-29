@@ -767,3 +767,46 @@ fn depth_brings_roles_down_to_the_terminal() {
     let buf = draw(&mut app_in(&d, ColorDepth::Ansi16), 100, 24);
     assert!(buf.content().iter().all(|c| named(c.fg) && named(c.bg)));
 }
+
+/// A bundled theme's card says builtin and read-only; a user theme's names
+/// its file; an override says which bundled theme it shadows.
+#[test]
+fn the_theme_detail_heads_with_the_module_card() {
+    use crate::tree::{Origin, StateTone};
+    use agent_theme::Source;
+    let d = dir("card");
+    let nord = Themes::new(None, ColorDepth::TrueColor, None).get("nord").cloned().unwrap();
+    std::fs::write(d.join("mine.theme"), agent_theme::to_text(&agent_theme::Theme { name: "mine".into(), label: "Mine".into(), ..nord.clone() })).unwrap();
+    std::fs::write(d.join("nord.theme"), agent_theme::to_text(&agent_theme::Theme { label: "My Nord".into(), ..nord })).unwrap();
+    std::fs::write(d.join("choice"), "mine\n").unwrap();
+    let app = app_in(&d, ColorDepth::TrueColor);
+    let get = |n: &str| app.themes.get(n).cloned().unwrap();
+
+    let bundled = app.theme_card(&get("dracula"), Source::Bundled);
+    assert_eq!((bundled.origin, bundled.at.as_deref(), bundled.source.as_str()), (Origin::Builtin, None, "bundled (read-only)"));
+    assert_eq!(bundled.state, ("inactive (Enter uses it)".to_string(), StateTone::Plain));
+    let rows: Vec<&str> = bundled.rows.iter().map(|(k, _)| k.as_str()).collect();
+    assert_eq!(rows, ["saves to", "shape"]);
+
+    let user = app.theme_card(&get("mine"), Source::User);
+    assert_eq!((user.origin, user.at.as_deref()), (Origin::User, None));
+    assert!(user.source.ends_with("mine.theme"), "{}", user.source);
+    assert_eq!(user.state, ("active".to_string(), StateTone::Ok));
+
+    let over = app.theme_card(&get("nord"), Source::Override);
+    assert_eq!((over.origin, over.at.as_deref()), (Origin::User, Some("overrides the bundled nord")));
+    assert!(over.source.ends_with("nord.theme"), "{}", over.source);
+}
+
+#[test]
+fn the_theme_detail_draws_the_card_rows_before_the_theme_s_own() {
+    let d = dir("card-draw");
+    let mut app = app_in(&d, ColorDepth::TrueColor);
+    keys(&mut app, &[KeyCode::Char('3')]);
+    let shot = text(&draw(&mut app, 120, 35));
+    for row in ["origin    builtin", "source    bundled (read-only)", "state     active", "saves to  ", "shape     ", "waypoints "] {
+        assert!(shot.contains(row), "{row} missing:\n{shot}");
+    }
+    let at = |s: &str| shot.find(s).unwrap();
+    assert!(at("origin") < at("source") && at("source") < at("state") && at("state") < at("saves to"), "the common rows lead:\n{shot}");
+}
