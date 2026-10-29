@@ -122,7 +122,7 @@ mod tests {
     fn a_render_setting_a_project_file_sets_names_that_file() {
         let home = Path::new("/h");
         let user = layer("user", LayerScope::User, &home.join(".config/agent-ways/config.yaml"), "mods:\n  ways-theme:\n    rail: false\n    copy: false\n");
-        let project = layer("project", LayerScope::Project, &home.join("proj/.claude/ways.yaml"), "mods:\n  ways-theme:\n    copy: true\n    tables: text\n");
+        let project = layer("project", LayerScope::Project, &home.join("proj/.claude/ways.yaml"), "mods:\n  ways-theme:\n    copy: true\n    tables: text\n    paths: truncate\n");
         let w = ways(home);
         let cc = super::section_in(&w, &[user, project], vec![], "~/.config/agent-ways/config.yaml".into());
         let row = |k: &str| cc.render.iter().find(|r| r.key == format!("mods.ways-theme.{k}")).unwrap();
@@ -130,6 +130,8 @@ mod tests {
         assert_eq!((row("copy").value.as_str(), row("copy").project.as_deref()), ("true", Some("~/proj/.claude/ways.yaml")));
         assert_eq!((row("tables").value.as_str(), row("tables").project.as_deref()), ("text", Some("~/proj/.claude/ways.yaml")));
         assert_eq!((row("frames").value.as_str(), row("frames").project.as_deref()), ("true", None), "a default names nothing");
-        assert_eq!(cc.render.len(), 9);
+        let paths = row("paths");
+        assert_eq!((paths.value.as_str(), paths.options.as_slice(), paths.default.as_str()), ("truncate", ["wrap".to_string(), "truncate".to_string()].as_slice(), "wrap"));
+        assert_eq!(cc.render.len(), 10);
     }
 }

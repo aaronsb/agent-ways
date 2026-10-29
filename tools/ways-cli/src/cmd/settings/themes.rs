@@ -184,7 +184,7 @@ pub fn export(name: Option<&str>, form: Form) -> Out {
 
 /// The ways-theme mod's render keys under `mods.ways-theme`, in the order
 /// the export and the theme tab show them.
-pub const RENDER: [&str; 9] = ["rail", "tables", "shimmer", "charts", "markdown", "icons", "frames", "prompt_box", "copy"];
+pub const RENDER: [&str; 10] = ["rail", "tables", "shimmer", "charts", "markdown", "icons", "frames", "prompt_box", "copy", "paths"];
 
 /// The `mods.ways-theme` settings the mod reads, as resolved.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -309,6 +309,7 @@ mod tests {
                     "tables" => json!("on"),
                     "icons" => json!("unicode"),
                     "prompt_box" => json!("gradient"),
+                    "paths" => json!("wrap"),
                     _ => json!(true),
                 };
                 (*k, v)
@@ -334,7 +335,7 @@ mod tests {
         assert_eq!(v["words"], json!({ "spinner": ["Cruising", "Gliding", "Glowing", "Pulsing", "Racing", "Drifting"], "done": ["Cruised", "Glowed", "Docked", "Landed"] }));
         assert_eq!(
             v["render"],
-            json!({ "rail": true, "tables": "on", "shimmer": true, "charts": true, "markdown": true, "icons": "unicode", "frames": true, "prompt_box": "gradient", "copy": true })
+            json!({ "rail": true, "tables": "on", "shimmer": true, "charts": true, "markdown": true, "icons": "unicode", "frames": true, "prompt_box": "gradient", "copy": true, "paths": "wrap" })
         );
         assert!(!v.to_string().contains('\n'), "one line");
     }
@@ -348,7 +349,7 @@ mod tests {
         assert_eq!(
             v,
             json!({ "theme": "terminal", "kind": "dark", "roles": null, "gradient": null, "words": null,
-                    "render": { "rail": true, "tables": "on", "shimmer": true, "charts": true, "markdown": true, "icons": "unicode", "frames": true, "prompt_box": "frame", "copy": true } })
+                    "render": { "rail": true, "tables": "on", "shimmer": true, "charts": true, "markdown": true, "icons": "unicode", "frames": true, "prompt_box": "frame", "copy": true, "paths": "wrap" } })
         );
     }
 
@@ -370,5 +371,13 @@ mod tests {
         let mut s = defaults();
         s.render.iter_mut().find(|(k, _)| *k == "prompt_box").unwrap().1 = json!("off");
         assert_eq!(mod_json(Some(&theme("nord")), &s)["render"]["prompt_box"], json!("off"), "only gradient moves");
+    }
+
+    #[test]
+    fn paths_reaches_the_mod_as_set() {
+        let mut s = defaults();
+        assert_eq!(mod_json(None, &s)["render"]["paths"], json!("wrap"));
+        s.render.iter_mut().find(|(k, _)| *k == "paths").unwrap().1 = json!("truncate");
+        assert_eq!(mod_json(Some(&theme("nord")), &s)["render"]["paths"], json!("truncate"));
     }
 }

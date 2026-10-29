@@ -1304,6 +1304,7 @@ fn the_theme_mod_s_render_settings_are_set_like_every_other_key() {
         ("frames", "true", "false"),
         ("prompt_box", "gradient", "off"),
         ("copy", "true", "false"),
+        ("paths", "wrap", "truncate"),
         ("spinner_words", "[]", "Sailing, Docking"),
         ("done_words", "[]", "Docked"),
     ];
