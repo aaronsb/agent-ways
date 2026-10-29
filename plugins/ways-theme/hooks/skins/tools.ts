@@ -23,6 +23,31 @@ const MAX_TARGET = 120
 // The tools whose target is the file they name, so it may wrap and is drawn whole.
 export const PATH_TOOLS: ReadonlySet<string> = new Set(['Read', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit'])
 
+// The tools whose call row Claude Code draws empty: their user-facing name is
+// empty in Claude Code 2.1.312, and what they show is their result, a dialog or
+// a panel. A frame around such a row would hold nothing.
+export const NO_ROW: ReadonlySet<string> = new Set([
+  'AskUserQuestion',
+  'EnterPlanMode',
+  'ExitPlanMode',
+  'ScheduleWakeup',
+  'SendUserFile',
+  'SendUserMessage',
+  'TodoWrite',
+  'ToolSearch',
+])
+
+const isImage = (value: unknown): boolean => typeof value === 'object' && value !== null && (value as { isImage?: unknown }).isImage === true
+
+// Whether a call's result is a picture another mod may draw: a Read that
+// returned an image, or a SendUserFile with an image among its files.
+export function showsImage(tool: string, output: unknown): boolean {
+  const fields = fieldsOf(output)
+  if (tool === 'Read') return fields.type === 'image'
+  if (tool === 'SendUserFile') return Array.isArray(fields.attachments) && fields.attachments.some(isImage)
+  return false
+}
+
 // Null leaves the row to Claude Code: agents, plan mode and todos draw live progress
 // and dialogs that a skin would have to rebuild.
 export function kindOf(tool: string): ToolKind | null {

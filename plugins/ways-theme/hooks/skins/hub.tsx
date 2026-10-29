@@ -41,7 +41,8 @@ import { ICONS } from './skin.ts'
 import { hunksOf } from './svg-diff.ts'
 import { shellOutputOf } from './svg-terminal.ts'
 import { countdownsOf, limitLabel, metersOf } from './svg-usage.ts'
-import { PATH_TOOLS, kindOf, summarize, toolLabel } from './tools.ts'
+import { NO_ROW, PATH_TOOLS, kindOf, showsImage, summarize, toolLabel } from './tools.ts'
+import { namesImage, withRow } from './pictures.ts'
 import { commandOf, errorLine, isQuiet, quietLabel } from './quiet.ts'
 import { MAX_MARKDOWN, replySegments } from './reply.ts'
 import { fileHref, hyperlinksFrom, touchOf } from './links.ts'
@@ -125,16 +126,24 @@ const isExpanded = (view: View, row: unknown): boolean => isExpandedView(view.is
 
 type Row = { component: string; surface: RenderSurface; props: object }
 
+const drawsRow = (call: unknown): boolean => !NO_ROW.has(String((call as { tool?: unknown }).tool))
+
 /** Whether the frame wraps this row. The register module asks it to draw the
  *  frame and this layer to draw the row inside it, of the same look and view,
  *  so the two never disagree. No look loaded, `render.frames` off, the
  *  `terminal` theme or another Claude Code theme than `custom:ways` draws
  *  none. A reply is framed at the block that opens it; a row whose result
- *  skins draws as a shell card is that card's to frame. */
+ *  skins draws as a shell card is that card's to frame. A call row Claude Code
+ *  draws empty, and a group of only such calls, is not framed; of the results,
+ *  only a SendUserFile's that sends an image is, the row its call does not
+ *  draw. */
 export function isFramed(setup: Setup | null, e: Row, view: View): boolean {
   if (setup === null) return false
-  const props = e.props as { isExpanded?: unknown; isFirstOfReply?: unknown; text?: unknown; tool?: unknown; output?: unknown; isErrored?: unknown }
+  const props = e.props as { isExpanded?: unknown; isFirstOfReply?: unknown; text?: unknown; tool?: unknown; output?: unknown; isErrored?: unknown; calls?: unknown }
   if (e.component === 'AssistantMessage' && props.isFirstOfReply !== true) return false
+  if (e.component === 'ToolUse' && !drawsRow(props)) return false
+  if (e.component === 'ToolGroup' && Array.isArray(props.calls) && props.calls.length > 0 && !props.calls.some(drawsRow)) return false
+  if (e.component === 'ToolResult' && !(props.tool === 'SendUserFile' && showsImage(props.tool, props.output))) return false
   const length = e.component === 'AssistantMessage' && typeof props.text === 'string' ? props.text.length : undefined
   if (!shouldFrame({ surface: e.surface, isThemed: setup.frames && setup.themed, isWaysTheme: view.isWaysTheme, isVerbose: view.isVerbose, isExpanded: isExpanded(view, props.isExpanded), ...(length === undefined ? {} : { length }) })) return false
   if (e.component === 'ToolUse' && typeof props.tool === 'string' && SHELLS.has(props.tool) && setup.prefs.shell) {
@@ -494,7 +503,11 @@ export function registerSkins(on: On, shared: Shared): void {
     const row = toolRow(look, e.props, kind, target, meta, label, touch, href, room)
     const toggle = () => void update($, disclosure, () => (open ? 'closed' : 'open'))
 
-    const drawn = (row: ReturnType<Ui['Box']>) => withSettle($, e, framed ? marginRow(look, row) : row)
+    // A Read of an image keeps the picture a mod beneath draws (pictures.ts).
+    const drawn = async (row: ReturnType<Ui['Box']>) => {
+      const shown = showsImage(e.props.tool, e.props.output) ? withRow(await next(e), row) : row
+      return withSettle($, e, framed ? marginRow(look, shown) : shown)
+    }
 
     if (!open) return drawn(disclosedRow(look, row, false, toggle))
 
@@ -527,7 +540,11 @@ export function registerSkins(on: On, shared: Shared): void {
       if (e.props.isExpanded) return next(e)
     }
     const look = lookOf($.ui.resolve(e), setup, e.surface)
-    return isFramed(setup, e, shared.view()) ? marginRow(look, groupRow(forFrame(look), e.props.calls)) : groupRow(look, e.props.calls)
+    const framed = isFramed(setup, e, shared.view())
+    const row = groupRow(framed ? forFrame(look) : look, e.props.calls)
+    // Folded Reads of images keep the pictures a mod beneath draws under the line (pictures.ts).
+    const shown = e.props.calls.some(call => showsImage(call.tool, call.output)) ? withRow(await next(e), row) : row
+    return framed ? marginRow(look, shown) : shown
   })
 
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
@@ -569,6 +586,8 @@ export function registerSkins(on: On, shared: Shared): void {
         return shellRows(look, await read($, memberOf(commandAtom, e)), shell, e.props.isErrored, { stdout: fold, stderr: fold })
       }
     }
+    // A framed result opens on a blank line for the frame to take back.
+    if (isFramed(setup, e, shared.view())) return marginRow(look, await next(e))
     if (!look.prefs.clipOutput || !SHELLS.has(e.props.tool) || typeof output?.stdout !== 'string') return next(e)
     const stdout = clipLines(output.stdout, CLIP_HEAD, CLIP_TAIL)
     return stdout === output.stdout ? next(e) : next({ ...e, props: { ...e.props, output: { ...output, stdout } } })
@@ -627,7 +646,9 @@ export function registerSkins(on: On, shared: Shared): void {
     const framed = isFramed(setup, e, shared.view())
     const columns = (e.viewport?.columns ?? 100) - (framed ? FRAME_INSET : 0)
     const rows = replyRows(look, segments, columns, svg, segments.length > 1 ? text : undefined)
-    return withSettle($, e, framed ? marginRow(look, rows) : rows)
+    // A reply that names an image file keeps the picture a mod beneath draws (pictures.ts).
+    const shown = e.surface === 'terminal' && namesImage(text) ? withRow(await next(e), rows) : rows
+    return withSettle($, e, framed ? marginRow(look, shown) : shown)
   })
 
   // A slash command's output drawn the way a reply is.
