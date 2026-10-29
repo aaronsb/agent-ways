@@ -23,12 +23,14 @@ pub struct FileSensor {
     /// Where each poll's outcome is written; none for a test poll.
     record: Option<PathBuf>,
     project: String,
+    /// The last poll's failure, for a caller that reads it.
+    failure: Option<String>,
 }
 
 impl FileSensor {
     pub fn new(name: String, cadence: Cadence, inner: Box<dyn Sensor>, project: &str, record: bool) -> Self {
         let path = record.then(|| store_path(&name, project));
-        FileSensor { name, cadence, inner, record: path, project: project.to_string() }
+        FileSensor { name, cadence, inner, record: path, project: project.to_string(), failure: None }
     }
 }
 
@@ -47,7 +49,8 @@ impl Sensor for FileSensor {
 
     fn poll(&mut self, focus: &Focus) -> Vec<(f64, String)> {
         let out = self.inner.poll(focus);
-        let failure = self.inner.take_failure();
+        self.failure = self.inner.take_failure();
+        let failure = self.failure.clone();
         if let Some(path) = &self.record {
             let rec = Record {
                 sensor: self.name.clone(),
@@ -84,7 +87,7 @@ impl Sensor for FileSensor {
     }
 
     fn take_failure(&mut self) -> Option<String> {
-        None
+        self.failure.take()
     }
 }
 
