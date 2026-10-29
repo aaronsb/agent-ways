@@ -216,10 +216,10 @@ fn layer(name: String, reads: Vec<Read>, trust: bool, project: &Path) -> Loaded 
         ));
         let lower: Vec<_> = docs.iter().filter(|(o, _, _)| *o != Origin::Project).cloned().collect();
         let files = files_of(true, &docs);
-        if lower.is_empty() {
-            return Loaded { name, files, spec: None, findings, refused };
-        }
-        let mut l = check(name, files, &lower, &merged(&lower), findings);
+        // With nothing beneath, the refused file is still read, so the list
+        // can say what it is; it never runs.
+        let shown = if lower.is_empty() { &docs } else { &lower };
+        let mut l = check(name, files, shown, &merged(shown), findings);
         l.refused = refused;
         return l;
     }
@@ -366,7 +366,7 @@ mod tests {
     fn a_project_command_file_is_refused_until_the_project_is_trusted() {
         let cmd = "kind: command\nargv: [/bin/true]\noutput: lines\n";
         let l = layer("chk".into(), vec![read(Origin::Project, cmd)], false, Path::new("/p"));
-        assert!(l.is_refused() && l.spec.is_none(), "{l:?}");
+        assert!(l.is_refused() && l.spec.is_some(), "a refused file is read for the list: {l:?}");
         let l = layer("chk".into(), vec![read(Origin::Project, cmd)], true, Path::new("/p"));
         assert!(l.refused.is_none() && l.spec.is_some());
         // A crate override from a project needs no trust.

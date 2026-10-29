@@ -112,6 +112,18 @@ pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
             println!("{w}");
         }
     }
+    // attend's sensor files (ADR-403), for the project, with one file alone
+    // naming none of them.
+    if file.is_none() {
+        let dir = read_project(project).unwrap_or_else(|| PathBuf::from(crate::util::project_dir()));
+        for line in attend_config::sensors::lint(&dir) {
+            // A warning leaves the exit alone, as a key's does.
+            if !line.contains(": warning: ") {
+                n += 1;
+            }
+            println!("{line}");
+        }
+    }
     for h in &held {
         println!("{}", h.line());
         n += 1;

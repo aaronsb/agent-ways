@@ -384,12 +384,8 @@ impl Ways {
         TABS.iter().map(|tab| self.tab(tab, layers)).collect()
     }
 
-    /// The doc of a group: its section's, or for one of attend's sensors or
-    /// one mod, a line on it.
+    /// The doc of a group: its section's, or for one mod, a line on it.
     pub(super) fn section_doc(&self, name: &str) -> String {
-        if let Some(s) = name.strip_prefix("attend.sensors.").filter(|s| !s.contains('.')) {
-            return attend_config::schema::sensor_doc(s);
-        }
         if let Some(m) = name.strip_prefix("mods.").filter(|m| !m.contains('.')) {
             if let Some((_, doc)) = ways_core::settings::MODS.iter().find(|(n, _)| *n == m) {
                 return doc.to_string();
