@@ -552,6 +552,11 @@ pub struct Overview {
     pub claude_code: bool,
     /// Each enabled target where the mod is critical and does not run.
     pub attention: Vec<Attention>,
+    /// The versions Claude Code lists as installed, once each, in target
+    /// order.
+    pub installed: Vec<String>,
+    /// The marketplace folder the mod is read from.
+    pub folder: PathBuf,
 }
 
 /// A critical mod that does not run in one enabled target
@@ -611,8 +616,16 @@ pub fn overview() -> Vec<Overview> {
             let older = here
                 .iter()
                 .any(|v| v.installed.as_deref().zip(shipped.as_deref()).is_some_and(|(i, s)| super::update::version_older(i, s)));
+            let mut installed: Vec<String> = Vec::new();
+            for v in here.iter().filter_map(|v| v.installed.clone()) {
+                if !installed.contains(&v) {
+                    installed.push(v);
+                }
+            }
             Overview {
                 m,
+                installed,
+                folder: attend_mod::marketplace_dir(&src),
                 word: State::over(&here.iter().map(|v| v.state(shipped.as_deref())).collect::<Vec<_>>()),
                 rows: here.iter().map(|v| (shown(&v.dir), v.row(&m, shipped.as_deref()), v.describe(&m, shipped.as_deref()))).collect(),
                 attention: here.iter().filter_map(|v| attention(&m, v, claude_code, &default_root)).collect(),

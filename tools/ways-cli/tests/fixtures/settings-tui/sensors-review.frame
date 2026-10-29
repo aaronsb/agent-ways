@@ -1,20 +1,20 @@
 agent-tui frame 100x30
 | 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors  ●1 ↺    7 mod    8 theme     |
 |┌ writes user — ~/proj — review ──────────────────────┐┌detail─────────────────────────────────────┐|
-|│▌  ▾ processes             ●1                        ││sensors.processes                          │|
-|│       enabled             true → false              ││                                           │|
-|│                                                     ││The built-in processes sensor. `attend     │|
-|│                                                     ││sensor list` shows what it watches and     │|
-|│                                                     ││whether it runs.                           │|
+|│▌  ▾ processes             ●1                        ││processes                                  │|
+|│       enabled             true → false              ││built-in sensor                            │|
+|│                                                     ││                                           │|
+|│                                                     ││origin    builtin                          │|
+|│                                                     ││kind      crate                            │|
+|│                                                     ││source    unknown: attend absent           │|
+|│                                                     ││state     enabled                          │|
+|│                                                     ││interval  30s quiet, 5s busy               │|
+|│                                                     ││threshold 2                                │|
 |│                                                     ││                                           │|
 |│                                                     ││1 change under this group                  │|
 |│                                                     ││                                           │|
 |│                                                     ││file it writes                             │|
 |│                                                     ││  ~/.config/attend/config.yaml             │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -50,46 +50,48 @@ styles
   2  28-29  Yellow - BOLD|REVERSED
   2  30-53  - - BOLD|REVERSED
   2  54-55  - - DIM
-  2  56-72  - - BOLD
+  2  56-64  - - BOLD
   2  99-99  - - DIM
   3   0-0   - - DIM
   3  28-31  - - DIM|CROSSED_OUT
   3  35-39  Green - BOLD
-  3  54-55  - - DIM
+  3  54-70  - - DIM
   3  99-99  - - DIM
   4   0-0   - - DIM
   4  54-55  - - DIM
   4  99-99  - - DIM
   5   0-0   - - DIM
-  5  54-55  - - DIM
+  5  54-65  - - DIM
+  5  66-72  LightBlue - -
   5  99-99  - - DIM
   6   0-0   - - DIM
-  6  54-55  - - DIM
+  6  54-65  - - DIM
   6  99-99  - - DIM
   7   0-0   - - DIM
-  7  54-55  - - DIM
+  7  54-65  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
-  8  54-80  - - DIM
+  8  54-65  - - DIM
+  8  66-72  Green - -
   8  99-99  - - DIM
   9   0-0   - - DIM
-  9  54-55  - - DIM
+  9  54-65  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
- 10  54-55  - - DIM
- 10  56-69  - - BOLD
+ 10  54-65  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
  11  54-55  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM
- 12  54-55  - - DIM
+ 12  54-80  - - DIM
  12  99-99  - - DIM
  13   0-0   - - DIM
  13  54-55  - - DIM
  13  99-99  - - DIM
  14   0-0   - - DIM
  14  54-55  - - DIM
+ 14  56-69  - - BOLD
  14  99-99  - - DIM
  15   0-0   - - DIM
  15  54-55  - - DIM

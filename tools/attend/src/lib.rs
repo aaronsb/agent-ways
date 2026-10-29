@@ -116,8 +116,8 @@ pub fn cli_main() {
             }
         }
         Commands::Chat { passthrough } => exec_chat(passthrough),
-        Commands::Sensor { sub } => match sub.unwrap_or(SensorCmd::List) {
-            SensorCmd::List => cmd::sensors::cmd_sensors(),
+        Commands::Sensor { sub } => match sub.unwrap_or(SensorCmd::List(JsonArgs { json: false })) {
+            SensorCmd::List(a) => cmd::sensors::cmd_sensors(a.json),
             SensorCmd::Permissions => cmd::permissions::cmd_permissions_audit(),
         },
         Commands::Config { sub } => dispatch_config(sub.unwrap_or(ConfigCmd::Show)),

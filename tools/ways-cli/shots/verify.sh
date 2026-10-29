@@ -3,7 +3,7 @@
 # 120x35, and save a PNG and a text capture of each state. The screens run
 # on the synthetic fixture of docs/images/ways/tools (env.sh, fixture.py).
 #
-#   cargo build --manifest-path tools/Cargo.toml -p ways -p ways-agent -p tui-harness
+#   cargo build --manifest-path tools/Cargo.toml -p ways -p ways-agent -p attend -p tui-harness
 #   tools/ways-cli/shots/verify.sh                 # every scenario
 #   tools/ways-cli/shots/verify.sh timeline why    # some
 #
@@ -67,6 +67,11 @@ theme-claude-paths | ways settings theme --project $PS      | End c End
 theme-claude-tampa | ways settings theme --project $PS      | End Up c Right | Left
 flow-pick  | ways settings install --project $PS            | t
 flow-other | ways settings install --project $PS            | t Down Enter text:~/work Enter
+card-mod   | ways settings mod --project $PS                |
+card-sensor | ways settings sensors --project $PS           | Down
+card-script-sensor | ways settings sensors --project $PS    | End
+card-theme | ways settings theme --project $PS              | Down
+card-user-theme | ways settings theme --project $PS         | End
 "
 
 python3 "$TOOLS/fixture.py" "$WORK" >/dev/null
@@ -159,6 +164,28 @@ teardown_theme_claude_paths() { teardown_theme_claude; }
 
 setup_mod_states() { setup_mod_actions; }
 teardown_mod_states() { teardown_mod_actions; }
+
+# The module card (the detail pane's head on a mod, a sensor, a theme): the
+# healthy mods; the built-in git sensor, described by the debug `attend` in
+# $BIN; a script sensor of the user's in attend's user file; and a user
+# theme beside the bundled ones.
+setup_card_mod() { setup_healthy; }
+teardown_card_mod() { teardown_mod_actions; }
+setup_card_script_sensor() {
+  local h=$F/home
+  mkdir -p "$h/.config/attend" "$h/.local/share/attend/sensors"
+  printf '#!/bin/sh\n' >"$h/.local/share/attend/sensors/downloads.sh"
+  # An absolute script path: the fixture's HOME is the relative `~`, which
+  # attend's expansion leaves relative, under the project.
+  printf 'sensors:\n  downloads:\n    script: %s\n    interval: 120\n' "$(cd "$h" && pwd -P)/.local/share/attend/sensors/downloads.sh" >"$h/.config/attend/config.yaml"
+}
+teardown_card_script_sensor() { rm -rf "$F/home/.config/attend" "$F/home/.local/share/attend"; }
+setup_card_user_theme() {
+  local t=$F/home/.config/agent-ways/themes
+  mkdir -p "$t"
+  sed -e 's/^THEME_NAME=.*/THEME_NAME="mine"/' -e 's/^THEME_LABEL=.*/THEME_LABEL="Mine"/' "$HERE/../../agent-theme/themes/nord.theme" >"$t/mine.theme"
+}
+teardown_card_user_theme() { rm -f "$F/home/.config/agent-ways/themes/mine.theme"; }
 
 want() { [ $# -eq 1 ] || [[ " ${*:2} " == *" $1 "* ]]; }
 trim() { local s=$1; s=${s#"${s%%[![:space:]]*}"}; printf '%s' "${s%"${s##*[![:space:]]}"}"; }
