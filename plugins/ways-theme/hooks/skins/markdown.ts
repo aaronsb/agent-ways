@@ -1,6 +1,8 @@
 // Ported from skins by hellosverre (MIT; LICENSE beside this file),
 // https://github.com/hellosverre/claude-skins at 985ad63, hooks/markdown.ts.
 
+import type { Command } from './commands'
+
 // Finds the tables and fenced code in a reply so they can be drawn as cards; the rest
 // stays markdown.
 
@@ -14,16 +16,25 @@ export type Code = { kind: 'code'; lang: string; code: string; raw: string }
 // `tex` is the formula alone; `raw` the block as written, kept for the copy button.
 export type Math = { kind: 'math'; tex: string; raw: string }
 
-export type Segment = { kind: 'text'; text: string } | Table | Code | Math
+// A command is a `! <command>` suggestion (commands.ts).
+export type Segment = { kind: 'text'; text: string } | Table | Code | Math | Command
 
 // Fences the desktop marks runnable with a Run button of its own. A card is an image and
 // cannot carry it, so these keep Claude Code's drawing there.
 const SHELLS = new Set(['bash', 'sh', 'shell', 'zsh', 'fish', 'console', 'powershell', 'pwsh', 'ps1', 'cmd', 'bat'])
 
-export const isShell = (segment: Segment): boolean => segment.kind === 'code' && SHELLS.has(segment.lang)
+export const isShellLang = (lang: string): boolean => SHELLS.has(lang)
+
+export const isShell = (segment: Segment): boolean => segment.kind === 'code' && isShellLang(segment.lang)
 
 const SEPARATOR = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/
-const FENCE = /^\s*(```|~~~)\s*([\w+#.-]*)/
+
+// A fence's opening line, its language in the second group.
+export const FENCE = /^\s*(```|~~~)\s*([\w+#.-]*)/
+
+// The line that closes the fence opened on line `i`, or -1 while it is still streaming.
+export const fenceClose = (lines: readonly string[], i: number): number =>
+  lines.findIndex((other, j) => j > i && FENCE.test(other) && other.trim().replace(/[`~]/g, '') === '')
 
 // Inline emphasis and code ticks read as noise in a padded cell.
 const clean = (cell: string): string =>
@@ -88,7 +99,7 @@ export function splitReply(markdown: string, options: SplitOptions = SPLIT_ALL):
 
     // A closed fence becomes a code segment; one still streaming stays text.
     if (fence !== null && !inFence) {
-      const close = lines.findIndex((other, j) => j > i && FENCE.test(other) && other.trim().replace(/[`~]/g, '') === '')
+      const close = fenceClose(lines, i)
 
       if (close !== -1) {
         const lang = (fence[2] ?? '').toLowerCase()
@@ -156,7 +167,7 @@ function displayMath(lines: readonly string[], i: number, fence: RegExpExecArray
       return null
     }
 
-    const close = lines.findIndex((other, j) => j > i && FENCE.test(other) && other.trim().replace(/[`~]/g, '') === '')
+    const close = fenceClose(lines, i)
 
     return close === -1 ? null : { tex: lines.slice(i + 1, close).join('\n'), end: close }
   }
