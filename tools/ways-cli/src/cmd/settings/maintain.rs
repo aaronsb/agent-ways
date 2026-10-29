@@ -77,6 +77,7 @@ pub(super) fn file_label(file: &str) -> &'static str {
     match file {
         f if f == ways_agent_core::settings::FILE => "agent.yaml",
         f if f == attend_config::FILE => "attend/config.yaml (or a project's .claude/attend.yaml)",
+        f if f == attend_config::schema::SENSOR_FILE => "attend/sensors/<name>.yaml, one file per sensor (or a project's .claude/attend/sensors/)",
         _ => "config.yaml (or a project's .claude/ways.yaml)",
     }
 }
@@ -98,7 +99,8 @@ pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
     let mut n = 0;
     // Findings `fix` can repair; the others name their own repair.
     let mut fixable = 0;
-    for l in layers.iter().filter(|l| l.present) {
+    // A sensor file's findings come with its sensor's, below.
+    for l in layers.iter().filter(|l| l.present && l.file != attend_config::schema::SENSOR_FILE) {
         for f in &l.findings {
             // Reported below with the command for its own file.
             if f.section.is_none() && f.key.as_deref() == Some(retired::KEY) && !held.is_empty() {

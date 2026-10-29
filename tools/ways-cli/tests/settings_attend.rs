@@ -223,3 +223,57 @@ fn a_session_dir_in_no_project_reads_the_user_layer() {
         assert!(out.contains("\"mods.attend.listening\": {\n      \"value\": \"active\""), "{dir}: {out}");
     }
 }
+
+/// The user's sensor file for `name`.
+fn sensor(fx: &Fx, name: &str) -> PathBuf {
+    fx.root.join(format!("xdg/config/attend/sensors/{name}.yaml"))
+}
+
+// A sensor's field is a key over its files (ADR-403 §5): set writes the
+// user's sensor file, creating it with only that field over the shipped
+// one, and get and list name that file as the source.
+#[test]
+fn a_sensor_field_is_set_in_the_user_s_sensor_file_over_the_shipped_one() {
+    let fx = Fx::new();
+    let (out, _, code) = fx.run(&["settings", "get", "attend.sensors.git.interval", "--json"]);
+    assert_eq!(code, 0);
+    assert!(out.contains("\"value\": 30") && out.contains("\"layer\": \"shipped\""), "{out}");
+    let (_, err, code) = fx.run(&["settings", "set", "attend.sensors.git.interval", "90"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(err.contains("user: <ROOT>/xdg/config/attend/sensors/git.yaml"), "{err}");
+    assert!(fx.read(&sensor(&fx, "git")).ends_with("\ninterval: 90\n"), "{}", fx.read(&sensor(&fx, "git")));
+    let (out, _, _) = fx.run(&["settings", "list", "--json", "attend.sensors.git"]);
+    assert!(out.contains("\"<ROOT>/xdg/config/attend/sensors/git.yaml\": {\n      \"interval\": 90"), "the stored fragment has the file's shape:\n{out}");
+    assert!(out.contains("\"file\": \"<ROOT>/xdg/config/attend/sensors/git.yaml\""), "{out}");
+    // unset takes the field out, and the shipped value is in effect again.
+    let (_, err, code) = fx.run(&["settings", "unset", "attend.sensors.git.interval"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(fx.run(&["settings", "get", "attend.sensors.git.interval"]).0, "30\n");
+}
+
+#[test]
+fn a_value_that_makes_the_sensor_invalid_exits_3_and_says_why() {
+    let fx = Fx::new();
+    let (_, err, code) = fx.run(&["settings", "set", "attend.sensors.git.min_interval", "500"]);
+    assert_eq!(code, 3, "{err}");
+    assert!(err.contains("would make the sensor git invalid: min_interval: min_interval 500 is longer than interval 30"), "{err}");
+    assert!(!sensor(&fx, "git").exists(), "nothing written");
+    // A field of a sensor no file defines defines no sensor.
+    let (_, err, code) = fx.run(&["settings", "set", "attend.sensors.weather.interval", "40"]);
+    assert_eq!(code, 3, "{err}");
+    assert!(err.contains("kind is required"), "{err}");
+    assert!(!sensor(&fx, "weather").exists());
+}
+
+#[test]
+fn project_writes_the_project_s_sensor_file() {
+    let fx = Fx::new();
+    let (_, err, code) = fx.run(&["settings", "set", "attend.sensors.processes.enabled", "false", "--project", "."]);
+    assert_eq!(code, 0, "{err}");
+    let file = fx.root.join("proj/.claude/attend/sensors/processes.yaml");
+    assert!(fx.read(&file).ends_with("\nenabled: false\n"), "{}", fx.read(&file));
+    // Set in the user's file now, the project's still wins: exit 4 names it.
+    let (_, err, code) = fx.run(&["settings", "set", "attend.sensors.processes.enabled", "true"]);
+    assert_eq!(code, 4, "{err}");
+    assert!(err.contains("proj/.claude/attend/sensors/processes.yaml sets attend.sensors.processes.enabled"), "{err}");
+}

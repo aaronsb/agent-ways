@@ -25,7 +25,7 @@ When you build a sensor, emit measurable transitions. If a description is about 
 | `mcp` | attend | one read-only tool call on a stdio MCP server | parsed, checked, listed and linted; `not hosted` until slice 3 |
 | `ways` | ways (ADR-199) | the session's hook stream | attend lists it as `not hosted` and never runs it |
 
-Triggers, declared state, `where` conditions, JSONPath and templates parse and are checked when a file loads. attend evaluates them, and writes declared state to the store, from slice 2. `attend sensor probe` arrives with slice 3. `ways settings` has no keys for sensor files in this release; write the files directly, and `ways settings lint` checks them.
+Triggers, declared state, `where` conditions, JSONPath and templates parse and are checked when a file loads. attend evaluates them, and writes declared state to the store, from slice 2. `attend sensor probe` arrives with slice 3. `ways settings` reaches the shared fields of every sensor file ([Settings keys](#settings-keys)); write the other fields in the files directly, and `ways settings lint` checks them.
 
 ## What sensor authors are designing around
 
@@ -54,6 +54,18 @@ A sensor's name is its file's stem: letters, digits, `-` and `_`, starting with 
 A later layer overrides any field of an earlier one. Mappings merge key by key. `triggers` merge by trigger name: a trigger with the name of a lower one merges into it, and any other is added after them. Every other value, a list included, is replaced whole. A new name adds a sensor, and `enabled: false` turns one off.
 
 A problem that makes the merged file invalid keeps the sensor from running; the lower layers do not stand in for it. `ways settings lint` reports each problem at the file and line of the highest layer that sets the field.
+
+### Settings keys
+
+Each sensor's `enabled`, `interval`, `min_interval`, `threshold`, `decay_threshold`, `lane` and `requires`, and a `processes` crate sensor's `watch`, are settings keys named `attend.sensors.<name>.<field>`. They resolve through the layers above, with the shipped layer lowest, and `ways settings get --json` and `list --json` name the file a value comes from:
+
+```bash
+ways settings set attend.sensors.git.interval 90                    # $XDG_CONFIG_HOME/attend/sensors/git.yaml
+ways settings set attend.sensors.git.enabled false --project .      # .claude/attend/sensors/git.yaml
+ways settings list --json attend.sensors.git
+```
+
+`set` writes the user's file, or with `--project` the project's, and creates it holding only that field when the sensor comes from a lower layer; a shipped file is never written. A value that would make the sensor invalid exits 3, names the problem and writes nothing. The settings screens' sensors tab lists every sensor of every layer with its card and these keys. A field of a sensor a project's file defines is written to that file, its `enabled` aside, which the screens keep in the user's file so the switch stays the operator's. A user file that holds only `enabled` defines no sensor of its own. Triggers, state and a kind's own fields have no keys yet.
 
 `attend run` watches the user and project sensor directories and the user config file. A file added, changed or removed there reloads the run, and the banner names the reason. The shipped files change with the binary.
 

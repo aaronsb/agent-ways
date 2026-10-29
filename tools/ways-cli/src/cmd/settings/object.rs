@@ -86,19 +86,21 @@ pub fn apply(file: Option<&Path>, dry_run: bool, project: Option<&Path>) -> Out 
     for (path, scope, list) in &by_file {
         let mut fragment = json!({});
         for (b, v) in list {
-            insert_path(&mut fragment, &b.path(), to_json(v));
+            insert_path(&mut fragment, &file_key(b), to_json(v));
             accepted_names.push(b.name());
         }
         if !dry_run {
-            let r = agent_settings::writer::edit_file(path, header_for(path), |d| {
-                for (b, v) in list {
-                    d.set(&b.path(), v)?;
+            let edits: Vec<(Vec<String>, Option<Value>)> = list.iter().map(|(b, v)| (file_key(b), Some(v.clone()))).collect();
+            match edit_checked(path, &edits, None, |_| Ok(())) {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => {
+                    error = Some(format!("{e}; nothing written to {}", path.display()));
+                    break;
                 }
-                Ok(())
-            });
-            if let Err(e) = r {
-                error = Some(format!("{e}; nothing written to {}", path.display()));
-                break;
+                Err(f) => {
+                    error = Some(f.message);
+                    break;
+                }
             }
         }
         touched(*scope, path, dry_run);

@@ -66,9 +66,64 @@ pub fn registry() -> Registry {
 pub(super) fn schema_of(file: &str) -> &'static agent_settings::Schema {
     match file {
         f if f == ways_agent_core::settings::FILE => &ways_agent_core::settings::SCHEMA,
-        f if f == attend_config::FILE => &attend_config::SCHEMA,
+        f if f == attend_config::FILE || f == attend_config::schema::SENSOR_FILE => &attend_config::SCHEMA,
         _ => &ways_core::settings::SCHEMA,
     }
+}
+
+/// Whether `b` is a field of an attend sensor file (ADR-403 §5).
+pub(super) fn is_sensor_key(b: &Bound) -> bool {
+    b.spec.file == attend_config::schema::SENSOR_FILE
+}
+
+/// The path `b` is written at in its file. A sensor file holds one sensor,
+/// so its key path drops the `sensors.<name>` its layer reads it under.
+pub(super) fn file_key(b: &Bound) -> Vec<String> {
+    let path = b.path();
+    if is_sensor_key(b) {
+        return path[2..].to_vec();
+    }
+    path
+}
+
+/// The sensor keys every sensor of `layers` has, whether or not a file sets
+/// them: its switch, cadence, emission and permissions, and for a processes
+/// crate sensor its watch list. `concrete` lists only the ones a file sets.
+pub(super) fn sensor_keys(reg: &Registry, layers: &[Layer]) -> Vec<Bound> {
+    const SHARED: &[&str] = &["enabled", "interval", "min_interval", "threshold", "decay_threshold", "lane", "requires"];
+    let mut names: Vec<String> = Vec::new();
+    for l in layers.iter().filter(|l| l.file == attend_config::schema::SENSOR_FILE) {
+        for n in l.accepted.get("sensors").and_then(Value::as_mapping).into_iter().flat_map(|m| m.keys()).filter_map(Value::as_str) {
+            if !names.iter().any(|x| x == n) {
+                names.push(n.to_string());
+            }
+        }
+    }
+    names.sort();
+    let field = |name: &str, f: &str| {
+        layers.iter().rev().filter(|l| l.file == attend_config::schema::SENSOR_FILE).find_map(|l| l.get(&["sensors".into(), name.into(), f.into()]).cloned())
+    };
+    let mut out = Vec::new();
+    for n in &names {
+        let watches = field(n, "crate").is_some_and(|c| c.as_str() == Some("processes")) || field(n, "watch").is_some();
+        for f in SHARED.iter().copied().chain(watches.then_some("watch")) {
+            out.extend(reg.lookup(&format!("attend.sensors.{n}.{f}")));
+        }
+    }
+    out
+}
+
+/// Every concrete key under `prefix` ([`Registry::concrete`]), with each
+/// sensor's keys whether or not a file sets them ([`sensor_keys`]).
+pub(super) fn concrete(reg: &Registry, prefix: &str, layers: &[Layer]) -> Vec<Bound> {
+    let mut keys = reg.concrete(prefix, layers);
+    keys.retain(|b| !is_sensor_key(b));
+    let sensors = sensor_keys(reg, layers).into_iter().filter(|b| {
+        let n = b.name();
+        agent_settings::registry::under(&n, prefix) || (!prefix.is_empty() && b.spec.section == prefix)
+    });
+    keys.extend(sensors);
+    keys
 }
 
 /// The file a key of `kind` and `scope` is written to, with the layer scope
@@ -188,6 +243,7 @@ pub(super) fn live_layers(project: Option<&Path>) -> Vec<Layer> {
     let mut out = ways_core::settings::layers(&dir);
     out.extend(ways_agent_core::settings::layers());
     out.extend(attend_config::layers(&dir));
+    out.extend(attend_config::sensors::layers(project));
     if project.is_none() {
         out.retain(|l| l.scope != LayerScope::Project);
     }
@@ -301,6 +357,15 @@ pub(super) fn options_json(spec: &agent_settings::KeySpec, layers: &[Layer], bou
 /// The file a key is written to, and the layer scope it is written at.
 pub(super) fn target_file(b: &Bound, project: Option<&Path>) -> Result<(PathBuf, LayerScope), Failure> {
     let name = b.name();
+    if is_sensor_key(b) {
+        // The sensor's own file at the layer written: a shipped file is
+        // never written, and an override starts with the one field.
+        let file = format!("{}.yaml", b.bound[0]);
+        return Ok(match project {
+            Some(p) => (attend_config::sensors::project_dir(p).join(file), LayerScope::Project),
+            None => (attend_config::sensors::user_dir().join(file), LayerScope::User),
+        });
+    }
     // The agent's keys live in the user file alone, whatever their scope says.
     let scope = if b.spec.file == ways_agent_core::settings::FILE { Scope::User } else { b.spec.scope };
     match file_of(b.spec.file, scope, project) {
@@ -324,7 +389,7 @@ pub(super) fn target_file(b: &Bound, project: Option<&Path>) -> Result<(PathBuf,
 /// screens' apply, so both leave the same bytes. Returns whether the file
 /// changed.
 pub(super) fn write_file(path: &Path, values: &[(Vec<String>, Value)]) -> Result<bool, Failure> {
-    write_file_checked(path, values, None, |_| Ok(())).map(|r| r.unwrap_or(false))
+    write_file_checked(path, values, None, |_| Ok(()))?.map_err(|e| fail(exit::REJECTED, e))
 }
 
 /// [`write_file`], with `check` run on the file's text under the writer's
@@ -337,13 +402,41 @@ pub(super) fn write_file_checked(
     wait: Option<std::time::Duration>,
     check: impl FnOnce(&agent_settings::yaml_edit::Doc) -> Result<(), String>,
 ) -> Result<Result<bool, String>, Failure> {
+    let edits: Vec<(Vec<String>, Option<Value>)> = values.iter().map(|(k, v)| (k.clone(), Some(v.clone()))).collect();
+    edit_checked(path, &edits, wait, check)
+}
+
+/// One locked edit of `path`: each key set to its value, or removed for
+/// `None`, once `check` passes on the file as it is. An edit of a sensor
+/// file that would make its sensor invalid writes nothing, and the reason
+/// comes back as the inner error ([`attend_config::sensors::check_edit`]).
+pub(super) fn edit_checked(
+    path: &Path,
+    edits: &[(Vec<String>, Option<Value>)],
+    wait: Option<std::time::Duration>,
+    check: impl FnOnce(&agent_settings::yaml_edit::Doc) -> Result<(), String>,
+) -> Result<Result<bool, String>, Failure> {
+    let apply = |d: &mut agent_settings::yaml_edit::Doc| -> Result<(), agent_settings::yaml_edit::EditError> {
+        for (k, v) in edits {
+            match v {
+                Some(v) => d.set(k, v)?,
+                None => d.unset(k).map(|_| ())?,
+            }
+        }
+        Ok(())
+    };
     agent_settings::writer::edit_file_within(path, header_for(path), wait, |d| {
         if let Err(e) = check(d) {
             return Ok(Err(e));
         }
-        for (k, v) in values {
-            d.set(k, v)?;
+        if attend_config::sensors::file_at(path).is_some() {
+            let mut after = agent_settings::yaml_edit::Doc::parse(&d.text())?;
+            apply(&mut after)?;
+            if let Err(e) = attend_config::sensors::check_edit(path, &after.text()) {
+                return Ok(Err(e));
+            }
         }
+        apply(d)?;
         Ok(Ok(()))
     })
     .map(|(r, changed)| r.map(|()| changed))
@@ -351,6 +444,9 @@ pub(super) fn write_file_checked(
 }
 
 pub(super) fn header_for(path: &Path) -> Option<&'static str> {
+    if attend_config::sensors::file_at(path).is_some() {
+        return Some(attend_config::sensors::HEADER);
+    }
     if path.file_name().is_some_and(|n| n == "ways.yaml") {
         return Some(ways_core::settings::PROJECT_HEADER);
     }
