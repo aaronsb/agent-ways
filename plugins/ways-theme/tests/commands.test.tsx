@@ -49,6 +49,22 @@ describe('which suggestions match', () => {
     expect(commands('! git fetch &&\n\nnext')).toEqual(['! git fetch &&'])
   })
 
+  test('a `|` continuation stops at a table row', () => {
+    expect(commandPieces('! git log --oneline |\n| a | b |\n|---|---|')).toEqual([
+      { kind: 'command', command: '! git log --oneline |', raw: '! git log --oneline |' },
+      { kind: 'text', text: '| a | b |\n|---|---|' },
+    ])
+  })
+
+  test('a command word may start with a digit, a dot, a slash, a tilde, a dollar, a bracket or a quote', () => {
+    const words = ['7z x a.7z', './build.sh', '/usr/bin/env true', '~/bin/sync', '$EDITOR notes', '(cd x && make)', '"$HOME/run"', "'quoted'"]
+    expect(commands(words.map(word => `! ${word}`).join('\n'))).toEqual(words.map(word => `! ${word}`))
+  })
+
+  test('a line after prose with no blank line between keeps its four-space indent and is a command', () => {
+    expect(commands('- item\n    ! git status')).toEqual(['! git status'])
+  })
+
   test('an inline code span: the prose before it, the command, the prose after it', () => {
     expect(commandPieces('Run `! git status` to see what moved.')).toEqual([
       { kind: 'text', text: 'Run' },
@@ -110,6 +126,17 @@ describe('what does not match', () => {
     ['a fence whose command does not start the code', '```\ncd x\n! make\n```'],
     ['a fence still streaming', '```\n! git push'],
     ['a line after a fence still streaming', '```\ncode\n! git push'],
+    ['a span in a quote', '> run `! git status` first'],
+    ['a span in link text', 'see [`! ls`](https://example.com) and [run `! ls` here][ref]'],
+    ['a span in a table row', '| step | `! git status` |'],
+    ['a line inside an HTML comment', 'note\n<!-- for later\n! git push\n-->'],
+    ['a span on a line with a whole HTML comment', 'run `! ls` <!-- later -->'],
+    ['an indented code block after a blank line', 'Example:\n\n    ! git status\n\n    ! git diff'],
+    ['an indented code block at the start', '\t! git status'],
+    ['prose that starts with `! ` and a capital', '! This is not a command'],
+    ['`! =`', '! = y'],
+    ["a TeX log's error line", '! Undefined control sequence.\nl.12 \\foo'],
+    ['a fence holding a TeX error line', '```\n! Undefined control sequence.\n```'],
   ]
   for (const [name, text] of asProse) {
     test(`${name} stays prose`, () => {
