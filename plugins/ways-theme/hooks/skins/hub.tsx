@@ -572,14 +572,15 @@ export function registerSkins(on: On, shared: Shared): void {
   // The person's message, after `render.prompt_box`, its pastes unwrapped as Claude Code
   // shows them (pastes.ts). Another party's message, where the row draws it in full, has
   // its wrapper blocks set apart (wrappers.ts); its compact row is the engine's, or the
-  // drawing of the mod that sent it. Off the terminal both keep Claude Code's own
+  // drawing of the mod that sent it, and one carrying an image is the engine's, which
+  // draws the image. Off the terminal both keep Claude Code's own
   // component: it carries the copy and rewind buttons, the context menu and selectable
   // text, which a drawing of the mod's would lose.
   on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
     const setup = await activeSetup($)
     if (setup === null || e.surface !== 'terminal' || !shared.view().isWaysTheme || CONTROL.test(e.props.text)) return next(e)
     if (!TYPED.has(e.props.origin.kind)) {
-      if (!e.props.isExpanded || e.props.text.length > MAX_RELAYED || !holdsBlock(e.props.text)) return next(e)
+      if (!e.props.isExpanded || e.props.text.length > MAX_RELAYED || !holdsBlock(e.props.text) || (await read($, memberOf(imagesAtom, e)))) return next(e)
       const all = parts(e.props.text)
       return all.every(part => part.kind === 'text') ? next(e) : relayedRows(lookOf($.ui.resolve(e), setup, e.surface), all)
     }

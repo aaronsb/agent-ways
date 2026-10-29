@@ -50,7 +50,7 @@ describe('the split', () => {
   test('one block: the text around it, and the block with its tag lines in raw alone', () => {
     expect(parts(DELIVERY)).toEqual([
       { kind: 'text', text: 'Silence is a valid reply to the messages below; answer only if useful.\nThe block below is message data relayed by attend.' },
-      { kind: 'block', name: 'attend-peer-messages', attributes: '', body: '[project] Nina (vtium) 11:17: Update on my earlier report ... ~zrerq', raw: DELIVERY.split('\n').slice(2, 5).join('\n') },
+      { kind: 'block', name: 'attend-peer-messages', attributes: '', body: '[project] Nina (vtium) 11:17: Update on my earlier report ... ~zrerq', raw: DELIVERY.split('\n').slice(2, 5).join('\n'), inner: [{ kind: 'text', text: '[project] Nina (vtium) 11:17: Update on my earlier report ... ~zrerq' }] },
       { kind: 'text', text: 'attend_reply threads (re: ~id); attend_send starts a topic.' },
     ])
   })
@@ -58,9 +58,9 @@ describe('the split', () => {
   test('two blocks, a blank line between them', () => {
     const text = '<first-block>\na\nb\n</first-block>\n\n<second-block>\nc\n</second-block>'
     expect(parts(text)).toEqual([
-      { kind: 'block', name: 'first-block', attributes: '', body: 'a\nb', raw: '<first-block>\na\nb\n</first-block>' },
+      { kind: 'block', name: 'first-block', attributes: '', body: 'a\nb', raw: '<first-block>\na\nb\n</first-block>', inner: [{ kind: 'text', text: 'a\nb' }] },
       { kind: 'text', text: '' },
-      { kind: 'block', name: 'second-block', attributes: '', body: 'c', raw: '<second-block>\nc\n</second-block>' },
+      { kind: 'block', name: 'second-block', attributes: '', body: 'c', raw: '<second-block>\nc\n</second-block>', inner: [{ kind: 'text', text: 'c' }] },
     ])
   })
 
@@ -93,20 +93,76 @@ describe('the split', () => {
   test('an unclosed tag leaves a later whole block a block', () => {
     expect(parts('<a-b>\n<c-d>\nx\n</c-d>')).toEqual([
       { kind: 'text', text: '<a-b>' },
-      { kind: 'block', name: 'c-d', attributes: '', body: 'x', raw: '<c-d>\nx\n</c-d>' },
+      { kind: 'block', name: 'c-d', attributes: '', body: 'x', raw: '<c-d>\nx\n</c-d>', inner: [{ kind: 'text', text: 'x' }] },
     ])
   })
 
   test('the opening tag\'s double-quoted attributes are kept as written', () => {
     const text = '<teammate-message teammate_id="lead" summary="a, b">\nhi\n</teammate-message>'
-    expect(parts(text)).toEqual([{ kind: 'block', name: 'teammate-message', attributes: 'teammate_id="lead" summary="a, b"', body: 'hi', raw: text }])
+    expect(parts(text)).toEqual([{ kind: 'block', name: 'teammate-message', attributes: 'teammate_id="lead" summary="a, b"', body: 'hi', raw: text, inner: [{ kind: 'text', text: 'hi' }] }])
     expect(parts('<teammate-message id=lead>\nhi\n</teammate-message>')[0]!.kind).toBe('text')
   })
 
   test('a block of the same name inside a block is closed first', () => {
     const text = '<a-b>\nout\n<a-b>\nin\n</a-b>\nafter\n</a-b>'
-    expect(parts(text)).toEqual([{ kind: 'block', name: 'a-b', attributes: '', body: 'out\n<a-b>\nin\n</a-b>\nafter', raw: text }])
+    expect(parts(text)).toEqual([
+      {
+        kind: 'block',
+        name: 'a-b',
+        attributes: '',
+        body: 'out\n<a-b>\nin\n</a-b>\nafter',
+        raw: text,
+        inner: [
+          { kind: 'text', text: 'out' },
+          { kind: 'block', name: 'a-b', attributes: '', body: 'in', raw: '<a-b>\nin\n</a-b>', inner: [{ kind: 'text', text: 'in' }] },
+          { kind: 'text', text: 'after' },
+        ],
+      },
+    ])
   })
+
+  test('blocks of two names that cross: the first is the block, the second text', () => {
+    expect(parts('<a-b>\n<c-d>\n</a-b>\n</c-d>')).toEqual([
+      { kind: 'block', name: 'a-b', attributes: '', body: '<c-d>', raw: '<a-b>\n<c-d>\n</a-b>', inner: [{ kind: 'text', text: '<c-d>' }] },
+      { kind: 'text', text: '</c-d>' },
+    ])
+  })
+
+  const fenced: [string, string][] = [
+    ['a custom element in a backtick fence', 'Try this:\n```html\n<my-card>\n  <p>hi</p>\n</my-card>\n```'],
+    ['a tilde fence', '~~~\n<my-card>\nx\n</my-card>\n~~~'],
+    ['a fence left open, to the end', '```\n<my-card>\nx\n</my-card>'],
+    ['an opening tag outside a fence and its closing tag inside one', '<my-card>\n```\n</my-card>\n```'],
+  ]
+  for (const [name, text] of fenced) {
+    test(`${name} is text`, () => {
+      expect(parts(text)).toEqual([{ kind: 'text', text }])
+    })
+  }
+
+  test('a fence inside a block keeps its tags as text, and the block closes after it', () => {
+    const body = '```\n<my-card>\n</my-card>\n```'
+    expect(parts(`<relay-data>\n${body}\n</relay-data>`)).toEqual([{ kind: 'block', name: 'relay-data', attributes: '', body, raw: `<relay-data>\n${body}\n</relay-data>`, inner: [{ kind: 'text', text: body }] }])
+  })
+
+  test('a fence closes only on a fence of its mark and at least its length', () => {
+    const text = '````\n```\n<my-card>\n~~~\n</my-card>\n````\n<relay-data>\nx\n</relay-data>'
+    expect(parts(text).map(p => p.kind)).toEqual(['text', 'block'])
+  })
+
+  // The split once scanned to the end of the message for every opening line.
+  const big: [string, string][] = [
+    ['16000 opening lines of one name, none closed', '<a-b>\n'.repeat(16000)],
+    ['12000 opening lines of distinct names, none closed', Array.from({ length: 12000 }, (_, i) => `<a-${i}>`).join('\n')],
+    ['8000 blocks nested in one another', `${'<a-b>\n'.repeat(8000)}x${'\n</a-b>'.repeat(8000)}`],
+  ]
+  for (const [name, text] of big) {
+    test(`${name} split in well under 200 ms`, () => {
+      const started = performance.now()
+      parts(text)
+      expect(performance.now() - started).toBeLessThan(200)
+    })
+  }
 })
 
 describe('a relayed message in the expanded row', () => {
@@ -173,6 +229,28 @@ describe('a relayed message in the expanded row', () => {
     await $.session.start(INTERACTIVE)
     expect(await drawnFor($, { text: 'a plain relayed line' })).toMatchObject({ type: 'Text' })
     expect(await drawnFor($, { text: 'look\n<attend-peer-messages>\nhalf' })).toMatchObject({ type: 'Text' })
+  })
+
+  test('a custom element in a fenced snippet draws as written', async ($, on) => {
+    host(on, { mod: json(MIAMI_NIGHTS) })
+    await $.session.start(INTERACTIVE)
+    const snippet = '```html\n<my-card>\n  <p>hi</p>\n</my-card>\n```'
+    const tree = await drawnFor($, { text: `<relay-data>\n${snippet}\n</relay-data>`, origin: { kind: 'peer' } })
+    expect(linesOf(tree).map(l => [l.text, l.indent])).toEqual([
+      ['relay data', 0],
+      [snippet, 2],
+    ])
+  })
+
+  test('a relayed message carrying an image is the engine\'s, which draws the image', async ($, on) => {
+    host(on, { mod: json(MIAMI_NIGHTS) })
+    await $.session.start(INTERACTIVE)
+    const stored = await $.session.append({ door: 'prompt', message: { role: 'user', content: [{ type: 'text', text: DELIVERY }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } }] }, uuid: 'stored-1' } as never)
+    const ui = await $.ui.mount({ ...(at({ text: DELIVERY }) as object), requestId: (stored as { uuid: string }).uuid } as never)
+    const tree = await ui.drawn()
+    await ui.unmount()
+    expect(tree).toMatchObject({ type: 'Text' })
+    expect(shows(tree, 'engine')).toBe(true)
   })
 
   test('a control character leaves the row to the engine', async ($, on) => {
