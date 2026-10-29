@@ -905,9 +905,10 @@ impl View {
     /// Why the mod does not run in this target, whatever its wanted state:
     /// one kept out by `install: false` counts as missing. `None` when it
     /// runs, when Claude Code's plugins could not be read, or when a plugin
-    /// of its name from another marketplace stands in for it.
+    /// of its name or an `agent-ways` marketplace from elsewhere is the
+    /// operator's own, which repair leaves alone.
     pub fn degraded(&self) -> Option<Degraded> {
-        if self.error.is_some() || !self.foreign.is_empty() {
+        if self.error.is_some() || !self.foreign.is_empty() || matches!(self.market, MarketState::Foreign(_)) {
             return None;
         }
         match (self.installed.is_some(), self.enabled) {

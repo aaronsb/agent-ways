@@ -573,17 +573,24 @@ pub fn attention(m: &Mod, v: &View, claude_code: bool, default_root: &Path) -> O
     }
     let why = v.degraded()?;
     let name = m.name;
+    // Repair installs a wanted mod nobody removed; one kept out or removed
+    // by hand takes the install action.
+    let repairs = v.wanted && !v.recorded;
+    let install = format!("`ways manage mod install {name} --commit`");
+    let then = if repairs { format!("`ways manage mod repair {name} --commit`") } else { install.clone() };
+    let floor = m.min_claude_code;
     let fix = match why {
-        // Repair installs a wanted mod nobody removed; one kept out or
-        // removed by hand takes the install action.
-        Degraded::Missing if v.wanted && !v.recorded => "`ways manage repair --commit` installs it".to_string(),
-        Degraded::Missing => format!("the install action, `ways manage mod install {name} --commit`, installs it"),
+        Degraded::Missing if repairs => "`ways manage repair --commit` installs it".to_string(),
+        Degraded::Missing => format!("the install action, {install}, installs it"),
         Degraded::Disabled => format!("`{}` enables it", attend_mod::enable_command(m, &v.dir, default_root)),
         Degraded::Pending if v.claude_code.is_some() => {
-            format!("upgrade Claude Code to {} or later, then `ways manage update --commit`", m.min_claude_code)
+            format!("upgrade Claude Code to {floor} or later, then {}", if repairs { "`ways manage update --commit`" } else { install.as_str() })
         }
+        // Without `claude` nothing was read; with it, only its version was not.
+        Degraded::Pending if !v.read => format!("install Claude Code {floor} or later and put `claude` on PATH, then {then}"),
         Degraded::Pending => {
-            format!("install Claude Code {} or later and put `claude` on PATH, then `ways manage mod repair {name} --commit`", m.min_claude_code)
+            let why = v.host.as_ref().err().map(String::as_str).unwrap_or_default();
+            format!("Claude Code's version could not be read ({why}); once `claude --version` names {floor} or later, {then}")
         }
     };
     Some(Attention { dir: shown(&v.dir), why, fix })
@@ -697,16 +704,37 @@ mod tests {
         let (d, fix) = why(&JUDGE, &below, true).unwrap();
         assert_eq!(d, Degraded::Pending);
         assert!(fix.contains("upgrade Claude Code to 2.1.304"), "{fix}");
-        let no_claude = view(dir, None, Err("`claude` is not on PATH".into()));
-        assert!(why(&ATTEND, &no_claude, true).unwrap().1.contains("put `claude` on PATH"));
+        // A mod repair will not install takes the install action after the
+        // upgrade.
+        let below_kept_out = View { wanted: false, target_off: true, ..below.clone() };
+        let (d, fix) = why(&JUDGE, &below_kept_out, true).unwrap();
+        assert_eq!(d, Degraded::Pending);
+        assert_eq!(fix, "upgrade Claude Code to 2.1.304 or later, then `ways manage mod install ways-judge --commit`");
+        let below_removed = View { recorded: true, ..below };
+        assert!(why(&JUDGE, &below_removed, true).unwrap().1.ends_with("then `ways manage mod install ways-judge --commit`"));
+
+        let no_claude = View { read: false, ..view(dir, None, Err("`claude` is not on PATH".into())) };
+        assert_eq!(
+            why(&ATTEND, &no_claude, true).unwrap().1,
+            "install Claude Code 2.1.296 or later and put `claude` on PATH, then `ways manage mod repair attend --commit`"
+        );
+        let no_claude_kept_out = View { wanted: false, target_off: true, ..no_claude };
+        assert!(why(&ATTEND, &no_claude_kept_out, true).unwrap().1.ends_with("on PATH, then `ways manage mod install attend --commit`"));
+        // `claude` is there and its plugin lists answer; only its version
+        // could not be read.
+        let unread = view(dir, None, Err("`claude --version` failed: exit 1".into()));
+        let fix = why(&ATTEND, &unread, true).unwrap().1;
+        assert!(fix.starts_with("Claude Code's version could not be read (`claude --version` failed: exit 1)") && !fix.contains("on PATH"), "{fix}");
 
         assert_eq!(why(&THEME, &missing, true), None, "ways-theme is not critical");
         assert_eq!(why(&JUDGE, &missing, false), None, "ways-judge under a key engine is absent by design");
         assert_eq!(why(&JUDGE, &missing, true).map(|w| w.0), Some(Degraded::Missing));
 
-        // Nothing is claimed when Claude Code could not tell, or when the
-        // operator's own plugin of the name stands in.
+        // Nothing is claimed when Claude Code could not tell, or when a
+        // plugin of the name or the marketplace is the operator's own,
+        // which repair leaves alone.
         assert_eq!(why(&ATTEND, &View { error: Some("timed out".into()), ..missing.clone() }, true), None);
-        assert_eq!(why(&ATTEND, &View { foreign: vec!["attend@mine".into()], ..missing }, true), None);
+        assert_eq!(why(&ATTEND, &View { foreign: vec!["attend@mine".into()], ..missing.clone() }, true), None);
+        assert_eq!(why(&ATTEND, &View { market: MarketState::Foreign("/elsewhere/plugins".into()), ..missing }, true), None);
     }
 }

@@ -807,3 +807,22 @@ fn the_bar_s_notice_sits_right_shortens_and_goes_before_the_counts() {
     let healthy = bar(&mut App::new("t", tree()).adapter(Noticed(Vec::new())), 200);
     assert!(!healthy.contains('⚠'), "{healthy}");
 }
+
+/// A message said since keeps its room beside the notice: at 80 columns a
+/// rejection shows whole, and the notice takes a form that fits beside it
+/// or goes.
+#[test]
+fn a_message_keeps_its_room_beside_the_notice() {
+    let forms = ["ways-judge not installed · see mod tab", "ways-judge not installed", "1 mod degraded"];
+    let mut app = App::new("t", tree()).adapter(Noticed(forms.iter().map(|f| f.to_string()).collect()));
+    app.msg = "rejected: no".into();
+    let b = bar(&mut app, 80);
+    assert!(b.contains("rejected: no"), "{b}");
+    assert!(b.ends_with(" ⚠ 1 mod degraded "), "{b}");
+    app.msg = "rejected: the key was refused".into();
+    let b = bar(&mut app, 80);
+    assert!(b.contains("rejected: the key was refused") && !b.contains('⚠'), "{b}");
+    // Wider, the notice comes back beside the message.
+    let b = bar(&mut app, 120);
+    assert!(b.contains("rejected: the key was refused") && b.ends_with(" ⚠ ways-judge not installed · see mod tab "), "{b}");
+}

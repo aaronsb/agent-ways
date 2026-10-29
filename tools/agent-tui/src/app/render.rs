@@ -554,9 +554,12 @@ impl App {
                     spans.push(hint(if self.mouse { "mouse on (m)" } else { "mouse off (m)" }));
                 }
                 // The adapter's notice sits left of the call to action in
-                // the first of its forms that fits clear of the counts, or
-                // not at all; the message and the actions take what is left.
-                let beside = area.width.saturating_sub(cta.as_ref().map_or(0, |c| width(c))).saturating_sub(width(&spans));
+                // the first of its forms that fits clear of the counts and
+                // of a message said since, which keeps at least the room it
+                // needs to show; else the notice goes. The opening hint and
+                // the actions take what is left.
+                let said = if self.msg == crate::app::HINT { 0 } else { msg.width().max(2 + MSG_MIN) as u16 };
+                let beside = area.width.saturating_sub(cta.as_ref().map_or(0, |c| width(c))).saturating_sub(width(&spans)).saturating_sub(said);
                 notice = self.notice_span(beside);
                 // A row's actions take the place of the opening hint when
                 // both do not fit; a message said since comes first. It is

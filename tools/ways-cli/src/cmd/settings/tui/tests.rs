@@ -1233,6 +1233,25 @@ fn the_bottom_bar_ends_with_the_degraded_notice() {
     assert!(!frame(&mut app, 120, 30).pop().unwrap().contains('⚠'));
 }
 
+/// Read in the background, the notice comes from the last read that
+/// landed: none while the first read runs, then the read's.
+#[test]
+fn the_background_notice_follows_the_read_that_landed() {
+    let fx = Fixture::home();
+    let mut ctx = ctx_of(&fx);
+    ctx.mods = slow_mod_states;
+    ctx.mods_background = true;
+    let ways = Ways::new(ctx).with_mods_fresh(std::time::Duration::from_millis(1));
+    let before = ways.stamp();
+    assert!(ways.notice().is_empty(), "nothing read yet");
+    let start = std::time::Instant::now();
+    while ways.stamp() == before {
+        assert!(start.elapsed() < std::time::Duration::from_secs(30), "the read never landed");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(ways.notice(), ["2 mods degraded · see mod tab", "2 mods degraded"]);
+}
+
 #[test]
 fn a_mod_whose_state_was_not_read_says_so() {
     let fx = Fixture::home();
