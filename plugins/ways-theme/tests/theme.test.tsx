@@ -621,7 +621,7 @@ describe('what the mod hooks reaches it on every host', () => {
     const regs = registrationsOf(register as never)
     // The recording saw the module's hooks: the control for the empty lists below.
     const skins = ['session.start', 'ui.invalidate', 'turn.start', 'session.append', 'session.measure', 'turn.complete', 'tool.call', ...Array(10).fill('ui.render')]
-    expect(regs.map(r => r.pattern)).toEqual(['session.start', 'config.set', 'ui.render', 'ui.render', 'ui.render', 'ui.render', ...skins])
+    expect(regs.map(r => r.pattern)).toEqual(['session.start', 'config.set', 'ui.render', 'ui.render', 'ui.render', 'ui.render', 'ui.render', ...skins])
     expect(regs.filter(r => r.pattern.startsWith('classic.'))).toEqual([])
     expect(passedOverHits(regs)).toEqual([])
   })

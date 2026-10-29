@@ -15,8 +15,12 @@
 //
 // The frames: on the terminal, under a theme with colours of its own, each
 // reply sits in a border on the theme's ground, and each tool call and tool
-// group in a border, wrapped around the engine's own drawing. Whether a row is
-// framed is one question, `isFramed` (hub.tsx), which this module and the
+// group in a border, wrapped around the engine's own drawing. A call whose row
+// Claude Code draws empty gets no border; a SendUserFile that sends an image
+// gets its border around its result, the row that shows it. Another mod's
+// picture in a framed row (the images mod's) is drawn inside the border when
+// that mod sits beneath this one in the chain (skins/pictures.ts). Whether a
+// row is framed is one question, `isFramed` (hub.tsx), which this module and the
 // skins layer ask of the same look, the live export's, so a theme switch
 // mid-session reframes both. A reply holding a `! <command>` block the skins
 // layer frames itself, in pieces around the block, so that no frame line runs
@@ -98,17 +102,22 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     if (!isFramed(await activeSetup($), e, view())) return next(e)
-    return framedRow($.ui.resolve(e), await next(e), FRAME.reply)
+    return framedRow($.ui.resolve(e), await next(e), FRAME.reply, e.viewport?.columns)
   })
 
   on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
     if (!isFramed(await activeSetup($), e, view())) return next(e)
-    return framedRow($.ui.resolve(e), await next(e), e.props.isErrored ? FRAME.toolErrored : FRAME.tool)
+    return framedRow($.ui.resolve(e), await next(e), e.props.isErrored ? FRAME.toolErrored : FRAME.tool, e.viewport?.columns)
   })
 
   on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
     if (!isFramed(await activeSetup($), e, view())) return next(e)
-    return framedRow($.ui.resolve(e), await next(e), FRAME.tool)
+    return framedRow($.ui.resolve(e), await next(e), FRAME.tool, e.viewport?.columns)
+  })
+
+  on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
+    if (!isFramed(await activeSetup($), e, view())) return next(e)
+    return framedRow($.ui.resolve(e), await next(e), FRAME.tool, e.viewport?.columns)
   })
 
   // The skins layer, after the hooks above so they wrap what it draws.
