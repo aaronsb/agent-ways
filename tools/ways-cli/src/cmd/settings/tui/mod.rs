@@ -84,12 +84,12 @@ pub struct Ctx {
 
 /// Whether the screens write `b` to the project's file: a project-scope key;
 /// when the screens were opened for a project, one the ways schema names for
-/// the screens to keep per project; or a key of a sensor whose script a
-/// project's file sets, as `layers` resolve it.
+/// the screens to keep per project; or, `enabled` aside, a key of a sensor
+/// whose script a project's file sets, as `layers` resolve it.
 pub(super) fn writes_project(b: &agent_settings::Bound, ctx: &Ctx, layers: &[Layer]) -> bool {
     b.spec.scope == Scope::Project
         || (ctx.for_project && ways_core::settings::SCREENS_WRITE_PROJECT.contains(&b.spec.name))
-        || (b.spec.section == "attend.sensors" && b.bound.first().is_some_and(|n| crate::cmd::modules::sensors::defined_in_project(layers, n)))
+        || (b.spec.section == "attend.sensors" && b.bound.first().is_some_and(|n| crate::cmd::modules::sensors::writes_project(layers, n, b.spec.name)))
 }
 
 /// Whether `given` (the `--project`, else `CLAUDE_PROJECT_DIR`) opens the

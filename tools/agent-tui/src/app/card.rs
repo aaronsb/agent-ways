@@ -50,7 +50,11 @@ pub(super) fn card_lines(c: &Card, room: usize) -> Vec<Line<'static>> {
         *first = head;
         origin[0].spans.push(Span::raw(rest));
     }
-    if c.fold_state {
+    // A folded state rides the origin's last line while it fits there, and
+    // takes a row of its own when it would not.
+    let width = |l: &Line| l.spans.iter().map(|s| crate::wrap::str_width(&s.content)).sum::<usize>();
+    let folds = c.fold_state && origin.last().is_some_and(|l| width(l) + 3 + crate::wrap::str_width(&c.state.0) <= super::review::LABEL + room);
+    if folds {
         if let Some(last) = origin.last_mut() {
             last.spans.push(Span::raw(" · "));
             last.spans.push(Span::styled(c.state.0.clone(), state_style(c.state.1)));
@@ -64,7 +68,7 @@ pub(super) fn card_lines(c: &Card, room: usize) -> Vec<Line<'static>> {
     if let Some(v) = &c.version {
         lines.extend(fields("version", v, Style::new(), room, dim));
     }
-    if !c.fold_state {
+    if !folds {
         lines.extend(fields("state", &c.state.0, state_style(c.state.1), room, dim));
     }
     for (k, v) in &c.rows {

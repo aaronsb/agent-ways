@@ -106,31 +106,40 @@ pub struct UserSensor {
     pub project: bool,
 }
 
+/// The layer that sets the script of `name`, a sensor the user added; `None`
+/// for a built-in, whose keys stay where a built-in's go whatever script a
+/// file names under it.
+fn script_layer<'a>(layers: &'a [Layer], name: &str) -> Option<&'a Layer> {
+    if BUILTINS.contains(&name) {
+        return None;
+    }
+    let spec = attend_config::schema::SCHEMA.keys.iter().find(|k| k.name == "attend.sensors.*.script")?;
+    resolve(spec, &[name.to_string()], layers).layer.and_then(|i| layers.get(i))
+}
+
 /// The sensors the user added, by name, as `layers` set them.
 pub fn user_sensors(layers: &[Layer], project: &Path) -> Vec<UserSensor> {
     let cfg = attend_config::Config::from_layers(layers);
-    let spec = attend_config::schema::SCHEMA.keys.iter().find(|k| k.name == "attend.sensors.*.script");
     cfg.sensors
         .iter()
-        .filter(|(name, _)| !BUILTINS.contains(&name.as_str()))
         .filter_map(|(name, sc)| {
+            let layer = script_layer(layers, name)?;
             let script = Path::new(sc.script.as_deref()?);
-            let layer = spec.and_then(|s| resolve(s, std::slice::from_ref(name), layers).layer).and_then(|i| layers.get(i));
             Some(UserSensor {
                 name: name.clone(),
                 script: if script.is_absolute() { script.to_path_buf() } else { project.join(script) },
-                file: layer.and_then(|l| l.path.clone()),
-                project: layer.is_some_and(|l| l.scope == LayerScope::Project),
+                file: layer.path.clone(),
+                project: layer.scope == LayerScope::Project,
             })
         })
         .collect()
 }
 
-/// Whether the sensor `name`'s script is set in a project's file, which its
-/// keys are then written to.
-pub fn defined_in_project(layers: &[Layer], name: &str) -> bool {
-    let Some(spec) = attend_config::schema::SCHEMA.keys.iter().find(|k| k.name == "attend.sensors.*.script") else { return false };
-    resolve(spec, &[name.to_string()], layers).layer.and_then(|i| layers.get(i)).is_some_and(|l| l.scope == LayerScope::Project)
+/// Whether the key `key` of the sensor `name` is written to the project's
+/// file: every key of a sensor whose script a project's file sets, but its
+/// `enabled`, which is each operator's own.
+pub fn writes_project(layers: &[Layer], name: &str, key: &str) -> bool {
+    key != "attend.sensors.*.enabled" && script_layer(layers, name).is_some_and(|l| l.scope == LayerScope::Project)
 }
 
 /// The rows every sensor has: its polling and its threshold.

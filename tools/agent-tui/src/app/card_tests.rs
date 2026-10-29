@@ -77,6 +77,14 @@ fn a_folded_state_follows_the_origin_in_its_role() {
 }
 
 #[test]
+fn a_folded_state_that_would_overflow_takes_its_own_row() {
+    let c = Card { fold_state: true, kind: None, state: ("inactive (Enter uses it)".into(), StateTone::Plain), ..card(None) };
+    let lines = text(&card_lines(&c, 20));
+    assert_eq!(lines[3], "origin    user");
+    assert!(lines.contains(&"state     inactive (Enter uses".to_string()), "{lines:?}");
+}
+
+#[test]
 fn a_long_origin_wraps_under_the_value_column() {
     let lines = text(&card_lines(&card(Some("~/a/very/long/path/to/config.yaml")), 20));
     assert_eq!(lines[3], "origin    user · ~/a/very/long");
