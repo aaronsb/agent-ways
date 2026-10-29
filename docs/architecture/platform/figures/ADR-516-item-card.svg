@@ -1,0 +1,56 @@
+<svg xml:space="preserve" xmlns="http://www.w3.org/2000/svg" width="1020" height="300" viewBox="0 0 1020 300" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" font-size="13">
+  <title>Three item cards drawn from the descriptor of ADR-516</title>
+  <desc>Three detail-pane cards side by side. The first is the git sensor: origin builtin, an override row reading user extends with the user's sensor file, kind crate, source attend, version 0.33.0, state active. The second is a project's command sensor named slack-unread: origin project with its file under .claude/attend/sensors, kind command, source slack-mcp unread, state refused with the detail that the project is not on attend.project_sensors. The third is the bundled Nord theme replaced by a user file: origin builtin, an override row reading user replaces with the user's nord.theme, state active. Origin words are coloured by role: builtin in the info colour, user and project in the accent colour.</desc>
+  <style>
+    .panel { fill: #1e2430; stroke: #94a3b8; stroke-width: 1.5; }
+    .head  { fill: #ffffff; font-weight: bold; }
+    .dim   { fill: #94a3b8; }
+    .label { fill: #94a3b8; }
+    .val   { fill: #e2e8f0; }
+    .bi    { fill: #7dd3fc; }
+    .usr   { fill: #f0abfc; font-weight: bold; }
+    .ok    { fill: #86efac; }
+    .warn  { fill: #fbbf24; }
+    .cap   { fill: #64748b; font-size: 12px; }
+  </style>
+
+  <!-- card 1: builtin sensor, extended by the user -->
+  <rect class="panel" x="10" y="10" width="320" height="250" rx="4"/>
+  <text x="22" y="34" class="head">git</text>
+  <text x="22" y="52" class="dim">tracks dirty files and branches</text>
+  <text x="22" y="86" class="label">origin</text>   <text x="102" y="86" class="bi">builtin</text>
+  <text x="22" y="106" class="label">override</text> <text x="102" y="106"><tspan class="usr">user</tspan><tspan class="val"> extends ·</tspan></text>
+  <text x="102" y="124" class="val">~/.config/attend/sensors/</text>
+  <text x="102" y="142" class="val">git.yaml</text>
+  <text x="22" y="162" class="label">kind</text>     <text x="102" y="162" class="val">crate</text>
+  <text x="22" y="182" class="label">source</text>   <text x="102" y="182" class="val">attend</text>
+  <text x="22" y="202" class="label">version</text>  <text x="102" y="202" class="val">0.33.0</text>
+  <text x="22" y="222" class="label">state</text>    <text x="102" y="222" class="ok">active</text>
+  <text x="22" y="244" class="dim">interval 30 · min_interval 10</text>
+
+  <!-- card 2: project command sensor, refused -->
+  <rect class="panel" x="350" y="10" width="320" height="250" rx="4"/>
+  <text x="362" y="34" class="head">slack-unread</text>
+  <text x="362" y="52" class="dim">new messages in a channel</text>
+  <text x="362" y="86" class="label">origin</text>   <text x="442" y="86"><tspan class="usr">project</tspan><tspan class="val"> ·</tspan></text>
+  <text x="442" y="104" class="val">~/shop/.claude/attend/</text>
+  <text x="442" y="122" class="val">sensors/slack-unread.yaml</text>
+  <text x="362" y="142" class="label">kind</text>     <text x="442" y="142" class="val">command</text>
+  <text x="362" y="162" class="label">source</text>   <text x="442" y="162" class="val">slack-mcp unread</text>
+  <text x="362" y="182" class="label">state</text>    <text x="442" y="182"><tspan class="warn">refused</tspan><tspan class="val"> · ~/shop is not</tspan></text>
+  <text x="442" y="200" class="val">on attend.project_sensors</text>
+  <text x="362" y="244" class="dim">interval 120 · min_interval 30</text>
+
+  <!-- card 3: bundled theme replaced by a user file -->
+  <rect class="panel" x="690" y="10" width="320" height="250" rx="4"/>
+  <text x="702" y="34" class="head">Nord</text>
+  <text x="702" y="52" class="dim">nord · dark · background terminal</text>
+  <text x="702" y="86" class="label">origin</text>   <text x="782" y="86" class="bi">builtin</text>
+  <text x="702" y="106" class="label">override</text> <text x="782" y="106"><tspan class="usr">user</tspan><tspan class="val"> replaces ·</tspan></text>
+  <text x="782" y="124" class="val">~/.config/agent-ways/</text>
+  <text x="782" y="142" class="val">themes/nord.theme</text>
+  <text x="702" y="162" class="label">state</text>    <text x="782" y="162" class="ok">active</text>
+  <text x="702" y="244" class="dim">saves to ~/.config/agent-ways/themes</text>
+
+  <text x="10" y="288" class="cap">A null field draws no row: the theme has no kind, source or version; the project sensor has no version.</text>
+</svg>
