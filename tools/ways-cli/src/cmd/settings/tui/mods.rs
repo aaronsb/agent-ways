@@ -5,11 +5,13 @@
 //! row. The state is read from [`crate::cmd::mods::overview`] off the
 //! screen's thread ([`super::modread`]). A critical mod that does not run
 //! carries a finding on its node and on the row of each target where it
-//! does not run, and puts a notice on the bottom bar.
+//! does not run, and puts a notice on the bottom bar. Each node carries the
+//! mod's card ([`modules::mods`]), whose state agrees with that notice.
 
 use agent_tui::tree::{Action, Kind, Node, Setting};
 
 use crate::cmd::attend_mod::{State, JUDGE, MODS};
+use crate::cmd::modules::{self, mods::Unread};
 use crate::cmd::mods::{Attention, Overview};
 
 /// What the target rows' value column comes from.
@@ -35,7 +37,7 @@ pub enum Read {
 /// Turn the tab's groups, one per mod, into the mod nodes. A mod with no
 /// group gets one, so every shipped mod has its node. A mod whose state is
 /// not read yet still offers `check`, which reads for itself.
-pub fn nodes(root: &mut Node, states: &[Overview], read: &Read) {
+pub fn nodes(root: &mut Node, states: &[Overview], read: &Read, home: &std::path::Path) {
     for m in MODS {
         if !root.children.iter().any(|g| g.name == m.name) {
             root.children.push(Node::group(m.name, "", vec![]));
@@ -50,7 +52,16 @@ pub fn nodes(root: &mut Node, states: &[Overview], read: &Read) {
         if let Read::Stale(why) = read {
             g.finding = Some(format!("The last read of the mods' state failed: {why}. This shows the read before it."));
         }
-        let Some(o) = states.iter().find(|o| o.m.name == g.name) else {
+        let found = states.iter().find(|o| o.m.name == g.name);
+        if let Some(m) = MODS.iter().find(|m| m.name == g.name) {
+            let unread = match read {
+                Read::Reading => Unread::Reading,
+                Read::Failed(_) => Unread::Failed,
+                Read::Done | Read::Stale(_) => Unread::Missing,
+            };
+            g.card = Some(super::card::card(&modules::mods::of_mod(m, found.ok_or(unread)), home));
+        }
+        let Some(o) = found else {
             let label = match read {
                 Read::Reading => "reading…",
                 Read::Failed(_) => "state read failed",

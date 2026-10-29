@@ -21,10 +21,10 @@
 // own while another Claude Code theme than `custom:ways` is selected.
 
 import { atom, memberOf, read, update } from 'claude-code'
-import type { EngineInterface, On, RenderSurface, Timer } from 'claude-code'
+import type { EngineInterface, On, RenderElement, RenderSurface, Timer } from 'claude-code'
 
 import { onPickup } from '../follow.ts'
-import { FRAME_INSET, isExpandedView, shouldFrame } from '../lib.ts'
+import { FRAME, FRAME_INSET, FRAME_PAD_X, isExpandedView, shouldFrame } from '../lib.ts'
 
 import { MOD_EXPORT_ARGV, parseExport, setupOf } from './config.ts'
 import type { Setup } from './config.ts'
@@ -33,7 +33,7 @@ import { bodyOf, inputFields, isOpen } from './detail.ts'
 import { DISCLOSE_INSET, disclosedRow, openedRows } from './detail-rows.tsx'
 import { commandSegments } from './command-output.ts'
 import { askBand, diffCard, footerRow, groupRow, promptRow, quietResult, relayedRows, replyRows, spinnerRow, terminalCard, toolRow, usageBand, desktopSpinnerRow } from './rows.tsx'
-import type { Look, SvgElement, Ui } from './rows.tsx'
+import type { Framing, Look, SvgElement, Ui } from './rows.tsx'
 import { keepsOwnRow, SHELLS, shellResultOf } from './shell.ts'
 import { OUTPUT_FOLD, shellRows } from './shell-rows.tsx'
 import { sightings } from './sightings.ts'
@@ -44,6 +44,7 @@ import { countdownsOf, limitLabel, metersOf } from './svg-usage.ts'
 import { PATH_TOOLS, kindOf, summarize, toolLabel } from './tools.ts'
 import { commandOf, errorLine, isQuiet, quietLabel } from './quiet.ts'
 import { MAX_MARKDOWN, replySegments } from './reply.ts'
+import { holdsCommand } from './commands.ts'
 import { fileHref, hyperlinksFrom, touchOf } from './links.ts'
 import { MIN_WIDTH, axisFor, boxLines, canMeasure, gradientBox, gradientRuns } from './prompt-box.tsx'
 import { holdsPaste, pasteIdOf, shownText } from './pastes.ts'
@@ -125,13 +126,11 @@ const isExpanded = (view: View, row: unknown): boolean => isExpandedView(view.is
 
 type Row = { component: string; surface: RenderSurface; props: object }
 
-/** Whether the frame wraps this row. The register module asks it to draw the
- *  frame and this layer to draw the row inside it, of the same look and view,
- *  so the two never disagree. No look loaded, `render.frames` off, the
- *  `terminal` theme or another Claude Code theme than `custom:ways` draws
- *  none. A reply is framed at the block that opens it; a row whose result
- *  skins draws as a shell card is that card's to frame. */
-export function isFramed(setup: Setup | null, e: Row, view: View): boolean {
+/** Whether a frame goes around this row, whole or in pieces. No look loaded,
+ *  `render.frames` off, the `terminal` theme or another Claude Code theme than
+ *  `custom:ways` draws none. A reply is framed at the block that opens it; a
+ *  row whose result skins draws as a shell card is that card's to frame. */
+function isFramedAround(setup: Setup | null, e: Row, view: View): boolean {
   if (setup === null) return false
   const props = e.props as { isExpanded?: unknown; isFirstOfReply?: unknown; text?: unknown; tool?: unknown; output?: unknown; isErrored?: unknown }
   if (e.component === 'AssistantMessage' && props.isFirstOfReply !== true) return false
@@ -141,6 +140,33 @@ export function isFramed(setup: Setup | null, e: Row, view: View): boolean {
     return keepsOwnRow(props.output) || shellResultOf(props.output, props.isErrored === true) === null
   }
   return true
+}
+
+/** Whether a reply's drawing holds a `! <command>` block, which keeps out of
+ *  every frame (replyRows). */
+function holdsCommandBlock(setup: Setup, e: Row): boolean {
+  const text = (e.props as { text?: unknown }).text
+  return typeof text === 'string' && holdsCommand(text) && (replySegments(text, setup.prefs as Look['prefs'], e.surface)?.some(segment => segment.kind === 'command') ?? false)
+}
+
+/** Whether the frame wraps this row whole. The register module asks it to
+ *  draw the frame and this layer to draw the row inside it, of the same look
+ *  and view, so the two never disagree. This layer frames a reply holding a
+ *  command block itself, in pieces around the block. */
+export function isFramed(setup: Setup | null, e: Row, view: View): boolean {
+  return setup !== null && isFramedAround(setup, e, view) && !(e.component === 'AssistantMessage' && holdsCommandBlock(setup, e))
+}
+
+/** `inner` inside a frame. The engine's row opens with a blank margin row;
+ *  the inner Box takes it back and the frame keeps the gap outside, so the
+ *  ground starts at the first line of text. */
+export function framedRow(ui: Pick<Ui, 'Box'>, inner: RenderElement, frame: Record<string, string>): RenderElement {
+  const { Box } = ui
+  return (
+    <Box marginTop={1} borderStyle="round" paddingX={FRAME_PAD_X} {...frame}>
+      <Box marginTop={-1}>{inner}</Box>
+    </Box>
+  )
 }
 
 /** A row the frame wraps opens on a blank line, as the engine's own does, for
@@ -623,11 +649,16 @@ export function registerSkins(on: On, shared: Shared): void {
     const svg = e.surface !== 'terminal' && setup.prefs.tables === 'on' && 'Svg' in ui ? ui.Svg : undefined
     const base = await sessionLook($, e, lookOf(ui, setup, e.surface, copier($, e.surface)), replyNeeds(text, segments))
     const look = base.svg === undefined ? base : { ...base, isFirstDraw: await firstDraws($, e) }
-    // A framed reply is laid out inside the frame the register module draws around it.
-    const framed = isFramed(setup, e, shared.view())
-    const columns = (e.viewport?.columns ?? 100) - (framed ? FRAME_INSET : 0)
-    const rows = replyRows(look, segments, columns, svg, segments.length > 1 ? text : undefined)
-    return withSettle($, e, framed ? marginRow(look, rows) : rows)
+    const columns = e.viewport?.columns ?? 100
+    const whole = segments.length > 1 ? text : undefined
+    // A framed reply is laid out inside the frame the register module draws around it,
+    // or, holding a command, in frames of this layer's around each run of blocks.
+    if (!isFramedAround(setup, e, shared.view())) return withSettle($, e, replyRows(look, segments, columns, svg, whole))
+    if (segments.some(segment => segment.kind === 'command')) {
+      const framing: Framing = { inset: FRAME_INSET, frame: rows => framedRow(ui, marginRow(look, rows), FRAME.reply) }
+      return withSettle($, e, replyRows(look, segments, columns, svg, whole, framing))
+    }
+    return withSettle($, e, marginRow(look, replyRows(look, segments, columns - FRAME_INSET, svg, whole)))
   })
 
   // A slash command's output drawn the way a reply is.

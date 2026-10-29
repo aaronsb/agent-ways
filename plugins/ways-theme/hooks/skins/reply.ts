@@ -5,6 +5,7 @@ import type { RenderSurface } from 'claude-code'
 
 import type { Prefs } from '../../types'
 import { drawsBlocks, hasBlocks } from './blocks'
+import { commandPieces, fenceCommand, holdsCommand } from './commands'
 import { isShell, splitReply } from './markdown'
 import type { Segment } from './markdown'
 import { inlineMath } from './math'
@@ -12,7 +13,8 @@ import { parseMermaid } from './mermaid'
 import { artKind } from './mermaid-art'
 
 // Which markdown the skin draws itself: a reply's blocks, or null to leave the text to
-// Claude Code's own drawing. Shared by replies and by the `$.skins.markdown` other mods call.
+// Claude Code's own drawing. On the terminal a `! <command>` suggestion is a block of its
+// own (commands.ts).
 
 // Markdown takes at most 10000 characters a block; a longer one keeps Claude Code's own
 // drawing.
@@ -26,18 +28,22 @@ export function replySegments(text: string, prefs: Prefs, surface: RenderSurface
   const charts = prefs.charts && /mermaid/i.test(text)
   // Display formulas become cards, inline TeX Unicode.
   const math = prefs.math && /\$|```math|\\\[|\\\(/.test(text)
+  const commands = surface === 'terminal' && holdsCommand(text)
 
-  if (!cards && !blocks && !charts && !math) {
+  if (!cards && !blocks && !charts && !math && !commands) {
     return null
   }
 
   const charted = (lang: string, code: string) =>
     lang === 'mermaid' && (parseMermaid(code) !== null || (surface === 'terminal' && artKind(code) !== null))
-  const segments: Segment[] = cards
+  const split: Segment[] = cards
     ? splitReply(text, { tables: true, fence: () => true, math })
     : charts || math
       ? splitReply(text, { tables: false, fence: (lang, code) => charts && charted(lang, code), math })
       : [{ kind: 'text', text }]
+  const segments = commands
+    ? split.flatMap((segment): Segment[] => (segment.kind === 'text' ? commandPieces(segment.text) : segment.kind === 'code' ? [fenceCommand(segment.lang, segment.code, segment.raw) ?? segment] : [segment]))
+    : split
   const fits = segments.every(segment => segment.kind === 'table' || (segment.kind === 'text' ? segment.text : segment.raw).length <= MAX_MARKDOWN)
   // Off the terminal a shell fence keeps the app's drawing, for its Run button; a reply
   // with nothing else to draw is left to the app whole.

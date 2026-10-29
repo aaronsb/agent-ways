@@ -1,7 +1,7 @@
 // Ported from skins by hellosverre (MIT; LICENSE beside this file),
 // https://github.com/hellosverre/claude-skins at 985ad63, hooks/math.ts.
 
-import { widthOf } from './markdown'
+import { FENCE, fenceClose, widthOf } from './markdown'
 
 // TeX math, parsed into a tree once and drawn three ways: in terminal cells over several
 // rows, as one line of Unicode where a drawing will not fit (also the alt text), and as a
@@ -1130,22 +1130,26 @@ const looksLikeMath = (tex: string): boolean =>
 // Markdown would read a `_` or `*` in the Unicode as emphasis.
 const markdownSafe = (text: string): string => text.replace(/[\\*_`]/g, '\\$&')
 
-const FENCE_LINE = /^\s*(```|~~~)/
-
-// Inline formulas in markdown turned into Unicode, outside code spans and fences.
+// Inline formulas in markdown turned into Unicode, outside code spans and fences: a fence
+// runs to the line of its mark that closes it (fenceClose), or to the end while it streams.
 export function inlineMath(markdown: string): string {
-  let inFence = false
+  const lines = markdown.split('\n')
+  let fenceEnd = -1
 
-  return markdown
-    .split('\n')
-    .map(line => {
-      if (FENCE_LINE.test(line)) {
-        inFence = !inFence
+  return lines
+    .map((line, i) => {
+      if (i <= fenceEnd) {
+        return line
+      }
+
+      if (FENCE.test(line)) {
+        const close = fenceClose(lines, i)
+        fenceEnd = close === -1 ? lines.length : close
 
         return line
       }
 
-      if (inFence || !/[$\\]/.test(line)) {
+      if (!/[$\\]/.test(line)) {
         return line
       }
 
