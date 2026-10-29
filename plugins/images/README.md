@@ -1,0 +1,88 @@
+# images
+
+A Claude Code mod that draws pictures inline in the terminal transcript, under the row that would otherwise show only a path.
+
+## What it draws
+
+- **SendUserFile**: the image attachments Claude sends you.
+- **Read**: an image Claude opens (PNG, JPEG, GIF, WebP), drawn from the bytes the model was shown, under the Read row or under the folded "Read N files" line.
+- **Images a reply names**: a markdown image `![alt](/abs/path.png)` or `![alt](~/path.png)`, or a bare absolute or `~/` path such as "saved the chart to /tmp/chart.png" or "`~/Pictures/x.jpg`". Bare paths count in prose, in inline code and in quotes, with trailing punctuation dropped. Fenced code blocks are skipped, and relative paths and URLs are ignored. A path that names no file draws nothing. Each file draws once, in the order the reply names it, up to 4 per reply.
+- **Pasted images**: the images pasted with a prompt, drawn under that prompt.
+
+A GIF draws its first frame. Other surfaces (desktop, VS Code, mobile) are left to Claude Code.
+
+## Size and caption
+
+A picture shows at its own size, one screen pixel per image pixel, times the `scale` option. The mod learns the terminal's cell size in pixels by asking the kernel for the window size of Claude Code's terminal (`TIOCGWINSZ`, through `python3`, Linux only), measured again when the transcript width changes, as it does after a font size change. A terminal that reports no pixels (tmux, some others), or a machine without `python3`, is taken to have 10x20-pixel cells. Half-blocks draw one column per image pixel, times `scale`.
+
+The size is then held to the transcript's width and 60% of its height, with the aspect kept, and a picture narrower than 24 columns is enlarged to 24, so icons and thumbnails stay legible. An enlargement of 1.25 times or more is made nearest-neighbour, each image pixel a solid block; a smaller one, from rounding to whole cells, is left to the terminal to blend.
+
+Under each picture a caption gives the file's name, its size in pixels, and how large it is shown against its own size: `chart.png · 1920×1080 · 83%`. The name links to the file (`file://`, OSC 8), where the picture has one; a pasted image has none.
+
+## Pixels or half-blocks
+
+- **Pixels**: in a terminal where Claude Code draws kitty graphics with Unicode placeholders (kitty and Ghostty, or any terminal once `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` turns Claude Code's detection on), the mod uses Claude Code's `Image` element.
+- **Half-blocks**: everywhere else, Konsole and iTerm2 among them, `Image` would draw only its alt text. The mod draws a `Raster` of `▀` cells instead: each cell's foreground is the upper pixel and its background the lower one, so a cell holds two pixels.
+
+An `Image` reads its picture from the resized PNG in the cache directory; the terminal opens the file itself. Verified in kitty with Claude Code 2.1.304, installed, on this version: the whole scrollback keeps its pictures, including ones scrolled out of view and back. Claude Code frees an `Image`'s pixels when its row leaves the view; the file source is the likely reason they come back, since the terminal can read a file again when the row is drawn again and a bytes source gives it nothing to read. The mod also raises the source's `generation` when a row is reported off screen and then back (`onScreen` `null`, then set), but `onScreen` stayed absent on every render throughout that check, so that step did not fire; it is kept because it is harmless. When Claude Code runs over ssh (`SSH_CONNECTION` or `SSH_TTY` set), the terminal cannot read this machine's files, so the PNG's bytes go in the element instead (see Known issues).
+
+The mod does not keep a list of terminal names. In `auto` it asks Claude Code: it draws the first picture of a session as half-blocks with a 1x1 transparent `Image` beside it, then calls `$.ui.blit` on that `Image`. Claude Code refuses a blit to an `Image` that is drawing its alt, so a refusal means half-blocks and an accepted blit means pixels. The answer holds for the rest of the session.
+
+## Options
+
+Set them in `/config`, or under `pluginConfigs.images.options` in settings.
+
+`showPathsInReplies` (default `true`): draw images a reply names by a bare path. Off, a reply draws only its markdown images.
+
+`steerToSendUserFile` (default `true`): add a short section to the system prompt, on the terminal surface only, saying the terminal draws images and that a request to see one is answered with SendUserFile, which also shows it in remote and web views. Where the request does not offer SendUserFile, the section names Read and absolute paths instead. Off, the prompt is left as Claude Code composes it.
+
+`scale` (default `1`, from `0.25` to `4`): picture size against one screen pixel per image pixel. `2` doubles every picture, `0.5` halves it; the transcript's width and height and the 24-column floor still apply.
+
+`showCaptions` (default `true`): the line under each picture with its linked file name, pixel size and shown percentage.
+
+`renderer`:
+
+| Value | Effect |
+|---|---|
+| `auto` (default) | Pixels where Claude Code draws kitty graphics, half-blocks elsewhere |
+| `image` | Always the `Image` element. Shows only the alt text where the terminal cannot draw it |
+| `halfblock` | Always half-blocks |
+
+## Requirements
+
+ImageMagick, as `magick` (version 7) or `convert` (version 6), on `PATH`. It decodes and resizes every picture. Without it, each site shows Claude Code's own row and one dim note.
+
+The mod keeps resized pictures, and pasted or Read images written as data URI files, in `$XDG_RUNTIME_DIR/claude-images` (mode 0700). Without `XDG_RUNTIME_DIR` it uses `$TMPDIR/claude-images-$USER`, or `/tmp/claude-images-$USER`. It writes its own files there through `sh` (`cat`, `mv`), as ImageMagick writes its: an installed plugin's `$.fs` writes did not land there. Its child processes run one at a time and from `/`, so a burst of renders (an agent reading several images at once) and a session whose working directory was removed both still draw. A failed check for ImageMagick or the directory is asked again by the next picture. When the directory takes no write, a Read or pasted image shows a dim note in place of the picture, and the session gets one dim line saying so.
+
+## Install
+
+The mod lives in the dotfiles store, in the `dotfiles` marketplace at `claude/mods` (deployed as `~/.local/share/claude-mods`). `dotfiles deploy` declares that marketplace in `~/.claude/settings.json` (`extraKnownMarketplaces`) and enables `images@dotfiles`; the next Claude Code session loads the mod from the folder, with no install step. `claude plugin list` shows it once a session has recorded the marketplace. To register it for the CLI before then:
+
+```bash
+claude plugin marketplace add ~/.local/share/claude-mods
+claude plugin install images@dotfiles
+```
+
+or, in a session, `/plugin install images@dotfiles`.
+
+## Smoke test
+
+In a fresh session in kitty or Ghostty, ask:
+
+```text
+show me /usr/share/pixmaps/archlinux-logo.png
+```
+
+The picture appears in the transcript.
+
+## Render log
+
+To see which transcript components the mod is handed, create `debug` in the cache directory: `touch $XDG_RUNTIME_DIR/claude-images/debug`. Each tool row, tool result, tool group and message then appends one line to `render.log` beside it: the component, its `requestId`, where it is on screen (`onScreen`: `null` while scrolled out of view, `first-last/of` rows when in it, `absent` when the surface does not say), the tool, and the shape of its props, with strings shown only by their length and booleans by their value. The flag is looked for at most every 2 seconds; remove it to stop.
+
+## Developing
+
+```bash
+claude --plugin-dir plugins/images      # load it for one session
+claude plugin validate plugins/images
+claude plugin test plugins/images
+```
