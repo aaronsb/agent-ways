@@ -36,6 +36,8 @@ attend-instances = { path = "../attend-instances" }
 claude-sessions = { path = "../claude-sessions" }
 attend-state = { path = "../attend-state" }
 sensor-trait = { path = "../sensor-trait" }
+# Sensor files: the spec every sensor is written to (ADR-403).
+sensor-spec = { path = "../sensor-spec" }
 # CLI parsing — matches ADR-111's choice for `ways-cli`. Doc comments on
 # the `Cli`/`Commands` types in `cli.rs` are the single source of truth
 # for runtime help and the markdown reference (see `bin/gen-docs.rs`).

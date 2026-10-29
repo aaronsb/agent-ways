@@ -167,19 +167,22 @@ fn tune_apply_clamps_a_derived_decay_to_its_range() {
 }
 
 #[test]
-fn an_old_minus_entry_switches_the_project_s_sensors_off() {
+fn an_old_sensor_key_names_the_sensor_file_to_write() {
     let fx = Fx::new();
-    fx.write(&fx.home.join("proj/.claude/attend.yaml"), "sensors:\n  -processes:\n");
-    let o = text(&fx.run(&["config", "show"]).stdout);
-    assert!(o.contains("attend.sensors.processes.enabled=false\n") && o.contains("attend.sensors.git.enabled=false\n"), "{o}");
+    fx.write(&fx.user(), "sensors:\n  git:\n    interval: 45\n");
+    let out = fx.run(&["config", "lint"]);
+    assert_eq!(out.status.code(), Some(3));
+    let o = text(&out.stdout);
+    assert!(o.contains("config/attend/config.yaml:3: sensors.git.interval: retired by ADR-403; write `interval: 45` in $XDG_CONFIG_HOME/attend/sensors/git.yaml"), "{o}");
+    assert!(!text(&fx.run(&["config", "show"]).stdout).contains("attend.sensors"), "no old key is read");
 }
 
 #[test]
-fn a_project_file_that_does_not_parse_switches_its_sensors_off() {
+fn a_project_file_that_does_not_parse_switches_its_switches_off() {
     let fx = Fx::new();
-    fx.write(&fx.home.join("proj/.claude/attend.yaml"), "sensors:\n  processes:\n    enabled: false\ngovernor: [\n");
+    fx.write(&fx.home.join("proj/.claude/attend.yaml"), "cleanup:\n  interval: 60\ngovernor: [\n");
     let o = text(&fx.run(&["config", "show"]).stdout);
-    assert!(o.contains("attend.sensors.processes.enabled=false\n") && o.contains("attend.sensors.peers.enabled=false\n"), "{o}");
+    assert!(o.contains("attend.cleanup.enabled=false\n"), "{o}");
 }
 
 #[test]
@@ -215,7 +218,7 @@ fn lint_reports_a_bad_value_with_its_line_and_exits_3() {
     assert_eq!(out.status.code(), Some(3), "{}{}", text(&out.stdout), text(&out.stderr));
     let o = text(&out.stdout);
     assert!(o.contains("config/attend/config.yaml:2: [attend.governor] governor.base_cooldown: expected an integer"), "{o}");
-    assert!(o.contains("proj/.claude/attend.yaml:2: [attend.sensors] sensors.-processes: '-processes' is not a sensor name"), "{o}");
+    assert!(o.contains("proj/.claude/attend.yaml:2: sensors.-processes: retired by ADR-403; write `enabled: false` in .claude/attend/sensors/processes.yaml"), "{o}");
     let clean = Fx::new();
     assert_eq!(clean.run(&["config", "lint"]).status.code(), Some(0));
 }
@@ -224,11 +227,11 @@ fn lint_reports_a_bad_value_with_its_line_and_exits_3() {
 fn show_prints_the_values_in_effect_as_key_value_lines() {
     let fx = Fx::new();
     fx.write(&fx.user(), "engagement:\n  decay_per_minute: 0.05\n");
-    fx.write(&fx.home.join("proj/.claude/attend.yaml"), "sensors:\n  processes:\n    enabled: false\n");
+    fx.write(&fx.home.join("proj/.claude/attend.yaml"), "cleanup:\n  enabled: false\n");
     let out = fx.run(&["config", "show"]);
     assert!(out.status.success());
     let o = text(&out.stdout);
-    for want in ["attend.engagement.decay_per_minute=0.05\n", "attend.sensors.processes.enabled=false\n", "attend.governor.base_cooldown=15\n", "attend.sensors.git.requires=[Bash(git:*)]\n"] {
+    for want in ["attend.engagement.decay_per_minute=0.05\n", "attend.cleanup.enabled=false\n", "attend.governor.base_cooldown=15\n", "attend.project_sensors=[]\n"] {
         assert!(o.contains(want), "{want} missing:\n{o}");
     }
 }

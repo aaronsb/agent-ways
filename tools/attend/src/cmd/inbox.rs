@@ -890,7 +890,7 @@ fn mod_line(d: &impl DrainedView) -> String {
 /// could hide or draw as `/` between them (review of #949), at the cost of
 /// `</div>`, `<attendee>` and a trailing `<`. `defuseFence` in
 /// plugins/attend/hooks/lib.ts applies the same rule.
-fn defuse_fence(s: &str) -> String {
+pub(crate) fn defuse_fence(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for (i, c) in s.char_indices() {
         let keep = c != '<' || {

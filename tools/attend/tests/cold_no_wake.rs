@@ -167,11 +167,7 @@ fn an_open_post_alone_reports_no_lapse() {
 #[test]
 fn the_keepwarm_wake_still_fires_at_fifty_minutes() {
     let f = addressed("cold-keepwarm", Some(51 * MIN));
-    std::fs::write(
-        f.home.join("config").join("attend").join("config.yaml"),
-        "sensors:\n  keepwarm:\n    enabled: true\ncleanup:\n  enabled: false\n",
-    )
-    .unwrap();
+    f.sensor("keepwarm", "enabled: true\n");
     assert!(f.attend(&["keepwarm", "on"]).status.success());
     assert_eq!(f.ok(&["keepwarm", "check"]), "", "the first check baselines");
     assert!(f.ok(&["keepwarm", "check"]).starts_with("keepwarm: 51m idle"));
@@ -238,11 +234,7 @@ fn after_a_clear_the_monitor_poller_reads_the_new_ids_clock() {
 #[test]
 fn the_monitor_poller_prints_no_event_on_a_lapsed_cache() {
     let f = Fixture::new("cold-events");
-    std::fs::write(
-        f.home.join("config").join("attend").join("config.yaml"),
-        "sensors:\n  context:\n    enabled: false\n  processes:\n    enabled: false\n  disclosure:\n    enabled: false\n  keepwarm:\n    enabled: false\n  peers:\n    interval: 1\n    min_interval: 1\n  git:\n    interval: 1\n    min_interval: 1\ncleanup:\n  enabled: false\n",
-    )
-    .unwrap();
+    f.sensor("git", "interval: 1\nmin_interval: 1\n");
     let git = |args: &[&str]| {
         let out = std::process::Command::new("git").args(args).current_dir(&f.origin).output().unwrap();
         assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));

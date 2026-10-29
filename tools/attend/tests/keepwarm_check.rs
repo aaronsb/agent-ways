@@ -45,11 +45,7 @@ struct Warm {
 impl Warm {
     fn new(tag: &str) -> Self {
         let f = Fixture::new(tag);
-        std::fs::write(
-            f.home.join("config").join("attend").join("config.yaml"),
-            "sensors:\n  keepwarm:\n    enabled: true\ncleanup:\n  enabled: false\n",
-        )
-        .unwrap();
+        f.sensor("keepwarm", "enabled: true\n");
         let bin = f.home.join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let reading = f.home.join("reading.json");
@@ -203,18 +199,14 @@ fn a_paid_cold_write_arms_keepwarm() {
 #[test]
 fn the_check_is_off_where_the_sensor_is_off() {
     let w = Warm::new("kw-config-off");
-    std::fs::write(
-        w.f.home.join("config").join("attend").join("config.yaml"),
-        "sensors:\n  keepwarm:\n    enabled: false\n",
-    )
-    .unwrap();
+    w.f.sensor("keepwarm", "enabled: false\n");
     w.reading(&[(51 * MIN, 200_000, 500)]);
     assert!(w.run(&["keepwarm", "on"]).status.success());
     w.check();
     let out = w.run(&["keepwarm", "check"]);
     assert_eq!(out.status.code(), Some(0));
     assert!(out.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("off in attend's config"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no sensor file runs the keepwarm sensor"));
 }
 
 /// Outside a Claude Code session there is nothing to warm: nothing printed,

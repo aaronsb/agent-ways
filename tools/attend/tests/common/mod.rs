@@ -8,26 +8,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant, SystemTime};
 
-/// Attend config for tests: only the peers sensor, polling every
-/// `{peers}` seconds.
-const QUIET_CONFIG: &str = "\
-sensors:
-  context:
-    enabled: false
-  git:
-    enabled: false
-  processes:
-    enabled: false
-  disclosure:
-    enabled: false
-  keepwarm:
-    enabled: false
-  peers:
-    interval: {peers}
-    min_interval: {peers}
-cleanup:
-  enabled: false
-";
+/// Attend config for tests: no cleanup sweep.
+const QUIET_CONFIG: &str = "cleanup:\n  enabled: false\n";
+
+/// The shipped sensors a test fixture switches off, leaving peers.
+const QUIET_SENSORS: &[&str] = &["context", "git", "processes", "disclosure", "keepwarm"];
 
 pub struct Fixture {
     pub home: PathBuf,
@@ -36,6 +21,11 @@ pub struct Fixture {
 }
 
 impl Fixture {
+    /// Write the user sensor file `name`, which layers over the shipped one.
+    pub fn sensor(&self, name: &str, text: &str) {
+        std::fs::write(self.home.join("config").join("attend").join("sensors").join(format!("{name}.yaml")), text).unwrap();
+    }
+
     pub fn new(tag: &str) -> Self {
         Self::with_peers_interval(tag, 1)
     }
@@ -47,7 +37,13 @@ impl Fixture {
         std::fs::create_dir_all(home.join(".claude").join("sessions")).unwrap();
         let config = home.join("config").join("attend");
         std::fs::create_dir_all(&config).unwrap();
-        std::fs::write(config.join("config.yaml"), QUIET_CONFIG.replace("{peers}", &secs.to_string())).unwrap();
+        std::fs::write(config.join("config.yaml"), QUIET_CONFIG).unwrap();
+        let sensors = config.join("sensors");
+        std::fs::create_dir_all(&sensors).unwrap();
+        for s in QUIET_SENSORS {
+            std::fs::write(sensors.join(format!("{s}.yaml")), "enabled: false\n").unwrap();
+        }
+        std::fs::write(sensors.join("peers.yaml"), format!("interval: {secs}\nmin_interval: {secs}\n")).unwrap();
         let origin = home.join("proj");
         assert_origin_kept(&origin);
         std::fs::create_dir_all(&origin).unwrap();

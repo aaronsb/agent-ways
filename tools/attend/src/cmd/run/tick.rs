@@ -31,7 +31,8 @@ pub(super) struct TickState<'a> {
     pub(super) slots: &'a mut Vec<SensorSlot>,
     pub(super) queue: &'a mut BinaryHeap<ScheduledSensor>,
     pub(super) governor: &'a mut DisclosureGovernor,
-    /// Permissive governor for the message lane (the peers sensor). The
+    /// Permissive governor for the message lane (a sensor whose file
+    /// declares `lane: message`). The
     /// event lane keeps `governor`; messages must not be starved by it.
     pub(super) msg_governor: &'a mut DisclosureGovernor,
     pub(super) last_checkpoint: &'a mut Instant,
@@ -183,20 +184,28 @@ pub(super) fn maybe_self_reload(
         *baseline_mtime = Some(current_mtime);
         return;
     }
+    reload(slots, state_store, session_id, working_dir, "binary changed", "binary updated");
+}
+
+/// Checkpoint and re-exec `attend run` because `what` happened, once the
+/// plan allows: at once on a warm cache, quietly on a lapsed one with only
+/// presence held, and not yet while a held line may carry a message.
+/// `why` is what the new process's banner says.
+pub(super) fn reload(slots: &mut [SensorSlot], state_store: &state::StateStore, session_id: &str, working_dir: &str, what: &str, why: &str) {
     let lapsed = sensor_keepwarm::session_cache_lapsed(session_id, working_dir, sensor_trait::epoch_secs());
     let held: Vec<&str> = slots
         .iter()
-        .filter(|slot| rides_message_lane(slot.name()))
+        .filter(|slot| slot.message_lane)
         .flat_map(|slot| slot.accumulator.events.iter().map(String::as_str))
         .collect();
     let plan = reload_plan(lapsed, &held);
     if plan == ReloadPlan::Wait {
-        emit::log("binary changed — a held line may carry a message; reloading once the prompt cache is warm");
+        emit::log(&format!("{what} — a held line may carry a message; reloading once the prompt cache is warm"));
         return;
     }
     if plan == ReloadPlan::Quiet {
-        emit::log("binary changed — the prompt cache has lapsed, so the reload stays off stdout");
-        for slot in slots.iter_mut().filter(|slot| rides_message_lane(slot.name())) {
+        emit::log(&format!("{what} — the prompt cache has lapsed, so the reload stays off stdout"));
+        for slot in slots.iter_mut().filter(|slot| slot.message_lane) {
             for line in slot.accumulator.drain_events() {
                 emit::log(&format!("{}: {line}", slot.name()));
             }
@@ -204,7 +213,7 @@ pub(super) fn maybe_self_reload(
         }
         std::env::set_var(RELOADED_COLD, "1");
     } else {
-        emit::log("binary changed — checkpointing and reloading");
+        emit::log(&format!("{what} — checkpointing and reloading"));
         flush_message_lane(slots);
     }
     let snapshot = collect_snapshot(slots);
@@ -221,8 +230,12 @@ pub(super) fn maybe_self_reload(
         env!("CARGO_PKG_VERSION"),
         env!("ATTEND_COMMIT")
     );
+    std::env::set_var(RELOAD_REASON, why);
     reexec("ATTEND_RELOADED_FROM", &prev_version);
 }
+
+/// What a reload's banner says changed: the binary, or the sensor files.
+pub(super) const RELOAD_REASON: &str = "ATTEND_RELOAD_REASON";
 
 /// Set for the process a reload starts on a lapsed cache: its banner goes
 /// to the log, not to Monitor.
@@ -328,14 +341,14 @@ pub(super) fn tick_iteration(s: &mut TickState) {
             ));
         }
 
-        // The message lane (peers) bypasses the action-potential
+        // The message lane bypasses the action-potential
         // refractory (ADR-136 Decision 1): an authored message is not
         // observation noise, so it must surface whenever there is
         // anything accumulated, never held by a refractory built for
         // throttling git/process churn. It still rides the permissive
         // message governor downstream. The event lane keeps the
         // refractory gate unchanged.
-        let is_message_lane = rides_message_lane(s.slots[i].name());
+        let is_message_lane = s.slots[i].message_lane;
 
         // ADR-172 Decision 3, the other direction: the sensor marks
         // scanned signals seen in memory, but the drain reads the FILE
@@ -380,11 +393,12 @@ pub(super) fn tick_iteration(s: &mut TickState) {
 
     // Batch disclosure, split by lane (ADR-136 Decision 1). The event
     // lane (git/process) keeps the strict, rate-ballooning governor that
-    // suppresses observation noise. The message lane (the peers sensor)
-    // rides a permissive governor: authored messages flow at normal
-    // cadence and a burst — already coalesced into one digest by
-    // sensor-peers — discloses promptly instead of being starved.
-    // KNOWN LIMITATION (ADR-136 follow-up): the lane is chosen per
+    // suppresses observation noise. The message lane, which a sensor's
+    // file declares (ADR-403 §3a), rides a permissive governor: authored
+    // messages flow at normal cadence and a burst — already coalesced into
+    // one digest by sensor-peers — discloses promptly instead of being
+    // starved.
+    // KNOWN LIMITATION (#139): the lane is chosen per
     // *sensor*, but the `peers` sensor emits BOTH authored messages and
     // peer-presence *events* (peer started/exited, status). Today all of
     // it rides the message lane, so peer-presence skips the refractory and
@@ -394,7 +408,7 @@ pub(super) fn tick_iteration(s: &mut TickState) {
     // observation (also the seam a future Slack event-sensor wants).
     let (mut msg_ready, mut evt_ready): (Vec<usize>, Vec<usize>) = ready_indices
         .iter()
-        .partition(|&&i| rides_message_lane(s.slots[i].name()));
+        .partition(|&&i| s.slots[i].message_lane);
     // The cache gate: on a lapsed cache only keepwarm's line goes out. The
     // event lane's observations are dropped, as its decay drops any it does
     // not disclose; they describe a moment, and the next turn reads the
@@ -459,13 +473,6 @@ pub(super) fn tick_iteration(s: &mut TickState) {
             *s.last_cleanup = Some(Instant::now());
         }
     }
-}
-
-/// Sensors whose output is never observation noise: authored peer
-/// messages (ADR-136) and the keepwarm floor (ADR-182), a timed wake that
-/// must not be held by a refractory built for git and process churn.
-fn rides_message_lane(name: &str) -> bool {
-    matches!(name, "peers" | "keepwarm")
 }
 
 /// Disclose a batch of ready sensors through `governor`, or log a hold if
@@ -540,7 +547,7 @@ fn try_disclose(
 /// otherwise be recorded as consumed and never shown.
 pub(super) fn flush_message_lane(slots: &mut [SensorSlot]) {
     let held: Vec<usize> = (0..slots.len())
-        .filter(|&i| rides_message_lane(slots[i].name()) && slots[i].accumulator.magnitude > 0.0)
+        .filter(|&i| slots[i].message_lane && slots[i].accumulator.magnitude > 0.0)
         .collect();
     if held.is_empty() {
         return;

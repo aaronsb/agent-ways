@@ -363,8 +363,8 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
         return quiet("an attend run holds this session; its sensor keeps the cache warm", None);
     }
     let cfg = crate::config::Config::load(&ident.origin_path);
-    if !cfg.sensors.get("keepwarm").map(|s| s.enabled).unwrap_or(true) {
-        return quiet("the keepwarm sensor is off in attend's config", None);
+    if !crate::sensors::crate_enabled(&cfg, &ident.origin_path, "keepwarm") {
+        return quiet("no sensor file runs the keepwarm sensor", None);
     }
     let now = sensor_trait::epoch_secs();
     if !args.policy {

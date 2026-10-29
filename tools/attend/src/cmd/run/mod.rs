@@ -282,6 +282,9 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
         .and_then(|m| m.modified().ok());
     let initial_hash = tick::initial_self_hash(self_exe.as_deref());
     let mut last_reload_check = Instant::now();
+    // A sensor file added, changed or removed reloads the run the same way
+    // (ADR-403 §2), so the files and the sensors polled never disagree.
+    let sensor_files = sensors::files_stamp(&focus.working_dir);
 
     // Heartbeat identifier (ADR-129) — the same canonical identity as
     // everything else in this run. `session_id` already carries the
@@ -318,6 +321,9 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
                 &heartbeat_id,
                 &focus.working_dir,
             );
+            if sensors::files_stamp(&focus.working_dir) != sensor_files {
+                tick::reload(&mut slots, &state_store, &heartbeat_id, &focus.working_dir, "sensor files changed", "sensor files changed");
+            }
             last_reload_check = Instant::now();
         }
 
@@ -358,7 +364,8 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
 #[derive(Debug, PartialEq, Eq)]
 enum Banner {
     /// A binary hot-swap re-executed this process (`ATTEND_RELOADED_FROM`).
-    Reloaded(String),
+    /// The version it reloaded from, and what changed.
+    Reloaded(String, String),
     /// This session ran attend before with the same fingerprint: a
     /// Monitor re-arm or a manual restart.
     Unchanged,
@@ -368,9 +375,9 @@ enum Banner {
 
 /// Choose the banner from this session's previous stamp, if any, and the
 /// hot-swap marker.
-fn choose_banner(fingerprint: &str, prev: Option<&str>, reloaded_from: Option<String>) -> Banner {
+fn choose_banner(fingerprint: &str, prev: Option<&str>, reloaded_from: Option<(String, String)>) -> Banner {
     match reloaded_from {
-        Some(v) => Banner::Reloaded(v),
+        Some((v, why)) => Banner::Reloaded(v, why),
         None if prev.is_some_and(|p| p.trim() == fingerprint) => Banner::Unchanged,
         None => Banner::Started,
     }
@@ -397,6 +404,8 @@ fn print_startup_banner(me: &str, enabled_names: &[String], focus_desc: &str, st
     // subprocesses attend itself spawns.
     let reloaded_from = std::env::var("ATTEND_RELOADED_FROM").ok();
     std::env::remove_var("ATTEND_RELOADED_FROM");
+    let reason = std::env::var(tick::RELOAD_REASON).unwrap_or_else(|_| "binary updated".into());
+    std::env::remove_var(tick::RELOAD_REASON);
     // The stamp used to be one file for every session on the machine, so
     // a brand-new session read another session's stamp and was told it had
     // restarted. Remove that legacy file; the stamp is per session now.
@@ -413,7 +422,7 @@ fn print_startup_banner(me: &str, enabled_names: &[String], focus_desc: &str, st
     // A reload on a lapsed cache must not wake the session (ADR-406 item 2).
     let quiet = std::env::var_os(tick::RELOADED_COLD).is_some();
     std::env::remove_var(tick::RELOADED_COLD);
-    let banner = choose_banner(&banner_fingerprint, prev.as_deref(), reloaded_from);
+    let banner = choose_banner(&banner_fingerprint, prev.as_deref(), reloaded_from.map(|v| (v, reason)));
     if quiet {
         emit::log(&banner_line(&banner, me, &sensor_list, focus_desc));
     } else {
@@ -432,8 +441,8 @@ fn banner_line(banner: &Banner, me: &str, sensor_list: &str, focus_desc: &str) -
     let version = env!("CARGO_PKG_VERSION");
     let commit = env!("ATTEND_COMMIT");
     match banner {
-        Banner::Reloaded(prev_version) => format!(
-            "[attend] reloaded {prev_version} → v{version} ({commit}) — binary updated, state preserved across exec() — you are {me}"
+        Banner::Reloaded(prev_version, why) => format!(
+            "[attend] reloaded {prev_version} → v{version} ({commit}) — {why}, state preserved across exec() — you are {me}"
         ),
         Banner::Unchanged => format!("[attend] restarted (unchanged) — you are {me}"),
         Banner::Started => format!(
@@ -464,14 +473,14 @@ mod banner_tests {
     #[test]
     fn a_hot_swap_is_named_whatever_the_stamp() {
         assert_eq!(
-            choose_banner("v1:abc:git", Some("v1:abc:git"), Some("v0.9".into())),
-            Banner::Reloaded("v0.9".into())
+            choose_banner("v1:abc:git", Some("v1:abc:git"), Some(("v0.9".into(), "binary updated".into()))),
+            Banner::Reloaded("v0.9".into(), "binary updated".into())
         );
     }
 
     #[test]
     fn every_banner_names_the_session() {
-        for b in [Banner::Started, Banner::Unchanged, Banner::Reloaded("v0.9".into())] {
+        for b in [Banner::Started, Banner::Unchanged, Banner::Reloaded("v0.9".into(), "binary updated".into())] {
             let line = banner_line(&b, "Chaucer-alpha", "git, peers", "project only");
             assert!(line.contains("you are Chaucer-alpha"), "{line}");
         }

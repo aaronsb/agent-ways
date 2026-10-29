@@ -1,4 +1,4 @@
-//! `attend sensor permissions` — cross-check sensor `requires:` against
+//! `attend sensor permissions` — cross-check each sensor file's `requires:` against
 //! the grants declared in `~/.claude/settings.json`.
 
 use crate::config;
@@ -23,20 +23,14 @@ pub(crate) fn cmd_permissions_audit() {
         eprintln!("Warning: no permissions found in {}", settings_path.display());
     }
 
-    // Collect (sensor_name, requires) pairs from config
-    let mut requirements: Vec<(String, Vec<String>)> = Vec::new();
-    let mut names: Vec<&String> = cfg.sensors.keys().collect();
-    names.sort();
-    for name in names {
-        let sensor = &cfg.sensors[name];
-        if !sensor.requires.is_empty() {
-            let prefix = if sensor.script.is_some() { "+" } else { "" };
-            requirements.push((
-                format!("{prefix}{name}"),
-                sensor.requires.clone(),
-            ));
-        }
-    }
+    // Each sensor file's `requires`, by sensor name.
+    let requirements: Vec<(String, Vec<String>)> = crate::sensors::catalog(&cfg, &focus.working_dir)
+        .into_iter()
+        .filter_map(|h| {
+            let spec = h.loaded.spec?;
+            (!spec.requires.is_empty()).then_some((spec.name, spec.requires))
+        })
+        .collect();
 
     let results = permissions::audit(&requirements, &grants);
     permissions::display_audit("Attend Permissions Audit", "Sensor", &results, false);
