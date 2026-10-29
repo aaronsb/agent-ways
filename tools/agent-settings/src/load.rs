@@ -276,6 +276,16 @@ pub fn check(schema: &Schema, file: &str, scope: LayerScope, doc: &Value, only: 
             continue;
         };
         let Some(sec) = schema.section_of_top(file, top) else {
+            let explained = match (retired.iter().any(|(r, _)| *r == top), schema.file(file).and_then(|f| f.explain)) {
+                (true, Some(explain)) => explain(top, v, scope),
+                _ => Vec::new(),
+            };
+            if !explained.is_empty() {
+                for (path, message) in explained {
+                    out.failures.push(Failure { section: None, repair: None, unit: None, path, message, closed: false });
+                }
+                continue;
+            }
             let message = match retired.iter().find(|(r, _)| *r == top) {
                 Some((_, m)) => (*m).to_string(),
                 None => "unknown key; it is ignored".to_string(),
@@ -748,7 +758,7 @@ mod tests {
         KeySpec { name: "matching.presets.*", section: "matching", path: &["presets", "*"], kind: Kind::Float { min: 0.0, max: 1.0 }, instances: &["normal"], default: DefaultValue::Yaml("0.15"), ..BASE },
         KeySpec { name: "ways.project.*", section: "toggles", path: &["ways", "*"], kind: Kind::Toggle, scope: Scope::Project, default: DefaultValue::Yaml("true"), ..BASE },
     ];
-    const SCHEMA: Schema = Schema { component: "t", files: &[FileSpec { id: "cfg", retired: &[("old_key", "old_key was retired; use prob")] }], sections: SECTIONS, keys: KEYS };
+    const SCHEMA: Schema = Schema { component: "t", files: &[FileSpec { id: "cfg", retired: &[("old_key", "old_key was retired; use prob")], explain: None }], sections: SECTIONS, keys: KEYS };
 
     fn layer(name: &str, scope: LayerScope, text: &str) -> Layer {
         Layer::from_text(&SCHEMA, name, "cfg", scope, Some(Path::new(&format!("/{name}.yaml"))), text)
@@ -815,6 +825,19 @@ mod tests {
         let typo = l.findings.iter().find(|f| f.key.as_deref() == Some("presets.typo")).unwrap();
         assert_eq!(typo.line, Some(3));
         assert!(!l.findings.iter().find(|f| f.key.as_deref() == Some("mystery")).unwrap().fallback);
+    }
+
+    #[test]
+    fn an_explained_retired_key_reports_each_old_key_on_its_line() {
+        fn explain(top: &str, v: &Value, scope: LayerScope) -> Vec<(Vec<String>, String)> {
+            let keys = v.as_mapping().map(|m| m.keys().filter_map(|k| k.as_str().map(str::to_string)).collect()).unwrap_or_else(Vec::new);
+            keys.into_iter().map(|k| (vec![top.to_string(), k.clone()], format!("write {k} elsewhere ({scope:?})"))).collect()
+        }
+        static S: Schema = Schema { component: "t", files: &[FileSpec { id: "cfg", retired: &[("old_key", "old_key was retired")], explain: Some(explain) }], sections: SECTIONS, keys: KEYS };
+        let l = Layer::from_text(&S, "user", "cfg", LayerScope::User, Some(Path::new("/u.yaml")), "prob: 0.4\nold_key:\n  a: 1\n  b: 2\n");
+        let got: Vec<(Option<usize>, String)> = l.findings.iter().map(|f| (f.line, f.to_string())).collect();
+        assert_eq!(got, vec![(Some(3), "/u.yaml:3: old_key.a: write a elsewhere (User)".to_string()), (Some(4), "/u.yaml:4: old_key.b: write b elsewhere (User)".to_string())]);
+        assert_eq!(l.get(&["prob".into()]), Some(&Value::from(0.4)));
     }
 
     #[test]
@@ -894,7 +917,7 @@ mod tests {
             KeySpec { name: "general.on", path: &["on"], kind: Kind::Bool, default: DefaultValue::Yaml("true"), fail_closed: Some(|v| (v != &Value::Bool(true)).then_some(Value::Bool(false))), ..BASE },
             KeySpec { name: "matching.prob", section: "matching", path: &["prob"], kind: Kind::Float { min: 0.0, max: 1.0 }, ..BASE },
         ];
-        static S: Schema = Schema { component: "t", files: &[FileSpec { id: "cfg", retired: &[] }], sections: SECTIONS, keys: SW };
+        static S: Schema = Schema { component: "t", files: &[FileSpec { id: "cfg", retired: &[], explain: None }], sections: SECTIONS, keys: SW };
         // Every value the text holds is dropped, readable or not; the switch is off.
         let l = Layer::from_text(&S, "p", "cfg", LayerScope::Project, None, "on: true\nprob: 0.2\nx: [\n");
         assert_eq!(l.accepted, serde_yaml::from_str::<Mapping>("on: false").unwrap());
@@ -952,7 +975,7 @@ mod tests {
             KeySpec { name: "cleanup.enabled", section: "cleanup", path: &["cleanup", "enabled"], kind: Kind::Bool, default: DefaultValue::Yaml("true"), fail_closed: Some(closed_off), ..BASE },
             KeySpec { name: "cleanup.interval", section: "cleanup", path: &["cleanup", "interval"], kind: Kind::Int { min: 1, max: 60 }, ..BASE },
         ];
-        static S: Schema = Schema { component: "t", files: &[FileSpec { id: "cfg", retired: &[] }], sections: SECTIONS, keys: KEYS };
+        static S: Schema = Schema { component: "t", files: &[FileSpec { id: "cfg", retired: &[], explain: None }], sections: SECTIONS, keys: KEYS };
 
         fn read(text: &str) -> Layer {
             Layer::from_text(&S, "p", "cfg", LayerScope::Project, Some(Path::new("/p.yaml")), text)
