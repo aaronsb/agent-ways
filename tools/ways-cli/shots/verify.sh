@@ -69,10 +69,12 @@ flow-pick  | ways settings install --project $PS            | t
 flow-other | ways settings install --project $PS            | t Down Enter text:~/work Enter
 card-mod   | ways settings mod --project $PS                |
 card-sensor | ways settings sensors --project $PS           | Down Down Down Down
+card-extended-sensor | ways settings sensors --project $PS  | Down Down Down Down
 card-command-sensor | ways settings sensors --project $PS   | End
 card-mcp-sensor | ways settings sensors --project $PS       | End Up
 card-theme | ways settings theme --project $PS              | Down
 card-user-theme | ways settings theme --project $PS         | End
+card-replaced-theme | ways settings theme --project $PS     | Down Down
 "
 
 python3 "$TOOLS/fixture.py" "$WORK" >/dev/null
@@ -169,8 +171,9 @@ teardown_mod_states() { teardown_mod_actions; }
 # The module card (the detail pane's head on a mod, a sensor, a theme): the
 # healthy mods; the shipped git sensor, described by the debug `attend` in
 # $BIN; a command and an mcp sensor of the user's, each a file in attend's
-# user sensor directory, last in name order; and a user theme beside the
-# bundled ones.
+# user sensor directory, last in name order; the git sensor extended by a
+# user file; a user theme beside the bundled ones; and a user file that
+# replaces the bundled nord.
 setup_card_mod() { setup_healthy; }
 teardown_card_mod() { teardown_mod_actions; }
 setup_card_command_sensor() {
@@ -188,6 +191,16 @@ setup_card_user_theme() {
   sed -e 's/^THEME_NAME=.*/THEME_NAME="mine"/' -e 's/^THEME_LABEL=.*/THEME_LABEL="Mine"/' "$HERE/../../agent-theme/themes/nord.theme" >"$t/mine.theme"
 }
 teardown_card_user_theme() { rm -f "$F/home/.config/agent-ways/themes/mine.theme"; }
+setup_card_extended_sensor() {
+  mkdir -p "$F/home/.config/attend/sensors"
+  printf 'interval: 90\n' >"$F/home/.config/attend/sensors/git.yaml"
+}
+teardown_card_extended_sensor() { teardown_card_command_sensor; }
+setup_card_replaced_theme() {
+  mkdir -p "$F/home/.config/agent-ways/themes"
+  cp "$HERE/../../agent-theme/themes/nord.theme" "$F/home/.config/agent-ways/themes/nord.theme"
+}
+teardown_card_replaced_theme() { rm -f "$F/home/.config/agent-ways/themes/nord.theme"; }
 
 want() { [ $# -eq 1 ] || [[ " ${*:2} " == *" $1 "* ]]; }
 trim() { local s=$1; s=${s#"${s%%[![:space:]]*}"}; printf '%s' "${s%"${s##*[![:space:]]}"}"; }
