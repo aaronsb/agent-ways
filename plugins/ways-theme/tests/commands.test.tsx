@@ -4,6 +4,7 @@ import type { On, RenderElement } from 'claude-code'
 
 import { commandPieces, fenceCommand, holdsCommand } from '../hooks/skins/commands.ts'
 import { setupOf } from '../hooks/skins/config.ts'
+import { splitReply } from '../hooks/skins/markdown.ts'
 import { replySegments } from '../hooks/skins/reply.ts'
 import { MIAMI_NIGHTS } from './fixtures.ts'
 import { INTERACTIVE, borders, host, json, shows } from './host.tsx'
@@ -125,6 +126,26 @@ describe('what does not match', () => {
   test('a fence of another language is not a command', () => {
     expect(fenceCommand('python', '! pip install x', '')).toBe(null)
     expect(fenceCommand('', '! git push', 'raw')).toEqual({ kind: 'command', command: '! git push', raw: 'raw' })
+  })
+})
+
+describe('a fence closes only on a line of its mark, at least as long', () => {
+  const nested: [string, string, string][] = [
+    ['a ```` fence holding ``` lines', '````md\nRun:\n```\n! git status\n```\n````', 'md'],
+    ['a ~~~ fence holding ``` lines', '~~~\nnote\n```\n! git push\n```\n~~~', ''],
+  ]
+  for (const [name, text, lang] of nested) {
+    test(`${name} is one code segment, with no command in it`, () => {
+      const segments = splitReply(text)
+      expect(segments.length).toBe(1)
+      expect(segments[0]).toMatchObject({ kind: 'code', lang, raw: text })
+      expect(replySegments(text, PREFS, 'terminal')?.some(segment => segment.kind === 'command') ?? false).toBe(false)
+      expect(commandPieces(text).every(piece => piece.kind === 'text')).toBe(true)
+    })
+  }
+
+  test('a closing line shorter than the opening one does not close it', () => {
+    expect(splitReply('````\n! git push\n```').every(segment => segment.kind === 'text')).toBe(true)
   })
 })
 

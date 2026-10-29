@@ -1,6 +1,8 @@
 // Ported from skins by hellosverre (MIT; LICENSE beside this file),
 // https://github.com/hellosverre/claude-skins at 985ad63, hooks/blocks.ts.
 
+import { FENCE, fenceClose } from './markdown'
+
 // The markdown pack: the prose between tables and code, split into what the skin draws
 // itself (GitHub alerts, task lists, headings, plain paragraphs with their numbers, paths
 // and versions picked out) and what stays Claude Code's own markdown.
@@ -32,7 +34,6 @@ const BULLET = /^(\s*)([-*+]|\d{1,3}[.)])\s+(.*)$/
 // Anything here is markdown the skin does not draw: links, images, html, footnotes,
 // escapes, quotes, rules, indented code, maths.
 const FOREIGN = /<|\\|\||!\[|\]\(|\]\[|\[\^|&[a-z#\d]+;|\$\$|^\s*(>|#|[-*_]{3,}\s*$)|^ {4}|^\t/m
-const FENCE = /^\s*(```|~~~)/
 
 const INLINE = /(`+)([^`]+?)\1|\*\*(?=\S)(.+?)(?<=\S)\*\*|__(?=\S)(.+?)(?<=\S)__|~~(?=\S)(.+?)(?<=\S)~~|(?<![\w*])\*(?=\S)(.+?)(?<=\S)\*(?![\w*])|(?<![\w_])_(?=\S)(.+?)(?<=\S)_(?![\w_])/g
 
@@ -200,7 +201,7 @@ export function splitBlocks(text: string, options: BlockOptions): Block[] {
     // A fence, closed or still streaming, is Claude Code's to draw.
     if (FENCE.test(line)) {
       flush()
-      const close = lines.findIndex((other, j) => j > i && FENCE.test(other) && other.trim().replace(/[`~]/g, '') === '')
+      const close = fenceClose(lines, i)
       const end = close === -1 ? lines.length - 1 : close
       markdown(lines.slice(i, end + 1).join('\n'))
       i = end

@@ -29,12 +29,26 @@ export const isShell = (segment: Segment): boolean => segment.kind === 'code' &&
 
 const SEPARATOR = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/
 
-// A fence's opening line, its language in the second group.
-export const FENCE = /^\s*(```|~~~)\s*([\w+#.-]*)/
+// A fence's opening line: its mark, three or more backticks or tildes, and its language.
+export const FENCE = /^\s*(`{3,}|~{3,})\s*([\w+#.-]*)/
+const FENCE_END = /^\s*(`{3,}|~{3,})\s*$/
 
-// The line that closes the fence opened on line `i`, or -1 while it is still streaming.
-export const fenceClose = (lines: readonly string[], i: number): number =>
-  lines.findIndex((other, j) => j > i && FENCE.test(other) && other.trim().replace(/[`~]/g, '') === '')
+// The line that closes the fence opened on line `i`, or -1 while it is still streaming: a
+// line of the opening's mark alone, at least as long, so a ```` fence holds ``` lines and
+// a ~~~ fence holds ``` ones.
+export function fenceClose(lines: readonly string[], i: number): number {
+  const mark = FENCE.exec(lines[i] ?? '')?.[1]
+
+  if (mark === undefined) {
+    return -1
+  }
+
+  return lines.findIndex((other, j) => {
+    const end = j > i ? FENCE_END.exec(other)?.[1] : undefined
+
+    return end !== undefined && end[0] === mark[0] && end.length >= mark.length
+  })
+}
 
 // Inline emphasis and code ticks read as noise in a padded cell.
 const clean = (cell: string): string =>
