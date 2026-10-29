@@ -1,13 +1,15 @@
 //! `attend sensor list`, `poll` and `fire` (ADR-403 §6).
 //!
-//! `list` reports every sensor the files declare: its kind, origin and file,
-//! source and version, lane and recorded state. `poll` runs one real poll
+//! `list` reports every sensor the files declare as an item (ADR-516): its
+//! kind, origin and file, source and version, recorded state, and lane. `poll` runs one real poll
 //! and `fire` sends a synthetic result; both go through the sensor's real
 //! threshold and lane, deliver as `attend run` would unless `--dry-run`, and
 //! record nothing in the sensor's store. A fire's lines are marked `[test]`.
 
 use std::io::Read;
 
+use agent_settings::item::{Entry, Item};
+use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::cli::{FireArgs, PollArgs};
@@ -35,14 +37,17 @@ pub(crate) fn list(json: bool) {
     // Column 0 is short; auto-fit would push the rest far right.
     t.no_auto_fit();
     for h in &all {
-        let e = entry(h);
-        let text = |k: &str| e[k].as_str().unwrap_or("-").to_string();
+        let i = item(h);
         let interval = sensors::intervals(h).map(|(a, b)| format!("{}s / {}s", a.as_secs(), b.as_secs())).unwrap_or_else(|| "-".into());
-        let source = match e["version"].as_str() {
-            Some(v) => format!("{}@{v}", text("source")),
-            None => text("source"),
+        let source = match (&i.source, &i.version) {
+            (Some(s), Some(v)) => format!("{s}@{v}"),
+            (Some(s), None) => s.clone(),
+            (None, _) => "-".into(),
         };
-        t.add_owned(vec![h.name().to_string(), text("kind"), text("origin"), text("state"), text("lane"), interval, source, tilde(&text("path"))]);
+        let path = i.path.as_deref().map_or("-".into(), |p| tilde(&p.display().to_string()));
+        let lane = h.lane().map_or("-", Lane::as_str);
+        let kind = i.kind.map_or("-", |k| k.word());
+        t.add_owned(vec![h.name().to_string(), kind.into(), i.origin.word().into(), i.state.word().into(), lane.into(), interval, source, path]);
     }
     t.print();
     let lines: Vec<String> = all
@@ -65,9 +70,10 @@ fn tilde(p: &str) -> String {
     }
 }
 
-/// One sensor as `--json` prints it. `kind`, `origin` with `path`,
-/// `source`, `version` and `state` name what the settings screens show.
-fn entry(h: &Hosted) -> Value {
+/// One sensor as an item (ADR-516): its files' kind, origin, path and
+/// overrides, and attend's state with why, the source that runs it, and a
+/// crate's version split from `<crate>@<version>`.
+fn item(h: &Hosted) -> Item {
     let spec = h.loaded.spec.as_ref();
     let (source, version) = match (spec.map(|s| &s.block), &h.compiled) {
         (Some(Block::Crate(_)), Some(c)) => match c.source.split_once('@') {
@@ -77,26 +83,38 @@ fn entry(h: &Hosted) -> Value {
         (Some(_), _) => (spec.map(|s| s.source()), None),
         (None, _) => (None, None),
     };
+    let item = Item { source, version, detail: h.state.detail().map(str::to_string), ..h.loaded.item() };
+    item.with_state(h.state.word())
+}
+
+/// A sensor's own fields, after its descriptor: `description`, `interval`
+/// and `min_interval` (ADR-516 §2), then what only attend knows of it.
+#[derive(Serialize)]
+struct Fields {
+    description: Option<String>,
+    interval: Option<u64>,
+    min_interval: Option<u64>,
+    threshold: Option<f64>,
+    lane: Option<&'static str>,
+    /// What runs but is not as written.
+    notes: Vec<String>,
+    last_poll: Option<Value>,
+}
+
+/// One sensor as `--json` prints it: the descriptor, then its fields.
+fn entry(h: &Hosted) -> Value {
+    let spec = h.loaded.spec.as_ref();
     let description = spec.map(|s| s.description.clone()).filter(|d| !d.is_empty()).or_else(|| h.compiled.as_ref().map(|c| c.description.clone()));
-    json!({
-        "name": h.name(),
-        "kind": spec.map(|s| s.kind.as_str()),
-        "origin": h.loaded.origin().as_str(),
-        "path": h.loaded.path().map(|p| p.display().to_string()),
-        "source": source,
-        "version": version,
-        "state": h.state.label(),
-        "detail": h.state.detail(),
-        "enabled": spec.map(|s| s.enabled),
-        "lane": h.lane().map(Lane::as_str),
-        "description": description,
-        "interval": spec.map(|s| s.cadence.interval),
-        "min_interval": spec.map(|s| s.cadence.min_interval),
-        "threshold": spec.map(|s| s.cadence.threshold),
-        "files": h.loaded.files.iter().map(|f| json!({ "origin": f.origin.as_str(), "path": f.path.as_ref().map(|p| p.display().to_string()), "refused": f.refused })).collect::<Vec<_>>(),
-        "notes": h.notes,
-        "last_poll": h.last.as_ref().map(|p| json!({ "at": p.at, "ok": p.ok, "detail": p.detail, "observations": p.observations })),
-    })
+    let fields = Fields {
+        description,
+        interval: spec.map(|s| s.cadence.interval),
+        min_interval: spec.map(|s| s.cadence.min_interval),
+        threshold: spec.map(|s| s.cadence.threshold),
+        lane: h.lane().map(Lane::as_str),
+        notes: h.notes.clone(),
+        last_poll: h.last.as_ref().map(|p| json!({ "at": p.at, "ok": p.ok, "detail": p.detail, "observations": p.observations })),
+    };
+    serde_json::to_value(Entry { item: item(h), fields }).unwrap_or_default()
 }
 
 /// A sensor that returns one prepared result, under another sensor's
@@ -335,6 +353,38 @@ fn parse_input(text: &str) -> Result<Vec<(f64, String)>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The shipped sensors with a user's command sensor and a user file
+    /// over the shipped git, read from no directory.
+    fn listed() -> Vec<Value> {
+        use attend_config::sensors::{file_layer, from_layers, SHIPPED};
+        use sensor_spec::Origin;
+        let mut layers: Vec<_> = SHIPPED.iter().map(|(n, t)| file_layer(n, Origin::Builtin, None, t)).collect();
+        let user = std::path::Path::new("/c/attend/sensors");
+        layers.push(file_layer("weather", Origin::User, Some(&user.join("weather.yaml")), "kind: command\nargv: [curl, -s, x]\noutput: json\n"));
+        layers.push(file_layer("git", Origin::User, Some(&user.join("git.yaml")), "interval: 90\n"));
+        let loaded = from_layers(&layers, std::path::Path::new("/nonexistent/p"), &[]);
+        sensors::catalog_of(loaded, |_| None).iter().map(entry).collect()
+    }
+
+    #[test]
+    fn each_sensor_lists_as_an_item_then_its_fields() {
+        let all = listed();
+        let find = |n: &str| all.iter().find(|e| e["name"] == n).unwrap_or_else(|| panic!("no {n}")).clone();
+        let git = find("git");
+        let keys: Vec<&str> = git.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(&keys[..13], ["family", "name", "kind", "origin", "path", "overrides", "source", "version", "state", "detail", "description", "interval", "min_interval"]);
+        assert_eq!((git["family"].as_str(), git["kind"].as_str(), git["origin"].as_str(), git["state"].as_str()), (Some("sensor"), Some("crate"), Some("builtin"), Some("active")));
+        assert_eq!(git["source"].as_str(), Some("attend"), "the crate, split from its version");
+        assert!(git["version"].as_str().is_some_and(|v| !v.contains('@')));
+        assert_eq!(git["overrides"], json!([{ "origin": "user", "how": "extends", "path": "/c/attend/sensors/git.yaml" }]));
+        assert_eq!(git["interval"], json!(90));
+        // A kind attend does not run yet reads degraded, with the reason.
+        let weather = find("weather");
+        assert_eq!((weather["kind"].as_str(), weather["origin"].as_str(), weather["state"].as_str()), (Some("command"), Some("user"), Some("degraded")));
+        assert_eq!((weather["path"].as_str(), weather["source"].as_str()), (Some("/c/attend/sensors/weather.yaml"), Some("curl")));
+        assert!(weather["detail"].as_str().is_some_and(|d| d.contains("not yet hosted")), "{weather}");
+    }
 
     #[test]
     fn input_reads_as_json_or_lines() {

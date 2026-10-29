@@ -4,7 +4,7 @@
 //! Every sensor is a file (`attend_config::sensors` finds and layers them).
 //! A `crate` file names a compiled sensor, which runs here under the
 //! file's name, cadence, threshold and lane. `command` and `mcp` files load,
-//! list and lint, and are recorded as not hosted until attend runs them.
+//! list and lint, and read `degraded` until attend runs them.
 //!
 //! `context`, `git` and `disclosure` are modules here and always compiled;
 //! the other compiled sensors are crates behind feature flags (default:
@@ -61,16 +61,23 @@ pub enum State {
 }
 
 impl State {
-    pub fn label(&self) -> &'static str {
+    /// The sensor family's word for it (ADR-516 §2): a kind attend does
+    /// not run yet reads `degraded`.
+    pub fn word(&self) -> agent_settings::item::SensorState {
+        use agent_settings::item::SensorState as W;
         match self {
-            State::Active => "active",
-            State::Failed(_) => "failed",
-            State::Off => "off",
-            State::Invalid(_) => "invalid",
-            State::Refused(_) => "refused",
-            State::NotHosted(_) => "not hosted",
-            State::NotCompiled => "not compiled",
+            State::Active => W::Active,
+            State::Failed(_) => W::Failing,
+            State::Off => W::Off,
+            State::Invalid(_) => W::Invalid,
+            State::Refused(_) => W::Refused,
+            State::NotHosted(_) => W::Degraded,
+            State::NotCompiled => W::NotCompiled,
         }
+    }
+
+    pub fn label(&self) -> &'static str {
+        agent_settings::item::State::from(self.word()).word()
     }
 
     /// Why the sensor is in this state.
@@ -135,7 +142,7 @@ pub fn catalog(cfg: &Config, project: &str) -> Vec<Hosted> {
 }
 
 /// The sensors `loaded` declares, each with its last poll from `last`.
-fn catalog_of(loaded: Vec<Loaded>, last: impl Fn(&str) -> Option<Poll>) -> Vec<Hosted> {
+pub(crate) fn catalog_of(loaded: Vec<Loaded>, last: impl Fn(&str) -> Option<Poll>) -> Vec<Hosted> {
     let mut out: Vec<Hosted> = loaded
         .into_iter()
         .map(|l| {

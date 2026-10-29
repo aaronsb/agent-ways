@@ -115,17 +115,6 @@ pub struct Loaded {
 }
 
 impl Loaded {
-    /// The highest layer whose file is merged, or the refused file's when
-    /// nothing else loads.
-    pub fn origin(&self) -> Origin {
-        self.merged_files().map(|f| f.origin).max().unwrap_or(Origin::Builtin)
-    }
-
-    /// The file of [`Loaded::origin`]'s layer, if it has a path.
-    pub fn path(&self) -> Option<&Path> {
-        self.merged_files().rev().find_map(|f| f.path.as_deref())
-    }
-
     /// The files merged into it: every one when nothing else loads, else
     /// all but a refused project file.
     fn merged_files(&self) -> impl DoubleEndedIterator<Item = &SensorFile> {
