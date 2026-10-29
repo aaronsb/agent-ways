@@ -133,6 +133,10 @@ pub struct Installed {
     pub ours: Option<String>,
     /// Ids of plugins of the mod's name from other marketplaces.
     pub foreign: Vec<String>,
+    /// The ids in `foreign` that only the target's `settings.json` enables,
+    /// and that file. Claude Code lists none of them.
+    pub settings_only: Vec<String>,
+    pub settings_file: Option<PathBuf>,
     /// Ids of the other plugins installed from the `agent-ways` marketplace.
     pub siblings: Vec<String>,
 }
@@ -169,15 +173,25 @@ pub fn parse_installed(m: &Mod, marketplaces: &str, plugins: &str) -> Installed 
 /// is missing from `claude plugin list` until a session has recorded that
 /// marketplace, and ours installed beside it would draw everything twice.
 pub fn add_enabled_foreign(m: &Mod, have: &mut Installed, dest_root: &Path) {
-    let Ok(text) = std::fs::read_to_string(dest_root.join("settings.json")) else { return };
+    let file = dest_root.join("settings.json");
+    let Ok(text) = std::fs::read_to_string(&file) else { return };
     let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else { return };
     let Some(enabled) = json.get("enabledPlugins").and_then(|e| e.as_object()) else { return };
     for (id, on) in enabled {
         let name = id.split_once('@').map_or(id.as_str(), |(n, _)| n);
         if on.as_bool() == Some(true) && name == m.name && id != m.id && !have.foreign.contains(id) {
             have.foreign.push(id.clone());
+            have.settings_only.push(id.clone());
+            have.settings_file = Some(file.clone());
         }
     }
+}
+
+/// How a repair note and a check line name a plugin that only `settings.json`
+/// enables: uninstalling it does nothing, the `enabledPlugins` entry goes.
+pub fn settings_only_words(id: &str, file: Option<&Path>) -> String {
+    let file = file.map_or("settings.json".to_string(), |f| f.display().to_string());
+    format!("{id} is enabled in {file} (enabledPlugins) from a marketplace Claude Code has not recorded")
 }
 
 /// One call of the plugin CLI. The plugin calls act on the mod being
@@ -298,11 +312,22 @@ pub fn enable_command(m: &Mod, dest_root: &Path, default_root: &Path) -> String 
 pub fn plan_converge(m: &Mod, have: &Installed, dir: &str, recorded: Option<&str>, shipped: &str, recover: &str) -> Plan {
     let mut plan = Plan::default();
     if !have.foreign.is_empty() {
-        plan.notes.push(format!(
-            "{} is installed from another marketplace; left as it is, and {} is not installed beside it",
-            have.foreign.join(", "),
-            m.id
-        ));
+        let (only, listed): (Vec<_>, Vec<_>) = have.foreign.iter().partition(|f| have.settings_only.contains(f));
+        if !listed.is_empty() {
+            let ids: Vec<&str> = listed.iter().map(|s| s.as_str()).collect();
+            plan.notes.push(format!(
+                "{} is installed from another marketplace; left as it is, and {} is not installed beside it",
+                ids.join(", "),
+                m.id
+            ));
+        }
+        for id in only {
+            plan.notes.push(format!(
+                "{}; left as it is, and {} is not installed beside it. Fix: remove that enabledPlugins entry, then `ways manage mod repair`",
+                settings_only_words(id, have.settings_file.as_deref()),
+                m.id
+            ));
+        }
         return plan;
     }
     match market(have, dir, recorded) {
@@ -832,6 +857,9 @@ pub struct View {
     pub market: MarketState,
     /// Plugins of the mod's name from other marketplaces.
     pub foreign: Vec<String>,
+    /// The ids in `foreign` that only `settings.json` enables, and that file.
+    pub settings_only: Vec<String>,
+    pub settings_file: Option<PathBuf>,
     /// Whether the host can run the mod: Claude Code's version against the
     /// floor, or why it could not be read.
     pub host: Result<String, String>,
@@ -1070,6 +1098,8 @@ pub fn views(source_root: &Path, t: &Target, only: Option<&Mod>) -> Vec<(Mod, Vi
                 recorded: record.has(m.id),
                 market: MarketState::Absent,
                 foreign: Vec::new(),
+                settings_only: Vec::new(),
+                settings_file: None,
                 host,
                 claude_code: version.as_ref().and_then(|v| v.as_ref().ok()).and_then(|o| claude_code_version(o)).map(str::to_string),
                 read: lists.is_ok(),
@@ -1088,6 +1118,8 @@ pub fn views(source_root: &Path, t: &Target, only: Option<&Mod>) -> Vec<(Mod, Vi
                     v.runs = runs_version(&have, &dir, shipped.as_deref());
                     v.installed = have.ours;
                     v.foreign = have.foreign;
+                    v.settings_only = have.settings_only;
+                    v.settings_file = have.settings_file;
                 }
                 // No `claude` at all is a host that cannot run the mod yet:
                 // pending where wanted, off where not, never unknown.
@@ -1268,6 +1300,33 @@ mod tests {
         assert_eq!(recover_command(Some(Path::new("/t/claude-b"))), "CLAUDE_CONFIG_DIR=/t/claude-b claude plugin marketplace remove agent-ways");
     }
 
+    /// With an empty plugin list only settings.json names the plugin, and
+    /// uninstalling it would do nothing.
+    #[test]
+    fn a_plugin_only_settings_enables_is_worded_as_an_enabledplugins_entry() {
+        let dir = std::env::temp_dir().join(format!("ways-attend-mod-settings-only-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("settings.json"), r#"{"enabledPlugins":{"images@dotfiles":true}}"#).unwrap();
+        let mut h = parse_installed(&IMAGES, "[]", "[]");
+        add_enabled_foreign(&IMAGES, &mut h, &dir);
+        assert_eq!(h.settings_only, vec!["images@dotfiles".to_string()]);
+        let p = plan_converge(&IMAGES, &h, DIR, None, "1.48.0", "CMD");
+        let want = format!(
+            "images@dotfiles is enabled in {}/settings.json (enabledPlugins) from a marketplace Claude Code has not recorded",
+            dir.display()
+        );
+        assert_eq!(p.notes.len(), 1, "{p:?}");
+        assert!(p.notes[0].starts_with(&want) && p.notes[0].contains("remove that enabledPlugins entry, then `ways manage mod repair`"), "{p:?}");
+        assert!(!p.notes[0].contains("is installed"), "{p:?}");
+
+        // A plugin Claude Code lists keeps the installed wording.
+        let mut listed = parse_installed(&IMAGES, "[]", r#"[{"id":"images@dotfiles","version":"0.1.0"}]"#);
+        add_enabled_foreign(&IMAGES, &mut listed, &dir);
+        assert!(listed.settings_only.is_empty());
+        assert!(plan_converge(&IMAGES, &listed, DIR, None, "1.48.0", "CMD").notes[0].contains("is installed from another marketplace"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn foreign_plugins_and_marketplaces_are_reported_and_left_alone() {
         let mut h = have(None, None);
@@ -1434,6 +1493,8 @@ mod tests {
             recorded: installed.is_some(),
             market: MarketState::Ours,
             foreign: vec![],
+            settings_only: vec![],
+            settings_file: None,
             host: Ok("2.1.309".into()),
             claude_code: Some("2.1.309".into()),
             read: true,

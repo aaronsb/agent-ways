@@ -232,7 +232,12 @@ fn checks(m: &Mod, v: &View, shipped: Option<&str>, claude_code: bool, default_r
         }
     }
     for f in &v.foreign {
-        out.push((Mark::Warn, format!("{f} is installed from another marketplace and left as it is. Fix: uninstall it, then {repair}")));
+        if v.settings_only.contains(f) {
+            let words = attend_mod::settings_only_words(f, v.settings_file.as_deref());
+            out.push((Mark::Warn, format!("{words} and is left as it is. Fix: remove that enabledPlugins entry, then {repair}")));
+        } else {
+            out.push((Mark::Warn, format!("{f} is installed from another marketplace and left as it is. Fix: uninstall it, then {repair}")));
+        }
     }
     if let attend_mod::MarketState::Foreign(from) = &v.market {
         out.push((
@@ -668,6 +673,8 @@ mod tests {
             recorded: installed.is_some(),
             market: MarketState::Ours,
             foreign: vec![],
+            settings_only: vec![],
+            settings_file: None,
             claude_code: host.as_ref().ok().cloned(),
             host,
             read: true,
