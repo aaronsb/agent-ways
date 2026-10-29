@@ -48,6 +48,65 @@ export function parseRendererOption(value: unknown): RendererOption {
   return RENDERER_OPTIONS.includes(value as RendererOption) ? (value as RendererOption) : 'auto'
 }
 
+/** The mod's options, the `mods.images.*` ways settings (ADR-517 item 5). */
+export type Options = {
+  renderer: RendererOption
+  scale: number
+  showCaptions: boolean
+  showPathsInReplies: boolean
+  steerToSendUserFile: boolean
+}
+
+export const DEFAULT_OPTIONS: Options = {
+  renderer: 'auto',
+  scale: 1,
+  showCaptions: true,
+  showPathsInReplies: true,
+  steerToSendUserFile: true,
+}
+
+/** Each `ways` call's bound; a call past it counts as a failure. */
+export const WAYS_TIMEOUT_MS = 1500
+/** A read older than this is taken again before the next picture. */
+export const OPTIONS_MAX_AGE_MS = 5000
+
+/** `ways settings list mods.images --json --effective`, for the project at `project` when known. */
+export function optionsArgv(project: string | undefined): string[] {
+  const argv = ['ways', 'settings', 'list', 'mods.images', '--json', '--effective']
+  return project === undefined || project === '' ? argv : [...argv, '--project', project]
+}
+
+/**
+ * The options from `optionsArgv`'s output: each key's resolved `value`, a key
+ * missing or of the wrong kind taking its default. Output that is not the
+ * settings JSON gives why, so the caller keeps what it had.
+ */
+export function parseOptions(stdout: string): Options | string {
+  let json: unknown
+  try {
+    json = JSON.parse(stdout)
+  } catch {
+    return 'printed no settings JSON'
+  }
+  const keys = isObj(json) && isObj(json.keys) ? json.keys : null
+  if (keys === null) return 'printed settings JSON without its keys'
+  const value = (name: string): unknown => {
+    const key = keys[`mods.images.${name}`]
+    return isObj(key) ? key.value : undefined
+  }
+  const flag = (name: string, fallback: boolean): boolean => {
+    const v = value(name)
+    return typeof v === 'boolean' ? v : fallback
+  }
+  return {
+    renderer: parseRendererOption(value('renderer')),
+    scale: parseScale(value('scale')),
+    showCaptions: flag('show_captions', DEFAULT_OPTIONS.showCaptions),
+    showPathsInReplies: flag('show_paths_in_replies', DEFAULT_OPTIONS.showPathsInReplies),
+    steerToSendUserFile: flag('steer_to_send_user_file', DEFAULT_OPTIONS.steerToSendUserFile),
+  }
+}
+
 /** The `scale` option: a positive number, held to SCALE_MIN..SCALE_MAX; 1 otherwise. */
 export function parseScale(value: unknown): number {
   const n = typeof value === 'string' && value.trim() !== '' ? Number(value) : value
@@ -174,9 +233,23 @@ export const WINSIZE_ARGV: readonly string[] = [
   ].join('\n'),
 ]
 
+/** argv for the host's kernel name. */
+export const UNAME_ARGV: readonly string[] = ['uname', '-s']
+
+/**
+ * Whether WINSIZE_ARGV runs on a host whose `uname -s` printed `uname`: on
+ * Linux only. Off it there is no `/proc`, and on a Mac `/usr/bin/python3`
+ * without the Command Line Tools opens an install dialog, so a Mac takes
+ * DEFAULT_CELL_PIXELS until a probe of its own is verified there (ADR-517
+ * item 7).
+ */
+export function probesCells(uname: string): boolean {
+  return uname.trim() === 'Linux'
+}
+
 /** A cell's pixels from WINSIZE_ARGV's output; null where the terminal reports none. */
 export function parseCellPixels(stdout: string): CellPixels | null {
-  const [rows, columns, xPixels, yPixels] = stdout.trim().split(/\s+/).map(Number)
+  const [rows = 0, columns = 0, xPixels = 0, yPixels = 0] = stdout.trim().split(/\s+/).map(Number)
   if (![rows, columns, xPixels, yPixels].every(n => Number.isInteger(n) && n > 0)) return null
   return { width: xPixels / columns, height: yPixels / rows }
 }
@@ -456,6 +529,31 @@ export function hashKey(text: string): string {
 /** The basename of a path, for an alt text. */
 export function basename(path: string): string {
   return path.slice(path.lastIndexOf('/') + 1) || path
+}
+
+/** The key prefix of the Box holding one picture and its caption, which ways-theme finds it by (ADR-517 item 6). */
+export const PICTURE_KEY = 'images-picture-'
+
+const cellsOf = (props: Obj, ...names: string[]): number => {
+  for (const name of names) if (typeof props[name] === 'number') return props[name] as number
+  return 0
+}
+
+/**
+ * The columns a frame takes from its row's width, where `row` is a bordered
+ * Box, as ways-theme draws its frame (the mod draws no border of its own):
+ * its border, padding and margin on both sides. null for anything else.
+ */
+export function frameInset(row: unknown): number | null {
+  if (!isObj(row) || row.type !== 'Box' || !isObj(row.props) || typeof row.props.borderStyle !== 'string') return null
+  const p = row.props
+  return (
+    2 +
+    cellsOf(p, 'paddingLeft', 'paddingX', 'padding') +
+    cellsOf(p, 'paddingRight', 'paddingX', 'padding') +
+    Math.max(0, cellsOf(p, 'marginLeft', 'marginX', 'margin')) +
+    Math.max(0, cellsOf(p, 'marginRight', 'marginX', 'margin'))
+  )
 }
 
 /**

@@ -2,6 +2,9 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On, ProcessRunResult } from 'claude-code'
 
+// The test's environment has a timer; Claude Code's declarations name none.
+declare function setTimeout(fn: () => void, ms: number): unknown
+
 import {
   DEFAULT_COLOR,
   LOWER_HALF,
@@ -11,18 +14,23 @@ import {
   cellsToBase64,
   chooseRenderer,
   contentImages,
+  DEFAULT_OPTIONS,
   fileUrl,
   fitCells,
+  frameInset,
   pngArgv,
   fromBase64,
   REPLY_IMAGES_MAX,
   needsProbe,
+  optionsArgv,
   packHalfBlocks,
   parseCellPixels,
   parseDimensions,
+  parseOptions,
   parseRendererOption,
   parseScale,
   probeVerdict,
+  probesCells,
   replyImages,
   rgbaArgv,
   roomAt,
@@ -31,6 +39,9 @@ import {
   toBase64,
   toolImages,
 } from '../hooks/lib.ts'
+import { register } from '../hooks/register.tsx'
+import { passedOverHits, registrationsOf } from './passed-over.ts'
+import { contractBreaches } from './picture-frame.ts'
 
 describe('sizing', () => {
   const ROOM = { columns: 200, rows: 60 }
@@ -388,12 +399,41 @@ type World = {
   mkdirFailures?: number
   /** What the terminal size child prints: `rows cols xpixels ypixels`. */
   winsize?: string
+  /** What `uname -s` prints; Linux when left out. */
+  uname?: string
   /** More environment, over the defaults. */
   env?: Record<string, string>
+  /** The `mods.images.*` values `ways settings list` resolves, over the defaults; `fail` exits 2, `garbage` prints no JSON. */
+  settings?: Record<string, unknown> | 'fail' | 'garbage'
+  /** Every `ways` argv the mod ran. */
+  ways?: string[][]
+  /** Every `$.ui.log` line sent to the debug log. */
+  debugLines?: string[]
+  /** The row beneath the mod is a frame, as ways-theme draws one. */
+  frame?: boolean
+  /** What ImageMagick's `info:` prints for every picture: `width height`. */
+  dims?: string
+}
+
+/** `ways settings list mods.images --json --effective` answering `values` over the defaults. */
+function settingsJson(values: Record<string, unknown>): string {
+  const all: Record<string, unknown> = {
+    install: true,
+    renderer: 'auto',
+    scale: 1,
+    show_captions: true,
+    show_paths_in_replies: true,
+    steer_to_send_user_file: true,
+    ...values,
+  }
+  const keys = Object.fromEntries(Object.entries(all).map(([k, value]) => [`mods.images.${k}`, { value, layer: 'default' }]))
+  return JSON.stringify({ view: 'effective', fragment: { config: { mods: { images: all } } }, keys })
 }
 
 function engine(on: On, world: World) {
   mock.env(on, { HOME: '/home/t', XDG_RUNTIME_DIR: '/run/user/1000', USER: 't', ...world.env })
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.root', () => ({ value: '/work/proj' }) as never)
   const written = new Set<string>()
   /** The raw RGBA size each `rgba:` output was resized to. */
   const resized = new Map<string, number>()
@@ -405,9 +445,16 @@ function engine(on: On, world: World) {
     if (world.oneAtATime === true) {
       if (inFlight > 0) throw new Error('process.run refused: another child is running')
       inFlight++
-      await new Promise(resolve => setTimeout(resolve, 2))
+      await new Promise<void>(resolve => setTimeout(resolve, 2))
       inFlight--
     }
+    if (tool === 'ways') {
+      world.ways?.push([...e.argv])
+      if (world.settings === 'fail') return { value: { ...ok(), exitCode: 2 } }
+      if (world.settings === 'garbage') return { value: ok('mods.images.scale=2\n') }
+      return { value: ok(settingsJson(world.settings ?? {})) }
+    }
+    if (tool === 'uname') return { value: ok(`${world.uname ?? 'Linux'}\n`) }
     if (tool === 'python3') return { value: ok(world.winsize ?? '') }
     if (tool === 'mkdir' && (world.mkdirFailures ?? 0) > 0) {
       world.mkdirFailures = (world.mkdirFailures ?? 0) - 1
@@ -426,7 +473,7 @@ function engine(on: On, world: World) {
       const box = /^(\d+)x(\d+)!$/.exec(e.argv.find(arg => /^\d+x\d+!$/.test(arg)) ?? '')
       if (out.startsWith('rgba:') && box !== null) resized.set(out.slice(5), Number(box[1]) * Number(box[2]) * 4)
       if (e.argv[1] === '-version') return { value: ok('Version: ImageMagick 7.1') }
-      if (e.argv.at(-1) === 'info:') return { value: ok('4 4') }
+      if (e.argv.at(-1) === 'info:') return { value: ok(world.dims ?? '4 4') }
     }
     return { value: ok() }
   })
@@ -449,13 +496,17 @@ function engine(on: On, world: World) {
     return { value: { base64: path.endsWith('.png') ? PNG : toBase64(new Uint8Array(resized.get(path) ?? 0).fill(255)) } }
   })
   on('ui.log', ($, e) => {
-    world.logs?.push(String((e as { text?: unknown }).text ?? ''))
+    const { text, to } = e as { text?: unknown; to?: unknown }
+    ;(to === 'debug' ? world.debugLines : world.logs)?.push(String(text ?? ''))
     return { value: undefined }
   })
   on('ui.blit', () => ({ value: world.blit === undefined ? {} : { deny: world.blit } }))
   on('ui.render', ($, e) => {
-    const { Text } = $.ui.resolve(e)
-    return h(Text, {}, 'engine-row') as never
+    const { Box, Text } = $.ui.resolve(e)
+    const row = h(Text, {}, 'engine-row')
+    // The frame as ways-theme's framedRow draws it around a row.
+    if (world.frame === true) return h(Box, { marginTop: 1, borderStyle: 'round', paddingX: 1, borderColor: 'suggestion' }, h(Box, { marginTop: -1 }, row)) as never
+    return row as never
   })
 }
 
@@ -526,16 +577,16 @@ describe('drawing', () => {
     expect(later.probe).toBeDefined()
   })
 
-  test('renderer image forces the Image element', { options: { renderer: 'image' } }, async ($, on) => {
-    engine(on, { hasMagick: true, blit: undefined, ran: [] })
+  test('renderer image forces the Image element', async ($, on) => {
+    engine(on, { hasMagick: true, blit: undefined, ran: [], settings: { renderer: 'image' } })
     const found = await drawn($)
     expect(found.image).toBeDefined()
     expect(found.raster).toBeUndefined()
     expect(found.probe).toBeUndefined()
   })
 
-  test('renderer halfblock forces the Raster, with no probe', { options: { renderer: 'halfblock' } }, async ($, on) => {
-    engine(on, { hasMagick: true, blit: undefined, ran: [] })
+  test('renderer halfblock forces the Raster, with no probe', async ($, on) => {
+    engine(on, { hasMagick: true, blit: undefined, ran: [], settings: { renderer: 'halfblock' } })
     const found = await drawn($)
     expect(found.raster).toBeDefined()
     expect(found.probe).toBeUndefined()
@@ -582,8 +633,8 @@ describe('drawing', () => {
     await ui.unmount()
   })
 
-  test('showPathsInReplies off: only markdown images draw', { options: { showPathsInReplies: false } }, async ($, on) => {
-    engine(on, { hasMagick: true, blit: undefined, ran: [] })
+  test('show_paths_in_replies off: only markdown images draw', async ($, on) => {
+    engine(on, { hasMagick: true, blit: undefined, ran: [], settings: { show_paths_in_replies: false } })
     const ui = await $.ui.mount(REPLY as never)
     expect(await ui.find({ type: 'Raster' })).toBeUndefined()
     expect(await ui.find({ text: 'engine-row' })).toBeDefined()
@@ -601,8 +652,8 @@ describe('drawing', () => {
     await ui.unmount()
   })
 
-  test('showCaptions off: the picture alone', { options: { showCaptions: false } }, async ($, on) => {
-    engine(on, { hasMagick: true, blit: undefined, ran: [] })
+  test('show_captions off: the picture alone', async ($, on) => {
+    engine(on, { hasMagick: true, blit: undefined, ran: [], settings: { show_captions: false } })
     const ui = await $.ui.mount(SENT as never)
     expect(await ui.find({ type: 'Raster' })).toBeDefined()
     expect(await ui.find({ type: 'Link' })).toBeUndefined()
@@ -675,10 +726,15 @@ describe('prompt section', () => {
     expect(sections.map(s => s.id)).toEqual(['intro'])
   })
 
-  test('steerToSendUserFile off: no section', { options: { steerToSendUserFile: false } }, async ($, on) => {
+  test('steer_to_send_user_file off: no section', async ($, on) => {
+    const world: World = { hasMagick: true, blit: undefined, ran: [], ways: [], settings: { steer_to_send_user_file: false } }
+    engine(on, world)
     on('prompt.compose', () => BASE as never)
+    await $.session.start({ cwd: '/work/proj', surface: 'terminal', isInteractive: true })
     const { sections } = await $.prompt.compose({ ...FACTS, surfaces: ['terminal'], tools: TOOLS })
     expect(sections.map(s => s.id)).toEqual(['intro'])
+    // Composing reads nothing: the session's start read them once.
+    expect(world.ways).toHaveLength(1)
   })
 })
 
@@ -789,8 +845,8 @@ describe('scroll-back', () => {
   }
   const SHOWN = { first: 0, last: 5, of: 6 }
 
-  test('an Image reads the cached PNG file, generation 0', { options: { renderer: 'image' } }, async ($, on) => {
-    const world: World = { hasMagick: true, blit: undefined, ran: [] }
+  test('an Image reads the cached PNG file, generation 0', async ($, on) => {
+    const world: World = { hasMagick: true, blit: undefined, ran: [], settings: { renderer: 'image' } }
     engine(on, world)
     const source = await imageSource($, SHOWN)
     expect(source?.format).toBe('png')
@@ -799,8 +855,8 @@ describe('scroll-back', () => {
     expect(source?.png).toBeUndefined()
   })
 
-  test('off screen, then back: the next render raises the generation once', { options: { renderer: 'image' } }, async ($, on) => {
-    engine(on, { hasMagick: true, blit: undefined, ran: [] })
+  test('off screen, then back: the next render raises the generation once', async ($, on) => {
+    engine(on, { hasMagick: true, blit: undefined, ran: [], settings: { renderer: 'image' } })
     expect((await imageSource($, SHOWN))?.generation).toBe(0)
     expect((await imageSource($, { first: 2, last: 5, of: 6 }))?.generation).toBe(0)
     expect((await imageSource($, null))?.generation).toBe(0)
@@ -811,8 +867,8 @@ describe('scroll-back', () => {
     expect((await imageSource($, SHOWN))?.generation).toBe(2)
   })
 
-  test('over ssh: the PNG travels as bytes', { options: { renderer: 'image' } }, async ($, on) => {
-    engine(on, { hasMagick: true, blit: undefined, ran: [], env: { SSH_CONNECTION: '10.0.0.2 5000 10.0.0.1 22' } })
+  test('over ssh: the PNG travels as bytes', async ($, on) => {
+    engine(on, { hasMagick: true, blit: undefined, ran: [], settings: { renderer: 'image' }, env: { SSH_CONNECTION: '10.0.0.2 5000 10.0.0.1 22' } })
     const source = await imageSource($, SHOWN)
     expect(source?.png).toBe(PNG)
     expect(source?.file).toBeUndefined()
@@ -935,5 +991,174 @@ describe('children', () => {
     await ui.unmount()
 
     expect((await drawn($)).raster).toBeDefined()
+  })
+})
+
+describe('options from ways settings', () => {
+  test('the settings JSON gives each option; a missing or wrong-kind key takes its default', () => {
+    expect(parseOptions(settingsJson({}))).toEqual(DEFAULT_OPTIONS)
+    expect(
+      parseOptions(settingsJson({ renderer: 'halfblock', scale: 2, show_captions: false, show_paths_in_replies: false, steer_to_send_user_file: false })),
+    ).toEqual({ renderer: 'halfblock', scale: 2, showCaptions: false, showPathsInReplies: false, steerToSendUserFile: false })
+    expect(parseOptions(settingsJson({ renderer: 'sixel', scale: 99, show_captions: 'no' }))).toMatchObject({ renderer: 'auto', scale: 4, showCaptions: true })
+    expect(parseOptions('mods.images.scale=2')).toBe('printed no settings JSON')
+    expect(parseOptions('{"view":"effective"}')).toBe('printed settings JSON without its keys')
+  })
+
+  test('the read names the project, whose settings win over the user and target files', () => {
+    expect(optionsArgv('/work/proj')).toEqual(['ways', 'settings', 'list', 'mods.images', '--json', '--effective', '--project', '/work/proj'])
+    expect(optionsArgv(undefined)).toEqual(['ways', 'settings', 'list', 'mods.images', '--json', '--effective'])
+  })
+
+  test('an interactive session reads them once at its start', async ($, on) => {
+    const world: World = { hasMagick: true, blit: undefined, ran: [], ways: [] }
+    mock.clock(on)
+    engine(on, world)
+    await $.session.start({ cwd: '/work/proj', surface: 'terminal', isInteractive: true })
+    expect(world.ways).toEqual([['ways', 'settings', 'list', 'mods.images', '--json', '--effective', '--project', '/work/proj']])
+  })
+
+  test('a headless session reads nothing at its start', async ($, on) => {
+    const world: World = { hasMagick: true, blit: undefined, ran: [], ways: [] }
+    engine(on, world)
+    await $.session.start({ cwd: '/work/proj', surface: null, isInteractive: false })
+    expect(world.ways).toEqual([])
+  })
+
+  test('a change reaches the next picture once the last read is over 5 s old, with no restart', async ($, on) => {
+    const world: World = { hasMagick: true, blit: undefined, ran: [], ways: [], settings: { renderer: 'halfblock' }, dims: '320 100' }
+    const clock = mock.clock(on)
+    engine(on, world)
+    const columns = async () => {
+      const ui = await $.ui.mount(SENT as never)
+      const found = await ui.find({ type: 'Raster' })
+      await ui.unmount()
+      return found?.props.columns
+    }
+    expect(await columns()).toBe(94)
+    world.settings = { renderer: 'halfblock', scale: 0.25 }
+    await clock.advance(1_000)
+    expect(await columns()).toBe(94)
+    expect(world.ways).toHaveLength(1)
+    await clock.advance(5_000)
+    // 320 pixels at a quarter: 80 columns.
+    expect(await columns()).toBe(80)
+    expect(world.ways).toHaveLength(2)
+  })
+
+  test('a failing ways keeps the last good options and logs one debug line per reason', async ($, on) => {
+    const world: World = { hasMagick: true, blit: undefined, ran: [], ways: [], logs: [], debugLines: [], settings: { renderer: 'image' } }
+    const clock = mock.clock(on)
+    engine(on, world)
+    expect((await drawn($)).image).toBeDefined()
+    world.settings = 'fail'
+    for (let n = 0; n < 3; n++) {
+      await clock.advance(6_000)
+      expect((await drawn($)).image).toBeDefined()
+    }
+    world.settings = 'garbage'
+    await clock.advance(6_000)
+    expect((await drawn($)).image).toBeDefined()
+    expect(world.ways).toHaveLength(5)
+    expect(world.debugLines).toHaveLength(2)
+    expect(world.debugLines?.[0]).toMatch(/^images: kept the options as they were: `ways settings list mods\.images .*` exited 2$/)
+    expect(world.debugLines?.[1]).toBe('images: kept the options as they were: printed no settings JSON')
+    expect(world.logs).toEqual([])
+  })
+
+  test('with no good read yet, a failing ways leaves the defaults', async ($, on) => {
+    const world: World = { hasMagick: true, blit: undefined, ran: [], debugLines: [], settings: 'fail' }
+    engine(on, world)
+    const found = await drawn($)
+    expect(found.raster).toBeDefined()
+    expect(found.probe).toBeDefined()
+    expect(world.debugLines).toHaveLength(1)
+  })
+})
+
+describe('cell size by host', () => {
+  test('only Linux runs the probe', () => {
+    expect(probesCells('Linux\n')).toBe(true)
+    expect(probesCells('Darwin\n')).toBe(false)
+    expect(probesCells('FreeBSD')).toBe(false)
+  })
+
+  test('on a Mac no python3 runs, and pictures are sized from 10x20 cells', async ($, on) => {
+    const world: World = { hasMagick: true, blit: undefined, ran: [], uname: 'Darwin', winsize: '40 100 800 640' }
+    engine(on, world)
+    const ui = await $.ui.mount(SENT as never)
+    // 24 columns of 10 pixels show 4 pixels at 6000%, whatever the terminal would report.
+    expect(await ui.find({ text: ' · 4×4 · 6000%' })).toBeDefined()
+    await ui.unmount()
+    expect(world.ran.some(argv => argv[0] === 'python3')).toBe(false)
+    expect(world.ran.filter(argv => argv[0] === 'uname')).toHaveLength(1)
+  })
+
+  test('on Linux the probe runs and its cells size the picture', async ($, on) => {
+    const world: World = { hasMagick: true, blit: undefined, ran: [], winsize: '40 100 800 640' }
+    engine(on, world)
+    const ui = await $.ui.mount(SENT as never)
+    expect(await ui.find({ text: ' · 4×4 · 4800%' })).toBeDefined()
+    await ui.unmount()
+    expect(world.ran.some(argv => argv[0] === 'python3')).toBe(true)
+  })
+})
+
+// The images side of the frame contract (picture-frame.ts): beneath a plain
+// row, or inside the frame the row beneath the mod already is, as it is when
+// the mod sits above ways-theme in the chain.
+describe('the frame contract', () => {
+  const WANT = { columns: 100, cellWidth: 10, href: 'file:///pics/cat.png', name: 'cat.png' }
+
+  test('a frame reads as its border, padding and margin', () => {
+    expect(frameInset({ type: 'Box', props: { borderStyle: 'round', paddingX: 1 } })).toBe(4)
+    expect(frameInset({ type: 'Box', props: { borderStyle: 'single', paddingLeft: 2, marginRight: 1 } })).toBe(5)
+    expect(frameInset({ type: 'Box', props: { paddingX: 1 } })).toBeNull()
+    expect(frameInset({ type: 'Text', props: {} })).toBeNull()
+  })
+
+  for (const renderer of ['halfblock', 'image'] as const) {
+    test(`${renderer}: under a plain row, the picture and its caption keep the contract`, async ($, on) => {
+      engine(on, { hasMagick: true, blit: undefined, ran: [], settings: { renderer }, dims: '1020 300' })
+      const ui = await $.ui.mount(SENT as never)
+      const tree = await ui.drawn()
+      await ui.unmount()
+      expect(contractBreaches(tree, WANT)).toEqual([])
+    })
+
+    test(`${renderer}: in a frame, the picture goes inside it, sized to its room, caption and all`, async ($, on) => {
+      engine(on, { hasMagick: true, blit: undefined, ran: [], settings: { renderer }, dims: '1020 300', frame: true })
+      const ui = await $.ui.mount(SENT as never)
+      const tree = (await ui.drawn()) as { type?: unknown; props?: Record<string, unknown> }
+      const found = await ui.find({ type: renderer === 'image' ? 'Image' : 'Raster' })
+      expect(await ui.find({ text: 'engine-row' })).toBeDefined()
+      await ui.unmount()
+      // The frame stays the root: one border, the pictures within it.
+      expect(tree.type).toBe('Box')
+      expect(tree.props?.borderStyle).toBe('round')
+      expect(contractBreaches(tree, { ...WANT, isFramed: true })).toEqual([])
+      // 100 columns, less the frame's 4, the indent of 5 and one spare.
+      expect(found?.props.columns).toBe(90)
+    })
+  }
+
+  test('the contract check fails a picture drawn past the frame (control)', () => {
+    const raster = { type: 'Raster', props: { columns: 98, rows: 1, cells: btoa('x'.repeat(98 * 12)) } }
+    const caption = { type: 'Box', children: [{ type: 'Link', props: { href: WANT.href, label: WANT.name } }, { type: 'Text', props: {}, children: [' · 1020×300 · 96%'] }] }
+    const site = { type: 'Box', props: { key: 'images-picture-0' }, children: [raster, caption] }
+    const tree = { type: 'Box', props: { borderStyle: 'round', paddingX: 1 }, children: [site] }
+    expect(contractBreaches(tree, { ...WANT, isFramed: true })).toEqual(['images-picture-0: 98 columns inside 4 of insets overrun 100'])
+  })
+})
+
+describe('what the mod hooks reaches it on every host', () => {
+  test("the one hook an organization's policy plugin passes over is the prompt section, and none is classic", () => {
+    const regs = registrationsOf(register as never)
+    // The recording saw the module's hooks: the control for the lists below.
+    expect(regs.map(r => r.pattern)).toContain('ui.render')
+    expect(regs.map(r => r.pattern)).toContain('session.start')
+    expect(regs.filter(r => r.pattern.startsWith('classic.'))).toEqual([])
+    // Where the policy plugin sits, the steer section is left out; every picture still draws.
+    expect(passedOverHits(regs)).toEqual(['prompt.compose'])
   })
 })

@@ -9,10 +9,17 @@
 //     the two: a call whose latest group render was folded is the group's,
 //     any other its row's;
 //   - the images a reply names by an absolute or `~/` path, as markdown
-//     images or (with `showPathsInReplies`) bare, fenced code skipped;
+//     images or (with `show_paths_in_replies`) bare, fenced code skipped;
 //   - the images pasted with a prompt, caught as the prompt row is appended.
 //
-// With `steerToSendUserFile` (the default), a short system-prompt section on
+// Where the row the mod is handed is another plugin's frame (a bordered Box,
+// as ways-theme draws one), the pictures go inside it, under its content,
+// sized to the room inside its border and padding. Each picture and its
+// caption sit in one Box keyed `images-picture-<n>`, which ways-theme finds
+// when it frames a row the mod drew beneath it (ADR-517 item 6).
+//
+// The options are the `mods.images.*` ways settings (options.ts). With
+// `steer_to_send_user_file` (the default), a short system-prompt section on
 // the terminal surface tells the model the terminal draws images, so a request
 // to see one ends with SendUserFile (or a Read, or a path) and a picture.
 //
@@ -36,9 +43,11 @@
 // writes did not land there. Without ImageMagick each site draws the
 // engine's row and one dim note.
 //
-// Children run one at a time, from `/`: the host refuses a child started while
-// another runs, and a session's working directory can vanish under it (a
-// removed worktree or temp dir), which fails every spawn that inherits it.
+// The terminal's cell size in pixels comes from a `python3` probe of `/proc`
+// on Linux; on any other host, a Mac among them, no probe runs and cells are
+// taken as 10x20 pixels.
+//
+// Children run one at a time, from `/` (run.ts).
 // Finding ImageMagick and making the cache directory are kept once they
 // succeed; a failure is asked again by the next picture, so one refused run
 // under a burst of renders does not leave the rest of the session without
@@ -49,12 +58,14 @@
 // line to `render.log` beside it (component, requestId, tool, and the shape
 // of its props, never their bytes).
 
-import type { Elements, EngineInterface, ProcessRunResult, Register, RenderElement, RenderNode, RenderViewport } from 'claude-code'
+import type { Elements, EngineInterface, Register, RenderElement, RenderNode, RenderViewport } from 'claude-code'
 
 import {
   DEFAULT_CELL_PIXELS,
+  PICTURE_KEY,
   PROBE_PNG,
   TOOL_INDENT,
+  UNAME_ARGV,
   WINSIZE_ARGV,
   basename,
   cellsToBase64,
@@ -64,6 +75,7 @@ import {
   dataUri,
   fileUrl,
   fitCells,
+  frameInset,
   fromBase64,
   hashKey,
   identifyArgv,
@@ -72,10 +84,9 @@ import {
   packHalfBlocks,
   parseCellPixels,
   parseDimensions,
-  parseRendererOption,
-  parseScale,
   pngArgv,
   probeVerdict,
+  probesCells,
   replyImages,
   rgbaArgv,
   roomAt,
@@ -83,7 +94,9 @@ import {
   takeExisting,
   toolImages,
 } from './lib.ts'
-import type { CellPixels, ImageRef, Renderer, RendererOption, Room } from './lib.ts'
+import type { CellPixels, ImageRef, Options, Renderer, Room } from './lib.ts'
+import { currentOptions, freshOptions, readOptions } from './options.ts'
+import { run } from './run.ts'
 
 const KITTY_GRAPHICS = { plugin: 'images', key: 'kittyGraphics' } as const
 const PASTED = { plugin: 'images', key: 'pasted' } as const
@@ -96,7 +109,6 @@ const IMAGE_BYTES_MAX = 2 * 1024 * 1024
 const MEMO_MAX = 64
 /** A cache file holding base64 bytes as a data URI. */
 const URI_SUFFIX = '.uri'
-const RUN_TIMEOUT_MS = 15_000
 /** A reply worth scanning names an image file somewhere. */
 const IMAGE_MENTION = /\.(png|jpe?g|gif|webp)\b/i
 /** Indent of a reply's or a prompt's body under its bullet. */
@@ -126,11 +138,6 @@ type Terminal = Elements['terminal']
 
 // Per load: a reload evaluates the module again and starts these over; the
 // files on disk stay.
-let option: RendererOption = 'auto'
-let showPathsInReplies = true
-let steerToSendUserFile = true
-let showCaptions = true
-let scale = 1
 let isProbing = false
 const memo = new Map<string, Picture>()
 /** Per site (requestId): its Images' generation, and whether it is off screen. */
@@ -155,24 +162,10 @@ async function isRegularFile($: EngineInterface, path: string): Promise<boolean>
   return stat?.kind === 'file'
 }
 
-/** The children in flight, one after another: renders arrive in pairs within a millisecond. */
-let runs: Promise<unknown> = Promise.resolve()
-
-/**
- * Runs `argv` from `/`, queued behind the runs before it, with `stdin` when
- * given. A run the host refused is tried once more; null after a second
- * refusal, or when the command cannot start.
- */
-function run($: EngineInterface, argv: string[], stdin?: string): Promise<ProcessRunResult | null> {
-  const once = () => $.process.run(argv, { cwd: '/', stdin, timeoutMs: RUN_TIMEOUT_MS })
-  const done = runs.then(() => once().catch(once)).catch(() => null)
-  runs = done
-  return done
-}
-
 type Lookup = { found: string | null; running: Promise<string | null> | null }
 const magickLookup: Lookup = { found: null, running: null }
 const cacheLookup: Lookup = { found: null, running: null }
+const unameLookup: Lookup = { found: null, running: null }
 
 /**
  * A lookup kept once it finds its value; one that finds none, or throws, is
@@ -228,7 +221,7 @@ async function makeCacheDirectory($: EngineInterface): Promise<string | null> {
  */
 async function writeFile($: EngineInterface, path: string, text: string, how: 'whole' | 'append'): Promise<boolean> {
   const script = how === 'append' ? 'cat >> "$1"' : 'cat > "$1.$$" && mv -f "$1.$$" "$1"'
-  return (await run($, ['sh', '-c', script, 'sh', path], text))?.exitCode === 0
+  return (await run($, ['sh', '-c', script, 'sh', path], { stdin: text }))?.exitCode === 0
 }
 
 /** Says once per load, as a dim transcript line, that the cache took no write. */
@@ -305,8 +298,17 @@ async function cellPixels($: EngineInterface, columns: number | undefined): Prom
   return cell ?? DEFAULT_CELL_PIXELS
 }
 
-/** null only when the measure could not run; a terminal that reports no pixels is the default. */
+/**
+ * null only when the measure could not run; a terminal that reports no
+ * pixels, and a host the probe does not run on, is the default.
+ */
 async function measureCell($: EngineInterface): Promise<CellPixels | null> {
+  const kernel = await lookup(unameLookup, async () => {
+    const named = await run($, [...UNAME_ARGV])
+    return named?.exitCode === 0 ? named.stdout : null
+  })
+  if (kernel === null) return null
+  if (!probesCells(kernel)) return DEFAULT_CELL_PIXELS
   const ran = await run($, [...WINSIZE_ARGV])
   if (ran === null) return null
   return (ran.exitCode === 0 ? parseCellPixels(ran.stdout) : null) ?? DEFAULT_CELL_PIXELS
@@ -343,6 +345,7 @@ async function picture(
   renderer: Renderer,
   room: Room,
   cell: CellPixels,
+  scale: number,
 ): Promise<Outcome> {
   const tool = await findMagick($)
   if (tool === null) {
@@ -376,7 +379,7 @@ async function picture(
     let png: string | null = null
     if (await isOverSsh($)) {
       png = (await $.fs.read(out, { as: 'bytes' })).base64
-      if ((png.length * 3) / 4 > IMAGE_BYTES_MAX) return picture($, ref, 'halfblock', room, cell)
+      if ((png.length * 3) / 4 > IMAGE_BYTES_MAX) return picture($, ref, 'halfblock', room, cell, scale)
     }
     made = { kind: 'image', file: out, png, columns: fit.columns, rows: fit.rows, alt: `image: ${ref.alt}`, caption }
   } else {
@@ -429,14 +432,15 @@ async function pictures(
   cell: CellPixels,
   indent: number,
   generation: number,
+  options: Options,
 ): Promise<RenderNode | null> {
   const { Box, Image, Link, Raster, Text } = el
   const { value: capability = null } = await $.state.get(KITTY_GRAPHICS)
-  const renderer = chooseRenderer(option, capability)
+  const renderer = chooseRenderer(options.renderer, capability)
   const drawn: RenderNode[] = []
   let note: string | null = null
   for (const [n, ref] of refs.entries()) {
-    const made = await picture($, ref, renderer, room, cell)
+    const made = await picture($, ref, renderer, room, cell, options.scale)
     if (made === null) continue
     if (made.kind === 'note') {
       note = made.text
@@ -454,22 +458,20 @@ async function pictures(
       ) : (
         <Raster key={`images-${n}`} cells={made.cells} columns={made.columns} rows={made.rows} />
       )
-    if (!showCaptions) {
-      drawn.push(shown)
-      continue
-    }
     const { name, href, detail } = made.caption
+    const caption = (
+      <Box>
+        {href === null ? <Text dimColor>{name}</Text> : <Link href={href} label={name} />}
+        <Text dimColor>{` · ${detail}`}</Text>
+      </Box>
+    )
     drawn.push(
-      <Box key={`picture-${n}`} flexDirection="column">
-        {shown}
-        <Box>
-          {href === null ? <Text dimColor>{name}</Text> : <Link href={href} label={name} />}
-          <Text dimColor>{` · ${detail}`}</Text>
-        </Box>
+      <Box key={`${PICTURE_KEY}${n}`} flexDirection="column">
+        {options.showCaptions ? [shown, caption] : [shown]}
       </Box>,
     )
   }
-  if (drawn.length > 0 && needsProbe(option, capability)) {
+  if (drawn.length > 0 && needsProbe(options.renderer, capability)) {
     drawn.push(<Image key={PROBE_KEY} source={{ png: PROBE_PNG }} columns={1} rows={1} alt=" " />)
     probe($, requestId)
   }
@@ -482,7 +484,11 @@ async function pictures(
   )
 }
 
-/** The engine's row with the pictures for `refs` under it. */
+/**
+ * The row the mod was handed with the pictures for `refs` under it: inside
+ * the row, sized to the room within its border and padding, where the row is
+ * another plugin's frame; beneath it otherwise.
+ */
 async function withPictures(
   $: EngineInterface,
   el: Terminal,
@@ -493,12 +499,25 @@ async function withPictures(
   indent: number,
   onScreen: unknown,
 ): Promise<RenderElement> {
-  const room = roomAt(viewport, indent)
   const generation = generationFor(requestId, onScreen)
-  const cell = await cellPixels($, viewport?.columns)
-  const [own, drawn] = await Promise.all([row, pictures($, el, requestId, refs, room, cell, indent, generation)])
+  const [own, options, cell] = await Promise.all([row, freshOptions($), cellPixels($, viewport?.columns)])
+  const inset = frameInset(own)
+  const room = roomAt(viewport, indent + (inset ?? 0))
+  const drawn = await pictures($, el, requestId, refs, room, cell, indent, generation, options)
   if (drawn === null) return own
   const { Box } = el
+  if (inset !== null) {
+    const frame = own as Extract<RenderElement, { type: 'Box' }>
+    return {
+      ...frame,
+      children: [
+        <Box flexDirection="column">
+          {frame.children ?? []}
+          {drawn}
+        </Box>,
+      ],
+    }
+  }
   return (
     <Box flexDirection="column">
       {own}
@@ -507,30 +526,26 @@ async function withPictures(
   )
 }
 
-export const register: Register = (on, options) => {
-  option = parseRendererOption(options.renderer)
-  showPathsInReplies = options.showPathsInReplies !== false
-  steerToSendUserFile = options.steerToSendUserFile !== false
-  showCaptions = options.showCaptions !== false
-  scale = parseScale(options.scale)
+export const register: Register = on => {
+  on('session.start', async ($, e, next) => {
+    const started = await next(e)
+    if (e.isInteractive) await readOptions($)
+    return started
+  })
 
   // One section, added last on the session side, where the terminal draws.
-  if (steerToSendUserFile) {
-    on('prompt.compose', async ($, e, next) => {
-      const composed = await next(e)
-      if (!e.surfaces.includes('terminal')) return composed
-      const text = e.tools.includes('SendUserFile') ? STEER_WITH_SEND : STEER_WITHOUT_SEND
-      return { sections: [...composed.sections, { id: STEER_ID, text, scope: 'session' }] }
-    })
-  }
+  on('prompt.compose', async ($, e, next) => {
+    const composed = await next(e)
+    if (!currentOptions().steerToSendUserFile || !e.surfaces.includes('terminal')) return composed
+    const text = e.tools.includes('SendUserFile') ? STEER_WITH_SEND : STEER_WITHOUT_SEND
+    return { sections: [...composed.sections, { id: STEER_ID, text, scope: 'session' }] }
+  })
 
   // The render log sees each component before the drawing hooks below do.
-  for (const component of TRACED) {
-    on('ui.render', { component }, async ($, e, next) => {
-      await trace($, e).catch(() => undefined)
-      return next(e)
-    })
-  }
+  on('ui.render', { component: [...TRACED] }, async ($, e, next) => {
+    await trace($, e).catch(() => undefined)
+    return next(e)
+  })
 
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
     if (e.surface !== 'terminal' || e.props.isErrored) return next(e)
@@ -569,6 +584,7 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     if (e.surface !== 'terminal' || e.props.isSummary === true || !IMAGE_MENTION.test(e.props.text)) return next(e)
+    const { showPathsInReplies } = await freshOptions($)
     const named = replyImages(e.props.text, await $.env.get('HOME'), { bare: showPathsInReplies })
     // A path that names no file draws nothing, and says nothing.
     const existing = await takeExisting(named, path => isRegularFile($, path), REPLY_IMAGES_MAX)
@@ -578,21 +594,26 @@ export const register: Register = (on, options) => {
   })
 
   // A pasted image reaches the prompt row as base64 content; its bytes go to
-  // the cache as a data URI file, listed under the row's uuid.
+  // the cache as a data URI file, listed under the row's uuid. A failure
+  // leaves the row stored and its pictures undrawn.
   on('session.append', { door: 'prompt' }, async ($, e, next) => {
     const stored = await next(e)
     const refs = contentImages(e.message.content, e.uuid)
     if (refs.length === 0) return stored
-    const dir = await cacheDirectory($)
-    if (dir === null) return stored
-    const files: string[] = []
-    for (const ref of refs) {
-      const file = 'data' in ref ? await stash($, ref, dir) : null
-      if (file !== null) files.push(file)
+    try {
+      const dir = await cacheDirectory($)
+      if (dir === null) return stored
+      const files: string[] = []
+      for (const ref of refs) {
+        const file = 'data' in ref ? await stash($, ref, dir) : null
+        if (file !== null) files.push(file)
+      }
+      await $.state.set({ ...PASTED, id: stored.uuid ?? e.uuid }, files)
+    } catch {
+      // Nothing to undo: the row is stored.
     }
-    await $.state.set({ ...PASTED, id: stored.uuid ?? e.uuid }, files)
     return stored
-  }).catch(($, e, next) => next(e))
+  })
 
   on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
     if (e.surface !== 'terminal') return next(e)
