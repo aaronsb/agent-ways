@@ -15,6 +15,7 @@
 
 pub mod engine;
 mod help;
+pub mod items;
 mod maintain;
 mod object;
 mod property;

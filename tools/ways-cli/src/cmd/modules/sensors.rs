@@ -1,17 +1,15 @@
 //! A sensor as an item: one per sensor its files declare (ADR-403), read
 //! through attend's own loader ([`attend_config::sensors`]), with what only
-//! attend knows (a crate's version, whether a poll failed) from
-//! `attend sensor list --json`. The lowest file that defines a sensor is its
-//! origin, and each file above it extends it.
+//! attend knows (a crate's version, whether a poll failed, whether it runs
+//! the sensor's kind) from `attend sensor list --json`. The lowest file that
+//! defines a sensor is its origin, and each other file extends it.
 
 use std::time::{Duration, Instant};
 
-use agent_settings::item::{Family, How, Item, ItemKind, Origin, Override, SensorState};
-use agent_tui::tree::Card;
+use agent_settings::item::{Entry, ItemKind, SensorState};
 use attend_config::sensors::Loaded;
 use sensor_spec::Severity;
-
-use super::row;
+use serde::Serialize;
 
 /// One sensor as `attend sensor list --json` describes it.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -19,7 +17,7 @@ pub struct Described {
     pub name: String,
     /// `crate`, `command`, `mcp` or `ways`; empty for an invalid file.
     pub kind: String,
-    /// `builtin`, `user` or `project`: the highest layer with a file.
+    /// `builtin`, `user` or `project`: the lowest layer that defines it.
     pub origin: String,
     /// That layer's file.
     pub path: Option<String>,
@@ -28,17 +26,13 @@ pub struct Described {
     pub source: String,
     /// A crate's version.
     pub version: Option<String>,
-    /// `active`, `failed`, `off`, `invalid`, `refused`, `not hosted` or
-    /// `not compiled`.
+    /// A word of the sensor family's list.
     pub state: String,
     /// Why it is in that state.
     pub detail: Option<String>,
-    pub enabled: Option<bool>,
-    pub lane: Option<String>,
     pub description: String,
     pub interval: Option<u64>,
     pub min_interval: Option<u64>,
-    pub threshold: Option<f64>,
 }
 
 /// How long attend's answer is waited on.
@@ -119,122 +113,103 @@ pub fn parse(json: &str) -> Option<Vec<Described>> {
             version: text("version"),
             state: text("state").unwrap_or_default(),
             detail: text("detail"),
-            enabled: e.get("enabled").and_then(|v| v.as_bool()),
-            lane: text("lane"),
             description: text("description").unwrap_or_default(),
             interval: e.get("interval").and_then(|v| v.as_u64()),
             min_interval: e.get("min_interval").and_then(|v| v.as_u64()),
-            threshold: e.get("threshold").and_then(|v| v.as_f64()),
         }
     });
     Some(rows.collect())
 }
 
-/// A state as attend reports it, in the sensor family's words. attend's
-/// `failed`, `not hosted` and `not compiled` read `failing`, `missing` and
-/// `not-compiled`.
+/// A state as attend reports it, in the sensor family's words. An attend
+/// older than those words says `failed`, `not hosted` and `not compiled`,
+/// which read `failing`, `degraded` and `not-compiled`.
 fn state_of(word: &str) -> Option<SensorState> {
     Some(match word {
         "active" => SensorState::Active,
         "off" => SensorState::Off,
-        "not compiled" | "not-compiled" => SensorState::NotCompiled,
-        "not hosted" | "missing" => SensorState::Missing,
+        "not-compiled" | "not compiled" => SensorState::NotCompiled,
+        "missing" => SensorState::Missing,
         "refused" => SensorState::Refused,
-        "failed" | "failing" => SensorState::Failing,
+        "failing" | "failed" => SensorState::Failing,
         "invalid" => SensorState::Invalid,
+        "degraded" | "not hosted" => SensorState::Degraded,
+        "unknown" => SensorState::Unknown,
         _ => return None,
     })
 }
 
-fn kind_of(k: sensor_spec::Kind) -> ItemKind {
-    match k {
-        sensor_spec::Kind::Crate => ItemKind::Crate,
-        sensor_spec::Kind::Command => ItemKind::Command,
-        sensor_spec::Kind::Mcp => ItemKind::Mcp,
-        sensor_spec::Kind::Ways => ItemKind::Ways,
-    }
-}
-
-fn origin_of(o: sensor_spec::Origin) -> Origin {
-    match o {
-        sensor_spec::Origin::Builtin => Origin::Builtin,
-        sensor_spec::Origin::User => Origin::User,
-        sensor_spec::Origin::Project => Origin::Project,
-    }
-}
-
 /// The state of `l` as its files say, for an attend that did not describe
-/// it, and why. A sensor its files enable has no state until attend says
-/// whether it runs, which `unknown` says it has not.
-fn local_state(l: &Loaded, unknown: &str) -> (Option<SensorState>, Option<String>) {
+/// it, and why. A sensor its files enable is `unknown` until attend says
+/// whether it runs, and `why` says why attend did not.
+fn local_state(l: &Loaded, why: &str) -> (SensorState, Option<String>) {
     if l.is_refused() {
-        return (Some(SensorState::Refused), l.refused.clone());
+        return (SensorState::Refused, l.refused.clone());
     }
     let Some(spec) = &l.spec else {
-        let why = l.findings.iter().find(|f| f.problem.severity == Severity::Invalid).map(|f| f.problem.to_string());
-        return (Some(SensorState::Invalid), why);
+        let finding = l.findings.iter().find(|f| f.problem.severity == Severity::Invalid).map(|f| f.problem.to_string());
+        return (SensorState::Invalid, finding);
     };
     match spec.enabled {
-        true => (None, Some(format!("enabled; {unknown}"))),
-        false => (Some(SensorState::Off), None),
+        true => (SensorState::Unknown, Some(format!("enabled; {why}"))),
+        false => (SensorState::Off, None),
     }
 }
 
-/// The sensor `l`, its files layered, as a card: its kind, the file that
-/// defines it and each file that extends it, and its state, source and
-/// version as `attend` reports them. With no account from attend, the files
-/// alone say what they can: a crate's source is then unknown.
-pub fn of_sensor(l: &Loaded, attend: &Attend) -> Card {
+/// A sensor's own fields, after its descriptor (ADR-516 §2). The screens
+/// also draw its threshold and lane, which the CLI leaves to
+/// `attend sensor list`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SensorFields {
+    pub description: Option<String>,
+    /// Seconds between polls while quiet.
+    pub interval: Option<u64>,
+    /// Seconds between polls while things change.
+    pub min_interval: Option<u64>,
+    #[serde(skip)]
+    pub threshold: Option<f64>,
+    #[serde(skip)]
+    pub lane: Option<&'static str>,
+}
+
+/// The sensor `l`, its files layered: its kind, the file that defines it
+/// and each file that extends it, and its state, source and version as
+/// `attend` reports them. With no account from attend, the files alone say
+/// what they can: a crate's source is then unknown.
+pub fn item(l: &Loaded, attend: &Attend) -> Entry<SensorFields> {
     let spec = l.spec.as_ref();
     let d = attend.find(&l.name);
-    let kind = spec.map(|s| s.kind).or_else(|| d.and_then(|d| sensor_spec::Kind::parse(&d.kind))).map(kind_of);
-    // The files merged into it: every one when nothing else loads, else
-    // all but a refused project file.
-    let whole = l.is_refused();
-    let files: Vec<_> = l.files.iter().filter(|f| whole || !f.refused).collect();
-    let base = files.iter().position(|f| !f.switch).unwrap_or(0);
-    let (origin, path) = files.get(base).map_or((Origin::Builtin, None), |f| (origin_of(f.origin), f.path.clone()));
-    let overrides = files
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| *i != base)
-        .filter_map(|(_, f)| Some(Override { origin: origin_of(f.origin), how: How::Extends, path: f.path.clone()? }))
-        .collect();
-    let unknown = match attend {
+    let mut item = l.item();
+    if item.kind.is_none() {
+        item.kind = d.and_then(|d| sensor_spec::Kind::parse(&d.kind)).map(attend_config::sensors::item_kind);
+    }
+    let why = match attend {
         Attend::Absent => "attend absent",
         Attend::Unlisted => "attend did not list its sensors",
         Attend::Listed(_) => "attend does not list it",
     };
     let (state, detail) = match d {
         Some(d) => match state_of(&d.state) {
-            Some(s) => (Some(s), d.detail.clone()),
-            None => (None, Some(d.detail.clone().map_or(d.state.clone(), |why| format!("{} · {why}", d.state)))),
+            Some(s) => (s, d.detail.clone()),
+            None => (SensorState::Unknown, Some(d.detail.clone().map_or(d.state.clone(), |why| format!("{} · {why}", d.state)))),
         },
-        None => local_state(l, unknown),
+        None => local_state(l, why),
     };
-    let (source, version) = match (d, kind) {
+    let (source, version) = match (d, item.kind) {
         (Some(d), _) if !d.source.is_empty() => (Some(d.source.clone()), d.version.clone()),
         (None, Some(ItemKind::Crate) | None) => (None, None),
         _ => (spec.map(|s| s.source()), None),
     };
-    let summary = spec.map(|s| s.description.clone()).filter(|s| !s.is_empty()).or_else(|| d.map(|d| d.description.clone()).filter(|s| !s.is_empty()));
-    let mut rows = Vec::new();
-    if let Some(s) = spec {
-        let c = s.cadence;
-        rows.push(row("interval", format!("{}s quiet, {}s busy", c.interval, c.min_interval)));
-        rows.push(row("threshold", c.threshold.to_string()));
-        rows.push(row("lane", s.lane().as_str()));
-    }
-    let mut item = Item { kind, path, overrides, source, version, detail, ..Item::new(Family::Sensor, l.name.clone(), origin) };
-    if let Some(state) = state {
-        item = item.with_state(state);
-    }
-    Card {
-        title: l.name.clone(),
-        summary: summary.unwrap_or_else(|| kind.map_or("a sensor file".into(), |k| format!("a {} sensor", k.word()))),
-        item,
-        fold_state: false,
-        rows,
-    }
+    item.source = source;
+    item.version = version;
+    item.detail = detail;
+    let description = spec.map(|s| s.description.clone()).filter(|s| !s.is_empty()).or_else(|| d.map(|d| d.description.clone()).filter(|s| !s.is_empty()));
+    let fields = SensorFields {
+        description,
+        interval: spec.map(|s| s.cadence.interval),
+        min_interval: spec.map(|s| s.cadence.min_interval),
+        threshold: spec.map(|s| s.cadence.threshold),
+        lane: spec.map(|s| s.lane().as_str()),
+    };
+    Entry { item: item.with_state(state), fields }
 }
-

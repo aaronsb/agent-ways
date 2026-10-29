@@ -72,6 +72,7 @@ card-sensor | ways settings sensors --project $PS           | Down Down Down Dow
 card-extended-sensor | ways settings sensors --project $PS  | Down Down Down Down
 card-command-sensor | ways settings sensors --project $PS   | End
 card-mcp-sensor | ways settings sensors --project $PS       | End Up
+card-sensor-attend-absent | env PATH=$WORK/no-attend:/usr/bin:/bin ways settings sensors --project $PS | Down Down Down Down
 card-theme | ways settings theme --project $PS              | Down
 card-user-theme | ways settings theme --project $PS         | End
 card-replaced-theme | ways settings theme --project $PS     | Down Down
@@ -185,6 +186,13 @@ setup_card_command_sensor() {
 teardown_card_command_sensor() { rm -rf "$F/home/.config/attend/sensors"; }
 setup_card_mcp_sensor() { setup_card_command_sensor; }
 teardown_card_mcp_sensor() { teardown_card_command_sensor; }
+# A sensor with no `attend` on PATH: a directory holding `ways` and
+# `ways-agent` alone.
+setup_card_sensor_attend_absent() {
+  mkdir -p "$WORK/no-attend"
+  ln -sf "$BIN/ways" "$BIN/ways-agent" "$WORK/no-attend/"
+}
+teardown_card_sensor_attend_absent() { rm -rf "$WORK/no-attend"; }
 setup_card_user_theme() {
   local t=$F/home/.config/agent-ways/themes
   mkdir -p "$t"

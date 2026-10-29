@@ -45,7 +45,7 @@ impl Adapter for Choice {
         Some(crate::tree::Card {
             title: theme.label.clone(),
             summary: format!("{} · {source:?}", theme.name),
-            item: Item { state: Some(state.into()), ..Item::new(Family::Theme, theme.name.clone(), origin) },
+            item: Item::new(Family::Theme, theme.name.clone(), origin).with_state(state),
             fold_state: false,
             rows: vec![("saves to".into(), self.0.display().to_string()), ("shape".into(), shape.into())],
         })

@@ -146,7 +146,7 @@ pub fn run(
     vlog("hashing core ways");
     let global_hash = content_hash(&global_dir);
     log(&format!(
-        "Core ways: {global_count} (hash: {}...)",
+        "Builtin ways: {global_count} (hash: {}...)",
         &global_hash[..16.min(global_hash.len())]
     ));
 

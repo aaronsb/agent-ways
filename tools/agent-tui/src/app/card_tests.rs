@@ -16,7 +16,7 @@ fn card(path: Option<&str>) -> Card {
             kind: Some(ItemKind::Command),
             path: path.map(Into::into),
             source: Some("~/bin/dl.sh".into()),
-            state: Some(SensorState::Active.into()),
+            state: SensorState::Active.into(),
             ..Item::new(Family::Sensor, "downloads", Origin::User)
         },
         fold_state: false,
@@ -83,17 +83,30 @@ fn each_override_follows_the_origin_on_a_row_of_its_own() {
 }
 
 #[test]
-fn a_null_field_draws_no_row() {
+fn a_null_field_draws_no_row_and_the_state_always_draws() {
     let mut c = card(None);
     c.item.kind = None;
     c.item.source = None;
-    c.item.state = None;
-    let lines = text(&card_lines(&c, 60));
-    assert_eq!(lines[3], "origin    user");
-    assert!(!lines.iter().any(|l| ["kind", "source", "version", "state", "override"].iter().any(|r| l.starts_with(r))), "{lines:?}");
-    // A state not yet known shows what is known of it.
-    c.item.detail = Some("reading…".into());
-    assert!(text(&card_lines(&c, 60)).contains(&"state     reading…".to_string()));
+    c.item = c.item.with_state(SensorState::Unknown);
+    let lines = card_lines(&c, 60);
+    let t = text(&lines);
+    assert_eq!(t[3], "origin    user");
+    assert!(!t.iter().any(|l| ["kind", "source", "version", "override"].iter().any(|r| l.starts_with(r))), "{t:?}");
+    assert_eq!(t[4], "state     unknown");
+    assert_eq!(lines[4].spans[1].style, ratatui::style::Style::new(), "unknown reads plain");
+    // Why it is not known follows the word.
+    c.item.detail = Some("attend absent".into());
+    assert!(text(&card_lines(&c, 60)).contains(&"state     unknown · attend absent".to_string()));
+}
+
+#[test]
+fn a_degraded_sensor_reads_in_the_warn_tone() {
+    let mut c = card(None);
+    c.item = c.item.with_state(SensorState::Degraded);
+    c.item.detail = Some("kind command not yet hosted".into());
+    let lines = card_lines(&c, 60);
+    let at = text(&lines).iter().position(|l| l.starts_with("state")).unwrap();
+    assert_eq!((lines[at].spans[1].content.as_ref(), lines[at].spans[1].style), ("degraded", theme::warn()));
 }
 
 #[test]

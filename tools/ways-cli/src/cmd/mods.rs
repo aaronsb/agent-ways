@@ -123,8 +123,14 @@ fn item(r: &mut Report, line: &str, done: Mark) {
 }
 
 /// `ways manage mod list`: each shipped mod, its shipped version and wanted
-/// state, and its state in each enabled target.
-pub fn list() -> Result<()> {
+/// state, and its state in each enabled target. With `--json`, each mod's
+/// item (ADR-516 §5), then `wanted` and its `targets`.
+pub fn list(as_json: bool) -> Result<()> {
+    if as_json {
+        let entries: Vec<_> = overview().iter().map(|o| super::modules::mods::item(&o.m, Ok(o))).collect();
+        println!("{}", serde_json::to_string_pretty(&entries)?);
+        return Ok(());
+    }
     let src = source();
     let default_root = crate::paths::projection_root();
     let targets = enabled();
@@ -145,6 +151,17 @@ pub fn list() -> Result<()> {
     }
     r.print();
     Ok(())
+}
+
+/// Whether the user config wants `m`: its `mods.<name>.install`, else
+/// ways-judge while `gate.engine` is claude-code, else the default, which
+/// wants attend alone.
+pub fn wanted(m: &Mod) -> bool {
+    match ways_core::settings::mod_install_in_user(m.name) {
+        Some(v) => v,
+        None if *m == JUDGE && super::settings::engine::claude_code_chosen() => true,
+        None => m.name == attend_mod::ATTEND.name,
+    }
 }
 
 /// Where a mod's wanted state comes from in the user config.
@@ -542,6 +559,51 @@ pub fn status_lines(dir: &Path, config: &Path) -> Vec<String> {
         .collect()
 }
 
+/// One mod in one enabled target, as `ways status --json` prints it under
+/// the mod's name and `ways manage mod list --json` in its `targets`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct TargetState {
+    pub state: &'static str,
+    pub wanted: bool,
+    pub installed: Option<String>,
+    pub runs: Option<String>,
+    pub shipped: Option<String>,
+    pub enabled: Option<bool>,
+    /// Why a wanted, missing mod waits on the host.
+    pub pending: Option<String>,
+    pub removed: bool,
+    pub foreign: Vec<String>,
+    pub error: Option<String>,
+    /// Why a critical mod does not run here.
+    pub degraded: Option<&'static str>,
+}
+
+impl TargetState {
+    fn of(m: &Mod, v: &View, shipped: Option<&str>, claude_code: bool, default_root: &Path) -> TargetState {
+        TargetState {
+            state: v.state(shipped).word(),
+            wanted: v.wanted,
+            installed: v.installed.clone(),
+            runs: v.runs.clone(),
+            shipped: shipped.map(str::to_string),
+            enabled: v.enabled,
+            pending: if v.wanted && v.installed.is_none() { v.host.as_ref().err().cloned() } else { None },
+            removed: v.target_off || (v.wanted && v.installed.is_none() && v.recorded),
+            foreign: v.foreign.clone(),
+            error: v.error.clone(),
+            degraded: attention(m, v, claude_code, default_root).map(|a| a.why.word()),
+        }
+    }
+}
+
+/// A [`TargetState`] with the target it is in.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct InTarget {
+    pub dir: PathBuf,
+    #[serde(flatten)]
+    pub state: TargetState,
+}
+
 /// `ways status --json`'s mods of one enabled target, by name.
 pub fn status_json(dir: &Path, config: &Path) -> serde_json::Value {
     let src = source();
@@ -551,23 +613,8 @@ pub fn status_json(dir: &Path, config: &Path) -> serde_json::Value {
     let mut out = serde_json::Map::new();
     for (m, v) in attend_mod::views(&src, &t, None) {
         let shipped = attend_mod::shipped_version(&m, &src);
-        let degraded = attention(&m, &v, claude_code, &default_root).map(|a| a.why.word());
-        out.insert(
-            m.name.to_string(),
-            serde_json::json!({
-                "state": v.state(shipped.as_deref()).word(),
-                "wanted": v.wanted,
-                "installed": v.installed,
-                "runs": v.runs,
-                "shipped": shipped,
-                "enabled": v.enabled,
-                "pending": if v.wanted && v.installed.is_none() { v.host.as_ref().err().cloned() } else { None },
-                "removed": v.target_off || (v.wanted && v.installed.is_none() && v.recorded),
-                "foreign": v.foreign,
-                "error": v.error,
-                "degraded": degraded,
-            }),
-        );
+        let state = TargetState::of(&m, &v, shipped.as_deref(), claude_code, &default_root);
+        out.insert(m.name.to_string(), serde_json::to_value(state).unwrap_or_default());
     }
     serde_json::Value::Object(out)
 }
@@ -594,6 +641,10 @@ pub struct Overview {
     pub installed: Vec<String>,
     /// The marketplace folder the mod is read from.
     pub folder: PathBuf,
+    /// Whether the user config wants it ([`wanted`]).
+    pub wanted: bool,
+    /// Each enabled target's state of it, as `ways status` reads it.
+    pub targets: Vec<InTarget>,
 }
 
 /// A critical mod that does not run in one enabled target
@@ -666,6 +717,8 @@ pub fn overview() -> Vec<Overview> {
                 word: State::over(&here.iter().map(|v| v.state(shipped.as_deref())).collect::<Vec<_>>()),
                 rows: here.iter().map(|v| (shown(&v.dir), v.row(&m, shipped.as_deref()), v.describe(&m, shipped.as_deref()))).collect(),
                 attention: here.iter().filter_map(|v| attention(&m, v, claude_code, &default_root)).collect(),
+                targets: here.iter().map(|v| InTarget { dir: v.dir.clone(), state: TargetState::of(&m, v, shipped.as_deref(), claude_code, &default_root) }).collect(),
+                wanted: wanted(&m),
                 shipped,
                 older,
                 claude_code,

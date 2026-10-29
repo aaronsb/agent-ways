@@ -11,14 +11,19 @@ use agent_tui::tree::{Card, Node};
 use attend_config::sensors::{file_layer, SHIPPED};
 use sensor_spec::Origin as From;
 
-use super::card::shown;
+use super::card::{shown, to_card};
 use super::mods;
 use super::{Ctx, Ways};
 use crate::cmd::attend_mod::{Degraded, State, ATTEND, JUDGE, THEME};
-use crate::cmd::modules::mods::{of_mod, Unread};
+use crate::cmd::modules::mods::{item as mod_item, Unread};
 use crate::cmd::modules::sensors::{self, Attend, Described};
-use crate::cmd::modules::themes::of_theme;
+use crate::cmd::modules::themes;
 use crate::cmd::mods::{Attention, Overview};
+
+/// A mod's card, as the mod tab draws it.
+fn of_mod(m: &crate::cmd::attend_mod::Mod, o: Result<&Overview, Unread>) -> Card {
+    to_card(mod_item(m, o))
+}
 
 fn home(tag: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("ways-card-{tag}-{}", std::process::id()));
@@ -99,13 +104,13 @@ fn row<'a>(c: &'a Card, label: &str) -> Option<&'a str> {
     c.rows.iter().find(|(l, _)| l == label).map(|(_, v)| v.as_str())
 }
 
-/// A card's state word, or what it says while it has none.
+/// A card's state word.
 fn said(c: &Card) -> String {
-    c.item.state.map_or_else(|| c.item.detail.clone().unwrap_or_default(), |s| s.word().to_string())
+    c.item.state.word().to_string()
 }
 
-fn sensor(s: SensorState) -> Option<Word> {
-    Some(s.into())
+fn sensor(s: SensorState) -> Word {
+    s.into()
 }
 
 #[test]
@@ -116,7 +121,7 @@ fn a_shipped_crate_sensor_s_card_names_its_crate_version_and_cadence() {
     assert_eq!((git.origin, git.kind, git.source.as_deref(), git.version.as_deref()), (Origin::Builtin, Some(ItemKind::Crate), Some("attend"), Some("0.33.0")));
     assert_eq!((git.path.as_deref(), git.overrides.as_slice()), (None, &[][..]), "a shipped file read from the build has no path");
     assert_eq!(card(&tab, "git").summary, "tracks dirty files, branch changes, and upstream divergence");
-    assert_eq!((git.state, git.state.map(Word::tone)), (sensor(SensorState::Active), Some(agent_settings::item::Tone::Ok)));
+    assert_eq!((git.state, git.state.tone()), (sensor(SensorState::Active), agent_settings::item::Tone::Ok));
     assert_eq!(card(&tab, "git").rows, [("interval".into(), "30s quiet, 10s busy".into()), ("threshold".into(), "2".into()), ("lane".into(), "event".into())]);
     let peers = &card(&tab, "peers").item;
     assert_eq!((peers.source.as_deref(), peers.version.as_deref()), (Some("sensor-peers"), Some("0.6.0")));
@@ -130,7 +135,7 @@ fn a_shipped_crate_sensor_s_card_names_its_crate_version_and_cadence() {
     let example = &card(&tab, "example-command").item;
     assert_eq!((example.state, example.source.as_deref()), (sensor(SensorState::Off), Some("sh")));
     let keepwarm = &card(&tab, "keepwarm").item;
-    assert_eq!((keepwarm.source.as_deref(), keepwarm.state, keepwarm.detail.as_deref()), (None, None, Some("enabled; attend does not list it")));
+    assert_eq!((keepwarm.source.as_deref(), keepwarm.state, keepwarm.detail.as_deref()), (None, sensor(SensorState::Unknown), Some("enabled; attend does not list it")));
     let _ = std::fs::remove_dir_all(&h);
 }
 
@@ -160,8 +165,10 @@ fn a_user_command_sensor_is_listed_with_its_file_and_its_rows_write_that_file() 
     assert_eq!((i.origin, i.kind, i.version.as_deref(), i.overrides.as_slice()), (Origin::User, Some(ItemKind::Command), None, &[][..]));
     assert_eq!(i.path.as_deref(), Some(Path::new("~/.config/attend/sensors/weather.yaml")));
     assert_eq!((c.summary.as_str(), i.source.as_deref()), ("the wind at home", Some("curl")));
-    // attend's `not hosted` reads `missing`.
-    assert_eq!((i.state, i.detail.as_deref()), (sensor(SensorState::Missing), Some("kind command not yet hosted")));
+    // A kind attend does not run yet reads `degraded`, in the warn tone,
+    // with attend's reason.
+    assert_eq!((i.state, i.detail.as_deref()), (sensor(SensorState::Degraded), Some("kind command not yet hosted")));
+    assert_eq!(i.state.tone(), agent_settings::item::Tone::Warn);
     assert_eq!(row(c, "interval"), Some("120s quiet, 15s busy"));
     let interval = node.children.iter().find(|n| n.name == "interval").and_then(|n| n.setting.as_ref()).unwrap();
     assert_eq!(interval.value, "120");
@@ -171,7 +178,7 @@ fn a_user_command_sensor_is_listed_with_its_file_and_its_rows_write_that_file() 
     // With attend absent the file says what it can.
     let absent = sensors_tab(&h, || Attend::Absent, &layers);
     let c = &card(&absent, "weather").item;
-    assert_eq!((c.source.as_deref(), c.state, c.detail.as_deref()), (Some("curl"), None, Some("enabled; attend absent")));
+    assert_eq!((c.source.as_deref(), c.state, c.detail.as_deref()), (Some("curl"), sensor(SensorState::Unknown), Some("enabled; attend absent")));
     let _ = std::fs::remove_dir_all(&h);
 }
 
@@ -188,13 +195,19 @@ fn a_project_mcp_sensor_is_refused_until_the_project_is_trusted() {
     assert_eq!(c.source.as_deref(), Some("slack list_unread"));
     layers.push(attend_layer(&h, &format!("project_sensors: [{}]\n", h.join("proj").display())));
     let trusted = card(&sensors_tab(&h, || Attend::Absent, &layers), "inbox").item.clone();
-    assert_eq!((trusted.state, trusted.detail.as_deref()), (None, Some("enabled; attend absent")));
+    assert_eq!((trusted.state, trusted.detail.as_deref()), (sensor(SensorState::Unknown), Some("enabled; attend absent")));
+    // attend's own word for it, when it lists it.
+    let degraded = || Attend::Listed(vec![Described { name: "inbox".into(), kind: "mcp".into(), state: "degraded".into(), detail: Some("kind mcp not yet hosted".into()), ..Described::default() }]);
+    let listed = card(&sensors_tab(&h, degraded, &layers), "inbox").item.clone();
+    assert_eq!((listed.state, listed.detail.as_deref()), (sensor(SensorState::Degraded), Some("kind mcp not yet hosted")));
     let _ = std::fs::remove_dir_all(&h);
 }
 
+/// ADR-516's addendum: every other layer that changes an item is an
+/// override, in layer order, so a user's switch kept for a project's sensor
+/// lists ahead of the project origin, and switches it off.
 #[test]
-fn characterizes_a_user_switch_under_a_project_sensor() {
-    // ADR-516 §1 decision pending: whether a lower switch lists as an override
+fn a_user_switch_under_a_project_sensor_lists_ahead_of_its_origin() {
     let h = home("switch-under-project");
     let mut layers = with_user(&h, "inbox", "enabled: false\n");
     layers.push(project_file(&h, "inbox", "kind: mcp\nserver: slack\ntool: list_unread\n"));
@@ -202,7 +215,10 @@ fn characterizes_a_user_switch_under_a_project_sensor() {
     let tab = sensors_tab(&h, || Attend::Absent, &layers);
     let c = &card(&tab, "inbox").item;
     let user = Override { origin: Origin::User, how: How::Extends, path: "~/.config/attend/sensors/inbox.yaml".into() };
-    assert_eq!((c.origin, c.overrides.as_slice()), (Origin::Project, std::slice::from_ref(&user)));
+    assert_eq!((c.origin, c.path.as_deref(), c.overrides.as_slice()), (Origin::Project, Some(Path::new("~/proj/.claude/attend/sensors/inbox.yaml")), std::slice::from_ref(&user)));
+    assert_eq!(c.state, sensor(SensorState::Off), "the user's switch is in effect");
+    let v = serde_json::to_value(c).unwrap();
+    assert_eq!((v["origin"].as_str(), v["overrides"][0]["origin"].as_str(), v["overrides"][0]["how"].as_str()), (Some("project"), Some("user"), Some("extends")));
     let _ = std::fs::remove_dir_all(&h);
 }
 
@@ -237,12 +253,12 @@ fn a_file_over_a_shipped_sensor_reads_builtin_extended_by_it() {
 #[test]
 fn attend_s_json_reads_into_described_rows() {
     let rows = sensors::parse(
-        r#"[{"name":"git","kind":"crate","origin":"builtin","path":null,"state":"active","detail":null,"enabled":true,"lane":"event","description":"d","source":"attend","version":"0.33.0","interval":30,"min_interval":10,"threshold":2.0}]"#,
+        r#"[{"family":"sensor","name":"git","kind":"crate","origin":"builtin","path":null,"overrides":[],"source":"attend","version":"0.33.0","state":"active","detail":null,"description":"d","interval":30,"min_interval":10,"threshold":2.0,"lane":"event"}]"#,
     )
     .unwrap();
     assert_eq!((rows[0].source.as_str(), rows[0].version.as_deref(), rows[0].kind.as_str()), ("attend", Some("0.33.0"), "crate"));
-    assert_eq!((rows[0].interval, rows[0].min_interval, rows[0].threshold, rows[0].enabled), (Some(30), Some(10), Some(2.0), Some(true)));
-    assert_eq!((rows[0].lane.as_deref(), rows[0].path.as_deref()), (Some("event"), None));
+    assert_eq!((rows[0].interval, rows[0].min_interval, rows[0].description.as_str()), (Some(30), Some(10), "d"));
+    assert_eq!((rows[0].state.as_str(), rows[0].origin.as_str(), rows[0].path.as_deref()), ("active", "builtin", None));
     assert!(sensors::parse("not json").is_none() && sensors::parse("{}").is_none());
 }
 
@@ -257,6 +273,8 @@ fn overview(m: crate::cmd::attend_mod::Mod, word: State, installed: &[&str], att
         attention: attention.map(|why| Attention { dir: "~/.claude".into(), why, fix: "fix".into() }).into_iter().collect(),
         installed: installed.iter().map(|s| s.to_string()).collect(),
         folder: "/home/u/.local/share/agent-ways/plugins".into(),
+        wanted: true,
+        targets: vec![],
     }
 }
 
@@ -267,7 +285,7 @@ fn a_mod_s_card_reads_each_state_as_the_notice_does() {
     let folder = Path::new("/home/u/.local/share/agent-ways/plugins/attend");
     assert_eq!((m.kind, m.origin, m.path.as_deref()), (Some(ItemKind::Plugin), Origin::Builtin, Some(folder)));
     assert_eq!((m.source.as_deref(), m.version.as_deref()), (Some("attend@agent-ways"), Some("0.29.0")));
-    assert_eq!((m.state, m.detail.as_deref()), (Some(ModState::Converged.into()), None));
+    assert_eq!((m.state, m.detail.as_deref()), (ModState::Converged.into(), None));
     let row = |l: &str, v: &str| (l.to_string(), v.to_string());
     assert_eq!(c.rows, [row("installed", "0.29.0"), row("critical", "yes"), row("needs", "Claude Code 2.1.296 or later")]);
     let c = shown(c, Path::new("/home/u"));
@@ -280,7 +298,7 @@ fn a_mod_s_card_reads_each_state_as_the_notice_does() {
     ] {
         let o = overview(ATTEND, word, &[], Some(why));
         let m = of_mod(&ATTEND, Ok(&o)).item;
-        assert_eq!((m.state, m.detail), (Some(state.into()), Some(format!("critical: {said}"))));
+        assert_eq!((m.state, m.detail), (state.into(), Some(format!("critical: {said}"))));
         assert!(mods::notice(std::slice::from_ref(&o))[1].contains(said), "the card and the notice agree");
         assert_eq!(m.version.as_deref(), Some("0.29.0"));
     }
@@ -288,19 +306,26 @@ fn a_mod_s_card_reads_each_state_as_the_notice_does() {
     assert_eq!((said(&removed), row_of(&removed, "critical")), ("removed".to_string(), Some("no")));
     let older = Overview { older: true, ..overview(ATTEND, State::Drift, &["0.28.0"], None) };
     assert_eq!(of_mod(&ATTEND, Ok(&older)).item.detail.as_deref(), Some("an installed copy is older"));
-    let off = of_mod(&THEME, Ok(&overview(THEME, State::Off, &[], None))).item;
-    assert_eq!((off.state, off.detail.as_deref()), (Some(ModState::Off.into()), Some("not wanted")));
+    let unwanted = Overview { wanted: false, ..overview(THEME, State::Off, &[], None) };
+    let off = of_mod(&THEME, Ok(&unwanted)).item;
+    assert_eq!((off.state, off.detail.as_deref()), (ModState::Off.into(), Some("not wanted")));
+    // Off and wanted: no target read holds it, or the app does not ship it.
+    let detail = |o: Overview| of_mod(&THEME, Ok(&o)).item.detail;
+    assert_eq!(detail(overview(THEME, State::Off, &[], None)).as_deref(), Some("no enabled target holds it"));
+    assert_eq!(detail(Overview { shipped: None, ..overview(THEME, State::Off, &[], None) }).as_deref(), Some("not shipped in this app"));
 
     // ways-judge is critical only under the claude-code engine.
     let keyed = Overview { claude_code: false, ..overview(JUDGE, State::Off, &[], None) };
     assert_eq!(row_of(&of_mod(&JUDGE, Ok(&keyed)), "critical"), Some("no: only while gate.engine is claude-code"));
     assert_eq!(row_of(&of_mod(&JUDGE, Ok(&overview(JUDGE, State::Converged, &["0.29.0"], None))), "critical"), Some("yes: gate.engine is claude-code"));
 
-    // Unread: no state yet, and the detail says where the read stands.
+    // Unread: `unknown`, and the detail says where the read stands.
     let reading = of_mod(&ATTEND, Err(Unread::Reading)).item;
-    assert_eq!((reading.state, reading.detail.as_deref(), reading.source.as_deref(), reading.version.as_deref()), (None, Some("reading…"), Some("attend@agent-ways"), None));
-    assert_eq!(said(&of_mod(&ATTEND, Err(Unread::Failed))), "state read failed");
-    assert_eq!(said(&of_mod(&ATTEND, Err(Unread::Missing))), "state not read");
+    assert_eq!((reading.state, reading.detail.as_deref(), reading.source.as_deref(), reading.version.as_deref()), (ModState::Unknown.into(), Some("reading…"), Some("attend@agent-ways"), None));
+    let detail = |u| of_mod(&ATTEND, Err(u)).item.detail;
+    assert_eq!((detail(Unread::Failed).as_deref(), detail(Unread::Missing).as_deref()), (Some("state read failed"), Some("state not read")));
+    let unread = mod_item(&ATTEND, Err(Unread::Missing));
+    assert_eq!((unread.fields.wanted, unread.fields.targets.len()), (None, 0));
 }
 
 fn row_of<'a>(c: &'a Card, label: &str) -> Option<&'a str> {
@@ -312,26 +337,37 @@ fn a_theme_s_card_names_where_it_comes_from() {
     use agent_theme::Source;
     let nord = agent_theme::BUNDLED.iter().find(|(n, _)| *n == "nord").map(|(_, s)| agent_theme::parse(s).unwrap()).unwrap();
     let dir = Path::new("/home/u/.config/agent-ways/themes");
-    let bundled = of_theme(&nord, Source::Bundled, None, false, Some(dir), "plain");
+    let bundled = to_card(themes::item(&nord, Source::Bundled, None, false));
     let b = &bundled.item;
     assert_eq!((b.kind, b.origin, b.path.as_deref(), b.source.as_deref(), b.overrides.as_slice()), (None, Origin::Builtin, None, None, &[][..]));
-    assert_eq!((b.name.as_str(), b.state), ("nord", Some(ThemeState::Inactive.into())));
-    assert_eq!(bundled.rows, [("saves to".into(), dir.display().to_string()), ("shape".into(), "plain (a: shape cycles it)".into())]);
+    assert_eq!((b.name.as_str(), b.state, bundled.title.as_str()), ("nord", ThemeState::Inactive.into(), "Nord"));
     assert_eq!(bundled.summary, "nord · dark · background terminal");
+    // The theme tab adds where edits save and the shape it draws with.
+    let h = home("theme-rows");
+    let ways = Ways::new(ctx(&h, || Attend::Absent));
+    let tab = agent_tui::Adapter::theme_card(&ways, &nord, Source::Bundled, None, false, "plain").unwrap();
+    assert_eq!(tab.rows, [("saves to".into(), "none: nothing saves".into()), ("shape".into(), "plain (a: shape cycles it)".into())]);
+    let _ = std::fs::remove_dir_all(&h);
 
     let file = dir.join("mine.theme");
-    let user = shown(of_theme(&nord, Source::User, Some(&file), true, Some(dir), "plain"), Path::new("/home/u"));
+    let user = shown(to_card(themes::item(&nord, Source::User, Some(&file), true)), Path::new("/home/u"));
     assert_eq!((user.item.origin, user.item.path.as_deref()), (Origin::User, Some(Path::new("~/.config/agent-ways/themes/mine.theme"))));
-    assert_eq!(user.item.state, Some(ThemeState::Active.into()));
+    assert_eq!(user.item.state, ThemeState::Active.into());
     // The theme tab says it is a theme, and the state rides the origin line.
     assert!(user.fold_state);
 
     // A user file that takes a bundled theme's name is that builtin,
     // replaced by the file.
-    let over = of_theme(&nord, Source::Override, Some(&dir.join("nord.theme")), false, None, "plain");
+    let over = themes::item(&nord, Source::Override, Some(&dir.join("nord.theme")), false);
     let replaced = Override { origin: Origin::User, how: How::Replaces, path: dir.join("nord.theme") };
     assert_eq!((over.item.origin, over.item.path.as_deref(), over.item.overrides.as_slice()), (Origin::Builtin, None, std::slice::from_ref(&replaced)));
-    assert_eq!(over.rows[0], ("saves to".into(), "none: nothing saves".into()));
+    assert_eq!(over.fields.label.as_deref(), Some("Nord"));
+
+    // A file that does not load is the user's, invalid, with why.
+    let errors = [agent_theme::parse("not a theme").unwrap_err().remove(0)];
+    let broken = themes::rejected(&dir.join("broken.theme"), &errors);
+    assert_eq!((broken.item.name.as_str(), broken.item.origin, broken.item.state), ("broken", Origin::User, ThemeState::Invalid.into()));
+    assert_eq!((broken.item.detail.clone(), broken.fields.label.clone()), (Some(errors[0].to_string()), None));
 }
 
 #[test]
@@ -342,7 +378,7 @@ fn the_mod_tab_puts_the_card_on_each_mod_node() {
     let tab = Ways::new(c).build(&[]).into_iter().find(|t| t.name == "mod").unwrap();
     let names: Vec<(&str, String)> = tab.children.iter().map(|n| (n.name.as_str(), n.card.as_ref().map_or(String::new(), said))).collect();
     let want = |n: &'static str, s: &str| (n, s.to_string());
-    assert_eq!(names, [want("attend", "converged"), want("ways-judge", "state not read"), want("ways-theme", "state not read"), want("images", "state not read")]);
+    assert_eq!(names, [want("attend", "converged"), want("ways-judge", "unknown"), want("ways-theme", "unknown"), want("images", "unknown")]);
     let _ = std::fs::remove_dir_all(&h);
 }
 
@@ -376,7 +412,7 @@ fn an_attend_that_does_not_list_its_sensors_is_told_from_none() {
     let h = home("unlisted");
     let tab = sensors_tab(&h, || Attend::Unlisted, &shipped());
     let git = &card(&tab, "git").item;
-    assert_eq!((git.source.as_deref(), git.version.as_deref(), git.state), (None, None, None));
+    assert_eq!((git.source.as_deref(), git.version.as_deref(), git.state), (None, None, sensor(SensorState::Unknown)));
     assert_eq!(git.detail.as_deref(), Some("enabled; attend did not list its sensors"), "the file's own switch");
     let absent = sensors_tab(&h, || Attend::Absent, &shipped());
     assert_eq!(card(&absent, "git").item.detail.as_deref(), Some("enabled; attend absent"));

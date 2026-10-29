@@ -7,7 +7,7 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││origin    builtin                          │|
 |│                                                     ││kind      crate                            │|
-|│                                                     ││state     enabled; attend absent           │|
+|│                                                     ││state     unknown · enabled; attend absent │|
 |│                                                     ││interval  30s quiet, 5s busy               │|
 |│                                                     ││threshold 2                                │|
 |│                                                     ││lane      event                            │|
