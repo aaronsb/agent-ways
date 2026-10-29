@@ -85,11 +85,11 @@ pub struct Ctx {
 /// Whether the screens write `b` to the project's file: a project-scope key;
 /// when the screens were opened for a project, one the ways schema names for
 /// the screens to keep per project; or, `enabled` aside, a key of a sensor
-/// whose script a project's file sets, as `layers` resolve it.
+/// a project's sensor file defines, as `layers` resolve it.
 pub(super) fn writes_project(b: &agent_settings::Bound, ctx: &Ctx, layers: &[Layer]) -> bool {
     b.spec.scope == Scope::Project
         || (ctx.for_project && ways_core::settings::SCREENS_WRITE_PROJECT.contains(&b.spec.name))
-        || (b.spec.section == "attend.sensors" && b.bound.first().is_some_and(|n| crate::cmd::modules::sensors::writes_project(layers, n, b.spec.name)))
+        || (super::is_sensor_key(b) && b.bound.first().is_some_and(|n| sensors::writes_project(layers, n, b.spec.name)))
 }
 
 /// Whether `given` (the `--project`, else `CLAUDE_PROJECT_DIR`) opens the
@@ -250,6 +250,7 @@ impl Ways {
         // The cached model lists the model keys offer: `ways agent models`
         // run while the screen is open reloads the picker.
         paths.extend(model_caches());
+        paths.extend(sensors::dirs(self.ctx.project_layer()));
         if self.all_projects.get() {
             paths.extend(self.others().iter().map(|o| ways_core::settings::project_file(&o.project)));
         }
@@ -295,7 +296,7 @@ impl Ways {
         let v = b.spec.parse_cli(text, &live_layers(self.ctx.project_layer()), &b.bound).map_err(|m| format!("{key}: {m}"))?;
         let (path, _) = target_file(&b, None).map_err(|f| f.message)?;
         self.refuse_broken(&path)?;
-        write_file(&path, &[(b.path(), v)]).map(|_| ()).map_err(|f| self.short(&f.message))
+        write_file(&path, &[(super::file_key(&b), v)]).map(|_| ()).map_err(|f| self.short(&f.message))
     }
 
     /// A file that does not parse fails closed and takes no write from the
@@ -325,7 +326,10 @@ impl Ways {
             vec![Layer::read(&ways_core::settings::SCHEMA, "project", ways_core::settings::FILE, agent_settings::LayerScope::Project, file)]
         };
         for l in layers.iter_mut().filter(|l| l.path.as_deref() == Some(file)) {
-            *l = Layer::from_text(super::schema_of(l.file), &l.name.clone(), l.file, l.scope, Some(file), &text);
+            *l = match attend_config::sensors::file_at(file) {
+                Some((name, origin, _)) if l.file == attend_config::schema::SENSOR_FILE => attend_config::sensors::file_layer(&name, origin, Some(file), &text),
+                _ => Layer::from_text(super::schema_of(l.file), &l.name.clone(), l.file, l.scope, Some(file), &text),
+            };
         }
         for w in values {
             let Some(b) = self.reg.lookup(&w.store.key) else { continue };
@@ -454,7 +458,7 @@ impl Adapter for Ways {
             if path != file {
                 return Err(format!("{} is written to {}, not {}", w.store.key, path.display(), file.display()));
             }
-            edits.push((b.path(), v));
+            edits.push((super::file_key(&b), v));
         }
         // The wait for the lock is bounded: a writer that hangs holding it
         // must not freeze the screen's keys and signals.

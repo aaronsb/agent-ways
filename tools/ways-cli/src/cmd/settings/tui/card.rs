@@ -12,7 +12,7 @@ use super::build::{tilde, tilde_text};
 use crate::cmd::modules::{self, Health, Kind, Module};
 
 pub fn card(m: &Module, home: &Path) -> Card {
-    let theme = m.kind == Kind::Theme;
+    let theme = m.kind == Some(Kind::Theme);
     let at = m.path.as_deref().filter(|p| p.display().to_string() != m.source).map(|p| tilde(p, home));
     Card {
         title: m.name.clone(),
@@ -23,7 +23,7 @@ pub fn card(m: &Module, home: &Path) -> Card {
             modules::Origin::Project => Origin::Project,
         },
         at,
-        kind: (!theme).then(|| m.kind.word().to_string()),
+        kind: m.kind.filter(|_| !theme).map(|k| k.word().to_string()),
         source: tilde_text(&m.source, home),
         version: m.version.clone(),
         state: (

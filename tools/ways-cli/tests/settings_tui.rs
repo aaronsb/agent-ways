@@ -260,17 +260,22 @@ fn an_attend_change_applied_in_the_screens_writes_the_bytes_set_writes() {
         let (_, err, code) = cli.run(&["settings", "set", key, value]);
         assert_eq!(code, 0, "set {key}: {err}");
     }
-    // The same three on attend's two tabs, each reviewed and applied.
+    // The same three on attend's two tabs, each reviewed and applied:
+    // processes is the eighth sensor, in name order.
     let left = tui.drive(
         "attend",
         "/ text:base_cool enter down down enter e ctrl-u text:30 enter \
          / text:decay_per enter down down enter e ctrl-u text:0.07 enter w a \
-         6 down down down right down enter w a",
+         6 down down down down down down down right down enter w a",
     );
     assert_eq!(left, "nothing pending\n", "every change applied");
     let rel = ".config/attend/config.yaml";
     assert_eq!(tui.read(rel), cli.read(rel), "the screens wrote other bytes than `ways settings set`");
     assert!(tui.read(rel).unwrap().starts_with("# my attend settings\nengagement:\n  decay_per_minute: 0.07  # tuned\n"));
+    // The sensor's switch went to its own file, which both created alike.
+    let sensor = ".config/attend/sensors/processes.yaml";
+    assert_eq!(tui.read(sensor), cli.read(sensor), "the screens wrote other bytes than `ways settings set`");
+    assert!(tui.read(sensor).unwrap().ends_with("\nenabled: false\n"));
     // attend runs on what the screens wrote.
     let (out, _, _) = tui.run(&["settings", "get", "attend.sensors.processes.enabled"]);
     assert_eq!(out, "false\n");
@@ -279,13 +284,15 @@ fn an_attend_change_applied_in_the_screens_writes_the_bytes_set_writes() {
 #[test]
 fn an_unset_watch_list_shows_the_built_in_one_is_in_effect() {
     let fx = Fx::new();
-    // processes, opened: its watch list is unset, so the sensor's own applies.
-    let f = glyphs(&fx.snap("sensors", "down down down right", "100x30", "16"));
+    // processes, the eighth sensor, opened: its watch list is unset, so the
+    // sensor's own applies.
+    let open = "down down down down down down down right";
+    let f = glyphs(&fx.snap("sensors", open, "100x30", "16"));
     let row = f.lines().find(|l| l.contains(" watch ")).unwrap_or_default();
     assert!(row.contains("(built-in)") && !row.contains("[]"), "{f}");
-    // An explicit empty list replaces it, and shows as one.
-    fx.file(".config/attend/config.yaml", "sensors:\n  processes:\n    watch: []\n");
-    let f = glyphs(&fx.snap("sensors", "down down down right", "100x30", "16"));
+    // An explicit empty list in the user's file replaces it, and shows as one.
+    fx.file(".config/attend/sensors/processes.yaml", "watch: []\n");
+    let f = glyphs(&fx.snap("sensors", open, "100x30", "16"));
     assert!(f.lines().any(|l| l.contains(" watch ") && l.contains("[]")), "{f}");
 }
 
@@ -293,13 +300,13 @@ fn an_unset_watch_list_shows_the_built_in_one_is_in_effect() {
 fn a_finding_in_an_attend_file_marks_its_row_on_attend_s_tab() {
     let fx = Fx::new();
     fx.file(".config/attend/config.yaml", "engagement:\n  burst_window: 900\n");
-    fx.file("proj/.claude/attend.yaml", "sensors:\n  -processes:\n");
+    fx.file(".config/attend/sensors/odd.yaml", "kind: crate\ncrate: nope\n");
     let f = glyphs(&fx.snap("attend", "down", "120x30", "16"));
     assert!(f.contains("▾ findings") && f.contains("[attend.engagement] engagement.burst_window: unknown"), "{f}");
     assert!(f.contains("ways settings fix attend.engagement"), "the finding row queues fix:\n{f}");
-    assert!(!f.contains("-processes"), "a sensor's finding is on the sensors tab:\n{f}");
+    assert!(!f.contains("odd"), "a sensor file's finding is on the sensors tab:\n{f}");
     let f = glyphs(&fx.snap("sensors", "down", "160x30", "16"));
-    assert!(f.contains("'-processes' is not a sensor name"), "{f}");
+    assert!(f.contains("▾ findings") && f.contains("[attend.sensors] odd.crate !") && f.contains("odd.crate: names no compiled sensor"), "{f}");
     // fix, queued from the finding row, repairs the user file.
     let left = fx.drive("attend", "down a enter y w a");
     assert_eq!(left, "nothing pending\n");
@@ -739,9 +746,10 @@ fn golden_frames() {
         ("attend-browse", "attend", "down down right", "100x30"),
         ("attend-edit", "attend", "down down right down down e ctrl-u text:900", "100x30"),
         ("attend-review", "attend", "right down e ctrl-u text:30 enter w", "100x30"),
-        ("sensors-browse", "sensors", "down down down right", "100x30"),
-        ("sensors-edit", "sensors", "down right down down e ctrl-u text:45", "100x30"),
-        ("sensors-review", "sensors", "down down down right down enter w", "100x30"),
+        // The sensors in name order: git the fifth, processes the eighth.
+        ("sensors-browse", "sensors", "down down down down down down down right", "100x30"),
+        ("sensors-edit", "sensors", "down down down down right down down e ctrl-u text:45", "100x30"),
+        ("sensors-review", "sensors", "down down down down down down down right down enter w", "100x30"),
     ];
     for (name, tab, keys, size) in shots {
         g.check_text(name, &fx.snap(tab, keys, size, "16"));

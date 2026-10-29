@@ -1,28 +1,48 @@
-//! A sensor as a [`Module`]. A built-in is a crate of attend's, described
-//! by attend itself (`attend sensor list --json`).
+//! A sensor as a [`Module`]: one per sensor its files declare (ADR-403),
+//! read through attend's own loader ([`attend_config::sensors`]), with what
+//! only attend knows (a crate's version, whether a poll failed) from
+//! `attend sensor list --json`.
 
 use std::time::{Duration, Instant};
 
-use agent_settings::load::Layer;
+use attend_config::sensors::Loaded;
+use sensor_spec::Severity;
 
-use super::{Health, Kind, Module, Origin, State};
+use super::{Health, Kind, Module, Origin, Row, State};
 
 /// One sensor as `attend sensor list --json` describes it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Described {
     pub name: String,
-    /// `active`, `off`, `not compiled` or `missing`.
-    pub state: String,
-    pub description: String,
-    /// A built-in's `crate@version`, a script sensor's path.
+    /// `crate`, `command`, `mcp` or `ways`; empty for an invalid file.
+    pub kind: String,
+    /// `builtin`, `user` or `project`: the highest layer with a file.
+    pub origin: String,
+    /// That layer's file.
+    pub path: Option<String>,
+    /// A crate's package, a command's program, an mcp sensor's server and
+    /// tool.
     pub source: String,
+    /// A crate's version.
+    pub version: Option<String>,
+    /// `active`, `failed`, `off`, `invalid`, `refused`, `not hosted` or
+    /// `not compiled`.
+    pub state: String,
+    /// Why it is in that state.
+    pub detail: Option<String>,
+    pub enabled: Option<bool>,
+    pub lane: Option<String>,
+    pub description: String,
+    pub interval: Option<u64>,
+    pub min_interval: Option<u64>,
+    pub threshold: Option<f64>,
 }
 
 /// How long attend's answer is waited on.
 const ATTEND_WAIT: Duration = Duration::from_secs(2);
 
 /// What the `attend` on PATH said of its sensors.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Attend {
     /// Its own account.
     Listed(Vec<Described>),
@@ -85,33 +105,100 @@ pub fn described_by(mut cmd: std::process::Command) -> Attend {
 /// The JSON `attend sensor list --json` prints, as [`Described`] rows.
 pub fn parse(json: &str) -> Option<Vec<Described>> {
     let v: serde_json::Value = serde_json::from_str(json).ok()?;
-    let text = |e: &serde_json::Value, k: &str| e.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
-    Some(v.as_array()?.iter().map(|e| Described { name: text(e, "name"), state: text(e, "state"), description: text(e, "description"), source: text(e, "source") }).collect())
-}
-
-/// Whether the key `key` of the sensor `name` is written to the project's
-/// file. Sensor keys are written to sensor files (ADR-403), which no layer
-/// here reads, so none is.
-pub fn writes_project(_layers: &[Layer], _name: &str, _key: &str) -> bool {
-    false
-}
-
-/// The built-in sensor `name`: its crate and version as `attend` reports
-/// them.
-pub fn of_builtin_sensor(name: &str, attend: &Attend) -> Module {
-    let builtin = "built-in sensor".to_string();
-    let listed = State::new("listed", Health::Running);
-    let (summary, source, version, state) = match (attend, attend.find(name)) {
-        (Attend::Absent, _) => (builtin, "unknown: attend absent".to_string(), None, listed),
-        (Attend::Unlisted, _) => (builtin, "unknown: attend did not list its sensors".to_string(), None, listed),
-        (Attend::Listed(_), None) => (builtin, "unknown: attend does not list it".to_string(), None, listed),
-        (_, Some(d)) => {
-            let (krate, version) = match d.source.split_once('@') {
-                Some((c, v)) => (c.to_string(), Some(v.to_string())),
-                None => (d.source.clone(), None),
-            };
-            (d.description.clone(), krate, version, State::new(d.state.clone(), Health::Running))
+    let rows = v.as_array()?.iter().map(|e| {
+        let text = |k: &str| e.get(k).and_then(|v| v.as_str()).map(str::to_string);
+        Described {
+            name: text("name").unwrap_or_default(),
+            kind: text("kind").unwrap_or_default(),
+            origin: text("origin").unwrap_or_default(),
+            path: text("path"),
+            source: text("source").unwrap_or_default(),
+            version: text("version"),
+            state: text("state").unwrap_or_default(),
+            detail: text("detail"),
+            enabled: e.get("enabled").and_then(|v| v.as_bool()),
+            lane: text("lane"),
+            description: text("description").unwrap_or_default(),
+            interval: e.get("interval").and_then(|v| v.as_u64()),
+            min_interval: e.get("min_interval").and_then(|v| v.as_u64()),
+            threshold: e.get("threshold").and_then(|v| v.as_f64()),
         }
+    });
+    Some(rows.collect())
+}
+
+/// How a state attend reports stands.
+fn health(state: &str) -> Health {
+    match state {
+        "active" => Health::Running,
+        "off" => Health::Idle,
+        "failed" | "invalid" => Health::Broken,
+        _ => Health::Attention,
+    }
+}
+
+/// The state of `l` as its files say, for an attend that did not describe
+/// it, and why when the files say why.
+fn local_state(l: &Loaded) -> (State, Option<String>) {
+    if l.is_refused() {
+        return (State::new("refused", Health::Attention), l.refused.clone());
+    }
+    let Some(spec) = &l.spec else {
+        let why = l.findings.iter().find(|f| f.problem.severity == Severity::Invalid).map(|f| f.problem.to_string());
+        return (State::new("invalid", Health::Broken), why);
     };
-    Module { name: name.into(), summary, kind: Kind::Crate, origin: Origin::Builtin, path: None, source, version, state, rows: Vec::new() }
+    match spec.enabled {
+        true => (State::new("enabled", Health::Running), None),
+        false => (State::new("off", Health::Idle), None),
+    }
+}
+
+/// The sensor `l`, its files layered, as a card: its kind, the layer and
+/// file it comes from, and its state, source and version as `attend`
+/// reports them. With no account from attend, the files alone say what
+/// they can: a crate's source is then unknown.
+pub fn of_sensor(l: &Loaded, attend: &Attend) -> Module {
+    let spec = l.spec.as_ref();
+    let d = attend.find(&l.name);
+    let kind = spec.map(|s| Kind::from(s.kind)).or_else(|| d.and_then(|d| sensor_spec::Kind::parse(&d.kind)).map(Kind::from));
+    let unknown = match (attend, d) {
+        (_, Some(_)) => None,
+        (Attend::Absent, _) => Some("unknown: attend absent"),
+        (Attend::Unlisted, _) => Some("unknown: attend did not list its sensors"),
+        (Attend::Listed(_), None) => Some("unknown: attend does not list it"),
+    };
+    let (state, why) = match d {
+        Some(d) => (State::new(d.state.clone(), health(&d.state)), d.detail.clone()),
+        None => local_state(l),
+    };
+    let (source, version) = match (d, kind, unknown) {
+        (Some(d), _, _) if d.state == "not compiled" => ("not compiled into this attend".to_string(), None),
+        (Some(d), _, _) => (d.source.clone(), d.version.clone()),
+        (None, Some(Kind::Crate) | None, Some(u)) => (u.to_string(), None),
+        (None, _, _) => (spec.map(|s| s.source()).unwrap_or_default(), None),
+    };
+    let summary = spec.map(|s| s.description.clone()).filter(|s| !s.is_empty()).or_else(|| d.map(|d| d.description.clone()).filter(|s| !s.is_empty()));
+    let mut rows = Vec::new();
+    if let Some(s) = spec {
+        let c = s.cadence;
+        rows.push(Row::new("interval", format!("{}s quiet, {}s busy", c.interval, c.min_interval)));
+        rows.push(Row::new("threshold", c.threshold.to_string()));
+        rows.push(Row::new("lane", s.lane().as_str()));
+    }
+    rows.extend(why.map(|w| Row::new("why", w)));
+    Module {
+        name: l.name.clone(),
+        summary: summary.unwrap_or_else(|| kind.map_or("a sensor file".into(), |k| format!("a {} sensor", k.word()))),
+        kind,
+        origin: match l.origin() {
+            sensor_spec::Origin::Builtin => Origin::Builtin,
+            sensor_spec::Origin::User => Origin::User,
+            sensor_spec::Origin::Project => Origin::Project,
+        },
+        path: l.path().map(std::path::Path::to_path_buf),
+        source,
+        version,
+        state,
+        rows,
+    }
 }

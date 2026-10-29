@@ -54,7 +54,9 @@ fn roots(fx: &Fixture) -> Vec<Node> {
         sensors: || crate::cmd::modules::sensors::Attend::Absent,
         mods_background: false,
     };
-    Ways::new(ctx).build(&[])
+    // The shipped sensor files are a layer every install has.
+    let shipped: Vec<_> = attend_config::sensors::SHIPPED.iter().map(|(n, t)| attend_config::sensors::file_layer(n, sensor_spec::Origin::Builtin, None, t)).collect();
+    Ways::new(ctx).build(&shipped)
 }
 
 fn app_with(fx: &Fixture, env: Env) -> (App, Rc<RefCell<Vec<String>>>) {
@@ -379,7 +381,8 @@ fn the_tabs_are_the_registry_roots_with_a_toggle_per_corpus_way() {
     let r = roots(&fx);
     assert_eq!(r.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["ways", "matching", "gate", "install", "attend", "sensors", "mod"]);
     // attend's tabs: its sections, and a group per sensor on the next one.
-    assert_eq!(r[4].children.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["governor", "engagement", "cleanup", "chat"]);
+    // The loose key, attend.project_sensors, sits in the tab's settings.
+    assert_eq!(r[4].children.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["governor", "engagement", "cleanup", "chat", "settings"]);
     assert_eq!(r[5].children.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), attend_config::sensors::SHIPPED.iter().map(|(n, _)| *n).collect::<Vec<_>>());
     let project = r[0].children.iter().find(|n| n.name == "project").expect("the per-way toggles");
     let shipped = project.children.iter().find(|n| n.name == "shipped").expect("shipped ways in their own section");
@@ -1022,30 +1025,36 @@ fn each_tab_s_title_names_the_layers_it_writes() {
 
 // A sensor a project's file defines: the sensors tab names the project
 // among the files it writes, and an edit to the sensor lands in the
-// project's file, all but its switch. The fixture's user file sets the
-// sensor's interval, which the edit is checked against.
+// project's sensor file, all but its switch, which goes to the user's. An
+// edit that would make the sensor invalid writes nothing.
 #[test]
 #[ignore = "run by a_project_sensor_s_edit_lands_in_the_project_file"]
 fn child_writes_a_project_sensor_to_the_project() {
     let Some((mut ways, _)) = child() else { return };
-    let user = attend_config::user_path();
-    std::fs::create_dir_all(user.parent().unwrap()).unwrap();
-    std::fs::write(&user, "sensors:\n  disk:\n    interval: 90\n").unwrap();
-    let file = ways.ctx.project.join(".claude/attend.yaml");
+    let file = attend_config::sensors::project_dir(&ways.ctx.project).join("disk.yaml");
     std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-    std::fs::write(&file, "sensors:\n  disk:\n    script: .claude/sensors/disk.sh\n").unwrap();
+    std::fs::write(&file, "kind: command\nargv: [df, -h]\noutput: lines\ninterval: 90\n").unwrap();
     let title = ways.title("sensors").unwrap();
     assert!(title.contains("writes project+user"), "{title}");
     let interval = store("attend.sensors.disk.interval", &file);
     ways.write(&file, &[Write { store: &interval, value: "120", loaded: "90" }]).expect("the project's file takes it");
     let text = std::fs::read_to_string(&file).unwrap();
-    assert!(text.contains("interval: 120") && text.contains("script: .claude/sensors/disk.sh"), "{text}");
-    // Its switch is the operator's own: the project's file takes no write of it.
+    assert!(text.contains("interval: 120") && text.contains("argv: [df, -h]"), "{text}");
+    // A busy interval past the quiet one makes the sensor invalid.
+    let min = store("attend.sensors.disk.min_interval", &file);
+    let invalid = ways.write(&file, &[Write { store: &min, value: "500", loaded: "15" }]).unwrap_err();
+    assert!(invalid.contains("would make the sensor disk invalid") && invalid.contains("min_interval"), "{invalid}");
+    assert!(!std::fs::read_to_string(&file).unwrap().contains("min_interval"), "nothing written");
+    // Its switch is the operator's own: the project's file takes no write of
+    // it, and the user's sensor file does.
     let enabled = store("attend.sensors.disk.enabled", &file);
     let refused = ways.write(&file, &[Write { store: &enabled, value: "false", loaded: "true" }]).unwrap_err();
     assert!(refused.contains("is written to"), "{refused}");
     assert!(!std::fs::read_to_string(&file).unwrap().contains("enabled"), "nothing written");
-    assert_eq!(std::fs::read_to_string(&user).unwrap(), "sensors:\n  disk:\n    interval: 90\n", "the user file is untouched");
+    let user = attend_config::sensors::user_dir().join("disk.yaml");
+    let switch = store("attend.sensors.disk.enabled", &user);
+    ways.write(&user, &[Write { store: &switch, value: "false", loaded: "true" }]).expect("the user's file takes the switch");
+    assert!(std::fs::read_to_string(&user).unwrap().ends_with("enabled: false\n"));
 }
 
 #[test]

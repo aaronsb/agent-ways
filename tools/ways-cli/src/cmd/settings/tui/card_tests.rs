@@ -1,12 +1,14 @@
-//! Modules and their cards: built-in and script sensors (attend present
-//! and absent, a user's and a project's), a mod in each state, and a
-//! bundled, a user and an overriding theme.
+//! Modules and their cards: sensors of each kind and layer (attend present,
+//! absent and unlisted), a mod in each state, and a bundled, a user and an
+//! overriding theme.
 
 use std::path::{Path, PathBuf};
 
 use agent_settings::load::Layer;
 use agent_settings::LayerScope;
 use agent_tui::tree::{Card, Node, Origin, StateTone};
+use attend_config::sensors::{file_layer, SHIPPED};
+use sensor_spec::Origin as From;
 
 use super::mods;
 use super::{Ctx, Ways};
@@ -16,9 +18,6 @@ use crate::cmd::modules::sensors::{self, Attend, Described};
 use crate::cmd::modules::themes::of_theme;
 use crate::cmd::modules::{self, Health, Kind, Row};
 use crate::cmd::mods::{Attention, Overview};
-
-/// The shipped sensors.
-const BUILTINS: &[&str] = &["context", "disclosure", "git", "keepwarm", "peers", "processes"];
 
 fn home(tag: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("ways-card-{tag}-{}", std::process::id()));
@@ -46,29 +45,44 @@ fn ctx(home: &Path, sensors: fn() -> Attend) -> Ctx {
     }
 }
 
+/// The shipped sensor files, as the settings layers hold them.
+fn shipped() -> Vec<Layer> {
+    SHIPPED.iter().map(|(n, t)| file_layer(n, From::Builtin, None, t)).collect()
+}
+
+/// The shipped files with a user's file for `name` under `home`.
+fn with_user(home: &Path, name: &str, text: &str) -> Vec<Layer> {
+    let mut l = shipped();
+    l.push(file_layer(name, From::User, Some(&home.join(format!(".config/attend/sensors/{name}.yaml"))), text));
+    l
+}
+
+/// A project's sensor file for `name` under `home`.
+fn project_file(home: &Path, name: &str, text: &str) -> Layer {
+    file_layer(name, From::Project, Some(&home.join(format!("proj/.claude/attend/sensors/{name}.yaml"))), text)
+}
+
 /// attend's user file at `home`, holding `text`.
 fn attend_layer(home: &Path, text: &str) -> Layer {
     let path = home.join(".config/attend/config.yaml");
     Layer::from_text(&attend_config::schema::SCHEMA, "user", attend_config::schema::FILE, LayerScope::User, Some(&path), text)
 }
 
-/// The project's attend file under `home`, holding `text`.
-fn project_layer(home: &Path, text: &str) -> Layer {
-    let path = home.join("proj/.claude/attend.yaml");
-    Layer::from_text(&attend_config::schema::SCHEMA, "project", attend_config::schema::FILE, LayerScope::Project, Some(&path), text)
-}
-
 fn described() -> Attend {
-    let d = |name: &str, state: &str, description: &str, source: &str| Described {
+    let d = |name: &str, kind: &str, state: &str, source: &str, version: Option<&str>| Described {
         name: name.into(),
+        kind: kind.into(),
         state: state.into(),
-        description: description.into(),
         source: source.into(),
+        version: version.map(str::to_string),
+        ..Described::default()
     };
     Attend::Listed(vec![
-        d("git", "active", "tracks dirty files, branch changes, and upstream divergence", "attend@0.33.0"),
-        d("peers", "active", "discovers Claude Code sessions and reads peer signals", "sensor-peers@0.6.0"),
-        d("processes", "not compiled", "", ""),
+        d("git", "crate", "active", "attend", Some("0.33.0")),
+        d("peers", "crate", "active", "sensor-peers", Some("0.6.0")),
+        d("processes", "crate", "not compiled", "", None),
+        Described { detail: Some("kind command not yet hosted".into()), ..d("weather", "command", "not hosted", "curl", None) },
+        Described { detail: Some("poll timed out after 10 s".into()), ..d("context", "crate", "failed", "attend", Some("0.33.0")) },
     ])
 }
 
@@ -80,87 +94,119 @@ fn card<'a>(tab: &'a Node, name: &str) -> &'a Card {
     tab.children.iter().find(|n| n.name == name).and_then(|n| n.card.as_ref()).unwrap_or_else(|| panic!("no card on {name}"))
 }
 
+fn row<'a>(c: &'a Card, label: &str) -> Option<&'a str> {
+    c.rows.iter().find(|(l, _)| l == label).map(|(_, v)| v.as_str())
+}
+
 #[test]
-fn a_built_in_sensor_s_card_names_its_crate_and_version() {
+fn a_shipped_crate_sensor_s_card_names_its_crate_version_and_cadence() {
     let h = home("builtin");
-    let tab = sensors_tab(&h, described, &[]);
+    let tab = sensors_tab(&h, described, &shipped());
     let git = card(&tab, "git");
     assert_eq!((git.origin, git.kind.as_deref(), git.source.as_str(), git.version.as_deref()), (Origin::Builtin, Some("crate"), "attend", Some("0.33.0")));
     assert_eq!(git.summary, "tracks dirty files, branch changes, and upstream divergence");
-    assert_eq!(git.state, ("enabled".to_string(), StateTone::Ok));
-    assert_eq!(git.rows, [("interval".to_string(), "30s quiet, 10s busy".to_string()), ("threshold".to_string(), "2".to_string())]);
+    assert_eq!(git.state, ("active".to_string(), StateTone::Ok));
+    assert_eq!(git.rows, [("interval".into(), "30s quiet, 10s busy".into()), ("threshold".into(), "2".into()), ("lane".into(), "event".into())]);
     let peers = card(&tab, "peers");
     assert_eq!((peers.source.as_str(), peers.version.as_deref()), ("sensor-peers", Some("0.6.0")));
     assert_eq!(card(&tab, "processes").state, ("not compiled".to_string(), StateTone::Warn));
-    // One switched off in a file reads disabled.
-    let off = sensors_tab(&h, described, &[attend_layer(&h, "sensors:\n  git:\n    enabled: false\n")]);
-    assert_eq!(card(&off, "git").state, ("disabled".to_string(), StateTone::Plain));
+    assert_eq!(card(&tab, "processes").source, "not compiled into this attend");
+    let failed = card(&tab, "context");
+    assert_eq!((failed.state.clone(), row(failed, "why")), (("failed".to_string(), StateTone::Err), Some("poll timed out after 10 s")));
+    // The examples ship off. One attend does not list reads from its file:
+    // a command's program, where a crate's source is attend's to say.
+    let example = card(&tab, "example-command");
+    assert_eq!((example.state.clone(), example.source.as_str()), (("off".to_string(), StateTone::Plain), "sh"));
+    assert_eq!(card(&tab, "keepwarm").source, "unknown: attend does not list it");
     let _ = std::fs::remove_dir_all(&h);
 }
 
 #[test]
-fn no_script_sensor_configured_leaves_the_built_ins_alone() {
-    let h = home("none");
-    let tab = sensors_tab(&h, described, &[]);
+fn every_sensor_file_is_a_node_in_name_order_with_the_keys_each_sensor_has() {
+    let h = home("names");
+    let tab = sensors_tab(&h, || Attend::Absent, &shipped());
     let names: Vec<&str> = tab.children.iter().map(|n| n.name.as_str()).collect();
-    assert_eq!(names, BUILTINS);
+    let mut want: Vec<&str> = SHIPPED.iter().map(|(n, _)| *n).collect();
+    want.sort();
+    assert_eq!(names, want);
     assert!(tab.children.iter().all(|n| n.card.as_ref().is_some_and(|c| c.origin == Origin::Builtin)));
+    let rows = |name: &str| tab.children.iter().find(|n| n.name == name).unwrap().children.iter().map(|n| n.name.clone()).collect::<Vec<_>>();
+    assert_eq!(rows("git"), ["enabled", "interval", "min_interval", "threshold", "decay_threshold", "lane", "requires"]);
+    assert_eq!(rows("processes").last().map(String::as_str), Some("watch"), "a processes crate sensor takes a watch list");
     let _ = std::fs::remove_dir_all(&h);
 }
 
 #[test]
-fn a_script_sensor_is_listed_with_its_card_and_the_generic_rows() {
-    let h = home("script");
-    let script = h.join("dl.sh");
-    std::fs::write(&script, "#!/bin/sh\n").unwrap();
-    let layers = [attend_layer(&h, &format!("sensors:\n  downloads:\n    script: {}\n    interval: 120\n", script.display()))];
+fn a_user_command_sensor_is_listed_with_its_file_and_its_rows_write_that_file() {
+    let h = home("command");
+    let layers = with_user(&h, "weather", "description: the wind at home\nkind: command\nargv: [curl, -s, https://example.org]\noutput: json\ninterval: 120\n");
     let tab = sensors_tab(&h, described, &layers);
-    let names: Vec<&str> = tab.children.iter().map(|n| n.name.as_str()).collect();
-    assert_eq!(names.last(), Some(&"downloads"), "after the built-ins: {names:?}");
-    let node = tab.children.iter().find(|n| n.name == "downloads").unwrap();
+    let node = tab.children.iter().find(|n| n.name == "weather").unwrap();
     let c = node.card.as_ref().unwrap();
-    assert_eq!((c.origin, c.kind.as_deref(), c.version.as_deref()), (Origin::User, Some("script"), None));
-    assert_eq!(c.at.as_deref(), Some("~/.config/attend/config.yaml"));
-    assert_eq!(c.source, "~/dl.sh");
-    assert_eq!(c.state, ("enabled".to_string(), StateTone::Ok));
-    assert_eq!(c.rows[0], ("interval".to_string(), "120s quiet, 15s busy".to_string()));
-    // Its rows are the keys a built-in has, plus its script, each one the
-    // screens write.
-    let rows: Vec<&str> = node.children.iter().map(|n| n.name.as_str()).collect();
-    assert_eq!(rows, ["enabled", "interval", "min_interval", "threshold", "decay_threshold", "requires", "script"]);
+    assert_eq!((c.origin, c.kind.as_deref(), c.version.as_deref()), (Origin::User, Some("command"), None));
+    assert_eq!(c.at.as_deref(), Some("~/.config/attend/sensors/weather.yaml"));
+    assert_eq!((c.summary.as_str(), c.source.as_str()), ("the wind at home", "curl"));
+    assert_eq!(c.state, ("not hosted".to_string(), StateTone::Warn));
+    assert_eq!(row(c, "interval"), Some("120s quiet, 15s busy"));
+    assert_eq!(row(c, "why"), Some("kind command not yet hosted"));
     let interval = node.children.iter().find(|n| n.name == "interval").and_then(|n| n.setting.as_ref()).unwrap();
     assert_eq!(interval.value, "120");
-    assert!(interval.kind.editable() && interval.store.as_ref().is_some_and(|s| s.key == "attend.sensors.downloads.interval"), "{interval:?}");
+    let store = interval.store.as_ref().unwrap();
+    assert_eq!((store.key.as_str(), store.layer.as_str()), ("attend.sensors.weather.interval", "user"));
+    assert_eq!(store.file, attend_config::sensors::user_dir().join("weather.yaml"));
+    // With attend absent the file says what it can.
+    let absent = sensors_tab(&h, || Attend::Absent, &layers);
+    let c = card(&absent, "weather");
+    assert_eq!((c.source.as_str(), c.state.clone()), ("curl", ("enabled".to_string(), StateTone::Ok)));
     let _ = std::fs::remove_dir_all(&h);
 }
 
 #[test]
-fn a_script_sensor_is_listed_with_attend_absent() {
-    let h = home("absent");
-    let layers = [attend_layer(&h, "sensors:\n  mine:\n    script: .claude/sensors/mine.sh\n    enabled: false\n")];
+fn a_project_mcp_sensor_is_refused_until_the_project_is_trusted() {
+    let h = home("mcp");
+    let mut layers = shipped();
+    layers.push(project_file(&h, "inbox", "kind: mcp\nserver: slack\ntool: list_unread\n"));
     let tab = sensors_tab(&h, || Attend::Absent, &layers);
-    let c = card(&tab, "mine");
-    assert_eq!(c.origin, Origin::User);
-    assert_eq!(c.source, "~/proj/.claude/sensors/mine.sh", "a relative script is under the project");
-    assert_eq!(c.state, ("disabled · script not found".to_string(), StateTone::Warn));
-    let git = card(&tab, "git");
-    assert_eq!((git.origin, git.version.as_deref()), (Origin::Builtin, None));
-    assert_eq!(git.source, "unknown: attend absent");
+    let c = card(&tab, "inbox");
+    assert_eq!((c.origin, c.kind.as_deref(), c.at.as_deref()), (Origin::Project, Some("mcp"), Some("~/proj/.claude/attend/sensors/inbox.yaml")));
+    assert_eq!(c.state, ("refused".to_string(), StateTone::Warn));
+    assert!(row(c, "why").is_some_and(|w| w.contains("attend.project_sensors")), "{:?}", c.rows);
+    assert_eq!(c.source, "slack/list_unread");
+    layers.push(attend_layer(&h, &format!("project_sensors: [{}]\n", h.join("proj").display())));
+    assert_eq!(card(&sensors_tab(&h, || Attend::Absent, &layers), "inbox").state, ("enabled".to_string(), StateTone::Ok));
     let _ = std::fs::remove_dir_all(&h);
 }
 
 #[test]
-fn an_enabled_script_sensor_whose_script_is_gone_reads_as_broken() {
-    let h = home("gone");
-    let layers = [attend_layer(&h, "sensors:\n  mine:\n    script: /nonexistent/mine.sh\n")];
-    assert_eq!(card(&sensors_tab(&h, described, &layers), "mine").state, ("enabled · script not found".to_string(), StateTone::Err));
+fn an_invalid_sensor_file_shows_why_and_no_kind() {
+    let h = home("invalid");
+    let tab = sensors_tab(&h, || Attend::Absent, &with_user(&h, "broken", "interval: 30\n"));
+    let c = card(&tab, "broken");
+    assert_eq!((c.kind.as_deref(), c.state.clone()), (None, ("invalid".to_string(), StateTone::Err)));
+    assert!(row(c, "why").is_some_and(|w| w.contains("kind is required")), "{:?}", c.rows);
+    assert_eq!(c.summary, "a sensor file");
+    let _ = std::fs::remove_dir_all(&h);
+}
+
+#[test]
+fn a_user_override_of_a_shipped_sensor_reads_as_the_user_s() {
+    let h = home("override");
+    let tab = sensors_tab(&h, || Attend::Absent, &with_user(&h, "git", "enabled: false\n"));
+    let git = card(&tab, "git");
+    assert_eq!((git.origin, git.at.as_deref()), (Origin::User, Some("~/.config/attend/sensors/git.yaml")));
+    assert_eq!(git.state, ("off".to_string(), StateTone::Plain));
     let _ = std::fs::remove_dir_all(&h);
 }
 
 #[test]
 fn attend_s_json_reads_into_described_rows() {
-    let rows = sensors::parse(r#"[{"name":"git","kind":"builtin","state":"active","description":"d","source":"attend@0.33.0","interval":30,"min_interval":10}]"#).unwrap();
-    assert_eq!(rows[0].source, "attend@0.33.0");
+    let rows = sensors::parse(
+        r#"[{"name":"git","kind":"crate","origin":"builtin","path":null,"state":"active","detail":null,"enabled":true,"lane":"event","description":"d","source":"attend","version":"0.33.0","interval":30,"min_interval":10,"threshold":2.0}]"#,
+    )
+    .unwrap();
+    assert_eq!((rows[0].source.as_str(), rows[0].version.as_deref(), rows[0].kind.as_str()), ("attend", Some("0.33.0"), "crate"));
+    assert_eq!((rows[0].interval, rows[0].min_interval, rows[0].threshold, rows[0].enabled), (Some(30), Some(10), Some(2.0), Some(true)));
+    assert_eq!((rows[0].lane.as_deref(), rows[0].path.as_deref()), (Some("event"), None));
     assert!(sensors::parse("not json").is_none() && sensors::parse("{}").is_none());
 }
 
@@ -181,7 +227,7 @@ fn overview(m: crate::cmd::attend_mod::Mod, word: State, installed: &[&str], att
 #[test]
 fn a_mod_s_module_reads_each_state_as_the_notice_does() {
     let m = of_mod(&ATTEND, Ok(&overview(ATTEND, State::Converged, &["0.29.0"], None)));
-    assert_eq!((m.kind, m.origin, m.path.as_deref()), (Kind::Plugin, modules::Origin::Builtin, None));
+    assert_eq!((m.kind, m.origin, m.path.as_deref()), (Some(Kind::Plugin), modules::Origin::Builtin, None));
     assert_eq!(m.source, "attend@agent-ways · /home/u/.local/share/agent-ways/plugins");
     assert_eq!(m.version.as_deref(), Some("shipped 0.29.0 · installed 0.29.0"));
     assert_eq!(m.state, modules::State::new("installed · enabled", Health::Running));
@@ -221,7 +267,7 @@ fn a_theme_s_module_names_where_it_comes_from() {
     let nord = agent_theme::BUNDLED.iter().find(|(n, _)| *n == "nord").map(|(_, s)| agent_theme::parse(s).unwrap()).unwrap();
     let dir = Path::new("/home/u/.config/agent-ways/themes");
     let bundled = of_theme(&nord, Source::Bundled, None, false, Some(dir), "plain");
-    assert_eq!((bundled.kind, bundled.origin, bundled.path.as_deref(), bundled.source.as_str()), (Kind::Theme, modules::Origin::Builtin, None, "bundled (read-only)"));
+    assert_eq!((bundled.kind, bundled.origin, bundled.path.as_deref(), bundled.source.as_str()), (Some(Kind::Theme), modules::Origin::Builtin, None, "bundled (read-only)"));
     assert_eq!(bundled.state, modules::State::new("inactive", Health::Idle));
     assert_eq!(bundled.rows, [Row::new("saves to", dir.display().to_string()), Row::new("shape", "plain (a: shape cycles it)")]);
     assert_eq!(bundled.summary, "nord · dark · background terminal");
@@ -279,55 +325,37 @@ fn an_attend_that_does_not_list_its_sensors_is_told_from_none() {
     assert_eq!(sensors::described_by(stand_in("text")), Attend::Unlisted, "output that is no JSON");
 
     let h = home("unlisted");
-    let tab = sensors_tab(&h, || Attend::Unlisted, &[]);
+    let tab = sensors_tab(&h, || Attend::Unlisted, &shipped());
     let git = card(&tab, "git");
     assert_eq!((git.source.as_str(), git.version.as_deref()), ("unknown: attend did not list its sensors", None));
-    let absent = sensors_tab(&h, || Attend::Absent, &[]);
+    assert_eq!(git.state, ("enabled".to_string(), StateTone::Ok), "the file's own switch");
+    let absent = sensors_tab(&h, || Attend::Absent, &shipped());
     assert_eq!(card(&absent, "git").source, "unknown: attend absent");
     let _ = std::fs::remove_dir_all(&h);
 }
 
+/// A sensor a project's file defines is edited in that file, its switch
+/// aside; any other sensor, in the user's.
 #[test]
-fn a_script_under_a_built_in_s_name_shows_on_the_built_in_s_card() {
-    let h = home("collide");
-    let layers = [attend_layer(&h, "sensors:\n  git:\n    script: /opt/mine/git.sh\n")];
-    let tab = sensors_tab(&h, described, &layers);
-    let names: Vec<&str> = tab.children.iter().map(|n| n.name.as_str()).collect();
-    assert_eq!(names, BUILTINS, "listed once, as the built-in");
-    let git = card(&tab, "git");
-    assert_eq!((git.origin, git.kind.as_deref()), (Origin::Builtin, Some("crate")));
-    assert_eq!(git.state, ("enabled · a script named git also runs".to_string(), StateTone::Warn));
-    assert_eq!(git.rows.last(), Some(&("script".to_string(), "/opt/mine/git.sh".to_string())));
-    // Switched off, neither runs, and nothing collides.
-    let off = [attend_layer(&h, "sensors:\n  git:\n    script: /opt/mine/git.sh\n    enabled: false\n")];
-    assert_eq!(card(&sensors_tab(&h, described, &off), "git").state, ("disabled".to_string(), StateTone::Plain));
-    let _ = std::fs::remove_dir_all(&h);
-}
-
-/// A sensor a project's file defines is edited in that file; one the user
-/// defines, in the user's.
-#[test]
-fn a_script_sensor_s_rows_write_to_the_file_that_defines_it_but_its_switch() {
+fn a_project_sensor_s_rows_write_to_its_file_but_its_switch() {
     let h = home("writes");
-    let layers = [
-        attend_layer(&h, "sensors:\n  mine:\n    script: /opt/mine.sh\n"),
-        project_layer(&h, "sensors:\n  disk:\n    script: .claude/sensors/disk.sh\n  git:\n    script: .claude/sensors/git.sh\n"),
-    ];
+    let mut layers = with_user(&h, "mine", "kind: command\nargv: [/opt/mine]\noutput: lines\n");
+    layers.push(project_file(&h, "disk", "kind: command\nargv: [df]\noutput: lines\n"));
+    layers.push(project_file(&h, "git", "interval: 90\n"));
     let tab = sensors_tab(&h, described, &layers);
     let store = |sensor: &str, key: &str| {
         let node = tab.children.iter().find(|n| n.name == sensor).unwrap();
         node.children.iter().find(|n| n.name == key).and_then(|n| n.setting.as_ref()).and_then(|s| s.store.clone()).unwrap_or_else(|| panic!("{sensor}.{key} has no store"))
     };
     let disk = store("disk", "interval");
-    assert_eq!((disk.layer.as_str(), disk.file.as_path()), ("project", h.join("proj/.claude/attend.yaml").as_path()));
-    assert_eq!(store("disk", "script").layer, "project");
+    assert_eq!((disk.layer.as_str(), disk.file.as_path()), ("project", h.join("proj/.claude/attend/sensors/disk.yaml").as_path()));
     assert_eq!(store("disk", "threshold").layer, "project");
     // Switching a project's sensor off is each operator's own.
     assert_eq!(store("disk", "enabled").layer, "user");
     assert_eq!(store("mine", "interval").layer, "user");
-    // A script the project names under a built-in's name moves none of the
-    // built-in's keys into the shared file.
-    for key in ["enabled", "interval", "script"] {
+    // A project's override of a shipped sensor moves none of its keys into
+    // the shared file.
+    for key in ["enabled", "interval", "lane"] {
         assert_eq!(store("git", key).layer, "user", "git.{key}");
     }
     let _ = std::fs::remove_dir_all(&h);

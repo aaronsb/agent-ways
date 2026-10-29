@@ -7,8 +7,8 @@ agent-tui frame 100x30
 |│     enabled                   true                  ││                                           │|
 |│▌    interval                  600                   ││value    600                               │|
 |│ ▸ chat · setting              value                 ││type     integer 1..=604800 (Enter edits)  │|
-|│                                                     ││default  600                               │|
-|│                                                     ││from     default                           │|
+|│ ▾ settings                    value                 ││default  600                               │|
+|│     project_sensors           []                    ││from     default                           │|
 |│                                                     ││writes   ~/.config/attend/config.yaml      │|
 |│                                                     ││[attend.cleanup.interval]                  │|
 |│                                                     ││                                           │|
@@ -77,6 +77,8 @@ styles
   7  54-64  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
+  8   2-11  - - BOLD
+  8  32-36  - - DIM
   8  54-64  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM

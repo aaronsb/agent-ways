@@ -2147,6 +2147,7 @@ dependencies = [
  "memchr",
  "regex",
  "rust-stemmers",
+ "sensor-spec",
  "sensor-trait",
  "serde",
  "serde_json",

@@ -329,14 +329,14 @@ pub(super) fn insert(root: &mut Node, path: &[String], leaf: Node, docs: &dyn Fn
 }
 
 impl Ways {
-    /// The keys of a tab: every concrete key under it, and a toggle for each
-    /// way of the corpus on the ways tab.
+    /// The keys of a tab: every concrete key under it, each sensor's on the
+    /// sensors tab, and a toggle for each way of the corpus on the ways tab.
     fn keys_of(&self, tab: &Tab, layers: &[Layer], scopes: &BTreeMap<String, Located>) -> Vec<Bound> {
+        if tab.name == "sensors" {
+            return super::sensors::keys(&self.reg, layers);
+        }
         let mut keys = self.reg.concrete(tab.prefix, layers);
         keys.retain(|b| tab.holds(&b.name()));
-        if tab.name == "sensors" {
-            keys = super::sensors::with_user_keys(&self.reg, keys, layers, &self.ctx.project);
-        }
         if tab.name == "ways" {
             if let Some(b) = self.reg.lookup("ways.project.x") {
                 // The ways a file names and the ways of the corpus, as one
@@ -765,7 +765,12 @@ impl Ways {
                         (None, None) => "finding".into(),
                     }
                 };
-                let doc = if f.is_parse_failure() {
+                let sensor = l.file == attend_config::schema::SENSOR_FILE;
+                let doc = if sensor && f.is_parse_failure() {
+                    "Fix the file's syntax by hand. Until then its sensor is invalid, and nothing is written to it.".to_string()
+                } else if sensor {
+                    "attend reads the sensor's file this way; the sensor's card shows the state that leaves it in. Edit the file, or the field's row where it has one.".to_string()
+                } else if f.is_parse_failure() {
                     "Fix the file's syntax by hand. Until then it sets nothing, every switch in its scope is off, and nothing is written to it.".to_string()
                 } else if let (Some(r), false) = (&f.repair, f.fallback) {
                     format!("The value loads as written, but its list of choices does not name it. {r} repairs it; `fix` does not.")
