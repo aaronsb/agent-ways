@@ -1656,6 +1656,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sensor-spec"
+version = "0.1.0"
+dependencies = [
+ "serde_yaml",
+]
+
+[[package]]
 name = "sensor-trait"
 version = "0.6.0"
 dependencies = [

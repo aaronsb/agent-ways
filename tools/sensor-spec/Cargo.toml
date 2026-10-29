@@ -1,0 +1,9 @@
+[package]
+name = "sensor-spec"
+version = "0.1.0"
+edition = "2021"
+description = "The sensor spec (ADR-403): one YAML file per sensor, a shared core and a block per kind"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+serde_yaml = "0.9"
