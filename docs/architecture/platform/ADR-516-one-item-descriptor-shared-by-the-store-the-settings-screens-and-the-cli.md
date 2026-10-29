@@ -25,6 +25,15 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "user / project: anything agent-ways didn't ship reads user in your own config folder and project in a project's .claude/ folder"
+    via: session 2026-10-29, choice question on the origin words, selected from agent-written options
+    covers: [words]
+  - operator: aaronsb
+    said: "Stays builtin with an override row naming your file and whether it extends or replaces the built-in"
+    via: session 2026-10-29, choice question on a tweaked built-in, selected from agent-written options
+    covers: [tweaked]
 observable:
   - 'run: ways settings items --json lists every theme, mod, sensor, way and judge profile, and selecting origin != "builtin" leaves exactly the ones a person or a project added, each with its path'
   - 'see: a command sensor in a project''s .claude/attend/sensors/ reads origin project on its card, in attend sensor list and in ways settings items'
