@@ -4,8 +4,8 @@ agent-tui frame 100x30
 |│ ● terminal         dark                             ││Nord                                       │|
 |│   agent-ways       dark                             ││nord · dark · background terminal          │|
 |│▌  nord             dark                             ││                                           │|
-|│   catppuccin-mocha dark                             ││source    bundled (read-only)              │|
-|│   dracula          dark                             ││active    no (Enter)                       │|
+|│   catppuccin-mocha dark                             ││origin    builtin · inactive               │|
+|│   dracula          dark                             ││source    bundled (read-only)              │|
 |│   gruvbox-dark     dark                             ││saves to  ~/.config/agent-ways/themes      │|
 |│   tokyonight-night dark                             ││shape     plain (a: shape cycles it)       │|
 |│   paper            light                            ││waypoints theme  ● ◆ ■ ▲ ◉ ▶ ★ ◈ ♦ ▪       │|
@@ -91,6 +91,7 @@ styles
   5  40-40  - LightBlue -
   5  41-44  - Gray -
   5  54-65  - - DIM
+  5  66-72  LightBlue - -
   5  99-99  - - DIM
   6   0-0   - - DIM
   6  21-27  - - DIM

@@ -356,15 +356,6 @@ const KEYS: &[KeySpec] = &[
     },
 ];
 
-/// One line on the sensor `name`, for the settings screens.
-pub fn sensor_doc(name: &str) -> String {
-    if BUILTINS.contains(&name) {
-        format!("The built-in {name} sensor. `attend sensor list` shows what it watches and whether it runs.")
-    } else {
-        format!("{name}, a sensor of your own: it runs its script. `attend sensor list` shows whether the script resolves.")
-    }
-}
-
 fn name(bound: &[String]) -> &str {
     bound.first().map(String::as_str).unwrap_or("")
 }

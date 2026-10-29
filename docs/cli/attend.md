@@ -693,7 +693,11 @@ List sensors and audit their permissions (default: list)
 
 List all sensors — built-in and config-defined script sensors
 
-**Usage:** `attend sensor list`
+**Usage:** `attend sensor list [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Print the result as one JSON document
 
 
 

@@ -1,6 +1,8 @@
 // Ported from skins by hellosverre (MIT; LICENSE beside this file),
 // https://github.com/hellosverre/claude-skins at 985ad63, hooks/markdown.ts.
 
+import type { Command } from './commands'
+
 // Finds the tables and fenced code in a reply so they can be drawn as cards; the rest
 // stays markdown.
 
@@ -14,16 +16,39 @@ export type Code = { kind: 'code'; lang: string; code: string; raw: string }
 // `tex` is the formula alone; `raw` the block as written, kept for the copy button.
 export type Math = { kind: 'math'; tex: string; raw: string }
 
-export type Segment = { kind: 'text'; text: string } | Table | Code | Math
+// A command is a `! <command>` suggestion (commands.ts).
+export type Segment = { kind: 'text'; text: string } | Table | Code | Math | Command
 
 // Fences the desktop marks runnable with a Run button of its own. A card is an image and
 // cannot carry it, so these keep Claude Code's drawing there.
 const SHELLS = new Set(['bash', 'sh', 'shell', 'zsh', 'fish', 'console', 'powershell', 'pwsh', 'ps1', 'cmd', 'bat'])
 
-export const isShell = (segment: Segment): boolean => segment.kind === 'code' && SHELLS.has(segment.lang)
+export const isShellLang = (lang: string): boolean => SHELLS.has(lang)
+
+export const isShell = (segment: Segment): boolean => segment.kind === 'code' && isShellLang(segment.lang)
 
 const SEPARATOR = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/
-const FENCE = /^\s*(```|~~~)\s*([\w+#.-]*)/
+
+// A fence's opening line: its mark, three or more backticks or tildes, and its language.
+export const FENCE = /^\s*(`{3,}|~{3,})\s*([\w+#.-]*)/
+const FENCE_END = /^\s*(`{3,}|~{3,})\s*$/
+
+// The line that closes the fence opened on line `i`, or -1 while it is still streaming: a
+// line of the opening's mark alone, at least as long, so a ```` fence holds ``` lines and
+// a ~~~ fence holds ``` ones.
+export function fenceClose(lines: readonly string[], i: number): number {
+  const mark = FENCE.exec(lines[i] ?? '')?.[1]
+
+  if (mark === undefined) {
+    return -1
+  }
+
+  return lines.findIndex((other, j) => {
+    const end = j > i ? FENCE_END.exec(other)?.[1] : undefined
+
+    return end !== undefined && end[0] === mark[0] && end.length >= mark.length
+  })
+}
 
 // Inline emphasis and code ticks read as noise in a padded cell.
 const clean = (cell: string): string =>
@@ -59,7 +84,6 @@ export function splitReply(markdown: string, options: SplitOptions = SPLIT_ALL):
   const lines = markdown.split('\n')
   const segments: Segment[] = []
   let text: string[] = []
-  let inFence = false
 
   const flush = () => {
     if (text.join('\n').trim() !== '') {
@@ -75,7 +99,7 @@ export function splitReply(markdown: string, options: SplitOptions = SPLIT_ALL):
 
     const fence = FENCE.exec(line)
 
-    if (options.math === true && !inFence) {
+    if (options.math === true) {
       const formula = displayMath(lines, i, fence)
 
       if (formula !== null) {
@@ -86,35 +110,34 @@ export function splitReply(markdown: string, options: SplitOptions = SPLIT_ALL):
       }
     }
 
-    // A closed fence becomes a code segment; one still streaming stays text.
-    if (fence !== null && !inFence) {
-      const close = lines.findIndex((other, j) => j > i && FENCE.test(other) && other.trim().replace(/[`~]/g, '') === '')
+    // A closed fence becomes a code segment; one still streaming stays text, and so does
+    // every line after it.
+    if (fence !== null) {
+      const close = fenceClose(lines, i)
 
-      if (close !== -1) {
-        const lang = (fence[2] ?? '').toLowerCase()
-        const code = lines.slice(i + 1, close).join('\n')
+      if (close === -1) {
+        text.push(...lines.slice(i))
+        break
+      }
 
-        if (!options.fence(lang, code)) {
-          text.push(...lines.slice(i, close + 1))
-          i = close
-          continue
-        }
+      const lang = (fence[2] ?? '').toLowerCase()
+      const code = lines.slice(i + 1, close).join('\n')
 
-        flush()
-        segments.push({ kind: 'code', lang, code, raw: lines.slice(i, close + 1).join('\n') })
+      if (!options.fence(lang, code)) {
+        text.push(...lines.slice(i, close + 1))
         i = close
         continue
       }
 
-      inFence = true
-    } else if (fence !== null) {
-      inFence = false
+      flush()
+      segments.push({ kind: 'code', lang, code, raw: lines.slice(i, close + 1).join('\n') })
+      i = close
+      continue
     }
 
     const header = cellsOf(line)
     const isTable =
       options.tables &&
-      !inFence &&
       line.includes('|') &&
       SEPARATOR.test(next) &&
       header.length > 1 &&
@@ -156,7 +179,7 @@ function displayMath(lines: readonly string[], i: number, fence: RegExpExecArray
       return null
     }
 
-    const close = lines.findIndex((other, j) => j > i && FENCE.test(other) && other.trim().replace(/[`~]/g, '') === '')
+    const close = fenceClose(lines, i)
 
     return close === -1 ? null : { tex: lines.slice(i + 1, close).join('\n'), end: close }
   }

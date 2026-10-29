@@ -176,6 +176,8 @@ _Install, update, configuration, permissions, the CLI contract, testing_
 | [ADR-512](./platform/ADR-512-each-shipped-claude-code-mod-has-one-wanted-state-in-settings-under-mods-name-and-ways-manage-converges-every-target-to-it.md) | Each shipped Claude Code mod has one wanted state in settings, under mods.<name>, and ways manage converges every target to it | accepted |
 | [ADR-513](./platform/ADR-513-themes-reach-every-surface-with-gradients-glyphs-and-painted-report-bands.md) | Themes reach every surface, with gradients, glyphs and painted report bands | accepted |
 | [ADR-514](./platform/ADR-514-claude-code-follows-the-active-theme-through-the-ways-theme-mod-over-externalised-theme-layers.md) | Claude Code follows the active theme through the ways-theme mod, over externalised theme layers | accepted |
+| [ADR-515](./platform/ADR-515-item-origin-across-store-screens-and-cli-audited-2026-10-29.md) | How themes, mods, sensors, ways and judge profiles are kept and shown across the store, the settings screens and the CLI, audited 2026-10-29 | proposed |
+| [ADR-516](./platform/ADR-516-one-item-descriptor-shared-by-the-store-the-settings-screens-and-the-cli.md) | One item descriptor of kind, origin, path, source, version and state for themes, mods, sensors, ways and judge profiles, shared by the store, the settings screens and the CLI | accepted |
 
 ## Practice
 _The ways method, way authoring, the development loop_

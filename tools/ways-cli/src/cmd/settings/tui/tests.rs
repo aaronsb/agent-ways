@@ -51,6 +51,7 @@ fn roots(fx: &Fixture) -> Vec<Node> {
         claude: fx.root.join(".claude"),
         judge: || None,
         mods: Vec::new,
+        sensors: || crate::cmd::modules::sensors::Attend::Absent,
         mods_background: false,
     };
     Ways::new(ctx).build(&[])
@@ -471,6 +472,7 @@ fn a_switch_for_a_way_no_root_holds_is_listed_as_not_found() {
         claude: fx.root.join(".claude"),
         judge: || None,
         mods: Vec::new,
+        sensors: || crate::cmd::modules::sensors::Attend::Absent,
         mods_background: false,
     };
     let r = Ways::new(ctx).build(&[project]);
@@ -496,6 +498,7 @@ fn ctx_of(fx: &Fixture) -> Ctx {
         claude: fx.root.join(".claude"),
         judge: || None,
         mods: Vec::new,
+        sensors: || crate::cmd::modules::sensors::Attend::Absent,
         mods_background: false,
     }
 }
@@ -918,6 +921,7 @@ fn a_prefix_switch_shows_its_ways_off_and_is_not_listed_as_not_found() {
         claude: fx.root.join(".claude"),
         judge: || None,
         mods: Vec::new,
+        sensors: || crate::cmd::modules::sensors::Attend::Absent,
         mods_background: false,
     };
     let r = Ways::new(ctx).build(&[project]);
@@ -1016,6 +1020,39 @@ fn each_tab_s_title_names_the_layers_it_writes() {
     let _ = std::fs::remove_dir_all(in_fixture("child_titles_name_the_layers_written"));
 }
 
+// A sensor a project's file defines: the sensors tab names the project
+// among the files it writes, and an edit to the sensor lands in the
+// project's file, all but its switch. The fixture's user file sets the
+// sensor's interval, which the edit is checked against.
+#[test]
+#[ignore = "run by a_project_sensor_s_edit_lands_in_the_project_file"]
+fn child_writes_a_project_sensor_to_the_project() {
+    let Some((mut ways, _)) = child() else { return };
+    let user = attend_config::user_path();
+    std::fs::create_dir_all(user.parent().unwrap()).unwrap();
+    std::fs::write(&user, "sensors:\n  disk:\n    interval: 90\n").unwrap();
+    let file = ways.ctx.project.join(".claude/attend.yaml");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, "sensors:\n  disk:\n    script: .claude/sensors/disk.sh\n").unwrap();
+    let title = ways.title("sensors").unwrap();
+    assert!(title.contains("writes project+user"), "{title}");
+    let interval = store("attend.sensors.disk.interval", &file);
+    ways.write(&file, &[Write { store: &interval, value: "120", loaded: "90" }]).expect("the project's file takes it");
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains("interval: 120") && text.contains("script: .claude/sensors/disk.sh"), "{text}");
+    // Its switch is the operator's own: the project's file takes no write of it.
+    let enabled = store("attend.sensors.disk.enabled", &file);
+    let refused = ways.write(&file, &[Write { store: &enabled, value: "false", loaded: "true" }]).unwrap_err();
+    assert!(refused.contains("is written to"), "{refused}");
+    assert!(!std::fs::read_to_string(&file).unwrap().contains("enabled"), "nothing written");
+    assert_eq!(std::fs::read_to_string(&user).unwrap(), "sensors:\n  disk:\n    interval: 90\n", "the user file is untouched");
+}
+
+#[test]
+fn a_project_sensor_s_edit_lands_in_the_project_file() {
+    let _ = std::fs::remove_dir_all(in_fixture("child_writes_a_project_sensor_to_the_project"));
+}
+
 // A provider key pasted into its rotate entry, as the terminal sends a
 // bracketed paste with the line break it was copied with, reaches the
 // command's stdin. It runs in a fixture of its own, where a key file makes
@@ -1065,6 +1102,8 @@ fn mod_states() -> Vec<crate::cmd::mods::Overview> {
             older: false,
             claude_code: true,
             attention: vec![Attention { dir: "~/.claude-work".into(), why: Degraded::Missing, fix: "the install action, `ways manage mod install attend --commit`, installs it".into() }],
+            installed: vec!["0.29.0".into()],
+            folder: "/home/u/.local/share/agent-ways/plugins".into(),
         },
         crate::cmd::mods::Overview {
             m: JUDGE,
@@ -1078,6 +1117,8 @@ fn mod_states() -> Vec<crate::cmd::mods::Overview> {
                 why: Degraded::Pending,
                 fix: "upgrade Claude Code to 2.1.304 or later, then `ways manage update --commit`".into(),
             }],
+            installed: vec![],
+            folder: "/home/u/.local/share/agent-ways/plugins".into(),
         },
         crate::cmd::mods::Overview {
             m: THEME,
@@ -1087,6 +1128,8 @@ fn mod_states() -> Vec<crate::cmd::mods::Overview> {
             older: false,
             claude_code: true,
             attention: vec![],
+            installed: vec![],
+            folder: "/home/u/.local/share/agent-ways/plugins".into(),
         },
     ]
 }

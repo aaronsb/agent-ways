@@ -10,6 +10,7 @@ import { columnWidths, graphemes, isShell, tableArt, widthOf, wrapLines } from '
 import { diffFenceTag, diffRows, fenceDiff, newOnly } from './diff-fence'
 import { FOLD_CODE, FOLD_ROWS, foldButton, shownCount } from './fold'
 import type { Segment, Table } from './markdown'
+import type { Command } from './commands'
 import { splitBlocks } from './blocks'
 import { artRows, chartRows } from './chart-rows'
 import { chartArt } from './chart-art'
@@ -661,6 +662,27 @@ export function copyRow(look: Look, key: string, text: string, label = 'Copy') {
   )
 }
 
+// A `! <command>` suggestion as a block of its own: one Text the terminal wraps, nothing
+// beside it on any of its lines, so a selection over it crosses no border or margin glyph,
+// and Copy on the line under it, which copies the command whole. `gapBelow` keeps a blank
+// line under it for prose that follows, which opens on none; a frame opens on one.
+export function commandRows(look: Look, command: Command, key: string, gapBelow: boolean) {
+  const { Box, Text } = look.ui
+  const { palette } = look.skin
+
+  return (
+    <Box flexDirection="column" marginTop={1} marginBottom={gapBelow ? 1 : 0}>
+      <Text>
+        <Text color={palette.user} bold>
+          {command.command.slice(0, 1)}
+        </Text>
+        <Text color={palette.search}>{command.command.slice(1)}</Text>
+      </Text>
+      {copyRow(look, key, command.command)}
+    </Box>
+  )
+}
+
 // One block of a reply, `maxWidth` columns wide.
 function segmentRow(look: Look, segment: Segment, i: number, maxWidth: number, Svg?: SvgElement) {
   const { Box, Markdown } = look.ui
@@ -673,6 +695,10 @@ function segmentRow(look: Look, segment: Segment, i: number, maxWidth: number, S
     ) : (
       <Markdown text={text} />
     )
+  }
+
+  if (segment.kind === 'command') {
+    return commandRows(look, segment, `copy-${i}`, true)
   }
 
   if (segment.kind === 'math') {
@@ -888,25 +914,53 @@ function packRun(run: readonly Placed[], maxWidth: number, Svg?: SvgElement): Pl
   return [...rows, ...(row.length === 0 ? [] : [row])].map(placed => (placed.length === 1 ? placed.map(one => ({ ...one, width: maxWidth })) : placed))
 }
 
-// `whole`, the reply as Claude wrote it, adds a `copy reply` control under it.
-export function replyRows(look: Look, segments: readonly Segment[], maxWidth: number, Svg?: SvgElement, whole?: string) {
+/** A reply the frame would wrap, laid out in frames of its own around its commands
+ *  (replyRows): `frame` wraps a run of blocks, and takes `inset` columns of the width. */
+export type Framing = { inset: number; frame: (rows: ReturnType<Ui['Box']>) => ReturnType<Ui['Box']> }
+
+// `whole`, the reply as Claude wrote it, adds a `copy reply` control under it. With
+// `framing`, each run of blocks between `! <command>` suggestions sits in a frame of its
+// own and each command between the frames, the whole width wide, so no frame line runs
+// beside a line of it.
+export function replyRows(look: Look, segments: readonly Segment[], maxWidth: number, Svg?: SvgElement, whole?: string, framing?: Framing) {
   const { Box } = look.ui
+  const inner = maxWidth - (framing?.inset ?? 0)
+  const rows = layoutRows(look, segments, inner, Svg)
+  const drawn = (row: Placed[]) =>
+    row.length === 1 ? (
+      segmentRow(look, row[0]!.segment, row[0]!.i, inner, Svg)
+    ) : (
+      <Box flexDirection="row" columnGap={BESIDE_GAP} alignItems="flex-start">
+        {row.map(placed => (
+          <Box flexDirection="column" flexShrink={0} {...(Svg === undefined ? { width: placed.width } : { width: 0, flexGrow: 1 })}>
+            {segmentRow(look, placed.segment, placed.i, placed.width, Svg)}
+          </Box>
+        ))}
+      </Box>
+    )
+  const commandOf = (row: Placed[]) => (row.length === 1 && row[0]!.segment.kind === 'command' ? { command: row[0]!.segment, i: row[0]!.i } : null)
+  const runs: (Placed[][] | { command: Command; i: number })[] = []
+
+  for (const row of framing === undefined ? [] : rows) {
+    const command = commandOf(row)
+    const last = runs.at(-1)
+
+    if (command !== null) {
+      runs.push(command)
+    } else if (Array.isArray(last)) {
+      last.push(row)
+    } else {
+      runs.push([row])
+    }
+  }
 
   return (
     <Box flexDirection="column">
-      {layoutRows(look, segments, maxWidth, Svg).map(row =>
-        row.length === 1 ? (
-          segmentRow(look, row[0]!.segment, row[0]!.i, maxWidth, Svg)
-        ) : (
-          <Box flexDirection="row" columnGap={BESIDE_GAP} alignItems="flex-start">
-            {row.map(placed => (
-              <Box flexDirection="column" flexShrink={0} {...(Svg === undefined ? { width: placed.width } : { width: 0, flexGrow: 1 })}>
-                {segmentRow(look, placed.segment, placed.i, placed.width, Svg)}
-              </Box>
-            ))}
-          </Box>
-        ),
-      )}
+      {framing === undefined
+        ? rows.map(drawn)
+        : runs.map(run =>
+            Array.isArray(run) ? framing.frame(<Box flexDirection="column">{run.map(drawn)}</Box>) : commandRows(look, run.command, `copy-${run.i}`, false),
+          )}
       {whole === undefined ? '' : copyRow(look, 'copy-reply', whole, 'copy reply')}
     </Box>
   )
