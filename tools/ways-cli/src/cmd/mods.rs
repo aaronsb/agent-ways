@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
 
-use super::attend_mod::{self, Mod, State, Target, View, JUDGE, MODS};
+use super::attend_mod::{self, Degraded, Mod, State, Target, View, JUDGE, MODS};
 use super::lifecycle::{self, Mark, Mode, Report};
 
 /// The exit code of `check` with any problem, as `ways settings lint`.
@@ -494,11 +494,13 @@ pub fn status_lines(dir: &Path, config: &Path) -> Vec<String> {
     let src = source();
     let default_root = crate::paths::projection_root();
     let t = Target { dest_root: dir, default_root: &default_root, config };
+    let claude_code = super::settings::engine::claude_code_chosen();
     attend_mod::views(&src, &t, None)
         .into_iter()
         .map(|(m, v)| {
             let shipped = attend_mod::shipped_version(&m, &src);
-            format!("{} {}: {}", m.id, v.state(shipped.as_deref()).word(), v.describe(&m, shipped.as_deref()))
+            let flag = attention(&m, &v, claude_code, &default_root).map(|a| format!(" · ⚠ {} {}", m.name, a.why.word())).unwrap_or_default();
+            format!("{} {}: {}{flag}", m.id, v.state(shipped.as_deref()).word(), v.describe(&m, shipped.as_deref()))
         })
         .collect()
 }
@@ -508,9 +510,11 @@ pub fn status_json(dir: &Path, config: &Path) -> serde_json::Value {
     let src = source();
     let default_root = crate::paths::projection_root();
     let t = Target { dest_root: dir, default_root: &default_root, config };
+    let claude_code = super::settings::engine::claude_code_chosen();
     let mut out = serde_json::Map::new();
     for (m, v) in attend_mod::views(&src, &t, None) {
         let shipped = attend_mod::shipped_version(&m, &src);
+        let degraded = attention(&m, &v, claude_code, &default_root).map(|a| a.why.word());
         out.insert(
             m.name.to_string(),
             serde_json::json!({
@@ -524,6 +528,7 @@ pub fn status_json(dir: &Path, config: &Path) -> serde_json::Value {
                 "removed": v.target_off || (v.wanted && v.installed.is_none() && v.recorded),
                 "foreign": v.foreign,
                 "error": v.error,
+                "degraded": degraded,
             }),
         );
     }
@@ -545,6 +550,43 @@ pub struct Overview {
     pub older: bool,
     /// `gate.engine` names a keyless profile, which the ways-judge mod hosts.
     pub claude_code: bool,
+    /// Each enabled target where the mod is critical and does not run.
+    pub attention: Vec<Attention>,
+}
+
+/// A critical mod that does not run in one enabled target
+/// ([`View::degraded`]), as the settings screens flag it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Attention {
+    /// The target, as shown.
+    pub dir: String,
+    pub why: Degraded,
+    /// What brings it back: a command, or the mod tab's action.
+    pub fix: String,
+}
+
+/// `m` in the target `v` reads, where it is critical under the engine
+/// (`claude_code`: `gate.engine` is `claude-code`) and does not run.
+pub fn attention(m: &Mod, v: &View, claude_code: bool, default_root: &Path) -> Option<Attention> {
+    if !m.critical_under(claude_code) {
+        return None;
+    }
+    let why = v.degraded()?;
+    let name = m.name;
+    let fix = match why {
+        // Repair installs a wanted mod nobody removed; one kept out or
+        // removed by hand takes the install action.
+        Degraded::Missing if v.wanted && !v.recorded => "`ways manage repair --commit` installs it".to_string(),
+        Degraded::Missing => format!("the install action, `ways manage mod install {name} --commit`, installs it"),
+        Degraded::Disabled => format!("`{}` enables it", attend_mod::enable_command(m, &v.dir, default_root)),
+        Degraded::Pending if v.claude_code.is_some() => {
+            format!("upgrade Claude Code to {} or later, then `ways manage update --commit`", m.min_claude_code)
+        }
+        Degraded::Pending => {
+            format!("install Claude Code {} or later and put `claude` on PATH, then `ways manage mod repair {name} --commit`", m.min_claude_code)
+        }
+    };
+    Some(Attention { dir: shown(&v.dir), why, fix })
 }
 
 /// Every shipped mod over the enabled targets, read now: Claude Code's
@@ -566,6 +608,7 @@ pub fn overview() -> Vec<Overview> {
                 m,
                 word: State::over(&here.iter().map(|v| v.state(shipped.as_deref())).collect::<Vec<_>>()),
                 rows: here.iter().map(|v| (shown(&v.dir), v.row(&m, shipped.as_deref()), v.describe(&m, shipped.as_deref()))).collect(),
+                attention: here.iter().filter_map(|v| attention(&m, v, claude_code, &default_root)).collect(),
                 shipped,
                 older,
                 claude_code,
@@ -623,5 +666,47 @@ mod tests {
         let uninstall = would_theme(&THEME, &view(&dir, Some("1.45.0"), ok()), false, &src, &base);
         assert_eq!(uninstall, vec![r#"would change settings.json theme: "custom:ways" → "light""#.to_string(), format!("would remove {file}")]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A critical mod that is missing, disabled or pending needs the
+    /// operator, whatever its wanted state; ways-theme never does, and
+    /// ways-judge only under gate.engine: claude-code.
+    #[test]
+    fn a_critical_mod_that_does_not_run_needs_attention() {
+        let dir = Path::new("/home/u/.claude");
+        let ok = || Ok("2.1.310".to_string());
+        let why = |m: &Mod, v: &View, claude_code: bool| attention(m, v, claude_code, dir).map(|a| (a.why, a.fix));
+
+        assert_eq!(why(&ATTEND, &view(dir, Some("0.29.0"), ok()), true), None, "installed and enabled");
+
+        let missing = View { recorded: false, ..view(dir, None, ok()) };
+        let (d, fix) = why(&ATTEND, &missing, true).unwrap();
+        assert_eq!((d, fix.as_str()), (Degraded::Missing, "`ways manage repair --commit` installs it"));
+        // Removed by hand, then kept out by the install false repair wrote.
+        let kept_out = View { wanted: false, target_off: true, recorded: false, ..view(dir, None, ok()) };
+        let (d, fix) = why(&ATTEND, &kept_out, true).unwrap();
+        assert_eq!(d, Degraded::Missing);
+        assert!(fix.contains("ways manage mod install attend --commit"), "{fix}");
+
+        let disabled = View { enabled: Some(false), ..view(dir, Some("0.29.0"), ok()) };
+        let (d, fix) = why(&ATTEND, &disabled, true).unwrap();
+        assert_eq!(d, Degraded::Disabled);
+        assert!(fix.contains("claude plugin enable attend@agent-ways"), "{fix}");
+
+        let below = View { claude_code: Some("2.1.300".into()), ..view(dir, None, Err("Claude Code 2.1.300 is older than 2.1.304".into())) };
+        let (d, fix) = why(&JUDGE, &below, true).unwrap();
+        assert_eq!(d, Degraded::Pending);
+        assert!(fix.contains("upgrade Claude Code to 2.1.304"), "{fix}");
+        let no_claude = view(dir, None, Err("`claude` is not on PATH".into()));
+        assert!(why(&ATTEND, &no_claude, true).unwrap().1.contains("put `claude` on PATH"));
+
+        assert_eq!(why(&THEME, &missing, true), None, "ways-theme is not critical");
+        assert_eq!(why(&JUDGE, &missing, false), None, "ways-judge under a key engine is absent by design");
+        assert_eq!(why(&JUDGE, &missing, true).map(|w| w.0), Some(Degraded::Missing));
+
+        // Nothing is claimed when Claude Code could not tell, or when the
+        // operator's own plugin of the name stands in.
+        assert_eq!(why(&ATTEND, &View { error: Some("timed out".into()), ..missing.clone() }, true), None);
+        assert_eq!(why(&ATTEND, &View { foreign: vec!["attend@mine".into()], ..missing }, true), None);
     }
 }

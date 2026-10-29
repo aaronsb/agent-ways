@@ -60,17 +60,29 @@ pub struct Mod {
     pub label: &'static str,
     /// The oldest Claude Code checked to carry every call the mod makes.
     pub min_claude_code: &'static str,
+    /// The mod missing, disabled or pending in a target leaves agent-ways
+    /// degraded there, which the settings screens and `ways status` flag.
+    pub critical: bool,
+}
+
+impl Mod {
+    /// Whether the mod counts as critical now: ways-judge only while
+    /// `gate.engine` is `claude-code` (`claude_code`), the one engine it
+    /// hosts.
+    pub fn critical_under(&self, claude_code: bool) -> bool {
+        self.critical && (*self != JUDGE || claude_code)
+    }
 }
 
 /// attend's agent-facing driver (ADR-406): function-hook modules, which
 /// Claude Code 2.1.296 offers. Wanted by default.
-pub const ATTEND: Mod = Mod { name: "attend", id: "attend@agent-ways", label: "attend mod", min_claude_code: "2.1.296" };
+pub const ATTEND: Mod = Mod { name: "attend", id: "attend@agent-ways", label: "attend mod", min_claude_code: "2.1.296", critical: true };
 /// The judge host for the `claude-code` engine (ADR-708 §3). Beside the
 /// modules it calls `$.model.complete` and `$.process.spawn`; its floor is
 /// the oldest Claude Code checked to carry both (2.1.304's bundled mod
 /// types). An older release may carry them too, unchecked. Wanted while
 /// `gate.engine` is `claude-code` (ADR-512 item 4).
-pub const JUDGE: Mod = Mod { name: "ways-judge", id: "ways-judge@agent-ways", label: "ways-judge mod", min_claude_code: "2.1.304" };
+pub const JUDGE: Mod = Mod { name: "ways-judge", id: "ways-judge@agent-ways", label: "ways-judge mod", min_claude_code: "2.1.304", critical: true };
 
 /// Claude Code follows the active agent-ways theme (ADR-514). The mod calls
 /// `ui.render` on AssistantMessage, ToolUse, ToolGroup and TurnDuration,
@@ -80,7 +92,7 @@ pub const JUDGE: Mod = Mod { name: "ways-judge", id: "ways-judge@agent-ways", la
 /// mod's type declarations carrying every one of them; nothing older is
 /// claimed. As for every mod, the floor is checked when the mod is
 /// installed, so a Claude Code downgraded afterwards is not caught.
-pub const THEME: Mod = Mod { name: "ways-theme", id: "ways-theme@agent-ways", label: "ways-theme mod", min_claude_code: "2.1.309" };
+pub const THEME: Mod = Mod { name: "ways-theme", id: "ways-theme@agent-ways", label: "ways-theme mod", min_claude_code: "2.1.309", critical: false };
 
 /// Every mod the marketplace ships, in its order. Each has an entry under
 /// `mods` in the settings registry (ADR-512 item 1).
@@ -868,7 +880,44 @@ impl State {
     }
 }
 
+/// Why a critical mod leaves agent-ways degraded in one target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Degraded {
+    /// Claude Code does not list it.
+    Missing,
+    /// Installed and disabled in Claude Code.
+    Disabled,
+    /// Missing, and the host cannot run it yet.
+    Pending,
+}
+
+impl Degraded {
+    pub fn word(self) -> &'static str {
+        match self {
+            Degraded::Missing => "not installed",
+            Degraded::Disabled => "disabled",
+            Degraded::Pending => "pending",
+        }
+    }
+}
+
 impl View {
+    /// Why the mod does not run in this target, whatever its wanted state:
+    /// one kept out by `install: false` counts as missing. `None` when it
+    /// runs, when Claude Code's plugins could not be read, or when a plugin
+    /// of its name from another marketplace stands in for it.
+    pub fn degraded(&self) -> Option<Degraded> {
+        if self.error.is_some() || !self.foreign.is_empty() {
+            return None;
+        }
+        match (self.installed.is_some(), self.enabled) {
+            (true, Some(false)) => Some(Degraded::Disabled),
+            (true, _) => None,
+            (false, _) if self.host.is_err() => Some(Degraded::Pending),
+            (false, _) => Some(Degraded::Missing),
+        }
+    }
+
     pub fn state(&self, shipped: Option<&str>) -> State {
         if self.error.is_some() || !self.foreign.is_empty() || matches!(self.market, MarketState::Foreign(_)) {
             return State::Drift;

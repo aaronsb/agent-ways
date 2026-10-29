@@ -3,12 +3,14 @@
 //! holding a read-only row per enabled target, the mod's settings, and the
 //! `ways manage mod` commands as actions, on the node and on each target
 //! row. The state is read from [`crate::cmd::mods::overview`] off the
-//! screen's thread ([`super::modread`]).
+//! screen's thread ([`super::modread`]). A critical mod that does not run
+//! carries a finding on its node and on the row of each target where it
+//! does not run, and puts a notice on the bottom bar.
 
 use agent_tui::tree::{Action, Kind, Node, Setting};
 
 use crate::cmd::attend_mod::{State, JUDGE, MODS};
-use crate::cmd::mods::Overview;
+use crate::cmd::mods::{Attention, Overview};
 
 /// What the target rows' value column comes from.
 const SOURCE: &str = "Claude Code's plugin lists, repair's record";
@@ -68,13 +70,43 @@ pub fn nodes(root: &mut Node, states: &[Overview], read: &Read) {
             .iter()
             .map(|(dir, row, full)| {
                 let doc = format!("{full}\n\nThe {} in {dir}, read from Claude Code's plugin lists and repair's record of what it installed there.", o.m.label);
-                Node::leaf(dir.clone(), doc, Setting::new(Kind::ReadOnly, row.clone(), SOURCE))
+                let mut n = Node::leaf(dir.clone(), doc, Setting::new(Kind::ReadOnly, row.clone(), SOURCE))
                     .headed(format!("{} in {dir}", o.m.name))
-                    .with_actions(acts.clone())
+                    .with_actions(acts.clone());
+                n.finding = o.attention.iter().find(|a| a.dir == *dir).map(|a| attention_line(o, a, "here"));
+                n
             })
             .collect();
         g.children.splice(0..0, rows);
         g.actions = acts;
+        if g.finding.is_none() && !o.attention.is_empty() {
+            g.finding = Some(o.attention.iter().map(|a| attention_line(o, a, &format!("in {}", a.dir))).collect::<Vec<_>>().join("\n"));
+        }
+    }
+}
+
+/// A critical mod that does not run `at` a target, and its fix.
+fn attention_line(o: &Overview, a: &Attention, at: &str) -> String {
+    format!("{} is critical and {} {at}. Fix: {}.", o.m.name, a.why.word(), a.fix)
+}
+
+/// The bottom bar's notice of the critical mods that do not run, longest
+/// form first: one mod by name and why, several by count; the longer forms
+/// point at this tab, whose rows say why and how to fix it.
+pub fn notice(states: &[Overview]) -> Vec<String> {
+    let flagged: Vec<&Overview> = states.iter().filter(|o| !o.attention.is_empty()).collect();
+    let count = format!("{} mod{} degraded", flagged.len(), if flagged.len() == 1 { "" } else { "s" });
+    match flagged.as_slice() {
+        [] => Vec::new(),
+        [o] => {
+            let named = format!("{} {}", o.m.name, o.attention[0].why.word());
+            let mut forms = vec![format!("{named} · see mod tab"), named];
+            if count.len() < forms[1].len() {
+                forms.push(count);
+            }
+            forms
+        }
+        _ => vec![format!("{count} · see mod tab"), count],
     }
 }
 

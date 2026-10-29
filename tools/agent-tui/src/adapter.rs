@@ -125,6 +125,14 @@ pub trait Adapter {
         None
     }
 
+    /// What needs the operator's attention, which the bottom bar shows at
+    /// its right end after a warning mark: the forms of one notice, longest
+    /// first, of which the bar draws the first that fits beside its counts.
+    /// Asked as the bar is drawn; empty draws nothing.
+    fn notice(&self) -> Vec<String> {
+        Vec::new()
+    }
+
     /// Keep `name` as the active theme.
     fn choose_theme(&mut self, _name: &str) -> Result<(), String> {
         Err("this application keeps no theme choice".into())

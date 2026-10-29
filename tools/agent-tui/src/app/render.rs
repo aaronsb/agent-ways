@@ -32,6 +32,9 @@ pub(super) fn width(spans: &[Span]) -> u16 {
     spans.iter().map(|s| s.width() as u16).sum()
 }
 
+/// The mark before the bottom bar's notice ([`crate::Adapter::notice`]).
+const NOTICE_MARK: &str = "⚠";
+
 /// Buttons on one line, each on its ground and recorded as a click target.
 /// `focus` marks the one Enter would press.
 ///
@@ -461,6 +464,7 @@ impl App {
         let msg = self.msg_span();
         let mut spans: Vec<Span> = Vec::new();
         let mut cta = None;
+        let mut notice = None;
         let mut modal = self.modal().and_then(|m| m.status(self));
         match &self.mode {
             _ if modal.is_some() => spans.extend(modal.take().into_iter().flatten()),
@@ -549,14 +553,20 @@ impl App {
                 } else {
                     spans.push(hint(if self.mouse { "mouse on (m)" } else { "mouse off (m)" }));
                 }
+                // The adapter's notice sits left of the call to action in
+                // the first of its forms that fits clear of the counts, or
+                // not at all; the message and the actions take what is left.
+                let beside = area.width.saturating_sub(cta.as_ref().map_or(0, |c| width(c))).saturating_sub(width(&spans));
+                notice = self.notice_span(beside);
                 // A row's actions take the place of the opening hint when
                 // both do not fit; a message said since comes first. It is
-                // cut in the middle to the room left of the call to action,
-                // keeping its end, and goes when too little is left to read.
-                // The opening hint is cut at its tail instead: its keys
-                // lead, and `Tab 1-9` must not be the part cut away.
+                // cut in the middle to the room left of the call to action
+                // and the notice, keeping its end, and goes when too little
+                // is left to read. The opening hint is cut at its tail
+                // instead: its keys lead, and `Tab 1-9` must not be the part
+                // cut away.
                 let here = self.footer_actions();
-                let room = area.width.saturating_sub(cta.as_ref().map_or(0, |c| width(c)));
+                let room = area.width.saturating_sub(cta.as_ref().map_or(0, |c| width(c))).saturating_sub(notice.as_ref().map_or(0, |n| n.width() as u16));
                 let fits = |here: &[Span]| width(&spans) + msg.width() as u16 + width(&[theme::sep()]) + width(here) <= room;
                 if self.msg != crate::app::HINT || here.as_deref().is_none_or(fits) {
                     // Two columns lead the message; it needs eight past them.
@@ -566,9 +576,21 @@ impl App {
                         spans.push(Span::styled(format!("  {cut}"), msg.style));
                     }
                 }
+                // The actions keep the pairs that fit whole in what is left.
                 if let Some(here) = here {
-                    spans.push(theme::sep());
-                    spans.extend(here);
+                    let mut kept: Vec<Span> = Vec::new();
+                    for pair in here.split(|s| s.content == " · ") {
+                        let dot = if kept.is_empty() { None } else { Some(Span::styled(" · ", theme::hint())) };
+                        if width(&spans) + width(&[theme::sep()]) + width(&kept) + dot.as_ref().map_or(0, |d| d.width() as u16) + width(pair) > room {
+                            break;
+                        }
+                        kept.extend(dot);
+                        kept.extend(pair.iter().cloned());
+                    }
+                    if !kept.is_empty() {
+                        spans.push(theme::sep());
+                        spans.extend(kept);
+                    }
                 }
             }
         }
@@ -583,7 +605,21 @@ impl App {
             }
             None => area,
         };
+        let left = match notice {
+            Some(n) => {
+                let w = (n.width() as u16).min(left.width);
+                f.render_widget(Paragraph::new(Line::from(n)), Rect { x: left.x + left.width - w, width: w, ..left });
+                Rect { width: left.width - w, ..left }
+            }
+            None => left,
+        };
         f.render_widget(Paragraph::new(Line::from(spans)), left);
+    }
+
+    /// The adapter's notice in its first form narrower than `room`, after
+    /// the warning mark, in the warning colour.
+    fn notice_span(&self, room: u16) -> Option<Span<'static>> {
+        self.adapter.notice().into_iter().map(|form| Span::styled(format!(" {NOTICE_MARK} {form} "), theme::warn())).find(|s| (s.width() as u16) < room)
     }
 
     /// The message on the bottom bar, after two columns; a rejection is
