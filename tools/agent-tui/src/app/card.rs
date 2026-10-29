@@ -8,11 +8,11 @@ use super::review::fields;
 use super::theme;
 use crate::tree::{Card, Origin, StateTone};
 
-/// The origin word's role: builtin and user apart at a glance.
+/// The origin word's role: builtin apart from what was added, at a glance.
 pub(super) fn origin_style(o: Origin) -> Style {
     match o {
         Origin::Builtin => theme::info(),
-        Origin::User => theme::non_default().add_modifier(Modifier::BOLD),
+        Origin::User | Origin::Project => theme::non_default().add_modifier(Modifier::BOLD),
     }
 }
 

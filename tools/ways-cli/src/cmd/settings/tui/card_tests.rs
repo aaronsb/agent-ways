@@ -1,5 +1,6 @@
-//! The module card on the sensors and mod tabs: built-in and script
-//! sensors, attend present and absent, and a mod in each state.
+//! Modules and their cards: built-in and script sensors (attend present
+//! and absent, a user's and a project's), a mod in each state, and a
+//! bundled, a user and an overriding theme.
 
 use std::path::{Path, PathBuf};
 
@@ -7,10 +8,13 @@ use agent_settings::load::Layer;
 use agent_settings::LayerScope;
 use agent_tui::tree::{Card, Node, Origin, StateTone};
 
-use super::mods::{self, Read};
-use super::sensors::{self, Described};
+use super::mods;
 use super::{Ctx, Ways};
 use crate::cmd::attend_mod::{Degraded, State, ATTEND, JUDGE, THEME};
+use crate::cmd::modules::mods::{of_mod, Unread};
+use crate::cmd::modules::sensors::{self, Described};
+use crate::cmd::modules::themes::of_theme;
+use crate::cmd::modules::{self, Health, Kind, Row};
 use crate::cmd::mods::{Attention, Overview};
 
 fn home(tag: &str) -> PathBuf {
@@ -39,16 +43,21 @@ fn ctx(home: &Path, sensors: fn() -> Option<Vec<Described>>) -> Ctx {
     }
 }
 
-/// attend's file at `home`, holding `text`.
+/// attend's user file at `home`, holding `text`.
 fn attend_layer(home: &Path, text: &str) -> Layer {
     let path = home.join(".config/attend/config.yaml");
     Layer::from_text(&attend_config::schema::SCHEMA, "user", attend_config::schema::FILE, LayerScope::User, Some(&path), text)
 }
 
+/// The project's attend file under `home`, holding `text`.
+fn project_layer(home: &Path, text: &str) -> Layer {
+    let path = home.join("proj/.claude/attend.yaml");
+    Layer::from_text(&attend_config::schema::SCHEMA, "project", attend_config::schema::FILE, LayerScope::Project, Some(&path), text)
+}
+
 fn described() -> Option<Vec<Described>> {
     let d = |name: &str, state: &str, description: &str, source: &str| Described {
         name: name.into(),
-        kind: "builtin".into(),
         state: state.into(),
         description: description.into(),
         source: source.into(),
@@ -162,42 +171,85 @@ fn overview(m: crate::cmd::attend_mod::Mod, word: State, installed: &[&str], att
         claude_code: true,
         attention: attention.map(|why| Attention { dir: "~/.claude".into(), why, fix: "fix".into() }).into_iter().collect(),
         installed: installed.iter().map(|s| s.to_string()).collect(),
-        folder: "~/.local/share/agent-ways/plugins".into(),
+        folder: "/home/u/.local/share/agent-ways/plugins".into(),
     }
 }
 
 #[test]
-fn a_mod_s_card_reads_each_state_as_the_notice_does() {
-    let c = mods::card(&ATTEND, Some(&overview(ATTEND, State::Converged, &["0.29.0"], None)), &Read::Done);
-    assert_eq!((c.origin, c.kind.as_deref()), (Origin::Builtin, Some("plugin")));
-    assert_eq!(c.source, "attend@agent-ways · ~/.local/share/agent-ways/plugins");
-    assert_eq!(c.version.as_deref(), Some("shipped 0.29.0 · installed 0.29.0"));
-    assert_eq!(c.state, ("installed · enabled".to_string(), StateTone::Ok));
-    assert_eq!(c.rows, [("critical".to_string(), "yes".to_string()), ("needs".to_string(), "Claude Code 2.1.296 or later".to_string())]);
+fn a_mod_s_module_reads_each_state_as_the_notice_does() {
+    let m = of_mod(&ATTEND, Ok(&overview(ATTEND, State::Converged, &["0.29.0"], None)));
+    assert_eq!((m.kind, m.origin, m.path.as_deref()), (Kind::Plugin, modules::Origin::Builtin, None));
+    assert_eq!(m.source, "attend@agent-ways · /home/u/.local/share/agent-ways/plugins");
+    assert_eq!(m.version.as_deref(), Some("shipped 0.29.0 · installed 0.29.0"));
+    assert_eq!(m.state, modules::State::new("installed · enabled", Health::Running));
+    assert_eq!(m.rows, [Row::new("critical", "yes"), Row::new("needs", "Claude Code 2.1.296 or later")]);
+    let c = super::card::card(&m, Path::new("/home/u"));
+    assert_eq!((c.origin, c.kind.as_deref(), c.at.as_deref()), (Origin::Builtin, Some("plugin"), None));
+    assert_eq!((c.source.as_str(), &c.state), ("attend@agent-ways · ~/.local/share/agent-ways/plugins", &("installed · enabled".to_string(), StateTone::Ok)));
 
     for (word, why, said) in [(State::Drift, Degraded::Missing, "not installed"), (State::Disabled, Degraded::Disabled, "disabled"), (State::Pending, Degraded::Pending, "pending")] {
         let o = overview(ATTEND, word, &[], Some(why));
-        let c = mods::card(&ATTEND, Some(&o), &Read::Done);
-        assert_eq!(c.state, (format!("{said} · critical"), StateTone::Err));
+        let m = of_mod(&ATTEND, Ok(&o));
+        assert_eq!(m.state, modules::State::new(format!("{said} · critical"), Health::Broken));
         assert!(mods::notice(std::slice::from_ref(&o))[1].contains(said), "the card and the notice agree");
-        assert_eq!(c.version.as_deref(), Some("shipped 0.29.0"));
+        assert_eq!(m.version.as_deref(), Some("shipped 0.29.0"));
     }
-    let removed = mods::card(&THEME, Some(&overview(THEME, State::Removed, &[], None)), &Read::Done);
-    assert_eq!((removed.state.0.as_str(), removed.rows[0].1.as_str()), ("removed", "no"));
+    let removed = of_mod(&THEME, Ok(&overview(THEME, State::Removed, &[], None)));
+    assert_eq!((removed.state.word.as_str(), removed.rows[0].value.as_str()), ("removed", "no"));
     let older = Overview { older: true, ..overview(ATTEND, State::Drift, &["0.28.0"], None) };
-    assert_eq!(mods::card(&ATTEND, Some(&older), &Read::Done).state, ("update · an installed copy is older".to_string(), StateTone::Warn));
-    let off = mods::card(&THEME, Some(&overview(THEME, State::Off, &[], None)), &Read::Done);
-    assert_eq!(off.state.0, "off · not wanted");
+    assert_eq!(of_mod(&ATTEND, Ok(&older)).state, modules::State::new("update · an installed copy is older", Health::Attention));
+    assert_eq!(of_mod(&THEME, Ok(&overview(THEME, State::Off, &[], None))).state.word, "off · not wanted");
 
     // ways-judge is critical only under the claude-code engine.
     let keyed = Overview { claude_code: false, ..overview(JUDGE, State::Off, &[], None) };
-    assert_eq!(mods::card(&JUDGE, Some(&keyed), &Read::Done).rows[0].1, "no: only while gate.engine is claude-code");
-    assert_eq!(mods::card(&JUDGE, Some(&overview(JUDGE, State::Converged, &["0.29.0"], None)), &Read::Done).rows[0].1, "yes: gate.engine is claude-code");
+    assert_eq!(of_mod(&JUDGE, Ok(&keyed)).rows[0].value, "no: only while gate.engine is claude-code");
+    assert_eq!(of_mod(&JUDGE, Ok(&overview(JUDGE, State::Converged, &["0.29.0"], None))).rows[0].value, "yes: gate.engine is claude-code");
 
-    // Unread: the card says where the read stands.
-    let reading = mods::card(&ATTEND, None, &Read::Reading);
-    assert_eq!((reading.state.0.as_str(), reading.source.as_str(), reading.version.as_deref()), ("reading…", "attend@agent-ways", None));
-    assert_eq!(mods::card(&ATTEND, None, &Read::Failed("x".into())).state, ("state read failed".to_string(), StateTone::Err));
+    // Unread: the module says where the read stands.
+    let reading = of_mod(&ATTEND, Err(Unread::Reading));
+    assert_eq!((reading.state.word.as_str(), reading.source.as_str(), reading.version.as_deref()), ("reading…", "attend@agent-ways", None));
+    assert_eq!(of_mod(&ATTEND, Err(Unread::Failed)).state.health, Health::Broken);
+    assert_eq!(of_mod(&ATTEND, Err(Unread::Missing)).state.word, "state not read");
+}
+
+#[test]
+fn a_project_s_script_sensor_reads_as_the_project_s() {
+    let h = home("project");
+    let layers = [project_layer(&h, "sensors:\n  disk:\n    script: .claude/sensors/disk.sh\n")];
+    let users = sensors::user_sensors(&layers, &h.join("proj"));
+    assert_eq!(users.len(), 1);
+    let sc = attend_config::Config::from_layers(&layers);
+    let m = sensors::of_script_sensor(&users[0], &sc.sensors["disk"]);
+    assert_eq!((m.kind, m.origin), (Kind::Script, modules::Origin::Project));
+    assert_eq!(m.path, Some(h.join("proj/.claude/attend.yaml")));
+    assert_eq!(m.source, h.join("proj/.claude/sensors/disk.sh").display().to_string());
+    let tab = sensors_tab(&h, described, &layers);
+    let c = card(&tab, "disk");
+    assert_eq!((c.origin, c.at.as_deref()), (Origin::Project, Some("~/proj/.claude/attend.yaml")));
+    let _ = std::fs::remove_dir_all(&h);
+}
+
+#[test]
+fn a_theme_s_module_names_where_it_comes_from() {
+    use agent_theme::Source;
+    let nord = agent_theme::BUNDLED.iter().find(|(n, _)| *n == "nord").map(|(_, s)| agent_theme::parse(s).unwrap()).unwrap();
+    let dir = Path::new("/home/u/.config/agent-ways/themes");
+    let bundled = of_theme(&nord, Source::Bundled, None, false, Some(dir), "plain");
+    assert_eq!((bundled.kind, bundled.origin, bundled.path.as_deref(), bundled.source.as_str()), (Kind::Theme, modules::Origin::Builtin, None, "bundled (read-only)"));
+    assert_eq!(bundled.state, modules::State::new("inactive (Enter uses it)", Health::Idle));
+    assert_eq!(bundled.rows, [Row::new("saves to", dir.display().to_string()), Row::new("shape", "plain (a: shape cycles it)")]);
+    assert_eq!(bundled.summary, "nord · dark · background terminal");
+
+    let file = dir.join("mine.theme");
+    let user = of_theme(&nord, Source::User, Some(&file), true, Some(dir), "plain");
+    assert_eq!((user.origin, user.path.as_deref(), user.source.as_str()), (modules::Origin::User, Some(file.as_path()), file.to_str().unwrap()));
+    assert_eq!(user.state.health, Health::Running);
+    let c = super::card::card(&user, Path::new("/home/u"));
+    assert_eq!((c.at.as_deref(), c.source.as_str()), (None, "~/.config/agent-ways/themes/mine.theme"), "a source naming the file it was added in says it once");
+
+    let over = of_theme(&nord, Source::Override, Some(&dir.join("nord.theme")), false, None, "plain");
+    assert_eq!(over.rows[0], Row::new("overrides", "the bundled nord"));
+    assert_eq!(over.rows[1], Row::new("saves to", "none: nothing saves"));
 }
 
 #[test]

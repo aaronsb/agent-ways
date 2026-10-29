@@ -9,6 +9,7 @@
 //! `build` turns the registry into the tree, `flows` holds the guided flows.
 
 pub mod build;
+pub mod card;
 pub mod flows;
 pub mod judge;
 pub mod mods;
@@ -78,7 +79,7 @@ pub struct Ctx {
     pub mods_background: bool,
     /// attend's account of its sensors, read once for the sensors tab's
     /// cards; `None` when no attend answers.
-    pub sensors: fn() -> Option<Vec<sensors::Described>>,
+    pub sensors: fn() -> Option<Vec<crate::cmd::modules::sensors::Described>>,
 }
 
 /// Whether the screens write `b` to the project's file: a project-scope key,
@@ -117,7 +118,7 @@ impl Ctx {
             judge: judge::JudgeState::live,
             mods: crate::cmd::mods::overview,
             mods_background: true,
-            sensors: sensors::described,
+            sensors: crate::cmd::modules::sensors::described,
             xdg_config,
             home,
         }
@@ -159,7 +160,7 @@ pub struct Ways {
     /// mod.
     ran: Cell<bool>,
     /// What attend says of its sensors, asked at the first build.
-    described: std::cell::OnceCell<Option<Vec<sensors::Described>>>,
+    described: std::cell::OnceCell<Option<Vec<crate::cmd::modules::sensors::Described>>>,
 }
 
 /// How soon after a read starts another may: a burst of requests reads once.
@@ -208,7 +209,7 @@ impl Ways {
     }
 
     /// What attend says of its sensors, asked once.
-    pub(super) fn described(&self) -> Option<&[sensors::Described]> {
+    pub(super) fn described(&self) -> Option<&[crate::cmd::modules::sensors::Described]> {
         self.described.get_or_init(|| (self.ctx.sensors)()).as_deref()
     }
 
@@ -644,6 +645,11 @@ impl Adapter for Ways {
             spans.push(Span::raw(" "));
         }
         Some(Line::from(spans))
+    }
+
+    fn theme_card(&self, theme: &agent_theme::Theme, source: agent_theme::Source, file: Option<&Path>, active: bool, shape: &str) -> Option<agent_tui::tree::Card> {
+        let m = crate::cmd::modules::themes::of_theme(theme, source, file, active, self.ctx.themes.as_deref(), shape);
+        Some(card::card(&m, &self.ctx.home))
     }
 
     fn claude_code(&self) -> Option<agent_tui::ClaudeCode> {

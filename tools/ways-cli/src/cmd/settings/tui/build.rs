@@ -526,7 +526,7 @@ impl Ways {
         }
         if tab.name == "mod" {
             let (states, read) = self.mod_states();
-            super::mods::nodes(&mut root, &states, &read);
+            super::mods::nodes(&mut root, &states, &read, &self.ctx.home);
         }
         if tab.name == "gate" {
             // Last, so the settings keep their rows.

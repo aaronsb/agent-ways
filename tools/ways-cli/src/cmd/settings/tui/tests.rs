@@ -1070,7 +1070,7 @@ fn mod_states() -> Vec<crate::cmd::mods::Overview> {
             claude_code: true,
             attention: vec![Attention { dir: "~/.claude-work".into(), why: Degraded::Missing, fix: "the install action, `ways manage mod install attend --commit`, installs it".into() }],
             installed: vec!["0.29.0".into()],
-            folder: "~/.local/share/agent-ways/plugins".into(),
+            folder: "/home/u/.local/share/agent-ways/plugins".into(),
         },
         crate::cmd::mods::Overview {
             m: JUDGE,
@@ -1085,7 +1085,7 @@ fn mod_states() -> Vec<crate::cmd::mods::Overview> {
                 fix: "upgrade Claude Code to 2.1.304 or later, then `ways manage update --commit`".into(),
             }],
             installed: vec![],
-            folder: "~/.local/share/agent-ways/plugins".into(),
+            folder: "/home/u/.local/share/agent-ways/plugins".into(),
         },
         crate::cmd::mods::Overview {
             m: THEME,
@@ -1096,7 +1096,7 @@ fn mod_states() -> Vec<crate::cmd::mods::Overview> {
             claude_code: true,
             attention: vec![],
             installed: vec![],
-            folder: "~/.local/share/agent-ways/plugins".into(),
+            folder: "/home/u/.local/share/agent-ways/plugins".into(),
         },
     ]
 }

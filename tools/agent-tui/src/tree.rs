@@ -187,11 +187,12 @@ pub struct Node {
     pub card: Option<Card>,
 }
 
-/// Whether agent-ways ships a module or the operator added it.
+/// Who added a module: the application, the user, or a project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Origin {
     Builtin,
     User,
+    Project,
 }
 
 impl Origin {
@@ -199,6 +200,7 @@ impl Origin {
         match self {
             Origin::Builtin => "builtin",
             Origin::User => "user",
+            Origin::Project => "project",
         }
     }
 }
@@ -214,7 +216,8 @@ pub enum StateTone {
 
 /// One module as the detail pane heads it, the same on every tab: its
 /// name and a line on it, then where it comes from, what it is read from,
-/// its version and state, then the rows of its kind.
+/// its version and state, then the rows of its kind. The adapter fills it
+/// in from its own description of the module; these are the words drawn.
 #[derive(Debug, Clone)]
 pub struct Card {
     pub title: String,

@@ -38,6 +38,20 @@ impl Adapter for Choice {
     fn choose_waypoints(&mut self, name: &str) -> Result<(), String> {
         std::fs::write(self.0.join("waypoints"), name).map_err(|e| e.to_string())
     }
+    fn theme_card(&self, theme: &agent_theme::Theme, source: agent_theme::Source, _file: Option<&std::path::Path>, active: bool, shape: &str) -> Option<crate::tree::Card> {
+        use crate::tree::{Card, Origin, StateTone};
+        Some(Card {
+            title: theme.label.clone(),
+            summary: theme.name.clone(),
+            origin: if source == agent_theme::Source::Bundled { Origin::Builtin } else { Origin::User },
+            at: None,
+            kind: Some("theme".into()),
+            source: format!("{source:?}"),
+            version: None,
+            state: if active { ("active".into(), StateTone::Ok) } else { ("inactive".into(), StateTone::Plain) },
+            rows: vec![("saves to".into(), self.0.display().to_string()), ("shape".into(), shape.into())],
+        })
+    }
     fn waypoints_preview(&self, theme: &agent_theme::Theme, setting: &str) -> Option<ratatui::text::Line<'static>> {
         let glyphs: Vec<&str> = match theme.decor.waypoints {
             Some(w) if setting == "theme" => w.as_slice().iter().map(|w| w.glyph).collect(),
@@ -109,7 +123,7 @@ fn the_theme_tab_shows_the_shape_and_its_menu_cycles_it() {
     let d = dir("shape");
     let mut app = app_in(&d, ColorDepth::TrueColor).shape(super::theme::Shape::PLAIN);
     keys(&mut app, &[KeyCode::Char('3')]);
-    assert!(text(&draw(&mut app, 100, 30)).contains("shape     plain (a: shape cycles it)"));
+    assert!(text(&draw(&mut app, 100, 30)).contains("shape     plain"), "the adapter is handed the shape");
     act(&mut app, "shape");
     assert_eq!(std::fs::read_to_string(d.join("shape")).unwrap(), "flame", "the adapter keeps the next shape");
     assert_eq!(app.shape, super::theme::Shape::named("flame"));
@@ -768,45 +782,31 @@ fn depth_brings_roles_down_to_the_terminal() {
     assert!(buf.content().iter().all(|c| named(c.fg) && named(c.bg)));
 }
 
-/// A bundled theme's card says builtin and read-only; a user theme's names
-/// its file; an override says which bundled theme it shadows.
+/// The theme detail opens with the card the adapter gives for the theme
+/// under the cursor: here one naming its source, whether it is active, and
+/// the shape, so each reaches the adapter.
 #[test]
-fn the_theme_detail_heads_with_the_module_card() {
-    use crate::tree::{Origin, StateTone};
-    use agent_theme::Source;
-    let d = dir("card");
-    let nord = Themes::new(None, ColorDepth::TrueColor, None).get("nord").cloned().unwrap();
-    std::fs::write(d.join("mine.theme"), agent_theme::to_text(&agent_theme::Theme { name: "mine".into(), label: "Mine".into(), ..nord.clone() })).unwrap();
-    std::fs::write(d.join("nord.theme"), agent_theme::to_text(&agent_theme::Theme { label: "My Nord".into(), ..nord })).unwrap();
-    std::fs::write(d.join("choice"), "mine\n").unwrap();
-    let app = app_in(&d, ColorDepth::TrueColor);
-    let get = |n: &str| app.themes.get(n).cloned().unwrap();
-
-    let bundled = app.theme_card(&get("dracula"), Source::Bundled);
-    assert_eq!((bundled.origin, bundled.at.as_deref(), bundled.source.as_str()), (Origin::Builtin, None, "bundled (read-only)"));
-    assert_eq!(bundled.state, ("inactive (Enter uses it)".to_string(), StateTone::Plain));
-    let rows: Vec<&str> = bundled.rows.iter().map(|(k, _)| k.as_str()).collect();
-    assert_eq!(rows, ["saves to", "shape"]);
-
-    let user = app.theme_card(&get("mine"), Source::User);
-    assert_eq!((user.origin, user.at.as_deref()), (Origin::User, None));
-    assert!(user.source.ends_with("mine.theme"), "{}", user.source);
-    assert_eq!(user.state, ("active".to_string(), StateTone::Ok));
-
-    let over = app.theme_card(&get("nord"), Source::Override);
-    assert_eq!((over.origin, over.at.as_deref()), (Origin::User, Some("overrides the bundled nord")));
-    assert!(over.source.ends_with("nord.theme"), "{}", over.source);
-}
-
-#[test]
-fn the_theme_detail_draws_the_card_rows_before_the_theme_s_own() {
+fn the_theme_detail_heads_with_the_adapter_s_card() {
     let d = dir("card-draw");
     let mut app = app_in(&d, ColorDepth::TrueColor);
     keys(&mut app, &[KeyCode::Char('3')]);
     let shot = text(&draw(&mut app, 120, 35));
-    for row in ["origin    builtin", "source    bundled (read-only)", "state     active", "saves to  ", "shape     ", "waypoints "] {
+    for row in ["origin    builtin", "kind      theme", "source    Bundled", "state     active", "shape     plain", "waypoints "] {
         assert!(shot.contains(row), "{row} missing:\n{shot}");
     }
     let at = |s: &str| shot.find(s).unwrap();
-    assert!(at("origin") < at("source") && at("source") < at("state") && at("state") < at("saves to"), "the common rows lead:\n{shot}");
+    assert!(at("origin") < at("source") && at("source") < at("state") && at("state") < at("shape") && at("shape") < at("waypoints"), "the card leads:\n{shot}");
+    keys(&mut app, &[KeyCode::Down]);
+    assert!(text(&draw(&mut app, 120, 35)).contains("state     inactive"), "the card follows the cursor");
+}
+
+/// An adapter with no card for a theme heads its detail with the name alone.
+#[test]
+fn without_a_card_the_theme_detail_heads_with_its_name() {
+    let flag = Node::leaf("alpha", "", Setting::new(Kind::Bool, "true", "default"));
+    let mut app = App::new("t", vec![Node::group("ways", "", vec![flag])]).themes(Themes::new(None, ColorDepth::TrueColor, None));
+    keys(&mut app, &[KeyCode::Char('2')]);
+    let shot = text(&draw(&mut app, 120, 35));
+    assert!(shot.contains("Terminal") && !shot.contains("origin "), "{shot}");
+    assert!(shot.contains("waypoints "), "the theme's own rows follow: {shot}");
 }

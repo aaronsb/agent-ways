@@ -555,8 +555,8 @@ pub struct Overview {
     /// The versions Claude Code lists as installed, once each, in target
     /// order.
     pub installed: Vec<String>,
-    /// The marketplace folder the mod is read from, as shown.
-    pub folder: String,
+    /// The marketplace folder the mod is read from.
+    pub folder: PathBuf,
 }
 
 /// A critical mod that does not run in one enabled target
@@ -625,7 +625,7 @@ pub fn overview() -> Vec<Overview> {
             Overview {
                 m,
                 installed,
-                folder: shown(&attend_mod::marketplace_dir(&src)),
+                folder: attend_mod::marketplace_dir(&src),
                 word: State::over(&here.iter().map(|v| v.state(shipped.as_deref())).collect::<Vec<_>>()),
                 rows: here.iter().map(|v| (shown(&v.dir), v.row(&m, shipped.as_deref()), v.describe(&m, shipped.as_deref()))).collect(),
                 attention: here.iter().filter_map(|v| attention(&m, v, claude_code, &default_root)).collect(),
