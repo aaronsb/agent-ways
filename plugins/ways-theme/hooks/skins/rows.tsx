@@ -37,6 +37,8 @@ import type { Meter } from './svg-usage'
 import { kindOf, toolLabel } from './tools'
 import { inlineMath, mathArt, parseTex } from './math'
 import { mathSvg } from './svg-math'
+import { labelOf } from './wrappers'
+import type { Part } from './wrappers'
 
 export type Ui = Pick<ElementTable, 'Box' | 'Text' | 'Markdown' | 'Button' | 'Code' | 'Link'>
 
@@ -339,6 +341,30 @@ export function promptRow(look: Look, text: string, images?: ReturnType<Ui['Text
         )}
       </Box>
       {images ?? ''}
+    </Box>
+  )
+}
+
+// A message another party relayed, drawn in full: each wrapper block's tags give way to
+// its label in muted, the attributes its opening tag carried beside it, and its body is
+// indented under the label. Text around the blocks draws plain. A block inside a block
+// draws the same way, to the depth the split went (wrappers.ts).
+export function relayedRows(look: Look, all: readonly Part[]): ReturnType<Ui['Box']> {
+  const { Box, Text } = look.ui
+  const { palette } = look.skin
+
+  return (
+    <Box flexDirection="column">
+      {all.map(part =>
+        part.kind === 'text' ? (
+          <Text color={palette.fg}>{part.text === '' ? ' ' : part.text}</Text>
+        ) : (
+          <Box flexDirection="column">
+            <Text color={palette.muted}>{part.attributes === '' ? labelOf(part.name) : `${labelOf(part.name)}  ${part.attributes}`}</Text>
+            {part.body === '' ? '' : <Box flexDirection="column" paddingLeft={2}>{relayedRows(look, part.inner)}</Box>}
+          </Box>
+        ),
+      )}
     </Box>
   )
 }
