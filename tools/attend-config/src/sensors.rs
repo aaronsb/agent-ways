@@ -168,8 +168,9 @@ fn only_switches(reads: &[Read]) -> bool {
     })
 }
 
-/// The `.yaml` files in `dir`, by stem, sorted.
-fn yaml_files(dir: &Path) -> Vec<(String, PathBuf)> {
+/// The `.yaml` files in `dir`, by stem, sorted: the files a sensor layer
+/// reads.
+pub fn yaml_files(dir: &Path) -> Vec<(String, PathBuf)> {
     let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
     let mut out: Vec<(String, PathBuf)> = rd
         .flatten()

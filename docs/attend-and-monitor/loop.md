@@ -92,7 +92,7 @@ flowchart TD
 
 The session-id check runs every iteration. When Claude Code's `/clear` has given the session a new id, the run prints any message line its governor still holds, checkpoints, and re-executes itself; the new process moves the state to the new id before reading it.
 
-The reload branch is a hard exit — `execve(2)` replaces the current process image with a fresh copy of the binary. A changed binary takes it, and so does a sensor file added, changed or removed in the user or project sensor directory, or a change to the user config file; the banner names the reason. State is checkpointed first, and the new process restores from that checkpoint during startup, so observed signals, engagement history, and disclosed context thresholds survive the reload.
+The reload branch is a hard exit — `execve(2)` replaces the current process image with a fresh copy of the binary. A changed binary takes it, and so does a sensor file added, changed or removed in the user or project sensor directory, or a change to `attend.project_sensors`; the banner names the reason. State is checkpointed first, and the new process restores from that checkpoint during startup, so observed signals, engagement history, and disclosed context thresholds survive the reload.
 
 The queue-empty branch is a defensive break. In practice it's unreachable because every poll reschedules the sensor, but a future sensor that explicitly retires could drop out of the queue.
 

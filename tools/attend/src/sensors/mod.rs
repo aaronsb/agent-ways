@@ -307,21 +307,29 @@ pub fn deliverable(text: &str) -> String {
     crate::cmd::inbox::defuse_fence(&one)
 }
 
-/// What the user and project sensor files and the user config are now:
-/// each file's path, length and modification time. A change to any of them
-/// changes the sensors `attend run` polls.
-pub fn files_stamp(project: &str) -> Vec<(std::path::PathBuf, u64, Option<std::time::SystemTime>)> {
+/// What decides the sensors `attend run` polls: each user and project
+/// sensor file's path, length and modification time, and the trusted
+/// projects of `attend.project_sensors`.
+pub type Stamp = (Vec<(std::path::PathBuf, u64, Option<std::time::SystemTime>)>, Vec<String>);
+
+/// The [`Stamp`] for the project at `project` now. A change to it changes
+/// the sensors.
+pub fn files_stamp(project: &str) -> Stamp {
     let dirs = [attend_config::sensors::user_dir(), attend_config::sensors::project_dir(std::path::Path::new(project))];
-    let mut paths: Vec<std::path::PathBuf> = dirs.iter().flat_map(|d| std::fs::read_dir(d).into_iter().flatten().flatten().map(|e| e.path())).collect();
-    paths.push(attend_config::user_path());
-    paths.sort();
-    paths
-        .into_iter()
-        .filter_map(|p| {
+    stamp_of(&dirs, attend_config::sensors::trusted_projects())
+}
+
+/// The [`Stamp`] of the sensor files in `dirs`, the files the load reads.
+fn stamp_of(dirs: &[std::path::PathBuf], trusted: Vec<String>) -> Stamp {
+    let files = dirs
+        .iter()
+        .flat_map(|d| attend_config::sensors::yaml_files(d))
+        .filter_map(|(_, p)| {
             let m = std::fs::metadata(&p).ok()?;
             Some((p, m.len(), m.modified().ok()))
         })
-        .collect()
+        .collect();
+    (files, trusted)
 }
 
 /// The interval pair as the list shows it.
@@ -374,6 +382,24 @@ mod tests {
         assert_eq!(lane("keepwarm"), Some(Lane::Message));
         assert_eq!(lane("git"), Some(Lane::Event));
         std::fs::remove_dir_all(&project).ok();
+    }
+
+    /// Only a sensor file changes the stamp: a swap file, a lock or any
+    /// other file beside them does not.
+    #[test]
+    fn the_stamp_changes_with_a_sensor_file_alone() {
+        let dir = fixture("stamp");
+        let dirs = [dir.clone()];
+        let before = stamp_of(&dirs, Vec::new());
+        for other in [".git.yaml.swp", "4913", "git.yaml~", "notes.txt"] {
+            std::fs::write(dir.join(other), "x").unwrap();
+        }
+        assert_eq!(stamp_of(&dirs, Vec::new()), before, "other files leave it");
+        std::fs::write(dir.join("git.yaml"), "interval: 90\n").unwrap();
+        let with = stamp_of(&dirs, Vec::new());
+        assert_ne!(with, before, "a sensor file added changes it");
+        assert_ne!(stamp_of(&dirs, vec!["/p".into()]), with, "a project trusted changes it");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

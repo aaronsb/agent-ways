@@ -67,7 +67,7 @@ ways settings list --json attend.sensors.git
 
 `set` writes the user's file, or with `--project` the project's, and creates it holding only that field when the sensor comes from a lower layer; a shipped file is never written. A value that would make the sensor invalid exits 3, names the problem and writes nothing. The settings screens' sensors tab lists every sensor of every layer with its card and these keys. A field of a sensor a project's file defines is written to that file, its `enabled` aside, which the screens keep in the user's file so the switch stays the operator's. A user file that holds only `enabled` defines no sensor of its own. Triggers, state and a kind's own fields have no keys yet.
 
-`attend run` watches the user and project sensor directories and the user config file. A file added, changed or removed there reloads the run, and the banner names the reason. The shipped files change with the binary.
+`attend run` watches the `.yaml` files in the user and project sensor directories, and `attend.project_sensors` in the user config file. A sensor file added, changed or removed, or a project trusted or untrusted, reloads the run, and the banner names the reason. The shipped files change with the binary.
 
 ### Project files and the allow-list
 
