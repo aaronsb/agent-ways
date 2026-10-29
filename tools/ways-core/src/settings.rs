@@ -659,6 +659,16 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
+        name: "mods.ways-theme.paths",
+        section: "mods",
+        path: &["mods", "ways-theme", "paths"],
+        kind: Kind::Choice(&["wrap", "truncate"]),
+        default: DefaultValue::Yaml("wrap"),
+        doc: "How a tool row draws a path too long for its line: wrap or truncate.",
+        long: "wrap moves the path onto lines of its own under the tool's name, broken after a /, and draws all of it; truncate keeps it on the tool's line, cut short with an ellipsis. The mod reads it at each session start, through `ways settings theme export --mod`.",
+        ..BASE
+    },
+    KeySpec {
         name: "mods.ways-theme.spinner_words",
         section: "mods",
         path: &["mods", "ways-theme", "spinner_words"],
@@ -1101,13 +1111,14 @@ mod tests {
             ("frames", Some(Value::Bool(true))),
             ("prompt_box", s("gradient")),
             ("copy", Some(Value::Bool(true))),
+            ("paths", s("wrap")),
             ("spinner_words", Some(Value::Sequence(vec![]))),
             ("done_words", Some(Value::Sequence(vec![]))),
         ];
         for (k, want) in &defaults {
             assert_eq!(&resolved(&format!("mods.ways-theme.{k}"), &[]), want, "{k}");
         }
-        let text = "mods:\n  ways-theme:\n    rail: false\n    tables: text\n    shimmer: false\n    charts: false\n    markdown: false\n    icons: ascii\n    frames: false\n    prompt_box: frame\n    copy: false\n    spinner_words: [Sailing]\n    done_words: [Docked, Moored]\n";
+        let text = "mods:\n  ways-theme:\n    rail: false\n    tables: text\n    shimmer: false\n    charts: false\n    markdown: false\n    icons: ascii\n    frames: false\n    prompt_box: frame\n    copy: false\n    paths: truncate\n    spinner_words: [Sailing]\n    done_words: [Docked, Moored]\n";
         let l = [layer("user", LayerScope::User, text)];
         assert!(l[0].findings.is_empty(), "{:?}", l[0].findings);
         let set = [
@@ -1120,6 +1131,7 @@ mod tests {
             ("frames", Some(Value::Bool(false))),
             ("prompt_box", s("frame")),
             ("copy", Some(Value::Bool(false))),
+            ("paths", s("truncate")),
             ("spinner_words", Some(Value::Sequence(vec!["Sailing".into()]))),
             ("done_words", Some(Value::Sequence(vec!["Docked".into(), "Moored".into()]))),
         ];

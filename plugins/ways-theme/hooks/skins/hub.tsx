@@ -30,7 +30,7 @@ import { MOD_EXPORT_ARGV, parseExport, setupOf } from './config.ts'
 import type { Setup } from './config.ts'
 import { clipLines, diffstat, pick, shortenPath } from './format.ts'
 import { bodyOf, inputFields, isOpen } from './detail.ts'
-import { disclosedRow, openedRows } from './detail-rows.tsx'
+import { DISCLOSE_INSET, disclosedRow, openedRows } from './detail-rows.tsx'
 import { commandSegments } from './command-output.ts'
 import { askBand, diffCard, footerRow, groupRow, promptRow, quietResult, relayedRows, replyRows, spinnerRow, terminalCard, toolRow, usageBand, desktopSpinnerRow } from './rows.tsx'
 import type { Look, SvgElement, Ui } from './rows.tsx'
@@ -473,10 +473,12 @@ export function registerSkins(on: On, shared: Shared): void {
     const cwd = await cwdOf($)
     const ms = e.props.isRunning ? -1 : await read($, memberOf(durationAtom, e))
     const diff = diffstat(e.props.output)
-    const target = summarize(e.props.tool, e.props.input, cwd)
     const meta = { ...(ms >= 0 && !e.props.isRunning ? { ms } : {}), ...(diff === null ? {} : diff) }
     const fields = (e.props.input ?? {}) as { file_path?: unknown; notebook_path?: unknown }
     const path = fields.file_path ?? fields.notebook_path
+    // A path that may wrap is drawn whole.
+    const wraps = e.surface === 'terminal' && setup.prefs.paths === 'wrap' && typeof path === 'string'
+    const target = summarize(e.props.tool, e.props.input, cwd, wraps ? Infinity : undefined)
     const disclosure = memberOf(disclosureAtom, e)
     const open = isOpen(await read($, disclosure), e.props.isErrored)
     const base = await sessionLook($, e, lookOf($.ui.resolve(e), setup, e.surface, copier($, e.surface)), { links: open || typeof path === 'string', touched: typeof path === 'string', folds: open, cwd })
@@ -486,7 +488,9 @@ export function registerSkins(on: On, shared: Shared): void {
     const touch = typeof path === 'string' && look.touched !== undefined ? touchOf(look.touched.files, path, cwd) : undefined
     const label = setup.prefs.quiet && isQuiet(e.props.tool, e.props.input) ? quietLabel(e.props.tool) : toolLabel(e.props.tool)
     const href = typeof path === 'string' && look.links === true && look.paths !== undefined ? fileHref(path, look.paths) : null
-    const row = toolRow(look, e.props, kind, target, meta, label, touch, href)
+    // A file's path may wrap under the label, in the row's room beside the frame and the chevron.
+    const room = typeof path === 'string' ? (e.viewport?.columns ?? 100) - (framed ? FRAME_INSET : 0) - DISCLOSE_INSET : undefined
+    const row = toolRow(look, e.props, kind, target, meta, label, touch, href, room)
     const toggle = () => void update($, disclosure, () => (open ? 'closed' : 'open'))
 
     const drawn = (row: ReturnType<Ui['Box']>) => withSettle($, e, framed ? marginRow(look, row) : row)

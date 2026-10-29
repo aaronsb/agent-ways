@@ -6,7 +6,7 @@ import type { ElementTable, RenderSurface } from 'claude-code'
 import type { Prefs, Touch, TurnStats } from '../../types'
 import { formatDuration, formatMs } from './format'
 import type { PathBase } from './links'
-import { columnWidths, isShell, tableArt, widthOf, wrapLines } from './markdown'
+import { columnWidths, graphemes, isShell, tableArt, widthOf, wrapLines } from './markdown'
 import { diffFenceTag, diffRows, fenceDiff, newOnly } from './diff-fence'
 import { FOLD_CODE, FOLD_ROWS, foldButton, shownCount } from './fold'
 import type { Segment, Table } from './markdown'
@@ -115,34 +115,50 @@ function railLine(look: Look) {
   return <Text color={look.skin.palette.user}>{look.icons.rail}</Text>
 }
 
+const branchOf = (look: Look): string => (look.prefs.rail && look.surface === 'terminal' ? look.icons.branch : '')
+
 function node(look: Look, calls: readonly Call[]) {
   const { Text } = look.ui
   const { glyph, color } = status(look, calls)
-  const branch = look.prefs.rail && look.surface === 'terminal' ? look.icons.branch : ''
 
   return (
     <Text color={color}>
       {`${glyph}`}
-      <Text color={look.skin.palette.muted}>{`${branch} `}</Text>
+      <Text color={look.skin.palette.muted}>{`${branchOf(look)} `}</Text>
     </Text>
   )
 }
 
-function metaSpans(look: Look, meta: Meta) {
-  const { Text } = look.ui
-  const { palette } = look.skin
-  const spans = []
+// Cells the node takes ahead of the label.
+const nodeWidth = (look: Look, calls: readonly Call[]): number => widthOf(`${status(look, calls).glyph}${branchOf(look)} `)
+
+function metaParts({ skin: { palette } }: Look, meta: Meta): { text: string; color: string }[] {
+  const parts = []
 
   if (meta.added !== undefined && meta.removed !== undefined && meta.added + meta.removed > 0) {
-    spans.push(<Text color={palette.ok}>{`+${meta.added}`}</Text>)
-    spans.push(<Text color={palette.err}>{` −${meta.removed}`}</Text>)
+    parts.push({ text: `+${meta.added}`, color: palette.ok }, { text: ` −${meta.removed}`, color: palette.err })
   }
 
   if (meta.ms !== undefined) {
-    spans.push(<Text color={palette.muted}>{`${spans.length > 0 ? '  ' : ''}${formatMs(meta.ms)}`}</Text>)
+    parts.push({ text: `${parts.length > 0 ? '  ' : ''}${formatMs(meta.ms)}`, color: palette.muted })
   }
 
-  return spans
+  return parts
+}
+
+function metaSpans(look: Look, meta: Meta) {
+  const { Text } = look.ui
+
+  return metaParts(look, meta).map(part => <Text color={part.color}>{part.text}</Text>)
+}
+
+// Cells the facts take at the line's right, with the gap withMeta leaves before them.
+function metaWidth(look: Look, meta: Meta): number {
+  const text = metaParts(look, meta)
+    .map(part => part.text)
+    .join('')
+
+  return text === '' ? 0 : 2 + widthOf(text)
 }
 
 // A line with its facts flush right on the terminal and trailing it on the desktop,
@@ -206,12 +222,81 @@ function iconRow(look: Look, Svg: SvgElement, kind: Kind, calls: readonly Call[]
   )
 }
 
+// `path` in lines of at most `width` cells, every character kept: a line ends after a `/`,
+// and inside a segment only where the segment alone is wider than the line.
+export function pathLines(path: string, width: number): string[] {
+  const room = Math.max(1, width)
+  const lines: string[] = []
+  let line = ''
+  let used = 0
+  const push = () => {
+    lines.push(line)
+    line = ''
+    used = 0
+  }
+
+  for (const segment of path.split(/(?<=\/)/)) {
+    const cells = widthOf(segment)
+
+    if (used > 0 && used + cells > room) push()
+
+    if (cells <= room - used) {
+      line += segment
+      used += cells
+      continue
+    }
+
+    for (const grapheme of graphemes(segment)) {
+      const w = widthOf(grapheme)
+
+      if (used > 0 && used + w > room) push()
+      line += grapheme
+      used += w
+    }
+  }
+
+  if (line !== '') push()
+
+  return lines
+}
+
 // `touch` colours the target of a file this turn created (ok) or edited (warn); `href`, the
 // file's link where the surface draws one, makes the target a link drawn the same.
-export function toolRow(look: Look, call: Call, kind: Kind, target: string, meta: Meta, label = toolLabel(call.tool), touch?: Touch, href?: string | null) {
-  const { Link, Text } = look.ui
+// `room` is the cells the row has on the terminal. Given, under `paths: wrap`, a target
+// that does not fit beside the label and the facts goes on lines of its own under the
+// label, each piece in the target's colour and linked to the same file.
+export function toolRow(look: Look, call: Call, kind: Kind, target: string, meta: Meta, label = toolLabel(call.tool), touch?: Touch, href?: string | null, room?: number) {
+  const { Box, Link, Text } = look.ui
   const { palette } = look.skin
   const targetColor = call.isErrored ? palette.err : touch === 'created' ? palette.ok : touch === 'edited' ? palette.warn : palette.muted
+  const indent = nodeWidth(look, [call])
+
+  if (
+    look.svg === undefined &&
+    look.prefs.paths === 'wrap' &&
+    room !== undefined &&
+    indent + widthOf(`${label}  ${target}`) + metaWidth(look, meta) > room
+  ) {
+    const head = (
+      <Text wrap="truncate-end">
+        {node(look, [call])}
+        <Text color={palette[kind]}>{label}</Text>
+      </Text>
+    )
+
+    return stack(
+      look,
+      <Box flexDirection="column">
+        {withMeta(look, head, meta)}
+        <Box flexDirection="column" paddingLeft={indent}>
+          {pathLines(target, room - indent).map(piece => (
+            <Text color={targetColor}>{href === undefined || href === null ? piece : <Link href={href}>{piece}</Link>}</Text>
+          ))}
+        </Box>
+      </Box>,
+    )
+  }
+
   const targetText =
     href === undefined || href === null ? (
       <Text color={targetColor}>{`  ${target}`}</Text>

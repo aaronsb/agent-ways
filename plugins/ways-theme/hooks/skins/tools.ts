@@ -51,8 +51,9 @@ const textOf = (value: unknown): string => (typeof value === 'string' ? value : 
 const firstString = (fields: Fields): string =>
   Object.values(fields).map(textOf).find(value => value !== '') ?? ''
 
-// The one thing about a call worth a glance: the command, the file, the pattern.
-export function summarize(tool: string, input: unknown, cwd: string): string {
+// The one thing about a call worth a glance: the command, the file, the pattern. `max`
+// bounds its characters.
+export function summarize(tool: string, input: unknown, cwd: string, max = MAX_TARGET): string {
   const fields = fieldsOf(input)
 
   const summary = ((): string => {
@@ -85,5 +86,5 @@ export function summarize(tool: string, input: unknown, cwd: string): string {
     }
   })()
 
-  return oneLine(summary).slice(0, MAX_TARGET)
+  return oneLine(summary).slice(0, max)
 }
