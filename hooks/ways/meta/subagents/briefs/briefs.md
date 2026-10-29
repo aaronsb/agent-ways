@@ -19,7 +19,10 @@ A subagent, workflow agent or headless run starts with nothing from this session
 - **The shared contract, verbatim**: the API, data shape or output format that parallel workers must agree on.
 - **The files the worker owns**, the scope it stays inside, and the repository layout it needs to find them.
 - **Absolute paths** in shell commands. The worker's working directory can reset between calls.
+- **Foreground builds and gates.** Tell the worker to run them in the foreground with a raised Bash timeout, never to end a turn waiting on a background job, and to read a started job's output file. A Monitor or `run_in_background` notice reaches the lead's queue, so a worker that ends its turn to wait is never woken.
 - **One task.** Chaining two goals in one brief gets one of them done badly.
+
+A worker that goes idle saying it will wait for an event needs a message from the lead to wake it. A message sent to a working worker arrives when its turn ends; a message to an idle worker wakes it.
 
 For research and judgment work, add to the return shape the parent lists a confidence level with its reason, and the caveats, stated before the evidence.
 
@@ -41,6 +44,7 @@ For a goal condition another agent will run toward, use the goal-author skill.
 | "The worker will pick up the project rules" | It sees what the brief and the repository give it. This session's corrections are in neither. |
 | "I'll describe the contract in my own words" | Two workers paraphrase it two ways. Paste it verbatim. |
 | "It's a messaging task, but the agent knows not to send" | Write "never send" in the brief. |
+| "I'll start the gates in the background and wait" | The notice goes to the lead, so the worker sleeps through it. Run them in the foreground. |
 | "Rerun the whole batch to be safe" | Count the valid results and rerun only the gaps. |
 
 ## See Also
