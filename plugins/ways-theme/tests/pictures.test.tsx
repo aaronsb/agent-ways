@@ -1,15 +1,17 @@
 // Rows that carry another mod's picture, and rows Claude Code draws empty.
-// The stand-in below draws as the images mod (images@dotfiles) does: under
-// the row `next(e)` gave it, a column of a picture (a half-block `Raster`, or
-// an `Image` in its `image` mode) sized to the transcript's width less its
-// indent, then its caption line, the file's name as a `file://` link and the
-// size and scale beside it. For a row whose requestId holds `host` it also
-// does what the images mod would need to, sitting above the theme, to draw
-// inside the theme's frame: given a bordered Box another plugin drew, it sizes
-// the picture to the room inside the border and adds it under that Box's child.
-// An inline plugin's register closes over nothing of the test file, so the
-// stand-in reads its modes off the requestId: an `Image` for one that starts
-// `image`, half-blocks for any other.
+// The stand-in below draws as the images mod (plugins/images) does: under
+// the row `next(e)` gave it, a column holding a Box keyed `images-picture-0`
+// with a picture (a half-block `Raster`, or an `Image` in its `image` mode)
+// sized to the transcript's width less its indent, then its caption line, the
+// file's name as a `file://` link and the size and scale beside it. For a row
+// whose requestId holds `host` it does what the images mod does sitting above
+// the theme: given a bordered Box, it sizes the picture to the room inside the
+// border and adds it under that Box's child. An inline plugin's register
+// closes over nothing of the test file, so the stand-in reads its modes off
+// the requestId: an `Image` for one that starts `image`, half-blocks for any
+// other. The frame contract the two mods share is picture-frame.ts, whose
+// copy in plugins/images/tests the images mod's own drawing is checked
+// against.
 
 import { describe, expect, test } from 'claude-code/testing'
 import type { Plugin } from 'claude-code/testing'
@@ -18,6 +20,7 @@ import type { RenderElement } from 'claude-code'
 import { MIAMI_NIGHTS } from './fixtures.ts'
 import { INTERACTIVE, borders, host, json, shows, walk } from './host.tsx'
 import type { Node } from './host.tsx'
+import { contractBreaches } from './picture-frame.ts'
 
 const VIEW = { columns: 100, rows: 30 }
 const at = (surface: string, component: string, props: Record<string, unknown>, requestId = 'r1') => ({ plugin: 'ways-theme', surface, component, requestId, viewport: VIEW, props }) as never
@@ -61,13 +64,15 @@ const standIn = (tier?: Plugin['tier']): Plugin => ({
         ) : (
           <Raster key="images-0" cells={btoa(cell.repeat(columns * rows))} columns={columns} rows={rows} />
         )
+      // 1020 pixels in columns of 10.
+      const percent = Math.round(((columns * 10) / 1020) * 100)
       const drawn = (
         <Box flexDirection="column" paddingLeft={INDENT}>
-          <Box flexDirection="column">
+          <Box key="images-picture-0" flexDirection="column">
             {picture}
             <Box>
               <Link href={`file://${FILE}`} label="ADR-516-item-card.png" />
-              <Text dimColor>{' · 1020×300 · 90%'}</Text>
+              <Text dimColor>{` · 1020×300 · ${percent}%`}</Text>
             </Box>
           </Box>
         </Box>
@@ -119,16 +124,10 @@ function pictures(tree: unknown, inset = 0, out: { node: Node; inset: number }[]
 /** The Box drawing the frame, as the register module draws it. */
 const frameOf = (tree: RenderElement) => borders(tree)[0]
 
-const fitsInside = (tree: RenderElement): boolean =>
-  pictures(tree).every(({ node, inset }) => {
-    const p = node.props ?? {}
-    const columns = p.columns as number
-    const isWhole = node.type !== 'Raster' || atob(p.cells as string).length === columns * (p.rows as number) * 12
-    return isWhole && columns + inset <= VIEW.columns
-  })
-
-const captionKept = (tree: unknown): boolean =>
-  walk(tree).some(n => n.type === 'Link' && n.props?.href === `file://${PNG}` && n.props?.label === 'ADR-516-item-card.png') && shows(tree as RenderElement, ' · 1020×300 · 90%')
+/** What `tree` breaks of the frame contract: the picture within its room, its
+ *  caption's link, sizes and percentage kept. */
+const breaches = (tree: unknown, isFramed = false): string[] =>
+  contractBreaches(tree, { columns: VIEW.columns, cellWidth: 10, href: `file://${PNG}`, name: 'ADR-516-item-card.png', isFramed })
 
 describe('a picture another mod draws beneath the theme', () => {
   const sites: [string, string, Record<string, unknown>][] = [
@@ -147,8 +146,7 @@ describe('a picture another mod draws beneath the theme', () => {
         expect(borders(tree).length).toBe(1)
         const frame = frameOf(tree)
         expect(pictures(frame).length).toBe(1)
-        expect(captionKept(frame)).toBe(true)
-        expect(fitsInside(tree)).toBe(true)
+        expect(breaches(tree, true)).toEqual([])
         await ui.unmount()
       })
     }
@@ -190,8 +188,7 @@ describe('a picture another mod draws beneath the theme', () => {
     expect(borders(tree).length).toBeGreaterThan(0)
     expect(shows(tree, ` xdg-open ${PNG}`)).toBe(true)
     expect(pictures(tree).length).toBe(1)
-    expect(captionKept(tree)).toBe(true)
-    expect(fitsInside(tree)).toBe(true)
+    expect(breaches(tree)).toEqual([])
     await ui.unmount()
   })
 
@@ -212,7 +209,7 @@ describe('a picture another mod draws beneath the theme', () => {
     const terminal = await $.ui.mount(at('terminal', 'ToolResult', SENT))
     const tree = await terminal.drawn()
     expect(borders(tree).length).toBe(0)
-    expect(captionKept(tree)).toBe(true)
+    expect(breaches(tree)).toEqual([])
     await terminal.unmount()
     const desktop = await $.ui.mount(at('desktop', 'ToolResult', SENT, 'r2'))
     expect(borders(await desktop.drawn()).length).toBe(0)
@@ -230,7 +227,7 @@ describe('a picture another mod draws above the theme', () => {
     expect(borders(tree).length).toBe(1)
     expect(pictures(frameOf(tree)).length).toBe(0)
     expect(pictures(tree).length).toBe(1)
-    expect(captionKept(tree)).toBe(true)
+    expect(breaches(tree)).toEqual([])
     await ui.unmount()
   })
 
@@ -244,8 +241,7 @@ describe('a picture another mod draws above the theme', () => {
       const tree = await ui.drawn()
       expect(borders(tree).length).toBe(1)
       expect(pictures(frameOf(tree)).length).toBe(1)
-      expect(captionKept(frameOf(tree))).toBe(true)
-      expect(fitsInside(tree)).toBe(true)
+      expect(breaches(tree, true)).toEqual([])
       await ui.unmount()
     })
   }
