@@ -34,12 +34,15 @@ considered:
     said: "Stays builtin with an override row naming your file and whether it extends or replaces the built-in"
     via: session 2026-10-29, choice question on a tweaked built-in, selected from agent-written options
     covers: [tweaked]
+  - operator: aaronsb
+    said: "ok I see - just opened 516. makes sense. let's proceed and accept, I'm looking forward to getting all 12 items done"
+    via: session 2026-10-29, after the walk through ADR-515's twelve inconsistencies
 observable:
   - 'run: ways settings items --json lists every theme, mod, sensor, way and judge profile, and selecting origin != "builtin" leaves exactly the ones a person or a project added, each with its path'
   - 'see: a command sensor in a project''s .claude/attend/sensors/ reads origin project on its card, in attend sensor list and in ways settings items'
   - 'see: a user file named nord.theme reads origin builtin with override user replaces and its path on the theme tab, and the same overrides entry in ways settings theme list --json'
   - 'run: for one item of each family, the card''s origin, override, kind, source, version and state rows equal the fields of its ways settings items --json object'
-status: proposed
+status: accepted
 date: 2026-10-29
 deciders:
   - aaronsb
