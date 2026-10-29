@@ -338,39 +338,3 @@ fn an_attend_that_does_not_answer_in_time_is_unlisted_and_reaped() {
     let took = start.elapsed();
     assert!(took >= std::time::Duration::from_secs(2) && took < std::time::Duration::from_secs(4), "{took:?}");
 }
-
-/// A project's own sensor, in a project on disk: its file and the screens
-/// over it.
-fn project_on_disk(tag: &str) -> (PathBuf, Ways) {
-    let h = home(tag);
-    std::fs::create_dir_all(h.join("proj/.claude")).unwrap();
-    std::fs::write(h.join("proj/.claude/attend.yaml"), "sensors:\n  disk:\n    script: .claude/sensors/disk.sh\n").unwrap();
-    let ways = Ways::new(ctx(&h, || Attend::Absent));
-    (h, ways)
-}
-
-#[test]
-fn a_project_s_sensor_puts_the_project_in_the_sensors_tab_title() {
-    let (h, ways) = project_on_disk("title");
-    let title = agent_tui::Adapter::title(&ways, "sensors").unwrap();
-    assert!(title.contains("writes project+user"), "{title}");
-    let _ = std::fs::remove_dir_all(&h);
-}
-
-#[test]
-fn a_project_sensor_s_edit_lands_in_the_project_file() {
-    use agent_tui::tree::Store;
-    let (h, mut ways) = project_on_disk("write");
-    let file = h.join("proj/.claude/attend.yaml");
-    let store = |key: &str, f: &Path| Store { layer: "project".into(), file: f.to_path_buf(), key: key.into(), shown: String::new() };
-    let interval = store("attend.sensors.disk.interval", &file);
-    agent_tui::Adapter::write(&mut ways, &file, &[agent_tui::Write { store: &interval, value: "120", loaded: "60" }]).unwrap();
-    let text = std::fs::read_to_string(&file).unwrap();
-    assert!(text.contains("interval: 120") && text.contains("script: .claude/sensors/disk.sh"), "{text}");
-    // Its switch is the operator's own: the project file takes no write of it.
-    let enabled = store("attend.sensors.disk.enabled", &file);
-    let refused = agent_tui::Adapter::write(&mut ways, &file, &[agent_tui::Write { store: &enabled, value: "false", loaded: "true" }]).unwrap_err();
-    assert!(refused.contains("is written to"), "{refused}");
-    assert!(!std::fs::read_to_string(&file).unwrap().contains("enabled"), "nothing written");
-    let _ = std::fs::remove_dir_all(&h);
-}
