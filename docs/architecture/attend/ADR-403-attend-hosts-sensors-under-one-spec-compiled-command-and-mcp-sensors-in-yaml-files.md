@@ -373,3 +373,7 @@ The spec owns these and may change them in a later version without a new decisio
 - **Wipe every store at start.** Withdrawn by the operator. Each start would re-baseline every sensor, and an item that arrived while attend was down would never fire. The check at load and the retention limit bound what a store can hold over time.
 - **Streaming processes (`dbus-monitor`, `journalctl -f`) in this version.** Deferred: a poll per run covers the cases in #843, and streaming adds process supervision. It returns when a sensor needs sub-interval latency.
 - **Remote MCP servers now.** Deferred to #845 by operator decision, until OAuth refresh needs no interactive login.
+
+## Addendum, 2026-10-29: §2 and §5 amended by ADR-516
+
+Appended after acceptance; nothing above is changed. ADR-516 amends §2 and §5, which call the lowest sensor layer `shipped` and its files `bundled`. That layer's sensors report the origin `builtin`, and a key one of its files sets reports `layer: builtin`. A user or project file for a shipped sensor's name reads as that builtin sensor with an `extends` override naming the file.
