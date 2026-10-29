@@ -33,19 +33,26 @@ const SHELL_FOLD = { head: 8, tail: 4 }
 // Shell output shows whole when folding is off or the person opened it.
 const isWhole = (look: Look, opened: Opened): boolean => opened.isAll || !look.prefs.fold || look.folds?.open.has(OUTPUT_FOLD) === true
 
-// The row with its chevron at the right; `▸` closed, `▾` open.
+// Cells the chevron takes at a row's right: its padding and its glyph.
+export const DISCLOSE_INSET = 2
+
+// The row with its chevron at the right; `▸` closed, `▾` open. On the terminal the chevron
+// sits on the row's first line, under the rail's connector, where a wrapped target puts
+// lines below it.
 export function disclosedRow(look: Look, row: RenderElement, isOpen: boolean, toggle: () => void, opened?: RenderElement) {
   const { Box, Button } = look.ui
   const ascii = look.prefs.icons === 'ascii'
   const chevron = isOpen ? (ascii ? 'v' : '▾') : ascii ? '>' : '▸'
+  const isTerminal = look.surface === 'terminal'
+  const railed = look.prefs.rail && isTerminal
 
   return (
     <Box flexDirection="column">
-      <Box flexDirection="row" alignItems="flex-end">
+      <Box flexDirection="row" alignItems={isTerminal ? 'flex-start' : 'flex-end'}>
         <Box flexGrow={1} flexShrink={1} flexDirection="column">
           {row}
         </Box>
-        <Box flexShrink={0} paddingLeft={1}>
+        <Box flexShrink={0} paddingLeft={1} marginTop={railed ? 1 : 0}>
           <Button key="disclose" label={chevron} plain dimColor onPress={toggle} />
         </Box>
       </Box>

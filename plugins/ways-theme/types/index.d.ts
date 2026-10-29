@@ -61,6 +61,9 @@ export type Prefs = {
   links: boolean
   // Copy buttons on tables, code, diagrams and whole replies.
   copy: boolean
+  // A tool row's target path too long for its line: on lines of its own under the tool's
+  // name, or cut short with an ellipsis.
+  paths: 'wrap' | 'truncate'
   // Long code, tables and shell output folded behind a `▾ N more` control.
   fold: boolean
   // Runs of reads and searches drawn open, as if each had been expanded, not as one line.

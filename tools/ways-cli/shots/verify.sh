@@ -62,7 +62,8 @@ item-delete | ways settings theme --project $PS             | a Enter text:scrat
 action-menu | ways settings install --project $PS           | a Down
 theme-menu | ways settings theme --project $PS              | a Down
 theme-claude | ways settings theme --project $PS            | End
-theme-claude-nights | ways settings theme --project $PS     | End c End Up
+theme-claude-nights | ways settings theme --project $PS     | End c End Up Up
+theme-claude-paths | ways settings theme --project $PS      | End c End
 theme-claude-tampa | ways settings theme --project $PS      | End Up c Right | Left
 flow-pick  | ways settings install --project $PS            | t
 flow-other | ways settings install --project $PS            | t Down Enter text:~/work Enter
@@ -153,6 +154,8 @@ setup_theme_claude_nights() { setup_theme_claude; }
 teardown_theme_claude_nights() { teardown_theme_claude; }
 setup_theme_claude_tampa() { setup_theme_claude; }
 teardown_theme_claude_tampa() { teardown_theme_claude; }
+setup_theme_claude_paths() { setup_theme_claude; }
+teardown_theme_claude_paths() { teardown_theme_claude; }
 
 setup_mod_states() { setup_mod_actions; }
 teardown_mod_states() { teardown_mod_actions; }

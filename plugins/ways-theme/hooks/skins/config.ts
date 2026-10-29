@@ -29,6 +29,10 @@ export type Render = {
   /** The inline Copy, `as text` and `copy reply` controls. Optional in the
    *  export; absent reads as true. */
   copy: boolean
+  /** A tool row's target path too long for its line: drawn on lines of its own
+   *  under the tool's name, or cut short. Optional in the export; absent reads
+   *  as wrap. */
+  paths: 'wrap' | 'truncate'
 }
 
 /** The export, as the contract with `ways` states it. */
@@ -63,22 +67,26 @@ const oneOf = <T extends string>(v: unknown, of: readonly T[]): v is T => typeof
 
 const RENDER_KEYS = ['rail', 'tables', 'shimmer', 'charts', 'markdown', 'icons', 'frames', 'prompt_box'] as const
 
+// Keys an older `ways` does not export, each with the value its absence reads as.
+const OPTIONAL_RENDER = { copy: true, paths: 'wrap' } as const
+
 function parseRender(v: unknown): Render | string {
   if (!isRecord(v)) return 'render is not an object'
-  const keys = Object.hasOwn(v, 'copy') ? [...RENDER_KEYS, 'copy'] : RENDER_KEYS
-  if (!hasExactly(v, keys)) return 'render is not the eight keys and an optional copy'
+  const keys = [...RENDER_KEYS, ...Object.keys(OPTIONAL_RENDER).filter(k => Object.hasOwn(v, k))]
+  if (!hasExactly(v, keys)) return 'render is not the eight keys, an optional copy and an optional paths'
   const { rail, tables, shimmer, charts, markdown, icons, frames, prompt_box } = v
-  const copy = Object.hasOwn(v, 'copy') ? v.copy : true
+  const { copy, paths } = { ...OPTIONAL_RENDER, ...v }
   if (![rail, shimmer, charts, markdown, frames, copy].every(b => typeof b === 'boolean')) return 'a render switch is not a boolean'
   if (!oneOf(tables, ['on', 'text', 'off'] as const)) return 'render.tables is not on, text or off'
   if (!oneOf(icons, ['unicode', 'ascii'] as const)) return 'render.icons is not unicode or ascii'
   if (!oneOf(prompt_box, ['off', 'frame', 'gradient'] as const)) return 'render.prompt_box is not off, frame or gradient'
-  return { rail, tables, shimmer, charts, markdown, icons, frames, prompt_box, copy } as Render
+  if (!oneOf(paths, ['wrap', 'truncate'] as const)) return 'render.paths is not wrap or truncate'
+  return { rail, tables, shimmer, charts, markdown, icons, frames, prompt_box, copy, paths } as Render
 }
 
 /** The export's stdout, held to the contract: the export, or why not. Every
- *  key but `render.copy` is required, none is extra, and every colour is
- *  `#rrggbb`. */
+ *  key but `render.copy` and `render.paths` is required, none is extra, and
+ *  every colour is `#rrggbb`. */
 export function parseExport(stdout: string): ModExport | string {
   let v: unknown
   try {
@@ -249,6 +257,7 @@ export function setupOf(x: ModExport): Setup {
     highlight: true,
     links: true,
     copy: r.copy,
+    paths: r.paths,
     fold: true,
     expand: false,
     calm: null,
