@@ -14,4 +14,6 @@ agent-settings = { path = "../agent-settings" }
 # The `theme` section's declarations, read only here (attend keeps no theme key).
 agent-theme = { path = "../agent-theme", features = ["settings"] }
 claude-sessions = { path = "../claude-sessions" }
+# The sensor files: their spec, layering and checks (ADR-403).
+sensor-spec = { path = "../sensor-spec" }
 serde_yaml = "0.9"

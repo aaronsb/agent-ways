@@ -183,6 +183,7 @@ dependencies = [
  "sensor-keepwarm",
  "sensor-peers",
  "sensor-processes",
+ "sensor-spec",
  "sensor-trait",
  "serde",
  "serde_json",
@@ -220,6 +221,7 @@ dependencies = [
  "agent-settings",
  "agent-theme",
  "claude-sessions",
+ "sensor-spec",
  "serde_yaml",
 ]
 

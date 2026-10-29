@@ -1,0 +1,114 @@
+# A command sensor to copy (ADR-403 §1, §3, §3b). It runs one program each
+# poll, reads its JSON output, and wakes the agent when the result changes.
+# Shipped switched off. This one reports systemd user units that fail; it
+# needs systemctl and jq.
+#
+# To make a working sensor from it:
+#   1. Copy it to $XDG_CONFIG_HOME/attend/sensors/<name>.yaml. The file's
+#      stem is the sensor's name, and `name` below must match it.
+#   2. Set `argv` to your command and map the triggers and state onto what
+#      it prints.
+#   3. Run `attend sensor poll <name>` to see one real poll and each
+#      trigger's verdict, and `attend sensor fire <name>/<trigger> --input
+#      FILE` to send a sample result through the triggers.
+#   4. Set `enabled: true`. `attend sensor list` shows its state.
+#
+# A command file in a project's .claude/attend/sensors/ runs code the
+# repository's author chose, so it loads only when that project is listed in
+# attend.project_sensors in $XDG_CONFIG_HOME/attend/config.yaml. Until then
+# `attend sensor list` shows it as refused.
+#
+# attend hosts command sensors from slice 2 of ADR-403; before that, an
+# enabled copy loads and lints, and `attend sensor list` shows it as not
+# hosted.
+
+# The spec version the file is written to.
+spec: 1
+# The sensor's name: letters, digits, - and _. It is the file's stem.
+name: example-command
+# One line for `attend sensor list` and the settings screens.
+description: Failed systemd user units
+# crate, command or mcp. This file is a command sensor.
+kind: command
+# true or false; unset is true. A shipped example is off.
+enabled: false
+
+# Seconds between polls while nothing changes, at least 1.
+interval: 300
+# Seconds between polls while things change, from 1 to `interval`.
+min_interval: 60
+# The magnitude, from 0 to 100, that accumulates before attend discloses.
+threshold: 2.0
+# Quiet polls, at least 1, before the interval eases back to `interval`.
+decay_threshold: 3
+# The tool permissions the sensor needs (ADR-116); `attend sensor
+# permissions` checks them against settings.json.
+requires: []
+# event or message; unset is event. What a machine reports rides the event
+# lane.
+lane: event
+
+# The program and its arguments, run directly with no shell. Name a shell,
+# as here, when the command needs a pipe.
+argv:
+  - sh
+  - -c
+  - "systemctl --user list-units --failed --output=json | jq '{units: ., state: {failed: length}}'"
+# Extra environment, as name: value.
+env: {}
+# The directory it runs in; unset is the project attend runs for.
+# cwd: .
+# Seconds before the run is killed: 10 when unset, at most 600. A timeout, a
+# non-zero exit or output that does not parse is the sensor's recorded
+# state in `attend sensor list`.
+timeout: 10
+# json: one JSON document, the poll result. lines: magnitude|description
+# lines, which take no triggers or state.
+output: json
+
+# The fields attend keeps between polls: at most 16, each named [a-z][a-z0-9_]*
+# in at most 32 characters. A type is number, string or boolean. A string
+# carries `max`, its length in characters: 256 when unset, at most 1024. The
+# serialized state is at most 4 KiB.
+#
+# A field fills one of two ways. `from` is a path over the result in the
+# subset $, .field, [n], [*] and .., and must select one value; a path that
+# selects nothing leaves the field as it was. A field with no `from` is
+# emitted: the command prints it in a top-level `state` object. A field the
+# output leaves out keeps its value, and a value for a field with a `from`
+# refuses the whole write.
+state:
+  # Emitted: jq puts {state: {failed: <count>}} in the output.
+  failed: { type: number }
+  # Mapped from the result.
+  first:  { type: string, max: 128, from: "$.units[0].unit" }
+
+# Each trigger fires on a change between two polls, never while a condition
+# merely holds.
+triggers:
+  # An item trigger. `path` selects the items, `key` names the field that
+  # identifies one across polls, and `on` is added, removed or changed
+  # against the previous poll, or enters or leaves the `where` condition.
+  - name: unit-failed
+    path: "$.units[*]"
+    key: unit
+    on: added
+    # Each property maps to a value or to operators: equals, not, in,
+    # contains, like, matches, above, below. A bare string with *, ? or
+    # [...] is a glob, and a property name may be one too ("load_*").
+    # `match` combines them: all (unset) or any.
+    where:
+      unit: "*.service"
+      load: { not: not-found }
+    # The magnitude this trigger adds, from 0 to 100.
+    magnitude: 2
+    # {field} reads the item, dotted for a nested field; {state.<field>}
+    # and {prev.<field>} read the declared state after and before the
+    # poll's write; {trigger.count} is how many items changed.
+    description: "systemd user unit {unit} failed ({state.failed} failed in all)"
+  # A state trigger: declared fields mapped to changed, or for a number
+  # rises or falls.
+  - name: all-clear
+    state: { failed: falls }
+    magnitude: 1
+    description: "systemd user units recovering: {state.failed} still failed, down from {prev.failed}"

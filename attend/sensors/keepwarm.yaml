@@ -1,0 +1,15 @@
+# Shipped with attend (ADR-403). A file of the same name under
+# $XDG_CONFIG_HOME/attend/sensors/ or a project's .claude/attend/sensors/
+# overrides any field here.
+spec: 1
+name: keepwarm
+description: keeps the prompt cache warm with one wake per idle stretch
+kind: crate
+crate: keepwarm
+interval: 60
+min_interval: 60
+threshold: 3.0
+decay_threshold: 3
+requires: ["Bash(ways:*)"]
+lane: message
+lane_exception: "ADR-182: the timed wake floor rides the message lane so no refractory holds it, and it has no author"

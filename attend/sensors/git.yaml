@@ -1,0 +1,17 @@
+# Shipped with attend (ADR-403). A file of the same name under
+# $XDG_CONFIG_HOME/attend/sensors/ or a project's .claude/attend/sensors/
+# overrides any field here.
+#
+# git stays compiled until attend hosts command sensors: its poll keeps the
+# last snapshot in memory and reports changes against it, which a command
+# file can express once triggers run.
+spec: 1
+name: git
+description: tracks dirty files, branch changes, and upstream divergence
+kind: crate
+crate: git
+interval: 30
+min_interval: 10
+threshold: 2.0
+decay_threshold: 4
+requires: ["Bash(git:*)"]

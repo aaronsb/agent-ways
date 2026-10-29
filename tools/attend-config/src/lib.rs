@@ -7,13 +7,17 @@
 //! layered on top. `agent-settings` parses and checks them, and every write
 //! goes through its writer: locked, atomic, and changing only the keys it
 //! sets, so comments and order stay.
+//!
+//! Each sensor is a file of its own (ADR-403); [`sensors`] finds and layers
+//! them.
 
 mod config;
 pub mod schema;
+pub mod sensors;
 pub mod theme;
 
-pub use config::{expand_path, ChatConfig, CleanupConfig, Config, EngagementConfig, GovernorConfig, SensorConfig};
-pub use schema::{BUILTINS, FILE, SCHEMA};
+pub use config::{expand_path, ChatConfig, CleanupConfig, Config, EngagementConfig, GovernorConfig};
+pub use schema::{FILE, SCHEMA};
 
 use agent_settings::schema::LayerScope;
 use agent_settings::writer::{self, WriteError};
@@ -129,71 +133,10 @@ cleanup:
   enabled: true
   interval: 600              # seconds between sweeps (10 min)
 
-sensors:
-  context:
-    interval: 60
-    min_interval: 20
-    threshold: 1.5
-  git:
-    interval: 30
-    min_interval: 10
-    threshold: 2.0
-  peers:
-    interval: 30
-    min_interval: 10
-    threshold: 2.0
-  processes:
-    interval: 30
-    min_interval: 5
-    threshold: 2.0
-
-  # Example sensor of your own, switched off. A sensor with a `script` is
-  # one of your own.
-  #
-  # To enable it:
-  #   1. Copy the example script from the agent-ways repo to a path where
-  #      you keep trusted user scripts. The XDG convention:
-  #        mkdir -p $XDG_DATA_HOME/attend/sensors
-  #        cp tools/attend/examples/xdg-downloads.sh \
-  #           $XDG_DATA_HOME/attend/sensors/
-  #   2. Read the script. A sensor runs arbitrary shell as you.
-  #   3. Set `enabled: true` below.
-  #
-  # A script can live anywhere: under $XDG_DATA_HOME, in a project's
-  # .claude/sensors/, or at any absolute path. attend needs only that the
-  # path resolves and the script keeps the subprocess contract in
-  # docs/attend-and-monitor/authoring-sensors.md.
-  #
-  # This example watches XDG Downloads for new files: one new file fires
-  # at 2.0, a batch at 3.0.
-  xdg-downloads:
-    script: $XDG_DATA_HOME/attend/sensors/xdg-downloads.sh
-    enabled: false
-    interval: 120
-    min_interval: 30
-    threshold: 2.0
-    decay_threshold: 3
-
-  # A second shipped example, gh-notifications, emits one line per new
-  # GitHub notification, its magnitude tiered by reason. It needs gh and
-  # jq on PATH and a gh login. Watching a PR's CI is a Monitor concern,
-  # not an ambient sensor (ADR-137).
-  #gh-notifications:
-  #  script: $XDG_DATA_HOME/attend/sensors/gh-notifications.sh
-  #  enabled: false
-  #  interval: 180
-  #  min_interval: 60
-  #  threshold: 2.0
-
-# Project-scope example (in .claude/attend.yaml):
-#
-# sensors:
-#   disk-pressure:
-#     script: .claude/sensors/check-disk.sh
-#     interval: 120
-#     threshold: 3.0
-#   processes:
-#     enabled: false
+# Projects whose own command and mcp sensor files run (ADR-403). Each
+# sensor is a file under attend/sensors/; `attend sensor list` shows them.
+# project_sensors:
+#   - ~/Projects/example
 "#
     .to_string()
 }
