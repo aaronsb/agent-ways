@@ -60,16 +60,16 @@ pub(super) fn card_lines(c: &Card, room: usize) -> Vec<Line<'static>> {
     let path = |p: Option<&std::path::Path>| p.map(|p| p.display().to_string());
     let mut head = headed("origin", i.origin.word(), origin_style(i.origin), &after(path(i.path.as_deref()).as_deref()), room, dim);
     for o in &i.overrides {
-        let rest = format!(" {}{}", o.how.word(), after(path(o.path.as_deref()).as_deref()));
+        let rest = format!(" {}{}", o.how.word(), after(path(Some(&o.path)).as_deref()));
         head.extend(headed("override", o.origin.word(), origin_style(o.origin), &rest, room, dim));
     }
     let word = i.state.map(|s| (s.word(), tone_style(s.tone())));
     let detail = i.detail.as_deref();
-    // A folded state rides the block's last line while it fits there, and
-    // takes a row of its own when it would not.
+    // A folded state rides the origin line while it fits there, and takes a
+    // row of its own when it would not or when an override follows.
     let width = |l: &Line| l.spans.iter().map(|s| crate::wrap::str_width(&s.content)).sum::<usize>();
     let state_width = word.map_or(0, |(w, _)| crate::wrap::str_width(w)) + crate::wrap::str_width(&after(detail));
-    let folds = c.fold_state && word.is_some() && head.last().is_some_and(|l| width(l) + 3 + state_width <= super::review::LABEL + room);
+    let folds = c.fold_state && i.overrides.is_empty() && word.is_some() && head.last().is_some_and(|l| width(l) + 3 + state_width <= super::review::LABEL + room);
     if let (true, Some((w, style)), Some(last)) = (folds, word, head.last_mut()) {
         last.spans.push(Span::raw(" · "));
         last.spans.push(Span::styled(w.to_string(), style));

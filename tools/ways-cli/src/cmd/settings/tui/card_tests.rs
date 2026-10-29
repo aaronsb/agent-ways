@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use agent_settings::item::{How, Kind, ModState, Origin, Override, SensorState, State as Word, ThemeState};
+use agent_settings::item::{How, ItemKind, ModState, Origin, Override, SensorState, State as Word, ThemeState};
 use agent_settings::load::Layer;
 use agent_settings::LayerScope;
 use agent_tui::tree::{Card, Node};
@@ -113,7 +113,7 @@ fn a_shipped_crate_sensor_s_card_names_its_crate_version_and_cadence() {
     let h = home("builtin");
     let tab = sensors_tab(&h, described, &shipped());
     let git = &card(&tab, "git").item;
-    assert_eq!((git.origin, git.kind, git.source.as_deref(), git.version.as_deref()), (Origin::Builtin, Some(Kind::Crate), Some("attend"), Some("0.33.0")));
+    assert_eq!((git.origin, git.kind, git.source.as_deref(), git.version.as_deref()), (Origin::Builtin, Some(ItemKind::Crate), Some("attend"), Some("0.33.0")));
     assert_eq!((git.path.as_deref(), git.overrides.as_slice()), (None, &[][..]), "a shipped file read from the build has no path");
     assert_eq!(card(&tab, "git").summary, "tracks dirty files, branch changes, and upstream divergence");
     assert_eq!((git.state, git.state.map(Word::tone)), (sensor(SensorState::Active), Some(agent_settings::item::Tone::Ok)));
@@ -157,7 +157,7 @@ fn a_user_command_sensor_is_listed_with_its_file_and_its_rows_write_that_file() 
     let node = tab.children.iter().find(|n| n.name == "weather").unwrap();
     let c = node.card.as_ref().unwrap();
     let i = &c.item;
-    assert_eq!((i.origin, i.kind, i.version.as_deref(), i.overrides.as_slice()), (Origin::User, Some(Kind::Command), None, &[][..]));
+    assert_eq!((i.origin, i.kind, i.version.as_deref(), i.overrides.as_slice()), (Origin::User, Some(ItemKind::Command), None, &[][..]));
     assert_eq!(i.path.as_deref(), Some(Path::new("~/.config/attend/sensors/weather.yaml")));
     assert_eq!((c.summary.as_str(), i.source.as_deref()), ("the wind at home", Some("curl")));
     // attend's `not hosted` reads `missing`.
@@ -182,13 +182,27 @@ fn a_project_mcp_sensor_is_refused_until_the_project_is_trusted() {
     layers.push(project_file(&h, "inbox", "kind: mcp\nserver: slack\ntool: list_unread\n"));
     let tab = sensors_tab(&h, || Attend::Absent, &layers);
     let c = &card(&tab, "inbox").item;
-    assert_eq!((c.origin, c.kind, c.path.as_deref()), (Origin::Project, Some(Kind::Mcp), Some(Path::new("~/proj/.claude/attend/sensors/inbox.yaml"))));
+    assert_eq!((c.origin, c.kind, c.path.as_deref()), (Origin::Project, Some(ItemKind::Mcp), Some(Path::new("~/proj/.claude/attend/sensors/inbox.yaml"))));
     assert_eq!(c.state, sensor(SensorState::Refused));
     assert!(c.detail.as_deref().is_some_and(|w| w.contains("attend.project_sensors")), "{:?}", c.detail);
-    assert_eq!(c.source.as_deref(), Some("slack/list_unread"));
+    assert_eq!(c.source.as_deref(), Some("slack list_unread"));
     layers.push(attend_layer(&h, &format!("project_sensors: [{}]\n", h.join("proj").display())));
     let trusted = card(&sensors_tab(&h, || Attend::Absent, &layers), "inbox").item.clone();
     assert_eq!((trusted.state, trusted.detail.as_deref()), (None, Some("enabled; attend absent")));
+    let _ = std::fs::remove_dir_all(&h);
+}
+
+#[test]
+fn characterizes_a_user_switch_under_a_project_sensor() {
+    // ADR-516 §1 decision pending: whether a lower switch lists as an override
+    let h = home("switch-under-project");
+    let mut layers = with_user(&h, "inbox", "enabled: false\n");
+    layers.push(project_file(&h, "inbox", "kind: mcp\nserver: slack\ntool: list_unread\n"));
+    layers.push(attend_layer(&h, &format!("project_sensors: [{}]\n", h.join("proj").display())));
+    let tab = sensors_tab(&h, || Attend::Absent, &layers);
+    let c = &card(&tab, "inbox").item;
+    let user = Override { origin: Origin::User, how: How::Extends, path: "~/.config/attend/sensors/inbox.yaml".into() };
+    assert_eq!((c.origin, c.overrides.as_slice()), (Origin::Project, std::slice::from_ref(&user)));
     let _ = std::fs::remove_dir_all(&h);
 }
 
@@ -208,14 +222,14 @@ fn a_file_over_a_shipped_sensor_reads_builtin_extended_by_it() {
     let h = home("override");
     let tab = sensors_tab(&h, || Attend::Absent, &with_user(&h, "git", "enabled: false\n"));
     let git = &card(&tab, "git").item;
-    let user = Override { origin: Origin::User, how: How::Extends, path: Some("~/.config/attend/sensors/git.yaml".into()) };
+    let user = Override { origin: Origin::User, how: How::Extends, path: "~/.config/attend/sensors/git.yaml".into() };
     assert_eq!((git.origin, git.path.as_deref(), git.overrides.as_slice()), (Origin::Builtin, None, std::slice::from_ref(&user)));
     assert_eq!(git.state, sensor(SensorState::Off));
     // A project's file extends it too, above the user's.
     let mut layers = with_user(&h, "git", "enabled: false\n");
     layers.push(project_file(&h, "git", "interval: 90\n"));
     let git = card(&sensors_tab(&h, || Attend::Absent, &layers), "git").item.clone();
-    let project = Override { origin: Origin::Project, how: How::Extends, path: Some("~/proj/.claude/attend/sensors/git.yaml".into()) };
+    let project = Override { origin: Origin::Project, how: How::Extends, path: "~/proj/.claude/attend/sensors/git.yaml".into() };
     assert_eq!((git.origin, git.overrides), (Origin::Builtin, vec![user, project]));
     let _ = std::fs::remove_dir_all(&h);
 }
@@ -251,7 +265,7 @@ fn a_mod_s_card_reads_each_state_as_the_notice_does() {
     let c = of_mod(&ATTEND, Ok(&overview(ATTEND, State::Converged, &["0.29.0"], None)));
     let m = &c.item;
     let folder = Path::new("/home/u/.local/share/agent-ways/plugins/attend");
-    assert_eq!((m.kind, m.origin, m.path.as_deref()), (Some(Kind::Plugin), Origin::Builtin, Some(folder)));
+    assert_eq!((m.kind, m.origin, m.path.as_deref()), (Some(ItemKind::Plugin), Origin::Builtin, Some(folder)));
     assert_eq!((m.source.as_deref(), m.version.as_deref()), (Some("attend@agent-ways"), Some("0.29.0")));
     assert_eq!((m.state, m.detail.as_deref()), (Some(ModState::Converged.into()), None));
     let row = |l: &str, v: &str| (l.to_string(), v.to_string());
@@ -315,7 +329,7 @@ fn a_theme_s_card_names_where_it_comes_from() {
     // A user file that takes a bundled theme's name is that builtin,
     // replaced by the file.
     let over = of_theme(&nord, Source::Override, Some(&dir.join("nord.theme")), false, None, "plain");
-    let replaced = Override { origin: Origin::User, how: How::Replaces, path: Some(dir.join("nord.theme")) };
+    let replaced = Override { origin: Origin::User, how: How::Replaces, path: dir.join("nord.theme") };
     assert_eq!((over.item.origin, over.item.path.as_deref(), over.item.overrides.as_slice()), (Origin::Builtin, None, std::slice::from_ref(&replaced)));
     assert_eq!(over.rows[0], ("saves to".into(), "none: nothing saves".into()));
 }

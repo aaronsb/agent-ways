@@ -1,6 +1,6 @@
 //! The item card as the detail pane heads a node with it.
 
-use agent_settings::item::{Family, How, Item, Kind, Origin, Override, SensorState, ThemeState};
+use agent_settings::item::{Family, How, Item, ItemKind, Origin, Override, SensorState, ThemeState};
 use ratatui::style::Modifier;
 use ratatui::text::Line;
 
@@ -13,7 +13,7 @@ fn card(path: Option<&str>) -> Card {
         title: "downloads".into(),
         summary: "a sensor of your own".into(),
         item: Item {
-            kind: Some(Kind::Command),
+            kind: Some(ItemKind::Command),
             path: path.map(Into::into),
             source: Some("~/bin/dl.sh".into()),
             state: Some(SensorState::Active.into()),
@@ -72,12 +72,12 @@ fn each_override_follows_the_origin_on_a_row_of_its_own() {
     let mut c = card(None);
     c.item.origin = Origin::Builtin;
     c.item.overrides = vec![
-        Override { origin: Origin::User, how: How::Extends, path: Some("~/.config/attend/sensors/git.yaml".into()) },
-        Override { origin: Origin::Project, how: How::Replaces, path: None },
+        Override { origin: Origin::User, how: How::Extends, path: "~/.config/attend/sensors/git.yaml".into() },
+        Override { origin: Origin::Project, how: How::Replaces, path: "~/proj/.claude/attend/sensors/git.yaml".into() },
     ];
     let lines = card_lines(&c, 60);
     let t = text(&lines);
-    assert_eq!(&t[3..7], ["origin    builtin", "override  user extends · ~/.config/attend/sensors/git.yaml", "override  project replaces", "kind      command"]);
+    assert_eq!(&t[3..7], ["origin    builtin", "override  user extends · ~/.config/attend/sensors/git.yaml", "override  project replaces · ~/proj/.claude/attend/sensors/git.yaml", "kind      command"]);
     assert_eq!((lines[3].spans[1].content.as_ref(), lines[3].spans[1].style), ("builtin", theme::info()));
     assert_eq!((lines[4].spans[1].content.as_ref(), lines[4].spans[1].style), ("user", origin_style(Origin::User)));
 }
@@ -97,18 +97,17 @@ fn a_null_field_draws_no_row() {
 }
 
 #[test]
-fn a_folded_state_follows_the_last_override_in_its_tone() {
+fn a_folded_state_takes_its_own_row_once_an_override_follows_the_origin() {
     let mut c = card(None);
     c.fold_state = true;
-    c.item = Item { state: Some(ThemeState::Active.into()), ..Item::new(Family::Theme, "nord", Origin::Builtin) };
+    c.item = Item::new(Family::Theme, "nord", Origin::Builtin).with_state(ThemeState::Active);
     let lines = card_lines(&c, 60);
     assert_eq!(text(&lines)[3], "origin    builtin · active");
-    c.item.overrides = vec![Override { origin: Origin::User, how: How::Replaces, path: Some("~/t/nord.theme".into()) }];
+    c.item.overrides = vec![Override { origin: Origin::User, how: How::Replaces, path: "~/t/nord.theme".into() }];
     let lines = card_lines(&c, 60);
     let t = text(&lines);
-    assert_eq!(&t[3..5], ["origin    builtin", "override  user replaces · ~/t/nord.theme · active"]);
-    assert!(!t.iter().any(|l| l.starts_with("state")), "{t:?}");
-    let state = &lines[4].spans[lines[4].spans.len() - 2];
+    assert_eq!(&t[3..6], ["origin    builtin", "override  user replaces · ~/t/nord.theme", "state     active"]);
+    let state = &lines[5].spans[1];
     assert_eq!((state.content.as_ref(), state.style), ("active", theme::ok()));
 }
 

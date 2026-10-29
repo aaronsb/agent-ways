@@ -2,7 +2,7 @@
 //! state in ADR-512's words, and a critical mod that does not run saying so
 //! as the bottom bar's notice does.
 
-use agent_settings::item::{Family, Item, Kind, ModState, Origin};
+use agent_settings::item::{Family, Item, ItemKind, ModState, Origin};
 use agent_tui::tree::Card;
 
 use super::row;
@@ -41,7 +41,7 @@ pub fn of_mod(m: &Mod, o: Result<&Overview, Unread>) -> Card {
         (true, true, false) => "no: only while gate.engine is claude-code",
     };
     let mut rows = vec![row("critical", critical), row("needs", format!("Claude Code {} or later", m.min_claude_code))];
-    let mut item = Item { kind: Some(Kind::Plugin), source: Some(m.id.into()), ..Item::new(Family::Mod, m.name, Origin::Builtin) };
+    let mut item = Item { kind: Some(ItemKind::Plugin), source: Some(m.id.into()), ..Item::new(Family::Mod, m.name, Origin::Builtin) };
     match o {
         Err(why) => {
             let said = match why {
@@ -55,7 +55,7 @@ pub fn of_mod(m: &Mod, o: Result<&Overview, Unread>) -> Card {
             use attend_mod::State as S;
             item.path = Some(o.folder.join(m.name));
             item.version = o.shipped.clone();
-            item.state = Some(state(o.word).into());
+            item = item.with_state(state(o.word));
             item.detail = match (o.attention.first(), o.word) {
                 (Some(a), _) => Some(format!("critical: {}", a.why.word())),
                 (None, S::Drift) if o.older => Some("an installed copy is older".into()),

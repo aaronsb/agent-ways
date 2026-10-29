@@ -17,10 +17,10 @@ pub fn of_theme(t: &Theme, source: Source, file: Option<&Path>, active: bool, sa
     let (origin, path, overrides) = match source {
         Source::Bundled => (Origin::Builtin, None, vec![]),
         Source::User => (Origin::User, file.map(Path::to_path_buf), vec![]),
-        Source::Override => (Origin::Builtin, None, vec![Override { origin: Origin::User, how: How::Replaces, path: file.map(Path::to_path_buf) }]),
+        Source::Override => (Origin::Builtin, None, file.map(|f| Override { origin: Origin::User, how: How::Replaces, path: f.to_path_buf() }).into_iter().collect()),
     };
     let state = if active { ThemeState::Active } else { ThemeState::Inactive };
-    let item = Item { path, overrides, state: Some(state.into()), ..Item::new(Family::Theme, t.name.clone(), origin) };
+    let item = Item { path, overrides, ..Item::new(Family::Theme, t.name.clone(), origin) }.with_state(state);
     let kind = if t.kind == agent_theme::Kind::Dark { "dark" } else { "light" };
     let ground = if t.background == Background::Fill { "fill" } else { "terminal" };
     let rows = vec![

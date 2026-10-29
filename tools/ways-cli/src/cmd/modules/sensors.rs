@@ -6,7 +6,7 @@
 
 use std::time::{Duration, Instant};
 
-use agent_settings::item::{Family, How, Item, Kind, Origin, Override, SensorState};
+use agent_settings::item::{Family, How, Item, ItemKind, Origin, Override, SensorState};
 use agent_tui::tree::Card;
 use attend_config::sensors::Loaded;
 use sensor_spec::Severity;
@@ -146,12 +146,12 @@ fn state_of(word: &str) -> Option<SensorState> {
     })
 }
 
-fn kind_of(k: sensor_spec::Kind) -> Kind {
+fn kind_of(k: sensor_spec::Kind) -> ItemKind {
     match k {
-        sensor_spec::Kind::Crate => Kind::Crate,
-        sensor_spec::Kind::Command => Kind::Command,
-        sensor_spec::Kind::Mcp => Kind::Mcp,
-        sensor_spec::Kind::Ways => Kind::Ways,
+        sensor_spec::Kind::Crate => ItemKind::Crate,
+        sensor_spec::Kind::Command => ItemKind::Command,
+        sensor_spec::Kind::Mcp => ItemKind::Mcp,
+        sensor_spec::Kind::Ways => ItemKind::Ways,
     }
 }
 
@@ -198,7 +198,7 @@ pub fn of_sensor(l: &Loaded, attend: &Attend) -> Card {
         .iter()
         .enumerate()
         .filter(|(i, _)| *i != base)
-        .map(|(_, f)| Override { origin: origin_of(f.origin), how: How::Extends, path: f.path.clone() })
+        .filter_map(|(_, f)| Some(Override { origin: origin_of(f.origin), how: How::Extends, path: f.path.clone()? }))
         .collect();
     let unknown = match attend {
         Attend::Absent => "attend absent",
@@ -214,7 +214,7 @@ pub fn of_sensor(l: &Loaded, attend: &Attend) -> Card {
     };
     let (source, version) = match (d, kind) {
         (Some(d), _) if !d.source.is_empty() => (Some(d.source.clone()), d.version.clone()),
-        (None, Some(Kind::Crate) | None) => (None, None),
+        (None, Some(ItemKind::Crate) | None) => (None, None),
         _ => (spec.map(|s| s.source()), None),
     };
     let summary = spec.map(|s| s.description.clone()).filter(|s| !s.is_empty()).or_else(|| d.map(|d| d.description.clone()).filter(|s| !s.is_empty()));
@@ -225,7 +225,10 @@ pub fn of_sensor(l: &Loaded, attend: &Attend) -> Card {
         rows.push(row("threshold", c.threshold.to_string()));
         rows.push(row("lane", s.lane().as_str()));
     }
-    let item = Item { kind, path, overrides, source, version, state: state.map(Into::into), detail, ..Item::new(Family::Sensor, l.name.clone(), origin) };
+    let mut item = Item { kind, path, overrides, source, version, detail, ..Item::new(Family::Sensor, l.name.clone(), origin) };
+    if let Some(state) = state {
+        item = item.with_state(state);
+    }
     Card {
         title: l.name.clone(),
         summary: summary.unwrap_or_else(|| kind.map_or("a sensor file".into(), |k| format!("a {} sensor", k.word()))),

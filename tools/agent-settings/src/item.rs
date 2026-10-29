@@ -15,7 +15,7 @@ pub struct Item {
     /// Unique within the family; a way's is its id.
     pub name: String,
     /// What implements it; `None` where the family has one implementation.
-    pub kind: Option<Kind>,
+    pub kind: Option<ItemKind>,
     /// The lowest layer that defines an item of this name.
     pub origin: Origin,
     /// The origin layer's definition; `None` when it exists only inside a
@@ -38,6 +38,13 @@ impl Item {
     /// else known.
     pub fn new(family: Family, name: impl Into<String>, origin: Origin) -> Item {
         Item { family, name: name.into(), kind: None, origin, path: None, overrides: Vec::new(), source: None, version: None, state: None, detail: None }
+    }
+
+    /// This item in `state`, which must be a word of its family's list.
+    pub fn with_state(self, state: impl Into<State>) -> Item {
+        let state = state.into();
+        debug_assert_eq!(state.family(), self.family, "state {} is not a {:?} state", state.word(), self.family);
+        Item { state: Some(state), ..self }
     }
 }
 
@@ -76,8 +83,8 @@ impl Origin {
 pub struct Override {
     pub origin: Origin,
     pub how: How,
-    /// The file that makes it; `None` for a layer read from no file.
-    pub path: Option<PathBuf>,
+    /// The file that makes it.
+    pub path: PathBuf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -102,7 +109,7 @@ impl How {
 /// profile's provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum Kind {
+pub enum ItemKind {
     Plugin,
     Crate,
     Command,
@@ -113,17 +120,17 @@ pub enum Kind {
     ClaudeCode,
 }
 
-impl Kind {
+impl ItemKind {
     pub fn word(self) -> &'static str {
         match self {
-            Kind::Plugin => "plugin",
-            Kind::Crate => "crate",
-            Kind::Command => "command",
-            Kind::Mcp => "mcp",
-            Kind::Ways => "ways",
-            Kind::Anthropic => "anthropic",
-            Kind::Openrouter => "openrouter",
-            Kind::ClaudeCode => "claude-code",
+            ItemKind::Plugin => "plugin",
+            ItemKind::Crate => "crate",
+            ItemKind::Command => "command",
+            ItemKind::Mcp => "mcp",
+            ItemKind::Ways => "ways",
+            ItemKind::Anthropic => "anthropic",
+            ItemKind::Openrouter => "openrouter",
+            ItemKind::ClaudeCode => "claude-code",
         }
     }
 }
@@ -265,11 +272,11 @@ mod tests {
     #[test]
     fn a_full_item_serializes_its_overrides_under_the_descriptor_names() {
         let git = Item {
-            kind: Some(Kind::Crate),
+            kind: Some(ItemKind::Crate),
             path: Some("/d/agent-ways/attend/sensors/git.yaml".into()),
             overrides: vec![
-                Override { origin: Origin::User, how: How::Extends, path: Some("/c/attend/sensors/git.yaml".into()) },
-                Override { origin: Origin::Project, how: How::Replaces, path: None },
+                Override { origin: Origin::User, how: How::Extends, path: "/c/attend/sensors/git.yaml".into() },
+                Override { origin: Origin::Project, how: How::Replaces, path: "/p/.claude/attend/sensors/git.yaml".into() },
             ],
             source: Some("attend".into()),
             version: Some("0.33.0".into()),
@@ -281,10 +288,16 @@ mod tests {
             json(&git),
             concat!(
                 r#"{"family":"sensor","name":"git","kind":"crate","origin":"builtin","path":"/d/agent-ways/attend/sensors/git.yaml","#,
-                r#""overrides":[{"origin":"user","how":"extends","path":"/c/attend/sensors/git.yaml"},{"origin":"project","how":"replaces","path":null}],"#,
+                r#""overrides":[{"origin":"user","how":"extends","path":"/c/attend/sensors/git.yaml"},{"origin":"project","how":"replaces","path":"/p/.claude/attend/sensors/git.yaml"}],"#,
                 r#""source":"attend","version":"0.33.0","state":"not-compiled","detail":"this build leaves it out"}"#
             )
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "is not a Theme state")]
+    fn a_state_of_another_family_is_refused() {
+        let _ = Item::new(Family::Theme, "nord", Origin::Builtin).with_state(SensorState::Active);
     }
 
     #[test]
@@ -324,10 +337,10 @@ mod tests {
         assert_eq!(v(&Family::Profile), "profile");
         assert_eq!(v(&How::Replaces), "replaces");
         assert_eq!(v(&Tone::Warn), "warn");
-        for k in [Kind::Plugin, Kind::Crate, Kind::Command, Kind::Mcp, Kind::Ways, Kind::Anthropic, Kind::Openrouter, Kind::ClaudeCode] {
+        for k in [ItemKind::Plugin, ItemKind::Crate, ItemKind::Command, ItemKind::Mcp, ItemKind::Ways, ItemKind::Anthropic, ItemKind::Openrouter, ItemKind::ClaudeCode] {
             assert_eq!(v(&k), k.word());
         }
-        assert_eq!(v(&Kind::ClaudeCode), "claude-code");
+        assert_eq!(v(&ItemKind::ClaudeCode), "claude-code");
         for o in [Origin::Builtin, Origin::User, Origin::Project] {
             assert_eq!(v(&o), o.word());
         }

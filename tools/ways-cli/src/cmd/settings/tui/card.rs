@@ -8,9 +8,9 @@ use agent_tui::tree::Card;
 use super::build::{tilde, tilde_text};
 
 pub fn shown(mut c: Card, home: &Path) -> Card {
-    let at = |p: &mut Option<PathBuf>| *p = p.as_deref().map(|p| PathBuf::from(tilde(p, home)));
-    at(&mut c.item.path);
-    c.item.overrides.iter_mut().for_each(|o| at(&mut o.path));
+    let at = |p: &Path| PathBuf::from(tilde(p, home));
+    c.item.path = c.item.path.as_deref().map(at);
+    c.item.overrides.iter_mut().for_each(|o| o.path = at(&o.path));
     c.item.source = c.item.source.map(|s| tilde_text(&s, home));
     c.item.detail = c.item.detail.map(|s| tilde_text(&s, home));
     for (_, v) in &mut c.rows {
