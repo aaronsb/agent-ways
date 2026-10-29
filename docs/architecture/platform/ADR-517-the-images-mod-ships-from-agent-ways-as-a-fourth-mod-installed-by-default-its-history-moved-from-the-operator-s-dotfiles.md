@@ -39,7 +39,10 @@ considered:
     said: "On, guessed size: images installs on Macs too, drawing at a 10x20-pixel cell guess until the probe lands"
     via: session 2026-10-29, choice question on the darwin default, selected from agent-written options
     covers: [Mac]
-status: proposed
+  - operator: aaronsb
+    said: "Yes to all theew"
+    via: session 2026-10-29, answering the wrap's decision 1 (accept ADR-517)
+status: accepted
 date: 2026-10-29
 deciders:
   - aaronsb
