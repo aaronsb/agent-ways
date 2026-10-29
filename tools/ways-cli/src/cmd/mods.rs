@@ -183,8 +183,10 @@ pub fn check(name: Option<&str>) -> Result<()> {
     let mut r = Report::new("ways manage mod check");
     let mut problems = 0;
     let claude_code = super::settings::engine::claude_code_chosen();
+    let mut images_wanted = false;
     for t in &targets {
         for (m, v) in attend_mod::views(&src, &t.target(&default_root), only.as_ref()) {
+            images_wanted |= m == IMAGES && v.wanted;
             r.section(format!("{} — {}", m.name, shown(&t.dir)));
             for (mark, text) in checks(&m, &v, attend_mod::shipped_version(&m, &src).as_deref(), claude_code, &default_root) {
                 if mark == Mark::Warn {
@@ -193,6 +195,14 @@ pub fn check(name: Option<&str>) -> Result<()> {
                 r.item(mark, text);
             }
         }
+    }
+    if images_wanted {
+        r.section(format!("{} — this host", IMAGES.name));
+        let (mark, text) = imagemagick_check(std::env::var_os("PATH").as_deref());
+        if mark == Mark::Warn {
+            problems += 1;
+        }
+        r.item(mark, text);
     }
     if targets.is_empty() {
         r.footer(Mark::Info, "no enabled target; `ways manage target list` lists them");
@@ -287,17 +297,23 @@ fn checks(m: &Mod, v: &View, shipped: Option<&str>, claude_code: bool, default_r
             _ => out.push((Mark::Ok, "gate.engine and the mod's wanted state agree".to_string())),
         }
     }
-    if *m == IMAGES && v.wanted {
-        out.push(imagemagick_check(std::env::var_os("PATH").as_deref()));
-    }
     out
 }
 
 /// The images mod decodes and resizes every picture with ImageMagick, as
-/// `magick` (version 7) or `convert` (version 6), found on `path`.
+/// `magick` (version 7) or `convert` (version 6), found on `path`. Like the
+/// mod, it takes a tool whose `-version` names ImageMagick, so GraphicsMagick's
+/// `convert` does not pass.
 fn imagemagick_check(path: Option<&std::ffi::OsStr>) -> (Mark, String) {
     use super::mcp_register::on_path;
-    match on_path("magick", path).or_else(|| on_path("convert", path)) {
+    let is_imagemagick = |tool: &PathBuf| {
+        std::process::Command::new(tool)
+            .arg("-version")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .is_ok_and(|o| o.status.success() && String::from_utf8_lossy(&o.stdout).contains("ImageMagick"))
+    };
+    match ["magick", "convert"].iter().filter_map(|n| on_path(n, path)).find(is_imagemagick) {
         Some(tool) => (Mark::Ok, format!("ImageMagick is on PATH ({})", tool.display())),
         None => (
             Mark::Warn,
@@ -722,20 +738,45 @@ mod tests {
         let (mark, text) = imagemagick_check(Some(&path));
         assert_eq!(mark, Mark::Warn);
         assert!(text.contains("ImageMagick (magick or convert) is not on PATH") && text.contains("Fix: install ImageMagick"), "{text}");
-        let convert = dir.join("convert");
-        std::fs::write(&convert, "#!/bin/sh\n").unwrap();
-        std::fs::set_permissions(&convert, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let tool = |name: &str, banner: &str| {
+            let f = dir.join(name);
+            std::fs::write(&f, format!("#!/bin/sh\necho '{banner}'\n")).unwrap();
+            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+            f
+        };
+        // GraphicsMagick's convert answers -version without naming ImageMagick.
+        tool("convert", "GraphicsMagick 1.3.45 2024-01-01 Q16");
+        let (mark, text) = imagemagick_check(Some(&path));
+        assert_eq!(mark, Mark::Warn, "{text}");
+        let convert = tool("convert", "Version: ImageMagick 6.9.12-98 Q16 x86_64");
         let (mark, text) = imagemagick_check(Some(&path));
         assert_eq!(mark, Mark::Ok, "{text}");
         assert!(text.contains(&convert.display().to_string()), "{text}");
 
-        // The check is the images mod's, while it is wanted.
+        // The per-target checks leave it to the one host-wide line.
         let v = view(&dir, Some("1.48.0"), Ok("2.1.310".to_string()));
-        let names = |m: &Mod, v: &View| checks(m, v, Some("1.48.0"), false, &dir).into_iter().filter(|(_, t)| t.contains("ImageMagick")).count();
-        assert_eq!(names(&IMAGES, &v), 1);
-        assert_eq!(names(&ATTEND, &v), 0);
-        assert_eq!(names(&IMAGES, &View { wanted: false, ..v.clone() }), 0);
+        assert!(checks(&IMAGES, &v, Some("1.48.0"), false, &dir).iter().all(|(_, t)| !t.contains("ImageMagick")));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_plugin_only_settings_enables_gets_the_enabledplugins_fix() {
+        let dir = Path::new("/home/u/.claude");
+        let v = View {
+            foreign: vec!["images@dotfiles".into(), "images@old".into()],
+            settings_only: vec!["images@dotfiles".into()],
+            settings_file: Some(dir.join("settings.json")),
+            ..view(dir, None, Ok("2.1.310".to_string()))
+        };
+        let lines: Vec<String> = checks(&IMAGES, &v, Some("1.48.0"), false, dir).into_iter().map(|(_, t)| t).collect();
+        let only = lines.iter().find(|t| t.starts_with("images@dotfiles")).unwrap();
+        assert!(
+            only.starts_with("images@dotfiles is enabled in /home/u/.claude/settings.json (enabledPlugins) from a marketplace Claude Code has not recorded")
+                && only.contains("Fix: remove that enabledPlugins entry, then `ways manage mod repair images --commit`"),
+            "{only}"
+        );
+        let listed = lines.iter().find(|t| t.starts_with("images@old")).unwrap();
+        assert!(listed.contains("is installed from another marketplace") && listed.contains("Fix: uninstall it"), "{listed}");
     }
 
     /// A critical mod that is missing, disabled or pending needs the
