@@ -9,12 +9,16 @@
 //! `build` turns the registry into the tree, `flows` holds the guided flows.
 
 pub mod build;
+pub mod card;
 pub mod flows;
 pub mod judge;
 pub mod mods;
 pub mod modread;
 pub mod others;
+pub mod sensors;
 mod themecc;
+#[cfg(test)]
+mod card_tests;
 #[cfg(test)]
 mod tests;
 
@@ -73,13 +77,19 @@ pub struct Ctx {
     /// Whether `mods` runs off the screen's thread: the live one calls
     /// Claude Code, which the screens do not wait on.
     pub mods_background: bool,
+    /// What attend says of its sensors, read once for the sensors tab's
+    /// cards.
+    pub sensors: fn() -> crate::cmd::modules::sensors::Attend,
 }
 
-/// Whether the screens write `b` to the project's file: a project-scope key,
-/// or, when the screens were opened for a project, one the ways schema names
-/// for the screens to keep per project.
-pub(super) fn writes_project(b: &agent_settings::Bound, ctx: &Ctx) -> bool {
-    b.spec.scope == Scope::Project || (ctx.for_project && ways_core::settings::SCREENS_WRITE_PROJECT.contains(&b.spec.name))
+/// Whether the screens write `b` to the project's file: a project-scope key;
+/// when the screens were opened for a project, one the ways schema names for
+/// the screens to keep per project; or, `enabled` aside, a key of a sensor
+/// whose script a project's file sets, as `layers` resolve it.
+pub(super) fn writes_project(b: &agent_settings::Bound, ctx: &Ctx, layers: &[Layer]) -> bool {
+    b.spec.scope == Scope::Project
+        || (ctx.for_project && ways_core::settings::SCREENS_WRITE_PROJECT.contains(&b.spec.name))
+        || (b.spec.section == "attend.sensors" && b.bound.first().is_some_and(|n| crate::cmd::modules::sensors::writes_project(layers, n, b.spec.name)))
 }
 
 /// Whether `given` (the `--project`, else `CLAUDE_PROJECT_DIR`) opens the
@@ -111,6 +121,7 @@ impl Ctx {
             judge: judge::JudgeState::live,
             mods: crate::cmd::mods::overview,
             mods_background: true,
+            sensors: crate::cmd::modules::sensors::described,
             xdg_config,
             home,
         }
@@ -151,6 +162,8 @@ pub struct Ways {
     /// A queued command ran since the last reload, which may have moved a
     /// mod.
     ran: Cell<bool>,
+    /// What attend says of its sensors, asked at the first build.
+    described: std::cell::OnceCell<crate::cmd::modules::sensors::Attend>,
 }
 
 /// How soon after a read starts another may: a burst of requests reads once.
@@ -173,6 +186,7 @@ impl Ways {
             mods,
             files: Cell::new(None),
             ran: Cell::new(false),
+            described: std::cell::OnceCell::new(),
         }
     }
 
@@ -195,6 +209,11 @@ impl Ways {
         // read landing later moves the stamp and reloads the tree.
         m.wait_first(MODS_WAIT);
         m.shown()
+    }
+
+    /// What attend says of its sensors, asked once.
+    pub(super) fn described(&self) -> &crate::cmd::modules::sensors::Attend {
+        self.described.get_or_init(|| (self.ctx.sensors)())
     }
 
     /// The stamp of the files the tree was read from: metadata only.
@@ -409,9 +428,9 @@ impl Adapter for Ways {
         for w in values {
             let b = lookup(&self.reg, &w.store.key).map_err(|f| f.message)?;
             let v = b.spec.parse_cli(w.value, &layers, &b.bound).map_err(|m| format!("{}: {m}", w.store.key))?;
-            let at = |p: &Path| target_file(&b, writes_project(&b, &self.ctx).then_some(p)).map(|t| t.0).map_err(|f| f.message);
+            let at = |p: &Path| target_file(&b, writes_project(&b, &self.ctx, &layers).then_some(p)).map(|t| t.0).map_err(|f| f.message);
             let mut path = at(&self.ctx.project)?;
-            if path == file && !self.ctx.in_project && writes_project(&b, &self.ctx) {
+            if path == file && !self.ctx.in_project && writes_project(&b, &self.ctx, &layers) {
                 return Err(self.short(&format!(
                     "{} is set in a project's file, and no project encloses {}; nothing was written",
                     w.store.key,
@@ -629,6 +648,11 @@ impl Adapter for Ways {
             spans.push(Span::raw(" "));
         }
         Some(Line::from(spans))
+    }
+
+    fn theme_card(&self, theme: &agent_theme::Theme, source: agent_theme::Source, file: Option<&Path>, active: bool, shape: &str) -> Option<agent_tui::tree::Card> {
+        let m = crate::cmd::modules::themes::of_theme(theme, source, file, active, self.ctx.themes.as_deref(), shape);
+        Some(card::card(&m, &self.ctx.home))
     }
 
     fn claude_code(&self) -> Option<agent_tui::ClaudeCode> {

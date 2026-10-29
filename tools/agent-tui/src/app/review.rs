@@ -140,7 +140,12 @@ impl App {
         match &r.kind {
             RKind::Node { own, below, files } => {
                 let n = tree::get(&self.roots, &r.path);
-                lines.extend([Line::styled(tree::label(&self.roots, &r.path), bold), Line::raw("")]);
+                // A module's card heads the pane, as it does in browse.
+                match &n.card {
+                    Some(c) => lines.extend(super::card::card_lines(c, room)),
+                    None => lines.push(Line::styled(tree::label(&self.roots, &r.path), bold)),
+                }
+                lines.push(Line::raw(""));
                 if !n.doc.is_empty() {
                     lines.extend(n.doc.lines().map(|l| Line::raw(l.to_string())));
                     lines.push(Line::raw(""));

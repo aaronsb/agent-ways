@@ -155,6 +155,13 @@ pub trait Adapter {
         None
     }
 
+    /// The card the theme tab's detail opens with for `theme`, read from
+    /// `file` as `source` says, `active` when it is the chosen theme, drawn
+    /// with `shape`. `None` heads the detail with the theme's name alone.
+    fn theme_card(&self, _theme: &agent_theme::Theme, _source: agent_theme::Source, _file: Option<&std::path::Path>, _active: bool, _shape: &str) -> Option<crate::tree::Card> {
+        None
+    }
+
     /// What the theme tab's Claude Code section shows: the mod that draws
     /// the theme in Claude Code, its render settings and its words. `None`
     /// leaves the section out.

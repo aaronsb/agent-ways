@@ -354,8 +354,12 @@ impl App {
     fn draw_detail(&self, f: &mut Frame, area: Rect, path: &[usize]) {
         let n = tree::get(&self.roots, path);
         let dim = theme::muted();
-        let title = n.heading.clone().unwrap_or_else(|| tree::label(&self.roots, path));
-        let mut lines = vec![Line::styled(title, Style::new().add_modifier(Modifier::BOLD)), Line::raw("")];
+        // A module's card heads the pane in place of its key.
+        let mut lines = match &n.card {
+            Some(c) => super::card::card_lines(c, (area.width as usize).saturating_sub(2 + super::review::LABEL)),
+            None => vec![Line::styled(n.heading.clone().unwrap_or_else(|| tree::label(&self.roots, path)), Style::new().add_modifier(Modifier::BOLD))],
+        };
+        lines.push(Line::raw(""));
         // A setting beside its `about` shows its controls alone; a group
         // keeps its doc above the summary.
         if !n.doc.is_empty() && (n.about.is_empty() || n.setting.is_none()) {
