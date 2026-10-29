@@ -68,6 +68,18 @@ basis:
     level: directed
     said: we should have a reasonable limit for cleanup though
     via: session 2026-10-29
+  - operator: aaronsb
+    level: directed
+    said: 'One poller per project: the first attend in a project takes a lock and polls; the others read its results'
+    via: session 2026-10-29, choice question on two attend instances in one project, selected from agent-written options
+  - operator: aaronsb
+    level: directed
+    said: 'Both lanes: any filled description is made one line with frame-forging < defused, whichever lane it rides'
+    via: session 2026-10-29, choice question on the event lane, selected from agent-written options
+  - operator: aaronsb
+    level: directed
+    said: 'Refuse the write: an emitted value for a field with a from mapping refuses the whole write'
+    via: session 2026-10-29, choice question on an emitted value for a mapped field, selected from agent-written options
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -75,6 +87,10 @@ considered:
   - operator: aaronsb
     said: "Yes, allow-list (Recommended)"
     via: session 2026-10-03, selected from agent-written options on the gate for repository sensor files
+    covers: [project-trust]
+  - operator: aaronsb
+    said: "Allow-list: a repo's command and mcp sensors are refused until the project is in attend.project_sensors in the user config"
+    via: session 2026-10-29, choice question on the project-trust probe, selected from agent-written options
     covers: [project-trust]
 observable:
   - 'see: attend sensor list shows a shipped git.yaml, a user weather.yaml (kind: command, Open-Meteo) and a user slack-unread.yaml (kind: mcp), each with its source file and last poll state'
@@ -111,7 +127,7 @@ related:
 - **Decided:** attend becomes a sensor host. Every sensor, compiled or declarative, is defined by one YAML file under one versioned spec. The spec is a shared core (identity, file layout, layering, `where` conditions, enable and disable, the management flow) plus a block per kind. attend hosts three kinds: `crate` (compiled poll code), `command` (an argv and an output format) and `mcp` (a read-only tool on a stdio MCP server). ways hosts the fourth, `ways` (ADR-199). An attend trigger is a small condition object over the poll result, with wildcards, that fires on transitions. An attend sensor may declare a small typed state that only attend writes and checks, and its triggers and descriptions read it. `ways settings` and its key path reach every sensor, trigger and field, and the CLI can poll, probe and test-fire any sensor.
 - **Trades away:** the inline `attend.sensors.<name>.script` form and the `attend.sensors.*` keys in `config.yaml` and `.claude/attend.yaml` are replaced, with no legacy reader. Compiled sensors lose their hard-coded defaults. A sensor's memory is limited to a few declared scalar fields. Remote MCP servers wait for #845.
 - **One-way?** No. Sensor files are plain data, and the compiled sensors keep their poll code.
-- **Probes:** *Confident (host):* attend is a host and sensors are data it loads, so adding a sensor needs no change to attend. *Not confident (project-trust):* a project's own command and MCP sensor files load only after you list that project in your user config. Is that the gate you want for sensors shared through a repository?
+- **Probes:** *Confident (host):* attend is a host and sensors are data it loads, so adding a sensor needs no change to attend. *Not confident (project-trust):* a project's own command and MCP sensor files load only after you list that project in your user config. Is that the gate you want for sensors shared through a repository? Answered: the allow-list (§2).
 - **Inversion:** between every sensor as compiled code (one build, no runtime surprises) and every sensor as an external script (open, unvalidated, quiet on failure). The decision keeps compiled code only where a poll needs it and puts everything else in validated data.
 
 ## Context
@@ -201,14 +217,17 @@ The lane is per sensor, which is a step toward #139 and not its fix. `peers` sti
 
 An attend sensor may declare a `state` block: a map from field name to a type, `number`, `string` or `boolean`. A string field carries a `max` length in characters. There is no object, array or null type, and no nesting. A new field starts at `0`, `""` or `false`. §8 holds the bounds.
 
-Only attend writes the store. It keeps one JSON file per sensor under its state directory, `$XDG_STATE_HOME/agent-ways/attend/sensor-state/`, named by a hash of the sensor's name and the project attend runs for, so no part of the path comes from a sensor file. Every attend sensor has a store, empty when it declares no state. Its trigger memory sits beside the store, outside the declared fields, and is deleted whenever the store is. No template field, argument or environment variable gives the path to a command, a server or the agent.
+Only attend writes the store, and in a project only its poller does. It keeps one JSON file per sensor under its state directory, `$XDG_STATE_HOME/agent-ways/attend/sensor-state/`, named by a hash of the sensor's name and the project attend runs for, so no part of the path comes from a sensor file. Every attend sensor has a store, empty when it declares no state. Its trigger memory sits beside the store, outside the declared fields, and is deleted whenever the store is. Trigger memory is attend-internal: no template reads it, and the declaration check does not cover it. No template field, argument or environment variable gives the path to a command, a server or the agent.
+
+One attend per project polls. The first attend to start in a project takes a lock in its state directory and becomes the project's poller: it runs every sensor, holds the project's MCP sessions (§4) and is the only writer of the project's stores. Every other attend in the project reads the poller's results and delivers them to its own session. The poller holds the lock for the life of its process, so the lock is released when the poller exits for any reason, and another instance takes it at its next tick and polls on from the stores as they stand.
 
 A sensor fills its fields in two ways:
 - **Mappings.** A field's `from` is a JSONPath of the §8 subset over the poll result, and must select one scalar. A path that selects nothing leaves the field as it was. `mcp` and `command` sensors both map.
-- **Emitted fields.** A `command` sensor with `output: json` may put a `state` object at the top of its output, with a value for any declared field that has no `from`. A field it leaves out keeps its value.
+- **Emitted fields.** A `command` sensor with `output: json` may put a `state` object at the top of its output, with a value for any declared field that has no `from`. A field it leaves out keeps its value, and a value for a field that has a `from` refuses the whole write.
 
 Every write is checked whole against the declaration:
 - every field name is declared;
+- no emitted value is for a field that has a `from`;
 - every type is exact, with no coercion: a number is a finite JSON number, a boolean is `true` or `false`, and the string `"3"` is a string;
 - every string is within its `max`, and the serialized state within the §8 size;
 - no string holds a control or format character (Unicode Cc or Cf). The check rejects such a string, so a stored string is always what the source sent.
@@ -223,7 +242,7 @@ At start attend also deletes two kinds of store:
 
 An expired or discarded store is recorded as its sensor's state. A sensor whose file is gone has no row of its own, so `attend sensor list` shows each orphan deletion as a line until the next start. A sensor whose store was discarded or expired sets a baseline on its first poll and fires nothing.
 
-A string inserted into a description is still sensor output. The typed bounds limit its size and shape, and attend's framing carries what it says to the model as data. On the message lane the description is delivered inside attend's message frame (ADR-406 item 4): made one line, with every `<` that could forge the frame's tags replaced by `‹`, by the rule `defuse_fence` in `tools/attend/src/cmd/inbox.rs` and `defuseFence` in `plugins/attend/hooks/lib.ts` share. On the event lane attend makes a filled description one line and applies the same rule before delivery.
+A string inserted into a description is still sensor output. The typed bounds limit its size and shape, and attend's framing carries what it says to the model as data. Whichever lane it rides, a filled description is made one line, with every `<` that could forge a frame's tags replaced by `‹`, by the rule `defuse_fence` in `tools/attend/src/cmd/inbox.rs` and `defuseFence` in `plugins/attend/hooks/lib.ts` share. On the message lane it is then delivered inside attend's message frame (ADR-406 item 4).
 
 A Slack sensor through an MCP server, counting unread messages and describing the newest:
 
@@ -253,7 +272,7 @@ A poll that raises `unread` and changes `last_ts` fires the trigger once. The pl
 
 ### 4. MCP sensors: stdio, read-only, attend-side diff
 
-An `mcp` sensor's `server` names a server from Claude Code's MCP configuration (user `~/.claude.json`, project `.mcp.json`), or defines one inline with `command`, `args` and `env`. attend starts its own stdio instance of that server, holds one long-lived session per server shared by every sensor that uses it, and restarts it on failure.
+An `mcp` sensor's `server` names a server from Claude Code's MCP configuration (user `~/.claude.json`, project `.mcp.json`), or defines one inline with `command`, `args` and `env`. The project's poller (§3b) starts one stdio instance of that server for the project, holds one long-lived session per server shared by every sensor that uses it, and restarts it on failure.
 - **Transport:** stdio only. Remote servers wait for #845, where OAuth must refresh without an interactive login.
 - **Read-only, checked:** the MCP specification makes `readOnlyHint` advisory and untrusted, so the hint is necessary but not sufficient.
   - The tool must declare `readOnlyHint: true`. A file may set `allow_unannotated: true`, which `attend sensor list` and the settings tab show as an override.
