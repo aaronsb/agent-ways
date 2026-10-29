@@ -277,3 +277,32 @@ fn project_writes_the_project_s_sensor_file() {
     assert_eq!(code, 4, "{err}");
     assert!(err.contains("proj/.claude/attend/sensors/processes.yaml sets attend.sensors.processes.enabled"), "{err}");
 }
+
+// A sensor's name is its file's name, so a name that is a path is refused
+// before any file is opened.
+#[test]
+fn a_sensor_name_that_is_a_path_is_refused_by_set_and_writes_nothing() {
+    let fx = Fx::new();
+    let outside = fx.root.join("outside/compose.yaml");
+    fx.write(&outside, "interval: 1\n");
+    let stem = fx.root.join("outside/compose");
+    for name in [stem.to_str().unwrap(), "../../../outside/compose"] {
+        let (_, err, code) = fx.run(&["settings", "set", &format!("attend.sensors.{name}.interval"), "7"]);
+        assert_eq!(code, 2, "{name}: {err}");
+        assert!(err.contains("is not a sensor name"), "{name}: {err}");
+    }
+    assert_eq!(fx.read(&outside), "interval: 1\n", "the file outside is untouched");
+    assert!(!fx.root.join("xdg/config/attend/sensors").exists(), "nothing written");
+}
+
+#[test]
+fn a_sensor_name_that_is_a_path_is_refused_by_apply_and_writes_nothing() {
+    let fx = Fx::new();
+    let obj = fx.root.join("obj.yaml");
+    fx.write(&obj, "sensors:\n  \"../../../outside/dotdot\":\n    enabled: false\n");
+    let (out, err, code) = fx.run(&["settings", "apply", "--file", obj.to_str().unwrap()]);
+    assert_ne!(code, 0, "{out}{err}");
+    assert!(format!("{out}{err}").contains("is not a sensor name"), "{out}{err}");
+    assert!(!fx.root.join("outside").exists() && !fx.root.join("xdg/outside").exists(), "nothing written outside the sensor directories");
+    assert!(!fx.root.join("xdg/config/attend/sensors").exists(), "nothing written");
+}

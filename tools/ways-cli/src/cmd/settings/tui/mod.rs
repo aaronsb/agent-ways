@@ -296,7 +296,7 @@ impl Ways {
         let v = b.spec.parse_cli(text, &live_layers(self.ctx.project_layer()), &b.bound).map_err(|m| format!("{key}: {m}"))?;
         let (path, _) = target_file(&b, None).map_err(|f| f.message)?;
         self.refuse_broken(&path)?;
-        write_file(&path, &[(super::file_key(&b), v)]).map(|_| ()).map_err(|f| self.short(&f.message))
+        write_file(&path, super::is_sensor_key(&b), &[(super::file_key(&b), v)]).map(|_| ()).map_err(|f| self.short(&f.message))
     }
 
     /// A file that does not parse fails closed and takes no write from the
@@ -428,6 +428,7 @@ impl Adapter for Ways {
         // names.
         let mut project = self.ctx.project.clone();
         let mut edits = Vec::new();
+        let mut sensor = false;
         let layers = live_layers(self.ctx.project_layer());
         for w in values {
             let b = lookup(&self.reg, &w.store.key).map_err(|f| f.message)?;
@@ -458,11 +459,12 @@ impl Adapter for Ways {
             if path != file {
                 return Err(format!("{} is written to {}, not {}", w.store.key, path.display(), file.display()));
             }
+            sensor |= super::is_sensor_key(&b);
             edits.push((super::file_key(&b), v));
         }
         // The wait for the lock is bounded: a writer that hangs holding it
         // must not freeze the screen's keys and signals.
-        match write_file_checked(file, &edits, Some(LOCK_WAIT), |doc| self.unchanged(file, &project, doc, values)) {
+        match write_file_checked(file, sensor, &edits, Some(LOCK_WAIT), |doc| self.unchanged(file, &project, doc, values)) {
             Ok(Ok(_)) => Ok(()),
             Ok(Err(conflict)) => Err(self.short(&conflict)),
             Err(f) => Err(self.short(&f.message)),

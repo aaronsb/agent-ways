@@ -81,7 +81,7 @@ pub fn set(key: &str, value: &str, project: Option<&Path>) -> Out {
         // (ADR-512 item 4).
         super::engine::report(&super::write_engine(Some(value))?);
     } else {
-        write_file(&path, &[(file_key(&b), v)]).map_err(|f| fail(f.code, format!("{key}: {}", f.message)))?;
+        write_file(&path, is_sensor_key(&b), &[(file_key(&b), v)]).map_err(|f| fail(f.code, format!("{key}: {}", f.message)))?;
         touched(scope, &path, false);
     }
     if let Some(why) = overridden(&b, &path, project) {
@@ -103,7 +103,7 @@ pub fn unset(key: &str, project: Option<&Path>) -> Out {
     if b.name() == "gate.engine" {
         super::engine::report(&super::write_engine(None)?);
     } else {
-        edit_checked(&path, &[(file_key(&b), None)], None, |_| Ok(()))?.map_err(|e| fail(exit::REJECTED, format!("{key}: {e}")))?;
+        edit_checked(&path, is_sensor_key(&b), &[(file_key(&b), None)], None, |_| Ok(()))?.map_err(|e| fail(exit::REJECTED, format!("{key}: {e}")))?;
         touched(scope, &path, false);
     }
     let layers = live_layers(project_dir(project).as_deref());

@@ -360,6 +360,7 @@ pub(super) fn target_file(b: &Bound, project: Option<&Path>) -> Result<(PathBuf,
     if is_sensor_key(b) {
         // The sensor's own file at the layer written: a shipped file is
         // never written, and an override starts with the one field.
+        attend_config::schema::check_sensor_name(&b.bound[0]).map_err(|m| fail(exit::USAGE, format!("{name}: {m}")))?;
         let file = format!("{}.yaml", b.bound[0]);
         return Ok(match project {
             Some(p) => (attend_config::sensors::project_dir(p).join(file), LayerScope::Project),
@@ -387,9 +388,9 @@ pub(super) fn target_file(b: &Bound, project: Option<&Path>) -> Result<(PathBuf,
 /// Write `values`, each a key path and a typed value, into one settings file
 /// in one locked edit. `set` writes through here, and so does the settings
 /// screens' apply, so both leave the same bytes. Returns whether the file
-/// changed.
-pub(super) fn write_file(path: &Path, values: &[(Vec<String>, Value)]) -> Result<bool, Failure> {
-    write_file_checked(path, values, None, |_| Ok(()))?.map_err(|e| fail(exit::REJECTED, e))
+/// changed. `sensor` says the values are sensor keys ([`is_sensor_key`]).
+pub(super) fn write_file(path: &Path, sensor: bool, values: &[(Vec<String>, Value)]) -> Result<bool, Failure> {
+    write_file_checked(path, sensor, values, None, |_| Ok(()))?.map_err(|e| fail(exit::REJECTED, e))
 }
 
 /// [`write_file`], with `check` run on the file's text under the writer's
@@ -398,24 +399,31 @@ pub(super) fn write_file(path: &Path, values: &[(Vec<String>, Value)]) -> Result
 /// comes back as the inner error.
 pub(super) fn write_file_checked(
     path: &Path,
+    sensor: bool,
     values: &[(Vec<String>, Value)],
     wait: Option<std::time::Duration>,
     check: impl FnOnce(&agent_settings::yaml_edit::Doc) -> Result<(), String>,
 ) -> Result<Result<bool, String>, Failure> {
     let edits: Vec<(Vec<String>, Option<Value>)> = values.iter().map(|(k, v)| (k.clone(), Some(v.clone()))).collect();
-    edit_checked(path, &edits, wait, check)
+    edit_checked(path, sensor, &edits, wait, check)
 }
 
 /// One locked edit of `path`: each key set to its value, or removed for
-/// `None`, once `check` passes on the file as it is. An edit of a sensor
-/// file that would make its sensor invalid writes nothing, and the reason
-/// comes back as the inner error ([`attend_config::sensors::check_edit`]).
+/// `None`, once `check` passes on the file as it is. `sensor` says the
+/// edits are sensor keys: `path` must then be a sensor file
+/// ([`attend_config::sensors::file_at`]), and an edit that would make its
+/// sensor invalid writes nothing, the reason coming back as the inner error
+/// ([`attend_config::sensors::check_edit`]).
 pub(super) fn edit_checked(
     path: &Path,
+    sensor: bool,
     edits: &[(Vec<String>, Option<Value>)],
     wait: Option<std::time::Duration>,
     check: impl FnOnce(&agent_settings::yaml_edit::Doc) -> Result<(), String>,
 ) -> Result<Result<bool, String>, Failure> {
+    if sensor && attend_config::sensors::file_at(path).is_none() {
+        return Err(fail(exit::USAGE, format!("{} is not a sensor file; nothing written", path.display())));
+    }
     let apply = |d: &mut agent_settings::yaml_edit::Doc| -> Result<(), agent_settings::yaml_edit::EditError> {
         for (k, v) in edits {
             match v {
@@ -429,7 +437,7 @@ pub(super) fn edit_checked(
         if let Err(e) = check(d) {
             return Ok(Err(e));
         }
-        if attend_config::sensors::file_at(path).is_some() {
+        if sensor {
             let mut after = agent_settings::yaml_edit::Doc::parse(&d.text())?;
             apply(&mut after)?;
             if let Err(e) = attend_config::sensors::check_edit(path, &after.text()) {

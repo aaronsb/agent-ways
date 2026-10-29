@@ -43,7 +43,7 @@ pub fn write_mod_install(path: &Path, name: &str, value: Option<bool>) -> Result
 fn write_mod_install_within(path: &Path, name: &str, value: Option<bool>, wait: Option<Duration>) -> Result<bool, String> {
     let key: Vec<String> = vec!["mods".into(), name.into(), "install".into()];
     match value {
-        Some(v) => write_file_checked(path, &[(key, Value::Bool(v))], wait, |_| Ok(())).map_err(|f| f.message)?,
+        Some(v) => write_file_checked(path, false, &[(key, Value::Bool(v))], wait, |_| Ok(())).map_err(|f| f.message)?,
         None if !path.is_file() => Ok(false),
         None => agent_settings::writer::edit_file_within(path, header_for(path), wait, |d| d.unset(&key))
             .map(|(_, changed)| changed)
@@ -95,7 +95,7 @@ pub fn write_engine_within(engine: Option<&str>, wait: Option<Duration>) -> Resu
     }
     match value {
         Some(v) => {
-            write_file_checked(&agent, &[(b.path(), v)], wait, |_| Ok(()))?.map_err(|e| fail(exit::WRITE_FAILED, e))?;
+            write_file_checked(&agent, false, &[(b.path(), v)], wait, |_| Ok(()))?.map_err(|e| fail(exit::WRITE_FAILED, e))?;
         }
         None => {
             let kp = b.path();

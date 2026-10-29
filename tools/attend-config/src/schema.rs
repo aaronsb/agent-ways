@@ -78,7 +78,7 @@ const SECTIONS: &[SectionSpec] = &[
         file: SENSOR_FILE,
         top: &["sensors"],
         per_entry: true,
-        entry: None,
+        entry: Some(check_sensor_name),
         repair: None,
         columns: None,
         doc: "Each sensor's file: shipped, the user's, and a project's, layered by name (ADR-403 §2).",
@@ -393,6 +393,14 @@ const KEYS: &[KeySpec] = &[
 
 /// The sensor keys share these.
 const SENSOR: KeySpec = KeySpec { section: "attend.sensors", file: SENSOR_FILE, ..BASE };
+
+/// A sensor's name, which is also its file's name.
+pub fn check_sensor_name(n: &str) -> Result<(), String> {
+    match sensor_spec::is_name(n) {
+        true => Ok(()),
+        false => Err(format!("'{n}' is not a sensor name (letters, digits, - and _, starting with a letter or digit)")),
+    }
+}
 
 fn closed_off(v: &Value) -> Option<Value> {
     (v != &Value::Bool(true)).then_some(Value::Bool(false))

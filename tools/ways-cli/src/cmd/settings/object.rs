@@ -91,7 +91,7 @@ pub fn apply(file: Option<&Path>, dry_run: bool, project: Option<&Path>) -> Out 
         }
         if !dry_run {
             let edits: Vec<(Vec<String>, Option<Value>)> = list.iter().map(|(b, v)| (file_key(b), Some(v.clone()))).collect();
-            match edit_checked(path, &edits, None, |_| Ok(())) {
+            match edit_checked(path, list.iter().any(|(b, _)| is_sensor_key(b)), &edits, None, |_| Ok(())) {
                 Ok(Ok(_)) => {}
                 Ok(Err(e)) => {
                     error = Some(format!("{e}; nothing written to {}", path.display()));
