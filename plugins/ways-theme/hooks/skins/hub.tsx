@@ -32,7 +32,7 @@ import { clipLines, diffstat, pick, shortenPath } from './format.ts'
 import { bodyOf, inputFields, isOpen } from './detail.ts'
 import { disclosedRow, openedRows } from './detail-rows.tsx'
 import { commandSegments } from './command-output.ts'
-import { askBand, diffCard, footerRow, groupRow, promptRow, quietResult, replyRows, spinnerRow, terminalCard, toolRow, usageBand, desktopSpinnerRow } from './rows.tsx'
+import { askBand, diffCard, footerRow, groupRow, promptRow, quietResult, relayedRows, replyRows, spinnerRow, terminalCard, toolRow, usageBand, desktopSpinnerRow } from './rows.tsx'
 import type { Look, SvgElement, Ui } from './rows.tsx'
 import { keepsOwnRow, SHELLS, shellResultOf } from './shell.ts'
 import { OUTPUT_FOLD, shellRows } from './shell-rows.tsx'
@@ -47,6 +47,7 @@ import { MAX_MARKDOWN, replySegments } from './reply.ts'
 import { fileHref, hyperlinksFrom, touchOf } from './links.ts'
 import { MIN_WIDTH, axisFor, boxLines, canMeasure, gradientBox, gradientRuns } from './prompt-box.tsx'
 import { holdsPaste, pasteIdOf, shownText } from './pastes.ts'
+import { holdsBlock, parts } from './wrappers.ts'
 import type { Touch, TurnStats, UsageSnap } from '../../types'
 
 /** Each export call's bound. */
@@ -56,6 +57,8 @@ export const WAYS_TIMEOUT_MS = 1500
 export const PICKUP_MS = 5000
 
 const MAX_PROMPT = 4000
+// The most of a message body the engine draws.
+const MAX_RELAYED = 100_000
 const CLIP_HEAD = 8
 const CLIP_TAIL = 4
 const FRAME_MS = 90
@@ -567,14 +570,20 @@ export function registerSkins(on: On, shared: Shared): void {
   })
 
   // The person's message, after `render.prompt_box`, its pastes unwrapped as Claude Code
-  // shows them (pastes.ts). Off the terminal it keeps Claude Code's own component: it
-  // carries the copy and rewind buttons, the context menu and selectable text, which a
-  // drawing of the mod's would lose.
+  // shows them (pastes.ts). Another party's message, where the row draws it in full, has
+  // its wrapper blocks set apart (wrappers.ts); its compact row is the engine's, or the
+  // drawing of the mod that sent it. Off the terminal both keep Claude Code's own
+  // component: it carries the copy and rewind buttons, the context menu and selectable
+  // text, which a drawing of the mod's would lose.
   on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
     const setup = await activeSetup($)
-    if (setup === null || setup.promptBox === 'off' || e.surface !== 'terminal' || !shared.view().isWaysTheme || !TYPED.has(e.props.origin.kind) || e.props.text.length > MAX_PROMPT || CONTROL.test(e.props.text)) {
-      return next(e)
+    if (setup === null || e.surface !== 'terminal' || !shared.view().isWaysTheme || CONTROL.test(e.props.text)) return next(e)
+    if (!TYPED.has(e.props.origin.kind)) {
+      if (!e.props.isExpanded || e.props.text.length > MAX_RELAYED || !holdsBlock(e.props.text)) return next(e)
+      const all = parts(e.props.text)
+      return all.every(part => part.kind === 'text') ? next(e) : relayedRows(lookOf($.ui.resolve(e), setup, e.surface), all)
     }
+    if (setup.promptBox === 'off' || e.props.text.length > MAX_PROMPT) return next(e)
     // A paste is unwrapped by the session's paste id; without it, Claude Code draws.
     let text = e.props.text
     if (holdsPaste(text)) {
