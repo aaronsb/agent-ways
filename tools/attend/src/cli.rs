@@ -243,7 +243,7 @@ pub(crate) enum PeerCmd {
 #[derive(Subcommand)]
 pub(crate) enum SensorCmd {
     /// List all sensors — built-in and config-defined script sensors
-    List,
+    List(JsonArgs),
 
     /// Compare each sensor's `requires:` against settings.json
     Permissions,

@@ -69,8 +69,9 @@ pub fn tilde(p: &Path, home: &Path) -> String {
     s.replace('\\', "/")
 }
 
-/// Every path in `text` under the home directory, written with `~`.
-fn tilde_text(text: &str, home: &Path) -> String {
+/// Every path in `text` under the home directory, written with `~`, and
+/// `/` between parts, as [`tilde`] writes one path.
+pub(super) fn tilde_text(text: &str, home: &Path) -> String {
     tilde_home(text, home).replace('\\', "/")
 }
 
@@ -333,6 +334,9 @@ impl Ways {
     fn keys_of(&self, tab: &Tab, layers: &[Layer], scopes: &BTreeMap<String, Located>) -> Vec<Bound> {
         let mut keys = self.reg.concrete(tab.prefix, layers);
         keys.retain(|b| tab.holds(&b.name()));
+        if tab.name == "sensors" {
+            keys = super::sensors::with_user_keys(&self.reg, keys, layers, &self.ctx.project);
+        }
         if tab.name == "ways" {
             if let Some(b) = self.reg.lookup("ways.project.x") {
                 // The ways a file names and the ways of the corpus, as one
@@ -367,8 +371,8 @@ impl Ways {
         let scopes: BTreeSet<&str> = keys
             .iter()
             .filter(|b| !matches!(b.spec.kind, Kind::ReadOnly | Kind::Secret) && b.spec.computed.is_none())
-            .filter(|b| self.ctx.in_project || !super::writes_project(b, &self.ctx))
-            .filter_map(|b| target_file(b, super::writes_project(b, &self.ctx).then_some(self.ctx.project.as_path())).ok())
+            .filter(|b| self.ctx.in_project || !super::writes_project(b, &self.ctx, &layers))
+            .filter_map(|b| target_file(b, super::writes_project(b, &self.ctx, &layers).then_some(self.ctx.project.as_path())).ok())
             .map(|(_, scope)| if scope == LayerScope::Project { "project" } else { "user" })
             .collect();
         match (scopes.contains("project"), scopes.contains("user")) {
@@ -384,12 +388,9 @@ impl Ways {
         TABS.iter().map(|tab| self.tab(tab, layers)).collect()
     }
 
-    /// The doc of a group: its section's, or for one of attend's sensors or
-    /// one mod, a line on it.
+    /// The doc of a group: its section's, or for one mod, a line on it. A
+    /// sensor's group has none: its card says what it is.
     pub(super) fn section_doc(&self, name: &str) -> String {
-        if let Some(s) = name.strip_prefix("attend.sensors.").filter(|s| !s.contains('.')) {
-            return attend_config::schema::sensor_doc(s);
-        }
         if let Some(m) = name.strip_prefix("mods.").filter(|m| !m.contains('.')) {
             if let Some((_, doc)) = ways_core::settings::MODS.iter().find(|(n, _)| *n == m) {
                 return doc.to_string();
@@ -464,14 +465,14 @@ impl Ways {
             if b.spec.name == super::super::engine::JUDGE_INSTALL {
                 // It follows the engine in the user config (ADR-512 item 4).
                 s = s.lock("set with gate.engine on the gate tab: claude-code wants the ways-judge mod, any other engine does not");
-            } else if settable && !self.ctx.in_project && super::writes_project(&b, &self.ctx) {
+            } else if settable && !self.ctx.in_project && super::writes_project(&b, &self.ctx, layers) {
                 // No project: the key has no file to go to.
                 s = s.lock(format!(
                     "not applicable: no project encloses {}, so a project's file has nowhere to be. Open the screens inside a project, or with --project <dir>",
                     tilde(&self.ctx.project, home)
                 ));
             } else if settable {
-                let project = super::writes_project(&b, &self.ctx).then_some(self.ctx.project.as_path());
+                let project = super::writes_project(&b, &self.ctx, layers).then_some(self.ctx.project.as_path());
                 if let Ok((path, scope)) = target_file(&b, project) {
                     let layer = if scope == agent_settings::LayerScope::Project { "project" } else { "user" };
                     if broken.iter().any(|(f, _)| *f == path) {
@@ -521,9 +522,12 @@ impl Ways {
             self.other_projects(&mut root);
         }
         self.headers(&mut root, tab.prefix);
+        if tab.name == "sensors" {
+            super::sensors::cards(&mut root, layers, &self.ctx.project, &self.ctx.home, self.described());
+        }
         if tab.name == "mod" {
             let (states, read) = self.mod_states();
-            super::mods::nodes(&mut root, &states, &read);
+            super::mods::nodes(&mut root, &states, &read, &self.ctx.home);
         }
         if tab.name == "gate" {
             // Last, so the settings keep their rows.

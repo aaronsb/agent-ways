@@ -99,7 +99,7 @@ pub const THEME: Mod = Mod { name: "ways-theme", id: "ways-theme@agent-ways", la
 pub const MODS: [Mod; 3] = [ATTEND, JUDGE, THEME];
 
 /// The marketplace folder in the app source.
-fn marketplace_dir(source_root: &Path) -> PathBuf {
+pub fn marketplace_dir(source_root: &Path) -> PathBuf {
     source_root.join("plugins")
 }
 
