@@ -306,3 +306,11 @@ fn a_sensor_name_that_is_a_path_is_refused_by_apply_and_writes_nothing() {
     assert!(!fx.root.join("outside").exists() && !fx.root.join("xdg/outside").exists(), "nothing written outside the sensor directories");
     assert!(!fx.root.join("xdg/config/attend/sensors").exists(), "nothing written");
 }
+
+#[test]
+fn fix_of_the_sensors_section_names_the_sensor_files_and_writes_nothing() {
+    let fx = Fx::new();
+    let (_, err, code) = fx.run(&["settings", "fix", "attend.sensors"]);
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("kept in each sensor's own file") && !err.contains("--target"), "{err}");
+}

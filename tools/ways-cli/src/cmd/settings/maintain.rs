@@ -275,7 +275,12 @@ pub fn fix(section: &str, project: Option<&Path>, target: Option<&Path>) -> Out 
         }
     }
     if by_file.is_empty() {
-        return Err(fail(exit::USAGE, format!("{section} is not kept in a target's config; drop --target")));
+        let why = match target {
+            Some(_) => format!("{section} is not kept in a target's config; drop --target"),
+            // Only the sensor files have no file of their section to fix.
+            None => format!("{section} is kept in each sensor's own file, which fix does not write; edit the file, and `attend sensor list` shows its state"),
+        };
+        return Err(fail(exit::USAGE, why));
     }
     let mut left = Vec::new();
     for (path, scope, list) in &by_file {
