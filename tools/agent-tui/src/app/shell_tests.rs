@@ -755,3 +755,74 @@ fn a_stamp_the_adapter_moved_says_why() {
     app.watch();
     assert_eq!(app.message(), "reloaded: a settings file changed on disk", "a file change says so");
 }
+
+/// An adapter with a notice for the bottom bar, in its forms.
+struct Noticed(Vec<String>);
+
+impl Adapter for Noticed {
+    fn write(&mut self, _: &Path, _: &[Write]) -> Result<(), String> {
+        Ok(())
+    }
+    fn run(&mut self, _: &Queued) -> Result<(), String> {
+        Ok(())
+    }
+    fn notice(&self) -> Vec<String> {
+        self.0.clone()
+    }
+}
+
+fn bar(app: &mut App, w: u16) -> String {
+    crate::testkit::rows(&render(app, w, 24)).pop().unwrap()
+}
+
+/// The notice sits at the bar's right end in the warning colour, in the
+/// first form that fits clear of the counts; narrower, it takes a shorter
+/// form, then goes before it would reach them. With none, nothing is drawn.
+#[test]
+fn the_bar_s_notice_sits_right_shortens_and_goes_before_the_counts() {
+    let forms = ["ways-judge not installed · see mod tab", "ways-judge not installed", "1 mod degraded"];
+    let mut app = App::new("t", tree()).adapter(Noticed(forms.iter().map(|f| f.to_string()).collect()));
+    const COUNTS: &str = "0 queued │ mouse on (m)";
+    let plain = bar(&mut App::new("t", tree()), 200);
+    let end = plain.find(COUNTS).map(|b| plain[..b].chars().count() + COUNTS.chars().count()).unwrap_or_else(|| panic!("the counts: {plain}")) as u16;
+    // A form takes its text, the mark and three spaces, and a column more
+    // keeps it clear of the counts.
+    let fits = |f: &str| end + f.chars().count() as u16 + 5;
+
+    let wide = bar(&mut app, 200);
+    assert!(wide.ends_with(" ⚠ ways-judge not installed · see mod tab "), "{wide}");
+    assert!(wide.contains(COUNTS));
+    let mark = render(&mut app, 200, 24).content().iter().rev().find(|c| c.symbol() == "⚠").map(|c| c.fg);
+    assert_eq!(mark, theme::warn().fg);
+
+    assert!(bar(&mut app, fits(forms[0])).ends_with(" ⚠ ways-judge not installed · see mod tab "));
+    for (w, form) in [(fits(forms[0]) - 1, forms[1]), (fits(forms[1]), forms[1]), (fits(forms[1]) - 1, forms[2]), (fits(forms[2]), forms[2])] {
+        let b = bar(&mut app, w);
+        assert!(b.ends_with(&format!(" ⚠ {form} ")), "at {w}: {b}");
+        assert!(b.contains(COUNTS), "the counts keep their room at {w}: {b}");
+    }
+    let narrow = bar(&mut app, fits(forms[2]) - 1);
+    assert!(!narrow.contains('⚠') && narrow.contains(COUNTS), "{narrow}");
+
+    let healthy = bar(&mut App::new("t", tree()).adapter(Noticed(Vec::new())), 200);
+    assert!(!healthy.contains('⚠'), "{healthy}");
+}
+
+/// A message said since keeps its room beside the notice: at 80 columns a
+/// rejection shows whole, and the notice takes a form that fits beside it
+/// or goes.
+#[test]
+fn a_message_keeps_its_room_beside_the_notice() {
+    let forms = ["ways-judge not installed · see mod tab", "ways-judge not installed", "1 mod degraded"];
+    let mut app = App::new("t", tree()).adapter(Noticed(forms.iter().map(|f| f.to_string()).collect()));
+    app.msg = "rejected: no".into();
+    let b = bar(&mut app, 80);
+    assert!(b.contains("rejected: no"), "{b}");
+    assert!(b.ends_with(" ⚠ 1 mod degraded "), "{b}");
+    app.msg = "rejected: the key was refused".into();
+    let b = bar(&mut app, 80);
+    assert!(b.contains("rejected: the key was refused") && !b.contains('⚠'), "{b}");
+    // Wider, the notice comes back beside the message.
+    let b = bar(&mut app, 120);
+    assert!(b.contains("rejected: the key was refused") && b.ends_with(" ⚠ ways-judge not installed · see mod tab "), "{b}");
+}

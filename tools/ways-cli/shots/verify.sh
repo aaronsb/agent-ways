@@ -48,6 +48,9 @@ judge-readiness | ways settings gate --project $PS          | End Up Up Up Up
 mod        | ways settings mod --project $PS                |
 mod-states | ways settings mod --project $PS                |
 mod-actions | ways settings mod --project $PS               | a
+degraded   | ways settings --project $PS                    |
+degraded-mod | ways settings mod --project $PS              | Left Down Down
+healthy    | ways settings --project $PS                    |
 quit-guard | ways settings matching --project $PS           | Down Down e C-u text:0.2 Enter q
 key-help   | ways settings matching --project $PS           | text:?
 close-editor | ways settings theme --project $PS            | e text:mine Enter Escape
@@ -98,9 +101,12 @@ teardown_judge_readiness() { teardown_judge; }
 # The mod tab's node per mod (ADR-512 item 6): an app that ships both
 # mods, attend installed from its folder, and ways-judge wanted under
 # gate.engine: claude-code on a Claude Code below its floor, so pending. A
-# stand-in `claude` answers the plugin lists and --version.
+# stand-in `claude` answers the plugin lists and --version: mod_app takes
+# the version it prints and the plugin list.
 MODAPP=$F/home/.local/share/agent-ways
-setup_mod_actions() {
+ATTEND_ONLY='[{"id":"attend@agent-ways","version":"0.29.0","scope":"user"}]'
+setup_mod_actions() { mod_app 2.1.300 "$ATTEND_ONLY"; }
+mod_app() {
   local h=$F/home stub=$WORK/stub/claude
   mkdir -p "$MODAPP/plugins/.claude-plugin" "$MODAPP/plugins/attend/.claude-plugin" "$MODAPP/plugins/ways-judge/.claude-plugin" "$WORK/stub"
   printf '{"name":"agent-ways","plugins":[{"name":"attend"},{"name":"ways-judge"}]}\n' >"$MODAPP/plugins/.claude-plugin/marketplace.json"
@@ -111,9 +117,9 @@ setup_mod_actions() {
   cat >"$stub" <<STUB
 #!/bin/sh
 case "\$*" in
-  "--version") echo "2.1.300 (Claude Code)" ;;
+  "--version") echo "$1 (Claude Code)" ;;
   "plugin marketplace list --json") echo '[{"name":"agent-ways","source":"directory","path":"$MODAPP/plugins"}]' ;;
-  "plugin list --json") echo '[{"id":"attend@agent-ways","version":"0.29.0","scope":"user"}]' ;;
+  "plugin list --json") echo '$2' ;;
   *) exit 2 ;;
 esac
 STUB
@@ -125,6 +131,16 @@ teardown_mod_actions() {
   rm -f "$F/home/.config/agent-ways/agent.yaml" "$F/home/.config/agent-ways/config.yaml"
   unset WAYS_CLAUDE_BIN
 }
+
+# A critical mod missing (the bottom bar's notice): Claude Code above every
+# floor, and ways-judge wanted under gate.engine: claude-code and not
+# installed. The healthy one has both mods installed, and no notice.
+setup_degraded() { mod_app 2.1.310 "$ATTEND_ONLY"; }
+teardown_degraded() { teardown_mod_actions; }
+setup_degraded_mod() { setup_degraded; }
+teardown_degraded_mod() { teardown_mod_actions; }
+setup_healthy() { mod_app 2.1.310 '[{"id":"attend@agent-ways","version":"0.29.0","scope":"user"},{"id":"ways-judge@agent-ways","version":"1.43.0","scope":"user"}]'; }
+teardown_healthy() { teardown_mod_actions; }
 
 # The theme tab's Claude Code section (ADR-514): the ways-theme mod wanted
 # and listed in the target's enabledPlugins, so installed and active.

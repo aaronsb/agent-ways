@@ -14,7 +14,7 @@ use agent_tui::{Adapter, App, Write};
 
 use super::flows::testkit::Fixture;
 use super::flows::{self, Env};
-use super::{Ctx, Ways};
+use super::{mods, Ctx, Ways};
 
 /// Serves the flows over a fixture and logs each command an apply runs.
 struct Fixtured {
@@ -1051,7 +1051,8 @@ fn a_pasted_key_reaches_the_rotate_entry() {
 /// attend removed by hand in one of two targets, and ways-judge pending
 /// under gate.engine: claude-code.
 fn mod_states() -> Vec<crate::cmd::mods::Overview> {
-    use crate::cmd::attend_mod::{State, ATTEND, JUDGE, THEME};
+    use crate::cmd::attend_mod::{Degraded, State, ATTEND, JUDGE, THEME};
+    use crate::cmd::mods::Attention;
     vec![
         crate::cmd::mods::Overview {
             m: ATTEND,
@@ -1063,6 +1064,7 @@ fn mod_states() -> Vec<crate::cmd::mods::Overview> {
             ],
             older: false,
             claude_code: true,
+            attention: vec![Attention { dir: "~/.claude-work".into(), why: Degraded::Missing, fix: "the install action, `ways manage mod install attend --commit`, installs it".into() }],
         },
         crate::cmd::mods::Overview {
             m: JUDGE,
@@ -1071,6 +1073,11 @@ fn mod_states() -> Vec<crate::cmd::mods::Overview> {
             rows: vec![("~/.claude".into(), "pending · 2.1.300 < 2.1.304".into(), "pending: Claude Code 2.1.300 is below 2.1.304".into())],
             older: false,
             claude_code: true,
+            attention: vec![Attention {
+                dir: "~/.claude".into(),
+                why: Degraded::Pending,
+                fix: "upgrade Claude Code to 2.1.304 or later, then `ways manage update --commit`".into(),
+            }],
         },
         crate::cmd::mods::Overview {
             m: THEME,
@@ -1079,6 +1086,7 @@ fn mod_states() -> Vec<crate::cmd::mods::Overview> {
             rows: vec![("~/.claude".into(), "removed · install false".into(), "removed: mods.ways-theme.install is false".into())],
             older: false,
             claude_code: true,
+            attention: vec![],
         },
     ]
 }
@@ -1092,6 +1100,8 @@ fn mod_states_older() -> Vec<crate::cmd::mods::Overview> {
     for o in s.iter_mut() {
         o.claude_code = false;
     }
+    // Under a key engine ways-judge is not critical.
+    s[1].attention.clear();
     s
 }
 
@@ -1163,6 +1173,83 @@ fn repair_reads_update_for_an_older_copy_and_the_judge_install_names_the_engine(
     assert_eq!(labels(judge), ["check", "install", "uninstall", "repair"]);
     let install = &judge.actions[1];
     assert!(install.doc.contains("Sets gate.engine to claude-code") && install.touches.contains("gate.engine in agent.yaml"), "{}", install.doc);
+}
+
+/// A critical mod that does not run carries a finding naming why and the
+/// fix, on its node and on the row of the target concerned; ways-theme,
+/// not critical, carries none.
+#[test]
+fn a_critical_mod_that_does_not_run_says_why_on_its_rows() {
+    let fx = Fixture::home();
+    let tab = mod_tab(&fx, mod_states);
+    let attend = &tab.children[0];
+    assert_eq!(attend.children[0].finding, None, "installed in ~/.claude");
+    assert_eq!(
+        attend.children[1].finding.as_deref(),
+        Some("attend is critical and not installed here. Fix: the install action, `ways manage mod install attend --commit`, installs it.")
+    );
+    assert_eq!(
+        attend.finding.as_deref(),
+        Some("attend is critical and not installed in ~/.claude-work. Fix: the install action, `ways manage mod install attend --commit`, installs it.")
+    );
+    let judge = &tab.children[1];
+    assert!(judge.children[0].finding.as_deref().is_some_and(|f| f.starts_with("ways-judge is critical and pending here. Fix: upgrade Claude Code")), "{:?}", judge.children[0].finding);
+    let theme = &tab.children[2];
+    assert!(theme.finding.is_none() && theme.children[0].finding.is_none());
+}
+
+/// The bar's notice: one mod by name and why, several by count, each
+/// longer form pointing at the mod tab; none with nothing degraded.
+#[test]
+fn the_notice_names_one_degraded_mod_and_counts_several() {
+    let states = mod_states();
+    assert_eq!(mods::notice(&states), ["2 mods degraded · see mod tab", "2 mods degraded"]);
+    assert_eq!(mods::notice(&states[1..]), ["ways-judge pending · see mod tab", "ways-judge pending", "1 mod degraded"]);
+    let mut pending = states[..1].to_vec();
+    pending[0].attention[0].why = crate::cmd::attend_mod::Degraded::Pending;
+    assert_eq!(mods::notice(&pending), ["attend pending · see mod tab", "attend pending"], "a count form no shorter is left out");
+    assert!(mods::notice(&states[2..]).is_empty(), "ways-theme removed is not degraded");
+    assert!(mods::notice(&mod_states_older()[1..]).is_empty(), "ways-judge under a key engine");
+}
+
+/// The screens draw the notice at the bottom bar's right end, and none
+/// when the mods are healthy.
+#[test]
+fn the_bottom_bar_ends_with_the_degraded_notice() {
+    let fx = Fixture::home();
+    let mut ctx = ctx_of(&fx);
+    ctx.mods = mod_states;
+    let ways = Ways::new(ctx);
+    let roots = ways.build(&[]);
+    let mut app = App::new("t", roots).adapter(ways);
+    let bar = frame(&mut app, 120, 30).pop().unwrap();
+    assert!(bar.ends_with("⚠ 2 mods degraded · see mod tab "), "{bar}");
+
+    let mut ctx = ctx_of(&fx);
+    ctx.mods = Vec::new;
+    let ways = Ways::new(ctx);
+    let roots = ways.build(&[]);
+    let mut app = App::new("t", roots).adapter(ways);
+    assert!(!frame(&mut app, 120, 30).pop().unwrap().contains('⚠'));
+}
+
+/// Read in the background, the notice comes from the last read that
+/// landed: none while the first read runs, then the read's.
+#[test]
+fn the_background_notice_follows_the_read_that_landed() {
+    let fx = Fixture::home();
+    let mut ctx = ctx_of(&fx);
+    ctx.mods = slow_mod_states;
+    ctx.mods_background = true;
+    let ways = Ways::new(ctx).with_mods_fresh(std::time::Duration::from_millis(1));
+    let before = ways.stamp();
+    assert!(ways.notice().is_empty(), "nothing read yet");
+    let start = std::time::Instant::now();
+    while ways.stamp() == before {
+        assert!(start.elapsed() < std::time::Duration::from_secs(30), "the read never landed");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(ways.notice(), ["2 mods degraded · see mod tab", "2 mods degraded"]);
 }
 
 #[test]

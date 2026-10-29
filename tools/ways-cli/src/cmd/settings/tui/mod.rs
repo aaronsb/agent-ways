@@ -594,6 +594,13 @@ impl Adapter for Ways {
         super::help_text(Some(tab)).ok()
     }
 
+    /// The critical mods that do not run, as the last read of the mods left
+    /// them; asked at every draw, so it reads nothing.
+    fn notice(&self) -> Vec<String> {
+        let states = if self.ctx.mods_background { self.mods.borrow().shown().0 } else { (self.ctx.mods)() };
+        mods::notice(&states)
+    }
+
     fn choose_theme(&mut self, name: &str) -> Result<(), String> {
         self.set_one("theme.active", name)
     }
