@@ -4,9 +4,11 @@
 #   1. the attend plugin carries attend's version (the plugin is released
 #      with attend, since it depends on attend's verbs), and the mod's
 #      MOD_VERSION constant in hooks/lib.ts equals the plugin's version;
-#      the ways-judge and ways-theme plugins carry ways' version, for the
-#      same reason (they call `ways judge host|take|answer`, ADR-708, and
-#      `ways settings theme export`, ADR-514);
+#      the ways-judge, ways-theme and images plugins carry ways' version,
+#      for the same reason (they call `ways judge host|take|answer`, ADR-708,
+#      `ways settings theme export`, ADR-514, and `ways settings list`,
+#      ADR-517); and the images mod and ways-theme each test the frame
+#      contract between them with one copy of its fixture (ADR-517 item 6);
 #   2. `claude plugin validate` on the marketplace and on each plugin;
 #   3. `claude plugin test` on each plugin;
 #   4. a TypeScript check against Claude Code's declarations, where they can
@@ -44,14 +46,25 @@ MV="$(grep -oE "^export const MOD_VERSION = '[^']*'" plugins/attend/hooks/lib.ts
 [[ "$MV" == "$PV" ]] || fail "MOD_VERSION in plugins/attend/hooks/lib.ts is $MV but the plugin is at $PV; scripts/release.sh bump attend moves both"
 echo "version: MOD_VERSION $MV matches the plugin"
 
-# The ways-judge and ways-theme mods call ways verbs and are released with ways.
+# The ways-judge, ways-theme and images mods call ways verbs and are released with ways.
 WV="$(cargo_version tools/ways-cli/Cargo.toml)"
-for mod in ways-judge ways-theme; do
+for mod in ways-judge ways-theme images; do
   JV="$(plugin_version "plugins/$mod/.claude-plugin/plugin.json")"
   [[ -n "$JV" ]] || fail "plugins/$mod/.claude-plugin/plugin.json has no version"
   [[ "$JV" == "$WV" ]] || fail "the $mod plugin is at $JV but ways is at $WV; they release together (scripts/release.sh bump ways moves both)"
   echo "version: $mod plugin $JV matches ways $WV"
 done
+
+# ways-theme frames the pictures the images mod draws. A test's inline
+# plugin closes over nothing of its file, so neither mod's tests can load the
+# other's register(); each holds a copy of the contract's fixture, kept as one
+# text here, and tests its own side against it.
+CONTRACT=tests/picture-frame.ts
+for mod in images ways-theme; do
+  [[ -f "plugins/$mod/$CONTRACT" ]] || fail "plugins/$mod/$CONTRACT is missing; the frame contract is tested from both mods"
+done
+cmp -s "plugins/images/$CONTRACT" "plugins/ways-theme/$CONTRACT" || fail "plugins/ways-theme/$CONTRACT differs from plugins/images/$CONTRACT; the frame contract is kept as one text"
+echo "contract: images and ways-theme hold one text of $CONTRACT"
 
 # Where an organization manages Claude Code (Team and Enterprise, or a
 # machine with managed settings), the built-in cc-plugin-sec-default sits

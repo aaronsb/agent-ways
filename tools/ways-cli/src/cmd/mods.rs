@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
 
-use super::attend_mod::{self, Degraded, Mod, State, Target, View, JUDGE, MODS};
+use super::attend_mod::{self, Degraded, Mod, State, Target, View, IMAGES, JUDGE, MODS};
 use super::lifecycle::{self, Mark, Mode, Report};
 
 /// The exit code of `check` with any problem, as `ways settings lint`.
@@ -183,8 +183,10 @@ pub fn check(name: Option<&str>) -> Result<()> {
     let mut r = Report::new("ways manage mod check");
     let mut problems = 0;
     let claude_code = super::settings::engine::claude_code_chosen();
+    let mut images_wanted = false;
     for t in &targets {
         for (m, v) in attend_mod::views(&src, &t.target(&default_root), only.as_ref()) {
+            images_wanted |= m == IMAGES && v.wanted;
             r.section(format!("{} — {}", m.name, shown(&t.dir)));
             for (mark, text) in checks(&m, &v, attend_mod::shipped_version(&m, &src).as_deref(), claude_code, &default_root) {
                 if mark == Mark::Warn {
@@ -193,6 +195,14 @@ pub fn check(name: Option<&str>) -> Result<()> {
                 r.item(mark, text);
             }
         }
+    }
+    if images_wanted {
+        r.section(format!("{} — this host", IMAGES.name));
+        let (mark, text) = imagemagick_check(std::env::var_os("PATH").as_deref());
+        if mark == Mark::Warn {
+            problems += 1;
+        }
+        r.item(mark, text);
     }
     if targets.is_empty() {
         r.footer(Mark::Info, "no enabled target; `ways manage target list` lists them");
@@ -232,7 +242,12 @@ fn checks(m: &Mod, v: &View, shipped: Option<&str>, claude_code: bool, default_r
         }
     }
     for f in &v.foreign {
-        out.push((Mark::Warn, format!("{f} is installed from another marketplace and left as it is. Fix: uninstall it, then {repair}")));
+        if v.settings_only.contains(f) {
+            let words = attend_mod::settings_only_words(f, v.settings_file.as_deref());
+            out.push((Mark::Warn, format!("{words} and is left as it is. Fix: remove that enabledPlugins entry, then {repair}")));
+        } else {
+            out.push((Mark::Warn, format!("{f} is installed from another marketplace and left as it is. Fix: uninstall it, then {repair}")));
+        }
     }
     if let attend_mod::MarketState::Foreign(from) = &v.market {
         out.push((
@@ -283,6 +298,28 @@ fn checks(m: &Mod, v: &View, shipped: Option<&str>, claude_code: bool, default_r
         }
     }
     out
+}
+
+/// The images mod decodes and resizes every picture with ImageMagick, as
+/// `magick` (version 7) or `convert` (version 6), found on `path`. Like the
+/// mod, it takes a tool whose `-version` names ImageMagick, so GraphicsMagick's
+/// `convert` does not pass.
+fn imagemagick_check(path: Option<&std::ffi::OsStr>) -> (Mark, String) {
+    use super::mcp_register::on_path;
+    let is_imagemagick = |tool: &PathBuf| {
+        std::process::Command::new(tool)
+            .arg("-version")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .is_ok_and(|o| o.status.success() && String::from_utf8_lossy(&o.stdout).contains("ImageMagick"))
+    };
+    match ["magick", "convert"].iter().filter_map(|n| on_path(n, path)).find(is_imagemagick) {
+        Some(tool) => (Mark::Ok, format!("ImageMagick is on PATH ({})", tool.display())),
+        None => (
+            Mark::Warn,
+            "ImageMagick (magick or convert) is not on PATH, so each picture shows a dim note in its place. Fix: install ImageMagick".to_string(),
+        ),
+    }
 }
 
 /// What converging `m` would do in one target once its wanted state is
@@ -652,6 +689,8 @@ mod tests {
             recorded: installed.is_some(),
             market: MarketState::Ours,
             foreign: vec![],
+            settings_only: vec![],
+            settings_file: None,
             claude_code: host.as_ref().ok().cloned(),
             host,
             read: true,
@@ -686,6 +725,62 @@ mod tests {
         let uninstall = would_theme(&THEME, &view(&dir, Some("1.45.0"), ok()), false, &src, &base);
         assert_eq!(uninstall, vec![r#"would change settings.json theme: "custom:ways" → "light""#.to_string(), format!("would remove {file}")]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_images_mod_check_names_imagemagick_when_it_is_off_path() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("ways-mod-magick-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = std::ffi::OsString::from(&dir);
+        let (mark, text) = imagemagick_check(Some(&path));
+        assert_eq!(mark, Mark::Warn);
+        assert!(text.contains("ImageMagick (magick or convert) is not on PATH") && text.contains("Fix: install ImageMagick"), "{text}");
+        let tool = |name: &str, banner: &str| {
+            let f = dir.join(name);
+            std::fs::write(&f, format!("#!/bin/sh\necho '{banner}'\n")).unwrap();
+            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+            f
+        };
+        // GraphicsMagick's convert answers -version without naming ImageMagick.
+        tool("convert", "GraphicsMagick 1.3.45 2024-01-01 Q16");
+        let (mark, text) = imagemagick_check(Some(&path));
+        assert_eq!(mark, Mark::Warn, "{text}");
+        let convert = tool("convert", "Version: ImageMagick 6.9.12-98 Q16 x86_64");
+        let (mark, text) = imagemagick_check(Some(&path));
+        assert_eq!(mark, Mark::Ok, "{text}");
+        assert!(text.contains(&convert.display().to_string()), "{text}");
+
+        // The per-target checks leave it to the one host-wide line.
+        let v = view(&dir, Some("1.48.0"), Ok("2.1.310".to_string()));
+        assert!(checks(&IMAGES, &v, Some("1.48.0"), false, &dir).iter().all(|(_, t)| !t.contains("ImageMagick")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_plugin_only_settings_enables_gets_the_enabledplugins_fix() {
+        let dir = Path::new("/home/u/.claude");
+        let v = View {
+            foreign: vec!["images@dotfiles".into(), "images@old".into()],
+            settings_only: vec!["images@dotfiles".into()],
+            settings_file: Some(dir.join("settings.json")),
+            ..view(dir, None, Ok("2.1.310".to_string()))
+        };
+        let lines: Vec<String> = checks(&IMAGES, &v, Some("1.48.0"), false, dir).into_iter().map(|(_, t)| t).collect();
+        let only = lines.iter().find(|t| t.starts_with("images@dotfiles")).unwrap();
+        let want = format!(
+            "images@dotfiles is enabled in {} (enabledPlugins) from a marketplace Claude Code has not recorded",
+            dir.join("settings.json").display()
+        );
+        assert!(
+            only.starts_with(&want)
+                && only.contains("Fix: remove that enabledPlugins entry, then `ways manage mod repair images --commit`"),
+            "{only}"
+        );
+        let listed = lines.iter().find(|t| t.starts_with("images@old")).unwrap();
+        assert!(listed.contains("is installed from another marketplace") && listed.contains("Fix: uninstall it"), "{listed}");
     }
 
     /// A critical mod that is missing, disabled or pending needs the

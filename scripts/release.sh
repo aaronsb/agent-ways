@@ -18,7 +18,7 @@
 # Both bump and tag refuse a release whose range, from the component's last tag
 # to HEAD, changed plugins/attend/ without moving the plugin's version; `check`
 # runs that check alone. Bumping attend moves the plugin's version with it;
-# bumping ways moves the ways-judge and ways-theme plugins' versions.
+# bumping ways moves the ways-judge, ways-theme and images plugins' versions.
 #
 # `tag` without --push creates the annotated tag locally and prints the push
 # command (keeps the publish deliberate); `--push` pushes it. way-embed is out of
@@ -60,9 +60,9 @@ PLUGIN_MANIFEST="plugins/attend/.claude-plugin/plugin.json"
 # The mod cannot read its manifest, so it carries its version as a constant
 # the beat sends to attend; the bump moves both.
 PLUGIN_LIB="plugins/attend/hooks/lib.ts"
-# The ways-judge mod (ADR-708) and the ways-theme mod (ADR-514) call ways
-# verbs and carry ways' version; bumping ways moves them.
-WAYS_MANIFESTS=("plugins/ways-judge/.claude-plugin/plugin.json" "plugins/ways-theme/.claude-plugin/plugin.json")
+# The ways-judge mod (ADR-708), the ways-theme mod (ADR-514) and the images
+# mod (ADR-517) call ways verbs and carry ways' version; bumping ways moves them.
+WAYS_MANIFESTS=("plugins/ways-judge/.claude-plugin/plugin.json" "plugins/ways-theme/.claude-plugin/plugin.json" "plugins/images/.claude-plugin/plugin.json")
 
 plugin_version_of() {
   # The first "version" field, wherever it sits on its line, so a manifest

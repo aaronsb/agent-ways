@@ -19,6 +19,19 @@ use tui_harness::{session::helper_binary, tmux_available, Harness, LaunchOptions
 const WAIT: Duration = Duration::from_secs(15);
 const SESSION: &str = "bbbbbbbb-0000-4000-8000-000000000002";
 
+/// The pane once it holds every needle. A capture can land between the
+/// lines of one redraw, so a single needle does not say the rest is drawn.
+fn wait_for_all(s: &Session, needles: &[&str]) -> String {
+    let deadline = std::time::Instant::now() + WAIT;
+    loop {
+        let pane = s.wait_for(needles[0], WAIT).unwrap();
+        if needles.iter().all(|n| pane.contains(n)) || std::time::Instant::now() > deadline {
+            return pane;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 fn required() -> bool {
     std::env::var("TUI_HARNESS_REQUIRE_TMUX").is_ok_and(|v| v == "1")
 }
@@ -188,23 +201,23 @@ fn settings_gate_judge_section() {
     let proj = fx.project();
     let s = fx.launch("judge", &["settings", "gate", "--project", &proj]);
 
-    let pane = s.wait_for("judge · state", WAIT).unwrap();
+    let pane = wait_for_all(&s, &["judge · state", "degraded", "bbbbbbbb"]);
     assert!(pane.contains("degraded") && pane.contains("bbbbbbbb"), "pane was:\n{pane}");
 
     // The engine's picker: each shipped profile beside its display name.
     s.send(&["Down", "Enter"]).unwrap();
-    let pane = s.wait_for("Claude Code internal", WAIT).unwrap();
+    let pane = wait_for_all(&s, &["Claude Code internal", "Anthropic API key", "OpenRouter API key"]);
     assert!(pane.contains("Anthropic API key") && pane.contains("OpenRouter API key"), "pane was:\n{pane}");
     s.send(&["Escape"]).unwrap();
 
     // The live session, the last row: its reason and the remedy.
     s.send(&["End"]).unwrap();
-    let pane = s.wait_for("engine_unavailable", WAIT).unwrap();
+    let pane = wait_for_all(&s, &["engine_unavailable", "Anthropic or", "--provider openrouter"]);
     assert!(pane.contains("Anthropic or") && pane.contains("--provider openrouter"), "the fix line:\n{pane}");
     assert!(!pane.contains("--provider claude-code"), "pane was:\n{pane}");
 
     // The readiness row: the fix setup offers.
     s.send(&["Up", "Up", "Up"]).unwrap();
-    let pane = s.wait_for("Fix: ways judge-setup", WAIT).unwrap();
+    let pane = wait_for_all(&s, &["Fix: ways judge-setup", "Claude Code internal has", "(installs the mod, or adds an"]);
     assert!(pane.contains("Claude Code internal has") && pane.contains("(installs the mod, or adds an"), "pane was:\n{pane}");
 }

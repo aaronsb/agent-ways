@@ -1,7 +1,9 @@
-// Another mod's picture in a row the theme frames. The images mod (images@dotfiles)
+// Another mod's picture in a row the theme frames. The images mod (ADR-517)
 // draws an `Image` or a `Raster` and a caption line under the row Claude Code
-// drew; the runtime stamps each Image and Raster with the plugin whose hook drew
-// it, so the theme finds one without knowing the mod.
+// drew, the two in one Box keyed `images-picture-<n>`; the runtime stamps each
+// Image and Raster with the plugin whose hook drew it, so the theme finds a
+// picture without knowing the mod. The contract between the two is
+// tests/picture-frame.ts.
 //
 // Where such a mod sits beneath the theme in the chain, it draws under the row
 // `next(e)` gave it, the engine's own: `withRow` puts the theme's row in that
@@ -9,8 +11,9 @@
 // the frame. A rewritten `viewport` does not reach the mod (the runtime skips a
 // hook that changes the envelope), so it sizes the picture to the transcript's
 // width; `fitted` narrows the picture to the frame's room, its height in
-// proportion. Where the mod sits above the theme, it draws around the theme's
-// frame and none of this applies.
+// proportion, and moves the percentage in its caption with it. Where the mod
+// sits above the theme, it puts the picture inside the theme's frame itself,
+// sized to the frame's room, and none of this applies.
 
 import type { RenderElement } from 'claude-code'
 
@@ -109,8 +112,38 @@ function narrowed(node: Node, room: number): Node {
   return { ...node, props: { ...props, ...to, cells: resample(source, { columns, rows }, to) } }
 }
 
+/** The images mod's Box around one picture and its caption. */
+const PICTURE_KEY = 'images-picture-'
+/** The caption's sizes: ` · 1020×300 · 90%`. */
+const SHOWN = /^( · \d+×\d+ · )(\d+)%$/
+
+const isMarked = (node: Node): boolean => node.type === 'Box' && typeof node.props?.key === 'string' && node.props.key.startsWith(PICTURE_KEY)
+
+/** The columns of the first picture in `node`; 0 for none. */
+function columnsOf(node: Node): number {
+  if (isPicture(node)) return cells(node.props ?? {}, 'columns')
+  for (const child of node.children ?? []) {
+    const at = nodeOf(child)
+    const found = at === null ? 0 : columnsOf(at)
+    if (found > 0) return found
+  }
+  return 0
+}
+
+/** `node` with the percentage in its caption scaled by `ratio`. */
+function recaptioned(node: unknown, ratio: number): unknown {
+  if (typeof node === 'string') {
+    const m = SHOWN.exec(node)
+    return m === null ? node : `${m[1]}${Math.round(Number(m[2]) * ratio)}%`
+  }
+  const at = nodeOf(node)
+  if (at === null || at.children === undefined || isPicture(at)) return node
+  return { ...at, children: at.children.map(child => recaptioned(child, ratio)) }
+}
+
 /** `tree` with each picture another plugin drew narrowed to the `columns` it
- *  has inside the Boxes around it. */
+ *  has inside the Boxes around it, and the images mod's caption saying the
+ *  percentage it is shown at once narrowed. */
 export function fitted(tree: RenderElement, columns: number): RenderElement {
   const fit = (node: unknown, room: number): unknown => {
     const at = nodeOf(node)
@@ -118,7 +151,11 @@ export function fitted(tree: RenderElement, columns: number): RenderElement {
     if (isPicture(at)) return narrowed(at, room)
     if (at.children === undefined) return node
     const inner = room - insetOf(at)
-    return { ...at, children: at.children.map(child => fit(child, inner)) }
+    const box = { ...at, children: at.children.map(child => fit(child, inner)) }
+    if (!isMarked(at)) return box
+    const before = columnsOf(at)
+    const after = columnsOf(box)
+    return before > 0 && after !== before ? recaptioned(box, after / before) : box
   }
   return holdsPicture(tree) ? (fit(tree, columns) as RenderElement) : tree
 }

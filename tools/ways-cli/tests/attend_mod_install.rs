@@ -59,6 +59,7 @@ esac
 
 const ATTEND: &str = "attend@agent-ways";
 const JUDGE: &str = "ways-judge@agent-ways";
+const IMAGES: &str = "images@agent-ways";
 
 struct Fx {
     root: PathBuf,
@@ -91,6 +92,16 @@ impl Fx {
 
     fn src(&self) -> PathBuf {
         self.root.join("src")
+    }
+
+    /// The app source also ships the images mod: a source from before the mod
+    /// listed neither it nor its manifest.
+    fn ships_images(&self) {
+        write(
+            &self.src().join("plugins/.claude-plugin/marketplace.json"),
+            r#"{"name":"agent-ways","plugins":[{"name":"attend","source":"./attend"},{"name":"ways-judge","source":"./ways-judge"},{"name":"images","source":"./images"}]}"#,
+        );
+        write(&self.src().join("plugins/images/.claude-plugin/plugin.json"), r#"{"name":"images","version":"1.42.1"}"#);
     }
     fn dest(&self) -> PathBuf {
         self.root.join("dest")
@@ -642,6 +653,56 @@ fn install_false_removes_attend_and_keeps_the_marketplace_the_judge_runs_from() 
     assert!(fx.has(JUDGE) && !fx.has(ATTEND), "{}", fx.plugins());
     fx.repair_targets(&fx.src());
     assert_eq!(fx.changes(), Vec::<String>::new(), "converged");
+}
+
+/// attend withdrawn while images is wanted and shipped: the marketplace stays
+/// for images, which installs from it in the same repair.
+#[test]
+fn install_false_removes_attend_and_keeps_the_marketplace_the_images_mod_runs_from() {
+    let fx = Fx::new("images-keeps-market");
+    fx.ships_images();
+    fx.installed("0.17.0");
+    write(&fx.user_config(), &format!("mods:\n  attend:\n    install: false\n  ways-judge:\n    install: false\n{}", fx.targets(&[(&fx.dest(), true)])));
+    fx.repair_targets(&fx.src());
+    let dest = fx.dest().display().to_string();
+    assert_eq!(
+        fx.changes(),
+        vec![format!("{dest}|plugin uninstall {ATTEND} --scope user"), format!("{dest}|plugin install {IMAGES} --scope user")]
+    );
+    assert!(fx.has(IMAGES) && !fx.has(ATTEND), "{}", fx.plugins());
+    fx.repair_targets(&fx.src());
+    assert_eq!(fx.changes(), Vec::<String>::new(), "converged");
+}
+
+/// Every mod withdrawn: the last uninstall takes the marketplace with it.
+#[test]
+fn withdrawing_every_mod_removes_the_marketplace_with_the_last() {
+    let fx = Fx::new("images-all-off");
+    fx.ships_images();
+    write(&fx.user_config(), &format!("mods:\n  ways-judge:\n    install: false\n{}", fx.targets(&[(&fx.dest(), true)])));
+    fx.repair_targets(&fx.src());
+    assert!(fx.has(ATTEND) && fx.has(IMAGES), "{}", fx.plugins());
+    fx.changes();
+    write(
+        &fx.user_config(),
+        &format!(
+            "mods:\n  attend:\n    install: false\n  ways-judge:\n    install: false\n  ways-theme:\n    install: false\n  images:\n    install: false\n{}",
+            fx.targets(&[(&fx.dest(), true)])
+        ),
+    );
+    fx.repair_targets(&fx.src());
+    let dest = fx.dest().display().to_string();
+    let calls = fx.changes();
+    assert_eq!(
+        calls,
+        vec![
+            format!("{dest}|plugin uninstall {ATTEND} --scope user"),
+            format!("{dest}|plugin uninstall {IMAGES} --scope user"),
+            format!("{dest}|plugin marketplace remove agent-ways"),
+        ],
+        "{calls:?}"
+    );
+    assert_eq!(fx.plugins().trim(), "[]");
 }
 
 #[test]

@@ -1097,7 +1097,7 @@ fn a_pasted_key_reaches_the_rotate_entry() {
 /// attend removed by hand in one of two targets, and ways-judge pending
 /// under gate.engine: claude-code.
 fn mod_states() -> Vec<crate::cmd::mods::Overview> {
-    use crate::cmd::attend_mod::{Degraded, State, ATTEND, JUDGE, THEME};
+    use crate::cmd::attend_mod::{Degraded, State, ATTEND, IMAGES, JUDGE, THEME};
     use crate::cmd::mods::Attention;
     vec![
         crate::cmd::mods::Overview {
@@ -1140,6 +1140,17 @@ fn mod_states() -> Vec<crate::cmd::mods::Overview> {
             installed: vec![],
             folder: "/home/u/.local/share/agent-ways/plugins".into(),
         },
+        crate::cmd::mods::Overview {
+            m: IMAGES,
+            shipped: Some("1.48.0".into()),
+            word: State::Converged,
+            rows: vec![("~/.claude".into(), "installed · 1.48.0".into(), "installed 1.48.0, enabled".into())],
+            older: false,
+            claude_code: true,
+            attention: vec![],
+            installed: vec!["1.48.0".into()],
+            folder: "/home/u/.local/share/agent-ways/plugins".into(),
+        },
     ]
 }
 
@@ -1172,7 +1183,7 @@ fn the_mod_tab_has_a_node_per_mod_with_its_state_targets_settings_and_actions() 
     let fx = Fixture::home();
     let tab = mod_tab(&fx, mod_states);
     let names: Vec<&str> = tab.children.iter().map(|n| n.name.as_str()).collect();
-    assert_eq!(names, ["attend", "ways-judge", "ways-theme"]);
+    assert_eq!(names, ["attend", "ways-judge", "ways-theme", "images"]);
     let attend = &tab.children[0];
     assert_eq!(attend.columns, Some((String::new(), "0.29.0  removed".to_string())));
     // A read-only row per enabled target, first, then the settings.
@@ -1308,7 +1319,7 @@ fn the_background_notice_follows_the_read_that_landed() {
 fn a_mod_whose_state_was_not_read_says_so() {
     let fx = Fixture::home();
     let tab = mod_tab(&fx, Vec::new);
-    assert_eq!(tab.children.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["attend", "ways-judge", "ways-theme"]);
+    assert_eq!(tab.children.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["attend", "ways-judge", "ways-theme", "images"]);
     assert!(tab.children.iter().all(|n| n.columns == Some((String::new(), "state not read".to_string())) && labels(n) == ["check"]));
 }
 
