@@ -2,7 +2,8 @@ agent-tui frame 100x30
 | 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors  ●1 ↺    7 mod    8 theme     |
 |┌ writes user — ~/proj — review ──────────────────────┐┌detail─────────────────────────────────────┐|
 |│▌  ▾ processes             ●1                        ││processes                                  │|
-|│       enabled             true → false              ││built-in sensor                            │|
+|│       enabled             true → false              ││watches build/package tools and correlates │|
+|│                                                     ││exits with markers                         │|
 |│                                                     ││                                           │|
 |│                                                     ││origin    builtin                          │|
 |│                                                     ││kind      crate                            │|
@@ -10,13 +11,12 @@ agent-tui frame 100x30
 |│                                                     ││state     enabled                          │|
 |│                                                     ││interval  30s quiet, 5s busy               │|
 |│                                                     ││threshold 2                                │|
+|│                                                     ││lane      event                            │|
 |│                                                     ││                                           │|
 |│                                                     ││1 change under this group                  │|
 |│                                                     ││                                           │|
 |│                                                     ││file it writes                             │|
-|│                                                     ││  ~/.config/attend/config.yaml             │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
+|│                                                     ││  ~/.config/attend/sensors/processes.yaml  │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -55,49 +55,49 @@ styles
   3   0-0   - - DIM
   3  28-31  - - DIM|CROSSED_OUT
   3  35-39  Green - BOLD
-  3  54-70  - - DIM
+  3  54-97  - - DIM
   3  99-99  - - DIM
   4   0-0   - - DIM
-  4  54-55  - - DIM
+  4  54-73  - - DIM
   4  99-99  - - DIM
   5   0-0   - - DIM
-  5  54-65  - - DIM
-  5  66-72  LightBlue - -
+  5  54-55  - - DIM
   5  99-99  - - DIM
   6   0-0   - - DIM
   6  54-65  - - DIM
+  6  66-72  LightBlue - -
   6  99-99  - - DIM
   7   0-0   - - DIM
   7  54-65  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
   8  54-65  - - DIM
-  8  66-72  Green - -
   8  99-99  - - DIM
   9   0-0   - - DIM
   9  54-65  - - DIM
+  9  66-72  Green - -
   9  99-99  - - DIM
  10   0-0   - - DIM
  10  54-65  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
- 11  54-55  - - DIM
+ 11  54-65  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM
- 12  54-80  - - DIM
+ 12  54-65  - - DIM
  12  99-99  - - DIM
  13   0-0   - - DIM
  13  54-55  - - DIM
  13  99-99  - - DIM
  14   0-0   - - DIM
- 14  54-55  - - DIM
- 14  56-69  - - BOLD
+ 14  54-80  - - DIM
  14  99-99  - - DIM
  15   0-0   - - DIM
  15  54-55  - - DIM
  15  99-99  - - DIM
  16   0-0   - - DIM
  16  54-55  - - DIM
+ 16  56-69  - - BOLD
  16  99-99  - - DIM
  17   0-0   - - DIM
  17  54-55  - - DIM

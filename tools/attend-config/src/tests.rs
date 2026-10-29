@@ -20,11 +20,7 @@ fn the_default_file_lints_clean_and_loads_the_defaults() {
     let (from_file, defaults) = (Config::from_layers(&[l]), Config::default());
     assert_eq!(format!("{:?}", from_file.governor), format!("{:?}", defaults.governor));
     assert_eq!(format!("{:?}", from_file.engagement), format!("{:?}", defaults.engagement));
-    let xdg = &from_file.sensors["xdg-downloads"];
-    assert!(!xdg.enabled && xdg.script.as_deref().is_some_and(|s| s.ends_with("/attend/sensors/xdg-downloads.sh")));
-    for b in BUILTINS {
-        assert_eq!(format!("{:?}", from_file.sensors[*b]), format!("{:?}", defaults.sensors[*b]), "{b}");
-    }
+    assert!(from_file.project_sensors.is_empty());
 }
 
 #[test]
@@ -36,41 +32,12 @@ fn the_canonical_fragment_parses_back_to_the_defaults() {
     let l = layer(LayerScope::User, &text);
     assert!(l.findings.is_empty(), "{text}\n{:?}", messages(&l));
     assert_eq!(format!("{:?}", sorted(&Config::from_layers(&[l]))), format!("{:?}", sorted(&Config::default())));
-    // Each built-in's keys are listed with no file setting them.
-    let names: Vec<String> = reg.concrete("attend.sensors.git", &[]).iter().map(|b| b.name()).collect();
-    assert!(names.contains(&"attend.sensors.git.interval".to_string()), "{names:?}");
 }
 
 fn sorted(c: &Config) -> Vec<(String, String)> {
-    let mut v: Vec<_> = c.sensors.iter().map(|(k, s)| (k.clone(), format!("{s:?}"))).collect();
-    v.sort();
+    let mut v = vec![("projects".to_string(), format!("{:?}", c.project_sensors))];
     v.push(("governor".into(), format!("{:?} {:?} {:?}", c.governor, c.engagement, c.cleanup)));
     v
-}
-
-#[test]
-fn the_project_layers_over_the_user_file_key_by_key() {
-    let user = layer(LayerScope::User, "governor:\n  base_cooldown: 30\nsensors:\n  git:\n    interval: 45\n    threshold: 3.0\n");
-    let project = layer(
-        LayerScope::Project,
-        "sensors:\n  git:\n    interval: 90\n  processes:\n    enabled: false\n    watch: [mix, zig]\n  disk:\n    script: .claude/sensors/disk.sh\n    requires: [Read]\n",
-    );
-    let c = Config::from_layers(&[user, project]);
-    assert_eq!(c.governor.base_cooldown, Duration::from_secs(30));
-    assert_eq!((c.sensors["git"].interval, c.sensors["git"].threshold), (Duration::from_secs(90), 3.0));
-    assert!(!c.sensors["processes"].enabled);
-    assert_eq!(c.sensors["processes"].watch.as_deref(), Some(&["mix".to_string(), "zig".to_string()][..]));
-    assert_eq!(c.sensors["git"].watch, None, "no watch list keeps the sensor's own");
-    let disk = &c.sensors["disk"];
-    assert_eq!((disk.script.as_deref(), disk.interval, disk.requires.clone()), (Some(".claude/sensors/disk.sh"), Duration::from_secs(60), vec!["Read".to_string()]));
-    assert_eq!(c.sensors["context"].requires, vec!["Read".to_string()]);
-}
-
-#[test]
-fn block_and_flow_lists_read_the_same() {
-    let a = layer(LayerScope::User, "sensors:\n  processes:\n    watch:\n      - cargo\n\n      # elixir\n      - mix\n");
-    let b = layer(LayerScope::User, "sensors:\n  processes:\n    watch: [cargo, mix]\n");
-    assert_eq!(Config::from_layers(&[a]).sensors["processes"].watch, Config::from_layers(&[b]).sensors["processes"].watch);
 }
 
 // ── validation: a bad section falls back, a switch fails closed ──
@@ -91,78 +58,64 @@ fn out_of_range_values_are_findings_not_clamped() {
     for (text, section) in [
         ("engagement:\n  decay_per_minute: -5\n", "attend.engagement"),
         ("engagement:\n  step_multiplier: 1000\n", "attend.engagement"),
-        ("sensors:\n  git:\n    interval: 0\n", "attend.sensors"),
         ("cleanup:\n  interval: 0\n", "attend.cleanup"),
     ] {
         let l = layer(LayerScope::User, text);
         assert_eq!(l.findings.first().and_then(|f| f.section.as_deref()), Some(section), "{text}: {:?}", messages(&l));
     }
-    assert_eq!(Config::from_layers(&[layer(LayerScope::User, "sensors:\n  git:\n    interval: 0\n")]).sensors["git"].interval, Duration::from_secs(30));
 }
 
 #[test]
 fn a_bad_switch_reads_off() {
-    let c = Config::from_layers(&[layer(LayerScope::Project, "sensors:\n  git:\n    enabled: maybe\n    interval: 45\ncleanup:\n  enabled: yes please\n")]);
-    assert!(!c.sensors["git"].enabled, "a sensor whose switch is bad is off");
-    assert_eq!(c.sensors["git"].interval, Duration::from_secs(30), "its other keys fall through");
+    let c = Config::from_layers(&[layer(LayerScope::Project, "cleanup:\n  enabled: yes please\n")]);
     assert!(!c.cleanup.enabled, "cleanup's switch fails closed");
 }
 
 #[test]
 fn a_file_that_does_not_parse_sets_nothing_and_switches_cleanup_off() {
-    let l = layer(LayerScope::User, "governor:\n  base_cooldown: 99\nsensors: [\n");
+    let l = layer(LayerScope::User, "governor:\n  base_cooldown: 99\ncleanup: [\n");
     assert!(l.findings[0].is_parse_failure());
     let c = Config::from_layers(&[l]);
     assert_eq!(c.governor.base_cooldown, Duration::from_secs(15));
     assert!(!c.cleanup.enabled);
 }
 
-// ── lint: the forms the hand parser took and the schema does not ──
+// ── the retired sensors section (ADR-403 §7) ─────────────────
 
 #[test]
-fn old_sensor_prefixes_and_retired_keys_are_findings() {
+fn each_old_sensor_key_names_the_file_and_field_to_write() {
     let l = layer(
-        LayerScope::Project,
-        "signals:\n  half_life_seconds: 3600\nengagement:\n  burst_window: 900\n  burst_threshold: 4\ncleanup:\n  retention: 10\nsensors:\n  -processes:\n  +disk:\n    script: ./d.sh\n  git:\n    x-note: mine\n",
+        LayerScope::User,
+        "signals:\n  half_life_seconds: 3600\nsensors:\n  git:\n    interval: 45\n    enabled: false\n  disk:\n    script: ~/d.sh\n    interval: 120\n",
     );
     let m = messages(&l);
-    let has = |s: &str| m.iter().any(|x| x.contains(s));
-    assert!(has("/project.yaml:1: signals: `signals:` was retired"), "{m:?}");
-    assert!(has("/project.yaml:4: [attend.engagement] engagement.burst_window: unknown key"), "{m:?}");
-    assert!(has("[attend.cleanup] cleanup.retention: unknown key"), "{m:?}");
-    assert!(has("/project.yaml:9: [attend.sensors] sensors.-processes: '-processes' is not a sensor name; switch one off with `processes: {enabled: false}`"), "{m:?}");
-    assert!(has("'+disk' is not a sensor name; a sensor of your own is `disk:` with a script"), "{m:?}");
-    assert!(has("[attend.sensors] sensors.git.x-note: unknown key"), "{m:?}");
-    let c = Config::from_layers(&[l]);
-    assert_eq!(c.engagement.burst_threshold, 3, "engagement falls back whole");
-    assert!(!c.sensors.contains_key("+disk") && !c.sensors.contains_key("disk"), "a script under an old name never runs");
+    let want = [
+        "/user.yaml:1: signals: `signals:` was retired",
+        "/user.yaml:5: sensors.git.interval: retired by ADR-403; write `interval: 45` in $XDG_CONFIG_HOME/attend/sensors/git.yaml",
+        "/user.yaml:6: sensors.git.enabled: retired by ADR-403; write `enabled: false` in $XDG_CONFIG_HOME/attend/sensors/git.yaml",
+        "/user.yaml:8: sensors.disk.script: the inline script form was retired by ADR-403; write $XDG_CONFIG_HOME/attend/sensors/disk.yaml with `kind: command`, `argv: [bash, ~/d.sh]` and `output: lines`",
+        "/user.yaml:9: sensors.disk.interval: retired by ADR-403; write `interval: 120` in $XDG_CONFIG_HOME/attend/sensors/disk.yaml, the command sensor that replaces the script",
+    ];
+    for w in want {
+        assert!(m.iter().any(|x| x.starts_with(w)), "{w}\n{m:?}");
+    }
+    assert!(l.findings.iter().all(|f| !f.fallback), "a retired key only reports");
 }
 
 #[test]
-fn an_old_minus_entry_closes_the_files_sensors_and_reads_nothing_else_there() {
-    // `-processes:` was the way to switch a sensor off in a project. The
-    // schema cannot name it, so the project's sensors section fails closed:
-    // every built-in and every sensor the file names reads off.
-    let user = layer(LayerScope::User, "sensors:\n  mine:\n    script: ./m.sh\n");
-    let project = layer(LayerScope::Project, "sensors:\n  -processes:\n  git:\n    interval: 90\n  disk:\n    script: ./d.sh\n    enabled: true\n");
-    assert!(project.findings.iter().all(|f| f.closed), "{:?}", messages(&project));
-    let c = Config::from_layers(&[user, project]);
-    for b in BUILTINS {
-        assert!(!c.sensors[*b].enabled, "{b} is off");
-    }
-    assert!(!c.sensors["disk"].enabled, "a sensor the file names is off too");
-    assert_eq!(c.sensors["git"].interval, Duration::from_secs(30), "nothing else in the section is read");
-    assert!(c.sensors["mine"].enabled, "a sensor of the user file alone is not named here, and runs");
+fn a_project_file_s_old_keys_name_the_project_s_sensor_file() {
+    let m = messages(&layer(LayerScope::Project, "sensors:\n  -processes:\n  git:\n    threshold: 3.0\n"));
+    assert!(m.iter().any(|x| x.contains("sensors.-processes: retired by ADR-403; write `enabled: false` in .claude/attend/sensors/processes.yaml")), "{m:?}");
+    assert!(m.iter().any(|x| x.contains("sensors.git.threshold: retired by ADR-403; write `threshold: 3.0` in .claude/attend/sensors/git.yaml")), "{m:?}");
 }
 
 #[test]
-fn a_file_that_does_not_parse_switches_every_built_in_sensor_off() {
-    let l = layer(LayerScope::Project, "sensors:\n  processes:\n    enabled: false\ngovernor: [\n");
-    assert!(l.findings[0].is_parse_failure());
-    let c = Config::from_layers(&[l]);
-    for b in BUILTINS {
-        assert!(!c.sensors[*b].enabled, "{b} is off");
-    }
+fn project_sensors_is_the_user_file_s_alone() {
+    let c = Config::from_layers(&[layer(LayerScope::User, "project_sensors: [~/p, /q]\n")]);
+    assert_eq!(c.project_sensors, vec!["~/p".to_string(), "/q".to_string()]);
+    let l = layer(LayerScope::Project, "project_sensors: [/q]\n");
+    assert!(messages(&l).iter().any(|x| x.contains("user file only")), "{:?}", messages(&l));
+    assert!(Config::from_layers(&[l]).project_sensors.is_empty());
 }
 
 #[test]

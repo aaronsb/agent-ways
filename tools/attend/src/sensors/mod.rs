@@ -1,24 +1,27 @@
-//! Sensor module — the always-on sensors, re-exports from the optional
-//! sensor crates, and the local ScriptSensor.
+//! attend's sensors: the compiled ones, and the host that runs what the
+//! sensor files declare (ADR-403).
 //!
-//! `context`, `git` and `disclosure` are modules here: they are always
-//! compiled. The other sensor crates are wired in via feature flags (default:
-//! all). Config controls runtime activation/deactivation independent of
-//! compilation.
+//! Every sensor is a file (`attend_config::sensors` finds and layers them).
+//! A `crate` file names a compiled sensor, which runs here under the
+//! file's name, cadence, threshold and lane. `command` and `mcp` files load,
+//! list and lint, and are recorded as not hosted until attend runs them.
+//!
+//! `context`, `git` and `disclosure` are modules here and always compiled;
+//! the other compiled sensors are crates behind feature flags (default:
+//! all). A file switches a compiled sensor on or off; a feature flag
+//! decides whether the build has it.
 
 mod context;
 mod disclosure;
 mod git;
-mod script;
+pub mod hosted;
 
 pub use context::ContextSensor;
 pub use disclosure::DisclosureSensor;
 pub use git::GitSensor;
 
-// Re-export from sensor-trait (always available)
 pub use sensor_trait::{Focus, Sensor, SensorSlot};
 
-// Re-export from sensor crates (feature-gated)
 #[cfg(feature = "sensor-peers")]
 pub use sensor_peers::PeerSensor;
 
@@ -28,407 +31,421 @@ pub use sensor_processes::ProcessSensor;
 #[cfg(feature = "sensor-keepwarm")]
 pub use sensor_keepwarm::KeepwarmSensor;
 
-// ScriptSensor stays in attend — it's part of the orchestrator, not a sensor impl
-pub use script::ScriptSensor;
+use std::time::Duration;
 
-// ── Sensor registration ─────────────────────────────────────────
+use attend_config::sensors::Loaded;
+use sensor_spec::{Block, Kind, Lane, Severity};
 
 use crate::config::Config;
 use crate::groups::Groups;
-#[allow(unused_imports)]
-use std::time::Duration;
+use hosted::{FileSensor, Poll};
 
-/// Register all enabled sensors based on config and feature flags.
-///
-/// To add a new sensor crate:
-/// 1. Create the crate implementing sensor_trait::Sensor
-/// 2. Add it as an optional dep + feature in attend/Cargo.toml
-/// 3. Add a #[cfg(feature)] block below with register_builtin!
-///
-/// Config controls runtime: `<name>: {enabled: false}` in attend.yaml disables it.
-/// Feature flags control compilation: `--no-default-features` excludes it.
-#[allow(unused_variables)]
-pub fn register_sensors(
-    cfg: &Config,
-    focus: &Focus,
-    catchup: bool,
-    groups: &Groups,
-) -> (Vec<SensorSlot>, Vec<String>) {
-    let mut slots: Vec<SensorSlot> = Vec::new();
-    let mut enabled_names: Vec<String> = Vec::new();
-
-    // Macro to reduce boilerplate for built-in sensor registration.
-    // Checks: feature compiled + config enabled → instantiate with config overrides.
-    #[allow(unused_macros)]
-    macro_rules! register_builtin {
-        ($name:expr, $sensor:expr, $default_interval:expr, $default_min:expr, $default_decay:expr) => {
-            if cfg.sensors.get($name).map(|s| s.enabled).unwrap_or(true) {
-                let sc = cfg.sensors.get($name);
-                slots.push(SensorSlot::new_with_config(
-                    Box::new($sensor),
-                    sc.map(|s| s.interval).unwrap_or(Duration::from_secs($default_interval)),
-                    sc.map(|s| s.min_interval).unwrap_or(Duration::from_secs($default_min)),
-                    sc.map(|s| s.decay_threshold).unwrap_or($default_decay),
-                ));
-                enabled_names.push($name.to_string());
-            }
-        };
-    }
-
-    // ── Built-in crate sensors (feature-gated) ──────────────────
-
-    register_builtin!("context", ContextSensor::new(), 60, 20, 3);
-
-    #[cfg(feature = "sensor-processes")]
-    {
-        // Resolve the watch list once at startup: if config provides one,
-        // it replaces the defaults verbatim (explicit-replace contract).
-        // Otherwise the sensor's `new()` uses `DEFAULT_WATCH`.
-        let processes_sensor = match cfg.sensors.get("processes").and_then(|s| s.watch.clone()) {
-            Some(list) => ProcessSensor::with_watch(list),
-            None => ProcessSensor::new(),
-        };
-        register_builtin!("processes", processes_sensor, 30, 5, 5);
-    }
-
-    register_builtin!("git", GitSensor::new(), 30, 10, 4);
-
-    register_builtin!("disclosure", DisclosureSensor::new(), 60, 20, 3);
-
-    // Keepwarm (ADR-182) is pinned to this session's transcript, so a
-    // peer session in the same project can never be its idle clock.
-    // With no resolved session there is no transcript to read, so the
-    // sensor is skipped rather than registered against a `pid-` id.
-    #[cfg(feature = "sensor-keepwarm")]
-    {
-        let ident = attend_presence::session::identity();
-        if ident.session_resolved {
-            register_builtin!(
-                "keepwarm",
-                KeepwarmSensor::new(ident.session_id.clone(), crate::util::keepwarm_dir()),
-                60, 60, 3
-            );
-        } else if cfg.sensors.get("keepwarm").map(|s| s.enabled).unwrap_or(true) {
-            crate::emit::log("keepwarm: no resolved session id, sensor not started");
-        }
-    }
-
-    #[cfg(feature = "sensor-peers")]
-    {
-        if cfg.sensors.get("peers").map(|s| s.enabled).unwrap_or(true) {
-            let mut peer_sensor = PeerSensor::new();
-            // Register a provider that re-reads group membership on every
-            // poll, so mid-session focus-group join/leave is reflected
-            // without restarting the sensor loop (ADR-118 + issue #15).
-            let groups_for_scan = groups.clone();
-            peer_sensor.set_receive_dirs_provider(std::sync::Arc::new(move |origin: &str| {
-                groups_for_scan.receive_dirs(origin)
-            }));
-            // Align per-peer engagement window with global engagement config.
-            peer_sensor.set_peer_activity_window(cfg.engagement.peer_activity_window);
-            // The message lane no longer runs a per-signal salience gate
-            // (ADR-136 Decision 1): authored messages are durable and
-            // dedup-only, never aged-out by wall-clock decay. Cold-start
-            // flooding is prevented by the backlog baseline inside
-            // `read_signals`, not by salience. The neuron-decay model stays
-            // where it belongs — the event-lane sensors (git / process).
-            let sc = cfg.sensors.get("peers");
-            slots.push(SensorSlot::new_with_config(
-                Box::new(peer_sensor),
-                sc.map(|s| s.interval).unwrap_or(Duration::from_secs(30)),
-                sc.map(|s| s.min_interval).unwrap_or(Duration::from_secs(10)),
-                sc.map(|s| s.decay_threshold).unwrap_or(5),
-            ));
-            enabled_names.push("peers".to_string());
-        }
-    }
-
-    // ── Script sensors (config-driven, always available) ────────
-
-    for (name, sc) in &cfg.sensors {
-        if let Some(ref script_path) = sc.script {
-            if sc.enabled {
-                let sensor = ScriptSensor::new(
-                    name.clone(),
-                    script_path.clone(),
-                    focus.working_dir.clone(),
-                    sc.interval,
-                    sc.min_interval,
-                    sc.decay_threshold,
-                    sc.threshold,
-                );
-                slots.push(SensorSlot::new_with_config(
-                    Box::new(sensor),
-                    sc.interval,
-                    sc.min_interval,
-                    sc.decay_threshold,
-                ));
-                enabled_names.push(name.clone());
-            }
-        }
-    }
-
-    (slots, enabled_names)
-}
-
-// ── Sensor enumeration (for `attend sensor list`) ───────────────────
-
-/// Lightweight metadata for one sensor — used by `attend sensor list` to
-/// report what's compiled, configured, and active.
-pub struct SensorEntry {
-    pub name: String,
-    pub kind: SensorKind,
-    pub state: SensorState,
-    pub description: String,
-    pub source: String,
-    pub interval: Duration,
-    pub min_interval: Duration,
-}
-
-#[derive(Clone, Copy)]
-pub enum SensorKind {
-    Builtin,
-    Script,
-}
-
-impl SensorKind {
-    pub fn label(self) -> &'static str {
-        match self {
-            SensorKind::Builtin => "builtin",
-            SensorKind::Script => "script",
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub enum SensorState {
-    /// Compiled in (or script file present) and enabled in config.
+/// A sensor's recorded state, as `attend sensor list` and the settings
+/// screens show it (ADR-403 §1).
+#[derive(Debug, Clone, PartialEq)]
+pub enum State {
+    /// It runs; its last poll, if any, succeeded.
     Active,
-    /// Compiled in (or script file present) but disabled in config.
+    /// Its last poll failed, and why.
+    Failed(String),
+    /// Its file sets `enabled: false`.
     Off,
-    /// Built-in sensor whose feature flag was excluded at compile time.
-    /// Only constructible when a `sensor-*` feature is off, so default
-    /// builds correctly flag it as unused.
-    #[allow(dead_code)]
+    /// A problem in its files keeps it from running.
+    Invalid(String),
+    /// A project file the allow-list refused, with nothing beneath it.
+    Refused(String),
+    /// Its kind is one attend does not run yet, or not at all.
+    NotHosted(String),
+    /// Its file names a compiled sensor this build leaves out.
     NotCompiled,
-    /// Script sensor whose `script:` path does not point at a file.
-    Missing,
 }
 
-impl SensorState {
-    pub fn label(self) -> &'static str {
+impl State {
+    pub fn label(&self) -> &'static str {
         match self {
-            SensorState::Active => "active",
-            SensorState::Off => "off",
-            SensorState::NotCompiled => "not compiled",
-            SensorState::Missing => "missing",
+            State::Active => "active",
+            State::Failed(_) => "failed",
+            State::Off => "off",
+            State::Invalid(_) => "invalid",
+            State::Refused(_) => "refused",
+            State::NotHosted(_) => "not hosted",
+            State::NotCompiled => "not compiled",
+        }
+    }
+
+    /// Why the sensor is in this state.
+    pub fn detail(&self) -> Option<&str> {
+        match self {
+            State::Failed(d) | State::Invalid(d) | State::Refused(d) | State::NotHosted(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    /// Whether attend polls it.
+    pub fn runs(&self) -> bool {
+        matches!(self, State::Active | State::Failed(_))
+    }
+}
+
+/// What a compiled sensor says of itself.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Compiled {
+    pub description: String,
+    /// `crate@version`.
+    pub source: String,
+}
+
+/// One sensor as attend hosts it.
+#[derive(Debug, Clone)]
+pub struct Hosted {
+    pub loaded: Loaded,
+    pub state: State,
+    /// What runs but is not as written: a lane the author rule refused, a
+    /// project file the allow-list refused over a lower layer, a lint
+    /// finding.
+    pub notes: Vec<String>,
+    pub compiled: Option<Compiled>,
+    pub last: Option<Poll>,
+}
+
+impl Hosted {
+    pub fn name(&self) -> &str {
+        &self.loaded.name
+    }
+
+    /// The lane it runs on, when it loads.
+    pub fn lane(&self) -> Option<Lane> {
+        self.loaded.spec.as_ref().map(|s| s.lane())
+    }
+
+    /// The compiled sensor its file names, when it is a crate sensor.
+    pub fn crate_id(&self) -> Option<&str> {
+        match self.loaded.spec.as_ref().map(|s| &s.block) {
+            Some(Block::Crate(c)) => Some(&c.id),
+            _ => None,
         }
     }
 }
 
-/// Push one builtin sensor's metadata into `entries`. Two `#[cfg]`-gated
-/// branches per invocation: the feature-on branch instantiates the sensor
-/// to read its trait-supplied `description()` / `source()` / `name()`; the
-/// feature-off branch emits a `NotCompiled` placeholder so the slot is
-/// still visible in the table.
-///
-/// `$sensor` is only parsed lexically as an expression — when its feature
-/// is off, the entire block (and the substituted expression with it) is
-/// stripped before name resolution, so it's fine if the type doesn't exist
-/// in that build. `always` in place of the feature names a sensor that is
-/// a module of attend and so always compiled.
-macro_rules! enumerate_builtin {
-    ($entries:ident, $cfg:expr, always, $name:literal, $base:expr, $min:expr, $sensor:expr) => {{
-        let s = $sensor;
-        let (state, interval, min_interval) = builtin_state_for($cfg, $name, $base, $min);
-        $entries.push(SensorEntry {
-            name: s.name().to_string(),
-            kind: SensorKind::Builtin,
-            state,
-            description: s.description().to_string(),
-            source: s.source(),
-            interval,
-            min_interval,
-        });
-    }};
-    ($entries:ident, $cfg:expr, $feature:literal, $name:literal, $base:expr, $min:expr, $sensor:expr) => {{
-        #[cfg(feature = $feature)]
-        {
-            let s = $sensor;
-            let (state, interval, min_interval) = builtin_state_for($cfg, $name, $base, $min);
-            $entries.push(SensorEntry {
-                name: s.name().to_string(),
-                kind: SensorKind::Builtin,
-                state,
-                description: s.description().to_string(),
-                source: s.source(),
-                interval,
-                min_interval,
-            });
-        }
-        #[cfg(not(feature = $feature))]
-        {
-            let (_, interval, min_interval) = builtin_state_for($cfg, $name, $base, $min);
-            $entries.push(SensorEntry {
-                name: $name.to_string(),
-                kind: SensorKind::Builtin,
-                state: SensorState::NotCompiled,
-                description: String::new(),
-                source: String::new(),
-                interval,
-                min_interval,
-            });
-        }
-    }};
+/// Every sensor the files declare for the project at `project`, with its
+/// state.
+pub fn catalog(cfg: &Config, project: &str) -> Vec<Hosted> {
+    let loaded = attend_config::sensors::load(std::path::Path::new(project), &cfg.project_sensors);
+    catalog_of(loaded, |name| hosted::read(name, project).and_then(|r| r.poll))
 }
 
-/// Enumerate every sensor known to this build — both compiled-in
-/// built-ins and config-defined script sensors. Pure metadata, no
-/// side effects; safe to call from any subcommand.
-pub fn enumerate_sensors(cfg: &Config, focus: &Focus) -> Vec<SensorEntry> {
-    let mut entries: Vec<SensorEntry> = Vec::new();
+/// The sensors `loaded` declares, each with its last poll from `last`.
+fn catalog_of(loaded: Vec<Loaded>, last: impl Fn(&str) -> Option<Poll>) -> Vec<Hosted> {
+    let mut out: Vec<Hosted> = loaded
+        .into_iter()
+        .map(|l| {
+            let poll = last(&l.name);
+            host(l, poll)
+        })
+        .collect();
+    claim_crates(&mut out);
+    out
+}
 
-    // Built-in sensors. Defaults here mirror the macro defaults in
-    // `register_sensors` and the seeds in `Config::default()` — keep them
-    // in sync if you change either source.
-    enumerate_builtin!(entries, cfg, always, "context",
-        Duration::from_secs(60), Duration::from_secs(20),
-        ContextSensor::new());
-    enumerate_builtin!(entries, cfg, always, "git",
-        Duration::from_secs(30), Duration::from_secs(10),
-        GitSensor::new());
-    enumerate_builtin!(entries, cfg, "sensor-peers", "peers",
-        Duration::from_secs(30), Duration::from_secs(10),
-        PeerSensor::new());
-    enumerate_builtin!(entries, cfg, "sensor-processes", "processes",
-        Duration::from_secs(30), Duration::from_secs(5),
-        match cfg.sensors.get("processes").and_then(|sc| sc.watch.clone()) {
-            Some(list) => ProcessSensor::with_watch(list),
+fn host(loaded: Loaded, last: Option<Poll>) -> Hosted {
+    let mut notes: Vec<String> = loaded
+        .findings
+        .iter()
+        .filter(|f| f.problem.severity != Severity::Invalid)
+        .map(|f| f.problem.to_string())
+        .collect();
+    if let (Some(r), false) = (&loaded.refused, loaded.is_refused()) {
+        notes.push(format!("the project file is refused: {r}"));
+    }
+    let compiled = match loaded.spec.as_ref().map(|s| &s.block) {
+        Some(Block::Crate(c)) => compiled(&c.id),
+        _ => None,
+    };
+    let state = state_of(&loaded, compiled.is_some(), last.as_ref());
+    Hosted { loaded, state, notes, compiled, last }
+}
+
+fn state_of(l: &Loaded, compiled: bool, last: Option<&Poll>) -> State {
+    if l.is_refused() {
+        return State::Refused(l.refused.clone().unwrap_or_default());
+    }
+    let Some(spec) = &l.spec else {
+        let why = l.findings.iter().find(|f| f.problem.severity == Severity::Invalid).map(|f| f.problem.to_string()).unwrap_or_default();
+        return State::Invalid(why);
+    };
+    if spec.kind == Kind::Ways {
+        return State::NotHosted("a ways sensor runs in ways (ADR-199); attend does not host it".into());
+    }
+    if !spec.enabled {
+        return State::Off;
+    }
+    match spec.kind {
+        Kind::Command => State::NotHosted("kind command not yet hosted; attend runs command sensors from ADR-403 slice 2".into()),
+        Kind::Mcp => State::NotHosted("kind mcp not yet hosted; attend runs mcp sensors from ADR-403 slice 3".into()),
+        _ if !compiled => State::NotCompiled,
+        _ => match last {
+            Some(p) if !p.ok => State::Failed(p.detail.clone().unwrap_or_default()),
+            _ => State::Active,
+        },
+    }
+}
+
+/// One running sensor per compiled sensor: when two enabled files name the
+/// same crate, the one named after it runs, else the first by name, and the
+/// others are invalid.
+fn claim_crates(all: &mut [Hosted]) {
+    let ids: Vec<Option<String>> = all.iter().map(|h| h.crate_id().filter(|_| h.state.runs()).map(str::to_string)).collect();
+    for i in 0..all.len() {
+        let Some(id) = &ids[i] else { continue };
+        let rivals: Vec<usize> = (0..all.len()).filter(|&j| ids[j].as_ref() == Some(id)).collect();
+        let winner = rivals.iter().copied().find(|&j| all[j].name() == id).unwrap_or(rivals[0]);
+        if winner != i {
+            all[i].state = State::Invalid(format!("crate {id} already runs as sensor {}; one sensor per compiled sensor runs", all[winner].name()));
+        }
+    }
+}
+
+/// Whether this build has the compiled sensor `id` and an enabled file runs
+/// it. It reads the files and builds `id` alone, so no other sensor's state
+/// is read.
+#[cfg_attr(not(feature = "sensor-keepwarm"), allow(dead_code))]
+pub fn crate_enabled(cfg: &Config, project: &str, id: &str) -> bool {
+    let loaded = attend_config::sensors::load(std::path::Path::new(project), &cfg.project_sensors);
+    runs_crate(&loaded, id) && compiled(id).is_some()
+}
+
+/// Whether an enabled file of `loaded` names the compiled sensor `id`.
+#[cfg_attr(not(feature = "sensor-keepwarm"), allow(dead_code))]
+fn runs_crate(loaded: &[Loaded], id: &str) -> bool {
+    loaded.iter().filter(|l| !l.is_refused()).filter_map(|l| l.spec.as_ref()).any(|s| s.enabled && matches!(&s.block, Block::Crate(c) if c.id == id))
+}
+
+/// A compiled sensor's description and source, when this build has it.
+pub fn compiled(id: &str) -> Option<Compiled> {
+    let s: Box<dyn Sensor> = match id {
+        "context" => Box::new(ContextSensor::new()),
+        "git" => Box::new(GitSensor::new()),
+        "disclosure" => Box::new(DisclosureSensor::new()),
+        #[cfg(feature = "sensor-peers")]
+        "peers" => Box::new(PeerSensor::new()),
+        #[cfg(feature = "sensor-processes")]
+        "processes" => Box::new(ProcessSensor::new()),
+        #[cfg(feature = "sensor-keepwarm")]
+        "keepwarm" => Box::new(KeepwarmSensor::new(String::new(), std::path::PathBuf::new())),
+        _ => return None,
+    };
+    Some(Compiled { description: s.description().to_string(), source: s.source() })
+}
+
+/// What a running compiled sensor needs beyond its file: the peers sensor
+/// reads both.
+#[cfg_attr(not(feature = "sensor-peers"), allow(dead_code))]
+pub struct Ctx<'a> {
+    pub cfg: &'a Config,
+    pub groups: Option<&'a Groups>,
+}
+
+/// The compiled sensor `h` configures, ready to poll, or why it cannot run
+/// here.
+#[cfg_attr(not(feature = "sensor-peers"), allow(unused_variables))]
+pub fn build(h: &Hosted, ctx: &Ctx, project: &str, record: bool) -> Result<Box<dyn Sensor>, String> {
+    let Some(spec) = &h.loaded.spec else { return Err(h.state.detail().unwrap_or("it does not load").to_string()) };
+    let Block::Crate(c) = &spec.block else { return Err(h.state.detail().unwrap_or("its kind is not hosted").to_string()) };
+    let inner: Box<dyn Sensor> = match c.id.as_str() {
+        "context" => Box::new(ContextSensor::new()),
+        "git" => Box::new(GitSensor::new()),
+        "disclosure" => Box::new(DisclosureSensor::new()),
+        #[cfg(feature = "sensor-processes")]
+        "processes" => Box::new(match c.fields.get("watch").and_then(|w| w.as_sequence()) {
+            // A list, even empty, replaces the sensor's own.
+            Some(list) => ProcessSensor::with_watch(list.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()),
             None => ProcessSensor::new(),
-        });
-    enumerate_builtin!(entries, cfg, always, "disclosure",
-        Duration::from_secs(60), Duration::from_secs(20),
-        DisclosureSensor::new());
-    enumerate_builtin!(entries, cfg, "sensor-keepwarm", "keepwarm",
-        Duration::from_secs(60), Duration::from_secs(60),
-        KeepwarmSensor::new(String::new(), std::path::PathBuf::new()));
-
-    // Script sensors — anything in config with `script:` set, regardless
-    // of whether the file currently resolves.
-    for (name, sc) in &cfg.sensors {
-        let Some(script_path) = sc.script.clone() else { continue };
-        let probe = ScriptSensor::new(
-            name.clone(),
-            script_path.clone(),
-            focus.working_dir.clone(),
-            sc.interval,
-            sc.min_interval,
-            sc.decay_threshold,
-            sc.threshold,
-        );
-        let resolved = std::path::Path::new(&script_path);
-        let resolved = if resolved.is_absolute() {
-            resolved.to_path_buf()
-        } else {
-            std::path::Path::new(&focus.working_dir).join(resolved)
-        };
-        let state = if !resolved.is_file() {
-            SensorState::Missing
-        } else if sc.enabled {
-            SensorState::Active
-        } else {
-            SensorState::Off
-        };
-        entries.push(SensorEntry {
-            name: probe.name().to_string(),
-            kind: SensorKind::Script,
-            state,
-            description: probe.description().to_string(),
-            source: probe.source(),
-            interval: sc.interval,
-            min_interval: sc.min_interval,
-        });
-    }
-
-    entries
+        }),
+        // Pinned to this session's transcript, so a peer session in the same
+        // project is never its idle clock (ADR-182).
+        #[cfg(feature = "sensor-keepwarm")]
+        "keepwarm" => {
+            let ident = attend_presence::session::identity();
+            if !ident.session_resolved {
+                return Err("no resolved session id, so no transcript to read".into());
+            }
+            Box::new(KeepwarmSensor::new(ident.session_id.clone(), crate::util::keepwarm_dir()))
+        }
+        #[cfg(feature = "sensor-peers")]
+        "peers" => {
+            let mut p = PeerSensor::new();
+            // Group membership is re-read on every poll, so a focus group
+            // joined or left mid-session counts without a restart (ADR-118).
+            if let Some(groups) = ctx.groups {
+                let groups = groups.clone();
+                p.set_receive_dirs_provider(std::sync::Arc::new(move |origin: &str| groups.receive_dirs(origin)));
+            }
+            p.set_peer_activity_window(ctx.cfg.engagement.peer_activity_window);
+            Box::new(p)
+        }
+        id => return Err(format!("crate {id} is not compiled into this attend")),
+    };
+    Ok(Box::new(FileSensor::new(spec.name.clone(), spec.cadence, inner, project, record)))
 }
 
-fn builtin_state_for(
-    cfg: &Config,
-    name: &str,
-    default_base: Duration,
-    default_min: Duration,
-) -> (SensorState, Duration, Duration) {
-    let entry = cfg.sensors.get(name);
-    let enabled = entry.map(|s| s.enabled).unwrap_or(true);
-    let state = if enabled { SensorState::Active } else { SensorState::Off };
-    (
-        state,
-        entry.map(|s| s.interval).unwrap_or(default_base),
-        entry.map(|s| s.min_interval).unwrap_or(default_min),
-    )
+/// A slot for `sensor`, on the lane `lane`, running the compiled sensor
+/// `crate_id` when it is one.
+pub fn slot(sensor: Box<dyn Sensor>, lane: Lane, crate_id: Option<&str>) -> SensorSlot {
+    let (base, min, decay) = (sensor.base_interval(), sensor.min_interval(), sensor.decay_threshold());
+    let mut s = SensorSlot::new_with_config(sensor, base, min, decay);
+    s.message_lane = lane == Lane::Message;
+    s.crate_id = crate_id.map(str::to_string);
+    s
+}
+
+/// The slots `attend run` polls, and their names. A sensor that does not
+/// run is logged once with its state.
+pub fn register_sensors(cfg: &Config, focus: &Focus, _catchup: bool, groups: &Groups) -> (Vec<SensorSlot>, Vec<String>) {
+    let mut slots = Vec::new();
+    let mut names = Vec::new();
+    let ctx = Ctx { cfg, groups: Some(groups) };
+    for h in catalog(cfg, &focus.working_dir) {
+        for n in &h.notes {
+            crate::emit::log(&format!("sensor {}: {n}", h.name()));
+        }
+        if !h.state.runs() {
+            if h.state != State::Off {
+                crate::emit::log(&format!("sensor {}: {}{}", h.name(), h.state.label(), h.state.detail().map(|d| format!(": {d}")).unwrap_or_default()));
+            }
+            continue;
+        }
+        match build(&h, &ctx, &focus.working_dir, true) {
+            Ok(sensor) => {
+                slots.push(slot(sensor, h.lane().unwrap_or(Lane::Event), h.crate_id()));
+                names.push(h.name().to_string());
+            }
+            Err(why) => crate::emit::log(&format!("sensor {}: not started: {why}", h.name())),
+        }
+    }
+    (slots, names)
+}
+
+/// A description as it goes out (ADR-403 §3b): one line, with every `<`
+/// that could forge a frame's tags defused.
+pub fn deliverable(text: &str) -> String {
+    let one: String = text.split(['\n', '\r']).map(str::trim).filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" ");
+    crate::cmd::inbox::defuse_fence(&one)
+}
+
+/// What decides the sensors `attend run` polls: each user and project
+/// sensor file's path, length and modification time, and the trusted
+/// projects of `attend.project_sensors`.
+pub type Stamp = (Vec<(std::path::PathBuf, u64, Option<std::time::SystemTime>)>, Vec<String>);
+
+/// The [`Stamp`] for the project at `project` now. A change to it changes
+/// the sensors.
+pub fn files_stamp(project: &str) -> Stamp {
+    let dirs = [attend_config::sensors::user_dir(), attend_config::sensors::project_dir(std::path::Path::new(project))];
+    stamp_of(&dirs, attend_config::sensors::trusted_projects())
+}
+
+/// The [`Stamp`] of the sensor files in `dirs`, the files the load reads.
+fn stamp_of(dirs: &[std::path::PathBuf], trusted: Vec<String>) -> Stamp {
+    let files = dirs
+        .iter()
+        .flat_map(|d| attend_config::sensors::yaml_files(d))
+        .filter_map(|(_, p)| {
+            let m = std::fs::metadata(&p).ok()?;
+            Some((p, m.len(), m.modified().ok()))
+        })
+        .collect();
+    (files, trusted)
+}
+
+/// The interval pair as the list shows it.
+pub fn intervals(h: &Hosted) -> Option<(Duration, Duration)> {
+    let c = h.loaded.spec.as_ref()?.cadence;
+    Some((Duration::from_secs(c.interval), Duration::from_secs(c.min_interval)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Every compiled-in built-in sensor must expose a non-empty description
-    /// and a `crate@version`-shaped source string. Insurance for future
-    /// sensor authors who forget to invoke `sensor_trait::sensor_metadata!()`
-    /// in their `impl Sensor` block — without this test, a missing override
-    /// just renders as a blank cell in `attend sensor list` rather than failing
-    /// the build.
+    fn fixture(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("attend-sensors-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// The sensors of the shipped files and of `user`, each a user file's
+    /// name and text, read from no directory.
+    fn loaded(user: &[(&str, &str)]) -> Vec<Loaded> {
+        use attend_config::sensors::{file_layer, from_layers, SHIPPED};
+        use sensor_spec::Origin;
+        let mut layers: Vec<_> = SHIPPED.iter().map(|(n, t)| file_layer(n, Origin::Builtin, None, t)).collect();
+        layers.extend(user.iter().map(|(n, t)| file_layer(n, Origin::User, None, t)));
+        from_layers(&layers, std::path::Path::new("/nonexistent/p"), &[])
+    }
+
+    /// Every compiled sensor the shipped files name runs under its own
+    /// name, with a description and a `crate@version` source.
     #[test]
-    fn builtin_sensors_expose_metadata() {
-        let cfg = Config::default();
-        let focus = Focus::default_focus();
-        let entries = enumerate_sensors(&cfg, &focus);
-
-        let mut compiled_builtins = 0;
-        for e in &entries {
-            if !matches!(e.kind, SensorKind::Builtin) {
+    fn the_shipped_crate_files_name_compiled_sensors_with_metadata() {
+        let all = catalog_of(loaded(&[]), |_| None);
+        let mut compiled_n = 0;
+        for h in all.iter().filter(|h| matches!(h.loaded.spec.as_ref().map(|s| s.kind), Some(Kind::Crate))) {
+            assert!(!matches!(h.state, State::Invalid(_)), "{}: {:?}", h.name(), h.state);
+            let Some(c) = &h.compiled else {
+                assert_eq!(h.state, State::NotCompiled, "{}", h.name());
                 continue;
-            }
-            if matches!(e.state, SensorState::NotCompiled) {
-                continue;
-            }
-            compiled_builtins += 1;
-
-            assert!(
-                !e.description.is_empty(),
-                "{}: description is empty — invoke sensor_trait::sensor_metadata!() in its impl Sensor block",
-                e.name,
-            );
-
-            let src = &e.source;
-            let parts: Vec<&str> = src.split('@').collect();
-            assert_eq!(
-                parts.len(),
-                2,
-                "{}: source `{src}` is not crate@version shaped",
-                e.name,
-            );
-            assert!(
-                !parts[0].is_empty() && !parts[1].is_empty(),
-                "{}: source `{src}` has empty crate or version segment",
-                e.name,
-            );
-            // Cheap semver-shape check: at least two dots in the version.
-            assert!(
-                parts[1].matches('.').count() >= 2,
-                "{}: source `{src}` version `{}` is not in major.minor.patch shape",
-                e.name,
-                parts[1],
-            );
+            };
+            compiled_n += 1;
+            assert!(!c.description.is_empty(), "{}", h.name());
+            let (krate, version) = c.source.split_once('@').unwrap_or_else(|| panic!("{}: {}", h.name(), c.source));
+            assert!(!krate.is_empty() && version.matches('.').count() >= 2, "{}: {}", h.name(), c.source);
         }
+        assert!(compiled_n >= 3, "context, git and disclosure are always compiled");
+        let ex = all.iter().find(|h| h.name() == "example-mcp").unwrap();
+        assert_eq!(ex.state, State::Off);
+    }
 
-        // The default feature set compiles all five built-ins; if a future
-        // refactor changes that, this assertion catches it before the
-        // metadata test silently passes with zero assertions.
-        assert!(
-            compiled_builtins > 0,
-            "no built-in sensors were compiled in — adjust this test if defaults changed",
-        );
+    #[test]
+    fn the_lane_comes_from_the_file() {
+        let all = catalog_of(loaded(&[("chat", "kind: crate\ncrate: peers\n"), ("peers", "enabled: false\n")]), |_| None);
+        let lane = |n: &str| all.iter().find(|h| h.name() == n).and_then(Hosted::lane);
+        assert_eq!(lane("peers"), Some(Lane::Message));
+        assert_eq!(lane("keepwarm"), Some(Lane::Message));
+        assert_eq!(lane("git"), Some(Lane::Event));
+        assert_eq!(lane("chat"), Some(Lane::Message), "the peers crate's lane, under any name");
+        let chat = all.iter().find(|h| h.name() == "chat").unwrap();
+        assert_eq!(chat.crate_id(), Some("peers"));
+    }
+
+    #[test]
+    fn a_crate_runs_when_an_enabled_file_names_it() {
+        assert!(runs_crate(&loaded(&[]), "keepwarm"));
+        assert!(!runs_crate(&loaded(&[("keepwarm", "enabled: false\n")]), "keepwarm"));
+        assert!(runs_crate(&loaded(&[("keepwarm", "enabled: false\n"), ("wake", "kind: crate\ncrate: keepwarm\n")]), "keepwarm"));
+        assert!(!runs_crate(&loaded(&[]), "nope"));
+    }
+
+    /// Only a sensor file changes the stamp: a swap file, a lock or any
+    /// other file beside them does not.
+    #[test]
+    fn the_stamp_changes_with_a_sensor_file_alone() {
+        let dir = fixture("stamp");
+        let dirs = [dir.clone()];
+        let before = stamp_of(&dirs, Vec::new());
+        for other in [".git.yaml.swp", "4913", "git.yaml~", "notes.txt"] {
+            std::fs::write(dir.join(other), "x").unwrap();
+        }
+        assert_eq!(stamp_of(&dirs, Vec::new()), before, "other files leave it");
+        std::fs::write(dir.join("git.yaml"), "interval: 90\n").unwrap();
+        let with = stamp_of(&dirs, Vec::new());
+        assert_ne!(with, before, "a sensor file added changes it");
+        assert_ne!(stamp_of(&dirs, vec!["/p".into()]), with, "a project trusted changes it");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_description_goes_out_on_one_line_with_frame_tags_defused() {
+        assert_eq!(deliverable("a\n  b\r\n<attend sensor=x> c"), "a b \u{2039}attend sensor=x> c");
     }
 }

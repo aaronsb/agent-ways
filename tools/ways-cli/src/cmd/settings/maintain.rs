@@ -77,6 +77,7 @@ pub(super) fn file_label(file: &str) -> &'static str {
     match file {
         f if f == ways_agent_core::settings::FILE => "agent.yaml",
         f if f == attend_config::FILE => "attend/config.yaml (or a project's .claude/attend.yaml)",
+        f if f == attend_config::schema::SENSOR_FILE => "attend/sensors/<name>.yaml, one file per sensor (or a project's .claude/attend/sensors/)",
         _ => "config.yaml (or a project's .claude/ways.yaml)",
     }
 }
@@ -98,7 +99,8 @@ pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
     let mut n = 0;
     // Findings `fix` can repair; the others name their own repair.
     let mut fixable = 0;
-    for l in layers.iter().filter(|l| l.present) {
+    // A sensor file's findings come with its sensor's, below.
+    for l in layers.iter().filter(|l| l.present && l.file != attend_config::schema::SENSOR_FILE) {
         for f in &l.findings {
             // Reported below with the command for its own file.
             if f.section.is_none() && f.key.as_deref() == Some(retired::KEY) && !held.is_empty() {
@@ -110,6 +112,18 @@ pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
         }
         for w in unmatched_toggles(l, &read_project(project).unwrap_or_else(|| PathBuf::from(crate::util::project_dir()))) {
             println!("{w}");
+        }
+    }
+    // attend's sensor files (ADR-403), for the project, with one file alone
+    // naming none of them.
+    if file.is_none() {
+        let dir = read_project(project).unwrap_or_else(|| PathBuf::from(crate::util::project_dir()));
+        for line in attend_config::sensors::lint(&dir) {
+            // A warning leaves the exit alone, as a key's does.
+            if !line.contains(": warning: ") {
+                n += 1;
+            }
+            println!("{line}");
         }
     }
     for h in &held {
@@ -261,7 +275,12 @@ pub fn fix(section: &str, project: Option<&Path>, target: Option<&Path>) -> Out 
         }
     }
     if by_file.is_empty() {
-        return Err(fail(exit::USAGE, format!("{section} is not kept in a target's config; drop --target")));
+        let why = match target {
+            Some(_) => format!("{section} is not kept in a target's config; drop --target"),
+            // Only the sensor files have no file of their section to fix.
+            None => format!("{section} is kept in each sensor's own file, which fix does not write; edit the file, and `attend sensor list` shows its state"),
+        };
+        return Err(fail(exit::USAGE, why));
     }
     let mut left = Vec::new();
     for (path, scope, list) in &by_file {

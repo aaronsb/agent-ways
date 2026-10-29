@@ -80,7 +80,7 @@ impl Drop for Fx {
     }
 }
 
-const HAND: &str = "# my attend settings\nengagement:\n  decay_per_minute: 0.1  # tuned\n\nsensors:\n  git:\n    interval: 45   # slower here\n";
+const HAND: &str = "# my attend settings\nengagement:\n  decay_per_minute: 0.1  # tuned\n\ncleanup:\n  interval: 900   # slower here\n";
 
 #[test]
 fn set_writes_one_line_of_attend_s_user_file_and_get_reads_it() {
@@ -90,8 +90,7 @@ fn set_writes_one_line_of_attend_s_user_file_and_get_reads_it() {
     assert_eq!(code, 0, "{err}");
     assert_eq!(fx.read(&fx.user()), HAND.replace("0.1  # tuned", "0.05  # tuned"));
     assert_eq!(fx.run(&["settings", "get", "attend.engagement.decay_per_minute"]).0, "0.05\n");
-    assert_eq!(fx.run(&["settings", "get", "attend.sensors.git.interval"]).0, "45\n");
-    assert_eq!(fx.run(&["settings", "get", "attend.sensors.peers.requires"]).0, "[\"Read\"]\n");
+    assert_eq!(fx.run(&["settings", "get", "attend.cleanup.interval"]).0, "900\n");
 }
 
 #[test]
@@ -108,13 +107,13 @@ fn a_value_outside_its_range_exits_3_and_writes_nothing() {
 fn project_writes_the_project_s_attend_yaml_and_overrides_the_user_file() {
     let fx = Fx::new();
     fx.write(&fx.user(), HAND);
-    let (_, err, code) = fx.run(&["settings", "set", "attend.sensors.git.interval", "90", "--project", "."]);
+    let (_, err, code) = fx.run(&["settings", "set", "attend.cleanup.interval", "90", "--project", "."]);
     assert_eq!(code, 0, "{err}");
-    assert_eq!(fx.read(&fx.project()), "# attend settings; `ways settings help attend` describes each key\nsensors:\n  git:\n    interval: 90\n");
+    assert_eq!(fx.read(&fx.project()), "# attend settings; `ways settings help attend` describes each key\ncleanup:\n  interval: 90\n");
     // Set in the user file now, the project still wins: exit 4 names it.
-    let (_, err, code) = fx.run(&["settings", "set", "attend.sensors.git.interval", "50"]);
+    let (_, err, code) = fx.run(&["settings", "set", "attend.cleanup.interval", "50"]);
     assert_eq!(code, 4, "{err}");
-    assert!(err.contains("proj/.claude/attend.yaml sets attend.sensors.git.interval"), "{err}");
+    assert!(err.contains("proj/.claude/attend.yaml sets attend.cleanup.interval"), "{err}");
 }
 
 #[test]
@@ -125,33 +124,28 @@ fn lint_names_attend_s_findings_and_fix_repairs_them() {
     let (out, _, code) = fx.run(&["settings", "lint"]);
     assert_eq!(code, 3);
     assert!(out.contains("<ROOT>/xdg/config/attend/config.yaml:3: [attend.governor] governor.base_cooldown: expected an integer"), "{out}");
-    assert!(out.contains("<ROOT>/proj/.claude/attend.yaml:2: [attend.sensors] sensors.-processes: '-processes' is not a sensor name"), "{out}");
+    // The retired sensors section names each old key's sensor file (ADR-403 §7).
+    assert!(out.contains("<ROOT>/proj/.claude/attend.yaml:2: sensors.-processes: retired by ADR-403; write `enabled: false` in .claude/attend/sensors/processes.yaml"), "{out}");
+    assert!(out.contains("<ROOT>/proj/.claude/attend.yaml:4: sensors.git.interval: retired by ADR-403; write `interval: 30` in .claude/attend/sensors/git.yaml"), "{out}");
     let (_, err, code) = fx.run(&["settings", "fix", "attend.governor"]);
     assert_eq!(code, 0, "{err}");
     assert_eq!(fx.read(&fx.user()), "# mine\ngovernor:\n  base_cooldown: 15   # oops\n  rate_window: 60\n", "the user file takes the canonical value");
-    // `-processes:` may be an off-switch: fix will not guess, and writes nothing.
-    let before = fx.read(&fx.project());
-    let (_, err, code) = fx.run(&["settings", "fix", "attend.sensors", "--project", "."]);
-    assert_eq!(code, 5, "{err}");
-    assert!(err.contains("fix cannot repair an entry's name") && err.contains("`processes: {enabled: false}`"), "{err}");
-    assert_eq!(fx.read(&fx.project()), before, "the line stays until it is edited by hand");
-    // Until then the project's sensors read off.
-    assert_eq!(fx.run(&["settings", "get", "attend.sensors.processes.enabled"]).0, "false\n");
-    assert_eq!(fx.run(&["settings", "get", "attend.sensors.git.enabled"]).0, "false\n");
-    // The hand edit the message names clears it.
-    fx.write(&fx.project(), "sensors:\n  processes:\n    enabled: false\n  git:\n    interval: 30\n");
-    assert_eq!(fx.run(&["settings", "lint"]).2, 0);
-    assert_eq!(fx.run(&["settings", "get", "attend.sensors.git.enabled"]).0, "true\n");
+    // The files the lines name clear them.
+    fx.write(&fx.project(), "");
+    fx.write(&fx.root.join("proj/.claude/attend/sensors/processes.yaml"), "enabled: false\n");
+    fx.write(&fx.root.join("proj/.claude/attend/sensors/git.yaml"), "interval: 30\n");
+    let (out, _, code) = fx.run(&["settings", "lint"]);
+    assert_eq!(code, 0, "{out}");
 }
 
 #[test]
 fn a_copied_attend_file_reads_with_file() {
     let fx = Fx::new();
     let copy = fx.root.join("copy/attend.yaml");
-    fx.write(&copy, "sensors:\n  processes:\n    enabled: false\n");
-    let (out, err, code) = fx.run(&["settings", "list", "attend.sensors.processes", "--file", copy.to_str().unwrap()]);
+    fx.write(&copy, "cleanup:\n  enabled: false\n");
+    let (out, err, code) = fx.run(&["settings", "list", "attend.cleanup", "--file", copy.to_str().unwrap()]);
     assert_eq!(code, 0, "{err}");
-    assert!(out.contains("attend.sensors.processes.enabled=false\n"), "{out}");
+    assert!(out.contains("attend.cleanup.enabled=false\n"), "{out}");
     let user = fx.root.join("copy/attend/config.yaml");
     fx.write(&user, "governor:\n  base_cooldown: x\n");
     assert_eq!(fx.run(&["settings", "lint", "--file", user.to_str().unwrap()]).2, 3);
@@ -185,14 +179,11 @@ fn attend_reads_the_one_theme_choice_ways_writes() {
 }
 
 #[test]
-fn help_describes_an_attend_key_and_the_sensors_tab() {
+fn help_describes_an_attend_key() {
     let fx = Fx::new();
-    let (out, _, code) = fx.run(&["settings", "help", "attend.sensors.*.script"]);
+    let (out, _, code) = fx.run(&["settings", "help", "attend.project_sensors"]);
     assert_eq!(code, 0);
-    assert!(out.contains("type:    path") && out.contains("file:    attend key sensors.*.script"), "{out}");
-    let (out, _, code) = fx.run(&["settings", "help", "sensors"]);
-    assert_eq!(code, 0);
-    assert!(out.starts_with("attend.sensors: "), "{out}");
+    assert!(out.contains("file:    attend key project_sensors") && out.contains("user"), "{out}");
 }
 
 #[test]
@@ -231,4 +222,95 @@ fn a_session_dir_in_no_project_reads_the_user_layer() {
         assert_eq!(code, 0, "{dir}: {err}");
         assert!(out.contains("\"mods.attend.listening\": {\n      \"value\": \"active\""), "{dir}: {out}");
     }
+}
+
+/// The user's sensor file for `name`.
+fn sensor(fx: &Fx, name: &str) -> PathBuf {
+    fx.root.join(format!("xdg/config/attend/sensors/{name}.yaml"))
+}
+
+// A sensor's field is a key over its files (ADR-403 §5): set writes the
+// user's sensor file, creating it with only that field over the shipped
+// one, and get and list name that file as the source.
+#[test]
+fn a_sensor_field_is_set_in_the_user_s_sensor_file_over_the_shipped_one() {
+    let fx = Fx::new();
+    let (out, _, code) = fx.run(&["settings", "get", "attend.sensors.git.interval", "--json"]);
+    assert_eq!(code, 0);
+    assert!(out.contains("\"value\": 30") && out.contains("\"layer\": \"shipped\""), "{out}");
+    let (_, err, code) = fx.run(&["settings", "set", "attend.sensors.git.interval", "90"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(err.contains("user: <ROOT>/xdg/config/attend/sensors/git.yaml"), "{err}");
+    assert!(fx.read(&sensor(&fx, "git")).ends_with("\ninterval: 90\n"), "{}", fx.read(&sensor(&fx, "git")));
+    let (out, _, _) = fx.run(&["settings", "list", "--json", "attend.sensors.git"]);
+    assert!(out.contains("\"<ROOT>/xdg/config/attend/sensors/git.yaml\": {\n      \"interval\": 90"), "the stored fragment has the file's shape:\n{out}");
+    assert!(out.contains("\"file\": \"<ROOT>/xdg/config/attend/sensors/git.yaml\""), "{out}");
+    // unset takes the field out, and the shipped value is in effect again.
+    let (_, err, code) = fx.run(&["settings", "unset", "attend.sensors.git.interval"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(fx.run(&["settings", "get", "attend.sensors.git.interval"]).0, "30\n");
+}
+
+#[test]
+fn a_value_that_makes_the_sensor_invalid_exits_3_and_says_why() {
+    let fx = Fx::new();
+    let (_, err, code) = fx.run(&["settings", "set", "attend.sensors.git.min_interval", "500"]);
+    assert_eq!(code, 3, "{err}");
+    assert!(err.contains("would make the sensor git invalid: min_interval: min_interval 500 is longer than interval 30"), "{err}");
+    assert!(!sensor(&fx, "git").exists(), "nothing written");
+    // A field of a sensor no file defines defines no sensor.
+    let (_, err, code) = fx.run(&["settings", "set", "attend.sensors.weather.interval", "40"]);
+    assert_eq!(code, 3, "{err}");
+    assert!(err.contains("kind is required"), "{err}");
+    assert!(!sensor(&fx, "weather").exists());
+}
+
+#[test]
+fn project_writes_the_project_s_sensor_file() {
+    let fx = Fx::new();
+    let (_, err, code) = fx.run(&["settings", "set", "attend.sensors.processes.enabled", "false", "--project", "."]);
+    assert_eq!(code, 0, "{err}");
+    let file = fx.root.join("proj/.claude/attend/sensors/processes.yaml");
+    assert!(fx.read(&file).ends_with("\nenabled: false\n"), "{}", fx.read(&file));
+    // Set in the user's file now, the project's still wins: exit 4 names it.
+    let (_, err, code) = fx.run(&["settings", "set", "attend.sensors.processes.enabled", "true"]);
+    assert_eq!(code, 4, "{err}");
+    assert!(err.contains("proj/.claude/attend/sensors/processes.yaml sets attend.sensors.processes.enabled"), "{err}");
+}
+
+// A sensor's name is its file's name, so a name that is a path is refused
+// before any file is opened.
+#[test]
+fn a_sensor_name_that_is_a_path_is_refused_by_set_and_writes_nothing() {
+    let fx = Fx::new();
+    let outside = fx.root.join("outside/compose.yaml");
+    fx.write(&outside, "interval: 1\n");
+    let stem = fx.root.join("outside/compose");
+    for name in [stem.to_str().unwrap(), "../../../outside/compose"] {
+        let (_, err, code) = fx.run(&["settings", "set", &format!("attend.sensors.{name}.interval"), "7"]);
+        assert_eq!(code, 2, "{name}: {err}");
+        assert!(err.contains("is not a sensor name"), "{name}: {err}");
+    }
+    assert_eq!(fx.read(&outside), "interval: 1\n", "the file outside is untouched");
+    assert!(!fx.root.join("xdg/config/attend/sensors").exists(), "nothing written");
+}
+
+#[test]
+fn a_sensor_name_that_is_a_path_is_refused_by_apply_and_writes_nothing() {
+    let fx = Fx::new();
+    let obj = fx.root.join("obj.yaml");
+    fx.write(&obj, "sensors:\n  \"../../../outside/dotdot\":\n    enabled: false\n");
+    let (out, err, code) = fx.run(&["settings", "apply", "--file", obj.to_str().unwrap()]);
+    assert_ne!(code, 0, "{out}{err}");
+    assert!(format!("{out}{err}").contains("is not a sensor name"), "{out}{err}");
+    assert!(!fx.root.join("outside").exists() && !fx.root.join("xdg/outside").exists(), "nothing written outside the sensor directories");
+    assert!(!fx.root.join("xdg/config/attend/sensors").exists(), "nothing written");
+}
+
+#[test]
+fn fix_of_the_sensors_section_names_the_sensor_files_and_writes_nothing() {
+    let fx = Fx::new();
+    let (_, err, code) = fx.run(&["settings", "fix", "attend.sensors"]);
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("kept in each sensor's own file") && !err.contains("--target"), "{err}");
 }

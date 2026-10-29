@@ -27,7 +27,7 @@ pub fn of_theme(t: &Theme, source: Source, file: Option<&Path>, active: bool, sa
     Module {
         name: t.label.clone(),
         summary: format!("{} · {kind} · background {ground}", t.name),
-        kind: Kind::Theme,
+        kind: Some(Kind::Theme),
         origin,
         path,
         source,

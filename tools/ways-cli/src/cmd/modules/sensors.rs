@@ -1,34 +1,48 @@
-//! A sensor as a [`Module`]. A built-in is a crate of attend's, described
-//! by attend itself (`attend sensor list --json`); a sensor of the user's
-//! is one whose `script` a settings layer sets, read from those layers
-//! through attend's own loader ([`user_sensors`]).
+//! A sensor as a [`Module`]: one per sensor its files declare (ADR-403),
+//! read through attend's own loader ([`attend_config::sensors`]), with what
+//! only attend knows (a crate's version, whether a poll failed) from
+//! `attend sensor list --json`.
 
-use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use agent_settings::load::{resolve, Layer};
-use agent_settings::LayerScope;
-use attend_config::SensorConfig;
-use attend_config::schema::BUILTINS;
+use attend_config::sensors::Loaded;
+use sensor_spec::Severity;
 
 use super::{Health, Kind, Module, Origin, Row, State};
 
 /// One sensor as `attend sensor list --json` describes it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Described {
     pub name: String,
-    /// `active`, `off`, `not compiled` or `missing`.
-    pub state: String,
-    pub description: String,
-    /// A built-in's `crate@version`, a script sensor's path.
+    /// `crate`, `command`, `mcp` or `ways`; empty for an invalid file.
+    pub kind: String,
+    /// `builtin`, `user` or `project`: the highest layer with a file.
+    pub origin: String,
+    /// That layer's file.
+    pub path: Option<String>,
+    /// A crate's package, a command's program, an mcp sensor's server and
+    /// tool.
     pub source: String,
+    /// A crate's version.
+    pub version: Option<String>,
+    /// `active`, `failed`, `off`, `invalid`, `refused`, `not hosted` or
+    /// `not compiled`.
+    pub state: String,
+    /// Why it is in that state.
+    pub detail: Option<String>,
+    pub enabled: Option<bool>,
+    pub lane: Option<String>,
+    pub description: String,
+    pub interval: Option<u64>,
+    pub min_interval: Option<u64>,
+    pub threshold: Option<f64>,
 }
 
 /// How long attend's answer is waited on.
 const ATTEND_WAIT: Duration = Duration::from_secs(2);
 
 /// What the `attend` on PATH said of its sensors.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Attend {
     /// Its own account.
     Listed(Vec<Described>),
@@ -91,114 +105,100 @@ pub fn described_by(mut cmd: std::process::Command) -> Attend {
 /// The JSON `attend sensor list --json` prints, as [`Described`] rows.
 pub fn parse(json: &str) -> Option<Vec<Described>> {
     let v: serde_json::Value = serde_json::from_str(json).ok()?;
-    let text = |e: &serde_json::Value, k: &str| e.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
-    Some(v.as_array()?.iter().map(|e| Described { name: text(e, "name"), state: text(e, "state"), description: text(e, "description"), source: text(e, "source") }).collect())
-}
-
-/// A sensor the user added: one whose `script` a layer sets.
-#[derive(Debug, Clone, PartialEq)]
-pub struct UserSensor {
-    pub name: String,
-    /// The script, with `~`, `$HOME` and `$XDG_*` expanded and a relative
-    /// path taken under the project, as attend runs it.
-    pub script: PathBuf,
-    /// The file that sets the script, and whether it is a project's.
-    pub file: Option<PathBuf>,
-    pub project: bool,
-}
-
-/// The layer that sets the script of `name`, a sensor the user added; `None`
-/// for a built-in, whose keys stay where a built-in's go whatever script a
-/// file names under it.
-fn script_layer<'a>(layers: &'a [Layer], name: &str) -> Option<&'a Layer> {
-    if BUILTINS.contains(&name) {
-        return None;
-    }
-    let spec = attend_config::schema::SCHEMA.keys.iter().find(|k| k.name == "attend.sensors.*.script")?;
-    resolve(spec, &[name.to_string()], layers).layer.and_then(|i| layers.get(i))
-}
-
-/// The sensors the user added, by name, as `layers` set them.
-pub fn user_sensors(layers: &[Layer], project: &Path) -> Vec<UserSensor> {
-    let cfg = attend_config::Config::from_layers(layers);
-    cfg.sensors
-        .iter()
-        .filter_map(|(name, sc)| {
-            let layer = script_layer(layers, name)?;
-            let script = Path::new(sc.script.as_deref()?);
-            Some(UserSensor {
-                name: name.clone(),
-                // Part by part, so the path takes the platform's separator
-                // whatever the file wrote between the parts.
-                script: if script.is_absolute() { script.components().collect() } else { project.components().chain(script.components()).collect() },
-                file: layer.path.clone(),
-                project: layer.scope == LayerScope::Project,
-            })
-        })
-        .collect()
-}
-
-/// Whether the key `key` of the sensor `name` is written to the project's
-/// file: every key of a sensor whose script a project's file sets, but its
-/// `enabled`, which is each operator's own.
-pub fn writes_project(layers: &[Layer], name: &str, key: &str) -> bool {
-    key != "attend.sensors.*.enabled" && script_layer(layers, name).is_some_and(|l| l.scope == LayerScope::Project)
-}
-
-/// The rows every sensor has: its polling and its threshold.
-fn timing(sc: &SensorConfig) -> Vec<Row> {
-    vec![Row::new("interval", format!("{}s quiet, {}s busy", sc.interval.as_secs(), sc.min_interval.as_secs())), Row::new("threshold", sc.threshold.to_string())]
-}
-
-fn enabled(sc: &SensorConfig) -> State {
-    if sc.enabled { State::new("enabled", Health::Running) } else { State::new("disabled", Health::Idle) }
-}
-
-/// The built-in sensor `name`, configured as `sc`: its crate and version as
-/// `attend` reports them. A script set under the built-in's name runs as a
-/// sensor of its own beside it, which its state says.
-pub fn of_builtin_sensor(name: &str, sc: &SensorConfig, attend: &Attend) -> Module {
-    let builtin = "built-in sensor".to_string();
-    let (summary, source, version, mut state) = match (attend, attend.find(name)) {
-        (Attend::Absent, _) => (builtin, "unknown: attend absent".to_string(), None, enabled(sc)),
-        (Attend::Unlisted, _) => (builtin, "unknown: attend did not list its sensors".to_string(), None, enabled(sc)),
-        (Attend::Listed(_), None) => (builtin, "unknown: attend does not list it".to_string(), None, enabled(sc)),
-        (_, Some(d)) if d.state == "not compiled" => (d.description.clone(), "not compiled into this attend".to_string(), None, State::new("not compiled", Health::Attention)),
-        (_, Some(d)) => {
-            let (krate, version) = match d.source.split_once('@') {
-                Some((c, v)) => (c.to_string(), Some(v.to_string())),
-                None => (d.source.clone(), None),
-            };
-            (d.description.clone(), krate, version, enabled(sc))
+    let rows = v.as_array()?.iter().map(|e| {
+        let text = |k: &str| e.get(k).and_then(|v| v.as_str()).map(str::to_string);
+        Described {
+            name: text("name").unwrap_or_default(),
+            kind: text("kind").unwrap_or_default(),
+            origin: text("origin").unwrap_or_default(),
+            path: text("path"),
+            source: text("source").unwrap_or_default(),
+            version: text("version"),
+            state: text("state").unwrap_or_default(),
+            detail: text("detail"),
+            enabled: e.get("enabled").and_then(|v| v.as_bool()),
+            lane: text("lane"),
+            description: text("description").unwrap_or_default(),
+            interval: e.get("interval").and_then(|v| v.as_u64()),
+            min_interval: e.get("min_interval").and_then(|v| v.as_u64()),
+            threshold: e.get("threshold").and_then(|v| v.as_f64()),
         }
-    };
-    let mut rows = timing(sc);
-    if let Some(script) = &sc.script {
-        if sc.enabled {
-            state = State::new(format!("{} · a script named {name} also runs", state.word), Health::Attention);
-        }
-        rows.push(Row::new("script", script.clone()));
-    }
-    Module { name: name.into(), summary, kind: Kind::Crate, origin: Origin::Builtin, path: None, source, version, state, rows }
+    });
+    Some(rows.collect())
 }
 
-/// The user's sensor `u`, configured as `sc`.
-pub fn of_script_sensor(u: &UserSensor, sc: &SensorConfig) -> Module {
-    let on = enabled(sc);
-    let state = match (u.script.is_file(), sc.enabled) {
-        (true, _) => on,
-        (false, true) => State::new(format!("{} · script not found", on.word), Health::Broken),
-        (false, false) => State::new(format!("{} · script not found", on.word), Health::Attention),
+/// How a state attend reports stands.
+fn health(state: &str) -> Health {
+    match state {
+        "active" => Health::Running,
+        "off" => Health::Idle,
+        "failed" | "invalid" => Health::Broken,
+        _ => Health::Attention,
+    }
+}
+
+/// The state of `l` as its files say, for an attend that did not describe
+/// it, and why when the files say why.
+fn local_state(l: &Loaded) -> (State, Option<String>) {
+    if l.is_refused() {
+        return (State::new("refused", Health::Attention), l.refused.clone());
+    }
+    let Some(spec) = &l.spec else {
+        let why = l.findings.iter().find(|f| f.problem.severity == Severity::Invalid).map(|f| f.problem.to_string());
+        return (State::new("invalid", Health::Broken), why);
     };
+    match spec.enabled {
+        true => (State::new("enabled", Health::Running), None),
+        false => (State::new("off", Health::Idle), None),
+    }
+}
+
+/// The sensor `l`, its files layered, as a card: its kind, the layer and
+/// file it comes from, and its state, source and version as `attend`
+/// reports them. With no account from attend, the files alone say what
+/// they can: a crate's source is then unknown.
+pub fn of_sensor(l: &Loaded, attend: &Attend) -> Module {
+    let spec = l.spec.as_ref();
+    let d = attend.find(&l.name);
+    let kind = spec.map(|s| Kind::from(s.kind)).or_else(|| d.and_then(|d| sensor_spec::Kind::parse(&d.kind)).map(Kind::from));
+    let unknown = match (attend, d) {
+        (_, Some(_)) => None,
+        (Attend::Absent, _) => Some("unknown: attend absent"),
+        (Attend::Unlisted, _) => Some("unknown: attend did not list its sensors"),
+        (Attend::Listed(_), None) => Some("unknown: attend does not list it"),
+    };
+    let (state, why) = match d {
+        Some(d) => (State::new(d.state.clone(), health(&d.state)), d.detail.clone()),
+        None => local_state(l),
+    };
+    let (source, version) = match (d, kind, unknown) {
+        (Some(d), _, _) if d.state == "not compiled" => ("not compiled into this attend".to_string(), None),
+        (Some(d), _, _) => (d.source.clone(), d.version.clone()),
+        (None, Some(Kind::Crate) | None, Some(u)) => (u.to_string(), None),
+        (None, _, _) => (spec.map(|s| s.source()).unwrap_or_default(), None),
+    };
+    let summary = spec.map(|s| s.description.clone()).filter(|s| !s.is_empty()).or_else(|| d.map(|d| d.description.clone()).filter(|s| !s.is_empty()));
+    let mut rows = Vec::new();
+    if let Some(s) = spec {
+        let c = s.cadence;
+        rows.push(Row::new("interval", format!("{}s quiet, {}s busy", c.interval, c.min_interval)));
+        rows.push(Row::new("threshold", c.threshold.to_string()));
+        rows.push(Row::new("lane", s.lane().as_str()));
+    }
+    rows.extend(why.map(|w| Row::new("why", w)));
     Module {
-        name: u.name.clone(),
-        summary: "a sensor of your own".into(),
-        kind: Kind::Script,
-        origin: if u.project { Origin::Project } else { Origin::User },
-        path: u.file.clone(),
-        source: u.script.display().to_string(),
-        version: None,
+        name: l.name.clone(),
+        summary: summary.unwrap_or_else(|| kind.map_or("a sensor file".into(), |k| format!("a {} sensor", k.word()))),
+        kind,
+        origin: match l.origin() {
+            sensor_spec::Origin::Builtin => Origin::Builtin,
+            sensor_spec::Origin::User => Origin::User,
+            sensor_spec::Origin::Project => Origin::Project,
+        },
+        path: l.path().map(std::path::Path::to_path_buf),
+        source,
+        version,
         state,
-        rows: timing(sc),
+        rows,
     }
 }

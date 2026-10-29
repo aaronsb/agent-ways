@@ -340,7 +340,7 @@ fn changed_build_groups(app: &Path, a: &str, b: &str) -> Option<(bool, bool)> {
 /// with the escaping includes in the tree — the `embedded_assets_outside_tools_are_classified`
 /// test walks the source and fails if a new escape isn't listed here.
 /// Currently: `hooks/memory-seed/` → embedded into `ways` (see memory_seed.rs).
-const EMBEDDED_ASSET_PREFIXES: &[&str] = &["hooks/memory-seed/"];
+const EMBEDDED_ASSET_PREFIXES: &[&str] = &["hooks/memory-seed/", "attend/sensors/"];
 
 /// Pure classifier: given changed repo-relative paths, decide which build groups
 /// they touch — `(cargo_suite, way_embed)`. Every binary source lives under

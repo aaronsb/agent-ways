@@ -1,0 +1,13 @@
+# Shipped with attend (ADR-403). A file of the same name under
+# $XDG_CONFIG_HOME/attend/sensors/ or a project's .claude/attend/sensors/
+# overrides any field here.
+spec: 1
+name: context
+description: tracks context window usage and projects compaction
+kind: crate
+crate: context
+interval: 60
+min_interval: 20
+threshold: 1.5
+decay_threshold: 3
+requires: ["Read"]

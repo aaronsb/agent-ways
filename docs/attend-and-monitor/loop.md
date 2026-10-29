@@ -21,7 +21,7 @@ Before the loop begins, `cmd_run_with_catchup` builds up the context it needs:
 1. **Focus** — resolve the working directory and human-readable description (`Focus::default_focus()`).
 2. **Config** — load `~/.config/attend/config.yaml`, then overlay `<cwd>/.claude/attend.yaml` on top (ADR-115 pattern).
 3. **Groups manager** — construct a `Groups` handle for the signals base and the current session ID, the handle channels ride on.
-4. **Sensor registration** — `sensors::register_sensors()` walks the config and feature flags, instantiating each enabled sensor with its configured intervals and thresholds. The peers sensor receives a closure that lists the joined channel directories, so it picks up joins and leaves on every scan.
+4. **Sensor registration** — `sensors::register_sensors()` loads the sensor files, shipped, user and project ([`authoring-sensors.md`](authoring-sensors.md#where-sensor-files-live)), and builds a slot for each one that runs, under its file's intervals, threshold and lane. A sensor that does not run, other than one that is off, is logged once on stderr with its state. The peers sensor receives a closure that lists the joined channel directories, so it picks up joins and leaves on every scan.
 5. **Engagement state** — apply ADR-123 action-potential parameters to every slot. Refractory behavior is per-sensor but the parameters are shared.
 6. **State restore** — if `$XDG_CACHE_HOME/attend/state/<session-id>.state` exists from a previous run, import the saved seen-signals and disclosed thresholds so a restart is continuous. A run started after `/clear` first moves the old session id's state to the new one (see [`delivery.md`](delivery.md#when-the-session-id-changes)).
 7. **Banner** — print `[attend] started …` with the version, sensors and focus, unless this session's own fingerprint (version + commit + sensor list + focus), kept in `$XDG_CACHE_HOME/attend/state/<session-id>.banner`, matches, in which case print `[attend] restarted (unchanged)` to keep a re-armed Monitor quiet. A session that never ran attend has no stamp, so it always gets `started`. A session without a record (pid fallback) keys its stamp by the Claude Code process it runs under, pid and start time, so a Monitor re-arm still reads `restarted (unchanged)`. Startup then removes the `.banner` and `.last-inbound` stamps of sessions that are gone and whose state files are all older than 7 days. A session with a record is gone when the record is; a pid-fallback stamp is gone when its Claude Code process no longer runs with the same start time. Each start examines at most 2000 stamp keys and leaves the rest for a later start (ADR-137).
@@ -38,7 +38,7 @@ flowchart TD
     Start([loop iteration])
     RekeyCheck{session id<br/>changed?}
     Rekey[flush held message lines<br/>checkpoint, exec self]
-    ReloadCheck{binary mtime<br/>changed?}
+    ReloadCheck{binary or sensor<br/>files changed?}
     Exec[checkpoint state<br/>exec self]
     PeekQueue{queue<br/>empty?}
     Break([break])
@@ -63,8 +63,8 @@ flowchart TD
     PeekQueue -- no --> Sleep
     Sleep --> Poll
     Poll --> Lane
-    Lane -- "peers, keepwarm" --> MsgReady
-    Lane -- "context, git, processes, disclosure" --> EvtReady
+    Lane -- "message: peers, keepwarm" --> MsgReady
+    Lane -- "event: context, git, processes, disclosure" --> EvtReady
     MsgReady -- yes --> MsgGov
     EvtReady -- yes --> EvtGov
     MsgReady -- no --> Housekeeping
@@ -92,7 +92,7 @@ flowchart TD
 
 The session-id check runs every iteration. When Claude Code's `/clear` has given the session a new id, the run prints any message line its governor still holds, checkpoints, and re-executes itself; the new process moves the state to the new id before reading it.
 
-The reload branch is a hard exit — `execve(2)` replaces the current process image with a fresh copy of the binary. State is checkpointed first, and the new process restores from that checkpoint during startup, so observed signals, engagement history, and disclosed context thresholds survive the reload.
+The reload branch is a hard exit — `execve(2)` replaces the current process image with a fresh copy of the binary. A changed binary takes it, and so does a sensor file added, changed or removed in the user or project sensor directory, or a change to `attend.project_sensors`; the banner names the reason. State is checkpointed first, and the new process restores from that checkpoint during startup, so observed signals, engagement history, and disclosed context thresholds survive the reload.
 
 The queue-empty branch is a defensive break. In practice it's unreachable because every poll reschedules the sensor, but a future sensor that explicitly retires could drop out of the queue.
 
@@ -230,7 +230,7 @@ All of these tick inside the same single-threaded loop using `Instant::now()` co
 |---|---|---|
 | Per-sensor poll | `slot.next_fire` (varies) | Primary loop rhythm — when to poll each sensor |
 | Session-id check | every iteration | Follow `/clear` to the new session id |
-| Self-reload check | 10s | Detect binary change, exec self |
+| Self-reload check | 10s | Detect a changed binary or sensor file, exec self |
 | Checkpoint | 30s, and at once after a peers poll that found a message | Save sensor state snapshot for restart continuity and for the drain |
 | Cleanup sweep | `cleanup.interval` (default 600s) | Prune stale signal files + empty project dirs |
 | Sensor min_interval | per-sensor (default 10–20s) | Floor on polling frequency |
@@ -258,9 +258,9 @@ There's no graceful shutdown hook. The `attend run` process is meant to be start
 
 ## Where to go from here
 
-- **Writing new sensors**: [`authoring-sensors.md`](authoring-sensors.md) — how to implement a crate sensor or external script sensor that plays nicely with this loop.
+- **Writing new sensors**: [`authoring-sensors.md`](authoring-sensors.md) — the sensor file spec, and how to write a sensor that plays nicely with this loop.
 - **Human mode**: [`tui.md`](tui.md) — the `attend chat` interactive TUI, same signal bus as the agent side.
-- **Sensors individually**: [`sensors.md`](sensors.md) covers what each built-in observes and how it emits.
+- **Sensors individually**: [`sensors.md`](sensors.md) covers what each shipped sensor observes and how it emits.
 - **Engagement curve**: [`engagement.md`](engagement.md) covers the action potential model — why event-lane sensors go quiet after bursts.
 - **Message delivery**: [`delivery.md`](delivery.md) covers the Monitor line and the Stop-hook drain.
 - **Signal format**: [`signals.md`](signals.md) covers the wire format, on-disk layout, and lifecycle.

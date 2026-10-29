@@ -1,0 +1,91 @@
+# An mcp sensor to copy (ADR-403 §3b, §4). It calls one read-only tool on a
+# stdio MCP server each poll, keeps a few declared fields from the result,
+# and wakes the agent when they change. Shipped switched off.
+#
+# To make a working sensor from it:
+#   1. Copy it to $XDG_CONFIG_HOME/attend/sensors/<name>.yaml. The file's
+#      stem is the sensor's name, and `name` below must match it.
+#   2. Point `server` at a server in ~/.claude.json or a project's .mcp.json,
+#      and set `tool` and `args` to a call that lists items without marking
+#      them read.
+#   3. Map each state field's `from` onto that tool's result.
+#   4. Run `attend sensor probe <name>`. It calls the tool twice, checks the
+#      second call returned every item of the first, asks you to confirm in
+#      another client that the items are still unread, and writes the
+#      `probe` record into the file. A sensor with no record stays off.
+#   5. Set `enabled: true`. `attend sensor list` shows its state.
+#
+# attend hosts mcp sensors from slice 3 of ADR-403; before that, an enabled
+# copy loads and lints, and `attend sensor list` shows it as not hosted.
+
+# The spec version the file is written to.
+spec: 1
+# The sensor's name: letters, digits, - and _. It is the file's stem.
+name: example-mcp
+# One line for `attend sensor list` and the settings screens.
+description: Unread messages in Slack, through the Slack MCP server
+# crate, command or mcp. This file is an mcp sensor.
+kind: mcp
+# true or false; unset is true. A shipped example is off.
+enabled: false
+
+# Seconds between polls while nothing changes, at least 1.
+interval: 120
+# Seconds between polls while things change, from 1 to `interval`.
+min_interval: 60
+# The magnitude, from 0 to 100, that accumulates before attend discloses.
+threshold: 1.0
+# Quiet polls, at least 1, before the interval eases back to `interval`.
+decay_threshold: 3
+# The tool permissions the sensor needs (ADR-116); `attend sensor
+# permissions` checks them against settings.json.
+requires: []
+
+# event or message; unset is event. The message lane carries what a person
+# or agent wrote, so it needs an `author` on each trigger. A message-lane
+# file with a trigger that has none is a lint error and runs on the event
+# lane.
+lane: message
+
+# A server from Claude Code's MCP configuration, by name. A server of the
+# file's own is a mapping: { command: <program>, args: [..], env: {..} }.
+# stdio servers only.
+server: slack
+# The tool to call. It must declare readOnlyHint: true; a tool that does not
+# runs only with `allow_unannotated: true`, which the list shows as an
+# override.
+tool: list_unread
+# The tool's fixed arguments, sent unchanged on every call.
+args: { channel: general }
+# allow_unannotated: false
+
+# The fields attend keeps between polls: at most 16, each named [a-z][a-z0-9_]*
+# in at most 32 characters. A type is number, string or boolean. A string
+# carries `max`, its length in characters: 256 when unset, at most 1024.
+# `from` is a path over the tool's result in the subset $, .field, [n], [*]
+# and .., and must select one value; a path that selects nothing leaves the
+# field as it was. Every write is checked whole against these declarations,
+# and the serialized state is at most 4 KiB, so these maximums are chosen to
+# stay under it.
+state:
+  unread:  { type: number, from: "$.unread_count" }
+  last_ts: { type: string, max: 32, from: "$.messages[0].ts" }
+  user:    { type: string, max: 64, from: "$.messages[0].user.name" }
+  text:    { type: string, max: 512, from: "$.messages[0].text" }
+
+# Each trigger fires on a change between two polls. A state trigger maps
+# declared fields to changed, or for a number rises or falls, combined by
+# `match`: all (unset) or any.
+triggers:
+  - name: new-message
+    state: { unread: rises, last_ts: changed }
+    match: any
+    # The state field that holds who wrote the message.
+    author: user
+    # The magnitude this trigger adds, from 0 to 100.
+    magnitude: 1
+    # What the agent reads. {state.<field>} is the value after this poll's
+    # write, {prev.<field>} the value before it, {trigger.count} the items
+    # that changed. The plainest form is a fixed line:
+    #   description: go check new messages in slack mcp
+    description: "the last message in slack mcp from {state.user} at {state.last_ts} says {state.text}"

@@ -69,8 +69,8 @@
         * [The attend loop](attend-and-monitor/loop.md)
         * [Engagement](attend-and-monitor/engagement.md)
     * Sensors
-        * [Built-in sensors](attend-and-monitor/sensors.md)
-        * [Your first sensor](attend-and-monitor/first-sensor.md)
+        * [Shipped sensors](attend-and-monitor/sensors.md)
+        * [Your first sensor file](attend-and-monitor/first-sensor.md)
         * [Authoring sensors](attend-and-monitor/authoring-sensors.md)
         * [Keepwarm](attend-and-monitor/keepwarm.md)
     * Messaging

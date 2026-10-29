@@ -1,0 +1,15 @@
+# Shipped with attend (ADR-403). A file of the same name under
+# $XDG_CONFIG_HOME/attend/sensors/ or a project's .claude/attend/sensors/
+# overrides any field here.
+spec: 1
+name: processes
+description: watches build/package tools and correlates exits with markers
+kind: crate
+crate: processes
+interval: 30
+min_interval: 5
+threshold: 2.0
+decay_threshold: 5
+requires: ["Bash(ps:*)"]
+# watch: the process names that get exit-code enrichment. A list, even an
+# empty one, replaces the sensor's built-in list; unset keeps it.

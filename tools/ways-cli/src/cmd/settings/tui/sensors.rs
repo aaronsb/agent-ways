@@ -1,51 +1,52 @@
-//! The sensors tab's level above the settings: a node per sensor, each
-//! carrying its card ([`modules::sensors`]). A sensor of the user's gets
-//! the generic sensor keys a built-in has, written like a built-in's.
+//! The sensors tab's level above the settings: a node per sensor its files
+//! declare (ADR-403), each carrying its card ([`modules::sensors`]) and the
+//! keys every sensor has, written to its own file.
 
 use std::path::Path;
 
 use agent_settings::load::Layer;
-use agent_settings::{Bound, Registry};
+use agent_settings::{LayerScope, Registry};
 use agent_tui::tree::Node;
-use attend_config::schema::BUILTINS;
+use attend_config::schema::SENSOR_FILE;
 
 use crate::cmd::modules::sensors::{self as modules, Attend};
 
-/// The sensors tab's keys: `keys` with every generic sensor key bound for
-/// each sensor the user added, so its node holds the rows a built-in's
-/// does, in the tab's order: the built-ins, then the user's, each sensor's
-/// keys in the schema's order.
-pub fn with_user_keys(reg: &Registry, mut keys: Vec<Bound>, layers: &[Layer], project: &Path) -> Vec<Bound> {
-    let schema = &attend_config::schema::SCHEMA;
-    let users = modules::user_sensors(layers, project);
-    for u in &users {
-        for spec in schema.keys.iter().filter(|k| k.section == "attend.sensors" && k.instances == BUILTINS) {
-            let name = spec.name.replacen('*', &u.name, 1);
-            if !keys.iter().any(|b| b.name() == name) {
-                keys.extend(reg.lookup(&name));
-            }
-        }
-    }
-    let group = |b: &Bound| {
-        let n = b.bound.first().map(String::as_str).unwrap_or_default();
-        BUILTINS.iter().position(|x| *x == n).unwrap_or(BUILTINS.len() + users.iter().position(|u| u.name == n).unwrap_or(users.len()))
-    };
-    let field = |b: &Bound| schema.keys.iter().position(|k| k.name == b.spec.name).unwrap_or(usize::MAX);
-    keys.sort_by_key(|b| (group(b), field(b)));
-    keys
+/// The sensors tab's keys: each sensor's, in name order, every one the
+/// sensor has whether or not a file sets it.
+pub fn keys(reg: &Registry, layers: &[Layer]) -> Vec<agent_settings::Bound> {
+    crate::cmd::settings::sensor_keys(reg, layers)
 }
 
-/// Put a card on each sensor's node under `root`.
+/// Whether the key `key` of the sensor `name` is written to the project's
+/// sensor file: every key of a sensor a project's file defines (sets its
+/// `kind`), but its `enabled`, which is each operator's own. An override of
+/// a shipped or user sensor stays in the user's file.
+pub fn writes_project(layers: &[Layer], name: &str, key: &str) -> bool {
+    let at = ["sensors".to_string(), name.to_string(), "kind".to_string()];
+    key != "attend.sensors.*.enabled"
+        && layers.iter().rev().filter(|l| l.file == SENSOR_FILE).find(|l| l.get(&at).is_some()).is_some_and(|l| l.scope == LayerScope::Project)
+}
+
+/// The user's `attend.project_sensors`, as `layers` hold it.
+fn trusted(layers: &[Layer]) -> Vec<String> {
+    let user: Vec<Layer> = layers.iter().filter(|l| l.file == attend_config::FILE && l.scope == LayerScope::User).cloned().collect();
+    attend_config::Config::from_layers(&user).project_sensors
+}
+
+/// Put a card on each sensor's node under `root`, from the sensor files
+/// `layers` hold, layered for `project`.
 pub fn cards(root: &mut Node, layers: &[Layer], project: &Path, home: &Path, attend: &Attend) {
-    let cfg = attend_config::Config::from_layers(layers);
-    let users = modules::user_sensors(layers, project);
+    let loaded = attend_config::sensors::from_layers(layers, project, &trusted(layers));
     for g in root.children.iter_mut().filter(|g| !g.section) {
-        let Some(sc) = cfg.sensors.get(&g.name) else { continue };
-        let m = match users.iter().find(|u| u.name == g.name) {
-            Some(u) => modules::of_script_sensor(u, sc),
-            None if BUILTINS.contains(&g.name.as_str()) => modules::of_builtin_sensor(&g.name, sc, attend),
-            None => continue,
-        };
-        g.card = Some(super::card::card(&m, home));
+        let Some(l) = loaded.iter().find(|l| l.name == g.name) else { continue };
+        g.card = Some(super::card::card(&modules::of_sensor(l, attend), home));
     }
+}
+
+/// The directories of the user's and the project's sensor files, for the
+/// change watch: a file added there reloads the screens.
+pub fn dirs(project: Option<&Path>) -> Vec<std::path::PathBuf> {
+    let mut out = vec![attend_config::sensors::user_dir()];
+    out.extend(project.map(attend_config::sensors::project_dir));
+    out
 }

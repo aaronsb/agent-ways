@@ -7,8 +7,8 @@ agent-tui frame 100x30
 |│     enabled                   true                  ││project is gone (ADR-136).                 │|
 |│     interval                  600                   ││                                           │|
 |│ ▸ chat · setting              value                 ││2 entries, 0 changed                       │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
+|│ ▾ settings                    value                 ││                                           │|
+|│     project_sensors           []                    ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -78,6 +78,8 @@ styles
   7  54-75  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
+  8   2-11  - - BOLD
+  8  32-36  - - DIM
   8  54-55  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM

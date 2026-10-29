@@ -155,7 +155,7 @@ mod tests {
     };
     static SCHEMA: Schema = Schema {
         component: "t",
-        files: &[FileSpec { id: "cfg", retired: &[] }, FileSpec { id: "agent", retired: &[] }],
+        files: &[FileSpec { id: "cfg", retired: &[], explain: None }, FileSpec { id: "agent", retired: &[], explain: None }],
         sections: &[
             SectionSpec { per_entry: false, entry: None, repair: None, name: "matching", file: "cfg", top: &["prob", "presets"], columns: None, doc: "" },
             SectionSpec { per_entry: false, entry: None, repair: None, name: "gate", file: "agent", top: &["mode"], columns: None, doc: "" },

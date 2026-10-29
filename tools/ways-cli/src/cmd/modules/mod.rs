@@ -18,7 +18,8 @@ pub struct Module {
     pub name: String,
     /// A line on what it is.
     pub summary: String,
-    pub kind: Kind,
+    /// `None` for a sensor whose file names no kind it has.
+    pub kind: Option<Kind>,
     pub origin: Origin,
     /// Where the module was added: the file that names it. `None` for a
     /// builtin.
@@ -39,8 +40,12 @@ pub enum Kind {
     Plugin,
     /// A sensor compiled into attend.
     Crate,
-    /// A sensor that runs a script.
-    Script,
+    /// A sensor that runs an argv.
+    Command,
+    /// A sensor that calls a tool on an MCP server.
+    Mcp,
+    /// A sensor of ways' own, which attend does not host (ADR-199).
+    Ways,
     Theme,
 }
 
@@ -49,8 +54,21 @@ impl Kind {
         match self {
             Kind::Plugin => "plugin",
             Kind::Crate => "crate",
-            Kind::Script => "script",
+            Kind::Command => "command",
+            Kind::Mcp => "mcp",
+            Kind::Ways => "ways",
             Kind::Theme => "theme",
+        }
+    }
+}
+
+impl From<sensor_spec::Kind> for Kind {
+    fn from(k: sensor_spec::Kind) -> Kind {
+        match k {
+            sensor_spec::Kind::Crate => Kind::Crate,
+            sensor_spec::Kind::Command => Kind::Command,
+            sensor_spec::Kind::Mcp => Kind::Mcp,
+            sensor_spec::Kind::Ways => Kind::Ways,
         }
     }
 }
@@ -110,21 +128,21 @@ mod tests {
         let m = Module {
             name: "downloads".into(),
             summary: "a sensor of your own".into(),
-            kind: Kind::Script,
+            kind: Some(Kind::Command),
             origin: Origin::Project,
-            path: Some("/p/.claude/attend.yaml".into()),
+            path: Some("/p/.claude/attend/sensors/downloads.yaml".into()),
             source: "/p/dl.sh".into(),
             version: None,
-            state: State::new("enabled", Health::Running),
+            state: State::new("active", Health::Running),
             rows: vec![Row::new("threshold", "2")],
         };
         let v = serde_json::to_value(&m).unwrap();
         assert_eq!(
             v,
             serde_json::json!({
-                "name": "downloads", "summary": "a sensor of your own", "kind": "script", "origin": "project",
-                "path": "/p/.claude/attend.yaml", "source": "/p/dl.sh", "version": null,
-                "state": {"word": "enabled", "health": "running"}, "rows": [{"label": "threshold", "value": "2"}]
+                "name": "downloads", "summary": "a sensor of your own", "kind": "command", "origin": "project",
+                "path": "/p/.claude/attend/sensors/downloads.yaml", "source": "/p/dl.sh", "version": null,
+                "state": {"word": "active", "health": "running"}, "rows": [{"label": "threshold", "value": "2"}]
             })
         );
     }

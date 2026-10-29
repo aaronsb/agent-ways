@@ -283,7 +283,7 @@ fn key_presence(bound: &[String]) -> Value {
 
 pub static SCHEMA: Schema = Schema {
     component: "ways-agent",
-    files: &[FileSpec { id: FILE, retired: &[] }, FileSpec { id: "keys", retired: &[] }],
+    files: &[FileSpec { id: FILE, retired: &[], explain: None }, FileSpec { id: "keys", retired: &[], explain: None }],
     sections: SECTIONS,
     keys: KEYS,
 };

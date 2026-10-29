@@ -16,7 +16,7 @@ use agent_settings::Layer;
 use agent_theme::settings::{ACTIVE, FILE, SECTION, SHAPE, WAYPOINTS};
 
 /// ways' user file, as far as the `theme` section goes.
-static SCHEMA: Schema = Schema { component: "ways", files: &[FileSpec { id: FILE, retired: &[] }], sections: &[SECTION], keys: &[ACTIVE, SHAPE, WAYPOINTS] };
+static SCHEMA: Schema = Schema { component: "ways", files: &[FileSpec { id: FILE, retired: &[], explain: None }], sections: &[SECTION], keys: &[ACTIVE, SHAPE, WAYPOINTS] };
 
 /// What the user file chose. `None` is the default: the terminal palette,
 /// and the plain shape.

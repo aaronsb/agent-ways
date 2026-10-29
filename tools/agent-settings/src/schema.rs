@@ -560,7 +560,15 @@ pub struct FileSpec {
     /// Retired top-level keys and the message that names their replacement.
     /// They are lint findings and never make a section fall back.
     pub retired: &'static [(&'static str, &'static str)],
+    /// A finding for each old key under a retired top-level key, at its
+    /// own path, in place of the retired key's one message. Given the
+    /// top-level key, its value and the file's scope; nothing it returns
+    /// leaves the one message.
+    pub explain: Option<Explain>,
 }
+
+/// See [`FileSpec::explain`]: each old key's path and its message.
+pub type Explain = fn(&str, &Value, LayerScope) -> Vec<(Vec<String>, String)>;
 
 /// One component's schema.
 #[derive(Debug, Clone, Copy)]
@@ -669,7 +677,7 @@ mod tests {
         vec![l]
     }
 
-    static EMPTY: Schema = Schema { component: "t", files: &[FileSpec { id: "cfg", retired: &[] }], sections: &[], keys: &[] };
+    static EMPTY: Schema = Schema { component: "t", files: &[FileSpec { id: "cfg", retired: &[], explain: None }], sections: &[], keys: &[] };
 
     #[test]
     fn a_pattern_key_s_choice_is_checked_per_instance_never_unbound() {

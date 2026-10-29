@@ -3,14 +3,13 @@
 //! value here has passed the schema, so a conversion only falls back to the
 //! default when a key is absent.
 
-use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use std::time::Duration;
 
-use agent_settings::load::{bindings, resolve, Layer};
+use agent_settings::load::{resolve, Layer};
 use serde_yaml::Value;
 
-use crate::schema::{sensor_defaults, BUILTINS, SCHEMA};
+use crate::schema::SCHEMA;
 
 /// Top-level configuration.
 #[derive(Debug, Clone)]
@@ -18,8 +17,9 @@ pub struct Config {
     pub governor: GovernorConfig,
     pub engagement: EngagementConfig,
     pub cleanup: CleanupConfig,
-    pub sensors: HashMap<String, SensorConfig>,
     pub chat: ChatConfig,
+    /// The projects whose own command and mcp sensor files run (ADR-403 §2).
+    pub project_sensors: Vec<String>,
 }
 
 /// attend-chat's own keys: how its tabs are reached, and the mouse.
@@ -61,24 +61,6 @@ pub struct EngagementConfig {
     pub peer_activity_window: Duration,
 }
 
-/// Per-sensor configuration.
-#[derive(Debug, Clone)]
-pub struct SensorConfig {
-    pub enabled: bool,
-    pub interval: Duration,
-    pub min_interval: Duration,
-    pub threshold: f64,
-    pub decay_threshold: u32,
-    /// A sensor of your own: its script, with `$HOME`, `~` and `$XDG_*`
-    /// expanded.
-    pub script: Option<String>,
-    /// Permission requirements (ADR-116).
-    pub requires: Vec<String>,
-    /// The processes sensor's watch list. `None` keeps the sensor's
-    /// built-in list; a list, even empty, replaces it.
-    pub watch: Option<Vec<String>>,
-}
-
 impl Default for Config {
     fn default() -> Self {
         Config::from_layers(&[])
@@ -89,13 +71,6 @@ impl Default for Config {
 fn get(name: &str, layers: &[Layer]) -> Option<Value> {
     let spec = SCHEMA.keys.iter().find(|k| k.name == name)?;
     resolve(spec, &[], layers).value
-}
-
-/// Resolve the sensor key `attend.sensors.*.<field>` for `sensor`.
-fn sensor(field: &str, sensor: &str, layers: &[Layer]) -> Option<Value> {
-    let name = format!("attend.sensors.*.{field}");
-    let spec = SCHEMA.keys.iter().find(|k| k.name == name)?;
-    resolve(spec, &[sensor.to_string()], layers).value
 }
 
 fn secs(v: Option<Value>, default: u64) -> Duration {
@@ -129,23 +104,6 @@ impl Config {
             enabled: get("attend.cleanup.enabled", layers).and_then(|v| v.as_bool()).unwrap_or(true),
             interval: secs(get("attend.cleanup.interval", layers), 600),
         };
-        let sensors = sensor_names(layers)
-            .into_iter()
-            .map(|n| {
-                let d = sensor_defaults(&n);
-                let c = SensorConfig {
-                    enabled: sensor("enabled", &n, layers).and_then(|v| v.as_bool()).unwrap_or(true),
-                    interval: secs(sensor("interval", &n, layers), d.interval),
-                    min_interval: secs(sensor("min_interval", &n, layers), d.min_interval),
-                    threshold: float(sensor("threshold", &n, layers), d.threshold),
-                    decay_threshold: sensor("decay_threshold", &n, layers).and_then(|v| v.as_u64()).unwrap_or(d.decay_threshold) as u32,
-                    script: sensor("script", &n, layers).and_then(|v| v.as_str().map(expand_path)),
-                    requires: list(sensor("requires", &n, layers)).unwrap_or_else(|| d.requires.iter().map(|s| s.to_string()).collect()),
-                    watch: list(sensor("watch", &n, layers)),
-                };
-                (n, c)
-            })
-            .collect();
         let text = |name: &str, default: &str| get(name, layers).and_then(|v| v.as_str().map(str::to_string)).unwrap_or_else(|| default.to_string());
         let chat = ChatConfig {
             jump: text("attend.chat.tabs.jump", "auto"),
@@ -154,7 +112,8 @@ impl Config {
             mouse: get("attend.chat.mouse", layers).and_then(|v| v.as_bool()).unwrap_or(true),
             sidebar_key: text("attend.chat.sidebar_key", "f3"),
         };
-        Config { governor, engagement, cleanup, sensors, chat }
+        let project_sensors = list(get("attend.project_sensors", layers)).unwrap_or_default();
+        Config { governor, engagement, cleanup, chat, project_sensors }
     }
 
     /// Load the user file, then the project's at `working_dir`. Each finding
@@ -175,17 +134,8 @@ impl Config {
     }
 }
 
-/// The built-in sensors and every sensor a layer names, sorted.
-fn sensor_names(layers: &[Layer]) -> BTreeSet<String> {
-    let mut out: BTreeSet<String> = BUILTINS.iter().map(|s| s.to_string()).collect();
-    for spec in SCHEMA.keys.iter().filter(|k| k.section == "attend.sensors") {
-        out.extend(bindings(spec, layers).into_iter().filter_map(|b| b.into_iter().next()));
-    }
-    out
-}
-
-/// Expand `~/`, `$HOME` and `$XDG_*` in a script path, so a config is
-/// portable across installs.
+/// Expand `~/`, `$HOME` and `$XDG_*` in a path, so a config is portable
+/// across installs.
 pub fn expand_path(value: &str) -> String {
     let mut out = value.to_string();
     if let Some(home) = claude_sessions::env_home_dir() {

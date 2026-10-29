@@ -68,8 +68,9 @@ theme-claude-tampa | ways settings theme --project $PS      | End Up c Right | L
 flow-pick  | ways settings install --project $PS            | t
 flow-other | ways settings install --project $PS            | t Down Enter text:~/work Enter
 card-mod   | ways settings mod --project $PS                |
-card-sensor | ways settings sensors --project $PS           | Down
-card-script-sensor | ways settings sensors --project $PS    | End
+card-sensor | ways settings sensors --project $PS           | Down Down Down Down
+card-command-sensor | ways settings sensors --project $PS   | End
+card-mcp-sensor | ways settings sensors --project $PS       | End Up
 card-theme | ways settings theme --project $PS              | Down
 card-user-theme | ways settings theme --project $PS         | End
 "
@@ -166,20 +167,21 @@ setup_mod_states() { setup_mod_actions; }
 teardown_mod_states() { teardown_mod_actions; }
 
 # The module card (the detail pane's head on a mod, a sensor, a theme): the
-# healthy mods; the built-in git sensor, described by the debug `attend` in
-# $BIN; a script sensor of the user's in attend's user file; and a user
-# theme beside the bundled ones.
+# healthy mods; the shipped git sensor, described by the debug `attend` in
+# $BIN; a command and an mcp sensor of the user's, each a file in attend's
+# user sensor directory, last in name order; and a user theme beside the
+# bundled ones.
 setup_card_mod() { setup_healthy; }
 teardown_card_mod() { teardown_mod_actions; }
-setup_card_script_sensor() {
-  local h=$F/home
-  mkdir -p "$h/.config/attend" "$h/.local/share/attend/sensors"
-  printf '#!/bin/sh\n' >"$h/.local/share/attend/sensors/downloads.sh"
-  # An absolute script path: the fixture's HOME is the relative `~`, which
-  # attend's expansion leaves relative, under the project.
-  printf 'sensors:\n  downloads:\n    script: %s\n    interval: 120\n' "$(cd "$h" && pwd -P)/.local/share/attend/sensors/downloads.sh" >"$h/.config/attend/config.yaml"
+setup_card_command_sensor() {
+  local d=$F/home/.config/attend/sensors
+  mkdir -p "$d"
+  printf 'description: the wind at home, from Open-Meteo\nkind: command\nargv: [curl, -s, "https://api.open-meteo.com/v1/forecast?latitude=45.5&longitude=-122.7&current=wind_speed_10m"]\noutput: json\ninterval: 900\nmin_interval: 300\n' >"$d/weather.yaml"
+  printf 'description: unread messages in Slack\nkind: mcp\nlane: message\nserver: slack\ntool: list_unread\nargs: { channel: general }\nstate:\n  unread: { type: number, from: "$.unread_count" }\n  user: { type: string, max: 64, from: "$.messages[0].user.name" }\ntriggers:\n  - name: new-message\n    state: { unread: rises }\n    author: user\n    magnitude: 1\n    description: "{state.unread} unread in Slack"\n' >"$d/slack-unread.yaml"
 }
-teardown_card_script_sensor() { rm -rf "$F/home/.config/attend" "$F/home/.local/share/attend"; }
+teardown_card_command_sensor() { rm -rf "$F/home/.config/attend/sensors"; }
+setup_card_mcp_sensor() { setup_card_command_sensor; }
+teardown_card_mcp_sensor() { teardown_card_command_sensor; }
 setup_card_user_theme() {
   local t=$F/home/.config/agent-ways/themes
   mkdir -p "$t"

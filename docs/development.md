@@ -44,7 +44,7 @@ Each suite binary in `tools/suite-bins` is a package of the same name, so `-p <n
 | `attend-chat` | binary | The chat terminal on the signal bus (ADR-120) |
 | `attend-config` | library | attend's settings schema |
 | `attend-groups`, `attend-instances`, `attend-presence`, `attend-state` | library | attend's focus groups, instance registry, session identity and heartbeat, and per-session sensor state |
-| `sensor-trait`, `sensor-peers`, `sensor-processes`, `sensor-keepwarm` | library | The sensor interface and the built-in sensors |
+| `sensor-trait`, `sensor-peers`, `sensor-processes`, `sensor-keepwarm` | library | The sensor interface and the compiled sensors |
 | `agent-settings` | library | The settings registry: layered load, lint, emit, the atomic writer (ADR-503) |
 | `agent-tui`, `agent-theme` | library | The ratatui app shell and the theme engine every screen uses (ADR-504) |
 | `agent-fmt`, `agent-identity` | library | Shared terminal formatting; stable nicknames and the colour palette |

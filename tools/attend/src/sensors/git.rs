@@ -11,6 +11,8 @@ pub struct GitSensor {
     prior: Option<GitSnapshot>,
     /// First poll establishes baseline silently
     baseline_established: bool,
+    /// Why the last poll could not read the repository.
+    failure: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -34,6 +36,7 @@ impl GitSensor {
         Self {
             prior: None,
             baseline_established: false,
+            failure: None,
         }
     }
 
@@ -103,7 +106,13 @@ impl Sensor for GitSensor {
     fn poll(&mut self, focus: &Focus) -> Vec<(f64, String)> {
         let current = match self.snapshot(focus) {
             Some(s) => s,
-            None => return Vec::new(), // Not a git repo
+            None => {
+                // Not a repository, unless git itself cannot run.
+                if let Err(e) = Command::new("git").arg("--version").output() {
+                    self.failure = Some(format!("cannot run git: {e}"));
+                }
+                return Vec::new();
+            }
         };
 
         // First poll: establish baseline
@@ -190,6 +199,10 @@ impl Sensor for GitSensor {
 
         self.prior = Some(current);
         observations
+    }
+
+    fn take_failure(&mut self) -> Option<String> {
+        self.failure.take()
     }
 
     fn emission_threshold(&self) -> f64 {

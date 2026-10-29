@@ -31,8 +31,8 @@ fn marker_matches(marker: &BuildMarker, cmd: &str, now: u64, window_secs: u64) -
 /// Default watch list — process names whose exits get enriched build-event
 /// treatment (success/failure magnitude tiers, marker correlation). Covers
 /// the common build and package tools out of the box; users working in
-/// other toolchains (elixir, zig, custom scripts) override via
-/// `sensors.processes.watch:` in attend config.
+/// other toolchains (elixir, zig, custom scripts) override it with
+/// `watch:` in the processes sensor's file (ADR-403).
 pub const DEFAULT_WATCH: &[&str] = &[
     "cargo", "rustc", "make", "cmake", "ninja",
     "gcc", "g++", "cc", "c++", "clang", "clang++",

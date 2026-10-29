@@ -25,7 +25,7 @@ pub fn list(prefix: Option<&str>, as_json: bool, effective: bool, file: Option<&
     let prefix = prefix.unwrap_or("");
     let layers = layers_for(file, project)?;
     report(&layers);
-    let keys = reg.concrete(prefix, &layers);
+    let keys = concrete(&reg, prefix, &layers);
     if keys.is_empty() {
         return Err(fail(exit::USAGE, format!("no key under {prefix}; `ways settings list` names the keys")));
     }
@@ -50,12 +50,12 @@ pub fn list(prefix: Option<&str>, as_json: bool, effective: bool, file: Option<&
             continue;
         }
         if let (Some(v), true) = (&r.value, b.spec.computed.is_none()) {
-            let group = match (effective, layer_label(&r, &layers).1) {
-                (false, Some(path)) => path,
-                _ => b.spec.file.to_string(),
+            let (group, at) = match (effective, layer_label(&r, &layers).1) {
+                (false, Some(path)) => (path, file_key(b)),
+                _ => (b.spec.file.to_string(), r.path.clone()),
             };
             let file = fragment.entry(group).or_insert_with(|| json!({}));
-            insert_path(file, &r.path, to_json(v));
+            insert_path(file, &at, to_json(v));
         }
         described.insert(r.name.clone(), describe(&r, b.spec, &layers, &b.bound));
     }
@@ -81,7 +81,7 @@ pub fn set(key: &str, value: &str, project: Option<&Path>) -> Out {
         // (ADR-512 item 4).
         super::engine::report(&super::write_engine(Some(value))?);
     } else {
-        write_file(&path, &[(b.path(), v)])?;
+        write_file(&path, is_sensor_key(&b), &[(file_key(&b), v)]).map_err(|f| fail(f.code, format!("{key}: {}", f.message)))?;
         touched(scope, &path, false);
     }
     if let Some(why) = overridden(&b, &path, project) {
@@ -103,8 +103,7 @@ pub fn unset(key: &str, project: Option<&Path>) -> Out {
     if b.name() == "gate.engine" {
         super::engine::report(&super::write_engine(None)?);
     } else {
-        let kp = b.path();
-        agent_settings::writer::edit_file(&path, None, |d| d.unset(&kp)).map_err(write_failed)?;
+        edit_checked(&path, is_sensor_key(&b), &[(file_key(&b), None)], None, |_| Ok(()))?.map_err(|e| fail(exit::REJECTED, format!("{key}: {e}")))?;
         touched(scope, &path, false);
     }
     let layers = live_layers(project_dir(project).as_deref());

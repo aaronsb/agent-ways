@@ -111,6 +111,13 @@ pub trait Sensor: Send {
 
     /// Import state from checkpoint. Default: no-op.
     fn import_state(&mut self, _state: &[(String, String)]) {}
+
+    /// Why the last poll failed, if it did: a tool that could not run, a
+    /// source that could not be read. Taken once after each poll, so the
+    /// host records it as the sensor's state. Default: never fails.
+    fn take_failure(&mut self) -> Option<String> {
+        None
+    }
 }
 
 // ── Focus ───────────────────────────────────────────────────────
@@ -270,6 +277,13 @@ pub struct SensorSlot {
     pub accumulator: DeltaAccumulator,
     pub engagement: EngagementState,
     pub next_fire: Instant,
+    /// Whether the sensor rides the message lane (ADR-136), which bypasses
+    /// the refractory and has a permissive governor. Its file declares it.
+    pub message_lane: bool,
+    /// The compiled sensor the slot runs, from its file's `crate:`. The
+    /// slot's name is its file's, so what the host does for one compiled
+    /// sensor is keyed on this.
+    pub crate_id: Option<String>,
 }
 
 impl SensorSlot {
@@ -283,6 +297,8 @@ impl SensorSlot {
             accumulator: DeltaAccumulator::new(),
             engagement: EngagementState::new(default_sensor_curve()),
             next_fire: Instant::now(),
+            message_lane: false,
+            crate_id: None,
             interval,
             sensor,
         }
@@ -300,6 +316,8 @@ impl SensorSlot {
             accumulator: DeltaAccumulator::new(),
             engagement: EngagementState::new(default_sensor_curve()),
             next_fire: Instant::now(),
+            message_lane: false,
+            crate_id: None,
             interval,
             sensor,
         }
@@ -372,6 +390,11 @@ impl SensorSlot {
 
     pub fn name(&self) -> &str {
         self.sensor.name()
+    }
+
+    /// Whether the slot runs the compiled sensor `id`.
+    pub fn is_crate(&self, id: &str) -> bool {
+        self.crate_id.as_deref() == Some(id)
     }
 
     pub fn description(&self) -> &str {

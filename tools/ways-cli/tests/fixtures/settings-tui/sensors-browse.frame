@@ -2,21 +2,21 @@ agent-tui frame 100x30
 | 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 mod    8 theme           |
 |┌ writes user — ~/proj ───────────────────────────────┐┌detail─────────────────────────────────────┐|
 |│ ▸ context · setting           value                 ││processes                                  │|
-|│ ▸ git · setting               value                 ││built-in sensor                            │|
-|│ ▸ peers · setting             value                 ││                                           │|
-|│▌▾ processes · setting         value                 ││origin    builtin                          │|
-|│     enabled                   true                  ││kind      crate                            │|
-|│     interval                  30                    ││source    unknown: attend absent           │|
-|│     min_interval              5                     ││state     enabled                          │|
-|│     threshold                 2.0                   ││interval  30s quiet, 5s busy               │|
-|│     decay_threshold           5                     ││threshold 2                                │|
+|│ ▸ disclosure · setting        value                 ││watches build/package tools and correlates │|
+|│ ▸ example-command · setting   value                 ││exits with markers                         │|
+|│ ▸ example-mcp · setting       value                 ││                                           │|
+|│ ▸ git · setting               value                 ││origin    builtin                          │|
+|│ ▸ keepwarm · setting          value                 ││kind      crate                            │|
+|│ ▸ peers · setting             value                 ││source    unknown: attend absent           │|
+|│▌▾ processes · setting         value                 ││state     enabled                          │|
+|│     enabled                   true                  ││interval  30s quiet, 5s busy               │|
+|│     interval                  30                    ││threshold 2                                │|
+|│     min_interval              5                     ││lane      event                            │|
+|│     threshold                 2.0                   ││                                           │|
+|│     decay_threshold           5                     ││8 entries, 0 changed                       │|
+|│     lane                      event                 ││                                           │|
 |│     requires                  [Bash(ps:*)]          ││                                           │|
-|│     watch                     (built-in)            ││7 entries, 0 changed                       │|
-|│ ▸ disclosure · setting        value                 ││                                           │|
-|│ ▸ keepwarm · setting          value                 ││                                           │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
+|│     watch                     (built-in)            ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -51,65 +51,75 @@ styles
   2  56-64  - - BOLD
   2  99-99  - - DIM
   3   0-0   - - DIM
-  3   2-6   - - BOLD
-  3   7-16  - - DIM
+  3   2-13  - - BOLD
+  3  14-23  - - DIM
   3  32-36  - - DIM
-  3  54-70  - - DIM
+  3  54-97  - - DIM
   3  99-99  - - DIM
   4   0-0   - - DIM
-  4   2-8   - - BOLD
-  4   9-18  - - DIM
+  4   2-18  - - BOLD
+  4  19-28  - - DIM
   4  32-36  - - DIM
-  4  54-55  - - DIM
+  4  54-73  - - DIM
   4  99-99  - - DIM
   5   0-0   - - DIM
-  5   1-1   Cyan - BOLD|REVERSED
-  5   2-12  - - BOLD|REVERSED
-  5  13-22  - - BOLD|DIM|REVERSED
-  5  23-31  - - BOLD|REVERSED
-  5  32-36  - - BOLD|DIM|REVERSED
-  5  37-53  - - BOLD|REVERSED
-  5  54-65  - - DIM
-  5  66-72  LightBlue - -
+  5   2-14  - - BOLD
+  5  15-24  - - DIM
+  5  32-36  - - DIM
+  5  54-55  - - DIM
   5  99-99  - - DIM
   6   0-0   - - DIM
+  6   2-6   - - BOLD
+  6   7-16  - - DIM
+  6  32-36  - - DIM
   6  54-65  - - DIM
+  6  66-72  LightBlue - -
   6  99-99  - - DIM
   7   0-0   - - DIM
+  7   2-11  - - BOLD
+  7  12-21  - - DIM
+  7  32-36  - - DIM
   7  54-65  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
+  8   2-8   - - BOLD
+  8   9-18  - - DIM
+  8  32-36  - - DIM
   8  54-65  - - DIM
-  8  66-72  Green - -
   8  99-99  - - DIM
   9   0-0   - - DIM
+  9   1-1   Cyan - BOLD|REVERSED
+  9   2-12  - - BOLD|REVERSED
+  9  13-22  - - BOLD|DIM|REVERSED
+  9  23-31  - - BOLD|REVERSED
+  9  32-36  - - BOLD|DIM|REVERSED
+  9  37-53  - - BOLD|REVERSED
   9  54-65  - - DIM
+  9  66-72  Green - -
   9  99-99  - - DIM
  10   0-0   - - DIM
  10  54-65  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
- 11  54-55  - - DIM
+ 11  32-33  LightBlue - -
+ 11  54-65  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM
- 12  54-75  - - DIM
+ 12  32-32  LightBlue - -
+ 12  54-65  - - DIM
  12  99-99  - - DIM
  13   0-0   - - DIM
- 13   2-13  - - BOLD
- 13  14-23  - - DIM
- 13  32-36  - - DIM
  13  54-55  - - DIM
  13  99-99  - - DIM
  14   0-0   - - DIM
- 14   2-11  - - BOLD
- 14  12-21  - - DIM
- 14  32-36  - - DIM
- 14  54-55  - - DIM
+ 14  32-32  LightBlue - -
+ 14  54-75  - - DIM
  14  99-99  - - DIM
  15   0-0   - - DIM
  15  54-55  - - DIM
  15  99-99  - - DIM
  16   0-0   - - DIM
+ 16  32-43  LightBlue - -
  16  54-55  - - DIM
  16  99-99  - - DIM
  17   0-0   - - DIM

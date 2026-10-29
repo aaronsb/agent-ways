@@ -131,18 +131,10 @@ Each wake adds a user line and an assistant line to the transcript, on the order
 
 ## Turning it off
 
-`attend keepwarm off` disarms the current session. To remove the sensor from every session:
-
-```bash
-ways settings set attend.sensors.keepwarm.enabled false
-```
-
-or in `~/.config/attend/config.yaml`:
+`attend keepwarm off` disarms the current session. To remove the sensor from every session, write `$XDG_CONFIG_HOME/attend/sensors/keepwarm.yaml` (`~/.config/attend/sensors/keepwarm.yaml`), or `.claude/attend/sensors/keepwarm.yaml` for one project:
 
 ```yaml
-sensors:
-  keepwarm:
-    enabled: false
+enabled: false
 ```
 
 `mods.attend.keepwarm: off` in the ways config (a project's `.claude/ways.yaml` wins) does the same for the attend mod: its sessions run no check, the keepalive policy included, so nothing wakes and a paid cold write arms nothing. `mods.attend.keepalive.enabled: false` turns off the policy alone and returns the project to the armed windows. A dormant mod session never gets an armed window's wake; with autocompact off it gets the policy's keepalives.
@@ -151,8 +143,8 @@ A disabled sensor neither wakes nor auto-arms. The arm file and the ledger live 
 
 ## Related
 
-- [`sensors.md`](sensors.md#keepwarm) — the sensor's defaults beside the other built-ins
+- [`sensors.md`](sensors.md#keepwarm) — the sensor's shipped file beside the others
 - [`delivery.md`](delivery.md) — the message lane keepwarm shares with the peers sensor
-- [`configuration.md`](configuration.md) — the `sensors.keepwarm` keys
+- [`authoring-sensors.md`](authoring-sensors.md) — the fields a `keepwarm.yaml` of your own can set
 - **ADR-182** — the decision
 - **ADR-414** — the keepalive policy

@@ -1,0 +1,20 @@
+# Shipped with attend (ADR-403). A file of the same name under
+# $XDG_CONFIG_HOME/attend/sensors/ or a project's .claude/attend/sensors/
+# overrides any field here.
+#
+# peers carries messages sessions and people wrote, so it rides the message
+# lane, and its author is each message's sender. It also reports peer
+# presence from the same poll, which rides that lane too until message
+# scanning becomes a sensor of its own (#139).
+spec: 1
+name: peers
+description: discovers Claude Code sessions and reads peer signals
+kind: crate
+crate: peers
+interval: 30
+min_interval: 10
+threshold: 2.0
+decay_threshold: 5
+requires: ["Read"]
+lane: message
+author: sender

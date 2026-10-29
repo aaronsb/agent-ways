@@ -46,6 +46,8 @@ This document contains the help content for the `attend` command-line program.
 * [`attend chat`↴](#attend-chat)
 * [`attend sensor`↴](#attend-sensor)
 * [`attend sensor list`↴](#attend-sensor-list)
+* [`attend sensor poll`↴](#attend-sensor-poll)
+* [`attend sensor fire`↴](#attend-sensor-fire)
 * [`attend sensor permissions`↴](#attend-sensor-permissions)
 * [`attend config`↴](#attend-config)
 * [`attend config init`↴](#attend-config-init)
@@ -71,7 +73,7 @@ In a session with the attend mod, the attend_* tools send, reply, join and list 
 * `peer` — List sessions, show this session's identity and the running loops (default: list)
 * `keepwarm` — Keep the prompt cache warm across idle stretches (ADR-182; default: status)
 * `chat` — Launch the interactive chat TUI (ADR-120)
-* `sensor` — List sensors and audit their permissions (default: list)
+* `sensor` — List, poll and test-fire sensors, and audit their permissions (default: list)
 * `config` — Manage configuration (default: show)
 
 
@@ -678,25 +680,63 @@ Launch the interactive chat TUI (ADR-120)
 
 ## `attend sensor`
 
-List sensors and audit their permissions (default: list)
+List, poll and test-fire sensors, and audit their permissions (default: list)
 
 **Usage:** `attend sensor [COMMAND]`
 
 ###### **Subcommands:**
 
-* `list` — List all sensors — built-in and config-defined script sensors
+* `list` — List every sensor the files declare, with its kind, origin, file, source and state
+* `poll` — Run one real poll of a sensor and print its result and what attend would deliver
+* `fire` — Send a synthetic result through a sensor's threshold, lane and delivery, marked [test]
 * `permissions` — Compare each sensor's `requires:` against settings.json
 
 
 
 ## `attend sensor list`
 
-List all sensors — built-in and config-defined script sensors
+List every sensor the files declare, with its kind, origin, file, source and state
 
 **Usage:** `attend sensor list [OPTIONS]`
 
 ###### **Options:**
 
+* `--json` — Print the result as one JSON document
+
+
+
+## `attend sensor poll`
+
+Run one real poll of a sensor and print its result and what attend would deliver
+
+**Usage:** `attend sensor poll [OPTIONS] <NAME>`
+
+###### **Arguments:**
+
+* `<NAME>` — The sensor's name
+
+###### **Options:**
+
+* `--dry-run` — Stop before delivery
+* `--json` — Print the result as one JSON document
+
+
+
+## `attend sensor fire`
+
+Send a synthetic result through a sensor's threshold, lane and delivery, marked [test]
+
+**Usage:** `attend sensor fire [OPTIONS] <TARGET>`
+
+###### **Arguments:**
+
+* `<TARGET>` — The sensor, or `<sensor>/<trigger>` for one trigger
+
+###### **Options:**
+
+* `--input <FILE|->` — The synthetic result: a file, or `-` for stdin. A crate sensor takes a JSON list of `{magnitude, description}` or `magnitude|description` lines; with none, one observation at the sensor's threshold
+* `--dry-run` — Stop before delivery
+* `--commit` — Keep the trigger state and state store the fire leaves; a test fire changes neither without it
 * `--json` — Print the result as one JSON document
 
 

@@ -83,7 +83,7 @@ pub(crate) enum Commands {
         passthrough: Vec<String>,
     },
 
-    /// List sensors and audit their permissions (default: list)
+    /// List, poll and test-fire sensors, and audit their permissions (default: list)
     Sensor {
         #[command(subcommand)]
         sub: Option<SensorCmd>,
@@ -240,13 +240,56 @@ pub(crate) enum PeerCmd {
 }
 
 /// Subcommands for `attend sensor`. With no subcommand, defaults to `list`.
+///
+/// Each sensor is a YAML file (ADR-403): shipped with attend, under
+/// `$XDG_CONFIG_HOME/attend/sensors/`, or in a project's
+/// `.claude/attend/sensors/`, layered by name.
 #[derive(Subcommand)]
 pub(crate) enum SensorCmd {
-    /// List all sensors — built-in and config-defined script sensors
+    /// List every sensor the files declare, with its kind, origin, file, source and state
     List(JsonArgs),
+
+    /// Run one real poll of a sensor and print its result and what attend would deliver
+    Poll(PollArgs),
+
+    /// Send a synthetic result through a sensor's threshold, lane and delivery, marked [test]
+    Fire(FireArgs),
 
     /// Compare each sensor's `requires:` against settings.json
     Permissions,
+}
+
+#[derive(Args)]
+pub(crate) struct PollArgs {
+    /// The sensor's name
+    pub(crate) name: String,
+    /// Stop before delivery
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+    /// Print the result as one JSON document
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Args)]
+pub(crate) struct FireArgs {
+    /// The sensor, or `<sensor>/<trigger>` for one trigger
+    pub(crate) target: String,
+    /// The synthetic result: a file, or `-` for stdin. A crate sensor takes
+    /// a JSON list of `{magnitude, description}` or `magnitude|description`
+    /// lines; with none, one observation at the sensor's threshold
+    #[arg(long, value_name = "FILE|-")]
+    pub(crate) input: Option<String>,
+    /// Stop before delivery
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+    /// Keep the trigger state and state store the fire leaves; a test fire
+    /// changes neither without it
+    #[arg(long)]
+    pub(crate) commit: bool,
+    /// Print the result as one JSON document
+    #[arg(long)]
+    pub(crate) json: bool,
 }
 
 /// `attend channel`: the listing's flags, which also work with no

@@ -29,7 +29,7 @@ pub fn of_mod(m: &Mod, o: Result<&Overview, Unread>) -> Module {
     let base = |source: String, version, state| Module {
         name: m.name.into(),
         summary: "Claude Code mod".into(),
-        kind: Kind::Plugin,
+        kind: Some(Kind::Plugin),
         origin: Origin::Builtin,
         path: None,
         source,

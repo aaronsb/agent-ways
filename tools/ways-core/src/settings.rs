@@ -864,7 +864,7 @@ fn check_targets(v: &Value) -> Result<(), String> {
 
 pub static SCHEMA: Schema = Schema {
     component: "ways",
-    files: &[FileSpec { id: FILE, retired: RETIRED }],
+    files: &[FileSpec { id: FILE, retired: RETIRED, explain: None }],
     sections: SECTIONS,
     keys: KEYS,
 };

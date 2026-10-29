@@ -15,9 +15,9 @@
 #      of files is a clear burst worth surfacing more loudly.
 #
 # This is a pedagogical example. It runs on any typical Linux distro
-# with no dependencies beyond bash and coreutils. Disabled by default
-# in the attend config — flip `enabled: true` in the sensor block to
-# turn it on.
+# with no dependencies beyond bash and coreutils. attend runs it through
+# a command sensor file with `output: lines` (ADR-403), from slice 2 of
+# that record.
 #
 # Author's lever: magnitude. Everything else is attend's job.
 
@@ -84,10 +84,10 @@ count=$(echo "$new_files" | wc -l | tr -d ' ')
 #   2-3 files → 2.5 (small batch — something's happening)
 #   4+ files  → 3.0 (clear burst — breaks through into notifications)
 #
-# These land above the default emission threshold of 2.0 for script
-# sensors, so a single file will fire on its own. If you want more
-# aggregation, lower the magnitudes here and raise `threshold` in
-# your attend config so multiple files accumulate before firing.
+# These land above a sensor file's default threshold of 2.0, so a
+# single file fires on its own. For more aggregation, lower the
+# magnitudes here and raise `threshold` in the sensor file so several
+# files accumulate before firing.
 
 if (( count == 1 )); then
   name=$(basename "$(echo "$new_files" | head -1)")
