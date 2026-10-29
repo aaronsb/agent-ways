@@ -330,7 +330,7 @@ const KEYS: &[KeySpec] = &[
         kind: Kind::Bool,
         default: DefaultValue::Yaml("true"),
         doc: "Whether the sensor runs.",
-        long: "false in a project's sensor file switches the sensor off in that project. The settings screens write a project sensor's switch to your own file, so it stays yours.",
+        long: "false switches the sensor off. The settings screens write the switch to your own sensor file, for a project's sensor too, so it stays yours; `ways settings set --project` writes it to the project's file, which switches the sensor off in that project.",
         ..SENSOR
     },
     KeySpec {
