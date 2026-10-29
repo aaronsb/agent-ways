@@ -51,13 +51,14 @@ impl Attend {
 
 /// attend's account of its sensors, from the `attend` on PATH.
 pub fn described() -> Attend {
-    described_by(std::ffi::OsStr::new("attend"), &["sensor", "list", "--json"])
+    let mut cmd = std::process::Command::new("attend");
+    cmd.args(["sensor", "list", "--json"]);
+    described_by(cmd)
 }
 
-/// What `program args` answers as attend's account of its sensors.
-pub fn described_by(program: &std::ffi::OsStr, args: &[&str]) -> Attend {
-    let spawned = std::process::Command::new(program)
-        .args(args)
+/// What `cmd` answers as attend's account of its sensors.
+pub fn described_by(mut cmd: std::process::Command) -> Attend {
+    let spawned = cmd
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -127,7 +128,9 @@ pub fn user_sensors(layers: &[Layer], project: &Path) -> Vec<UserSensor> {
             let script = Path::new(sc.script.as_deref()?);
             Some(UserSensor {
                 name: name.clone(),
-                script: if script.is_absolute() { script.to_path_buf() } else { project.join(script) },
+                // Part by part, so the path takes the platform's separator
+                // whatever the file wrote between the parts.
+                script: if script.is_absolute() { script.components().collect() } else { project.components().chain(script.components()).collect() },
                 file: layer.path.clone(),
                 project: layer.scope == LayerScope::Project,
             })

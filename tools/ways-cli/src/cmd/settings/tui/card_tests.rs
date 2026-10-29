@@ -222,7 +222,7 @@ fn a_project_s_script_sensor_reads_as_the_project_s() {
     let m = sensors::of_script_sensor(&users[0], &sc.sensors["disk"]);
     assert_eq!((m.kind, m.origin), (Kind::Script, modules::Origin::Project));
     assert_eq!(m.path, Some(h.join("proj/.claude/attend.yaml")));
-    assert_eq!(m.source, h.join("proj/.claude/sensors/disk.sh").display().to_string());
+    assert_eq!(m.source, h.join("proj").join(".claude").join("sensors").join("disk.sh").display().to_string());
     let tab = sensors_tab(&h, described, &layers);
     let c = card(&tab, "disk");
     assert_eq!((c.origin, c.at.as_deref()), (Origin::Project, Some("~/proj/.claude/attend.yaml")));
@@ -265,16 +265,32 @@ fn the_mod_tab_puts_the_card_on_each_mod_node() {
     let _ = std::fs::remove_dir_all(&h);
 }
 
+/// This test binary standing in for an attend that answers as `how` says:
+/// `fail` exits 2, as an attend older than `--json` does; `text` exits 0
+/// having printed no JSON; `slow` answers too late.
+fn stand_in(how: &str) -> std::process::Command {
+    let name = format!("{}::stand_in_attend", module_path!().split_once("::").map_or(module_path!(), |(_, rest)| rest));
+    let mut cmd = std::process::Command::new(std::env::current_exe().unwrap());
+    cmd.args([name.as_str(), "--exact", "--ignored", "--test-threads=1"]).env("WAYS_ATTEND_STAND_IN", how);
+    cmd
+}
+
+#[test]
+#[ignore = "the attend that described_by's tests run"]
+fn stand_in_attend() {
+    match std::env::var("WAYS_ATTEND_STAND_IN").as_deref() {
+        Ok("fail") => std::process::exit(2),
+        Ok("slow") => std::thread::sleep(std::time::Duration::from_secs(5)),
+        _ => {}
+    }
+}
+
 #[test]
 fn an_attend_that_does_not_list_its_sensors_is_told_from_none() {
-    let none = std::ffi::OsStr::new("/nonexistent/attend-for-a-test");
-    assert_eq!(sensors::described_by(none, &[]), Attend::Absent);
-    // An older attend refuses `--json` and exits non-zero; another prints
-    // no JSON.
-    assert_eq!(sensors::described_by(std::ffi::OsStr::new("false"), &[]), Attend::Unlisted);
-    assert_eq!(sensors::described_by(std::ffi::OsStr::new("echo"), &["sensor list: unknown flag"]), Attend::Unlisted);
-    let listed = sensors::described_by(std::ffi::OsStr::new("echo"), &[r#"[{"name":"git","state":"active","description":"d","source":"attend@0.33.0"}]"#]);
-    assert!(matches!(&listed, Attend::Listed(d) if d[0].source == "attend@0.33.0"), "{listed:?}");
+    let none = Path::new("nonexistent-dir").join("attend-for-a-test");
+    assert_eq!(sensors::described_by(std::process::Command::new(none)), Attend::Absent);
+    assert_eq!(sensors::described_by(stand_in("fail")), Attend::Unlisted, "a non-zero exit");
+    assert_eq!(sensors::described_by(stand_in("text")), Attend::Unlisted, "output that is no JSON");
 
     let h = home("unlisted");
     let tab = sensors_tab(&h, || Attend::Unlisted, &[]);
@@ -334,7 +350,7 @@ fn a_script_sensor_s_rows_write_to_the_file_that_defines_it_but_its_switch() {
 #[test]
 fn an_attend_that_does_not_answer_in_time_is_unlisted_and_reaped() {
     let start = std::time::Instant::now();
-    assert_eq!(sensors::described_by(std::ffi::OsStr::new("sleep"), &["5"]), Attend::Unlisted);
+    assert_eq!(sensors::described_by(stand_in("slow")), Attend::Unlisted);
     let took = start.elapsed();
     assert!(took >= std::time::Duration::from_secs(2) && took < std::time::Duration::from_secs(4), "{took:?}");
 }

@@ -69,8 +69,9 @@ pub fn tilde(p: &Path, home: &Path) -> String {
     s.replace('\\', "/")
 }
 
-/// Every path in `text` under the home directory, written with `~`.
-fn tilde_text(text: &str, home: &Path) -> String {
+/// Every path in `text` under the home directory, written with `~`, and
+/// `/` between parts, as [`tilde`] writes one path.
+pub(super) fn tilde_text(text: &str, home: &Path) -> String {
     tilde_home(text, home).replace('\\', "/")
 }
 
