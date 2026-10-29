@@ -189,6 +189,22 @@ describe('where the row draws as before', () => {
     expect(wrapped(tree)).toBeUndefined()
   })
 
+  // An MCP tool's target is its first non-empty string field, which need not be its path.
+  const mcp = (tool: string, input: Record<string, unknown>) => ({ tool_use_id: 't4', tool, input, isRunning: false, isErrored: false, isInterrupted: false, isExpanded: false, output: undefined })
+  const MCP_CASES: [string, ReturnType<typeof mcp>, string][] = [
+    ['content ahead of a file_path', mcp('mcp__fs__write', { content: 'lorem ipsum '.repeat(200), file_path: '/a/b.ts' }), 'lorem ipsum '.repeat(200)],
+    ['a query beside an empty file_path', mcp('mcp__x__y', { file_path: '', query: 'q/'.repeat(300) }), 'q/'.repeat(300)],
+  ]
+  for (const [name, props, field] of MCP_CASES) {
+    test(`an MCP tool with ${name} stays on its line, cut at 120 characters`, async ($, on) => {
+      const tree = await drawn($, on, props)
+      expect(wrapped(tree)).toBeUndefined()
+      const line = walk(tree).find(n => n.type === 'Text' && n.props?.wrap === 'truncate-end' && textOf(n).includes(':'))
+      expect(textOf(line)).toContain(`  ${field.slice(0, 120)}`)
+      expect(textOf(line)).not.toContain(field.slice(0, 121))
+    })
+  }
+
   test('on the desktop the path stays on the tool line', async ($, on) => {
     host(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start({ ...INTERACTIVE, surface: 'desktop' })

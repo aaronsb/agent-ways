@@ -41,7 +41,7 @@ import { ICONS } from './skin.ts'
 import { hunksOf } from './svg-diff.ts'
 import { shellOutputOf } from './svg-terminal.ts'
 import { countdownsOf, limitLabel, metersOf } from './svg-usage.ts'
-import { kindOf, summarize, toolLabel } from './tools.ts'
+import { PATH_TOOLS, kindOf, summarize, toolLabel } from './tools.ts'
 import { commandOf, errorLine, isQuiet, quietLabel } from './quiet.ts'
 import { MAX_MARKDOWN, replySegments } from './reply.ts'
 import { fileHref, hyperlinksFrom, touchOf } from './links.ts'
@@ -476,8 +476,9 @@ export function registerSkins(on: On, shared: Shared): void {
     const meta = { ...(ms >= 0 && !e.props.isRunning ? { ms } : {}), ...(diff === null ? {} : diff) }
     const fields = (e.props.input ?? {}) as { file_path?: unknown; notebook_path?: unknown }
     const path = fields.file_path ?? fields.notebook_path
+    const isPathRow = PATH_TOOLS.has(e.props.tool) && typeof path === 'string'
     // A path that may wrap is drawn whole.
-    const wraps = e.surface === 'terminal' && setup.prefs.paths === 'wrap' && typeof path === 'string'
+    const wraps = e.surface === 'terminal' && setup.prefs.paths === 'wrap' && isPathRow
     const target = summarize(e.props.tool, e.props.input, cwd, wraps ? Infinity : undefined)
     const disclosure = memberOf(disclosureAtom, e)
     const open = isOpen(await read($, disclosure), e.props.isErrored)
@@ -489,7 +490,7 @@ export function registerSkins(on: On, shared: Shared): void {
     const label = setup.prefs.quiet && isQuiet(e.props.tool, e.props.input) ? quietLabel(e.props.tool) : toolLabel(e.props.tool)
     const href = typeof path === 'string' && look.links === true && look.paths !== undefined ? fileHref(path, look.paths) : null
     // A file's path may wrap under the label, in the row's room beside the frame and the chevron.
-    const room = typeof path === 'string' ? (e.viewport?.columns ?? 100) - (framed ? FRAME_INSET : 0) - DISCLOSE_INSET : undefined
+    const room = isPathRow ? (e.viewport?.columns ?? 100) - (framed ? FRAME_INSET : 0) - DISCLOSE_INSET : undefined
     const row = toolRow(look, e.props, kind, target, meta, label, touch, href, room)
     const toggle = () => void update($, disclosure, () => (open ? 'closed' : 'open'))
 

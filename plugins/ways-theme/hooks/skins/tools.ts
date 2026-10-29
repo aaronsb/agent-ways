@@ -20,6 +20,9 @@ const BUILTIN: Readonly<Record<string, ToolKind>> = {
 
 const MAX_TARGET = 120
 
+// The tools whose target is the file they name, so it may wrap and is drawn whole.
+export const PATH_TOOLS: ReadonlySet<string> = new Set(['Read', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit'])
+
 // Null leaves the row to Claude Code: agents, plan mode and todos draw live progress
 // and dialogs that a skin would have to rebuild.
 export function kindOf(tool: string): ToolKind | null {
