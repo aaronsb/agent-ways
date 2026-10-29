@@ -18,7 +18,9 @@
 // group in a border, wrapped around the engine's own drawing. Whether a row is
 // framed is one question, `isFramed` (hub.tsx), which this module and the
 // skins layer ask of the same look, the live export's, so a theme switch
-// mid-session reframes both. The colours are Claude Code theme keys, which
+// mid-session reframes both. A reply holding a `! <command>` block the skins
+// layer frames itself, in pieces around the block, so that no frame line runs
+// beside the command. The colours are Claude Code theme keys, which
 // name the agent-ways theme only while Claude Code's selected theme is
 // `custom:ways`. The mod reads that selection from the `theme` row of
 // `/config` at session start, on each change through `config.set`, which it
@@ -40,11 +42,11 @@
 // nothing. The mod hooks no classic.* event, which an organization's policy
 // plugin passes over.
 
-import type { EngineInterface, Register, RenderElement } from 'claude-code'
+import type { Register } from 'claude-code'
 
-import { FRAME, FRAME_PAD_X } from './lib.ts'
+import { FRAME } from './lib.ts'
 import { configRows, noteRow, startFollow, startRows } from './follow.ts'
-import { activeSetup, currentLook, isFramed, registerSkins } from './skins/hub.tsx'
+import { activeSetup, currentLook, framedRow, isFramed, registerSkins } from './skins/hub.tsx'
 import type { View } from './skins/hub.tsx'
 
 /** Whether the terminal's view is the ctrl+o transcript, as the turn line
@@ -55,18 +57,6 @@ let isTranscriptExpanded = false
 const view = (): View => ({ ...configRows(), isTranscriptExpanded })
 /** Each terminal turn line's last `isExpanded`, by row. */
 const turnLines = new Map<string, boolean>()
-
-/** `inner` inside a frame. The engine's row opens with a blank margin row;
- *  the inner Box takes it back and the frame keeps the gap outside, so the
- *  ground starts at the first line of text. */
-function framed($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0], inner: RenderElement, frame: Record<string, string>): RenderElement {
-  const { Box } = $.ui.resolve(e)
-  return (
-    <Box marginTop={1} borderStyle="round" paddingX={FRAME_PAD_X} {...frame}>
-      <Box marginTop={-1}>{inner}</Box>
-    </Box>
-  )
-}
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -108,17 +98,17 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     if (!isFramed(await activeSetup($), e, view())) return next(e)
-    return framed($, e, await next(e), FRAME.reply)
+    return framedRow($.ui.resolve(e), await next(e), FRAME.reply)
   })
 
   on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
     if (!isFramed(await activeSetup($), e, view())) return next(e)
-    return framed($, e, await next(e), e.props.isErrored ? FRAME.toolErrored : FRAME.tool)
+    return framedRow($.ui.resolve(e), await next(e), e.props.isErrored ? FRAME.toolErrored : FRAME.tool)
   })
 
   on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
     if (!isFramed(await activeSetup($), e, view())) return next(e)
-    return framed($, e, await next(e), FRAME.tool)
+    return framedRow($.ui.resolve(e), await next(e), FRAME.tool)
   })
 
   // The skins layer, after the hooks above so they wrap what it draws.
