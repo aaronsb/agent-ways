@@ -531,9 +531,17 @@ export function registerSkins(on: On, shared: Shared): void {
     const row = toolRow(look, e.props, kind, target, meta, label, touch, href, room)
     const toggle = () => void update($, disclosure, () => (open ? 'closed' : 'open'))
 
-    // A Read of an image keeps the picture a mod beneath draws (pictures.ts).
+    // What draws beneath, asked once. A Read of an image keeps the picture a mod
+    // beneath draws (pictures.ts), unless the opened body already holds it.
+    let beneath: Promise<RenderElement> | undefined
+    let isStockBody = false
+    const below = () => (beneath ??= next(e))
+    const stock = () => {
+      isStockBody = true
+      return below()
+    }
     const drawn = async (row: ReturnType<Ui['Box']>) => {
-      const shown = showsImage(e.props.tool, e.props.output) ? withRow(await next(e), row) : row
+      const shown = showsImage(e.props.tool, e.props.output) && !isStockBody ? withRow(await below(), row) : row
       return withSettle($, e, framed ? marginRow(look, shown) : shown)
     }
 
@@ -550,7 +558,7 @@ export function registerSkins(on: On, shared: Shared): void {
       columns: e.viewport?.columns ?? 100,
       isAll,
       toggleAll: () => void update($, all, () => !isAll),
-      stock: () => next(e),
+      stock,
     })
     return drawn(disclosedRow(look, row, true, toggle, opened))
   })
@@ -567,6 +575,8 @@ export function registerSkins(on: On, shared: Shared): void {
       groupStarts.delete(drawing)
       if (e.props.isExpanded) return next(e)
     }
+    // A group of only calls Claude Code draws no row for is its own.
+    if (e.props.calls.length > 0 && !e.props.calls.some(drawsRow)) return next(e)
     const look = lookOf($.ui.resolve(e), setup, e.surface)
     const framed = isFramed(setup, e, shared.view())
     const row = groupRow(framed ? forFrame(look) : look, e.props.calls)

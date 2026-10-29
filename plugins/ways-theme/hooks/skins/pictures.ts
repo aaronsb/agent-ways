@@ -34,6 +34,11 @@ const nodeOf =(tree: unknown): Node | null => (typeof tree === 'object' && tree 
 const isPicture = (node: Node): boolean =>
   (node.type === 'Image' && node.image?.plugin !== OWN) || (node.type === 'Raster' && node.raster?.plugin !== OWN)
 
+const holdsEngine = (tree: unknown): boolean => {
+  const node = nodeOf(tree)
+  return node !== null && (node.type === 'engine' || (node.children ?? []).some(holdsEngine))
+}
+
 /** Whether the tree holds a picture another plugin drew. */
 export function holdsPicture(tree: unknown): boolean {
   const node = nodeOf(tree)
@@ -41,10 +46,10 @@ export function holdsPicture(tree: unknown): boolean {
 }
 
 /** `tree` with the engine's own drawing in it replaced by `row`, when the tree
- *  holds another plugin's picture; `row` alone otherwise. A second engine node
- *  is dropped, so the row draws once. */
+ *  holds another plugin's picture and the engine's drawing; `row` alone
+ *  otherwise. A second engine node is dropped, so the row draws once. */
 export function withRow(tree: RenderElement, row: RenderElement): RenderElement {
-  if (!holdsPicture(tree)) return row
+  if (!holdsPicture(tree) || !holdsEngine(tree)) return row
   let isPlaced = false
   const swap = (node: unknown): unknown => {
     const at = nodeOf(node)

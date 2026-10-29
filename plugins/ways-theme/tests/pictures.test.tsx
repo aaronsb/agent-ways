@@ -93,6 +93,17 @@ const standIn = (tier?: Plugin['tier']): Plugin => ({
   },
 })
 
+/** The host, with Claude Code's own drawing of each row beneath every plugin
+ *  as the engine answers it, a node of its own. */
+function hostOver(on: Parameters<typeof host>[0], world: Parameters<typeof host>[1]) {
+  const engine = () => ({ type: 'engine', ref: 0 }) as never
+  on('ui.render', { component: 'ToolUse' }, engine)
+  on('ui.render', { component: 'ToolGroup' }, engine)
+  on('ui.render', { component: 'ToolResult' }, engine)
+  on('ui.render', { component: 'AssistantMessage' }, engine)
+  return host(on, world)
+}
+
 /** Each picture in the tree, with the columns the Boxes around it take. */
 function pictures(tree: unknown, inset = 0, out: { node: Node; inset: number }[] = []) {
   const node = tree as Node | null
@@ -129,7 +140,7 @@ describe('a picture another mod draws beneath the theme', () => {
   for (const renderer of ['halfblock', 'image'] as const) {
     for (const [name, component, props] of sites) {
       test(`${name} (${renderer}): the frame holds the row, the picture and its caption, the picture within the frame`, { plugins: [standIn()] }, async ($, on) => {
-        host(on, { mod: json(MIAMI_NIGHTS) })
+        hostOver(on, { mod: json(MIAMI_NIGHTS) })
         await $.session.start(INTERACTIVE)
         const ui = await $.ui.mount(at('terminal', component, props, `${renderer}-1`))
         const tree = await ui.drawn()
@@ -144,9 +155,7 @@ describe('a picture another mod draws beneath the theme', () => {
   }
 
   test("the theme's own Read row stands in the engine's place over the picture", { plugins: [standIn()] }, async ($, on) => {
-    // Beneath every plugin, the row Claude Code draws itself.
-    on('ui.render', { component: 'ToolUse' }, () => ({ type: 'engine', ref: 0 }) as never)
-    host(on, { mod: json(MIAMI_NIGHTS) })
+    hostOver(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
     const ui = await $.ui.mount(at('terminal', 'ToolUse', READ_IMAGE))
     const tree = await ui.drawn()
@@ -156,8 +165,38 @@ describe('a picture another mod draws beneath the theme', () => {
     await ui.unmount()
   })
 
+  // The opened body is Claude Code's drawing beneath, picture and all; a second
+  // picture would repeat the mod's key and the theme's tree would be refused.
+  test("an opened Read of an image draws its picture once, in the theme's frame", { plugins: [standIn()] }, async ($, on) => {
+    hostOver(on, { mod: json(MIAMI_NIGHTS) })
+    await $.session.start(INTERACTIVE)
+    const ui = await $.ui.mount(at('terminal', 'ToolUse', READ_IMAGE))
+    const closed = await ui.drawn()
+    await ui.press({ key: 'disclose' })
+    const tree = await ui.drawn()
+    expect(JSON.stringify(tree)).not.toBe(JSON.stringify(closed))
+    expect(walk(tree).some(n => n.type === 'Button' && n.props?.key === 'disclose')).toBe(true)
+    expect(borders(tree).length).toBe(1)
+    expect(pictures(frameOf(tree)).length).toBe(1)
+    expect(walk(tree).filter(n => n.props?.key === 'images-0').length).toBe(1)
+    await ui.unmount()
+  })
+
+  test('a reply holding a `!` command and naming an image keeps its picture and caption, drawn once', { plugins: [standIn()] }, async ($, on) => {
+    hostOver(on, { mod: json(MIAMI_NIGHTS) })
+    await $.session.start(INTERACTIVE)
+    const ui = await $.ui.mount(at('terminal', 'AssistantMessage', { text: `Saved the chart to ${PNG}.\n\n! xdg-open ${PNG}`, isFirstOfReply: true }))
+    const tree = await ui.drawn()
+    expect(borders(tree).length).toBeGreaterThan(0)
+    expect(shows(tree, ` xdg-open ${PNG}`)).toBe(true)
+    expect(pictures(tree).length).toBe(1)
+    expect(captionKept(tree)).toBe(true)
+    expect(fitsInside(tree)).toBe(true)
+    await ui.unmount()
+  })
+
   test('the head of a SendUserFile frame is its result as Claude Code draws it, the caption line under the picture', { plugins: [standIn()] }, async ($, on) => {
-    host(on, { mod: json(MIAMI_NIGHTS) })
+    hostOver(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
     const ui = await $.ui.mount(at('terminal', 'ToolResult', SENT))
     const text = JSON.stringify(frameOf(await ui.drawn()))
@@ -168,7 +207,7 @@ describe('a picture another mod draws beneath the theme', () => {
   })
 
   test('off the terminal, and under another Claude Code theme, nothing is framed', { plugins: [standIn()] }, async ($, on) => {
-    host(on, { mod: json(MIAMI_NIGHTS), selected: 'dark' })
+    hostOver(on, { mod: json(MIAMI_NIGHTS), selected: 'dark' })
     await $.session.start(INTERACTIVE)
     const terminal = await $.ui.mount(at('terminal', 'ToolResult', SENT))
     const tree = await terminal.drawn()
@@ -184,7 +223,7 @@ describe('a picture another mod draws beneath the theme', () => {
 describe('a picture another mod draws above the theme', () => {
   // The mod wraps what the theme answered: the frame is whole, the picture under it.
   test('the frame holds the result alone, the picture and caption sit under it at the width the mod chose', { plugins: [standIn('prepend')] }, async ($, on) => {
-    host(on, { mod: json(MIAMI_NIGHTS) })
+    hostOver(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
     const ui = await $.ui.mount(at('terminal', 'ToolResult', SENT))
     const tree = await ui.drawn()
@@ -199,7 +238,7 @@ describe('a picture another mod draws above the theme', () => {
   // frame is the root Box the theme answers, its border and padding the inset.
   for (const [name, component, props] of [['a SendUserFile result', 'ToolResult', SENT], ['a Read of an image', 'ToolUse', READ_IMAGE], ['a reply naming an image', 'AssistantMessage', REPLY_IMAGE]] as const) {
     test(`${name}: a mod that adds its picture under the frame's child draws inside the frame, within its room`, { plugins: [standIn('prepend')] }, async ($, on) => {
-      host(on, { mod: json(MIAMI_NIGHTS) })
+      hostOver(on, { mod: json(MIAMI_NIGHTS) })
       await $.session.start(INTERACTIVE)
       const ui = await $.ui.mount(at('terminal', component, props, 'host-1'))
       const tree = await ui.drawn()
@@ -225,12 +264,15 @@ describe('rows Claude Code draws empty', () => {
     })
   }
 
-  test('a group of only such calls draws no frame; one with a Read beside them does', async ($, on) => {
+  test("a group of only such calls is Claude Code's own, unframed; one with a Read beside them is framed", async ($, on) => {
     host(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
     const search = { tool: 'ToolSearch', input: { query: 'select:SendUserFile' }, isRunning: false, isErrored: false, isInterrupted: false }
     const empty = await $.ui.mount(at('terminal', 'ToolGroup', { calls: [search], isActive: false, isExpanded: false }))
-    expect(borders(await empty.drawn()).length).toBe(0)
+    const tree = await empty.drawn()
+    expect(borders(tree).length).toBe(0)
+    expect(shows(tree, 'engine')).toBe(true)
+    expect(shows(tree, 'Other')).toBe(false)
     await empty.unmount()
     const read = { tool: 'Read', input: { file_path: '/work/proj/a.ts' }, isRunning: false, isErrored: false, isInterrupted: false }
     const mixed = await $.ui.mount(at('terminal', 'ToolGroup', { calls: [search, read], isActive: false, isExpanded: false }, 'r2'))
@@ -241,7 +283,7 @@ describe('rows Claude Code draws empty', () => {
 
 describe('rows without a picture', () => {
   test('a Read of a text file is drawn by the theme alone, framed once', { plugins: [standIn()] }, async ($, on) => {
-    host(on, { mod: json(MIAMI_NIGHTS) })
+    hostOver(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
     const ui = await $.ui.mount(at('terminal', 'ToolUse', READ_TEXT))
     const tree = await ui.drawn()
@@ -252,7 +294,7 @@ describe('rows without a picture', () => {
   })
 
   test('a SendUserFile sending no image, and any other result, is not framed', { plugins: [standIn()] }, async ($, on) => {
-    host(on, { mod: json(MIAMI_NIGHTS) })
+    hostOver(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
     const report = { ...SENT, output: { attachments: [{ path: '/tmp/report.pdf', size: 1200, isImage: false }] } }
     const sent = await $.ui.mount(at('terminal', 'ToolResult', report))
