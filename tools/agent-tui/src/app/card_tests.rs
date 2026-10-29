@@ -17,6 +17,7 @@ fn card(at: Option<&str>) -> Card {
         source: "~/.local/share/attend/sensors/dl.sh".into(),
         version: None,
         state: ("enabled".into(), StateTone::Ok),
+        fold_state: false,
         rows: vec![("interval".into(), "60s quiet, 15s busy".into())],
     }
 }
@@ -62,6 +63,17 @@ fn a_card_with_no_version_or_kind_leaves_their_rows_out() {
     assert!(!lines.iter().any(|l| l.starts_with("kind") || l.starts_with("version")), "{lines:?}");
     let c = Card { version: Some("0.6.0".into()), ..card(None) };
     assert!(text(&card_lines(&c, 60)).contains(&"version   0.6.0".to_string()));
+}
+
+#[test]
+fn a_folded_state_follows_the_origin_in_its_role() {
+    let c = Card { fold_state: true, kind: None, ..card(None) };
+    let lines = card_lines(&c, 60);
+    let text_of = text(&lines);
+    assert_eq!(text_of[3], "origin    user · enabled");
+    assert!(!text_of.iter().any(|l| l.starts_with("state")), "{text_of:?}");
+    let state = lines[3].spans.last().unwrap();
+    assert_eq!((state.content.as_ref(), state.style), ("enabled", theme::ok()));
 }
 
 #[test]

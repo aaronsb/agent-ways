@@ -370,8 +370,8 @@ impl Ways {
         let scopes: BTreeSet<&str> = keys
             .iter()
             .filter(|b| !matches!(b.spec.kind, Kind::ReadOnly | Kind::Secret) && b.spec.computed.is_none())
-            .filter(|b| self.ctx.in_project || !super::writes_project(b, &self.ctx))
-            .filter_map(|b| target_file(b, super::writes_project(b, &self.ctx).then_some(self.ctx.project.as_path())).ok())
+            .filter(|b| self.ctx.in_project || !super::writes_project(b, &self.ctx, &layers))
+            .filter_map(|b| target_file(b, super::writes_project(b, &self.ctx, &layers).then_some(self.ctx.project.as_path())).ok())
             .map(|(_, scope)| if scope == LayerScope::Project { "project" } else { "user" })
             .collect();
         match (scopes.contains("project"), scopes.contains("user")) {
@@ -464,14 +464,14 @@ impl Ways {
             if b.spec.name == super::super::engine::JUDGE_INSTALL {
                 // It follows the engine in the user config (ADR-512 item 4).
                 s = s.lock("set with gate.engine on the gate tab: claude-code wants the ways-judge mod, any other engine does not");
-            } else if settable && !self.ctx.in_project && super::writes_project(&b, &self.ctx) {
+            } else if settable && !self.ctx.in_project && super::writes_project(&b, &self.ctx, layers) {
                 // No project: the key has no file to go to.
                 s = s.lock(format!(
                     "not applicable: no project encloses {}, so a project's file has nowhere to be. Open the screens inside a project, or with --project <dir>",
                     tilde(&self.ctx.project, home)
                 ));
             } else if settable {
-                let project = super::writes_project(&b, &self.ctx).then_some(self.ctx.project.as_path());
+                let project = super::writes_project(&b, &self.ctx, layers).then_some(self.ctx.project.as_path());
                 if let Ok((path, scope)) = target_file(&b, project) {
                     let layer = if scope == agent_settings::LayerScope::Project { "project" } else { "user" };
                     if broken.iter().any(|(f, _)| *f == path) {

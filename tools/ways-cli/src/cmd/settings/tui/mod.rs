@@ -77,16 +77,19 @@ pub struct Ctx {
     /// Whether `mods` runs off the screen's thread: the live one calls
     /// Claude Code, which the screens do not wait on.
     pub mods_background: bool,
-    /// attend's account of its sensors, read once for the sensors tab's
-    /// cards; `None` when no attend answers.
-    pub sensors: fn() -> Option<Vec<crate::cmd::modules::sensors::Described>>,
+    /// What attend says of its sensors, read once for the sensors tab's
+    /// cards.
+    pub sensors: fn() -> crate::cmd::modules::sensors::Attend,
 }
 
-/// Whether the screens write `b` to the project's file: a project-scope key,
-/// or, when the screens were opened for a project, one the ways schema names
-/// for the screens to keep per project.
-pub(super) fn writes_project(b: &agent_settings::Bound, ctx: &Ctx) -> bool {
-    b.spec.scope == Scope::Project || (ctx.for_project && ways_core::settings::SCREENS_WRITE_PROJECT.contains(&b.spec.name))
+/// Whether the screens write `b` to the project's file: a project-scope key;
+/// when the screens were opened for a project, one the ways schema names for
+/// the screens to keep per project; or a key of a sensor whose script a
+/// project's file sets, as `layers` resolve it.
+pub(super) fn writes_project(b: &agent_settings::Bound, ctx: &Ctx, layers: &[Layer]) -> bool {
+    b.spec.scope == Scope::Project
+        || (ctx.for_project && ways_core::settings::SCREENS_WRITE_PROJECT.contains(&b.spec.name))
+        || (b.spec.section == "attend.sensors" && b.bound.first().is_some_and(|n| crate::cmd::modules::sensors::defined_in_project(layers, n)))
 }
 
 /// Whether `given` (the `--project`, else `CLAUDE_PROJECT_DIR`) opens the
@@ -160,7 +163,7 @@ pub struct Ways {
     /// mod.
     ran: Cell<bool>,
     /// What attend says of its sensors, asked at the first build.
-    described: std::cell::OnceCell<Option<Vec<crate::cmd::modules::sensors::Described>>>,
+    described: std::cell::OnceCell<crate::cmd::modules::sensors::Attend>,
 }
 
 /// How soon after a read starts another may: a burst of requests reads once.
@@ -209,8 +212,8 @@ impl Ways {
     }
 
     /// What attend says of its sensors, asked once.
-    pub(super) fn described(&self) -> Option<&[crate::cmd::modules::sensors::Described]> {
-        self.described.get_or_init(|| (self.ctx.sensors)()).as_deref()
+    pub(super) fn described(&self) -> &crate::cmd::modules::sensors::Attend {
+        self.described.get_or_init(|| (self.ctx.sensors)())
     }
 
     /// The stamp of the files the tree was read from: metadata only.
@@ -425,9 +428,9 @@ impl Adapter for Ways {
         for w in values {
             let b = lookup(&self.reg, &w.store.key).map_err(|f| f.message)?;
             let v = b.spec.parse_cli(w.value, &layers, &b.bound).map_err(|m| format!("{}: {m}", w.store.key))?;
-            let at = |p: &Path| target_file(&b, writes_project(&b, &self.ctx).then_some(p)).map(|t| t.0).map_err(|f| f.message);
+            let at = |p: &Path| target_file(&b, writes_project(&b, &self.ctx, &layers).then_some(p)).map(|t| t.0).map_err(|f| f.message);
             let mut path = at(&self.ctx.project)?;
-            if path == file && !self.ctx.in_project && writes_project(&b, &self.ctx) {
+            if path == file && !self.ctx.in_project && writes_project(&b, &self.ctx, &layers) {
                 return Err(self.short(&format!(
                     "{} is set in a project's file, and no project encloses {}; nothing was written",
                     w.store.key,

@@ -27,7 +27,8 @@ fn state_style(t: StateTone) -> Style {
 
 /// The card's lines, each value wrapped to `room` columns beside its label:
 /// the title, the summary, a blank line, then origin, kind, source,
-/// version, state and the rows of its kind.
+/// version, state and the rows of its kind. A folded state follows the
+/// origin on its line.
 pub(super) fn card_lines(c: &Card, room: usize) -> Vec<Line<'static>> {
     let dim = theme::muted();
     let mut lines = vec![Line::styled(c.title.clone(), Style::new().add_modifier(Modifier::BOLD))];
@@ -49,6 +50,12 @@ pub(super) fn card_lines(c: &Card, room: usize) -> Vec<Line<'static>> {
         *first = head;
         origin[0].spans.push(Span::raw(rest));
     }
+    if c.fold_state {
+        if let Some(last) = origin.last_mut() {
+            last.spans.push(Span::raw(" · "));
+            last.spans.push(Span::styled(c.state.0.clone(), state_style(c.state.1)));
+        }
+    }
     lines.extend(origin);
     if let Some(k) = &c.kind {
         lines.extend(fields("kind", k, Style::new(), room, dim));
@@ -57,7 +64,9 @@ pub(super) fn card_lines(c: &Card, room: usize) -> Vec<Line<'static>> {
     if let Some(v) = &c.version {
         lines.extend(fields("version", v, Style::new(), room, dim));
     }
-    lines.extend(fields("state", &c.state.0, state_style(c.state.1), room, dim));
+    if !c.fold_state {
+        lines.extend(fields("state", &c.state.0, state_style(c.state.1), room, dim));
+    }
     for (k, v) in &c.rows {
         lines.extend(fields(k, v, Style::new(), room, dim));
     }

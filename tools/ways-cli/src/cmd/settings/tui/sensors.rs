@@ -9,7 +9,7 @@ use agent_settings::{Bound, Registry};
 use agent_tui::tree::Node;
 use attend_config::schema::BUILTINS;
 
-use crate::cmd::modules::sensors::{self as modules, Described};
+use crate::cmd::modules::sensors::{self as modules, Attend};
 
 /// The sensors tab's keys: `keys` with every generic sensor key bound for
 /// each sensor the user added, so its node holds the rows a built-in's
@@ -36,7 +36,7 @@ pub fn with_user_keys(reg: &Registry, mut keys: Vec<Bound>, layers: &[Layer], pr
 }
 
 /// Put a card on each sensor's node under `root`.
-pub fn cards(root: &mut Node, layers: &[Layer], project: &Path, home: &Path, attend: Option<&[Described]>) {
+pub fn cards(root: &mut Node, layers: &[Layer], project: &Path, home: &Path, attend: &Attend) {
     let cfg = attend_config::Config::from_layers(layers);
     let users = modules::user_sensors(layers, project);
     for g in root.children.iter_mut().filter(|g| !g.section) {

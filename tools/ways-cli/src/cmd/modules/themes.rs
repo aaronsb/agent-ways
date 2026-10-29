@@ -32,7 +32,7 @@ pub fn of_theme(t: &Theme, source: Source, file: Option<&Path>, active: bool, sa
         path,
         source,
         version: None,
-        state: if active { State::new("active", Health::Running) } else { State::new("inactive (Enter uses it)", Health::Idle) },
+        state: if active { State::new("active", Health::Running) } else { State::new("inactive", Health::Idle) },
         rows,
     }
 }

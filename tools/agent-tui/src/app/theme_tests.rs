@@ -49,6 +49,7 @@ impl Adapter for Choice {
             source: format!("{source:?}"),
             version: None,
             state: if active { ("active".into(), StateTone::Ok) } else { ("inactive".into(), StateTone::Plain) },
+            fold_state: false,
             rows: vec![("saves to".into(), self.0.display().to_string()), ("shape".into(), shape.into())],
         })
     }

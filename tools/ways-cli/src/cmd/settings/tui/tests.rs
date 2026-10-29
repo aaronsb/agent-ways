@@ -51,7 +51,7 @@ fn roots(fx: &Fixture) -> Vec<Node> {
         claude: fx.root.join(".claude"),
         judge: || None,
         mods: Vec::new,
-        sensors: || None,
+        sensors: || crate::cmd::modules::sensors::Attend::Absent,
         mods_background: false,
     };
     Ways::new(ctx).build(&[])
@@ -472,7 +472,7 @@ fn a_switch_for_a_way_no_root_holds_is_listed_as_not_found() {
         claude: fx.root.join(".claude"),
         judge: || None,
         mods: Vec::new,
-        sensors: || None,
+        sensors: || crate::cmd::modules::sensors::Attend::Absent,
         mods_background: false,
     };
     let r = Ways::new(ctx).build(&[project]);
@@ -498,7 +498,7 @@ fn ctx_of(fx: &Fixture) -> Ctx {
         claude: fx.root.join(".claude"),
         judge: || None,
         mods: Vec::new,
-        sensors: || None,
+        sensors: || crate::cmd::modules::sensors::Attend::Absent,
         mods_background: false,
     }
 }
@@ -921,7 +921,7 @@ fn a_prefix_switch_shows_its_ways_off_and_is_not_listed_as_not_found() {
         claude: fx.root.join(".claude"),
         judge: || None,
         mods: Vec::new,
-        sensors: || None,
+        sensors: || crate::cmd::modules::sensors::Attend::Absent,
         mods_background: false,
     };
     let r = Ways::new(ctx).build(&[project]);

@@ -27,31 +27,64 @@ pub struct Described {
 /// How long attend's answer is waited on.
 const ATTEND_WAIT: Duration = Duration::from_secs(2);
 
-/// attend's account of its sensors, from the `attend` on PATH; `None` when
-/// there is none, or it does not answer within [`ATTEND_WAIT`] or in JSON.
-pub fn described() -> Option<Vec<Described>> {
-    let mut child = std::process::Command::new("attend")
-        .args(["sensor", "list", "--json"])
+/// What the `attend` on PATH said of its sensors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Attend {
+    /// Its own account.
+    Listed(Vec<Described>),
+    /// No `attend` on PATH.
+    Absent,
+    /// An attend that did not list its sensors: one older than `--json`,
+    /// one that failed or did not answer within [`ATTEND_WAIT`], or one
+    /// that printed no JSON.
+    Unlisted,
+}
+
+impl Attend {
+    fn find(&self, name: &str) -> Option<&Described> {
+        match self {
+            Attend::Listed(d) => d.iter().find(|d| d.name == name),
+            _ => None,
+        }
+    }
+}
+
+/// attend's account of its sensors, from the `attend` on PATH.
+pub fn described() -> Attend {
+    described_by(std::ffi::OsStr::new("attend"), &["sensor", "list", "--json"])
+}
+
+/// What `program args` answers as attend's account of its sensors.
+pub fn described_by(program: &std::ffi::OsStr, args: &[&str]) -> Attend {
+    let spawned = std::process::Command::new(program)
+        .args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
-        .spawn()
-        .ok()?;
+        .spawn();
+    let mut child = match spawned {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Attend::Absent,
+        Err(_) => return Attend::Unlisted,
+    };
     let start = Instant::now();
-    loop {
+    let status = loop {
         match child.try_wait() {
-            Ok(Some(_)) => break,
+            Ok(Some(status)) => break status,
             Ok(None) if start.elapsed() < ATTEND_WAIT => std::thread::sleep(Duration::from_millis(10)),
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return None;
+                return Attend::Unlisted;
             }
         }
-    }
+    };
     let mut out = String::new();
-    std::io::Read::read_to_string(&mut child.stdout.take()?, &mut out).ok()?;
-    parse(&out)
+    let read = child.stdout.take().is_some_and(|mut o| std::io::Read::read_to_string(&mut o, &mut out).is_ok());
+    match (status.success() && read).then(|| parse(&out)).flatten() {
+        Some(d) => Attend::Listed(d),
+        None => Attend::Unlisted,
+    }
 }
 
 /// The JSON `attend sensor list --json` prints, as [`Described`] rows.
@@ -93,6 +126,13 @@ pub fn user_sensors(layers: &[Layer], project: &Path) -> Vec<UserSensor> {
         .collect()
 }
 
+/// Whether the sensor `name`'s script is set in a project's file, which its
+/// keys are then written to.
+pub fn defined_in_project(layers: &[Layer], name: &str) -> bool {
+    let Some(spec) = attend_config::schema::SCHEMA.keys.iter().find(|k| k.name == "attend.sensors.*.script") else { return false };
+    resolve(spec, &[name.to_string()], layers).layer.and_then(|i| layers.get(i)).is_some_and(|l| l.scope == LayerScope::Project)
+}
+
 /// The rows every sensor has: its polling and its threshold.
 fn timing(sc: &SensorConfig) -> Vec<Row> {
     vec![Row::new("interval", format!("{}s quiet, {}s busy", sc.interval.as_secs(), sc.min_interval.as_secs())), Row::new("threshold", sc.threshold.to_string())]
@@ -103,14 +143,16 @@ fn enabled(sc: &SensorConfig) -> State {
 }
 
 /// The built-in sensor `name`, configured as `sc`: its crate and version as
-/// `attend` (its account, `None` when absent) reports them.
-pub fn of_builtin_sensor(name: &str, sc: &SensorConfig, attend: Option<&[Described]>) -> Module {
-    let d = attend.and_then(|a| a.iter().find(|d| d.name == name));
-    let (summary, source, version, state) = match (attend, d) {
-        (None, _) => ("built-in sensor".to_string(), "unknown: attend absent".to_string(), None, enabled(sc)),
-        (Some(_), None) => ("built-in sensor".to_string(), "unknown: attend does not list it".to_string(), None, enabled(sc)),
-        (Some(_), Some(d)) if d.state == "not compiled" => (d.description.clone(), "not compiled into this attend".to_string(), None, State::new("not compiled", Health::Attention)),
-        (Some(_), Some(d)) => {
+/// `attend` reports them. A script set under the built-in's name runs as a
+/// sensor of its own beside it, which its state says.
+pub fn of_builtin_sensor(name: &str, sc: &SensorConfig, attend: &Attend) -> Module {
+    let builtin = "built-in sensor".to_string();
+    let (summary, source, version, mut state) = match (attend, attend.find(name)) {
+        (Attend::Absent, _) => (builtin, "unknown: attend absent".to_string(), None, enabled(sc)),
+        (Attend::Unlisted, _) => (builtin, "unknown: attend did not list its sensors".to_string(), None, enabled(sc)),
+        (Attend::Listed(_), None) => (builtin, "unknown: attend does not list it".to_string(), None, enabled(sc)),
+        (_, Some(d)) if d.state == "not compiled" => (d.description.clone(), "not compiled into this attend".to_string(), None, State::new("not compiled", Health::Attention)),
+        (_, Some(d)) => {
             let (krate, version) = match d.source.split_once('@') {
                 Some((c, v)) => (c.to_string(), Some(v.to_string())),
                 None => (d.source.clone(), None),
@@ -118,7 +160,14 @@ pub fn of_builtin_sensor(name: &str, sc: &SensorConfig, attend: Option<&[Describ
             (d.description.clone(), krate, version, enabled(sc))
         }
     };
-    Module { name: name.into(), summary, kind: Kind::Crate, origin: Origin::Builtin, path: None, source, version, state, rows: timing(sc) }
+    let mut rows = timing(sc);
+    if let Some(script) = &sc.script {
+        if sc.enabled {
+            state = State::new(format!("{} · a script named {name} also runs", state.word), Health::Attention);
+        }
+        rows.push(Row::new("script", script.clone()));
+    }
+    Module { name: name.into(), summary, kind: Kind::Crate, origin: Origin::Builtin, path: None, source, version, state, rows }
 }
 
 /// The user's sensor `u`, configured as `sc`.

@@ -1,15 +1,17 @@
 //! A [`Module`] as the detail pane's card, paths under home written `~`.
 //! Where a module was added follows its origin, unless its source names
-//! the same file.
+//! the same file. A theme's card leaves its kind to the tab and puts its
+//! state beside its origin, so the theme's own rows keep their room.
 
 use std::path::Path;
 
 use agent_tui::tree::{Card, Origin, StateTone};
 
 use super::build::{tilde, tilde_home};
-use crate::cmd::modules::{self, Health, Module};
+use crate::cmd::modules::{self, Health, Kind, Module};
 
 pub fn card(m: &Module, home: &Path) -> Card {
+    let theme = m.kind == Kind::Theme;
     let at = m.path.as_deref().filter(|p| p.display().to_string() != m.source).map(|p| tilde(p, home));
     Card {
         title: m.name.clone(),
@@ -20,7 +22,7 @@ pub fn card(m: &Module, home: &Path) -> Card {
             modules::Origin::Project => Origin::Project,
         },
         at,
-        kind: Some(m.kind.word().to_string()),
+        kind: (!theme).then(|| m.kind.word().to_string()),
         source: tilde_home(&m.source, home),
         version: m.version.clone(),
         state: (
@@ -32,6 +34,7 @@ pub fn card(m: &Module, home: &Path) -> Card {
                 Health::Broken => StateTone::Err,
             },
         ),
+        fold_state: theme,
         rows: m.rows.iter().map(|r| (r.label.clone(), tilde_home(&r.value, home))).collect(),
     }
 }

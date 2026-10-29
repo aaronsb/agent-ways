@@ -232,6 +232,9 @@ pub struct Card {
     pub source: String,
     pub version: Option<String>,
     pub state: (String, StateTone),
+    /// Draw the state after the origin, in place of a row of its own: for
+    /// a pane whose own rows leave the card little room.
+    pub fold_state: bool,
     /// The rows of its kind, as (label, value).
     pub rows: Vec<(String, String)>,
 }

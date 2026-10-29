@@ -12,7 +12,7 @@ use super::mods;
 use super::{Ctx, Ways};
 use crate::cmd::attend_mod::{Degraded, State, ATTEND, JUDGE, THEME};
 use crate::cmd::modules::mods::{of_mod, Unread};
-use crate::cmd::modules::sensors::{self, Described};
+use crate::cmd::modules::sensors::{self, Attend, Described};
 use crate::cmd::modules::themes::of_theme;
 use crate::cmd::modules::{self, Health, Kind, Row};
 use crate::cmd::mods::{Attention, Overview};
@@ -24,7 +24,7 @@ fn home(tag: &str) -> PathBuf {
     d
 }
 
-fn ctx(home: &Path, sensors: fn() -> Option<Vec<Described>>) -> Ctx {
+fn ctx(home: &Path, sensors: fn() -> Attend) -> Ctx {
     Ctx {
         project: home.join("proj"),
         for_project: true,
@@ -55,21 +55,21 @@ fn project_layer(home: &Path, text: &str) -> Layer {
     Layer::from_text(&attend_config::schema::SCHEMA, "project", attend_config::schema::FILE, LayerScope::Project, Some(&path), text)
 }
 
-fn described() -> Option<Vec<Described>> {
+fn described() -> Attend {
     let d = |name: &str, state: &str, description: &str, source: &str| Described {
         name: name.into(),
         state: state.into(),
         description: description.into(),
         source: source.into(),
     };
-    Some(vec![
+    Attend::Listed(vec![
         d("git", "active", "tracks dirty files, branch changes, and upstream divergence", "attend@0.33.0"),
         d("peers", "active", "discovers Claude Code sessions and reads peer signals", "sensor-peers@0.6.0"),
         d("processes", "not compiled", "", ""),
     ])
 }
 
-fn sensors_tab(home: &Path, attend: fn() -> Option<Vec<Described>>, layers: &[Layer]) -> Node {
+fn sensors_tab(home: &Path, attend: fn() -> Attend, layers: &[Layer]) -> Node {
     Ways::new(ctx(home, attend)).build(layers).into_iter().find(|t| t.name == "sensors").expect("the sensors tab")
 }
 
@@ -135,7 +135,7 @@ fn a_script_sensor_is_listed_with_its_card_and_the_generic_rows() {
 fn a_script_sensor_is_listed_with_attend_absent() {
     let h = home("absent");
     let layers = [attend_layer(&h, "sensors:\n  mine:\n    script: .claude/sensors/mine.sh\n    enabled: false\n")];
-    let tab = sensors_tab(&h, || None, &layers);
+    let tab = sensors_tab(&h, || Attend::Absent, &layers);
     let c = card(&tab, "mine");
     assert_eq!(c.origin, Origin::User);
     assert_eq!(c.source, "~/proj/.claude/sensors/mine.sh", "a relative script is under the project");
@@ -236,7 +236,7 @@ fn a_theme_s_module_names_where_it_comes_from() {
     let dir = Path::new("/home/u/.config/agent-ways/themes");
     let bundled = of_theme(&nord, Source::Bundled, None, false, Some(dir), "plain");
     assert_eq!((bundled.kind, bundled.origin, bundled.path.as_deref(), bundled.source.as_str()), (Kind::Theme, modules::Origin::Builtin, None, "bundled (read-only)"));
-    assert_eq!(bundled.state, modules::State::new("inactive (Enter uses it)", Health::Idle));
+    assert_eq!(bundled.state, modules::State::new("inactive", Health::Idle));
     assert_eq!(bundled.rows, [Row::new("saves to", dir.display().to_string()), Row::new("shape", "plain (a: shape cycles it)")]);
     assert_eq!(bundled.summary, "nord · dark · background terminal");
 
@@ -246,6 +246,8 @@ fn a_theme_s_module_names_where_it_comes_from() {
     assert_eq!(user.state.health, Health::Running);
     let c = super::card::card(&user, Path::new("/home/u"));
     assert_eq!((c.at.as_deref(), c.source.as_str()), (None, "~/.config/agent-ways/themes/mine.theme"), "a source naming the file it was added in says it once");
+    // The theme tab says it is a theme, and the state rides the origin line.
+    assert_eq!((c.kind.as_deref(), c.fold_state), (None, true));
 
     let over = of_theme(&nord, Source::Override, Some(&dir.join("nord.theme")), false, None, "plain");
     assert_eq!(over.rows[0], Row::new("overrides", "the bundled nord"));
@@ -255,10 +257,66 @@ fn a_theme_s_module_names_where_it_comes_from() {
 #[test]
 fn the_mod_tab_puts_the_card_on_each_mod_node() {
     let h = home("modtab");
-    let mut c = ctx(&h, || None);
+    let mut c = ctx(&h, || Attend::Absent);
     c.mods = || vec![overview(ATTEND, State::Converged, &["0.29.0"], None)];
     let tab = Ways::new(c).build(&[]).into_iter().find(|t| t.name == "mod").unwrap();
     let names: Vec<(&str, &str)> = tab.children.iter().map(|n| (n.name.as_str(), n.card.as_ref().map_or("", |c| c.state.0.as_str()))).collect();
     assert_eq!(names, [("attend", "installed · enabled"), ("ways-judge", "state not read"), ("ways-theme", "state not read")]);
+    let _ = std::fs::remove_dir_all(&h);
+}
+
+#[test]
+fn an_attend_that_does_not_list_its_sensors_is_told_from_none() {
+    let none = std::ffi::OsStr::new("/nonexistent/attend-for-a-test");
+    assert_eq!(sensors::described_by(none, &[]), Attend::Absent);
+    // An older attend refuses `--json` and exits non-zero; another prints
+    // no JSON.
+    assert_eq!(sensors::described_by(std::ffi::OsStr::new("false"), &[]), Attend::Unlisted);
+    assert_eq!(sensors::described_by(std::ffi::OsStr::new("echo"), &["sensor list: unknown flag"]), Attend::Unlisted);
+    let listed = sensors::described_by(std::ffi::OsStr::new("echo"), &[r#"[{"name":"git","state":"active","description":"d","source":"attend@0.33.0"}]"#]);
+    assert!(matches!(&listed, Attend::Listed(d) if d[0].source == "attend@0.33.0"), "{listed:?}");
+
+    let h = home("unlisted");
+    let tab = sensors_tab(&h, || Attend::Unlisted, &[]);
+    let git = card(&tab, "git");
+    assert_eq!((git.source.as_str(), git.version.as_deref()), ("unknown: attend did not list its sensors", None));
+    let absent = sensors_tab(&h, || Attend::Absent, &[]);
+    assert_eq!(card(&absent, "git").source, "unknown: attend absent");
+    let _ = std::fs::remove_dir_all(&h);
+}
+
+#[test]
+fn a_script_under_a_built_in_s_name_shows_on_the_built_in_s_card() {
+    let h = home("collide");
+    let layers = [attend_layer(&h, "sensors:\n  git:\n    script: /opt/mine/git.sh\n")];
+    let tab = sensors_tab(&h, described, &layers);
+    let names: Vec<&str> = tab.children.iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(names, attend_config::schema::BUILTINS, "listed once, as the built-in");
+    let git = card(&tab, "git");
+    assert_eq!((git.origin, git.kind.as_deref()), (Origin::Builtin, Some("crate")));
+    assert_eq!(git.state, ("enabled · a script named git also runs".to_string(), StateTone::Warn));
+    assert_eq!(git.rows.last(), Some(&("script".to_string(), "/opt/mine/git.sh".to_string())));
+    // Switched off, neither runs, and nothing collides.
+    let off = [attend_layer(&h, "sensors:\n  git:\n    script: /opt/mine/git.sh\n    enabled: false\n")];
+    assert_eq!(card(&sensors_tab(&h, described, &off), "git").state, ("disabled".to_string(), StateTone::Plain));
+    let _ = std::fs::remove_dir_all(&h);
+}
+
+/// A sensor a project's file defines is edited in that file; one the user
+/// defines, in the user's.
+#[test]
+fn a_script_sensor_s_rows_write_to_the_file_that_defines_it() {
+    let h = home("writes");
+    let layers = [attend_layer(&h, "sensors:\n  mine:\n    script: /opt/mine.sh\n"), project_layer(&h, "sensors:\n  disk:\n    script: .claude/sensors/disk.sh\n")];
+    let tab = sensors_tab(&h, described, &layers);
+    let store = |sensor: &str, key: &str| {
+        let node = tab.children.iter().find(|n| n.name == sensor).unwrap();
+        node.children.iter().find(|n| n.name == key).and_then(|n| n.setting.as_ref()).and_then(|s| s.store.clone()).unwrap_or_else(|| panic!("{sensor}.{key} has no store"))
+    };
+    let disk = store("disk", "interval");
+    assert_eq!((disk.layer.as_str(), disk.file.as_path()), ("project", h.join("proj/.claude/attend.yaml").as_path()));
+    assert_eq!(store("disk", "script").layer, "project");
+    assert_eq!(store("mine", "interval").layer, "user");
+    assert_eq!(store("git", "interval").layer, "user", "a built-in's keys stay in the user's file");
     let _ = std::fs::remove_dir_all(&h);
 }
