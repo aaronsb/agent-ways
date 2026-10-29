@@ -245,7 +245,7 @@ impl SensorSpec {
 pub enum Block {
     Crate(CrateBlock),
     Command(CommandBlock),
-    Mcp(McpBlock),
+    Mcp(Box<McpBlock>),
     /// ways' rules and dispatch (ADR-199), carried as written: attend hosts
     /// no ways sensor.
     Ways(Mapping),

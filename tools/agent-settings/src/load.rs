@@ -830,7 +830,7 @@ mod tests {
     #[test]
     fn an_explained_retired_key_reports_each_old_key_on_its_line() {
         fn explain(top: &str, v: &Value, scope: LayerScope) -> Vec<(Vec<String>, String)> {
-            let keys = v.as_mapping().map(|m| m.keys().filter_map(|k| k.as_str().map(str::to_string)).collect()).unwrap_or_else(Vec::new);
+            let keys: Vec<String> = v.as_mapping().map(|m| m.keys().filter_map(|k| k.as_str().map(str::to_string)).collect()).unwrap_or_default();
             keys.into_iter().map(|k| (vec![top.to_string(), k.clone()], format!("write {k} elsewhere ({scope:?})"))).collect()
         }
         static S: Schema = Schema { component: "t", files: &[FileSpec { id: "cfg", retired: &[("old_key", "old_key was retired")], explain: Some(explain) }], sections: SECTIONS, keys: KEYS };

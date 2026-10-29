@@ -184,7 +184,7 @@ impl Reader {
                 }
             },
             Kind::Command => Block::Command(self.command(m, &state)?),
-            Kind::Mcp => Block::Mcp(self.mcp(m)?),
+            Kind::Mcp => Block::Mcp(Box::new(self.mcp(m)?)),
             Kind::Ways => unreachable!("returned above"),
         };
         Some(SensorSpec { spec, name: stem.to_string(), description, kind, enabled, cadence, declared_lane, author, lane_exception, requires, triggers, state, block })
