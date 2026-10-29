@@ -61,6 +61,22 @@ describe('which suggestions match', () => {
     expect(commands(words.map(word => `! ${word}`).join('\n'))).toEqual(words.map(word => `! ${word}`))
   })
 
+  test('a command that opens with an environment assignment or a test bracket, as a line and as a span', () => {
+    const lines = ['! CLAUDE_CODE_TYPES=/x make test-plugins', '! VAR=1 cmd', '! RUST_LOG=debug cargo run', '! [ -f x ] && echo y']
+    expect(commands(lines.join('\n'))).toEqual(lines)
+    expect(commands('Run `! VAR=1 cmd` or `! [ -f x ] && echo y`.')).toEqual(['! VAR=1 cmd', '! [ -f x ] && echo y'])
+  })
+
+  test('a paragraph indented four columns inside a list item is the item\'s, and a command', () => {
+    expect(commands('1. Build it:\n\n    ! make dev-install\n\n2. Next')).toEqual(['! make dev-install'])
+    expect(commands('- Build it:\n\n    ! make dev-install')).toEqual(['! make dev-install'])
+    expect(prose('1. Build it:\n\n    ! make dev-install\n\n2. Next')).toEqual(['1. Build it:', '2. Next'])
+  })
+
+  test('a `<!--` inside a code span opens no comment', () => {
+    expect(commands('Write `<!--` to open a comment.\n\n! git status')).toEqual(['! git status'])
+  })
+
   test('a line after prose with no blank line between keeps its four-space indent and is a command', () => {
     expect(commands('- item\n    ! git status')).toEqual(['! git status'])
   })
@@ -133,6 +149,8 @@ describe('what does not match', () => {
     ['a span on a line with a whole HTML comment', 'run `! ls` <!-- later -->'],
     ['an indented code block after a blank line', 'Example:\n\n    ! git status\n\n    ! git diff'],
     ['an indented code block at the start', '\t! git status'],
+    ['an indented code block inside a list item, four columns past its content', '1. Build it:\n\n       ! make dev-install'],
+    ['an indented code block after a list has closed', '- a\n\npara\n\n    ! git status'],
     ['prose that starts with `! ` and a capital', '! This is not a command'],
     ['`! =`', '! = y'],
     ["a TeX log's error line", '! Undefined control sequence.\nl.12 \\foo'],
