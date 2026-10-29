@@ -92,6 +92,9 @@ considered:
     said: "Allow-list: a repo's command and mcp sensors are refused until the project is in attend.project_sensors in the user config"
     via: session 2026-10-29, choice question on the project-trust probe, selected from agent-written options
     covers: [project-trust]
+  - operator: aaronsb
+    said: "other than that I like the adr and can accept. perhaps we could implement using worktrees"
+    via: "session 2026-10-29, after the PR #1204 amendment"
 observable:
   - 'see: attend sensor list shows a shipped git.yaml, a user weather.yaml (kind: command, Open-Meteo) and a user slack-unread.yaml (kind: mcp), each with its source file and last poll state'
   - 'run: attend sensor fire weather/high-wind --input sample.json produces a [test] notification on the event lane and leaves the trigger''s stored state unchanged'
@@ -105,7 +108,7 @@ observable:
   - 'see: a store file edited by hand to hold an undeclared field, a wrong type or an over-long string is discarded at the next attend start and shown as a sensor state; an untouched store survives a restart and the next poll fires only on a real change'
   - 'see: a store whose sensor file is deleted is gone after the next start, and attend sensor list names the deletion; a store older than the retention limit is removed, and its sensor''s first poll sets a baseline without firing'
   - 'run: attend sensor fire slack-unread/new-message --input FILE, where FILE raises unread from 2 to 3 and carries a new last_ts, produces one [test] notification on the message lane reading "the last message in slack mcp from <user> at <ts> says <text>" with the values from FILE'
-status: proposed
+status: accepted
 date: 2026-10-03
 deciders:
   - aaronsb
