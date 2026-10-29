@@ -2,7 +2,7 @@
 
 Attend reads a two-layer YAML configuration following the same overlay pattern as ways (ADR-115). User-scope config applies to every attend invocation; project-scope config layers on top to add or override specific settings for work in that project.
 
-This page is the reference for the full config surface: where files live, what every key does, and how the overlay works.
+This page is the reference for the full config surface: where files live, what every key does, and how the overlay works. Each sensor is a YAML file of its own, layered the same way; [`authoring-sensors.md`](authoring-sensors.md) has their spec.
 
 ## File locations
 
@@ -20,12 +20,12 @@ The user-scope path respects `XDG_CONFIG_HOME` if set; otherwise it falls back t
 The keys are described by one schema, `attend-config`, which `ways settings` composes with ways' own (ADR-503). Every key is named `attend.<section>.<key>`:
 
 ```bash
-ways settings                                   # the settings screens: attend's tabs are `attend` and `sensors`
+ways settings                                   # the settings screens
 ways settings list attend                       # every attend key in effect, as key=value
 ways settings get attend.engagement.decay_per_minute
-ways settings set attend.sensors.git.interval 60 --project .   # writes .claude/attend.yaml
-ways settings help attend.sensors.*.script      # what a key does, its type, range and default
-ways settings lint                              # findings in every settings file; exit 3 with any
+ways settings set attend.governor.base_cooldown 30 --project .   # writes .claude/attend.yaml
+ways settings help attend.governor.base_cooldown   # what a key does, its type, range and default
+ways settings lint                              # findings in every settings file and sensor file; exit 3 with any
 ways settings fix attend.engagement             # repair what that section's findings point at
 
 attend config init      # write the default config to ~/.config/attend/config.yaml, if none is there
@@ -36,7 +36,7 @@ attend config lint      # the findings in attend's two files; exit 3 with any
 
 Every write goes through the one settings writer: it takes a lock beside the file, changes only the keys it sets, keeps every comment and the order of the rest, and renames a temporary file into place. `attend config tune --apply` and `ways settings set` leave the same bytes.
 
-A value of the wrong type or out of range is a finding, never clamped. A section with a finding is ignored in that file, so its keys resolve from the layers beneath, ending at the defaults; each sensor falls back alone. A switch fails closed: a sensor or `cleanup` whose `enabled` holds anything but `true` in an entry with a finding reads as off. A sensor name the schema refuses (such as the retired `-processes:`) closes that file's `sensors:`: every built-in and every sensor the file names reads off until the name is edited by hand, and `ways settings fix` will not guess at it. A file that does not parse sets nothing; `cleanup` and every built-in sensor are off in its scope until its syntax is fixed by hand. Each finding is one line on stderr of `attend run` and `attend config show`, naming the file, line and section.
+A value of the wrong type or out of range is a finding, never clamped. A section with a finding is ignored in that file, so its keys resolve from the layers beneath, ending at the defaults. A switch fails closed: a `cleanup` whose `enabled` holds anything but `true` in a section with a finding reads as off. A file that does not parse sets nothing; `cleanup` is off in its scope until its syntax is fixed by hand. Each finding is one line on stderr of `attend run` and `attend config show`, naming the file, line and section.
 
 `attend config init` creates the user-scope file with fully commented defaults, and never overwrites one that exists.
 
@@ -63,50 +63,8 @@ cleanup:
   enabled: true              # master switch
   interval: 600              # seconds between auto-sweeps (10 minutes)
 
-# Per-sensor configuration — applies to built-ins and script sensors
-sensors:
-  context:
-    interval: 60             # base polling interval in seconds
-    min_interval: 20         # fastest polling interval
-    threshold: 1.5           # emission threshold (accumulator must exceed)
-    decay_threshold: 3       # quiet polls before interval decays back
-    requires:                # permission audit (ADR-116)
-      - Read
-  git:
-    interval: 30
-    min_interval: 10
-    threshold: 2.0
-    decay_threshold: 4
-    requires:
-      - Bash(git:*)
-  peers:
-    interval: 30
-    min_interval: 10
-    threshold: 2.0
-    decay_threshold: 5
-    requires:
-      - Read
-  processes:
-    interval: 30
-    min_interval: 5
-    threshold: 2.0
-    decay_threshold: 5
-    requires:
-      - Bash(ps:*)
-  disclosure:
-    interval: 60
-    min_interval: 20
-    threshold: 5.0
-    decay_threshold: 3
-    requires:
-      - Bash(ways:*)
-  keepwarm:                  # wakes only while armed (attend keepwarm on)
-    interval: 60
-    min_interval: 60
-    threshold: 3.0
-    decay_threshold: 3
-    requires:
-      - Bash(ways:*)
+# Projects whose own command and mcp sensor files run (user file only)
+project_sensors: []
 ```
 
 The `governor` block governs the event lane. The message lane (`peers`, `keepwarm`) uses a fixed permissive governor with no keys (see [`delivery.md`](delivery.md#the-monitor-line)).
@@ -165,108 +123,43 @@ attend message cleanup --dry-run              # list what would be removed
 attend message cleanup --all                  # nuke everything (ignore liveness)
 ```
 
-### `sensors`
+### `project_sensors`
 
-Per-sensor configuration. Each built-in sensor can have its intervals, threshold, decay, and permissions overridden. A sensor of your own is declared in the same block: any name with a `script`. A sensor's name is letters, digits, `-` and `_`.
-
-**Existing built-in override:**
+The projects whose own `command` and `mcp` sensor files attend runs (ADR-403). A list of project directories; entries expand `~`, `$HOME` and `$XDG_*`. Only the user file sets it. A project's `.claude/attend/sensors/` file of either kind is `refused` until its project is listed; [`authoring-sensors.md`](authoring-sensors.md#project-files-and-the-allow-list) says what runs meanwhile.
 
 ```yaml
-sensors:
-  git:
-    interval: 60         # poll less often in this project
-    threshold: 3.0       # raise the bar
+project_sensors:
+  - ~/Projects/example
 ```
 
-**Disable a built-in:**
+### Sensors
 
-```yaml
-sensors:
-  processes:
-    enabled: false
-```
-
-**Add a new script sensor:**
-
-```yaml
-sensors:
-  github-project:
-    script: $XDG_DATA_HOME/attend/sensors/github-project.sh
-    interval: 300
-    min_interval: 60
-    threshold: 2.5
-    decay_threshold: 3
-    requires:
-      - Bash(gh:*)
-```
-
-The `script` key makes it a sensor of your own. Script paths are deliberately unconstrained — they can be:
-
-- **User-global**, under `$XDG_DATA_HOME/attend/sensors/` (the convention this config documents by default). Survives across projects; lives in your own trusted script dir.
-- **Project-scoped**, at `.claude/sensors/name.sh` in a specific repo. Only loads when attend runs from that project.
-- **Absolute paths** to anywhere on disk — your personal tools repo, a team-shared scripts dir, `~/bin`, wherever you keep trusted executables.
-
-Attend only cares that the path resolves and that the script respects the subprocess contract. The `$HOME`, `~`, and `$XDG_*` prefixes are expanded when the config loads, so `$XDG_DATA_HOME/...` in config becomes an absolute path at load time. This keeps configs portable across machines.
-
-**The shipped example.** Attend ships one external sensor at `tools/attend/examples/xdg-downloads.sh` in the agent-ways repo as a reference implementation. The default user-scope config declares it as `xdg-downloads:` with `enabled: false`. To actually run it you copy the script to a trusted location you control (the comment in the default config walks through `$XDG_DATA_HOME/attend/sensors/` as the XDG-convention choice), review it, and flip `enabled: true`. The "copy to a trusted path, review, then enable" workflow is intentional — external sensors run arbitrary shell under your user, and you should always audit a sensor's code before letting it run.
-
-### Per-sensor keys
-
-All sensors (built-in or script) accept:
-
-- **`interval`** (seconds): base polling interval when quiet
-- **`min_interval`** (seconds): fastest polling interval during active change
-- **`threshold`** (float): emission threshold — accumulator must exceed this
-- **`decay_threshold`** (count): number of quiet polls before interval decays back to base
-- **`enabled`** (bool): set false to disable without removing the entry
-- **`script`** (path, script sensors only): path to the executable
-- **`requires`** (list): permission strings audited against `settings.json` (ADR-116)
-
-Some sensors accept additional sensor-specific keys:
-
-- **`processes.watch`** (list): replaces the default build-tool watch list. Exits of tools on this list get build enrichment (the affordance line, success and failure magnitudes, the marker file); other tracked processes get a plain `X exited`. See [`sensors.md`](sensors.md#the-watch-list) for the default list.
+Each sensor is a file under `attend/sensors/` in the user and project layers, not a section of these files. The `sensors:` section these files once held, its `+name:` and `-name:` prefixes and its inline `script:` sensors are retired with no reader. `ways settings lint`, `attend config lint` and `attend run` report each of their keys with the sensor file to write and the field to set there ([`authoring-sensors.md`](authoring-sensors.md#the-retired-forms)).
 
 ## Overlay semantics
 
-The overlay layers project-scope on top of user-scope. For each setting:
-
-- **Scalar values** (numbers, strings, bools): project-scope replaces user-scope entirely
-- **Sensor blocks**: merge on a per-key basis — a project can override just one sensor's interval without touching the others
-- **Sensors of your own** (a name with `script:`): union — the project can add script sensors the user-scope doesn't know about
-- **Sensor disables** (`enabled: false`): the sensor is off for this project only
+The overlay layers project-scope on top of user-scope, key by key: a project value replaces the user value for that key, and every key the project leaves out keeps the user's. `project_sensors` is read from the user file alone.
 
 Example. User-scope:
 
 ```yaml
-sensors:
-  git:
-    interval: 30
-    threshold: 2.0
+governor:
+  base_cooldown: 15
+  max_per_window: 3
 ```
 
 Project-scope at `<repo>/.claude/attend.yaml`:
 
 ```yaml
-sensors:
-  git:
-    interval: 60         # slow down git polling in this repo only
-  processes:
-    enabled: false       # don't run the process sensor here
-  build-watcher:
-    script: .claude/sensors/build-watcher.sh
-    interval: 20
+governor:
+  max_per_window: 1      # at most one event-lane disclosure per window in this repo
 ```
 
-Merged result in that project:
-
-- `git`: interval 60 (from project), threshold 2.0 (inherited from user)
-- `processes`: disabled
-- `context`, `peers`, `disclosure`, `keepwarm`: unchanged defaults
-- `build-watcher`: active per project-scope declaration
+Merged result in that project: `base_cooldown` 15 (from user), `max_per_window` 1 (from project), `rate_window` 120 (the default).
 
 ## Permissions (ADR-116)
 
-The `requires:` list on each sensor block declares the harness permissions that sensor needs. Running `attend sensor permissions` walks your config and checks each declared requirement against `settings.json`:
+A sensor file's `requires:` list declares the harness permissions the sensor needs. `attend sensor permissions` checks each one against `~/.claude/settings.json`:
 
 ```bash
 $ attend sensor permissions
@@ -275,7 +168,6 @@ $ attend sensor permissions
 
   Sensor          Requires       Status
   ──────────────────────────────────────
-  +build-watcher  Bash(cargo:*)  MISSING
   context         Read           granted
   disclosure      Bash(ways:*)   granted
   git             Bash(git:*)    granted
@@ -283,19 +175,17 @@ $ attend sensor permissions
   peers           Read           granted
   processes       Bash(ps:*)     granted
 
-  1 missing permission(s). Add to settings.json:
-    "Bash(cargo:*)"
+  All permissions granted.
 ```
 
-Use this to confirm your config will actually work before launching attend — a sensor that requires a permission you haven't granted will silently emit nothing.
+A missing grant prints as `MISSING`, with the line to add to `settings.json`.
 
 ## The schema
 
-The files are YAML, read by `serde_yaml` and checked against attend's schema in the `attend-config` crate. Flow and block lists read the same (`requires: [Bash(gh:*), Read]`, or one `- item` per line). Anchors, block scalars and any other YAML work; a key the schema does not name is a finding.
+The files are YAML, read by `serde_yaml` and checked against attend's schema in the `attend-config` crate. Flow and block lists read the same (`project_sensors: [~/a, ~/b]`, or one `- item` per line). Anchors, block scalars and any other YAML work; a key the schema does not name is a finding.
 
 Removed with the hand-written parser (ADR-506; the release notes say how to move a file by hand):
 
-- the `+name:` and `-name:` sensor prefixes: write `name:` with a `script`, and `enabled: false`;
 - the `x-` escape hatch for keys of your own: any key the schema does not name is a finding;
 - `attend config lint --fix` and `--check`: `attend config lint` exits 3 with findings, and `ways settings fix <section>` repairs them;
 - the startup refusal of `burst_window`: it is an unknown key like any other.
@@ -321,5 +211,6 @@ Where the file has no `mods` section, fix renames the block in place: `attend_mo
 - **ADR-117** — sensor crate extraction (feature flags for compile-time sensor selection)
 - **ADR-123** — action potential engagement (the `engagement` block)
 - [`engagement.md`](engagement.md) — engagement model in depth
-- [`authoring-sensors.md`](authoring-sensors.md) — how to declare and write new sensors
-- [`sensors.md`](sensors.md) — the built-in sensors and their default values
+- **ADR-403** — sensors as files under one spec
+- [`authoring-sensors.md`](authoring-sensors.md) — the sensor file spec, its layers and the project allow-list
+- [`sensors.md`](sensors.md) — the shipped sensors and their values

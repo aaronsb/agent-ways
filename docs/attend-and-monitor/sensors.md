@@ -1,30 +1,46 @@
-# Sensors — the built-in set
+# Sensors — the shipped set
 
-Attend ships six built-in sensors. Three are modules of the attend crate and always compiled in: `context`, `git` and `disclosure`, under `tools/attend/src/sensors/`. Three are separate crates linked behind feature flags: `sensor-peers`, `sensor-processes` and `sensor-keepwarm`. Anything else is a sensor of your own, an external script or another crate (see [`authoring-sensors.md`](authoring-sensors.md)).
+Every sensor is one YAML file (ADR-403). attend embeds eight shipped files, kept in the repository under `attend/sensors/` and projected with the app to `$XDG_DATA_HOME/agent-ways/attend/sensors/`. Six are `crate` sensors, each configuring a compiled sensor: `context`, `git` and `disclosure` are modules of attend under `tools/attend/src/sensors/` and always compiled; `peers`, `processes` and `keepwarm` are the crates `sensor-peers`, `sensor-processes` and `sensor-keepwarm`, linked behind feature flags. The other two, `example-command` and `example-mcp`, ship with `enabled: false` as patterns to copy. A file of the same name in your user or project layer changes any field of a shipped one; [`authoring-sensors.md`](authoring-sensors.md) has the spec.
 
-`attend sensor list` lists what is running:
+`attend sensor list` shows every sensor the files declare:
 
 ```
-  Sensor     Kind    State  Interval  Description                                                   Source
-  ────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  context    builtin active 60s / 20s tracks context window usage and projects compaction           attend@0.15.2
-  git        builtin active 30s / 10s tracks dirty files, branch changes, and upstream divergence   attend@0.15.2
-  peers      builtin active 30s / 10s discovers Claude Code sessions and reads peer signals         sensor-peers@0.6.0
-  processes  builtin active 30s / 5s  watches build/package tools and correlates exits with markers sensor-processes@0.6.0
-  disclosure builtin active 60s / 20s reheats affordance instructions on token-distance drift       attend@0.15.2
-  keepwarm   builtin active 60s / 60s keeps the prompt cache warm with one wake per idle stretch    sensor-keepwarm@0.1.0
+  Sensor          Kind    Origin  State  Lane    Interval   Source                 File
+  ─────────────────────────────────────────────────────────────────────────────────────
+  context         crate   builtin active event   60s / 20s  attend@0.33.0          -
+  disclosure      crate   builtin active event   60s / 20s  attend@0.33.0          -
+  example-command command builtin off    event   300s / 60s sh                     -
+  example-mcp     mcp     builtin off    message 120s / 60s slack/list_unread      -
+  git             crate   builtin active event   30s / 10s  attend@0.33.0          -
+  keepwarm        crate   builtin active message 60s / 60s  sensor-keepwarm@0.1.0  -
+  peers           crate   builtin active message 30s / 10s  sensor-peers@0.6.0     -
+  processes       crate   builtin active event   30s / 5s   sensor-processes@0.6.0 -
 ```
+
+`Origin` is the highest layer with a file for the sensor: `builtin`, `user` or `project`. `File` is that layer's file; a shipped file shows its copy in the app dir, or `-` when the app dir has none. `Source` is the compiled sensor and its version for a crate sensor, the program for a command sensor, and the server and tool for an mcp sensor. Below the table, one line per sensor gives the reason behind a state and any note, such as a lane the author rule refused or a project file the allow-list refused. `--json` prints the same with each layer's file and the last poll's outcome.
+
+| State | Meaning |
+|---|---|
+| `active` | attend polls it, and its last poll, if any, succeeded |
+| `failed` | attend polls it, and its last poll failed; the line below says why |
+| `off` | its file sets `enabled: false` |
+| `invalid` | a problem in its merged files keeps it from running |
+| `refused` | a project command or mcp file, from a project not in `attend.project_sensors`, with no lower layer |
+| `not hosted` | a `command` or `mcp` sensor, which attend runs from ADR-403 slices 2 and 3, or a `ways` sensor, which ways runs (ADR-199) |
+| `not compiled` | its file names a compiled sensor this build leaves out |
 
 ## Summary
 
-| Sensor | Observes | Interval / min | Threshold | Lane |
-|---|---|---|---|---|
-| **context** | the session's own token usage | 60s / 20s | 1.5 | event |
-| **git** | the working tree and its upstream | 30s / 10s | 2.0 | event |
-| **peers** | other Claude sessions and peer messages | 30s / 10s | 2.0 | message |
-| **processes** | build and dev-tool processes | 30s / 5s | 2.0 | event |
-| **disclosure** | tokens since attend last taught the messaging contract | 60s / 20s | 5.0 | event |
-| **keepwarm** | idle time against the prompt-cache hour | 60s / 60s | 3.0 | message |
+These are the shipped files' values.
+
+| Sensor | Observes | Interval / min | Threshold | Decay | Lane | Requires |
+|---|---|---|---|---|---|---|
+| **context** | the session's own token usage | 60s / 20s | 1.5 | 3 | event | `Read` |
+| **git** | the working tree and its upstream | 30s / 10s | 2.0 | 4 | event | `Bash(git:*)` |
+| **peers** | other Claude sessions and peer messages | 30s / 10s | 2.0 | 5 | message | `Read` |
+| **processes** | build and dev-tool processes | 30s / 5s | 2.0 | 5 | event | `Bash(ps:*)` |
+| **disclosure** | tokens since attend last taught the messaging contract | 60s / 20s | 1.5 | 3 | event | `Bash(ways:*)` |
+| **keepwarm** | idle time against the prompt-cache hour | 60s / 60s | 3.0 | 3 | message | `Bash(ways:*)` |
 
 Every sensor polls faster (toward its minimum interval) while it sees change and slower (toward its base interval) when quiet. Event-lane sensors pass through the action-potential refractory and the strict governor ([`engagement.md`](engagement.md)). Message-lane sensors skip the refractory and use the message lane's permissive governor ([`delivery.md`](delivery.md#the-monitor-line)).
 
@@ -79,7 +95,7 @@ Discovers other Claude Code sessions from `~/.claude/sessions/*.json` and reads 
 
 **Messages.** Each poll scans the project tray, `_broadcast/` and every joined channel, and emits every unseen message. Base magnitudes are 7.0 for a message sent to the project, 5.0 for a channel and 4.0 for `#open`, raised by the per-peer boost ([`engagement.md`](engagement.md#per-peer-boost)). More than 8 messages in one poll become one count line. [`delivery.md`](delivery.md) covers the line format, the cold start and the Stop-hook drain.
 
-The whole sensor rides the message lane, so session events skip the refractory too. That is a known limitation of ADR-136, which chose lanes per sensor rather than per observation.
+Its file declares `lane: message` with `author: sender`, the field of each message that names who wrote it. The lane is per sensor, so session events from the same poll ride the message lane and skip the refractory too, until message scanning becomes a sensor of its own (#139).
 
 The sensor re-reads `_groups.yaml` on every poll, so `attend channel join` and `attend channel leave` take effect on the next scan.
 
@@ -118,12 +134,10 @@ go, npm, yarn, pnpm, tsc,
 mvn, gradle, pip, pip3
 ```
 
-`sensors.processes.watch` replaces the default; it is not merged, and an empty list turns enrichment off. An entry is matched against the tracked name, not the raw `comm`: `node` watches `node-MainThread`, `npm` watches `npm test` and `npm run dev`, and `npx` watches `npm exec …`. Every watched tool is tracked, so a name added here produces events even when it is not on the tracked list. To enrich only Rust and C builds:
+`watch` in a `processes.yaml` of your own replaces the default, and an empty list turns enrichment off. An entry is matched against the tracked name, not the raw `comm`: `node` watches `node-MainThread`, `npm` watches `npm test` and `npm run dev`, and `npx` watches `npm exec …`. Every watched tool is tracked, so a name added here produces events even when it is not on the tracked list. To enrich only Rust and C builds, write `$XDG_CONFIG_HOME/attend/sensors/processes.yaml`, or `.claude/attend/sensors/processes.yaml` for one project:
 
 ```yaml
-sensors:
-  processes:
-    watch: [cargo, rustc, make, cmake, ninja, gcc, g++]
+watch: [cargo, rustc, make, cmake, ninja, gcc, g++]
 ```
 
 ### Exit codes through a marker file
@@ -154,23 +168,25 @@ The body is `tools/attend/src/sensors/disclosures/messaging.md`, compiled into t
 
 ## `keepwarm`
 
-While armed, wakes an idle session once at 50 idle minutes so the prompt cache is read before its hour lapses (ADR-182). It emits at 3.0 on the message lane and needs a resolved session id; without one it does not start. Arming, the status card, the cost model and the agent's one-word contract are in [`keepwarm.md`](keepwarm.md).
+While armed, wakes an idle session once at 50 idle minutes so the prompt cache is read before its hour lapses (ADR-182). It emits at 3.0 on the message lane and needs a resolved session id; without one it does not start. Its wake has no author, so its shipped file records the lane as an exception (`lane_exception`, ADR-182), a field only a shipped file may set. Arming, the status card, the cost model and the agent's one-word contract are in [`keepwarm.md`](keepwarm.md).
 
 ## Choosing where a new observation goes
 
-1. **Does a built-in cover it?** The `git` sensor already watches git state.
-2. **Can a shell command observe it?** Then write an external script sensor: no Rust and no rebuild. Almost everything belongs here, from GitHub Project boards to custom event logs. See [`authoring-sensors.md`](authoring-sensors.md).
-3. **Does it need native speed, shared state or complex logic?** Then write a crate sensor: a new `sensor-*` crate in `tools/` that implements `Sensor`, added to attend's `Cargo.toml` as an optional dependency with a feature, and registered in `tools/attend/src/sensors/mod.rs`.
+1. **Does a shipped sensor cover it?** The `git` sensor already watches git state. A file of the same name in your user or project layer tunes it.
+2. **Can a program print it?** Then write a `command` sensor from `example-command.yaml`: an argv and its output, with no Rust and no rebuild. attend hosts the kind from ADR-403 slice 2; until then the file loads, lints and lists as `not hosted`.
+3. **Does a read-only MCP tool return it?** Then write an `mcp` sensor from `example-mcp.yaml`. attend hosts the kind from slice 3.
+4. **Does it need native speed, state no file can declare, or complex logic?** Then write a compiled sensor: a `sensor-*` crate in `tools/` that implements `Sensor`, an optional dependency of attend with a feature, and a shipped `crate` file that names it. See [`authoring-sensors.md`](authoring-sensors.md#compiled-sensors).
 
 ## Related
 
-- [`authoring-sensors.md`](authoring-sensors.md) — writing new sensors
+- [`authoring-sensors.md`](authoring-sensors.md) — the sensor file spec and writing new sensors
+- [`first-sensor.md`](first-sensor.md) — a first sensor file, step by step
 - [`engagement.md`](engagement.md) — the event lane's refractory
 - [`delivery.md`](delivery.md) — the message lane and its two conduits
 - [`keepwarm.md`](keepwarm.md) — the keepwarm sensor in full
-- [`configuration.md`](configuration.md) — per-sensor keys and defaults
 - **ADR-113** — attend and the first context sensor
 - **ADR-117** — sensor crate extraction and feature flags
 - **ADR-122** — the disclosure sensor
 - **ADR-136** — the event and message lanes
 - **ADR-182** — keepwarm
+- **ADR-403** — sensors as files under one spec

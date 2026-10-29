@@ -12,7 +12,7 @@ Said another way: **Monitor is a delivery mechanism; attend is the editorial lay
 
 ## The pair
 
-**Attend** is a sensor loop. It watches the local environment (git state, peer sessions, context pressure, process activity, peer messages, and any external sensors a user wires in) and emits observations when something crosses a threshold. It runs as a single long-lived process inside the Claude Code session.
+**Attend** is a sensor loop. It watches the local environment (git state, peer sessions, context pressure, process activity, peer messages, and any sensor a user adds as a file) and emits observations when something crosses a threshold. It runs as a single long-lived process inside the Claude Code session.
 
 **Monitor** is the Claude Code tool feature that launches a command and delivers each line of its stdout as an asynchronous notification into the conversation. It's general-purpose: build watchers, test runners, deploy pipelines, custom event logs all fit.
 
@@ -36,19 +36,18 @@ The attend development effort so far has put significant weight on the multi-age
 
 The common-case shape looks like this: you're writing code, Claude is helping, and you want the session to notice things that happen outside the conversation — a `make test` finished, an issue got assigned to you on GitHub, a long-running deploy finished. Attend's sensors feed those into the conversation without you having to interrupt and ask "what's the status?" The peer-messaging layer is still there if you ever run four agents at once, but you don't have to opt into it to get value.
 
-This is why **external sensors are a first-class design surface** — they're the bridge between attend's formal engagement model and whatever the user actually cares about watching. See the next section.
+This is why **sensors of your own are a first-class design surface** — they're the bridge between attend's formal engagement model and whatever the user actually cares about watching. See the next section.
 
 ## Sensor authorship is a design surface
 
-Attend is extensible through two sensor implementations, both first-class:
+Every sensor is one YAML file under one spec (ADR-403), layered by name: the files attend ships, then your own under `$XDG_CONFIG_HOME/attend/sensors/`, then a project's under `.claude/attend/sensors/`. A file's `kind` says what polls:
 
-**1. Compiled crate sensors.** A Rust crate implementing the `Sensor` trait from `sensor-trait`. Gets linked into the attend binary at build time, runs at full native speed, shares process memory with the loop. Used for the built-in sensors: `context`, `git` and `disclosure` (modules of attend itself, always compiled), and the `sensor-peers`, `sensor-processes` and `sensor-keepwarm` crates. The right choice when performance matters or when the sensor needs fine-grained control over its own state.
+- **`crate`** configures a compiled sensor: a Rust crate or attend module implementing the `Sensor` trait from `sensor-trait`. The shipped sensors are of this kind: `context`, `git` and `disclosure` (modules of attend itself, always compiled), and the `sensor-peers`, `sensor-processes` and `sensor-keepwarm` crates. A file of your own changes any of their fields without a rebuild.
+- **`command`** runs an argv and reads its output, and **`mcp`** calls one read-only tool on a stdio MCP server. Neither needs Rust or a recompile. attend loads, checks and lists both now, and runs them from ADR-403 slices 2 and 3. The shipped `example-command.yaml` and `example-mcp.yaml` are the patterns to copy.
 
-**2. External script sensors.** A shell script (or any executable) declared in the attend config as a `sensor-name:` block with a `script`. Attend runs it as a subprocess on the configured interval, parses its stdout as events, and feeds those into the same engagement/threshold/disclosure machinery. No Rust required. No recompile. The right choice for integrations with CLI tools (`gh`, `kubectl`, custom ops scripts) or for per-project sensors that don't belong in the main codebase.
+**Every kind shares one constraint: the sensor author has to understand the loop's intention.** Events are not log lines — they're magnitude-weighted observations that feed an accumulator, decay over time, and fire disclosure only when they cross a refractory-aware threshold. A sensor that emits "something happened" on every tick will either flood the governor or get suppressed into silence by action potential. A well-designed sensor encodes *how much each kind of change matters* in the event magnitude, and lets the loop handle the rest.
 
-**Both implementations share one constraint: the sensor author has to understand the loop's intention.** Events are not log lines — they're magnitude-weighted observations that feed an accumulator, decay over time, and fire disclosure only when they cross a refractory-aware threshold. A sensor that emits "something happened" on every tick will either flood the governor or get suppressed into silence by action potential. A well-designed sensor encodes *how much each kind of change matters* in the event magnitude, and lets the loop handle the rest.
-
-See [`authoring-sensors.md`](authoring-sensors.md) for the full author's guide, including a walkthrough of the canonical external sensor example: a `gh`-CLI bash wrapper that watches a GitHub Project board associated with the repo attend was invoked in, surfacing card movements as signals with magnitude tuned to whether the moved issue is assigned to the current git user.
+See [`authoring-sensors.md`](authoring-sensors.md) for the spec and the author's guide.
 
 ## What lives in this directory
 
@@ -56,9 +55,9 @@ See [`authoring-sensors.md`](authoring-sensors.md) for the full author's guide, 
 |---|---|
 | [`README.md`](README.md) | Orientation — you are here |
 | [`loop.md`](loop.md) | The sensor loop — state diagrams, timing, the two lanes |
-| [`first-sensor.md`](first-sensor.md) | Walkthrough — build your first external sensor from zero |
-| [`authoring-sensors.md`](authoring-sensors.md) | Writing crate and external sensors (reference) |
-| [`sensors.md`](sensors.md) | What each built-in sensor observes and emits |
+| [`first-sensor.md`](first-sensor.md) | Walkthrough — write your first sensor file |
+| [`authoring-sensors.md`](authoring-sensors.md) | The sensor file spec and writing sensors (reference) |
+| [`sensors.md`](sensors.md) | The shipped sensors, their states, and what each observes and emits |
 | [`engagement.md`](engagement.md) | The action-potential model on the event lane |
 | [`signals.md`](signals.md) | Signal file format, storage layout, lifecycle |
 | [`delivery.md`](delivery.md) | The Monitor line and the Stop-hook drain, enrollment, opt-out |
@@ -74,8 +73,8 @@ See [`authoring-sensors.md`](authoring-sensors.md) for the full author's guide, 
 1. **[`loop.md`](loop.md)** — if you only read one file, read this. The sensor loop is the substrate everything else rides on.
 2. **[`delivery.md`](delivery.md)** — how a peer message reaches a session, and how to opt out.
 3. **[`tui.md`](tui.md)** — if you're a human using attend directly, or coordinating multiple agents.
-4. **[`first-sensor.md`](first-sensor.md)** — if you want to build a sensor and you've never done it before.
-5. **[`authoring-sensors.md`](authoring-sensors.md)** — reference for the subprocess contract and design surface once the tutorial isn't enough.
+4. **[`first-sensor.md`](first-sensor.md)** — if you want to tune or write a sensor and you've never done it before.
+5. **[`authoring-sensors.md`](authoring-sensors.md)** — the sensor file spec and design surface once the tutorial isn't enough.
 6. **[`sensors.md`](sensors.md)**, **[`engagement.md`](engagement.md)**, **[`signals.md`](signals.md)**, **[`channels.md`](channels.md)**, **[`keepwarm.md`](keepwarm.md)**, **[`configuration.md`](configuration.md)** — reference, read as needed.
 
 The scenarios in [`../explanation/attend-messaging/`](../explanation/attend-messaging/00-overview.md) show the message lane at work with one, two and many Claudes and a human.
@@ -97,6 +96,7 @@ The scenarios in [`../explanation/attend-messaging/`](../explanation/attend-mess
 - **ADR-172** — turn-boundary delivery through the Stop-hook drain
 - **ADR-173** — the chat idiom: channels, `join`/`leave`, tabs and slash commands
 - **ADR-182** — keepwarm
+- **ADR-403** — sensors as files under one spec: crate, command and mcp
 - `docs/hooks-and-ways/` — sibling docs for the synchronous hook mechanism
 - `docs/architecture/practice/ADR-600-cognitive-loop-and-the-awareness-layer.md` — earlier design exploration that informed ADR-113
 
@@ -106,7 +106,8 @@ The scenarios in [`../explanation/attend-messaging/`](../explanation/attend-mess
 - `tools/attend-chat/` — the chat screen, on `agent-tui`
 - `tools/attend-groups/`, `attend-presence/`, `attend-state/`, `attend-config/` — channels, heartbeats and enrollment, the per-session seen-set, the config schema
 - `tools/sensor-trait/` — base `Sensor` trait, `SensorSlot`, engagement state
-- `tools/attend/src/sensors/` (`context`, `git`, `disclosure`), `tools/sensor-peers/`, `sensor-processes/`, `sensor-keepwarm/` — the built-in sensors
+- `tools/attend/src/sensors/` (`context`, `git`, `disclosure`), `tools/sensor-peers/`, `sensor-processes/`, `sensor-keepwarm/` — the compiled sensors
+- `attend/sensors/` — the shipped sensor files; `tools/sensor-spec/` parses, layers and checks them, and `tools/attend-config/src/sensors.rs` finds them
 - `hooks/ways/attend-drain-stop.sh` — the Stop hook that drains messages at the turn boundary
 - `tools/agent-fmt/` — shared terminal formatting (banners, tables, commands)
 - `skills/attend/SKILL.md` — the invocation skill the agent reads when the user asks for awareness

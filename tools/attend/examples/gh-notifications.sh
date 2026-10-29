@@ -58,23 +58,19 @@
 # Author's lever: magnitude + the reason table. Everything else is
 # attend's job.
 #
-# --- Config recipe ------------------------------------------------------
+# --- Sensor file --------------------------------------------------------
 #
-# Add to ~/.config/attend/config.yaml (or a project-scope overlay):
+# attend runs a script through a command sensor file (ADR-403), from
+# slice 2 of that record. Until then attend sensor list shows the file as
+# not hosted. $XDG_CONFIG_HOME/attend/sensors/gh-notifications.yaml:
 #
-#   sensors:
-#     gh-notifications:
-#       script: ~/.claude/tools/attend/examples/gh-notifications.sh
-#       enabled: true
-#       interval: 180      # 3 min at rest — inbox is minute-scale
-#       min_interval: 60   # 1 min during ramp-up
-#       threshold: 2.0
-#       requires:
-#         - Bash(gh:*)
-#         - Bash(jq:*)
-#
-# A commented-out stub for this sensor lives in the default user-scope
-# config — flip the comments and set `enabled: true` to turn it on.
+#   kind: command
+#   argv: [bash, /path/to/gh-notifications.sh]
+#   output: lines
+#   interval: 180      # 3 min at rest — inbox is minute-scale
+#   min_interval: 60   # 1 min during ramp-up
+#   threshold: 2.0
+#   requires: ["Bash(gh:*)", "Bash(jq:*)"]
 #
 # ----------------------------------------------------------------------
 
