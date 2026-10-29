@@ -131,12 +131,23 @@ impl Hosted {
 /// state.
 pub fn catalog(cfg: &Config, project: &str) -> Vec<Hosted> {
     let loaded = attend_config::sensors::load(std::path::Path::new(project), &cfg.project_sensors);
-    let mut out: Vec<Hosted> = loaded.into_iter().map(|l| host(l, project)).collect();
+    catalog_of(loaded, |name| hosted::read(name, project).and_then(|r| r.poll))
+}
+
+/// The sensors `loaded` declares, each with its last poll from `last`.
+fn catalog_of(loaded: Vec<Loaded>, last: impl Fn(&str) -> Option<Poll>) -> Vec<Hosted> {
+    let mut out: Vec<Hosted> = loaded
+        .into_iter()
+        .map(|l| {
+            let poll = last(&l.name);
+            host(l, poll)
+        })
+        .collect();
     claim_crates(&mut out);
     out
 }
 
-fn host(loaded: Loaded, project: &str) -> Hosted {
+fn host(loaded: Loaded, last: Option<Poll>) -> Hosted {
     let mut notes: Vec<String> = loaded
         .findings
         .iter()
@@ -146,7 +157,6 @@ fn host(loaded: Loaded, project: &str) -> Hosted {
     if let (Some(r), false) = (&loaded.refused, loaded.is_refused()) {
         notes.push(format!("the project file is refused: {r}"));
     }
-    let last = hosted::read(&loaded.name, project).and_then(|r| r.poll);
     let compiled = match loaded.spec.as_ref().map(|s| &s.block) {
         Some(Block::Crate(c)) => compiled(&c.id),
         _ => None,
@@ -195,10 +205,19 @@ fn claim_crates(all: &mut [Hosted]) {
     }
 }
 
-/// Whether an enabled file runs the compiled sensor `id`.
+/// Whether this build has the compiled sensor `id` and an enabled file runs
+/// it. It reads the files and builds `id` alone, so no other sensor's state
+/// is read.
 #[cfg_attr(not(feature = "sensor-keepwarm"), allow(dead_code))]
 pub fn crate_enabled(cfg: &Config, project: &str, id: &str) -> bool {
-    catalog(cfg, project).iter().any(|h| h.state.runs() && matches!(h.loaded.spec.as_ref().map(|s| &s.block), Some(Block::Crate(c)) if c.id == id))
+    let loaded = attend_config::sensors::load(std::path::Path::new(project), &cfg.project_sensors);
+    runs_crate(&loaded, id) && compiled(id).is_some()
+}
+
+/// Whether an enabled file of `loaded` names the compiled sensor `id`.
+#[cfg_attr(not(feature = "sensor-keepwarm"), allow(dead_code))]
+fn runs_crate(loaded: &[Loaded], id: &str) -> bool {
+    loaded.iter().filter(|l| !l.is_refused()).filter_map(|l| l.spec.as_ref()).any(|s| s.enabled && matches!(&s.block, Block::Crate(c) if c.id == id))
 }
 
 /// A compiled sensor's description and source, when this build has it.
@@ -355,12 +374,21 @@ mod tests {
         d
     }
 
+    /// The sensors of the shipped files and of `user`, each a user file's
+    /// name and text, read from no directory.
+    fn loaded(user: &[(&str, &str)]) -> Vec<Loaded> {
+        use attend_config::sensors::{file_layer, from_layers, SHIPPED};
+        use sensor_spec::Origin;
+        let mut layers: Vec<_> = SHIPPED.iter().map(|(n, t)| file_layer(n, Origin::Builtin, None, t)).collect();
+        layers.extend(user.iter().map(|(n, t)| file_layer(n, Origin::User, None, t)));
+        from_layers(&layers, std::path::Path::new("/nonexistent/p"), &[])
+    }
+
     /// Every compiled sensor the shipped files name runs under its own
     /// name, with a description and a `crate@version` source.
     #[test]
     fn the_shipped_crate_files_name_compiled_sensors_with_metadata() {
-        let project = fixture("shipped");
-        let all = catalog(&Config::default(), project.to_str().unwrap());
+        let all = catalog_of(loaded(&[]), |_| None);
         let mut compiled_n = 0;
         for h in all.iter().filter(|h| matches!(h.loaded.spec.as_ref().map(|s| s.kind), Some(Kind::Crate))) {
             assert!(!matches!(h.state, State::Invalid(_)), "{}: {:?}", h.name(), h.state);
@@ -376,18 +404,26 @@ mod tests {
         assert!(compiled_n >= 3, "context, git and disclosure are always compiled");
         let ex = all.iter().find(|h| h.name() == "example-mcp").unwrap();
         assert_eq!(ex.state, State::Off);
-        std::fs::remove_dir_all(&project).ok();
     }
 
     #[test]
     fn the_lane_comes_from_the_file() {
-        let project = fixture("lanes");
-        let all = catalog(&Config::default(), project.to_str().unwrap());
+        let all = catalog_of(loaded(&[("chat", "kind: crate\ncrate: peers\n"), ("peers", "enabled: false\n")]), |_| None);
         let lane = |n: &str| all.iter().find(|h| h.name() == n).and_then(Hosted::lane);
         assert_eq!(lane("peers"), Some(Lane::Message));
         assert_eq!(lane("keepwarm"), Some(Lane::Message));
         assert_eq!(lane("git"), Some(Lane::Event));
-        std::fs::remove_dir_all(&project).ok();
+        assert_eq!(lane("chat"), Some(Lane::Message), "the peers crate's lane, under any name");
+        let chat = all.iter().find(|h| h.name() == "chat").unwrap();
+        assert_eq!(chat.crate_id(), Some("peers"));
+    }
+
+    #[test]
+    fn a_crate_runs_when_an_enabled_file_names_it() {
+        assert!(runs_crate(&loaded(&[]), "keepwarm"));
+        assert!(!runs_crate(&loaded(&[("keepwarm", "enabled: false\n")]), "keepwarm"));
+        assert!(runs_crate(&loaded(&[("keepwarm", "enabled: false\n"), ("wake", "kind: crate\ncrate: keepwarm\n")]), "keepwarm"));
+        assert!(!runs_crate(&loaded(&[]), "nope"));
     }
 
     /// Only a sensor file changes the stamp: a swap file, a lock or any
