@@ -254,6 +254,7 @@ ADR-136 draws the lane boundary at authored communication: words a person or age
 - `lane: message` needs an author. A `command` or `mcp` file names it with `author` on each trigger: the item field, or for a state trigger the declared state field, that holds who composed the item. A `crate` file names it with a sensor-level `author`, a field the compiled sensor's items have; `peers` has `sender`.
 - A message-lane file without its author is a lint error, and attend runs that sensor on the event lane and says why in `attend sensor list`.
 - `lane_exception` records why a shipped file rides the message lane with no author. `keepwarm`'s shipped file carries the one exception (ADR-182). Only a shipped file may set it; in a user or project file it is an error and is ignored.
+- The `peers` and `keepwarm` compiled sensors always ride the message lane, under any file name: a lapsed cache drops what the event lane holds, and peers carries messages while keepwarm is the wake that keeps the cache warm. A file that declares `lane: event` for either is a lint error, and the lane is ignored.
 
 ## Testing from the CLI
 

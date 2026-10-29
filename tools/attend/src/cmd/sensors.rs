@@ -139,7 +139,7 @@ struct Outcome {
 
 fn run_through(of: Box<dyn Sensor>, lane: Lane, result: Vec<(f64, String)>, focus: &Focus) -> Outcome {
     let threshold = of.emission_threshold();
-    let mut slot = sensors::slot(Box::new(Replay { of, result }), lane);
+    let mut slot = sensors::slot(Box::new(Replay { of, result }), lane, None);
     slot.poll(focus);
     let accumulated = slot.accumulator.magnitude;
     let ready = (slot.message_lane && accumulated > 0.0) || slot.ready_to_disclose();

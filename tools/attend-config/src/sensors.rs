@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use agent_settings::schema::LayerScope;
 use agent_settings::Layer;
-use sensor_spec::{Block, Origin, Problem, SensorSpec, Severity};
+use sensor_spec::{Block, Lane, Origin, Problem, SensorSpec, Severity};
 use serde_yaml::Value;
 
 /// The shipped sensor files, by name.
@@ -29,23 +29,35 @@ pub const SHIPPED: &[(&str, &str)] = &[
     ("processes", include_str!("../../../attend/sensors/processes.yaml")),
 ];
 
-/// A compiled sensor a `crate` file may name: its own fields, and the item
-/// fields that can stand as its author on the message lane.
+/// A compiled sensor a `crate` file may name: its own fields, the item
+/// fields that can stand as its author on the message lane, and the lane it
+/// always rides, with why, when its files may not choose one.
 #[derive(Debug, Clone, Copy)]
 pub struct Crate {
     pub id: &'static str,
     pub fields: &'static [&'static str],
     pub authors: &'static [&'static str],
+    pub lane: Option<(Lane, &'static str)>,
 }
 
 /// The compiled sensors attend has, whether or not this build includes them.
 pub const CRATES: &[Crate] = &[
-    Crate { id: "context", fields: &[], authors: &[] },
-    Crate { id: "disclosure", fields: &[], authors: &[] },
-    Crate { id: "git", fields: &[], authors: &[] },
-    Crate { id: "keepwarm", fields: &[], authors: &[] },
-    Crate { id: "peers", fields: &[], authors: &["sender"] },
-    Crate { id: "processes", fields: &["watch"], authors: &[] },
+    Crate { id: "context", fields: &[], authors: &[], lane: None },
+    Crate { id: "disclosure", fields: &[], authors: &[], lane: None },
+    Crate { id: "git", fields: &[], authors: &[], lane: None },
+    Crate {
+        id: "keepwarm",
+        fields: &[],
+        authors: &[],
+        lane: Some((Lane::Message, "ADR-182: no refractory or lapsed cache may hold the timed wake")),
+    },
+    Crate {
+        id: "peers",
+        fields: &[],
+        authors: &["sender"],
+        lane: Some((Lane::Message, "it carries what people wrote, which the event lane drops on a lapsed cache")),
+    },
+    Crate { id: "processes", fields: &["watch"], authors: &[], lane: None },
 ];
 
 /// `$XDG_CONFIG_HOME/attend/sensors/`, beside the user config file.
@@ -256,8 +268,10 @@ fn layer(name: String, reads: Vec<Read>, trust: bool, project: &Path) -> Loaded 
 fn check(name: String, files: Vec<SensorFile>, docs: &[(Origin, Option<PathBuf>, Value)], doc: &Value, mut findings: Vec<Finding>) -> Loaded {
     let parsed = sensor_spec::parse(&name, doc);
     let mut problems = parsed.problems;
-    if let Some(s) = &parsed.spec {
+    let mut spec = parsed.spec;
+    if let Some(s) = &mut spec {
         problems.extend(crate_problems(s));
+        fix_lane(s, doc.get("lane").is_some(), &mut problems);
     }
     let invalid = problems.iter().any(|p| p.severity == Severity::Invalid);
     for problem in problems {
@@ -272,7 +286,23 @@ fn check(name: String, files: Vec<SensorFile>, docs: &[(Origin, Option<PathBuf>,
         };
         findings.push(Finding { file, line, problem });
     }
-    Loaded { name, files, spec: if invalid { None } else { parsed.spec }, findings, refused: None }
+    Loaded { name, files, spec: if invalid { None } else { spec }, findings, refused: None }
+}
+
+/// Put a compiled sensor with a fixed lane ([`Crate::lane`]) on that lane,
+/// whatever its files declare, with an error where one declares another.
+fn fix_lane(s: &mut SensorSpec, declared: bool, problems: &mut Vec<Problem>) {
+    let Block::Crate(c) = &s.block else { return };
+    let Some(Crate { id, lane: Some((lane, why)), .. }) = CRATES.iter().find(|k| k.id == c.id).copied() else { return };
+    problems.retain(|p| p.at != "lane");
+    if declared && s.declared_lane != lane {
+        let message = format!("the {id} sensor rides the {} lane: {why}; lane: {} is ignored", lane.as_str(), s.declared_lane.as_str());
+        problems.push(Problem { at: "lane".into(), message, severity: Severity::Error });
+    }
+    s.declared_lane = lane;
+    if s.lane() != lane {
+        s.lane_exception = Some(why.to_string());
+    }
 }
 
 /// A crate file's checks against the compiled sensor it names.
@@ -582,6 +612,22 @@ mod tests {
         assert!(check_edit(&mine, "interval: 90\n").unwrap_err().contains("kind is required"));
         assert!(check_edit(&mine, "enabled: false\n").is_ok(), "a switch alone defines nothing to refuse");
         assert!(check_edit(&dir.join("elsewhere.yaml"), "kind: [").is_ok(), "not a sensor file");
+    }
+
+    /// peers and keepwarm keep the message lane under any file name, and a
+    /// file that declares another lane for them is ignored with an error.
+    #[test]
+    fn the_peers_and_keepwarm_crates_keep_the_message_lane_whatever_their_files_say() {
+        let shipped = |n: &str| read(Origin::Builtin, SHIPPED.iter().find(|(m, _)| *m == n).unwrap().1);
+        let l = layer("peers".into(), vec![shipped("peers"), read(Origin::Project, "lane: event\n")], false, Path::new("/p"));
+        assert_eq!(l.spec.as_ref().map(|s| s.lane()), Some(sensor_spec::Lane::Message));
+        assert!(l.findings.iter().any(|f| f.problem.at == "lane" && f.problem.severity == Severity::Error && f.problem.message.contains("lane: event is ignored")), "{:?}", l.findings);
+        for (name, id) in [("chat", "peers"), ("wake", "keepwarm")] {
+            let l = layer(name.into(), vec![read(Origin::User, &format!("kind: crate\ncrate: {id}\n"))], false, Path::new("/p"));
+            assert_eq!(l.spec.as_ref().map(|s| s.lane()), Some(sensor_spec::Lane::Message), "{name}");
+            assert!(l.findings.is_empty(), "{name}: {:?}", l.findings);
+        }
+        assert!(layer("peers".into(), vec![shipped("peers")], false, Path::new("/p")).findings.is_empty());
     }
 
     #[test]

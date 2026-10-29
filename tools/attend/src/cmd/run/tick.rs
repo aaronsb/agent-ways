@@ -308,7 +308,7 @@ pub(super) fn tick_iteration(s: &mut TickState) {
         // turn boundary is not re-emitted by the poller. The remaining
         // race (a drain landing between this read and the scan) costs at
         // worst a duplicate notification — at-least-once, never loss.
-        if s.slots[i].name() == "peers" {
+        if s.slots[i].is_crate("peers") {
             if let Some(snap) = s.state_store.load() {
                 let marks: Vec<(String, String)> = snap
                     .seen_signals
@@ -416,14 +416,14 @@ pub(super) fn tick_iteration(s: &mut TickState) {
     // what the peers sensor surfaced, presence included, and it goes out
     // once the cache is warm. Messages that would wake the session wait
     // unseen in the sensor itself.
-    let gated = |i: &usize| s.slots[*i].name() != "keepwarm";
+    let gated = |i: &usize| !s.slots[*i].is_crate("keepwarm");
     if (evt_ready.iter().any(gated) || msg_ready.iter().any(gated)) && s.cache_gate.lapsed(s.heartbeat_id, &s.focus.working_dir) {
         for &i in &evt_ready {
             emit::log(&format!("{}: dropped {} event(s), the prompt cache has lapsed", s.slots[i].name(), s.slots[i].accumulator.event_count));
             s.slots[i].accumulator.reset();
         }
         evt_ready.clear();
-        msg_ready.retain(|i| s.slots[*i].name() == "keepwarm");
+        msg_ready.retain(|i| s.slots[*i].is_crate("keepwarm"));
     }
     try_disclose(s.slots, &evt_ready, s.governor, true);
     // Message lane: do not record engagement, so it never builds the
@@ -566,7 +566,7 @@ pub(super) fn flush_message_lane(slots: &mut [SensorSlot]) {
 pub(super) fn collect_snapshot(slots: &[sensors::SensorSlot]) -> state::StateSnapshot {
     let mut snapshot = state::StateSnapshot::default();
     for slot in slots {
-        let peers = slot.name() == "peers";
+        let peers = slot.is_crate("peers");
         for (key, value) in slot.export_state() {
             match key.as_str() {
                 "seen_signal" => {
@@ -620,6 +620,45 @@ mod tests {
         assert_eq!(reload_plan(true, &["peer session started: p [/p] (same project, idle, ctx 3%)"]), ReloadPlan::Quiet);
         assert_eq!(reload_plan(true, &["peer session exited: p [/p]", "message from A ~x: hi"]), ReloadPlan::Wait);
         assert_eq!(reload_plan(true, &["2 older messages held back; reading them is optional: attend message inbox"]), ReloadPlan::Wait);
+    }
+
+    /// A sensor that exports the peers sensor's cold-start mark, under a
+    /// name of its file's choosing.
+    struct Marked(&'static str);
+    impl sensors::Sensor for Marked {
+        fn name(&self) -> &str {
+            self.0
+        }
+        fn poll(&mut self, _: &sensors::Focus) -> Vec<(f64, String)> {
+            Vec::new()
+        }
+        fn emission_threshold(&self) -> f64 {
+            1.0
+        }
+        fn base_interval(&self) -> Duration {
+            Duration::from_secs(30)
+        }
+        fn min_interval(&self) -> Duration {
+            Duration::from_secs(10)
+        }
+        fn decay_threshold(&self) -> u32 {
+            3
+        }
+        fn export_state(&self) -> Vec<(String, String)> {
+            vec![("baselined".into(), "true".into())]
+        }
+    }
+
+    /// The peers sensor's state is the crate's, whatever its file is named:
+    /// a `chat.yaml` running it keeps the mark, and a file named `peers`
+    /// running another crate does not.
+    #[test]
+    fn the_snapshot_keys_the_peers_state_on_the_crate_and_not_the_name() {
+        let peers_as_chat = sensors::slot(Box::new(Marked("chat")), sensor_spec::Lane::Message, Some("peers"));
+        assert!(peers_as_chat.is_crate("peers"));
+        assert!(collect_snapshot(&[peers_as_chat]).baselined);
+        let git_as_peers = sensors::slot(Box::new(Marked("peers")), sensor_spec::Lane::Event, Some("git"));
+        assert!(!collect_snapshot(&[git_as_peers]).baselined);
     }
 
     #[test]

@@ -369,7 +369,7 @@ const KEYS: &[KeySpec] = &[
         kind: Kind::Choice(&["event", "message"]),
         default: DefaultValue::Yaml("event"),
         doc: "The lane the sensor's notifications ride (ADR-403 §3a).",
-        long: "message is for authored communication and needs an author field naming who composed each item; without one the sensor runs on the event lane, and lint says why.",
+        long: "message is for authored communication and needs an author field naming who composed each item; without one the sensor runs on the event lane, and lint says why. The peers and keepwarm crate sensors always ride the message lane.",
         ..SENSOR
     },
     KeySpec {

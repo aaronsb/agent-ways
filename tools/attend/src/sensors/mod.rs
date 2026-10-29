@@ -117,6 +117,14 @@ impl Hosted {
     pub fn lane(&self) -> Option<Lane> {
         self.loaded.spec.as_ref().map(|s| s.lane())
     }
+
+    /// The compiled sensor its file names, when it is a crate sensor.
+    pub fn crate_id(&self) -> Option<&str> {
+        match self.loaded.spec.as_ref().map(|s| &s.block) {
+            Some(Block::Crate(c)) => Some(&c.id),
+            _ => None,
+        }
+    }
 }
 
 /// Every sensor the files declare for the project at `project`, with its
@@ -176,11 +184,7 @@ fn state_of(l: &Loaded, compiled: bool, last: Option<&Poll>) -> State {
 /// same crate, the one named after it runs, else the first by name, and the
 /// others are invalid.
 fn claim_crates(all: &mut [Hosted]) {
-    let id_of = |h: &Hosted| match h.loaded.spec.as_ref().map(|s| &s.block) {
-        Some(Block::Crate(c)) if h.state.runs() => Some(c.id.clone()),
-        _ => None,
-    };
-    let ids: Vec<Option<String>> = all.iter().map(id_of).collect();
+    let ids: Vec<Option<String>> = all.iter().map(|h| h.crate_id().filter(|_| h.state.runs()).map(str::to_string)).collect();
     for i in 0..all.len() {
         let Some(id) = &ids[i] else { continue };
         let rivals: Vec<usize> = (0..all.len()).filter(|&j| ids[j].as_ref() == Some(id)).collect();
@@ -265,11 +269,13 @@ pub fn build(h: &Hosted, ctx: &Ctx, project: &str, record: bool) -> Result<Box<d
     Ok(Box::new(FileSensor::new(spec.name.clone(), spec.cadence, inner, project, record)))
 }
 
-/// A slot for `sensor`, on the lane `lane`.
-pub fn slot(sensor: Box<dyn Sensor>, lane: Lane) -> SensorSlot {
+/// A slot for `sensor`, on the lane `lane`, running the compiled sensor
+/// `crate_id` when it is one.
+pub fn slot(sensor: Box<dyn Sensor>, lane: Lane, crate_id: Option<&str>) -> SensorSlot {
     let (base, min, decay) = (sensor.base_interval(), sensor.min_interval(), sensor.decay_threshold());
     let mut s = SensorSlot::new_with_config(sensor, base, min, decay);
     s.message_lane = lane == Lane::Message;
+    s.crate_id = crate_id.map(str::to_string);
     s
 }
 
@@ -291,7 +297,7 @@ pub fn register_sensors(cfg: &Config, focus: &Focus, _catchup: bool, groups: &Gr
         }
         match build(&h, &ctx, &focus.working_dir, true) {
             Ok(sensor) => {
-                slots.push(slot(sensor, h.lane().unwrap_or(Lane::Event)));
+                slots.push(slot(sensor, h.lane().unwrap_or(Lane::Event), h.crate_id()));
                 names.push(h.name().to_string());
             }
             Err(why) => crate::emit::log(&format!("sensor {}: not started: {why}", h.name())),

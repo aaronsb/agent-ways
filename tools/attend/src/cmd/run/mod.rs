@@ -178,7 +178,7 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     if let Some(snapshot) = state_store.restore() {
         // Distribute state to matching sensors
         for slot in &mut slots {
-            let sensor_state: Vec<(String, String)> = match slot.name() {
+            let sensor_state: Vec<(String, String)> = match slot.crate_id.as_deref().unwrap_or_default() {
                 "peers" => snapshot
                     .seen_signals
                     .iter()
