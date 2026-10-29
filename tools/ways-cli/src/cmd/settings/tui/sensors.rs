@@ -39,7 +39,7 @@ pub fn cards(root: &mut Node, layers: &[Layer], project: &Path, home: &Path, att
     let loaded = attend_config::sensors::from_layers(layers, project, &trusted(layers));
     for g in root.children.iter_mut().filter(|g| !g.section) {
         let Some(l) = loaded.iter().find(|l| l.name == g.name) else { continue };
-        g.card = Some(super::card::card(&modules::of_sensor(l, attend), home));
+        g.card = Some(super::card::shown(modules::of_sensor(l, attend), home));
     }
 }
 

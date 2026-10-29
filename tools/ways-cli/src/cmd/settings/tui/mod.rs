@@ -657,8 +657,8 @@ impl Adapter for Ways {
     }
 
     fn theme_card(&self, theme: &agent_theme::Theme, source: agent_theme::Source, file: Option<&Path>, active: bool, shape: &str) -> Option<agent_tui::tree::Card> {
-        let m = crate::cmd::modules::themes::of_theme(theme, source, file, active, self.ctx.themes.as_deref(), shape);
-        Some(card::card(&m, &self.ctx.home))
+        let c = crate::cmd::modules::themes::of_theme(theme, source, file, active, self.ctx.themes.as_deref(), shape);
+        Some(card::shown(c, &self.ctx.home))
     }
 
     fn claude_code(&self) -> Option<agent_tui::ClaudeCode> {

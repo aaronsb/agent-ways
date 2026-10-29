@@ -7,13 +7,13 @@ agent-tui frame 100x30
 |│ ▸ example-mcp · setting       value                 ││                                           │|
 |│ ▸ git · setting               value                 ││origin    builtin                          │|
 |│ ▸ keepwarm · setting          value                 ││kind      crate                            │|
-|│ ▸ peers · setting             value                 ││source    unknown: attend absent           │|
-|│▌▾ processes · setting         value                 ││state     enabled                          │|
-|│     enabled                   true                  ││interval  30s quiet, 5s busy               │|
-|│     interval                  30                    ││threshold 2                                │|
-|│     min_interval              5                     ││lane      event                            │|
-|│     threshold                 2.0                   ││                                           │|
-|│     decay_threshold           5                     ││8 entries, 0 changed                       │|
+|│ ▸ peers · setting             value                 ││state     enabled; attend absent           │|
+|│▌▾ processes · setting         value                 ││interval  30s quiet, 5s busy               │|
+|│     enabled                   true                  ││threshold 2                                │|
+|│     interval                  30                    ││lane      event                            │|
+|│     min_interval              5                     ││                                           │|
+|│     threshold                 2.0                   ││8 entries, 0 changed                       │|
+|│     decay_threshold           5                     ││                                           │|
 |│     lane                      event                 ││                                           │|
 |│     requires                  [Bash(ps:*)]          ││                                           │|
 |│     watch                     (built-in)            ││                                           │|
@@ -95,7 +95,6 @@ styles
   9  32-36  - - BOLD|DIM|REVERSED
   9  37-53  - - BOLD|REVERSED
   9  54-65  - - DIM
-  9  66-72  Green - -
   9  99-99  - - DIM
  10   0-0   - - DIM
  10  54-65  - - DIM
@@ -106,14 +105,14 @@ styles
  11  99-99  - - DIM
  12   0-0   - - DIM
  12  32-32  LightBlue - -
- 12  54-65  - - DIM
+ 12  54-55  - - DIM
  12  99-99  - - DIM
  13   0-0   - - DIM
- 13  54-55  - - DIM
+ 13  54-75  - - DIM
  13  99-99  - - DIM
  14   0-0   - - DIM
  14  32-32  LightBlue - -
- 14  54-75  - - DIM
+ 14  54-55  - - DIM
  14  99-99  - - DIM
  15   0-0   - - DIM
  15  54-55  - - DIM

@@ -4,9 +4,9 @@ agent-tui frame 80x25
 |│   terminal         dark                  ││mine                              │|
 |│   agent-ways       dark                  ││mine · dark · background terminal │|
 |│   nord             dark                  ││                                  │|
-|│   catppuccin-mocha dark                  ││origin    user · active           │|
-|│   dracula          dark                  ││source    ~/.config/agent-ways/the│|
-|│   gruvbox-dark     dark                  ││          mes/mine.theme          │|
+|│   catppuccin-mocha dark                  ││origin    user · ~/.config/agent-w│|
+|│   dracula          dark                  ││          ays/themes/mine.theme   │|
+|│   gruvbox-dark     dark                  ││state     active                  │|
 |│   tokyonight-night dark                  ││saves to  ~/.config/agent-ways/the│|
 |│   paper            light                 ││          mes                     │|
 |│   miami            light                 ││shape     plain (a: shape cycles i│|
@@ -78,7 +78,6 @@ styles
   5  41-42  - Gray -
   5  43-54  - - DIM
   5  55-58  LightBlue - BOLD
-  5  62-67  Green - -
   5  79-79  - - DIM
   6   0-0   - - DIM
   6  21-27  - - DIM
@@ -88,7 +87,7 @@ styles
   6  39-40  - Gray -
   6  41-41  - Cyan -
   6  42-42  - Yellow -
-  6  43-54  - - DIM
+  6  43-44  - - DIM
   6  79-79  - - DIM
   7   0-0   - - DIM
   7  21-27  - - DIM
@@ -97,7 +96,8 @@ styles
   7  38-38  - Gray -
   7  39-40  - DarkGray -
   7  41-42  - Yellow -
-  7  43-44  - - DIM
+  7  43-54  - - DIM
+  7  55-60  Green - -
   7  79-79  - - DIM
   8   0-0   - - DIM
   8  21-27  - - DIM

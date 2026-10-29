@@ -59,7 +59,7 @@ pub fn nodes(root: &mut Node, states: &[Overview], read: &Read, home: &std::path
                 Read::Failed(_) => Unread::Failed,
                 Read::Done | Read::Stale(_) => Unread::Missing,
             };
-            g.card = Some(super::card::card(&modules::mods::of_mod(m, found.ok_or(unread)), home));
+            g.card = Some(super::card::shown(modules::mods::of_mod(m, found.ok_or(unread)), home));
         }
         let Some(o) = found else {
             let label = match read {

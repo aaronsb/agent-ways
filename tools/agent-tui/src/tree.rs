@@ -4,6 +4,8 @@
 
 use std::path::PathBuf;
 
+use agent_settings::Item;
+
 /// What a value may be, and so how the editor changes it.
 #[derive(Debug, Clone)]
 pub enum Kind {
@@ -182,60 +184,25 @@ pub struct Node {
     /// What the detail pane heads the row with in place of its key: for a
     /// row that stands for no setting, whose key would read as one.
     pub heading: Option<String>,
-    /// The module the row stands for, drawn at the top of the detail pane
-    /// in place of its heading: a mod, a sensor, a theme.
+    /// The item the row stands for, drawn at the top of the detail pane in
+    /// place of its heading: a mod, a sensor, a theme.
     pub card: Option<Card>,
 }
 
-/// Who added a module: the application, the user, or a project.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Origin {
-    Builtin,
-    User,
-    Project,
-}
-
-impl Origin {
-    pub fn word(self) -> &'static str {
-        match self {
-            Origin::Builtin => "builtin",
-            Origin::User => "user",
-            Origin::Project => "project",
-        }
-    }
-}
-
-/// How a module's state reads: running, idle, wanting a look, or broken.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StateTone {
-    Ok,
-    Plain,
-    Warn,
-    Err,
-}
-
-/// One module as the detail pane heads it, the same on every tab: its
-/// name and a line on it, then where it comes from, what it is read from,
-/// its version and state, then the rows of its kind. The adapter fills it
-/// in from its own description of the module; these are the words drawn.
+/// An item as the detail pane heads it, the same on every tab (ADR-516
+/// §6): its name and a line on it, then the rows of its descriptor, then
+/// the rows of its family. The adapter writes the descriptor's paths as the
+/// screens write paths.
 #[derive(Debug, Clone)]
 pub struct Card {
     pub title: String,
     /// A dim line under the title.
     pub summary: String,
-    pub origin: Origin,
-    /// Where the module was added, after the origin word.
-    pub at: Option<String>,
-    /// What implements it, such as `crate`, `script` or `plugin`.
-    pub kind: Option<String>,
-    /// What it is read from: a file, a crate, a plugin.
-    pub source: String,
-    pub version: Option<String>,
-    pub state: (String, StateTone),
-    /// Draw the state after the origin, in place of a row of its own: for
-    /// a pane whose own rows leave the card little room.
+    pub item: Item,
+    /// Draw the state after the origin and its overrides, in place of a row
+    /// of its own: for a pane whose own rows leave the card little room.
     pub fold_state: bool,
-    /// The rows of its kind, as (label, value).
+    /// The rows of its family, as (label, value).
     pub rows: Vec<(String, String)>,
 }
 
