@@ -119,9 +119,12 @@ pub(crate) fn claude_bin() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("WAYS_CLAUDE_BIN") {
         return Some(PathBuf::from(p)).filter(|p| p.is_file());
     }
-    std::env::var_os("PATH").and_then(|paths| {
-        std::env::split_paths(&paths).map(|d| d.join("claude")).find(|p| is_executable(p))
-    })
+    on_path("claude", std::env::var_os("PATH").as_deref())
+}
+
+/// The first executable `name` in the directories of `path`, a PATH value.
+pub(crate) fn on_path(name: &str, path: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    std::env::split_paths(path?).map(|d| d.join(name)).find(|p| is_executable(p))
 }
 
 fn run_claude(claude: &Path, config_dir: Option<&Path>, args: &[&str]) -> Result<(), String> {

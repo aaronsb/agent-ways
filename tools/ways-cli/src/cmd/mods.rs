@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
 
-use super::attend_mod::{self, Degraded, Mod, State, Target, View, JUDGE, MODS};
+use super::attend_mod::{self, Degraded, Mod, State, Target, View, IMAGES, JUDGE, MODS};
 use super::lifecycle::{self, Mark, Mode, Report};
 
 /// The exit code of `check` with any problem, as `ways settings lint`.
@@ -282,7 +282,23 @@ fn checks(m: &Mod, v: &View, shipped: Option<&str>, claude_code: bool, default_r
             _ => out.push((Mark::Ok, "gate.engine and the mod's wanted state agree".to_string())),
         }
     }
+    if *m == IMAGES && v.wanted {
+        out.push(imagemagick_check(std::env::var_os("PATH").as_deref()));
+    }
     out
+}
+
+/// The images mod decodes and resizes every picture with ImageMagick, as
+/// `magick` (version 7) or `convert` (version 6), found on `path`.
+fn imagemagick_check(path: Option<&std::ffi::OsStr>) -> (Mark, String) {
+    use super::mcp_register::on_path;
+    match on_path("magick", path).or_else(|| on_path("convert", path)) {
+        Some(tool) => (Mark::Ok, format!("ImageMagick is on PATH ({})", tool.display())),
+        None => (
+            Mark::Warn,
+            "ImageMagick (magick or convert) is not on PATH, so each picture shows a dim note in its place. Fix: install ImageMagick".to_string(),
+        ),
+    }
 }
 
 /// What converging `m` would do in one target once its wanted state is
@@ -685,6 +701,33 @@ mod tests {
         std::fs::write(&file, "{}").unwrap();
         let uninstall = would_theme(&THEME, &view(&dir, Some("1.45.0"), ok()), false, &src, &base);
         assert_eq!(uninstall, vec![r#"would change settings.json theme: "custom:ways" → "light""#.to_string(), format!("would remove {file}")]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_images_mod_check_names_imagemagick_when_it_is_off_path() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("ways-mod-magick-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = std::ffi::OsString::from(&dir);
+        let (mark, text) = imagemagick_check(Some(&path));
+        assert_eq!(mark, Mark::Warn);
+        assert!(text.contains("ImageMagick (magick or convert) is not on PATH") && text.contains("Fix: install ImageMagick"), "{text}");
+        let convert = dir.join("convert");
+        std::fs::write(&convert, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&convert, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let (mark, text) = imagemagick_check(Some(&path));
+        assert_eq!(mark, Mark::Ok, "{text}");
+        assert!(text.contains(&convert.display().to_string()), "{text}");
+
+        // The check is the images mod's, while it is wanted.
+        let v = view(&dir, Some("1.48.0"), Ok("2.1.310".to_string()));
+        let names = |m: &Mod, v: &View| checks(m, v, Some("1.48.0"), false, &dir).into_iter().filter(|(_, t)| t.contains("ImageMagick")).count();
+        assert_eq!(names(&IMAGES, &v), 1);
+        assert_eq!(names(&ATTEND, &v), 0);
+        assert_eq!(names(&IMAGES, &View { wanted: false, ..v.clone() }), 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

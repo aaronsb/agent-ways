@@ -34,7 +34,8 @@
 //! missing its marketplace for now, in a checkout that is still there (a
 //! branch without `plugins/`), is reported, not claimed. Any other
 //! `agent-ways` marketplace, and a plugin of the mod's name from another
-//! marketplace, are the operator's own: reported, with the command that hands
+//! marketplace, whether Claude Code lists it or the target's settings.json
+//! enables it (ADR-517 item 8), are the operator's own: reported, with the command that hands
 //! the marketplace to this app, and left alone. Removing a marketplace
 //! uninstalls its plugins, so a moved app's marketplace is removed, added
 //! again and every mod of ours that was installed from it installed again in
@@ -94,9 +95,15 @@ pub const JUDGE: Mod = Mod { name: "ways-judge", id: "ways-judge@agent-ways", la
 /// installed, so a Claude Code downgraded afterwards is not caught.
 pub const THEME: Mod = Mod { name: "ways-theme", id: "ways-theme@agent-ways", label: "ways-theme mod", min_claude_code: "2.1.309", critical: false };
 
+/// Draws pictures inline in the terminal transcript (ADR-517). Its floor is
+/// 2.1.304, whose engine wrote the mod's type declarations carrying every
+/// call it makes (`Image`, `Raster`, `$.ui.blit`, `onScreen`), the release it
+/// was verified on. Not critical: agent-ways loses nothing without it.
+pub const IMAGES: Mod = Mod { name: "images", id: "images@agent-ways", label: "images mod", min_claude_code: "2.1.304", critical: false };
+
 /// Every mod the marketplace ships, in its order. Each has an entry under
 /// `mods` in the settings registry (ADR-512 item 1).
-pub const MODS: [Mod; 3] = [ATTEND, JUDGE, THEME];
+pub const MODS: [Mod; 4] = [ATTEND, JUDGE, THEME, IMAGES];
 
 /// The marketplace folder in the app source.
 pub fn marketplace_dir(source_root: &Path) -> PathBuf {
@@ -154,6 +161,23 @@ pub fn parse_installed(m: &Mod, marketplaces: &str, plugins: &str) -> Installed 
         }
     }
     out
+}
+
+/// Adds to `have.foreign` each plugin of `m`'s name from another marketplace
+/// that the `settings.json` of the target at `dest_root` enables. A plugin
+/// enabled from a marketplace declared in settings (`extraKnownMarketplaces`)
+/// is missing from `claude plugin list` until a session has recorded that
+/// marketplace, and ours installed beside it would draw everything twice.
+pub fn add_enabled_foreign(m: &Mod, have: &mut Installed, dest_root: &Path) {
+    let Ok(text) = std::fs::read_to_string(dest_root.join("settings.json")) else { return };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else { return };
+    let Some(enabled) = json.get("enabledPlugins").and_then(|e| e.as_object()) else { return };
+    for (id, on) in enabled {
+        let name = id.split_once('@').map_or(id.as_str(), |(n, _)| n);
+        if on.as_bool() == Some(true) && name == m.name && id != m.id && !have.foreign.contains(id) {
+            have.foreign.push(id.clone());
+        }
+    }
 }
 
 /// One call of the plugin CLI. The plugin calls act on the mod being
@@ -623,7 +647,8 @@ pub fn converge_target(source_root: &Path, t: &Target, only: Option<&Mod>, dry_r
                 break;
             }
         };
-        let have = parse_installed(m, &now.markets, &now.plugins);
+        let mut have = parse_installed(m, &now.markets, &now.plugins);
+        add_enabled_foreign(m, &mut have, t.dest_root);
         let record = Record::read(t.dest_root);
         let whose = market(&have, &dir, record.folder.as_deref());
         // A mod of ours installed from this app's marketplace is one repair
@@ -642,8 +667,8 @@ pub fn converge_target(source_root: &Path, t: &Target, only: Option<&Mod>, dry_r
         }
         let missing = have.ours.is_none() && have.foreign.is_empty() && !matches!(whose, Market::Foreign(_));
         let plan = if !t.wants(m) {
-            // Another mod wanted here keeps the marketplace for itself.
-            let other = MODS.iter().any(|o| o.id != m.id && t.wants(o));
+            // Another mod wanted here, and shipped, keeps the marketplace for itself.
+            let other = MODS.iter().any(|o| o.id != m.id && t.wants(o) && shipped_version(o, source_root).is_some());
             plan_withdraw(&have, &dir, record.folder.as_deref(), &recover, other)
         } else if missing && record.has(m.id) {
             lines.push(removed_by_hand(m, t, dry_run));
@@ -1053,7 +1078,8 @@ pub fn views(source_root: &Path, t: &Target, only: Option<&Mod>) -> Vec<(Mod, Vi
             };
             match &lists {
                 Ok(l) => {
-                    let have = parse_installed(&m, &l.markets, &l.plugins);
+                    let mut have = parse_installed(&m, &l.markets, &l.plugins);
+                    add_enabled_foreign(&m, &mut have, t.dest_root);
                     v.market = match market(&have, &dir, record.folder.as_deref()) {
                         Market::Absent => MarketState::Absent,
                         Market::Current | Market::Moved => MarketState::Ours,
@@ -1252,6 +1278,45 @@ mod tests {
         let p = plan_converge(&ATTEND, &have(Some(""), None), DIR, None, "0.17.0", "CMD");
         assert!(p.calls.is_empty());
         assert_eq!(p.notes.len(), 1);
+    }
+
+    /// `images@dotfiles` enabled from a marketplace declared in settings.json,
+    /// which `claude plugin list` does not show until a session records it.
+    #[test]
+    fn a_same_named_plugin_enabled_in_settings_is_foreign_and_nothing_installs_beside_it() {
+        let dir = std::env::temp_dir().join(format!("ways-attend-mod-enabled-foreign-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"{"enabledPlugins":{"images@dotfiles":true,"images@agent-ways":true,"images@old":false,"attend@agent-ways":true}}"#,
+        )
+        .unwrap();
+        let mut h = parse_installed(&IMAGES, "[]", "[]");
+        assert!(h.foreign.is_empty(), "the plugin list shows nothing");
+        add_enabled_foreign(&IMAGES, &mut h, &dir);
+        assert_eq!(h.foreign, vec!["images@dotfiles".to_string()], "ours and a disabled one are not foreign");
+        let p = plan_converge(&IMAGES, &h, DIR, None, "1.48.0", "CMD");
+        assert!(p.calls.is_empty(), "{p:?}");
+        assert!(p.notes[0].contains("images@dotfiles") && p.notes[0].contains("images@agent-ways is not installed beside it"), "{p:?}");
+
+        // Listed by Claude Code and enabled in settings, it is named once.
+        let mut listed = parse_installed(&IMAGES, "[]", r#"[{"id":"images@dotfiles","version":"0.1.0"}]"#);
+        add_enabled_foreign(&IMAGES, &mut listed, &dir);
+        assert_eq!(listed.foreign, vec!["images@dotfiles".to_string()]);
+
+        // The rule holds for every mod.
+        let mut attend = parse_installed(&ATTEND, "[]", "[]");
+        std::fs::write(dir.join("settings.json"), r#"{"enabledPlugins":{"attend@mine":true}}"#).unwrap();
+        add_enabled_foreign(&ATTEND, &mut attend, &dir);
+        assert_eq!(attend.foreign, vec!["attend@mine".to_string()]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_images_mod_runs_on_the_claude_code_it_was_verified_on() {
+        assert!(new_enough(&IMAGES, "2.1.304 (Claude Code)").is_ok());
+        assert!(new_enough(&IMAGES, "2.1.303 (Claude Code)").unwrap_err().contains("older than 2.1.304"));
+        assert!(!IMAGES.critical_under(true) && !IMAGES.critical_under(false));
     }
 
     #[test]

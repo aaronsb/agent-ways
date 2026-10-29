@@ -147,6 +147,7 @@ pub const MODS: &[(&str, &str)] = &[
     ("attend", "The attend mod in Claude Code (ADR-406, ADR-414): whether a session starts listening, keepwarm, keepalive, the install and poll timing."),
     ("ways-judge", "The ways-judge mod, the relevance gate's Claude Code internal engine (ADR-708): whether repair installs it."),
     ("ways-theme", "The ways-theme mod, which has Claude Code follow theme.active (ADR-514): whether repair installs it, what it draws, and the words it shows."),
+    ("images", "The images mod, which draws pictures inline in the terminal transcript (ADR-517): whether repair installs it, and how it draws."),
 ];
 
 const BASE: KeySpec = KeySpec {
@@ -688,6 +689,68 @@ const KEYS: &[KeySpec] = &[
         check: Some(check_words),
         doc: "The verbs a turn's done line takes; empty takes the theme's [words].",
         long: "Up to 12 entries of 1 to 24 characters, no control characters. Set, the list wins over the theme's [words]; empty, the theme's list is used, and Claude Code's own where the theme has none. Set several with commas: `ways settings set mods.ways-theme.done_words \"Sailing, Docking\"`.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.images.install",
+        section: "mods",
+        fail_closed: Some(closed_uninstalled),
+        path: &["mods", "images", "install"],
+        kind: Kind::Bool,
+        default: DefaultValue::Yaml("true"),
+        scope: Scope::Machine,
+        doc: "Whether `ways manage repair` installs the images mod in Claude Code.",
+        long: "Installed, the terminal transcript draws a picture under each row that would show only an image's path: a SendUserFile, a Read of an image, an image a reply names, an image pasted with a prompt. Other surfaces keep Claude Code's own drawing. It needs ImageMagick on PATH, which `ways manage mod check images` checks (ADR-517). Read per target, from the user file and the target's own file, the target winning; a project cannot set it.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.images.renderer",
+        section: "mods",
+        path: &["mods", "images", "renderer"],
+        kind: Kind::Choice(&["auto", "image", "halfblock"]),
+        default: DefaultValue::Yaml("auto"),
+        doc: "How the images mod draws a picture: auto, image or halfblock.",
+        long: "auto draws pixels where Claude Code draws kitty graphics and half-block cells elsewhere, asking Claude Code once per session which it is. image always uses Claude Code's Image element, which shows only its alt text where the terminal cannot draw it. halfblock always draws half-block cells. The mod reads it at session start and again before a picture when its last read is over 5 s old.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.images.scale",
+        section: "mods",
+        path: &["mods", "images", "scale"],
+        kind: Kind::Float { min: 0.25, max: 4.0 },
+        default: DefaultValue::Yaml("1"),
+        doc: "Picture size against one screen pixel per image pixel, from 0.25 to 4.",
+        long: "1 shows an image at its own size, 2 doubles it, 0.5 halves it. A picture still fits the width it is drawn in and 60% of the transcript's height, and none is narrower than 24 columns. On macOS the mod takes 10x20-pixel cells, so this is how a picture's size is corrected there. The mod reads it at session start and again before a picture when its last read is over 5 s old.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.images.show_captions",
+        section: "mods",
+        path: &["mods", "images", "show_captions"],
+        kind: Kind::Bool,
+        default: DefaultValue::Yaml("true"),
+        doc: "Whether the images mod draws a caption under each picture.",
+        long: "The caption gives the file's name, linked to the file where there is one, its size in pixels and the percentage it is shown at. The mod reads it at session start and again before a picture when its last read is over 5 s old.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.images.show_paths_in_replies",
+        section: "mods",
+        path: &["mods", "images", "show_paths_in_replies"],
+        kind: Kind::Bool,
+        default: DefaultValue::Yaml("true"),
+        doc: "Whether a bare image path in a reply draws its picture.",
+        long: "On, a reply's absolute or ~/ image path draws, in prose, inline code or quotes; off, only its markdown images draw. Fenced code is skipped either way. The mod reads it at session start and again before a picture when its last read is over 5 s old.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.images.steer_to_send_user_file",
+        section: "mods",
+        path: &["mods", "images", "steer_to_send_user_file"],
+        kind: Kind::Bool,
+        default: DefaultValue::Yaml("true"),
+        doc: "Whether the system prompt tells the model the terminal draws images.",
+        long: "On, a short section on the terminal surface says a request to see an image is answered with SendUserFile, or with a Read or an absolute path where SendUserFile is not offered. Off, the prompt is left as Claude Code composes it. Where an organization manages Claude Code, its policy plugin passes over the hook that adds the section, so the section is absent there.",
         ..BASE
     },
     KeySpec {

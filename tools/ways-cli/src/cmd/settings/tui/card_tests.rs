@@ -342,7 +342,7 @@ fn the_mod_tab_puts_the_card_on_each_mod_node() {
     let tab = Ways::new(c).build(&[]).into_iter().find(|t| t.name == "mod").unwrap();
     let names: Vec<(&str, String)> = tab.children.iter().map(|n| (n.name.as_str(), n.card.as_ref().map_or(String::new(), said))).collect();
     let want = |n: &'static str, s: &str| (n, s.to_string());
-    assert_eq!(names, [want("attend", "converged"), want("ways-judge", "state not read"), want("ways-theme", "state not read")]);
+    assert_eq!(names, [want("attend", "converged"), want("ways-judge", "state not read"), want("ways-theme", "state not read"), want("images", "state not read")]);
     let _ = std::fs::remove_dir_all(&h);
 }
 
