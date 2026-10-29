@@ -17,6 +17,11 @@ use serde_yaml::Value;
 /// The file kind: the user and project files both take these keys.
 pub const FILE: &str = "attend";
 
+/// The sensor files' kind (ADR-403 §5). Each sensor file is a layer of its
+/// own, read by [`crate::sensors::layers`] as `sensors: {<name>: <file>}`,
+/// so a key's path names the sensor and the field it sets.
+pub const SENSOR_FILE: &str = "attend-sensor";
+
 const SECTIONS: &[SectionSpec] = &[
     SectionSpec {
         name: "attend.governor",
@@ -67,6 +72,16 @@ const SECTIONS: &[SectionSpec] = &[
         repair: None,
         columns: None,
         doc: "The projects whose own command and mcp sensor files attend runs (ADR-403 §2).",
+    },
+    SectionSpec {
+        name: "attend.sensors",
+        file: SENSOR_FILE,
+        top: &["sensors"],
+        per_entry: true,
+        entry: None,
+        repair: None,
+        columns: None,
+        doc: "Each sensor's file: shipped, the user's, and a project's, layered by name (ADR-403 §2).",
     },
 ];
 
@@ -309,7 +324,75 @@ const KEYS: &[KeySpec] = &[
         long: "Such a file runs code the repository's author chose, so it is refused until its project is listed here. Each entry is a project directory; ~, $HOME and $XDG_* are expanded. A project's file may override a crate sensor's fields without it. Only the user file holds this key.",
         ..BASE
     },
+    KeySpec {
+        name: "attend.sensors.*.enabled",
+        path: &["sensors", "*", "enabled"],
+        kind: Kind::Bool,
+        default: DefaultValue::Yaml("true"),
+        doc: "Whether the sensor runs.",
+        long: "false in a project's sensor file switches the sensor off in that project. The settings screens write a project sensor's switch to your own file, so it stays yours.",
+        ..SENSOR
+    },
+    KeySpec {
+        name: "attend.sensors.*.interval",
+        path: &["sensors", "*", "interval"],
+        default: DefaultValue::Yaml("60"),
+        doc: "Seconds between polls while quiet.",
+        ..SENSOR
+    },
+    KeySpec {
+        name: "attend.sensors.*.min_interval",
+        path: &["sensors", "*", "min_interval"],
+        default: DefaultValue::Yaml("15"),
+        doc: "Seconds between polls while things change; at most the interval.",
+        ..SENSOR
+    },
+    KeySpec {
+        name: "attend.sensors.*.threshold",
+        path: &["sensors", "*", "threshold"],
+        kind: Kind::Float { min: 0.0, max: 100.0 },
+        default: DefaultValue::Yaml("2.0"),
+        doc: "The accumulated magnitude a sensor must pass to disclose.",
+        ..SENSOR
+    },
+    KeySpec {
+        name: "attend.sensors.*.decay_threshold",
+        path: &["sensors", "*", "decay_threshold"],
+        kind: COUNT,
+        default: DefaultValue::Yaml("4"),
+        doc: "Quiet polls before the interval decays back to its base.",
+        ..SENSOR
+    },
+    KeySpec {
+        name: "attend.sensors.*.lane",
+        path: &["sensors", "*", "lane"],
+        kind: Kind::Choice(&["event", "message"]),
+        default: DefaultValue::Yaml("event"),
+        doc: "The lane the sensor's notifications ride (ADR-403 §3a).",
+        long: "message is for authored communication and needs an author field naming who composed each item; without one the sensor runs on the event lane, and lint says why.",
+        ..SENSOR
+    },
+    KeySpec {
+        name: "attend.sensors.*.requires",
+        path: &["sensors", "*", "requires"],
+        kind: Kind::List,
+        default: DefaultValue::Yaml("[]"),
+        doc: "The tool permissions the sensor needs (ADR-116).",
+        long: "`attend sensor permissions` checks each against settings.json.",
+        ..SENSOR
+    },
+    KeySpec {
+        name: "attend.sensors.*.watch",
+        path: &["sensors", "*", "watch"],
+        kind: Kind::List,
+        doc: "The processes sensor's watch list; it replaces the built-in list.",
+        long: "Only watched processes get exit-code enrichment. Unset, the sensor's built-in list applies. Only a crate sensor of the processes crate takes it.",
+        ..SENSOR
+    },
 ];
+
+/// The sensor keys share these.
+const SENSOR: KeySpec = KeySpec { section: "attend.sensors", file: SENSOR_FILE, ..BASE };
 
 fn closed_off(v: &Value) -> Option<Value> {
     (v != &Value::Bool(true)).then_some(Value::Bool(false))
@@ -317,7 +400,7 @@ fn closed_off(v: &Value) -> Option<Value> {
 
 pub static SCHEMA: Schema = Schema {
     component: "attend",
-    files: &[FileSpec { id: FILE, retired: RETIRED, explain: Some(explain_sensors) }],
+    files: &[FileSpec { id: FILE, retired: RETIRED, explain: Some(explain_sensors) }, FileSpec { id: SENSOR_FILE, retired: &[], explain: None }],
     sections: SECTIONS,
     keys: KEYS,
 };

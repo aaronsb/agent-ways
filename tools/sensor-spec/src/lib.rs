@@ -76,7 +76,8 @@ impl Kind {
         }
     }
 
-    fn parse(s: &str) -> Option<Kind> {
+    /// The kind a file's `kind` names.
+    pub fn parse(s: &str) -> Option<Kind> {
         [Kind::Crate, Kind::Command, Kind::Mcp, Kind::Ways].into_iter().find(|k| k.as_str() == s)
     }
 

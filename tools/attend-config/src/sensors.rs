@@ -12,6 +12,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use agent_settings::schema::LayerScope;
+use agent_settings::Layer;
 use sensor_spec::{Block, Origin, Problem, SensorSpec, Severity};
 use serde_yaml::Value;
 
@@ -129,20 +131,41 @@ struct Read {
 /// Every sensor of the shipped, user and project layers for the project at
 /// `project`, by name. `trusted` is the user's `attend.project_sensors`.
 pub fn load(project: &Path, trusted: &[String]) -> Vec<Loaded> {
+    from_layers(&layers(Some(project)), project, trusted)
+}
+
+/// [`load`] over the sensor files of `layers` ([`layers`]), as the settings
+/// screens read them; layers of other kinds are passed over. A file's text
+/// is read again from its path when it does not parse, so its finding has
+/// the parser's line.
+pub fn from_layers(layers: &[Layer], project: &Path, trusted: &[String]) -> Vec<Loaded> {
     let mut by_name: BTreeMap<String, Vec<Read>> = BTreeMap::new();
-    let projected = shipped_dir();
-    for (name, text) in SHIPPED {
-        let p = projected.join(format!("{name}.yaml"));
-        by_name.entry(name.to_string()).or_default().push(Read { origin: Origin::Builtin, path: p.is_file().then_some(p), text: text.to_string() });
-    }
-    for (origin, dir) in [(Origin::User, user_dir()), (Origin::Project, project_dir(project))] {
-        for (name, path) in yaml_files(&dir) {
-            let text = std::fs::read_to_string(&path).unwrap_or_default();
-            by_name.entry(name).or_default().push(Read { origin, path: Some(path), text });
-        }
+    for l in layers.iter().filter(|l| l.file == crate::schema::SENSOR_FILE) {
+        let Some((name, doc)) = l.accepted.get("sensors").and_then(Value::as_mapping).and_then(|m| m.iter().next()) else { continue };
+        let Some(name) = name.as_str() else { continue };
+        let origin = match (l.scope, l.name.as_str()) {
+            (LayerScope::Project, _) => Origin::Project,
+            (_, "shipped") => Origin::Builtin,
+            _ => Origin::User,
+        };
+        let text = match l.findings.iter().any(|f| f.is_parse_failure()) {
+            true => l.path.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_else(|| "{".into()),
+            false => serde_yaml::to_string(doc).unwrap_or_default(),
+        };
+        by_name.entry(name.to_string()).or_default().push(Read { origin, path: l.path.clone(), text });
     }
     let trust = is_trusted(project, trusted);
-    by_name.into_iter().map(|(name, reads)| layer(name, reads, trust, project)).collect()
+    by_name.into_iter().filter(|(_, reads)| !only_switches(reads)).map(|(name, reads)| layer(name, reads, trust, project)).collect()
+}
+
+/// Whether every file of a name sets nothing but `enabled`: the switch the
+/// settings screens keep in the user's file for a project's sensor, read in
+/// a project that has no such sensor. It defines none.
+fn only_switches(reads: &[Read]) -> bool {
+    reads.iter().all(|r| match serde_yaml::from_str::<Value>(&r.text) {
+        Ok(Value::Mapping(m)) => m.keys().all(|k| k.as_str() == Some("enabled")),
+        _ => false,
+    })
 }
 
 /// The `.yaml` files in `dir`, by stem, sorted.
@@ -176,9 +199,10 @@ fn layer(name: String, reads: Vec<Read>, trust: bool, project: &Path) -> Loaded 
                 if r.origin != Origin::Builtin {
                     if let Some(m) = v.as_mapping_mut().filter(|m| m.contains_key("lane_exception")) {
                         m.remove("lane_exception");
+                        let text = r.path.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_else(|| r.text.clone());
                         findings.push(Finding {
                             file: r.path.clone(),
-                            line: line_of(&r.text, "lane_exception"),
+                            line: line_of(&text, "lane_exception"),
                             problem: Problem { at: "lane_exception".into(), message: "only a shipped file sets lane_exception; it is ignored".into(), severity: Severity::Error },
                         });
                     }
@@ -289,6 +313,150 @@ fn line_of(text: &str, at: &str) -> Option<usize> {
     None
 }
 
+/// The first lines of a sensor file a settings write creates.
+pub const HEADER: &str = "# An attend sensor (ADR-403); it overrides any layer beneath it by field.\n# `attend sensor list` shows the sensor, `ways settings help attend.sensors` its keys.\n";
+
+/// Every sensor file of the shipped and user layers, and of the project at
+/// `project` when one is given, as a settings layer each, lowest first
+/// (ADR-403 §5). A layer holds its file as `sensors: {<name>: <file>}`. A
+/// file that does not parse, or is not a mapping, adds no layer: lint
+/// reports it, and the layer holds its name with nothing set. Refused
+/// project files are layered too, as the files say. A name whose files are
+/// all switches ([`only_switches`]) adds none.
+pub fn layers(project: Option<&Path>) -> Vec<Layer> {
+    let projected = shipped_dir();
+    let mut out: Vec<(String, Layer)> = SHIPPED
+        .iter()
+        .map(|(name, text)| {
+            let p = projected.join(format!("{name}.yaml"));
+            (name.to_string(), file_layer(name, Origin::Builtin, p.is_file().then_some(p.as_path()), text))
+        })
+        .collect();
+    let mut dirs = vec![(Origin::User, user_dir())];
+    dirs.extend(project.map(|p| (Origin::Project, project_dir(p))));
+    for (origin, dir) in dirs {
+        for (name, path) in yaml_files(&dir) {
+            let text = std::fs::read_to_string(&path).unwrap_or_default();
+            out.push((name.clone(), file_layer(&name, origin, Some(&path), &text)));
+        }
+    }
+    let switch = |l: &Layer, name: &str| {
+        l.findings.is_empty()
+            && l.get(&["sensors".into(), name.into()]).and_then(Value::as_mapping).is_some_and(|m| m.keys().all(|k| k.as_str() == Some("enabled")))
+    };
+    let switches: Vec<String> = out.iter().map(|(n, _)| n.clone()).filter(|n| out.iter().filter(|(m, _)| m == n).all(|(_, l)| switch(l, n))).collect();
+    let mut out: Vec<Layer> = out.into_iter().filter(|(n, _)| !switches.contains(n)).map(|(_, l)| l).collect();
+    let trusted = trusted_projects();
+    for loaded in from_layers(&out, project.unwrap_or(Path::new("")), &trusted) {
+        mark(&mut out, &loaded);
+    }
+    out
+}
+
+/// Put each finding of `loaded` on the layer of the file it is in, as a
+/// settings finding, so a reader of the layers sees it where the file is.
+/// A file that does not parse already carries its own.
+fn mark(layers: &mut [Layer], loaded: &Loaded) {
+    for f in &loaded.findings {
+        let Some(l) = layers.iter_mut().find(|l| l.path.is_some() && l.path == f.file) else { continue };
+        if l.findings.iter().any(|x| x.is_parse_failure()) {
+            continue;
+        }
+        let level = match f.problem.severity {
+            Severity::Warning => "warning: ",
+            Severity::Error => "error: ",
+            Severity::Invalid => "",
+        };
+        l.findings.push(agent_settings::load::Finding {
+            file: f.file.clone(),
+            line: f.line,
+            section: Some("attend.sensors".into()),
+            unit: Some(format!("attend.sensors.{}", loaded.name)),
+            key: Some(format!("{}{}", loaded.name, Some(f.problem.at.as_str()).filter(|a| !a.is_empty()).map(|a| format!(".{a}")).unwrap_or_default())),
+            message: format!("{level}{}", f.problem.message),
+            fallback: false,
+            repair: Some("edit the sensor's file; `attend sensor list` shows its state".into()),
+            closed: false,
+        });
+    }
+}
+
+/// The sensor file `name` of the layer `origin`, holding `text`, as a
+/// settings layer. A file that does not parse holds nothing, and its layer
+/// carries the finding.
+pub fn file_layer(name: &str, origin: Origin, path: Option<&Path>, text: &str) -> Layer {
+    let mut findings = Vec::new();
+    let doc = match serde_yaml::from_str::<Value>(text) {
+        Ok(Value::Null) => Value::Mapping(Default::default()),
+        Ok(v) => v,
+        Err(e) => {
+            findings.push(agent_settings::load::Finding {
+                file: path.map(Path::to_path_buf),
+                line: e.location().map(|l| l.line()),
+                section: Some("attend.sensors".into()),
+                unit: None,
+                key: None,
+                message: format!("does not parse: {e}; the sensor {name} is invalid until its syntax is fixed by hand"),
+                fallback: true,
+                repair: None,
+                closed: false,
+            });
+            Value::Mapping(Default::default())
+        }
+    };
+    let mut sensors = serde_yaml::Mapping::new();
+    sensors.insert(Value::from(name), doc);
+    let mut accepted = serde_yaml::Mapping::new();
+    accepted.insert(Value::from("sensors"), Value::Mapping(sensors));
+    let (label, scope) = match origin {
+        Origin::Builtin => ("shipped", LayerScope::User),
+        Origin::User => ("user", LayerScope::User),
+        Origin::Project => ("project", LayerScope::Project),
+    };
+    Layer { name: label.into(), file: crate::schema::SENSOR_FILE, scope, path: path.map(Path::to_path_buf), accepted, findings, present: true }
+}
+
+/// The sensor a file at `path` holds, and the layer it is: a `.yaml` file in
+/// the user's sensor directory, or in a project's, with that project.
+pub fn file_at(path: &Path) -> Option<(String, Origin, Option<PathBuf>)> {
+    let name = path.file_stem()?.to_str()?.to_string();
+    if path.extension()? != "yaml" {
+        return None;
+    }
+    let dir = path.parent()?;
+    if dir == user_dir() {
+        return Some((name, Origin::User, None));
+    }
+    let project = dir.parent()?.parent()?.parent()?;
+    (project_dir(project) == dir).then(|| (name, Origin::Project, Some(project.to_path_buf())))
+}
+
+/// Whether the sensor file at `path` may hold `text`: refused, with the
+/// reason, when the sensor its layers then make is invalid. A user file is
+/// read over the shipped one, as every project reads it; a project's file
+/// over the shipped and user ones. A file of switches alone defines no
+/// sensor and is always taken.
+pub fn check_edit(path: &Path, text: &str) -> Result<(), String> {
+    let Some((name, origin, project)) = file_at(path) else { return Ok(()) };
+    let mut reads: Vec<Read> = SHIPPED.iter().filter(|(n, _)| *n == name).map(|(_, t)| Read { origin: Origin::Builtin, path: None, text: t.to_string() }).collect();
+    if origin == Origin::Project {
+        let user = user_dir().join(format!("{name}.yaml"));
+        if let Ok(t) = std::fs::read_to_string(&user) {
+            reads.push(Read { origin: Origin::User, path: Some(user), text: t });
+        }
+    }
+    reads.push(Read { origin, path: Some(path.to_path_buf()), text: text.to_string() });
+    if only_switches(&reads) {
+        return Ok(());
+    }
+    let l = layer(name.clone(), reads, true, project.as_deref().unwrap_or(Path::new("")));
+    if l.spec.is_some() {
+        return Ok(());
+    }
+    let why: Vec<String> = l.findings.iter().filter(|f| f.problem.severity == Severity::Invalid).map(|f| f.problem.to_string()).collect();
+    Err(format!("that would make the sensor {name} invalid: {}", why.join("; ")))
+}
+
 /// The user's `attend.project_sensors`.
 pub fn trusted_projects() -> Vec<String> {
     crate::Config::from_layers(&[crate::user_layer()]).project_sensors
@@ -378,6 +546,41 @@ mod tests {
         let Block::Command(c) = l.spec.as_ref().unwrap().block.clone() else { panic!() };
         assert_eq!(c.argv, vec!["/bin/true".to_string()]);
         assert!(l.refused.is_some() && !l.is_refused());
+    }
+
+    #[test]
+    fn a_name_whose_files_only_switch_it_defines_no_sensor() {
+        assert!(only_switches(&[read(Origin::User, "enabled: false\n")]));
+        let shipped = SHIPPED.iter().find(|(n, _)| *n == "git").unwrap().1;
+        assert!(!only_switches(&[read(Origin::Builtin, shipped), read(Origin::User, "enabled: false\n")]));
+        assert!(!only_switches(&[read(Origin::User, "enabled: false\ninterval: 9\n")]));
+    }
+
+    #[test]
+    fn a_sensor_file_is_a_layer_under_its_name_and_loads_back_from_the_layers() {
+        let l = file_layer("weather", Origin::User, Some(Path::new("/u/weather.yaml")), "kind: command\nargv: [curl]\noutput: json\ninterval: 90\n");
+        assert_eq!((l.name.as_str(), l.file, l.scope), ("user", crate::schema::SENSOR_FILE, LayerScope::User));
+        assert_eq!(l.get(&["sensors".into(), "weather".into(), "interval".into()]), Some(&Value::from(90)));
+        let p = file_layer("disk", Origin::Project, Some(Path::new("/nonexistent/p/.claude/attend/sensors/disk.yaml")), "kind: [\n");
+        assert!(p.findings.iter().any(|f| f.is_parse_failure()) && p.scope == LayerScope::Project);
+        let loaded = from_layers(&[l, p], Path::new("/p"), &[]);
+        let names: Vec<&str> = loaded.iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(names, ["disk", "weather"]);
+        assert!(loaded[0].is_invalid(), "a file that does not parse makes its sensor invalid");
+        assert_eq!(loaded[1].spec.as_ref().map(|s| s.cadence.interval), Some(90));
+    }
+
+    #[test]
+    fn an_edit_that_makes_a_sensor_invalid_is_refused_with_the_reason() {
+        let dir = std::env::temp_dir().join(format!("attend-sensors-edit-{}", std::process::id()));
+        let path = project_dir(&dir).join("git.yaml");
+        assert!(check_edit(&path, "interval: 90\n").is_ok(), "an override of a shipped field");
+        let e = check_edit(&path, "interval: 5\nmin_interval: 50\n").unwrap_err();
+        assert!(e.contains("would make the sensor git invalid") && e.contains("min_interval"), "{e}");
+        let mine = project_dir(&dir).join("mine.yaml");
+        assert!(check_edit(&mine, "interval: 90\n").unwrap_err().contains("kind is required"));
+        assert!(check_edit(&mine, "enabled: false\n").is_ok(), "a switch alone defines nothing to refuse");
+        assert!(check_edit(&dir.join("elsewhere.yaml"), "kind: [").is_ok(), "not a sensor file");
     }
 
     #[test]
