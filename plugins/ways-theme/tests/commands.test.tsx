@@ -5,6 +5,7 @@ import type { On, RenderElement } from 'claude-code'
 import { commandPieces, fenceCommand, holdsCommand } from '../hooks/skins/commands.ts'
 import { setupOf } from '../hooks/skins/config.ts'
 import { splitReply } from '../hooks/skins/markdown.ts'
+import { inlineMath } from '../hooks/skins/math.ts'
 import { replySegments } from '../hooks/skins/reply.ts'
 import { MIAMI_NIGHTS } from './fixtures.ts'
 import { INTERACTIVE, borders, host, json, shows } from './host.tsx'
@@ -188,6 +189,18 @@ describe('a fence closes only on a line of its mark, at least as long', () => {
       expect(commandPieces(text).every(piece => piece.kind === 'text')).toBe(true)
     })
   }
+
+  test('a nested fence still streaming keeps a table inside it as text', () => {
+    const text = 'Here:\n\n````md\n```\n| a | b |\n|---|---|\n| 1 | 2 |'
+    expect(splitReply(text)).toEqual([{ kind: 'text', text }])
+  })
+
+  test('inline math is left alone inside a fence a line of another mark does not close', () => {
+    const drawn = inlineMath('~~~\n```\nlet $x^2$ be\n~~~\nafter $y^2$').split('\n')
+    expect(drawn.slice(0, 4)).toEqual(['~~~', '```', 'let $x^2$ be', '~~~'])
+    expect(drawn[4]).not.toContain('$')
+    expect(drawn[4]!.startsWith('after ')).toBe(true)
+  })
 
   test('a closing line shorter than the opening one does not close it', () => {
     expect(splitReply('````\n! git push\n```').every(segment => segment.kind === 'text')).toBe(true)

@@ -84,7 +84,6 @@ export function splitReply(markdown: string, options: SplitOptions = SPLIT_ALL):
   const lines = markdown.split('\n')
   const segments: Segment[] = []
   let text: string[] = []
-  let inFence = false
 
   const flush = () => {
     if (text.join('\n').trim() !== '') {
@@ -100,7 +99,7 @@ export function splitReply(markdown: string, options: SplitOptions = SPLIT_ALL):
 
     const fence = FENCE.exec(line)
 
-    if (options.math === true && !inFence) {
+    if (options.math === true) {
       const formula = displayMath(lines, i, fence)
 
       if (formula !== null) {
@@ -111,35 +110,34 @@ export function splitReply(markdown: string, options: SplitOptions = SPLIT_ALL):
       }
     }
 
-    // A closed fence becomes a code segment; one still streaming stays text.
-    if (fence !== null && !inFence) {
+    // A closed fence becomes a code segment; one still streaming stays text, and so does
+    // every line after it.
+    if (fence !== null) {
       const close = fenceClose(lines, i)
 
-      if (close !== -1) {
-        const lang = (fence[2] ?? '').toLowerCase()
-        const code = lines.slice(i + 1, close).join('\n')
+      if (close === -1) {
+        text.push(...lines.slice(i))
+        break
+      }
 
-        if (!options.fence(lang, code)) {
-          text.push(...lines.slice(i, close + 1))
-          i = close
-          continue
-        }
+      const lang = (fence[2] ?? '').toLowerCase()
+      const code = lines.slice(i + 1, close).join('\n')
 
-        flush()
-        segments.push({ kind: 'code', lang, code, raw: lines.slice(i, close + 1).join('\n') })
+      if (!options.fence(lang, code)) {
+        text.push(...lines.slice(i, close + 1))
         i = close
         continue
       }
 
-      inFence = true
-    } else if (fence !== null) {
-      inFence = false
+      flush()
+      segments.push({ kind: 'code', lang, code, raw: lines.slice(i, close + 1).join('\n') })
+      i = close
+      continue
     }
 
     const header = cellsOf(line)
     const isTable =
       options.tables &&
-      !inFence &&
       line.includes('|') &&
       SEPARATOR.test(next) &&
       header.length > 1 &&
