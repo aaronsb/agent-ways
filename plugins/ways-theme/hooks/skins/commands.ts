@@ -14,9 +14,12 @@
 //   a lowercase letter, a digit, `.`, `/`, `~`, `$`, `(`, `[` or a quote.
 // - `slash`, a slash command such as `/compact keep the handoff`: `/`, a
 //   name of a lowercase letter and then lowercase letters, digits, `:` or
-//   `-`, and then a space or the end. `/home/aaron`, `/tmp/x` and `a/b` are
-//   paths, and a URL starts otherwise. A name that is a top-level directory
-//   (ROOTS: `/tmp`, `/etc`, `/usr`) is a path too.
+//   `-`, and then a space or the end, where the name is one Claude Code lists
+//   as a command the person can run (`isCommand`, from `$.command.list()`,
+//   hub.tsx). `/home/aaron`, `/tmp/x` and `a/b` are paths, a URL starts
+//   otherwise, and a route such as `/health` names no command. Until the list
+//   is read, and where Claude Code has none, every name but a top-level
+//   directory (ROOTS: `/tmp`, `/etc`, `/nix`) counts.
 // - `code`, a closed fence's code, as written. It keeps its language and its
 //   highlighting. A fence with no code in it stays as it is, and so does a
 //   fence the skin draws as a picture, a Mermaid chart or a diff (reply.ts).
@@ -89,7 +92,13 @@ const SLASH_STARTS = new RegExp(`^\\/(${NAME})(?= |$)`)
 /** A line that is a suggestion: a shell one to the end of the line, a slash one the bare name. */
 const LINE = new RegExp(String.raw`^[ \t]*(?:(?:[-*+]|\d{1,3}[.)])[ \t]+)?(! ${WORD}.*?|\/${NAME})[ \t]*$`)
 /** The top-level directories of a Unix filesystem, which read as paths, never as slash commands. */
-const ROOTS = new Set(['bin', 'boot', 'dev', 'etc', 'home', 'lib', 'lib64', 'media', 'mnt', 'opt', 'proc', 'root', 'run', 'sbin', 'srv', 'sys', 'tmp', 'usr', 'var'])
+const ROOTS = new Set(['bin', 'boot', 'dev', 'etc', 'home', 'lib', 'lib64', 'media', 'mnt', 'nix', 'opt', 'private', 'proc', 'root', 'run', 'sbin', 'srv', 'sys', 'tmp', 'usr', 'var'])
+
+/** Whether a name is a slash command the person can run. */
+export type IsCommand = (name: string) => boolean
+
+/** The answer while Claude Code's command list is unread: any name but a top-level directory. */
+export const notRoot: IsCommand = name => !ROOTS.has(name)
 /** The share of its row a span's content may take before it leaves its sentence. */
 const SPAN_SHARE = 0.6
 /** A line that a shell reads on past. */
@@ -120,14 +129,14 @@ const isWide = (content: string, width: number | undefined, indent: number): boo
 /** Whether `text` may hold a copy block, so that drawing it needs the split.
  *  `width` is the columns the reply's prose is drawn in; without it no span
  *  is wide. */
-export const holdsCopy = (text: string, width?: number): boolean =>
-  MAY_HOLD.test(text) || (width !== undefined && text.includes('`') && copyPieces(text, width).some(piece => piece.kind === 'copy'))
+export const holdsCopy = (text: string, width?: number, isCommand: IsCommand = notRoot): boolean =>
+  MAY_HOLD.test(text) || (width !== undefined && text.includes('`') && copyPieces(text, width, undefined, isCommand).some(piece => piece.kind === 'copy'))
 
 /** The suggestion `text` starts, or null. */
-function suggestionForm(text: string): 'shell' | 'slash' | null {
+function suggestionForm(text: string, isCommand: IsCommand): 'shell' | 'slash' | null {
   if (SHELL_STARTS.test(text)) return 'shell'
   const name = SLASH_STARTS.exec(text)?.[1]
-  return name === undefined || ROOTS.has(name) ? null : 'slash'
+  return name !== undefined && isCommand(name) ? 'slash' : null
 }
 
 /** Columns of leading whitespace, a tab to the next multiple of four. */
@@ -158,20 +167,21 @@ const outsideSpans = (line: string): string => line.replace(SPAN, '')
 /** A fence's code as a copy block: a suggestion when it is one, else the
  *  code, its trailing blank lines off. Null for a fence with no code. `raw`
  *  is the fence as written. */
-export function fenceCopy(lang: string, code: string, raw: string): Copy | null {
+export function fenceCopy(lang: string, code: string, raw: string, isCommand: IsCommand = notRoot): Copy | null {
   if (code.trim() === '') return null
   const lines = code.trim().split('\n')
   const isShell = (lang === '' || isShellLang(lang)) && SHELL_STARTS.test(lines[0]!) && lines.slice(0, -1).every(line => CONTINUES.test(line))
   if (isShell) return { kind: 'copy', form: 'shell', text: lines.map(line => line.trimEnd()).join('\n'), raw }
-  if (lang === '' && lines.length === 1 && suggestionForm(lines[0]!) === 'slash') return { kind: 'copy', form: 'slash', text: lines[0]!.trimEnd(), raw }
+  if (lang === '' && lines.length === 1 && suggestionForm(lines[0]!, isCommand) === 'slash') return { kind: 'copy', form: 'slash', text: lines[0]!.trimEnd(), raw }
   return { kind: 'copy', form: 'code', lang, text: code.replace(/(?:\n[ \t]*)+$/, ''), raw }
 }
 
 /** `text` cut into prose and whole copy blocks, line by line. `width` is the
  *  columns the reply's prose is drawn in, for the spans too wide for it.
  *  `isPicture` names the fences the skin draws as pictures, which stay
- *  prose. A fence still streaming, and every line after it, stay prose. */
-export function copyPieces(text: string, width?: number, isPicture: (lang: string, code: string) => boolean = () => false): Piece[] {
+ *  prose, and `isCommand` the slash commands. A fence still streaming, and
+ *  every line after it, stay prose. */
+export function copyPieces(text: string, width?: number, isPicture: (lang: string, code: string) => boolean = () => false, isCommand: IsCommand = notRoot): Piece[] {
   const lines = text.split('\n')
   const out: Piece[] = []
   let prose: string[] = []
@@ -208,7 +218,7 @@ export function copyPieces(text: string, width?: number, isPicture: (lang: strin
       }
       const lang = (fence[2] ?? '').toLowerCase()
       const code = fenceCode(lines, i, close)
-      const found = isPicture(lang, code) ? null : fenceCopy(lang, code, lines.slice(i, close + 1).join('\n'))
+      const found = isPicture(lang, code) ? null : fenceCopy(lang, code, lines.slice(i, close + 1).join('\n'), isCommand)
       if (found === null) prose.push(...lines.slice(i, close + 1))
       else copy(found)
       i = close
@@ -234,7 +244,7 @@ export function copyPieces(text: string, width?: number, isPicture: (lang: strin
     }
 
     const whole = LINE.exec(line)
-    const form = whole === null ? null : suggestionForm(whole[1]!)
+    const form = whole === null ? null : suggestionForm(whole[1]!, isCommand)
     if (whole !== null && form !== null) {
       const taken = [whole[1]!]
       let end = i
@@ -250,7 +260,7 @@ export function copyPieces(text: string, width?: number, isPicture: (lang: strin
     let at = 0
     for (const span of QUOTE_OR_ROW.test(line) ? [] : line.matchAll(SPAN)) {
       const content = spanContent(span[2]!)
-      const form = suggestionForm(content) ?? (isWide(content, width, item ?? 0) ? 'span' : null)
+      const form = suggestionForm(content, isCommand) ?? (isWide(content, width, item ?? 0) ? 'span' : null)
       if (form === null || isLinkText(span.index)) continue
       const before = line.slice(at, span.index)
       const isFirst = at === 0

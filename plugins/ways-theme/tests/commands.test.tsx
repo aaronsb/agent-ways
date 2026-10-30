@@ -420,9 +420,9 @@ describe('slash commands', () => {
     })
   }
 
-  const ROOTS = ['bin', 'boot', 'dev', 'etc', 'home', 'lib', 'lib64', 'media', 'mnt', 'opt', 'proc', 'root', 'run', 'sbin', 'srv', 'sys', 'tmp', 'usr', 'var']
+  const ROOTS = ['bin', 'boot', 'dev', 'etc', 'home', 'lib', 'lib64', 'media', 'mnt', 'nix', 'opt', 'private', 'proc', 'root', 'run', 'sbin', 'srv', 'sys', 'tmp', 'usr', 'var']
   for (const root of ROOTS) {
-    test(`/${root} is a directory, in a span, on a line of its own and in a fence`, () => {
+    test(`/${root} is a directory while the command list is unread, in a span, on a line of its own and in a fence`, () => {
       for (const text of [`look in \`/${root}\` first`, `/${root}`, `- /${root}`, `\`/${root} x\``]) {
         expect(copyPieces(text, 76).every(piece => piece.kind === 'text')).toBe(true)
       }
@@ -432,6 +432,42 @@ describe('slash commands', () => {
 
   test("a fence with a language holding a slash line is that language's code", () => {
     expect(copyPieces('```text\n/compact keep it\n```').map(piece => piece.kind === 'copy' && piece.form)).toEqual(['code'])
+  })
+
+  // `/compact` and `/review` are commands; `/health` and `/users` are routes.
+  const LISTED = new Set(['compact', 'review'])
+  const listed = (name: string) => LISTED.has(name)
+  const listedSlashes = (text: string) => copyPieces(text, 80, undefined, listed).flatMap(piece => (piece.kind === 'copy' && piece.form === 'slash' ? [piece.text] : []))
+
+  test('with the command list read, a name it lists is a command', () => {
+    expect(listedSlashes('Run `/review` on it.\n\n/compact\n\n```\n/compact keep it\n```')).toEqual(['/review', '/compact', '/compact keep it'])
+  })
+
+  for (const text of ['The handler for `/health` returns 200.', 'A GET on `/users` lists them.', '- `/health`: liveness probe', '/health', '- /users', '```\n/health\n```']) {
+    test(`with the command list read, a route it does not list stays where it is: ${JSON.stringify(text)}`, () => {
+      expect(copyPieces(text, 80, undefined, listed).some(piece => piece.kind === 'copy' && piece.form === 'slash')).toBe(false)
+      expect(holdsCopy(text, 80, listed) && copyPieces(text, 80, undefined, listed).some(piece => piece.kind === 'copy' && piece.form !== 'code')).toBe(false)
+    })
+  }
+
+  test('a reply drawn after the list is read lifts only the commands it lists', async ($, on) => {
+    const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS), commands: ['compact', 'review'] })
+    await $.session.start(INTERACTIVE)
+    const ui = await $.ui.mount(at('The handler for `/health` returns 200. Run `/review` on it.'))
+    for (const button of await ui.findAll({ type: 'Button', text: /^\s*Copy\s*$/ })) await ui.press({ key: button.key! })
+    const tree = await ui.drawn()
+    await ui.unmount()
+    expect(h.copies).toEqual(['/review'])
+    expect(shows(tree, '/health')).toBe(true)
+  })
+
+  test('where the list cannot be read, a name that is no directory counts', async ($, on) => {
+    const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS), commands: null })
+    await $.session.start(INTERACTIVE)
+    const ui = await $.ui.mount(at('Run `/review` on it, not `/nix`.'))
+    for (const button of await ui.findAll({ type: 'Button', text: /^\s*Copy\s*$/ })) await ui.press({ key: button.key! })
+    await ui.unmount()
+    expect(h.copies).toEqual(['/review'])
   })
 })
 

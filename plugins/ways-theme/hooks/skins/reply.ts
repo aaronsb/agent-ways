@@ -5,7 +5,8 @@ import type { RenderSurface } from 'claude-code'
 
 import type { Prefs } from '../../types'
 import { drawsBlocks, hasBlocks } from './blocks'
-import { copyPieces, fenceCopy, holdsCopy } from './commands'
+import { copyPieces, fenceCopy, holdsCopy, notRoot } from './commands'
+import type { IsCommand } from './commands'
 import { diffFenceTag, fenceDiff } from './diff-fence'
 import { isShell, splitReply } from './markdown'
 import type { Segment } from './markdown'
@@ -25,8 +26,9 @@ export const MAX_MARKDOWN = 9000
 const isPicture = (lang: string, code: string, prefs: Prefs): boolean =>
   (lang === 'mermaid' && prefs.charts) || (diffFenceTag(lang) !== null && fenceDiff(code) !== null)
 
-// `width` is the columns the reply's prose is drawn in, for the code spans too wide for it.
-export function replySegments(text: string, prefs: Prefs, surface: RenderSurface, width?: number): Segment[] | null {
+// `width` is the columns the reply's prose is drawn in, for the code spans too wide for it;
+// `isCommand` names the slash commands.
+export function replySegments(text: string, prefs: Prefs, surface: RenderSurface, width?: number, isCommand: IsCommand = notRoot): Segment[] | null {
   const cards = prefs.tables !== 'off' && /\||```|~~~/.test(text)
   // The terminal draws every paragraph itself; elsewhere only alerts and task lists.
   const blocks = prefs.markdown && (surface === 'terminal' || hasBlocks(text))
@@ -34,7 +36,7 @@ export function replySegments(text: string, prefs: Prefs, surface: RenderSurface
   const charts = prefs.charts && /mermaid/i.test(text)
   // Display formulas become cards, inline TeX Unicode.
   const math = prefs.math && /\$|```math|\\\[|\\\(/.test(text)
-  const copies = surface === 'terminal' && holdsCopy(text, width)
+  const copies = surface === 'terminal' && holdsCopy(text, width, isCommand)
 
   if (!cards && !blocks && !charts && !math && !copies) {
     return null
@@ -50,9 +52,9 @@ export function replySegments(text: string, prefs: Prefs, surface: RenderSurface
   const pictured = (lang: string, code: string) => isPicture(lang, code, prefs)
   const lifted = (segment: Segment): Segment[] =>
     segment.kind === 'text'
-      ? copyPieces(segment.text, width, pictured)
+      ? copyPieces(segment.text, width, pictured, isCommand)
       : segment.kind === 'code' && !pictured(segment.lang, segment.code)
-        ? [fenceCopy(segment.lang, segment.code, segment.raw) ?? segment]
+        ? [fenceCopy(segment.lang, segment.code, segment.raw, isCommand) ?? segment]
         : [segment]
   const segments = copies ? split.flatMap(lifted) : split
   const fits = segments.every(segment => segment.kind === 'table' || (segment.kind === 'text' ? segment.text : segment.raw).length <= MAX_MARKDOWN)

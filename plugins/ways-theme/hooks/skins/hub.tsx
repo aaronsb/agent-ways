@@ -45,7 +45,8 @@ import { NO_ROW, PATH_TOOLS, kindOf, showsImage, summarize, toolLabel } from './
 import { fitted, namesImage, withRow } from './pictures.ts'
 import { commandOf, errorLine, isQuiet, quietLabel } from './quiet.ts'
 import { MAX_MARKDOWN, replySegments } from './reply.ts'
-import { holdsCopy } from './commands.ts'
+import { holdsCopy, notRoot } from './commands.ts'
+import type { IsCommand } from './commands.ts'
 import { fileHref, hyperlinksFrom, touchOf } from './links.ts'
 import { MIN_WIDTH, axisFor, boxLines, canMeasure, gradientBox, gradientRuns } from './prompt-box.tsx'
 import { holdsPaste, pasteIdOf, shownText } from './pastes.ts'
@@ -155,7 +156,7 @@ const proseWidth = (e: Row, framed: boolean): number => (e.viewport?.columns ?? 
 function holdsCopyBlock(setup: Setup, e: Row): boolean {
   const text = (e.props as { text?: unknown }).text
   const width = proseWidth(e, true)
-  return typeof text === 'string' && holdsCopy(text, width) && (replySegments(text, setup.prefs as Look['prefs'], e.surface, width)?.some(segment => segment.kind === 'copy') ?? false)
+  return typeof text === 'string' && holdsCopy(text, width, isCommand) && (replySegments(text, setup.prefs as Look['prefs'], e.surface, width, isCommand)?.some(segment => segment.kind === 'copy') ?? false)
 }
 
 /** Whether the frame wraps this row whole. The register module asks it to
@@ -242,6 +243,23 @@ let sessionCwd: string | undefined
 let hasTouched = false
 
 const cwdOf = async ($: EngineInterface): Promise<string> => sessionCwd ?? (await $.session.cwd())
+
+// The slash commands the person can run, by name, as `$.command.list()` last answered:
+// built-in, plugin and MCP alike. Null until it has answered, and where the engine has no
+// list or the read failed; a reply's slash blocks then fall back to `notRoot` (commands.ts).
+let commandNames: ReadonlySet<string> | null = null
+
+const isCommand: IsCommand = name => (commandNames === null ? notRoot(name) : commandNames.has(name))
+
+// Reads the command list, and redraws when it changed. Claude Code names no event for a
+// change to it, and an MCP server or another mod's command can arrive after the session
+// starts, so it is read at the session's start and at each turn of the main loop.
+async function readCommands($: EngineInterface): Promise<void> {
+  const names = new Set((await $.command.list()).map(command => command.name))
+  if (commandNames !== null && commandNames.size === names.size && [...names].every(name => commandNames!.has(name))) return
+  commandNames = names
+  $.ui.invalidate('ui.render')
+}
 
 // The id Claude Code gives this session's pastes, worked out by `idOf` once per
 // session id; null when the session id or its digest cannot be had.
@@ -411,6 +429,7 @@ export function registerSkins(on: On, shared: Shared): void {
     sessionCwd = e.cwd
     await readLinkEnv($).catch(quietly($, 'link check'))
     await refreshUsage($).catch(quietly($, 'usage'))
+    await readCommands($).catch(quietly($, 'command list'))
     ticker?.cancel()
     pickup?.cancel()
     ticker = $.clock.every(FRAME_MS, () => {
@@ -433,6 +452,7 @@ export function registerSkins(on: On, shared: Shared): void {
   })
 
   on('turn.start', async ($, e, next) => {
+    if (e.agentId === undefined) await readCommands($).catch(quietly($, 'command list'))
     stats = NO_STATS
     isWorking = true
     sessionCwd = await $.session.cwd()
@@ -649,7 +669,7 @@ export function registerSkins(on: On, shared: Shared): void {
     if (setup === null) return next(e)
     const text = e.props.text
     const framed = isFramedAround(setup, e, shared.view())
-    const segments = replySegments(text, setup.prefs as Look['prefs'], e.surface, proseWidth(e, framed))
+    const segments = replySegments(text, setup.prefs as Look['prefs'], e.surface, proseWidth(e, framed), isCommand)
     if (segments === null) return next(e)
     const ui = $.ui.resolve(e)
     const svg = e.surface !== 'terminal' && setup.prefs.tables === 'on' && 'Svg' in ui ? ui.Svg : undefined
