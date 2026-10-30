@@ -54,7 +54,7 @@ observable:
 ## Summary
 
 - **Decided:** keys under `ways:` in a project's `.claude/ways.yaml` are toggle patterns matched against way ids. A key with no wildcard names one way, `*` matches one segment, `**` matches one or more segments, and the most specific matching pattern wins whatever the key order. A trailing `dir/*` now covers direct children only, and `ways settings lint` names the replacement for its old meaning. A switched-off way stays out of the competition that decides what fires. A shadow pass over the same scores finds each switched-off way that would have fired and logs it as `way_discarded`, naming the filter that discarded it.
-- **Trades away:** a `dir/*` key changes meaning. Each scan computes a second share and margin over the unmasked rows and tests the frontmatter patterns of switched-off ways. The event stream gains one line per discarded fire.
+- **Trades away:** a `dir/*` key changes meaning. Each scan repeats its score aggregation once for each switched-off way near the top and tests the frontmatter patterns of switched-off ways. The event stream gains one line per discarded fire.
 - **One-way?** No. Toggle patterns are configuration syntax and the event is additive. Lint names the one key whose meaning changes.
 - **Probes:** *Confident (discard-logged):* when a way, a domain or a whole project is switched off, the statistics show each time a switched-off way would have fired, marked as discarded with the setting that discarded it, and nothing of that way reaches the session. *Not confident (discard-count):* a discarded way is counted apart from the ways that fired, so a fire count still means guidance that reached the session.
 - **Inversion:** one end removes a switched-off way before matching, which costs nothing and leaves no trace. The other lets it compete and drops it afterwards, which records it but lets it take share from enabled ways. The decision keeps the first for what fires and adds a shadow pass for the record. For keys, the ends are directory inheritance, where a key covers its subtree, and exact ids only. The decision makes a key exact unless it carries a wildcard.
@@ -78,6 +78,7 @@ Keys under `ways:` in a project's `.claude/ways.yaml` are toggle patterns, match
 - A pattern with no wildcard names exactly one way.
 - `*` matches exactly one id segment.
 - `**` matches one or more whole segments.
+- `ways settings lint` reports a segment that mixes text and a wildcard, such as `doc*` or `a*b`, as an error. The matcher treats such a key literally, so it matches only a way id spelled with that asterisk, which no way has.
 - The most specific matching pattern wins, independent of key order. An exact id beats any wildcard pattern. Among wildcard patterns, more literal segments win, then fewer `**`. A tie between `true` and `false` resolves to `false`, and `ways settings lint` warns about the tie.
 - `true` turns a way back on.
 - A way no pattern matches stays on, as ADR-131 decided.
@@ -105,7 +106,7 @@ Under ADR-701 §1, a trailing `dir/*` switched off `dir` and its whole subtree a
 
 - The masked pass decides what fires. ADR-701 §1 stands: a switched-off way takes no softmax share and no survivor slot from an enabled way. The top-candidate log of ADR-701 §2 keeps the masked pass's ranking.
 - Candidate collection keeps a switched-off way, tagged with the filter that switched it off.
-- On the semantic lane, a shadow pass over the same per-chunk scores computes share, margin and the fire decision with no filter applied. The corpus already embeds every way, so the shadow pass adds no embedding work.
+- On the semantic lane, the shadow pass runs once per switched-off way that appears in any chunk's top-K window. Each run repeats the aggregation over the same per-chunk scores with the enabled set plus that one way, and the way would have fired when it clears the same gates. The corpus already embeds every way, so the shadow pass is arithmetic only, with no embedding work.
 - The keyword, command, file and tool lanes test a switched-off way's frontmatter patterns with the gates they apply to an enabled way, and log a hit the same way.
 - Each switched-off way that would have fired is logged as `way_discarded`, and its injection is dropped. A switched-off way that would not have fired is not logged, so a switched-off domain does not flood the log.
 - The relevance judge is not asked about a switched-off way. Would have fired means it cleared the matcher's gates.
@@ -140,8 +141,7 @@ The ways under a switched-off way compete without it. In the run of 2026-10-30, 
 ### Negative
 
 - A `/*` key changes meaning. A project that uses one switches off fewer ways after the upgrade until it adds `dir: false` and `dir/**: false`, and lint names the fix.
-- Each semantic scan computes a second softmax and margin, and the pattern lanes test the patterns of switched-off ways.
-- In the shadow pass, switched-off ways compete with each other, so when several of them match one prompt a would-have-fired discard can be missed.
+- Each semantic scan repeats the aggregation once for every switched-off way in a top-K window, and the pattern lanes test the patterns of switched-off ways.
 - Switching off a parent way can raise its children's fire rate.
 - The specificity order is a rule a user must learn, and a `true`/`false` tie shows only in lint.
 
@@ -159,6 +159,6 @@ The ways under a switched-off way compete without it. In the run of 2026-10-30, 
 - **A bare key covers its subtree.** Rejected: it assumes the directory tree holds child subsets, and the planned graph overlay does not follow directories. `dir/**` covers a subtree when that is wanted.
 - **Keep `dir/*` as the subtree form and add `**` beside it.** Rejected: `*` would match one segment inside a pattern and a whole subtree at its end.
 - **Let switched-off ways compete and drop them after the fire decision.** Rejected: a switched-off way would take share and survivor slots from enabled ways (ADR-701 §1).
-- **Re-run the masked pass once per switched-off way, with only that way added.** Rejected: its cost grows with the number of switched-off ways, where one unmasked pass costs one more softmax.
+- **One shadow pass with every filter lifted.** Rejected: switched-off ways would compete with each other, so when several matched one prompt they would split the share and a way that would have fired alone could go unlogged. The per-way runs cost arithmetic only.
 - **Log every switched-off candidate, or its near misses.** Rejected: a switched-off domain would write lines on every scan.
 - **Ask the judge about a would-have-fired discard.** Rejected: it spends a judge call on a way that will not be shown.
