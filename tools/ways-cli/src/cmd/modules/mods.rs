@@ -2,12 +2,11 @@
 //! state in ADR-512's words, and a critical mod that does not run saying so
 //! as the bottom bar's notice does.
 
-use agent_settings::item::{Family, Item, ItemKind, ModState, Origin};
-use agent_tui::tree::Card;
+use agent_settings::item::{Entry, Family, Item, ItemKind, ModState, Origin};
+use serde::Serialize;
 
-use super::row;
 use crate::cmd::attend_mod::{self, Mod, JUDGE};
-use crate::cmd::mods::Overview;
+use crate::cmd::mods::{InTarget, Overview};
 
 /// Why a mod's state is not to hand.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,15 +31,33 @@ fn state(s: attend_mod::State) -> ModState {
     }
 }
 
-/// `m` as its overview `o` reads it, or as far as an unread state tells.
-pub fn of_mod(m: &Mod, o: Result<&Overview, Unread>) -> Card {
+/// A mod's own fields, after its descriptor (ADR-516 §2). The screens also
+/// draw whether it is critical, the Claude Code it needs and the versions
+/// installed, which the CLI leaves to `targets`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ModFields {
+    /// Whether the user config wants it; null until its state is read.
+    pub wanted: Option<bool>,
+    /// Each enabled target's state of it.
+    pub targets: Vec<InTarget>,
+    #[serde(skip)]
+    pub critical: &'static str,
+    #[serde(skip)]
+    pub needs: String,
+    #[serde(skip)]
+    pub installed: Vec<String>,
+}
+
+/// `m` as its overview `o` reads it, or as far as an unread state tells:
+/// `unknown`, with where the read stands.
+pub fn item(m: &Mod, o: Result<&Overview, Unread>) -> Entry<ModFields> {
     let critical = match (m.critical, *m == JUDGE, o.is_ok_and(|o| o.claude_code)) {
         (false, _, _) => "no",
         (true, false, _) => "yes",
         (true, true, true) => "yes: gate.engine is claude-code",
         (true, true, false) => "no: only while gate.engine is claude-code",
     };
-    let mut rows = vec![row("critical", critical), row("needs", format!("Claude Code {} or later", m.min_claude_code))];
+    let mut fields = ModFields { wanted: None, targets: Vec::new(), critical, needs: format!("Claude Code {} or later", m.min_claude_code), installed: Vec::new() };
     let mut item = Item { kind: Some(ItemKind::Plugin), source: Some(m.id.into()), ..Item::new(Family::Mod, m.name, Origin::Builtin) };
     match o {
         Err(why) => {
@@ -53,20 +70,49 @@ pub fn of_mod(m: &Mod, o: Result<&Overview, Unread>) -> Card {
         }
         Ok(o) => {
             use attend_mod::State as S;
-            item.path = Some(o.folder.join(m.name));
+            item.path = o.shipped.is_some().then(|| o.folder.join(m.name));
             item.version = o.shipped.clone();
             item = item.with_state(state(o.word));
             item.detail = match (o.attention.first(), o.word) {
                 (Some(a), _) => Some(format!("critical: {}", a.why.word())),
                 (None, S::Drift) if o.older => Some("an installed copy is older".into()),
                 (None, S::Drift) => Some("repair converges it".into()),
-                (None, S::Off) => Some("not wanted".into()),
+                (None, S::Off) if o.shipped.is_none() => Some("not shipped in this app".into()),
+                (None, S::Off) if !o.wanted => Some("not wanted".into()),
+                (None, S::Off) if o.targets.is_empty() => Some("no enabled target holds it".into()),
                 _ => None,
             };
-            if !o.installed.is_empty() {
-                rows.insert(0, row("installed", o.installed.join(", ")));
-            }
+            fields.wanted = Some(o.wanted);
+            fields.targets = o.targets.clone();
+            fields.installed = o.installed.clone();
         }
     }
-    Card { title: m.name.into(), summary: "Claude Code mod".into(), item, fold_state: false, rows }
+    Entry { item, fields }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cmd::attend_mod::ATTEND;
+
+    #[test]
+    fn a_mod_that_is_not_shipped_has_no_path_or_version() {
+        let o = Overview {
+            m: ATTEND,
+            shipped: None,
+            word: attend_mod::State::Off,
+            rows: vec![],
+            older: false,
+            claude_code: false,
+            attention: vec![],
+            installed: vec![],
+            folder: "/home/u/plugins".into(),
+            wanted: true,
+            targets: vec![],
+        };
+        let e = item(&ATTEND, Ok(&o));
+        assert_eq!((e.item.path, e.item.version, e.item.detail.as_deref()), (None, None, Some("not shipped in this app")));
+        let shipped = Overview { shipped: Some("0.1.0".into()), ..o };
+        assert_eq!(item(&ATTEND, Ok(&shipped)).item.path.as_deref(), Some(std::path::Path::new("/home/u/plugins/attend")));
+    }
 }

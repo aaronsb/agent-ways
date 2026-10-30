@@ -1113,6 +1113,8 @@ fn mod_states() -> Vec<crate::cmd::mods::Overview> {
             attention: vec![Attention { dir: "~/.claude-work".into(), why: Degraded::Missing, fix: "the install action, `ways manage mod install attend --commit`, installs it".into() }],
             installed: vec!["0.29.0".into()],
             folder: "/home/u/.local/share/agent-ways/plugins".into(),
+            wanted: true,
+            targets: vec![],
         },
         crate::cmd::mods::Overview {
             m: JUDGE,
@@ -1128,6 +1130,8 @@ fn mod_states() -> Vec<crate::cmd::mods::Overview> {
             }],
             installed: vec![],
             folder: "/home/u/.local/share/agent-ways/plugins".into(),
+            wanted: true,
+            targets: vec![],
         },
         crate::cmd::mods::Overview {
             m: THEME,
@@ -1139,6 +1143,8 @@ fn mod_states() -> Vec<crate::cmd::mods::Overview> {
             attention: vec![],
             installed: vec![],
             folder: "/home/u/.local/share/agent-ways/plugins".into(),
+            wanted: true,
+            targets: vec![],
         },
         crate::cmd::mods::Overview {
             m: IMAGES,
@@ -1150,6 +1156,8 @@ fn mod_states() -> Vec<crate::cmd::mods::Overview> {
             attention: vec![],
             installed: vec!["1.48.0".into()],
             folder: "/home/u/.local/share/agent-ways/plugins".into(),
+            wanted: true,
+            targets: vec![],
         },
     ]
 }

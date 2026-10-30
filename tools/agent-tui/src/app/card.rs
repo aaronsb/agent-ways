@@ -47,8 +47,8 @@ fn after(text: Option<&str>) -> String {
 /// The card's lines, each value wrapped to `room` columns beside its label:
 /// the title, the summary, a blank line, then origin, each override, kind,
 /// source, version, state and the rows of its family. A field the item
-/// leaves null draws no row. A folded state follows the last override, or
-/// the origin, on its line.
+/// leaves null draws no row; the state always draws. A folded state follows
+/// the origin on its line.
 pub(super) fn card_lines(c: &Card, room: usize) -> Vec<Line<'static>> {
     let dim = theme::muted();
     let i = &c.item;
@@ -63,16 +63,16 @@ pub(super) fn card_lines(c: &Card, room: usize) -> Vec<Line<'static>> {
         let rest = format!(" {}{}", o.how.word(), after(path(Some(&o.path)).as_deref()));
         head.extend(headed("override", o.origin.word(), origin_style(o.origin), &rest, room, dim));
     }
-    let word = i.state.map(|s| (s.word(), tone_style(s.tone())));
+    let (word, style) = (i.state.word(), tone_style(i.state.tone()));
     let detail = i.detail.as_deref();
     // A folded state rides the origin line while it fits there, and takes a
     // row of its own when it would not or when an override follows.
     let width = |l: &Line| l.spans.iter().map(|s| crate::wrap::str_width(&s.content)).sum::<usize>();
-    let state_width = word.map_or(0, |(w, _)| crate::wrap::str_width(w)) + crate::wrap::str_width(&after(detail));
-    let folds = c.fold_state && i.overrides.is_empty() && word.is_some() && head.last().is_some_and(|l| width(l) + 3 + state_width <= super::review::LABEL + room);
-    if let (true, Some((w, style)), Some(last)) = (folds, word, head.last_mut()) {
+    let state_width = crate::wrap::str_width(word) + crate::wrap::str_width(&after(detail));
+    let folds = c.fold_state && i.overrides.is_empty() && head.last().is_some_and(|l| width(l) + 3 + state_width <= super::review::LABEL + room);
+    if let (true, Some(last)) = (folds, head.last_mut()) {
         last.spans.push(Span::raw(" · "));
-        last.spans.push(Span::styled(w.to_string(), style));
+        last.spans.push(Span::styled(word.to_string(), style));
         last.spans.push(Span::raw(after(detail)));
     }
     lines.extend(head);
@@ -84,10 +84,8 @@ pub(super) fn card_lines(c: &Card, room: usize) -> Vec<Line<'static>> {
     plain("kind", i.kind.map(|k| k.word()));
     plain("source", i.source.as_deref());
     plain("version", i.version.as_deref());
-    match (folds, word, detail) {
-        (true, _, _) | (false, None, None) => {}
-        (false, Some((w, style)), _) => lines.extend(headed("state", w, style, &after(detail), room, dim)),
-        (false, None, Some(d)) => lines.extend(fields("state", d, Style::new(), room, dim)),
+    if !folds {
+        lines.extend(headed("state", word, style, &after(detail), room, dim));
     }
     for (k, v) in &c.rows {
         lines.extend(fields(k, v, Style::new(), room, dim));

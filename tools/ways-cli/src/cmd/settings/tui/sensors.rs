@@ -33,13 +33,19 @@ fn trusted(layers: &[Layer]) -> Vec<String> {
     attend_config::Config::from_layers(&user).project_sensors
 }
 
+/// The sensors the files `layers` hold declare, layered for `project`
+/// under the user's allow-list.
+pub fn loaded(layers: &[Layer], project: &Path) -> Vec<attend_config::sensors::Loaded> {
+    attend_config::sensors::from_layers(layers, project, &trusted(layers))
+}
+
 /// Put a card on each sensor's node under `root`, from the sensor files
 /// `layers` hold, layered for `project`.
 pub fn cards(root: &mut Node, layers: &[Layer], project: &Path, home: &Path, attend: &Attend) {
-    let loaded = attend_config::sensors::from_layers(layers, project, &trusted(layers));
+    let loaded = loaded(layers, project);
     for g in root.children.iter_mut().filter(|g| !g.section) {
         let Some(l) = loaded.iter().find(|l| l.name == g.name) else { continue };
-        g.card = Some(super::card::shown(modules::of_sensor(l, attend), home));
+        g.card = Some(super::card::shown(super::card::to_card(modules::item(l, attend)), home));
     }
 }
 

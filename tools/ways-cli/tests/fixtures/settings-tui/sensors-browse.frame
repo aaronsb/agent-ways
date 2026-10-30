@@ -7,7 +7,7 @@ agent-tui frame 100x30
 |│ ▸ example-mcp · setting       value                 ││                                           │|
 |│ ▸ git · setting               value                 ││origin    builtin                          │|
 |│ ▸ keepwarm · setting          value                 ││kind      crate                            │|
-|│ ▸ peers · setting             value                 ││state     enabled; attend absent           │|
+|│ ▸ peers · setting             value                 ││state     unknown · enabled; attend absent │|
 |│▌▾ processes · setting         value                 ││interval  30s quiet, 5s busy               │|
 |│     enabled                   true                  ││threshold 2                                │|
 |│     interval                  30                    ││lane      event                            │|

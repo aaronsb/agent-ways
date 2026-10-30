@@ -34,10 +34,10 @@ The file carries only what it changes. It merges over the shipped `processes.yam
 ```
 $ attend sensor list
   ...
-  processes       crate   user    active event   30s / 5s   sensor-processes@0.6.0 ~/.config/attend/sensors/processes.yaml
+  processes       crate   builtin · user extends active event   30s / 5s   sensor-processes@0.6.0 ~/.config/attend/sensors/processes.yaml
 ```
 
-`Origin` is now `user` and `File` names your file. A running `attend run` sees the change and reloads.
+`Origin` is now `builtin · user extends` and `File` names your file. A running `attend run` sees the change and reloads.
 
 ## Step 3 — Send a test through it
 
@@ -100,9 +100,9 @@ A sensor's name is its file's stem, so set `name: failed-units` in the copy, and
 ```
 $ attend sensor list
   ...
-  failed-units    command user    not hosted event   300s / 60s sh  ~/.config/attend/sensors/failed-units.yaml
+  failed-units    command user    degraded event   300s / 60s sh  ~/.config/attend/sensors/failed-units.yaml
   ...
-  failed-units: not hosted: kind command not yet hosted; attend runs command sensors from ADR-403 slice 2
+  failed-units: degraded: kind command not yet hosted; attend runs command sensors from ADR-403 slice 2
 ```
 
 attend loads, checks and lists command sensors now, and runs them from ADR-403 slice 2. `ways settings lint` checks the file today: change a trigger's `on: added` to `on: appeared` and lint names the line.

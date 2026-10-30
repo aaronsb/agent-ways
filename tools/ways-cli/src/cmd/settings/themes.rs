@@ -9,7 +9,7 @@
 //! theme mapped from them in agent-theme.
 
 use agent_settings::exit;
-use agent_theme::{Background, ColorDepth, Kind, Rgb, Roles, Source, Theme, TERMINAL};
+use agent_theme::{Background, ColorDepth, Kind, Rgb, Roles, Theme, TERMINAL};
 use agent_tui::named::{self, Done, Refusal, Refused};
 use agent_tui::{Adapter, Themes};
 use serde_json::json;
@@ -32,34 +32,22 @@ fn load() -> (Ways, Themes) {
     (ways, themes)
 }
 
-fn source(s: Source) -> &'static str {
-    match s {
-        Source::Bundled => "bundled",
-        Source::User => "user",
-        Source::Override => "override",
-    }
-}
-
-/// The themes on offer: name, source and the active mark; with `--json`,
-/// each with its label and file.
+/// The themes on offer, then each user file that does not load: name,
+/// origin with any override, state and why; with `--json`, each theme's
+/// item (ADR-516 §5) and its label.
 pub fn list(as_json: bool) -> Out {
     let (_, themes) = load();
-    let rows = themes.list();
+    let entries = crate::cmd::modules::themes::all(&themes);
     if as_json {
-        let out: Vec<_> = rows
-            .iter()
-            .map(|(t, s)| {
-                let file = (*s != Source::Bundled).then(|| themes.path_of(&t.name)).flatten();
-                json!({ "name": t.name, "label": t.label, "source": source(*s), "active": t.name == themes.active, "file": file })
-            })
-            .collect();
-        println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
+        println!("{}", serde_json::to_string_pretty(&entries).unwrap_or_default());
         return Ok(());
     }
-    let w = rows.iter().map(|(t, _)| t.name.len()).max().unwrap_or(0);
-    for (t, s) in &rows {
-        let mark = if t.name == themes.active { " active" } else { "" };
-        println!("{:<w$}  {}{mark}", t.name, source(*s));
+    let w = entries.iter().map(|e| e.item.name.len()).max().unwrap_or(0);
+    for e in &entries {
+        let i = &e.item;
+        let origin = i.origin_text();
+        let detail = i.detail.as_deref().map(|d| format!("  {d}")).unwrap_or_default();
+        println!("{:<w$}  {origin}  {}{detail}", i.name, i.state.word());
     }
     Ok(())
 }

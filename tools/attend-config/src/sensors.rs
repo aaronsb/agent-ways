@@ -115,17 +115,8 @@ pub struct Loaded {
 }
 
 impl Loaded {
-    /// The highest layer whose file is merged, or the refused file's when
-    /// nothing else loads.
-    pub fn origin(&self) -> Origin {
-        self.merged_files().map(|f| f.origin).max().unwrap_or(Origin::Builtin)
-    }
-
-    /// The file of [`Loaded::origin`]'s layer, if it has a path.
-    pub fn path(&self) -> Option<&Path> {
-        self.merged_files().rev().find_map(|f| f.path.as_deref())
-    }
-
+    /// The files merged into it: every one when nothing else loads, else
+    /// all but a refused project file.
     fn merged_files(&self) -> impl DoubleEndedIterator<Item = &SensorFile> {
         let whole = self.is_refused();
         self.files.iter().filter(move |f| whole || !f.refused)
@@ -140,6 +131,45 @@ impl Loaded {
     /// refused.
     pub fn is_refused(&self) -> bool {
         self.refused.is_some() && self.files.iter().all(|f| f.refused || f.switch)
+    }
+
+    /// The sensor as an item (ADR-516): its kind, the lowest merged file
+    /// that defines it as its origin, and every other merged file as an
+    /// override that extends it. Its state is left `unknown`, for attend or
+    /// a reader of attend to say.
+    pub fn item(&self) -> agent_settings::item::Item {
+        use agent_settings::item::{Family, How, Item, Override};
+        let files: Vec<&SensorFile> = self.merged_files().collect();
+        let base = files.iter().position(|f| !f.switch).unwrap_or(0);
+        let (origin, path) = files.get(base).map_or((Origin::Builtin, None), |f| (f.origin, f.path.clone()));
+        let overrides = files
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != base)
+            .filter_map(|(_, f)| Some(Override { origin: item_origin(f.origin), how: How::Extends, path: f.path.clone()? }))
+            .collect();
+        let kind = self.spec.as_ref().map(|s| item_kind(s.kind));
+        Item { kind, path, ..Item::new(Family::Sensor, self.name.clone(), item_origin(origin)) }.with_overrides(overrides)
+    }
+}
+
+fn item_origin(o: Origin) -> agent_settings::item::Origin {
+    use agent_settings::item::Origin as O;
+    match o {
+        Origin::Builtin => O::Builtin,
+        Origin::User => O::User,
+        Origin::Project => O::Project,
+    }
+}
+
+/// A sensor kind as the item's.
+pub fn item_kind(k: sensor_spec::Kind) -> agent_settings::item::ItemKind {
+    use agent_settings::item::ItemKind;
+    match k {
+        sensor_spec::Kind::Crate => ItemKind::Crate,
+        sensor_spec::Kind::Command => ItemKind::Command,
+        sensor_spec::Kind::Mcp => ItemKind::Mcp,
+        sensor_spec::Kind::Ways => ItemKind::Ways,
     }
 }
 
@@ -656,10 +686,10 @@ mod tests {
         let cmd = "kind: command\nargv: [/bin/true]\noutput: lines\n";
         let l = layer("chk".into(), vec![read(Origin::User, "enabled: false\n"), read(Origin::Project, cmd)], false, Path::new("/p"));
         assert!(l.is_refused(), "{l:?}");
-        assert_eq!(l.origin(), Origin::Project, "nothing else loads, so the refused file is shown");
+        assert_eq!(l.item().origin, agent_settings::item::Origin::Project, "nothing else loads, so the refused file is shown");
         let l = layer("chk".into(), vec![read(Origin::User, cmd), read(Origin::Project, "argv: [rm, -rf, x]\n")], false, Path::new("/p"));
         assert!(!l.is_refused());
-        assert_eq!(l.origin(), Origin::User, "the refused project file is not merged");
+        assert_eq!(l.item().origin, agent_settings::item::Origin::User, "the refused project file is not merged");
     }
 
     /// peers and keepwarm keep the message lane under any file name, and a

@@ -62,7 +62,7 @@
 #
 # attend runs a script through a command sensor file (ADR-403), from
 # slice 2 of that record. Until then attend sensor list shows the file as
-# not hosted. $XDG_CONFIG_HOME/attend/sensors/gh-notifications.yaml:
+# degraded. $XDG_CONFIG_HOME/attend/sensors/gh-notifications.yaml:
 #
 #   kind: command
 #   argv: [bash, /path/to/gh-notifications.sh]

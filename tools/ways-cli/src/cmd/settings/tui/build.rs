@@ -570,19 +570,21 @@ impl Ways {
     /// user's, then the shipped corpus, a higher scope shadowing a lower one
     /// as `ways corpus` does (ADR-143).
     fn way_scopes(&self) -> BTreeMap<String, Located> {
-        let mut out = BTreeMap::new();
-        let roots = [
-            (WayScope::Project, crate::cmd::ways_roots::project_ways(&self.ctx.project)),
-            (WayScope::User, Some(self.ctx.user_ways.clone())),
-            (WayScope::Shipped, Some(self.ctx.corpus.clone())),
-        ];
-        for (scope, root) in roots {
-            let Some(root) = root else { continue };
-            for id in crate::cmd::scan::candidates::way_ids(&root) {
-                out.entry(id.clone()).or_insert_with(|| Located { scope, file: way_file(&root, &id), root: root.clone() });
-            }
-        }
-        out
+        use agent_settings::item::Origin;
+        let project = crate::cmd::ways_roots::project_ways(&self.ctx.project);
+        let found = crate::cmd::modules::ways::found(&self.ctx.corpus, &self.ctx.user_ways, project.as_deref());
+        found
+            .into_iter()
+            .filter_map(|(id, mut f)| {
+                let top = f.pop()?;
+                let scope = match top.origin {
+                    Origin::Builtin => WayScope::Shipped,
+                    Origin::User => WayScope::User,
+                    Origin::Project => WayScope::Project,
+                };
+                Some((id, Located { scope, root: top.root, file: top.file }))
+            })
+            .collect()
     }
 
     /// The ways tab's `project` group, its switches gathered by scope into

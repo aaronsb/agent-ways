@@ -525,23 +525,111 @@ fn rename_and_delete_follow_the_file_a_theme_was_read_from() {
     assert!(fx.read(&format!("{THEMES}/foo.theme")).is_none());
 }
 
+/// The descriptor's fields, in order (ADR-516 §1).
+const DESCRIPTOR: [&str; 10] = ["family", "name", "kind", "origin", "path", "overrides", "source", "version", "state", "detail"];
+
+/// The keys of a JSON object, in order.
+fn keys(v: &serde_json::Value) -> Vec<&str> {
+    v.as_object().unwrap().keys().map(String::as_str).collect()
+}
+
 #[test]
-fn the_cli_lists_the_themes_with_their_source() {
+fn the_cli_lists_the_themes_with_their_origin_and_state() {
     let fx = Fx::new();
     assert_eq!(fx.run(&["settings", "theme", "copy", "nord", "mine"]).2, 0);
     assert_eq!(fx.run(&["settings", "set", "theme.active", "mine"]).2, 0);
+    let text = fx.read(&format!("{THEMES}/mine.theme")).unwrap();
+    fx.file(&format!("{THEMES}/nord.theme"), &text.replacen("THEME_NAME=\"mine\"", "THEME_NAME=\"nord\"", 1));
+    fx.file(&format!("{THEMES}/broken.theme"), "not a theme\n");
     let (out, _, code) = fx.run(&["settings", "theme", "list"]);
     assert_eq!(code, 0);
-    let lines: Vec<&str> = out.lines().collect();
-    assert_eq!(lines.first().map(|l| l.split_whitespace().collect::<Vec<_>>()), Some(vec!["terminal", "bundled"]));
-    assert_eq!(lines.last().map(|l| l.split_whitespace().collect::<Vec<_>>()), Some(vec!["mine", "user", "active"]));
+    let words = |name: &str| out.lines().find(|l| l.starts_with(&format!("{name} "))).map(|l| l.split_whitespace().take(5).collect::<Vec<_>>());
+    assert_eq!(words("terminal"), Some(vec!["terminal", "builtin", "inactive"]));
+    assert_eq!(words("mine"), Some(vec!["mine", "user", "active"]));
+    assert_eq!(words("nord"), Some(vec!["nord", "builtin", "·", "user", "replaces"]));
+    assert_eq!(words("broken").map(|w| w[..3].to_vec()), Some(vec!["broken", "user", "invalid"]));
     let (out, _, _) = fx.run(&["settings", "theme", "list", "--json"]);
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-    let mine = v.as_array().unwrap().iter().find(|t| t["name"] == "mine").unwrap();
-    assert_eq!((mine["source"].as_str(), mine["active"].as_bool()), (Some("user"), Some(true)));
-    assert!(mine["file"].as_str().unwrap().ends_with("/themes/mine.theme"));
-    let nord = v.as_array().unwrap().iter().find(|t| t["name"] == "nord").unwrap();
-    assert_eq!((nord["source"].as_str(), nord["file"].is_null()), (Some("bundled"), true));
+    let find = |n: &str| v.as_array().unwrap().iter().find(|t| t["name"] == n).unwrap_or_else(|| panic!("no {n}: {v}")).clone();
+    let mine = find("mine");
+    assert_eq!(keys(&mine), [&DESCRIPTOR[..], &["label"]].concat(), "the descriptor, then the label");
+    assert_eq!((mine["origin"].as_str(), mine["state"].as_str()), (Some("user"), Some("active")));
+    assert!(mine["path"].as_str().unwrap().ends_with("/themes/mine.theme"));
+    let nord = find("nord");
+    assert_eq!((nord["origin"].as_str(), nord["path"].is_null(), nord["label"].as_str()), (Some("builtin"), true, Some("mine")), "the label is the user file's");
+    assert_eq!((nord["overrides"][0]["origin"].as_str(), nord["overrides"][0]["how"].as_str()), (Some("user"), Some("replaces")));
+    assert!(nord["overrides"][0]["path"].as_str().unwrap().ends_with("/themes/nord.theme"));
+    let broken = find("broken");
+    assert_eq!((broken["state"].as_str(), broken["label"].is_null()), (Some("invalid"), true));
+    assert!(broken["detail"].as_str().is_some_and(|d| !d.is_empty()), "{broken}");
+    // `source` is the descriptor's, null for a theme; `file` and `active`
+    // are gone.
+    assert!(mine["source"].is_null() && mine.get("file").is_none() && mine.get("active").is_none(), "{mine}");
+}
+
+#[test]
+fn a_rejected_user_theme_file_named_for_a_bundled_theme_folds_into_it() {
+    let fx = Fx::new();
+    fx.file(&format!("{THEMES}/nord.theme"), "not a theme\n");
+    fx.file(&format!("{THEMES}/broken.theme"), "not a theme\n");
+    let (out, _, _) = fx.run(&["settings", "theme", "list", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let named = |n: &str| v.as_array().unwrap().iter().filter(|t| t["name"] == n).cloned().collect::<Vec<_>>();
+    let nord = named("nord");
+    assert_eq!(nord.len(), 1, "{v}");
+    assert_eq!((nord[0]["origin"].as_str(), nord[0]["state"].as_str()), (Some("builtin"), Some("inactive")));
+    let detail = nord[0]["detail"].as_str().unwrap();
+    assert!(detail.starts_with("user file nord.theme does not load: ") && detail.ends_with("; the bundled theme is in effect"), "{detail}");
+    let broken = named("broken");
+    assert_eq!((broken.len(), broken[0]["origin"].as_str(), broken[0]["state"].as_str()), (1, Some("user"), Some("invalid")));
+}
+
+#[test]
+fn settings_items_text_shows_the_overrides_and_the_highest_file() {
+    let fx = Fx::new();
+    fx.file(".config/attend/sensors/git.yaml", "interval: 90\n");
+    let (out, err, code) = fx.run(&["settings", "items", "sensor"]);
+    assert_eq!(code, 0, "{err}");
+    let line = out.lines().find(|l| l.split_whitespace().nth(1) == Some("git")).unwrap();
+    assert!(line.contains("builtin · user extends"), "{line}");
+    assert!(line.ends_with("~/.config/attend/sensors/git.yaml"), "{line}");
+}
+
+#[test]
+fn settings_items_lists_every_family_with_the_descriptor_first() {
+    let fx = Fx::new();
+    assert_eq!(fx.run(&["settings", "theme", "copy", "nord", "mine"]).2, 0);
+    let (out, err, code) = fx.run(&["settings", "items", "--json"]);
+    assert_eq!(code, 0, "{err}");
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let all = v.as_array().unwrap();
+    for f in ["theme", "mod", "sensor", "way", "profile"] {
+        assert!(all.iter().any(|i| i["family"] == f), "no {f} in {v}");
+    }
+    for i in all {
+        assert_eq!(&keys(i)[..DESCRIPTOR.len()], DESCRIPTOR, "{i}");
+    }
+    let mine = all.iter().find(|i| i["family"] == "theme" && i["name"] == "mine").unwrap();
+    assert_eq!(mine["origin"].as_str(), Some("user"));
+    let git = all.iter().find(|i| i["family"] == "sensor" && i["name"] == "git").unwrap();
+    assert_eq!((git["kind"].as_str(), git["origin"].as_str()), (Some("crate"), Some("builtin")));
+    assert_eq!(&keys(git)[DESCRIPTOR.len()..], ["description", "interval", "min_interval", "threshold", "lane"]);
+    let attend = all.iter().find(|i| i["family"] == "mod" && i["name"] == "attend").unwrap();
+    assert_eq!((attend["kind"].as_str(), attend["source"].as_str()), (Some("plugin"), Some("attend@agent-ways")));
+    assert_eq!(&keys(attend)[DESCRIPTOR.len()..], ["wanted", "targets"]);
+    let haiku = all.iter().find(|i| i["family"] == "profile" && i["name"] == "anthropic").unwrap();
+    assert_eq!((haiku["kind"].as_str(), haiku["origin"].as_str()), (Some("anthropic"), Some("builtin")));
+    // One family, and the text form: family, name, origin, kind, state, path.
+    let (out, _, _) = fx.run(&["settings", "items", "theme", "--json"]);
+    let themes: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert!(themes.as_array().unwrap().iter().all(|i| i["family"] == "theme"));
+    let (out, _, _) = fx.run(&["settings", "items", "theme"]);
+    let line = out.lines().find(|l| l.split_whitespace().nth(1) == Some("mine")).unwrap();
+    let w: Vec<&str> = line.split_whitespace().collect();
+    assert_eq!(&w[..5], ["theme", "mine", "user", "-", "inactive"]);
+    assert_eq!(w[5], "~/.config/agent-ways/themes/mine.theme");
+    let (_, err, code) = fx.run(&["settings", "items", "nope"]);
+    assert_eq!((code, err.as_str()), (2, "ways settings: no family `nope`; the families are theme, mod, sensor, way, profile\n"));
 }
 
 // ── a broken file fails closed and takes no write ──────────────

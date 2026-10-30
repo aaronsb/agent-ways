@@ -1124,6 +1124,20 @@ fn mod_list_names_every_shipped_mod() {
     assert!(out.status.success(), "{text}");
     assert!(text.contains("attend  0.17.0  converged") && text.contains("ways-judge  1.42.1  off"), "{text}");
     assert!(text.contains("installed 0.17.0, enabled"), "{text}");
+    // With --json: each mod's item, then wanted and a state per target.
+    let out = fx.run(&["manage", "mod", "list", "--json"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let attend = v.as_array().unwrap().iter().find(|m| m["name"] == "attend").unwrap();
+    let keys: Vec<&str> = attend.as_object().unwrap().keys().map(String::as_str).collect();
+    assert_eq!(keys, ["family", "name", "kind", "origin", "path", "overrides", "source", "version", "state", "detail", "wanted", "targets"]);
+    assert_eq!((attend["kind"].as_str(), attend["origin"].as_str(), attend["version"].as_str(), attend["state"].as_str()), (Some("plugin"), Some("builtin"), Some("0.17.0"), Some("converged")));
+    assert_eq!(attend["wanted"].as_bool(), Some(true));
+    let t = &attend["targets"][0];
+    assert_eq!((t["state"].as_str(), t["installed"].as_str(), t["enabled"].as_bool()), (Some("converged"), Some("0.17.0"), Some(true)));
+    assert!(t["dir"].as_str().is_some(), "{t}");
+    let judge = v.as_array().unwrap().iter().find(|m| m["name"] == "ways-judge").unwrap();
+    assert_eq!((judge["state"].as_str(), judge["wanted"].as_bool()), (Some("off"), Some(false)));
 }
 
 // ── convergence review of the wanted state (follow-up to ADR-512 S2) ──
