@@ -675,6 +675,33 @@ describe('copy_as', () => {
 
   test('a CSV cell holding a comma, a quote or a line break is quoted, its quotes doubled', () => {
     const table: Table = { kind: 'table', header: ['a', 'b'], align: ['left', 'left'], rows: [['x, y', 'say "hi"'], ['plain', 'one<br/>two'], ['~~gone~~ `kept`', 'snake_case _em_']] }
-    expect(tableCsv(table)).toBe('a,b\n"x, y","say ""hi"""\nplain,"one\ntwo"\ngone `kept`,snake_case em')
+    expect(tableCsv(table)).toBe('a,b\n"x, y","say ""hi"""\nplain,"one\ntwo"\ngone kept,snake_case em')
+  })
+
+  const csvOf = (row: string) => tableCsv(splitReply(`| a | b |\n|---|---|\n${row}`)[0] as Table).split('\n')[1]
+  const spans: [string, string, string][] = [
+    ['dunders and a double star', '| `__init__` | `**kwargs` |', '__init__,**kwargs'],
+    ['underscores', '| `_private_` | x |', '_private_,x'],
+    ['tildes', '| `~~x~~` | x |', '~~x~~,x'],
+    ['backslashes', '| `C:\\temp\\*` | x |', 'C:\\temp\\*,x'],
+    ['a link', '| `[a](b)` | x |', '[a](b),x'],
+    ['a line break', '| `a<br>b` | x |', 'a<br>b,x'],
+    ['an escaped pipe', '| `a \\| b` | x |', 'a | b,x'],
+  ]
+  for (const [name, row, csv] of spans) {
+    test(`a code span keeps its content verbatim: ${name}`, () => {
+      expect(csvOf(row)).toBe(csv)
+    })
+  }
+
+  test('outside a code span the markdown comes off: bold, a link with parentheses in its address, an autolink', () => {
+    expect(csvOf('| **bold** `**kept**` | __b__ |')).toBe('bold **kept**,b')
+    expect(csvOf('| [a](https://x.com/(p)) | <https://x.com> |')).toBe('a,https://x.com')
+    expect(csvOf('| [`run`](https://x.com) | *it* `*it*` |')).toBe('run,it *it*')
+  })
+
+  test('the drawn cell keeps a code span as written and drops bold around it', () => {
+    const table = splitReply('| a | b |\n|---|---|\n| `**kwargs` | **bold** `__init__` |')[0] as Table
+    expect(table.rows).toEqual([['**kwargs', 'bold __init__']])
   })
 })

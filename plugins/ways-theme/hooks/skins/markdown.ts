@@ -64,15 +64,31 @@ export function fenceCode(lines: readonly string[], open: number, close: number)
     .join('\n')
 }
 
-// Inline emphasis and code ticks read as noise in a padded cell.
-const clean = (cell: string): string =>
-  cell.replace(/\*\*|__|`/g, '').replace(/\\\|/g, '|').trim()
+// A code span in a cell: a run of backticks, the content, a run of the same length.
+const CELL_SPAN = /(?<![`\\])(`+)(?!`)(.+?)(?<!`)\1(?!`)/g
 
-export function cellsOf(line: string): string[] {
-  const inner = line.trim().replace(/^\|/, '').replace(/(?<!\\)\|$/, '')
+// A span's content as CommonMark reads it: one space off each side when both have one.
+const spanText = (inner: string): string => (inner.length > 1 && inner.startsWith(' ') && inner.endsWith(' ') && inner.trim() !== '' ? inner.slice(1, -1) : inner)
 
-  return inner.split(/(?<!\\)\|/).map(clean)
+// `cell` with `reduce` applied outside its code spans, and each span as its content
+// verbatim, its ticks off. The spans are held out behind private-use marks while
+// `reduce` runs, so a link or emphasis around a span still reads whole.
+function outsideCode(cell: string, reduce: (text: string) => string): string {
+  const spans: string[] = []
+  const masked = cell.replace(CELL_SPAN, (_, _ticks: string, inner: string) => `\uE000${spans.push(spanText(inner)) - 1}\uE001`)
+
+  return reduce(masked).replace(/\uE000(\d+)\uE001/g, (_, at: string) => spans[Number(at)] ?? '')
 }
+
+// A cell as written, `\|` read as `|`, which GFM takes inside code spans too.
+const cellSource = (cell: string): string => cell.replace(/\\\|/g, '|').trim()
+
+// Bold read as noise in a padded cell; a code span as its content.
+const clean = (cell: string): string => outsideCode(cellSource(cell), text => text.replace(/\*\*|__/g, ''))
+
+const splitCells = (line: string): string[] => line.trim().replace(/^\|/, '').replace(/(?<!\\)\|$/, '').split(/(?<!\\)\|/)
+
+export const cellsOf = (line: string): string[] => splitCells(line).map(clean)
 
 const alignOf = (cell: string): Align => {
   const spec = cell.trim()
@@ -447,17 +463,34 @@ export function copyOf(reply: string, code: boolean): { text: string } | { messa
   return last === undefined ? { message: 'No code block in the last reply' } : { text: last.code }
 }
 
-// A cell's inline markdown as its text: an image or a link as its text, `<br>` as a line
-// break, emphasis and strikethrough as the words inside them, a backslash escape as the
-// character. Bold and code ticks are already gone (`cellsOf`).
+// A cell's inline markdown as its text: an image or a link as its text, an autolink as its
+// address, `<br>` as a line break, emphasis and strikethrough as the words inside them, a
+// backslash escape as the character, and a code span as its content verbatim. A link's
+// address may hold one level of parentheses, `(https://x.com/(p))`.
 const plainCell = (cell: string): string =>
-  cell
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/~~(.+?)~~/g, '$1')
-    .replace(/(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])/g, '$1')
-    .replace(/(?<!\w)_(?!\s)(.+?)(?<!\s)_(?!\w)/g, '$1')
-    .replace(/\\([\\`*_{}[\]()#+\-.!|~<>])/g, '$1')
+  outsideCode(cellSource(cell), text =>
+    text
+      .replace(/!?\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)/g, '$1')
+      .replace(/<((?:[a-z][a-z0-9+.-]{1,31}:[^\s<>]*)|(?:[^\s<>@]+@[^\s<>]+))>/gi, '$1')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/\*\*(.+?)\*\*|__(.+?)__/g, '$1$2')
+      .replace(/~~(.+?)~~/g, '$1')
+      .replace(/(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])/g, '$1')
+      .replace(/(?<!\w)_(?!\s)(.+?)(?<!\s)_(?!\w)/g, '$1')
+      .replace(/\\([\\`*_{}[\]()#+\-.!|~<>])/g, '$1'),
+  )
+
+// The cells of a table as written, for the copy: its header and rows from `raw` where it
+// came from markdown, since the drawn cells have lost their code spans' ticks.
+function writtenCells(table: Table): string[][] {
+  const lines = table.raw?.split('\n')
+
+  if (lines === undefined) {
+    return [table.header, ...table.rows]
+  }
+
+  return [lines[0] ?? '', ...lines.slice(2)].map(line => fit(splitCells(line), table.header.length))
+}
 
 // A table as CSV, its header row first. A cell holding a comma, a quote or a line break is
 // quoted and its quotes doubled, as RFC 4180 has it; rows end in a line feed.
@@ -467,7 +500,9 @@ export function tableCsv(table: Table): string {
     return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
   }
 
-  return [table.header, ...table.rows].map(cells => cells.map(field).join(',')).join('\n')
+  return writtenCells(table)
+    .map(cells => cells.map(field).join(','))
+    .join('\n')
 }
 
 // A table as it is drawn, boxed in monospace, for pasting where markdown does not render.
