@@ -2,7 +2,7 @@
 // https://github.com/hellosverre/claude-skins at 985ad63, hooks/svg-code.ts.
 
 import type { Palette } from './skin'
-import { CONTROL_SLOT, escape, HEADER_MID, fitText, MAX_SVG, MONO, riseDelay, staggerEnd, staggerStep, svgCard, tint } from './svg-kit'
+import { CONTROL_SLOT, escape, HEADER_MID, fitText, MAX_SVG, measure, MONO, riseDelay, staggerEnd, staggerStep, svgCard, tint } from './svg-kit'
 
 // A fenced code block as a card: the language and line count in a header, line numbers
 // in a gutter, and light highlighting of comments, strings, numbers and keywords. Every
@@ -48,28 +48,30 @@ export function tokenize(line: string, lang: string): Token[] {
   return line.slice(last) === '' ? tokens : [...tokens, { text: line.slice(last), role: 'plain' }]
 }
 
-// A token list as rows of at most `max` characters each, a token split where a row ends.
-function rowsOf(tokens: Token[], max: number): Token[][] {
+// A token list as rows at most `room` pixels wide, each character measured as breakText
+// measures it, so a wide character takes the room of two; a token splits where a row ends.
+function rowsOf(tokens: Token[], room: number): Token[][] {
   const rows: Token[][] = [[]]
-  let room = max
+  let used = 0
 
   for (const token of tokens) {
-    let rest = [...token.text]
+    let piece = ''
 
-    while (rest.length > room) {
-      if (room > 0) {
-        rows.at(-1)!.push({ text: rest.slice(0, room).join(''), role: token.role })
+    for (const char of token.text) {
+      const width = measure(char, true, CODE)
+
+      if (used > 0 && used + width > room) {
+        if (piece !== '') rows.at(-1)!.push({ text: piece, role: token.role })
+        rows.push([])
+        piece = ''
+        used = 0
       }
 
-      rest = rest.slice(room)
-      rows.push([])
-      room = max
+      piece += char
+      used += width
     }
 
-    if (rest.length > 0) {
-      rows.at(-1)!.push({ text: rest.join(''), role: token.role })
-      room -= rest.length
-    }
+    if (piece !== '') rows.at(-1)!.push({ text: piece, role: token.role })
   }
 
   return rows
@@ -80,7 +82,6 @@ function rowsOf(tokens: Token[], max: number): Token[][] {
 export function codeSvg(code: string, lang: string, palette: Palette, width: number, hasControl = false): { source: string; width: number; height: number; alt: string; entranceMs: number } | null {
   const lines = code.replace(/\t/g, '  ').split('\n')
   const gutter = String(lines.length).length * 8 + 24
-  const maxChars = Math.max(1, Math.floor((width - gutter - 24) / (CODE * 0.6)))
   const color: Readonly<Record<Token['role'], string>> = {
     plain: palette.fg,
     comment: palette.muted,
@@ -88,7 +89,7 @@ export function codeSvg(code: string, lang: string, palette: Palette, width: num
     number: palette.warn,
     keyword: palette.user,
   }
-  const wrapped = lines.map(line => rowsOf(tokenize(line, lang), maxChars))
+  const wrapped = lines.map(line => rowsOf(tokenize(line, lang), width - gutter - 24))
   const count = wrapped.reduce((sum, rows) => sum + rows.length, 0)
   const step = staggerStep(count, 12)
   let at = 0

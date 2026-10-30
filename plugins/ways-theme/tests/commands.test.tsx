@@ -12,7 +12,7 @@ import { inlineMath } from '../hooks/skins/math.ts'
 import { replySegments } from '../hooks/skins/reply.ts'
 import { codeSvg } from '../hooks/skins/svg-code.ts'
 import { diffSvg } from '../hooks/skins/svg-diff.ts'
-import { MAX_SVG } from '../hooks/skins/svg-kit.ts'
+import { MAX_SVG, measure } from '../hooks/skins/svg-kit.ts'
 import { terminalSvg } from '../hooks/skins/svg-terminal.ts'
 import { MIAMI_NIGHTS } from './fixtures.ts'
 import { INTERACTIVE, borders, host, json, shows } from './host.tsx'
@@ -819,6 +819,17 @@ describe('nothing folds and nothing is cut', () => {
     expect(card.source).toContain('>201<')
     expect(card.source).not.toMatch(/more line|…/)
     expect(card.source.match(/y/g)!.length).toBeGreaterThanOrEqual(300)
+  })
+
+  test('a code card wraps a line of wide characters by their width', () => {
+    const text = '漢'.repeat(100)
+    const card = codeSvg(text, '', PALETTE, 600)!
+    const rows = [...card.source.matchAll(/font-size="12.5"[^>]*xml:space="preserve">(.*?)<\/text>/g)].map(m => m[1]!.replace(/<[^>]+>/g, ''))
+    // The card's width less the gutter of a one-digit line number and the right margin.
+    const room = 600 - (8 + 24) - 24
+    expect(rows.join('')).toBe(text)
+    expect(rows.every(row => measure(row, true, 12.5) <= room)).toBe(true)
+    expect(rows.map(row => [...row].length)).toEqual([36, 36, 28])
   })
 
   test('a diff card draws every line and wraps a long one, with no `more lines`', () => {
