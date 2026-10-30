@@ -121,31 +121,38 @@ export function diffRows(
       {onBorder(
         look,
         <Box flexDirection="column" borderStyle="round" borderColor={palette.muted} paddingX={1}>
-          {lines.map((line, i) =>
-            line.kind === 'gap' ? (
-              <Text color={palette.muted}>{`${' '.repeat(digits * 2 + 2)}⋯ line ${line.at}`}</Text>
-            ) : syntax?.[i] !== undefined && line.text !== '' ? (
-              // The marker keeps the change's colour; the code after it takes the language's.
-              <Text>
-                <Text color={palette.muted}>{`${number(line.old)} ${number(line.new)} `}</Text>
-                <Text color={line.kind === 'add' ? palette.ok : line.kind === 'del' ? palette.err : palette.muted}>
-                  {`${line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' '} `}
-                </Text>
-                {(syntax[i] ?? []).map(token => (
-                  <Text color={colors[token.role]} dimColor={line.kind === 'del'}>
-                    {token.text}
+          {lines.map((line, i) => {
+            if (line.kind === 'gap') return <Text color={palette.muted}>{`${' '.repeat(digits * 2 + 2)}⋯ line ${line.at}`}</Text>
+            const sign = line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' '
+            const signColor = line.kind === 'add' ? palette.ok : line.kind === 'del' ? palette.err : palette.muted
+
+            // The numbers and the sign in a gutter of their own, so a wrapped line goes on
+            // under its code.
+            return (
+              <Box flexDirection="row">
+                <Box flexShrink={0}>
+                  <Text>
+                    <Text color={palette.muted}>{`${number(line.old)} ${number(line.new)} `}</Text>
+                    <Text color={signColor}>{`${sign} `}</Text>
                   </Text>
-                ))}
-              </Text>
-            ) : (
-              <Text>
-                <Text color={palette.muted}>{`${number(line.old)} ${number(line.new)} `}</Text>
-                <Text color={line.kind === 'add' ? palette.ok : line.kind === 'del' ? palette.err : palette.muted}>
-                  {`${line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' '} ${line.text === '' ? ' ' : line.text}`}
-                </Text>
-              </Text>
-            ),
-          )}
+                </Box>
+                <Box flexShrink={1} flexGrow={1}>
+                  {syntax?.[i] !== undefined && line.text !== '' ? (
+                    // The sign keeps the change's colour; the code takes the language's.
+                    <Text>
+                      {(syntax[i] ?? []).map(token => (
+                        <Text color={colors[token.role]} dimColor={line.kind === 'del'}>
+                          {token.text}
+                        </Text>
+                      ))}
+                    </Text>
+                  ) : (
+                    <Text color={signColor}>{line.text === '' ? ' ' : line.text}</Text>
+                  )}
+                </Box>
+              </Box>
+            )
+          })}
         </Box>,
         {
           label: (

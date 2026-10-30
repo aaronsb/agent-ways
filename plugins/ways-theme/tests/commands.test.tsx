@@ -573,6 +573,23 @@ describe('a fence copy block', () => {
     expect(drawnAt(tree, 'make dev-install').length).toBeGreaterThan(0)
   })
 
+  test("a diff fence's long line wraps under its code, its numbers and sign in a gutter of their own", async ($, on) => {
+    hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
+    await $.session.start(INTERACTIVE)
+    const long = `const value = ${'compute(1, 2) + '.repeat(8)}0`
+    const tree = await drawn($, `See:\n\n\`\`\`diff\n--- a/x.ts\n+++ b/x.ts\n@@ -1 +1 @@\n-const value = 0\n+${long}\n\`\`\``)
+    const [above] = drawnAt(tree, long)
+    expect(above).toBeDefined()
+    const boxes = above!.filter(n => n.type === 'Box')
+    const code = boxes.at(-1)!
+    const row = boxes.at(-2)!
+    expect(code.props?.flexShrink).toBe(1)
+    expect(row.props?.flexDirection).toBe('row')
+    const gutter = (row.children ?? []).flat(Infinity as 1)[0] as Node
+    expect(gutter.props?.flexShrink).toBe(0)
+    expect(strings(gutter)).toBe('  1 + ')
+  })
+
   test('with tables off, a diff and a Mermaid chart keep their drawing', () => {
     const prefs = { ...(PREFS as object), tables: 'off' } as never
     const diff = 'See:\n\n```diff\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n```'
