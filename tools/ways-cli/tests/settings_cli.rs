@@ -1006,7 +1006,7 @@ fn renamed_corpus(f: &Fx) {
 fn a_toggle_naming_a_renamed_way_is_a_lint_warning_and_exits_clean() {
     let f = Fx::new();
     renamed_corpus(&f);
-    f.write(&f.overlay(), "ways:\n  data/documentation: false\n  workstation/shell/prompt: false\n  data/schema-docs: false\n  workstation/*: false\n  local/mine: false\n");
+    f.write(&f.overlay(), "ways:\n  data/documentation: false\n  workstation/shell/prompt: false\n  data/schema-docs: false\n  workstation/**: false\n  local/mine: false\n");
     let (out, err, code) = f.run(&["settings", "lint"]);
     assert_eq!(code, 0, "{out}{err}");
     assert_eq!(
@@ -1017,23 +1017,64 @@ fn a_toggle_naming_a_renamed_way_is_a_lint_warning_and_exits_clean() {
 }
 
 #[test]
-fn a_prefix_covering_no_way_is_a_lint_warning_and_one_covering_a_way_is_not() {
+fn a_pattern_matching_no_way_is_a_lint_warning_and_one_matching_a_way_is_not() {
     let f = Fx::new();
     renamed_corpus(&f);
-    f.write(&f.overlay(), "ways:\n  itops/*: false\n  data/*: false\n  local/*: false\n  workstation/shell/*: true\n");
+    f.write(&f.overlay(), "ways:\n  itops/**: false\n  data/**: false\n  \"*/mine\": false\n  workstation/shell/**: true\n");
     let (out, _, code) = f.run(&["settings", "lint"]);
     assert_eq!(code, 0);
-    assert_eq!(out, "<ROOT>/proj/.claude/ways.yaml:2: [ways.project] ways.itops/*: warning: names no way in the project, user or shipped ways, so it switches nothing\n");
+    assert_eq!(out, "<ROOT>/proj/.claude/ways.yaml:2: [ways.project] ways.itops/**: warning: names no way in the project, user or shipped ways, so it switches nothing\n");
+}
+
+#[test]
+fn a_trailing_star_key_is_a_lint_warning_naming_the_toggles_for_its_old_meaning() {
+    let f = Fx::new();
+    renamed_corpus(&f);
+    f.write(&f.overlay(), "ways:\n  data/*: false\n  workstation/*: true\n");
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(
+        out,
+        "<ROOT>/proj/.claude/ways.yaml:2: [ways.project] ways.data/*: warning: `/*` matches only the ways directly under data; for data and every way under it, write `data: false` plus `data/**: false`\n\
+         <ROOT>/proj/.claude/ways.yaml:3: [ways.project] ways.workstation/*: warning: `/*` matches only the ways directly under workstation; for workstation and every way under it, write `workstation: true` plus `workstation/**: true`\n\
+         <ROOT>/proj/.claude/ways.yaml:3: [ways.project] ways.workstation/*: warning: names no way in the project, user or shipped ways, so it switches nothing\n"
+    );
+}
+
+#[test]
+fn a_true_false_tie_between_patterns_is_a_lint_warning() {
+    let f = Fx::new();
+    renamed_corpus(&f);
+    f.write(&f.overlay(), "ways:\n  workstation/*/shell-prompt: true\n  \"*/shell/shell-prompt\": false\n  data/**: false\n");
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(
+        out,
+        "<ROOT>/proj/.claude/ways.yaml:3: [ways.project] ways.*/shell/shell-prompt: warning: ties with ways.workstation/*/shell-prompt on workstation/shell/shell-prompt at the same specificity with the opposite value, so the tie resolves to false\n"
+    );
+}
+
+#[test]
+fn a_segment_mixing_text_and_a_wildcard_is_a_lint_error() {
+    let f = Fx::new();
+    renamed_corpus(&f);
+    f.write(&f.overlay(), "ways:\n  data/schema*: false\n  data/schema-docs: false\n");
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!(code, 3, "{out}{err}");
+    assert_eq!(
+        out,
+        "<ROOT>/proj/.claude/ways.yaml:2: [ways.project] ways.data/schema*: a segment mixes text and a wildcard, so the key is read literally and matches no way; write `*` or `**` as a whole segment\n"
+    );
 }
 
 #[test]
 fn status_lists_a_toggle_naming_no_way_apart_from_the_disabled_ways() {
     let f = Fx::new();
     renamed_corpus(&f);
-    f.write(&f.overlay(), "ways:\n  data/documentation: false\n  data/schema-docs: false\n  local/mine: false\n  data/*: false\n  bogus/thing:\n    threshold: 0.5\n");
+    f.write(&f.overlay(), "ways:\n  data/documentation: false\n  data/schema-docs: false\n  local/mine: false\n  data/**: false\n  bogus/thing:\n    threshold: 0.5\n");
     let (out, err, _) = f.run(&["status"]);
     let line = |p: &str| out.lines().find(|l| l.starts_with(p)).unwrap_or_else(|| panic!("no {p} line in\n{out}{err}")).to_string();
-    assert_eq!(line("Disabled ways:"), "Disabled ways:    data/schema-docs, local/mine, data/* (project scope, ADR-131; `dir/*` covers every way under it)");
+    assert_eq!(line("Disabled ways:"), "Disabled ways:    data/schema-docs, local/mine, data/** (project scope, ADR-131; `dir/**` covers every way under `dir`)");
     // An entry that sets no `enabled` is still a key status checks, as lint does.
     assert_eq!(
         line("Toggles naming no way:"),
@@ -1045,7 +1086,7 @@ fn status_lists_a_toggle_naming_no_way_apart_from_the_disabled_ways() {
     assert!(warned[0].contains("ways.data/documentation:") && warned[1].contains("ways.bogus/thing:"), "{lint}");
     let (out, _, _) = f.run(&["status", "--json"]);
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-    assert_eq!(v["disabled_ways"], serde_json::json!(["data/schema-docs", "local/mine", "data/*"]));
+    assert_eq!(v["disabled_ways"], serde_json::json!(["data/schema-docs", "local/mine", "data/**"]));
     assert_eq!(v["toggles_checked"], true);
     assert_eq!(v["unmatched_toggles"][0]["key"], "data/documentation");
     assert_eq!(v["unmatched_toggles"][0]["nearest"], "data/schema-docs");
@@ -1084,7 +1125,7 @@ fn a_toggle_naming_a_way_in_a_disabled_domain_is_not_flagged() {
     let f = Fx::new();
     renamed_corpus(&f);
     f.write(&f.user(), "disabled_domains: [data]\n");
-    f.write(&f.overlay(), "ways:\n  data/schema-docs: false\n  data/*: false\n");
+    f.write(&f.overlay(), "ways:\n  data/schema-docs: false\n  data/**: false\n");
     let (out, err, code) = f.run(&["settings", "lint"]);
     assert_eq!((out.as_str(), code), ("", 0), "{err}");
     let (out, _, _) = f.run(&["status"]);

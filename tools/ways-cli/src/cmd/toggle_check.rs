@@ -1,9 +1,10 @@
-//! Per-way toggles (ADR-131) that name no way. A key in a project's
-//! `.claude/ways.yaml` `ways:` map is a way id, or a `dir/*` prefix that
-//! covers the way at `dir` and every way under it (ADR-701 §1). A key that
-//! matches no way switches nothing: after a way is renamed, the toggle that
-//! switched it off stays in the file and the way runs again. The overlay
-//! accepts any key, so `ways status` and `ways settings lint` report these.
+//! Per-way toggles (ADR-131) that name no way, and toggle patterns that do
+//! not mean what they say. A key in a project's `.claude/ways.yaml` `ways:`
+//! map is a toggle pattern over way ids (`ways_core::config::toggle_matches`).
+//! A key that matches no way switches nothing: after a way is renamed, the
+//! toggle that switched it off stays in the file and the way runs again. The
+//! overlay accepts any key, so `ways status` and `ways settings lint` report
+//! these.
 //!
 //! The way ids are read from the roots a scan reads (`paths::ways_roots`):
 //! the project's own ways, the user's, then the shipped ways. Without the
@@ -38,10 +39,16 @@ pub fn check(keys: &[String], project: &Path) -> Check {
     if keys.is_empty() {
         return Check::Checked(Vec::new());
     }
-    if !ways_core::paths::shipped_ways_root().is_dir() {
-        return Check::NoShippedWays;
+    match judged_ids(project) {
+        Some(ids) => Check::Checked(unmatched(keys.iter().map(String::as_str), &ids)),
+        None => Check::NoShippedWays,
     }
-    Check::Checked(unmatched(keys.iter().map(String::as_str), &known_ids(project)))
+}
+
+/// The way ids toggles in `project` are judged against; `None` without the
+/// shipped ways.
+pub fn judged_ids(project: &Path) -> Option<BTreeSet<String>> {
+    ways_core::paths::shipped_ways_root().is_dir().then(|| known_ids(project))
 }
 
 /// Every key of the `ways:` map in a project-scope ways overlay, whatever
@@ -57,6 +64,28 @@ pub fn overlay_keys(l: &Layer) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Every toggle of the `ways:` map in a project-scope ways overlay, as
+/// `(key, enabled)`, read as the config reads it: an entry that sets no
+/// boolean `enabled` is left out. Empty for any other layer.
+pub fn overlay_toggles(l: &Layer) -> Vec<(String, bool)> {
+    if !(l.file == ways_core::settings::FILE && l.scope == LayerScope::Project) {
+        return Vec::new();
+    }
+    let Some(map) = l.accepted.get("ways").and_then(serde_yaml::Value::as_mapping) else {
+        return Vec::new();
+    };
+    map.iter()
+        .filter_map(|(k, v)| {
+            let enabled = match v {
+                serde_yaml::Value::Bool(b) => Some(*b),
+                serde_yaml::Value::Mapping(m) => m.get("enabled").and_then(serde_yaml::Value::as_bool),
+                _ => None,
+            };
+            Some((k.as_str()?.to_string(), enabled?))
+        })
+        .collect()
+}
+
 /// Every way id a session in `project` can see, across the scan's roots.
 pub fn known_ids(project: &Path) -> BTreeSet<String> {
     ways_core::paths::ways_roots(Some(project))
@@ -66,13 +95,36 @@ pub fn known_ids(project: &Path) -> BTreeSet<String> {
 }
 
 /// Whether a toggle key matches at least one way, by the rule of
-/// `config::way_disabled`: a bare key matches the way with that id, and a
-/// `dir/*` key matches the way at `dir` and every way under it.
+/// `config::way_disabled`.
 pub fn names_a_way(key: &str, ids: &BTreeSet<String>) -> bool {
-    match key.strip_suffix("/*") {
-        None => ids.contains(key),
-        Some(dir) => ids.iter().any(|id| id == dir || (id.starts_with(dir) && id.as_bytes().get(dir.len()) == Some(&b'/'))),
+    ids.iter().any(|id| ways_core::config::toggle_matches(key, id))
+}
+
+/// Whether a segment of `key` mixes text and a wildcard, as `doc*` or `a*b`
+/// do. Such a key is no toggle pattern: the matcher reads it literally, so
+/// it matches only a way id spelled with that asterisk.
+pub fn mixes_wildcard(key: &str) -> bool {
+    key.split('/').any(|s| s.contains('*') && s != "*" && s != "**")
+}
+
+/// For a key ending in `/*`, the toggles that keep the meaning it had before
+/// toggle patterns, when it covered `dir` itself and every way under it.
+pub fn old_star_replacement(key: &str, enabled: bool) -> Option<String> {
+    let dir = key.strip_suffix("/*")?;
+    Some(format!("`{dir}: {enabled}` plus `{dir}/**: {enabled}`"))
+}
+
+/// Each set of toggles tied at the highest rank with opposite values on a
+/// way in `ids`, with the first such way. A tie resolves to `false`.
+pub fn ties(toggles: &[(String, bool)], ids: &BTreeSet<String>) -> Vec<(Vec<String>, String)> {
+    let mut out: Vec<(Vec<String>, String)> = Vec::new();
+    for id in ids {
+        let keys: Vec<String> = ways_core::config::tied_toggles(toggles.iter().map(|(k, on)| (k.as_str(), *on)), id).into_iter().map(str::to_string).collect();
+        if !keys.is_empty() && !out.iter().any(|(k, _)| *k == keys) {
+            out.push((keys, id.clone()));
+        }
     }
+    out
 }
 
 /// The keys among `keys` that match no way in `ids`, in the order given.
@@ -108,15 +160,15 @@ pub fn line_of(text: &str, key: &str) -> Option<usize> {
 }
 
 /// The suggestion for a key that matches nothing. A bare key that is a
-/// directory of ways is the prefix form `dir/*`. Otherwise the sibling way
+/// directory of ways is the pattern `dir/**`. Otherwise the sibling way
 /// (same parent) whose name shares a word stem with the key's, or failing
 /// that is within half its length in edit distance; `None` when no sibling
 /// is close or two are equally close.
 fn nearest(key: &str, ids: &BTreeSet<String>) -> Option<String> {
-    if key.strip_suffix("/*").is_some() {
+    if key.contains('*') {
         return None;
     }
-    let dir_form = format!("{key}/*");
+    let dir_form = format!("{key}/**");
     if names_a_way(&dir_form, ids) {
         return Some(dir_form);
     }
@@ -191,27 +243,50 @@ mod tests {
     }
 
     #[test]
-    fn an_existing_way_or_a_covering_prefix_is_matched() {
+    fn an_existing_way_or_a_pattern_matching_one_is_matched() {
         let ids = ids(&["data", "data/schema-docs", "softwaredev/code/quality"]);
-        assert!(unmatched(["data/schema-docs", "data/*", "softwaredev/*", "softwaredev/code/*", "data"], &ids).is_empty());
+        assert!(unmatched(["data/schema-docs", "data/*", "softwaredev/**", "softwaredev/code/*", "*/code/quality", "data"], &ids).is_empty());
     }
 
     #[test]
-    fn a_prefix_covers_the_way_at_its_own_directory() {
-        let ids = ids(&["workstation/shell/shell-prompt"]);
-        assert!(unmatched(["workstation/shell/shell-prompt/*"], &ids).is_empty());
+    fn a_pattern_matching_no_way_is_unmatched() {
+        let ids = ids(&["data/schema-docs", "workstation/shell/shell-prompt"]);
+        let got = unmatched(["itops/**", "dat/*", "workstation/*", "workstation/shell/shell-prompt/*"], &ids);
+        assert_eq!(
+            got.iter().map(|u| u.key.as_str()).collect::<Vec<_>>(),
+            ["itops/**", "dat/*", "workstation/*", "workstation/shell/shell-prompt/*"],
+            "`*` reaches one segment down, and never the directory's own way"
+        );
     }
 
     #[test]
-    fn a_prefix_covering_no_way_is_unmatched() {
-        let ids = ids(&["data/schema-docs"]);
-        assert_eq!(unmatched(["itops/*", "dat/*"], &ids).iter().map(|u| u.key.as_str()).collect::<Vec<_>>(), ["itops/*", "dat/*"]);
-    }
-
-    #[test]
-    fn a_bare_directory_key_suggests_its_prefix_form() {
+    fn a_bare_directory_key_suggests_its_subtree_pattern() {
         let ids = ids(&["softwaredev/code/quality"]);
-        assert_eq!(unmatched(["softwaredev"], &ids)[0].nearest.as_deref(), Some("softwaredev/*"));
+        assert_eq!(unmatched(["softwaredev"], &ids)[0].nearest.as_deref(), Some("softwaredev/**"));
+    }
+
+    #[test]
+    fn a_segment_mixing_text_and_a_wildcard_is_flagged() {
+        for key in ["doc*", "documentation/adr*", "a*b/c", "a/***"] {
+            assert!(mixes_wildcard(key), "{key}");
+        }
+        for key in ["documentation/adr", "*/adr", "a/**", "a/*/c"] {
+            assert!(!mixes_wildcard(key), "{key}");
+        }
+    }
+
+    #[test]
+    fn a_trailing_star_key_names_the_toggles_for_its_old_meaning() {
+        assert_eq!(old_star_replacement("data/*", false).as_deref(), Some("`data: false` plus `data/**: false`"));
+        assert_eq!(old_star_replacement("a/*/c", false), None);
+        assert_eq!(old_star_replacement("data/**", true), None);
+    }
+
+    #[test]
+    fn a_true_false_tie_is_reported_once_with_its_first_way() {
+        let ids = ids(&["a/b/c", "a/b/d", "x/b/c", "z/b/c"]);
+        let toggles = vec![("a/*/c".to_string(), true), ("*/b/c".to_string(), false), ("x/*/c".to_string(), false)];
+        assert_eq!(ties(&toggles, &ids), [(vec!["*/b/c".to_string(), "a/*/c".to_string()], "a/b/c".to_string())]);
     }
 
     #[test]

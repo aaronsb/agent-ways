@@ -290,10 +290,10 @@ pub fn run(json_output: bool) -> Result<()> {
             agent_fmt::say!(out, "Disabled domains: {}", disabled.join(", "));
         }
         if !disabled_ways.is_empty() {
-            agent_fmt::say!(out, "Disabled ways:    {} (project scope, ADR-131; `dir/*` covers every way under it)", disabled_ways.join(", "));
+            agent_fmt::say!(out, "Disabled ways:    {} (project scope, ADR-131; `dir/**` covers every way under `dir`)", disabled_ways.join(", "));
             let on = &enabled_ways;
             if !on.is_empty() {
-                agent_fmt::say!(out, "Enabled by name:  {} (overrides a disabled prefix, ADR-701)", on.join(", "));
+                agent_fmt::say!(out, "Enabled:          {} (overrides a broader disabling pattern)", on.join(", "));
             }
         }
         if !toggles_checked {
