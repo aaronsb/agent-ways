@@ -361,6 +361,10 @@ pub struct KeySpec {
     /// (`Value::Null`). `None` from the function means no opinion: the key
     /// falls through to the layers beneath. Keys without one fall through.
     pub fail_closed: Option<FailClosed>,
+    /// A wildcard may bind to a literal `*`, for a key whose instances are
+    /// patterns themselves, such as the way toggle `"*": false`. Otherwise a
+    /// typed `*` is the pattern and binds nothing.
+    pub star_instance: bool,
 }
 
 /// The fail-closed reading of a raw value.
@@ -472,7 +476,7 @@ impl KeySpec {
         let pat: Vec<&str> = self.name.split('.').collect();
         let parts: Vec<&str> = name.split('.').collect();
         let mut out = Vec::new();
-        if match_parts(&pat, &parts, &mut out) {
+        if match_parts(&pat, &parts, self.star_instance, &mut out) {
             Some(out)
         } else {
             None
@@ -487,7 +491,7 @@ impl KeySpec {
         let mut out = Vec::new();
         for (p, s) in self.path.iter().zip(path) {
             if *p == "*" {
-                if s.is_empty() || s == "*" {
+                if s.is_empty() || (s == "*" && !self.star_instance) {
                     return None;
                 }
                 out.push(s.clone());
@@ -499,7 +503,7 @@ impl KeySpec {
     }
 }
 
-fn match_parts(pat: &[&str], parts: &[&str], out: &mut Vec<String>) -> bool {
+fn match_parts(pat: &[&str], parts: &[&str], star_instance: bool, out: &mut Vec<String>) -> bool {
     match (pat.first(), parts.first()) {
         (None, None) => true,
         (None, _) | (_, None) => false,
@@ -513,19 +517,20 @@ fn match_parts(pat: &[&str], parts: &[&str], out: &mut Vec<String>) -> bool {
             for take in 1..=parts.len() - rest {
                 let mut trial = out.clone();
                 let name = parts[..take].join(".");
-                // `*` typed in a key is the pattern, not an instance's name.
-                if name.is_empty() || parts[..take].contains(&"*") {
+                // `*` typed in a key is the pattern, not an instance's name,
+                // unless the key takes `*` as an instance.
+                if name.is_empty() || (!star_instance && parts[..take].contains(&"*")) {
                     continue;
                 }
                 trial.push(name);
-                if match_parts(&pat[1..], &parts[take..], &mut trial) {
+                if match_parts(&pat[1..], &parts[take..], star_instance, &mut trial) {
                     *out = trial;
                     return true;
                 }
             }
             false
         }
-        (Some(p), Some(q)) => p == q && match_parts(&pat[1..], &parts[1..], out),
+        (Some(p), Some(q)) => p == q && match_parts(&pat[1..], &parts[1..], star_instance, out),
     }
 }
 
@@ -617,6 +622,7 @@ mod tests {
         check: None,
         computed: None,
         fail_closed: None,
+        star_instance: false,
     };
 
     #[test]
@@ -627,6 +633,16 @@ mod tests {
         assert_eq!(p.match_name("gate.profiles.my.fast.model"), Some(vec!["my.fast".into()]));
         assert_eq!(p.match_name("gate.profiles.a.threshold"), None);
         assert_eq!(p.bind(&["a".into()]), ("gate.profiles.a.model".into(), vec!["profiles".into(), "a".into(), "model".into()]));
+    }
+
+    #[test]
+    fn a_typed_star_binds_only_where_the_key_takes_it_as_an_instance() {
+        assert_eq!(K.match_name("ways.project.*"), None);
+        assert_eq!(K.match_path(&["ways".into(), "*".into()]), None);
+        let star = KeySpec { star_instance: true, ..K };
+        assert_eq!(star.match_name("ways.project.*"), Some(vec!["*".into()]));
+        assert_eq!(star.match_path(&["ways".into(), "*".into()]), Some(vec!["*".into()]));
+        assert_eq!(star.match_name("ways.project.a/*"), Some(vec!["a/*".into()]));
     }
 
     #[test]

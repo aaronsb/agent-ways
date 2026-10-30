@@ -110,8 +110,10 @@ pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
             n += 1;
             fixable += f.lint_note().is_empty() as usize;
         }
-        for w in unmatched_toggles(l, &read_project(project).unwrap_or_else(|| PathBuf::from(crate::util::project_dir()))) {
-            println!("{w}");
+        for (is_error, line) in toggle_lines(l, &read_project(project).unwrap_or_else(|| PathBuf::from(crate::util::project_dir()))) {
+            // A warning leaves the exit alone, as a key's does.
+            n += usize::from(is_error);
+            println!("{line}");
         }
     }
     // attend's sensor files (ADR-403), for the project, with one file alone
@@ -143,31 +145,55 @@ pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
     Ok(())
 }
 
-/// A warning per per-way toggle (ADR-131) in a project overlay that names
-/// no way the project, the user or the shipped corpus has: it switches
-/// nothing, so a way renamed since it was written runs again. Without the
-/// shipped ways nothing is judged and nothing is printed; `ways status`
-/// says so.
-fn unmatched_toggles(l: &Layer, fallback_project: &Path) -> Vec<String> {
-    use crate::cmd::toggle_check::{self, Check};
+/// The lines for the per-way toggles (ADR-131) in a project overlay, each as
+/// `(is_error, line)`, key by key in file order, then the ties:
+/// - an error for a key whose segment mixes text and a wildcard, which is
+///   read literally and so switches nothing;
+/// - a warning for a key `dir/*`, which now covers only the ways directly
+///   under `dir`, naming the keys that replace it where following them
+///   keeps every way's state, else the keys to read it together with;
+/// - a warning for a key that names no way the project, the user or the
+///   shipped corpus has, so a way renamed since it was written runs again;
+/// - a warning for patterns tied at one specificity with opposite values,
+///   which resolve to `false`.
+///
+/// Without the shipped ways the last two are not judged and no `dir/*`
+/// replacement is named; `ways status` says so.
+fn toggle_lines(l: &Layer, fallback_project: &Path) -> Vec<(bool, String)> {
+    use crate::cmd::toggle_check;
     let Some(path) = &l.path else { return Vec::new() };
     let keys = toggle_check::overlay_keys(l);
-    let Check::Checked(found) = toggle_check::check(&keys, &toggle_check::project_of(path, fallback_project)) else {
+    if keys.is_empty() {
         return Vec::new();
-    };
+    }
+    let toggles = toggle_check::overlay_toggles(l);
+    let ids = toggle_check::judged_ids(&toggle_check::project_of(path, fallback_project));
+    let judged: Vec<&str> = keys.iter().map(String::as_str).filter(|k| !toggle_check::mixes_wildcard(k)).collect();
+    let unmatched = ids.as_ref().map(|ids| toggle_check::unmatched(judged, ids)).unwrap_or_default();
     let text = String::from_utf8_lossy(&std::fs::read(path).unwrap_or_default()).into_owned();
-    found
-        .into_iter()
-        .map(|u| {
-            let at = toggle_check::line_of(&text, &u.key).map(|n| format!(":{n}")).unwrap_or_default();
-            let hint = u.nearest.map(|n| format!("; nearest way: {n}")).unwrap_or_default();
-            format!(
-                "{}{at}: [ways.project] ways.{}: warning: names no way in the project, user or shipped ways, so it switches nothing{hint}",
-                path.display(),
-                u.key
-            )
-        })
-        .collect()
+    let at = |key: &str| format!("{}{}: [ways.project] ways.{key}:", path.display(), toggle_check::line_of(&text, key).map(|n| format!(":{n}")).unwrap_or_default());
+    let mut out = Vec::new();
+    for key in &keys {
+        if toggle_check::mixes_wildcard(key) {
+            out.push((true, format!("{} {}", at(key), toggle_check::MIXED_WILDCARD)));
+        }
+        if let Some(advice) = toggle_check::old_star_advice(key, &toggles, &keys, ids.as_ref()) {
+            out.push((false, format!("{} warning: {advice}", at(key))));
+        }
+        if let Some(u) = unmatched.iter().find(|u| u.key == *key) {
+            let hint = u.nearest.as_ref().map(|n| format!("; nearest way: {n}")).unwrap_or_default();
+            out.push((false, format!("{} warning: names no way in the project, user or shipped ways, so it switches nothing{hint}", at(key))));
+        }
+    }
+    for (tied, id) in ids.map(|ids| toggle_check::ties(&toggles, &ids)).unwrap_or_default() {
+        let (first, rest) = tied.split_first().expect("a tie has two keys");
+        out.push((false, format!(
+            "{} warning: ties with {} on {id} at the same specificity with the opposite value, so the tie resolves to false",
+            at(first),
+            rest.iter().map(|k| format!("ways.{k}")).collect::<Vec<_>>().join(", ")
+        )));
+    }
+    out
 }
 
 /// A section `fix <arg>` covers, and the entry of it `arg` names when it

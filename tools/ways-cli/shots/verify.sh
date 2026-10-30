@@ -76,6 +76,7 @@ card-sensor-attend-absent | env PATH=$WORK/no-attend:/usr/bin:/bin ways settings
 card-theme | ways settings theme --project $PS              | Down
 card-user-theme | ways settings theme --project $PS         | End
 card-replaced-theme | ways settings theme --project $PS     | Down Down
+patterns   | ways settings ways --project $PS               | / text:supplychain Enter End
 "
 
 python3 "$TOOLS/fixture.py" "$WORK" >/dev/null
@@ -209,6 +210,13 @@ setup_card_replaced_theme() {
   cp "$HERE/../../agent-theme/themes/nord.theme" "$F/home/.config/agent-ways/themes/nord.theme"
 }
 teardown_card_replaced_theme() { rm -f "$F/home/.config/agent-ways/themes/nord.theme"; }
+# The ways tab's toggles: a pattern key, a single-way key, and a `true` that
+# turns one way under the pattern back on.
+SHOP_WAYS="$F/home/$(basename "$P")/.claude/ways.yaml"
+setup_patterns() {
+  printf 'ways:\n  softwaredev/code/supplychain/**: false\n  softwaredev/code/quality: false\n  softwaredev/code/supplychain/depscan: true\n' >"$SHOP_WAYS"
+}
+teardown_patterns() { rm -f "$SHOP_WAYS"; }
 
 want() { [ $# -eq 1 ] || [[ " ${*:2} " == *" $1 "* ]]; }
 trim() { local s=$1; s=${s#"${s%%[![:space:]]*}"}; printf '%s' "${s%"${s##*[![:space:]]}"}"; }

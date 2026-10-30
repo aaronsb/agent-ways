@@ -1006,7 +1006,7 @@ fn renamed_corpus(f: &Fx) {
 fn a_toggle_naming_a_renamed_way_is_a_lint_warning_and_exits_clean() {
     let f = Fx::new();
     renamed_corpus(&f);
-    f.write(&f.overlay(), "ways:\n  data/documentation: false\n  workstation/shell/prompt: false\n  data/schema-docs: false\n  workstation/*: false\n  local/mine: false\n");
+    f.write(&f.overlay(), "ways:\n  data/documentation: false\n  workstation/shell/prompt: false\n  data/schema-docs: false\n  workstation/**: false\n  local/mine: false\n");
     let (out, err, code) = f.run(&["settings", "lint"]);
     assert_eq!(code, 0, "{out}{err}");
     assert_eq!(
@@ -1017,23 +1017,293 @@ fn a_toggle_naming_a_renamed_way_is_a_lint_warning_and_exits_clean() {
 }
 
 #[test]
-fn a_prefix_covering_no_way_is_a_lint_warning_and_one_covering_a_way_is_not() {
+fn a_pattern_matching_no_way_is_a_lint_warning_and_one_matching_a_way_is_not() {
     let f = Fx::new();
     renamed_corpus(&f);
-    f.write(&f.overlay(), "ways:\n  itops/*: false\n  data/*: false\n  local/*: false\n  workstation/shell/*: true\n");
+    f.write(&f.overlay(), "ways:\n  itops/**: false\n  data/**: false\n  \"*/mine\": false\n  workstation/shell/**: true\n");
     let (out, _, code) = f.run(&["settings", "lint"]);
     assert_eq!(code, 0);
-    assert_eq!(out, "<ROOT>/proj/.claude/ways.yaml:2: [ways.project] ways.itops/*: warning: names no way in the project, user or shipped ways, so it switches nothing\n");
+    assert_eq!(out, "<ROOT>/proj/.claude/ways.yaml:2: [ways.project] ways.itops/**: warning: names no way in the project, user or shipped ways, so it switches nothing\n");
+}
+
+#[test]
+fn a_trailing_star_key_is_a_lint_warning_naming_the_toggles_for_its_old_meaning() {
+    let f = Fx::new();
+    renamed_corpus(&f);
+    f.write(&f.overlay(), "ways:\n  data/*: false\n  workstation/*: true\n");
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(
+        out,
+        "<ROOT>/proj/.claude/ways.yaml:2: [ways.project] ways.data/*: warning: `/*` matches only the ways directly under data; for data and every way under it, replace this key with `data: false` plus `data/**: false`\n\
+         <ROOT>/proj/.claude/ways.yaml:3: [ways.project] ways.workstation/*: warning: `/*` matches only the ways directly under workstation; for every way under workstation, replace this key with `workstation/**: true`\n\
+         <ROOT>/proj/.claude/ways.yaml:3: [ways.project] ways.workstation/*: warning: names no way in the project, user or shipped ways, so it switches nothing\n"
+    );
+}
+
+#[test]
+fn a_true_false_tie_between_patterns_is_a_lint_warning() {
+    let f = Fx::new();
+    renamed_corpus(&f);
+    f.write(&f.overlay(), "ways:\n  workstation/*/shell-prompt: true\n  \"*/shell/shell-prompt\": false\n  data/**: false\n");
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(
+        out,
+        "<ROOT>/proj/.claude/ways.yaml:3: [ways.project] ways.*/shell/shell-prompt: warning: ties with ways.workstation/*/shell-prompt on workstation/shell/shell-prompt at the same specificity with the opposite value, so the tie resolves to false\n"
+    );
+}
+
+#[test]
+fn a_segment_mixing_text_and_a_wildcard_is_a_lint_error() {
+    let f = Fx::new();
+    renamed_corpus(&f);
+    f.write(&f.overlay(), "ways:\n  data/schema*: false\n  data/schema-docs: false\n");
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!(code, 3, "{out}{err}");
+    assert_eq!(
+        out,
+        "<ROOT>/proj/.claude/ways.yaml:2: [ways.project] ways.data/schema*: a segment mixes text and a wildcard, so the key is read literally and matches no way; write `*` or `**` as a whole segment\n"
+    );
+}
+
+#[test]
+fn a_mixed_segment_before_a_trailing_star_gets_only_the_error() {
+    let f = Fx::new();
+    renamed_corpus(&f);
+    f.write(&f.overlay(), "ways:\n  data*/*: false\n");
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!(code, 3, "{out}{err}");
+    assert_eq!(
+        out,
+        "<ROOT>/proj/.claude/ways.yaml:2: [ways.project] ways.data*/*: a segment mixes text and a wildcard, so the key is read literally and matches no way; write `*` or `**` as a whole segment\n"
+    );
+}
+
+#[test]
+fn a_trailing_star_key_beside_its_directory_key_keeps_that_key() {
+    let f = Fx::new();
+    renamed_corpus(&f);
+    let shipped = f.root.join("home/.claude/hooks/ways");
+    for id in ["softwaredev/code", "softwaredev/code/quality"] {
+        way(&f, &shipped, id);
+    }
+    f.write(&f.overlay(), "ways:\n  softwaredev/code: true\n  softwaredev/code/*: false\n");
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(
+        out,
+        "<ROOT>/proj/.claude/ways.yaml:3: [ways.project] ways.softwaredev/code/*: warning: `/*` matches only the ways directly under softwaredev/code; for every way under softwaredev/code, replace this key with `softwaredev/code/**: false`; the existing `softwaredev/code: true` stays, so softwaredev/code itself stays on\n"
+    );
+}
+
+/// `text` with the advice lint gives for the key `star` followed as
+/// written: its line removed, or replaced by the keys the advice names.
+fn follow_star_advice(text: &str, lint: &str, star: &str) -> String {
+    let at = format!("ways.{star}: warning: `/*` matches only");
+    let advice = lint.lines().find(|l| l.contains(&at)).unwrap_or_else(|| panic!("no advice for {star} in\n{lint}"));
+    let with: Vec<String> = match advice.split_once("replace this key with ") {
+        Some((_, rest)) => rest.split(';').next().unwrap().split(" plus ").map(|k| format!("  {}\n", k.trim_matches('`'))).collect(),
+        None => {
+            assert!(advice.contains("; remove it"), "{advice}");
+            Vec::new()
+        }
+    };
+    let mut out = String::new();
+    for line in text.split_inclusive('\n') {
+        if line.starts_with(&format!("  {star}:")) {
+            out.extend(with.iter().cloned());
+        } else {
+            out.push_str(line);
+        }
+    }
+    out
+}
+
+/// The toggles of an overlay's `ways:` map, as the config reads them.
+fn overlay_toggles(text: &str) -> Vec<(String, bool)> {
+    let doc: serde_yaml::Value = serde_yaml::from_str(text).unwrap();
+    let Some(map) = doc.get("ways").and_then(serde_yaml::Value::as_mapping) else { return Vec::new() };
+    map.iter()
+        .filter_map(|(k, v)| {
+            let on = match v {
+                serde_yaml::Value::Bool(b) => Some(*b),
+                v => v.get("enabled").and_then(serde_yaml::Value::as_bool),
+            };
+            Some((k.as_str()?.to_string(), on?))
+        })
+        .collect()
+}
+
+/// Whether `id` was off by the toggle rule before ADR-710: a key equal to
+/// the id wins, else the longest `dir/*` key covering `dir` and its subtree.
+fn off_by_old_rule(toggles: &[(String, bool)], id: &str) -> bool {
+    let covers = |key: &str| match key.strip_suffix("/*") {
+        None => (key == id).then_some(usize::MAX),
+        Some(dir) => (id == dir || id.starts_with(&format!("{dir}/"))).then_some(dir.len()),
+    };
+    toggles.iter().filter_map(|(k, on)| covers(k).map(|r| (r, *on))).max_by_key(|(r, _)| *r).is_some_and(|(_, on)| !on)
+}
+
+/// Lint `before`, follow its advice for `star`, and lint again: the file
+/// parses, `star` is gone with nothing left to advise, and every way is on
+/// or off as the old rule had it over `before`. `shipped` are way ids added
+/// to the fixture's shipped corpus first.
+fn star_advice_settles(before: &str, star: &str, shipped: &[&str]) -> String {
+    let f = Fx::new();
+    renamed_corpus(&f);
+    let root = f.root.join("home/.claude/hooks/ways");
+    for id in shipped {
+        way(&f, &root, id);
+    }
+    f.write(&f.overlay(), before);
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!(code, 0, "{out}{err}");
+    let after = follow_star_advice(before, &out, star);
+    f.write(&f.overlay(), &after);
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!((out.as_str(), code), ("", 0), "{after}{err}");
+    let (old, new) = (overlay_toggles(before), overlay_toggles(&after));
+    for id in ["data", "data/schema-docs", "workstation/shell/shell-prompt", "local/mine"].iter().chain(shipped) {
+        let now_off = ways_core::config::way_toggled_off(new.iter().map(|(k, on)| (k.as_str(), *on)), id);
+        assert_eq!(now_off, off_by_old_rule(&old, id), "{id} after following the advice:\n{after}");
+    }
+    after
+}
+
+/// Lint `before` with `shipped` added to the corpus; the advice for
+/// `data/*` names no replacement.
+fn star_lint_names_no_replacement(before: &str, shipped: &[&str]) -> String {
+    let f = Fx::new();
+    renamed_corpus(&f);
+    for id in shipped {
+        way(&f, &f.root.join("home/.claude/hooks/ways"), id);
+    }
+    f.write(&f.overlay(), before);
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(!out.contains("replace this key"), "{out}");
+    out
+}
+
+#[test]
+fn a_star_key_whose_replacement_would_tie_with_a_competitor_names_it_instead() {
+    assert_eq!(
+        star_lint_names_no_replacement("ways:\n  data/*: true\n  \"**/x\": false\n", &["data/x"]),
+        "<ROOT>/proj/.claude/ways.yaml:2: [ways.project] ways.data/*: warning: `/*` matches only the ways directly under data; it no longer covers data itself or the ways deeper down, and no replacement of this key alone keeps every way as it was, so read it together with `**/x`\n"
+    );
+}
+
+#[test]
+fn a_star_key_whose_replacement_a_competitor_would_outrank_names_it_instead() {
+    assert_eq!(
+        star_lint_names_no_replacement("ways:\n  data/*: false\n  \"*/x\": true\n", &["data/x"]),
+        "<ROOT>/proj/.claude/ways.yaml:2: [ways.project] ways.data/*: warning: `/*` matches only the ways directly under data; it no longer covers data itself or the ways deeper down, and no replacement of this key alone keeps every way as it was, so read it together with `*/x`\n\
+         <ROOT>/proj/.claude/ways.yaml:3: [ways.project] ways.*/x: warning: ties with ways.data/* on data/x at the same specificity with the opposite value, so the tie resolves to false\n"
+    );
+}
+
+#[test]
+fn following_the_star_advice_beside_a_competitor_it_keeps_holds_every_way() {
+    assert_eq!(
+        star_advice_settles("ways:\n  data/*: false\n  \"*/x\": false\n", "data/*", &["data/x"]),
+        "ways:\n  data: false\n  data/**: false\n  \"*/x\": false\n"
+    );
+}
+
+#[test]
+fn following_the_star_advice_beside_a_valueless_directory_key_holds_every_way() {
+    assert_eq!(
+        star_advice_settles("ways:\n  data/*: true\n  data: {note: x}\n", "data/*", &[]),
+        "ways:\n  data/**: true\n  data: {note: x}\n"
+    );
+}
+
+#[test]
+fn following_the_star_advice_leaves_nothing_to_advise() {
+    assert_eq!(star_advice_settles("ways:\n  data/*: false\n", "data/*", &[]), "ways:\n  data: false\n  data/**: false\n");
+}
+
+#[test]
+fn following_the_star_advice_beside_its_directory_key_writes_only_the_subtree_key() {
+    assert_eq!(star_advice_settles("ways:\n  data/*: false\n  data: false\n", "data/*", &[]), "ways:\n  data/**: false\n  data: false\n");
+}
+
+#[test]
+fn following_the_star_advice_for_a_directory_that_is_no_way_writes_only_the_subtree_key() {
+    assert_eq!(
+        star_advice_settles("ways:\n  softwaredev/*: false\n", "softwaredev/*", &["softwaredev/code"]),
+        "ways:\n  softwaredev/**: false\n"
+    );
+}
+
+#[test]
+fn following_the_advice_for_a_star_key_that_sets_nothing_removes_it() {
+    assert_eq!(star_advice_settles("ways:\n  data/*: {note: x}\n  data: false\n", "data/*", &[]), "ways:\n  data: false\n");
+}
+
+#[test]
+fn a_star_key_beside_a_subtree_key_is_read_together_and_left_as_written() {
+    for before in ["ways:\n  data/*: false\n  data/**: false\n", "ways:\n  data/*: false\n  data/**: true\n"] {
+        let f = Fx::new();
+        renamed_corpus(&f);
+        f.write(&f.overlay(), before);
+        let (out, err, code) = f.run(&["settings", "lint"]);
+        assert_eq!(code, 0, "{out}{err}");
+        assert_eq!(
+            out,
+            "<ROOT>/proj/.claude/ways.yaml:2: [ways.project] ways.data/*: warning: `/*` matches only the ways directly under data, and on those ways it outranks `data/**`; it no longer covers data itself or the ways deeper down, so read it together with `data/**`\n",
+            "{before}"
+        );
+    }
+}
+
+#[test]
+fn a_bare_star_key_is_set_linted_and_listed_as_a_toggle() {
+    let f = Fx::new();
+    renamed_corpus(&f);
+    let (out, err, code) = f.run(&["settings", "set", "ways.project.*", "false"]);
+    assert_eq!((out.as_str(), code), ("", 0), "{err}");
+    assert!(std::fs::read_to_string(f.overlay()).unwrap().contains("  \"*\": false\n"), "the key is quoted");
+    assert_eq!(f.run(&["settings", "get", "ways.project.*"]).0, "false\n");
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!((out.as_str(), code), ("", 0), "`*` matches the one-segment way data: {err}");
+    let (out, _, _) = f.run(&["status"]);
+    assert!(out.contains("Disabled ways:    * (project scope"), "{out}");
+}
+
+#[test]
+fn setting_a_key_with_a_mixed_segment_is_refused_as_lint_reports_it() {
+    let f = Fx::new();
+    let (out, err, code) = f.run(&["settings", "set", "ways.project.doc*", "false"]);
+    assert_eq!((out.as_str(), code), ("", 2));
+    assert_eq!(
+        err,
+        "ways settings: ways.project.doc*: a segment mixes text and a wildcard, so the key is read literally and matches no way; write `*` or `**` as a whole segment\n"
+    );
+    assert!(!f.overlay().exists(), "nothing is written");
+}
+
+#[test]
+fn applying_a_key_with_a_mixed_segment_is_refused_and_writes_nothing() {
+    let f = Fx::new();
+    let (out, err, code) = f.run_stdin(&["settings", "apply"], Some("ways:\n  data: false\n  doc*: false\n"));
+    assert_eq!((out.as_str(), code), ("", 2));
+    assert_eq!(
+        err,
+        "ways settings: ways.project.doc*: a segment mixes text and a wildcard, so the key is read literally and matches no way; write `*` or `**` as a whole segment\n"
+    );
+    assert!(!f.overlay().exists(), "nothing is written");
 }
 
 #[test]
 fn status_lists_a_toggle_naming_no_way_apart_from_the_disabled_ways() {
     let f = Fx::new();
     renamed_corpus(&f);
-    f.write(&f.overlay(), "ways:\n  data/documentation: false\n  data/schema-docs: false\n  local/mine: false\n  data/*: false\n  bogus/thing:\n    threshold: 0.5\n");
+    f.write(&f.overlay(), "ways:\n  data/documentation: false\n  data/schema-docs: false\n  local/mine: false\n  data/**: false\n  bogus/thing:\n    threshold: 0.5\n");
     let (out, err, _) = f.run(&["status"]);
     let line = |p: &str| out.lines().find(|l| l.starts_with(p)).unwrap_or_else(|| panic!("no {p} line in\n{out}{err}")).to_string();
-    assert_eq!(line("Disabled ways:"), "Disabled ways:    data/schema-docs, local/mine, data/* (project scope, ADR-131; `dir/*` covers every way under it)");
+    assert_eq!(line("Disabled ways:"), "Disabled ways:    data/schema-docs, local/mine, data/** (project scope, ADR-131; `dir/**` covers every way under `dir`)");
     // An entry that sets no `enabled` is still a key status checks, as lint does.
     assert_eq!(
         line("Toggles naming no way:"),
@@ -1045,7 +1315,7 @@ fn status_lists_a_toggle_naming_no_way_apart_from_the_disabled_ways() {
     assert!(warned[0].contains("ways.data/documentation:") && warned[1].contains("ways.bogus/thing:"), "{lint}");
     let (out, _, _) = f.run(&["status", "--json"]);
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-    assert_eq!(v["disabled_ways"], serde_json::json!(["data/schema-docs", "local/mine", "data/*"]));
+    assert_eq!(v["disabled_ways"], serde_json::json!(["data/schema-docs", "local/mine", "data/**"]));
     assert_eq!(v["toggles_checked"], true);
     assert_eq!(v["unmatched_toggles"][0]["key"], "data/documentation");
     assert_eq!(v["unmatched_toggles"][0]["nearest"], "data/schema-docs");
@@ -1084,7 +1354,7 @@ fn a_toggle_naming_a_way_in_a_disabled_domain_is_not_flagged() {
     let f = Fx::new();
     renamed_corpus(&f);
     f.write(&f.user(), "disabled_domains: [data]\n");
-    f.write(&f.overlay(), "ways:\n  data/schema-docs: false\n  data/*: false\n");
+    f.write(&f.overlay(), "ways:\n  data/schema-docs: false\n  data/**: false\n");
     let (out, err, code) = f.run(&["settings", "lint"]);
     assert_eq!((out.as_str(), code), ("", 0), "{err}");
     let (out, _, _) = f.run(&["status"]);

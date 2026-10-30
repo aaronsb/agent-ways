@@ -1741,7 +1741,19 @@ fn scenario_event_log_rotates_old_lines_on_a_scan() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-// ── ADR-701 §1: a project prefix toggle excludes the ways under it ─────
+// ── toggle patterns in a project's ways.yaml ───────────────────
+
+/// Run a prompt scan for `s` in `project`, with its `.claude/ways.yaml`.
+fn scan_in_project(s: &Session, project: &Path, query: &str) {
+    s.cmd()
+        .args(["scan", "prompt", "--query", query, "--session", &s.id, "--project"])
+        .arg(project)
+        .env("CLAUDE_PROJECT_DIR", project)
+        .current_dir(project)
+        .env("PWD", project)
+        .output()
+        .expect("Failed to run ways scan prompt");
+}
 
 #[test]
 fn scenario_prefix_toggle_excludes_ways_and_a_way_toggle_overrides_it() {
@@ -1749,31 +1761,52 @@ fn scenario_prefix_toggle_excludes_ways_and_a_way_toggle_overrides_it() {
     let project = sim_root().join("project-prefix");
     let _ = std::fs::remove_dir_all(&project);
     std::fs::create_dir_all(project.join(".claude")).unwrap();
-    let scan = |query: &str| {
-        s.cmd()
-            .args(["scan", "prompt", "--query", query, "--session", &s.id, "--project"])
-            .arg(&project)
-            .env("CLAUDE_PROJECT_DIR", &project)
-            .current_dir(&project)
-            .env("PWD", &project)
-            .output()
-            .expect("Failed to run ways scan prompt");
-    };
 
-    std::fs::write(project.join(".claude/ways.yaml"), "ways:\n  testdomain/*: false\n").unwrap();
-    scan("how do I write a unit test for this module");
+    std::fs::write(project.join(".claude/ways.yaml"), "ways:\n  testdomain/**: false\n").unwrap();
+    scan_in_project(&s, &project, "how do I write a unit test for this module");
     assert_marker_absent("testdomain/parent/child", &s.id);
 
-    // An explicit toggle on the way itself overrides the prefix.
+    // An explicit toggle on the way itself overrides the pattern.
     std::fs::write(
         project.join(".claude/ways.yaml"),
-        "ways:\n  testdomain/*: false\n  testdomain/parent/child: true\n",
+        "ways:\n  testdomain/**: false\n  testdomain/parent/child: true\n",
     )
     .unwrap();
-    scan("how do I write a unit test for this module");
+    scan_in_project(&s, &project, "how do I write a unit test for this module");
     assert_marker_exists("testdomain/parent/child", &s.id);
 
     let _ = std::fs::remove_dir_all(&project);
+}
+
+/// The parent's prompt fires `testdomain/parent` with no toggle, then a
+/// session under `ways` leaves the parent silent and its child eligible.
+fn assert_parent_off_and_child_on(name: &str, ways: &str) {
+    let project = sim_root().join(format!("project-{name}"));
+    let _ = std::fs::remove_dir_all(&project);
+    std::fs::create_dir_all(project.join(".claude")).unwrap();
+
+    let control = Session::new(&format!("{name}-ctl"));
+    scan_in_project(&control, &project, "code quality review architecture maintainability coupling");
+    assert_marker_exists("testdomain/parent", &control.id);
+
+    let s = Session::new(name);
+    std::fs::write(project.join(".claude/ways.yaml"), ways).unwrap();
+    scan_in_project(&s, &project, "code quality review architecture maintainability coupling");
+    assert_marker_absent("testdomain/parent", &s.id);
+    scan_in_project(&s, &project, "how do I write a unit test for this module");
+    assert_marker_exists("testdomain/parent/child", &s.id);
+
+    let _ = std::fs::remove_dir_all(&project);
+}
+
+#[test]
+fn scenario_a_single_way_toggle_on_a_parent_leaves_its_child_eligible() {
+    assert_parent_off_and_child_on("parentonly", "ways:\n  testdomain/parent: false\n");
+}
+
+#[test]
+fn scenario_a_star_toggle_reaches_one_segment_and_leaves_the_grandchild_eligible() {
+    assert_parent_off_and_child_on("onestar", "ways:\n  testdomain/*: false\n");
 }
 
 // ── ADR-701 §2: history is archived, not deleted ───────────────

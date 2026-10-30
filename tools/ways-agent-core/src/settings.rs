@@ -48,6 +48,7 @@ const BASE: KeySpec = KeySpec {
     check: None,
     computed: None,
     fail_closed: None,
+    star_instance: false,
 };
 
 const POSITIVE: Kind = Kind::Int { min: 1, max: i64::MAX };
