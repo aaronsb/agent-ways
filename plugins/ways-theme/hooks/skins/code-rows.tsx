@@ -51,7 +51,8 @@ export function codeRows(look: Look, lang: string, code: string, control?: Retur
 
 // A fence's code as a copy block (commands.ts): the language and Copy on the line above,
 // then each line highlighted with no border, padding or margin beside it, so a selection
-// over the lines takes the code alone. A blank line draws nothing, not a space.
+// over the lines takes the code alone. A blank line draws nothing, not a space. A fence
+// with no language and no Copy draws no line above.
 export function codeCopyRows(look: Look, lang: string, code: string, control: ReturnType<Ui['Button']> | undefined, margins: Record<string, number>) {
   const { Box, Text } = look.ui
   const { palette } = look.skin
@@ -59,10 +60,14 @@ export function codeCopyRows(look: Look, lang: string, code: string, control: Re
 
   return (
     <Box flexDirection="column" {...margins}>
-      <Box flexDirection="row" justifyContent="space-between">
-        <Text color={palette.muted}>{lang}</Text>
-        {control ?? ''}
-      </Box>
+      {lang === '' && control === undefined ? (
+        ''
+      ) : (
+        <Box flexDirection="row" justifyContent="space-between">
+          <Text color={palette.muted}>{lang}</Text>
+          {control ?? ''}
+        </Box>
+      )}
       {lines.map(tokens => (tokens.every(token => token.text === '') ? <Box height={1} /> : <Text>{tokenSpans(look, tokens)}</Text>))}
     </Box>
   )

@@ -15,27 +15,32 @@
 // - `slash`, a slash command such as `/compact keep the handoff`: `/`, a
 //   name of a lowercase letter and then lowercase letters, digits, `:` or
 //   `-`, and then a space or the end. `/home/aaron`, `/tmp/x` and `a/b` are
-//   paths, and a URL starts otherwise.
+//   paths, and a URL starts otherwise. A name that is a top-level directory
+//   (ROOTS: `/tmp`, `/etc`, `/usr`) is a path too.
 // - `code`, a closed fence's code, as written. It keeps its language and its
 //   highlighting. A fence with no code in it stays as it is, and so does a
 //   fence the skin draws as a picture, a Mermaid chart or a diff (reply.ts).
-// - `span`, an inline code span whose content is wider than the row the
-//   reply's prose is drawn in. A span that wraps inside a frame has the
-//   frame's border beside each of its lines, which no drawing of the span
-//   inside the frame avoids, so the span leaves the frame. A narrower span
-//   stays in its sentence.
+// - `span`, an inline code span whose content is wider than 60% of the row
+//   the span's line is drawn in: the reply's prose, less an open list item's
+//   indentation. A span that wraps inside a frame has the frame's border
+//   beside each of its lines, which no drawing of the span inside the frame
+//   avoids, and a span that starts late in its line wraps sooner than its
+//   width alone says, so the span leaves the frame. A narrower span stays in
+//   its sentence.
 //
 // A suggestion, shell or slash, is one of three forms:
 //
 // - A line whose text, after its indentation and an optional list marker
-//   (`-`, `*`, `+`, `1.`, `1)`), is a suggestion. The suggestion runs to the
-//   end of the line, trailing spaces off. A lead-in sentence on the line
+//   (`-`, `*`, `+`, `1.`, `1)`), is a suggestion. A shell one runs to the
+//   end of the line, trailing spaces off. A slash one is the bare name
+//   (`/clear`) and nothing else, since a line that starts `/compact is
+//   useful` or `/dev and /proc` is prose. A lead-in sentence on the line
 //   before stays prose.
 // - An inline code span whose content, less the one space CommonMark strips
-//   from each side, is a suggestion. The line is cut there: the prose before
-//   the span, the suggestion, the prose after it. A list marker alone before
-//   the span, and punctuation alone after it, go with the span. A `span`
-//   block cuts its line the same way.
+//   from each side, is a suggestion, arguments and all. The line is cut
+//   there: the prose before the span, the suggestion, the prose after it. A
+//   list marker alone before the span, and punctuation alone after it, go
+//   with the span. A `span` block cuts its line the same way.
 // - A closed fence whose code is one suggestion. For a shell one the fence
 //   has no language or a shell's (markdown.ts, SHELLS), the first line is a
 //   suggestion, and every line before the last ends in a continuation, `\`,
@@ -44,7 +49,7 @@
 //
 // A shell line that ends in a continuation takes the lines after it the same
 // way, up to the first that does not continue, the first blank line or the
-// first table row. A slash command is one line.
+// first table row.
 //
 // Nothing else is a suggestion: a `!` inside a sentence ("that's it!"),
 // `!=`, `!!`, `!important`, an image (`![alt](src)`), `!` with no space
@@ -57,9 +62,12 @@
 // a fence still streaming. The same markdown keeps a `span` block in its
 // place. The copied text is the suggestion with its `! ` or its `/`, as the
 // person types it into Claude Code's prompt, and a fence's code or a span's
-// content as written.
+// content as written. A fence's code is read as CommonMark reads it: each
+// line less up to as many spaces as the opening line is indented, so a fence
+// in a list item copies without the item's indentation, and its trailing
+// blank lines off.
 
-import { FENCE, fenceClose, isShellLang, widthOf } from './markdown'
+import { FENCE, fenceClose, fenceCode, isShellLang, widthOf } from './markdown'
 
 /** What a copy block is (the header comment). */
 export type Form = 'shell' | 'slash' | 'span' | 'code'
@@ -73,11 +81,17 @@ export type Piece = { kind: 'text'; text: string } | Copy
 
 /** What may follow `! `: an environment assignment, or a command's first character. */
 const WORD = String.raw`(?:[A-Z_][A-Z0-9_]*=|[a-z0-9./~$("'\[])`
-/** A slash command's name, ending at a space or the end. */
-const SLASH = String.raw`\/[a-z][a-z0-9:-]*(?= |$)`
+/** A slash command's name, after its `/`. */
+const NAME = '[a-z][a-z0-9:-]*'
 const SHELL_STARTS = new RegExp(`^! ${WORD}`)
-const SLASH_STARTS = new RegExp(`^${SLASH}`)
-const LINE = new RegExp(String.raw`^[ \t]*(?:(?:[-*+]|\d{1,3}[.)])[ \t]+)?((?:! ${WORD}|${SLASH}).*?)[ \t]*$`)
+/** A slash command at the start of a span's content, its name ending at a space or the end. */
+const SLASH_STARTS = new RegExp(`^\\/(${NAME})(?= |$)`)
+/** A line that is a suggestion: a shell one to the end of the line, a slash one the bare name. */
+const LINE = new RegExp(String.raw`^[ \t]*(?:(?:[-*+]|\d{1,3}[.)])[ \t]+)?(! ${WORD}.*?|\/${NAME})[ \t]*$`)
+/** The top-level directories of a Unix filesystem, which read as paths, never as slash commands. */
+const ROOTS = new Set(['bin', 'boot', 'dev', 'etc', 'home', 'lib', 'lib64', 'media', 'mnt', 'opt', 'proc', 'root', 'run', 'sbin', 'srv', 'sys', 'tmp', 'usr', 'var'])
+/** The share of its row a span's content may take before it leaves its sentence. */
+const SPAN_SHARE = 0.6
 /** A line that a shell reads on past. */
 const CONTINUES = /(?:\\|&&|\|)[ \t]*$/
 /** A code span on one line: a run of backticks, the content, a run of the same length. */
@@ -99,17 +113,22 @@ const MAY_HOLD = /(?:^|\n)[ \t]*(?:(?:[-*+]|\d{1,3}[.)])[ \t]+)?(?:! \S|\/[a-z])
  *  when both sides have one and it is not all spaces. */
 const spanContent = (inner: string): string => (inner.length > 1 && inner.startsWith(' ') && inner.endsWith(' ') && inner.trim() !== '' ? inner.slice(1, -1) : inner)
 
-/** Whether a span's content is wider than `width`, the columns of the reply's prose. */
-const isWide = (content: string, width: number | undefined): boolean => width !== undefined && widthOf(content) > width
+/** Whether a span's content is wider than SPAN_SHARE of its row: `width`, the
+ *  columns of the reply's prose, less `indent`, the open list item's content column. */
+const isWide = (content: string, width: number | undefined, indent: number): boolean => width !== undefined && widthOf(content) > SPAN_SHARE * (width - indent)
 
 /** Whether `text` may hold a copy block, so that drawing it needs the split.
  *  `width` is the columns the reply's prose is drawn in; without it no span
  *  is wide. */
 export const holdsCopy = (text: string, width?: number): boolean =>
-  MAY_HOLD.test(text) || (width !== undefined && text.includes('`') && [...text.matchAll(SPAN)].some(span => isWide(spanContent(span[2]!), width)))
+  MAY_HOLD.test(text) || (width !== undefined && text.includes('`') && copyPieces(text, width).some(piece => piece.kind === 'copy'))
 
 /** The suggestion `text` starts, or null. */
-const suggestionForm = (text: string): 'shell' | 'slash' | null => (SHELL_STARTS.test(text) ? 'shell' : SLASH_STARTS.test(text) ? 'slash' : null)
+function suggestionForm(text: string): 'shell' | 'slash' | null {
+  if (SHELL_STARTS.test(text)) return 'shell'
+  const name = SLASH_STARTS.exec(text)?.[1]
+  return name === undefined || ROOTS.has(name) ? null : 'slash'
+}
 
 /** Columns of leading whitespace, a tab to the next multiple of four. */
 const indentOf = (line: string): number => {
@@ -137,20 +156,22 @@ function itemContent(line: string): number | null {
 const outsideSpans = (line: string): string => line.replace(SPAN, '')
 
 /** A fence's code as a copy block: a suggestion when it is one, else the
- *  code. Null for a fence with no code. `raw` is the fence as written. */
+ *  code, its trailing blank lines off. Null for a fence with no code. `raw`
+ *  is the fence as written. */
 export function fenceCopy(lang: string, code: string, raw: string): Copy | null {
   if (code.trim() === '') return null
   const lines = code.trim().split('\n')
   const isShell = (lang === '' || isShellLang(lang)) && SHELL_STARTS.test(lines[0]!) && lines.slice(0, -1).every(line => CONTINUES.test(line))
   if (isShell) return { kind: 'copy', form: 'shell', text: lines.map(line => line.trimEnd()).join('\n'), raw }
-  if (lang === '' && lines.length === 1 && SLASH_STARTS.test(lines[0]!)) return { kind: 'copy', form: 'slash', text: lines[0]!.trimEnd(), raw }
-  return { kind: 'copy', form: 'code', lang, text: code, raw }
+  if (lang === '' && lines.length === 1 && suggestionForm(lines[0]!) === 'slash') return { kind: 'copy', form: 'slash', text: lines[0]!.trimEnd(), raw }
+  return { kind: 'copy', form: 'code', lang, text: code.replace(/(?:\n[ \t]*)+$/, ''), raw }
 }
 
 /** `text` cut into prose and whole copy blocks, line by line. `width` is the
- *  columns the reply's prose is drawn in, for the spans too wide for it. A
- *  fence still streaming, and every line after it, stay prose. */
-export function copyPieces(text: string, width?: number): Piece[] {
+ *  columns the reply's prose is drawn in, for the spans too wide for it.
+ *  `isPicture` names the fences the skin draws as pictures, which stay
+ *  prose. A fence still streaming, and every line after it, stay prose. */
+export function copyPieces(text: string, width?: number, isPicture: (lang: string, code: string) => boolean = () => false): Piece[] {
   const lines = text.split('\n')
   const out: Piece[] = []
   let prose: string[] = []
@@ -185,8 +206,9 @@ export function copyPieces(text: string, width?: number): Piece[] {
         prose.push(...lines.slice(i))
         break
       }
-      const raw = lines.slice(i, close + 1).join('\n')
-      const found = fenceCopy((fence[2] ?? '').toLowerCase(), lines.slice(i + 1, close).join('\n'), raw)
+      const lang = (fence[2] ?? '').toLowerCase()
+      const code = fenceCode(lines, i, close)
+      const found = isPicture(lang, code) ? null : fenceCopy(lang, code, lines.slice(i, close + 1).join('\n'))
       if (found === null) prose.push(...lines.slice(i, close + 1))
       else copy(found)
       i = close
@@ -212,8 +234,8 @@ export function copyPieces(text: string, width?: number): Piece[] {
     }
 
     const whole = LINE.exec(line)
-    if (whole !== null) {
-      const form = suggestionForm(whole[1]!)!
+    const form = whole === null ? null : suggestionForm(whole[1]!)
+    if (whole !== null && form !== null) {
       const taken = [whole[1]!]
       let end = i
       const continues = () => form === 'shell' && CONTINUES.test(lines[end]!) && end + 1 < lines.length && lines[end + 1]!.trim() !== '' && !TABLE_ROW.test(lines[end + 1]!)
@@ -228,7 +250,7 @@ export function copyPieces(text: string, width?: number): Piece[] {
     let at = 0
     for (const span of QUOTE_OR_ROW.test(line) ? [] : line.matchAll(SPAN)) {
       const content = spanContent(span[2]!)
-      const form = suggestionForm(content) ?? (isWide(content, width) ? 'span' : null)
+      const form = suggestionForm(content) ?? (isWide(content, width, item ?? 0) ? 'span' : null)
       if (form === null || isLinkText(span.index)) continue
       const before = line.slice(at, span.index)
       const isFirst = at === 0

@@ -230,6 +230,13 @@ function drawnAt(tree: RenderElement, text: string): Node[][] {
   return out
 }
 
+/** Every node under `tree` that `test` holds for. */
+function nodes(tree: unknown, test: (n: Node) => boolean): Node[] {
+  if (tree === null || typeof tree !== 'object') return []
+  const n = tree as Node
+  return [...(test(n) ? [n] : []), ...(n.children ?? []).flatMap(child => nodes(child, test))]
+}
+
 /** The host, and every text a copy put on the clipboard. */
 function hostWithClipboard(on: On, world: World) {
   const h = host(on, world)
@@ -346,13 +353,13 @@ describe('slash commands', () => {
     ])
   })
 
-  test('a line of its own, a list item, and a fence of one line with no language', () => {
-    expect(copyPieces('Then:\n/compact keep it  \nDone.')).toEqual([
+  test('a bare name on a line of its own or as a list item, and a fence of one line with no language', () => {
+    expect(copyPieces('Then:\n/compact  \nDone.')).toEqual([
       { kind: 'text', text: 'Then:' },
-      { kind: 'copy', form: 'slash', text: '/compact keep it', raw: '/compact keep it  ' },
+      { kind: 'copy', form: 'slash', text: '/compact', raw: '/compact  ' },
       { kind: 'text', text: 'Done.' },
     ])
-    expect(slashes('- /review 12\n2. /mcp')).toEqual(['/review 12', '/mcp'])
+    expect(slashes('- /review\n2. /mcp')).toEqual(['/review', '/mcp'])
     expect(copyPieces('```\n/compact keep it\n```')).toEqual([{ kind: 'copy', form: 'slash', text: '/compact keep it', raw: '```\n/compact keep it\n```' }])
   })
 
@@ -360,11 +367,9 @@ describe('slash commands', () => {
     expect(slashes('`/plugin:skill-2 go` and `/clear`.')).toEqual(['/plugin:skill-2 go', '/clear'])
   })
 
-  test('a slash command is one line: a `|` at its end takes no line after it', () => {
-    expect(copyPieces('/compact keep a |\nnext line')).toEqual([
-      { kind: 'copy', form: 'slash', text: '/compact keep a |', raw: '/compact keep a |' },
-      { kind: 'text', text: 'next line' },
-    ])
+  test('arguments count in a span or a fence, never on a line of their own', () => {
+    expect(slashes('`/compact keep it`\n\n```\n/review 12\n```')).toEqual(['/compact keep it', '/review 12'])
+    expect(slashes('/compact keep it\n- /review 12')).toEqual([])
   })
 
   test('the screenshot reply: the lead-in stays prose and the span is the command, whole', () => {
@@ -397,10 +402,26 @@ describe('slash commands', () => {
     ['a slash command in an HTML comment', '<!--\n/compact\n-->'],
     ['a slash command in an indented code block', 'Example:\n\n    /compact keep it'],
     ['a fence still streaming', '```\n/compact keep it'],
+    ['a list item that names a command and explains it', '- /compact — summarize the context'],
+    ['a list item that names a command before a colon', '- /clear: wipe it'],
+    ['a sentence that opens on two directories', '/dev and /proc are virtual filesystems'],
+    ['a sentence that opens on a command name', '/compact is useful when the context fills'],
+    ['a numbered item that opens on a directory', '1. /opt holds it'],
+    ['a command and its arguments on a line of their own', '/compact keep the handoff'],
   ]
   for (const [name, text] of asProse) {
     test(`${name} stays prose`, () => {
       expect(copyPieces(text, 76).every(piece => piece.kind === 'text')).toBe(true)
+    })
+  }
+
+  const ROOTS = ['bin', 'boot', 'dev', 'etc', 'home', 'lib', 'lib64', 'media', 'mnt', 'opt', 'proc', 'root', 'run', 'sbin', 'srv', 'sys', 'tmp', 'usr', 'var']
+  for (const root of ROOTS) {
+    test(`/${root} is a directory, in a span, on a line of its own and in a fence`, () => {
+      for (const text of [`look in \`/${root}\` first`, `/${root}`, `- /${root}`, `\`/${root} x\``]) {
+        expect(copyPieces(text, 76).every(piece => piece.kind === 'text')).toBe(true)
+      }
+      expect(copyPieces(`\`\`\`\n/${root}\n\`\`\``).map(piece => piece.kind === 'copy' && piece.form)).toEqual(['code'])
     })
   }
 
@@ -434,6 +455,8 @@ describe('a fenced block is a copy block', () => {
 
 /** A span no 80-column frame holds on one line. */
 const LONG = 'git worktree remove ../vtium-glyph-fix36 && git branch -d feat/glyph-fix36 feat/glyph-s4 docs/heads-adr'
+/** A row wide enough that LONG stays in its sentence. */
+const ROOMY = Math.ceil(LONG.length / 0.6)
 
 describe('a code span wider than its row', () => {
   test('leaves its sentence as a span block; a narrower one stays', () => {
@@ -443,10 +466,79 @@ describe('a code span wider than its row', () => {
       { kind: 'copy', form: 'span', text: LONG, raw: `\`${LONG}\`` },
       { kind: 'text', text: 'clears them, and `git status` shows it.' },
     ])
-    expect(copyPieces(text, LONG.length).every(piece => piece.kind === 'text')).toBe(true)
+    expect(copyPieces(text, ROOMY).every(piece => piece.kind === 'text')).toBe(true)
     expect(copyPieces(text).every(piece => piece.kind === 'text')).toBe(true)
     expect(holdsCopy(text, 76)).toBe(true)
-    expect(holdsCopy(text, LONG.length)).toBe(false)
+    expect(holdsCopy(text, ROOMY)).toBe(false)
+  })
+
+  test('a span wider than 60% of its row leaves it, so one that starts late in its line does not wrap', () => {
+    const late = (span: string) => `${'word '.repeat(10)}\`${span}\` ends it.`
+    expect(copyPieces(late('x'.repeat(50)), 76).map(piece => piece.kind)).toEqual(['text', 'copy', 'text'])
+    expect(copyPieces(late('x'.repeat(45)), 76).every(piece => piece.kind === 'text')).toBe(true)
+    expect(holdsCopy(late('x'.repeat(50)), 76)).toBe(true)
+    expect(holdsCopy(late('x'.repeat(45)), 76)).toBe(false)
+  })
+
+  test("an open list item's indentation comes off the row", () => {
+    const span = 'x'.repeat(60)
+    const spans = (text: string) => copyPieces(text, 100).filter(piece => piece.kind === 'copy').map(piece => (piece as Copy).text)
+    expect(spans(`Then \`${span}\` clears them.`)).toEqual([])
+    expect(spans(`- Then \`${span}\` clears them.`)).toEqual([span])
+    expect(spans(`10. First:\n\n    then \`${span}\` clears them.`)).toEqual([span])
+    expect(holdsCopy(`- Then \`${span}\` clears them.`, 100)).toBe(true)
+    expect(holdsCopy(`Then \`${span}\` clears them.`, 100)).toBe(false)
+  })
+})
+
+describe('a fence in a list item', () => {
+  const PYTHON = '1. Do this:\n   ```python\n   def total(xs):\n       for x in xs:\n           yield x\n\n   ```'
+  const WRITTEN = 'def total(xs):\n    for x in xs:\n        yield x'
+
+  test('copies and draws without the list\'s indentation, its own kept', () => {
+    expect(copyPieces('1. Do this:\n   ```sh\n   ls -la\n   ```').find(piece => piece.kind === 'copy')).toMatchObject({ form: 'code', text: 'ls -la' })
+    expect(copyPieces(PYTHON).find(piece => piece.kind === 'copy')).toMatchObject({ form: 'code', lang: 'python', text: WRITTEN })
+    expect(replySegments(PYTHON, PREFS, 'terminal')?.find(segment => segment.kind === 'copy')).toMatchObject({ text: WRITTEN })
+    expect(splitReply(PYTHON).find(segment => segment.kind === 'code')).toMatchObject({ code: `${WRITTEN}\n` })
+  })
+
+  test('a line indented less than the fence loses only what it has', () => {
+    expect(copyPieces('   ```\n   a\n b\n```').find(piece => piece.kind === 'copy')).toMatchObject({ text: 'a\nb' })
+  })
+
+  test('Copy takes the code as written, and each line draws at its own indentation', async ($, on) => {
+    const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
+    await $.session.start(INTERACTIVE)
+    const ui = await $.ui.mount(at(PYTHON))
+    const tree = await ui.drawn()
+    expect(drawnAt(tree, '    for x in xs:').length).toBeGreaterThan(0)
+    expect(drawnAt(tree, '       for x in xs:')).toEqual([])
+    await ui.press({ key: (await ui.find({ type: 'Button', text: /^\s*Copy\s*$/ }))!.key! })
+    await ui.unmount()
+    expect(h.copies).toEqual([WRITTEN])
+  })
+})
+
+describe('a fence copy block', () => {
+  test('keeps no trailing blank line, in the copy or the drawing', () => {
+    expect(fenceCopy('rust', 'fn x() {}\n\n  \n', 'raw')).toEqual({ kind: 'copy', form: 'code', lang: 'rust', text: 'fn x() {}', raw: 'raw' })
+  })
+
+  test('with no language and no Copy, draws no line above its code', async ($, on) => {
+    hostWithClipboard(on, { mod: json({ ...MIAMI_NIGHTS, render: { ...MIAMI_NIGHTS.render, copy: false } }) })
+    await $.session.start(INTERACTIVE)
+    const tree = await drawn($, 'Here:\n\n```\nmake dev-install\n```')
+    expect(nodes(tree, n => n.props?.justifyContent === 'space-between')).toEqual([])
+    expect(drawnAt(tree, 'make dev-install').length).toBeGreaterThan(0)
+  })
+
+  test('with tables off, a diff and a Mermaid chart keep their drawing', () => {
+    const prefs = { ...(PREFS as object), tables: 'off' } as never
+    const diff = 'See:\n\n```diff\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n```'
+    const chart = 'See:\n\n```mermaid\nnot a chart\n```'
+    expect(replySegments(diff, prefs, 'terminal')?.some(segment => segment.kind === 'copy') ?? false).toBe(false)
+    expect(replySegments(chart, prefs, 'terminal')?.some(segment => segment.kind === 'copy') ?? false).toBe(false)
+    expect(replySegments('See:\n\n```rust\nfn x() {}\n```', prefs, 'terminal')?.some(segment => segment.kind === 'copy')).toBe(true)
   })
 })
 

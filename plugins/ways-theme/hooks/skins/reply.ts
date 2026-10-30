@@ -8,7 +8,7 @@ import { drawsBlocks, hasBlocks } from './blocks'
 import { copyPieces, fenceCopy, holdsCopy } from './commands'
 import { diffFenceTag, fenceDiff } from './diff-fence'
 import { isShell, splitReply } from './markdown'
-import type { Code, Segment } from './markdown'
+import type { Segment } from './markdown'
 import { inlineMath } from './math'
 import { parseMermaid } from './mermaid'
 import { artKind } from './mermaid-art'
@@ -22,8 +22,8 @@ import { artKind } from './mermaid-art'
 export const MAX_MARKDOWN = 9000
 
 // A fence the skin draws as a picture: a Mermaid chart, or a diff with changes in it.
-const isPicture = (segment: Code, prefs: Prefs): boolean =>
-  (segment.lang === 'mermaid' && prefs.charts) || (diffFenceTag(segment.lang) !== null && fenceDiff(segment.code) !== null)
+const isPicture = (lang: string, code: string, prefs: Prefs): boolean =>
+  (lang === 'mermaid' && prefs.charts) || (diffFenceTag(lang) !== null && fenceDiff(code) !== null)
 
 // `width` is the columns the reply's prose is drawn in, for the code spans too wide for it.
 export function replySegments(text: string, prefs: Prefs, surface: RenderSurface, width?: number): Segment[] | null {
@@ -47,8 +47,13 @@ export function replySegments(text: string, prefs: Prefs, surface: RenderSurface
     : charts || math
       ? splitReply(text, { tables: false, fence: (lang, code) => charts && charted(lang, code), math })
       : [{ kind: 'text', text }]
+  const pictured = (lang: string, code: string) => isPicture(lang, code, prefs)
   const lifted = (segment: Segment): Segment[] =>
-    segment.kind === 'text' ? copyPieces(segment.text, width) : segment.kind === 'code' && !isPicture(segment, prefs) ? [fenceCopy(segment.lang, segment.code, segment.raw) ?? segment] : [segment]
+    segment.kind === 'text'
+      ? copyPieces(segment.text, width, pictured)
+      : segment.kind === 'code' && !pictured(segment.lang, segment.code)
+        ? [fenceCopy(segment.lang, segment.code, segment.raw) ?? segment]
+        : [segment]
   const segments = copies ? split.flatMap(lifted) : split
   const fits = segments.every(segment => segment.kind === 'table' || (segment.kind === 'text' ? segment.text : segment.raw).length <= MAX_MARKDOWN)
   // Off the terminal a shell fence keeps the app's drawing, for its Run button; a reply

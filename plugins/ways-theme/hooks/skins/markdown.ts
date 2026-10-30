@@ -51,6 +51,19 @@ export function fenceClose(lines: readonly string[], i: number): number {
   })
 }
 
+// The code between a fence's opening on line `open` and its closing on line `close`, each
+// line less up to as many spaces as the opening is indented, as CommonMark reads a fence:
+// a fence in a list item keeps none of the item's indentation.
+export function fenceCode(lines: readonly string[], open: number, close: number): string {
+  const indent = /^ */.exec(lines[open] ?? '')?.[0].length ?? 0
+  const margin = new RegExp(`^ {0,${indent}}`)
+
+  return lines
+    .slice(open + 1, close)
+    .map(line => line.replace(margin, ''))
+    .join('\n')
+}
+
 // Inline emphasis and code ticks read as noise in a padded cell.
 const clean = (cell: string): string =>
   cell.replace(/\*\*|__|`/g, '').replace(/\\\|/g, '|').trim()
@@ -122,7 +135,7 @@ export function splitReply(markdown: string, options: SplitOptions = SPLIT_ALL):
       }
 
       const lang = (fence[2] ?? '').toLowerCase()
-      const code = lines.slice(i + 1, close).join('\n')
+      const code = fenceCode(lines, i, close)
 
       if (!options.fence(lang, code)) {
         text.push(...lines.slice(i, close + 1))
