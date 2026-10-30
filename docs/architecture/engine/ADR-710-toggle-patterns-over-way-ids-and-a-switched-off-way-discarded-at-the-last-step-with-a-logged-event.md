@@ -116,6 +116,10 @@ Under ADR-701 §1, a trailing `dir/*` switched off `dir` and its whole subtree a
 - The keyword, command, file and tool lanes test a switched-off way's frontmatter patterns with the gates they apply to an enabled way, and log a hit the same way.
 - Each switched-off way that would have fired is logged as a `way_fired` event with a `discarded` property, and its injection is dropped. A switched-off way that would not have fired is not logged, so a switched-off domain does not flood the log.
 - The relevance judge is not asked about a switched-off way. Would have fired means it cleared the matcher's gates.
+- On the late-interaction lane a switched-off way is confirmed against the body sidecar at the way's current hash. With no such entry it is not logged, since confirming it on the call would embed.
+- A keyword hit that the floor vetoes is re-checked against the prompt-only scores only when the enabled pass already computed them.
+- A state-lane discard is logged once per session per way.
+- In a project with `enabled: false`, only the pattern lanes log discards, since nothing is embedded there. Testing the corpus's patterns costs about 35 ms per prompt in such a project.
 - Macros and sensors follow the same rule as they gain filters: the event is selected and logged, and the action is dropped at the last step with the filter named.
 
 ### 4. A discarded fire
