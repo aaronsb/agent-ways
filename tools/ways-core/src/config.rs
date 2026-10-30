@@ -1066,6 +1066,25 @@ mod tests {
     }
 
     #[test]
+    fn literal_segments_outrank_fewer_double_stars_in_either_order() {
+        for cfg in both_orders(&["a/b/**: false", "a/*/*: true"]) {
+            assert_eq!(cfg.disabling_toggle("a/b/c"), Some("a/b/**"), "two literals beat one, though `a/*/*` has no `**`");
+        }
+        for cfg in both_orders(&["\"*/*/*\": true", "a/**: false"]) {
+            assert_eq!(cfg.disabling_toggle("a/b/c"), Some("a/**"), "one literal beats none, though `*/*/*` has more segments");
+        }
+    }
+
+    #[test]
+    fn a_bare_star_key_loads_and_matches_every_one_segment_way() {
+        let mut cfg = Config::default();
+        apply_project(&mut cfg, "ways:\n  \"*\": false\n");
+        assert_eq!(cfg.disabled_ways(), ["*"]);
+        assert!(cfg.way_disabled("data"));
+        assert!(!cfg.way_disabled("data/schema-docs"));
+    }
+
+    #[test]
     fn true_turns_a_way_back_on_under_a_broader_false() {
         for cfg in both_orders(&["softwaredev/code/supplychain/**: false", "softwaredev/code/supplychain/npm: true"]) {
             assert!(!cfg.way_disabled("softwaredev/code/supplychain/npm"));

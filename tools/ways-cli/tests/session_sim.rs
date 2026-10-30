@@ -1778,21 +1778,35 @@ fn scenario_prefix_toggle_excludes_ways_and_a_way_toggle_overrides_it() {
     let _ = std::fs::remove_dir_all(&project);
 }
 
-#[test]
-fn scenario_a_single_way_toggle_on_a_parent_leaves_its_child_eligible() {
-    let s = Session::new("parentonly");
-    let project = sim_root().join("project-parentonly");
+/// The parent's prompt fires `testdomain/parent` with no toggle, then a
+/// session under `ways` leaves the parent silent and its child eligible.
+fn assert_parent_off_and_child_on(name: &str, ways: &str) {
+    let project = sim_root().join(format!("project-{name}"));
     let _ = std::fs::remove_dir_all(&project);
     std::fs::create_dir_all(project.join(".claude")).unwrap();
 
-    // `testdomain/*` reaches the parent, one segment down, and not its child.
-    std::fs::write(project.join(".claude/ways.yaml"), "ways:\n  testdomain/parent: false\n  testdomain/*: false\n").unwrap();
+    let control = Session::new(&format!("{name}-ctl"));
+    scan_in_project(&control, &project, "code quality review architecture maintainability coupling");
+    assert_marker_exists("testdomain/parent", &control.id);
+
+    let s = Session::new(name);
+    std::fs::write(project.join(".claude/ways.yaml"), ways).unwrap();
     scan_in_project(&s, &project, "code quality review architecture maintainability coupling");
     assert_marker_absent("testdomain/parent", &s.id);
     scan_in_project(&s, &project, "how do I write a unit test for this module");
     assert_marker_exists("testdomain/parent/child", &s.id);
 
     let _ = std::fs::remove_dir_all(&project);
+}
+
+#[test]
+fn scenario_a_single_way_toggle_on_a_parent_leaves_its_child_eligible() {
+    assert_parent_off_and_child_on("parentonly", "ways:\n  testdomain/parent: false\n");
+}
+
+#[test]
+fn scenario_a_star_toggle_reaches_one_segment_and_leaves_the_grandchild_eligible() {
+    assert_parent_off_and_child_on("onestar", "ways:\n  testdomain/*: false\n");
 }
 
 // ── ADR-701 §2: history is archived, not deleted ───────────────
