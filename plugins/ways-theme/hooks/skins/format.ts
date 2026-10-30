@@ -3,6 +3,10 @@
 
 // Plain string helpers behind the row builders.
 
+// One drawing draws at most 100000 characters in all, its `Code` and `Markdown` blocks of
+// any length; text longer than this keeps Claude Code's own drawing.
+export const MAX_DRAWN = 90000
+
 export const oneLine = (text: string): string =>
   (text.split('\n', 1)[0] ?? '').replace(/\s+/g, ' ').trim()
 

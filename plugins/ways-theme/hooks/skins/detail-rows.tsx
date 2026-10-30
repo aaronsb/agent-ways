@@ -3,9 +3,9 @@
 
 import type { RenderElement } from 'claude-code'
 
-import { chunksOf, MAX_BLOCK, MAX_DRAWN, unifiedDiff } from './detail'
+import { unifiedDiff } from './detail'
 import type { Body, Field } from './detail'
-import { shortenPath } from './format'
+import { MAX_DRAWN, shortenPath } from './format'
 import { fileHref } from './links'
 import { diffCard, terminalCard } from './rows'
 import type { Look } from './rows'
@@ -92,8 +92,8 @@ const isDrawable = (text: string): boolean => text.length <= MAX_DRAWN
 export type Answer = Omit<Opened, 'fields' | 'stock'>
 
 // The answer's drawing, or null where the row falls back to Claude Code's own: an answer
-// past one drawing (MAX_DRAWN), a diff past one block (MAX_BLOCK), a card past what a card
-// holds (MAX_SVG), a body this cannot read.
+// past one drawing (MAX_DRAWN), a card past what a card holds (MAX_SVG), a body this
+// cannot read.
 function answerRows(look: Look, answer: Answer): RenderElement | string | null {
   const { Box, Code, Text } = look.ui
   const { palette } = look.skin
@@ -101,13 +101,7 @@ function answerRows(look: Look, answer: Answer): RenderElement | string | null {
 
   switch (body.kind) {
     case 'file':
-      return isDrawable(body.text) ? (
-        <Box flexDirection="column">
-          {chunksOf(body.text.split('\n'), body.startLine).map(chunk => (
-            <Code source={chunk.text} path={body.path} startLine={chunk.startLine} />
-          ))}
-        </Box>
-      ) : null
+      return isDrawable(body.text) ? <Code source={body.text} path={body.path} startLine={body.startLine} /> : null
     case 'matches':
       return isDrawable(body.lines.join('\n')) ? (
         <Box flexDirection="column">
@@ -124,8 +118,7 @@ function answerRows(look: Look, answer: Answer): RenderElement | string | null {
 
       const source = unifiedDiff(body.diff)
 
-      // A diff cut mid-hunk no longer parses: one too long for a block is Claude Code's.
-      return source.length > MAX_BLOCK ? null : <Code source={source} format="diff" path={body.diff.path} />
+      return isDrawable(source) ? <Code source={source} format="diff" path={body.diff.path} /> : null
     }
     case 'text':
       return isDrawable(body.text) ? textLines(look, body.text.split('\n'), body.isError ? palette.err : palette.fg) : null

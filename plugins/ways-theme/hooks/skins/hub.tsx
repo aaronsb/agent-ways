@@ -28,7 +28,7 @@ import { FRAME, FRAME_INSET, FRAME_PAD_X, isExpandedView, shouldFrame } from '..
 
 import { MOD_EXPORT_ARGV, parseExport, setupOf } from './config.ts'
 import type { Setup } from './config.ts'
-import { diffstat, pick, shortenPath } from './format.ts'
+import { diffstat, MAX_DRAWN, pick, shortenPath } from './format.ts'
 import { bodyOf, inputFields, isOpen } from './detail.ts'
 import { DISCLOSE_INSET, disclosedRow, drawsBody, openedRows } from './detail-rows.tsx'
 import { commandSegments } from './command-output.ts'
@@ -44,7 +44,7 @@ import { countdownsOf, limitLabel, metersOf } from './svg-usage.ts'
 import { NO_ROW, PATH_TOOLS, kindOf, showsImage, summarize, toolLabel } from './tools.ts'
 import { fitted, namesImage, withRow } from './pictures.ts'
 import { commandOf, errorLine, isQuiet, quietLabel } from './quiet.ts'
-import { MAX_MARKDOWN, replySegments } from './reply.ts'
+import { replySegments } from './reply.ts'
 import { holdsCopy, notRoot } from './commands.ts'
 import type { IsCommand } from './commands.ts'
 import { fileHref, hyperlinksFrom, touchOf } from './links.ts'
@@ -691,7 +691,7 @@ export function registerSkins(on: On, shared: Shared): void {
   on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => {
     const setup = await activeSetup($)
     if (setup === null || !setup.prefs.commands || setup.prefs.tables === 'off' || e.props.isErrored) return next(e)
-    const segments = e.props.text.length > MAX_MARKDOWN ? null : commandSegments(e.props.text, e.props.command)
+    const segments = e.props.text.length > MAX_DRAWN ? null : commandSegments(e.props.text, e.props.command)
     if (segments === null) return next(e)
     const ui = $.ui.resolve(e)
     const svg = e.surface !== 'terminal' && setup.prefs.tables === 'on' && 'Svg' in ui ? ui.Svg : undefined

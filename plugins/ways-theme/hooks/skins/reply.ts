@@ -8,6 +8,7 @@ import { drawsBlocks, hasBlocks } from './blocks'
 import { copyPieces, fenceCopy, holdsCopy, notRoot } from './commands'
 import type { IsCommand } from './commands'
 import { diffFenceTag, fenceDiff } from './diff-fence'
+import { MAX_DRAWN } from './format'
 import { isShell, splitReply } from './markdown'
 import type { Segment } from './markdown'
 import { inlineMath } from './math'
@@ -18,10 +19,6 @@ import { artKind } from './mermaid-art'
 // Claude Code's own drawing. On the terminal the text the person copies is a block of its
 // own (commands.ts).
 
-// Markdown takes at most 10000 characters a block; a longer one keeps Claude Code's own
-// drawing.
-export const MAX_MARKDOWN = 9000
-
 // A fence the skin draws as a picture: a Mermaid chart, or a diff with changes in it.
 const isPicture = (lang: string, code: string, prefs: Prefs): boolean =>
   (lang === 'mermaid' && prefs.charts) || (diffFenceTag(lang) !== null && fenceDiff(code) !== null)
@@ -29,6 +26,11 @@ const isPicture = (lang: string, code: string, prefs: Prefs): boolean =>
 // `width` is the columns the reply's prose is drawn in, for the code spans too wide for it;
 // `isCommand` names the slash commands.
 export function replySegments(text: string, prefs: Prefs, surface: RenderSurface, width?: number, isCommand: IsCommand = notRoot): Segment[] | null {
+  // A reply past one drawing keeps Claude Code's own.
+  if (text.length > MAX_DRAWN) {
+    return null
+  }
+
   const cards = prefs.tables !== 'off' && /\||```|~~~/.test(text)
   // The terminal draws every paragraph itself; elsewhere only alerts and task lists.
   const blocks = prefs.markdown && (surface === 'terminal' || hasBlocks(text))
@@ -57,7 +59,6 @@ export function replySegments(text: string, prefs: Prefs, surface: RenderSurface
         ? [fenceCopy(segment.lang, segment.code, segment.raw, isCommand) ?? segment]
         : [segment]
   const segments = copies ? split.flatMap(lifted) : split
-  const fits = segments.every(segment => segment.kind === 'table' || (segment.kind === 'text' ? segment.text : segment.raw).length <= MAX_MARKDOWN)
   // Off the terminal a shell fence keeps the app's drawing, for its Run button; a reply
   // with nothing else to draw is left to the app whole.
   const kept = surface === 'terminal' ? segments : segments.filter(segment => !isShell(segment))
@@ -68,5 +69,5 @@ export function replySegments(text: string, prefs: Prefs, surface: RenderSurface
       (math && inlineMath(segment.text) !== segment.text),
   )
 
-  return fits && drawn ? segments : null
+  return drawn ? segments : null
 }

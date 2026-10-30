@@ -92,7 +92,7 @@ export function breakText(text: string, width: number, isMono: boolean, size: nu
 }
 
 // The Svg element takes a document of at most this many characters. A card past it is
-// handed back to Claude Code's own drawing, as a reply past MAX_MARKDOWN is (reply.ts).
+// handed back to Claude Code's own drawing.
 export const MAX_SVG = 131072
 
 // The room a reply gives a card, from the width the desktop reports in cells of its code

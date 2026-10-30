@@ -4,7 +4,7 @@
 import type { ElementTable, RenderSurface } from 'claude-code'
 
 import type { Prefs, Touch, TurnStats } from '../../types'
-import { formatDuration, formatMs } from './format'
+import { formatDuration, formatMs, MAX_DRAWN } from './format'
 import type { PathBase } from './links'
 import { columnWidths, graphemes, isShell, tableArt, tableCsv, widthOf, wrapLines } from './markdown'
 import { diffFenceTag, diffRows, fenceDiff, newOnly } from './diff-fence'
@@ -18,7 +18,6 @@ import { mermaidArt } from './mermaid-art'
 import type { Art } from './mermaid-art'
 import type { Chart } from './mermaid'
 import { blockRows } from './prose'
-import { MAX_MARKDOWN } from './reply'
 import type { Icons, Kind, Skin } from './skin'
 import { spinnerColor, spinnerIcon, toolIcon } from './icons'
 import type { SpinnerMode } from './icons'
@@ -408,7 +407,7 @@ export const literal = (text: string): string =>
 // Claude Code. `/skin prompt right` puts it on the right, where the desktop app draws it,
 // and `/skin prompt plain` drops the outline for the skin's prompt marker.
 // On the desktop app the text is the app's own Markdown, which can be selected and copied;
-// a prompt too long for one Markdown block keeps the Text.
+// a prompt past one drawing keeps the Text.
 export function promptRow(look: Look, text: string, images?: ReturnType<Ui['Text']>) {
   const { Box, Markdown, Text } = look.ui
   const markdown = look.surface === 'terminal' ? null : literal(text)
@@ -418,7 +417,7 @@ export function promptRow(look: Look, text: string, images?: ReturnType<Ui['Text
     <Box flexDirection="column" alignItems={look.prefs.prompt === 'right' ? 'flex-end' : 'flex-start'} marginY={1}>
       <Box {...(plain ? {} : { borderStyle: 'round' as const, borderColor: look.skin.palette.muted, paddingX: 1 })} flexShrink={1}>
         {plain ? <Text color={look.skin.palette.user}>{`${look.icons.prompt} `}</Text> : ''}
-        {markdown === null || markdown.length > MAX_MARKDOWN ? (
+        {markdown === null || markdown.length > MAX_DRAWN ? (
           <Text color={look.skin.palette.fg}>{text}</Text>
         ) : (
           <Markdown text={markdown} />
