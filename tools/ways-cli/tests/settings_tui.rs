@@ -568,6 +568,34 @@ fn the_cli_lists_the_themes_with_their_origin_and_state() {
 }
 
 #[test]
+fn a_rejected_user_theme_file_named_for_a_bundled_theme_folds_into_it() {
+    let fx = Fx::new();
+    fx.file(&format!("{THEMES}/nord.theme"), "not a theme\n");
+    fx.file(&format!("{THEMES}/broken.theme"), "not a theme\n");
+    let (out, _, _) = fx.run(&["settings", "theme", "list", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let named = |n: &str| v.as_array().unwrap().iter().filter(|t| t["name"] == n).cloned().collect::<Vec<_>>();
+    let nord = named("nord");
+    assert_eq!(nord.len(), 1, "{v}");
+    assert_eq!((nord[0]["origin"].as_str(), nord[0]["state"].as_str()), (Some("builtin"), Some("inactive")));
+    let detail = nord[0]["detail"].as_str().unwrap();
+    assert!(detail.starts_with("user file nord.theme does not load: ") && detail.ends_with("; the bundled theme is in effect"), "{detail}");
+    let broken = named("broken");
+    assert_eq!((broken.len(), broken[0]["origin"].as_str(), broken[0]["state"].as_str()), (1, Some("user"), Some("invalid")));
+}
+
+#[test]
+fn settings_items_text_shows_the_overrides_and_the_highest_file() {
+    let fx = Fx::new();
+    fx.file(".config/attend/sensors/git.yaml", "interval: 90\n");
+    let (out, err, code) = fx.run(&["settings", "items", "sensor"]);
+    assert_eq!(code, 0, "{err}");
+    let line = out.lines().find(|l| l.split_whitespace().nth(1) == Some("git")).unwrap();
+    assert!(line.contains("builtin · user extends"), "{line}");
+    assert!(line.ends_with("~/.config/attend/sensors/git.yaml"), "{line}");
+}
+
+#[test]
 fn settings_items_lists_every_family_with_the_descriptor_first() {
     let fx = Fx::new();
     assert_eq!(fx.run(&["settings", "theme", "copy", "nord", "mine"]).2, 0);
@@ -585,7 +613,7 @@ fn settings_items_lists_every_family_with_the_descriptor_first() {
     assert_eq!(mine["origin"].as_str(), Some("user"));
     let git = all.iter().find(|i| i["family"] == "sensor" && i["name"] == "git").unwrap();
     assert_eq!((git["kind"].as_str(), git["origin"].as_str()), (Some("crate"), Some("builtin")));
-    assert_eq!(&keys(git)[DESCRIPTOR.len()..], ["description", "interval", "min_interval"]);
+    assert_eq!(&keys(git)[DESCRIPTOR.len()..], ["description", "interval", "min_interval", "threshold", "lane"]);
     let attend = all.iter().find(|i| i["family"] == "mod" && i["name"] == "attend").unwrap();
     assert_eq!((attend["kind"].as_str(), attend["source"].as_str()), (Some("plugin"), Some("attend@agent-ways")));
     assert_eq!(&keys(attend)[DESCRIPTOR.len()..], ["wanted", "targets"]);

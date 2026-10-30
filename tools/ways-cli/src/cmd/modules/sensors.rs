@@ -156,9 +156,8 @@ fn local_state(l: &Loaded, why: &str) -> (SensorState, Option<String>) {
     }
 }
 
-/// A sensor's own fields, after its descriptor (ADR-516 §2). The screens
-/// also draw its threshold and lane, which the CLI leaves to
-/// `attend sensor list`.
+/// A sensor's own fields, after its descriptor (ADR-516 §2); the same
+/// fields `attend sensor list --json` carries.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SensorFields {
     pub description: Option<String>,
@@ -166,9 +165,7 @@ pub struct SensorFields {
     pub interval: Option<u64>,
     /// Seconds between polls while things change.
     pub min_interval: Option<u64>,
-    #[serde(skip)]
     pub threshold: Option<f64>,
-    #[serde(skip)]
     pub lane: Option<&'static str>,
 }
 

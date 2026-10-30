@@ -5,38 +5,45 @@
 use std::path::Path;
 
 use agent_settings::exit;
+use agent_settings::item::{Entry, Item};
 use agent_theme::ColorDepth;
 use serde::Serialize;
 use serde_json::Value;
 
 use super::tui::{self, Ctx, Ways};
-use super::{fail, Out};
+use super::{fail, Failure, Out};
 
 /// The families, in the order they list.
 pub const FAMILIES: [&str; 5] = ["theme", "mod", "sensor", "way", "profile"];
 
-fn value(e: impl Serialize) -> Value {
-    serde_json::to_value(e).unwrap_or_default()
+/// An entry's descriptor, with the entry serialized.
+fn value<F: Serialize>(e: Entry<F>) -> Result<(Item, Value), Failure> {
+    let v = serde_json::to_value(&e).map_err(|err| fail(exit::WRITE_FAILED, format!("serializing {:?} {}: {err}", e.item.family, e.item.name)))?;
+    Ok((e.item, v))
 }
 
-/// Every item of `family`, each serialized as its entry, for the project
+fn all<F: Serialize>(entries: impl IntoIterator<Item = Entry<F>>) -> Result<Vec<(Item, Value)>, Failure> {
+    entries.into_iter().map(value).collect()
+}
+
+/// Every item of `family`, each with its entry serialized, for the project
 /// `ways` was opened for.
-fn of(family: &str, ways: &Ways) -> Vec<Value> {
+fn of(family: &str, ways: &Ways) -> Result<Vec<(Item, Value)>, Failure> {
     use crate::cmd::modules;
     let ctx = &ways.ctx;
     match family {
-        "theme" => modules::themes::all(&tui::themes(ways, &ways.layers(), ColorDepth::TrueColor)).into_iter().map(value).collect(),
+        "theme" => all(modules::themes::all(&tui::themes(ways, &ways.layers(), ColorDepth::TrueColor))),
         "mod" => crate::cmd::mods::overview().iter().map(|o| value(modules::mods::item(&o.m, Ok(o)))).collect(),
         "sensor" => {
             let attend = (ctx.sensors)();
             tui::sensors::loaded(&ways.layers(), &ctx.project).iter().map(|l| value(modules::sensors::item(l, &attend))).collect()
         }
-        "way" => modules::ways::all(&ctx.corpus, &ctx.user_ways, &ctx.project).into_iter().map(value).collect(),
+        "way" => all(modules::ways::all(&ctx.corpus, &ctx.user_ways, &ctx.project)),
         "profile" => {
             let has_key = |p| ways_agent_core::keys::locate_file(p).is_some();
-            modules::profiles::all(&ways_agent_core::profile::user_layer_path(), has_key).into_iter().map(value).collect()
+            all(modules::profiles::all(&ways_agent_core::profile::user_layer_path(), has_key))
         }
-        _ => Vec::new(),
+        _ => Ok(Vec::new()),
     }
 }
 
@@ -56,13 +63,25 @@ pub fn list(family: Option<&str>, as_json: bool, project: Option<&Path>) -> Out 
         return Err(fail(exit::USAGE, format!("no family `{f}`; the families are {}", FAMILIES.join(", "))));
     }
     let ways = Ways::new(Ctx::from_env(project));
-    let items: Vec<Value> = FAMILIES.iter().filter(|f| family.is_none_or(|w| w == **f)).flat_map(|f| of(f, &ways)).collect();
+    let mut items = Vec::new();
+    for f in FAMILIES.iter().filter(|f| family.is_none_or(|w| w == **f)) {
+        items.extend(of(f, &ways)?);
+    }
     if as_json {
-        println!("{}", serde_json::to_string_pretty(&items).unwrap_or_default());
+        let values: Vec<&Value> = items.iter().map(|(_, v)| v).collect();
+        let text = serde_json::to_string_pretty(&values).map_err(|e| fail(exit::WRITE_FAILED, format!("serializing the items: {e}")))?;
+        println!("{text}");
         return Ok(());
     }
-    let text = |v: &Value, k: &str| v[k].as_str().map_or("-".to_string(), |s| tilde(s, &ways.ctx.home));
-    let rows: Vec<[String; 6]> = items.iter().map(|v| ["family", "name", "origin", "kind", "state", "path"].map(|k| text(v, k))).collect();
+    let word = |s: Option<&str>| s.map_or("-".to_string(), str::to_string);
+    let rows: Vec<[String; 6]> = items
+        .iter()
+        .map(|(i, _)| {
+            let family = format!("{:?}", i.family).to_lowercase();
+            let file = i.file().map(|p| tilde(&p.display().to_string(), &ways.ctx.home));
+            [family, i.name.clone(), i.origin_text(), word(i.kind.map(|k| k.word())), i.state.word().to_string(), word(file.as_deref())]
+        })
+        .collect();
     let mut w = [0; 5];
     for r in &rows {
         for (i, c) in r.iter().take(5).enumerate() {

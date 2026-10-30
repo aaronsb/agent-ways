@@ -45,7 +45,8 @@ pub fn rejected(file: &Path, errors: &[ThemeError]) -> Entry<ThemeFields> {
 }
 
 /// Every theme `themes` offers, in its order, then each user file that did
-/// not load.
+/// not load. A rejected file named for a bundled theme is not listed twice:
+/// that theme says in its detail that the file does not load.
 pub fn all(themes: &agent_tui::Themes) -> Vec<Entry<ThemeFields>> {
     let mut out: Vec<_> = themes
         .list()
@@ -57,6 +58,17 @@ pub fn all(themes: &agent_tui::Themes) -> Vec<Entry<ThemeFields>> {
         .collect();
     // A bundled theme that failed to parse is a build defect, which a test
     // catches; only the user's files are listed.
-    out.extend(themes.set.rejected.iter().filter(|(f, _)| !f.starts_with("bundled:")).map(|(f, e)| rejected(&PathBuf::from(f), e)));
+    for (f, e) in themes.set.rejected.iter().filter(|(f, _)| !f.starts_with("bundled:")) {
+        let file = PathBuf::from(f);
+        let bad = rejected(&file, e);
+        match out.iter_mut().find(|o| o.item.name == bad.item.name) {
+            Some(o) => {
+                let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let why = bad.item.detail.unwrap_or_default();
+                o.item.detail = Some(format!("user file {name} does not load: {why}; the bundled theme is in effect"));
+            }
+            None => out.push(bad),
+        }
+    }
     out
 }

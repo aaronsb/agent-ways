@@ -45,8 +45,7 @@ pub fn list(as_json: bool) -> Out {
     let w = entries.iter().map(|e| e.item.name.len()).max().unwrap_or(0);
     for e in &entries {
         let i = &e.item;
-        let overrides = i.overrides.iter().map(|o| format!(" · {} {}", o.origin.word(), o.how.word()));
-        let origin: String = std::iter::once(i.origin.word().to_string()).chain(overrides).collect();
+        let origin = i.origin_text();
         let detail = i.detail.as_deref().map(|d| format!("  {d}")).unwrap_or_default();
         println!("{:<w$}  {origin}  {}{detail}", i.name, i.state.word());
     }
