@@ -51,16 +51,38 @@ export function fenceClose(lines: readonly string[], i: number): number {
   })
 }
 
+// Columns of leading whitespace, a tab to the next multiple of four.
+export function indentOf(line: string): number {
+  let width = 0
+  for (const char of line) {
+    if (char === ' ') width += 1
+    else if (char === '\t') width += 4 - (width % 4)
+    else break
+  }
+  return width
+}
+
+// `line` less up to `columns` of its indentation; a tab that runs past them leaves the
+// rest of its columns as spaces.
+function outdent(line: string, columns: number): string {
+  let width = 0
+  let at = 0
+  while (at < line.length && width < columns && (line[at] === ' ' || line[at] === '\t')) {
+    width += line[at] === '\t' ? 4 - (width % 4) : 1
+    at++
+  }
+  return ' '.repeat(Math.max(0, width - columns)) + line.slice(at)
+}
+
 // The code between a fence's opening on line `open` and its closing on line `close`, each
-// line less up to as many spaces as the opening is indented, as CommonMark reads a fence:
-// a fence in a list item keeps none of the item's indentation.
+// line less up to as many columns of indentation as the opening has, spaces or tabs, as
+// CommonMark reads a fence: a fence in a list item keeps none of the item's indentation.
 export function fenceCode(lines: readonly string[], open: number, close: number): string {
-  const indent = /^ */.exec(lines[open] ?? '')?.[0].length ?? 0
-  const margin = new RegExp(`^ {0,${indent}}`)
+  const indent = indentOf(lines[open] ?? '')
 
   return lines
     .slice(open + 1, close)
-    .map(line => line.replace(margin, ''))
+    .map(line => outdent(line, indent))
     .join('\n')
 }
 

@@ -475,6 +475,18 @@ describe('slash commands', () => {
 const CODE = 'fn main() {\n    let x = 1;   \n\n\tprintln!("{x}");\n\n}'
 const FENCED = `Here it is:\n\n\`\`\`rust\n${CODE}\n\`\`\`\n\nThat prints 1.`
 
+describe('a fence in a list item copies without the indentation, spaces or tabs', () => {
+  const code = (text: string) => (copyPieces(text).find(piece => piece.kind === 'copy') as Copy | undefined)?.text
+  test('a tab-indented fence', () => {
+    expect(code('-\tItem\n\n\t```python\n\tdef f():\n\t    return 1\n\t```')).toBe('def f():\n    return 1')
+  })
+  test('a tab counts to the next multiple of four, and one past the indentation leaves the rest as spaces', () => {
+    expect(code('1. a\n\n   ```\n\tx\n   y\n```')).toBe(' x\ny')
+    expect(code('- a\n\n  ```\n\tx\n```')).toBe('  x')
+    expect(code('- a\n\n  ```\n  \tx\n```')).toBe('\tx')
+  })
+})
+
 describe('a CRLF line ending reads as LF', () => {
   for (const lf of ['a\n/clear\nb', '! ls -la\n', '```python\ndef f():\n    return 1\n```', '| a | b |\n|---|---|\n| `x` | y |\n']) {
     test(JSON.stringify(lf), () => {

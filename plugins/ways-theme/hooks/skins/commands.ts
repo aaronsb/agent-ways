@@ -66,11 +66,12 @@
 // place. The copied text is the suggestion with its `! ` or its `/`, as the
 // person types it into Claude Code's prompt, and a fence's code or a span's
 // content as written. A fence's code is read as CommonMark reads it: each
-// line less up to as many spaces as the opening line is indented, so a fence
-// in a list item copies without the item's indentation, and its trailing
-// blank lines off.
+// line less up to as many columns of indentation as the opening line has,
+// spaces or tabs, a tab to the next multiple of four, so a fence in a list
+// item copies without the item's indentation, and its trailing blank lines
+// off.
 
-import { FENCE, fenceClose, fenceCode, isShellLang, widthOf } from './markdown'
+import { FENCE, fenceClose, fenceCode, indentOf, isShellLang, widthOf } from './markdown'
 
 /** What a copy block is (the header comment). */
 export type Form = 'shell' | 'slash' | 'span' | 'code'
@@ -137,17 +138,6 @@ function suggestionForm(text: string, isCommand: IsCommand): 'shell' | 'slash' |
   if (SHELL_STARTS.test(text)) return 'shell'
   const name = SLASH_STARTS.exec(text)?.[1]
   return name !== undefined && isCommand(name) ? 'slash' : null
-}
-
-/** Columns of leading whitespace, a tab to the next multiple of four. */
-const indentOf = (line: string): number => {
-  let width = 0
-  for (const char of line) {
-    if (char === ' ') width += 1
-    else if (char === '\t') width += 4 - (width % 4)
-    else break
-  }
-  return width
 }
 
 /** Where a list item's content starts: past its indentation, its marker and
