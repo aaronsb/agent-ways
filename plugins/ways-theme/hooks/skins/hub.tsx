@@ -405,9 +405,12 @@ async function refreshUsage($: EngineInterface): Promise<void> {
 const quietly = ($: EngineInterface, what: string) => (error: unknown) => debug($, `${what}: ${error instanceof Error ? error.message : String(error)}`)
 
 /** Puts a card's text on the clipboard of the surface that drew it. */
-function copier($: EngineInterface, surface: RenderSurface): (text: string) => void {
+// A press reaches a terminal row only under the fullscreen layout: on the main screen a
+// row is printed into scrollback, where no Button can be pressed, so it draws no Copy.
+function copier($: EngineInterface, e: { surface: RenderSurface; viewport?: { isFullscreen?: boolean } }): ((text: string) => void) | undefined {
+  if (e.surface === 'terminal' && e.viewport?.isFullscreen !== true) return undefined
   return text => {
-    void $.ui.copy({ text, surface }).then(result => $.ui.toast(result.isCopied ? 'Copied' : 'Could not copy here'))
+    void $.ui.copy({ text, surface: e.surface }).then(result => $.ui.toast(result.isCopied ? 'Copied' : 'Could not copy here'))
   }
 }
 
@@ -526,7 +529,7 @@ export function registerSkins(on: On, shared: Shared): void {
     const target = summarize(e.props.tool, e.props.input, cwd)
     const disclosure = memberOf(disclosureAtom, e)
     const open = isOpen(await read($, disclosure), e.props.isErrored)
-    const base = await sessionLook($, e, lookOf($.ui.resolve(e), setup, e.surface, copier($, e.surface)), { links: open || typeof path === 'string', touched: typeof path === 'string', cwd })
+    const base = await sessionLook($, e, lookOf($.ui.resolve(e), setup, e.surface, copier($, e)), { links: open || typeof path === 'string', touched: typeof path === 'string', cwd })
     const framed = isFramed(setup, e, shared.view())
     const plain = base.svg === undefined ? base : { ...base, isFirstDraw: await firstDraws($, e) }
     const look = framed ? forFrame(plain) : plain
@@ -591,7 +594,7 @@ export function registerSkins(on: On, shared: Shared): void {
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
     const setup = await activeSetup($)
     if (setup === null) return next(e)
-    const look = await sessionLook($, e, lookOf($.ui.resolve(e), setup, e.surface, copier($, e.surface)), {})
+    const look = await sessionLook($, e, lookOf($.ui.resolve(e), setup, e.surface, copier($, e)), {})
     const columns = e.viewport?.columns ?? 100
     // An opened row draws the answer itself; one it cannot draw keeps Claude Code's here.
     const isOpened = kindOf(e.props.tool) !== null && isOpen(await read($, memberOf(disclosureAtom, e)), e.props.isErrored)
@@ -671,7 +674,7 @@ export function registerSkins(on: On, shared: Shared): void {
     if (segments === null) return next(e)
     const ui = $.ui.resolve(e)
     const svg = e.surface !== 'terminal' && setup.prefs.tables === 'on' && 'Svg' in ui ? ui.Svg : undefined
-    const base = await sessionLook($, e, lookOf(ui, setup, e.surface, copier($, e.surface)), replyNeeds(text, segments))
+    const base = await sessionLook($, e, lookOf(ui, setup, e.surface, copier($, e)), replyNeeds(text, segments))
     const look = base.svg === undefined ? base : { ...base, isFirstDraw: await firstDraws($, e) }
     const columns = e.viewport?.columns ?? 100
     const whole = segments.length > 1 ? text : undefined
@@ -695,7 +698,7 @@ export function registerSkins(on: On, shared: Shared): void {
     if (segments === null) return next(e)
     const ui = $.ui.resolve(e)
     const svg = e.surface !== 'terminal' && setup.prefs.tables === 'on' && 'Svg' in ui ? ui.Svg : undefined
-    const base = await sessionLook($, e, lookOf(ui, setup, e.surface, copier($, e.surface)), replyNeeds(e.props.text, segments))
+    const base = await sessionLook($, e, lookOf(ui, setup, e.surface, copier($, e)), replyNeeds(e.props.text, segments))
     const look = base.svg === undefined ? base : { ...base, isFirstDraw: await firstDraws($, e) }
     return withSettle($, e, replyRows(look, segments, e.viewport?.columns ?? 100, svg))
   })

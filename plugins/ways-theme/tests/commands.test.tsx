@@ -21,6 +21,8 @@ import type { Node, World } from './host.tsx'
 const PREFS = setupOf(MIAMI_NIGHTS as never).prefs as never
 const at = (text: string, surface = 'terminal', columns = 80, isFullscreen = false) =>
   ({ plugin: 'ways-theme', surface, component: 'AssistantMessage', requestId: 'r1', viewport: { columns, rows: 40, isFullscreen }, props: { text, isFirstOfReply: true } }) as never
+/** A reply on the terminal under the fullscreen layout, where a Copy can be pressed. */
+const full = (text: string) => at(text, 'terminal', 80, true)
 
 /** The command from the operator's screenshot, wider than any line it was drawn on. */
 const COMMAND = '! git worktree remove ../vtium-glyph-fix36 && git worktree remove ../vtium-glyph-s4 && git worktree remove ../vtium-heads-adr && git branch -d feat/glyph-fix36 feat/glyph-s4 docs/heads-adr && git push origin --delete docs/heads-adr feat/deferred'
@@ -285,7 +287,7 @@ describe('a command draws as one string outside every frame', () => {
   test('Copy puts the command on the clipboard exactly, with its `! `, no line break and no frame glyph', async ($, on) => {
     const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
-    const ui = await $.ui.mount(at(SCREENSHOT))
+    const ui = await $.ui.mount(full(SCREENSHOT))
     const button = await ui.find({ type: 'Button', text: /^Copy$/ })
     expect(button?.key).toBeDefined()
     await ui.press({ key: button!.key! })
@@ -297,7 +299,7 @@ describe('a command draws as one string outside every frame', () => {
   test('each of several commands copies its own text', async ($, on) => {
     const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
-    const ui = await $.ui.mount(at('One:\n\n! git status\n\nand `! git diff --stat`.'))
+    const ui = await $.ui.mount(full('One:\n\n! git status\n\nand `! git diff --stat`.'))
     for (const button of await ui.findAll({ type: 'Button', text: /^Copy$/ })) await ui.press({ key: button.key! })
     await ui.unmount()
     expect(h.copies).toEqual(['! git status', '! git diff --stat'])
@@ -306,7 +308,7 @@ describe('a command draws as one string outside every frame', () => {
   test('with copy off the command still draws whole outside the frame, with no control', async ($, on) => {
     hostWithClipboard(on, { mod: json({ ...MIAMI_NIGHTS, render: { ...MIAMI_NIGHTS.render, copy: false } }) })
     await $.session.start(INTERACTIVE)
-    const ui = await $.ui.mount(at(SCREENSHOT))
+    const ui = await $.ui.mount(full(SCREENSHOT))
     expect(await ui.findAll({ type: 'Button' })).toEqual([])
     const tree = await ui.drawn()
     await ui.unmount()
@@ -453,7 +455,7 @@ describe('slash commands', () => {
   test('a reply drawn after the list is read lifts only the commands it lists', async ($, on) => {
     const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS), commands: ['compact', 'review'] })
     await $.session.start(INTERACTIVE)
-    const ui = await $.ui.mount(at('The handler for `/health` returns 200. Run `/review` on it.'))
+    const ui = await $.ui.mount(full('The handler for `/health` returns 200. Run `/review` on it.'))
     for (const button of await ui.findAll({ type: 'Button', text: /^\s*Copy\s*$/ })) await ui.press({ key: button.key! })
     const tree = await ui.drawn()
     await ui.unmount()
@@ -464,7 +466,7 @@ describe('slash commands', () => {
   test('where the list cannot be read, a name that is no directory counts', async ($, on) => {
     const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS), commands: null })
     await $.session.start(INTERACTIVE)
-    const ui = await $.ui.mount(at('Run `/review` on it, not `/nix`.'))
+    const ui = await $.ui.mount(full('Run `/review` on it, not `/nix`.'))
     for (const button of await ui.findAll({ type: 'Button', text: /^\s*Copy\s*$/ })) await ui.press({ key: button.key! })
     await ui.unmount()
     expect(h.copies).toEqual(['/review'])
@@ -578,7 +580,7 @@ describe('a fence in a list item', () => {
   test('Copy takes the code as written, and each line draws at its own indentation', async ($, on) => {
     const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
-    const ui = await $.ui.mount(at(PYTHON))
+    const ui = await $.ui.mount(full(PYTHON))
     const tree = await ui.drawn()
     expect(drawnAt(tree, '    for x in xs:').length).toBeGreaterThan(0)
     expect(drawnAt(tree, '       for x in xs:')).toEqual([])
@@ -639,7 +641,7 @@ describe('a copy block draws clear of every frame and copies its text alone', ()
   test('the screenshot at 80 columns: the slash command outside the frame, copied whole', async ($, on) => {
     const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
-    const ui = await $.ui.mount(at(SLASH_REPLY))
+    const ui = await $.ui.mount(full(SLASH_REPLY))
     const tree = await ui.drawn()
     expect(borders(tree).length).toBe(1)
     const found = drawnAt(tree, SLASH)
@@ -654,7 +656,7 @@ describe('a copy block draws clear of every frame and copies its text alone', ()
   test('a wide span copies what its rows draw: one Text, clear of every frame, with no glyph, padding or break', async ($, on) => {
     const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
-    const ui = await $.ui.mount(at(`Then \`${LONG}\` clears them, and \`${LONG.replace('worktree', 'branch')}\` too.`))
+    const ui = await $.ui.mount(full(`Then \`${LONG}\` clears them, and \`${LONG.replace('worktree', 'branch')}\` too.`))
     const tree = await ui.drawn()
     for (const button of await ui.findAll({ type: 'Button', text: /^Copy$/ })) await ui.press({ key: button.key! })
     await ui.unmount()
@@ -671,7 +673,7 @@ describe('a copy block draws clear of every frame and copies its text alone', ()
   test('a fence: language and Copy above, each line clear of every frame, the code copied exactly', async ($, on) => {
     const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
-    const ui = await $.ui.mount(at(FENCED))
+    const ui = await $.ui.mount(full(FENCED))
     const tree = await ui.drawn()
     expect(borders(tree).length).toBe(2)
     expect(drawnAt(tree, 'rust').length).toBe(1)
@@ -714,7 +716,7 @@ describe('a copy block draws clear of every frame and copies its text alone', ()
   test('a `!` command still copies as before beside a slash command and a fence', async ($, on) => {
     const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
-    const ui = await $.ui.mount(at('One:\n\n! git status\n\nthen `/clear`, and:\n\n```sh\nls -la\n```'))
+    const ui = await $.ui.mount(full('One:\n\n! git status\n\nthen `/clear`, and:\n\n```sh\nls -la\n```'))
     for (const button of await ui.findAll({ type: 'Button', text: /^\s*Copy\s*$/ })) await ui.press({ key: button.key! })
     await ui.unmount()
     expect(h.copies).toEqual(['! git status', '/clear', 'ls -la'])
@@ -730,7 +732,7 @@ async function copiesOf($: Parameters<TestBody>[0], on: On, copyAs: 'content' | 
   const render = copyAs === undefined ? MIAMI_NIGHTS.render : { ...MIAMI_NIGHTS.render, copy_as: copyAs }
   const h = hostWithClipboard(on, { mod: json({ ...MIAMI_NIGHTS, render }) })
   await $.session.start(INTERACTIVE)
-  const ui = await $.ui.mount(at(BLOCKS))
+  const ui = await $.ui.mount(full(BLOCKS))
   for (const button of await ui.findAll({ type: 'Button', text: /^\s*Copy\s*$/ })) await ui.press({ key: button.key! })
   const blocks = [...h.copies]
   await ui.press({ key: (await ui.find({ type: 'Button', text: /as text/ }))!.key! })
@@ -738,6 +740,26 @@ async function copiesOf($: Parameters<TestBody>[0], on: On, copyAs: 'content' | 
   await ui.unmount()
   return { blocks, art: h.copies.at(-2), reply: h.copies.at(-1) }
 }
+
+describe('a Copy draws only where a press reaches it', () => {
+  const REPLY = 'Run:\n\n! git status\n\n```sh\nls -la\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nDone.'
+
+  test('the terminal main screen draws no copy control', async ($, on) => {
+    hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
+    await $.session.start(INTERACTIVE)
+    const ui = await $.ui.mount(at(REPLY, 'terminal', 80, false))
+    expect(await ui.findAll({ type: 'Button' })).toEqual([])
+    await ui.unmount()
+  })
+
+  test('the fullscreen layout draws them', async ($, on) => {
+    hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
+    await $.session.start(INTERACTIVE)
+    const ui = await $.ui.mount(at(REPLY, 'terminal', 80, true))
+    expect((await ui.findAll({ type: 'Button' })).length).toBeGreaterThan(0)
+    await ui.unmount()
+  })
+})
 
 describe('copy_as', () => {
   const art = tableArt(splitReply(TABLE)[0] as Table)

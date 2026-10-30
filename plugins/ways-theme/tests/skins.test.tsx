@@ -533,7 +533,7 @@ describe('the copy controls', () => {
   test('render.copy on draws Copy, as text and copy reply', async ($, on) => {
     host(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
-    const ui = await $.ui.mount(at('terminal', 'AssistantMessage', TABLE_REPLY))
+    const ui = await $.ui.mount({ ...(at('terminal', 'AssistantMessage', TABLE_REPLY) as object), viewport: { ...VIEW, isFullscreen: true } } as never)
     for (const label of [/Copy/, /as text/, /copy reply/]) expect(await ui.find({ type: 'Button', text: label })).toBeDefined()
     await ui.unmount()
   })
