@@ -14,7 +14,7 @@ import { shellRows } from './shell-rows'
 // An opened tool row: what the call was asked, then what it answered, under the row the
 // chevron sits on, every line of it and each long line wrapped. The terminal prints a
 // transcript row into scrollback, where no control can be pressed, so nothing folds. An
-// answer past what one drawing holds (MAX_DRAWN) keeps Claude Code's own drawing.
+// answer this cannot draw (drawsBody) keeps Claude Code's own drawing, under the row.
 
 export type Opened = {
   fields: readonly Field[]
@@ -88,10 +88,16 @@ function textLines(look: Look, lines: readonly string[], color: string) {
 // Whether an answer of `text` fits one drawing.
 const isDrawable = (text: string): boolean => text.length <= MAX_DRAWN
 
-async function bodyRows(look: Look, opened: Opened): Promise<RenderElement | string> {
+// What an opened row draws of the call's answer.
+export type Answer = Omit<Opened, 'fields' | 'stock'>
+
+// The answer's drawing, or null where the row falls back to Claude Code's own: an answer
+// past one drawing (MAX_DRAWN), a diff past one block (MAX_BLOCK), a card past what a card
+// holds (MAX_SVG), a body this cannot read.
+function answerRows(look: Look, answer: Answer): RenderElement | string | null {
   const { Box, Code, Text } = look.ui
   const { palette } = look.skin
-  const { body } = opened
+  const { body } = answer
 
   switch (body.kind) {
     case 'file':
@@ -101,47 +107,43 @@ async function bodyRows(look: Look, opened: Opened): Promise<RenderElement | str
             <Code source={chunk.text} path={body.path} startLine={chunk.startLine} />
           ))}
         </Box>
-      ) : (
-        opened.stock()
-      )
+      ) : null
     case 'matches':
       return isDrawable(body.lines.join('\n')) ? (
         <Box flexDirection="column">
           {body.note === '' ? '' : <Text color={palette.muted}>{body.note}</Text>}
           {textLines(look, body.lines, palette.fg)}
         </Box>
-      ) : (
-        opened.stock()
-      )
+      ) : null
     case 'shell':
-      return look.svg !== undefined
-        ? (terminalCard(look, look.svg, body.result, opened.isErrored, opened.columns) ?? opened.stock())
-        : shellRows(look, opened.command, body.result, opened.isErrored)
+      return look.svg !== undefined ? terminalCard(look, look.svg, body.result, answer.isErrored, answer.columns) : shellRows(look, answer.command, body.result, answer.isErrored)
     case 'diff': {
-      const path = shortenPath(body.diff.path, opened.cwd)
-
       if (look.svg !== undefined) {
-        return diffCard(look, look.svg, body.diff, path, opened.columns) ?? opened.stock()
+        return diffCard(look, look.svg, body.diff, shortenPath(body.diff.path, answer.cwd), answer.columns)
       }
 
       const source = unifiedDiff(body.diff)
 
       // A diff cut mid-hunk no longer parses: one too long for a block is Claude Code's.
-      return source.length > MAX_BLOCK ? opened.stock() : <Code source={source} format="diff" path={body.diff.path} />
+      return source.length > MAX_BLOCK ? null : <Code source={source} format="diff" path={body.diff.path} />
     }
     case 'text':
-      return isDrawable(body.text) ? textLines(look, body.text.split('\n'), body.isError ? palette.err : palette.fg) : opened.stock()
+      return isDrawable(body.text) ? textLines(look, body.text.split('\n'), body.isError ? palette.err : palette.fg) : null
     case 'none':
       return ''
     case 'stock':
-      return opened.stock()
+      return null
   }
 }
+
+// Whether an opened row draws the answer itself. Where it does not, Claude Code's result
+// row keeps its own drawing of it.
+export const drawsBody = (look: Look, answer: Answer): boolean => answerRows(look, answer) !== null
 
 // What an opened row holds: the input, a line's breath, the answer.
 export async function openedRows(look: Look, opened: Opened) {
   const { Box } = look.ui
-  const body = await bodyRows(look, opened)
+  const body = answerRows(look, opened) ?? (await opened.stock())
 
   return (
     <Box flexDirection="column" paddingLeft={2} marginBottom={1}>

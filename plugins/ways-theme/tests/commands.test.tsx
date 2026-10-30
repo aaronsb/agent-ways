@@ -5,6 +5,7 @@ import type { On, RenderElement } from 'claude-code'
 import { copyPieces, fenceCopy, holdsCopy } from '../hooks/skins/commands.ts'
 import type { Copy } from '../hooks/skins/commands.ts'
 import { parseExport, setupOf } from '../hooks/skins/config.ts'
+import { MAX_DRAWN } from '../hooks/skins/detail.ts'
 import { splitReply, tableArt, tableCsv } from '../hooks/skins/markdown.ts'
 import type { Segment, Table } from '../hooks/skins/markdown.ts'
 import { inlineMath } from '../hooks/skins/math.ts'
@@ -727,6 +728,28 @@ describe('nothing folds and nothing is cut', () => {
     await ui.unmount()
     for (const line of ['error 1', 'error 21', 'error 119', `error 120 ${'x'.repeat(200)}`]) expect(drawnAt(tree, line).length).toBeGreaterThan(0)
     expect(nodes(tree, n => n.props?.wrap === 'truncate-end' && strings(n).startsWith('error '))).toEqual([])
+  })
+
+  test('an opened answer past one drawing keeps Claude Code\'s result under the row', async ($, on) => {
+    // Claude Code's own result draws the output it was given.
+    on('ui.render', { component: 'ToolResult' }, ($, e) => {
+      const { Text } = $.ui.resolve(e)
+      return <Text>{String((e.props as { output?: unknown }).output)}</Text>
+    })
+    hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
+    await $.session.start(INTERACTIVE)
+    // Past what an opened row draws (MAX_DRAWN), inside what the stand-in's one Text draws.
+    const output = lines(2000, k => `error ${k} ${'x'.repeat(36)}`)
+    expect(output.length).toBeGreaterThan(MAX_DRAWN)
+    expect(output.length).toBeLessThan(100000)
+    const last = `error 2000 ${'x'.repeat(36)}`
+    const call = { tool_use_id: 't1', tool: 'Read', input: { file_path: '/work/proj/a.ts' }, isRunning: false, isErrored: true, isInterrupted: false, isExpanded: false, output }
+    const row = await $.ui.mount({ plugin: 'ways-theme', surface: 'terminal', component: 'ToolUse', requestId: 't1', viewport: { columns: 80, rows: 40 }, props: call } as never)
+    const result = await $.ui.mount({ plugin: 'ways-theme', surface: 'terminal', component: 'ToolResult', requestId: 't1', viewport: { columns: 80, rows: 40 }, props: { tool_use_id: 't1', tool: 'Read', output, isErrored: true } } as never)
+    const trees = [await row.drawn(), await result.drawn()]
+    await row.unmount()
+    await result.unmount()
+    expect(trees.some(tree => shows(tree, last))).toBe(true)
   })
 
   test('a code card draws every line and wraps a long one, with no `more lines`', () => {

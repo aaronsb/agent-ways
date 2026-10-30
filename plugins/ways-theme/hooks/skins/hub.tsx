@@ -30,7 +30,7 @@ import { MOD_EXPORT_ARGV, parseExport, setupOf } from './config.ts'
 import type { Setup } from './config.ts'
 import { diffstat, pick, shortenPath } from './format.ts'
 import { bodyOf, inputFields, isOpen } from './detail.ts'
-import { DISCLOSE_INSET, disclosedRow, openedRows } from './detail-rows.tsx'
+import { DISCLOSE_INSET, disclosedRow, drawsBody, openedRows } from './detail-rows.tsx'
 import { commandSegments } from './command-output.ts'
 import { askBand, diffCard, footerRow, groupRow, promptRow, quietResult, relayedRows, replyRows, spinnerRow, terminalCard, toolRow, usageBand, desktopSpinnerRow } from './rows.tsx'
 import type { Framing, Look, SvgElement, Ui } from './rows.tsx'
@@ -576,11 +576,9 @@ export function registerSkins(on: On, shared: Shared): void {
     const look = await sessionLook($, e, lookOf($.ui.resolve(e), setup, e.surface, copier($, e.surface)), {})
     const columns = e.viewport?.columns ?? 100
     // An opened row draws the answer itself; one it cannot draw keeps Claude Code's here.
-    const isOpened =
-      kindOf(e.props.tool) !== null &&
-      isOpen(await read($, memberOf(disclosureAtom, e)), e.props.isErrored) &&
-      bodyOf(e.props.tool, e.props.output, e.props.isErrored, false, '').kind !== 'stock'
-    if (isOpened) {
+    const isOpened = kindOf(e.props.tool) !== null && isOpen(await read($, memberOf(disclosureAtom, e)), e.props.isErrored)
+    const cwd = isOpened ? await cwdOf($) : ''
+    if (isOpened && drawsBody(look, { body: bodyOf(e.props.tool, e.props.output, e.props.isErrored, false, cwd), command: '', isErrored: e.props.isErrored, cwd, columns })) {
       const { Box } = $.ui.resolve(e)
       return <Box />
     }
