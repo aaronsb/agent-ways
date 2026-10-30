@@ -34,7 +34,12 @@ amends:
   - ADR-701#2-logging-and-history
   - ADR-131#schema
   - ADR-131#enforcement
-status: proposed
+considered:
+  - operator: aaronsb
+    said: "discard should show in fire statistics, because the discard was an operator choice specific for that project"
+    via: session 2026-10-30, answering the discard-count probe in chat; the record was changed so a discard is a way_fired event with a discarded property, counted in the fire statistics
+    covers: [discard-count]
+status: accepted
 date: 2026-10-30
 deciders:
   - aaronsb
@@ -45,7 +50,7 @@ related:
   - ADR-115
   - ADR-518
 observable:
-  - "run: with documentation/adr: false in a project's .claude/ways.yaml, a prompt that fires documentation/adr with no configuration writes a way_discarded event with filter toggle and toggle documentation/adr, and the way is not injected"
+  - "run: with documentation/adr: false in a project's .claude/ways.yaml, a prompt that fires documentation/adr with no configuration writes a way_fired event whose discarded property names filter toggle and toggle documentation/adr, ways stats counts it under documentation/adr as discarded, and the way is not injected"
   - "run: ways settings lint on a ways.yaml holding dir/*: false reports the key and names dir: false plus dir/**: false"
   - "run: two ways.yaml files holding the same keys in different orders switch off the same ways"
 ---
@@ -54,7 +59,7 @@ observable:
 
 ## Summary
 
-- **Decided:** keys under `ways:` in a project's `.claude/ways.yaml` are toggle patterns matched against way ids. A key with no wildcard names one way, `*` matches one segment, `**` matches one or more segments, and the most specific matching pattern wins whatever the key order. A trailing `dir/*` now covers direct children only, and `ways settings lint` names the replacement for its old meaning. A switched-off way stays out of the competition that decides what fires. A shadow pass over the same scores finds each switched-off way that would have fired and logs it as `way_discarded`, naming the filter that discarded it.
+- **Decided:** keys under `ways:` in a project's `.claude/ways.yaml` are toggle patterns matched against way ids. A key with no wildcard names one way, `*` matches one segment, `**` matches one or more segments, and the most specific matching pattern wins whatever the key order. A trailing `dir/*` now covers direct children only, and `ways settings lint` names the replacement for its old meaning. A switched-off way stays out of the competition that decides what fires. A shadow pass over the same scores finds each switched-off way that would have fired and logs it as a fire with a `discarded` property naming the filter, so it counts in the fire statistics and nothing of it reaches the session.
 - **Trades away:** a `dir/*` key changes meaning. Each scan repeats its score aggregation once for each switched-off way near the top and tests the frontmatter patterns of switched-off ways. The event stream gains one line per discarded fire.
 - **One-way?** No. Toggle patterns are configuration syntax and the event is additive. Lint names the one key whose meaning changes.
 - **Probes:** *Confident (discard-logged):* when a way, a domain or a whole project is switched off, the statistics show each time a switched-off way would have fired, marked as discarded with the setting that discarded it, and nothing of that way reaches the session. *Not confident (discard-count):* a discarded way is counted apart from the ways that fired, so a fire count still means guidance that reached the session.
@@ -109,20 +114,20 @@ Under ADR-701 §1, a trailing `dir/*` switched off `dir` and its whole subtree a
 - Candidate collection keeps a switched-off way, tagged with the filter that switched it off.
 - On the semantic lane, the shadow pass runs once per switched-off way that appears in any chunk's top-K window. Each run repeats the aggregation over the same per-chunk scores with the enabled set plus that one way, and the way would have fired when it clears the same gates. The corpus already embeds every way, so the shadow pass is arithmetic only, with no embedding work.
 - The keyword, command, file and tool lanes test a switched-off way's frontmatter patterns with the gates they apply to an enabled way, and log a hit the same way.
-- Each switched-off way that would have fired is logged as `way_discarded`, and its injection is dropped. A switched-off way that would not have fired is not logged, so a switched-off domain does not flood the log.
+- Each switched-off way that would have fired is logged as a `way_fired` event with a `discarded` property, and its injection is dropped. A switched-off way that would not have fired is not logged, so a switched-off domain does not flood the log.
 - The relevance judge is not asked about a switched-off way. Would have fired means it cleared the matcher's gates.
 - Macros and sensors follow the same rule as they gain filters: the event is selected and logged, and the action is dropped at the last step with the filter named.
 
-### 4. The `way_discarded` event
+### 4. A discarded fire
 
-`way_discarded` goes to the events stream beside `way_fired`, `way_suppressed` and `way_nearmiss`.
+A discarded fire is a `way_fired` event in the events stream with a `discarded` property. A delivered fire has no `discarded` property. The discard was the operator's choice for that project, so the fire statistics count it, and `ways stats` shows each way's discarded fires by filter beside its delivered ones. Every reader that means guidance reached the session excludes discarded fires: the injected text, token and spend accounting, refire and disclosure state, and any delivery-based learning signal.
 
 | Field | Value |
 |---|---|
 | `way` | the way id |
-| `filter` | what discarded it: `toggle`; `domain` for user-scope `disabled_domains`; `project_off` for `enabled: false`. `isolation` and `untrusted` are added by ADR-518. |
-| `toggle` | the winning pattern, when `filter` is `toggle` |
-| `scope` | `user` or `project`, the settings layer the filter came from, when it is known |
+| `discarded.filter` | what discarded it: `toggle`; `domain` for user-scope `disabled_domains`; `project_off` for `enabled: false`. `isolation` and `untrusted` are added by ADR-518. |
+| `discarded.toggle` | the winning pattern, when the filter is `toggle` |
+| `discarded.scope` | `user` or `project`, the settings layer the filter came from, when it is known |
 | `lane` | `prompt`, `command`, `file`, `tool`, `task`, `state`, `check`, `pull` or `subagent` |
 | scores | on the semantic lane, the cosine, share and margin the shadow pass computed, under the candidate log's names |
 
@@ -149,13 +154,14 @@ The ways under a switched-off way compete without it. In the run of 2026-10-30, 
 ### Neutral
 
 - `way_toggled_off` and the settings screens move to the toggle-pattern resolver, so what they show is what a session does.
-- Stats and tuning count `way_fired`, so a discard is not counted as a fire. Reporting discards in `ways stats` is later work.
+- Every reader of `way_fired` events is sorted into one of two kinds. Fire statistics count discarded fires. Readers of delivered guidance skip them.
 - `disabled_domains` and `enabled: false` keep their meaning and gain a logged discard.
 - ADR-131 said a disabled way is skipped entirely, with no scoring. A switched-off way is now scored in the shadow pass and logged, and it still never reaches the session.
 - ADR-702, proposed, has the enabled state follow the parent graph. Under this record, following the graph is the job of a selector beside toggle patterns, and a bare key does not inherit.
 
 ## Alternatives Considered
 
+- **A separate `way_discarded` event, counted apart from fires.** Rejected by the operator: the discard is a choice made for one project, and the fire statistics should show it.
 - **Gitignore's rules.** Rejected: a bare path would cover its subtree, and the last matching line would win, so a key's effect would depend on its position in the file.
 - **A bare key covers its subtree.** Rejected: it assumes the directory tree holds child subsets, and the planned graph overlay does not follow directories. `dir/**` covers a subtree when that is wanted.
 - **Keep `dir/*` as the subtree form and add `**` beside it.** Rejected: `*` would match one segment inside a pattern and a whole subtree at its end.

@@ -228,7 +228,7 @@ _The ways engine, continued after the full 100-199 band: matching, disclosure an
 | [ADR-707](./engine/ADR-707-measurements-of-the-shell-surface-covering-the-semantic-lane-s-on-topic-rate-alternative-match-surfaces-and-a-judge-reading-the-described-call.md) | Measurements of the shell surface, covering the semantic lane's on-topic rate, alternative match surfaces, and a judge reading the described call | proposed |
 | [ADR-708](./engine/ADR-708-a-claude-code-internal-engine-for-the-relevance-gate-selectable-with-one-judge-engine-per-session.md) | A Claude Code internal engine for the relevance gate, selectable, with one judge engine per session | accepted |
 | [ADR-709](./engine/ADR-709-a-spike-of-the-prompt-lane-handoff-to-a-mod-judge-covering-the-prompt-submit-bracket-session-identity-and-model-latency.md) | A spike of the prompt-lane handoff to a mod judge, covering the prompt.submit bracket, session identity and model latency | proposed |
-| [ADR-710](./engine/ADR-710-toggle-patterns-over-way-ids-and-a-switched-off-way-discarded-at-the-last-step-with-a-logged-event.md) | Toggle patterns over way ids, and a switched-off way discarded at the last step with a logged event | proposed |
+| [ADR-710](./engine/ADR-710-toggle-patterns-over-way-ids-and-a-switched-off-way-discarded-at-the-last-step-with-a-logged-event.md) | Toggle patterns over way ids, and a switched-off way discarded at the last step with a logged event | accepted |
 
 ## Archived
 
