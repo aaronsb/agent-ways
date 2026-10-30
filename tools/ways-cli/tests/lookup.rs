@@ -264,12 +264,12 @@ fn a_pull_inside_the_refire_window_is_out_of_band_and_restarts_the_window() {
 #[test]
 fn a_disabled_way_is_refused_with_or_without_a_session_and_the_toggle_is_named() {
     let env = guide_env("disabled");
-    std::fs::write(env.project.join(".claude/ways.yaml"), "ways:\n  lookupdomain/*: false\n").unwrap();
+    std::fs::write(env.project.join(".claude/ways.yaml"), "ways:\n  lookupdomain/**: false\n").unwrap();
     for args in [vec!["read", "lookupdomain/guide", "--session", env.session.as_str()], vec!["read", "lookupdomain/guide"]] {
         let (v, code) = env.lookup(&args);
         assert_eq!(code, 1, "{v}");
         let err = v["error"].as_str().unwrap();
-        assert!(err.contains("disabled") && err.contains("lookupdomain/*: false") && err.contains("ways.yaml"), "{err}");
+        assert!(err.contains("disabled") && err.contains("lookupdomain/**: false") && err.contains("ways.yaml"), "{err}");
         assert!(v.get("body").is_none(), "a disabled way is not served");
     }
     assert!(env.hook_pull("lookupdomain/guide", None, None).status.success());

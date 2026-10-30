@@ -9,7 +9,8 @@ type Accepted = Vec<(Bound, Value)>;
 
 /// `apply`: write a settings object. Prints a JSON report of what each key
 /// did and the fragment written; exits 3 when any key is rejected, 4 when an
-/// accepted key is overridden, 5 when a write fails.
+/// accepted key is overridden, 5 when a write fails. A way toggle whose key
+/// mixes text and a wildcard in a segment fails the whole object, exit 2.
 pub fn apply(file: Option<&Path>, dry_run: bool, project: Option<&Path>) -> Out {
     let project = resolve_project(project)?;
     let project = project.as_deref();
@@ -51,7 +52,7 @@ pub fn apply(file: Option<&Path>, dry_run: bool, project: Option<&Path>) -> Out 
                 findings.push(json!({ "key": top, "ok": false, "message": "unknown key" }));
                 continue;
             };
-            walk(&reg, &layers, sec.file, &mut vec![top], v, &mut accepted, &mut rejected, &mut findings, project);
+            walk(&reg, &layers, sec.file, &mut vec![top], v, &mut accepted, &mut rejected, &mut findings, project)?;
         }
     }
     // The engine is written through the engine choice, with the judge mod's
@@ -213,8 +214,9 @@ pub(super) fn walk(
     rejected: &mut Vec<serde_json::Value>,
     findings: &mut Vec<serde_json::Value>,
     project: Option<&Path>,
-) {
+) -> Result<(), Failure> {
     if let Some(b) = reg.lookup_path(file, path) {
+        refuse_mixed_wildcard(&b)?;
         let name = b.name();
         // The user config's judge install follows the engine. An object
         // holding the value in effect, as `emit` prints it, changes nothing
@@ -223,7 +225,7 @@ pub(super) fn walk(
             let r = agent_settings::load::resolve(b.spec, &b.bound, layers);
             if r.value.or(r.default).as_ref() == Some(v) {
                 findings.push(json!({ "key": name, "ok": true, "message": "unchanged; it follows gate.engine" }));
-                return;
+                return Ok(());
             }
         }
         let verdict = match b.spec.kind {
@@ -245,7 +247,7 @@ pub(super) fn walk(
                 rejected.push(json!({ "key": name, "message": m }));
             }
         }
-        return;
+        return Ok(());
     }
     let deeper = reg.keys().any(|(_, k)| {
         k.file == file && k.path.len() > path.len() && k.path.iter().zip(path.iter()).all(|(p, s)| *p == "*" || p == s)
@@ -254,7 +256,7 @@ pub(super) fn walk(
         (Value::Mapping(m), true) => {
             for (k, cv) in m {
                 path.push(k.as_str().unwrap_or_default().to_string());
-                walk(reg, layers, file, path, cv, accepted, rejected, findings, project);
+                walk(reg, layers, file, path, cv, accepted, rejected, findings, project)?;
                 path.pop();
             }
         }
@@ -265,5 +267,6 @@ pub(super) fn walk(
             rejected.push(json!({ "key": name, "message": message }));
         }
     }
+    Ok(())
 }
 

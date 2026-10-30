@@ -768,6 +768,7 @@ mod tests {
         check: None,
         computed: None,
         fail_closed: None,
+        star_instance: false,
     };
     const KEYS: &[KeySpec] = &[
         BASE,

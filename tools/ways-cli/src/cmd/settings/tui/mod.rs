@@ -432,6 +432,7 @@ impl Adapter for Ways {
         let layers = live_layers(self.ctx.project_layer());
         for w in values {
             let b = lookup(&self.reg, &w.store.key).map_err(|f| f.message)?;
+            super::refuse_mixed_wildcard(&b).map_err(|f| f.message)?;
             let v = b.spec.parse_cli(w.value, &layers, &b.bound).map_err(|m| format!("{}: {m}", w.store.key))?;
             let at = |p: &Path| target_file(&b, writes_project(&b, &self.ctx, &layers).then_some(p)).map(|t| t.0).map_err(|f| f.message);
             let mut path = at(&self.ctx.project)?;

@@ -70,6 +70,7 @@ pub fn set(key: &str, value: &str, project: Option<&Path>) -> Out {
     let reg = registry();
     let b = lookup(&reg, key)?;
     super::engine::refuse(&b.name())?;
+    refuse_mixed_wildcard(&b)?;
     let layers = live_layers(project_dir(project).as_deref());
     let v = b
         .spec

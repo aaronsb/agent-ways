@@ -43,6 +43,7 @@ pub const ACTIVE: KeySpec = KeySpec {
     check: Some(check_theme_name),
     computed: None,
     fail_closed: None,
+    star_instance: false,
 };
 
 /// `theme.shape`: the lozenge caps of tabs and the bottom bar.

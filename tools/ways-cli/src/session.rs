@@ -710,7 +710,7 @@ pub fn domain_disabled(domain: &str) -> bool {
 
 /// Check if a specific way is disabled in the current project (ADR-131).
 /// Project-scope only — sourced exclusively from `{project}/.claude/ways.yaml`.
-/// A toggle may name the way or a `dir/*` prefix; the most specific wins (ADR-701 §1).
+/// Each toggle key is a pattern over way ids; the most specific match wins.
 /// config::global() — future migration: ctx.config.disabled_ways
 pub fn way_disabled(way_id: &str) -> bool {
     crate::config::global().way_disabled(way_id)
