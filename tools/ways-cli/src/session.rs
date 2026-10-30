@@ -16,7 +16,7 @@ mod log;
 // `session::way_fire_outcome`, etc. — no call-site churn from the
 // structural split (issue #52).
 pub use engagement::{
-    first_suppression_in_window, lock_engagement, record_way_fire, way_fire_outcome,
+    discarded_fire_outcome, first_suppression_in_window, lock_engagement, record_discarded_fire, record_way_fire, way_fire_outcome,
     way_refire_threshold_k, EngagementLock, FireDecision, FireOutcome, REFIRE_FLOOR,
 };
 pub use log::{log_decision, log_event, log_event_with};
@@ -567,17 +567,34 @@ mod context_window_tests {
 
 /// Get and increment fire count for a check.
 pub fn bump_check_fires(way_id: &str, session_id: &str) -> u64 {
-    let path = agent_state_dir(session_id).join("check-fires").join(way_id).join(".value");
-    ensure_parent(&path);
-    let count = read_u64_path(&path) + 1;
-    let _ = std::fs::write(&path, count.to_string());
-    count
+    bump_count(&check_count_path("check-fires", way_id, session_id))
 }
 
 /// Get current fire count without incrementing.
 pub fn get_check_fires(way_id: &str, session_id: &str) -> u64 {
-    let path = agent_state_dir(session_id).join("check-fires").join(way_id).join(".value");
-    read_u64_path(&path)
+    read_u64_path(&check_count_path("check-fires", way_id, session_id))
+}
+
+/// [`bump_check_fires`] for a check discarded with its switched-off way,
+/// which decays on its own count and leaves the real one untouched.
+pub fn bump_discarded_check_fires(way_id: &str, session_id: &str) -> u64 {
+    bump_count(&check_count_path("discarded-check-fires", way_id, session_id))
+}
+
+/// [`get_check_fires`] for a discarded check.
+pub fn get_discarded_check_fires(way_id: &str, session_id: &str) -> u64 {
+    read_u64_path(&check_count_path("discarded-check-fires", way_id, session_id))
+}
+
+fn check_count_path(kind: &str, way_id: &str, session_id: &str) -> PathBuf {
+    agent_state_dir(session_id).join(kind).join(way_id).join(".value")
+}
+
+fn bump_count(path: &Path) -> u64 {
+    ensure_parent(path);
+    let count = read_u64_path(path) + 1;
+    let _ = std::fs::write(path, count.to_string());
+    count
 }
 
 // ── Core marker ─────────────────────────────────────────────────
@@ -659,14 +676,6 @@ pub fn prune_subagent_switches(max_age: std::time::Duration) {
 /// whether this call is the first for the agent.
 pub fn first_suppression_for(session_id: &str, agent: &str) -> bool {
     let marker = session_dir(session_id).join("suppressed").join(agent);
-    ensure_parent(&marker);
-    std::fs::OpenOptions::new().write(true).create_new(true).open(&marker).is_ok()
-}
-
-/// Record a state-lane discarded fire once per session (scan/state.rs).
-/// Returns whether this call is the first for the way.
-pub fn first_state_discard(session_id: &str, way_id: &str) -> bool {
-    let marker = session_dir(session_id).join("discarded-state").join(way_id).join(".marker");
     ensure_parent(&marker);
     std::fs::OpenOptions::new().write(true).create_new(true).open(&marker).is_ok()
 }

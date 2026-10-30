@@ -285,7 +285,8 @@ impl SessionIntrospection {
         // A discarded fire reached no turn: it is counted in the summary and
         // has no row.
         let mut discarded: BTreeMap<String, u64> = BTreeMap::new();
-        for filter in events.iter().filter(|e| e["session"].as_str() == Some(session_id)).filter_map(crate::firing::discarded_filter) {
+        let way_events = events.iter().filter(|e| e["session"].as_str() == Some(session_id) && e["event"].as_str() == Some("way_fired"));
+        for filter in way_events.filter_map(crate::firing::discarded_filter) {
             *discarded.entry(filter.to_string()).or_insert(0) += 1;
         }
         let mut fires: Vec<FireRow> = events

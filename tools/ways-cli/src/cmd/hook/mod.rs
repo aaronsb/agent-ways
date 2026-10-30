@@ -22,7 +22,8 @@ use crate::session;
 /// In a project switched off, log what the pattern lanes would have fired
 /// there as discarded fires (scan/discard.rs). A dispatch to a defined agent
 /// injects nothing whatever the switches say, so it logs nothing either.
-fn log_switched_off(request: &Request, project: Option<&str>) {
+fn log_switched_off(request: &Request, project: Option<&str>, transcript: Option<&str>) {
+    crate::cmd::show::set_firing_transcript(transcript);
     use scan::discard::{project_off, OffSurface};
     match request {
         Request::Prompt { session, query } => project_off(OffSurface::Prompt { query }, session, project),
@@ -71,7 +72,7 @@ pub fn run(event: HookEvent) -> Result<()> {
     let config = crate::config::Config::load(&project_dir);
     let request = input.request(event);
     if injects && !config.enabled {
-        log_switched_off(&request, project);
+        log_switched_off(&request, project, transcript);
         return Ok(());
     }
 

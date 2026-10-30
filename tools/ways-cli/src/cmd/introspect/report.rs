@@ -445,7 +445,7 @@ impl Stats {
                     " · {} sessions · {} fires{} · {} re-disclosures · {} → {}",
                     r.sessions,
                     r.fires,
-                    if r.discarded > 0 { format!(" · {} discarded", r.discarded) } else { String::new() },
+                    if r.discarded.total > 0 { format!(" · {} discarded", r.discarded.total) } else { String::new() },
                     r.redisclosures,
                     day(&r.first_ts),
                     day(&r.last_ts)

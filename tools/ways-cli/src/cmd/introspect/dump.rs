@@ -300,8 +300,12 @@ fn build_summary(
     let mut discarded: BTreeMap<String, u64> = BTreeMap::new();
 
     for v in session_events(content, session_id) {
+        // Discarded way fires are counted here; a discarded check fire is not
+        // a check fire either.
         if let Some(filter) = ways_core::firing::discarded_filter(&v) {
-            *discarded.entry(filter.to_string()).or_insert(0) += 1;
+            if v["event"].as_str() == Some("way_fired") {
+                *discarded.entry(filter.to_string()).or_insert(0) += 1;
+            }
             continue;
         }
         match v["event"].as_str() {

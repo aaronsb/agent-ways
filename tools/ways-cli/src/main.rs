@@ -1446,6 +1446,7 @@ fn run() -> Result<()> {
             // log what would have fired there as discarded fires.
             ScanCommand::Prompt { query, session, project, response_context, transcript } => {
                 if !cmd::scan::enabled_for(project.as_deref()) {
+                    cmd::show::set_firing_transcript(transcript.as_deref());
                     cmd::scan::discard::project_off(cmd::scan::discard::OffSurface::Prompt { query: &query }, &session, project.as_deref());
                     return Ok(());
                 }
@@ -1465,6 +1466,7 @@ fn run() -> Result<()> {
             }
             ScanCommand::Command { command, description, session, project, transcript } => {
                 if !cmd::scan::enabled_for(project.as_deref()) {
+                    cmd::show::set_firing_transcript(transcript.as_deref());
                     cmd::scan::discard::project_off(cmd::scan::discard::OffSurface::Command { command: &command, description: description.as_deref() }, &session, project.as_deref());
                     return Ok(());
                 }
@@ -1478,6 +1480,7 @@ fn run() -> Result<()> {
             }
             ScanCommand::File { path, session, project, transcript } => {
                 if !cmd::scan::enabled_for(project.as_deref()) {
+                    cmd::show::set_firing_transcript(transcript.as_deref());
                     cmd::scan::discard::project_off(cmd::scan::discard::OffSurface::File { path: &path }, &session, project.as_deref());
                     return Ok(());
                 }

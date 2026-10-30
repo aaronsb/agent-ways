@@ -80,12 +80,13 @@ pub fn state(
         }
     }
 
-    // A state trigger holds on every scan while its condition does, and a
-    // switched-off way records no fire to hold it back, so each logs once per
-    // session.
+    // A switched-off way's refire window is read before its trigger, which can
+    // mean reading the transcript.
     let at = discard::LaneLog { lane: "state", scope: &scope, session: session_id, project: &project_dir };
-    for way in off.ways.iter().filter(|w| state.triggers(w)) {
-        if session::first_state_discard(session_id, &way.id) {
+    let off_state: Vec<_> = off.ways.iter().filter(|w| w.trigger.is_some()).collect();
+    let tick = if off_state.is_empty() { 0 } else { session::get_token_position(session_id) };
+    for way in off_state.into_iter().filter(|w| discard::refire_open(w, &at, tick).is_some()) {
+        if state.triggers(way) {
             discard::log(&off, &at, &discard::Hit { way: &way.id, trigger: "state", span: None, scores: None });
         }
     }

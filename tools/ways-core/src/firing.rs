@@ -109,12 +109,12 @@ fn has_session_start(text: &str, matches: impl Fn(&Value) -> bool) -> bool {
         .any(|v| v["event"].as_str() == Some("session_start") && matches(&v))
 }
 
-/// What switched off the way of a discarded fire: a `way_fired` event whose
-/// `discarded` object records a switched-off way that would have fired. `None`
-/// for a delivered fire and for every other event. A `discarded` object with no
-/// filter reads as `unknown`.
+/// What switched off the way of a discarded fire: a `way_fired` or
+/// `check_fired` event whose `discarded` object records a switched-off way or
+/// check that would have fired. `None` for a delivered fire and for every
+/// other event. A `discarded` object with no filter reads as `unknown`.
 pub fn discarded_filter(event: &Value) -> Option<&str> {
-    if event["event"].as_str() != Some("way_fired") {
+    if !matches!(event["event"].as_str(), Some("way_fired" | "check_fired")) {
         return None;
     }
     let discarded = event.get("discarded").filter(|d| d.is_object())?;

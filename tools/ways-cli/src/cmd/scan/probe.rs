@@ -156,6 +156,7 @@ pub(crate) fn bash(text: &str, project_dir: &str) -> ProbeScan {
         },
         &candidates,
         &embed_matches,
+        &Default::default(),
     );
     let boost_exercised = hits.iter().any(|h| h.payload.2);
 

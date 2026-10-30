@@ -101,21 +101,64 @@ pub(crate) struct Hit<'a> {
     pub scores: Option<Shadow>,
 }
 
-/// Log a discarded fire for a way of `off`.
-pub(crate) fn log(off: &Switched, at: &LaneLog<'_>, hit: &Hit<'_>) {
-    if let Some(why) = off.why(hit.way) {
-        log_one(hit, why, at);
+impl LaneLog<'_> {
+    /// Whether the lane's delivered fires meet a refire window. A task
+    /// dispatch stashes its ways whatever the window, and the subagent's
+    /// injection and a pull meet none either.
+    fn refire_gated(&self) -> bool {
+        !matches!(self.lane, "task" | "subagent" | "pull")
     }
 }
 
-/// Log a discarded fire: a `way_fired` event whose `discarded` object names
+/// Log a discarded fire for a way of `off`. On a lane whose delivered fires
+/// meet a refire window, as `way_scored` gates them, it logs only when the
+/// way's refire curve lets it fire now; the way's discard record keeps that
+/// window, so its real engagement state is never written.
+pub(crate) fn log(off: &Switched, at: &LaneLog<'_>, hit: &Hit<'_>) {
+    let (Some(why), Some(way)) = (off.why(hit.way), off.ways.iter().find(|w| w.id == hit.way)) else { return };
+    let tick = session::get_token_position(at.session);
+    if !at.refire_gated() {
+        return write(hit, why, at, tick);
+    }
+    let Some(curve) = refire_open(way, at, tick) else { return };
+    session::record_discarded_fire(&way.id, at.session, &curve, tick);
+    write(hit, why, at, tick);
+}
+
+/// The way's refire curve when a discarded fire of it would clear the curve
+/// at `tick`, read from its discard record; `None` while the window holds, or
+/// for a way with no `refire:`, which never fires.
+pub(crate) fn refire_open(way: &WayCandidate, at: &LaneLog<'_>, tick: u64) -> Option<sensor_trait::Curve> {
+    let curve = crate::cmd::show::refire_curve(&way.path, at.session, at.project)?;
+    session::discarded_fire_outcome(&way.id, at.session, &curve, tick).is_allowed().then_some(curve)
+}
+
+/// Log a discarded fire with no refire gate, for a pull and a subagent's
+/// injection, which name their way outside a collection.
+pub(crate) fn log_one(hit: &Hit<'_>, why: &Discard, at: &LaneLog<'_>) {
+    write(hit, why, at, session::get_token_position(at.session));
+}
+
+/// The `discarded` object of an event: what switched the way off.
+pub(crate) fn object(why: &Discard) -> serde_json::Value {
+    let mut discarded = serde_json::json!({ "filter": why.filter });
+    if let Some(key) = why.toggle.as_deref() {
+        discarded["toggle"] = key.into();
+    }
+    if let Some(scope) = why.scope {
+        discarded["scope"] = scope.into();
+    }
+    discarded
+}
+
+/// Write a discarded fire: a `way_fired` event whose `discarded` object names
 /// the switch, so fire statistics count it and readers of delivered fires
 /// leave it out. It carries a delivered fire's leading fields, the lane, and on
 /// a semantic channel the scores under the candidate log's names
 /// (scan/candidate_log.rs).
-pub(crate) fn log_one(hit: &Hit<'_>, why: &Discard, at: &LaneLog<'_>) {
+fn write(hit: &Hit<'_>, why: &Discard, at: &LaneLog<'_>, tick: u64) {
     let domain = hit.way.split('/').next().unwrap_or(hit.way);
-    let token_position = session::get_token_position(at.session).to_string();
+    let token_position = tick.to_string();
     let model = crate::cmd::show::firing_model(at.session, at.project);
     let agent = session::current_agent();
     let mut fields: Vec<(&str, &str)> = vec![
@@ -134,15 +177,8 @@ pub(crate) fn log_one(hit: &Hit<'_>, why: &Discard, at: &LaneLog<'_>) {
     if let Some(span) = hit.span.filter(|s| !s.is_empty()) {
         fields.push(("matched_span", span));
     }
-    let mut discarded = serde_json::json!({ "filter": why.filter });
-    if let Some(key) = why.toggle.as_deref() {
-        discarded["toggle"] = key.into();
-    }
-    if let Some(scope) = why.scope {
-        discarded["scope"] = scope.into();
-    }
     let round = |v: f64| serde_json::json!((v * 10_000.0).round() / 10_000.0);
-    let mut extra: Vec<(&str, serde_json::Value)> = vec![("discarded", discarded)];
+    let mut extra: Vec<(&str, serde_json::Value)> = vec![("discarded", object(why))];
     if let Some(s) = hit.scores {
         extra.extend([("cosine", round(s.cosine)), ("share", round(s.share)), ("margin", s.margin.map_or(serde_json::Value::Null, round))]);
     }
@@ -261,7 +297,7 @@ pub fn project_off(surface: OffSurface<'_>, session_id: &str, project: Option<&s
         OffSurface::Command { command, description } => {
             let command = super::ShellCommand::parse(command);
             let surface = super::CommandSurface { command: &command, description, session_id, scope: &scope, project_dir: &project_dir };
-            super::command::log_discarded(&surface, &[], &off, &none);
+            super::command::log_discarded(&surface, &[], &HashSet::new(), &off, &none);
         }
         OffSurface::File { path } => super::file::log_discarded(&off, path, &at("file", &scope)),
         OffSurface::Tool { tool, hook_event } => super::tool::log_discarded(&off, tool, hook_event, &at("tool", &scope)),

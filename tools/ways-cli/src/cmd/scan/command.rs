@@ -60,8 +60,9 @@ pub fn command(
 
     let command = ShellCommand::parse(cmd);
     let surface = CommandSurface { command: &command, description, session_id, scope: &scope, project_dir: &project_dir };
-    let hits = command_hits(&surface, &candidates, &embed_matches);
-    log_discarded(&surface, &candidates, &off, &embed_matches);
+    let hits = command_hits(&surface, &candidates, &embed_matches, &HashSet::new());
+    let fired: HashSet<String> = hits.iter().map(|h| h.id.clone()).collect();
+    log_discarded(&surface, &candidates, &fired, &off, &embed_matches);
     let mut shown: HashSet<String> = HashSet::new();
     for hit in &hits {
         let (channel, span, needs_parent) = &hit.payload;
@@ -166,18 +167,20 @@ pub(super) struct CommandSurface<'a> {
 
 /// The Bash lane's way hits for one command, in admission order: the command
 /// and description regexes, then the semantic lane on the tool description.
-/// Shared by the scan and the probe scorer.
+/// `fired_in_scan` holds ways already fired in this scan, whose children they
+/// boost. Shared by the scan and the probe scorer.
 pub(super) fn command_hits(
     surface: &CommandSurface<'_>,
     candidates: &[WayCandidate],
     embed_matches: &EmbedScores,
+    fired_in_scan: &HashSet<String>,
 ) -> Vec<Hit<(&'static str, Option<String>, bool)>> {
     let CommandSurface { command, description, session_id, scope, project_dir } = *surface;
     // Way matching: commands regex + pattern regex + semantic (ADR-155 §4).
     // Hits are collected, then admitted in a fixed order (scan/order.rs).
     // Payload: (channel, matched span, fired only on this scan's parent boost).
     let mut hits: Vec<Hit<(&'static str, Option<String>, bool)>> = Vec::new();
-    let mut fired_ids: HashSet<String> = HashSet::new();
+    let mut fired_ids: HashSet<String> = fired_in_scan.clone();
     for way in candidates {
         if !session::scope_matches(&way.scope, scope) {
             continue;
@@ -242,12 +245,18 @@ pub(super) fn command_hits(
     hits
 }
 
-/// The Bash lane's shadow pass: [`command_hits`] over the switched-off ways
-/// alone, each hit logged as a discarded fire. A hit that needed a
-/// switched-off parent's boost is dropped, since switched-off ways never lift
-/// each other. A semantic hit carries its scores beside the enabled ways that
-/// compete on this lane.
-pub(super) fn log_discarded(surface: &CommandSurface<'_>, candidates: &[WayCandidate], off: &discard::Switched, embed_matches: &EmbedScores) {
+/// The Bash lane's shadow pass: [`command_hits`] over each switched-off way
+/// alone, beside the enabled ways the scan fired so a child of one keeps its
+/// in-scan boost, each hit logged as a discarded fire. Switched-off ways never
+/// lift each other. A semantic hit carries its scores beside the enabled ways
+/// that compete on this lane.
+pub(super) fn log_discarded(
+    surface: &CommandSurface<'_>,
+    candidates: &[WayCandidate],
+    fired: &HashSet<String>,
+    off: &discard::Switched,
+    embed_matches: &EmbedScores,
+) {
     if off.ways.is_empty() {
         return;
     }
@@ -258,16 +267,15 @@ pub(super) fn log_discarded(surface: &CommandSurface<'_>, candidates: &[WayCandi
         .map(|w| (w.corpus_id.as_str(), w.id.as_str()))
         .collect();
     let at = discard::LaneLog { lane: "command", scope: surface.scope, session: surface.session_id, project: surface.project_dir };
-    for hit in command_hits(surface, &off.ways, embed_matches) {
-        let (trigger, span, needs_parent) = &hit.payload;
-        if *needs_parent {
-            continue;
+    for way in &off.ways {
+        for hit in command_hits(surface, std::slice::from_ref(way), embed_matches, fired) {
+            let (trigger, span, _) = &hit.payload;
+            let scores = match span {
+                Some(_) => None,
+                None => discard::single_scores(embed_matches, &enabled, way),
+            };
+            discard::log(off, &at, &discard::Hit { way: &hit.id, trigger, span: span.as_deref(), scores });
         }
-        let scores = match span {
-            Some(_) => None,
-            None => off.ways.iter().find(|w| w.id == hit.id).and_then(|w| discard::single_scores(embed_matches, &enabled, w)),
-        };
-        discard::log(off, &at, &discard::Hit { way: &hit.id, trigger, span: span.as_deref(), scores });
     }
 }
 

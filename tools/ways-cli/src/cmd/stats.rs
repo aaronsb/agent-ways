@@ -249,10 +249,9 @@ pub(crate) struct StatsReport {
     pub(crate) fires: u32,
     /// Discarded fires: a switched-off way that would have fired, an operator
     /// choice for the project. Counted apart from `fires`.
-    pub(crate) discarded: u32,
-    pub(crate) discarded_by_filter: Vec<(String, u32)>,
-    /// Per way, its discarded fires by filter, ways with the most first.
-    pub(crate) discarded_by_way: Vec<(String, Vec<(String, u32)>)>,
+    pub(crate) discarded: Discarded,
+    /// Discarded check fires, counted apart from `check_fires`.
+    pub(crate) check_discarded: Discarded,
     pub(crate) redisclosures: u32,
     /// Timestamps of the first and last event in the period (full ISO text).
     pub(crate) first_ts: Option<String>,
@@ -269,6 +268,53 @@ pub(crate) struct StatsReport {
     pub(crate) check_avg_distance: f64,
     pub(crate) check_anchored: u32,
     pub(crate) redisclose_avg_token_distance: f64,
+}
+
+/// Discarded fires of ways or of checks: the total, by filter, and per item
+/// by filter, items with the most first.
+#[derive(Default, Clone, PartialEq, Debug)]
+pub(crate) struct Discarded {
+    pub(crate) total: u32,
+    pub(crate) by_filter: Vec<(String, u32)>,
+    pub(crate) by_item: Vec<(String, Vec<(String, u32)>)>,
+}
+
+impl Discarded {
+    /// Tally `(item, filter)` rows.
+    fn tally<'a>(rows: impl Iterator<Item = (&'a str, &'a str)>) -> Self {
+        let mut by_filter: HashMap<&str, u32> = HashMap::new();
+        let mut by_item: HashMap<&str, HashMap<&str, u32>> = HashMap::new();
+        for (item, filter) in rows {
+            *by_filter.entry(filter).or_insert(0) += 1;
+            *by_item.entry(item).or_default().entry(filter).or_insert(0) += 1;
+        }
+        let mut by_item: Vec<(String, Vec<(String, u32)>)> =
+            by_item.into_iter().map(|(item, split)| (item.to_string(), ranked(split))).collect();
+        let total = |split: &[(String, u32)]| split.iter().map(|(_, n)| n).sum::<u32>();
+        by_item.sort_by(|a, b| total(&b.1).cmp(&total(&a.1)).then_with(|| a.0.cmp(&b.0)));
+        Discarded { total: by_filter.values().sum(), by_filter: ranked(by_filter), by_item }
+    }
+
+    /// The `--json` form, its per-item map under `item_key`.
+    fn json(&self, item_key: &str) -> serde_json::Value {
+        let by_item: serde_json::Map<String, serde_json::Value> =
+            self.by_item.iter().map(|(item, split)| (item.clone(), json!(counts_json(split)))).collect();
+        json!({ "total": self.total, "by_filter": counts_json(&self.by_filter), item_key: by_item })
+    }
+
+    /// The human section under `title`, when there is anything to show.
+    fn print(&self, title: &str) {
+        if self.total == 0 {
+            return;
+        }
+        let split = |rows: &[(String, u32)]| rows.iter().map(|(f, n)| format!("{f} {n}")).collect::<Vec<_>>().join(", ");
+        println!("{title} ({}):", split(&self.by_filter));
+        for (item, rows) in self.by_item.iter().take(10) {
+            let n: u32 = rows.iter().map(|(_, n)| n).sum();
+            println!("  {:<30} {:>3}  {}", item, n, split(rows));
+        }
+        println!();
+    }
 }
 
 /// Count table as rows, most first, ties by name.
@@ -290,8 +336,6 @@ fn aggregate(events: &[Event]) -> StatsReport {
     let mut by_trigger: HashMap<&str, u32> = HashMap::new();
     let mut by_scope: HashMap<&str, u32> = HashMap::new();
     let mut by_check: HashMap<&str, u32> = HashMap::new();
-    let mut discarded_by_filter: HashMap<&str, u32> = HashMap::new();
-    let mut discarded_by_way: HashMap<&str, HashMap<&str, u32>> = HashMap::new();
     let mut sessions = 0u32;
     let mut fires = 0u32;
     let mut check_fires = 0u32;
@@ -303,11 +347,7 @@ fn aggregate(events: &[Event]) -> StatsReport {
     for e in events {
         match e.event.as_str() {
             "session_start" => sessions += 1,
-            "way_fired" if e.discarded.is_some() => {
-                let filter = e.discarded.as_deref().unwrap_or_default();
-                *discarded_by_filter.entry(filter).or_insert(0) += 1;
-                *discarded_by_way.entry(&e.way).or_default().entry(filter).or_insert(0) += 1;
-            }
+            "way_fired" | "check_fired" if e.discarded.is_some() => {}
             "way_fired" => {
                 fires += 1;
                 *by_way.entry(&e.way).or_insert(0) += 1;
@@ -351,18 +391,19 @@ fn aggregate(events: &[Event]) -> StatsReport {
         })
         .collect();
 
-    let mut by_way_discarded: Vec<(String, Vec<(String, u32)>)> =
-        discarded_by_way.into_iter().map(|(way, split)| (way.to_string(), ranked(split))).collect();
-    let total = |split: &[(String, u32)]| split.iter().map(|(_, n)| n).sum::<u32>();
-    by_way_discarded.sort_by(|a, b| total(&b.1).cmp(&total(&a.1)).then_with(|| a.0.cmp(&b.0)));
+    let discarded = |kind: &str| {
+        Discarded::tally(events.iter().filter(|e| e.event == kind).filter_map(|e| {
+            let item = if kind == "check_fired" { &e.check } else { &e.way };
+            Some((item.as_str(), e.discarded.as_deref()?))
+        }))
+    };
 
     StatsReport {
         total_events: events.len(),
         sessions,
         fires,
-        discarded: discarded_by_filter.values().sum(),
-        discarded_by_filter: ranked(discarded_by_filter),
-        discarded_by_way: by_way_discarded,
+        discarded: discarded("way_fired"),
+        check_discarded: discarded("check_fired"),
         redisclosures,
         first_ts: events.first().map(|e| e.ts.clone()),
         last_ts: events.last().map(|e| e.ts.clone()),
@@ -419,11 +460,8 @@ fn json_value(r: &StatsReport) -> serde_json::Value {
         "total_events": r.total_events,
         "sessions": r.sessions,
         "way_fires": r.fires,
-        "discarded_fires": {
-            "total": r.discarded,
-            "by_filter": counts_json(&r.discarded_by_filter),
-            "by_way": r.discarded_by_way.iter().map(|(way, split)| (way.clone(), json!(counts_json(split)))).collect::<serde_json::Map<_, _>>(),
-        },
+        "discarded_fires": r.discarded.json("by_way"),
+        "discarded_check_fires": r.check_discarded.json("by_check"),
         "by_way": counts_json(&r.by_way),
         "by_trigger": counts_json(&r.by_trigger),
         "by_scope": counts_json(&r.by_scope),
@@ -470,21 +508,13 @@ fn print_human(r: &StatsReport, days: Option<u32>, project_filter: Option<&str>)
     println!();
     println!(
         "  Sessions: {}  |  Way fires: {}  |  Discarded: {}  |  Re-disclosures: {}",
-        r.sessions, r.fires, r.discarded, r.redisclosures
+        r.sessions, r.fires, r.discarded.total, r.redisclosures
     );
     println!();
 
     // Discarded fires: switched-off ways that would have fired, by what
     // switched each off.
-    if r.discarded > 0 {
-        let split = |rows: &[(String, u32)]| rows.iter().map(|(f, n)| format!("{f} {n}")).collect::<Vec<_>>().join(", ");
-        println!("Discarded fires ({}):", split(&r.discarded_by_filter));
-        for (way, rows) in r.discarded_by_way.iter().take(10) {
-            let n: u32 = rows.iter().map(|(_, n)| n).sum();
-            println!("  {:<30} {:>3}  {}", way, n, split(rows));
-        }
-        println!();
-    }
+    r.discarded.print("Discarded fires");
 
     // Top ways
     println!("Top ways:");
@@ -583,6 +613,7 @@ fn print_human(r: &StatsReport, days: Option<u32>, project_filter: Option<&str>)
         }
         println!();
     }
+    r.check_discarded.print("Discarded check fires");
 }
 
 
