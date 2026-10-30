@@ -208,9 +208,9 @@ pub struct Config {
     /// per-way knobs to user-scope `apply_yaml` would have to also touch
     /// this field, which sits right next to a load-bearing doc comment.
     pub(crate) disabled_ways: Vec<String>,
-    /// Ways and prefixes the project switched on by name (`way: true`). Read
-    /// only through [`Config::way_disabled`], where an explicit entry overrides
-    /// a broader prefix (ADR-701 §1). Project scope only, like `disabled_ways`.
+    /// Toggle patterns the project switched on (`way: true`). Read only
+    /// through [`Config::way_disabled`], where a more specific pattern
+    /// overrides a broader one. Project scope only, like `disabled_ways`.
     pub(crate) enabled_ways: Vec<String>,
     /// Parent-boost multiplier: a child way's effective semantic fire
     /// probability is multiplied by this value when any ancestor way has fired
@@ -324,19 +324,18 @@ impl Config {
         &self.disabled_ways
     }
 
-    /// Ways and prefixes the project switched on by name; they override a
-    /// broader disabled prefix (ADR-701 §1).
+    /// Toggle patterns the project switched on; they override a broader
+    /// disabling pattern.
     pub fn enabled_ways(&self) -> &[String] {
         &self.enabled_ways
     }
 
     /// Whether the project switched `way_id` off (ADR-131, ADR-701 §1).
     ///
-    /// A toggle key is either a way id or a path prefix ending in `/*`, which
-    /// covers every way under that directory. The most specific toggle wins: a
-    /// toggle on the way itself beats any prefix, and a longer prefix beats a
-    /// shorter one. So `a/b/*: false` with `a/b/c: true` leaves `a/b/c` on.
-    /// A way with no toggle is on.
+    /// Each toggle key is a pattern matched against way ids
+    /// ([`toggle_matches`]), and the most specific matching pattern wins
+    /// whatever the key order. So `a/b/**: false` with `a/b/c: true` leaves
+    /// `a/b/c` on. A way no pattern matches is on.
     pub fn way_disabled(&self, way_id: &str) -> bool {
         self.disabling_toggle(way_id).is_some()
     }
@@ -541,8 +540,8 @@ impl Config {
     ///       enabled: false
     ///
     /// Anything that evaluates to enabled=false is collected into `disabled_ways`;
-    /// an explicit enabled=true into `enabled_ways`, so it can override a prefix.
-    /// A key ending in `/*` is a path prefix (ADR-701 §1, see `way_disabled`).
+    /// an explicit enabled=true into `enabled_ways`, so it can override a
+    /// broader pattern. Each key is a toggle pattern (see `way_disabled`).
     /// Unknown sub-keys on the long-form (threshold overrides, etc.) are ignored
     /// — reserved for future use per ADR-131.
     fn apply_project_ways_overlay_value(&mut self, doc: &serde_yaml::Value) {
@@ -573,30 +572,76 @@ impl Config {
 }
 
 /// Whether a set of project toggles switches `way_id` off. Each toggle is
-/// `(key, enabled)`, where the key is a way id or a `dir/*` prefix. The most
-/// specific toggle wins: a toggle on the way itself beats any prefix, and a
-/// longer prefix beats a shorter one; a prefix covers the way at its own path
-/// and every way under it. No matching toggle leaves the way on. The settings
-/// screens call this too, so what they show is what a session does.
+/// `(key, enabled)`, where the key is a toggle pattern ([`toggle_matches`])
+/// and the most specific matching pattern wins ([`toggle_rank`]). No
+/// matching toggle leaves the way on. The settings screens call this too,
+/// so what they show is what a session does.
 pub fn way_toggled_off<'a>(toggles: impl Iterator<Item = (&'a str, bool)>, way_id: &str) -> bool {
     winning_toggle(toggles, way_id).is_some_and(|(_, enabled)| !enabled)
 }
 
-/// The most specific toggle covering `way_id`, as `(key, enabled)`.
-fn winning_toggle<'a>(toggles: impl Iterator<Item = (&'a str, bool)>, way_id: &str) -> Option<(&'a str, bool)> {
-    let mut best: Option<(usize, &'a str, bool)> = None; // (specificity, key, enabled)
-    for (key, enabled) in toggles {
-        let rank = match key.strip_suffix("/*") {
-            None if key == way_id => usize::MAX,
-            None => continue,
-            Some(dir) if way_id == dir || (way_id.len() > dir.len() + 1 && way_id.starts_with(dir) && way_id.as_bytes()[dir.len()] == b'/') => dir.len(),
-            Some(_) => continue,
-        };
-        if best.is_none_or(|(r, _, _)| rank > r) {
-            best = Some((rank, key, enabled));
+/// Whether a toggle key holds a wildcard segment (`*` or `**`), so it may
+/// match more than the one way it spells.
+pub fn is_toggle_pattern(key: &str) -> bool {
+    key.split('/').any(|s| s == "*" || s == "**")
+}
+
+/// Whether toggle pattern `key` matches `way_id`. A pattern matches whole id
+/// segments: `*` matches exactly one, `**` one or more, and any other
+/// segment only itself. So `documentation/adr/**` covers every way under
+/// `documentation/adr` and not `documentation/adr` itself.
+pub fn toggle_matches(key: &str, way_id: &str) -> bool {
+    fn segs(pat: &[&str], id: &[&str]) -> bool {
+        match pat.split_first() {
+            None => id.is_empty(),
+            Some((&"**", rest)) => (1..=id.len()).any(|n| segs(rest, &id[n..])),
+            Some((&"*", rest)) => !id.is_empty() && segs(rest, &id[1..]),
+            Some((lit, rest)) => id.first() == Some(lit) && segs(rest, &id[1..]),
         }
     }
-    best.map(|(_, key, enabled)| (key, enabled))
+    segs(&key.split('/').collect::<Vec<_>>(), &way_id.split('/').collect::<Vec<_>>())
+}
+
+/// How specific a toggle pattern is; the greater rank wins. An exact id
+/// beats any wildcard pattern; among wildcard patterns more literal
+/// segments win, then fewer `**`.
+fn toggle_rank(key: &str) -> (bool, usize, std::cmp::Reverse<usize>) {
+    let literal = key.split('/').filter(|s| *s != "*" && *s != "**").count();
+    let doubles = key.split('/').filter(|s| *s == "**").count();
+    (!is_toggle_pattern(key), literal, std::cmp::Reverse(doubles))
+}
+
+/// The toggles matching `way_id` at the highest rank, as `(key, enabled)`.
+fn top_toggles<'a>(toggles: impl Iterator<Item = (&'a str, bool)>, way_id: &str) -> Vec<(&'a str, bool)> {
+    let mut top: Vec<(&'a str, bool)> = Vec::new();
+    for (key, enabled) in toggles.filter(|(k, _)| toggle_matches(k, way_id)) {
+        match top.first().map(|(k, _)| toggle_rank(key).cmp(&toggle_rank(k))) {
+            Some(std::cmp::Ordering::Less) => {}
+            Some(std::cmp::Ordering::Equal) => top.push((key, enabled)),
+            _ => top = vec![(key, enabled)],
+        }
+    }
+    top
+}
+
+/// The most specific toggle matching `way_id`, as `(key, enabled)`. A tie
+/// between `true` and `false` resolves to `false`; among tied keys of one
+/// value the least in byte order is named, so key order never decides.
+fn winning_toggle<'a>(toggles: impl Iterator<Item = (&'a str, bool)>, way_id: &str) -> Option<(&'a str, bool)> {
+    top_toggles(toggles, way_id).into_iter().min_by_key(|(key, enabled)| (*enabled, *key))
+}
+
+/// The keys of a `true`/`false` tie at the highest rank for `way_id`,
+/// sorted; empty when the toggles at that rank agree.
+pub fn tied_toggles<'a>(toggles: impl Iterator<Item = (&'a str, bool)>, way_id: &str) -> Vec<&'a str> {
+    let top = top_toggles(toggles, way_id);
+    if !(top.iter().any(|(_, on)| *on) && top.iter().any(|(_, on)| !on)) {
+        return Vec::new();
+    }
+    let mut keys: Vec<&str> = top.into_iter().map(|(k, _)| k).collect();
+    keys.sort_unstable();
+    keys.dedup();
+    keys
 }
 
 fn home_dir() -> PathBuf {
@@ -886,7 +931,7 @@ mod tests {
         assert!(cfg.disabled_ways.is_empty());
     }
 
-    // ── ADR-701 §1: path-prefix toggles ────────────────────────────
+    // ── toggle patterns ────────────────────────────────────────────
 
     fn project_cfg(yaml: &str) -> Config {
         let mut cfg = Config::default();
@@ -932,66 +977,133 @@ mod tests {
         assert_eq!(cfg.event_retention_days, 365, "retention is machine-wide, user scope only");
     }
 
-    #[test]
-    fn an_explicit_enable_on_the_prefix_dir_beats_the_prefix() {
-        let cfg = project_cfg("ways:\n  a/b/*: false\n  a/b: true\n");
-        assert!(!cfg.way_disabled("a/b"));
-        assert!(cfg.way_disabled("a/b/c"));
+    /// The config from `ways:` entries written in the order given and in
+    /// reverse, so a test can assert that key order decides nothing.
+    fn both_orders(entries: &[&str]) -> [Config; 2] {
+        let doc = |list: Vec<&str>| project_cfg(&format!("ways:\n{}", list.iter().map(|e| format!("  {e}\n")).collect::<String>()));
+        [doc(entries.to_vec()), doc(entries.iter().rev().copied().collect())]
     }
 
     #[test]
-    fn disabling_toggle_names_the_key_that_wins() {
-        let cfg = project_cfg("ways:\n  a/*: false\n  a/b/*: false\n  a/b/c: false\n  a/b/d: true\n");
-        assert_eq!(cfg.disabling_toggle("a/b/c"), Some("a/b/c"), "the way's own toggle is the most specific");
-        assert_eq!(cfg.disabling_toggle("a/b/x"), Some("a/b/*"), "the longer prefix beats the shorter");
-        assert_eq!(cfg.disabling_toggle("a/z"), Some("a/*"));
-        assert_eq!(cfg.disabling_toggle("a/b/d"), None, "an explicit enable wins, so nothing disables it");
-        assert_eq!(cfg.disabling_toggle("other/w"), None);
-        for id in ["a/b/c", "a/b/x", "a/z", "a/b/d", "other/w"] {
-            assert_eq!(cfg.way_disabled(id), cfg.disabling_toggle(id).is_some(), "{id}: one rule for both");
+    fn a_key_without_a_wildcard_names_exactly_one_way() {
+        let cfg = project_cfg("ways:\n  itops/incident: false\n");
+        assert!(cfg.way_disabled("itops/incident"));
+        assert!(!cfg.way_disabled("itops/incident/postmortem"), "not the ways under it");
+        assert!(!cfg.way_disabled("itops"), "not its parent");
+        assert!(!cfg.way_disabled("itops/other"));
+    }
+
+    #[test]
+    fn a_star_matches_exactly_one_segment() {
+        let cfg = project_cfg("ways:\n  a/*: false\n");
+        assert!(cfg.way_disabled("a/b"));
+        assert!(!cfg.way_disabled("a/b/c"), "a grandchild is two segments down");
+        assert!(!cfg.way_disabled("a"), "the directory's own way is not a child");
+        assert!(!cfg.way_disabled("ab/c"), "segments match whole");
+    }
+
+    #[test]
+    fn a_double_star_matches_one_or_more_segments() {
+        let cfg = project_cfg("ways:\n  a/**: false\n");
+        assert!(cfg.way_disabled("a/b"));
+        assert!(cfg.way_disabled("a/b/c"));
+        assert!(cfg.way_disabled("a/b/c/d"));
+        assert!(!cfg.way_disabled("a"), "`**` needs at least one segment");
+        assert!(!cfg.way_disabled("ab/c"));
+    }
+
+    #[test]
+    fn a_star_mid_pattern_matches_one_segment_there() {
+        let cfg = project_cfg("ways:\n  \"*/adr/figure\": false\n");
+        assert!(cfg.way_disabled("documentation/adr/figure"));
+        assert!(cfg.way_disabled("other/adr/figure"));
+        assert!(!cfg.way_disabled("documentation/adr"));
+        assert!(!cfg.way_disabled("x/documentation/adr/figure"));
+        assert!(!cfg.way_disabled("documentation/adr/figure/inset"));
+    }
+
+    #[test]
+    fn a_segment_mixing_text_and_a_wildcard_is_read_literally() {
+        let cfg = project_cfg("ways:\n  documentation/adr*: false\n  \"*b/c\": false\n");
+        assert!(!cfg.way_disabled("documentation/adr"));
+        assert!(!cfg.way_disabled("documentation/adr-figures"));
+        assert!(!cfg.way_disabled("ab/c"));
+        assert!(cfg.way_disabled("documentation/adr*"), "only an id spelled with the asterisk");
+        assert!(!is_toggle_pattern("documentation/adr*"));
+    }
+
+    #[test]
+    fn an_exact_id_beats_any_wildcard_pattern_in_either_order() {
+        for cfg in both_orders(&["a/b/c: true", "a/**: false", "a/b/*: false"]) {
+            assert!(!cfg.way_disabled("a/b/c"));
+            assert_eq!(cfg.disabling_toggle("a/b/d"), Some("a/b/*"));
+        }
+        for cfg in both_orders(&["a/b/c: false", "a/b/*: true"]) {
+            assert_eq!(cfg.disabling_toggle("a/b/c"), Some("a/b/c"));
+            assert!(!cfg.way_disabled("a/b/d"));
         }
     }
 
     #[test]
-    fn prefix_toggle_disables_every_way_under_it() {
-        let cfg = project_cfg("ways:\n  softwaredev/code/supplychain/*: false\n");
-        assert!(cfg.way_disabled("softwaredev/code/supplychain/npm"));
-        assert!(cfg.way_disabled("softwaredev/code/supplychain/npm/lockfiles"));
-        assert!(!cfg.way_disabled("softwaredev/code/quality"), "a sibling stays on");
-        assert!(!cfg.way_disabled("softwaredev/code/supplychainx"), "the prefix ends at a path boundary");
-        assert!(cfg.way_disabled("softwaredev/code/supplychain"), "the prefix covers the way at its own path too");
+    fn more_literal_segments_win_in_either_order() {
+        for cfg in both_orders(&["a/**: false", "a/b/*: true"]) {
+            assert!(!cfg.way_disabled("a/b/c"), "two literal segments beat one");
+            assert!(cfg.way_disabled("a/x"));
+            assert!(cfg.way_disabled("a/b/c/d"), "`a/b/*` does not reach a grandchild");
+        }
     }
 
     #[test]
-    fn explicit_enable_overrides_a_disabled_prefix() {
-        let cfg = project_cfg(
-            "ways:\n  softwaredev/code/supplychain/*: false\n  softwaredev/code/supplychain/npm: true\n",
-        );
-        assert!(!cfg.way_disabled("softwaredev/code/supplychain/npm"));
-        assert!(cfg.way_disabled("softwaredev/code/supplychain/pip"));
+    fn fewer_double_stars_win_at_equal_literals_in_either_order() {
+        for cfg in both_orders(&["a/b/**: true", "a/*/c: false"]) {
+            assert_eq!(cfg.disabling_toggle("a/b/c"), Some("a/*/c"));
+            assert!(!cfg.way_disabled("a/b/d"));
+        }
+        for cfg in both_orders(&["a/b/**: false", "a/*/c: true"]) {
+            assert!(!cfg.way_disabled("a/b/c"), "the `true` with no `**` wins outright, not by a tie");
+            assert_eq!(cfg.disabling_toggle("a/b/d"), Some("a/b/**"));
+        }
     }
 
     #[test]
-    fn explicit_disable_overrides_an_enabled_prefix() {
-        let cfg = project_cfg(
-            "ways:\n  softwaredev/code/*: true\n  softwaredev/code/quality:\n    enabled: false\n",
-        );
-        assert!(cfg.way_disabled("softwaredev/code/quality"));
-        assert!(!cfg.way_disabled("softwaredev/code/testing"));
+    fn true_turns_a_way_back_on_under_a_broader_false() {
+        for cfg in both_orders(&["softwaredev/code/supplychain/**: false", "softwaredev/code/supplychain/npm: true"]) {
+            assert!(!cfg.way_disabled("softwaredev/code/supplychain/npm"));
+            assert!(cfg.way_disabled("softwaredev/code/supplychain/pip"));
+            assert!(cfg.way_disabled("softwaredev/code/supplychain/npm/lockfiles"));
+            assert!(!cfg.way_disabled("softwaredev/code/supplychain"));
+        }
+        for cfg in both_orders(&["a/**: false", "a/b/**: true"]) {
+            assert!(!cfg.way_disabled("a/b/c"));
+            assert!(cfg.way_disabled("a/b"), "`a/b/**` does not cover `a/b` itself");
+        }
     }
 
     #[test]
-    fn the_longer_prefix_wins_between_prefixes() {
-        let cfg = project_cfg("ways:\n  a/*: false\n  a/b/*: true\n");
-        assert!(cfg.way_disabled("a/x"));
-        assert!(!cfg.way_disabled("a/b/c"));
+    fn a_tie_between_true_and_false_resolves_to_false() {
+        for cfg in both_orders(&["a/*/c: true", "\"*/b/c\": false"]) {
+            assert_eq!(cfg.disabling_toggle("a/b/c"), Some("*/b/c"));
+            assert!(!cfg.way_disabled("a/x/c"), "only `a/*/c` matches here");
+        }
+        let toggles = [("a/*/c", true), ("*/b/c", false), ("a/**", false)];
+        assert_eq!(tied_toggles(toggles.into_iter(), "a/b/c"), ["*/b/c", "a/*/c"]);
+        assert!(tied_toggles(toggles.into_iter(), "a/x/c").is_empty());
     }
 
     #[test]
-    fn exact_toggle_still_works_without_prefixes() {
-        let cfg = project_cfg("ways:\n  itops/incident: false\n");
-        assert!(cfg.way_disabled("itops/incident"));
-        assert!(!cfg.way_disabled("itops/other"));
+    fn tied_keys_of_one_value_name_the_same_key_in_either_order() {
+        for cfg in both_orders(&["a/*/c: false", "\"*/b/c\": false"]) {
+            assert_eq!(cfg.disabling_toggle("a/b/c"), Some("*/b/c"));
+        }
+        assert!(tied_toggles([("a/*/c", false), ("*/b/c", false)].into_iter(), "a/b/c").is_empty());
+    }
+
+    #[test]
+    fn disabling_toggle_and_way_disabled_agree() {
+        let cfg = project_cfg("ways:\n  a/**: false\n  a/b/*: false\n  a/b/c: false\n  a/b/d: true\n");
+        for id in ["a/b/c", "a/b/x", "a/z", "a/b/d", "a", "other/w"] {
+            assert_eq!(cfg.way_disabled(id), cfg.disabling_toggle(id).is_some(), "{id}: one rule for both");
+        }
     }
 
     #[test]

@@ -201,14 +201,14 @@ pub(super) enum WayScope {
     Shipped,
     /// Named in a ways.yaml, found in no root.
     Missing,
-    /// A `dir/*` toggle: covers the ways under a directory, no way of its own.
-    Prefix,
+    /// A toggle key with a wildcard: it matches ways and is no way itself.
+    Pattern,
     /// Another project's, listed in the all projects view.
     Other,
 }
 
 impl WayScope {
-    const ORDER: [WayScope; 5] = [WayScope::Project, WayScope::User, WayScope::Shipped, WayScope::Prefix, WayScope::Missing];
+    const ORDER: [WayScope; 5] = [WayScope::Project, WayScope::User, WayScope::Shipped, WayScope::Pattern, WayScope::Missing];
 
     fn label(self) -> &'static str {
         match self {
@@ -216,7 +216,7 @@ impl WayScope {
             WayScope::User => "your ways",
             WayScope::Shipped => "shipped",
             WayScope::Missing => "not found",
-            WayScope::Prefix => "prefixes",
+            WayScope::Pattern => "patterns",
             WayScope::Other => "another project",
         }
     }
@@ -228,7 +228,7 @@ impl WayScope {
             WayScope::User => format!("Your own ways, in {}. They survive updates and shadow a shipped way of the same id.", tilde(&ctx.user_ways, home)),
             WayScope::Shipped => "The ways agent-ways ships.".into(),
             WayScope::Missing => "Switches this project's ways.yaml names for ways no root holds any more.".into(),
-            WayScope::Prefix => "A `dir/*` switch covers that directory's way and every way under it; a switch on a way itself overrides it (ADR-701).".into(),
+            WayScope::Pattern => "A switch whose key has a wildcard: `*` matches one id segment and `**` one or more, so `dir/**` covers every way under `dir`. The most specific matching switch wins, and a switch on a way itself beats any pattern.".into(),
             WayScope::Other => "The ways of another project Claude Code knows.".into(),
         }
     }
@@ -284,7 +284,7 @@ pub(super) fn summarize(n: &mut Node) -> (usize, usize) {
     let own = n
         .setting
         .as_ref()
-        .filter(|s| s.store.as_ref().is_some_and(|st| !st.key.ends_with("/*")))
+        .filter(|s| s.store.as_ref().is_some_and(|st| !st.key.strip_prefix("ways.project.").is_some_and(ways_core::config::is_toggle_pattern)))
         .map_or((0, 0), |s| (1, usize::from(s.loaded == "false")));
     if n.children.is_empty() {
         return own;
@@ -416,7 +416,7 @@ impl Ways {
         let depth = tab.prefix.split('.').count();
         let scopes = if tab.name == "ways" { self.way_scopes() } else { BTreeMap::new() };
         // The switches the project's file sets, by id, so a way that sets none
-        // can be shown as a session will treat it: off under a disabled prefix.
+        // can be shown as a session will treat it: off under a disabling pattern.
         let toggles: Vec<(String, bool)> = self
             .reg
             .concrete("ways.project", layers)
@@ -451,7 +451,7 @@ impl Ways {
                 let explicit = toggles.iter().any(|(k, _)| k == id);
                 if !explicit && ways_core::config::way_toggled_off(toggles.iter().map(|(k, on)| (k.as_str(), *on)), id) {
                     shown = "false".into();
-                    source = "off under a prefix switch".into();
+                    source = "off under a pattern switch".into();
                 }
             }
             let mut s = Setting::new(kind(b.spec.kind, layers, &b.bound), shown, source);
@@ -504,7 +504,7 @@ impl Ways {
                 let found = scopes.get(&id);
                 let scope = match found {
                     Some(w) => w.scope,
-                    None if id.ends_with("/*") => WayScope::Prefix,
+                    None if ways_core::config::is_toggle_pattern(&id) => WayScope::Pattern,
                     None => WayScope::Missing,
                 };
                 if let Some(w) = found {

@@ -902,13 +902,13 @@ fn a_home_reached_through_a_symlink_shows_as_tilde_in_its_canonical_form_too() {
 }
 
 #[test]
-fn a_prefix_switch_shows_its_ways_off_and_is_not_listed_as_not_found() {
+fn a_pattern_switch_shows_its_ways_off_and_is_not_listed_as_not_found() {
     let fx = Fixture::home();
     for id in ["a/one", "a/two", "b/three"] {
         let name = id.rsplit('/').next().unwrap();
         fx.file(&format!("corpus/{id}/{name}.md"), &format!("---\ndescription: {name}\n---\n"));
     }
-    fx.file("work/current/.claude/ways.yaml", "ways:\n  a/*: false\n  a/two: true\n");
+    fx.file("work/current/.claude/ways.yaml", "ways:\n  a/**: false\n  a/two: true\n");
     let file = fx.root.join("work/current/.claude/ways.yaml");
     let project = agent_settings::Layer::read(&ways_core::settings::SCHEMA, "project", ways_core::settings::FILE, agent_settings::LayerScope::Project, &file);
     let ctx = Ctx {
@@ -932,13 +932,13 @@ fn a_prefix_switch_shows_its_ways_off_and_is_not_listed_as_not_found() {
     let shipped = section(project, "shipped");
     let a = shipped.children.iter().find(|n| n.name == "a").unwrap();
     let loaded = |name: &str| a.children.iter().find(|n| n.name == name).unwrap().setting.as_ref().unwrap().loaded.clone();
-    assert_eq!(loaded("one"), "false", "off under the prefix, as a session treats it");
-    assert_eq!(loaded("two"), "true", "its own switch overrides the prefix");
-    // one is off; two (explicit on) and three are on; the prefix row is no way.
+    assert_eq!(loaded("one"), "false", "off under the pattern, as a session treats it");
+    assert_eq!(loaded("two"), "true", "its own switch overrides the pattern");
+    // one is off; two (explicit on) and three are on; the pattern row is no way.
     assert_eq!(shipped.about, "3 ways, 1 switched off as loaded.");
-    let prefixes = section(project, "prefixes");
-    assert_eq!(prefixes.children[0].children[0].setting.as_ref().unwrap().store.as_ref().unwrap().key, "ways.project.a/*");
-    assert!(project.children.iter().all(|n| n.name != "not found"), "a prefix is not a missing way");
+    let patterns = section(project, "patterns");
+    assert_eq!(patterns.children[0].children[0].setting.as_ref().unwrap().store.as_ref().unwrap().key, "ways.project.a/**");
+    assert!(project.children.iter().all(|n| n.name != "not found"), "a pattern is not a missing way");
 }
 
 /// Opened without a project, the screens write listening and keepwarm to
