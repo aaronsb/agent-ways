@@ -134,7 +134,11 @@ const RETIRED: &[(&str, &str)] = &[
     ("default_embed_threshold", "`default_embed_threshold` was retired by ADR-156 (calibrated scoring) and is ignored; use `semantic_fire_probability` (a probability in [0,1])"),
     ("default_multi_embed_threshold", "`default_multi_embed_threshold` was retired by ADR-156 (calibrated scoring) and is ignored; use `semantic_fire_probability` (a probability in [0,1])"),
     ("keyword_gate_fraction", "`keyword_gate_fraction` was retired by ADR-156 (calibrated scoring) and is ignored; use `keyword_floor_probability` (a probability in [0,1])"),
+    ("mods.ways-theme.copy_as", COPY_AS_RETIRED),
 ];
+
+/// What a file that still holds `mods.ways-theme.copy_as` is told.
+pub const COPY_AS_RETIRED: &str = "`mods.ways-theme.copy_as` was retired by ADR-514 and is ignored; a copy control offers each form per press, and `mods.ways-theme.copy_style` sets how the forms are drawn";
 
 /// What a file that still holds `attend_mod` is told: nothing reads it, and
 /// the command that moves its values (ADR-512 item 2).
@@ -967,11 +971,56 @@ pub const SCREENS_WRITE_PROJECT: &[&str] = &[
 /// (ADR-512 item 1): `mods.<name>.install` from the user file, then the
 /// target's own file. A project cannot set it.
 pub fn mod_install(name: &str, target_config: &Path) -> bool {
-    let layers = [
+    mod_install_in(name, &mod_layers(target_config))
+}
+
+/// The finding that decided `mods.<name>.install` as false, if one did.
+/// The deciding file is the highest of the target's file and the user file
+/// whose text sets the key; with neither, the default decides. A finding
+/// decided it when:
+/// - the deciding file does not parse;
+/// - its `mods.<name>` entry fell back and the key is not written `false`;
+/// - with no file setting the key, the user file's whole `mods` section fell
+///   back, so an entry it held is not read.
+///
+/// `install` then takes its fail-closed reading, which repair does not act on
+/// to uninstall a mod. A finding in a file that did not decide changes
+/// nothing.
+pub fn mod_entry_ignored(name: &str, target_config: &Path) -> Option<agent_settings::Finding> {
+    let read = mod_layers(target_config).map(|l| {
+        let text = l.path.as_deref().and_then(|p| std::fs::read(p).ok()).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
+        (l, text)
+    });
+    mod_entry_ignored_in(name, &read)
+}
+
+/// [`mod_entry_ignored`] over each file's layer and text, lowest first.
+fn mod_entry_ignored_in(name: &str, files: &[(Layer, String)]) -> Option<agent_settings::Finding> {
+    let unit = format!("mods.{name}");
+    let key = ["mods".to_string(), name.to_string(), "install".to_string()];
+    for (layer, text) in files.iter().rev().filter(|(l, _)| l.present) {
+        if let Some(f) = layer.findings.iter().find(|f| f.is_parse_failure()) {
+            return Some(f.clone());
+        }
+        let doc = agent_settings::load::parse_text(text, None).ok();
+        let Some(raw) = doc.as_ref().and_then(|d| agent_settings::yaml_edit::value_at(d, &key)) else { continue };
+        if *raw == Value::Bool(false) {
+            return None;
+        }
+        return layer.findings.iter().find(|f| f.fallback && f.unit.as_deref() == Some(unit.as_str())).cloned();
+    }
+    let (user, _) = files.first().filter(|(l, _)| l.present && l.scope == LayerScope::User)?;
+    let whole = |u: &str| u == "mods" || u.starts_with("mods[");
+    user.findings.iter().find(|f| f.fallback && f.section.as_deref() == Some("mods") && f.unit.as_deref().is_some_and(whole)).cloned()
+}
+
+/// The two files `mods.<name>.install` is read from: the user file, then
+/// the target's own.
+fn mod_layers(target_config: &Path) -> [Layer; 2] {
+    [
         Layer::read(&SCHEMA, "user", FILE, LayerScope::User, &crate::paths::user_config()),
         Layer::read(&SCHEMA, "target", FILE, LayerScope::Target, target_config),
-    ];
-    mod_install_in(name, &layers)
+    ]
 }
 
 /// What one file sets for `mods.<name>.install`, if anything: the target's
@@ -1235,6 +1284,65 @@ mod tests {
         assert!(check_words(&Value::String("x".repeat(25))).is_err());
         let bad = layer("user", LayerScope::User, "mods:\n  ways-theme:\n    prompt_box: neon\n");
         assert_eq!(resolved("mods.ways-theme.prompt_box", &[bad]), s("gradient"), "a bad value falls back to the default");
+    }
+
+    /// One unknown key in a mod's entry has the entry ignored, and the
+    /// finding that did it is named; a clean entry, or another mod's bad
+    /// one, names none.
+    /// A file's layer with its text, as [`mod_entry_ignored_in`] reads it.
+    fn file(name: &str, scope: LayerScope, text: &str) -> (Layer, String) {
+        (layer(name, scope, text), text.to_string())
+    }
+
+    #[test]
+    fn a_finding_in_a_mods_entry_is_named_for_that_mod() {
+        let user = file("user", LayerScope::User, "mods:\n  ways-theme:\n    install: true\n    bogus_key: 1\n");
+        assert!(!mod_install_in("ways-theme", std::slice::from_ref(&user.0)), "the entry is ignored, so install reads false");
+        let f = mod_entry_ignored_in("ways-theme", std::slice::from_ref(&user)).expect("the entry's finding");
+        assert_eq!((f.key.as_deref(), f.line), (Some("mods.ways-theme.bogus_key"), Some(4)));
+        assert!(mod_entry_ignored_in("attend", std::slice::from_ref(&user)).is_none());
+        let clean = file("user", LayerScope::User, "mods:\n  ways-theme:\n    install: true\n");
+        assert!(mod_entry_ignored_in("ways-theme", &[clean]).is_none());
+        let broken = file("user", LayerScope::User, "mods: [\n");
+        assert!(mod_entry_ignored_in("attend", &[broken]).is_some_and(|f| f.is_parse_failure()));
+    }
+
+    /// Only the finding that decided the false holds the mod: one in the
+    /// lower file under a clean `install: false` above it, or beside an
+    /// `install: false` written in the same entry, does not.
+    #[test]
+    fn only_the_deciding_file_s_finding_holds_the_mod() {
+        let bad = || file("user", LayerScope::User, "mods:\n  ways-theme:\n    install: true\n    bogus_key: 1\n");
+        let target_off = file("target", LayerScope::Target, "mods:\n  ways-theme:\n    install: false\n");
+        assert!(mod_entry_ignored_in("ways-theme", &[bad(), target_off]).is_none(), "the target's clean false decides");
+        let target_silent = file("target", LayerScope::Target, "mods:\n  attend:\n    install: true\n");
+        assert!(mod_entry_ignored_in("ways-theme", &[bad(), target_silent]).is_some(), "the user file decides, with its finding");
+        let written_off = file("user", LayerScope::User, "mods:\n  ways-theme:\n    install: false\n    bogus_key: 1\n");
+        assert!(mod_entry_ignored_in("ways-theme", &[written_off]).is_none(), "an uninstall the operator wrote is not held");
+        let bad_value = file("user", LayerScope::User, "mods:\n  ways-theme:\n    install: maybe\n");
+        assert!(mod_entry_ignored_in("ways-theme", &[bad_value]).is_some());
+    }
+
+    /// A user file whose whole `mods` section fell back holds every mod no
+    /// file sets; the same in a target's file leaves the user file to decide.
+    #[test]
+    fn a_whole_mods_section_falling_back_in_the_user_file_holds() {
+        let list = "mods:\n  - ways-theme:\n      install: true\n";
+        let user = file("user", LayerScope::User, list);
+        let f = mod_entry_ignored_in("ways-theme", std::slice::from_ref(&user)).expect("the section's finding");
+        assert_eq!(f.section.as_deref(), Some("mods"));
+        assert!(mod_entry_ignored_in("ways-theme", &[file("user", LayerScope::User, ""), file("target", LayerScope::Target, list)]).is_none());
+    }
+
+    /// `copy_as` was removed by ADR-514: a file that still holds it is told
+    /// so, and the rest of the entry loads, `install` with it.
+    #[test]
+    fn copy_as_is_retired_and_the_entry_still_loads() {
+        let (l, text) = file("user", LayerScope::User, "mods:\n  ways-theme:\n    install: true\n    copy_as: markdown\n");
+        assert!(mod_install_in("ways-theme", std::slice::from_ref(&l)));
+        assert!(mod_entry_ignored_in("ways-theme", &[(l.clone(), text)]).is_none());
+        let f: Vec<_> = l.findings.iter().map(|f| (f.key.as_deref(), f.line, f.fallback, f.message.as_str())).collect();
+        assert_eq!(f, [(Some("mods.ways-theme.copy_as"), Some(4), false, COPY_AS_RETIRED)]);
     }
 
     /// ADR-512 item 2: `attend_mod` is retired, so a file holding it

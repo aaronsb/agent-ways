@@ -99,7 +99,7 @@ An item is identified by its family and name. A user or project definition that 
 | Family | `kind` | `source` | `version` | `state` |
 |---|---|---|---|---|
 | theme | null | null | null | `active`, `inactive`, `invalid`, `unknown` |
-| mod | `plugin` | the plugin id, such as `attend@agent-ways` | the shipped plugin version | `converged`, `drift`, `pending`, `disabled`, `removed`, `off` (ADR-512), `unknown` |
+| mod | `plugin` | the plugin id, such as `attend@agent-ways` | the shipped plugin version | `converged`, `drift`, `pending`, `disabled`, `removed`, `held`, `off` (ADR-512), `unknown` |
 | sensor | `crate`, `script`; under ADR-403, `crate`, `command`, `mcp`, and `ways` for ADR-199's sensors | the crate; the command's executable; `<server> <tool>` | the crate's version; null for the others | `active`, `off`, `not-compiled`, `missing`, `refused`, `failing`, `invalid`, `degraded`, `unknown` |
 | way | null | null | null | `enabled`, `disabled`, `invalid`, `unknown` |
 | profile | the provider: `anthropic`, `openrouter`, `claude-code` | the model | null | `active`, `inactive`, `invalid`, `unknown` |

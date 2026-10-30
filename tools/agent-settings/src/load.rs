@@ -296,6 +296,7 @@ pub fn check(schema: &Schema, file: &str, scope: LayerScope, doc: &Value, only: 
         if only.is_some_and(|o| !o.contains(&sec.name)) {
             continue;
         }
+        let v = &strip_retired(retired, sec, top, v, &mut out);
         let mut accepted = v.clone();
         match (sec.per_entry, v) {
             (true, Value::Mapping(m)) => {
@@ -396,6 +397,22 @@ pub fn check(schema: &Schema, file: &str, scope: LayerScope, doc: &Value, only: 
         out.accepted.insert(k, c);
     }
     out
+}
+
+/// `v`, the value of the top-level key `top`, with each retired key below
+/// it removed. Each one found is reported at its own path and fails no
+/// unit, so the entry around it loads.
+fn strip_retired(retired: &[(&str, &str)], sec: &SectionSpec, top: &str, v: &Value, out: &mut Checked) -> Value {
+    let mut v = v.clone();
+    for (name, message) in retired {
+        let path: Vec<String> = name.split('.').map(str::to_string).collect();
+        let Some((last, between)) = path[1..].split_last().filter(|_| path[0] == top) else { continue };
+        let parent = between.iter().try_fold(&mut v, |cur, seg| cur.as_mapping_mut()?.get_mut(seg.as_str()));
+        if parent.and_then(Value::as_mapping_mut).and_then(|m| m.remove(last.as_str())).is_some() {
+            out.failures.push(Failure { section: Some(sec.name), repair: None, unit: None, path, message: (*message).to_string(), closed: false });
+        }
+    }
+    v
 }
 
 fn check_tree(keys: &[&KeySpec], scope: LayerScope, path: &mut Vec<String>, v: &Value, errs: &mut Vec<(Vec<String>, String)>) {
@@ -758,7 +775,7 @@ mod tests {
         KeySpec { name: "matching.presets.*", section: "matching", path: &["presets", "*"], kind: Kind::Float { min: 0.0, max: 1.0 }, instances: &["normal"], default: DefaultValue::Yaml("0.15"), ..BASE },
         KeySpec { name: "ways.project.*", section: "toggles", path: &["ways", "*"], kind: Kind::Toggle, scope: Scope::Project, default: DefaultValue::Yaml("true"), ..BASE },
     ];
-    const SCHEMA: Schema = Schema { component: "t", files: &[FileSpec { id: "cfg", retired: &[("old_key", "old_key was retired; use prob")], explain: None }], sections: SECTIONS, keys: KEYS };
+    const SCHEMA: Schema = Schema { component: "t", files: &[FileSpec { id: "cfg", retired: &[("old_key", "old_key was retired; use prob"), ("presets.old", "presets.old was retired; use presets.normal")], explain: None }], sections: SECTIONS, keys: KEYS };
 
     fn layer(name: &str, scope: LayerScope, text: &str) -> Layer {
         Layer::from_text(&SCHEMA, name, "cfg", scope, Some(Path::new(&format!("/{name}.yaml"))), text)
@@ -825,6 +842,17 @@ mod tests {
         let typo = l.findings.iter().find(|f| f.key.as_deref() == Some("presets.typo")).unwrap();
         assert_eq!(typo.line, Some(3));
         assert!(!l.findings.iter().find(|f| f.key.as_deref() == Some("mystery")).unwrap().fallback);
+    }
+
+    /// A retired key below the top level reports on its line, and the
+    /// section around it loads without it.
+    #[test]
+    fn a_retired_key_below_the_top_reports_and_its_section_loads() {
+        let l = layer("user", LayerScope::User, "presets:\n  normal: 0.2\n  old: 0.3\n");
+        assert_eq!(l.get(&["presets".into(), "normal".into()]), Some(&Value::from(0.2)));
+        assert_eq!(l.get(&["presets".into(), "old".into()]), None);
+        let f: Vec<_> = l.findings.iter().map(|f| (f.line, f.key.as_deref(), f.fallback, f.to_string())).collect();
+        assert_eq!(f, [(Some(3), Some("presets.old"), false, "/user.yaml:3: [matching] presets.old: presets.old was retired; use presets.normal".to_string())]);
     }
 
     #[test]
