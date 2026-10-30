@@ -336,7 +336,7 @@ export function quietResult(look: Look, failure: string | null) {
   return failure === null ? (
     <Box />
   ) : (
-    <Text color={look.skin.palette.err} wrap="truncate-end">{`${look.prefs.icons === 'ascii' ? 'x' : '✖'} ${failure}`}</Text>
+    <Text color={look.skin.palette.err}>{`${look.prefs.icons === 'ascii' ? 'x' : '✖'} ${failure}`}</Text>
   )
 }
 
@@ -490,7 +490,7 @@ export function tableRows(look: Look, table: Table, maxWidth: number, control?: 
       {cells.map((cell, i) => (
         <Box {...size(i)} flexDirection="column" paddingX={CELL_PAD} alignItems={JUSTIFY[table.align[i] ?? 'left']}>
           {wrapLines(cell, widths[i] ?? 0, Infinity).map(line => (
-            <Text color={palette.fg} bold={isHeader} wrap={isTerminal && !isFluid ? 'truncate-end' : 'wrap'}>
+            <Text color={palette.fg} bold={isHeader}>
               {line}
             </Text>
           ))}
@@ -731,7 +731,7 @@ function segmentRow(look: Look, segment: Segment, i: number, maxWidth: number, S
     const diff = tag === null ? null : fenceDiff(segment.code)
 
     if (diff !== null) {
-      return diffFence(look, diff, copyText(look, segment), maxWidth, i, Svg, tag?.lang)
+      return diffFence(look, segment, diff, maxWidth, i, Svg, tag?.lang)
     }
 
     const { chart, art } = drawingOf(look, segment, maxWidth, Svg)
@@ -764,14 +764,7 @@ function segmentRow(look: Look, segment: Segment, i: number, maxWidth: number, S
       return codeRows(look, segment.lang, segment.code, copyButton(look, `copy-${i}`, copyText(look, segment)))
     }
 
-    return Svg === undefined ? (
-      <Box flexDirection="column">
-        <Markdown text={segment.raw} />
-        {copyRow(look, `copy-${i}`, copyText(look, segment))}
-      </Box>
-    ) : (
-      codeCard(look, segment.lang, segment.code, Svg, maxWidth, `copy-${i}`, copyText(look, segment))
-    )
+    return (Svg === undefined ? null : codeCard(look, segment.lang, segment.code, Svg, maxWidth, `copy-${i}`, copyText(look, segment))) ?? stockFence(look, segment, `copy-${i}`)
   }
 
   return Svg === undefined ? (
@@ -807,16 +800,18 @@ function drawingOf(look: Look, segment: Segment & { kind: 'code' }, maxWidth: nu
 }
 
 // A diff fence: the diff card on the desktop, numbered rows on the terminal, with Copy for
-// the fence (`copied`) and `new only` for the code as it stands after the change.
-function diffFence(look: Look, diff: DiffInput, copied: string, maxWidth: number, i: number, Svg?: SvgElement, fenceLang?: string) {
-  const { Box } = look.ui
-  const whole = copyButton(look, `copy-${i}`, copied)
+// the fence and `new only` for the code as it stands after the change. A diff past what a
+// card holds keeps Claude Code's drawing of the fence.
+function diffFence(look: Look, fence: Code, diff: DiffInput, maxWidth: number, i: number, Svg?: SvgElement, fenceLang?: string) {
+  const { Box, Markdown } = look.ui
+  const whole = copyButton(look, `copy-${i}`, copyText(look, fence))
   const fresh = copyButton(look, `copy-${i}-new`, newOnly(diff), ' new only ')
+  const built = Svg === undefined ? null : diffCard(look, Svg, diff, diff.path === '' ? 'diff' : diff.path, maxWidth)
 
   if (Svg !== undefined) {
     return (
       <Box flexDirection="column">
-        {diffCard(look, Svg, diff, diff.path === '' ? 'diff' : diff.path, maxWidth)}
+        {built ?? <Markdown text={fence.raw} />}
         <Box flexDirection="row" justifyContent="flex-end">
           {whole ?? ''}
           {fresh ?? ''}
@@ -1064,27 +1059,49 @@ function card(look: Look, Svg: SvgElement, built: { source: string; alt: string;
   )
 }
 
-// A code block as a card, to the card's own 80-line cap. Copy takes `copied`.
+// A code block as a card, every line drawn. Copy takes `copied`. Null for code past what
+// a card holds (MAX_SVG), which the caller leaves to Claude Code's own drawing.
 export function codeCard(look: Look, lang: string, code: string, Svg: SvgElement, columns: number, key = 'copy-code', copied = code) {
-  return cardWithCopy(look, Svg, codeSvg(code, lang, look.skin.palette, cardWidth(columns), look.copy !== undefined), key, copied)
+  const built = codeSvg(code, lang, look.skin.palette, cardWidth(columns), look.copy !== undefined)
+
+  return built === null ? null : cardWithCopy(look, Svg, built, key, copied)
+}
+
+// A fence in Claude Code's own drawing, with Copy under it.
+function stockFence(look: Look, fence: Code, key: string) {
+  const { Box, Markdown } = look.ui
+
+  return (
+    <Box flexDirection="column">
+      <Markdown text={fence.raw} />
+      {copyRow(look, key, copyText(look, fence))}
+    </Box>
+  )
 }
 
 // A chart too crowded to draw at this width keeps its source as a code card.
 function chartCard(look: Look, chart: Chart, fence: Code, Svg: SvgElement, columns: number, key: string) {
   const built = chartSvg(chart, look.skin.palette, cardWidth(columns), look.copy !== undefined)
 
-  return built === null ? codeCard(look, 'mermaid', fence.code, Svg, columns, key, copyText(look, fence)) : cardWithCopy(look, Svg, built, key, copyText(look, fence))
+  return built === null
+    ? (codeCard(look, 'mermaid', fence.code, Svg, columns, key, copyText(look, fence)) ?? stockFence(look, fence, key))
+    : cardWithCopy(look, Svg, built, key, copyText(look, fence))
 }
 
+// An edit as a card, or null for one past what a card holds (MAX_SVG).
 export function diffCard(look: Look, Svg: SvgElement, input: DiffInput, shownPath: string, columns: number) {
-  return card(look, Svg, diffSvg(input, shownPath, look.skin.palette, cardWidth(columns)), 'diff')
+  const built = diffSvg(input, shownPath, look.skin.palette, cardWidth(columns))
+
+  return built === null ? null : card(look, Svg, built, 'diff')
 }
 
+// Shell output as a card, or null for output past what a card holds (MAX_SVG).
 export function terminalCard(look: Look, Svg: SvgElement, output: ShellOutput, isErrored: boolean, columns: number, key = 'copy-output') {
   const text = [output.stdout, output.stderr].filter(part => part.trim() !== '').join('\n')
   const withCopy = text === '' ? { ...look, copy: undefined } : look
+  const built = terminalSvg(output, isErrored, look.skin.palette, cardWidth(columns), withCopy.copy !== undefined, look.prefs.highlight)
 
-  return cardWithCopy(withCopy, Svg, terminalSvg(output, isErrored, look.skin.palette, cardWidth(columns), withCopy.copy !== undefined, look.prefs.highlight), key, text)
+  return built === null ? null : cardWithCopy(withCopy, Svg, built, key, text)
 }
 
 // From this full, the band suggests compacting and makes it the main action.

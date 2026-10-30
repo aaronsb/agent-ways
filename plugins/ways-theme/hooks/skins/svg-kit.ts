@@ -67,6 +67,34 @@ export function fitText(text: string, width: number, isMono: boolean, size: numb
   return `${chars.slice(0, Math.max(1, kept)).join('')}…`
 }
 
+// `text` cut into pieces that each fit `width`, never inside a character; one piece for
+// text that fits. A card wraps a long line of code or output onto these instead of
+// cutting it.
+export function breakText(text: string, width: number, isMono: boolean, size: number): string[] {
+  const pieces: string[] = []
+  let piece = ''
+  let used = 0
+
+  for (const char of text) {
+    const next = measure(char, isMono, size)
+
+    if (piece !== '' && used + next > width) {
+      pieces.push(piece)
+      piece = ''
+      used = 0
+    }
+
+    piece += char
+    used += next
+  }
+
+  return [...pieces, piece]
+}
+
+// The Svg element takes a document of at most this many characters. A card past it is
+// handed back to Claude Code's own drawing, as a reply past MAX_MARKDOWN is (reply.ts).
+export const MAX_SVG = 131072
+
 // The room a reply gives a card, from the width the desktop reports in cells of its code
 // font, kept to a range a card reads well at. Measured against the desktop's reply column,
 // a reported cell is about 7.2px (6.4 drew cards at about 88% of the column). A card drawn

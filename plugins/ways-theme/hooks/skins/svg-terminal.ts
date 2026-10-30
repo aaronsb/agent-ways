@@ -3,10 +3,10 @@
 
 import type { Palette } from './skin'
 import { outputTokens, roleColors } from './highlight'
-import { CONTROL_SLOT, escape, HEADER_MID, fitText, MONO, pill, riseDelay, staggerEnd, staggerStep, strokeIcon, svgCard } from './svg-kit'
+import { breakText, CONTROL_SLOT, escape, HEADER_MID, MAX_SVG, MONO, pill, riseDelay, staggerEnd, staggerStep, strokeIcon, svgCard } from './svg-kit'
 
 // A shell command's output as a terminal card: a status pill, and every line of the output
-// in mono with stderr in the error colour.
+// in mono with stderr in the error colour, a long one wrapped onto the rows under it.
 
 const HEADER_H = 56
 const LINE_H = 20
@@ -45,10 +45,10 @@ export function streamLines(text: string, isErr: boolean): { text: string; isErr
 export const outputLines = (output: ShellOutput): { text: string; isErr: boolean }[] => [...streamLines(output.stdout, false), ...streamLines(output.stderr, true)]
 
 // `hasControl` leaves the header's right corner free for a Copy button laid over it.
-// `colour` picks out paths, numbers and verdicts in stdout with the skin's colours.
-export function terminalSvg(output: ShellOutput, isErrored: boolean, palette: Palette, width: number, hasControl = false, colour = false): { source: string; width: number; height: number; alt: string; entranceMs: number } {
+// `colour` picks out paths, numbers and verdicts in stdout with the skin's colours. Null
+// for output whose card would be past MAX_SVG, which keeps Claude Code's own drawing.
+export function terminalSvg(output: ShellOutput, isErrored: boolean, palette: Palette, width: number, hasControl = false, colour = false): { source: string; width: number; height: number; alt: string; entranceMs: number } | null {
   const lines = outputLines(output)
-  const step = staggerStep(Math.max(1, lines.length), 22)
   const status = output.interrupted
     ? { text: 'interrupted', color: palette.warn }
     : output.timedOutAfterMs !== undefined
@@ -57,22 +57,25 @@ export function terminalSvg(output: ShellOutput, isErrored: boolean, palette: Pa
         ? { text: 'failed', color: palette.err }
         : { text: 'ok', color: palette.ok }
 
-  const rows = (lines.length === 0 ? [{ text: 'no output', isErr: false, isNote: true }] : lines).map((line, i) => {
+  const shown = (lines.length === 0 ? [{ text: 'no output', isErr: false, isNote: true }] : lines).flatMap(line =>
+    breakText(line.text, width - 40, true, CODE).map(text => ({ ...line, text })),
+  )
+  const step = staggerStep(shown.length, 22)
+  const rows = shown.map((line, i) => {
     const top = HEADER_H + 6 + i * LINE_H
 
     const color = 'isNote' in line ? palette.muted : line.isErr ? palette.err : palette.fg
-    const text = fitText(line.text, width - 40, true, CODE)
     const body =
       colour && !line.isErr && !('isNote' in line)
-        ? outputTokens(text)
+        ? outputTokens(line.text)
             .map(token => `<tspan style="fill:${roleColors(palette)[token.role]}">${escape(token.text)}</tspan>`)
             .join('')
-        : escape(text)
+        : escape(line.text)
 
     return `<g class="rise" ${riseDelay(i, step)}><text x="20" y="${top + 14}" font-family="${MONO}" font-size="${CODE}" style="fill:${color}" xml:space="preserve">${body}</text></g>`
   })
 
-  const height = HEADER_H + 6 + Math.max(1, lines.length) * LINE_H + 10
+  const height = HEADER_H + 6 + shown.length * LINE_H + 10
   const note = output.returnCodeInterpretation === undefined ? 'Output' : `Output · ${output.returnCodeInterpretation}`
   const header = [
     strokeIcon(PROMPT, 16, HEADER_MID - 9, 18, palette.fg),
@@ -81,11 +84,15 @@ export function terminalSvg(output: ShellOutput, isErrored: boolean, palette: Pa
     `<line x1="0" y1="${HEADER_H - 0.5}" x2="${width}" y2="${HEADER_H - 0.5}" stroke="${palette.muted}" stroke-opacity=".3"/>`,
   ].join('')
 
-  return {
-    source: svgCard(width, height, palette, '', header + rows.join('')),
-    width,
-    height,
-    alt: lines.map(line => line.text).join('\n') || 'no output',
-    entranceMs: staggerEnd(Math.max(1, lines.length), step),
-  }
+  const source = svgCard(width, height, palette, '', header + rows.join(''))
+
+  return source.length > MAX_SVG
+    ? null
+    : {
+        source,
+        width,
+        height,
+        alt: lines.map(line => line.text).join('\n') || 'no output',
+        entranceMs: staggerEnd(shown.length, step),
+      }
 }

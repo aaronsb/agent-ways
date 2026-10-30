@@ -126,7 +126,7 @@ export function diffRows(
               <Text color={palette.muted}>{`${' '.repeat(digits * 2 + 2)}⋯ line ${line.at}`}</Text>
             ) : syntax?.[i] !== undefined && line.text !== '' ? (
               // The marker keeps the change's colour; the code after it takes the language's.
-              <Text wrap="truncate-end">
+              <Text>
                 <Text color={palette.muted}>{`${number(line.old)} ${number(line.new)} `}</Text>
                 <Text color={line.kind === 'add' ? palette.ok : line.kind === 'del' ? palette.err : palette.muted}>
                   {`${line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' '} `}
@@ -138,7 +138,7 @@ export function diffRows(
                 ))}
               </Text>
             ) : (
-              <Text wrap="truncate-end">
+              <Text>
                 <Text color={palette.muted}>{`${number(line.old)} ${number(line.new)} `}</Text>
                 <Text color={line.kind === 'add' ? palette.ok : line.kind === 'del' ? palette.err : palette.muted}>
                   {`${line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' '} ${line.text === '' ? ' ' : line.text}`}

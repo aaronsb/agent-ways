@@ -80,7 +80,6 @@ const usageAtom = atom({ plugin: 'ways-theme', key: 'usage' } as const, { contex
 const countdownsAtom = atom({ plugin: 'ways-theme', key: 'countdowns' } as const, {} as Record<string, string>)
 const settleAtom = atom({ plugin: 'ways-theme', key: 'settle' } as const, 0)
 const disclosureAtom = atom({ plugin: 'ways-theme', key: 'disclosure' } as const, 'auto' as 'auto' | 'open' | 'closed')
-const allAtom = atom({ plugin: 'ways-theme', key: 'showAll' } as const, false)
 const touchedAtom = atom({ plugin: 'ways-theme', key: 'touched' } as const, {} as Record<string, Touch>)
 
 const WRITES = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit'])
@@ -537,8 +536,6 @@ export function registerSkins(on: On, shared: Shared): void {
 
     if (!open) return drawn(disclosedRow(look, row, false, toggle))
 
-    const all = memberOf(allAtom, e)
-    const isAll = await read($, all)
     const opened = await openedRows(look, {
       fields: inputFields(e.props.tool, e.props.input, cwd),
       body: bodyOf(e.props.tool, e.props.output, e.props.isErrored, e.props.isRunning, cwd),
@@ -546,8 +543,6 @@ export function registerSkins(on: On, shared: Shared): void {
       isErrored: e.props.isErrored,
       cwd,
       columns: e.viewport?.columns ?? 100,
-      isAll,
-      toggleAll: () => void update($, all, () => !isAll),
       stock,
     })
     return drawn(disclosedRow(look, row, true, toggle, opened))
@@ -594,15 +589,14 @@ export function registerSkins(on: On, shared: Shared): void {
     }
     if (look.svg !== undefined && EDITS.has(e.props.tool) && !e.props.isErrored) {
       const diff = hunksOf(e.props.output)
-      if (diff !== null) {
-        const shown = shortenPath(diff.path, await $.session.cwd())
-        return withSettle($, e, diffCard({ ...look, isFirstDraw: await firstDraws($, e) }, look.svg, diff, shown, columns))
-      }
+      const card = diff === null ? null : diffCard({ ...look, isFirstDraw: await firstDraws($, e) }, look.svg, diff, shortenPath(diff.path, await $.session.cwd()), columns)
+      if (card !== null) return withSettle($, e, card)
     }
     const isShellCard = look.prefs.shell && SHELLS.has(e.props.tool) && !keepsOwnRow(e.props.output)
     if (look.svg !== undefined && isShellCard) {
       const shell = shellOutputOf(e.props.output)
-      if (shell !== null) return withSettle($, e, terminalCard({ ...look, isFirstDraw: await firstDraws($, e) }, look.svg, shell, e.props.isErrored, columns))
+      const card = shell === null ? null : terminalCard({ ...look, isFirstDraw: await firstDraws($, e) }, look.svg, shell, e.props.isErrored, columns)
+      if (card !== null) return withSettle($, e, card)
     }
     if (e.surface === 'terminal' && isShellCard) {
       const shell = shellResultOf(e.props.output, e.props.isErrored)

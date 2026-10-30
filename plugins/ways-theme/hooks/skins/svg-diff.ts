@@ -2,16 +2,16 @@
 // https://github.com/hellosverre/claude-skins at 985ad63, hooks/svg-diff.ts.
 
 import type { Palette } from './skin'
-import { escape, fitText, MONO, pill, riseDelay, staggerEnd, staggerStep, strokeIcon, svgCard } from './svg-kit'
+import { breakText, escape, fitText, MAX_SVG, MONO, pill, riseDelay, staggerEnd, staggerStep, strokeIcon, svgCard } from './svg-kit'
 
 // An edit as a card: the file, how many lines it added and removed, and the changed
-// lines with their numbers, green and red, rising in one after another.
+// lines with their numbers, green and red, rising in one after another. Every line draws,
+// a long one wrapped onto rows under its numbers.
 
 const HEADER_H = 44
 const LINE_H = 22
 const GAP_H = 20
 const CODE = 12.5
-const MAX_LINES = 30
 const PENCIL = '<path d="M4 20h4L18.5 9.5a2.83 2.83 0 0 0-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/>'
 const NEW_FILE = '<path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/><path d="M12 11v6M9 14h6"/>'
 
@@ -70,18 +70,17 @@ export function hunksOf(output: unknown): DiffInput | null {
   return null
 }
 
-export function diffSvg(input: DiffInput, shownPath: string, palette: Palette, width: number): { source: string; height: number; alt: string; entranceMs: number } {
+// Null for an edit whose card would be past MAX_SVG, which keeps Claude Code's own drawing.
+export function diffSvg(input: DiffInput, shownPath: string, palette: Palette, width: number): { source: string; height: number; alt: string; entranceMs: number } | null {
   const all = diffLines(input.hunks)
-  const shown = all.slice(0, MAX_LINES)
-  const step = staggerStep(shown.length, 18)
-  const hidden = all.length - shown.length
+  const step = staggerStep(all.length, 18)
   const added = all.filter(line => line.kind === 'add').length
   const removed = all.filter(line => line.kind === 'del').length
   const codeX = 112
   const codeWidth = width - codeX - 16
 
   let y = HEADER_H
-  const rows = shown.map((line, i) => {
+  const rows = all.map((line, i) => {
     const top = y
 
     if (line.kind === 'gap') {
@@ -90,19 +89,23 @@ export function diffSvg(input: DiffInput, shownPath: string, palette: Palette, w
       return `<g ${riseDelay(i, step)} class="rise"><text x="${codeX}" y="${top + 14}" font-size="11" style="fill:${palette.muted}">⋯  line ${line.at}</text></g>`
     }
 
-    y += LINE_H
+    const pieces = breakText(line.text, codeWidth, true, CODE)
+    const height = pieces.length * LINE_H
+    y += height
 
     const tint = line.kind === 'add' ? palette.ok : line.kind === 'del' ? palette.err : undefined
     const sign = line.kind === 'add' ? '+' : line.kind === 'del' ? '−' : ''
-    const band = tint === undefined ? '' : `<rect y="${top}" width="${width}" height="${LINE_H}" fill="${tint}" fill-opacity=".1"/><rect y="${top}" width="2" height="${LINE_H}" fill="${tint}"/>`
+    const band = tint === undefined ? '' : `<rect y="${top}" width="${width}" height="${height}" fill="${tint}" fill-opacity=".1"/><rect y="${top}" width="2" height="${height}" fill="${tint}"/>`
     const number = (value: number | undefined, x: number) =>
       value === undefined ? '' : `<text x="${x}" y="${top + 15}" text-anchor="end" font-family="${MONO}" font-size="11" style="fill:${palette.muted}">${value}</text>`
+    const text = pieces
+      .map((piece, p) => `<text x="${codeX}" y="${top + 15 + p * LINE_H}" font-family="${MONO}" font-size="${CODE}" style="fill:${line.kind === 'ctx' ? palette.muted : palette.fg}" xml:space="preserve">${escape(piece)}</text>`)
+      .join('')
 
-    return `<g ${riseDelay(i, step)} class="rise">${band}${number(line.old, 44)}${number(line.new, 80)}<text x="96" y="${top + 15}" font-family="${MONO}" font-size="${CODE}" style="fill:${tint ?? palette.muted}">${sign}</text><text x="${codeX}" y="${top + 15}" font-family="${MONO}" font-size="${CODE}" style="fill:${line.kind === 'ctx' ? palette.muted : palette.fg}" xml:space="preserve">${escape(fitText(line.text, codeWidth, true, CODE))}</text></g>`
+    return `<g ${riseDelay(i, step)} class="rise">${band}${number(line.old, 44)}${number(line.new, 80)}<text x="96" y="${top + 15}" font-family="${MONO}" font-size="${CODE}" style="fill:${tint ?? palette.muted}">${sign}</text>${text}</g>`
   })
 
-  const footer = hidden > 0 ? `<text x="${codeX}" y="${y + 18}" font-size="11.5" style="fill:${palette.muted}">${hidden} more line${hidden === 1 ? '' : 's'}</text>` : ''
-  const height = y + (hidden > 0 ? 30 : 8)
+  const height = y + 8
   const tag = input.isNewFile ? pill(width - 16, 12, 'new file', palette.user, palette) : ''
   const counts = `<text x="${width - (input.isNewFile ? 100 : 16)}" y="27" text-anchor="end" font-family="${MONO}" font-size="12.5"><tspan style="fill:${palette.ok}">+${added}</tspan><tspan style="fill:${palette.muted}">  </tspan><tspan style="fill:${palette.err}">−${removed}</tspan></text>`
   const header = [
@@ -112,11 +115,14 @@ export function diffSvg(input: DiffInput, shownPath: string, palette: Palette, w
     tag,
     `<line x1="0" y1="${HEADER_H - 0.5}" x2="${width}" y2="${HEADER_H - 0.5}" stroke="${palette.muted}" stroke-opacity=".3"/>`,
   ].join('')
+  const source = svgCard(width, height, palette, '', header + rows.join(''))
 
-  return {
-    source: svgCard(width, height, palette, '', header + rows.join('') + footer),
-    height,
-    alt: `${shownPath}: +${added} −${removed}`,
-    entranceMs: staggerEnd(shown.length, step),
-  }
+  return source.length > MAX_SVG
+    ? null
+    : {
+        source,
+        height,
+        alt: `${shownPath}: +${added} −${removed}`,
+        entranceMs: staggerEnd(all.length, step),
+      }
 }

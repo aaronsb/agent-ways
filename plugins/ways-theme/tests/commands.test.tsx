@@ -9,6 +9,10 @@ import { splitReply, tableArt, tableCsv } from '../hooks/skins/markdown.ts'
 import type { Segment, Table } from '../hooks/skins/markdown.ts'
 import { inlineMath } from '../hooks/skins/math.ts'
 import { replySegments } from '../hooks/skins/reply.ts'
+import { codeSvg } from '../hooks/skins/svg-code.ts'
+import { diffSvg } from '../hooks/skins/svg-diff.ts'
+import { MAX_SVG } from '../hooks/skins/svg-kit.ts'
+import { terminalSvg } from '../hooks/skins/svg-terminal.ts'
 import { MIAMI_NIGHTS } from './fixtures.ts'
 import { INTERACTIVE, borders, host, json, shows } from './host.tsx'
 import type { Node, World } from './host.tsx'
@@ -703,5 +707,61 @@ describe('copy_as', () => {
   test('the drawn cell keeps a code span as written and drops bold around it', () => {
     const table = splitReply('| a | b |\n|---|---|\n| `**kwargs` | **bold** `__init__` |')[0] as Table
     expect(table.rows).toEqual([['**kwargs', 'bold __init__']])
+  })
+})
+
+describe('nothing folds and nothing is cut', () => {
+  const PALETTE = setupOf(MIAMI_NIGHTS as never).skin.palette
+  const lines = (n: number, line = (k: number) => `line ${k}`) => Array.from({ length: n }, (_, k) => line(k + 1)).join('\n')
+
+  test('an opened answer of 120 lines draws every line, wrapped, with no `show all`', async ($, on) => {
+    hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
+    await $.session.start(INTERACTIVE)
+    const failed = { tool_use_id: 't1', tool: 'Read', input: { file_path: '/work/proj/a.ts' }, isRunning: false, isErrored: true, isInterrupted: false, isExpanded: false, output: lines(120, k => `error ${k} ${'x'.repeat(k === 120 ? 200 : 0)}`.trimEnd()) }
+    const ui = await $.ui.mount({ plugin: 'ways-theme', surface: 'terminal', component: 'ToolUse', requestId: 'r1', viewport: { columns: 80, rows: 40 }, props: failed } as never)
+    const tree = await ui.drawn()
+    expect(await ui.find({ type: 'Button', text: /show all|show less/ })).toBe(undefined)
+    await ui.unmount()
+    for (const line of ['error 1', 'error 21', 'error 119', `error 120 ${'x'.repeat(200)}`]) expect(drawnAt(tree, line).length).toBeGreaterThan(0)
+    expect(nodes(tree, n => n.props?.wrap === 'truncate-end' && strings(n).startsWith('error '))).toEqual([])
+  })
+
+  test('a code card draws every line and wraps a long one, with no `more lines`', () => {
+    const card = codeSvg(`${lines(200)}\n${'y'.repeat(300)}`, 'ts', PALETTE, 800)!
+    expect(card.source).toContain('>201<')
+    expect(card.source).not.toMatch(/more line|…/)
+    expect(card.source.match(/y/g)!.length).toBeGreaterThanOrEqual(300)
+  })
+
+  test('a diff card draws every line and wraps a long one, with no `more lines`', () => {
+    const diff = { path: 'a.ts', isNewFile: false, hunks: [{ oldStart: 1, newStart: 1, lines: [...Array.from({ length: 100 }, (_, k) => `+added ${k + 1}`), `+${'y'.repeat(300)}`] }] }
+    const card = diffSvg(diff, 'a.ts', PALETTE, 800)!
+    expect(card.source).toContain('added 100<')
+    expect(card.source).not.toMatch(/more line|…/)
+    expect(card.source.match(/y/g)!.length).toBeGreaterThanOrEqual(300)
+  })
+
+  test('a terminal card wraps a long line', () => {
+    const card = terminalSvg({ stdout: 'y'.repeat(300), stderr: '', interrupted: false }, false, PALETTE, 800)!
+    expect(card.source).not.toContain('…')
+    expect(card.source.match(/y/g)!.length).toBeGreaterThanOrEqual(300)
+  })
+
+  test('a card past what the Svg element takes is null', () => {
+    const big = lines(4000)
+    expect(codeSvg(big, 'ts', PALETTE, 800)).toBe(null)
+    expect(diffSvg({ path: 'a.ts', isNewFile: true, hunks: [{ oldStart: 0, newStart: 1, lines: big.split('\n').map(line => `+${line}`) }] }, 'a.ts', PALETTE, 800)).toBe(null)
+    expect(terminalSvg({ stdout: big, stderr: '', interrupted: false }, false, PALETTE, 800)).toBe(null)
+    expect(codeSvg(lines(40), 'ts', PALETTE, 800)!.source.length).toBeLessThan(MAX_SVG)
+  })
+
+  test('on the desktop a fence too big for a card keeps Claude Code\'s drawing, whole', async ($, on) => {
+    hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
+    await $.session.start({ ...INTERACTIVE, surface: 'desktop' })
+    const fence = `\`\`\`ts\n${lines(900, () => 'abcdefgh')}\n\`\`\``
+    expect(fence.length).toBeLessThan(9000)
+    const tree = await drawn($, `Here:\n\n${fence}\n\nDone.`, 'desktop')
+    expect(nodes(tree, n => n.type === 'Svg')).toEqual([])
+    expect(nodes(tree, n => n.type === 'Markdown' && n.props?.text === fence).length).toBe(1)
   })
 })

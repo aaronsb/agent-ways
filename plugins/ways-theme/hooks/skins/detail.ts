@@ -22,11 +22,12 @@ export type Body =
   | { kind: 'none' }
   | { kind: 'stock' }
 
-// Lines of a read or a search shown before the rest folds behind a `show all` control.
-export const DETAIL_LINES = 20
-
 // The engine's `Code` and `Markdown` take at most 10000 characters a block.
 export const MAX_BLOCK = 9000
+
+// One drawing draws at most 100000 characters in all; an opened answer longer than this
+// keeps Claude Code's own drawing.
+export const MAX_DRAWN = 90000
 
 export const isOpen = (disclosure: string, isErrored: boolean): boolean =>
   disclosure === 'open' || (disclosure !== 'closed' && isErrored)
@@ -233,7 +234,8 @@ export function unifiedDiff(diff: DiffInput): string {
     .join('\n')
 }
 
-// Text cut into blocks the engine takes, each with the line number it starts at.
+// Lines cut into blocks of at most `max` characters, each with the line number it starts
+// at; a line longer than `max` is a block of its own.
 export function chunksOf(lines: readonly string[], startLine: number, max = MAX_BLOCK): { text: string; startLine: number }[] {
   const chunks: { text: string; startLine: number }[] = []
   let current: string[] = []
@@ -241,17 +243,15 @@ export function chunksOf(lines: readonly string[], startLine: number, max = MAX_
   let at = startLine
 
   for (const [i, line] of lines.entries()) {
-    const cut = line.length > max ? `${line.slice(0, max - 1)}…` : line
-
-    if (current.length > 0 && size + cut.length + 1 > max) {
+    if (current.length > 0 && size + line.length + 1 > max) {
       chunks.push({ text: current.join('\n'), startLine: at })
       at = startLine + i
       current = []
       size = 0
     }
 
-    current.push(cut)
-    size += cut.length + 1
+    current.push(line)
+    size += line.length + 1
   }
 
   return current.length === 0 ? chunks : [...chunks, { text: current.join('\n'), startLine: at }]

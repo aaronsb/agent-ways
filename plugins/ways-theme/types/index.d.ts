@@ -101,9 +101,8 @@ declare module 'claude-code' {
       quiet: StateFamily<boolean>
       // A shell call's command, for its output card's header: ToolResult does not carry it.
       command: StateFamily<string>
-      // Each tool row's chevron, and whether its opened answer shows past the fold.
+      // Each tool row's chevron.
       disclosure: StateFamily<Disclosure>
-      showAll: StateFamily<boolean>
       // Files the turn created or edited, by absolute path, for their colour in rows and prose.
       touched: Record<string, Touch>
       settle: number

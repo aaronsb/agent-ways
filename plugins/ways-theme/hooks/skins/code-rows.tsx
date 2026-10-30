@@ -25,7 +25,7 @@ export function tokenSpans(look: Look, tokens: readonly Token[]) {
 export function outputLine(look: Look, text: string) {
   const { Text } = look.ui
 
-  return <Text wrap="truncate-end">{tokenSpans(look, outputTokens(text))}</Text>
+  return <Text>{tokenSpans(look, outputTokens(text))}</Text>
 }
 
 // A fenced block: the language and a control (Copy) on the frame, then each line highlighted.
