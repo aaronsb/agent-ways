@@ -493,18 +493,26 @@ export function copyOf(reply: string, code: boolean): { text: string } | { messa
 // address, `<br>` as a line break, emphasis and strikethrough as the words inside them, a
 // backslash escape as the character, and a code span as its content verbatim. A link's
 // address may hold one level of parentheses, `(https://x.com/(p))`.
-const plainCell = (cell: string): string =>
-  outsideCode(cellSource(cell), text =>
-    text
-      .replace(/!?\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)/g, '$1')
-      .replace(/<((?:[a-z][a-z0-9+.-]{1,31}:[^\s<>]*)|(?:[^\s<>@]+@[^\s<>]+))>/gi, '$1')
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/\*\*(.+?)\*\*|__(.+?)__/g, '$1$2')
-      .replace(/~~(.+?)~~/g, '$1')
-      .replace(/(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])/g, '$1')
-      .replace(/(?<!\w)_(?!\s)(.+?)(?<!\s)_(?!\w)/g, '$1')
-      .replace(/\\([\\`*_{}[\]()#+\-.!|~<>])/g, '$1'),
-  )
+const inlineText = (text: string): string =>
+  text
+    .replace(/!?\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)/g, '$1')
+    .replace(/<((?:[a-z][a-z0-9+.-]{1,31}:[^\s<>]*)|(?:[^\s<>@]+@[^\s<>]+))>/gi, '$1')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/\*\*(.+?)\*\*|__(.+?)__/g, '$1$2')
+    .replace(/~~(.+?)~~/g, '$1')
+    .replace(/(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])/g, '$1')
+    .replace(/(?<!\w)_(?!\s)(.+?)(?<!\s)_(?!\w)/g, '$1')
+    .replace(/\\([\\`*_{}[\]()#+\-.!|~<>])/g, '$1')
+
+const plainCell = (cell: string): string => outsideCode(cellSource(cell), inlineText)
+
+// Prose as its text: each line less its heading or quote mark, its inline markdown read as
+// a cell's is.
+export const proseText = (prose: string): string =>
+  prose
+    .split('\n')
+    .map(line => outsideCode(line.replace(/^(\s*)#{1,6}\s+/, '$1').replace(/^\s*>\s?/, ''), inlineText))
+    .join('\n')
 
 // The cells of a table as written, for the copy: its header and rows from `raw` where it
 // came from markdown, since the drawn cells have lost their code spans' ticks.
@@ -531,11 +539,13 @@ export function tableCsv(table: Table): string {
     .join('\n')
 }
 
-// A table as it is drawn, boxed in monospace, for pasting where markdown does not render.
-export function tableArt(table: Table): string {
-  const widths = table.header.map((cell, col) => Math.max(widthOf(cell), ...table.rows.map(row => widthOf(row[col] ?? ''))))
-  const rule = (left: string, mid: string, right: string) => `${left}${widths.map(width => '─'.repeat(width + 2)).join(mid)}${right}`
-  const row = (cells: readonly string[]) => `│${widths.map((width, col) => ` ${padCell(cells[col] ?? '', width, table.align[col] ?? 'left')} `).join('│')}│`
+// A table as text: its header and rows, each cell's inline markdown read as `tableCsv`
+// reads it and a line break in it a space, each column padded to its widest cell and two
+// spaces apart, with no rule or border.
+export function tableText(table: Table): string {
+  const cells = writtenCells(table).map(row => row.map(cell => plainCell(cell).replace(/\n/g, ' ')))
+  const widths = (cells[0] ?? []).map((_, col) => Math.max(...cells.map(row => widthOf(row[col] ?? ''))))
+  const row = (texts: readonly string[]) => widths.map((width, col) => padCell(texts[col] ?? '', width, table.align[col] ?? 'left')).join('  ').trimEnd()
 
-  return [rule('╭', '┬', '╮'), row(table.header), rule('├', '┼', '┤'), ...table.rows.map(row), rule('╰', '┴', '╯')].join('\n')
+  return cells.map(row).join('\n')
 }

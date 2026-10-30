@@ -9,7 +9,7 @@ import { diffLines } from './svg-diff'
 import type { DiffInput, Hunk } from './svg-diff'
 
 // A ```diff fence drawn as a diff: old and new line numbers, added and removed lines in the
-// skin's colours, and the code as it stands after the change for `copy new only`.
+// skin's colours, and the code as it stands after the change for the `new only` copy.
 
 const HEADER = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/
 const FILE_LINE = /^(?:diff |index |--- |\+\+\+ |similarity |rename |new file|deleted file)/

@@ -27,7 +27,7 @@ export const MIAMI_NIGHTS = {
     spinner: ['Cruising', 'Gliding', 'Glowing', 'Pulsing', 'Racing', 'Drifting'],
     done: ['Cruised', 'Glowed', 'Docked', 'Landed'],
   },
-  render: { rail: true, tables: 'on', shimmer: true, charts: true, markdown: true, icons: 'unicode', frames: true, prompt_box: 'gradient', copy: true, copy_as: 'content', paths: 'wrap' },
+  render: { rail: true, tables: 'on', shimmer: true, charts: true, markdown: true, icons: 'unicode', frames: true, prompt_box: 'gradient', copy: true, copy_style: 'verbose', paths: 'wrap' },
 } as const
 
 export const TAMPA = {
@@ -51,7 +51,7 @@ export const TAMPA = {
   },
   gradient: { axis: 'horizontal', stops: ['#e8f3fb', '#fff6e8', '#ffe4d2'] },
   words: null,
-  render: { rail: true, tables: 'on', shimmer: true, charts: true, markdown: true, icons: 'unicode', frames: true, prompt_box: 'gradient', copy: true, copy_as: 'content', paths: 'wrap' },
+  render: { rail: true, tables: 'on', shimmer: true, charts: true, markdown: true, icons: 'unicode', frames: true, prompt_box: 'gradient', copy: true, copy_style: 'verbose', paths: 'wrap' },
 } as const
 
 export const TERMINAL_THEME = {
@@ -60,5 +60,5 @@ export const TERMINAL_THEME = {
   roles: null,
   gradient: null,
   words: null,
-  render: { rail: true, tables: 'on', shimmer: true, charts: true, markdown: true, icons: 'unicode', frames: true, prompt_box: 'frame', copy: true, copy_as: 'content', paths: 'wrap' },
+  render: { rail: true, tables: 'on', shimmer: true, charts: true, markdown: true, icons: 'unicode', frames: true, prompt_box: 'frame', copy: true, copy_style: 'verbose', paths: 'wrap' },
 } as const
