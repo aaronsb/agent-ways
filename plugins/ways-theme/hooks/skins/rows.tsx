@@ -8,7 +8,6 @@ import { formatDuration, formatMs } from './format'
 import type { PathBase } from './links'
 import { columnWidths, graphemes, isShell, tableArt, widthOf, wrapLines } from './markdown'
 import { diffFenceTag, diffRows, fenceDiff, newOnly } from './diff-fence'
-import { FOLD_CODE, FOLD_ROWS, foldButton, shownCount } from './fold'
 import type { Segment, Table } from './markdown'
 import type { Copy } from './commands'
 import { splitBlocks } from './blocks'
@@ -65,8 +64,6 @@ export type Look = {
   paths?: PathBase
   // The files this turn created or edited, by absolute path, and the folder paths are under.
   touched?: { files: Readonly<Record<string, Touch>>; cwd: string }
-  // The blocks the person unfolded, by key, and how to flip one. Absent, nothing folds.
-  folds?: { open: ReadonlySet<string>; toggle: (key: string) => void }
 }
 
 export type Call = {
@@ -465,8 +462,7 @@ const NATURAL_SHARE = 0.55
 // A grid of cells, so columns line up in the terminal's monospace and in the desktop
 // app's proportional font alike. `control`, such as a Copy button, sits on the frame's
 // top border at the right, as ╭──── Copy ─╮.
-// Past FOLD_ROWS rows it folds under `foldKey`. Long cells wrap within their column in
-// full: unlike the desktop card, the terminal has no tooltip to read a cut cell by (#59).
+// Every row is drawn. Long cells wrap within their column in full: unlike the desktop card, the terminal has no tooltip to read a cut cell by (#59).
 // `maxWidth` is the room the table is drawn in, not the terminal's width: in a frame it
 // is the frame's inside.
 //
@@ -475,9 +471,8 @@ const NATURAL_SHARE = 0.55
 // lines. Elsewhere the font is proportional, so the cells' lines wrap again where the
 // surface needs them to, and a wide table splits its container between columns; so does
 // a terminal table of more columns than its room holds at one cell each.
-export function tableRows(look: Look, table: Table, maxWidth: number, control?: ReturnType<Ui['Button']>, foldKey = 'fold-table') {
+export function tableRows(look: Look, table: Table, maxWidth: number, control?: ReturnType<Ui['Button']>) {
   const { Box, Text } = look.ui
-  const rows = table.rows.slice(0, shownCount(look, foldKey, table.rows.length, FOLD_ROWS))
   const { palette } = look.skin
   const widths = columnWidths(table, maxWidth - 4, CELL_PAD * 2)
   const natural = widths.reduce((sum, width) => sum + width + CELL_PAD * 2, 2)
@@ -504,23 +499,13 @@ export function tableRows(look: Look, table: Table, maxWidth: number, control?: 
     </Box>
   )
 
-  const fold = foldButton(look, foldKey, table.rows.length, FOLD_ROWS)
-  const frame = onBorder(
+  return onBorder(
     look,
     <Box flexDirection="column" borderStyle="round" borderColor={palette.muted}>
       {row(table.header, true, palette.surface)}
-      {rows.map((cells, i) => row(cells, false, i % 2 === 1 ? palette.zebra : undefined))}
+      {table.rows.map((cells, i) => row(cells, false, i % 2 === 1 ? palette.zebra : undefined))}
     </Box>,
-    { control, box: { marginY: fold === '' ? 1 : 0, ...(isFluid ? { width: '100%' } : { alignSelf: 'flex-start' }) } },
-  )
-
-  return fold === '' ? (
-    frame
-  ) : (
-    <Box flexDirection="column" marginY={1}>
-      {frame}
-      {fold}
-    </Box>
+    { control, box: { marginY: 1, ...(isFluid ? { width: '100%' } : { alignSelf: 'flex-start' }) } },
   )
 }
 
@@ -667,13 +652,13 @@ export function copyRow(look: Look, key: string, text: string, label = 'Copy') {
 // and Copy on the line under it, which copies the text whole. A suggestion's `!` or `/`
 // is drawn bold; a fence's code is drawn by `codeCopyRows`. `gapBelow` keeps a blank line
 // under it for prose that follows, which opens on none; a frame opens on one.
-export function copyRows(look: Look, copy: Copy, key: string, gapBelow: boolean, foldKey: string) {
+export function copyRows(look: Look, copy: Copy, key: string, gapBelow: boolean) {
   const { Box, Text } = look.ui
   const { palette } = look.skin
   const margins = { marginTop: 1, marginBottom: gapBelow ? 1 : 0 }
 
   if (copy.form === 'code') {
-    return codeCopyRows(look, copy.lang, copy.text, copyButton(look, key, copy.text), foldKey, margins)
+    return codeCopyRows(look, copy.lang, copy.text, copyButton(look, key, copy.text), margins)
   }
 
   const lead = copy.form === 'span' ? 0 : 1
@@ -710,7 +695,7 @@ function segmentRow(look: Look, segment: Segment, i: number, maxWidth: number, S
   }
 
   if (segment.kind === 'copy') {
-    return copyRows(look, segment, `copy-${i}`, true, `fold-${i}`)
+    return copyRows(look, segment, `copy-${i}`, true)
   }
 
   if (segment.kind === 'math') {
@@ -758,7 +743,7 @@ function segmentRow(look: Look, segment: Segment, i: number, maxWidth: number, S
 
     // The terminal highlights the languages it knows in the skin's colours.
     if (look.surface === 'terminal' && look.prefs.highlight && languageOf(segment.lang) !== undefined) {
-      return codeRows(look, segment.lang, segment.code, copyButton(look, `copy-${i}`, segment.code), `fold-${i}`)
+      return codeRows(look, segment.lang, segment.code, copyButton(look, `copy-${i}`, segment.code))
     }
 
     return Svg === undefined ? (
@@ -767,12 +752,12 @@ function segmentRow(look: Look, segment: Segment, i: number, maxWidth: number, S
         {copyRow(look, `copy-${i}`, segment.code)}
       </Box>
     ) : (
-      codeCard(look, segment.lang, segment.code, Svg, maxWidth, `copy-${i}`, `fold-${i}`)
+      codeCard(look, segment.lang, segment.code, Svg, maxWidth, `copy-${i}`)
     )
   }
 
   return Svg === undefined ? (
-    tableRows(look, segment, maxWidth, tableControls(look, `copy-${i}`, segment), `fold-${i}`)
+    tableRows(look, segment, maxWidth, tableControls(look, `copy-${i}`, segment))
   ) : (
     tableCard(look, segment, Svg, maxWidth, `copy-${i}`)
   )
@@ -830,7 +815,7 @@ function diffFence(look: Look, diff: DiffInput, code: string, maxWidth: number, 
       </Box>
     )
 
-  return diffRows(look, diff, controls, `fold-${i}`, fenceLang)
+  return diffRows(look, diff, controls, fenceLang)
 }
 
 // Columns between blocks laid side by side.
@@ -971,7 +956,7 @@ export function replyRows(look: Look, segments: readonly Segment[], maxWidth: nu
       {framing === undefined
         ? rows.map(drawn)
         : runs.map(run =>
-            Array.isArray(run) ? framing.frame(<Box flexDirection="column">{run.map(drawn)}</Box>) : copyRows(look, run.copy, `copy-${run.i}`, false, `fold-${run.i}`),
+            Array.isArray(run) ? framing.frame(<Box flexDirection="column">{run.map(drawn)}</Box>) : copyRows(look, run.copy, `copy-${run.i}`, false),
           )}
       {whole === undefined ? '' : copyRow(look, 'copy-reply', whole, 'copy reply')}
     </Box>
@@ -1061,22 +1046,9 @@ function card(look: Look, Svg: SvgElement, built: { source: string; alt: string;
   )
 }
 
-// Past FOLD_CODE lines the card is cut there, with `▾ N more` under it; opened, it runs to
-// the card's own 80-line cap.
-export function codeCard(look: Look, lang: string, code: string, Svg: SvgElement, columns: number, key = 'copy-code', foldKey = `${key}-fold`) {
-  const { Box } = look.ui
-  const count = code.split('\n').length
-  const shown = shownCount(look, foldKey, count, FOLD_CODE)
-  const card = cardWithCopy(look, Svg, codeSvg(code, lang, look.skin.palette, cardWidth(columns), look.copy !== undefined, shown === count ? undefined : shown), key, code)
-
-  return look.folds === undefined || count <= FOLD_CODE ? (
-    card
-  ) : (
-    <Box flexDirection="column">
-      {card}
-      {foldButton(look, foldKey, count, FOLD_CODE)}
-    </Box>
-  )
+// A code block as a card, to the card's own 80-line cap.
+export function codeCard(look: Look, lang: string, code: string, Svg: SvgElement, columns: number, key = 'copy-code') {
+  return cardWithCopy(look, Svg, codeSvg(code, lang, look.skin.palette, cardWidth(columns), look.copy !== undefined), key, code)
 }
 
 // A chart too crowded to draw at this width keeps its source as a code card.

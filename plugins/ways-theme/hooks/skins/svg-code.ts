@@ -73,10 +73,9 @@ function cutTokens(tokens: Token[], max: number): Token[] {
 }
 
 // `hasControl` leaves the header's right corner free for a Copy button laid over it.
-// `maxLines` cuts the card short of its usual 80 lines, for a block folded under it.
-export function codeSvg(code: string, lang: string, palette: Palette, width: number, hasControl = false, maxLines = MAX_LINES): { source: string; width: number; height: number; alt: string; entranceMs: number } {
+export function codeSvg(code: string, lang: string, palette: Palette, width: number, hasControl = false): { source: string; width: number; height: number; alt: string; entranceMs: number } {
   const all = code.replace(/\t/g, '  ').split('\n')
-  const lines = all.slice(0, maxLines)
+  const lines = all.slice(0, MAX_LINES)
   const step = staggerStep(lines.length, 12)
   const gutter = String(all.length).length * 8 + 24
   const maxChars = Math.floor((width - gutter - 24) / (CODE * 0.6))

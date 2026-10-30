@@ -5,14 +5,12 @@ import type { Palette } from './skin'
 import { outputTokens, roleColors } from './highlight'
 import { CONTROL_SLOT, escape, HEADER_MID, fitText, MONO, pill, riseDelay, staggerEnd, staggerStep, strokeIcon, svgCard } from './svg-kit'
 
-// A shell command's output as a terminal card: a status pill, the output in mono with
-// stderr in the error colour, and long output folded to its head and tail.
+// A shell command's output as a terminal card: a status pill, and every line of the output
+// in mono with stderr in the error colour.
 
 const HEADER_H = 56
 const LINE_H = 20
 const CODE = 12.5
-const HEAD = 6
-const TAIL = 6
 const PROMPT = '<path d="M5 7l5 5-5 5"/><path d="M12 18h7"/>'
 
 // Escape sequences for colour and cursor moves, which a card cannot draw.
@@ -36,8 +34,6 @@ export function shellOutputOf(output: unknown): ShellOutput | null {
   }
 }
 
-type Line = { text: string; isErr: boolean } | { fold: number }
-
 // A stream's lines, colour codes stripped and trailing blank lines dropped.
 export function streamLines(text: string, isErr: boolean): { text: string; isErr: boolean }[] {
   const lines = text.replace(ANSI, '').replace(/\r/g, '').replace(/\t/g, '  ').split('\n')
@@ -46,13 +42,7 @@ export function streamLines(text: string, isErr: boolean): { text: string; isErr
   return lines.every(line => line.trim() === '') ? [] : lines.slice(0, end).map(line => ({ text: line, isErr }))
 }
 
-export function outputLines(output: ShellOutput): Line[] {
-  const kept = [...streamLines(output.stdout, false), ...streamLines(output.stderr, true)]
-
-  return kept.length <= HEAD + TAIL + 1
-    ? kept
-    : [...kept.slice(0, HEAD), { fold: kept.length - HEAD - TAIL }, ...kept.slice(kept.length - TAIL)]
-}
+export const outputLines = (output: ShellOutput): { text: string; isErr: boolean }[] => [...streamLines(output.stdout, false), ...streamLines(output.stderr, true)]
 
 // `hasControl` leaves the header's right corner free for a Copy button laid over it.
 // `colour` picks out paths, numbers and verdicts in stdout with the skin's colours.
@@ -69,10 +59,6 @@ export function terminalSvg(output: ShellOutput, isErrored: boolean, palette: Pa
 
   const rows = (lines.length === 0 ? [{ text: 'no output', isErr: false, isNote: true }] : lines).map((line, i) => {
     const top = HEADER_H + 6 + i * LINE_H
-
-    if ('fold' in line) {
-      return `<g class="rise" ${riseDelay(i, step)}><text x="20" y="${top + 14}" font-size="11.5" style="fill:${palette.muted}">⋯  ${line.fold} more lines</text></g>`
-    }
 
     const color = 'isNote' in line ? palette.muted : line.isErr ? palette.err : palette.fg
     const text = fitText(line.text, width - 40, true, CODE)
@@ -99,7 +85,7 @@ export function terminalSvg(output: ShellOutput, isErrored: boolean, palette: Pa
     source: svgCard(width, height, palette, '', header + rows.join('')),
     width,
     height,
-    alt: lines.map(line => ('fold' in line ? `… ${line.fold} more lines` : line.text)).join('\n') || 'no output',
+    alt: lines.map(line => line.text).join('\n') || 'no output',
     entranceMs: staggerEnd(Math.max(1, lines.length), step),
   }
 }

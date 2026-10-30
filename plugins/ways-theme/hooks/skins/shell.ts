@@ -4,14 +4,12 @@
 import { shellOutputOf, streamLines } from './svg-terminal'
 import type { ShellOutput } from './svg-terminal'
 
-// What a shell call's output card shows on the terminal: its lines by stream, how it
-// ended, and long runs folded to their head and tail.
+// What a shell call's output card shows on the terminal: its lines by stream and how it
+// ended.
 
 export type ShellResult = ShellOutput & { exitCode?: number }
 
 export type ShellLine = { text: string; isErr: boolean }
-
-export type Folded<T> = T | { fold: number }
 
 export type ShellStatus = { tone: 'ok' | 'err' | 'warn'; text: string }
 
@@ -60,14 +58,6 @@ export const linesOf = (result: ShellResult): { stdout: ShellLine[]; stderr: She
   stdout: streamLines(result.stdout, false),
   stderr: streamLines(result.stderr, true),
 })
-
-// The first `head` and last `tail` lines with a count of the rest between them. A single
-// hidden line is shown instead: its fold row would take the same room.
-export function foldLines<T>(lines: readonly T[], head: number, tail: number): Folded<T>[] {
-  const hidden = lines.length - head - tail
-
-  return hidden <= 1 ? [...lines] : [...lines.slice(0, head), { fold: hidden }, ...lines.slice(lines.length - tail)]
-}
 
 // How the call ended, worst first; an exit code only where the call reported one.
 export function shellStatus(result: ShellResult, isErrored: boolean, ascii: boolean): ShellStatus {

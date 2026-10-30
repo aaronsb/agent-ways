@@ -505,18 +505,29 @@ describe('a copy block draws clear of every frame and copies its text alone', ()
     expect(/[│╭╮╰╯]/.test(h.copies[0]!)).toBe(false)
   })
 
-  test('a fence past FOLD_CODE lines, folded, copies every line', async ($, on) => {
+  test('a 40-row table, a 60-line fence, a 40-line diff and 200 lines of shell output each draw whole', async ($, on) => {
     const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
-    const code = Array.from({ length: 30 }, (_, n) => `line ${n + 1}`).join('\n')
-    const ui = await $.ui.mount(at(`Log:\n\n\`\`\`\n${code}\n\`\`\``, 'terminal', 80, true))
+    const table = ['| n | name |', '|---|---|', ...Array.from({ length: 40 }, (_, n) => `| ${n + 1} | row-${n + 1} |`)].join('\n')
+    const code = Array.from({ length: 60 }, (_, n) => `line ${n + 1}`).join('\n')
+    const diff = ['--- a/x', '+++ b/x', '@@ -0,0 +1,40 @@', ...Array.from({ length: 40 }, (_, n) => `+added ${n + 1}`)].join('\n')
+    const ui = await $.ui.mount(at(`${table}\n\n\`\`\`\n${code}\n\`\`\`\n\n\`\`\`diff\n${diff}\n\`\`\``, 'terminal', 80, true))
     const tree = await ui.drawn()
-    expect(drawnAt(tree, 'line 24').length).toBeGreaterThan(0)
-    expect(drawnAt(tree, 'line 25')).toEqual([])
-    expect(await ui.find({ type: 'Button', text: /6 more/ })).toBeDefined()
-    await ui.press({ key: (await ui.find({ type: 'Button', text: /^\s*Copy\s*$/ }))!.key! })
+    expect(shows(tree, 'added 40')).toBe(true)
+    expect(drawnAt(tree, 'row-40').length).toBeGreaterThan(0)
+    expect(drawnAt(tree, 'line 60').length).toBeGreaterThan(0)
+    expect(await ui.find({ type: 'Button', text: /more|less/ })).toBe(undefined)
+    for (const button of await ui.findAll({ type: 'Button', text: /^\s*Copy\s*$/ })) await ui.press({ key: button.key! })
     await ui.unmount()
-    expect(h.copies).toEqual([code])
+    expect(h.copies).toContain(code)
+
+    const stdout = Array.from({ length: 200 }, (_, n) => `out ${n + 1}`).join('\n')
+    const result = { plugin: 'ways-theme', surface: 'terminal', component: 'ToolResult', requestId: 't2', viewport: { columns: 80, rows: 40 }, props: { tool_use_id: 't2', tool: 'Bash', output: { stdout, stderr: '', interrupted: false, isImage: false }, isErrored: false } } as never
+    const card = await $.ui.mount(result)
+    const drawn = await card.drawn()
+    await card.unmount()
+    for (const line of ['out 1', 'out 100', 'out 200']) expect(drawnAt(drawn, line).length).toBeGreaterThan(0)
+    expect(shows(drawn, 'lines hidden')).toBe(false)
   })
 
   test('a `!` command still copies as before beside a slash command and a fence', async ($, on) => {

@@ -69,19 +69,3 @@ export function pick<T>(items: readonly T[], seed: string): T | undefined {
 
   return items[hash % items.length]
 }
-
-// Keeps the first `head` and last `tail` lines of a long text and names how many it hid.
-export function clipLines(text: string, head: number, tail: number): string {
-  const lines = text.split('\n')
-  const hidden = lines.length - head - tail
-
-  if (hidden <= 1) {
-    return text
-  }
-
-  return [
-    ...lines.slice(0, head),
-    `… ${hidden} lines hidden`,
-    ...lines.slice(lines.length - tail),
-  ].join('\n')
-}

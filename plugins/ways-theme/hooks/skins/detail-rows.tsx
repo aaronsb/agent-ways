@@ -9,7 +9,7 @@ import { shortenPath } from './format'
 import { fileHref } from './links'
 import { diffCard, terminalCard } from './rows'
 import type { Look } from './rows'
-import { OUTPUT_FOLD, shellRows } from './shell-rows'
+import { shellRows } from './shell-rows'
 
 // An opened tool row: what the call was asked, then what it answered, under the row the
 // chevron sits on. Long answers fold behind a `show all` control of their own.
@@ -27,11 +27,6 @@ export type Opened = {
   // Claude Code's own drawing of the call, for a body this cannot draw.
   stock: () => Promise<RenderElement>
 }
-
-const SHELL_FOLD = { head: 8, tail: 4 }
-
-// Shell output shows whole when folding is off or the person opened it.
-const isWhole = (look: Look, opened: Opened): boolean => opened.isAll || !look.prefs.fold || look.folds?.open.has(OUTPUT_FOLD) === true
 
 // Cells the chevron takes at a row's right: its padding and its glyph.
 export const DISCLOSE_INSET = 2
@@ -135,10 +130,7 @@ async function bodyRows(look: Look, opened: Opened): Promise<RenderElement | str
     case 'shell':
       return look.svg !== undefined
         ? terminalCard(look, look.svg, body.result, opened.isErrored, opened.columns)
-        : shellRows(look, opened.command, body.result, opened.isErrored, {
-            stdout: isWhole(look, opened) ? null : SHELL_FOLD,
-            stderr: isWhole(look, opened) || opened.isErrored ? null : SHELL_FOLD,
-          })
+        : shellRows(look, opened.command, body.result, opened.isErrored)
     case 'diff': {
       const path = shortenPath(body.diff.path, opened.cwd)
 

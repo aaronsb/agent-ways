@@ -247,7 +247,6 @@ export function setupOf(x: ModExport): Setup {
     shimmer: r.shimmer,
     band: true,
     countdown: false,
-    clipOutput: false,
     markdown: r.markdown,
     quiet: false,
     charts: r.charts,
@@ -258,7 +257,6 @@ export function setupOf(x: ModExport): Setup {
     links: true,
     copy: r.copy,
     paths: r.paths,
-    fold: true,
     expand: false,
     calm: null,
   }

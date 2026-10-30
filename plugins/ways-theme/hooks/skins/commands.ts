@@ -17,10 +17,8 @@
 //   `-`, and then a space or the end. `/home/aaron`, `/tmp/x` and `a/b` are
 //   paths, and a URL starts otherwise.
 // - `code`, a closed fence's code, as written. It keeps its language and its
-//   highlighting, and a long one folds as other code does; Copy takes all of
-//   it, folded or not. A fence with no code in it stays as it is, and so does
-//   a fence the skin draws as a picture, a Mermaid chart or a diff
-//   (reply.ts).
+//   highlighting. A fence with no code in it stays as it is, and so does a
+//   fence the skin draws as a picture, a Mermaid chart or a diff (reply.ts).
 // - `span`, an inline code span whose content is wider than the row the
 //   reply's prose is drawn in. A span that wraps inside a frame has the
 //   frame's border beside each of its lines, which no drawing of the span
