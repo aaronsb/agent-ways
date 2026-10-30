@@ -45,7 +45,7 @@ import { NO_ROW, PATH_TOOLS, kindOf, showsImage, summarize, toolLabel } from './
 import { fitted, namesImage, withRow } from './pictures.ts'
 import { commandOf, errorLine, isQuiet, quietLabel } from './quiet.ts'
 import { MAX_MARKDOWN, replySegments } from './reply.ts'
-import { holdsCommand } from './commands.ts'
+import { holdsCopy } from './commands.ts'
 import { fileHref, hyperlinksFrom, touchOf } from './links.ts'
 import { MIN_WIDTH, axisFor, boxLines, canMeasure, gradientBox, gradientRuns } from './prompt-box.tsx'
 import { holdsPaste, pasteIdOf, shownText } from './pastes.ts'
@@ -125,7 +125,7 @@ export type View = { isVerbose: boolean; isTranscriptExpanded: boolean; isWaysTh
  *  its own, and neither under `verbose` (isExpandedView). */
 const isExpanded = (view: View, row: unknown): boolean => isExpandedView(view.isTranscriptExpanded || row === true, view.isVerbose)
 
-type Row = { component: string; surface: RenderSurface; props: object }
+type Row = { component: string; surface: RenderSurface; props: object; viewport?: { columns: number } }
 
 const drawsRow = (call: unknown): boolean => !NO_ROW.has(String((call as { tool?: unknown }).tool))
 
@@ -151,19 +151,23 @@ function isFramedAround(setup: Setup | null, e: Row, view: View): boolean {
   return true
 }
 
-/** Whether a reply's drawing holds a `! <command>` block, which keeps out of
- *  every frame (replyRows). */
-function holdsCommandBlock(setup: Setup, e: Row): boolean {
+/** The columns a reply's prose is drawn in, inside the frame or not. */
+const proseWidth = (e: Row, framed: boolean): number => (e.viewport?.columns ?? 100) - (framed ? FRAME_INSET : 0)
+
+/** Whether a framed reply's drawing holds a copy block (commands.ts), which
+ *  keeps out of every frame (replyRows). */
+function holdsCopyBlock(setup: Setup, e: Row): boolean {
   const text = (e.props as { text?: unknown }).text
-  return typeof text === 'string' && holdsCommand(text) && (replySegments(text, setup.prefs as Look['prefs'], e.surface)?.some(segment => segment.kind === 'command') ?? false)
+  const width = proseWidth(e, true)
+  return typeof text === 'string' && holdsCopy(text, width) && (replySegments(text, setup.prefs as Look['prefs'], e.surface, width)?.some(segment => segment.kind === 'copy') ?? false)
 }
 
 /** Whether the frame wraps this row whole. The register module asks it to
  *  draw the frame and this layer to draw the row inside it, of the same look
  *  and view, so the two never disagree. This layer frames a reply holding a
- *  command block itself, in pieces around the block. */
+ *  copy block itself, in pieces around the block. */
 export function isFramed(setup: Setup | null, e: Row, view: View): boolean {
-  return setup !== null && isFramedAround(setup, e, view) && !(e.component === 'AssistantMessage' && holdsCommandBlock(setup, e))
+  return setup !== null && isFramedAround(setup, e, view) && !(e.component === 'AssistantMessage' && holdsCopyBlock(setup, e))
 }
 
 /** `inner` inside a frame. The engine's row opens with a blank margin row;
@@ -298,7 +302,7 @@ const hasPathish = (text: string): boolean => /[\w.-]\/[\w.-]|\w\.[A-Za-z]{1,5}\
 const replyNeeds = (text: string, segments: readonly { kind: string }[]): Needs => ({
   links: /https?:\/\//.test(text) || hasPathish(text),
   touched: hasPathish(text),
-  folds: segments.some(segment => segment.kind === 'code' || segment.kind === 'table'),
+  folds: segments.some(segment => segment.kind === 'code' || segment.kind === 'table' || segment.kind === 'copy'),
 })
 
 // Whether the terminal draws links, and the home a `~/` path links under.
@@ -674,7 +678,8 @@ export function registerSkins(on: On, shared: Shared): void {
     const setup = await activeSetup($)
     if (setup === null) return next(e)
     const text = e.props.text
-    const segments = replySegments(text, setup.prefs as Look['prefs'], e.surface)
+    const framed = isFramedAround(setup, e, shared.view())
+    const segments = replySegments(text, setup.prefs as Look['prefs'], e.surface, proseWidth(e, framed))
     if (segments === null) return next(e)
     const ui = $.ui.resolve(e)
     const svg = e.surface !== 'terminal' && setup.prefs.tables === 'on' && 'Svg' in ui ? ui.Svg : undefined
@@ -685,9 +690,9 @@ export function registerSkins(on: On, shared: Shared): void {
     // A reply that names an image file keeps the picture a mod beneath draws (pictures.ts).
     const pictured = async (rows: ReturnType<Ui['Box']>) => (e.surface === 'terminal' && namesImage(text) ? withRow(await next(e), rows) : rows)
     // A framed reply is laid out inside the frame the register module draws around it,
-    // or, holding a command, in frames of this layer's around each run of blocks.
-    if (!isFramedAround(setup, e, shared.view())) return withSettle($, e, await pictured(replyRows(look, segments, columns, svg, whole)))
-    if (segments.some(segment => segment.kind === 'command')) {
+    // or, holding a copy block, in frames of this layer's around each run of blocks.
+    if (!framed) return withSettle($, e, await pictured(replyRows(look, segments, columns, svg, whole)))
+    if (segments.some(segment => segment.kind === 'copy')) {
       const framing: Framing = { inset: FRAME_INSET, frame: rows => framedRow(ui, marginRow(look, rows), FRAME.reply) }
       return withSettle($, e, await pictured(replyRows(look, segments, columns, svg, whole, framing)))
     }

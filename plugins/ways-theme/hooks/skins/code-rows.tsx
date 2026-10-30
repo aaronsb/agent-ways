@@ -52,3 +52,25 @@ export function codeRows(look: Look, lang: string, code: string, control?: Retur
     </Box>
   )
 }
+
+// A fence's code as a copy block (commands.ts): the language and Copy on the line above,
+// then each line highlighted with no border, padding or margin beside it, so a selection
+// over the lines takes the code alone. A blank line draws nothing, not a space. Past
+// FOLD_CODE lines it folds under `foldKey`; Copy still takes every line.
+export function codeCopyRows(look: Look, lang: string, code: string, control: ReturnType<Ui['Button']> | undefined, foldKey: string, margins: Record<string, number>) {
+  const { Box, Text } = look.ui
+  const { palette } = look.skin
+  const lines = highlight(code.replace(/\t/g, '  '), look.prefs.highlight ? lang : '')
+  const shown = lines.slice(0, shownCount(look, foldKey, lines.length, FOLD_CODE))
+
+  return (
+    <Box flexDirection="column" {...margins}>
+      <Box flexDirection="row" justifyContent="space-between">
+        <Text color={palette.muted}>{lang}</Text>
+        {control ?? ''}
+      </Box>
+      {shown.map(tokens => (tokens.every(token => token.text === '') ? <Box height={1} /> : <Text>{tokenSpans(look, tokens)}</Text>))}
+      {foldButton(look, foldKey, lines.length, FOLD_CODE)}
+    </Box>
+  )
+}

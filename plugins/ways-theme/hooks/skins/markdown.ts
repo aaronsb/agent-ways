@@ -1,7 +1,7 @@
 // Ported from skins by hellosverre (MIT; LICENSE beside this file),
 // https://github.com/hellosverre/claude-skins at 985ad63, hooks/markdown.ts.
 
-import type { Command } from './commands'
+import type { Copy } from './commands'
 
 // Finds the tables and fenced code in a reply so they can be drawn as cards; the rest
 // stays markdown.
@@ -16,8 +16,8 @@ export type Code = { kind: 'code'; lang: string; code: string; raw: string }
 // `tex` is the formula alone; `raw` the block as written, kept for the copy button.
 export type Math = { kind: 'math'; tex: string; raw: string }
 
-// A command is a `! <command>` suggestion (commands.ts).
-export type Segment = { kind: 'text'; text: string } | Table | Code | Math | Command
+// A copy is the text the person copies, as a block of its own (commands.ts).
+export type Segment = { kind: 'text'; text: string } | Table | Code | Math | Copy
 
 // Fences the desktop marks runnable with a Run button of its own. A card is an image and
 // cannot carry it, so these keep Claude Code's drawing there.

@@ -10,7 +10,7 @@ import { columnWidths, graphemes, isShell, tableArt, widthOf, wrapLines } from '
 import { diffFenceTag, diffRows, fenceDiff, newOnly } from './diff-fence'
 import { FOLD_CODE, FOLD_ROWS, foldButton, shownCount } from './fold'
 import type { Segment, Table } from './markdown'
-import type { Command } from './commands'
+import type { Copy } from './commands'
 import { splitBlocks } from './blocks'
 import { artRows, chartRows } from './chart-rows'
 import { chartArt } from './chart-art'
@@ -32,7 +32,7 @@ import { tableSvg } from './svg-table'
 import { terminalSvg } from './svg-terminal'
 import type { ShellOutput } from './svg-terminal'
 import { metersKey, usageLine, usageSvg } from './svg-usage'
-import { codeRows } from './code-rows'
+import { codeCopyRows, codeRows } from './code-rows'
 import { languageOf } from './highlight'
 import type { Meter } from './svg-usage'
 import { kindOf, toolLabel } from './tools'
@@ -662,23 +662,35 @@ export function copyRow(look: Look, key: string, text: string, label = 'Copy') {
   )
 }
 
-// A `! <command>` suggestion as a block of its own: one Text the terminal wraps, nothing
-// beside it on any of its lines, so a selection over it crosses no border or margin glyph,
-// and Copy on the line under it, which copies the command whole. `gapBelow` keeps a blank
-// line under it for prose that follows, which opens on none; a frame opens on one.
-export function commandRows(look: Look, command: Command, key: string, gapBelow: boolean) {
+// A copy block (commands.ts): its text as one Text the terminal wraps, nothing beside it
+// on any of its lines, so a selection over it crosses no border, padding or margin glyph,
+// and Copy on the line under it, which copies the text whole. A suggestion's `!` or `/`
+// is drawn bold; a fence's code is drawn by `codeCopyRows`. `gapBelow` keeps a blank line
+// under it for prose that follows, which opens on none; a frame opens on one.
+export function copyRows(look: Look, copy: Copy, key: string, gapBelow: boolean, foldKey: string) {
   const { Box, Text } = look.ui
   const { palette } = look.skin
+  const margins = { marginTop: 1, marginBottom: gapBelow ? 1 : 0 }
+
+  if (copy.form === 'code') {
+    return codeCopyRows(look, copy.lang, copy.text, copyButton(look, key, copy.text), foldKey, margins)
+  }
+
+  const lead = copy.form === 'span' ? 0 : 1
 
   return (
-    <Box flexDirection="column" marginTop={1} marginBottom={gapBelow ? 1 : 0}>
+    <Box flexDirection="column" {...margins}>
       <Text>
-        <Text color={palette.user} bold>
-          {command.command.slice(0, 1)}
-        </Text>
-        <Text color={palette.search}>{command.command.slice(1)}</Text>
+        {lead === 0 ? (
+          ''
+        ) : (
+          <Text color={palette.user} bold>
+            {copy.text.slice(0, lead)}
+          </Text>
+        )}
+        <Text color={palette.search}>{copy.text.slice(lead)}</Text>
       </Text>
-      {copyRow(look, key, command.command)}
+      {copyRow(look, key, copy.text)}
     </Box>
   )
 }
@@ -697,8 +709,8 @@ function segmentRow(look: Look, segment: Segment, i: number, maxWidth: number, S
     )
   }
 
-  if (segment.kind === 'command') {
-    return commandRows(look, segment, `copy-${i}`, true)
+  if (segment.kind === 'copy') {
+    return copyRows(look, segment, `copy-${i}`, true, `fold-${i}`)
   }
 
   if (segment.kind === 'math') {
@@ -914,13 +926,13 @@ function packRun(run: readonly Placed[], maxWidth: number, Svg?: SvgElement): Pl
   return [...rows, ...(row.length === 0 ? [] : [row])].map(placed => (placed.length === 1 ? placed.map(one => ({ ...one, width: maxWidth })) : placed))
 }
 
-/** A reply the frame would wrap, laid out in frames of its own around its commands
+/** A reply the frame would wrap, laid out in frames of its own around its copy blocks
  *  (replyRows): `frame` wraps a run of blocks, and takes `inset` columns of the width. */
 export type Framing = { inset: number; frame: (rows: ReturnType<Ui['Box']>) => ReturnType<Ui['Box']> }
 
 // `whole`, the reply as Claude wrote it, adds a `copy reply` control under it. With
-// `framing`, each run of blocks between `! <command>` suggestions sits in a frame of its
-// own and each command between the frames, the whole width wide, so no frame line runs
+// `framing`, each run of blocks between copy blocks (commands.ts) sits in a frame of its
+// own and each copy block between the frames, the whole width wide, so no frame line runs
 // beside a line of it.
 export function replyRows(look: Look, segments: readonly Segment[], maxWidth: number, Svg?: SvgElement, whole?: string, framing?: Framing) {
   const { Box } = look.ui
@@ -938,15 +950,15 @@ export function replyRows(look: Look, segments: readonly Segment[], maxWidth: nu
         ))}
       </Box>
     )
-  const commandOf = (row: Placed[]) => (row.length === 1 && row[0]!.segment.kind === 'command' ? { command: row[0]!.segment, i: row[0]!.i } : null)
-  const runs: (Placed[][] | { command: Command; i: number })[] = []
+  const copyOf = (row: Placed[]) => (row.length === 1 && row[0]!.segment.kind === 'copy' ? { copy: row[0]!.segment, i: row[0]!.i } : null)
+  const runs: (Placed[][] | { copy: Copy; i: number })[] = []
 
   for (const row of framing === undefined ? [] : rows) {
-    const command = commandOf(row)
+    const copy = copyOf(row)
     const last = runs.at(-1)
 
-    if (command !== null) {
-      runs.push(command)
+    if (copy !== null) {
+      runs.push(copy)
     } else if (Array.isArray(last)) {
       last.push(row)
     } else {
@@ -959,7 +971,7 @@ export function replyRows(look: Look, segments: readonly Segment[], maxWidth: nu
       {framing === undefined
         ? rows.map(drawn)
         : runs.map(run =>
-            Array.isArray(run) ? framing.frame(<Box flexDirection="column">{run.map(drawn)}</Box>) : commandRows(look, run.command, `copy-${run.i}`, false),
+            Array.isArray(run) ? framing.frame(<Box flexDirection="column">{run.map(drawn)}</Box>) : copyRows(look, run.copy, `copy-${run.i}`, false, `fold-${run.i}`),
           )}
       {whole === undefined ? '' : copyRow(look, 'copy-reply', whole, 'copy reply')}
     </Box>

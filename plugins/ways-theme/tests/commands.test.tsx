@@ -2,9 +2,11 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 import type { On, RenderElement } from 'claude-code'
 
-import { commandPieces, fenceCommand, holdsCommand } from '../hooks/skins/commands.ts'
+import { copyPieces, fenceCopy, holdsCopy } from '../hooks/skins/commands.ts'
+import type { Copy } from '../hooks/skins/commands.ts'
 import { setupOf } from '../hooks/skins/config.ts'
 import { splitReply } from '../hooks/skins/markdown.ts'
+import type { Segment } from '../hooks/skins/markdown.ts'
 import { inlineMath } from '../hooks/skins/math.ts'
 import { replySegments } from '../hooks/skins/reply.ts'
 import { MIAMI_NIGHTS } from './fixtures.ts'
@@ -12,28 +14,30 @@ import { INTERACTIVE, borders, host, json, shows } from './host.tsx'
 import type { Node, World } from './host.tsx'
 
 const PREFS = setupOf(MIAMI_NIGHTS as never).prefs as never
-const at = (text: string, surface = 'terminal', columns = 80) =>
-  ({ plugin: 'ways-theme', surface, component: 'AssistantMessage', requestId: 'r1', viewport: { columns, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
+const at = (text: string, surface = 'terminal', columns = 80, isFullscreen = false) =>
+  ({ plugin: 'ways-theme', surface, component: 'AssistantMessage', requestId: 'r1', viewport: { columns, rows: 40, isFullscreen }, props: { text, isFirstOfReply: true } }) as never
 
 /** The command from the operator's screenshot, wider than any line it was drawn on. */
 const COMMAND = '! git worktree remove ../vtium-glyph-fix36 && git worktree remove ../vtium-glyph-s4 && git worktree remove ../vtium-heads-adr && git branch -d feat/glyph-fix36 feat/glyph-s4 docs/heads-adr && git push origin --delete docs/heads-adr feat/deferred'
 const SCREENSHOT = `You can run it yourself:\n\n${COMMAND}`
 
-const commands = (text: string) => commandPieces(text).flatMap(piece => (piece.kind === 'command' ? [piece.command] : []))
-const prose = (text: string) => commandPieces(text).flatMap(piece => (piece.kind === 'text' ? [piece.text] : []))
+/** Whether a segment is a suggestion, shell or slash. */
+const isSuggestion = (segment: Segment) => segment.kind === 'copy' && (segment.form === 'shell' || segment.form === 'slash')
+const commands = (text: string) => copyPieces(text).flatMap(piece => (isSuggestion(piece) ? [(piece as Copy).text] : []))
+const prose = (text: string) => copyPieces(text).flatMap(piece => (piece.kind === 'text' ? [piece.text] : []))
 
 describe('which suggestions match', () => {
   test('a line of its own, after a lead-in paragraph', () => {
-    expect(commandPieces(SCREENSHOT)).toEqual([
+    expect(copyPieces(SCREENSHOT)).toEqual([
       { kind: 'text', text: 'You can run it yourself:' },
-      { kind: 'command', command: COMMAND, raw: COMMAND },
+      { kind: 'copy', form: 'shell', text: COMMAND, raw: COMMAND },
     ])
   })
 
   test('a line straight after a lead-in sentence on the line before', () => {
-    expect(commandPieces('Run this:\n! git status  \nThen look.')).toEqual([
+    expect(copyPieces('Run this:\n! git status  \nThen look.')).toEqual([
       { kind: 'text', text: 'Run this:' },
-      { kind: 'command', command: '! git status', raw: '! git status  ' },
+      { kind: 'copy', form: 'shell', text: '! git status', raw: '! git status  ' },
       { kind: 'text', text: 'Then look.' },
     ])
   })
@@ -43,16 +47,16 @@ describe('which suggestions match', () => {
   })
 
   test('a line that ends in a continuation takes the lines after it, to the first that does not continue', () => {
-    expect(commandPieces('! git fetch &&\n  git rebase origin/main |\n  tee log \\\n  more\nnext')).toEqual([
-      { kind: 'command', command: '! git fetch &&\n  git rebase origin/main |\n  tee log \\\n  more', raw: '! git fetch &&\n  git rebase origin/main |\n  tee log \\\n  more' },
+    expect(copyPieces('! git fetch &&\n  git rebase origin/main |\n  tee log \\\n  more\nnext')).toEqual([
+      { kind: 'copy', form: 'shell', text: '! git fetch &&\n  git rebase origin/main |\n  tee log \\\n  more', raw: '! git fetch &&\n  git rebase origin/main |\n  tee log \\\n  more' },
       { kind: 'text', text: 'next' },
     ])
     expect(commands('! git fetch &&\n\nnext')).toEqual(['! git fetch &&'])
   })
 
   test('a `|` continuation stops at a table row', () => {
-    expect(commandPieces('! git log --oneline |\n| a | b |\n|---|---|')).toEqual([
-      { kind: 'command', command: '! git log --oneline |', raw: '! git log --oneline |' },
+    expect(copyPieces('! git log --oneline |\n| a | b |\n|---|---|')).toEqual([
+      { kind: 'copy', form: 'shell', text: '! git log --oneline |', raw: '! git log --oneline |' },
       { kind: 'text', text: '| a | b |\n|---|---|' },
     ])
   })
@@ -83,9 +87,9 @@ describe('which suggestions match', () => {
   })
 
   test('an inline code span: the prose before it, the command, the prose after it', () => {
-    expect(commandPieces('Run `! git status` to see what moved.')).toEqual([
+    expect(copyPieces('Run `! git status` to see what moved.')).toEqual([
       { kind: 'text', text: 'Run' },
-      { kind: 'command', command: '! git status', raw: '`! git status`' },
+      { kind: 'copy', form: 'shell', text: '! git status', raw: '`! git status`' },
       { kind: 'text', text: 'to see what moved.' },
     ])
   })
@@ -96,7 +100,7 @@ describe('which suggestions match', () => {
   })
 
   test('a list item that is only a span keeps no empty bullet', () => {
-    expect(commandPieces('- `! git status`')).toEqual([{ kind: 'command', command: '! git status', raw: '`! git status`' }])
+    expect(copyPieces('- `! git status`')).toEqual([{ kind: 'copy', form: 'shell', text: '! git status', raw: '`! git status`' }])
   })
 
   test('a fence of one command, with no language or a shell\'s', () => {
@@ -118,11 +122,11 @@ describe('which suggestions match', () => {
   test('a reply on the terminal carries them as command segments, fences split out as cards included', () => {
     const text = `Lead:\n\n${COMMAND}\n\n\`\`\`\n! git status\n\`\`\`\n\n| a | b |\n|---|---|\n| 1 | 2 |`
     const kinds = replySegments(text, PREFS, 'terminal')?.map(segment => segment.kind)
-    expect(kinds).toEqual(['text', 'command', 'command', 'table'])
+    expect(kinds).toEqual(['text', 'copy', 'copy', 'table'])
   })
 
   test('off the terminal a reply keeps no command segment', () => {
-    expect(replySegments(SCREENSHOT, PREFS, 'desktop')?.some(segment => segment.kind === 'command') ?? false).toBe(false)
+    expect(replySegments(SCREENSHOT, PREFS, 'desktop')?.some(isSuggestion) ?? false).toBe(false)
   })
 })
 
@@ -159,19 +163,19 @@ describe('what does not match', () => {
   ]
   for (const [name, text] of asProse) {
     test(`${name} stays prose`, () => {
-      expect(commandPieces(text).every(piece => piece.kind === 'text')).toBe(true)
+      expect(copyPieces(text).every(piece => piece.kind === 'text' || piece.form === 'code')).toBe(true)
     })
   }
 
   test('the quick test passes prose by', () => {
-    expect(holdsCommand("That's it! Done.\na != b\n![x](y)")).toBe(false)
-    expect(holdsCommand(SCREENSHOT)).toBe(true)
-    expect(holdsCommand('see `! ls`')).toBe(true)
+    expect(holdsCopy("That's it! Done.\na != b\n![x](y)")).toBe(false)
+    expect(holdsCopy(SCREENSHOT)).toBe(true)
+    expect(holdsCopy('see `! ls`')).toBe(true)
   })
 
-  test('a fence of another language is not a command', () => {
-    expect(fenceCommand('python', '! pip install x', '')).toBe(null)
-    expect(fenceCommand('', '! git push', 'raw')).toEqual({ kind: 'command', command: '! git push', raw: 'raw' })
+  test('a fence of another language is its code, not a command', () => {
+    expect(fenceCopy('python', '! pip install x', '')).toEqual({ kind: 'copy', form: 'code', lang: 'python', text: '! pip install x', raw: '' })
+    expect(fenceCopy('', '! git push', 'raw')).toEqual({ kind: 'copy', form: 'shell', text: '! git push', raw: 'raw' })
   })
 })
 
@@ -185,8 +189,8 @@ describe('a fence closes only on a line of its mark, at least as long', () => {
       const segments = splitReply(text)
       expect(segments.length).toBe(1)
       expect(segments[0]).toMatchObject({ kind: 'code', lang, raw: text })
-      expect(replySegments(text, PREFS, 'terminal')?.some(segment => segment.kind === 'command') ?? false).toBe(false)
-      expect(commandPieces(text).every(piece => piece.kind === 'text')).toBe(true)
+      expect(replySegments(text, PREFS, 'terminal')?.some(isSuggestion) ?? false).toBe(false)
+      expect(copyPieces(text).map(piece => piece.kind === 'copy' && piece.form)).toEqual(['code'])
     })
   }
 
@@ -325,5 +329,202 @@ describe('a command draws as one string outside every frame', () => {
     hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
     expect(borders(await drawn($, "That's it! The worktrees are gone.")).length).toBe(1)
+  })
+})
+
+/** The slash command from the operator's second screenshot, the last line of a reply. */
+const SLASH = '/compact keep the continuation prompt in .claude/handoff.wrap.md and the task list as it stands; drop the exploratory back-and-forth'
+const SLASH_REPLY = `The handoff is written. When you are ready:\n\n\`${SLASH}\``
+const slashes = (text: string) => copyPieces(text).flatMap(piece => (piece.kind === 'copy' && piece.form === 'slash' ? [piece.text] : []))
+
+describe('slash commands', () => {
+  test('an inline span: the prose before it, the command, the prose after it', () => {
+    expect(copyPieces('Run `/compact keep the handoff` now.')).toEqual([
+      { kind: 'text', text: 'Run' },
+      { kind: 'copy', form: 'slash', text: '/compact keep the handoff', raw: '`/compact keep the handoff`' },
+      { kind: 'text', text: 'now.' },
+    ])
+  })
+
+  test('a line of its own, a list item, and a fence of one line with no language', () => {
+    expect(copyPieces('Then:\n/compact keep it  \nDone.')).toEqual([
+      { kind: 'text', text: 'Then:' },
+      { kind: 'copy', form: 'slash', text: '/compact keep it', raw: '/compact keep it  ' },
+      { kind: 'text', text: 'Done.' },
+    ])
+    expect(slashes('- /review 12\n2. /mcp')).toEqual(['/review 12', '/mcp'])
+    expect(copyPieces('```\n/compact keep it\n```')).toEqual([{ kind: 'copy', form: 'slash', text: '/compact keep it', raw: '```\n/compact keep it\n```' }])
+  })
+
+  test('a name may hold digits, `:` and `-`, and a bare name ends the span', () => {
+    expect(slashes('`/plugin:skill-2 go` and `/clear`.')).toEqual(['/plugin:skill-2 go', '/clear'])
+  })
+
+  test('a slash command is one line: a `|` at its end takes no line after it', () => {
+    expect(copyPieces('/compact keep a |\nnext line')).toEqual([
+      { kind: 'copy', form: 'slash', text: '/compact keep a |', raw: '/compact keep a |' },
+      { kind: 'text', text: 'next line' },
+    ])
+  })
+
+  test('the screenshot reply: the lead-in stays prose and the span is the command, whole', () => {
+    expect(copyPieces(SLASH_REPLY, 76)).toEqual([
+      { kind: 'text', text: 'The handoff is written. When you are ready:' },
+      { kind: 'copy', form: 'slash', text: SLASH, raw: `\`${SLASH}\`` },
+    ])
+  })
+
+  test('the quick test sees a slash line, a slash span and a fence', () => {
+    expect(holdsCopy('/compact')).toBe(true)
+    expect(holdsCopy('see `/help`')).toBe(true)
+    expect(holdsCopy('```rust\nfn x() {}\n```')).toBe(true)
+  })
+
+  const asProse: [string, string][] = [
+    ['a path on a line of its own', '/home/aaron/Projects/x'],
+    ['a path in a span', 'look in `/tmp/x` first'],
+    ['a path that starts a line of prose', '/etc/hosts maps the names'],
+    ['`a/b` in prose', 'the a/b split and and/or'],
+    ['a `/` inside a sentence', 'use the /compact command when the context is full'],
+    ['a URL', 'https://example.com/compact x\n`https://example.com/clear`'],
+    ['a line comment', '// compact this'],
+    ['a capital after the slash', '/Compact keep it'],
+    ['a digit after the slash', '/9 x'],
+    ['a slash with a space after it', '/ compact'],
+    ['a slash command in a quote', '> /compact keep it'],
+    ['a slash command in a table row', '| step | `/compact` |'],
+    ['a slash command in link text', 'see [`/compact`](https://example.com)'],
+    ['a slash command in an HTML comment', '<!--\n/compact\n-->'],
+    ['a slash command in an indented code block', 'Example:\n\n    /compact keep it'],
+    ['a fence still streaming', '```\n/compact keep it'],
+  ]
+  for (const [name, text] of asProse) {
+    test(`${name} stays prose`, () => {
+      expect(copyPieces(text, 76).every(piece => piece.kind === 'text')).toBe(true)
+    })
+  }
+
+  test("a fence with a language holding a slash line is that language's code", () => {
+    expect(copyPieces('```text\n/compact keep it\n```').map(piece => piece.kind === 'copy' && piece.form)).toEqual(['code'])
+  })
+})
+
+/** A fence's code with what a copy must keep: indentation, a tab, trailing spaces, blank lines. */
+const CODE = 'fn main() {\n    let x = 1;   \n\n\tprintln!("{x}");\n\n}'
+const FENCED = `Here it is:\n\n\`\`\`rust\n${CODE}\n\`\`\`\n\nThat prints 1.`
+
+describe('a fenced block is a copy block', () => {
+  test('its code as written, its language kept', () => {
+    const copy = { kind: 'copy', form: 'code', lang: 'rust', text: CODE, raw: `\`\`\`rust\n${CODE}\n\`\`\`` }
+    expect(copyPieces(FENCED)).toEqual([{ kind: 'text', text: 'Here it is:' }, copy, { kind: 'text', text: 'That prints 1.' }])
+    expect(replySegments(FENCED, PREFS, 'terminal')?.find(segment => segment.kind === 'copy')).toEqual(copy)
+  })
+
+  test('a fence with no code, a Mermaid chart and a diff keep their drawing', () => {
+    expect(copyPieces('```\n\n```').every(piece => piece.kind === 'text')).toBe(true)
+    const kinds = (text: string) => replySegments(text, PREFS, 'terminal')?.map(segment => segment.kind)
+    expect(kinds('```mermaid\nflowchart LR\n  A --> B\n```')).toEqual(['code'])
+    expect(kinds('```diff\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n```')).toEqual(['code'])
+  })
+
+  test('off the terminal a fence stays a code card', () => {
+    expect(replySegments(FENCED, PREFS, 'desktop')?.some(segment => segment.kind === 'copy') ?? false).toBe(false)
+  })
+})
+
+/** A span no 80-column frame holds on one line. */
+const LONG = 'git worktree remove ../vtium-glyph-fix36 && git branch -d feat/glyph-fix36 feat/glyph-s4 docs/heads-adr'
+
+describe('a code span wider than its row', () => {
+  test('leaves its sentence as a span block; a narrower one stays', () => {
+    const text = `Then \`${LONG}\` clears them, and \`git status\` shows it.`
+    expect(copyPieces(text, 76)).toEqual([
+      { kind: 'text', text: 'Then' },
+      { kind: 'copy', form: 'span', text: LONG, raw: `\`${LONG}\`` },
+      { kind: 'text', text: 'clears them, and `git status` shows it.' },
+    ])
+    expect(copyPieces(text, LONG.length).every(piece => piece.kind === 'text')).toBe(true)
+    expect(copyPieces(text).every(piece => piece.kind === 'text')).toBe(true)
+    expect(holdsCopy(text, 76)).toBe(true)
+    expect(holdsCopy(text, LONG.length)).toBe(false)
+  })
+})
+
+/** Whether a drawn Text sits clear of every frame: no border, padding or ground around it. */
+const isClear = (above: Node[]) =>
+  !above.some(n => n.props?.borderStyle !== undefined || ['paddingX', 'paddingLeft', 'paddingRight'].some(pad => typeof n.props?.[pad] === 'number') || n.props?.backgroundColor !== undefined)
+
+/** What a selection or a copy must never carry: a frame glyph, a padding space at a line's end, a line break. */
+const isClean = (text: string) => !/[│╭╮╰╯─]/.test(text) && !/ $/m.test(text) && !text.includes('\n')
+
+describe('a copy block draws clear of every frame and copies its text alone', () => {
+  test('the screenshot at 80 columns: the slash command outside the frame, copied whole', async ($, on) => {
+    const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
+    await $.session.start(INTERACTIVE)
+    const ui = await $.ui.mount(at(SLASH_REPLY))
+    const tree = await ui.drawn()
+    expect(borders(tree).length).toBe(1)
+    const found = drawnAt(tree, SLASH)
+    expect(found.length).toBe(1)
+    expect(isClear(found[0]!)).toBe(true)
+    const button = await ui.find({ type: 'Button', text: /^Copy$/ })
+    await ui.press({ key: button!.key! })
+    await ui.unmount()
+    expect(h.copies).toEqual([SLASH])
+    expect(isClean(h.copies[0]!)).toBe(true)
+  })
+
+  test('a wide span copies as one string, with no frame glyph, padding or break', async ($, on) => {
+    const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
+    await $.session.start(INTERACTIVE)
+    const ui = await $.ui.mount(at(`Then \`${LONG}\` clears them.`))
+    const tree = await ui.drawn()
+    expect(isClear(drawnAt(tree, LONG)[0]!)).toBe(true)
+    await ui.press({ key: (await ui.find({ type: 'Button', text: /^Copy$/ }))!.key! })
+    await ui.unmount()
+    expect(h.copies).toEqual([LONG])
+    expect(isClean(h.copies[0]!)).toBe(true)
+  })
+
+  test('a fence: language and Copy above, each line clear of every frame, the code copied exactly', async ($, on) => {
+    const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
+    await $.session.start(INTERACTIVE)
+    const ui = await $.ui.mount(at(FENCED))
+    const tree = await ui.drawn()
+    expect(borders(tree).length).toBe(2)
+    expect(drawnAt(tree, 'rust').length).toBe(1)
+    for (const line of ['fn main() {', '    let x = 1;   ', '  println!("{x}");', '}']) {
+      // The line's Text and its one token's Text both draw it.
+      const found = drawnAt(tree, line)
+      expect(found.length).toBeGreaterThan(0)
+      expect(found.every(isClear)).toBe(true)
+    }
+    await ui.press({ key: (await ui.find({ type: 'Button', text: /^\s*Copy\s*$/ }))!.key! })
+    await ui.unmount()
+    expect(h.copies).toEqual([CODE])
+    expect(/[│╭╮╰╯]/.test(h.copies[0]!)).toBe(false)
+  })
+
+  test('a fence past FOLD_CODE lines, folded, copies every line', async ($, on) => {
+    const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
+    await $.session.start(INTERACTIVE)
+    const code = Array.from({ length: 30 }, (_, n) => `line ${n + 1}`).join('\n')
+    const ui = await $.ui.mount(at(`Log:\n\n\`\`\`\n${code}\n\`\`\``, 'terminal', 80, true))
+    const tree = await ui.drawn()
+    expect(drawnAt(tree, 'line 24').length).toBeGreaterThan(0)
+    expect(drawnAt(tree, 'line 25')).toEqual([])
+    expect(await ui.find({ type: 'Button', text: /6 more/ })).toBeDefined()
+    await ui.press({ key: (await ui.find({ type: 'Button', text: /^\s*Copy\s*$/ }))!.key! })
+    await ui.unmount()
+    expect(h.copies).toEqual([code])
+  })
+
+  test('a `!` command still copies as before beside a slash command and a fence', async ($, on) => {
+    const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
+    await $.session.start(INTERACTIVE)
+    const ui = await $.ui.mount(at('One:\n\n! git status\n\nthen `/clear`, and:\n\n```sh\nls -la\n```'))
+    for (const button of await ui.findAll({ type: 'Button', text: /^\s*Copy\s*$/ })) await ui.press({ key: button.key! })
+    await ui.unmount()
+    expect(h.copies).toEqual(['! git status', '/clear', 'ls -la'])
   })
 })
