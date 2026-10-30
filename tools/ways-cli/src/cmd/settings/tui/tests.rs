@@ -690,6 +690,17 @@ fn a_write_to_a_ways_yaml_no_known_project_owns_is_refused() {
     assert!(!file.exists());
 }
 
+#[test]
+fn a_write_of_a_way_toggle_with_a_mixed_segment_is_refused() {
+    let fx = Fixture::home();
+    let mut ways = Ways::new(ctx_of(&fx));
+    let file = fx.root.join("stray/.claude/ways.yaml");
+    let st = agent_tui::tree::Setting::new(agent_tui::tree::Kind::Bool, "true", "default").store("project", file.clone(), "ways.project.doc*").store.unwrap();
+    let e = ways.write(&file, &[Write { store: &st, value: "false", loaded: "true" }]).expect_err("a mixed segment is refused");
+    assert_eq!(e, format!("ways.project.doc*: {}", crate::cmd::toggle_check::MIXED_WILDCARD));
+    assert!(!file.exists());
+}
+
 // ── the adapter's write, under the real paths ──────────────────
 //
 // `Ways::write` finds its files through the environment, which tests in one

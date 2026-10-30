@@ -70,9 +70,7 @@ pub fn set(key: &str, value: &str, project: Option<&Path>) -> Out {
     let reg = registry();
     let b = lookup(&reg, key)?;
     super::engine::refuse(&b.name())?;
-    if b.spec.name == "ways.project.*" && b.bound.first().is_some_and(|k| crate::cmd::toggle_check::mixes_wildcard(k)) {
-        return Err(fail(exit::USAGE, format!("{key}: {}", crate::cmd::toggle_check::MIXED_WILDCARD)));
-    }
+    refuse_mixed_wildcard(&b)?;
     let layers = live_layers(project_dir(project).as_deref());
     let v = b
         .spec

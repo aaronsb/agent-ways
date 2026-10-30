@@ -1177,6 +1177,18 @@ fn setting_a_key_with_a_mixed_segment_is_refused_as_lint_reports_it() {
 }
 
 #[test]
+fn applying_a_key_with_a_mixed_segment_is_refused_and_writes_nothing() {
+    let f = Fx::new();
+    let (out, err, code) = f.run_stdin(&["settings", "apply"], Some("ways:\n  data: false\n  doc*: false\n"));
+    assert_eq!((out.as_str(), code), ("", 2));
+    assert_eq!(
+        err,
+        "ways settings: ways.project.doc*: a segment mixes text and a wildcard, so the key is read literally and matches no way; write `*` or `**` as a whole segment\n"
+    );
+    assert!(!f.overlay().exists(), "nothing is written");
+}
+
+#[test]
 fn status_lists_a_toggle_naming_no_way_apart_from_the_disabled_ways() {
     let f = Fx::new();
     renamed_corpus(&f);

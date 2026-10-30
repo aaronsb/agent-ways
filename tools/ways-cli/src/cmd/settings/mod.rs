@@ -304,6 +304,17 @@ pub(super) fn lookup(reg: &Registry, key: &str) -> Result<Bound, Failure> {
     })
 }
 
+/// Refuse a way toggle whose key has a segment mixing text and a wildcard
+/// ([`crate::cmd::toggle_check::mixes_wildcard`]), which would be written as
+/// a key that matches no way. `set`, `apply` and the screens call it.
+pub(super) fn refuse_mixed_wildcard(b: &Bound) -> Result<(), Failure> {
+    use crate::cmd::toggle_check::{mixes_wildcard, MIXED_WILDCARD};
+    match b.bound.first() {
+        Some(k) if b.spec.name == "ways.project.*" && mixes_wildcard(k) => Err(fail(exit::USAGE, format!("{}: {MIXED_WILDCARD}", b.name()))),
+        _ => Ok(()),
+    }
+}
+
 /// A value as `get` and `list` print it: text bare, anything else as JSON.
 pub(super) fn plain(v: Option<&Value>) -> String {
     match v {

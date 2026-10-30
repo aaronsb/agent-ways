@@ -107,7 +107,8 @@ pub fn mixes_wildcard(key: &str) -> bool {
     key.split('/').any(|s| s.contains('*') && s != "*" && s != "**")
 }
 
-/// What `lint` and `set` say of a key that [`mixes_wildcard`].
+/// What `lint` and the writers of `ways settings` say of a key that
+/// [`mixes_wildcard`].
 pub const MIXED_WILDCARD: &str = "a segment mixes text and a wildcard, so the key is read literally and matches no way; write `*` or `**` as a whole segment";
 
 /// For a key `dir/*`, the advice that keeps the meaning it had before toggle
