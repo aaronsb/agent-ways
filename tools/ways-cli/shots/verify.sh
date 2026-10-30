@@ -212,10 +212,11 @@ setup_card_replaced_theme() {
 teardown_card_replaced_theme() { rm -f "$F/home/.config/agent-ways/themes/nord.theme"; }
 # The ways tab's toggles: a pattern key, a single-way key, and a `true` that
 # turns one way under the pattern back on.
+SHOP_WAYS="$F/home/$(basename "$P")/.claude/ways.yaml"
 setup_patterns() {
-  printf 'ways:\n  softwaredev/code/supplychain/**: false\n  softwaredev/code/quality: false\n  softwaredev/code/supplychain/depscan: true\n' >"$F/home/shop/.claude/ways.yaml"
+  printf 'ways:\n  softwaredev/code/supplychain/**: false\n  softwaredev/code/quality: false\n  softwaredev/code/supplychain/depscan: true\n' >"$SHOP_WAYS"
 }
-teardown_patterns() { rm -f "$F/home/shop/.claude/ways.yaml"; }
+teardown_patterns() { rm -f "$SHOP_WAYS"; }
 
 want() { [ $# -eq 1 ] || [[ " ${*:2} " == *" $1 "* ]]; }
 trim() { local s=$1; s=${s#"${s%%[![:space:]]*}"}; printf '%s' "${s%"${s##*[![:space:]]}"}"; }
