@@ -150,7 +150,7 @@ pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
 /// - an error for a key whose segment mixes text and a wildcard, which is
 ///   read literally and so switches nothing;
 /// - a warning for a key `dir/*`, which now covers only the ways directly
-///   under `dir`, naming the toggles for its old meaning;
+///   under `dir`, naming the keys that replace it for its old meaning;
 /// - a warning for a key that names no way the project, the user or the
 ///   shipped corpus has, so a way renamed since it was written runs again;
 /// - a warning for patterns tied at one specificity with opposite values,

@@ -442,7 +442,7 @@ ways:
   documentation/adr/figures: true # back on
 ```
 
-A `dir/*` key once switched off `dir` and every way under it. It now covers the ways directly under `dir` only; `ways settings lint` reports each such key and names the toggles for the old meaning, `dir: false` plus `dir/**: false`.
+A `dir/*` key once switched off `dir` and every way under it. It now covers the ways directly under `dir` only; `ways settings lint` reports each such key and names the keys that replace it for the old meaning, `dir: false` plus `dir/**: false`, leaving out any the file already holds.
 
 The config files layer in this order, each overriding the one before: the user `$XDG_CONFIG_HOME/agent-ways/config.yaml`, the current target's `$XDG_CONFIG_HOME/agent-ways/targets/<key>/config.yaml`, then the project's `.claude/ways.yaml`. A session switch for subagents applies even when the config says `subagents: true`.
 

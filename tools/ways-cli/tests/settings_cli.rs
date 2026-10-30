@@ -1035,8 +1035,8 @@ fn a_trailing_star_key_is_a_lint_warning_naming_the_toggles_for_its_old_meaning(
     assert_eq!(code, 0, "{out}{err}");
     assert_eq!(
         out,
-        "<ROOT>/proj/.claude/ways.yaml:2: [ways.project] ways.data/*: warning: `/*` matches only the ways directly under data; for data and every way under it, write `data: false` plus `data/**: false`\n\
-         <ROOT>/proj/.claude/ways.yaml:3: [ways.project] ways.workstation/*: warning: `/*` matches only the ways directly under workstation; for workstation and every way under it, write `workstation: true` plus `workstation/**: true`\n\
+        "<ROOT>/proj/.claude/ways.yaml:2: [ways.project] ways.data/*: warning: `/*` matches only the ways directly under data; for data and every way under it, replace this key with `data: false` plus `data/**: false`\n\
+         <ROOT>/proj/.claude/ways.yaml:3: [ways.project] ways.workstation/*: warning: `/*` matches only the ways directly under workstation; for workstation and every way under it, replace this key with `workstation: true` plus `workstation/**: true`\n\
          <ROOT>/proj/.claude/ways.yaml:3: [ways.project] ways.workstation/*: warning: names no way in the project, user or shipped ways, so it switches nothing\n"
     );
 }
@@ -1093,8 +1093,61 @@ fn a_trailing_star_key_beside_its_directory_key_keeps_that_key() {
     assert_eq!(code, 0, "{out}{err}");
     assert_eq!(
         out,
-        "<ROOT>/proj/.claude/ways.yaml:3: [ways.project] ways.softwaredev/code/*: warning: `/*` matches only the ways directly under softwaredev/code; for every way under it, write `softwaredev/code/**: false`; the existing `softwaredev/code: true` stays, so softwaredev/code itself stays on\n"
+        "<ROOT>/proj/.claude/ways.yaml:3: [ways.project] ways.softwaredev/code/*: warning: `/*` matches only the ways directly under softwaredev/code; for every way under softwaredev/code, replace this key with `softwaredev/code/**: false`; the existing `softwaredev/code: true` stays, so softwaredev/code itself stays on\n"
     );
+}
+
+/// `text` with the advice lint gives for the key `star` followed as
+/// written: its line removed, or replaced by the keys the advice names.
+fn follow_star_advice(text: &str, lint: &str, star: &str) -> String {
+    let at = format!("ways.{star}: warning: `/*` matches only");
+    let advice = lint.lines().find(|l| l.contains(&at)).unwrap_or_else(|| panic!("no advice for {star} in\n{lint}"));
+    let with: Vec<String> = match advice.split_once("replace this key with ") {
+        Some((_, rest)) => rest.split(';').next().unwrap().split(" plus ").map(|k| format!("  {}\n", k.trim_matches('`'))).collect(),
+        None => {
+            assert!(advice.contains("; remove this key"), "{advice}");
+            Vec::new()
+        }
+    };
+    let mut out = String::new();
+    for line in text.split_inclusive('\n') {
+        if line.starts_with(&format!("  {star}:")) {
+            out.extend(with.iter().cloned());
+        } else {
+            out.push_str(line);
+        }
+    }
+    out
+}
+
+/// Lint `before`, follow its advice for `data/*`, and lint again: the file
+/// parses, and `data/*` is gone with nothing left to advise.
+fn star_advice_settles(before: &str) -> String {
+    let f = Fx::new();
+    renamed_corpus(&f);
+    f.write(&f.overlay(), before);
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!(code, 0, "{out}{err}");
+    let after = follow_star_advice(before, &out, "data/*");
+    f.write(&f.overlay(), &after);
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!((out.as_str(), code), ("", 0), "{after}{err}");
+    after
+}
+
+#[test]
+fn following_the_star_advice_leaves_nothing_to_advise() {
+    assert_eq!(star_advice_settles("ways:\n  data/*: false\n"), "ways:\n  data: false\n  data/**: false\n");
+}
+
+#[test]
+fn following_the_star_advice_beside_both_new_keys_removes_the_star_key() {
+    assert_eq!(star_advice_settles("ways:\n  data/*: false\n  data: false\n  data/**: false\n"), "ways:\n  data: false\n  data/**: false\n");
+}
+
+#[test]
+fn following_the_star_advice_beside_a_differing_subtree_key_keeps_that_key() {
+    assert_eq!(star_advice_settles("ways:\n  data/*: false\n  data/**: true\n"), "ways:\n  data: false\n  data/**: true\n");
 }
 
 #[test]
