@@ -44,10 +44,10 @@ pub(crate) fn list(json: bool) {
             (Some(s), None) => s.clone(),
             (None, _) => "-".into(),
         };
-        let path = i.path.as_deref().map_or("-".into(), |p| tilde(&p.display().to_string()));
+        let path = i.file().map_or("-".into(), |p| tilde(&p.display().to_string()));
         let lane = h.lane().map_or("-", Lane::as_str);
         let kind = i.kind.map_or("-", |k| k.word());
-        t.add_owned(vec![h.name().to_string(), kind.into(), i.origin.word().into(), i.state.word().into(), lane.into(), interval, source, path]);
+        t.add_owned(vec![h.name().to_string(), kind.into(), i.origin_text(), i.state.word().into(), lane.into(), interval, source, path]);
     }
     t.print();
     let lines: Vec<String> = all

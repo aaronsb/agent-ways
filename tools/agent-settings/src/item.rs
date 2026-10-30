@@ -3,7 +3,7 @@
 //! CLI describe the same way. Each family's state words and their tones are
 //! its §2 list.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
@@ -52,6 +52,16 @@ impl Item {
     pub fn with_overrides(self, mut overrides: Vec<Override>) -> Item {
         overrides.sort_by_key(|o| o.origin);
         Item { overrides, ..self }
+    }
+
+    /// The origin and each layer that changes it, as `builtin · user extends`.
+    pub fn origin_text(&self) -> String {
+        std::iter::once(self.origin.word().to_string()).chain(self.overrides.iter().map(|o| format!(" · {} {}", o.origin.word(), o.how.word()))).collect()
+    }
+
+    /// The highest file that changes the item, else the file that defines it.
+    pub fn file(&self) -> Option<&Path> {
+        self.overrides.last().map(|o| o.path.as_path()).or(self.path.as_deref())
     }
 }
 
@@ -405,5 +415,16 @@ mod tests {
         for o in [Origin::Builtin, Origin::User, Origin::Project] {
             assert_eq!(v(&o), o.word());
         }
+    }
+
+    #[test]
+    fn the_origin_text_and_file_follow_the_overrides() {
+        let o = |origin: Origin, how: How| Override { origin, how, path: format!("/{}", origin.word()).into() };
+        let bare = Item { path: Some("/base".into()), ..Item::new(Family::Sensor, "git", Origin::Builtin) };
+        assert_eq!((bare.origin_text().as_str(), bare.file()), ("builtin", Some(Path::new("/base"))));
+        let over = bare.with_overrides(vec![o(Origin::Project, How::Replaces), o(Origin::User, How::Extends)]);
+        assert_eq!(over.origin_text(), "builtin · user extends · project replaces");
+        assert_eq!(over.file(), Some(Path::new("/project")));
+        assert_eq!(Item::new(Family::Sensor, "x", Origin::Builtin).file(), None);
     }
 }
