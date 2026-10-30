@@ -464,7 +464,7 @@ const NATURAL_SHARE = 0.55
 
 // A grid of cells, so columns line up in the terminal's monospace and in the desktop
 // app's proportional font alike. `control`, its copy control, sits on the frame's top
-// border at the right, as ╭──── Copy as: markdown · native · text ─╮.
+// border at the right, as ╭──── Copy as: markdown · csv · text ─╮.
 // Every row is drawn. Long cells wrap within their column in full: unlike the desktop card, the terminal has no tooltip to read a cut cell by (#59).
 // `maxWidth` is the room the table is drawn in, not the terminal's width: in a frame it
 // is the frame's inside.
@@ -755,7 +755,7 @@ function drawingOf(look: Look, segment: Segment & { kind: 'code' }, maxWidth: nu
 // diff past what a card holds keeps Claude Code's drawing of the fence.
 function diffFence(look: Look, fence: Code, diff: DiffInput, maxWidth: number, i: number, Svg?: SvgElement, fenceLang?: string) {
   const { Box, Markdown } = look.ui
-  const copies = [...copiesOf(fence), { form: 'new' as const, text: newOnly(diff), glyph: 'new' as const }]
+  const copies = [...copiesOf(fence), { form: 'new' as const, text: newOnly(diff), format: 'new' }]
 
   if (Svg !== undefined) {
     return (

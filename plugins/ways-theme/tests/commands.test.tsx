@@ -3,6 +3,8 @@ import type { TestBody } from 'claude-code/testing'
 import type { On, RenderElement } from 'claude-code'
 
 import { copyPieces, fenceCopy, holdsCopy } from '../hooks/skins/commands.ts'
+import { LABELS } from '../hooks/skins/copy-rows.tsx'
+import type { Label } from '../hooks/skins/copy-rows.tsx'
 import type { Copy } from '../hooks/skins/commands.ts'
 import { parseExport, setupOf } from '../hooks/skins/config.ts'
 import { MAX_DRAWN } from '../hooks/skins/format.ts'
@@ -584,7 +586,7 @@ describe('a fence in a list item', () => {
     const tree = await ui.drawn()
     expect(drawnAt(tree, '    for x in xs:').length).toBeGreaterThan(0)
     expect(drawnAt(tree, '       for x in xs:')).toEqual([])
-    await ui.press({ key: (await ui.find({ type: 'Button', text: /^native$/ }))!.key! })
+    await ui.press({ key: (await ui.findAll({ type: 'Button' })).find(button => button.key?.endsWith('-native'))!.key! })
     await ui.unmount()
     expect(h.copies).toEqual([WRITTEN])
   })
@@ -683,7 +685,7 @@ describe('a copy block draws clear of every frame and copies its text alone', ()
       expect(found.length).toBeGreaterThan(0)
       expect(found.every(isClear)).toBe(true)
     }
-    await ui.press({ key: (await ui.find({ type: 'Button', text: /^native$/ }))!.key! })
+    await ui.press({ key: (await ui.findAll({ type: 'Button' })).find(button => button.key?.endsWith('-native'))!.key! })
     await ui.unmount()
     expect(h.copies).toEqual([CODE])
   })
@@ -700,7 +702,7 @@ describe('a copy block draws clear of every frame and copies its text alone', ()
     expect(drawnAt(tree, 'row-40').length).toBeGreaterThan(0)
     expect(drawnAt(tree, 'line 60').length).toBeGreaterThan(0)
     expect(await ui.find({ type: 'Button', text: /more|less/ })).toBe(undefined)
-    for (const button of await ui.findAll({ type: 'Button', text: /^(Copy|native)$/ })) await ui.press({ key: button.key! })
+    for (const button of (await ui.findAll({ type: 'Button' })).filter(button => /^copy-\d+(-native)?$/.test(button.key ?? ''))) await ui.press({ key: button.key! })
     await ui.unmount()
     expect(h.copies).toContain(code)
 
@@ -717,7 +719,7 @@ describe('a copy block draws clear of every frame and copies its text alone', ()
     const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
     const ui = await $.ui.mount(full('One:\n\n! git status\n\nthen `/clear`, and:\n\n```sh\nls -la\n```'))
-    for (const button of await ui.findAll({ type: 'Button', text: /^(Copy|native)$/ })) await ui.press({ key: button.key! })
+    for (const button of (await ui.findAll({ type: 'Button' })).filter(button => /^copy-\d+(-native)?$/.test(button.key ?? ''))) await ui.press({ key: button.key! })
     await ui.unmount()
     expect(h.copies).toEqual(['! git status', '/clear', 'ls -la'])
   })
@@ -777,7 +779,7 @@ describe('the forms a block copies', () => {
     for (const form of ['markdown', 'native', 'text']) await ui.press({ key: `copy-4-${form}` })
     await ui.unmount()
     expect(h.copies).toEqual([TABLE, CSV, TEXT])
-    expect(h.toasts.map(toast => (toast as { text: string }).text)).toEqual(['Copied markdown', 'Copied native', 'Copied text'])
+    expect(h.toasts.map(toast => (toast as { text: string }).text)).toEqual(['Copied markdown', 'Copied csv', 'Copied text'])
   })
 
   test('a fence offers markdown and its code, and no text, which would copy the code again', async ($, on) => {
@@ -811,12 +813,12 @@ describe('the forms a block copies', () => {
 describe('the copy control draws', () => {
   const REPLY = 'Two:\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```sh\nls\n```\n\nAnd more.'
 
-  test('verbose, the default: an accent `Copy as:`, then the forms as words with a `·` between them', async ($, on) => {
+  test('verbose, the default: an accent `Copy as:`, then each format by name with a `·` between them', async ($, on) => {
     const { ui } = await mounted($, on, REPLY)
     const tree = await ui.drawn()
     await ui.unmount()
-    expect(controlLine(tree, 'copy-1-markdown')).toBe(' Copy as: markdown · native · text ')
-    expect(controlLine(tree, 'copy-2-markdown')).toBe(' Copy as: markdown · native ')
+    expect(controlLine(tree, 'copy-1-markdown')).toBe(' Copy as: markdown · csv · text ')
+    expect(controlLine(tree, 'copy-2-markdown')).toBe(' Copy as: markdown · sh ')
     expect(controlLine(tree, 'copy-reply-markdown')).toBe(' Copy reply as: markdown · text ')
     const leads = walk(tree).filter(n => n.type === 'Text' && /^ Copy (reply )?as: $/.test(textOf(n)))
     expect(leads.map(n => n.props?.color)).toEqual([ACCENT, ACCENT, ACCENT])
@@ -826,7 +828,7 @@ describe('the copy control draws', () => {
     const { ui } = await mounted($, on, REPLY, { icons: 'ascii' })
     const tree = await ui.drawn()
     await ui.unmount()
-    expect(controlLine(tree, 'copy-1-markdown')).toBe(' Copy as: markdown | native | text ')
+    expect(controlLine(tree, 'copy-1-markdown')).toBe(' Copy as: markdown | csv | text ')
     expect(controlLine(tree, 'copy-reply-markdown')).toBe(' Copy reply as: markdown | text ')
   })
 
@@ -839,13 +841,13 @@ describe('the copy control draws', () => {
     expect(controlLine(tree, 'copy-reply-markdown')).toBe('   ·  ')
   })
 
-  test('compact under ascii icons: cp, then md, csv or code, and txt', async ($, on) => {
+  test('compact under ascii icons: cp or reply, then md, csv or code, and txt', async ($, on) => {
     const { ui } = await mounted($, on, REPLY, { copy_style: 'compact', icons: 'ascii' })
     const tree = await ui.drawn()
     await ui.unmount()
     expect(controlLine(tree, 'copy-1-markdown')).toBe(' cp md | csv | txt ')
     expect(controlLine(tree, 'copy-2-markdown')).toBe(' cp md | code ')
-    expect(controlLine(tree, 'copy-reply-markdown')).toBe(' cp md | txt ')
+    expect(controlLine(tree, 'copy-reply-markdown')).toBe(' reply md | txt ')
   })
 
   test('a block with one copy draws a bold accent Copy, and the copy glyph under compact', async ($, on) => {
@@ -871,6 +873,51 @@ describe('the copy control draws', () => {
     expect(parseExport(JSON.stringify({ ...MIAMI_NIGHTS, render: { ...MIAMI_NIGHTS.render, copy_style: 'tiny' } }))).toBe('render.copy_style is not verbose or compact')
     expect(typeof parseExport(JSON.stringify({ ...MIAMI_NIGHTS, render: { ...MIAMI_NIGHTS.render, copy_as: 'content' } }))).toBe('string')
   })
+})
+
+describe('each form is labelled by the format it copies, from one table', () => {
+  test('a table copies as csv, a fence as its language, a fence with none as code', async ($, on) => {
+    const { ui } = await mounted($, on, 'Rows:\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```python\nprint(1)\n```\n\n```\nmake\n```')
+    const tree = await ui.drawn()
+    await ui.unmount()
+    expect(controlLine(tree, 'copy-1-markdown')).toBe(' Copy as: markdown · csv · text ')
+    expect(controlLine(tree, 'copy-2-markdown')).toBe(' Copy as: markdown · python ')
+    expect(controlLine(tree, 'copy-3-markdown')).toBe(' Copy as: markdown · code ')
+    expect(walk(tree).some(n => (n.type === 'Button' && n.props?.label === 'native') || (n.type === 'Text' && textOf(n).includes('native')))).toBe(false)
+  })
+
+  test('a fence copied as its language toasts the language', async ($, on) => {
+    const { h, ui } = await mounted($, on, 'Run:\n\n```python\nprint(1)\n```')
+    await ui.press({ key: 'copy-1-native' })
+    await ui.unmount()
+    expect(h.copies).toEqual(['print(1)'])
+    expect(h.toasts.map(toast => (toast as { text: string }).text)).toEqual(['Copied python'])
+  })
+
+  test('the compact Nerd Font labels are exactly these codepoints', () => {
+    const nerd = Object.fromEntries(Object.entries(LABELS).map(([format, label]) => [format, label.nerd]))
+    expect(nerd).toEqual({ markdown: '', text: '', csv: '', code: '', new: '', copy: '', reply: '' })
+  })
+
+  const REPLY = 'Rows:\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```python\nprint(1)\n```'
+  const styles: [string, Style, (label: Label) => string, string][] = [
+    ['verbose', {}, label => label.verbose, ' · '],
+    ['verbose ascii', { icons: 'ascii' }, label => label.verbose, ' | '],
+    ['compact', { copy_style: 'compact' }, label => label.nerd, ' · '],
+    ['compact ascii', { copy_style: 'compact', icons: 'ascii' }, label => label.ascii, ' | '],
+  ]
+  for (const [name, style, pick, sep] of styles) {
+    test(`${name} draws every label from the table`, async ($, on) => {
+      const { ui } = await mounted($, on, REPLY, style)
+      const tree = await ui.drawn()
+      await ui.unmount()
+      const lead = (row: Label) => (style.copy_style === 'compact' ? ` ${pick(row)} ` : ` ${row.verbose} as: `)
+      const python = style.copy_style === 'compact' ? pick(LABELS.code) : 'python'
+      expect(controlLine(tree, 'copy-1-markdown')).toBe(`${lead(LABELS.copy)}${[LABELS.markdown, LABELS.csv, LABELS.text].map(pick).join(sep)} `)
+      expect(controlLine(tree, 'copy-2-markdown')).toBe(`${lead(LABELS.copy)}${pick(LABELS.markdown)}${sep}${python} `)
+      expect(controlLine(tree, 'copy-reply-markdown')).toBe(`${lead(LABELS.reply)}${[LABELS.markdown, LABELS.text].map(pick).join(sep)} `)
+    })
+  }
 })
 
 describe('a table copies as CSV', () => {

@@ -31,12 +31,7 @@ export type IconSet = 'unicode' | 'ascii'
 
 export type Icons = Readonly<
   Record<'running' | 'ok' | 'err' | 'interrupted' | 'done' | 'rail' | 'branch' | 'prompt', string>
-> & { readonly frames: readonly string[]; readonly copy: CopyGlyphs }
-
-// The compact copy control's glyphs: `copy` leads it, and each form has its own. A table's
-// own form is `table`, any other block's `code`; `new` is a diff's code after the change.
-export type CopyGlyph = 'copy' | 'markdown' | 'table' | 'code' | 'text' | 'new'
-export type CopyGlyphs = Readonly<Record<CopyGlyph, string>>
+> & { readonly frames: readonly string[] }
 
 // Single-cell glyphs with no emoji presentation; each status has its own shape, not only a colour.
 export const ICONS: Readonly<Record<IconSet, Icons>> = {
@@ -50,8 +45,6 @@ export const ICONS: Readonly<Record<IconSet, Icons>> = {
     branch: '─',
     prompt: '▍',
     frames: ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'],
-    // Nerd Font: nf-fa-copy, nf-dev-markdown, nf-fa-table, nf-fa-code, nf-fa-align_left, nf-fa-plus.
-    copy: { copy: '\uf0c5', markdown: '\ue73e', table: '\uf0ce', code: '\uf121', text: '\uf036', new: '\uf067' },
   },
   ascii: {
     running: 'o',
@@ -63,6 +56,5 @@ export const ICONS: Readonly<Record<IconSet, Icons>> = {
     branch: '-',
     prompt: '>',
     frames: ['|', '/', '-', '\\'],
-    copy: { copy: 'cp', markdown: 'md', table: 'csv', code: 'code', text: 'txt', new: 'new' },
   },
 }
