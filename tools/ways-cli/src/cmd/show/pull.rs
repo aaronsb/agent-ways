@@ -121,7 +121,7 @@ fn inside_a_root(file: &Path, project_dir: &str) -> bool {
 /// when known, is the session whose scope a mismatch is reported against.
 pub fn read(id: &str, session_id: Option<&str>) -> Result<Read> {
     let project_dir = crate::util::project_dir();
-    let (way_file, is_project_local) = resolve(id, &project_dir)?;
+    let (way_file, is_project_local) = resolve(id, &project_dir).inspect_err(|e| log_discarded(id, session_id, &project_dir, e))?;
     let content = std::fs::read_to_string(&way_file)?;
     let session_scope = session_id.map_or_else(|| "agent".to_string(), session::detect_scope);
     let field = crate::frontmatter::field_in(&content, "scope").unwrap_or_default();
@@ -177,6 +177,22 @@ pub fn stamp(id: &str, session_id: &str) -> Result<()> {
         reason: None,
     });
     Ok(())
+}
+
+/// A read refused because the way is switched off would have disclosed it:
+/// log it as a discarded fire. The read is the disclosure attempt; the hook's
+/// stamp never runs for a read that failed. A pull meets no refire window, so
+/// neither does its discard. A read with no session belongs to no session's
+/// fires and logs nothing.
+fn log_discarded(id: &str, session_id: Option<&str>, project_dir: &str, e: &anyhow::Error) {
+    let Some(session) = session_id.filter(|s| !s.is_empty()) else { return };
+    if reason_of(e) != "disabled" || session::resolve_way_file(id, project_dir).is_none() {
+        return;
+    }
+    let Some(why) = crate::cmd::scan::discard::reason(id) else { return };
+    let scope = session::detect_scope(session);
+    let at = crate::cmd::scan::discard::LaneLog { lane: "pull", scope: &scope, session, project: project_dir };
+    crate::cmd::scan::discard::log_one(&crate::cmd::scan::discard::Hit { way: id, trigger: "pull", span: None, scores: None }, &why, &at);
 }
 
 /// The switch that turns `id` off, named for the operator, or `None` when the

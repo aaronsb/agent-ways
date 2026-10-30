@@ -441,7 +441,15 @@ impl Stats {
         let line = vec![
             Span::styled("Usage", Style::new().add_modifier(Modifier::BOLD)),
             Span::styled(
-                format!(" · {} sessions · {} fires · {} re-disclosures · {} → {}", r.sessions, r.fires, r.redisclosures, day(&r.first_ts), day(&r.last_ts)),
+                format!(
+                    " · {} sessions · {} fires{} · {} re-disclosures · {} → {}",
+                    r.sessions,
+                    r.fires,
+                    if r.discarded.total > 0 { format!(" · {} discarded", r.discarded.total) } else { String::new() },
+                    r.redisclosures,
+                    day(&r.first_ts),
+                    day(&r.last_ts)
+                ),
                 theme::muted(),
             ),
         ];

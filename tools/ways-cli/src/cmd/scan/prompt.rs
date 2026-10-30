@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use crate::cmd::show::ContextBudget;
 use crate::session;
 
-use super::candidates::collect_candidates;
-use super::gate;
+use super::candidates::collect_with_off;
+use super::{discard, gate};
 use super::matching::{
     log_keyword_gated, log_near_miss, match_prompt, record_keyword_gated, record_near_miss, PromptMatch,
 };
@@ -204,7 +204,7 @@ fn scan_prompt_surface(
         epoch,
         turn_start: bump_epoch,
     });
-    let candidates = collect_candidates(&project_dir);
+    let (candidates, off) = collect_with_off(&project_dir);
 
     // ADR-130: cap embed input to the model's working window via the
     // sentence-salience reducer. Pattern/keyword matching downstream
@@ -231,19 +231,19 @@ fn scan_prompt_surface(
     // the matcher can't run (surface too sparse to chunk, engine unavailable) it
     // returns None and match_prompt uses the single-vector scores. The keyword
     // gate and near-miss telemetry keep using the single-vector batch scores.
-    let verdicts = late_interaction::run(&reduced, &bodies, crate::config::global().admission, body_rank);
+    let lane = Lane::Prompt { scope: &scope };
+    let off_bodies = body_map(off.ways.iter().filter(|w| eligible(w, lane, &project_dir)));
+    let verdicts = late_interaction::run(&reduced, &bodies, &off_bodies, crate::config::global().admission, body_rank);
     let fused = single_fused || verdicts.as_ref().is_some_and(|v| v.used_body_rank());
 
     // ADR-701 §2: record the top candidates with share and margin, from the
     // rows the scan already holds, and whether confirmation read the body
     // sidecar. Enabled ways only: `candidates` is already filtered by the
     // domain and per-way toggles.
-    {
-        let enabled: std::collections::HashMap<&str, &str> =
-            competitors.iter().map(|c| (c.corpus_id.as_str(), c.id.as_str())).collect();
-        record.candidates(&embed_matches, &enabled, verdicts.as_ref().is_some_and(|v| v.used_sidecar()));
-        record.body_rank(fused.then(|| body_rank.as_str()));
-    }
+    let enabled: std::collections::HashMap<&str, &str> =
+        competitors.iter().map(|c| (c.corpus_id.as_str(), c.id.as_str())).collect();
+    record.candidates(&embed_matches, &enabled, verdicts.as_ref().is_some_and(|v| v.used_sidecar()));
+    record.body_rank(fused.then(|| body_rank.as_str()));
 
     // Prompt-only embed scores, computed lazily for gate re-checks (ADR-155
     // review): the shared embed vector mixes the response context in, which
@@ -265,7 +265,7 @@ fn scan_prompt_surface(
     let mut fired_ids: HashSet<String> = HashSet::new();
 
     for way in &candidates {
-        if !eligible(way, Lane::Prompt { scope: &scope }, &project_dir) {
+        if !eligible(way, lane, &project_dir) {
             continue;
         }
 
@@ -322,7 +322,7 @@ fn scan_prompt_surface(
     };
     let mut gate = gate::apply(&pending, query, response_context, &gate_log);
 
-    admit_hits(&hits, &mut gate, &pending, &gate_log, &mut record, |hit| {
+    let shown = admit_hits(&hits, &mut gate, &pending, &gate_log, &mut record, |hit| {
         let (channel, matched_span, _) = &hit.payload;
         let shown = capture_show_way(
             &hit.id,
@@ -342,6 +342,22 @@ fn scan_prompt_surface(
         (shown.outcome, delivered)
     });
     record.write();
+
+    discard::prompt_shaped(
+        &off,
+        |w| eligible(w, lane, &project_dir),
+        &discard::PromptShadow {
+            query,
+            masked: &masked,
+            session: session_id,
+            scores: &embed_matches,
+            recheck: prompt_only_scores.as_ref(),
+            verdicts: verdicts.as_ref(),
+            boost: Some(discard::Boost { fired: &fired_ids, shown: &shown }),
+            enabled: &enabled,
+        },
+        &discard::LaneLog { lane: "prompt", scope: &scope, session: session_id, project: &project_dir },
+    );
 
     if !context.is_empty() {
         emit_hook_context(hook_event, context.trim_end());
@@ -471,7 +487,7 @@ fn admit_hits(
     gate_log: &gate::LogContext<'_>,
     record: &mut decision::Record,
     mut show: impl FnMut(&Hit<PromptPayload>) -> (crate::cmd::show::ShowOutcome, bool),
-) {
+) -> HashSet<String> {
     let mut shown: HashSet<String> = HashSet::new();
     for (i, hit) in hits.iter().enumerate() {
         let (channel, _, needs_parent) = &hit.payload;
@@ -490,6 +506,7 @@ fn admit_hits(
         record.hit(&hit.id, i + 1, channel, hit.score, result, Some(gate));
     }
     record.judge(gate);
+    shown
 }
 
 /// A way that fired on its parent's boost is withheld when the parent is not

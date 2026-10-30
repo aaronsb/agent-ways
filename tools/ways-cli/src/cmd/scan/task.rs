@@ -5,7 +5,8 @@ use anyhow::Result;
 
 use crate::session;
 
-use super::candidates::collect_candidates;
+use super::candidates::collect_with_off;
+use super::discard;
 use super::matching::{
     log_keyword_gated, log_near_miss, match_prompt, record_keyword_gated, record_near_miss, PromptMatch,
 };
@@ -28,7 +29,7 @@ pub fn task(
         .unwrap_or_else(crate::util::project_dir);
 
     let is_teammate = team.is_some();
-    let candidates = collect_candidates(&project_dir);
+    let (candidates, off) = collect_with_off(&project_dir);
     let near_miss_margin = crate::config::global().near_miss_margin;
     let keyword_floor = crate::config::global().keyword_floor_probability;
     // Session scope for telemetry: the task channel is subagent unless a team
@@ -41,10 +42,12 @@ pub fn task(
     let masked = mask_nonlinguistic(query);
     // ADR-160: the matcher is the semantic matcher on the task surface too;
     // single-vector is the fail-safe when it can't chunk (see scan::prompt).
-    let bodies = body_map(candidates.iter().filter(|w| eligible(w, Lane::Task { teammate: is_teammate }, &project_dir)));
+    let lane = Lane::Task { teammate: is_teammate };
+    let bodies = body_map(candidates.iter().filter(|w| eligible(w, lane, &project_dir)));
+    let off_bodies = body_map(off.ways.iter().filter(|w| eligible(w, lane, &project_dir)));
     let body_rank = crate::config::global().body_rank;
     let (embed_matches, single_fused) = late_interaction::single_scores(&reduced, &bodies, body_rank);
-    let verdicts = late_interaction::run(&reduced, &bodies, crate::config::global().admission, body_rank);
+    let verdicts = late_interaction::run(&reduced, &bodies, &off_bodies, crate::config::global().admission, body_rank);
     let fused = single_fused || verdicts.as_ref().is_some_and(|v| v.used_body_rank());
     // ADR-701 §2: the task lane writes a decision record too, its candidates
     // drawn from the ways eligible there. A dispatch is not a turn: the epoch
@@ -58,22 +61,19 @@ pub fn task(
         epoch: session::get_epoch(session_id),
         turn_start: false,
     });
-    {
-        let lane = Lane::Task { teammate: is_teammate };
-        let enabled: std::collections::HashMap<&str, &str> = candidates
-            .iter()
-            .filter(|c| c.embeddable() && eligible(c, lane, &project_dir))
-            .map(|c| (c.corpus_id.as_str(), c.id.as_str()))
-            .collect();
-        record.candidates(&embed_matches, &enabled, verdicts.as_ref().is_some_and(|v| v.used_sidecar()));
-        record.body_rank(fused.then(|| body_rank.as_str()));
-    }
+    let enabled: std::collections::HashMap<&str, &str> = candidates
+        .iter()
+        .filter(|c| c.embeddable() && eligible(c, lane, &project_dir))
+        .map(|c| (c.corpus_id.as_str(), c.id.as_str()))
+        .collect();
+    record.candidates(&embed_matches, &enabled, verdicts.as_ref().is_some_and(|v| v.used_sidecar()));
+    record.body_rank(fused.then(|| body_rank.as_str()));
 
     // Payload: channel. Ordered like the other lanes before the stash is written.
     let mut hits: Vec<Hit<String>> = Vec::new();
 
     for way in &candidates {
-        if !eligible(way, Lane::Task { teammate: is_teammate }, &project_dir) {
+        if !eligible(way, lane, &project_dir) {
             continue;
         }
 
@@ -111,6 +111,22 @@ pub fn task(
             PromptMatch::NoMatch => {}
         }
     }
+
+    discard::prompt_shaped(
+        &off,
+        |w| eligible(w, lane, &project_dir),
+        &discard::PromptShadow {
+            query,
+            masked: &masked,
+            session: session_id,
+            scores: &embed_matches,
+            recheck: None,
+            verdicts: verdicts.as_ref(),
+            boost: None,
+            enabled: &enabled,
+        },
+        &discard::LaneLog { lane: "task", scope: task_scope, session: session_id, project: &project_dir },
+    );
 
     order_hits(&mut hits);
     let stashed = write_stash(&hits, record.scan_id(), session_id, is_teammate, team);

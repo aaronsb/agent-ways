@@ -86,7 +86,7 @@ pub(crate) fn gather_sessions(content: &str, project_filter: Option<&str>) -> Ve
 
         let counts = event_counts.entry(sid.clone()).or_insert((0, 0));
         counts.0 += 1;
-        if event == "way_fired" {
+        if ways_core::firing::is_delivered_fire(&v) {
             counts.1 += 1;
         }
         last_ts.insert(sid, ts);

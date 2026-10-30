@@ -9,8 +9,8 @@ use anyhow::Result;
 
 use crate::session;
 
-use super::candidates::collect_candidates;
-use super::emit_hook_context;
+use super::candidates::collect_with_off;
+use super::{discard, emit_hook_context};
 use super::scoring::capture_show_way;
 
 pub fn state(
@@ -37,7 +37,7 @@ pub fn state(
         .unwrap_or_else(crate::util::project_dir);
 
     let scope = session::detect_scope(session_id);
-    let candidates = collect_candidates(&project_dir);
+    let (candidates, off) = collect_with_off(&project_dir);
 
     let mut context = String::new();
 
@@ -57,40 +57,9 @@ pub fn state(
     }
 
     // State trigger evaluation
+    let state = StateSurface { session_id, scope: &scope, project_dir: &project_dir, transcript, envelope_turn };
     for way in &candidates {
-        let trigger_type = match &way.trigger {
-            Some(t) => t.as_str(),
-            None => continue,
-        };
-
-        if !session::scope_matches(&way.scope, &scope) {
-            continue;
-        }
-
-        let triggered = match trigger_type {
-            "context-threshold" => {
-                !envelope_turn && evaluate_context_threshold(way.threshold as u64, transcript)
-            }
-            "file-exists" => {
-                if let Some(ref pattern) = way.trigger_path {
-                    evaluate_file_exists(pattern, &project_dir)
-                } else {
-                    false
-                }
-            }
-            // Once per session: the state hook also runs on every prompt for
-            // the two conditional triggers above, and a session-start way
-            // must not ride that cadence on its refire curve. The marker is
-            // cleared on startup, compact, and clear, so the way still shows
-            // again after a compaction. Gated here on the marker rather than
-            // on the SessionStart event because the teammate scope marker is
-            // written after session start, and the teams way must still
-            // reach a teammate on its first prompt.
-            "session-start" => !session::way_is_shown(&way.id, session_id),
-            _ => false,
-        };
-
-        if !triggered {
+        if !state.triggers(way) {
             continue;
         }
 
@@ -111,11 +80,57 @@ pub fn state(
         }
     }
 
+    // A switched-off way's refire window is read before its trigger, which can
+    // mean reading the transcript.
+    let at = discard::LaneLog { lane: "state", scope: &scope, session: session_id, project: &project_dir };
+    let off_state: Vec<_> = off.ways.iter().filter(|w| w.trigger.is_some()).collect();
+    let tick = if off_state.is_empty() { 0 } else { session::get_token_position(session_id) };
+    for way in off_state.into_iter().filter(|w| discard::refire_open(w, &at, tick).is_some()) {
+        if state.triggers(way) {
+            discard::log(&off, &at, &discard::Hit { way: &way.id, trigger: "state", span: None, scores: None });
+        }
+    }
+
     if !context.is_empty() {
         emit_hook_context(hook_event, context.trim_end());
     }
 
     Ok(())
+}
+
+/// What the state triggers are evaluated against.
+struct StateSurface<'a> {
+    session_id: &'a str,
+    scope: &'a str,
+    project_dir: &'a str,
+    transcript: Option<&'a str>,
+    envelope_turn: bool,
+}
+
+impl StateSurface<'_> {
+    /// Whether `way` is state-triggered, in scope, and its condition holds.
+    fn triggers(&self, way: &super::WayCandidate) -> bool {
+        let Some(trigger_type) = way.trigger.as_deref() else { return false };
+        if !session::scope_matches(&way.scope, self.scope) {
+            return false;
+        }
+        match trigger_type {
+            "context-threshold" => {
+                !self.envelope_turn && evaluate_context_threshold(way.threshold as u64, self.transcript)
+            }
+            "file-exists" => way.trigger_path.as_deref().is_some_and(|p| evaluate_file_exists(p, self.project_dir)),
+            // Once per session: the state hook also runs on every prompt for
+            // the two conditional triggers above, and a session-start way
+            // must not ride that cadence on its refire curve. The marker is
+            // cleared on startup, compact, and clear, so the way still shows
+            // again after a compaction. Gated here on the marker rather than
+            // on the SessionStart event because the teammate scope marker is
+            // written after session start, and the teams way must still
+            // reach a teammate on its first prompt.
+            "session-start" => !session::way_is_shown(&way.id, self.session_id),
+            _ => false,
+        }
+    }
 }
 
 /// True when the invoking prompt is a harness envelope on a UserPromptSubmit,

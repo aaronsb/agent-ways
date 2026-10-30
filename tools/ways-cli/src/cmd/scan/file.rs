@@ -5,10 +5,11 @@ use anyhow::Result;
 use crate::cmd::show::ContextBudget;
 use crate::session;
 
-use super::candidates::{check_when, collect_candidates, collect_checks};
+use super::candidates::{check_when, collect_checks, collect_with_off};
+use super::discard;
 use super::order::{order_hits, Hit};
 use super::scoring::{batch_embed_score, capture_show_check, capture_show_way};
-use super::{check_semantic_score, emit_hook_context, reduce, regex_matches, regex_span, BUDGET_FILE};
+use super::{check_semantic_score, emit_hook_context, reduce, regex_matches, regex_span, WayCandidate, BUDGET_FILE};
 
 // ── File scan ───────────────────────────────────────────────────
 
@@ -25,29 +26,13 @@ pub fn file(
 
     session::bump_epoch(session_id);
     let scope = session::detect_scope(session_id);
-    let candidates = collect_candidates(&project_dir);
+    let (candidates, off) = collect_with_off(&project_dir);
 
     let mut context = String::new();
     let mut budget = ContextBudget::hook();
 
-    // Collect the hits, then admit them in a fixed order (scan/order.rs):
-    // walk order is directory order, and it decides what the budget withholds.
-    let mut hits: Vec<Hit<String>> = Vec::new();
-    for way in &candidates {
-        if !session::scope_matches(&way.scope, &scope) {
-            continue;
-        }
-        if !check_when(&way.when_project, &way.when_file_exists, &project_dir) {
-            continue;
-        }
-
-        if let Some(ref files_pattern) = way.files {
-            if let Some(span) = regex_span(files_pattern, filepath) {
-                hits.push(Hit::explicit(&way.id, files_pattern, &span, span.clone()));
-            }
-        }
-    }
-    order_hits(&mut hits);
+    let hits = file_hits(&candidates, filepath, &scope, &project_dir);
+    log_discarded(&off, filepath, &discard::LaneLog { lane: "file", scope: &scope, session: session_id, project: &project_dir });
     for hit in &hits {
         let out = capture_show_way(&hit.id, session_id, "file", None, Some(hit.payload.as_str()), None, Some(&mut budget)).body;
         if !out.is_empty() {
@@ -94,4 +79,34 @@ pub fn file(
     }
 
     Ok(())
+}
+
+/// The file-lane hits among `candidates` for `filepath`, in admission order
+/// (scan/order.rs): walk order is directory order, and it would decide what
+/// the budget withholds. The payload is the matched span.
+fn file_hits(candidates: &[WayCandidate], filepath: &str, scope: &str, project_dir: &str) -> Vec<Hit<String>> {
+    let mut hits: Vec<Hit<String>> = Vec::new();
+    for way in candidates {
+        if !session::scope_matches(&way.scope, scope) {
+            continue;
+        }
+        if !check_when(&way.when_project, &way.when_file_exists, project_dir) {
+            continue;
+        }
+        if let Some(ref files_pattern) = way.files {
+            if let Some(span) = regex_span(files_pattern, filepath) {
+                hits.push(Hit::explicit(&way.id, files_pattern, &span, span.clone()));
+            }
+        }
+    }
+    order_hits(&mut hits);
+    hits
+}
+
+/// The file lane's shadow pass: [`file_hits`] over the switched-off ways, each
+/// logged as a discarded fire.
+pub(super) fn log_discarded(off: &discard::Switched, filepath: &str, at: &discard::LaneLog<'_>) {
+    for hit in file_hits(&off.ways, filepath, at.scope, at.project) {
+        discard::log(off, at, &discard::Hit { way: &hit.id, trigger: "file", span: Some(&hit.payload), scores: None });
+    }
 }

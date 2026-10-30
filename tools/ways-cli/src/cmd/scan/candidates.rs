@@ -3,13 +3,44 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use crate::session;
+use super::discard::{self, Discard, Switched};
 
 use super::WayCandidate;
 
 // ── Collection ─────────────────────────────────────────────────
 
 pub(crate) fn collect_candidates(project_dir: &str) -> Vec<WayCandidate> {
+    collect(project_dir, &mut Off::Skip)
+}
+
+/// [`collect_candidates`] with the switched-off ways beside them, each parsed
+/// from its frontmatter alone, for a lane's shadow pass (scan/discard.rs).
+pub(crate) fn collect_with_off(project_dir: &str) -> (Vec<WayCandidate>, Switched) {
+    let mut off = Switched::default();
+    let on = collect(project_dir, &mut Off::Collect(&mut off));
+    sort_by_tree_id(&mut off.ways);
+    (on, off)
+}
+
+/// Every way, switched off by `why`, for a project that is off as a whole.
+pub(crate) fn collect_all_off(project_dir: &str, why: &Discard) -> Switched {
+    let mut off = Switched::default();
+    collect(project_dir, &mut Off::All(&mut off, why));
+    sort_by_tree_id(&mut off.ways);
+    off
+}
+
+/// What a walk does with a switched-off way.
+enum Off<'a> {
+    /// Drop it before its file is read.
+    Skip,
+    /// Keep it apart, read from its frontmatter.
+    Collect(&'a mut Switched),
+    /// Every way is off for this reason.
+    All(&'a mut Switched, &'a Discard),
+}
+
+fn collect(project_dir: &str, off: &mut Off<'_>) -> Vec<WayCandidate> {
     let mut candidates = Vec::new();
 
     // Full ADR-143 precedence, by bare id: project > user > core. A higher root
@@ -29,7 +60,7 @@ pub(crate) fn collect_candidates(project_dir: &str) -> Vec<WayCandidate> {
     for root in &roots.all {
         let claimed = seen.clone();
         let prefix = if *root == roots.project { project_corpus_prefix(project_dir) } else { String::new() };
-        collect_from_dir(Walk { dir: root, corpus_prefix: &prefix, kind: Kind::Ways, foreign_roots: &roots.foreign_to(root) }, &mut candidates, &claimed, &mut seen, &mut seen_paths);
+        collect_from_dir(Walk { dir: root, corpus_prefix: &prefix, kind: Kind::Ways, foreign_roots: &roots.foreign_to(root) }, &mut candidates, &claimed, &mut seen, &mut seen_paths, off);
     }
 
     sort_by_tree_id(&mut candidates);
@@ -96,7 +127,7 @@ pub(crate) fn collect_checks(project_dir: &str) -> Vec<WayCandidate> {
     for root in &roots.all {
         let claimed = seen.clone();
         let prefix = if *root == roots.project { project_corpus_prefix(project_dir) } else { String::new() };
-        collect_from_dir(Walk { dir: root, corpus_prefix: &prefix, kind: Kind::Checks, foreign_roots: &roots.foreign_to(root) }, &mut candidates, &claimed, &mut seen, &mut seen_paths);
+        collect_from_dir(Walk { dir: root, corpus_prefix: &prefix, kind: Kind::Checks, foreign_roots: &roots.foreign_to(root) }, &mut candidates, &claimed, &mut seen, &mut seen_paths, &mut Off::Skip);
     }
 
     sort_by_tree_id(&mut candidates);
@@ -157,6 +188,7 @@ fn collect_from_dir(
     skip: &HashSet<String>,
     written: &mut HashSet<String>,
     seen_paths: &mut HashSet<PathBuf>,
+    off: &mut Off<'_>,
 ) {
     let Walk { dir, corpus_prefix, kind, foreign_roots } = walk;
     let root_canon = canonical(dir);
@@ -178,10 +210,23 @@ fn collect_from_dir(
         if skip.contains(&id) {
             continue;
         }
-        // Domain disable (user scope) and per-way disable (project scope, ADR-131).
+        // A domain disable, a project toggle (ADR-131) or a project switched
+        // off keeps the way out of matching. The id is claimed either way, so
+        // a lower root's copy is not collected in its place.
         if kind == Kind::Ways {
-            let domain = id.split('/').next().unwrap_or(&id);
-            if session::domain_disabled(domain) || session::way_disabled(&id) {
+            let why = match off {
+                Off::All(_, why) => Some((*why).clone()),
+                _ => discard::reason(&id),
+            };
+            if let Some(why) = why {
+                let into = match off {
+                    Off::Skip => continue,
+                    Off::Collect(into) | Off::All(into, _) => into,
+                };
+                if let Some(candidate) = read_frontmatter(path).and_then(|fm| parse_candidate(&id, corpus_prefix, path, &fm)) {
+                    written.insert(id.clone());
+                    into.push(candidate, why);
+                }
                 continue;
             }
         }
@@ -197,6 +242,30 @@ fn collect_from_dir(
         if let Some(candidate) = parse_candidate(&id, corpus_prefix, path, &content) {
             written.insert(id.clone());
             out.push(candidate);
+        }
+    }
+}
+
+/// A way file up to the end of its frontmatter block; `None` when it does not
+/// open with a fence or the block never closes. The body is not read.
+fn read_frontmatter(path: &Path) -> Option<String> {
+    use std::io::BufRead;
+    let mut reader = std::io::BufReader::new(std::fs::File::open(path).ok()?);
+    let mut out = String::new();
+    let mut line = String::new();
+    loop {
+        line.clear();
+        if reader.read_line(&mut line).ok()? == 0 {
+            return None;
+        }
+        let fence = line.trim_end_matches(['\n', '\r']) == "---";
+        if out.is_empty() && !fence {
+            return None;
+        }
+        let closes = fence && !out.is_empty();
+        out.push_str(&line);
+        if closes {
+            return Some(out);
         }
     }
 }
@@ -348,7 +417,7 @@ mod tests {
         let mut out = Vec::new();
         let mut written = HashSet::new();
         let mut seen_paths = HashSet::new();
-        collect_from_dir(Walk { dir: &root, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &[] }, &mut out, &HashSet::new(), &mut written, &mut seen_paths);
+        collect_from_dir(Walk { dir: &root, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &[] }, &mut out, &HashSet::new(), &mut written, &mut seen_paths, &mut Off::Skip);
 
         let ids: Vec<&str> = out.iter().map(|c| c.id.as_str()).collect();
         assert_eq!(ids, vec!["dom/alpha"], "got {ids:?}");
@@ -374,9 +443,9 @@ mod tests {
         let mut out = Vec::new();
         let mut written = HashSet::new();
         let mut seen_paths = HashSet::new();
-        collect_from_dir(Walk { dir: &user, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &roots.foreign_to(&user) }, &mut out, &HashSet::new(), &mut written, &mut seen_paths);
+        collect_from_dir(Walk { dir: &user, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &roots.foreign_to(&user) }, &mut out, &HashSet::new(), &mut written, &mut seen_paths, &mut Off::Skip);
         let claimed = written.clone();
-        collect_from_dir(Walk { dir: &core, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &roots.foreign_to(&core) }, &mut out, &claimed, &mut written, &mut seen_paths);
+        collect_from_dir(Walk { dir: &core, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &roots.foreign_to(&core) }, &mut out, &claimed, &mut written, &mut seen_paths, &mut Off::Skip);
         let ids: Vec<&str> = out.iter().map(|c| c.id.as_str()).collect();
         assert_eq!(ids, vec!["dom/alpha"], "got {ids:?}");
         let _ = std::fs::remove_dir_all(&base);
@@ -399,10 +468,10 @@ mod tests {
         let mut out = Vec::new();
         let mut written = HashSet::new();
         let mut seen_paths = HashSet::new();
-        collect_from_dir(Walk { dir: &user, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &[canonical(&core)] }, &mut out, &HashSet::new(), &mut written, &mut seen_paths);
+        collect_from_dir(Walk { dir: &user, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &[canonical(&core)] }, &mut out, &HashSet::new(), &mut written, &mut seen_paths, &mut Off::Skip);
         assert!(out.is_empty(), "user root must not collect core's files: {:?}", out.iter().map(|c| &c.id).collect::<Vec<_>>());
         let claimed = written.clone();
-        collect_from_dir(Walk { dir: &core, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &[canonical(&user)] }, &mut out, &claimed, &mut written, &mut seen_paths);
+        collect_from_dir(Walk { dir: &core, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &[canonical(&user)] }, &mut out, &claimed, &mut written, &mut seen_paths, &mut Off::Skip);
 
         let ids: Vec<&str> = out.iter().map(|c| c.id.as_str()).collect();
         assert_eq!(ids, vec!["dom/alpha"], "got {ids:?}");
@@ -442,9 +511,9 @@ mod tests {
         let mut candidates = Vec::new();
         let mut seen = HashSet::new();
         let mut seen_paths = HashSet::new();
-        collect_from_dir(Walk { dir: &user, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &[] }, &mut candidates, &HashSet::new(), &mut seen, &mut seen_paths);
+        collect_from_dir(Walk { dir: &user, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &[] }, &mut candidates, &HashSet::new(), &mut seen, &mut seen_paths, &mut Off::Skip);
         let claimed = seen.clone();
-        collect_from_dir(Walk { dir: &core, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &[] }, &mut candidates, &claimed, &mut seen, &mut seen_paths);
+        collect_from_dir(Walk { dir: &core, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &[] }, &mut candidates, &claimed, &mut seen, &mut seen_paths, &mut Off::Skip);
 
         let ids: Vec<&str> = candidates.iter().map(|c| c.id.as_str()).collect();
         // The blocker: a unique user way must be a candidate (i.e. can fire).

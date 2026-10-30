@@ -19,6 +19,31 @@ use std::io::Read;
 use crate::cmd::scan;
 use crate::session;
 
+/// In a project switched off, log what the pattern lanes would have fired
+/// there as discarded fires (scan/discard.rs). A dispatch to a defined agent
+/// injects nothing whatever the switches say, so it logs nothing either.
+fn log_switched_off(request: &Request, project: Option<&str>, transcript: Option<&str>) {
+    crate::cmd::show::set_firing_transcript(transcript);
+    use scan::discard::{project_off, OffSurface};
+    match request {
+        Request::Prompt { session, query } => project_off(OffSurface::Prompt { query }, session, project),
+        Request::Command { session, command, description } => {
+            project_off(OffSurface::Command { command, description: description.as_deref() }, session, project)
+        }
+        Request::File { session, path } => project_off(OffSurface::File { path }, session, project),
+        Request::Tool { session, tool, hook_event } => project_off(OffSurface::Tool { tool, hook_event }, session, project),
+        Request::Task { session, query, team, subagent_type } => {
+            let defined = subagent_type.as_deref().zip(project).is_some_and(|(t, p)| {
+                subagent::is_defined_agent(t, std::path::Path::new(p), &crate::paths::projection_root())
+            });
+            if !defined {
+                project_off(OffSurface::Task { query, team: team.as_deref() }, session, project);
+            }
+        }
+        _ => {}
+    }
+}
+
 pub fn run(event: HookEvent) -> Result<()> {
     let mut raw = String::new();
     std::io::stdin().read_to_string(&mut raw)?;
@@ -45,11 +70,12 @@ pub fn run(event: HookEvent) -> Result<()> {
         HookEvent::Stop | HookEvent::SessionStart | HookEvent::TasksActive
     );
     let config = crate::config::Config::load(&project_dir);
+    let request = input.request(event);
     if injects && !config.enabled {
+        log_switched_off(&request, project, transcript);
         return Ok(());
     }
 
-    let request = input.request(event);
     // A Task naming a defined agent injects nothing, whatever the switches say.
     if let Request::Task { subagent_type: Some(t), .. } = &request {
         if subagent::is_defined_agent(t, std::path::Path::new(&project_dir), &crate::paths::projection_root()) {

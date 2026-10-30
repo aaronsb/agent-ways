@@ -109,11 +109,29 @@ fn has_session_start(text: &str, matches: impl Fn(&Value) -> bool) -> bool {
         .any(|v| v["event"].as_str() == Some("session_start") && matches(&v))
 }
 
-/// Count `way_fired` events per way ID across the given events.
+/// What switched off the way of a discarded fire: a `way_fired` or
+/// `check_fired` event whose `discarded` object records a switched-off way or
+/// check that would have fired. `None` for a delivered fire and for every
+/// other event. A `discarded` object with no filter reads as `unknown`.
+pub fn discarded_filter(event: &Value) -> Option<&str> {
+    if !matches!(event["event"].as_str(), Some("way_fired" | "check_fired")) {
+        return None;
+    }
+    let discarded = event.get("discarded").filter(|d| d.is_object())?;
+    Some(discarded["filter"].as_str().unwrap_or("unknown"))
+}
+
+/// Whether `event` is a fire that reached the session: a `way_fired` event
+/// that was not discarded.
+pub fn is_delivered_fire(event: &Value) -> bool {
+    event["event"].as_str() == Some("way_fired") && discarded_filter(event).is_none()
+}
+
+/// Count delivered fires per way ID across the given events.
 pub fn count_fires(events: &[Value]) -> HashMap<String, u64> {
     let mut counts: HashMap<String, u64> = HashMap::new();
     for event in events {
-        if event["event"].as_str() == Some("way_fired") {
+        if is_delivered_fire(event) {
             if let Some(way) = event["way"].as_str() {
                 *counts.entry(way.to_string()).or_default() += 1;
             }
@@ -193,13 +211,14 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn counts_only_way_fired_events() {
+    fn counts_only_delivered_fires() {
         let events = vec![
             json!({"event": "way_fired", "way": "softwaredev/commits"}),
             json!({"event": "way_fired", "way": "softwaredev/commits"}),
             json!({"event": "way_fired", "way": "meta/todos"}),
             json!({"event": "session_start", "way": "softwaredev/commits"}),
             json!({"event": "way_fired"}), // no way field → skipped
+            json!({"event": "way_fired", "way": "meta/todos", "discarded": {"filter": "domain"}}), // never delivered
         ];
         let counts = count_fires(&events);
         assert_eq!(counts.get("softwaredev/commits"), Some(&2));

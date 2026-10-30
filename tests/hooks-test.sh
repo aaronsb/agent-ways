@@ -108,7 +108,7 @@ check "inject-subagent injects user, core and macro ways" "$expected" "$ctx"
 # A second subagent in the same session gets the same ways again.
 check "inject-subagent ignores the parent's refire state" "$expected" "$(inject sess-sub)"
 check "inject-subagent logs each injection" "8" \
-    "$(jq -r 'select(.event=="way_fired" and .scope=="subagent") | .way' "$XDG_STATE_HOME/agent-ways/events.jsonl" 2>/dev/null | wc -l | tr -d ' ')"
+    "$(jq -r 'select(.event=="way_fired" and .scope=="subagent" and .discarded == null) | .way' "$XDG_STATE_HOME/agent-ways/events.jsonl" 2>/dev/null | wc -l | tr -d ' ')"
 
 # Hooks that test their assembled context must stay linear in its size
 # (#705, #710). In a UTF-8 locale `${ctx// /}` took 150 ms on 13 KB of ways

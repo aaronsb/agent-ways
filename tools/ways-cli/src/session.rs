@@ -16,7 +16,8 @@ mod log;
 // `session::way_fire_outcome`, etc. — no call-site churn from the
 // structural split (issue #52).
 pub use engagement::{
-    first_suppression_in_window, lock_engagement, record_way_fire, way_fire_outcome,
+    discarded_fire_outcome, discarded_fire_recorded, first_suppression_in_window, lock_discarded_fire, lock_engagement, record_discarded_fire,
+    record_way_fire, way_fire_outcome,
     way_refire_threshold_k, EngagementLock, FireDecision, FireOutcome, REFIRE_FLOOR,
 };
 pub use log::{log_decision, log_event, log_event_with};
@@ -567,17 +568,34 @@ mod context_window_tests {
 
 /// Get and increment fire count for a check.
 pub fn bump_check_fires(way_id: &str, session_id: &str) -> u64 {
-    let path = agent_state_dir(session_id).join("check-fires").join(way_id).join(".value");
-    ensure_parent(&path);
-    let count = read_u64_path(&path) + 1;
-    let _ = std::fs::write(&path, count.to_string());
-    count
+    bump_count(&check_count_path("check-fires", way_id, session_id))
 }
 
 /// Get current fire count without incrementing.
 pub fn get_check_fires(way_id: &str, session_id: &str) -> u64 {
-    let path = agent_state_dir(session_id).join("check-fires").join(way_id).join(".value");
-    read_u64_path(&path)
+    read_u64_path(&check_count_path("check-fires", way_id, session_id))
+}
+
+/// [`bump_check_fires`] for a check discarded with its switched-off way,
+/// which decays on its own count and leaves the real one untouched.
+pub fn bump_discarded_check_fires(way_id: &str, session_id: &str) -> u64 {
+    bump_count(&check_count_path("discarded-check-fires", way_id, session_id))
+}
+
+/// [`get_check_fires`] for a discarded check.
+pub fn get_discarded_check_fires(way_id: &str, session_id: &str) -> u64 {
+    read_u64_path(&check_count_path("discarded-check-fires", way_id, session_id))
+}
+
+fn check_count_path(kind: &str, way_id: &str, session_id: &str) -> PathBuf {
+    agent_state_dir(session_id).join(kind).join(way_id).join(".value")
+}
+
+fn bump_count(path: &Path) -> u64 {
+    ensure_parent(path);
+    let count = read_u64_path(path) + 1;
+    let _ = std::fs::write(path, count.to_string());
+    count
 }
 
 // ── Core marker ─────────────────────────────────────────────────

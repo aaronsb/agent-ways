@@ -5,7 +5,8 @@ use anyhow::Result;
 use crate::cmd::show::ContextBudget;
 use crate::session;
 
-use super::candidates::{check_when, collect_candidates};
+use super::candidates::{check_when, collect_with_off};
+use super::discard;
 use super::order::{order_hits, Hit};
 use super::scoring::capture_show_way;
 use super::{emit_hook_context, regex_span, WayCandidate};
@@ -70,11 +71,13 @@ pub fn tool(
 
     session::bump_epoch(session_id);
     let scope = session::detect_scope(session_id);
-    let candidates = collect_candidates(&project_dir);
+    let (candidates, off) = collect_with_off(&project_dir);
 
     let mut context = String::new();
     let mut budget = ContextBudget::hook();
-    for hit in &tool_hits(&candidates, tool, hook_event, &scope, &project_dir) {
+    let hits = tool_hits(&candidates, tool, hook_event, &scope, &project_dir);
+    log_discarded(&off, tool, hook_event, &discard::LaneLog { lane: "tool", scope: &scope, session: session_id, project: &project_dir });
+    for hit in &hits {
         let out = capture_show_way(&hit.id, session_id, "tool", None, Some(hit.payload.as_str()), None, Some(&mut budget)).body;
         if !out.is_empty() {
             context.push_str(&out);
@@ -86,6 +89,14 @@ pub fn tool(
     }
 
     Ok(())
+}
+
+/// The tool lane's shadow pass: [`tool_hits`] over the switched-off ways, each
+/// logged as a discarded fire.
+pub(super) fn log_discarded(off: &discard::Switched, tool: &str, hook_event: &str, at: &discard::LaneLog<'_>) {
+    for hit in tool_hits(&off.ways, tool, hook_event, at.scope, at.project) {
+        discard::log(off, at, &discard::Hit { way: &hit.id, trigger: "tool", span: Some(&hit.payload), scores: None });
+    }
 }
 
 #[cfg(test)]

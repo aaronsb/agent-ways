@@ -518,9 +518,16 @@ pub(crate) fn load_session_events(content: &str, session_id: &str) -> Vec<WayEve
             if v["session"].as_str()? != session_id {
                 return None;
             }
+            // A discarded fire put nothing in the session's context, so the
+            // replay reads it under its own name and no fire arm takes it.
+            let event = match (ways_core::firing::discarded_filter(&v), v["event"].as_str()) {
+                (Some(_), Some("check_fired")) => "check_discarded",
+                (Some(_), _) => "way_discarded",
+                (None, event) => event.unwrap_or(""),
+            };
             Some(WayEvent {
                 ts: v["ts"].as_str().unwrap_or("").to_string(),
-                event: v["event"].as_str().unwrap_or("").to_string(),
+                event: event.to_string(),
                 way: v["way"].as_str().unwrap_or("").to_string(),
                 trigger: v["trigger"].as_str().unwrap_or("").to_string(),
                 check: v["check"].as_str().unwrap_or("").to_string(),

@@ -50,8 +50,13 @@ A way was shown to the agent for the first time in its session.
 | `matched_span` | Keyword, command and file fires only: the text the pattern matched |
 | `parent`, `tree_depth`, `epoch_distance` | Ways inside a tree: the parent id, depth, and epochs since the parent fired |
 | `team` | Teammate sessions: the team name |
+| `discarded` | Discarded fires only: an object naming what switched the way off. `filter` is `toggle`, `domain` or `project_off` (`enabled: false`); `toggle` is the winning toggle key when the filter is `toggle`; `scope` is the config layer that holds the switch, `user` or `project`, when known |
+| `lane` | Discarded fires only: the lane that would have fired the way: `prompt`, `command`, `file`, `tool`, `task`, `state`, `pull` or `subagent` |
+| `cosine`, `share`, `margin` | Discarded fires on a semantic channel: the way's scores beside the enabled ways, named as the decision record's candidates |
 
 A way delivered to a subagent at dispatch logs `way_fired` with `way`, `domain`, `trigger`, `scope`, `project`, `session` and `team`, with no position or model.
+
+A `way_fired` event with a `discarded` object is a discarded fire: a switched-off way that would have fired on this surface, refire window included. It was not shown to the agent and recorded no refire state. `ways tune stats` and the session summaries count discarded fires apart from delivered ones, and every reader of delivered fires leaves them out. A discarded check logs `check_fired` with the same `discarded` object and `lane: check`.
 
 ### `way_redisclosed`
 

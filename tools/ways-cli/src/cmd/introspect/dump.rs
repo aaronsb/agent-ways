@@ -42,6 +42,10 @@ struct Summary {
     /// What the subagent switch held back (#786); new after `gate`, so
     /// the fields before it read as they did.
     suppressed: SuppressedSummary,
+    /// Discarded fires by what switched each way off, counted apart from
+    /// `total_fires` (scan/discard.rs).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    discarded: BTreeMap<String, u64>,
 }
 
 /// The `injection_suppressed` events of the session: each Task dispatch
@@ -293,8 +297,17 @@ fn build_summary(
     let mut gate = GateSummary::default();
     let mut gate_ms: Vec<u64> = Vec::new();
     let mut suppressed = SuppressedSummary::default();
+    let mut discarded: BTreeMap<String, u64> = BTreeMap::new();
 
     for v in session_events(content, session_id) {
+        // Discarded way fires are counted here; a discarded check fire is not
+        // a check fire either.
+        if let Some(filter) = ways_core::firing::discarded_filter(&v) {
+            if v["event"].as_str() == Some("way_fired") {
+                *discarded.entry(filter.to_string()).or_insert(0) += 1;
+            }
+            continue;
+        }
         match v["event"].as_str() {
             Some("way_fired") => {
                 total_fires += 1;
@@ -373,6 +386,7 @@ fn build_summary(
             GateSummary { gate_ms_p50: pct(0.5), gate_ms_p95: pct(0.95), ..gate }
         },
         suppressed,
+        discarded,
     }
 }
 

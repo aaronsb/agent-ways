@@ -109,9 +109,7 @@ fn firing_history(out: &mut String, way_id: &str) {
     let events = load_events();
     let fires: Vec<&str> = events
         .iter()
-        .filter(|e| {
-            e["event"].as_str() == Some("way_fired") && e["way"].as_str() == Some(way_id)
-        })
+        .filter(|e| ways_core::firing::is_delivered_fire(e) && e["way"].as_str() == Some(way_id))
         .filter_map(|e| e["ts"].as_str())
         .collect();
 

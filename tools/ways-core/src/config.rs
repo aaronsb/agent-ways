@@ -197,6 +197,11 @@ pub struct Config {
     pub language: String,
     /// Disabled domains (e.g., ["ea", "itops"]) — user scope.
     pub disabled_domains: Vec<String>,
+    /// The layer whose `disabled_domains` list applies; `None` when no layer
+    /// set one. A discard log names it.
+    pub disabled_domains_layer: Option<LayerScope>,
+    /// The layer whose `enabled` value applies; `None` when no layer set one.
+    pub enabled_layer: Option<LayerScope>,
     /// Disabled ways (e.g., ["itops/incident", "meta/introspection"]) — project scope only.
     /// Populated exclusively from `{project}/.claude/ways.yaml`. Default-enabled
     /// (absence means the way fires normally). See ADR-131.
@@ -301,6 +306,8 @@ impl Default for Config {
             default_scope: "agent".to_string(),
             language: "auto".to_string(),
             disabled_domains: Vec::new(),
+            disabled_domains_layer: None,
+            enabled_layer: None,
             disabled_ways: Vec::new(),
             enabled_ways: Vec::new(),
             parent_threshold_multiplier: 0.8,
@@ -434,7 +441,7 @@ impl Config {
         // single source of truth for the path (paths::user_config).
         let user_config = crate::paths::user_config();
         if let Some(doc) = checked_file(&user_config, LayerScope::User, sections) {
-            cfg.apply_values(&doc);
+            cfg.apply_layer(&doc, LayerScope::User);
             // Targets are user scope only (ADR-184): a project cannot
             // redirect where the install lands.
             cfg.targets = doc.get("targets").and_then(Self::read_targets_value);
@@ -447,7 +454,7 @@ impl Config {
         if let Some(t) = cfg.targets().iter().find(|t| t.matches_dir(&current)) {
             let path = t.config_path();
             if let Some(doc) = checked_file(&path, LayerScope::Target, sections) {
-                cfg.apply_values(&doc);
+                cfg.apply_layer(&doc, LayerScope::Target);
                 cfg.target_config = Some(path);
             }
         }
@@ -456,7 +463,7 @@ impl Config {
         // (ADR-131: per-way disable is project-scope only).
         let project_config = crate::settings::project_file(Path::new(project_dir));
         if let Some(doc) = checked_file(&project_config, LayerScope::Project, sections) {
-            cfg.apply_values(&doc);
+            cfg.apply_layer(&doc, LayerScope::Project);
             cfg.apply_project_ways_overlay_value(&doc);
         }
 
@@ -468,6 +475,18 @@ impl Config {
     fn apply_yaml(&mut self, content: &str) {
         if let Some(doc) = checked_text(content, None, LayerScope::User, crate::settings::HOOK_SECTIONS) {
             self.apply_values(&doc);
+        }
+    }
+
+    /// [`Config::apply_values`] for a layer at `layer`, recording it as the
+    /// source of the keys whose source a reader names.
+    fn apply_layer(&mut self, doc: &serde_yaml::Value, layer: LayerScope) {
+        self.apply_values(doc);
+        if doc.get("disabled_domains").and_then(|v| v.as_sequence()).is_some() {
+            self.disabled_domains_layer = Some(layer);
+        }
+        if doc.get("enabled").and_then(|v| v.as_bool()).is_some() {
+            self.enabled_layer = Some(layer);
         }
     }
 
@@ -1276,8 +1295,21 @@ mod tests {
 
     fn apply_project(cfg: &mut Config, text: &str) {
         let doc = checked_text(text, None, LayerScope::Project, crate::settings::HOOK_SECTIONS).unwrap();
-        cfg.apply_values(&doc);
+        cfg.apply_layer(&doc, LayerScope::Project);
         cfg.apply_project_ways_overlay_value(&doc);
+    }
+
+    #[test]
+    fn the_layer_that_set_the_domain_list_and_the_switch_is_recorded() {
+        let mut cfg = Config::default();
+        assert_eq!((cfg.disabled_domains_layer, cfg.enabled_layer), (None, None));
+        let user = checked_text("disabled_domains: [ea]\n", None, LayerScope::User, crate::settings::HOOK_SECTIONS).unwrap();
+        cfg.apply_layer(&user, LayerScope::User);
+        assert_eq!((cfg.disabled_domains_layer, cfg.enabled_layer), (Some(LayerScope::User), None));
+        apply_project(&mut cfg, "language: es\n");
+        assert_eq!(cfg.disabled_domains_layer, Some(LayerScope::User), "a layer without the key leaves its source alone");
+        apply_project(&mut cfg, "disabled_domains: [itops]\nenabled: false\n");
+        assert_eq!((cfg.disabled_domains_layer, cfg.enabled_layer), (Some(LayerScope::Project), Some(LayerScope::Project)));
     }
 
     #[test]

@@ -7,6 +7,7 @@ pub(crate) mod candidates;
 mod candidate_log;
 mod command;
 mod decision;
+pub(crate) mod discard;
 mod file;
 mod gate;
 mod late_interaction;

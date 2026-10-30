@@ -83,6 +83,19 @@ pub(crate) struct Verdicts {
     sidecar: bool,
     /// The ranking used fused scores (`matching.body_rank` on, sidecar complete).
     fused: bool,
+    /// The switched-off ways the shadow pass would have fired, keyed by
+    /// corpus id ([`shadow_pass`]).
+    discarded: HashMap<String, Shadow>,
+}
+
+/// A switched-off way's evidence in the shadow pass, named as the candidate
+/// log names its columns: its peak cosine, its share, and the cosine gap to
+/// the row below it in the chunk it peaked on (`None` for the last row).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Shadow {
+    pub cosine: f64,
+    pub share: f64,
+    pub margin: Option<f64>,
 }
 
 /// One way's ranking evidence from the chunk-match stage.
@@ -112,6 +125,18 @@ impl Verdicts {
     /// True when this scan ranked on fused scores, not alias cosines.
     pub(crate) fn used_body_rank(&self) -> bool {
         self.fused
+    }
+
+    /// The shadow pass's decision as a matcher decision: a switched-off way
+    /// it would have fired reads as fired, with its share.
+    pub(crate) fn shadow(&self) -> Verdicts {
+        let fired = self.discarded.iter().map(|(id, s)| (id.clone(), s.share)).collect();
+        Verdicts { fired, sidecar: self.sidecar, fused: self.fused, discarded: HashMap::new() }
+    }
+
+    /// The shadow pass's evidence for a switched-off way it would have fired.
+    pub(crate) fn discarded(&self, corpus_id: &str) -> Option<Shadow> {
+        self.discarded.get(corpus_id).copied()
     }
 }
 
@@ -184,7 +209,7 @@ pub(crate) fn run_diagnostic(
     let mut matched = batch_match(&bin, &corpus, &model, &chunks, sidecar.is_some())?;
     let fusion = fuse_if_on(body_rank, &mut matched, sidecar.as_ref());
     let confirmer = Confirmer::new(&bin, &model, sidecar, matched.vectors, fusion);
-    let (ranked, survivors, capped) = rank_and_admit(matched.per_chunk, bodies, chunks.len(), admission);
+    let (ranked, survivors, capped) = rank_and_admit(mask_to_enabled(matched.per_chunk, bodies), chunks.len(), admission);
     // The live matcher's survivor set: confirmation runs for these, and a
     // candidate outside it reports `confirm: None`.
     let survivors: std::collections::HashSet<String> = survivors.into_iter().map(|r| r.id).collect();
@@ -207,9 +232,10 @@ pub(crate) fn run_diagnostic(
 }
 
 /// Run the matcher over `surface`. `bodies` maps a way's corpus id to its `.md`
-/// path (for body-confirm); `admission` is the stage-4 rule. Returns `None` when the matcher cannot run — the
+/// path (for body-confirm); `off` does the same for the switched-off ways the
+/// shadow pass weighs; `admission` is the stage-4 rule. Returns `None` when the matcher cannot run — the
 /// caller then falls back to the single-vector semantic gate.
-pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>, admission: Admission, body_rank: BodyRank) -> Option<Verdicts> {
+pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>, off: &HashMap<String, PathBuf>, admission: Admission, body_rank: BodyRank) -> Option<Verdicts> {
     let dbg = std::env::var("WAYS_LI_DEBUG").is_ok();
     let bin = crate::paths::way_embed()?;
     let xdg = crate::paths::corpus_dir();
@@ -243,8 +269,10 @@ pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>, admission: A
     let confirmer = Confirmer::new(&bin, &model, sidecar, matched.vectors, fusion);
     if dbg { eprintln!("LI: confirm via {}", if confirmer.uses_sidecar() { "sidecar" } else { "per-call embedding" }); }
     // Stages 3+4: mask, peak rank + per-chunk softmax-share sorted by share
-    // desc, then the admission rule or the peak co-gate, by peak, capped.
-    let (ranked, survivors, _) = rank_and_admit(matched.per_chunk, bodies, chunks.len(), admission);
+    // desc, then the admission rule or the peak co-gate, by peak, capped. The
+    // shadow pass reads the rows from before the mask.
+    let raw = (!off.is_empty()).then(|| matched.per_chunk.clone());
+    let (ranked, survivors, _) = rank_and_admit(mask_to_enabled(matched.per_chunk, bodies), chunks.len(), admission);
 
     if dbg {
         eprintln!("LI: top ranked (share, peak, chunk, id):");
@@ -276,7 +304,69 @@ pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>, admission: A
     }
     if dbg { eprintln!("LI: confirm stage {n_survivors} survivors in {:.2} ms", ms(t)); }
     if dbg { eprintln!("LI: fired {} ways", fired.len()); }
-    Some(Verdicts { fired, sidecar: confirmer.uses_sidecar(), fused: fusion_on })
+
+    // A switched-off way is confirmed against the sidecar only, and only when
+    // the sidecar holds it at its current hash: a per-call confirmation would
+    // embed for it.
+    let discarded = match (raw, &confirmer) {
+        (Some(raw), Confirmer::Sidecar { sidecar, .. }) => {
+            let mut coverage: Option<sidecar::Coverage> = None;
+            shadow_pass(&raw, bodies, off, chunks.len(), admission, |r| {
+                let held = coverage.get_or_insert_with(|| sidecar::Coverage::read(&artifacts, &xdg, &bin)).holds(sidecar, &r.id);
+                if !held {
+                    return None;
+                }
+                confirmer.confirm(&r.id, r.peak_chunk, r.peak, &chunks, off.get(&r.id)?)
+            })
+        }
+        _ => HashMap::new(),
+    };
+    if dbg { eprintln!("LI: shadow pass would have fired {} switched-off ways", discarded.len()); }
+    Some(Verdicts { fired, sidecar: confirmer.uses_sidecar(), fused: fusion_on, discarded })
+}
+
+/// The shadow pass (ADR-701 §1). For each switched-off way in `off` that sits
+/// in some chunk's top-K window once the enabled ways and it alone compete,
+/// rank and admit again over the same rows with the enabled set plus that one
+/// way, and keep it when it survives and `confirm` clears the confirmation
+/// gate. Switched-off ways never compete with each other, and nothing is
+/// embedded.
+fn shadow_pass(
+    raw: &[Vec<(String, f64)>],
+    enabled: &HashMap<String, PathBuf>,
+    off: &HashMap<String, PathBuf>,
+    n_chunks: usize,
+    mode: Admission,
+    mut confirm: impl FnMut(&Ranked) -> Option<f64>,
+) -> HashMap<String, Shadow> {
+    // A switched-off row is in its chunk's window when fewer than K enabled
+    // rows stand above it.
+    let mut in_window: Vec<&str> = Vec::new();
+    for chunk in raw {
+        let mut above = 0;
+        for (id, _) in chunk {
+            if enabled.contains_key(id) {
+                above += 1;
+            } else if above < TOP_K_PER_CHUNK && off.contains_key(id) && !in_window.contains(&id.as_str()) {
+                in_window.push(id);
+            }
+        }
+    }
+    in_window.sort_unstable();
+    let mut out = HashMap::new();
+    for way in in_window {
+        let per_chunk: Vec<Vec<(String, f64)>> =
+            raw.iter().map(|c| c.iter().filter(|(id, _)| id == way || enabled.contains_key(id)).cloned().collect()).collect();
+        let (_, survivors, _) = rank_and_admit(per_chunk.clone(), n_chunks, mode);
+        let Some(r) = survivors.into_iter().find(|r| r.id == way) else { continue };
+        if !confirm(&r).is_some_and(|c| c >= CONFIRM_GATE) {
+            continue;
+        }
+        let rows = &per_chunk[r.peak_chunk];
+        let margin = rows.iter().position(|(id, _)| id == way).and_then(|i| rows.get(i + 1)).map(|(_, next)| r.peak - next);
+        out.insert(r.id.clone(), Shadow { cosine: r.peak, share: r.share, margin });
+    }
+    out
 }
 
 /// Milliseconds since `t`, for the WAYS_LI_DEBUG trace.
@@ -627,19 +717,13 @@ fn aggregate(per_chunk: &[Vec<(String, f64)>], n_chunks: usize) -> Vec<Ranked> {
     out
 }
 
-/// Stages 3 and 4 for one match pass, shared by [`run`] and
-/// [`run_diagnostic`]: mask the raw rows to the enabled ways (so a disabled
-/// way neither takes mass nor wins a chunk), rank, admit, and cap. Returns
-/// every ranked way by share, the survivors by peak (at most
+/// Stages 3 and 4 for one match pass, shared by [`run`], [`run_diagnostic`]
+/// and [`shadow_pass`]: rank, admit, and cap rows already masked to the ways
+/// allowed to compete (so a disabled way neither takes mass nor wins a
+/// chunk). Returns every ranked way by share, the survivors by peak (at most
 /// [`MAX_WINNERS_TO_CONFIRM`]), and the ways that passed the gate but were cut
 /// by the cap.
-fn rank_and_admit(
-    raw_per_chunk: Vec<Vec<(String, f64)>>,
-    enabled: &HashMap<String, PathBuf>,
-    n_chunks: usize,
-    mode: Admission,
-) -> (Vec<Ranked>, Vec<Ranked>, Vec<Ranked>) {
-    let per_chunk = mask_to_enabled(raw_per_chunk, enabled);
+fn rank_and_admit(per_chunk: Vec<Vec<(String, f64)>>, n_chunks: usize, mode: Admission) -> (Vec<Ranked>, Vec<Ranked>, Vec<Ranked>) {
     let ranked = aggregate(&per_chunk, n_chunks);
     let mut survivors = admit(ranked.clone(), &per_chunk, mode);
     let capped = survivors.split_off(survivors.len().min(MAX_WINNERS_TO_CONFIRM));
@@ -1227,6 +1311,40 @@ mod tests {
         ids.iter().map(|i| (i.to_string(), PathBuf::from(format!("/{i}.md")))).collect()
     }
 
+    /// The shadow pass weighs each switched-off way beside the enabled ways
+    /// alone. `off_b` survives in its own pass, where a union with `off_a`
+    /// would leave it under the share gate, and fails confirmation; `off_far`
+    /// sits below eight enabled rows in the only chunk that has it, so it is
+    /// never confirmed.
+    #[test]
+    fn the_shadow_pass_weighs_each_switched_off_way_alone() {
+        let mut far: Vec<(String, f64)> = (0..8).map(|i| (format!("on_{i}"), 0.45 - i as f64 * 0.01)).collect();
+        far.push(("off_far".to_string(), 0.30));
+        let raw = vec![rows(&[("off_a", 0.60), ("on_x", 0.40), ("off_b", 0.39)]), far];
+        let mut enabled_ids: Vec<String> = (0..8).map(|i| format!("on_{i}")).collect();
+        enabled_ids.push("on_x".to_string());
+        let enabled = bodies_of(&enabled_ids.iter().map(String::as_str).collect::<Vec<_>>());
+        let off = bodies_of(&["off_a", "off_b", "off_far"]);
+        let mut asked: Vec<String> = Vec::new();
+        let got = shadow_pass(&raw, &enabled, &off, 2, Admission::Share, |r| {
+            asked.push(r.id.clone());
+            Some(if r.id == "off_b" { 0.1 } else { 0.9 })
+        });
+        assert_eq!(asked, ["off_a", "off_b"], "only ways in a top-K window reach confirmation");
+        assert_eq!(got.keys().collect::<Vec<_>>(), ["off_a"], "off_b fails confirmation: {got:?}");
+        let a = got["off_a"];
+        assert_eq!(a.cosine, 0.60);
+        assert!((a.margin.unwrap() - 0.20).abs() < 1e-9, "the gap to on_x below it: {a:?}");
+        let mass = (0.60f64 / SOFTMAX_TAU).exp() / ((0.60f64 / SOFTMAX_TAU).exp() + (0.40f64 / SOFTMAX_TAU).exp());
+        assert!((a.share - mass / 2.0).abs() < 1e-9, "off_b takes no share from off_a: {a:?}");
+
+        let union = aggregate(&mask_to_enabled(raw.clone(), &enabled.clone().into_iter().chain(off.clone()).collect()), 2);
+        let b_union = union.iter().find(|r| r.id == "off_b").unwrap().share;
+        assert!(b_union < SHARE_GATE, "in a union off_b would fall under the gate ({b_union})");
+        let alone = shadow_pass(&raw, &enabled, &off, 2, Admission::Share, |_| Some(0.9));
+        assert!(alone.contains_key("off_b"), "alone beside the enabled ways, off_b survives: {alone:?}");
+    }
+
     /// ADR-701 §1: a disabled way that wins a chunk must not take softmax mass
     /// or a survivor slot. With it masked, every enabled way scores exactly as
     /// if the disabled way were absent from the corpus.
@@ -1285,7 +1403,7 @@ mod tests {
     /// The survivors of `per_chunk` with every way in it enabled.
     fn admitted(per_chunk: &[Vec<(String, f64)>], mode: Admission) -> Vec<String> {
         let ids: Vec<&str> = per_chunk.iter().flatten().map(|(id, _)| id.as_str()).collect();
-        rank_and_admit(per_chunk.to_vec(), &bodies_of(&ids), per_chunk.len(), mode).1.into_iter().map(|r| r.id).collect()
+        rank_and_admit(mask_to_enabled(per_chunk.to_vec(), &bodies_of(&ids)), per_chunk.len(), mode).1.into_iter().map(|r| r.id).collect()
     }
 
     /// ADR-701 §1 under chunk_top: a chunk's winner is read after masking. A
@@ -1296,7 +1414,7 @@ mod tests {
         let mut pc = two_topics();
         pc[0].insert(0, ("off".to_string(), 0.45));
         let enabled = bodies_of(&["a", "r1", "r2", "r3", "r4", "r5", "r6", "r7", "x"]);
-        let (_, survivors, _) = rank_and_admit(pc, &enabled, 2, Admission::ChunkTop);
+        let (_, survivors, _) = rank_and_admit(mask_to_enabled(pc, &enabled), 2, Admission::ChunkTop);
         let ids: Vec<&str> = survivors.iter().map(|r| r.id.as_str()).collect();
         assert_eq!(ids, ["x", "a"], "the masked way is absent and its runner-up admitted");
     }

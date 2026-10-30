@@ -41,7 +41,7 @@
 use agent_fmt::when::parse_utc_iso;
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
 // ── Model ─────────────────────────────────────────────────────
@@ -230,6 +230,10 @@ pub struct IntrospectionSummary {
     /// Of `suppressed_candidates`, the ways the relevance judge blocked.
     #[serde(skip_serializing_if = "u64_is_zero")]
     pub judge_blocked: u64,
+    /// Discarded fires by what switched each way off: switched-off ways that
+    /// would have fired. They reached no turn, so no row carries them.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub discarded: BTreeMap<String, u64>,
     /// Turns whose join was upgraded to `Keyed` by a transcript foreign key
     /// (ADR-153 §3). `0` until [`SessionIntrospection::join_transcript`] runs.
     pub keyed_turns: usize,
@@ -278,9 +282,17 @@ impl SessionIntrospection {
         window_k: u64,
         criteria: &CriteriaMap,
     ) -> Self {
+        // A discarded fire reached no turn: it is counted in the summary and
+        // has no row.
+        let mut discarded: BTreeMap<String, u64> = BTreeMap::new();
+        let way_events = events.iter().filter(|e| e["session"].as_str() == Some(session_id) && e["event"].as_str() == Some("way_fired"));
+        for filter in way_events.filter_map(crate::firing::discarded_filter) {
+            *discarded.entry(filter.to_string()).or_insert(0) += 1;
+        }
         let mut fires: Vec<FireRow> = events
             .iter()
             .filter(|e| e["session"].as_str() == Some(session_id))
+            .filter(|e| crate::firing::discarded_filter(e).is_none())
             .filter(|e| {
                 matches!(
                     e["event"].as_str(),
@@ -339,6 +351,7 @@ impl SessionIntrospection {
             gated_candidates,
             suppressed_candidates,
             judge_blocked,
+            discarded,
             keyed_turns: 0, // set by join_transcript once a transcript is joined
         };
 

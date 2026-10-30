@@ -14,7 +14,7 @@
 //! modules see parent-private items, so no visibility promotion was
 //! needed on the session.rs side.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use sensor_trait::{Curve, EngagementState, Tick};
 
@@ -81,9 +81,8 @@ fn engagement_path(way_id: &str, session_id: &str) -> PathBuf {
 /// One consequence for readers of the on-disk state: the `curve` field in
 /// `way-engagement/*.json` is still written but no longer read by this path.
 /// It is diagnostic only — the gating curve always comes from frontmatter.
-fn load_engagement(way_id: &str, session_id: &str, curve: &Curve) -> EngagementState {
-    let path = engagement_path(way_id, session_id);
-    match std::fs::read_to_string(&path)
+fn load_engagement(path: &Path, curve: &Curve) -> EngagementState {
+    match std::fs::read_to_string(path)
         .ok()
         .and_then(|s| serde_json::from_str::<EngagementState>(&s).ok())
     {
@@ -95,12 +94,46 @@ fn load_engagement(way_id: &str, session_id: &str, curve: &Curve) -> EngagementS
     }
 }
 
-fn save_engagement(way_id: &str, session_id: &str, state: &EngagementState) {
-    let path = engagement_path(way_id, session_id);
-    ensure_parent(&path);
+fn save_engagement(path: &Path, state: &EngagementState) {
+    ensure_parent(path);
     if let Ok(serialized) = serde_json::to_string(state) {
-        let _ = std::fs::write(&path, serialized);
+        let _ = std::fs::write(path, serialized);
     }
+}
+
+/// A switched-off way's discard record (scan/discard.rs): the engagement
+/// state its discarded fires keep, apart from the way's own, which a way
+/// that never fires leaves untouched.
+fn discarded_path(way_id: &str, session_id: &str) -> PathBuf {
+    agent_state_dir(session_id)
+        .join("discarded-fires")
+        .join(format!("{}.json", way_id.replace('/', "__")))
+}
+
+/// [`way_fire_outcome`] for a discarded fire: the same refire curve, read
+/// from the way's discard record.
+pub fn discarded_fire_outcome(way_id: &str, session_id: &str, curve: &Curve, current_tick: Tick) -> FireOutcome {
+    classify_outcome(&load_engagement_for_tick(&discarded_path(way_id, session_id), curve, current_tick), current_tick)
+}
+
+/// Whether the way's discard record holds a discarded fire.
+pub fn discarded_fire_recorded(way_id: &str, session_id: &str) -> bool {
+    discarded_path(way_id, session_id).exists()
+}
+
+/// [`lock_engagement`] for the way's discard record, so parallel hooks claim
+/// a discarded fire once, as they deliver a fire once.
+pub fn lock_discarded_fire(way_id: &str, session_id: &str) -> Option<EngagementLock> {
+    let target = discarded_path(way_id, session_id).with_extension("");
+    agent_settings::writer::Lock::acquire_kept(&target).ok().map(|l| EngagementLock { _lock: l })
+}
+
+/// [`record_way_fire`] into the way's discard record.
+pub fn record_discarded_fire(way_id: &str, session_id: &str, curve: &Curve, current_tick: Tick) {
+    let path = discarded_path(way_id, session_id);
+    let mut state = load_engagement_for_tick(&path, curve, current_tick);
+    state.record_fire(current_tick, 1.0);
+    save_engagement(&path, &state);
 }
 
 /// The firing engine's answer for one way at one tick.
@@ -125,7 +158,7 @@ pub fn way_fire_outcome(
     curve: &Curve,
     current_tick: Tick,
 ) -> FireDecision {
-    let state = load_engagement_for_tick(way_id, session_id, curve, current_tick);
+    let state = load_engagement_for_tick(&engagement_path(way_id, session_id), curve, current_tick);
     FireDecision {
         outcome: classify_outcome(&state, current_tick),
         last_fire: state.last_fire_tick(),
@@ -194,9 +227,10 @@ fn classify_outcome(state: &EngagementState, current_tick: Tick) -> FireOutcome 
 /// engagement state. Call it under [`lock_engagement`], after re-checking
 /// the outcome there.
 pub fn record_way_fire(way_id: &str, session_id: &str, curve: &Curve, current_tick: Tick) {
-    let mut state = load_engagement_for_tick(way_id, session_id, curve, current_tick);
+    let path = engagement_path(way_id, session_id);
+    let mut state = load_engagement_for_tick(&path, curve, current_tick);
     state.record_fire(current_tick, 1.0);
-    save_engagement(way_id, session_id, &state);
+    save_engagement(&path, &state);
 }
 
 /// Load engagement state and normalize it against the current tick.
@@ -213,13 +247,8 @@ pub fn record_way_fire(way_id: &str, session_id: &str, curve: &Curve, current_ti
 /// it as stale and reset it (clear history, clear `last_fire`). The next
 /// fire starts fresh, and the way becomes eligible immediately instead
 /// of waiting for the cursor to catch up to a tick it can never observe.
-fn load_engagement_for_tick(
-    way_id: &str,
-    session_id: &str,
-    curve: &Curve,
-    current_tick: Tick,
-) -> EngagementState {
-    let state = load_engagement(way_id, session_id, curve);
+fn load_engagement_for_tick(path: &Path, curve: &Curve, current_tick: Tick) -> EngagementState {
+    let state = load_engagement(path, curve);
     match state.last_fire_tick() {
         Some(last) if last > current_tick => EngagementState::new(curve.clone()),
         _ => state,
