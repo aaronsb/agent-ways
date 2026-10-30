@@ -111,45 +111,44 @@ pub fn mixes_wildcard(key: &str) -> bool {
 /// [`mixes_wildcard`].
 pub const MIXED_WILDCARD: &str = "a segment mixes text and a wildcard, so the key is read literally and matches no way; write `*` or `**` as a whole segment";
 
-/// For a key `dir/*`, the advice that keeps the meaning it had before toggle
-/// patterns, when it covered `dir` itself and every way under it: replace it
-/// with whichever of `dir` and `dir/**` the file lacks, set to its value, or
-/// remove it when the file holds both. `toggles` are the file's toggles as
-/// `(key, enabled)` and `keys` every key it holds. A key already in the file
-/// is never named to write, since a second would make the file fail closed;
-/// one whose value differs is named as staying. `None` unless `dir` is one
-/// directory: non-empty and with no wildcard.
-pub fn old_star_advice(key: &str, toggles: &[(String, bool)], keys: &[String]) -> Option<String> {
+/// For a key `dir/*`, which before toggle patterns covered `dir` itself and
+/// every way under it, what lint says of it. A replacement is named only
+/// where following it literally keeps that meaning, adds no key the file
+/// holds, and leaves lint clean: the key sets a value and the file has no
+/// `dir/**` key. `dir` is named to add when it is a way in `ids` (every
+/// name counts as a way when `ids` is `None`) and the file lacks it; a `dir`
+/// key already there stays. Otherwise lint states the change and names the
+/// keys to read together. `toggles` are the file's toggles as
+/// `(key, enabled)` and `keys` every key it holds. `None` unless `dir` is
+/// one directory: non-empty and with no wildcard.
+pub fn old_star_advice(key: &str, toggles: &[(String, bool)], keys: &[String], ids: Option<&BTreeSet<String>>) -> Option<String> {
     let dir = key.strip_suffix("/*").filter(|d| !d.is_empty() && !d.contains('*'))?;
     let value = |k: &str| toggles.iter().find(|(t, _)| t == k).map(|(_, on)| *on);
-    let on = value(key).unwrap_or(false);
-    let state = |b: bool| if b { "on" } else { "off" };
-    let sub = format!("{dir}/**");
-    let mut add = Vec::new();
-    let mut notes = String::new();
-    let mut covers = [false; 2];
-    for (i, (k, what)) in [(dir.to_string(), format!("{dir} itself")), (sub.clone(), format!("every way under {dir}"))].into_iter().enumerate() {
-        if !keys.contains(&k) {
-            add.push(format!("`{k}: {on}`"));
-            covers[i] = true;
-            continue;
-        }
-        match value(&k) {
-            Some(own) if own == on => covers[i] = true,
-            Some(own) => notes.push_str(&format!("; the existing `{k}: {own}` stays, so {what} stays {}", state(own))),
-            None => notes.push_str(&format!("; the existing `{k}` key sets no `enabled`, so {what} is not switched by it")),
-        }
-    }
     let head = format!("`/*` matches only the ways directly under {dir}");
-    if add.is_empty() {
-        return Some(format!("{head}; remove this key, as `{sub}` also matches those ways{notes}"));
-    }
-    let scope = match covers {
-        [true, true] => format!("{dir} and every way under it"),
-        [true, false] => format!("{dir} itself"),
-        _ => format!("every way under {dir}"),
+    let Some(on) = value(key) else {
+        return Some(format!("{head}; this key sets no `enabled`, so it switches nothing; remove it"));
     };
-    Some(format!("{head}; for {scope}, replace this key with {}{notes}", add.join(" plus ")))
+    let sub = format!("{dir}/**");
+    if keys.contains(&sub) {
+        return Some(format!("{head}, and on those ways it outranks `{sub}`; it no longer covers {dir} itself or the ways deeper down, so read it together with `{sub}`"));
+    }
+    let state = |b: bool| if b { "on" } else { "off" };
+    let mut add = Vec::new();
+    let mut note = String::new();
+    let mut covers_dir = false;
+    if keys.iter().any(|k| k == dir) {
+        match value(dir) {
+            Some(own) if own == on => covers_dir = true,
+            Some(own) => note = format!("; the existing `{dir}: {own}` stays, so {dir} itself stays {}", state(own)),
+            None => note = format!("; the existing `{dir}` key sets no `enabled`, so {dir} itself is not switched by it"),
+        }
+    } else if ids.is_none_or(|ids| ids.contains(dir)) {
+        add.push(format!("`{dir}: {on}`"));
+        covers_dir = true;
+    }
+    add.push(format!("`{sub}: {on}`"));
+    let scope = if covers_dir { format!("{dir} and every way under it") } else { format!("every way under {dir}") };
+    Some(format!("{head}; for {scope}, replace this key with {}{note}", add.join(" plus ")))
 }
 
 /// Each set of toggles tied at the highest rank with opposite values on a
@@ -320,7 +319,7 @@ mod tests {
     fn advice(entries: &[(&str, bool)]) -> String {
         let (t, k) = file(entries);
         let key = entries.iter().map(|(k, _)| *k).find(|k| k.ends_with("/*")).expect("a `/*` key");
-        old_star_advice(key, &t, &k).expect("advice")
+        old_star_advice(key, &t, &k, None).expect("advice")
     }
 
     #[test]
@@ -329,6 +328,18 @@ mod tests {
             advice(&[("data/*", false)]),
             "`/*` matches only the ways directly under data; for data and every way under it, replace this key with `data: false` plus `data/**: false`"
         );
+    }
+
+    #[test]
+    fn a_directory_that_is_no_way_is_not_named_to_add() {
+        let (t, k) = file(&[("softwaredev/*", false)]);
+        let ids = ids(&["softwaredev/code", "softwaredev/code/quality"]);
+        assert_eq!(
+            old_star_advice("softwaredev/*", &t, &k, Some(&ids)).as_deref(),
+            Some("`/*` matches only the ways directly under softwaredev; for every way under softwaredev, replace this key with `softwaredev/**: false`")
+        );
+        let ids = super::tests::ids(&["softwaredev", "softwaredev/code"]);
+        assert!(old_star_advice("softwaredev/*", &t, &k, Some(&ids)).expect("advice").contains("`softwaredev: false` plus `softwaredev/**: false`"));
     }
 
     #[test]
@@ -344,26 +355,22 @@ mod tests {
     }
 
     #[test]
-    fn an_existing_subtree_key_is_kept_not_written_again() {
-        assert_eq!(
-            advice(&[("data/*", false), ("data/**", false)]),
-            "`/*` matches only the ways directly under data; for data and every way under it, replace this key with `data: false`"
-        );
-        assert_eq!(
-            advice(&[("data/*", false), ("data/**", true)]),
-            "`/*` matches only the ways directly under data; for data itself, replace this key with `data: false`; the existing `data/**: true` stays, so every way under data stays on"
-        );
+    fn an_existing_subtree_key_gets_no_replacement() {
+        for entries in [&[("data/*", false), ("data/**", false)][..], &[("data/*", false), ("data/**", true)], &[("data", false), ("data/*", false), ("data/**", true)]] {
+            assert_eq!(
+                advice(entries),
+                "`/*` matches only the ways directly under data, and on those ways it outranks `data/**`; it no longer covers data itself or the ways deeper down, so read it together with `data/**`",
+                "{entries:?}"
+            );
+        }
     }
 
     #[test]
-    fn with_both_keys_in_the_file_the_advice_is_to_remove_the_star_key() {
+    fn a_star_key_that_sets_no_value_is_advised_away() {
+        let k = vec!["data/*".to_string()];
         assert_eq!(
-            advice(&[("data", false), ("data/*", false), ("data/**", false)]),
-            "`/*` matches only the ways directly under data; remove this key, as `data/**` also matches those ways"
-        );
-        assert_eq!(
-            advice(&[("data", true), ("data/*", false), ("data/**", true)]),
-            "`/*` matches only the ways directly under data; remove this key, as `data/**` also matches those ways; the existing `data: true` stays, so data itself stays on; the existing `data/**: true` stays, so every way under data stays on"
+            old_star_advice("data/*", &[], &k, None).as_deref(),
+            Some("`/*` matches only the ways directly under data; this key sets no `enabled`, so it switches nothing; remove it")
         );
     }
 
@@ -372,7 +379,7 @@ mod tests {
         let t = vec![("data/*".to_string(), false)];
         let k = vec!["data/*".to_string(), "data".to_string()];
         assert_eq!(
-            old_star_advice("data/*", &t, &k).as_deref(),
+            old_star_advice("data/*", &t, &k, None).as_deref(),
             Some("`/*` matches only the ways directly under data; for every way under data, replace this key with `data/**: false`; the existing `data` key sets no `enabled`, so data itself is not switched by it")
         );
     }
@@ -381,7 +388,7 @@ mod tests {
     fn only_a_star_under_one_named_directory_gets_the_advice() {
         for key in ["/*", "*", "a/*/*", "doc*/*", "**/*", "data/**", "a/*/c"] {
             let (t, k) = file(&[(key, false)]);
-            assert_eq!(old_star_advice(key, &t, &k), None, "{key}");
+            assert_eq!(old_star_advice(key, &t, &k, None), None, "{key}");
         }
     }
 

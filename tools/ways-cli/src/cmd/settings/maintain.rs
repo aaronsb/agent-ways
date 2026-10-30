@@ -176,7 +176,7 @@ fn toggle_lines(l: &Layer, fallback_project: &Path) -> Vec<(bool, String)> {
         if toggle_check::mixes_wildcard(key) {
             out.push((true, format!("{} {}", at(key), toggle_check::MIXED_WILDCARD)));
         }
-        if let Some(advice) = toggle_check::old_star_advice(key, &toggles, &keys) {
+        if let Some(advice) = toggle_check::old_star_advice(key, &toggles, &keys, ids.as_ref()) {
             out.push((false, format!("{} warning: {advice}", at(key))));
         }
         if let Some(u) = unmatched.iter().find(|u| u.key == *key) {
