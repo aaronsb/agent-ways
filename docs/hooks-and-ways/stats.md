@@ -31,7 +31,11 @@ Ways of Working — Usage Stats
 
   Period:  last 7 days
 
-  Sessions: 61  |  Way fires: 4883  |  Re-disclosures: 4381
+  Sessions: 61  |  Way fires: 4883  |  Discarded: 212  |  Re-disclosures: 4381
+
+Discarded fires (domain 180, toggle 32):
+  ea/inbox                        97  domain 97
+  softwaredev/code/testing        32  toggle 32
 
 Top ways:
   meta/deployment                147  ████████████████████
@@ -77,7 +81,9 @@ The full report also has "Top ways by model", the top ten ways with one column p
 
 ### How to read it
 
-**Top ways** shows which guidance is active. A domain way that never appears either does not match your workflow or sits in a disabled domain.
+**Discarded** in the header counts discarded fires: ways switched off by a disabled domain, a project toggle or `enabled: false` that would have fired, refire window included. None of them was shown. **Discarded fires** lists them by way, with what switched each off, and **Discarded check fires** does the same for checks. Every other count in the report is of delivered fires only.
+
+**Top ways** shows which guidance is active. A domain way that never appears either does not match your workflow or sits in a disabled domain; a way in a disabled domain shows under Discarded fires when it would have fired.
 
 **By trigger** shows how ways get activated. [Trigger values](../reference/events.md#trigger-values) explains each one. In the sample, most fires come from `semantic:bash:en`: shell commands matched against way descriptions.
 

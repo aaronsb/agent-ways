@@ -92,3 +92,5 @@ A local engine is worth revisiting with a model that reasons about the conversat
 ## Scripts
 
 `scripts/` holds the probe code; none of it embeds session text. `judge/judge.py` is the judge interface (local llama.cpp or transformers, or Haiku), `judge/bench.py` and `judge/stability.py` the benchmarks, `data/` builds the labelled sets from telemetry and transcripts, and `eval/` scores and analyses them. The Haiku scorer reads its key from `WAYS_JUDGE_KEY_FILE`, defaulting to `~/.config/agent-ways/keys/anthropic`. The scripts expect the data directory above and a llama.cpp build from the `tools/way-embed/llama.cpp` submodule.
+
+The scripts predate the `discarded` property on `way_fired` and count every `way_fired` event as a delivered fire; on a log with discarded fires, drop events that carry it first ([events reference](../../reference/events.md)).
