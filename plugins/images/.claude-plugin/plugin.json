@@ -1,6 +1,6 @@
 {
   "name": "images",
-  "version": "1.48.0",
+  "version": "1.48.1",
   "description": "Draws images inline in the terminal transcript (ADR-517): pixels where Claude Code draws kitty graphics, half-block cells elsewhere; its options are the mods.images ways settings, read over the ways CLI.",
   "author": { "name": "Aaron Bockelie" },
   "types": "./types/index.d.ts"
