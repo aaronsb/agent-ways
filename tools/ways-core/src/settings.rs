@@ -988,6 +988,11 @@ pub fn mod_install_in_user(name: &str) -> Option<bool> {
     layer.get(&["mods".to_string(), name.to_string(), "install".to_string()]).and_then(Value::as_bool)
 }
 
+/// The schema's default for `mods.<name>.install`, with no file setting it.
+pub fn mod_install_default(name: &str) -> bool {
+    mod_install_in(name, &[])
+}
+
 fn mod_install_in(name: &str, layers: &[Layer]) -> bool {
     let key = format!("mods.{name}.install");
     let Some(spec) = SCHEMA.keys.iter().find(|k| k.name == key) else { return false };
@@ -1157,6 +1162,16 @@ mod tests {
     /// ADR-512 item 1: one entry per mod under `mods`, the ways-judge
     /// mod's wanted state false unless a file says otherwise, and each entry
     /// falling back alone.
+    /// attend and images install by default (ADR-512, ADR-517); ways-judge
+    /// waits for the engine, and ways-theme for the person.
+    #[test]
+    fn a_mods_default_is_its_schema_default() {
+        assert!(mod_install_default("attend"));
+        assert!(mod_install_default("images"));
+        assert!(!mod_install_default("ways-judge"));
+        assert!(!mod_install_default("ways-theme"));
+    }
+
     #[test]
     fn each_mod_has_an_entry_and_one_falls_back_without_the_other() {
         assert_eq!(resolved("mods.ways-judge.install", &[]), Some(Value::Bool(false)));
