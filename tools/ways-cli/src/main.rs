@@ -1442,9 +1442,11 @@ fn run() -> Result<()> {
         }
         Commands::Scan { mode } => match mode {
             // ADR-184 item 6: a project (or user config) with `enabled: false`
-            // injects nothing. Checked before any lane runs.
+            // injects nothing. Checked before any lane runs; the pattern lanes
+            // log what would have fired there as discarded fires.
             ScanCommand::Prompt { query, session, project, response_context, transcript } => {
                 if !cmd::scan::enabled_for(project.as_deref()) {
+                    cmd::scan::discard::project_off(cmd::scan::discard::OffSurface::Prompt { query: &query }, &session, project.as_deref());
                     return Ok(());
                 }
                 cmd::scan::prompt(
@@ -1463,6 +1465,7 @@ fn run() -> Result<()> {
             }
             ScanCommand::Command { command, description, session, project, transcript } => {
                 if !cmd::scan::enabled_for(project.as_deref()) {
+                    cmd::scan::discard::project_off(cmd::scan::discard::OffSurface::Command { command: &command, description: description.as_deref() }, &session, project.as_deref());
                     return Ok(());
                 }
                 cmd::scan::command(
@@ -1475,12 +1478,14 @@ fn run() -> Result<()> {
             }
             ScanCommand::File { path, session, project, transcript } => {
                 if !cmd::scan::enabled_for(project.as_deref()) {
+                    cmd::scan::discard::project_off(cmd::scan::discard::OffSurface::File { path: &path }, &session, project.as_deref());
                     return Ok(());
                 }
                 cmd::scan::file(&path, &session, project.as_deref(), transcript.as_deref())
             }
             ScanCommand::Task { query, session, project, team } => {
                 if !cmd::scan::enabled_for(project.as_deref()) {
+                    cmd::scan::discard::project_off(cmd::scan::discard::OffSurface::Task { query: &query, team: team.as_deref() }, &session, project.as_deref());
                     return Ok(());
                 }
                 cmd::scan::task(&query, &session, project.as_deref(), team.as_deref())

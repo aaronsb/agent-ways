@@ -264,6 +264,26 @@ pub(crate) fn state_in<'a>(
     Ok(sc)
 }
 
+/// What [`state_in`] checks a sidecar's records against: the model identity
+/// and the manifest's way hashes. The shadow pass asks it one way at a time
+/// about switched-off ways, which the completeness check does not cover.
+pub(crate) struct Coverage {
+    model: Option<String>,
+    alias: HashMap<String, u64>,
+}
+
+impl Coverage {
+    pub(crate) fn read(corpus_dir: &Path, engine_dir: &Path, bin: &Path) -> Self {
+        Coverage { model: model_id(engine_dir, bin), alias: ManifestView::read(&corpus_dir.join("embed-manifest.json")).alias }
+    }
+
+    /// Whether `sc` holds `id` at the hash the manifest records, as
+    /// [`Sidecar::check`] would accept it.
+    pub(crate) fn holds(&self, sc: &Sidecar, id: &str) -> bool {
+        self.model.as_deref().is_some_and(|m| sc.check(m, [id], &self.alias).is_ok())
+    }
+}
+
 /// The manifest's `way_hashes` of a parsed manifest.
 pub(crate) fn alias_hashes_from(manifest: &serde_json::Value) -> HashMap<String, u64> {
     manifest

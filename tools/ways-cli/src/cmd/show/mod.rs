@@ -300,6 +300,12 @@ fn firing_context(session_id: &str, project_dir: &str) -> &'static FiringContext
     })
 }
 
+/// The model id a fire in this process is stamped with, `unknown` when none
+/// was resolved.
+pub(crate) fn firing_model(session_id: &str, project_dir: &str) -> String {
+    firing_context(session_id, project_dir).model.clone().unwrap_or_else(|| crate::cmd::context::UNKNOWN_MODEL.to_string())
+}
+
 /// [`firing_context`] with the agent's own transcript given: the window and
 /// model come from the file the token position is read from. Only the main
 /// agent falls back to the session and project lookups. For a subagent both
@@ -504,13 +510,15 @@ fn render_way(
 /// missing.
 pub fn subagent_way(id: &str, session_id: &str, scope: &str) -> Result<String> {
     let project_dir = crate::util::project_dir();
-    let domain = id.split('/').next().unwrap_or(id);
-    if session::domain_disabled(domain) || session::way_disabled(id) {
-        return Ok(String::new());
-    }
+    let discarded = crate::cmd::scan::discard::reason(id);
     let Some((way_file, is_project_local)) = session::resolve_way_file(id, &project_dir) else {
         return Ok(String::new());
     };
+    if let Some(why) = discarded {
+        let at = crate::cmd::scan::discard::LaneLog { lane: "subagent", scope, session: session_id, project: &project_dir };
+        crate::cmd::scan::discard::log_one(&crate::cmd::scan::discard::Hit { way: id, trigger: "subagent-start", span: None, scores: None }, &why, &at);
+        return Ok(String::new());
+    }
     let content = std::fs::read_to_string(&way_file)?;
     let body = static_way_body(&content);
     let run = MacroRun { session_id, project_dir: &project_dir, scope };
@@ -776,11 +784,10 @@ pub fn check_within(
 ) -> Result<String> {
     let project_dir = crate::util::project_dir();
 
-    // Disable checks: domain (user scope) and per-way (project scope, ADR-131)
+    // A domain disable or a project toggle (ADR-131) refuses the check once its
+    // score is known: one that would have fired is logged as a discarded fire.
     let domain = id.split('/').next().unwrap_or(id);
-    if session::domain_disabled(domain) || session::way_disabled(id) {
-        return Ok(String::new());
-    }
+    let discarded = crate::cmd::scan::discard::reason(id);
 
     // Scope check
     let scope = session::detect_scope(session_id);
@@ -819,6 +826,11 @@ pub fn check_within(
         .unwrap_or(2.0);
 
     if effective_score < threshold {
+        return Ok(String::new());
+    }
+    if let Some(why) = discarded {
+        let at = crate::cmd::scan::discard::LaneLog { lane: "check", scope: &scope, session: session_id, project: &project_dir };
+        crate::cmd::scan::discard::log_one(&crate::cmd::scan::discard::Hit { way: id, trigger, span: None, scores: None }, &why, &at);
         return Ok(String::new());
     }
 

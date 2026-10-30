@@ -156,8 +156,9 @@ struct Fixture {
 }
 
 /// Ways in the keyword fixture: `lab/kw` is the one switched off, `ctl/kw`
-/// the control that stays on (except under [`Source::ProjectOff`]).
-const KEYWORD_WAYS: [(&str, &str); 2] = [("lab/kw", "widget"), ("ctl/kw", "gadget")];
+/// the control that stays on (except under [`Source::ProjectOff`]), and
+/// `lab/quiet` a way no surface here matches.
+const KEYWORD_WAYS: [(&str, &str); 3] = [("lab/kw", "widget"), ("ctl/kw", "gadget"), ("lab/quiet", "sprocket")];
 
 /// Ways in the semantic fixture and the cosines the stub engine scores them
 /// at: 0.40 maps to p ≈ 0.82 and fires; 0.10 maps to p ≈ 0.18 and does not.
@@ -257,11 +258,47 @@ impl Fixture {
             .collect()
     }
 
-    /// The ways that fired, sorted.
+    /// The ways delivered to the session, sorted: fires without a
+    /// `discarded` object.
     fn fired(&self) -> Vec<String> {
-        let mut ways: Vec<String> = self.events("way_fired").iter().map(|v| v["way"].as_str().unwrap_or("").to_string()).collect();
+        let mut ways: Vec<String> = self
+            .events("way_fired")
+            .iter()
+            .filter(|v| v.get("discarded").is_none())
+            .map(|v| v["way"].as_str().unwrap_or("").to_string())
+            .collect();
         ways.sort();
         ways
+    }
+
+    /// The discarded fires, as `(way, filter, toggle, scope, lane)`, sorted.
+    fn discarded(&self) -> Vec<Discarded> {
+        let s = |v: &serde_json::Value| v.as_str().map(str::to_string);
+        let mut rows: Vec<Discarded> = self
+            .events("way_fired")
+            .iter()
+            .filter(|v| v.get("discarded").is_some())
+            .map(|v| {
+                let d = &v["discarded"];
+                (s(&v["way"]).unwrap_or_default(), s(&d["filter"]).unwrap_or_default(), s(&d["toggle"]), s(&d["scope"]), s(&v["lane"]).unwrap_or_default())
+            })
+            .collect();
+        rows.sort();
+        rows
+    }
+
+    /// The one discarded fire of `way`.
+    fn discarded_event(&self, way: &str) -> serde_json::Value {
+        let rows: Vec<serde_json::Value> = self.events("way_fired").into_iter().filter(|v| v["way"] == way && v.get("discarded").is_some()).collect();
+        assert_eq!(rows.len(), 1, "one discarded fire of {way}: {rows:#?}");
+        rows.into_iter().next().unwrap()
+    }
+
+    /// Run `ways <args>` in this fixture; return stdout.
+    fn ways(&self, args: &[&str]) -> String {
+        let out = ways_cmd(&self.home, &self.project).args(args).output().expect("Failed to run ways");
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).to_string()
     }
 
     /// The ways the task lane stashed for the next subagent, sorted.
@@ -286,6 +323,28 @@ impl Drop for Fixture {
         clean_markers(&self.session);
         let _ = std::fs::remove_dir_all(&self.base);
     }
+}
+
+/// A discarded fire as the tests compare it: way, filter, toggle, scope, lane.
+type Discarded = (String, String, Option<String>, Option<String>, String);
+
+/// The discarded fires `source` should log for `ways` on `lane`.
+fn expected(source: Source, lane: &str, ways: &[&str]) -> Vec<Discarded> {
+    let mut rows: Vec<Discarded> = ways
+        .iter()
+        .map(|way| {
+            let (filter, toggle, scope) = match source {
+                Source::ProjectWayKey => ("toggle", Some(way.to_string()), "project"),
+                Source::ProjectDomain => ("domain", None, "project"),
+                Source::UserDomain => ("domain", None, "user"),
+                Source::ProjectOff => ("project_off", None, "project"),
+                Source::None => unreachable!("nothing is switched off"),
+            };
+            (way.to_string(), filter.to_string(), toggle, Some(scope.to_string()), lane.to_string())
+        })
+        .collect();
+    rows.sort();
+    rows
 }
 
 /// The control way's expected fires: none when the whole project is off.
@@ -359,4 +418,228 @@ fn task_lane_does_not_stash_a_switched_off_way() {
         f.scan(&["task", "--query", "please build the widget and the gadget"]);
         f.stashed()
     });
+}
+
+// ── Step 2: a switched-off way that would have fired is logged ─────
+
+/// The ways each source discards on a keyword lane: under `enabled: false`
+/// the control is off too. `lab/quiet` matches nothing and never appears.
+fn keyword_discards(source: Source, lane: &str) -> Vec<Discarded> {
+    match source {
+        Source::ProjectOff => expected(source, lane, &["ctl/kw", "lab/kw"]),
+        _ => expected(source, lane, &["lab/kw"]),
+    }
+}
+
+/// Run one keyword lane under every source and check its discarded fires.
+fn each_source_discards(lane: &str, drive: impl Fn(&Fixture)) {
+    let on = Fixture::new(&format!("{lane}-log-on"), Source::None);
+    drive(&on);
+    assert!(on.discarded().is_empty(), "{lane}: nothing is switched off, nothing is discarded");
+    for source in SOURCES {
+        let f = Fixture::new(&format!("{lane}-log-{source:?}"), source);
+        drive(&f);
+        assert_eq!(f.discarded(), keyword_discards(source, lane), "{lane} under {source:?}");
+    }
+}
+
+#[test]
+fn prompt_keyword_lane_logs_a_discarded_fire() {
+    each_source_discards("prompt", |f| {
+        f.scan(&["prompt", "--query", "please build the widget and the gadget"]);
+    });
+    let f = Fixture::new("prompt-span", Source::ProjectDomain);
+    f.scan(&["prompt", "--query", "please build the widget and the gadget"]);
+    let ev = f.discarded_event("lab/kw");
+    assert_eq!((ev["trigger"].as_str(), ev["matched_span"].as_str()), (Some("keyword"), Some("widget")), "{ev}");
+}
+
+#[test]
+fn command_lane_logs_a_discarded_fire() {
+    each_source_discards("command", |f| {
+        f.scan(&["command", "--command", "widgetctl run && gadgetctl run"]);
+    });
+}
+
+#[test]
+fn file_lane_logs_a_discarded_fire() {
+    each_source_discards("file", |f| {
+        f.scan(&["file", "--path", "/src/a.widget"]);
+        f.scan(&["file", "--path", "/src/a.gadget"]);
+    });
+}
+
+#[test]
+fn tool_lane_logs_a_discarded_fire() {
+    each_source_discards("tool", |f| {
+        f.hook_tool("WidgetTool");
+        f.hook_tool("GadgetTool");
+    });
+}
+
+#[test]
+fn task_lane_logs_a_discarded_fire() {
+    each_source_discards("task", |f| {
+        f.scan(&["task", "--query", "please build the widget and the gadget"]);
+    });
+}
+
+/// The semantic lane logs `lab/sem` with the scores of the single-vector
+/// candidate log had it competed: cosine 0.40 beside `ctl/sem` at 0.40, and
+/// under the toggle `lab/cold` at 0.10 too. `lab/cold` would not have fired
+/// and logs nothing. A project switched off embeds nothing, so its semantic
+/// lane logs nothing.
+#[cfg(unix)]
+#[test]
+fn prompt_semantic_lane_logs_a_discarded_fire_with_its_scores() {
+    for source in SOURCES {
+        let f = Fixture::semantic(&format!("sem-log-{source:?}"), source);
+        f.scan(&["prompt", "--query", "tell me how this part of the system works"]);
+        if source == Source::ProjectOff {
+            assert!(f.discarded().is_empty(), "no semantic signal under enabled: false: {:?}", f.discarded());
+            continue;
+        }
+        assert_eq!(f.discarded(), expected(source, "prompt", &["lab/sem"]), "semantic lane under {source:?}");
+        let ev = f.discarded_event("lab/sem");
+        assert_eq!(ev["trigger"], "semantic:embedding:en", "{ev}");
+        assert_eq!(ev["cosine"].as_f64(), Some(0.4), "{ev}");
+        let (share, margin) = (ev["share"].as_f64().unwrap(), ev["margin"].as_f64());
+        if source == Source::ProjectWayKey {
+            let want = (5.0f64).exp() / (2.0 * (5.0f64).exp() + (1.25f64).exp());
+            assert!((share - want).abs() < 1e-3, "share among ctl/sem and lab/cold: {ev}");
+            assert_eq!(margin, Some(0.3), "lab/cold is next below: {ev}");
+        } else {
+            assert_eq!(share, 0.5, "an even split with ctl/sem: {ev}");
+            assert_eq!(margin, None, "nothing enabled below it: {ev}");
+        }
+    }
+}
+
+/// Add a check to `lab/kw` firing on its command, and a state way `lab/st`
+/// triggered by a file the project holds.
+fn add_check_and_state_ways(f: &Fixture) {
+    let ways = f.home.join(".claude/hooks/ways");
+    std::fs::write(
+        ways.join("lab/kw/kw.check.md"),
+        "---\ndescription: kw check\nvocabulary: kw\ncommands: ^widgetctl\\b\nscope: agent\n---\n## anchor\n\nAnchor.\n\n## check\n\n- [ ] Checked\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(ways.join("lab/st")).unwrap();
+    std::fs::write(
+        ways.join("lab/st/st.md"),
+        "---\ndescription: st guidance\ntrigger: file-exists\npath: marker.txt\nscope: agent\nrefire: 0.15\n---\n# Marker lab/st\n",
+    )
+    .unwrap();
+    std::fs::write(f.project.join("marker.txt"), "").unwrap();
+}
+
+/// A check refused for its switched-off way logs on the check lane once its
+/// score clears the threshold, and a state way logs once per session however
+/// often its condition holds.
+#[test]
+fn check_and_state_lanes_log_a_discarded_fire() {
+    let on = Fixture::new("check-state-on", Source::None);
+    add_check_and_state_ways(&on);
+    on.scan(&["command", "--command", "widgetctl run"]);
+    on.scan(&["state", "--hook-event", "UserPromptSubmit"]);
+    assert_eq!(on.fired(), ["lab/kw", "lab/st"], "both fire when on");
+    assert!(on.discarded().is_empty());
+
+    let f = Fixture::new("check-state", Source::ProjectDomain);
+    add_check_and_state_ways(&f);
+    f.scan(&["command", "--command", "widgetctl run"]);
+    f.scan(&["state", "--hook-event", "UserPromptSubmit"]);
+    f.scan(&["state", "--hook-event", "UserPromptSubmit"]);
+    let mut want = expected(Source::ProjectDomain, "check", &["lab/kw"]);
+    want.extend(expected(Source::ProjectDomain, "command", &["lab/kw"]));
+    want.extend(expected(Source::ProjectDomain, "state", &["lab/st"]));
+    assert_eq!(f.discarded(), want);
+    assert!(f.fired().is_empty(), "{:?}", f.fired());
+}
+
+/// The enabled ways see the same scan whether a way is switched off or gone:
+/// the same ways fire and the hook prints the same bytes.
+#[test]
+fn enabled_ways_fire_the_same_with_a_way_switched_off_or_deleted() {
+    type Drive = fn(&Fixture) -> String;
+    let lanes: [(&str, Drive); 5] = [
+        ("prompt", |f| f.scan(&["prompt", "--query", "please build the widget and the gadget"])),
+        ("command", |f| f.scan(&["command", "--command", "widgetctl run && gadgetctl run"])),
+        ("file", |f| f.scan(&["file", "--path", "/src/a.widget"]) + &f.scan(&["file", "--path", "/src/a.gadget"])),
+        ("tool", |f| f.hook_tool("WidgetTool") + &f.hook_tool("GadgetTool")),
+        ("task", |f| {
+            f.scan(&["task", "--query", "please build the widget and the gadget"]);
+            f.stashed().join(",")
+        }),
+    ];
+    for (lane, drive) in lanes {
+        for source in [Source::ProjectWayKey, Source::ProjectDomain, Source::UserDomain] {
+            let off = Fixture::new(&format!("pc-{lane}-{source:?}"), source);
+            let gone = Fixture::build(&format!("pc-{lane}-{source:?}-gone"), Source::None, false, &["lab/kw", "lab/quiet"]);
+            let (off_out, gone_out) = (drive(&off), drive(&gone));
+            assert!(!gone_out.is_empty(), "{lane}: the control fired and printed something");
+            assert_eq!(off_out, gone_out, "{lane} under {source:?}: hook output");
+            assert_eq!(off.fired(), gone.fired(), "{lane} under {source:?}: fired ways");
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn semantic_lane_fires_the_same_with_a_way_switched_off_or_deleted() {
+    for source in [Source::ProjectWayKey, Source::ProjectDomain, Source::UserDomain] {
+        let off = Fixture::semantic(&format!("pc-sem-{source:?}"), source);
+        let absent: &[&str] = if source == Source::ProjectWayKey { &["lab/sem"] } else { &["lab/sem", "lab/cold"] };
+        let gone = Fixture::build(&format!("pc-sem-{source:?}-gone"), Source::None, true, absent);
+        let query = ["prompt", "--query", "tell me how this part of the system works"];
+        let (off_out, gone_out) = (off.scan(&query), gone.scan(&query));
+        assert!(!gone_out.is_empty(), "the control fired");
+        assert_eq!(off_out, gone_out, "semantic lane under {source:?}: hook output");
+        assert_eq!(off.fired(), gone.fired(), "semantic lane under {source:?}: fired ways");
+    }
+}
+
+// ── Readers of fires ─────────────────────────────────────────
+
+/// `ways tune stats` counts a discarded fire under its way with the filter,
+/// beside the delivered fires, which do not include it.
+#[test]
+fn stats_count_a_discarded_fire_under_its_way_and_filter() {
+    let f = Fixture::new("stats", Source::ProjectDomain);
+    f.scan(&["prompt", "--query", "please build the widget and the gadget"]);
+    let project = f.project.to_str().unwrap();
+    let v: serde_json::Value = serde_json::from_str(&f.ways(&["tune", "stats", "--json", "--project", project])).unwrap();
+    assert_eq!(v["way_fires"], 1, "only ctl/kw reached the session: {v:#}");
+    assert_eq!(v["by_way"], serde_json::json!({"ctl/kw": 1}), "{v:#}");
+    assert_eq!(v["discarded_fires"]["total"], 1, "{v:#}");
+    assert_eq!(v["discarded_fires"]["by_filter"], serde_json::json!({"domain": 1}), "{v:#}");
+    assert_eq!(v["discarded_fires"]["by_way"], serde_json::json!({"lab/kw": {"domain": 1}}), "{v:#}");
+    let human = f.ways(&["tune", "stats", "--project", project]);
+    let line = human.lines().find(|l| l.trim_start().starts_with("lab/kw")).unwrap_or_else(|| panic!("lab/kw listed: {human}"));
+    assert!(line.contains("domain 1"), "the filter is shown: {line}");
+    assert!(human.contains("Way fires: 1  |  Discarded: 1"), "{human}");
+}
+
+/// The session dump and the replay count what reached the session in their
+/// fires and turns, and the discarded fires apart, by filter.
+#[test]
+fn session_views_keep_a_discarded_fire_out_of_their_fires() {
+    let f = Fixture::new("dump", Source::ProjectWayKey);
+    f.scan(&["prompt", "--query", "please build the widget and the gadget"]);
+    let project = f.project.to_str().unwrap();
+
+    let dump: serde_json::Value = serde_json::from_str(&f.ways(&["session", "dump", "--session", &f.session, "--project", project])).unwrap();
+    let summary = &dump["summary"];
+    assert_eq!((summary["total_fires"].as_u64(), summary["distinct_ways"].as_u64()), (Some(1), Some(1)), "{summary:#}");
+    assert_eq!(summary["discarded"], serde_json::json!({"toggle": 1}), "{summary:#}");
+    let rows: Vec<&str> = dump["turns"].as_array().unwrap().iter().flat_map(|t| t["fired_ways"].as_array().unwrap()).map(|w| w["way_id"].as_str().unwrap()).collect();
+    assert_eq!(rows, ["ctl/kw"], "no turn carries the discarded fire: {dump:#}");
+
+    let replay: serde_json::Value = serde_json::from_str(&f.ways(&["session", "replay", "--json", "--session", &f.session, "--project", project])).unwrap();
+    let summary = &replay["summary"];
+    assert_eq!(summary["total_fires"], 1, "{summary:#}");
+    assert_eq!(summary["top_ways"], serde_json::json!([{"way": "ctl/kw", "fires": 1}]), "{summary:#}");
+    assert_eq!(summary["discarded"], serde_json::json!({"toggle": 1}), "{summary:#}");
+    let active: Vec<&str> = replay["frames"].as_array().unwrap().iter().flat_map(|fr| fr["active_ways"].as_array().unwrap()).map(|w| w["id"].as_str().unwrap_or("")).collect();
+    assert!(!active.is_empty() && active.iter().all(|w| *w == "ctl/kw"), "only ctl/kw is in context: {active:?}");
 }

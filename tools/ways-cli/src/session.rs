@@ -663,6 +663,14 @@ pub fn first_suppression_for(session_id: &str, agent: &str) -> bool {
     std::fs::OpenOptions::new().write(true).create_new(true).open(&marker).is_ok()
 }
 
+/// Record a state-lane discarded fire once per session (scan/state.rs).
+/// Returns whether this call is the first for the way.
+pub fn first_state_discard(session_id: &str, way_id: &str) -> bool {
+    let marker = session_dir(session_id).join("discarded-state").join(way_id).join(".marker");
+    ensure_parent(&marker);
+    std::fs::OpenOptions::new().write(true).create_new(true).open(&marker).is_ok()
+}
+
 /// Check if a way's scope field matches the current scope.
 pub fn scope_matches(scope_field: &str, current_scope: &str) -> bool {
     if scope_field.is_empty() {
