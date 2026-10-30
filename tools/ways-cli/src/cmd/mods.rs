@@ -159,7 +159,7 @@ enum WantedBy {
     Config,
     /// ways-judge while `gate.engine` is claude-code, with the key unset.
     Engine,
-    /// The default, which wants attend alone.
+    /// The schema's default for `mods.<name>.install`.
     Default,
 }
 
@@ -167,13 +167,12 @@ fn wanted_by(m: &Mod) -> (bool, WantedBy) {
     match ways_core::settings::mod_install_in_user(m.name) {
         Some(v) => (v, WantedBy::Config),
         None if *m == JUDGE && super::settings::engine::claude_code_chosen() => (true, WantedBy::Engine),
-        None => (m.name == attend_mod::ATTEND.name, WantedBy::Default),
+        None => (ways_core::settings::mod_install_default(m.name), WantedBy::Default),
     }
 }
 
 /// Whether the user config wants `m`: its `mods.<name>.install`, else
-/// ways-judge while `gate.engine` is claude-code, else the default, which
-/// wants attend alone.
+/// ways-judge while `gate.engine` is claude-code, else the schema's default.
 pub fn wanted(m: &Mod) -> bool {
     wanted_by(m).0
 }
