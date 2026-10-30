@@ -1068,6 +1068,62 @@ fn a_segment_mixing_text_and_a_wildcard_is_a_lint_error() {
 }
 
 #[test]
+fn a_mixed_segment_before_a_trailing_star_gets_only_the_error() {
+    let f = Fx::new();
+    renamed_corpus(&f);
+    f.write(&f.overlay(), "ways:\n  data*/*: false\n");
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!(code, 3, "{out}{err}");
+    assert_eq!(
+        out,
+        "<ROOT>/proj/.claude/ways.yaml:2: [ways.project] ways.data*/*: a segment mixes text and a wildcard, so the key is read literally and matches no way; write `*` or `**` as a whole segment\n"
+    );
+}
+
+#[test]
+fn a_trailing_star_key_beside_its_directory_key_keeps_that_key() {
+    let f = Fx::new();
+    renamed_corpus(&f);
+    let shipped = f.root.join("home/.claude/hooks/ways");
+    for id in ["softwaredev/code", "softwaredev/code/quality"] {
+        way(&f, &shipped, id);
+    }
+    f.write(&f.overlay(), "ways:\n  softwaredev/code: true\n  softwaredev/code/*: false\n");
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(
+        out,
+        "<ROOT>/proj/.claude/ways.yaml:3: [ways.project] ways.softwaredev/code/*: warning: `/*` matches only the ways directly under softwaredev/code; for every way under it, write `softwaredev/code/**: false`; the existing `softwaredev/code: true` stays, so softwaredev/code itself stays on\n"
+    );
+}
+
+#[test]
+fn a_bare_star_key_is_set_linted_and_listed_as_a_toggle() {
+    let f = Fx::new();
+    renamed_corpus(&f);
+    let (out, err, code) = f.run(&["settings", "set", "ways.project.*", "false"]);
+    assert_eq!((out.as_str(), code), ("", 0), "{err}");
+    assert!(std::fs::read_to_string(f.overlay()).unwrap().contains("  \"*\": false\n"), "the key is quoted");
+    assert_eq!(f.run(&["settings", "get", "ways.project.*"]).0, "false\n");
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!((out.as_str(), code), ("", 0), "`*` matches the one-segment way data: {err}");
+    let (out, _, _) = f.run(&["status"]);
+    assert!(out.contains("Disabled ways:    * (project scope"), "{out}");
+}
+
+#[test]
+fn setting_a_key_with_a_mixed_segment_is_refused_as_lint_reports_it() {
+    let f = Fx::new();
+    let (out, err, code) = f.run(&["settings", "set", "ways.project.doc*", "false"]);
+    assert_eq!((out.as_str(), code), ("", 2));
+    assert_eq!(
+        err,
+        "ways settings: ways.project.doc*: a segment mixes text and a wildcard, so the key is read literally and matches no way; write `*` or `**` as a whole segment\n"
+    );
+    assert!(!f.overlay().exists(), "nothing is written");
+}
+
+#[test]
 fn status_lists_a_toggle_naming_no_way_apart_from_the_disabled_ways() {
     let f = Fx::new();
     renamed_corpus(&f);

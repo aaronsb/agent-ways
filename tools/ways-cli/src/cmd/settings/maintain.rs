@@ -110,11 +110,9 @@ pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
             n += 1;
             fixable += f.lint_note().is_empty() as usize;
         }
-        for line in toggle_lines(l, &read_project(project).unwrap_or_else(|| PathBuf::from(crate::util::project_dir()))) {
+        for (is_error, line) in toggle_lines(l, &read_project(project).unwrap_or_else(|| PathBuf::from(crate::util::project_dir()))) {
             // A warning leaves the exit alone, as a key's does.
-            if !line.contains(": warning: ") {
-                n += 1;
-            }
+            n += usize::from(is_error);
             println!("{line}");
         }
     }
@@ -147,12 +145,12 @@ pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
     Ok(())
 }
 
-/// The lines for the per-way toggles (ADR-131) in a project overlay, key by
-/// key in file order, then the ties:
+/// The lines for the per-way toggles (ADR-131) in a project overlay, each as
+/// `(is_error, line)`, key by key in file order, then the ties:
 /// - an error for a key whose segment mixes text and a wildcard, which is
 ///   read literally and so switches nothing;
-/// - a warning for a key ending in `/*`, which now covers only the ways
-///   directly under its directory, naming the toggles for its old meaning;
+/// - a warning for a key `dir/*`, which now covers only the ways directly
+///   under `dir`, naming the toggles for its old meaning;
 /// - a warning for a key that names no way the project, the user or the
 ///   shipped corpus has, so a way renamed since it was written runs again;
 /// - a warning for patterns tied at one specificity with opposite values,
@@ -160,7 +158,7 @@ pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
 ///
 /// Without the shipped ways the last two are not judged; `ways status`
 /// says so.
-fn toggle_lines(l: &Layer, fallback_project: &Path) -> Vec<String> {
+fn toggle_lines(l: &Layer, fallback_project: &Path) -> Vec<(bool, String)> {
     use crate::cmd::toggle_check;
     let Some(path) = &l.path else { return Vec::new() };
     let keys = toggle_check::overlay_keys(l);
@@ -176,28 +174,23 @@ fn toggle_lines(l: &Layer, fallback_project: &Path) -> Vec<String> {
     let mut out = Vec::new();
     for key in &keys {
         if toggle_check::mixes_wildcard(key) {
-            out.push(format!(
-                "{} a segment mixes text and a wildcard, so the key is read literally and matches no way; write `*` or `**` as a whole segment",
-                at(key)
-            ));
+            out.push((true, format!("{} {}", at(key), toggle_check::MIXED_WILDCARD)));
         }
-        let enabled = toggles.iter().find(|(k, _)| k == key).is_some_and(|(_, on)| *on);
-        if let Some(old) = toggle_check::old_star_replacement(key, enabled) {
-            let dir = &key[..key.len() - 2];
-            out.push(format!("{} warning: `/*` matches only the ways directly under {dir}; for {dir} and every way under it, write {old}", at(key)));
+        if let Some(advice) = toggle_check::old_star_advice(key, &toggles, &keys) {
+            out.push((false, format!("{} warning: {advice}", at(key))));
         }
         if let Some(u) = unmatched.iter().find(|u| u.key == *key) {
             let hint = u.nearest.as_ref().map(|n| format!("; nearest way: {n}")).unwrap_or_default();
-            out.push(format!("{} warning: names no way in the project, user or shipped ways, so it switches nothing{hint}", at(key)));
+            out.push((false, format!("{} warning: names no way in the project, user or shipped ways, so it switches nothing{hint}", at(key))));
         }
     }
     for (tied, id) in ids.map(|ids| toggle_check::ties(&toggles, &ids)).unwrap_or_default() {
         let (first, rest) = tied.split_first().expect("a tie has two keys");
-        out.push(format!(
+        out.push((false, format!(
             "{} warning: ties with {} on {id} at the same specificity with the opposite value, so the tie resolves to false",
             at(first),
             rest.iter().map(|k| format!("ways.{k}")).collect::<Vec<_>>().join(", ")
-        ));
+        )));
     }
     out
 }

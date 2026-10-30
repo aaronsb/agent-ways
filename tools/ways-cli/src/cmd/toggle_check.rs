@@ -107,11 +107,28 @@ pub fn mixes_wildcard(key: &str) -> bool {
     key.split('/').any(|s| s.contains('*') && s != "*" && s != "**")
 }
 
-/// For a key ending in `/*`, the toggles that keep the meaning it had before
-/// toggle patterns, when it covered `dir` itself and every way under it.
-pub fn old_star_replacement(key: &str, enabled: bool) -> Option<String> {
-    let dir = key.strip_suffix("/*")?;
-    Some(format!("`{dir}: {enabled}` plus `{dir}/**: {enabled}`"))
+/// What `lint` and `set` say of a key that [`mixes_wildcard`].
+pub const MIXED_WILDCARD: &str = "a segment mixes text and a wildcard, so the key is read literally and matches no way; write `*` or `**` as a whole segment";
+
+/// For a key `dir/*`, the advice that keeps the meaning it had before toggle
+/// patterns, when it covered `dir` itself and every way under it. `toggles`
+/// are the file's toggles as `(key, enabled)` and `keys` every key it holds.
+/// A `dir` key already in the file stays, since writing a second would make
+/// the file fail closed. `None` unless `dir` is one directory: non-empty and
+/// with no wildcard.
+pub fn old_star_advice(key: &str, toggles: &[(String, bool)], keys: &[String]) -> Option<String> {
+    let dir = key.strip_suffix("/*").filter(|d| !d.is_empty() && !d.contains('*'))?;
+    let value = |k: &str| toggles.iter().find(|(t, _)| t == k).map(|(_, on)| *on);
+    let on = value(key).unwrap_or(false);
+    let head = format!("`/*` matches only the ways directly under {dir}");
+    if !keys.iter().any(|k| k == dir) {
+        return Some(format!("{head}; for {dir} and every way under it, write `{dir}: {on}` plus `{dir}/**: {on}`"));
+    }
+    let keep = match value(dir) {
+        Some(own) if own != on => format!("the existing `{dir}: {own}` stays, so {dir} itself stays {}", if own { "on" } else { "off" }),
+        _ => format!("keep the existing `{dir}` key"),
+    };
+    Some(format!("{head}; for every way under it, write `{dir}/**: {on}`; {keep}"))
 }
 
 /// Each set of toggles tied at the highest rank with opposite values on a
@@ -275,11 +292,39 @@ mod tests {
         }
     }
 
+    fn file(entries: &[(&str, bool)]) -> (Vec<(String, bool)>, Vec<String>) {
+        (entries.iter().map(|(k, v)| (k.to_string(), *v)).collect(), entries.iter().map(|(k, _)| k.to_string()).collect())
+    }
+
     #[test]
     fn a_trailing_star_key_names_the_toggles_for_its_old_meaning() {
-        assert_eq!(old_star_replacement("data/*", false).as_deref(), Some("`data: false` plus `data/**: false`"));
-        assert_eq!(old_star_replacement("a/*/c", false), None);
-        assert_eq!(old_star_replacement("data/**", true), None);
+        let (t, k) = file(&[("data/*", false)]);
+        assert_eq!(
+            old_star_advice("data/*", &t, &k).as_deref(),
+            Some("`/*` matches only the ways directly under data; for data and every way under it, write `data: false` plus `data/**: false`")
+        );
+    }
+
+    #[test]
+    fn an_existing_directory_key_is_kept_not_written_again() {
+        let (t, k) = file(&[("softwaredev/code", false), ("softwaredev/code/*", false)]);
+        assert_eq!(
+            old_star_advice("softwaredev/code/*", &t, &k).as_deref(),
+            Some("`/*` matches only the ways directly under softwaredev/code; for every way under it, write `softwaredev/code/**: false`; keep the existing `softwaredev/code` key")
+        );
+        let (t, k) = file(&[("softwaredev/code", true), ("softwaredev/code/*", false)]);
+        assert_eq!(
+            old_star_advice("softwaredev/code/*", &t, &k).as_deref(),
+            Some("`/*` matches only the ways directly under softwaredev/code; for every way under it, write `softwaredev/code/**: false`; the existing `softwaredev/code: true` stays, so softwaredev/code itself stays on")
+        );
+    }
+
+    #[test]
+    fn only_a_star_under_one_named_directory_gets_the_advice() {
+        for key in ["/*", "*", "a/*/*", "doc*/*", "**/*", "data/**", "a/*/c"] {
+            let (t, k) = file(&[(key, false)]);
+            assert_eq!(old_star_advice(key, &t, &k), None, "{key}");
+        }
     }
 
     #[test]
