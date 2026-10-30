@@ -17,17 +17,18 @@ Every sensor is one YAML file (ADR-403). attend embeds eight shipped files, kept
   processes       crate   builtin active event   30s / 5s   sensor-processes@0.6.0 -
 ```
 
-`Origin` is the highest layer with a file for the sensor: `builtin`, `user` or `project`. `File` is that layer's file; a shipped file shows its copy in the app dir, or `-` when the app dir has none. `Source` is the compiled sensor and its version for a crate sensor, the program for a command sensor, and the server and tool for an mcp sensor. Below the table, one line per sensor gives the reason behind a state and any note, such as a lane the author rule refused or a project file the allow-list refused. `--json` prints the same with each layer's file and the last poll's outcome.
+`Origin` is the lowest layer that defines the sensor: `builtin`, `user` or `project`. Each higher layer with a file for it follows, as `· user extends` or `· project extends`. `File` is the highest of those files; a shipped file shows its copy in the app dir, or `-` when the app dir has none. `Source` is the compiled sensor and its version for a crate sensor, the program for a command sensor, and the server and tool for an mcp sensor. Below the table, one line per sensor gives the reason behind a state and any note, such as a lane the author rule refused or a project file the allow-list refused. `--json` prints each sensor as an item: its origin and file, an `overrides` list with each higher layer's file, its state and reason, then its fields and the last poll's outcome.
 
 | State | Meaning |
 |---|---|
 | `active` | attend polls it, and its last poll, if any, succeeded |
-| `failed` | attend polls it, and its last poll failed; the line below says why |
+| `failing` | attend polls it, and its last poll failed; the line below says why |
 | `off` | its file sets `enabled: false` |
 | `invalid` | a problem in its merged files keeps it from running |
 | `refused` | a project command or mcp file, from a project not in `attend.project_sensors`, with no lower layer |
-| `not hosted` | a `command` or `mcp` sensor, which attend runs from ADR-403 slices 2 and 3, or a `ways` sensor, which ways runs (ADR-199) |
-| `not compiled` | its file names a compiled sensor this build leaves out |
+| `degraded` | a `command` or `mcp` sensor, which attend runs from ADR-403 slices 2 and 3, or a `ways` sensor, which ways runs (ADR-199) |
+| `not-compiled` | its file names a compiled sensor this build leaves out |
+| `unknown` | `ways settings items` could not ask attend for the sensor's state; the detail says why |
 
 ## Summary
 
@@ -173,7 +174,7 @@ While armed, wakes an idle session once at 50 idle minutes so the prompt cache i
 ## Choosing where a new observation goes
 
 1. **Does a shipped sensor cover it?** The `git` sensor already watches git state. A file of the same name in your user or project layer tunes it.
-2. **Can a program print it?** Then write a `command` sensor from `example-command.yaml`: an argv and its output, with no Rust and no rebuild. attend hosts the kind from ADR-403 slice 2; until then the file loads, lints and lists as `not hosted`.
+2. **Can a program print it?** Then write a `command` sensor from `example-command.yaml`: an argv and its output, with no Rust and no rebuild. attend hosts the kind from ADR-403 slice 2; until then the file loads, lints and lists as `degraded`.
 3. **Does a read-only MCP tool return it?** Then write an `mcp` sensor from `example-mcp.yaml`. attend hosts the kind from slice 3.
 4. **Does it need native speed, state no file can declare, or complex logic?** Then write a compiled sensor: a `sensor-*` crate in `tools/` that implements `Sensor`, an optional dependency of attend with a feature, and a shipped `crate` file that names it. See [`authoring-sensors.md`](authoring-sensors.md#compiled-sensors).
 

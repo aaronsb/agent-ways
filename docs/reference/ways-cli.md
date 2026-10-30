@@ -57,7 +57,8 @@ ways status --json
 | `lint` | Check the settings files against the schema. Exits 3 with findings. Without `--file` it also names every file that holds the retired `attend_mod` section: the user config, each target's config and the `.claude/ways.yaml` of every project `ways projects` knows, each with its fix command. |
 | `apply` | Write a settings object (YAML or JSON, from stdin or `--file`) and answer with a JSON report, whose `written` is keyed by each file's absolute path. Stderr names each file, as `set` does. `--dry-run` writes nothing. |
 | `fix <section>` | Rewrite one section of a file from canonical. Stderr names each file, as `set` does. `--project` fixes the project file, `--target <dir>` that target's own config. `fix mods.attend` first moves a retired `attend_mod` section to `mods.attend` ([ADR-512](../architecture/platform/ADR-512-each-shipped-claude-code-mod-has-one-wanted-state-in-settings-under-mods-name-and-ways-manage-converges-every-target-to-it.md)). |
-| `theme list` | List the themes: name, source (`bundled`, `user`, or `override` for a user file with a bundled name) and the active one. `--json` adds each one's label and file. |
+| `theme list` | List the themes: name, origin, state and why. Origin is `builtin` for a bundled theme or `user` for your own file, followed by `· user replaces` when a file of yours takes a bundled theme's name. A file that does not load lists as `invalid` with its first finding; a bundled name's detail says the bundled theme is in effect. `--json` prints each theme as an item (ADR-516) and its label. |
+| `items [<family>] [--json] [--project <path>]` | List every item of the families `theme`, `mod`, `sensor`, `way` and `profile`, or of one family, as the settings screens' cards describe them. A line is family, name, origin with each higher layer that changes it (`builtin · user extends`), kind, state and the highest file that changes it. `--json` prints one object per item: the descriptor (`family`, `name`, `kind`, `origin`, `path`, `overrides`, `source`, `version`, `state`, `detail`), then the family's fields. `--project` names the project whose ways and sensors are read. |
 | `theme copy <from> <to>` | Copy any theme, bundled or yours, to a new user theme file `<to>`. |
 | `theme rename <old> <new>` | Rename a user theme: its file and its `THEME_NAME`. `theme.active` follows when it named the theme. |
 | `theme delete <name>` | Delete a user theme's file. When it was the active theme, `theme.active` falls back to `terminal` and the output says so. |
@@ -749,7 +750,7 @@ Bare `ways manage target` on a terminal opens the settings screens on their inst
 
 **Run from:** Anywhere.
 
-**Tells you:** `list` prints each mod with its shipped version, a one-word state (`converged`, `pending`, `removed`, `disabled`, `off` or `drift`), where its wanted state comes from, and its state in each enabled target. `check [<mod>]` diagnoses each mod in each enabled target: Claude Code's version against the mod's floor, the `agent-ways` marketplace, the installed version against the shipped one, whether the mod is enabled, installed against wanted, and for ways-judge whether `gate.engine` agrees. Each problem is one ⚠ line naming its fix, and `check` exits 3 with any problem, 0 when every check passes.
+**Tells you:** `list` prints each mod with its shipped version, a one-word state (`converged`, `pending`, `removed`, `disabled`, `off` or `drift`), where its wanted state comes from, and its state in each enabled target. `list --json` prints each mod as an item (ADR-516): the descriptor, with `path` and `version` null for a mod this app does not ship, then `wanted` and `targets`. `check [<mod>]` diagnoses each mod in each enabled target: Claude Code's version against the mod's floor, the `agent-ways` marketplace, the installed version against the shipped one, whether the mod is enabled, installed against wanted, and for ways-judge whether `gate.engine` agrees. Each problem is one ⚠ line naming its fix, and `check` exits 3 with any problem, 0 when every check passes.
 
 | Verb | What it changes |
 |---|---|
@@ -762,7 +763,7 @@ Bare `ways manage target` on a terminal opens the settings screens on their inst
 The user config's `mods.ways-judge.install` is written only with the engine: `ways judge-setup`, the gate tab, `ways settings set|unset gate.engine` and `ways settings apply` of an object holding `engine` write both, the mod's setting first when the engine becomes `claude-code` and the engine first when it leaves it. `ways settings set` and `apply` refuse `mods.ways-judge.install` in the user config. `set` and `apply` write and name the repair; setup and the gate tab run it.
 
 ```
-ways manage mod list
+ways manage mod list [--json]
 ways manage mod check ways-judge
 ways manage mod install attend --commit                  # undoes a removal by hand
 ways manage mod uninstall attend --target ~/.claude-work --commit
