@@ -118,7 +118,11 @@ Under ADR-701 §1, a trailing `dir/*` switched off `dir` and its whole subtree a
 - The relevance judge is not asked about a switched-off way. Would have fired means it cleared the matcher's gates.
 - On the late-interaction lane a switched-off way is confirmed against the body sidecar at the way's current hash. With no such entry it is not logged, since confirming it on the call would embed.
 - A keyword hit that the floor vetoes is re-checked against the prompt-only scores only when the enabled pass already computed them.
-- A state-lane discard is logged once per session per way.
+- A state-lane discard follows the way's refire window, as its delivered fire does, except for a session-start way, which logs once per session.
+- A discard is recorded under a per-way lock, as a delivered fire is, so parallel hooks log it once.
+- A way's in-scan boost counts toward a discard only from a parent that was shown, as it does toward delivery.
+
+> Note 2026-10-30: §3's state-lane and boost rules settled during implementation.
 - In a project with `enabled: false`, only the pattern lanes log discards, since nothing is embedded there. Testing the corpus's patterns costs about 35 ms per prompt in such a project.
 - Macros and sensors follow the same rule as they gain filters: the event is selected and logged, and the action is dropped at the last step with the filter named.
 
