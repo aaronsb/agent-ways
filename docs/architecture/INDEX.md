@@ -179,6 +179,7 @@ _Install, update, configuration, permissions, the CLI contract, testing_
 | [ADR-515](./platform/ADR-515-item-origin-across-store-screens-and-cli-audited-2026-10-29.md) | How themes, mods, sensors, ways and judge profiles are kept and shown across the store, the settings screens and the CLI, audited 2026-10-29 | proposed |
 | [ADR-516](./platform/ADR-516-one-item-descriptor-shared-by-the-store-the-settings-screens-and-the-cli.md) | One item descriptor of kind, origin, path, source, version and state for themes, mods, sensors, ways and judge profiles, shared by the store, the settings screens and the CLI | accepted |
 | [ADR-517](./platform/ADR-517-the-images-mod-ships-from-agent-ways-as-a-fourth-mod-installed-by-default-its-history-moved-from-the-operator-s-dotfiles.md) | The images mod ships from agent-ways as a fourth mod, installed by default, its history moved from the operator's dotfiles | accepted |
+| [ADR-518](./platform/ADR-518-each-settings-tab-shows-its-items-by-scope-user-this-project-and-other-projects-with-a-trust-row-per-project-and-a-project-opt-out-from-user-scope-ways.md) | Each settings tab shows its items by scope: user, this project and other projects, with a trust row per project and a project opt-out from user-scope ways | accepted |
 
 ## Practice
 _The ways method, way authoring, the development loop_
@@ -209,6 +210,7 @@ _The ways method, way authoring, the development loop_
 | [ADR-607](./practice/ADR-607-children-of-a-loop-type-way-are-loop-types-or-concerns-several-loops-share.md) | Children of a loop-type way are loop types or concerns several loops share | accepted |
 | [ADR-608](./practice/ADR-608-delegation-is-asked-for-by-the-user-a-skill-or-a-claude-md-file-not-by-a-way-s-own-text.md) | Delegation is asked for by the user, a skill, or a CLAUDE.md file, not by a way's own text | accepted |
 | [ADR-609](./practice/ADR-609-outward-writes-need-the-user-s-ask-or-a-grant-in-their-claude-md-and-ways-offer-them-otherwise.md) | Outward writes need the user's ask or a grant in their CLAUDE.md, and ways offer them otherwise | accepted |
+| [ADR-610](./practice/ADR-610-every-wrap-is-recorded-by-one-ways-command-and-a-session-start-way-steers-the-next-session-by-its-distance-from-the-writer.md) | Every wrap is recorded by one ways command, and a session-start way steers the next session by its distance from the writer | accepted |
 | [ADR-611](./practice/ADR-611-working-branch-github-writes-need-no-grant-and-merging-into-a-consequential-branch-does.md) | Working-branch GitHub writes need no grant, and merging into a consequential branch does | accepted |
 
 ## Ways engine
@@ -226,6 +228,7 @@ _The ways engine, continued after the full 100-199 band: matching, disclosure an
 | [ADR-707](./engine/ADR-707-measurements-of-the-shell-surface-covering-the-semantic-lane-s-on-topic-rate-alternative-match-surfaces-and-a-judge-reading-the-described-call.md) | Measurements of the shell surface, covering the semantic lane's on-topic rate, alternative match surfaces, and a judge reading the described call | proposed |
 | [ADR-708](./engine/ADR-708-a-claude-code-internal-engine-for-the-relevance-gate-selectable-with-one-judge-engine-per-session.md) | A Claude Code internal engine for the relevance gate, selectable, with one judge engine per session | accepted |
 | [ADR-709](./engine/ADR-709-a-spike-of-the-prompt-lane-handoff-to-a-mod-judge-covering-the-prompt-submit-bracket-session-identity-and-model-latency.md) | A spike of the prompt-lane handoff to a mod judge, covering the prompt.submit bracket, session identity and model latency | proposed |
+| [ADR-710](./engine/ADR-710-toggle-patterns-over-way-ids-and-a-switched-off-way-discarded-at-the-last-step-with-a-logged-event.md) | Toggle patterns over way ids, and a switched-off way discarded at the last step with a logged event | accepted |
 
 ## Archived
 

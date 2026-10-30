@@ -1,0 +1,51 @@
+<svg xml:space="preserve" xmlns="http://www.w3.org/2000/svg" width="760" height="440" viewBox="0 0 760 440" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" font-size="13">
+  <title>The ways tab of ways settings, sectioned by scope, as ADR-518 decides</title>
+  <desc>A settings screen with the tabs ways, matching, gate, install, attend, sensors, mod and theme across the top, ways selected. Below it, three sections in order. The user section lists builtin and user ways, each row with its origin word and its state: adr builtin on · off here; commits builtin on; my-review user on. The this project section lists the project's own way release with origin project, the switch documentation/adr off, a row inherit all, and a trust row reading macros trusted, stored in the user's config.yaml. The other projects section shows two collapsed nodes, one per project with ways, each marked view only. Origin words are coloured by role: builtin in the info colour, user and project in the accent colour.</desc>
+  <style>
+    .panel { fill: #1e2430; stroke: #94a3b8; stroke-width: 1.5; }
+    .tab   { fill: #94a3b8; }
+    .tabon { fill: #ffffff; font-weight: bold; text-decoration: underline; }
+    .sec   { fill: #ffffff; font-weight: bold; }
+    .dim   { fill: #94a3b8; }
+    .val   { fill: #e2e8f0; }
+    .bi    { fill: #7dd3fc; }
+    .usr   { fill: #f0abfc; font-weight: bold; }
+    .ok    { fill: #86efac; }
+    .warn  { fill: #fbbf24; }
+    .cap   { fill: #64748b; font-size: 12px; }
+    .rule  { stroke: #475569; stroke-width: 1; }
+  </style>
+
+  <rect class="panel" x="10" y="10" width="740" height="390" rx="4"/>
+
+  <!-- tabs: what -->
+  <text x="24" y="34"><tspan class="tabon">ways</tspan><tspan class="tab">  matching  gate  install  attend  sensors  mod  theme</tspan></text>
+  <line class="rule" x1="20" y1="44" x2="740" y2="44"/>
+
+  <!-- user section -->
+  <text class="sec" x="24" y="68">▾ user</text>
+  <text class="dim" x="600" y="68">editable</text>
+  <text x="44" y="90"><tspan class="val">documentation/adr     </tspan><tspan class="bi">builtin</tspan><tspan class="ok">  on</tspan><tspan class="dim"> · </tspan><tspan class="warn">off here</tspan></text>
+  <text x="44" y="110"><tspan class="val">delivery/commits      </tspan><tspan class="bi">builtin</tspan><tspan class="ok">  on</tspan></text>
+  <text x="44" y="130"><tspan class="val">my-review             </tspan><tspan class="usr">user</tspan><tspan class="ok">     on</tspan></text>
+
+  <!-- this project section -->
+  <text class="sec" x="24" y="164">▾ this project  <tspan class="dim">~/src/app</tspan></text>
+  <text class="dim" x="600" y="164">editable</text>
+  <text x="44" y="186"><tspan class="val">release               </tspan><tspan class="usr">project</tspan><tspan class="ok">  on</tspan></text>
+  <text x="44" y="206"><tspan class="val">documentation/adr     </tspan><tspan class="dim">switch </tspan><tspan class="warn"> off</tspan></text>
+  <text x="44" y="226"><tspan class="val">inherit               </tspan><tspan class="val">all</tspan></text>
+  <text x="44" y="246"><tspan class="val">trust                 </tspan><tspan class="ok">macros trusted</tspan><tspan class="dim"> · ~/.config/agent-ways/config.yaml</tspan></text>
+
+  <!-- other projects section -->
+  <text class="sec" x="24" y="280">▾ other projects</text>
+  <text class="dim" x="600" y="280">view only</text>
+  <text x="44" y="302"><tspan class="dim">▸ </tspan><tspan class="val">~/src/site            </tspan><tspan class="dim">3 ways · inherit all · not trusted</tspan></text>
+  <text x="44" y="322"><tspan class="dim">▸ </tspan><tspan class="val">~/src/lab             </tspan><tspan class="dim">5 ways · inherit none · trusted</tspan></text>
+
+  <line class="rule" x1="20" y1="350" x2="740" y2="350"/>
+  <text class="cap" x="24" y="372">Tabs say what; sections say where, always user, this project, other projects.</text>
+  <text class="cap" x="24" y="390">The current project is not repeated under other projects.</text>
+
+  <text class="cap" x="10" y="426">ADR-518 · the ways tab opened in ~/src/app</text>
+</svg>
