@@ -542,6 +542,7 @@ mod choice_tests {
         check: None,
         computed: None,
         fail_closed: None,
+        star_instance: false,
     };
 
     #[test]

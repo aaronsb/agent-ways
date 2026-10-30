@@ -168,6 +168,7 @@ const BASE: KeySpec = KeySpec {
     check: None,
     computed: None,
     fail_closed: None,
+    star_instance: false,
 };
 
 const PROB: Kind = Kind::Float { min: 0.0, max: 1.0 };
@@ -232,6 +233,7 @@ const KEYS: &[KeySpec] = &[
         default: DefaultValue::Yaml("true"),
         scope: Scope::Project,
         doc: "One way on or off in this project.",
+        star_instance: true,
         long: "Project scope only (ADR-131). `false` silences the way in this project; absent means on. `ways settings set ways.project.<id> false` turns a way off; `ways settings unset ways.project.<id>` turns it back on. A key is a pattern over way ids: a key with no wildcard names one way, `*` matches one id segment, and `**` one or more, so `documentation/adr/**` covers every way under `documentation/adr` but not `documentation/adr` itself. A segment that mixes text and a wildcard, such as `adr*`, is read literally. The most specific matching key wins whatever the order: an exact id beats any pattern, then more literal segments, then fewer `**`; a tie between `true` and `false` is `false`. `true` turns a way back on under a broader `false`.",
         ..BASE
     },
