@@ -25,8 +25,9 @@ pub fn run(json_output: bool) -> Result<()> {
         "none"
     };
 
-    // Way counts: core (shipped) + user (operator's own, $XDG_CONFIG) — ADR-143.
-    let (global_total, global_semantic) = count_ways(&ways_dir);
+    // Way counts: builtin (shipped) + user (operator's own, $XDG_CONFIG) —
+    // ADR-143, in ADR-516's origin words.
+    let (builtin_total, builtin_semantic) = count_ways(&ways_dir);
     let user_ways_dir = crate::paths::user_ways_root();
     let (user_total, user_semantic) = count_ways(&user_ways_dir);
 
@@ -152,10 +153,8 @@ pub fn run(json_output: bool) -> Result<()> {
                 "global_hash": manifest_global_hash,
             },
             "ways": {
-                "global_total": global_total,
-                "global_semantic": global_semantic,
-                "user_total": user_total,
-                "user_semantic": user_semantic,
+                "builtin": { "total": builtin_total, "semantic": builtin_semantic },
+                "user": { "total": user_total, "semantic": user_semantic },
             },
             "projects": projects,
             "output_language": output_language,
@@ -282,7 +281,7 @@ pub fn run(json_output: bool) -> Result<()> {
         agent_fmt::say!(out);
 
         // Ways
-        agent_fmt::say!(out, "Core ways: {} total, {} semantic", global_total, global_semantic);
+        agent_fmt::say!(out, "Builtin ways: {} total, {} semantic", builtin_total, builtin_semantic);
         if user_total > 0 {
             agent_fmt::say!(out, "User ways: {} total, {} semantic", user_total, user_semantic);
         }

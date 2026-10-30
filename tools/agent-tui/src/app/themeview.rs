@@ -151,10 +151,11 @@ impl App {
             .list()
             .iter()
             .map(|(t, src)| {
+                // The origin word, for what agent-ways did not ship; a user
+                // file over a bundled theme is still that builtin (ADR-516).
                 let tag = match src {
-                    Source::Bundled => "",
+                    Source::Bundled | Source::Override => "",
                     Source::User => "user",
-                    Source::Override => "override",
                 };
                 let mark = if t.name == active { Span::styled("● ", theme::ok()) } else { Span::raw("  ") };
                 let mut spans = vec![

@@ -37,6 +37,9 @@ considered:
   - operator: aaronsb
     said: "ok I see - just opened 516. makes sense. let's proceed and accept, I'm looking forward to getting all 12 items done"
     via: session 2026-10-29, after the walk through ADR-515's twelve inconsistencies
+  - operator: aaronsb
+    said: "1 yes 2. we have a path for 'degraded' 3. agree 4. agree"
+    via: operator, in session, on the slice-1 review's four questions
 observable:
   - 'run: ways settings items --json lists every theme, mod, sensor, way and judge profile, and selecting origin != "builtin" leaves exactly the ones a person or a project added, each with its path'
   - 'see: a command sensor in a project''s .claude/attend/sensors/ reads origin project on its card, in attend sensor list and in ways settings items'
@@ -76,7 +79,7 @@ The operator asked for the store, the screens and the CLI to keep and present an
 | `kind` | text or null | what implements the item, from the family's list in §2; null where the family has one implementation |
 | `origin` | `builtin`, `user`, `project` | the lowest layer that defines an item of this name |
 | `path` | absolute path or null | the origin layer's definition; null when it exists only inside a binary |
-| `overrides` | list | each higher layer that changes the item, lowest first: `{origin, how, path}`, where `how` is `extends` (it sets fields over the definition beneath) or `replaces` (a whole definition of the same name takes its place) |
+| `overrides` | list | every other layer that changes the item, in layer order: `{origin, how, path}`, where `how` is `extends` (it sets fields over the definition beneath) or `replaces` (a whole definition of the same name takes its place) |
 | `source` | text or null | what runs or supplies the item when that is something other than its file: a crate, a command, an MCP server and tool, a plugin, a model |
 | `version` | text or null | the source's version as the source reports it |
 | `state` | one word | from the family's list in §2 |
@@ -95,11 +98,11 @@ An item is identified by its family and name. A user or project definition that 
 
 | Family | `kind` | `source` | `version` | `state` |
 |---|---|---|---|---|
-| theme | null | null | null | `active`, `inactive`, `invalid` |
-| mod | `plugin` | the plugin id, such as `attend@agent-ways` | the shipped plugin version | `converged`, `drift`, `pending`, `disabled`, `removed`, `off` (ADR-512) |
-| sensor | `crate`, `script`; under ADR-403, `crate`, `command`, `mcp`, and `ways` for ADR-199's sensors | the crate; the command's executable; `<server> <tool>` | the crate's version; null for the others | `active`, `off`, `not-compiled`, `missing`, `refused`, `failing`, `invalid` |
-| way | null | null | null | `enabled`, `disabled`, `invalid` |
-| profile | the provider: `anthropic`, `openrouter`, `claude-code` | the model | null | `active`, `inactive`, `invalid` |
+| theme | null | null | null | `active`, `inactive`, `invalid`, `unknown` |
+| mod | `plugin` | the plugin id, such as `attend@agent-ways` | the shipped plugin version | `converged`, `drift`, `pending`, `disabled`, `removed`, `off` (ADR-512), `unknown` |
+| sensor | `crate`, `script`; under ADR-403, `crate`, `command`, `mcp`, and `ways` for ADR-199's sensors | the crate; the command's executable; `<server> <tool>` | the crate's version; null for the others | `active`, `off`, `not-compiled`, `missing`, `refused`, `failing`, `invalid`, `degraded`, `unknown` |
+| way | null | null | null | `enabled`, `disabled`, `invalid`, `unknown` |
+| profile | the provider: `anthropic`, `openrouter`, `claude-code` | the model | null | `active`, `inactive`, `invalid`, `unknown` |
 
 A state that takes more than one word is written as a hyphenated token. A definition that fails its schema is listed with state `invalid`, and its `detail` names the first finding. It is never left out of a list. Fields that belong to one family follow the descriptor: a mod's `wanted` and its per-target installed versions, a sensor's `description`, `interval` and `min_interval`, a theme's `label`.
 
@@ -177,3 +180,12 @@ Every item node on the mod, sensors, theme, ways and gate tabs heads its detail 
 - **Origin as the layer of the definition in effect, so a user's `nord.theme` reads `user`.** Whether a name is shipped would no longer be a fact of the item, and the copy, rename and delete rules of ADR-403 §5 key on exactly that.
 - **A shared vocabulary with JSON shaped per family.** The screens and scripts would still parse each family separately, and `ways settings items` could not exist.
 - **`layer: default` for keys set by shipped sensor files.** `default` would then mean both the schema's canonical value and a file agent-ways ships.
+
+## Addendum, 2026-10-29: decisions from slice 1's review
+
+Appended after acceptance. The operator answered the four questions slice 1's review left open, and §1 and §2 above now read as follows.
+
+1. **`overrides` lists every other layer that changes the item, in layer order.** A user switch kept for a project's sensor lists as `user extends` ahead of the project origin.
+2. **The sensor states gain `degraded`.** A sensor whose kind attend does not run yet reads `degraded`, in the warn tone, with the reason in `detail`: a command or mcp sensor until ADR-403's later slices, and a `ways`-kind sensor. It replaces the earlier mapping of attend's "not hosted" to `missing`.
+3. **Every family's states gain `unknown`, in the plain tone, for a state not yet read:** a mod not yet read, or an enabled sensor while attend is absent. `detail` says why. `state` is never null.
+4. **Tone comes from the state word alone.** A critical mod in drift reads warn, and the bottom-bar notice still flags it.

@@ -1051,6 +1051,12 @@ fn status_lists_a_toggle_naming_no_way_apart_from_the_disabled_ways() {
     assert_eq!(v["unmatched_toggles"][0]["nearest"], "data/schema-docs");
     assert_eq!(v["unmatched_toggles"][1]["key"], "bogus/thing");
     assert_eq!(v["unmatched_toggles"].as_array().unwrap().len(), 2);
+    // The way counts by origin (ADR-516 §5), with no other names.
+    let ways = v["ways"].as_object().unwrap();
+    assert_eq!(ways.keys().collect::<Vec<_>>(), ["builtin", "user"]);
+    assert!(v["ways"]["builtin"]["total"].as_u64().is_some_and(|n| n > 0) && v["ways"]["user"]["semantic"].is_u64(), "{}", v["ways"]);
+    let (text, _, _) = f.run(&["status"]);
+    assert!(text.contains("\nBuiltin ways: ") && !text.contains("Core ways"), "{text}");
 }
 
 #[test]

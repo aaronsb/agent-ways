@@ -19,8 +19,8 @@
 # `attend sensor list` shows it as refused.
 #
 # attend hosts command sensors from slice 2 of ADR-403; before that, an
-# enabled copy loads and lints, and `attend sensor list` shows it as not
-# hosted.
+# enabled copy loads and lints, and `attend sensor list` shows it as
+# degraded.
 
 # The spec version the file is written to.
 spec: 1

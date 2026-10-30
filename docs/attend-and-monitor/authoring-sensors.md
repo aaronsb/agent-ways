@@ -21,9 +21,9 @@ When you build a sensor, emit measurable transitions. If a description is about 
 | Kind | Host | The poll | In this release |
 |---|---|---|---|
 | `crate` | attend | compiled code | hosted: polled under the file's name, cadence, threshold and lane |
-| `command` | attend | an argv run directly, with no shell | parsed, checked, listed and linted; `not hosted` until ADR-403 slice 2 |
-| `mcp` | attend | one read-only tool call on a stdio MCP server | parsed, checked, listed and linted; `not hosted` until slice 3 |
-| `ways` | ways (ADR-199) | the session's hook stream | attend lists it as `not hosted` and never runs it |
+| `command` | attend | an argv run directly, with no shell | parsed, checked, listed and linted; `degraded` until ADR-403 slice 2 |
+| `mcp` | attend | one read-only tool call on a stdio MCP server | parsed, checked, listed and linted; `degraded` until slice 3 |
+| `ways` | ways (ADR-199) | the session's hook stream | attend lists it as `degraded` and never runs it |
 
 Triggers, declared state, `where` conditions, JSONPath and templates parse and are checked when a file loads. attend evaluates them, and writes declared state to the store, from slice 2. `attend sensor probe` arrives with slice 3. `ways settings` reaches the shared fields of every sensor file ([Settings keys](#settings-keys)); write the other fields in the files directly, and `ways settings lint` checks them.
 
@@ -111,7 +111,7 @@ A field the kind does not take makes a `command` or `mcp` file invalid.
 
 ### `crate` files
 
-A `crate` file configures a compiled sensor, named in `crate`: `context`, `disclosure`, `git`, `keepwarm`, `peers` or `processes`. Any other field is the compiled sensor's own, checked against the fields it declares; `processes` takes `watch` ([`sensors.md`](sensors.md#the-watch-list)), and the others take none. A crate sensor's poll is compiled, so its file takes no `triggers` and no `state`. A name in `crate` that attend does not have makes the file invalid; one this build leaves out by feature flag lists as `not compiled`.
+A `crate` file configures a compiled sensor, named in `crate`: `context`, `disclosure`, `git`, `keepwarm`, `peers` or `processes`. Any other field is the compiled sensor's own, checked against the fields it declares; `processes` takes `watch` ([`sensors.md`](sensors.md#the-watch-list)), and the others take none. A crate sensor's poll is compiled, so its file takes no `triggers` and no `state`. A name in `crate` that attend does not have makes the file invalid; one this build leaves out by feature flag lists as `not-compiled`.
 
 A crate file in the user or project layer usually carries only what it changes. Polling git less often everywhere:
 
@@ -149,7 +149,7 @@ pub trait Sensor: Send {
 - **`description()`** and **`source()`** are what `attend sensor list` prints. `sensor_trait::sensor_metadata!();` inside the `impl` fills both from the crate's `Cargo.toml`.
 - **`emission_threshold()`**, **`base_interval()`**, **`min_interval()`** and **`decay_threshold()`** are overridden by the sensor's file: attend wraps the compiled sensor in the file's cadence and threshold.
 - **`export_state` / `import_state`** carry state across an attend restart; attend checkpoints every 30 seconds.
-- **`take_failure()`** says why the last poll failed, such as a tool that could not run. attend takes it after each poll and records the sensor as `failed`. `git` reports a git it cannot run this way.
+- **`take_failure()`** says why the last poll failed, such as a tool that could not run. attend takes it after each poll and records the sensor as `failing`. `git` reports a git it cannot run this way.
 
 To add one: a `sensor-*` crate in `tools/` as an optional dependency of attend behind a feature, a construction arm in `build` in `tools/attend/src/sensors/mod.rs`, an entry in `CRATES` in `tools/attend-config/src/sensors.rs` naming its own fields and author fields, and a shipped file under `attend/sensors/` added to `SHIPPED` beside it.
 
@@ -260,7 +260,7 @@ ADR-136 draws the lane boundary at authored communication: words a person or age
 
 | Command | What it does |
 |---|---|
-| `attend sensor list [--json]` | every sensor the files declare: kind, origin, file, source and version, state, lane, interval, and each reason and note; `--json` adds each layer's file and the last poll |
+| `attend sensor list [--json]` | every sensor the files declare: kind, origin, file, source and version, state, lane, interval, and each reason and note; `--json` prints each sensor as an item, with an `overrides` list of the higher layers' files, then its fields and the last poll |
 | `attend sensor poll <name> [--dry-run] [--json]` | one real poll of a crate sensor, passed through its threshold and lane, delivered as `attend run` would unless `--dry-run` |
 | `attend sensor fire <name>[/<trigger>] [--input FILE\|-] [--dry-run] [--commit] [--json]` | a synthetic result through the sensor's threshold, lane and delivery, each line marked `[test]` |
 | `attend sensor permissions` | each sensor's `requires` against `~/.claude/settings.json` |
@@ -271,7 +271,7 @@ A crate sensor's `--input` is a JSON list of `{magnitude, description}` objects 
 
 ## The store
 
-Each poll `attend run` makes is recorded in the sensor's store, one JSON file per sensor and project under `$XDG_STATE_HOME/agent-ways/attend/sensor-state/`, named by a hash of the two. It holds the last poll's time, whether it succeeded, why it failed, and how many observations it returned. `attend sensor list` reads it for the `failed` state and `last_poll`. The declared state and each trigger's memory join it once attend hosts `command` and `mcp` sensors.
+Each poll `attend run` makes is recorded in the sensor's store, one JSON file per sensor and project under `$XDG_STATE_HOME/agent-ways/attend/sensor-state/`, named by a hash of the two. It holds the last poll's time, whether it succeeded, why it failed, and how many observations it returned. `attend sensor list` reads it for the `failing` state and `last_poll`. The declared state and each trigger's memory join it once attend hosts `command` and `mcp` sensors.
 
 ## The retired forms
 

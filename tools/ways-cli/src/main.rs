@@ -961,6 +961,22 @@ enum SettingsCommand {
         #[arg(long)]
         target: Option<PathBuf>,
     },
+    /// Every theme, mod, sensor, way and judge profile, or one family's
+    ///
+    /// One line per item: family, name, origin, kind, state and path
+    /// (ADR-516). Origin is builtin for what agent-ways ships, user for what
+    /// sits in your config folder and project for what sits in the
+    /// project's .claude/ folder.
+    Items {
+        /// theme, mod, sensor, way or profile
+        family: Option<String>,
+        /// One object per item: the descriptor, then the family's fields
+        #[arg(long)]
+        json: bool,
+        /// The project whose ways and sensors are read
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
     /// The theme tab on a terminal; list, copy, rename and delete themes
     ///
     /// Alone, the screens on the theme tab. Its actions copy any theme to a
@@ -988,9 +1004,9 @@ enum SettingsCommand {
 
 #[derive(Subcommand)]
 enum ThemeCommand {
-    /// The themes on offer, their source and the active one
+    /// The themes on offer, with each one's origin and state
     List {
-        /// Each theme's name, label, source, file and whether it is active
+        /// Each theme's item (ADR-516), then its label
         #[arg(long)]
         json: bool,
     },
@@ -1103,7 +1119,11 @@ enum ManageCommand {
 #[derive(Subcommand)]
 enum ModCommand {
     /// Each shipped mod: its version, wanted state, and state in each enabled target
-    List,
+    List {
+        /// One object per mod: its item (ADR-516), then wanted and targets
+        #[arg(long)]
+        json: bool,
+    },
     /// Diagnose each mod in each enabled target; exit 3 with any problem
     ///
     /// Read-only. Checks Claude Code's version against the mod's floor, the
@@ -1352,7 +1372,7 @@ fn mods(action: Option<ModCommand>) -> Result<()> {
         return bare_group(&["manage", "mod"], || settings_screen("mod"));
     };
     match action {
-        ModCommand::List => cmd::mods::list(),
+        ModCommand::List { json } => cmd::mods::list(json),
         ModCommand::Check { name } => cmd::mods::check(name.as_deref()),
         ModCommand::Install { name, target, apply } => cmd::mods::install(&name, target.as_deref(), apply.mode(true)),
         ModCommand::Uninstall { name, target, apply } => cmd::mods::uninstall(&name, target.as_deref(), apply.mode(true)),
@@ -1518,6 +1538,7 @@ fn run() -> Result<()> {
                 Some(SettingsCommand::Lint { file, project }) => st::lint(file.as_deref(), project.as_deref()),
                 Some(SettingsCommand::Apply { file, dry_run, project }) => st::apply(file.as_deref(), dry_run, project.as_deref()),
                 Some(SettingsCommand::Fix { section, project, target }) => st::fix(&section, project.as_deref(), target.as_deref()),
+                Some(SettingsCommand::Items { family, json, project }) => st::items::list(family.as_deref(), json, project.as_deref()),
                 Some(SettingsCommand::Theme { action: None, project, keys, snap, depth }) => {
                     st::tui::open(&st::tui::Open { tab: Some("theme".into()), project, keys, snap, depth })
                 }

@@ -3,7 +3,7 @@
 //! CLI describe the same way. Each family's state words and their tones are
 //! its §2 list.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
@@ -21,31 +21,58 @@ pub struct Item {
     /// The origin layer's definition; `None` when it exists only inside a
     /// binary.
     pub path: Option<PathBuf>,
-    /// Each higher layer that changes it, lowest first.
+    /// Every other layer that changes it, in layer order.
     pub overrides: Vec<Override>,
     /// What runs or supplies it, when that is something other than its file.
     pub source: Option<String>,
     /// The source's version, as the source reports it.
     pub version: Option<String>,
-    /// A word of the family's list; `None` while it is not known.
-    pub state: Option<State>,
+    /// A word of the family's list: `unknown` until it is read.
+    pub state: State,
     /// One line that qualifies the state.
     pub detail: Option<String>,
 }
 
 impl Item {
     /// An item of `family` named `name`, defined by `origin`, with nothing
-    /// else known.
+    /// else known: its state is `unknown`.
     pub fn new(family: Family, name: impl Into<String>, origin: Origin) -> Item {
-        Item { family, name: name.into(), kind: None, origin, path: None, overrides: Vec::new(), source: None, version: None, state: None, detail: None }
+        Item { family, name: name.into(), kind: None, origin, path: None, overrides: Vec::new(), source: None, version: None, state: State::unknown(family), detail: None }
     }
 
     /// This item in `state`, which must be a word of its family's list.
     pub fn with_state(self, state: impl Into<State>) -> Item {
         let state = state.into();
         debug_assert_eq!(state.family(), self.family, "state {} is not a {:?} state", state.word(), self.family);
-        Item { state: Some(state), ..self }
+        Item { state, ..self }
     }
+
+    /// This item changed by `overrides`, listed in layer order whatever
+    /// order they come in; two of one layer keep theirs.
+    pub fn with_overrides(self, mut overrides: Vec<Override>) -> Item {
+        overrides.sort_by_key(|o| o.origin);
+        Item { overrides, ..self }
+    }
+
+    /// The origin and each layer that changes it, as `builtin · user extends`.
+    pub fn origin_text(&self) -> String {
+        std::iter::once(self.origin.word().to_string()).chain(self.overrides.iter().map(|o| format!(" · {} {}", o.origin.word(), o.how.word()))).collect()
+    }
+
+    /// The highest file that changes the item, else the file that defines it.
+    pub fn file(&self) -> Option<&Path> {
+        self.overrides.last().map(|o| o.path.as_path()).or(self.path.as_deref())
+    }
+}
+
+/// An item and the fields of its family, which serialize after the
+/// descriptor's (ADR-516 §2, §5).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Entry<F> {
+    #[serde(flatten)]
+    pub item: Item,
+    #[serde(flatten)]
+    pub fields: F,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -167,6 +194,17 @@ impl State {
         }
     }
 
+    /// The family's `unknown`: a state not yet read.
+    pub fn unknown(f: Family) -> State {
+        match f {
+            Family::Theme => ThemeState::Unknown.into(),
+            Family::Mod => ModState::Unknown.into(),
+            Family::Sensor => SensorState::Unknown.into(),
+            Family::Way => WayState::Unknown.into(),
+            Family::Profile => ProfileState::Unknown.into(),
+        }
+    }
+
     pub fn word(self) -> &'static str {
         self.entry().0
     }
@@ -217,10 +255,11 @@ states!(ThemeState, Theme {
     Active => "active", Ok;
     Inactive => "inactive", Plain;
     Invalid => "invalid", Err;
+    Unknown => "unknown", Plain;
 });
 
 states!(
-    /// ADR-512's words.
+    /// ADR-512's words, and `unknown`.
     ModState, Mod {
     Converged => "converged", Ok;
     Drift => "drift", Warn;
@@ -228,6 +267,7 @@ states!(
     Disabled => "disabled", Warn;
     Removed => "removed", Plain;
     Off => "off", Plain;
+    Unknown => "unknown", Plain;
 });
 
 states!(SensorState, Sensor {
@@ -238,18 +278,22 @@ states!(SensorState, Sensor {
     Refused => "refused", Warn;
     Failing => "failing", Err;
     Invalid => "invalid", Err;
+    Degraded => "degraded", Warn;
+    Unknown => "unknown", Plain;
 });
 
 states!(WayState, Way {
     Enabled => "enabled", Ok;
     Disabled => "disabled", Plain;
     Invalid => "invalid", Err;
+    Unknown => "unknown", Plain;
 });
 
 states!(ProfileState, Profile {
     Active => "active", Ok;
     Inactive => "inactive", Plain;
     Invalid => "invalid", Err;
+    Unknown => "unknown", Plain;
 });
 
 #[cfg(test)]
@@ -265,7 +309,7 @@ mod tests {
         let theme = Item::new(Family::Theme, "nord", Origin::Builtin);
         assert_eq!(
             json(&theme),
-            r#"{"family":"theme","name":"nord","kind":null,"origin":"builtin","path":null,"overrides":[],"source":null,"version":null,"state":null,"detail":null}"#
+            r#"{"family":"theme","name":"nord","kind":null,"origin":"builtin","path":null,"overrides":[],"source":null,"version":null,"state":"unknown","detail":null}"#
         );
     }
 
@@ -280,7 +324,7 @@ mod tests {
             ],
             source: Some("attend".into()),
             version: Some("0.33.0".into()),
-            state: Some(SensorState::NotCompiled.into()),
+            state: SensorState::NotCompiled.into(),
             detail: Some("this build leaves it out".into()),
             ..Item::new(Family::Sensor, "git", Origin::Builtin)
         };
@@ -314,11 +358,11 @@ mod tests {
             assert_eq!(serde_json::to_value(s).unwrap(), serde_json::Value::from(s.word()), "{s:?}");
         }
         let words = |f: Family| all.iter().filter(|s| s.family() == f).map(|s| s.word()).collect::<Vec<_>>();
-        assert_eq!(words(Family::Theme), ["active", "inactive", "invalid"]);
-        assert_eq!(words(Family::Mod), ["converged", "drift", "pending", "disabled", "removed", "off"]);
-        assert_eq!(words(Family::Sensor), ["active", "off", "not-compiled", "missing", "refused", "failing", "invalid"]);
-        assert_eq!(words(Family::Way), ["enabled", "disabled", "invalid"]);
-        assert_eq!(words(Family::Profile), ["active", "inactive", "invalid"]);
+        assert_eq!(words(Family::Theme), ["active", "inactive", "invalid", "unknown"]);
+        assert_eq!(words(Family::Mod), ["converged", "drift", "pending", "disabled", "removed", "off", "unknown"]);
+        assert_eq!(words(Family::Sensor), ["active", "off", "not-compiled", "missing", "refused", "failing", "invalid", "degraded", "unknown"]);
+        assert_eq!(words(Family::Way), ["enabled", "disabled", "invalid", "unknown"]);
+        assert_eq!(words(Family::Profile), ["active", "inactive", "invalid", "unknown"]);
     }
 
     #[test]
@@ -327,6 +371,33 @@ mod tests {
         assert_eq!(State::from(SensorState::Failing).tone(), Tone::Err);
         assert_eq!(State::from(ModState::Drift).tone(), Tone::Warn);
         assert_eq!(State::from(ThemeState::Inactive).tone(), Tone::Plain);
+        assert_eq!(State::from(SensorState::Degraded).tone(), Tone::Warn);
+    }
+
+    #[test]
+    fn every_family_starts_unknown_in_the_plain_tone() {
+        for f in [Family::Theme, Family::Mod, Family::Sensor, Family::Way, Family::Profile] {
+            let s = Item::new(f, "x", Origin::Builtin).state;
+            assert_eq!((s.family(), s.word(), s.tone()), (f, "unknown", Tone::Plain));
+        }
+    }
+
+    #[test]
+    fn overrides_list_in_layer_order() {
+        let o = |origin: Origin| Override { origin, how: How::Extends, path: format!("/{}", origin.word()).into() };
+        let item = Item::new(Family::Sensor, "inbox", Origin::Project).with_overrides(vec![o(Origin::Project), o(Origin::User), o(Origin::Builtin)]);
+        assert_eq!(item.overrides.iter().map(|o| o.origin).collect::<Vec<_>>(), [Origin::Builtin, Origin::User, Origin::Project]);
+    }
+
+    #[test]
+    fn an_entry_puts_its_family_fields_after_the_descriptor() {
+        #[derive(Serialize)]
+        struct Label {
+            label: &'static str,
+        }
+        let e = Entry { item: Item::new(Family::Theme, "nord", Origin::Builtin), fields: Label { label: "Nord" } };
+        let v = serde_json::to_string(&e).unwrap();
+        assert!(v.starts_with(r#"{"family":"theme","name":"nord""#) && v.ends_with(r#""detail":null,"label":"Nord"}"#), "{v}");
     }
 
     #[test]
@@ -344,5 +415,16 @@ mod tests {
         for o in [Origin::Builtin, Origin::User, Origin::Project] {
             assert_eq!(v(&o), o.word());
         }
+    }
+
+    #[test]
+    fn the_origin_text_and_file_follow_the_overrides() {
+        let o = |origin: Origin, how: How| Override { origin, how, path: format!("/{}", origin.word()).into() };
+        let bare = Item { path: Some("/base".into()), ..Item::new(Family::Sensor, "git", Origin::Builtin) };
+        assert_eq!((bare.origin_text().as_str(), bare.file()), ("builtin", Some(Path::new("/base"))));
+        let over = bare.with_overrides(vec![o(Origin::Project, How::Replaces), o(Origin::User, How::Extends)]);
+        assert_eq!(over.origin_text(), "builtin · user extends · project replaces");
+        assert_eq!(over.file(), Some(Path::new("/project")));
+        assert_eq!(Item::new(Family::Sensor, "x", Origin::Builtin).file(), None);
     }
 }

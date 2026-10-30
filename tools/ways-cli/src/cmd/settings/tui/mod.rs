@@ -657,7 +657,9 @@ impl Adapter for Ways {
     }
 
     fn theme_card(&self, theme: &agent_theme::Theme, source: agent_theme::Source, file: Option<&Path>, active: bool, shape: &str) -> Option<agent_tui::tree::Card> {
-        let c = crate::cmd::modules::themes::of_theme(theme, source, file, active, self.ctx.themes.as_deref(), shape);
+        let mut c = card::to_card(crate::cmd::modules::themes::item(theme, source, file, active));
+        let saves_to = self.ctx.themes.as_deref().map_or("none: nothing saves".to_string(), |d| d.display().to_string());
+        c.rows.extend([("saves to".into(), saves_to), ("shape".into(), format!("{shape} (a: shape cycles it)"))]);
         Some(card::shown(c, &self.ctx.home))
     }
 
