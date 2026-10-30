@@ -153,27 +153,37 @@ pub fn list(as_json: bool) -> Result<()> {
     Ok(())
 }
 
+/// Where a mod's wanted state comes from.
+enum WantedBy {
+    /// Its `mods.<name>.install` in the user config.
+    Config,
+    /// ways-judge while `gate.engine` is claude-code, with the key unset.
+    Engine,
+    /// The default, which wants attend alone.
+    Default,
+}
+
+fn wanted_by(m: &Mod) -> (bool, WantedBy) {
+    match ways_core::settings::mod_install_in_user(m.name) {
+        Some(v) => (v, WantedBy::Config),
+        None if *m == JUDGE && super::settings::engine::claude_code_chosen() => (true, WantedBy::Engine),
+        None => (m.name == attend_mod::ATTEND.name, WantedBy::Default),
+    }
+}
+
 /// Whether the user config wants `m`: its `mods.<name>.install`, else
 /// ways-judge while `gate.engine` is claude-code, else the default, which
 /// wants attend alone.
 pub fn wanted(m: &Mod) -> bool {
-    match ways_core::settings::mod_install_in_user(m.name) {
-        Some(v) => v,
-        None if *m == JUDGE && super::settings::engine::claude_code_chosen() => true,
-        None => m.name == attend_mod::ATTEND.name,
-    }
+    wanted_by(m).0
 }
 
 /// Where a mod's wanted state comes from in the user config.
 fn wanted_line(m: &Mod) -> String {
-    let user = ways_core::settings::mod_install_in_user(m.name);
-    let default = m.name == attend_mod::ATTEND.name;
-    let base = match user {
-        Some(v) => format!("mods.{}.install: {v} (user config)", m.name),
-        None if *m == JUDGE && super::settings::engine::claude_code_chosen() => {
-            format!("mods.{}.install: unset, wanted by gate.engine: claude-code; repair writes it", m.name)
-        }
-        None => format!("mods.{}.install: {default} (default)", m.name),
+    let base = match wanted_by(m) {
+        (v, WantedBy::Config) => format!("mods.{}.install: {v} (user config)", m.name),
+        (_, WantedBy::Engine) => format!("mods.{}.install: unset, wanted by gate.engine: claude-code; repair writes it", m.name),
+        (v, WantedBy::Default) => format!("mods.{}.install: {v} (default)", m.name),
     };
     if *m == JUDGE {
         format!("{base}; it follows gate.engine, which {}", engine_phrase())

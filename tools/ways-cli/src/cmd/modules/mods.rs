@@ -70,7 +70,7 @@ pub fn item(m: &Mod, o: Result<&Overview, Unread>) -> Entry<ModFields> {
         }
         Ok(o) => {
             use attend_mod::State as S;
-            item.path = Some(o.folder.join(m.name));
+            item.path = o.shipped.is_some().then(|| o.folder.join(m.name));
             item.version = o.shipped.clone();
             item = item.with_state(state(o.word));
             item.detail = match (o.attention.first(), o.word) {
@@ -88,4 +88,31 @@ pub fn item(m: &Mod, o: Result<&Overview, Unread>) -> Entry<ModFields> {
         }
     }
     Entry { item, fields }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cmd::attend_mod::ATTEND;
+
+    #[test]
+    fn a_mod_that_is_not_shipped_has_no_path_or_version() {
+        let o = Overview {
+            m: ATTEND,
+            shipped: None,
+            word: attend_mod::State::Off,
+            rows: vec![],
+            older: false,
+            claude_code: false,
+            attention: vec![],
+            installed: vec![],
+            folder: "/home/u/plugins".into(),
+            wanted: true,
+            targets: vec![],
+        };
+        let e = item(&ATTEND, Ok(&o));
+        assert_eq!((e.item.path, e.item.version, e.item.detail.as_deref()), (None, None, Some("not shipped in this app")));
+        let shipped = Overview { shipped: Some("0.1.0".into()), ..o };
+        assert_eq!(item(&ATTEND, Ok(&shipped)).item.path.as_deref(), Some(std::path::Path::new("/home/u/plugins/attend")));
+    }
 }
