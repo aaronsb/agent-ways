@@ -11,8 +11,10 @@ import type { Palette } from './skin'
 export const FONT = `ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Inter, sans-serif`
 export const MONO = `ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, monospace`
 
+// Text for an SVG document: the markup characters escaped, and the C0 controls XML 1.0
+// forbids taken out.
 export const escape = (text: string): string =>
-  text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 // Width of a string in pixels, close enough to lay out a card without a renderer.
 export function measure(text: string, isMono: boolean, size: number): number {

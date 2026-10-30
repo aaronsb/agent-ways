@@ -1,6 +1,7 @@
 // Ported from skins by hellosverre (MIT; LICENSE beside this file),
 // https://github.com/hellosverre/claude-skins at 985ad63, hooks/svg-terminal.ts.
 
+import { CONTROLS } from './format'
 import type { Palette } from './skin'
 import { outputTokens, roleColors } from './highlight'
 import { breakText, CONTROL_SLOT, escape, HEADER_MID, MAX_SVG, MONO, pill, riseDelay, staggerEnd, staggerStep, strokeIcon, svgCard } from './svg-kit'
@@ -12,9 +13,6 @@ const HEADER_H = 56
 const LINE_H = 20
 const CODE = 12.5
 const PROMPT = '<path d="M5 7l5 5-5 5"/><path d="M12 18h7"/>'
-
-// Escape sequences for colour and cursor moves, which a card cannot draw.
-const ANSI = /\u001b\[[0-9;?]*[A-Za-z]/g
 
 export type ShellOutput = { stdout: string; stderr: string; interrupted: boolean; timedOutAfterMs?: number; returnCodeInterpretation?: string }
 
@@ -34,9 +32,10 @@ export function shellOutputOf(output: unknown): ShellOutput | null {
   }
 }
 
-// A stream's lines, colour codes stripped and trailing blank lines dropped.
+// A stream's lines, escape sequences and control characters stripped (CONTROLS) and
+// trailing blank lines dropped.
 export function streamLines(text: string, isErr: boolean): { text: string; isErr: boolean }[] {
-  const lines = text.replace(ANSI, '').replace(/\r/g, '').replace(/\t/g, '  ').split('\n')
+  const lines = text.replace(CONTROLS, '').replace(/\t/g, '  ').split('\n')
   const end = lines.length - [...lines].reverse().findIndex(line => line.trim() !== '')
 
   return lines.every(line => line.trim() === '') ? [] : lines.slice(0, end).map(line => ({ text: line, isErr }))

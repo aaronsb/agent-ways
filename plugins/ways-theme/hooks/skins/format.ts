@@ -7,6 +7,11 @@
 // any length; text longer than this keeps Claude Code's own drawing.
 export const MAX_DRAWN = 90000
 
+// A terminal's escape sequences, payload and all: CSI (colour, cursor moves), OSC (a
+// title, a hyperlink) to its BEL or ST, and two-character escapes; then every C0 control
+// but tab and newline, and DEL. None of them can be drawn, and XML forbids the C0 ones.
+export const CONTROLS = /\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b\n]*(?:\u0007|\u001b\\)?|\u001b[ -/]*[0-~]|[\u0000-\u0008\u000b-\u001f\u007f]/g
+
 export const oneLine = (text: string): string =>
   (text.split('\n', 1)[0] ?? '').replace(/\s+/g, ' ').trim()
 

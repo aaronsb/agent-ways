@@ -1,7 +1,7 @@
 // Ported from skins by hellosverre (MIT; LICENSE beside this file),
 // https://github.com/hellosverre/claude-skins at 985ad63, hooks/detail.ts.
 
-import { shortenPath } from './format'
+import { CONTROLS, shortenPath } from './format'
 import { SHELLS, shellResultOf } from './shell'
 import type { ShellResult } from './shell'
 import { hunksOf } from './svg-diff'
@@ -28,7 +28,7 @@ export const isOpen = (disclosure: string, isErrored: boolean): boolean =>
 type Fields = Readonly<Record<string, unknown>>
 
 // Tab and newline are the only control characters a drawn string may hold.
-export const clean = (text: string): string => text.replace(/\r\n?/g, '\n').replace(/\u001b\[[0-9;?]*[A-Za-z]|[\u0000-\u0008\u000b-\u001f\u007f]/g, '')
+export const clean = (text: string): string => text.replace(/\r\n?/g, '\n').replace(CONTROLS, '')
 
 const fieldsOf = (value: unknown): Fields => (typeof value === 'object' && value !== null ? (value as Fields) : {})
 

@@ -886,6 +886,17 @@ describe('nothing folds and nothing is cut', () => {
     expect(card.source.match(/y/g)!.length).toBeGreaterThanOrEqual(300)
   })
 
+  test('a card holds no escape sequence and no control character XML forbids', () => {
+    const forbidden = /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/
+    const stdout = '\u001b[31mred\u001b[0m \u001b]8;;http://x\u0007link\u001b]8;;\u0007 \u001b]0;title\u001b\\bell\u0007 bs\b\r\nnext'
+    const card = terminalSvg({ stdout, stderr: '', interrupted: false }, false, PALETTE, 800)!
+    expect(forbidden.test(card.source)).toBe(false)
+    expect(card.source).not.toContain(']8;;')
+    expect(card.source).toContain('red link bell bs<')
+    expect(card.source).toContain('>next<')
+    expect(forbidden.test(codeSvg('a\u0007b\u0008c', '', PALETTE, 800)!.source)).toBe(false)
+  })
+
   test('a card past what the Svg element takes is null', () => {
     const big = lines(4000)
     expect(codeSvg(big, 'ts', PALETTE, 800)).toBe(null)
