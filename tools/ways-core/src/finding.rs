@@ -76,7 +76,7 @@ struct WayFiring {
 fn index_firing(events: &[Value]) -> BTreeMap<String, WayFiring> {
     let mut idx: BTreeMap<String, WayFiring> = BTreeMap::new();
     for ev in events {
-        if ev["event"].as_str() != Some("way_fired") {
+        if !crate::firing::is_delivered_fire(ev) {
             continue;
         }
         let Some(way) = ev["way"].as_str() else { continue };
@@ -177,6 +177,7 @@ mod tests {
             json!({"event": "way_fired", "way": "sd/commits", "session": "s1", "ts": "2026-06-01T10:00:00Z"}),
             json!({"event": "way_fired", "way": "sd/commits", "session": "s1", "ts": "2026-06-02T10:00:00Z"}),
             json!({"event": "way_fired", "way": "sd/commits", "session": "s2", "ts": "2026-05-30T10:00:00Z"}),
+            json!({"event": "way_fired", "way": "sd/commits", "session": "s3", "ts": "2026-07-01T10:00:00Z", "discarded": {"filter": "toggle"}}),
         ]
     }
 

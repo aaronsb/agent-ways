@@ -181,8 +181,8 @@ fn load_fires(content: &str, project_filter: Option<&str>) -> Vec<Fire> {
         // Load only `way_fired` events and dedup per (session, way) downstream;
         // `way_redisclosed` is a separate event type (cadence signal, tune-curves)
         // and never reaches here. So each (session, way) lands once — placement,
-        // not cadence.
-        if row.get("event").and_then(|v| v.as_str()) != Some("way_fired") {
+        // not cadence. A discarded fire placed nothing in the session.
+        if !ways_core::firing::is_delivered_fire(&row) {
             continue;
         }
         if let Some(pat) = project_filter {
@@ -637,6 +637,10 @@ mod tests {
         }
         lines.push("not json".to_string());
         lines.push(serde_json::json!({"event": "way_redisclosed", "way": "x/y", "session": "s0"}).to_string());
+        for s in 0..5 {
+            let discarded = serde_json::json!({"event": "way_fired", "way": "x/off", "session": format!("s{s}"), "trigger": "prompt", "project": "proj", "discarded": {"filter": "toggle"}});
+            lines.push(discarded.to_string());
+        }
         lines.join("\n")
     }
 
@@ -652,6 +656,7 @@ mod tests {
         assert_eq!((docs.sessions, docs.off_class, docs.irrelevance), (5, 0, 0.0));
         assert_eq!(docs.top_off_trigger, "-");
         assert!(matches!(docs.flag, Flag::Ok));
+        assert!(r.iter().all(|w| w.way != "x/off"), "a discarded fire placed nothing");
 
         // The way filter narrows results, and the project filter drops fires.
         assert_eq!(report(&log_fixture(), 5, 0.5, None, Some("migrations")).len(), 1);

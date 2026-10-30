@@ -353,6 +353,7 @@ pub(crate) fn semantic_fires(content: &str, session_id: &str) -> Vec<SemanticFir
             continue;
         }
         let redisclosed = match v.get("event").and_then(|e| e.as_str()).unwrap_or("") {
+            "way_fired" if ways_core::firing::discarded_filter(&v).is_some() => continue,
             "way_fired" => false,
             "way_redisclosed" => true,
             _ => continue,
