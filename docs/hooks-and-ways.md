@@ -431,7 +431,18 @@ Several switches turn ways off at different reaches. Each is checked by `ways ho
 | `ways session subagents off` | The same, for one session, until switched back on | `$XDG_STATE_HOME/agent-ways/subagent-switch/<session_id>` |
 | Defined agent | A Task whose `subagent_type` has its own `agents/<name>.md` (project, user or plugin) gets nothing, whatever the switches say | The agent definition itself |
 | `ways.disabled_domains` | Every way under the listed domains | `disabled_domains:` in any of the config files |
-| `ways.project.<id>: false` | One way, in one project (ADR-131) | `ways:` map in the project's `.claude/ways.yaml` only |
+| `ways.project.<id>: false` | One way, in one project (ADR-131), or the ways a toggle pattern matches | `ways:` map in the project's `.claude/ways.yaml` only |
+
+Each key under `ways:` is a toggle pattern matched against way ids. A key with no wildcard names exactly one way. `*` matches exactly one id segment, and `**` one or more whole segments, so `documentation/adr/**` covers every way under `documentation/adr` and not `documentation/adr` itself. A segment that mixes text and a wildcard, such as `adr*`, is read literally, and `ways settings lint` reports it as an error. The most specific matching pattern wins, whatever the key order: an exact id beats any wildcard pattern; among wildcard patterns, more literal segments win, then fewer `**`. A tie between `true` and `false` resolves to `false`, and `ways settings lint` warns about it. `true` turns a way back on under a broader `false`:
+
+```yaml
+ways:
+  documentation/adr: false        # the adr way only
+  documentation/adr/**: false     # every way under it
+  documentation/adr/figures: true # back on
+```
+
+A `dir/*` key once switched off `dir` and every way under it. It now covers the ways directly under `dir` only; `ways settings lint` reports each such key and names the toggles for the old meaning, `dir: false` plus `dir/**: false`.
 
 The config files layer in this order, each overriding the one before: the user `$XDG_CONFIG_HOME/agent-ways/config.yaml`, the current target's `$XDG_CONFIG_HOME/agent-ways/targets/<key>/config.yaml`, then the project's `.claude/ways.yaml`. A session switch for subagents applies even when the config says `subagents: true`.
 
