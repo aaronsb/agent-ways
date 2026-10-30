@@ -274,7 +274,7 @@ export async function sessionPasteId($: Pick<EngineInterface, 'session'>, idOf =
   }
 }
 
-const lookOf = (ui: Ui & { Svg?: SvgElement }, setup: Setup, surface: RenderSurface, copy?: (text: string) => void): Look => ({
+const lookOf = (ui: Ui & { Svg?: SvgElement }, setup: Setup, surface: RenderSurface, copy?: Look['copy']): Look => ({
   ui,
   skin: setup.skin,
   icons: ICONS[setup.prefs.icons],
@@ -407,10 +407,10 @@ const quietly = ($: EngineInterface, what: string) => (error: unknown) => debug(
 /** Puts a card's text on the clipboard of the surface that drew it. */
 // A press reaches a terminal row only under the fullscreen layout: on the main screen a
 // row is printed into scrollback, where no Button can be pressed, so it draws no Copy.
-function copier($: EngineInterface, e: { surface: RenderSurface; viewport?: { isFullscreen?: boolean } }): ((text: string) => void) | undefined {
+function copier($: EngineInterface, e: { surface: RenderSurface; viewport?: { isFullscreen?: boolean } }): Look['copy'] {
   if (e.surface === 'terminal' && e.viewport?.isFullscreen !== true) return undefined
-  return text => {
-    void $.ui.copy({ text, surface: e.surface }).then(result => $.ui.toast(result.isCopied ? 'Copied' : 'Could not copy here'))
+  return (text, form) => {
+    void $.ui.copy({ text, surface: e.surface }).then(result => $.ui.toast(result.isCopied ? (form === undefined ? 'Copied' : `Copied ${form}`) : 'Could not copy here'))
   }
 }
 

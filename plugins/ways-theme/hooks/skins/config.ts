@@ -26,13 +26,12 @@ export type Render = {
   icons: 'unicode' | 'ascii'
   frames: boolean
   prompt_box: 'off' | 'frame' | 'gradient'
-  /** The inline Copy, `as text` and `copy reply` controls. Optional in the
-   *  export; absent reads as true. */
+  /** The copy controls on blocks, cards and replies. Optional in the export;
+   *  absent reads as true. */
   copy: boolean
-  /** What a block's Copy takes: its content, or the markdown it was written
-   *  as (rows.tsx, `copyText`). Optional in the export; absent reads as
-   *  content. */
-  copy_as: 'content' | 'markdown'
+  /** How a copy control draws its forms: as words or as glyphs
+   *  (copy-rows.tsx). Optional in the export; absent reads as verbose. */
+  copy_style: 'verbose' | 'compact'
   /** A tool row's target path too long for its line: drawn on lines of its own
    *  under the tool's name, or cut short. Optional in the export; absent reads
    *  as wrap. */
@@ -72,25 +71,25 @@ const oneOf = <T extends string>(v: unknown, of: readonly T[]): v is T => typeof
 const RENDER_KEYS = ['rail', 'tables', 'shimmer', 'charts', 'markdown', 'icons', 'frames', 'prompt_box'] as const
 
 // Keys an older `ways` does not export, each with the value its absence reads as.
-const OPTIONAL_RENDER = { copy: true, copy_as: 'content', paths: 'wrap' } as const
+const OPTIONAL_RENDER = { copy: true, copy_style: 'verbose', paths: 'wrap' } as const
 
 function parseRender(v: unknown): Render | string {
   if (!isRecord(v)) return 'render is not an object'
   const keys = [...RENDER_KEYS, ...Object.keys(OPTIONAL_RENDER).filter(k => Object.hasOwn(v, k))]
-  if (!hasExactly(v, keys)) return 'render is not the eight keys, an optional copy, copy_as and paths'
+  if (!hasExactly(v, keys)) return 'render is not the eight keys, an optional copy, copy_style and paths'
   const { rail, tables, shimmer, charts, markdown, icons, frames, prompt_box } = v
-  const { copy, copy_as, paths } = { ...OPTIONAL_RENDER, ...v }
+  const { copy, copy_style, paths } = { ...OPTIONAL_RENDER, ...v }
   if (![rail, shimmer, charts, markdown, frames, copy].every(b => typeof b === 'boolean')) return 'a render switch is not a boolean'
   if (!oneOf(tables, ['on', 'text', 'off'] as const)) return 'render.tables is not on, text or off'
   if (!oneOf(icons, ['unicode', 'ascii'] as const)) return 'render.icons is not unicode or ascii'
   if (!oneOf(prompt_box, ['off', 'frame', 'gradient'] as const)) return 'render.prompt_box is not off, frame or gradient'
-  if (!oneOf(copy_as, ['content', 'markdown'] as const)) return 'render.copy_as is not content or markdown'
+  if (!oneOf(copy_style, ['verbose', 'compact'] as const)) return 'render.copy_style is not verbose or compact'
   if (!oneOf(paths, ['wrap', 'truncate'] as const)) return 'render.paths is not wrap or truncate'
-  return { rail, tables, shimmer, charts, markdown, icons, frames, prompt_box, copy, copy_as, paths } as Render
+  return { rail, tables, shimmer, charts, markdown, icons, frames, prompt_box, copy, copy_style, paths } as Render
 }
 
 /** The export's stdout, held to the contract: the export, or why not. Every
- *  key but `render.copy`, `render.copy_as` and `render.paths` is required, none is extra, and
+ *  key but `render.copy`, `render.copy_style` and `render.paths` is required, none is extra, and
  *  every colour is `#rrggbb`. */
 export function parseExport(stdout: string): ModExport | string {
   let v: unknown
@@ -261,7 +260,7 @@ export function setupOf(x: ModExport): Setup {
     highlight: true,
     links: true,
     copy: r.copy,
-    copyAs: r.copy_as,
+    copyStyle: r.copy_style,
     paths: r.paths,
     expand: false,
     calm: null,

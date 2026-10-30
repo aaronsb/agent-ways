@@ -655,18 +655,18 @@ const KEYS: &[KeySpec] = &[
         path: &["mods", "ways-theme", "copy"],
         kind: Kind::Bool,
         default: DefaultValue::Yaml("true"),
-        doc: "Draw the Copy, as text and copy reply labels on cards and replies.",
-        long: "Off draws neither label. The mod reads it at each session start, through `ways settings theme export --mod`.",
+        doc: "Draw the copy controls on blocks, cards and replies.",
+        long: "Off draws none. On Claude Code's main screen a row is printed into scrollback, where no control can be pressed, so the terminal draws them only under the fullscreen layout. The mod reads it at each session start, through `ways settings theme export --mod`.",
         ..BASE
     },
     KeySpec {
-        name: "mods.ways-theme.copy_as",
+        name: "mods.ways-theme.copy_style",
         section: "mods",
-        path: &["mods", "ways-theme", "copy_as"],
-        kind: Kind::Choice(&["content", "markdown"]),
-        default: DefaultValue::Yaml("content"),
-        doc: "What a block's Copy takes: its content, or the markdown it was written as.",
-        long: "It applies while `copy` is on. A `!` or `/` command copies as typed either way. With content, a fenced block copies its code exactly as written, with no frame, padding or wrap; a table copies as CSV, its header row first, a cell holding a comma, a quote or a line break quoted and its quotes doubled (RFC 4180), the cells' inline markdown reduced to text; a code span too wide for its row copies its text. With markdown, a fence copies with its backticks and language, a table as its markdown source, and a span with its backticks. A table's `as text` and a reply's `copy reply` copy what they always have. The mod reads it at each session start, through `ways settings theme export --mod`.",
+        path: &["mods", "ways-theme", "copy_style"],
+        kind: Kind::Choice(&["verbose", "compact"]),
+        default: DefaultValue::Yaml("verbose"),
+        doc: "How a copy control draws its forms: as words, or as glyphs.",
+        long: "A press copies one form of a block. markdown is the block as written. native is its own form: a table as CSV, its header row first, a cell holding a comma, a quote or a line break quoted and its quotes doubled (RFC 4180), the cells' inline markdown reduced to text; a fenced block's code exactly as written, with no frame, padding or wrap. text is the text as drawn, with no border glyph or padding: a table's header and rows, its columns padded and two spaces apart. A block offers only the forms whose text differs, so a table offers all three, a fence markdown and native, and a `!` or `/` command or a code span too wide for its row one copy, as typed. A diff fence adds new only, its code after the change, and the reply offers markdown and text. verbose draws `Copy as: markdown · native · text`, and `Copy` alone for a block with one copy. compact draws a copy glyph, then a glyph per form; under `icons: unicode` they are Nerd Font glyphs, which need a Nerd Font in the terminal, and under `icons: ascii` they are cp, md, csv or code, txt and new. It applies while `copy` is on. The mod reads it at each session start, through `ways settings theme export --mod`.",
         ..BASE
     },
     KeySpec {
@@ -1199,7 +1199,7 @@ mod tests {
             ("frames", Some(Value::Bool(true))),
             ("prompt_box", s("gradient")),
             ("copy", Some(Value::Bool(true))),
-            ("copy_as", s("content")),
+            ("copy_style", s("verbose")),
             ("paths", s("wrap")),
             ("spinner_words", Some(Value::Sequence(vec![]))),
             ("done_words", Some(Value::Sequence(vec![]))),
@@ -1207,7 +1207,7 @@ mod tests {
         for (k, want) in &defaults {
             assert_eq!(&resolved(&format!("mods.ways-theme.{k}"), &[]), want, "{k}");
         }
-        let text = "mods:\n  ways-theme:\n    rail: false\n    tables: text\n    shimmer: false\n    charts: false\n    markdown: false\n    icons: ascii\n    frames: false\n    prompt_box: frame\n    copy: false\n    copy_as: markdown\n    paths: truncate\n    spinner_words: [Sailing]\n    done_words: [Docked, Moored]\n";
+        let text = "mods:\n  ways-theme:\n    rail: false\n    tables: text\n    shimmer: false\n    charts: false\n    markdown: false\n    icons: ascii\n    frames: false\n    prompt_box: frame\n    copy: false\n    copy_style: compact\n    paths: truncate\n    spinner_words: [Sailing]\n    done_words: [Docked, Moored]\n";
         let l = [layer("user", LayerScope::User, text)];
         assert!(l[0].findings.is_empty(), "{:?}", l[0].findings);
         let set = [
@@ -1220,7 +1220,7 @@ mod tests {
             ("frames", Some(Value::Bool(false))),
             ("prompt_box", s("frame")),
             ("copy", Some(Value::Bool(false))),
-            ("copy_as", s("markdown")),
+            ("copy_style", s("compact")),
             ("paths", s("truncate")),
             ("spinner_words", Some(Value::Sequence(vec!["Sailing".into()]))),
             ("done_words", Some(Value::Sequence(vec!["Docked".into(), "Moored".into()]))),

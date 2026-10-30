@@ -468,9 +468,9 @@ fn export_mod_prints_what_the_theme_mod_reads_on_one_line() {
     assert!(v["roles"].is_null() && v["gradient"].is_null() && v["words"].is_null(), "nothing sets words: {v}");
     assert_eq!(v["render"]["prompt_box"], "frame", "terminal has no gradient");
     let keys: Vec<&str> = v["render"].as_object().unwrap().keys().map(String::as_str).collect();
-    assert_eq!(keys, ["rail", "tables", "shimmer", "charts", "markdown", "icons", "frames", "prompt_box", "copy", "copy_as", "paths"]);
+    assert_eq!(keys, ["rail", "tables", "shimmer", "charts", "markdown", "icons", "frames", "prompt_box", "copy", "copy_style", "paths"]);
     assert_eq!(v["render"]["paths"], "wrap");
-    assert_eq!(v["render"]["copy_as"], "content");
+    assert_eq!(v["render"]["copy_style"], "verbose");
     assert_eq!(fx.run(&["settings", "set", "theme.active", "miami-nights"]).2, 0);
     let v = one(&["settings", "theme", "export", "--mod"]);
     assert_eq!(v["theme"], "miami-nights");

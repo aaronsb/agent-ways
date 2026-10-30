@@ -28,8 +28,8 @@ export function outputLine(look: Look, text: string) {
   return <Text>{tokenSpans(look, outputTokens(text))}</Text>
 }
 
-// A fenced block: the language and a control (Copy) on the frame, then each line highlighted.
-export function codeRows(look: Look, lang: string, code: string, control?: ReturnType<Ui['Button']>) {
+// A fenced block: the language and its copy control on the frame, then each line highlighted.
+export function codeRows(look: Look, lang: string, code: string, control?: ReturnType<Ui['Box']>) {
   const { Box, Text } = look.ui
   const { palette } = look.skin
   const lines = highlight(code.replace(/\t/g, '  ').replace(/\n$/, ''), lang)
@@ -49,11 +49,11 @@ export function codeRows(look: Look, lang: string, code: string, control?: Retur
   )
 }
 
-// A fence's code as a copy block (commands.ts): the language and Copy on the line above,
+// A fence's code as a copy block (commands.ts): the language and its copy control on the line above,
 // then each line highlighted with no border, padding or margin beside it, so a selection
 // over the lines takes the code alone. A blank line draws nothing, not a space. A fence
-// with no language and no Copy draws no line above.
-export function codeCopyRows(look: Look, lang: string, code: string, control: ReturnType<Ui['Button']> | undefined, margins: Record<string, number>) {
+// with no language and no control draws no line above.
+export function codeCopyRows(look: Look, lang: string, code: string, control: ReturnType<Ui['Box']> | undefined, margins: Record<string, number>) {
   const { Box, Text } = look.ui
   const { palette } = look.skin
   const lines = highlight(code.replace(/\t/g, '  '), look.prefs.highlight ? lang : '')

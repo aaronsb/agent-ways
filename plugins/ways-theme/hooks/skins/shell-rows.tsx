@@ -2,7 +2,8 @@
 // https://github.com/hellosverre/claude-skins at 985ad63, hooks/shell-rows.tsx.
 
 import { outputLine } from './code-rows'
-import { copyButton, onBorder } from './rows'
+import { copyControl, single } from './copy-rows'
+import { onBorder } from './rows'
 import type { Look } from './rows'
 import { linesOf, shellStatus } from './shell'
 import type { ShellLine, ShellResult } from './shell'
@@ -24,7 +25,7 @@ export function shellRows(look: Look, command: string, result: ShellResult, isEr
       <Text color={line.isErr ? palette.err : palette.fg}>{line.text === '' ? ' ' : line.text}</Text>
     )
   const text = [result.stdout, result.stderr].filter(part => part.trim() !== '').join('\n')
-  const control = text === '' ? undefined : copyButton(look, 'copy-output', text)
+  const control = text === '' ? undefined : copyControl(look, 'copy-output', single(text))
   const isEmpty = lines.stdout.length === 0 && lines.stderr.length === 0
 
   return onBorder(

@@ -6,7 +6,7 @@ import type { ElementTable, RenderSurface } from 'claude-code'
 import type { Prefs, Touch, TurnStats } from '../../types'
 import { formatDuration, formatMs, MAX_DRAWN } from './format'
 import type { PathBase } from './links'
-import { columnWidths, graphemes, isShell, tableArt, tableCsv, widthOf, wrapLines } from './markdown'
+import { columnWidths, graphemes, isShell, widthOf, wrapLines } from './markdown'
 import { diffFenceTag, diffRows, fenceDiff, newOnly } from './diff-fence'
 import type { Code, Segment, Table } from './markdown'
 import type { Copy } from './commands'
@@ -31,6 +31,8 @@ import { terminalSvg } from './svg-terminal'
 import type { ShellOutput } from './svg-terminal'
 import { metersKey, usageLine, usageSvg } from './svg-usage'
 import { codeCopyRows, codeRows } from './code-rows'
+import { copiesOf, copyControl, copyRow, replyCopies, single } from './copy-rows'
+import type { CopyAs } from './copy-rows'
 import { languageOf } from './highlight'
 import type { Meter } from './svg-usage'
 import { kindOf, toolLabel } from './tools'
@@ -52,8 +54,9 @@ export type Look = {
   surface: RenderSurface
   // The vector element where the surface draws one: icons replace glyphs there.
   svg?: SvgElement
-  // Puts text on the clipboard of the surface drawing; absent where nothing can copy.
-  copy?: (text: string) => void
+  // Puts text on the clipboard of the surface drawing, its toast naming `form` where given;
+  // absent where nothing can copy.
+  copy?: (text: string, form?: string) => void
   // True the first time this drawing shows the card by that key; a card drawn again is
   // drawn settled. Absent, every card animates.
   isFirstDraw?: (key: string, entranceMs: number) => boolean
@@ -460,8 +463,8 @@ const JUSTIFY = { left: 'flex-start', right: 'flex-end', center: 'center' } as c
 const NATURAL_SHARE = 0.55
 
 // A grid of cells, so columns line up in the terminal's monospace and in the desktop
-// app's proportional font alike. `control`, such as a Copy button, sits on the frame's
-// top border at the right, as ╭──── Copy ─╮.
+// app's proportional font alike. `control`, its copy control, sits on the frame's top
+// border at the right, as ╭──── Copy as: markdown · native · text ─╮.
 // Every row is drawn. Long cells wrap within their column in full: unlike the desktop card, the terminal has no tooltip to read a cut cell by (#59).
 // `maxWidth` is the room the table is drawn in, not the terminal's width: in a frame it
 // is the frame's inside.
@@ -471,7 +474,7 @@ const NATURAL_SHARE = 0.55
 // lines. Elsewhere the font is proportional, so the cells' lines wrap again where the
 // surface needs them to, and a wide table splits its container between columns; so does
 // a terminal table of more columns than its room holds at one cell each.
-export function tableRows(look: Look, table: Table, maxWidth: number, control?: ReturnType<Ui['Button']>) {
+export function tableRows(look: Look, table: Table, maxWidth: number, control?: ReturnType<Ui['Box']>) {
   const { Box, Text } = look.ui
   const { palette } = look.skin
   const widths = columnWidths(table, maxWidth - 4, CELL_PAD * 2)
@@ -513,59 +516,53 @@ export function tableRows(look: Look, table: Table, maxWidth: number, control?: 
 const sourceOf = (look: Look, key: string, built: { source: string; entranceMs: number }): string =>
   look.isFirstDraw === undefined || look.isFirstDraw(key, built.entranceMs) ? built.source : settled(built.source)
 
-// A card drawn as an image, with its Copy button laid over the top-right corner the card
-// left free. The image cannot be pressed, so the button is a real one on top of it; the
-// box hugs the image so the corner is the card's, not the column's. The image takes the
-// markup's own size, so one drawn wider than the reply column is scaled down to fit it.
-function cardWithCopy(look: Look, Svg: SvgElement, built: { source: string; alt: string; entranceMs: number }, key: string, text: string) {
-  const { Box, Button } = look.ui
-  const copy = look.copy
+// A card drawn as an image, with its copy control. A block with one copy has its Copy laid
+// over the top-right corner the card left free: the image cannot be pressed, so the button
+// is a real one on top of it, and the box hugs the image so the corner is the card's, not
+// the column's. A block with more has the control on a line under the card. The image takes
+// the markup's own size, so one drawn wider than the reply column is scaled down to fit it.
+function cardWithCopy(look: Look, Svg: SvgElement, built: { source: string; alt: string; entranceMs: number }, key: string, copies: readonly CopyAs[]) {
+  const { Box } = look.ui
+  const image = <Svg source={sourceOf(look, key, built)} alt={built.alt} />
+
+  if (copies.length > 1) {
+    return (
+      <Box flexDirection="column" marginY={1} alignSelf="flex-start">
+        {image}
+        {copyRow(look, key, copies)}
+      </Box>
+    )
+  }
+
+  const control = copyControl(look, key, copies)
 
   return (
     <Box marginY={1} alignSelf="flex-start">
-      <Svg source={sourceOf(look, key, built)} alt={built.alt} />
-      {copy === undefined ? (
+      {image}
+      {control === undefined ? (
         ''
       ) : (
-        <Box position="absolute" top={1} right={3}>
-          <Button key={key} label="Copy" plain dimColor onPress={() => copy(text)} />
+        <Box position="absolute" top={1} right={2}>
+          {control}
         </Box>
       )}
     </Box>
   )
 }
 
-// Copy takes the markdown; `as text` under the card takes the table as drawn.
+// Whether a card leaves its top-right corner free for a Copy: one copy, and a surface that copies.
+const hasCorner = (look: Look, copies: readonly CopyAs[]): boolean => look.copy !== undefined && copies.length === 1
+
 function tableCard(look: Look, table: Table, Svg: SvgElement, columns: number, key: string) {
-  const { Box } = look.ui
-  const card = tableSvg(table, look.skin.palette, cardWidth(columns), look.copy !== undefined)
+  const copies = copiesOf(table)
 
-  return (
-    <Box flexDirection="column">
-      {cardWithCopy(look, Svg, card, key, copyText(look, table))}
-      {copyRow(look, `${key}-art`, tableArt(table), 'Copy as text')}
-    </Box>
-  )
-}
-
-// The table's two copies on its frame: Copy (`copyText`), and the table as drawn.
-function tableControls(look: Look, key: string, table: Table) {
-  const { Box } = look.ui
-  const whole = copyButton(look, key, copyText(look, table))
-  const art = copyButton(look, `${key}-art`, tableArt(table), ' as text ')
-
-  return whole === undefined || art === undefined ? undefined : (
-    <Box flexDirection="row">
-      {whole}
-      {art}
-    </Box>
-  )
+  return cardWithCopy(look, Svg, tableSvg(table, look.skin.palette, cardWidth(columns), hasCorner(look, copies)), key, copies)
 }
 
 function mathCard(look: Look, tex: string, Svg: SvgElement, columns: number, key: string) {
-  const card = mathSvg(tex, look.skin.palette, cardWidth(columns), look.copy !== undefined)
+  const copies = single(tex.trim())
 
-  return cardWithCopy(look, Svg, card, key, tex.trim())
+  return cardWithCopy(look, Svg, mathSvg(tex, look.skin.palette, cardWidth(columns), hasCorner(look, copies)), key, copies)
 }
 
 // A formula in cells: stacked fractions, radicals and tall brackets, one Text per row.
@@ -583,31 +580,9 @@ function mathRows(look: Look, tex: string, maxWidth: number, key: string) {
           <Text color={palette.fg}>{row === '' ? ' ' : row}</Text>
         ))}
       </Box>
-      {copyRow(look, key, tex.trim())}
+      {copyRow(look, key, single(tex.trim()))}
     </Box>
   )
-}
-
-// A table as markdown again, for one that has no source of its own.
-const tableMarkdown = (table: Table): string =>
-  [table.header, table.header.map(() => '---'), ...table.rows].map(cells => `| ${cells.join(' | ')} |`).join('\n')
-
-// What a block's Copy takes, after `copy_as`. As content: a suggestion as typed, a fence's
-// code, a table as CSV, a span's text. As markdown: a suggestion as typed, a fence, a table
-// and a span as written. The `as text`, `new only` and `copy reply` controls take what they
-// always have.
-export function copyText(look: Look, block: Copy | Code | Table): string {
-  const isMarkdown = look.prefs.copyAs === 'markdown'
-
-  if (block.kind === 'table') {
-    return isMarkdown ? (block.raw ?? tableMarkdown(block)) : tableCsv(block)
-  }
-
-  if (block.kind === 'code') {
-    return isMarkdown ? block.raw : block.code
-  }
-
-  return isMarkdown && (block.form === 'code' || block.form === 'span') ? block.raw : block.text
 }
 
 // A frame with a label and a control on its top border. They are laid over it from a plain
@@ -641,34 +616,10 @@ export function onBorder(
   )
 }
 
-// A Copy button padded to sit on a border line; nothing where nothing can copy.
-export function copyButton(look: Look, key: string, text: string, label = ' Copy ') {
-  const { Button } = look.ui
-  const copy = look.copy
-
-  return copy === undefined ? undefined : <Button key={key} label={label} plain dimColor onPress={() => copy(text)} />
-}
-
-// A small Copy button under a card or block, flush right; nothing where nothing can copy.
-export function copyRow(look: Look, key: string, text: string, label = 'Copy') {
-  const { Box, Button } = look.ui
-  const copy = look.copy
-
-  if (copy === undefined) {
-    return ''
-  }
-
-  return (
-    <Box flexDirection="row" justifyContent="flex-end">
-      <Button key={key} label={label} plain dimColor onPress={() => copy(text)} />
-    </Box>
-  )
-}
-
 // A copy block (commands.ts): its text as one Text the terminal wraps, nothing beside it
 // on any of its lines, so a selection over it crosses no border, padding or margin glyph,
-// and Copy on the line under it, which copies the text whole. A suggestion's `!` or `/`
-// is drawn bold; a fence's code is drawn by `codeCopyRows`. `gapBelow` keeps a blank line
+// and its copy control on the line under it. A suggestion's `!` or `/` is drawn bold; a
+// fence's code is drawn by `codeCopyRows`. `gapBelow` keeps a blank line
 // under it for prose that follows, which opens on none; a frame opens on one.
 export function copyRows(look: Look, copy: Copy, key: string, gapBelow: boolean) {
   const { Box, Text } = look.ui
@@ -676,7 +627,7 @@ export function copyRows(look: Look, copy: Copy, key: string, gapBelow: boolean)
   const margins = { marginTop: 1, marginBottom: gapBelow ? 1 : 0 }
 
   if (copy.form === 'code') {
-    return codeCopyRows(look, copy.lang, copy.text, copyButton(look, key, copyText(look, copy)), margins)
+    return codeCopyRows(look, copy.lang, copy.text, copyControl(look, key, copiesOf(copy)), margins)
   }
 
   const lead = copy.form === 'span' ? 0 : 1
@@ -693,7 +644,7 @@ export function copyRows(look: Look, copy: Copy, key: string, gapBelow: boolean)
         )}
         <Text color={palette.search}>{copy.text.slice(lead)}</Text>
       </Text>
-      {copyRow(look, key, copyText(look, copy))}
+      {copyRow(look, key, copiesOf(copy))}
     </Box>
   )
 }
@@ -740,7 +691,7 @@ function segmentRow(look: Look, segment: Segment, i: number, maxWidth: number, S
       return (
         <Box flexDirection="column">
           {artRows(look, art, chart === null ? '' : chartHeading(chart).count)}
-          {copyRow(look, `copy-${i}`, copyText(look, segment))}
+          {copyRow(look, `copy-${i}`, copiesOf(segment))}
         </Box>
       )
     }
@@ -754,21 +705,21 @@ function segmentRow(look: Look, segment: Segment, i: number, maxWidth: number, S
       return (
         <Box flexDirection="column">
           {chartRows(look, chart, maxWidth)}
-          {copyRow(look, `copy-${i}`, copyText(look, segment))}
+          {copyRow(look, `copy-${i}`, copiesOf(segment))}
         </Box>
       )
     }
 
     // The terminal highlights the languages it knows in the skin's colours.
     if (look.surface === 'terminal' && look.prefs.highlight && languageOf(segment.lang) !== undefined) {
-      return codeRows(look, segment.lang, segment.code, copyButton(look, `copy-${i}`, copyText(look, segment)))
+      return codeRows(look, segment.lang, segment.code, copyControl(look, `copy-${i}`, copiesOf(segment)))
     }
 
-    return (Svg === undefined ? null : codeCard(look, segment.lang, segment.code, Svg, maxWidth, `copy-${i}`, copyText(look, segment))) ?? stockFence(look, segment, `copy-${i}`)
+    return (Svg === undefined ? null : codeCard(look, segment.lang, segment.code, Svg, maxWidth, `copy-${i}`, copiesOf(segment))) ?? stockFence(look, segment, `copy-${i}`)
   }
 
   return Svg === undefined ? (
-    tableRows(look, segment, maxWidth, tableControls(look, `copy-${i}`, segment))
+    tableRows(look, segment, maxWidth, copyControl(look, `copy-${i}`, copiesOf(segment)))
   ) : (
     tableCard(look, segment, Svg, maxWidth, `copy-${i}`)
   )
@@ -799,36 +750,23 @@ function drawingOf(look: Look, segment: Segment & { kind: 'code' }, maxWidth: nu
   return drawing
 }
 
-// A diff fence: the diff card on the desktop, numbered rows on the terminal, with Copy for
-// the fence and `new only` for the code as it stands after the change. A diff past what a
-// card holds keeps Claude Code's drawing of the fence.
+// A diff fence: the diff card on the desktop, numbered rows on the terminal, its copy
+// control offering the fence's forms and `new`, the code as it stands after the change. A
+// diff past what a card holds keeps Claude Code's drawing of the fence.
 function diffFence(look: Look, fence: Code, diff: DiffInput, maxWidth: number, i: number, Svg?: SvgElement, fenceLang?: string) {
   const { Box, Markdown } = look.ui
-  const whole = copyButton(look, `copy-${i}`, copyText(look, fence))
-  const fresh = copyButton(look, `copy-${i}-new`, newOnly(diff), ' new only ')
-  const built = Svg === undefined ? null : diffCard(look, Svg, diff, diff.path === '' ? 'diff' : diff.path, maxWidth)
+  const copies = [...copiesOf(fence), { form: 'new' as const, text: newOnly(diff), glyph: 'new' as const }]
 
   if (Svg !== undefined) {
     return (
       <Box flexDirection="column">
-        {built ?? <Markdown text={fence.raw} />}
-        <Box flexDirection="row" justifyContent="flex-end">
-          {whole ?? ''}
-          {fresh ?? ''}
-        </Box>
+        {diffCard(look, Svg, diff, diff.path === '' ? 'diff' : diff.path, maxWidth) ?? <Markdown text={fence.raw} />}
+        {copyRow(look, `copy-${i}`, copies)}
       </Box>
     )
   }
 
-  const controls =
-    whole === undefined || fresh === undefined ? undefined : (
-      <Box flexDirection="row">
-        {whole}
-        {fresh}
-      </Box>
-    )
-
-  return diffRows(look, diff, controls, fenceLang)
+  return diffRows(look, diff, copyControl(look, `copy-${i}`, copies), fenceLang)
 }
 
 // Columns between blocks laid side by side.
@@ -928,10 +866,10 @@ function packRun(run: readonly Placed[], maxWidth: number, Svg?: SvgElement): Pl
  *  (replyRows): `frame` wraps a run of blocks, and takes `inset` columns of the width. */
 export type Framing = { inset: number; frame: (rows: ReturnType<Ui['Box']>) => ReturnType<Ui['Box']> }
 
-// `whole`, the reply as Claude wrote it, adds a `copy reply` control under it. With
-// `framing`, each run of blocks between copy blocks (commands.ts) sits in a frame of its
-// own and each copy block between the frames, the whole width wide, so no frame line runs
-// beside a line of it.
+// `whole`, the reply as Claude wrote it, adds the reply's copy control under it: the reply
+// as written, or as its text. With `framing`, each run of blocks between copy blocks
+// (commands.ts) sits in a frame of its own and each copy block between the frames, the
+// whole width wide, so no frame line runs beside a line of it.
 export function replyRows(look: Look, segments: readonly Segment[], maxWidth: number, Svg?: SvgElement, whole?: string, framing?: Framing) {
   const { Box } = look.ui
   const inner = maxWidth - (framing?.inset ?? 0)
@@ -971,7 +909,7 @@ export function replyRows(look: Look, segments: readonly Segment[], maxWidth: nu
         : runs.map(run =>
             Array.isArray(run) ? framing.frame(<Box flexDirection="column">{run.map(drawn)}</Box>) : copyRows(look, run.copy, `copy-${run.i}`, false),
           )}
-      {whole === undefined ? '' : copyRow(look, 'copy-reply', whole, 'copy reply')}
+      {whole === undefined ? '' : copyRow(look, 'copy-reply', replyCopies(whole, segments), 'reply')}
     </Box>
   )
 }
@@ -1059,33 +997,34 @@ function card(look: Look, Svg: SvgElement, built: { source: string; alt: string;
   )
 }
 
-// A code block as a card, every line drawn. Copy takes `copied`. Null for code past what
-// a card holds (MAX_SVG), which the caller leaves to Claude Code's own drawing.
-export function codeCard(look: Look, lang: string, code: string, Svg: SvgElement, columns: number, key = 'copy-code', copied = code) {
-  const built = codeSvg(code, lang, look.skin.palette, cardWidth(columns), look.copy !== undefined)
+// A code block as a card, every line drawn, its control offering `copies`. Null for code
+// past what a card holds (MAX_SVG), which the caller leaves to Claude Code's own drawing.
+export function codeCard(look: Look, lang: string, code: string, Svg: SvgElement, columns: number, key: string, copies: readonly CopyAs[]) {
+  const built = codeSvg(code, lang, look.skin.palette, cardWidth(columns), hasCorner(look, copies))
 
-  return built === null ? null : cardWithCopy(look, Svg, built, key, copied)
+  return built === null ? null : cardWithCopy(look, Svg, built, key, copies)
 }
 
-// A fence in Claude Code's own drawing, with Copy under it.
+// A fence in Claude Code's own drawing, with its copy control under it.
 function stockFence(look: Look, fence: Code, key: string) {
   const { Box, Markdown } = look.ui
 
   return (
     <Box flexDirection="column">
       <Markdown text={fence.raw} />
-      {copyRow(look, key, copyText(look, fence))}
+      {copyRow(look, key, copiesOf(fence))}
     </Box>
   )
 }
 
 // A chart too crowded to draw at this width keeps its source as a code card.
 function chartCard(look: Look, chart: Chart, fence: Code, Svg: SvgElement, columns: number, key: string) {
-  const built = chartSvg(chart, look.skin.palette, cardWidth(columns), look.copy !== undefined)
+  const copies = copiesOf(fence)
+  const built = chartSvg(chart, look.skin.palette, cardWidth(columns), hasCorner(look, copies))
 
   return built === null
-    ? (codeCard(look, 'mermaid', fence.code, Svg, columns, key, copyText(look, fence)) ?? stockFence(look, fence, key))
-    : cardWithCopy(look, Svg, built, key, copyText(look, fence))
+    ? (codeCard(look, 'mermaid', fence.code, Svg, columns, key, copies) ?? stockFence(look, fence, key))
+    : cardWithCopy(look, Svg, built, key, copies)
 }
 
 // An edit as a card, or null for one past what a card holds (MAX_SVG).
@@ -1098,10 +1037,10 @@ export function diffCard(look: Look, Svg: SvgElement, input: DiffInput, shownPat
 // Shell output as a card, or null for output past what a card holds (MAX_SVG).
 export function terminalCard(look: Look, Svg: SvgElement, output: ShellOutput, isErrored: boolean, columns: number, key = 'copy-output') {
   const text = [output.stdout, output.stderr].filter(part => part.trim() !== '').join('\n')
-  const withCopy = text === '' ? { ...look, copy: undefined } : look
-  const built = terminalSvg(output, isErrored, look.skin.palette, cardWidth(columns), withCopy.copy !== undefined, look.prefs.highlight)
+  const copies = text === '' ? [] : single(text)
+  const built = terminalSvg(output, isErrored, look.skin.palette, cardWidth(columns), hasCorner(look, copies), look.prefs.highlight)
 
-  return built === null ? null : cardWithCopy(withCopy, Svg, built, key, text)
+  return built === null ? null : cardWithCopy(look, Svg, built, key, copies)
 }
 
 // From this full, the band suggests compacting and makes it the main action.

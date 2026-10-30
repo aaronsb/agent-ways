@@ -530,11 +530,12 @@ describe('the gradient prompt box', () => {
 describe('the copy controls', () => {
   const TABLE_REPLY = { text: 'Two:\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nAnd more.', isFirstOfReply: true }
 
-  test('render.copy on draws Copy, as text and copy reply', async ($, on) => {
+  test("render.copy on draws the table's forms and the reply's", async ($, on) => {
     host(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
     const ui = await $.ui.mount({ ...(at('terminal', 'AssistantMessage', TABLE_REPLY) as object), viewport: { ...VIEW, isFullscreen: true } } as never)
-    for (const label of [/Copy/, /as text/, /copy reply/]) expect(await ui.find({ type: 'Button', text: label })).toBeDefined()
+    const keys = (await ui.findAll({ type: 'Button' })).map(button => button.key)
+    expect(keys).toEqual(['copy-1-markdown', 'copy-1-native', 'copy-1-text', 'copy-reply-markdown', 'copy-reply-text'])
     await ui.unmount()
   })
 
