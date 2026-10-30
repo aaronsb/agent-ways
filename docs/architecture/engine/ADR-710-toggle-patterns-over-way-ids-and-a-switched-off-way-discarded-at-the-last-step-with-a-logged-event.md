@@ -43,6 +43,7 @@ related:
   - ADR-131
   - ADR-702
   - ADR-115
+  - ADR-518
 observable:
   - "run: with documentation/adr: false in a project's .claude/ways.yaml, a prompt that fires documentation/adr with no configuration writes a way_discarded event with filter toggle and toggle documentation/adr, and the way is not injected"
   - "run: ways settings lint on a ways.yaml holding dir/*: false reports the key and names dir: false plus dir/**: false"
@@ -119,7 +120,7 @@ Under ADR-701 §1, a trailing `dir/*` switched off `dir` and its whole subtree a
 | Field | Value |
 |---|---|
 | `way` | the way id |
-| `filter` | what discarded it: `toggle`; `domain` for user-scope `disabled_domains`; `project_off` for `enabled: false`. `isolation` and `untrusted` are added by the scope-model record. |
+| `filter` | what discarded it: `toggle`; `domain` for user-scope `disabled_domains`; `project_off` for `enabled: false`. `isolation` and `untrusted` are added by ADR-518. |
 | `toggle` | the winning pattern, when `filter` is `toggle` |
 | `scope` | `user` or `project`, the settings layer the filter came from, when it is known |
 | `lane` | `prompt`, `command`, `file`, `tool`, `task`, `state`, `check`, `pull` or `subagent` |

@@ -28,6 +28,15 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "while the session runs, because otherwise a false start or a restart for some reason could loose it"
+    via: session 2026-10-30, answering the probes in chat after the drafts were summarized; asked whether a claim holds only while its session runs or consumes the record
+    covers: [first-wins]
+  - operator: aaronsb
+    said: "I'm not so sure about aging out over days. we could surface it still after 7 days and instead state something like it's d days old and could be invalid guidance"
+    via: session 2026-10-30, answering the probes in chat after the drafts were summarized; the record was changed to add an age note past T in place of naming the file only
+    covers: [reach]
 observable:
   - 'run: /wrap in a session writes .claude/handoff.wrap.md with the Write tool, and `ways wrap status` lists a record naming that session, the HEAD and the file hash'
   - 'run: /compact the same session; the session-start line says it wrote the handoff before compacting'
@@ -36,7 +45,7 @@ observable:
   - 'run: after a wrap, open, prompt and close four sessions one after another; with k = 3 the first is told to read and continue, the second and third to check the handoff against git with HEAD from, HEAD to and the commit count, and the fourth only where the file is'
   - 'run: edit the handoff after the wrap; the next session is told the file was edited after it was written'
   - 'run: resume the writing session with --resume; no wrap line appears'
-status: proposed
+status: accepted
 date: 2026-10-30
 deciders:
   - aaronsb
@@ -104,7 +113,7 @@ The way is `meta/wrap/continuity`, a child of `meta/wrap`, shipped in the corpus
 
 The candidate is the project's newest record. Claims are numbered: `<record>.claim.1`, `<record>.claim.2`, and so on, each holding the claimer's session id, the time and the source. A session reads the highest claim. When there is none, or its claimer has ended, the session creates the next number with exclusive create. Only one session can create a given number, so of two sessions starting together the first takes the handoff, and the other reads the winner's claim.
 
-A claimer is running while `~/.claude/sessions/` holds a record for its session id whose pid is alive with the recorded process start. A session that finds the newest record claimed by a running session, and written within T days, gets one line: "The latest handoff, `<path>`, was taken by session `<id>` at `<time>`." Once the claimer has ended, the next session to start claims the record again, at its own distance (§5).
+A claimer is running while `~/.claude/sessions/` holds a record for its session id whose pid is alive with the recorded process start. A session that finds the newest record claimed by a running session gets one line: "The latest handoff, `<path>`, was taken by session `<id>` at `<time>`." Once the claimer has ended, the next session to start claims the record again, at its own distance (§5).
 
 ### 5. Distance from the writer
 
@@ -121,7 +130,9 @@ A session that started before the wrap and kept working after it is not counted.
 | 0 | You wrote `<path>` before compacting. Continue from it. |
 | 1 | Read `<path>`, the handoff from the previous session here, and continue. |
 | 2 to k | N sessions started here since `<path>` was written. HEAD moved `<from>`→`<to>`, M commits. Check the handoff against git before acting on it. |
-| beyond k, or written more than T days ago | An earlier handoff is at `<path>`, written `<date>`. |
+| beyond k | An earlier handoff is at `<path>`, written `<date>`. |
+
+Age never withholds a steer. A handoff written more than T days ago adds to whichever line applies: "`<path>` is d days old and may be stale guidance."
 
 At distance 1, a HEAD that moved adds the HEAD line to the steer. When the recorded HEAD is not an ancestor of the current one, the line says HEAD is no longer on the commit the handoff was written at. A file whose hash differs from the record adds "`<path>` was edited after it was written." A missing file replaces the steer with "`<path>` is gone." Outside a repository there is no HEAD line.
 
@@ -130,7 +141,7 @@ At distance 1, a HEAD that moved adds the HEAD line to the steer. When the recor
 `ways wrap claim` owns these and may change them without a new decision:
 
 - k, the last distance that gets a steer: 3;
-- T, the age past which a handoff is only named: 7 days;
+- T, the age past which the steer gives the handoff's age and says it may be stale: 7 days;
 - retention: the recorder removes records, claims and its own reply files older than 30 days.
 
 ## Consequences
@@ -163,7 +174,8 @@ At distance 1, a HEAD that moved adds the HEAD line to the steer. When the recor
 - **A ways sensor (ADR-199).** Rejected: §8 limits a ways sensor to observing and dispatching outward, so it cannot steer the agent.
 - **The agent records the wrap itself**, with the skill running `ways wrap record` as a step. Rejected: the operator asked for a status the agent does not write by hand, a skipped step leaves no record, and the keepwarm wrap runs with nobody watching.
 - **Judge the handoff file alone at session start**, by its modification time and the date and commit on its first line. Rejected: with no writer session id there is no distance 0 and no claim, and a wrap left in the transcript has no file.
-- **Distance by wall-clock time alone.** Rejected: the operator measured distance in sessions. A handoff one hour old with three sessions since is further from its reader than one a day old with none. T bounds age separately.
+- **Distance by wall-clock time alone.** Rejected: the operator measured distance in sessions. A handoff one hour old with three sessions since is further from its reader than one a day old with none. Past T, age adds a staleness note to the steer.
+- **Name the file only once the handoff is older than T.** Rejected by the operator: a handoff a week old can still be the right next step, so the steer stays and says how old the handoff is.
 - **Counting every session, prompt-less ones included.** Rejected: a session opened and closed without a prompt changed nothing.
 - **Claiming through attend's peer presence or a held lock.** Rejected: an exclusive file create is atomic on a local filesystem and needs no running process.
 - **A claim that consumes the record for good.** Rejected: only the first session after a wrap would ever see it, and the operator asked for later sessions to be told how far they are from the writer. A claim holds only while its claimer runs.

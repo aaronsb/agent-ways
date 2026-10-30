@@ -31,16 +31,26 @@ basis:
   - precedent: ADR-116
   - precedent: ADR-504
   - precedent: ADR-506
+  - precedent: ADR-710
 agent:
   name: Claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "isolation seems to make sense, as long as we can then configure things within that project scope"
+    via: session 2026-10-30, answering the probes in chat after the drafts were summarized; the ADR-518 figure was shown first
+    covers: [isolation reach]
+  - operator: aaronsb
+    said: "this implies that the registry of allowed ways is a two way situation. ways could be disabled at the user scope, but selectively enabled at the project scope, which I like."
+    via: session 2026-10-30, answering the probes in chat after the drafts were summarized
+    covers: [user switch]
 observable:
   - 'see: on the ways tab opened in a project, the sections read user, this project and other projects in that order; a shipped way reads like adr  builtin  on · off here in the user section, and the project is not listed under other projects'
   - 'see: an other project''s node shows its switches, its inherit value and its trust row, and no row in it takes an edit'
   - 'see: the sensors tab''s this project section holds the project''s sensor files and a trust row naming $XDG_CONFIG_HOME/attend/config.yaml, and the attend tab no longer lists attend.project_sensors'
   - 'run: with inherit: none and softwaredev/delivery/commits: true in .claude/ways.yaml, a prompt that matches a shipped way other than that one fires nothing from the shipped corpus, and the discard log records the way with filter isolation'
   - 'run: in a project with a macro and no entry in ways.project_macros, the way''s text fires, the macro does not run, and the discard log records it with filter untrusted'
-status: proposed
+status: accepted
 date: 2026-10-30
 deciders:
   - aaronsb
