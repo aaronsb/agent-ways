@@ -475,6 +475,22 @@ describe('slash commands', () => {
 const CODE = 'fn main() {\n    let x = 1;   \n\n\tprintln!("{x}");\n\n}'
 const FENCED = `Here it is:\n\n\`\`\`rust\n${CODE}\n\`\`\`\n\nThat prints 1.`
 
+describe('a CRLF line ending reads as LF', () => {
+  for (const lf of ['a\n/clear\nb', '! ls -la\n', '```python\ndef f():\n    return 1\n```', '| a | b |\n|---|---|\n| `x` | y |\n']) {
+    test(JSON.stringify(lf), () => {
+      const crlf = lf.replace(/\n/g, '\r\n')
+      expect(copyPieces(crlf, 80)).toEqual(copyPieces(lf, 80))
+      expect(splitReply(crlf)).toEqual(splitReply(lf))
+    })
+  }
+
+  test('a CRLF fence copies its code with no carriage return', () => {
+    expect(copyPieces('```python\r\ndef f():\r\n    return 1\r\n```')).toEqual([{ kind: 'copy', form: 'code', lang: 'python', text: 'def f():\n    return 1', raw: '```python\ndef f():\n    return 1\n```' }])
+    expect(commands('a\r\n/clear\r\nb')).toEqual(['/clear'])
+    expect(commands('! ls -la\r\n')).toEqual(['! ls -la'])
+  })
+})
+
 describe('a fenced block is a copy block', () => {
   test('its code as written, its language kept', () => {
     const copy = { kind: 'copy', form: 'code', lang: 'rust', text: CODE, raw: `\`\`\`rust\n${CODE}\n\`\`\`` }

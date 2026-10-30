@@ -180,9 +180,9 @@ export function fenceCopy(lang: string, code: string, raw: string, isCommand: Is
  *  columns the reply's prose is drawn in, for the spans too wide for it.
  *  `isPicture` names the fences the skin draws as pictures, which stay
  *  prose, and `isCommand` the slash commands. A fence still streaming, and
- *  every line after it, stay prose. */
+ *  every line after it, stay prose. A CRLF line ending reads as LF. */
 export function copyPieces(text: string, width?: number, isPicture: (lang: string, code: string) => boolean = () => false, isCommand: IsCommand = notRoot): Piece[] {
-  const lines = text.split('\n')
+  const lines = text.replace(/\r\n/g, '\n').split('\n')
   const out: Piece[] = []
   let prose: string[] = []
   // A stretch of prose, the blank lines at either end of it off.

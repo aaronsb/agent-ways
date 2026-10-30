@@ -104,14 +104,14 @@ const fit = (cells: string[], width: number): string[] =>
   Array.from({ length: width }, (_, i) => cells[i] ?? '')
 
 // `tables` off leaves tables as text; a fence `fence` turns down stays text too, so a
-// reply can be split for its charts alone. `math` takes display formulas out as their own
+// reply can be split for its charts alone. A CRLF line ending reads as LF. `math` takes display formulas out as their own
 // segments: ````math`` fences, `$$…$$` and `\[…\]`.
 export type SplitOptions = { tables: boolean; fence: (lang: string, code: string) => boolean; math?: boolean }
 
 const SPLIT_ALL: SplitOptions = { tables: true, fence: () => true }
 
 export function splitReply(markdown: string, options: SplitOptions = SPLIT_ALL): Segment[] {
-  const lines = markdown.split('\n')
+  const lines = markdown.replace(/\r\n/g, '\n').split('\n')
   const segments: Segment[] = []
   let text: string[] = []
 
