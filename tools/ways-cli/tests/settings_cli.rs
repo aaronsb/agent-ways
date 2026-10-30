@@ -1190,7 +1190,7 @@ fn star_lint_names_no_replacement(before: &str, shipped: &[&str]) -> String {
 fn a_star_key_whose_replacement_would_tie_with_a_competitor_names_it_instead() {
     assert_eq!(
         star_lint_names_no_replacement("ways:\n  data/*: true\n  \"**/x\": false\n", &["data/x"]),
-        "<ROOT>/proj/.claude/ways.yaml:2: [ways.project] ways.data/*: warning: `/*` matches only the ways directly under data; it no longer covers data itself or the ways deeper down, and no replacement keeps every way as it was, so read it together with `**/x`\n"
+        "<ROOT>/proj/.claude/ways.yaml:2: [ways.project] ways.data/*: warning: `/*` matches only the ways directly under data; it no longer covers data itself or the ways deeper down, and no replacement of this key alone keeps every way as it was, so read it together with `**/x`\n"
     );
 }
 
@@ -1198,7 +1198,7 @@ fn a_star_key_whose_replacement_would_tie_with_a_competitor_names_it_instead() {
 fn a_star_key_whose_replacement_a_competitor_would_outrank_names_it_instead() {
     assert_eq!(
         star_lint_names_no_replacement("ways:\n  data/*: false\n  \"*/x\": true\n", &["data/x"]),
-        "<ROOT>/proj/.claude/ways.yaml:2: [ways.project] ways.data/*: warning: `/*` matches only the ways directly under data; it no longer covers data itself or the ways deeper down, and no replacement keeps every way as it was, so read it together with `*/x`\n\
+        "<ROOT>/proj/.claude/ways.yaml:2: [ways.project] ways.data/*: warning: `/*` matches only the ways directly under data; it no longer covers data itself or the ways deeper down, and no replacement of this key alone keeps every way as it was, so read it together with `*/x`\n\
          <ROOT>/proj/.claude/ways.yaml:3: [ways.project] ways.*/x: warning: ties with ways.data/* on data/x at the same specificity with the opposite value, so the tie resolves to false\n"
     );
 }

@@ -120,7 +120,7 @@ pub const MIXED_WILDCARD: &str = "a segment mixes text and a wildcard, so the ke
 /// rule gives it over the file as it is, with no tie the file lacks.
 /// Otherwise lint states the change and names the keys to read together.
 /// `toggles` are the file's toggles as `(key, enabled)` and `keys` every key
-/// it holds; with `ids` `None` nothing is simulated. `None` unless `dir` is
+/// it holds; with `ids` `None` or empty nothing is simulated. `None` unless `dir` is
 /// one directory: non-empty and with no wildcard.
 pub fn old_star_advice(key: &str, toggles: &[(String, bool)], keys: &[String], ids: Option<&BTreeSet<String>>) -> Option<String> {
     let dir = key.strip_suffix("/*").filter(|d| !d.is_empty() && !d.contains('*'))?;
@@ -130,6 +130,7 @@ pub fn old_star_advice(key: &str, toggles: &[(String, bool)], keys: &[String], i
         return Some(format!("{head}; this key sets no `enabled`, so it switches nothing; remove it"));
     };
     let sub = format!("{dir}/**");
+    let ids = ids.filter(|ids| !ids.is_empty());
     let dir_is_way = ids.is_none_or(|ids| ids.contains(dir));
     let lost = if dir_is_way { format!("{dir} itself or the ways deeper down") } else { "the ways deeper down".to_string() };
     let under = |id: &str| id == dir || id.strip_prefix(dir).is_some_and(|r| r.starts_with('/'));
@@ -156,6 +157,10 @@ pub fn old_star_advice(key: &str, toggles: &[(String, bool)], keys: &[String], i
     let Some(ids) = ids else {
         return Some(format!("{head}; it no longer covers {lost}, and with no shipped ways found no replacement is checked{}", together(&others)));
     };
+    let has_children = ids.iter().any(|id| id.strip_prefix(dir).is_some_and(|r| r.starts_with('/')));
+    if !dir_is_way && !has_children {
+        return Some(format!("{head}; no way sits at or under {dir}, so it switches nothing; remove it"));
+    }
     let state = |b: bool| if b { "on" } else { "off" };
     let mut add: Vec<(String, bool)> = Vec::new();
     let mut note = String::new();
@@ -163,14 +168,17 @@ pub fn old_star_advice(key: &str, toggles: &[(String, bool)], keys: &[String], i
     if keys.iter().any(|k| k == dir) {
         match value(dir) {
             Some(own) if own == on => covers_dir = dir_is_way,
-            Some(own) => note = format!("; the existing `{dir}: {own}` stays, so {dir} itself stays {}", state(own)),
-            None => note = format!("; the existing `{dir}` key sets no `enabled`, so {dir} itself is not switched by it"),
+            Some(own) if dir_is_way => note = format!("; the existing `{dir}: {own}` stays, so {dir} itself stays {}", state(own)),
+            None if dir_is_way => note = format!("; the existing `{dir}` key sets no `enabled`, so {dir} itself is not switched by it"),
+            _ => {}
         }
     } else if dir_is_way {
         add.push((dir.to_string(), on));
         covers_dir = true;
     }
-    add.push((sub.clone(), on));
+    if has_children {
+        add.push((sub.clone(), on));
+    }
     let after: Vec<(String, bool)> = toggles.iter().filter(|(k, _)| k != key).cloned().chain(add.iter().cloned()).collect();
     let states_kept = ids.iter().filter(|id| under(id)).all(|id| {
         let new_off = ways_core::config::way_toggled_off(after.iter().map(|(k, on)| (k.as_str(), *on)), id);
@@ -179,9 +187,16 @@ pub fn old_star_advice(key: &str, toggles: &[(String, bool)], keys: &[String], i
     let before = ties(toggles, ids);
     let ties_kept = ties(&after, ids).iter().all(|(k, _)| before.iter().any(|(b, _)| b == k));
     if !(states_kept && ties_kept) {
-        return Some(format!("{head}; it no longer covers {lost}, and no replacement keeps every way as it was{}", together(&others)));
+        return Some(format!("{head}; it no longer covers {lost}, and no replacement of this key alone keeps every way as it was{}", together(&others)));
     }
-    let scope = if covers_dir { format!("{dir} and every way under it") } else { format!("every way under {dir}") };
+    if add.is_empty() {
+        return Some(format!("{head}; no way sits under {dir}, and the `{dir}` key already in the file covers it, so remove this key{note}"));
+    }
+    let scope = match (covers_dir, has_children) {
+        (true, true) => format!("{dir} and every way under it"),
+        (true, false) => format!("{dir}, which has no ways under it"),
+        _ => format!("every way under {dir}"),
+    };
     let named: Vec<String> = add.iter().map(|(k, on)| format!("`{k}: {on}`")).collect();
     Some(format!("{head}; for {scope}, replace this key with {}{note}", named.join(" plus ")))
 }
@@ -466,7 +481,7 @@ mod tests {
         );
         assert_eq!(
             old_star_advice("data/*", &[("data/*".to_string(), false)], &k, Some(&ids)).as_deref(),
-            Some("`/*` matches only the ways directly under data; it no longer covers data itself or the ways deeper down, and no replacement keeps every way as it was, so read it together with `data`"),
+            Some("`/*` matches only the ways directly under data; it no longer covers data itself or the ways deeper down, and no replacement of this key alone keeps every way as it was, so read it together with `data`"),
             "data was off under the old rule and nothing would switch it"
         );
     }
@@ -475,7 +490,7 @@ mod tests {
     fn a_competitor_that_would_tie_with_the_subtree_key_gets_no_replacement() {
         assert_eq!(
             advice_over(&[("data/*", true), ("**/x", false)], &["data", "data/x"]),
-            "`/*` matches only the ways directly under data; it no longer covers data itself or the ways deeper down, and no replacement keeps every way as it was, so read it together with `**/x`"
+            "`/*` matches only the ways directly under data; it no longer covers data itself or the ways deeper down, and no replacement of this key alone keeps every way as it was, so read it together with `**/x`"
         );
     }
 
@@ -483,7 +498,7 @@ mod tests {
     fn a_competitor_that_would_outrank_the_subtree_key_gets_no_replacement() {
         assert_eq!(
             advice_over(&[("data/*", false), ("*/x", true)], &["data", "data/x"]),
-            "`/*` matches only the ways directly under data; it no longer covers data itself or the ways deeper down, and no replacement keeps every way as it was, so read it together with `*/x`"
+            "`/*` matches only the ways directly under data; it no longer covers data itself or the ways deeper down, and no replacement of this key alone keeps every way as it was, so read it together with `*/x`"
         );
     }
 
@@ -491,7 +506,7 @@ mod tests {
     fn a_deeper_competitor_that_would_tie_gets_no_replacement() {
         assert_eq!(
             advice_over(&[("data/*", false), ("*/x/**", true)], &["data", "data/x", "data/x/y"]),
-            "`/*` matches only the ways directly under data; it no longer covers data itself or the ways deeper down, and no replacement keeps every way as it was, so read it together with `*/x/**`"
+            "`/*` matches only the ways directly under data; it no longer covers data itself or the ways deeper down, and no replacement of this key alone keeps every way as it was, so read it together with `*/x/**`"
         );
     }
 
@@ -511,7 +526,7 @@ mod tests {
         );
         assert_eq!(
             advice_over(&[("softwaredev/*", true), ("**/code", false)], &["softwaredev/code"]),
-            "`/*` matches only the ways directly under softwaredev; it no longer covers the ways deeper down, and no replacement keeps every way as it was, so read it together with `**/code`"
+            "`/*` matches only the ways directly under softwaredev; it no longer covers the ways deeper down, and no replacement of this key alone keeps every way as it was, so read it together with `**/code`"
         );
     }
 
@@ -553,6 +568,38 @@ mod tests {
             let (t, k) = file(&[(key, false)]);
             assert_eq!(old_star_advice(key, &t, &k, None), None, "{key}");
         }
+    }
+
+    #[test]
+    fn a_directory_with_no_ways_under_it_gets_no_subtree_key() {
+        let (t, k) = file(&[("data/*", false)]);
+        assert_eq!(
+            old_star_advice("data/*", &t, &k, Some(&ids(&["data", "other/a"]))).as_deref(),
+            Some("`/*` matches only the ways directly under data; for data, which has no ways under it, replace this key with `data: false`")
+        );
+        let (t, k) = file(&[("gone/*", false)]);
+        assert_eq!(
+            old_star_advice("gone/*", &t, &k, Some(&ids(&["other/a"]))).as_deref(),
+            Some("`/*` matches only the ways directly under gone; no way sits at or under gone, so it switches nothing; remove it")
+        );
+    }
+
+    #[test]
+    fn a_directory_key_that_is_no_way_gets_no_note() {
+        let (t, k) = file(&[("softwaredev", true), ("softwaredev/*", false)]);
+        assert_eq!(
+            old_star_advice("softwaredev/*", &t, &k, Some(&ids(&["softwaredev/code", "softwaredev/code/x"]))).as_deref(),
+            Some("`/*` matches only the ways directly under softwaredev; for every way under softwaredev, replace this key with `softwaredev/**: false`")
+        );
+    }
+
+    #[test]
+    fn an_empty_set_of_ways_checks_no_replacement() {
+        let (t, k) = file(&[("data/*", false)]);
+        assert_eq!(
+            old_star_advice("data/*", &t, &k, Some(&BTreeSet::new())).as_deref(),
+            Some("`/*` matches only the ways directly under data; it no longer covers data itself or the ways deeper down, and with no shipped ways found no replacement is checked")
+        );
     }
 
     #[test]
