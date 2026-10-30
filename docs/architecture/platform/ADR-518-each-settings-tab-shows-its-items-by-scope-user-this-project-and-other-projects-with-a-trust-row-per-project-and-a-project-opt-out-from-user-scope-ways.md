@@ -20,7 +20,7 @@ basis:
   - evidence: "the ways tab's other projects section reads and writes each other project's .claude/ways.yaml (tools/ways-cli/src/cmd/settings/tui/others.rs), and finds those projects from Claude Code's projects directory"
   - evidence: "project macros and postchecks run only when the project is listed in ~/.claude/trusted-project-macros (ways_core::paths::trusted_project_macros, read by show::is_project_trusted and hook/post_tool.rs::roots); ways author permissions reports that file as deprecated"
   - evidence: "attend.project_sensors is a user-scope list in $XDG_CONFIG_HOME/attend/config.yaml that the sensors tab reads for its cards (tools/ways-cli/src/cmd/settings/tui/sensors.rs::trusted), and its row sits on the attend tab"
-  - evidence: "per-way switches are the project-scope key ways.project.* over the ways: map of .claude/ways.yaml, with /* prefix keys covering a subtree (tools/ways-core/src/settings.rs); ways.enabled: false in a project's file turns every way off there"
+  - evidence: "per-way switches are the project-scope key ways.project.* over the ways: map of .claude/ways.yaml, with /* prefix keys covering a subtree before ADR-710 (tools/ways-core/src/settings.rs); ways.enabled: false in a project's file turns every way off there"
   - evidence: "#825: ADR-116 deprecates trusted-project-macros in favour of requires:, and the runtime still enforces the list"
   - evidence: "#1218: ADR-516 slice 3 plans project, user and builtin sections on the ways tab"
   - precedent: ADR-516
@@ -44,14 +44,14 @@ status: proposed
 date: 2026-10-30
 deciders:
   - aaronsb
-related: [ADR-503, ADR-504, ADR-510, ADR-512, ADR-516, ADR-403, ADR-199, ADR-143, ADR-131, ADR-116, ADR-184, ADR-506]
+related: [ADR-710, ADR-503, ADR-504, ADR-510, ADR-512, ADR-516, ADR-403, ADR-199, ADR-143, ADR-131, ADR-116, ADR-184, ADR-506]
 ---
 
 # ADR-518: Each settings tab shows its items by scope: user, this project and other projects, with a trust row per project and a project opt-out from user-scope ways
 
 ## Summary
 
-- **Decided:** The settings screens have two axes. The tabs across the top say what: ways, matching, gate, install, attend, sensors, mod, theme. Inside a tab, sections say where, in this order: `user`, editable; `this project`, the project `ways settings` was opened in, editable; `other projects`, one collapsible node per other project with content for the tab, view only. Builtin items sit in the user section, each row tagged with its origin and its state in this project. On the ways and sensors tabs, each project section carries a trust row for the project's code. Trust is stored in the user's own file, and no project is trusted by default. A project can stop inheriting builtin and user ways with `inherit: none` in its `.claude/ways.yaml`, with switches as exceptions. Project macro trust is a user-scope list per project, and a way's `requires:` grants no trust, which settles #825. The record amends ADR-516 §6, ADR-403 §5, ADR-131 and ADR-116, and changes the ways-tab sections #1218 planned.
+- **Decided:** The settings screens have two axes. The tabs across the top say what: ways, matching, gate, install, attend, sensors, mod, theme. Inside a tab, sections say where, in this order: `user`, editable; `this project`, the project `ways settings` was opened in, editable; `other projects`, one collapsible node per other project with content for the tab, view only. Builtin items sit in the user section, each row tagged with its origin and its state in this project. On the ways and sensors tabs, each project section carries a trust row for the project's code. Trust is stored in the user's own file, and no project is trusted by default. A project can stop inheriting builtin and user ways with `inherit: none` in its `.claude/ways.yaml`, with switches as exceptions. Per-way switches may also sit in the user's file, and for one way a matching project switch wins over any user switch. Project macro trust is a user-scope list per project, and a way's `requires:` grants no trust, which settles #825. The record amends ADR-516 §6, ADR-403 §5, ADR-131 and ADR-116, and changes the ways-tab sections #1218 planned.
 - **Trades away:** The screens no longer write another project's files: today the ways tab edits other projects' switches. The `~/.claude/trusted-project-macros` file goes, with no legacy reader, so a project listed only there runs no macros until it is added to the new key. `requires: ["*"]` stops standing for a trusted project. ADR-131's limit of per-way switches to project scope is lifted, which adds a place a way can be turned off.
 - **One-way?** No. Reversible: the change covers the screens' layout, two new keys, and one trust list moved between files. The move fails closed.
 - **Probes:** *Not confident (isolation reach):* in an isolated project no shipped or personal way reaches the session by any route. None fires on a prompt or a tool call, none reaches a subagent, and the agent's own search and read find only the project's ways. The base posture, `core.md`, still loads at session start. *Confident (user switch):* from the user section you can switch a shipped way off for every project, and a project can switch it back on for itself.
@@ -91,7 +91,16 @@ The figure shows the ways tab opened in a project that has its own ways, a switc
 
 Each item row in the user section shows its name, its origin word (`builtin` or `user`, ADR-516 §1), its user-level state, and its state in this project where that differs: `adr  builtin  on · off here`. Editing a builtin item writes the user's file: a sensor gets an `extends` override, a theme is copied, and a way gets a user switch.
 
-ADR-131 kept the per-way switch map in the project overlay only. The same `ways:` map may now sit in `$XDG_CONFIG_HOME/agent-ways/config.yaml`, so a way can be switched off for every project from the user section. A project's switch on the same way overrides the user's.
+ADR-131 kept the per-way switch map in the project overlay only. The same `ways:` map may now sit in `$XDG_CONFIG_HOME/agent-ways/config.yaml`, so a way can be switched off for every project from the user section. Its keys are ADR-710's toggle patterns in both files.
+
+A builtin or user way's state in a project resolves in this order:
+
+1. A key in the project's `ways:` map that matches the way decides, whatever any user key says and however specific the user key is.
+2. Otherwise, under `inherit: none` (§4), the way is off.
+3. Otherwise, a key in the user's `ways:` map that matches the way decides.
+4. Otherwise, the way is on.
+
+Specificity (ADR-710 §1) chooses among the keys of one file only. A project can switch on a way the user switched off, or switch off one the user left on.
 
 A project's switch on a builtin or user way is a project key. It is listed under `this project`, and the way's row in the user section can set or clear it, writing the project's file.
 
@@ -122,11 +131,11 @@ This settles #825 and amends ADR-116's "Replaces `trusted-project-macros`". The 
 `.claude/ways.yaml` gains `inherit`, the settings key `ways.inherit`, of project scope only:
 
 - `all`, the default: builtin and user ways apply in the project, and a switch set to `false` turns one off (ADR-131).
-- `none`: no builtin or user way applies in the project. A switch set to `true` brings one back, and a prefix switch such as `softwaredev/delivery/*: true` brings back that way and every way under it. The project's own ways apply as usual.
+- `none`: no builtin or user way applies in the project. A switch set to `true` brings one back, and a pattern such as `softwaredev/delivery/**: true` brings back every way under `softwaredev/delivery`. The project's own ways apply as usual.
 
 Under `none`, the project's ways are the only guidance, and their macros, once the project is trusted, are the only macros that run. The set applies to every route that puts way text into the session: prompt and tool matching, subagent injection, and `ways_search` and `ways_read`. `core.md` is the base posture and still loads. `ways.enabled: false` remains the switch that turns every way off.
 
-A way that isolation removes is logged as discarded with the filter `isolation`. A project macro that trust refuses is logged with the filter `untrusted`. Both follow the toggle-patterns and discard record, drafted beside this one.
+A way that would have fired and that isolation removes is logged as `way_discarded` with the filter `isolation` and the scope `project`. A project macro that trust refuses is logged with the filter `untrusted`, and its way's text still fires. ADR-710 §4 defines the event and leaves these two filters to this record.
 
 On the ways tab, `inherit` is a row in `this project`, and each other project's node shows its value. Under `none`, user-section rows read `off here` for each way it removes and that no switch brings back.
 
