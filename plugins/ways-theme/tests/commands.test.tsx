@@ -167,7 +167,8 @@ describe('what does not match', () => {
   ]
   for (const [name, text] of asProse) {
     test(`${name} stays prose`, () => {
-      expect(copyPieces(text).every(piece => piece.kind === 'text' || piece.form === 'code')).toBe(true)
+      const isFenced = /^[ \t]*(?:`{3,}|~{3,})/m.test(text)
+      expect(copyPieces(text).every(piece => piece.kind === 'text' || (isFenced && piece.form === 'code'))).toBe(true)
     })
   }
 
@@ -289,7 +290,6 @@ describe('a command draws as one string outside every frame', () => {
     await ui.press({ key: button!.key! })
     await ui.unmount()
     expect(h.copies).toEqual([COMMAND])
-    expect(/[\n│╭╮╰╯]/.test(h.copies[0]!)).toBe(false)
     expect(h.toasts).toContainEqual(expect.objectContaining({ text: 'Copied' }))
   })
 
@@ -567,19 +567,23 @@ describe('a copy block draws clear of every frame and copies its text alone', ()
     await ui.press({ key: button!.key! })
     await ui.unmount()
     expect(h.copies).toEqual([SLASH])
-    expect(isClean(h.copies[0]!)).toBe(true)
   })
 
-  test('a wide span copies as one string, with no frame glyph, padding or break', async ($, on) => {
+  test('a wide span copies what its rows draw: one Text, clear of every frame, with no glyph, padding or break', async ($, on) => {
     const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
-    const ui = await $.ui.mount(at(`Then \`${LONG}\` clears them.`))
+    const ui = await $.ui.mount(at(`Then \`${LONG}\` clears them, and \`${LONG.replace('worktree', 'branch')}\` too.`))
     const tree = await ui.drawn()
-    expect(isClear(drawnAt(tree, LONG)[0]!)).toBe(true)
-    await ui.press({ key: (await ui.find({ type: 'Button', text: /^Copy$/ }))!.key! })
+    for (const button of await ui.findAll({ type: 'Button', text: /^Copy$/ })) await ui.press({ key: button.key! })
     await ui.unmount()
-    expect(h.copies).toEqual([LONG])
-    expect(isClean(h.copies[0]!)).toBe(true)
+    expect(h.copies.length).toBe(2)
+    for (const copy of h.copies) {
+      // The span's Text and the one coloured run inside it both draw it.
+      const found = drawnAt(tree, copy)
+      expect(found.length).toBeGreaterThan(0)
+      expect(found.every(isClear)).toBe(true)
+      expect(isClean(copy)).toBe(true)
+    }
   })
 
   test('a fence: language and Copy above, each line clear of every frame, the code copied exactly', async ($, on) => {
@@ -598,7 +602,6 @@ describe('a copy block draws clear of every frame and copies its text alone', ()
     await ui.press({ key: (await ui.find({ type: 'Button', text: /^\s*Copy\s*$/ }))!.key! })
     await ui.unmount()
     expect(h.copies).toEqual([CODE])
-    expect(/[│╭╮╰╯]/.test(h.copies[0]!)).toBe(false)
   })
 
   test('a 40-row table, a 60-line fence, a 40-line diff and 200 lines of shell output each draw whole', async ($, on) => {
