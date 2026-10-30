@@ -528,12 +528,14 @@ describe('the gradient prompt box', () => {
 })
 
 describe('the copy controls', () => {
+  // Under the fullscreen layout, where the terminal draws the controls.
+  const full = (e: never) => ({ ...(e as object), viewport: { ...VIEW, isFullscreen: true } }) as never
   const TABLE_REPLY = { text: 'Two:\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nAnd more.', isFirstOfReply: true }
 
   test("render.copy on draws the table's forms and the reply's", async ($, on) => {
     host(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
-    const ui = await $.ui.mount({ ...(at('terminal', 'AssistantMessage', TABLE_REPLY) as object), viewport: { ...VIEW, isFullscreen: true } } as never)
+    const ui = await $.ui.mount(full(at('terminal', 'AssistantMessage', TABLE_REPLY)))
     const keys = (await ui.findAll({ type: 'Button' })).map(button => button.key)
     expect(keys).toEqual(['copy-1-markdown', 'copy-1-native', 'copy-1-text', 'copy-reply-markdown', 'copy-reply-text'])
     await ui.unmount()
@@ -542,13 +544,13 @@ describe('the copy controls', () => {
   test('render.copy off draws none of them and leaves no row where they were', async ($, on) => {
     host(on, { mod: json({ ...MIAMI_NIGHTS, render: { ...MIAMI_NIGHTS.render, copy: false } }) })
     await $.session.start(INTERACTIVE)
-    const ui = await $.ui.mount(at('terminal', 'AssistantMessage', TABLE_REPLY))
+    const ui = await $.ui.mount(full(at('terminal', 'AssistantMessage', TABLE_REPLY)))
     expect(await ui.findAll({ type: 'Button' })).toEqual([])
     const empty = walk(await ui.drawn()).filter(n => n.type === 'Box' && n.props?.justifyContent === 'flex-end')
     expect(empty).toEqual([])
     await ui.unmount()
-    const card = await $.ui.mount(at('terminal', 'ToolResult', { tool_use_id: 't2', tool: 'Bash', output: BASH_OUT, isErrored: false }, 't2'))
-    expect(await card.find({ type: 'Button', text: /Copy/ })).toBeUndefined()
+    const card = await $.ui.mount(full(at('terminal', 'ToolResult', { tool_use_id: 't2', tool: 'Bash', output: BASH_OUT, isErrored: false }, 't2')))
+    expect(await card.findAll({ type: 'Button' })).toEqual([])
     await card.unmount()
   })
 })

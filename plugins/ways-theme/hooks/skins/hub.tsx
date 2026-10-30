@@ -30,6 +30,7 @@ import { MOD_EXPORT_ARGV, parseExport, setupOf } from './config.ts'
 import type { Setup } from './config.ts'
 import { diffstat, MAX_DRAWN, pick, shortenPath } from './format.ts'
 import { bodyOf, inputFields, isOpen } from './detail.ts'
+import { copiedToast } from './copy-rows.tsx'
 import { DISCLOSE_INSET, disclosedRow, drawsBody, openedRows } from './detail-rows.tsx'
 import { commandSegments } from './command-output.ts'
 import { askBand, diffCard, footerRow, groupRow, promptRow, quietResult, relayedRows, replyRows, spinnerRow, terminalCard, toolRow, usageBand, desktopSpinnerRow } from './rows.tsx'
@@ -410,7 +411,7 @@ const quietly = ($: EngineInterface, what: string) => (error: unknown) => debug(
 function copier($: EngineInterface, e: { surface: RenderSurface; viewport?: { isFullscreen?: boolean } }): Look['copy'] {
   if (e.surface === 'terminal' && e.viewport?.isFullscreen !== true) return undefined
   return (text, form) => {
-    void $.ui.copy({ text, surface: e.surface }).then(result => $.ui.toast(result.isCopied ? (form === undefined ? 'Copied' : `Copied ${form}`) : 'Could not copy here'))
+    void $.ui.copy({ text, surface: e.surface }).then(result => $.ui.toast(result.isCopied ? copiedToast(form) : 'Could not copy here'))
   }
 }
 

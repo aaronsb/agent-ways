@@ -678,7 +678,8 @@ describe('a copy block draws clear of every frame and copies its text alone', ()
     const ui = await $.ui.mount(full(FENCED))
     const tree = await ui.drawn()
     expect(borders(tree).length).toBe(2)
-    expect(drawnAt(tree, 'rust').length).toBe(1)
+    // The language once above the code; the fence's own copy is labelled `rust` too.
+    expect(drawnAt(tree, 'rust').filter(above => !above.some(n => n.type === 'Button')).length).toBe(1)
     for (const line of ['fn main() {', '    let x = 1;   ', '  println!("{x}");', '}']) {
       // The line's Text and its one token's Text both draw it.
       const found = drawnAt(tree, line)
@@ -731,6 +732,8 @@ const BLOCKS = ['! git status', '', 'then `/clear`.', '', '```sh\nls -la\n```', 
 const CSV = 'name,note\n"a, b","say ""hi"""\nlink,"it\ntwo"'
 const TEXT = 'name  note\na, b  say "hi"\nlink  it two'
 const ACCENT = setupOf(MIAMI_NIGHTS as never).skin.palette.user
+const MUTED = setupOf(MIAMI_NIGHTS as never).skin.palette.muted
+const TABLE_ONLY = 'Rows:\n\n| a | b |\n|---|---|\n| 1 | 2 |'
 
 type Style = { copy_style?: 'verbose' | 'compact'; icons?: 'unicode' | 'ascii' }
 
@@ -813,7 +816,7 @@ describe('the forms a block copies', () => {
 describe('the copy control draws', () => {
   const REPLY = 'Two:\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```sh\nls\n```\n\nAnd more.'
 
-  test('verbose, the default: an accent `Copy as:`, then each format by name with a `·` between them', async ($, on) => {
+  test('verbose, the default: a muted `Copy as:`, then each format by name in the accent with a `·` between them', async ($, on) => {
     const { ui } = await mounted($, on, REPLY)
     const tree = await ui.drawn()
     await ui.unmount()
@@ -821,7 +824,10 @@ describe('the copy control draws', () => {
     expect(controlLine(tree, 'copy-2-markdown')).toBe(' Copy as: markdown · sh ')
     expect(controlLine(tree, 'copy-reply-markdown')).toBe(' Copy reply as: markdown · text ')
     const leads = walk(tree).filter(n => n.type === 'Text' && /^ Copy (reply )?as: $/.test(textOf(n)))
-    expect(leads.map(n => n.props?.color)).toEqual([ACCENT, ACCENT, ACCENT])
+    expect(leads.map(n => n.props?.color)).toEqual([MUTED, MUTED, MUTED])
+    const forms = walk(tree).filter(n => n.type === 'Button').map(button => walk(button).find(n => n.type === 'Text')?.props?.color)
+    expect(forms.length).toBe(7)
+    expect(forms.every(color => color === ACCENT)).toBe(true)
   })
 
   test('verbose under ascii icons: a `|` between the forms', async ($, on) => {
@@ -836,9 +842,9 @@ describe('the copy control draws', () => {
     const { ui } = await mounted($, on, REPLY, { copy_style: 'compact' })
     const tree = await ui.drawn()
     await ui.unmount()
-    expect(controlLine(tree, 'copy-1-markdown')).toBe('   ·  ·  ')
-    expect(controlLine(tree, 'copy-2-markdown')).toBe('   ·  ')
-    expect(controlLine(tree, 'copy-reply-markdown')).toBe('   ·  ')
+    expect(controlLine(tree, 'copy-1-markdown')).toBe(' \uf0c5 \ue73e · \uf0ce · \uf036 ')
+    expect(controlLine(tree, 'copy-2-markdown')).toBe(' \uf0c5 \ue73e · \uf121 ')
+    expect(controlLine(tree, 'copy-reply-markdown')).toBe(' \uf0c5 \ue73e · \uf036 ')
   })
 
   test('compact under ascii icons: cp or reply, then md, csv or code, and txt', async ($, on) => {
@@ -886,7 +892,7 @@ describe('each form is labelled by the format it copies, from one table', () => 
     expect(walk(tree).some(n => (n.type === 'Button' && n.props?.label === 'native') || (n.type === 'Text' && textOf(n).includes('native')))).toBe(false)
   })
 
-  for (const lang of ['markdown', 'text', 'csv']) {
+  for (const lang of ['markdown', 'Markdown', 'text', 'csv']) {
     test(`a \`\`\`${lang} fence draws no label twice`, async ($, on) => {
       const { ui } = await mounted($, on, `Here:\n\n\`\`\`${lang}\n# a, b\n\`\`\``)
       const tree = await ui.drawn()
@@ -894,7 +900,7 @@ describe('each form is labelled by the format it copies, from one table', () => 
       const labels = walk(tree).flatMap(n => (n.type === 'Button' && String(n.props?.key).startsWith('copy-1-') ? [String(n.props?.label)] : []))
       expect(labels.length).toBeGreaterThan(1)
       expect(new Set(labels).size).toBe(labels.length)
-      if (lang === 'markdown') expect(controlLine(tree, 'copy-1-markdown')).toBe(' Copy as: markdown · code ')
+      if (lang.toLowerCase() === 'markdown') expect(controlLine(tree, 'copy-1-markdown')).toBe(' Copy as: markdown · code ')
     })
   }
 
@@ -908,7 +914,7 @@ describe('each form is labelled by the format it copies, from one table', () => 
 
   test('the compact Nerd Font labels are exactly these codepoints', () => {
     const nerd = Object.fromEntries(Object.entries(LABELS).map(([format, label]) => [format, label.nerd]))
-    expect(nerd).toEqual({ markdown: '', text: '', csv: '', code: '', new: '', copy: '', reply: '' })
+    expect(nerd).toEqual({ markdown: '\ue73e', text: '\uf036', csv: '\uf0ce', code: '\uf121', new: '\uf067', copy: '\uf0c5', reply: '\uf0c5' })
   })
 
   const REPLY = 'Rows:\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```python\nprint(1)\n```'
@@ -930,6 +936,65 @@ describe('each form is labelled by the format it copies, from one table', () => 
       expect(controlLine(tree, 'copy-reply-markdown')).toBe(`${lead(LABELS.reply)}${[LABELS.markdown, LABELS.text].map(pick).join(sep)} `)
     })
   }
+})
+
+describe('the fullscreen gate', () => {
+  const result = (isFullscreen: boolean) =>
+    ({ plugin: 'ways-theme', surface: 'terminal', component: 'ToolResult', requestId: 't2', viewport: { columns: 80, rows: 40, isFullscreen }, props: { tool_use_id: 't2', tool: 'Bash', output: { stdout: 'out 1\nout 2', stderr: '', interrupted: false, isImage: false }, isErrored: false } }) as never
+  const DIFF = 'See:\n\n```diff\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n```'
+
+  test('on the main screen a copy block draws clear of every frame, with no control line', async ($, on) => {
+    hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
+    await $.session.start(INTERACTIVE)
+    for (const [text, line] of [[SLASH_REPLY, SLASH], [`Then \`${LONG}\` clears them.`, LONG], [FENCED, '  println!("{x}");']] as const) {
+      const ui = await $.ui.mount(at(text))
+      const tree = await ui.drawn()
+      await ui.unmount()
+      const found = drawnAt(tree, line)
+      expect(found.length).toBeGreaterThan(0)
+      expect(found.every(isClear)).toBe(true)
+      expect(walk(tree).filter(n => n.type === 'Button')).toEqual([])
+    }
+    const fence = await $.ui.mount(at(FENCED))
+    const tree = await fence.drawn()
+    await fence.unmount()
+    expect([borders(tree).length, drawnAt(tree, 'rust').length]).toEqual([2, 1])
+  })
+
+  test('on the main screen shell output and a diff fence draw no control; fullscreen, the output does', async ($, on) => {
+    const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
+    await $.session.start(INTERACTIVE)
+    const main = await $.ui.mount(result(false))
+    expect(await main.findAll({ type: 'Button' })).toEqual([])
+    await main.unmount()
+    const diff = await $.ui.mount(at(DIFF))
+    expect(shows(await diff.drawn(), 'new')).toBe(true)
+    expect(await diff.findAll({ type: 'Button' })).toEqual([])
+    await diff.unmount()
+    const full = await $.ui.mount(result(true))
+    await full.press({ key: 'copy-output' })
+    await full.unmount()
+    expect(h.copies).toEqual(['out 1\nout 2'])
+  })
+
+  test('the desktop, with no isFullscreen, draws the control and copies on a press', async ($, on) => {
+    const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
+    await $.session.start(INTERACTIVE)
+    const ui = await $.ui.mount(at(TABLE_ONLY, 'desktop'))
+    expect(controlLine(await ui.drawn(), 'copy-1-markdown')).toBe(' Copy as: markdown · csv · text ')
+    await ui.press({ key: 'copy-1-native' })
+    await ui.unmount()
+    expect(h.copies).toEqual(['a,b\n1,2'])
+  })
+
+  test('compact on the desktop draws the ASCII glyphs, the desktop font having no Nerd Font', async ($, on) => {
+    hostWithClipboard(on, { mod: json({ ...MIAMI_NIGHTS, render: { ...MIAMI_NIGHTS.render, copy_style: 'compact' } }) })
+    await $.session.start(INTERACTIVE)
+    const ui = await $.ui.mount(at(TABLE_ONLY, 'desktop'))
+    const tree = await ui.drawn()
+    await ui.unmount()
+    expect(controlLine(tree, 'copy-1-markdown')).toBe(` ${LABELS.copy.ascii} ${[LABELS.markdown, LABELS.csv, LABELS.text].map(label => label.ascii).join(' · ')} `)
+  })
 })
 
 describe('a table copies as CSV', () => {

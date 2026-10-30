@@ -34,6 +34,13 @@ export const LABELS = {
   reply: { verbose: 'Copy reply', nerd: '\uf0c5', ascii: 'reply' },
 } as const satisfies Readonly<Record<string, Label>>
 
+/** The words around the labels: what follows a verbose lead, the separator between forms
+ *  under each icon set, and what a toast opens on. */
+export const WORDING = { as: ' as: ', separator: { unicode: ' · ', ascii: ' | ' }, copied: 'Copied' } as const
+
+/** A copy's toast: `Copied`, and the label of the form copied where there was a choice. */
+export const copiedToast = (label?: string): string => (label === undefined ? WORDING.copied : `${WORDING.copied} ${label}`)
+
 /** What leads a control: a block's copy, or the reply's. */
 export type Lead = 'copy' | 'reply'
 
@@ -78,10 +85,12 @@ export function copiesOf(block: Copy | Code | Table): CopyAs[] {
     { form: 'native', text: code, format: block.lang === '' ? 'code' : block.lang },
     { form: 'text', text: code, format: 'text' },
   ])
-  // A language whose label another offered form already draws, as ```markdown, reads `code`.
-  const taken = offered.filter(copy => copy.form !== 'native').map(copy => labelOf(copy.format).verbose)
+  // A language whose label another offered form already draws, in any case, as ```Markdown,
+  // reads `code`.
+  const word = (copy: CopyAs): string => labelOf(copy.format).verbose.toLowerCase()
+  const taken = offered.filter(copy => copy.form !== 'native').map(word)
 
-  return offered.map(copy => (copy.form === 'native' && taken.includes(labelOf(copy.format).verbose) ? { ...copy, format: 'code' } : copy))
+  return offered.map(copy => (copy.form === 'native' && taken.includes(word(copy)) ? { ...copy, format: 'code' } : copy))
 }
 
 // A reply as its text: prose without its markdown, a table as `tableText`, a fence, a
@@ -104,12 +113,16 @@ export const replyCopies = (whole: string, segments: readonly Segment[]): CopyAs
   ])
 
 /** The control for `copies`, padded by a space each side to sit on a border line;
- *  nothing where nothing can copy. `lead` is `reply` for the reply's control. */
-export function copyControl(look: Look, key: string, copies: readonly CopyAs[], lead: Lead = 'copy') {
+ *  nothing where nothing can copy. `lead` is `reply` for the reply's control, and `box`
+ *  adds to the control's own row. What can be pressed draws in the accent, the lead
+ *  muted. Off the terminal a compact glyph is the ASCII one: the desktop draws a Button's
+ *  label in a font of its own, with no Nerd Font glyphs. */
+export function copyControl(look: Look, key: string, copies: readonly CopyAs[], lead: Lead = 'copy', box: Record<string, unknown> = {}) {
   const { Box, Button, Text } = look.ui
-  const accent = look.skin.palette.user
+  const { palette } = look.skin
   const isCompact = look.prefs.copyStyle === 'compact'
-  const drawn = (label: Label): string => (!isCompact ? label.verbose : look.prefs.icons === 'ascii' ? label.ascii : label.nerd)
+  const isAscii = look.prefs.icons === 'ascii' || look.surface !== 'terminal'
+  const drawn = (label: Label): string => (!isCompact ? label.verbose : isAscii ? label.ascii : label.nerd)
   const copy = look.copy
 
   if (copy === undefined || copies.length === 0) {
@@ -121,10 +134,10 @@ export function copyControl(look: Look, key: string, copies: readonly CopyAs[], 
     const text = copies[0]!.text
 
     return (
-      <Box flexDirection="row">
+      <Box flexDirection="row" {...box}>
         <Text> </Text>
         <Button key={key} label={label} plain onPress={() => copy(text)}>
-          <Text color={accent} bold>
+          <Text color={palette.user} bold>
             {label}
           </Text>
         </Button>
@@ -133,30 +146,28 @@ export function copyControl(look: Look, key: string, copies: readonly CopyAs[], 
     )
   }
 
-  const separator = look.prefs.icons === 'ascii' ? ' | ' : ' · '
+  const separator = WORDING.separator[look.prefs.icons]
 
   return (
-    <Box flexDirection="row">
-      <Text color={accent}>{isCompact ? ` ${drawn(LABELS[lead])} ` : ` ${LABELS[lead].verbose} as: `}</Text>
-      {copies.flatMap(({ form, text, format }, i) => [
-        ...(i === 0 ? [] : [<Text color={look.skin.palette.muted}>{separator}</Text>]),
-        <Button key={`${key}-${form}`} label={drawn(labelOf(format))} plain onPress={() => copy(text, labelOf(format).verbose)} />,
-      ])}
+    <Box flexDirection="row" {...box}>
+      <Text color={palette.muted}>{isCompact ? ` ${drawn(LABELS[lead])} ` : ` ${LABELS[lead].verbose}${WORDING.as}`}</Text>
+      {copies.flatMap(({ form, text, format }, i) => {
+        const label = drawn(labelOf(format))
+
+        return [
+          ...(i === 0 ? [] : [<Text color={palette.muted}>{separator}</Text>]),
+          <Button key={`${key}-${form}`} label={label} plain onPress={() => copy(text, labelOf(format).verbose)}>
+            <Text color={palette.user}>{label}</Text>
+          </Button>,
+        ]
+      })}
       <Text> </Text>
     </Box>
   )
 }
 
-/** The control on a line of its own under a block or a card, flush right. */
+/** The control on a line of its own under a block or a card, flush right, wrapping where
+ *  the line is narrower than the control. */
 export function copyRow(look: Look, key: string, copies: readonly CopyAs[], lead?: Lead) {
-  const { Box } = look.ui
-  const control = copyControl(look, key, copies, lead)
-
-  return control === undefined ? (
-    ''
-  ) : (
-    <Box flexDirection="row" justifyContent="flex-end">
-      {control}
-    </Box>
-  )
+  return copyControl(look, key, copies, lead, { justifyContent: 'flex-end', flexWrap: 'wrap' }) ?? ''
 }
