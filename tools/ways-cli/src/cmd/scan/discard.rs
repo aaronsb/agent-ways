@@ -19,7 +19,7 @@ use crate::session;
 use super::late_interaction::{Shadow, Verdicts};
 use super::matching::{match_prompt, PromptMatch};
 use super::scoring::EmbedScores;
-use super::{candidate_log, effective_thresholds, effective_thresholds_in_scan, WayCandidate};
+use super::{candidate_log, effective_thresholds, effective_thresholds_in_scan, has_shown_ancestor, WayCandidate};
 
 /// What switched a way off.
 #[derive(Debug, Clone, PartialEq)]
@@ -113,24 +113,38 @@ impl LaneLog<'_> {
 /// Log a discarded fire for a way of `off`. On a lane whose delivered fires
 /// meet a refire window, as `way_scored` gates them, it logs only when the
 /// way's refire curve lets it fire now; the way's discard record keeps that
-/// window, so its real engagement state is never written.
+/// window, so its real engagement state is never written. As a delivered
+/// fire is, the claim is re-checked, recorded and written under a lock on the
+/// record, so parallel hooks claim it once.
 pub(crate) fn log(off: &Switched, at: &LaneLog<'_>, hit: &Hit<'_>) {
     let (Some(why), Some(way)) = (off.why(hit.way), off.ways.iter().find(|w| w.id == hit.way)) else { return };
     let tick = session::get_token_position(at.session);
     if !at.refire_gated() {
         return write(hit, why, at, tick);
     }
+    if refire_open(way, at, tick).is_none() {
+        return;
+    }
+    let lock = session::lock_discarded_fire(&way.id, at.session);
     let Some(curve) = refire_open(way, at, tick) else { return };
     session::record_discarded_fire(&way.id, at.session, &curve, tick);
     write(hit, why, at, tick);
+    drop(lock);
 }
 
 /// The way's refire curve when a discarded fire of it would clear the curve
 /// at `tick`, read from its discard record; `None` while the window holds, or
-/// for a way with no `refire:`, which never fires.
+/// for a way with no `refire:`, which never fires. A session-start way on the
+/// state lane is delivered once per session whatever its curve, so its
+/// discard opens only while the record is empty.
 pub(crate) fn refire_open(way: &WayCandidate, at: &LaneLog<'_>, tick: u64) -> Option<sensor_trait::Curve> {
     let curve = crate::cmd::show::refire_curve(&way.path, at.session, at.project)?;
-    session::discarded_fire_outcome(&way.id, at.session, &curve, tick).is_allowed().then_some(curve)
+    let open = if at.lane == "state" && way.trigger.as_deref() == Some("session-start") {
+        !session::discarded_fire_recorded(&way.id, at.session)
+    } else {
+        session::discarded_fire_outcome(&way.id, at.session, &curve, tick).is_allowed()
+    };
+    open.then_some(curve)
 }
 
 /// Log a discarded fire with no refire gate, for a pull and a subagent's
@@ -210,11 +224,18 @@ pub(crate) struct PromptShadow<'a> {
     /// The late-interaction verdicts, whose shadow pass decided each
     /// switched-off way's semantic channel.
     pub verdicts: Option<&'a Verdicts>,
-    /// Ways fired in this scan, which boost their children, or `None` on a
-    /// lane without the in-scan boost.
-    pub fired: Option<&'a HashSet<String>>,
+    /// The in-scan boost, on a lane that has one.
+    pub boost: Option<Boost<'a>>,
     /// The enabled competitors, corpus id to bare id.
     pub enabled: &'a HashMap<&'a str, &'a str>,
+}
+
+/// Ways fired in this scan, which boost their children, and those of them
+/// that were shown; a boost counts only from a shown ancestor, as delivery
+/// requires.
+pub(crate) struct Boost<'a> {
+    pub fired: &'a HashSet<String>,
+    pub shown: &'a HashSet<String>,
 }
 
 /// The prompt and task lanes' shadow pass: each eligible switched-off way
@@ -225,11 +246,11 @@ pub(crate) fn prompt_shaped(off: &Switched, eligible: impl Fn(&WayCandidate) -> 
     let shadow = s.verdicts.map(Verdicts::shadow);
     for way in off.ways.iter().filter(|w| eligible(w)) {
         let regex_text = if way.pattern_strict { s.query } else { s.masked };
-        let thresholds = match s.fired {
-            Some(fired) => effective_thresholds_in_scan(way, s.session, fired).0,
-            None => effective_thresholds(way, s.session),
+        let (thresholds, boosted) = match &s.boost {
+            Some(b) => effective_thresholds_in_scan(way, s.session, b.fired),
+            None => (effective_thresholds(way, s.session), false),
         };
-        let run = |scores: &EmbedScores| {
+        let run = |thresholds, scores: &EmbedScores| {
             match_prompt(
                 regex_text,
                 &way.pattern,
@@ -243,13 +264,18 @@ pub(crate) fn prompt_shaped(off: &Switched, eligible: impl Fn(&WayCandidate) -> 
                 shadow.as_ref(),
             )
         };
-        let mut outcome = run(s.scores);
+        let mut outcome = run(thresholds, s.scores);
         let mut scores = s.scores;
         if let (PromptMatch::KeywordGated(_), Some(recheck)) = (&outcome, s.recheck) {
-            outcome = run(recheck);
+            outcome = run(thresholds, recheck);
             scores = recheck;
         }
         let PromptMatch::Fired { channel, score, matched_span } = outcome else { continue };
+        // A fire that needed an unshown parent's boost would have been withheld.
+        let needs_parent = boosted && !matches!(run(effective_thresholds(way, s.session), scores), PromptMatch::Fired { .. });
+        if needs_parent && !s.boost.as_ref().is_some_and(|b| has_shown_ancestor(&way.id, b.shown)) {
+            continue;
+        }
         let semantic = match s.verdicts {
             _ if score.is_none() => None,
             Some(v) => v.discarded(&way.corpus_id),
@@ -297,7 +323,7 @@ pub fn project_off(surface: OffSurface<'_>, session_id: &str, project: Option<&s
         OffSurface::Command { command, description } => {
             let command = super::ShellCommand::parse(command);
             let surface = super::CommandSurface { command: &command, description, session_id, scope: &scope, project_dir: &project_dir };
-            super::command::log_discarded(&surface, &[], &HashSet::new(), &off, &none);
+            super::command::log_discarded(&surface, &[], &HashSet::new(), &HashSet::new(), &off, &none);
         }
         OffSurface::File { path } => super::file::log_discarded(&off, path, &at("file", &scope)),
         OffSurface::Tool { tool, hook_event } => super::tool::log_discarded(&off, tool, hook_event, &at("tool", &scope)),
@@ -309,7 +335,7 @@ pub fn project_off(surface: OffSurface<'_>, session_id: &str, project: Option<&s
 fn pattern_only(off: &Switched, query: &str, session_id: &str, none: &EmbedScores, eligible: impl Fn(&WayCandidate) -> bool, at: &LaneLog<'_>) {
     let masked = super::mask_nonlinguistic(query);
     let enabled = HashMap::new();
-    let shadow = PromptShadow { query, masked: &masked, session: session_id, scores: none, recheck: None, verdicts: None, fired: None, enabled: &enabled };
+    let shadow = PromptShadow { query, masked: &masked, session: session_id, scores: none, recheck: None, verdicts: None, boost: None, enabled: &enabled };
     prompt_shaped(off, eligible, &shadow, at);
 }
 

@@ -16,7 +16,8 @@ mod log;
 // `session::way_fire_outcome`, etc. — no call-site churn from the
 // structural split (issue #52).
 pub use engagement::{
-    discarded_fire_outcome, first_suppression_in_window, lock_engagement, record_discarded_fire, record_way_fire, way_fire_outcome,
+    discarded_fire_outcome, discarded_fire_recorded, first_suppression_in_window, lock_discarded_fire, lock_engagement, record_discarded_fire,
+    record_way_fire, way_fire_outcome,
     way_refire_threshold_k, EngagementLock, FireDecision, FireOutcome, REFIRE_FLOOR,
 };
 pub use log::{log_decision, log_event, log_event_with};

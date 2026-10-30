@@ -299,22 +299,6 @@ fn scan_prompt_surface(
         }
     }
 
-    discard::prompt_shaped(
-        &off,
-        |w| eligible(w, lane, &project_dir),
-        &discard::PromptShadow {
-            query,
-            masked: &masked,
-            session: session_id,
-            scores: &embed_matches,
-            recheck: prompt_only_scores.as_ref(),
-            verdicts: verdicts.as_ref(),
-            fired: Some(&fired_ids),
-            enabled: &enabled,
-        },
-        &discard::LaneLog { lane: "prompt", scope: &scope, session: session_id, project: &project_dir },
-    );
-
     order_hits(&mut hits);
 
     // ADR-196: the relevance gate judges the hits that would reach the agent
@@ -338,7 +322,7 @@ fn scan_prompt_surface(
     };
     let mut gate = gate::apply(&pending, query, response_context, &gate_log);
 
-    admit_hits(&hits, &mut gate, &pending, &gate_log, &mut record, |hit| {
+    let shown = admit_hits(&hits, &mut gate, &pending, &gate_log, &mut record, |hit| {
         let (channel, matched_span, _) = &hit.payload;
         let shown = capture_show_way(
             &hit.id,
@@ -358,6 +342,22 @@ fn scan_prompt_surface(
         (shown.outcome, delivered)
     });
     record.write();
+
+    discard::prompt_shaped(
+        &off,
+        |w| eligible(w, lane, &project_dir),
+        &discard::PromptShadow {
+            query,
+            masked: &masked,
+            session: session_id,
+            scores: &embed_matches,
+            recheck: prompt_only_scores.as_ref(),
+            verdicts: verdicts.as_ref(),
+            boost: Some(discard::Boost { fired: &fired_ids, shown: &shown }),
+            enabled: &enabled,
+        },
+        &discard::LaneLog { lane: "prompt", scope: &scope, session: session_id, project: &project_dir },
+    );
 
     if !context.is_empty() {
         emit_hook_context(hook_event, context.trim_end());
@@ -487,7 +487,7 @@ fn admit_hits(
     gate_log: &gate::LogContext<'_>,
     record: &mut decision::Record,
     mut show: impl FnMut(&Hit<PromptPayload>) -> (crate::cmd::show::ShowOutcome, bool),
-) {
+) -> HashSet<String> {
     let mut shown: HashSet<String> = HashSet::new();
     for (i, hit) in hits.iter().enumerate() {
         let (channel, _, needs_parent) = &hit.payload;
@@ -506,6 +506,7 @@ fn admit_hits(
         record.hit(&hit.id, i + 1, channel, hit.score, result, Some(gate));
     }
     record.judge(gate);
+    shown
 }
 
 /// A way that fired on its parent's boost is withheld when the parent is not

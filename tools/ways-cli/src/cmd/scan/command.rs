@@ -61,8 +61,6 @@ pub fn command(
     let command = ShellCommand::parse(cmd);
     let surface = CommandSurface { command: &command, description, session_id, scope: &scope, project_dir: &project_dir };
     let hits = command_hits(&surface, &candidates, &embed_matches, &HashSet::new());
-    let fired: HashSet<String> = hits.iter().map(|h| h.id.clone()).collect();
-    log_discarded(&surface, &candidates, &fired, &off, &embed_matches);
     let mut shown: HashSet<String> = HashSet::new();
     for hit in &hits {
         let (channel, span, needs_parent) = &hit.payload;
@@ -87,6 +85,8 @@ pub fn command(
             context.push_str(&out);
         }
     }
+    let fired: HashSet<String> = hits.iter().map(|h| h.id.clone()).collect();
+    log_discarded(&surface, &candidates, &fired, &shown, &off, &embed_matches);
 
     // Check matching: commands regex + semantic scoring.
     let checks = collect_checks(&project_dir);
@@ -246,14 +246,16 @@ pub(super) fn command_hits(
 }
 
 /// The Bash lane's shadow pass: [`command_hits`] over each switched-off way
-/// alone, beside the enabled ways the scan fired so a child of one keeps its
-/// in-scan boost, each hit logged as a discarded fire. Switched-off ways never
-/// lift each other. A semantic hit carries its scores beside the enabled ways
-/// that compete on this lane.
+/// alone, beside the enabled ways the scan `fired` so a child of one keeps its
+/// in-scan boost, each hit logged as a discarded fire. A hit that needed that
+/// boost counts only when an ancestor was `shown`, as delivery requires.
+/// Switched-off ways never lift each other. A semantic hit carries its scores
+/// beside the enabled ways that compete on this lane.
 pub(super) fn log_discarded(
     surface: &CommandSurface<'_>,
     candidates: &[WayCandidate],
     fired: &HashSet<String>,
+    shown: &HashSet<String>,
     off: &discard::Switched,
     embed_matches: &EmbedScores,
 ) {
@@ -269,7 +271,10 @@ pub(super) fn log_discarded(
     let at = discard::LaneLog { lane: "command", scope: surface.scope, session: surface.session_id, project: surface.project_dir };
     for way in &off.ways {
         for hit in command_hits(surface, std::slice::from_ref(way), embed_matches, fired) {
-            let (trigger, span, _) = &hit.payload;
+            let (trigger, span, needs_parent) = &hit.payload;
+            if *needs_parent && !has_shown_ancestor(&hit.id, shown) {
+                continue;
+            }
             let scores = match span {
                 Some(_) => None,
                 None => discard::single_scores(embed_matches, &enabled, way),

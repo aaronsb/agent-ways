@@ -122,7 +122,7 @@ pub fn task(
             scores: &embed_matches,
             recheck: None,
             verdicts: verdicts.as_ref(),
-            fired: None,
+            boost: None,
             enabled: &enabled,
         },
         &discard::LaneLog { lane: "task", scope: task_scope, session: session_id, project: &project_dir },

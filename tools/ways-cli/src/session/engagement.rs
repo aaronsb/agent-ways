@@ -116,6 +116,18 @@ pub fn discarded_fire_outcome(way_id: &str, session_id: &str, curve: &Curve, cur
     classify_outcome(&load_engagement_for_tick(&discarded_path(way_id, session_id), curve, current_tick), current_tick)
 }
 
+/// Whether the way's discard record holds a discarded fire.
+pub fn discarded_fire_recorded(way_id: &str, session_id: &str) -> bool {
+    discarded_path(way_id, session_id).exists()
+}
+
+/// [`lock_engagement`] for the way's discard record, so parallel hooks claim
+/// a discarded fire once, as they deliver a fire once.
+pub fn lock_discarded_fire(way_id: &str, session_id: &str) -> Option<EngagementLock> {
+    let target = discarded_path(way_id, session_id).with_extension("");
+    agent_settings::writer::Lock::acquire_kept(&target).ok().map(|l| EngagementLock { _lock: l })
+}
+
 /// [`record_way_fire`] into the way's discard record.
 pub fn record_discarded_fire(way_id: &str, session_id: &str, curve: &Curve, current_tick: Tick) {
     let path = discarded_path(way_id, session_id);

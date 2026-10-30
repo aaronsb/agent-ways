@@ -953,6 +953,113 @@ fn stats_count_a_discarded_fire_under_its_way_and_filter() {
     assert!(human.contains("Way fires: 1  |  Discarded: 1"), "{human}");
 }
 
+/// A boost counts only from a parent that was shown. `big/first` matches more
+/// specifically, is admitted first and fills the hook's context budget, so
+/// the enabled parent `ctl/kw` matches and is withheld; an enabled child that
+/// needed its boost is withheld with it, and the switched-off child logs
+/// nothing. On the prompt and command lanes.
+#[cfg(unix)]
+#[test]
+fn an_unshown_parent_boosts_no_discard() {
+    let run = |tag: &str, source: Source, lane: &[&str]| {
+        let f = Fixture::base(tag, source, "ctl/kw/child");
+        write_way(&f.ways_root(), "ctl/kw", "gadget");
+        let big = f.ways_root().join("big/first");
+        std::fs::create_dir_all(&big).unwrap();
+        std::fs::write(
+            big.join("first.md"),
+            format!("---\ndescription: first guidance\nvocabulary: first words\npattern: fix the gadget\ncommands: ^gadgetctl run\nscope: agent\nrefire: 0.15\n---\n# Marker big/first\n\n{}\n", "lorem ipsum ".repeat(840)),
+        )
+        .unwrap();
+        write_semantic_way(&f.ways_root(), "ctl/kw/child");
+        install_stub_engine(&f.engine(), &["big/first", "ctl/kw", "ctl/kw/child"], &[("big/first", 0.30), ("ctl/kw", 0.30), ("ctl/kw/child", 0.23)]);
+        f.scan(lane);
+        f
+    };
+    let lanes: [(&str, &[&str]); 2] = [
+        ("prompt", &["prompt", "--query", "please fix the gadget for me"]),
+        ("command", &["command", "--command", "gadgetctl run", "--description", "run the gadget"]),
+    ];
+    for (name, lane) in lanes {
+        let on = run(&format!("unshown-on-{name}"), Source::None, lane);
+        assert_eq!(on.fired(), ["big/first"], "{name}: the parent is withheld and its child with it");
+        let f = run(&format!("unshown-{name}"), Source::ProjectWayKey, lane);
+        assert!(f.discarded().is_empty(), "{name}: {:?}", f.discarded());
+    }
+}
+
+/// A session-start way is delivered once per session, so its discard logs
+/// once per session as the ticks advance past its refire window; a
+/// file-exists way keeps the window on both sides.
+#[test]
+fn a_session_start_way_discards_once_per_session() {
+    let f = Fixture::base("session-start", Source::ProjectDomain, "lab/ss");
+    let way = |id: &str, trigger: &str| {
+        let dir = f.ways_root().join(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        let name = id.rsplit('/').next().unwrap();
+        std::fs::write(dir.join(format!("{name}.md")), format!("---\ndescription: {name} guidance\n{trigger}\nscope: agent\nrefire: 0.15\n---\n# Marker {id}\n")).unwrap();
+    };
+    way("lab/ss", "trigger: session-start");
+    way("ctl/ss", "trigger: session-start");
+    way("lab/fe", "trigger: file-exists\npath: marker.txt");
+    way("ctl/fe", "trigger: file-exists\npath: marker.txt");
+    std::fs::write(f.project.join("marker.txt"), "").unwrap();
+    let transcript = f.base.join(format!("{}.jsonl", f.session));
+    for tick in [1_000u64, 2_000, 80_000, 90_000, 200_000] {
+        let line = format!(r#"{{"type":"assistant","message":{{"model":"claude-opus-5-5","usage":{{"input_tokens":{tick},"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}}}}"#);
+        std::fs::write(&transcript, format!("{line}\n")).unwrap();
+        f.scan(&["state", "--hook-event", "UserPromptSubmit", "--transcript", transcript.to_str().unwrap()]);
+    }
+    // A delivered refire logs `way_redisclosed`.
+    let shown = |id: &str| {
+        let fires = f.events("way_fired").into_iter().filter(|v| v.get("discarded").is_none());
+        fires.chain(f.events("way_redisclosed")).filter(|v| v["way"] == id).count()
+    };
+    let discarded = |id: &str| f.discarded().iter().filter(|d| d.0 == id).count();
+    assert_eq!((shown("ctl/ss"), discarded("lab/ss")), (1, 1), "once per session on both sides");
+    assert_eq!((shown("ctl/fe"), discarded("lab/fe")), (2, 2), "a file-exists way refires past its window on both sides");
+}
+
+/// Parallel hooks claim a discarded fire once, as they deliver a fire once:
+/// each round, a fresh session runs four `scan file` calls on a switched-off
+/// way's file and four on an enabled way's, all at once. The rounds default
+/// to 12; `WAYS_DISCARD_RACE_ROUNDS` raises them.
+#[test]
+fn parallel_scans_discard_once_per_window() {
+    let rounds: usize = std::env::var("WAYS_DISCARD_RACE_ROUNDS").ok().and_then(|s| s.parse().ok()).unwrap_or(12);
+    let f = Fixture::new("race", Source::ProjectDomain);
+    for round in 0..rounds {
+        let session = format!("{}-r{round}", f.session);
+        clean_markers(&session);
+        let children: Vec<std::process::Child> = ["/src/a.widget", "/src/a.gadget"]
+            .iter()
+            .cycle()
+            .take(8)
+            .map(|path| {
+                ways_cmd(&f.home, &f.project)
+                    .args(["scan", "file", "--path", path, "--session", &session, "--project"])
+                    .arg(&f.project)
+                    .stdout(Stdio::null())
+                    .spawn()
+                    .expect("Failed to run ways scan file")
+            })
+            .collect();
+        for mut child in children {
+            assert!(child.wait().unwrap().success());
+        }
+        let events: Vec<serde_json::Value> = std::fs::read_to_string(f.home.join(".local/state/agent-ways/events.jsonl"))
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .filter(|v| v["event"] == "way_fired" && v["session"] == session.as_str())
+            .collect();
+        let count = |way: &str, discarded: bool| events.iter().filter(|v| v["way"] == way && v.get("discarded").is_some() == discarded).count();
+        assert_eq!((count("ctl/kw", false), count("lab/kw", true)), (1, 1), "round {round}: one delivered fire and one discarded fire");
+        clean_markers(&session);
+    }
+}
+
 /// The session dump and the replay count what reached the session in their
 /// fires and turns, and the discarded fires apart, by filter.
 #[test]
