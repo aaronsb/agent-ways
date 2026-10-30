@@ -1120,9 +1120,35 @@ fn follow_star_advice(text: &str, lint: &str, star: &str) -> String {
     out
 }
 
+/// The toggles of an overlay's `ways:` map, as the config reads them.
+fn overlay_toggles(text: &str) -> Vec<(String, bool)> {
+    let doc: serde_yaml::Value = serde_yaml::from_str(text).unwrap();
+    let Some(map) = doc.get("ways").and_then(serde_yaml::Value::as_mapping) else { return Vec::new() };
+    map.iter()
+        .filter_map(|(k, v)| {
+            let on = match v {
+                serde_yaml::Value::Bool(b) => Some(*b),
+                v => v.get("enabled").and_then(serde_yaml::Value::as_bool),
+            };
+            Some((k.as_str()?.to_string(), on?))
+        })
+        .collect()
+}
+
+/// Whether `id` was off by the toggle rule before ADR-710: a key equal to
+/// the id wins, else the longest `dir/*` key covering `dir` and its subtree.
+fn off_by_old_rule(toggles: &[(String, bool)], id: &str) -> bool {
+    let covers = |key: &str| match key.strip_suffix("/*") {
+        None => (key == id).then_some(usize::MAX),
+        Some(dir) => (id == dir || id.starts_with(&format!("{dir}/"))).then_some(dir.len()),
+    };
+    toggles.iter().filter_map(|(k, on)| covers(k).map(|r| (r, *on))).max_by_key(|(r, _)| *r).is_some_and(|(_, on)| !on)
+}
+
 /// Lint `before`, follow its advice for `star`, and lint again: the file
-/// parses, and `star` is gone with nothing left to advise. `shipped` are
-/// way ids added to the fixture's shipped corpus first.
+/// parses, `star` is gone with nothing left to advise, and every way is on
+/// or off as the old rule had it over `before`. `shipped` are way ids added
+/// to the fixture's shipped corpus first.
 fn star_advice_settles(before: &str, star: &str, shipped: &[&str]) -> String {
     let f = Fx::new();
     renamed_corpus(&f);
@@ -1137,7 +1163,60 @@ fn star_advice_settles(before: &str, star: &str, shipped: &[&str]) -> String {
     f.write(&f.overlay(), &after);
     let (out, err, code) = f.run(&["settings", "lint"]);
     assert_eq!((out.as_str(), code), ("", 0), "{after}{err}");
+    let (old, new) = (overlay_toggles(before), overlay_toggles(&after));
+    for id in ["data", "data/schema-docs", "workstation/shell/shell-prompt", "local/mine"].iter().chain(shipped) {
+        let now_off = ways_core::config::way_toggled_off(new.iter().map(|(k, on)| (k.as_str(), *on)), id);
+        assert_eq!(now_off, off_by_old_rule(&old, id), "{id} after following the advice:\n{after}");
+    }
     after
+}
+
+/// Lint `before` with `shipped` added to the corpus; the advice for
+/// `data/*` names no replacement.
+fn star_lint_names_no_replacement(before: &str, shipped: &[&str]) -> String {
+    let f = Fx::new();
+    renamed_corpus(&f);
+    for id in shipped {
+        way(&f, &f.root.join("home/.claude/hooks/ways"), id);
+    }
+    f.write(&f.overlay(), before);
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(!out.contains("replace this key"), "{out}");
+    out
+}
+
+#[test]
+fn a_star_key_whose_replacement_would_tie_with_a_competitor_names_it_instead() {
+    assert_eq!(
+        star_lint_names_no_replacement("ways:\n  data/*: true\n  \"**/x\": false\n", &["data/x"]),
+        "<ROOT>/proj/.claude/ways.yaml:2: [ways.project] ways.data/*: warning: `/*` matches only the ways directly under data; it no longer covers data itself or the ways deeper down, and no replacement keeps every way as it was, so read it together with `**/x`\n"
+    );
+}
+
+#[test]
+fn a_star_key_whose_replacement_a_competitor_would_outrank_names_it_instead() {
+    assert_eq!(
+        star_lint_names_no_replacement("ways:\n  data/*: false\n  \"*/x\": true\n", &["data/x"]),
+        "<ROOT>/proj/.claude/ways.yaml:2: [ways.project] ways.data/*: warning: `/*` matches only the ways directly under data; it no longer covers data itself or the ways deeper down, and no replacement keeps every way as it was, so read it together with `*/x`\n\
+         <ROOT>/proj/.claude/ways.yaml:3: [ways.project] ways.*/x: warning: ties with ways.data/* on data/x at the same specificity with the opposite value, so the tie resolves to false\n"
+    );
+}
+
+#[test]
+fn following_the_star_advice_beside_a_competitor_it_keeps_holds_every_way() {
+    assert_eq!(
+        star_advice_settles("ways:\n  data/*: false\n  \"*/x\": false\n", "data/*", &["data/x"]),
+        "ways:\n  data: false\n  data/**: false\n  \"*/x\": false\n"
+    );
+}
+
+#[test]
+fn following_the_star_advice_beside_a_valueless_directory_key_holds_every_way() {
+    assert_eq!(
+        star_advice_settles("ways:\n  data/*: true\n  data: {note: x}\n", "data/*", &[]),
+        "ways:\n  data/**: true\n  data: {note: x}\n"
+    );
 }
 
 #[test]

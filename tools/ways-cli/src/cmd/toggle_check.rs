@@ -111,15 +111,16 @@ pub fn mixes_wildcard(key: &str) -> bool {
 /// [`mixes_wildcard`].
 pub const MIXED_WILDCARD: &str = "a segment mixes text and a wildcard, so the key is read literally and matches no way; write `*` or `**` as a whole segment";
 
-/// For a key `dir/*`, which before toggle patterns covered `dir` itself and
-/// every way under it, what lint says of it. A replacement is named only
-/// where following it literally keeps that meaning, adds no key the file
-/// holds, and leaves lint clean: the key sets a value and the file has no
-/// `dir/**` key. `dir` is named to add when it is a way in `ids` (every
-/// name counts as a way when `ids` is `None`) and the file lacks it; a `dir`
-/// key already there stays. Otherwise lint states the change and names the
-/// keys to read together. `toggles` are the file's toggles as
-/// `(key, enabled)` and `keys` every key it holds. `None` unless `dir` is
+/// For a key `dir/*`, which before toggle patterns (ADR-710) covered `dir`
+/// itself and every way under it, what lint says of it. The candidate
+/// replacement is `dir/**: v`, plus `dir: v` when `dir` is a way in `ids` and
+/// the file holds no `dir` key; a `dir` key already there stays. Lint names
+/// it only when the file holds no `dir/**` key and, over the toggles after
+/// it, every way in `ids` at or under `dir` has the state the pre-ADR-710
+/// rule gives it over the file as it is, with no tie the file lacks.
+/// Otherwise lint states the change and names the keys to read together.
+/// `toggles` are the file's toggles as `(key, enabled)` and `keys` every key
+/// it holds; with `ids` `None` nothing is simulated. `None` unless `dir` is
 /// one directory: non-empty and with no wildcard.
 pub fn old_star_advice(key: &str, toggles: &[(String, bool)], keys: &[String], ids: Option<&BTreeSet<String>>) -> Option<String> {
     let dir = key.strip_suffix("/*").filter(|d| !d.is_empty() && !d.contains('*'))?;
@@ -129,26 +130,101 @@ pub fn old_star_advice(key: &str, toggles: &[(String, bool)], keys: &[String], i
         return Some(format!("{head}; this key sets no `enabled`, so it switches nothing; remove it"));
     };
     let sub = format!("{dir}/**");
+    let dir_is_way = ids.is_none_or(|ids| ids.contains(dir));
+    let lost = if dir_is_way { format!("{dir} itself or the ways deeper down") } else { "the ways deeper down".to_string() };
+    let under = |id: &str| id == dir || id.strip_prefix(dir).is_some_and(|r| r.starts_with('/'));
+    // The other keys bearing on a way at or under `dir`. A key spelling one
+    // way and setting a value decides that way under both rules.
+    let mut others: Vec<&str> = keys
+        .iter()
+        .map(String::as_str)
+        .filter(|k| *k != key && !(!ways_core::config::is_toggle_pattern(k) && value(k).is_some()))
+        .filter(|k| match ids {
+            Some(ids) => ids.iter().any(|id| under(id) && (ways_core::config::toggle_matches(k, id) || pre_pattern_rank(k, id).is_some())),
+            None => overlaps(k, dir) || overlaps(k, &sub),
+        })
+        .collect();
+    let together = |others: &[&str]| match others {
+        [] => String::new(),
+        _ => format!(", so read it together with {}", others.iter().map(|k| format!("`{k}`")).collect::<Vec<_>>().join(", ")),
+    };
     if keys.contains(&sub) {
-        return Some(format!("{head}, and on those ways it outranks `{sub}`; it no longer covers {dir} itself or the ways deeper down, so read it together with `{sub}`"));
+        others.retain(|k| *k != sub);
+        others.insert(0, &sub);
+        return Some(format!("{head}, and on those ways it outranks `{sub}`; it no longer covers {lost}{}", together(&others)));
     }
+    let Some(ids) = ids else {
+        return Some(format!("{head}; it no longer covers {lost}, and with no shipped ways found no replacement is checked{}", together(&others)));
+    };
     let state = |b: bool| if b { "on" } else { "off" };
-    let mut add = Vec::new();
+    let mut add: Vec<(String, bool)> = Vec::new();
     let mut note = String::new();
     let mut covers_dir = false;
     if keys.iter().any(|k| k == dir) {
         match value(dir) {
-            Some(own) if own == on => covers_dir = true,
+            Some(own) if own == on => covers_dir = dir_is_way,
             Some(own) => note = format!("; the existing `{dir}: {own}` stays, so {dir} itself stays {}", state(own)),
             None => note = format!("; the existing `{dir}` key sets no `enabled`, so {dir} itself is not switched by it"),
         }
-    } else if ids.is_none_or(|ids| ids.contains(dir)) {
-        add.push(format!("`{dir}: {on}`"));
+    } else if dir_is_way {
+        add.push((dir.to_string(), on));
         covers_dir = true;
     }
-    add.push(format!("`{sub}: {on}`"));
+    add.push((sub.clone(), on));
+    let after: Vec<(String, bool)> = toggles.iter().filter(|(k, _)| k != key).cloned().chain(add.iter().cloned()).collect();
+    let states_kept = ids.iter().filter(|id| under(id)).all(|id| {
+        let new_off = ways_core::config::way_toggled_off(after.iter().map(|(k, on)| (k.as_str(), *on)), id);
+        (pre_pattern_toggle(toggles, id) == Some(false)) == new_off
+    });
+    let before = ties(toggles, ids);
+    let ties_kept = ties(&after, ids).iter().all(|(k, _)| before.iter().any(|(b, _)| b == k));
+    if !(states_kept && ties_kept) {
+        return Some(format!("{head}; it no longer covers {lost}, and no replacement keeps every way as it was{}", together(&others)));
+    }
     let scope = if covers_dir { format!("{dir} and every way under it") } else { format!("every way under {dir}") };
-    Some(format!("{head}; for {scope}, replace this key with {}{note}", add.join(" plus ")))
+    let named: Vec<String> = add.iter().map(|(k, on)| format!("`{k}: {on}`")).collect();
+    Some(format!("{head}; for {scope}, replace this key with {}{note}", named.join(" plus ")))
+}
+
+/// The pre-ADR-710 toggle rule, kept to check the `dir/*` advice: the value
+/// of the toggle that switched `way_id`, where a key equal to the id wins,
+/// else the longest `dir/*` key whose `dir` is the id or one of its
+/// ancestors.
+fn pre_pattern_toggle(toggles: &[(String, bool)], way_id: &str) -> Option<bool> {
+    let mut best: Option<(usize, bool)> = None;
+    for (key, enabled) in toggles {
+        let Some(rank) = pre_pattern_rank(key, way_id) else { continue };
+        if best.is_none_or(|(r, _)| rank > r) {
+            best = Some((rank, *enabled));
+        }
+    }
+    best.map(|(_, enabled)| enabled)
+}
+
+/// How specific `key` is for `way_id` under the pre-ADR-710 rule; `None`
+/// when it does not cover the way.
+fn pre_pattern_rank(key: &str, way_id: &str) -> Option<usize> {
+    match key.strip_suffix("/*") {
+        None => (key == way_id).then_some(usize::MAX),
+        Some(dir) => (way_id == dir || way_id.strip_prefix(dir).is_some_and(|r| r.len() > 1 && r.starts_with('/'))).then_some(dir.len()),
+    }
+}
+
+/// Whether toggle patterns `a` and `b` match at least one way id in common.
+fn overlaps(a: &str, b: &str) -> bool {
+    // Both patterns consume one id segment per step; a `**` may stay to
+    // consume the next one too.
+    fn step(a: &[&str], b: &[&str]) -> bool {
+        let (Some((x, ra)), Some((y, rb))) = (a.split_first(), b.split_first()) else {
+            return a.is_empty() && b.is_empty();
+        };
+        let wild = |s: &str| s == "*" || s == "**";
+        if !(x == y || wild(x) || wild(y)) {
+            return false;
+        }
+        step(ra, rb) || (*x == "**" && step(a, rb)) || (*y == "**" && step(ra, b))
+    }
+    step(&a.split('/').collect::<Vec<_>>(), &b.split('/').collect::<Vec<_>>())
 }
 
 /// Each set of toggles tied at the highest rank with opposite values on a
@@ -316,10 +392,16 @@ mod tests {
         (entries.iter().map(|(k, v)| (k.to_string(), *v)).collect(), entries.iter().map(|(k, _)| k.to_string()).collect())
     }
 
+    /// The advice for the file's `/*` key, against the ways `data`,
+    /// `data/a` and `data/a/b`.
     fn advice(entries: &[(&str, bool)]) -> String {
+        advice_over(entries, &["data", "data/a", "data/a/b"])
+    }
+
+    fn advice_over(entries: &[(&str, bool)], ways: &[&str]) -> String {
         let (t, k) = file(entries);
         let key = entries.iter().map(|(k, _)| *k).find(|k| k.ends_with("/*")).expect("a `/*` key");
-        old_star_advice(key, &t, &k, None).expect("advice")
+        old_star_advice(key, &t, &k, Some(&ids(ways))).expect("advice")
     }
 
     #[test]
@@ -376,12 +458,93 @@ mod tests {
 
     #[test]
     fn an_existing_key_that_sets_no_value_is_named() {
-        let t = vec![("data/*".to_string(), false)];
         let k = vec!["data/*".to_string(), "data".to_string()];
+        let ids = ids(&["data", "data/a"]);
+        assert_eq!(
+            old_star_advice("data/*", &[("data/*".to_string(), true)], &k, Some(&ids)).as_deref(),
+            Some("`/*` matches only the ways directly under data; for every way under data, replace this key with `data/**: true`; the existing `data` key sets no `enabled`, so data itself is not switched by it")
+        );
+        assert_eq!(
+            old_star_advice("data/*", &[("data/*".to_string(), false)], &k, Some(&ids)).as_deref(),
+            Some("`/*` matches only the ways directly under data; it no longer covers data itself or the ways deeper down, and no replacement keeps every way as it was, so read it together with `data`"),
+            "data was off under the old rule and nothing would switch it"
+        );
+    }
+
+    #[test]
+    fn a_competitor_that_would_tie_with_the_subtree_key_gets_no_replacement() {
+        assert_eq!(
+            advice_over(&[("data/*", true), ("**/x", false)], &["data", "data/x"]),
+            "`/*` matches only the ways directly under data; it no longer covers data itself or the ways deeper down, and no replacement keeps every way as it was, so read it together with `**/x`"
+        );
+    }
+
+    #[test]
+    fn a_competitor_that_would_outrank_the_subtree_key_gets_no_replacement() {
+        assert_eq!(
+            advice_over(&[("data/*", false), ("*/x", true)], &["data", "data/x"]),
+            "`/*` matches only the ways directly under data; it no longer covers data itself or the ways deeper down, and no replacement keeps every way as it was, so read it together with `*/x`"
+        );
+    }
+
+    #[test]
+    fn a_deeper_competitor_that_would_tie_gets_no_replacement() {
+        assert_eq!(
+            advice_over(&[("data/*", false), ("*/x/**", true)], &["data", "data/x", "data/x/y"]),
+            "`/*` matches only the ways directly under data; it no longer covers data itself or the ways deeper down, and no replacement keeps every way as it was, so read it together with `*/x/**`"
+        );
+    }
+
+    #[test]
+    fn a_competitor_the_replacement_keeps_is_no_bar() {
+        assert_eq!(
+            advice_over(&[("data/*", false), ("*/x", false), ("data/a", true)], &["data", "data/a", "data/x"]),
+            "`/*` matches only the ways directly under data; for data and every way under it, replace this key with `data: false` plus `data/**: false`"
+        );
+    }
+
+    #[test]
+    fn a_directory_that_is_no_way_is_not_claimed_as_covered() {
+        assert_eq!(
+            advice_over(&[("softwaredev", false), ("softwaredev/*", false)], &["softwaredev/code"]),
+            "`/*` matches only the ways directly under softwaredev; for every way under softwaredev, replace this key with `softwaredev/**: false`"
+        );
+        assert_eq!(
+            advice_over(&[("softwaredev/*", true), ("**/code", false)], &["softwaredev/code"]),
+            "`/*` matches only the ways directly under softwaredev; it no longer covers the ways deeper down, and no replacement keeps every way as it was, so read it together with `**/code`"
+        );
+    }
+
+    #[test]
+    fn without_the_ways_no_replacement_is_named() {
+        let (t, k) = file(&[("data/*", false), ("*/x", true), ("other/**", true), ("data/a", true)]);
         assert_eq!(
             old_star_advice("data/*", &t, &k, None).as_deref(),
-            Some("`/*` matches only the ways directly under data; for every way under data, replace this key with `data/**: false`; the existing `data` key sets no `enabled`, so data itself is not switched by it")
+            Some("`/*` matches only the ways directly under data; it no longer covers data itself or the ways deeper down, and with no shipped ways found no replacement is checked, so read it together with `*/x`")
         );
+        let (t, k) = file(&[("data/*", false)]);
+        assert_eq!(
+            old_star_advice("data/*", &t, &k, None).as_deref(),
+            Some("`/*` matches only the ways directly under data; it no longer covers data itself or the ways deeper down, and with no shipped ways found no replacement is checked")
+        );
+    }
+
+    #[test]
+    fn two_patterns_overlap_where_one_id_matches_both() {
+        for (a, b) in [("data", "*"), ("data/**", "*/x"), ("data/**", "**/x/**"), ("**", "**"), ("a/*/c", "*/b/**")] {
+            assert!(overlaps(a, b) && overlaps(b, a), "{a} {b}");
+        }
+        for (a, b) in [("data", "data/**"), ("data/**", "other/**"), ("*/x", "*/*/x"), ("data", "*/*")] {
+            assert!(!overlaps(a, b) && !overlaps(b, a), "{a} {b}");
+        }
+    }
+
+    #[test]
+    fn the_pre_pattern_rule_covers_a_directory_and_its_subtree() {
+        let toggles = vec![("data/*".to_string(), false), ("data/a/*".to_string(), true), ("data/a/b".to_string(), false), ("**/c".to_string(), true)];
+        for (id, want) in [("data", Some(false)), ("data/a", Some(true)), ("data/a/b", Some(false)), ("data/a/c", Some(true)), ("data/c", Some(false)), ("database", None)] {
+            assert_eq!(pre_pattern_toggle(&toggles, id), want, "{id}");
+        }
     }
 
     #[test]
