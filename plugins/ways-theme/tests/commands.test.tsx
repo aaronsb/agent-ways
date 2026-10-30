@@ -886,6 +886,18 @@ describe('each form is labelled by the format it copies, from one table', () => 
     expect(walk(tree).some(n => (n.type === 'Button' && n.props?.label === 'native') || (n.type === 'Text' && textOf(n).includes('native')))).toBe(false)
   })
 
+  for (const lang of ['markdown', 'text', 'csv']) {
+    test(`a \`\`\`${lang} fence draws no label twice`, async ($, on) => {
+      const { ui } = await mounted($, on, `Here:\n\n\`\`\`${lang}\n# a, b\n\`\`\``)
+      const tree = await ui.drawn()
+      await ui.unmount()
+      const labels = walk(tree).flatMap(n => (n.type === 'Button' && String(n.props?.key).startsWith('copy-1-') ? [String(n.props?.label)] : []))
+      expect(labels.length).toBeGreaterThan(1)
+      expect(new Set(labels).size).toBe(labels.length)
+      if (lang === 'markdown') expect(controlLine(tree, 'copy-1-markdown')).toBe(' Copy as: markdown · code ')
+    })
+  }
+
   test('a fence copied as its language toasts the language', async ($, on) => {
     const { h, ui } = await mounted($, on, 'Run:\n\n```python\nprint(1)\n```')
     await ui.press({ key: 'copy-1-native' })

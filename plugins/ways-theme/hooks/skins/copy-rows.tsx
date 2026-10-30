@@ -73,12 +73,15 @@ export function copiesOf(block: Copy | Code | Table): CopyAs[] {
   }
 
   const code = block.kind === 'code' ? block.code : block.text
-
-  return distinct([
+  const offered = distinct([
     { form: 'markdown', text: block.raw, format: 'markdown' },
     { form: 'native', text: code, format: block.lang === '' ? 'code' : block.lang },
     { form: 'text', text: code, format: 'text' },
   ])
+  // A language whose label another offered form already draws, as ```markdown, reads `code`.
+  const taken = offered.filter(copy => copy.form !== 'native').map(copy => labelOf(copy.format).verbose)
+
+  return offered.map(copy => (copy.form === 'native' && taken.includes(labelOf(copy.format).verbose) ? { ...copy, format: 'code' } : copy))
 }
 
 // A reply as its text: prose without its markdown, a table as `tableText`, a fence, a
