@@ -8,7 +8,8 @@ import type { Copy } from './commands'
 
 export type Align = 'left' | 'right' | 'center'
 
-export type Table = { kind: 'table'; header: string[]; align: Align[]; rows: string[][] }
+// `raw` is the table as written, where it came from markdown.
+export type Table = { kind: 'table'; header: string[]; align: Align[]; rows: string[][]; raw?: string }
 
 // `raw` is the fence as written, for the surfaces that keep Claude Code's own drawing.
 export type Code = { kind: 'code'; lang: string; code: string; raw: string }
@@ -150,6 +151,7 @@ export function splitReply(markdown: string, options: SplitOptions = SPLIT_ALL):
 
     flush()
 
+    const start = i
     const rows: string[][] = []
     i += 2
 
@@ -159,7 +161,7 @@ export function splitReply(markdown: string, options: SplitOptions = SPLIT_ALL):
     }
 
     i--
-    segments.push({ kind: 'table', header, align: cellsOf(next).map(alignOf), rows })
+    segments.push({ kind: 'table', header, align: cellsOf(next).map(alignOf), rows, raw: lines.slice(start, i + 1).join('\n') })
   }
 
   flush()
@@ -430,6 +432,29 @@ export function copyOf(reply: string, code: boolean): { text: string } | { messa
   const last = splitReply(reply).findLast((segment): segment is Code => segment.kind === 'code')
 
   return last === undefined ? { message: 'No code block in the last reply' } : { text: last.code }
+}
+
+// A cell's inline markdown as its text: an image or a link as its text, `<br>` as a line
+// break, emphasis and strikethrough as the words inside them, a backslash escape as the
+// character. Bold and code ticks are already gone (`cellsOf`).
+const plainCell = (cell: string): string =>
+  cell
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/~~(.+?)~~/g, '$1')
+    .replace(/(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])/g, '$1')
+    .replace(/(?<!\w)_(?!\s)(.+?)(?<!\s)_(?!\w)/g, '$1')
+    .replace(/\\([\\`*_{}[\]()#+\-.!|~<>])/g, '$1')
+
+// A table as CSV, its header row first. A cell holding a comma, a quote or a line break is
+// quoted and its quotes doubled, as RFC 4180 has it; rows end in a line feed.
+export function tableCsv(table: Table): string {
+  const field = (cell: string) => {
+    const text = plainCell(cell)
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+  }
+
+  return [table.header, ...table.rows].map(cells => cells.map(field).join(',')).join('\n')
 }
 
 // A table as it is drawn, boxed in monospace, for pasting where markdown does not render.

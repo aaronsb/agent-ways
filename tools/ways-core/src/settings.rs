@@ -660,6 +660,16 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
+        name: "mods.ways-theme.copy_as",
+        section: "mods",
+        path: &["mods", "ways-theme", "copy_as"],
+        kind: Kind::Choice(&["content", "markdown"]),
+        default: DefaultValue::Yaml("content"),
+        doc: "What a block's Copy takes: its content, or the markdown it was written as.",
+        long: "It applies while `copy` is on. A `!` or `/` command copies as typed either way. With content, a fenced block copies its code exactly as written, with no frame, padding or wrap; a table copies as CSV, its header row first, a cell holding a comma, a quote or a line break quoted and its quotes doubled (RFC 4180), the cells' inline markdown reduced to text; a code span too wide for its row copies its text. With markdown, a fence copies with its backticks and language, a table as its markdown source, and a span with its backticks. A table's `as text` and a reply's `copy reply` copy what they always have. The mod reads it at each session start, through `ways settings theme export --mod`.",
+        ..BASE
+    },
+    KeySpec {
         name: "mods.ways-theme.paths",
         section: "mods",
         path: &["mods", "ways-theme", "paths"],
@@ -1174,6 +1184,7 @@ mod tests {
             ("frames", Some(Value::Bool(true))),
             ("prompt_box", s("gradient")),
             ("copy", Some(Value::Bool(true))),
+            ("copy_as", s("content")),
             ("paths", s("wrap")),
             ("spinner_words", Some(Value::Sequence(vec![]))),
             ("done_words", Some(Value::Sequence(vec![]))),
@@ -1181,7 +1192,7 @@ mod tests {
         for (k, want) in &defaults {
             assert_eq!(&resolved(&format!("mods.ways-theme.{k}"), &[]), want, "{k}");
         }
-        let text = "mods:\n  ways-theme:\n    rail: false\n    tables: text\n    shimmer: false\n    charts: false\n    markdown: false\n    icons: ascii\n    frames: false\n    prompt_box: frame\n    copy: false\n    paths: truncate\n    spinner_words: [Sailing]\n    done_words: [Docked, Moored]\n";
+        let text = "mods:\n  ways-theme:\n    rail: false\n    tables: text\n    shimmer: false\n    charts: false\n    markdown: false\n    icons: ascii\n    frames: false\n    prompt_box: frame\n    copy: false\n    copy_as: markdown\n    paths: truncate\n    spinner_words: [Sailing]\n    done_words: [Docked, Moored]\n";
         let l = [layer("user", LayerScope::User, text)];
         assert!(l[0].findings.is_empty(), "{:?}", l[0].findings);
         let set = [
@@ -1194,6 +1205,7 @@ mod tests {
             ("frames", Some(Value::Bool(false))),
             ("prompt_box", s("frame")),
             ("copy", Some(Value::Bool(false))),
+            ("copy_as", s("markdown")),
             ("paths", s("truncate")),
             ("spinner_words", Some(Value::Sequence(vec!["Sailing".into()]))),
             ("done_words", Some(Value::Sequence(vec!["Docked".into(), "Moored".into()]))),

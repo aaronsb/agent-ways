@@ -4,9 +4,9 @@ import type { On, RenderElement } from 'claude-code'
 
 import { copyPieces, fenceCopy, holdsCopy } from '../hooks/skins/commands.ts'
 import type { Copy } from '../hooks/skins/commands.ts'
-import { setupOf } from '../hooks/skins/config.ts'
-import { splitReply } from '../hooks/skins/markdown.ts'
-import type { Segment } from '../hooks/skins/markdown.ts'
+import { parseExport, setupOf } from '../hooks/skins/config.ts'
+import { splitReply, tableArt, tableCsv } from '../hooks/skins/markdown.ts'
+import type { Segment, Table } from '../hooks/skins/markdown.ts'
 import { inlineMath } from '../hooks/skins/math.ts'
 import { replySegments } from '../hooks/skins/reply.ts'
 import { MIAMI_NIGHTS } from './fixtures.ts'
@@ -537,5 +537,52 @@ describe('a copy block draws clear of every frame and copies its text alone', ()
     for (const button of await ui.findAll({ type: 'Button', text: /^\s*Copy\s*$/ })) await ui.press({ key: button.key! })
     await ui.unmount()
     expect(h.copies).toEqual(['! git status', '/clear', 'ls -la'])
+  })
+})
+
+/** A reply holding one block of each kind `copy_as` decides for. */
+const TABLE = ['| name | note |', '|---|---|', '| **a, b** | say "hi" |', '| [link](https://x.example) | *it*<br>two |'].join('\n')
+const BLOCKS = ['! git status', '', 'then `/clear`.', '', '```sh\nls -la\n```', '', TABLE, '', `Then \`${LONG}\` clears them.`].join('\n')
+
+/** Every Copy on the reply pressed in order, then `as text` and `copy reply`. */
+async function copiesOf($: Parameters<TestBody>[0], on: On, copyAs: 'content' | 'markdown' | undefined) {
+  const render = copyAs === undefined ? MIAMI_NIGHTS.render : { ...MIAMI_NIGHTS.render, copy_as: copyAs }
+  const h = hostWithClipboard(on, { mod: json({ ...MIAMI_NIGHTS, render }) })
+  await $.session.start(INTERACTIVE)
+  const ui = await $.ui.mount(at(BLOCKS))
+  for (const button of await ui.findAll({ type: 'Button', text: /^\s*Copy\s*$/ })) await ui.press({ key: button.key! })
+  const blocks = [...h.copies]
+  await ui.press({ key: (await ui.find({ type: 'Button', text: /as text/ }))!.key! })
+  await ui.press({ key: (await ui.find({ type: 'Button', text: /copy reply/ }))!.key! })
+  await ui.unmount()
+  return { blocks, art: h.copies.at(-2), reply: h.copies.at(-1) }
+}
+
+describe('copy_as', () => {
+  const art = tableArt(splitReply(TABLE)[0] as Table)
+
+  test('content: a command as typed, a fence its code, a table as CSV, a span its text', async ($, on) => {
+    const copied = await copiesOf($, on, 'content')
+    expect(copied.blocks).toEqual(['! git status', '/clear', 'ls -la', 'name,note\n"a, b","say ""hi"""\nlink,"it\ntwo"', LONG])
+    expect(copied.art).toBe(art)
+    expect(copied.reply).toBe(BLOCKS)
+  })
+
+  test('markdown: a command as typed, a fence, a table and a span as written', async ($, on) => {
+    const copied = await copiesOf($, on, 'markdown')
+    expect(copied.blocks).toEqual(['! git status', '/clear', '```sh\nls -la\n```', TABLE, `\`${LONG}\``])
+    expect(copied.art).toBe(art)
+    expect(copied.reply).toBe(BLOCKS)
+  })
+
+  test('an export without copy_as copies content', async ($, on) => {
+    const copied = await copiesOf($, on, undefined)
+    expect(copied.blocks[2]).toBe('ls -la')
+    expect(parseExport(JSON.stringify({ ...MIAMI_NIGHTS, render: { ...MIAMI_NIGHTS.render, copy_as: 'html' } }))).toBe('render.copy_as is not content or markdown')
+  })
+
+  test('a CSV cell holding a comma, a quote or a line break is quoted, its quotes doubled', () => {
+    const table: Table = { kind: 'table', header: ['a', 'b'], align: ['left', 'left'], rows: [['x, y', 'say "hi"'], ['plain', 'one<br/>two'], ['~~gone~~ `kept`', 'snake_case _em_']] }
+    expect(tableCsv(table)).toBe('a,b\n"x, y","say ""hi"""\nplain,"one\ntwo"\ngone `kept`,snake_case em')
   })
 })

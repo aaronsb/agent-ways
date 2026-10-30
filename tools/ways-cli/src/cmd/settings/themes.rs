@@ -184,7 +184,7 @@ pub fn export(name: Option<&str>, form: Form) -> Out {
 
 /// The ways-theme mod's render keys under `mods.ways-theme`, in the order
 /// the export and the theme tab show them.
-pub const RENDER: [&str; 10] = ["rail", "tables", "shimmer", "charts", "markdown", "icons", "frames", "prompt_box", "copy", "paths"];
+pub const RENDER: [&str; 11] = ["rail", "tables", "shimmer", "charts", "markdown", "icons", "frames", "prompt_box", "copy", "copy_as", "paths"];
 
 /// The `mods.ways-theme` settings the mod reads, as resolved.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -309,6 +309,7 @@ mod tests {
                     "tables" => json!("on"),
                     "icons" => json!("unicode"),
                     "prompt_box" => json!("gradient"),
+                    "copy_as" => json!("content"),
                     "paths" => json!("wrap"),
                     _ => json!(true),
                 };
@@ -335,7 +336,7 @@ mod tests {
         assert_eq!(v["words"], json!({ "spinner": ["Cruising", "Gliding", "Glowing", "Pulsing", "Racing", "Drifting"], "done": ["Cruised", "Glowed", "Docked", "Landed"] }));
         assert_eq!(
             v["render"],
-            json!({ "rail": true, "tables": "on", "shimmer": true, "charts": true, "markdown": true, "icons": "unicode", "frames": true, "prompt_box": "gradient", "copy": true, "paths": "wrap" })
+            json!({ "rail": true, "tables": "on", "shimmer": true, "charts": true, "markdown": true, "icons": "unicode", "frames": true, "prompt_box": "gradient", "copy": true, "copy_as": "content", "paths": "wrap" })
         );
         assert!(!v.to_string().contains('\n'), "one line");
     }
@@ -349,7 +350,7 @@ mod tests {
         assert_eq!(
             v,
             json!({ "theme": "terminal", "kind": "dark", "roles": null, "gradient": null, "words": null,
-                    "render": { "rail": true, "tables": "on", "shimmer": true, "charts": true, "markdown": true, "icons": "unicode", "frames": true, "prompt_box": "frame", "copy": true, "paths": "wrap" } })
+                    "render": { "rail": true, "tables": "on", "shimmer": true, "charts": true, "markdown": true, "icons": "unicode", "frames": true, "prompt_box": "frame", "copy": true, "copy_as": "content", "paths": "wrap" } })
         );
     }
 

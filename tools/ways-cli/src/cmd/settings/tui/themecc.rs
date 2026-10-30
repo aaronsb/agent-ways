@@ -133,6 +133,6 @@ mod tests {
         assert_eq!((row("frames").value.as_str(), row("frames").project.as_deref()), ("true", None), "a default names nothing");
         let paths = row("paths");
         assert_eq!((paths.value.as_str(), paths.options.as_slice(), paths.default.as_str()), ("truncate", ["wrap".to_string(), "truncate".to_string()].as_slice(), "wrap"));
-        assert_eq!(cc.render.len(), 10);
+        assert_eq!(cc.render.len(), 11);
     }
 }
