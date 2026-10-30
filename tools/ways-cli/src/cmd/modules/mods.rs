@@ -27,6 +27,7 @@ fn state(s: attend_mod::State) -> ModState {
         S::Pending => ModState::Pending,
         S::Disabled => ModState::Disabled,
         S::Removed => ModState::Removed,
+        S::Held => ModState::Held,
         S::Off => ModState::Off,
     }
 }
@@ -77,6 +78,7 @@ pub fn item(m: &Mod, o: Result<&Overview, Unread>) -> Entry<ModFields> {
                 (Some(a), _) => Some(format!("critical: {}", a.why.word())),
                 (None, S::Drift) if o.older => Some("an installed copy is older".into()),
                 (None, S::Drift) => Some("repair converges it".into()),
+                (None, S::Held) => Some("a finding has its settings entry ignored".into()),
                 (None, S::Off) if o.shipped.is_none() => Some("not shipped in this app".into()),
                 (None, S::Off) if !o.wanted => Some("not wanted".into()),
                 (None, S::Off) if o.targets.is_empty() => Some("no enabled target holds it".into()),

@@ -60,6 +60,7 @@ esac
 const ATTEND: &str = "attend@agent-ways";
 const JUDGE: &str = "ways-judge@agent-ways";
 const IMAGES: &str = "images@agent-ways";
+const THEME: &str = "ways-theme@agent-ways";
 
 struct Fx {
     root: PathBuf,
@@ -103,6 +104,15 @@ impl Fx {
         );
         write(&self.src().join("plugins/images/.claude-plugin/plugin.json"), r#"{"name":"images","version":"1.42.1"}"#);
     }
+    /// The app source also ships the ways-theme mod.
+    fn ships_theme(&self) {
+        write(
+            &self.src().join("plugins/.claude-plugin/marketplace.json"),
+            r#"{"name":"agent-ways","plugins":[{"name":"attend","source":"./attend"},{"name":"ways-judge","source":"./ways-judge"},{"name":"ways-theme","source":"./ways-theme"}]}"#,
+        );
+        write(&self.src().join("plugins/ways-theme/.claude-plugin/plugin.json"), r#"{"name":"ways-theme","version":"1.42.1"}"#);
+    }
+
     fn dest(&self) -> PathBuf {
         self.root.join("dest")
     }
@@ -1277,4 +1287,87 @@ fn reasserting_claude_code_respects_an_unseen_removal_by_hand() {
         assert!(!fx.has(JUDGE), "apply {via_apply}: not reinstalled: {}", fx.plugins());
         assert!(fx.target_text(&fx.dest()).contains("ways-judge:\n    install: false"), "apply {via_apply}: {}", fx.target_text(&fx.dest()));
     }
+}
+
+// ── a finding in a mod's entry (the operator's ways-theme, 1.48.2) ──
+
+/// The ways-theme entry with an unknown key beside `install: true`, and the
+/// target listed.
+fn theme_entry_with_a_finding(fx: &Fx) {
+    write(
+        &fx.user_config(),
+        &format!("mods:\n  ways-theme:\n    install: true\n    bogus_key: 1\n{}", fx.targets(&[(&fx.dest(), true)])),
+    );
+}
+
+/// A finding that has the entry ignored reads `install` as false, and repair
+/// does not uninstall the mod on that reading: it leaves it installed and
+/// names the finding, its file and line, and the fix. `mod list`, `mod check`
+/// and `ways status` say the same.
+#[test]
+fn an_installed_mod_whose_entry_has_a_finding_is_left_installed() {
+    let fx = Fx::new("held-installed");
+    fx.ships_theme();
+    write(&fx.user_config(), &format!("mods:\n  ways-theme:\n    install: true\n{}", fx.targets(&[(&fx.dest(), true)])));
+    fx.repair_targets(&fx.src());
+    assert!(fx.has(THEME), "{}", fx.plugins());
+    fx.changes();
+
+    theme_entry_with_a_finding(&fx);
+    let out = fx.repair_targets(&fx.src());
+    assert_eq!(fx.changes(), Vec::<String>::new(), "no uninstall");
+    assert!(fx.has(THEME), "{}", fx.plugins());
+    let err = String::from_utf8_lossy(&out.stderr);
+    let at = format!("{}:4: [mods] mods.ways-theme.bogus_key: unknown key", fx.user_config().display());
+    assert!(err.contains(&format!("ways-theme mod: ⚠ left installed: {at}")), "{err}");
+    assert!(err.contains("repair does not uninstall it on an ignored entry"), "{err}");
+    assert!(err.contains("`ways settings fix mods.ways-theme` or removing the key repairs it"), "{err}");
+
+    let out = fx.run(&["manage", "mod", "list"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("ways-theme  1.42.1  held"), "{text}");
+    assert!(text.contains(&format!("installed 1.42.1, enabled; {at}")), "{text}");
+    let out = fx.run(&["manage", "mod", "check", "ways-theme"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(3), "{text}");
+    assert!(text.contains(&format!("installed 1.42.1; {at}")), "{text}");
+    let out = fx.run(&["status"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains(&format!("{THEME} held: installed 1.42.1, enabled; {at}")), "{text}");
+}
+
+/// The same entry with the mod not installed: repair does not install it,
+/// and says why.
+#[test]
+fn a_mod_whose_entry_has_a_finding_is_not_installed() {
+    let fx = Fx::new("held-missing");
+    fx.ships_theme();
+    theme_entry_with_a_finding(&fx);
+    let out = fx.repair_targets(&fx.src());
+    assert!(!fx.has(THEME), "{}", fx.plugins());
+    assert!(!fx.changes().iter().any(|c| c.contains(THEME)), "no install");
+    let err = String::from_utf8_lossy(&out.stderr);
+    let at = format!("{}:4: [mods] mods.ways-theme.bogus_key: unknown key", fx.user_config().display());
+    assert!(err.contains(&format!("ways-theme mod: ⚠ not installed: {at}")), "{err}");
+    assert!(err.contains("repair does not install it on an ignored entry"), "{err}");
+    let out = fx.run(&["manage", "mod", "list"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("ways-theme  1.42.1  held") && text.contains(&format!("not installed; {at}")), "{text}");
+}
+
+/// The retired `copy_as` is reported and ignored; the entry around it loads,
+/// so `install: true` installs the mod and keeps it.
+#[test]
+fn a_retired_copy_as_keeps_the_theme_mod_installed() {
+    let fx = Fx::new("copy-as");
+    fx.ships_theme();
+    write(
+        &fx.user_config(),
+        &format!("mods:\n  ways-theme:\n    install: true\n    copy_as: markdown\n{}", fx.targets(&[(&fx.dest(), true)])),
+    );
+    fx.repair_targets(&fx.src());
+    assert!(fx.has(THEME), "{}", fx.plugins());
+    let out = fx.run(&["settings", "lint"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("mods.ways-theme.copy_as: `mods.ways-theme.copy_as` was retired by ADR-514 and is ignored"), "{text}");
 }

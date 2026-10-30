@@ -557,8 +557,9 @@ pub struct SectionSpec {
 #[derive(Debug, Clone, Copy)]
 pub struct FileSpec {
     pub id: &'static str,
-    /// Retired top-level keys and the message that names their replacement.
-    /// They are lint findings and never make a section fall back.
+    /// Retired keys and the message that names their replacement: a
+    /// top-level key, or a dotted path below one (`mods.ways-theme.copy_as`).
+    /// They are lint findings and never make a section or entry fall back.
     pub retired: &'static [(&'static str, &'static str)],
     /// A finding for each old key under a retired top-level key, at its
     /// own path, in place of the retired key's one message. Given the

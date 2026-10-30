@@ -596,6 +596,18 @@ impl Target<'_> {
     pub fn wants(&self, m: &Mod) -> bool {
         wants_in(m, self.config)
     }
+
+    /// The finding that has `mods.<name>` ignored in the user config or
+    /// this target's config. A mod not wanted on that reading is held:
+    /// repair leaves it installed or not, as it finds it.
+    pub fn held(&self, m: &Mod) -> Option<agent_settings::Finding> {
+        ways_core::settings::mod_entry_ignored(m.name, self.config)
+    }
+
+    /// Whether repair keeps `m` where it is installed: wanted, or held.
+    fn keeps(&self, m: &Mod) -> bool {
+        self.wants(m) || self.held(m).is_some()
+    }
 }
 
 /// Whether `m` is wanted in the target whose ways config is `config`:
@@ -609,6 +621,23 @@ pub fn wants_in(m: &Mod, config: &Path) -> bool {
         return super::settings::engine::claude_code_chosen();
     }
     mod_install(m.name, config)
+}
+
+/// Why a mod is held in the target at `dest_root`: the finding `f` that
+/// has its entry ignored, what repair does about it, and the fix.
+pub fn held_why(m: &Mod, dest_root: &Path, f: &agent_settings::Finding, installed: bool) -> String {
+    let name = m.name;
+    let fix = if f.is_parse_failure() {
+        "fixing the file's syntax by hand repairs it".to_string()
+    } else if f.closed {
+        "editing that name by hand repairs it".to_string()
+    } else {
+        let user = f.file.as_deref().is_some_and(|p| p == ways_core::paths::user_config());
+        let target = if user { String::new() } else { format!(" --target {}", super::lifecycle::shell_word(&dest_root.display().to_string())) };
+        format!("`ways settings fix mods.{name}{target}` or removing the key repairs it")
+    };
+    let acts = if installed { "uninstall it" } else { "install it" };
+    format!("{f}. That ignores mods.{name}, and repair does not {acts} on an ignored entry. `ways settings lint` lists the findings; {fix}")
 }
 
 /// The line for a wanted mod the host cannot run yet.
@@ -692,8 +721,15 @@ pub fn converge_target(source_root: &Path, t: &Target, only: Option<&Mod>, dry_r
         }
         let missing = have.ours.is_none() && have.foreign.is_empty() && !matches!(whose, Market::Foreign(_));
         let plan = if !t.wants(m) {
-            // Another mod wanted here, and shipped, keeps the marketplace for itself.
-            let other = MODS.iter().any(|o| o.id != m.id && t.wants(o) && shipped_version(o, source_root).is_some());
+            if let Some(f) = t.held(m) {
+                let installed = have.ours.is_some();
+                let what = if installed { "left installed" } else { "not installed" };
+                lines.push(format!("{}: ⚠ {what}: {}", m.label, held_why(m, t.dest_root, &f, installed)));
+                lists = Some(now);
+                continue;
+            }
+            // Another mod kept here, and shipped, keeps the marketplace for itself.
+            let other = MODS.iter().any(|o| o.id != m.id && t.keeps(o) && shipped_version(o, source_root).is_some());
             plan_withdraw(&have, &dir, record.folder.as_deref(), &recover, other)
         } else if missing && record.has(m.id) {
             lines.push(removed_by_hand(m, t, dry_run));
@@ -874,6 +910,9 @@ pub struct View {
     /// The version sessions run: the shipped one when the mod is installed
     /// from this app's folder, which sessions read in place.
     pub runs: Option<String>,
+    /// Set when the mod is not wanted and a finding has its entry ignored:
+    /// why repair holds it ([`held_why`]).
+    pub held: Option<String>,
 }
 
 /// Whose the `agent-ways` marketplace is, as [`View`] reports it.
@@ -894,6 +933,9 @@ pub enum State {
     /// Kept out of this target by its config, or missing while the record
     /// lists it: removed by hand.
     Removed,
+    /// Not wanted on an entry a finding has ignored: repair leaves it
+    /// installed or not, as it is.
+    Held,
     /// Installed and disabled in Claude Code.
     Disabled,
     /// Not wanted and not installed.
@@ -908,6 +950,7 @@ impl State {
             State::Converged => "converged",
             State::Pending => "pending",
             State::Removed => "removed",
+            State::Held => "held",
             State::Disabled => "disabled",
             State::Off => "off",
             State::Drift => "drift",
@@ -915,10 +958,10 @@ impl State {
     }
 
     /// The mod's word over every enabled target: the first of pending,
-    /// removed, disabled and drift that any target is in, then off when every
-    /// target is off, else converged.
+    /// removed, held, disabled and drift that any target is in, then off when
+    /// every target is off, else converged.
     pub fn over(states: &[State]) -> State {
-        for s in [State::Pending, State::Removed, State::Disabled, State::Drift] {
+        for s in [State::Pending, State::Removed, State::Held, State::Disabled, State::Drift] {
             if states.contains(&s) {
                 return s;
             }
@@ -976,6 +1019,9 @@ impl View {
         if self.error.is_some() || !self.foreign.is_empty() || matches!(self.market, MarketState::Foreign(_)) {
             return State::Drift;
         }
+        if self.held.is_some() {
+            return State::Held;
+        }
         if !self.read {
             return match (self.wanted, self.target_off) {
                 (true, _) => State::Pending,
@@ -1017,6 +1063,8 @@ impl View {
             },
             State::Removed if self.target_off => "removed · install false here".to_string(),
             State::Removed => "removed · by hand; repair writes install false".to_string(),
+            State::Held if self.installed.is_some() => format!("held · {installed}, entry ignored"),
+            State::Held => "held · not installed, entry ignored".to_string(),
             State::Off => "off · not wanted".to_string(),
             State::Drift => match (self.wanted, self.installed.as_deref(), &self.market) {
                 (_, _, MarketState::Foreign(from)) => format!("foreign · marketplace {from}"),
@@ -1054,6 +1102,13 @@ impl View {
             },
             State::Removed if self.target_off => "removed by hand or kept out; install false in this target's config".to_string(),
             State::Removed => "removed by hand; the next repair writes install false in this target's config".to_string(),
+            State::Held => {
+                let why = self.held.as_deref().unwrap_or_default();
+                match self.installed.as_deref() {
+                    Some(v) => format!("{}{enabled}; {why}", runs(v)),
+                    None => format!("not installed; {why}"),
+                }
+            }
             State::Off => "not installed (not wanted)".to_string(),
             State::Drift => match (self.wanted, self.installed.as_deref(), &self.market) {
                 (_, _, MarketState::Foreign(from)) => format!("the {MARKETPLACE} marketplace is someone else's ({from})"),
@@ -1083,6 +1138,8 @@ pub fn views(source_root: &Path, t: &Target, only: Option<&Mod>) -> Vec<(Mod, Vi
     let target_off = |m: &Mod| ways_core::settings::mod_install_in_file(m.name, t.config) == Some(false);
     mods.into_iter()
         .map(|m| {
+            let wanted = t.wants(&m);
+            let held = if wanted { None } else { t.held(&m) };
             let shipped = shipped_version(&m, source_root);
             let host = match &version {
                 None => Err("`claude` is not on PATH".to_string()),
@@ -1091,7 +1148,7 @@ pub fn views(source_root: &Path, t: &Target, only: Option<&Mod>) -> Vec<(Mod, Vi
             };
             let mut v = View {
                 dir: t.dest_root.to_path_buf(),
-                wanted: t.wants(&m),
+                wanted,
                 target_off: target_off(&m),
                 installed: None,
                 enabled: enabled_value(&m, t.dest_root),
@@ -1105,6 +1162,7 @@ pub fn views(source_root: &Path, t: &Target, only: Option<&Mod>) -> Vec<(Mod, Vi
                 read: lists.is_ok(),
                 error: None,
                 runs: None,
+                held: None,
             };
             match &lists {
                 Ok(l) => {
@@ -1126,6 +1184,7 @@ pub fn views(source_root: &Path, t: &Target, only: Option<&Mod>) -> Vec<(Mod, Vi
                 Err(e) if claude.is_some() => v.error = Some(e.clone()),
                 Err(_) => {}
             }
+            v.held = held.map(|f| held_why(&m, t.dest_root, &f, v.installed.is_some()));
             (m, v)
         })
         .collect()
@@ -1500,6 +1559,7 @@ mod tests {
             read: true,
             error: None,
             runs: None,
+            held: None,
         }
     }
 

@@ -266,6 +266,7 @@ states!(
     Pending => "pending", Warn;
     Disabled => "disabled", Warn;
     Removed => "removed", Plain;
+    Held => "held", Warn;
     Off => "off", Plain;
     Unknown => "unknown", Plain;
 });
@@ -359,7 +360,7 @@ mod tests {
         }
         let words = |f: Family| all.iter().filter(|s| s.family() == f).map(|s| s.word()).collect::<Vec<_>>();
         assert_eq!(words(Family::Theme), ["active", "inactive", "invalid", "unknown"]);
-        assert_eq!(words(Family::Mod), ["converged", "drift", "pending", "disabled", "removed", "off", "unknown"]);
+        assert_eq!(words(Family::Mod), ["converged", "drift", "pending", "disabled", "removed", "held", "off", "unknown"]);
         assert_eq!(words(Family::Sensor), ["active", "off", "not-compiled", "missing", "refused", "failing", "invalid", "degraded", "unknown"]);
         assert_eq!(words(Family::Way), ["enabled", "disabled", "invalid", "unknown"]);
         assert_eq!(words(Family::Profile), ["active", "inactive", "invalid", "unknown"]);

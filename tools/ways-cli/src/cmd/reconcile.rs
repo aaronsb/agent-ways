@@ -538,9 +538,13 @@ fn converge_one(
     Ok(())
 }
 
-/// Whether the ways-theme mod is wanted in the target at `dest_root`.
+/// Whether the ways-theme mod is wanted in the target at `dest_root`, or
+/// held there installed, so the claim stays with the mod repair keeps.
 pub(crate) fn theme_wanted(dest_root: &Path) -> bool {
-    crate::cmd::attend_mod::wants_in(&crate::cmd::attend_mod::THEME, &target_config_path(dest_root))
+    use crate::cmd::attend_mod::{listed_in, wants_in, THEME};
+    let config = target_config_path(dest_root);
+    wants_in(&THEME, &config)
+        || (listed_in(&THEME, dest_root) && ways_core::settings::mod_entry_ignored(THEME.name, &config).is_some())
 }
 
 /// Whether the settings merge holds the `theme` key in the target at

@@ -284,6 +284,10 @@ fn checks(m: &Mod, v: &View, shipped: Option<&str>, claude_code: bool, default_r
         out.push((Mark::Ok, format!("the {} marketplace is this app's", attend_mod::MARKETPLACE)));
     }
     match (v.wanted, v.installed.as_deref()) {
+        (false, i) if v.held.is_some() => {
+            let what = i.map(|i| format!("installed {i}")).unwrap_or_else(|| "not installed".to_string());
+            out.push((Mark::Warn, format!("{what}; {}", v.held.as_deref().unwrap_or_default())))
+        }
         (true, Some(i)) if shipped.is_some_and(|s| super::update::version_older(i, s)) => {
             out.push((Mark::Warn, format!("installed {i}, older than the shipped {}. Fix: {repair}", shipped.unwrap_or("?"))))
         }
@@ -581,6 +585,8 @@ pub struct TargetState {
     /// Why a wanted, missing mod waits on the host.
     pub pending: Option<String>,
     pub removed: bool,
+    /// Why repair holds a mod whose entry a finding has ignored.
+    pub held: Option<String>,
     pub foreign: Vec<String>,
     pub error: Option<String>,
     /// Why a critical mod does not run here.
@@ -598,6 +604,7 @@ impl TargetState {
             enabled: v.enabled,
             pending: if v.wanted && v.installed.is_none() { v.host.as_ref().err().cloned() } else { None },
             removed: v.target_off || (v.wanted && v.installed.is_none() && v.recorded),
+            held: v.held.clone(),
             foreign: v.foreign.clone(),
             error: v.error.clone(),
             degraded: attention(m, v, claude_code, default_root).map(|a| a.why.word()),
@@ -758,6 +765,7 @@ mod tests {
             read: true,
             error: None,
             runs: None,
+            held: None,
         }
     }
 
