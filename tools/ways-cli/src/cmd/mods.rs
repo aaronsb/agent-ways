@@ -366,6 +366,8 @@ fn would(m: &Mod, v: &View, want: bool, shipped: Option<&str>) -> (Mark, String)
         }
         (true, Some(i)) if v.enabled == Some(false) => (Mark::Same, format!("installed {i} and disabled in Claude Code; it stays disabled")),
         (true, Some(i)) => (Mark::Same, format!("installed {i}; nothing to do")),
+        // `install: true` written into an entry a finding ignores is ignored with it.
+        (true, None) if v.held.is_some() => (Mark::Warn, format!("not installed; {}", v.held.as_deref().unwrap_or_default())),
         (true, None) => match &v.host {
             Err(why) => (Mark::Warn, format!("pending: {why}; upgrade Claude Code to {} or later", m.min_claude_code)),
             Ok(_) if v.market == attend_mod::MarketState::Absent => (
@@ -388,7 +390,7 @@ fn would_theme(m: &Mod, v: &View, want: bool, src_settings: &Path, base: &Path) 
     if *m != attend_mod::THEME || !src_settings.exists() {
         return Vec::new();
     }
-    let claim = want && (v.installed.is_some() || (v.error.is_none() && v.host.is_ok()));
+    let claim = want && (v.installed.is_some() || (v.error.is_none() && v.host.is_ok() && v.held.is_none()));
     super::reconcile::theme_plan(src_settings, &v.dir, base, claim).unwrap_or_else(|e| vec![format!("⚠ settings.json theme: {e:#}")])
 }
 
@@ -603,7 +605,7 @@ impl TargetState {
             shipped: shipped.map(str::to_string),
             enabled: v.enabled,
             pending: if v.wanted && v.installed.is_none() { v.host.as_ref().err().cloned() } else { None },
-            removed: v.target_off || (v.wanted && v.installed.is_none() && v.recorded),
+            removed: v.held.is_none() && (v.target_off || (v.wanted && v.installed.is_none() && v.recorded)),
             held: v.held.clone(),
             foreign: v.foreign.clone(),
             error: v.error.clone(),

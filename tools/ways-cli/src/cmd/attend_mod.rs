@@ -597,16 +597,17 @@ impl Target<'_> {
         wants_in(m, self.config)
     }
 
-    /// The finding that has `mods.<name>` ignored in the user config or
-    /// this target's config. A mod not wanted on that reading is held:
-    /// repair leaves it installed or not, as it finds it.
+    /// The finding that decided `mods.<name>.install` as false here
+    /// ([`ways_core::settings::mod_entry_ignored`]). A mod not wanted on that
+    /// reading is held: repair leaves it installed or not, as it finds it.
     pub fn held(&self, m: &Mod) -> Option<agent_settings::Finding> {
         ways_core::settings::mod_entry_ignored(m.name, self.config)
     }
 
-    /// Whether repair keeps `m` where it is installed: wanted, or held.
+    /// Whether repair keeps `m` installed here: wanted, or held and
+    /// installed.
     fn keeps(&self, m: &Mod) -> bool {
-        self.wants(m) || self.held(m).is_some()
+        self.wants(m) || (self.held(m).is_some() && listed_in(m, self.dest_root))
     }
 }
 
@@ -629,8 +630,8 @@ pub fn held_why(m: &Mod, dest_root: &Path, f: &agent_settings::Finding, installe
     let name = m.name;
     let fix = if f.is_parse_failure() {
         "fixing the file's syntax by hand repairs it".to_string()
-    } else if f.closed {
-        "editing that name by hand repairs it".to_string()
+    } else if f.unit.as_deref() != Some(format!("mods.{name}").as_str()) {
+        "rewriting the mods section by hand as one entry per mod repairs it".to_string()
     } else {
         let user = f.file.as_deref().is_some_and(|p| p == ways_core::paths::user_config());
         let target = if user { String::new() } else { format!(" --target {}", super::lifecycle::shell_word(&dest_root.display().to_string())) };

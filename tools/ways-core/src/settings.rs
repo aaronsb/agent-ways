@@ -974,20 +974,44 @@ pub fn mod_install(name: &str, target_config: &Path) -> bool {
     mod_install_in(name, &mod_layers(target_config))
 }
 
-/// The finding that has the `mods.<name>` entry ignored in the user file or
-/// the target's file, if one does: a bad value or unknown key in the entry, a
-/// refused entry name that closes the `mods` section, or a file that does not
-/// parse. `install` then takes its fail-closed reading, which repair does not
-/// act on to uninstall a mod.
+/// The finding that decided `mods.<name>.install` as false, if one did.
+/// The deciding file is the highest of the target's file and the user file
+/// whose text sets the key; with neither, the default decides. A finding
+/// decided it when:
+/// - the deciding file does not parse;
+/// - its `mods.<name>` entry fell back and the key is not written `false`;
+/// - with no file setting the key, the user file's whole `mods` section fell
+///   back, so an entry it held is not read.
+///
+/// `install` then takes its fail-closed reading, which repair does not act on
+/// to uninstall a mod. A finding in a file that did not decide changes
+/// nothing.
 pub fn mod_entry_ignored(name: &str, target_config: &Path) -> Option<agent_settings::Finding> {
-    mod_entry_ignored_in(name, &mod_layers(target_config))
+    let read = mod_layers(target_config).map(|l| {
+        let text = l.path.as_deref().and_then(|p| std::fs::read(p).ok()).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
+        (l, text)
+    });
+    mod_entry_ignored_in(name, &read)
 }
 
-fn mod_entry_ignored_in(name: &str, layers: &[Layer]) -> Option<agent_settings::Finding> {
+/// [`mod_entry_ignored`] over each file's layer and text, lowest first.
+fn mod_entry_ignored_in(name: &str, files: &[(Layer, String)]) -> Option<agent_settings::Finding> {
     let unit = format!("mods.{name}");
-    layers.iter().filter(|l| l.present).flat_map(|l| &l.findings).find(|f| {
-        f.is_parse_failure() || (f.fallback && (f.unit.as_deref() == Some(unit.as_str()) || (f.closed && f.section.as_deref() == Some("mods"))))
-    }).cloned()
+    let key = ["mods".to_string(), name.to_string(), "install".to_string()];
+    for (layer, text) in files.iter().rev().filter(|(l, _)| l.present) {
+        if let Some(f) = layer.findings.iter().find(|f| f.is_parse_failure()) {
+            return Some(f.clone());
+        }
+        let doc = agent_settings::load::parse_text(text, None).ok();
+        let Some(raw) = doc.as_ref().and_then(|d| agent_settings::yaml_edit::value_at(d, &key)) else { continue };
+        if *raw == Value::Bool(false) {
+            return None;
+        }
+        return layer.findings.iter().find(|f| f.fallback && f.unit.as_deref() == Some(unit.as_str())).cloned();
+    }
+    let (user, _) = files.first().filter(|(l, _)| l.present && l.scope == LayerScope::User)?;
+    let whole = |u: &str| u == "mods" || u.starts_with("mods[");
+    user.findings.iter().find(|f| f.fallback && f.section.as_deref() == Some("mods") && f.unit.as_deref().is_some_and(whole)).cloned()
 }
 
 /// The two files `mods.<name>.install` is read from: the user file, then
@@ -1265,26 +1289,58 @@ mod tests {
     /// One unknown key in a mod's entry has the entry ignored, and the
     /// finding that did it is named; a clean entry, or another mod's bad
     /// one, names none.
+    /// A file's layer with its text, as [`mod_entry_ignored_in`] reads it.
+    fn file(name: &str, scope: LayerScope, text: &str) -> (Layer, String) {
+        (layer(name, scope, text), text.to_string())
+    }
+
     #[test]
     fn a_finding_in_a_mods_entry_is_named_for_that_mod() {
-        let l = layer("user", LayerScope::User, "mods:\n  ways-theme:\n    install: true\n    bogus_key: 1\n");
-        assert!(!mod_install_in("ways-theme", std::slice::from_ref(&l)), "the entry is ignored, so install reads false");
-        let f = mod_entry_ignored_in("ways-theme", std::slice::from_ref(&l)).expect("the entry's finding");
+        let user = file("user", LayerScope::User, "mods:\n  ways-theme:\n    install: true\n    bogus_key: 1\n");
+        assert!(!mod_install_in("ways-theme", std::slice::from_ref(&user.0)), "the entry is ignored, so install reads false");
+        let f = mod_entry_ignored_in("ways-theme", std::slice::from_ref(&user)).expect("the entry's finding");
         assert_eq!((f.key.as_deref(), f.line), (Some("mods.ways-theme.bogus_key"), Some(4)));
-        assert!(mod_entry_ignored_in("attend", std::slice::from_ref(&l)).is_none());
-        let clean = layer("user", LayerScope::User, "mods:\n  ways-theme:\n    install: true\n");
+        assert!(mod_entry_ignored_in("attend", std::slice::from_ref(&user)).is_none());
+        let clean = file("user", LayerScope::User, "mods:\n  ways-theme:\n    install: true\n");
         assert!(mod_entry_ignored_in("ways-theme", &[clean]).is_none());
-        let broken = layer("user", LayerScope::User, "mods: [\n");
+        let broken = file("user", LayerScope::User, "mods: [\n");
         assert!(mod_entry_ignored_in("attend", &[broken]).is_some_and(|f| f.is_parse_failure()));
+    }
+
+    /// Only the finding that decided the false holds the mod: one in the
+    /// lower file under a clean `install: false` above it, or beside an
+    /// `install: false` written in the same entry, does not.
+    #[test]
+    fn only_the_deciding_file_s_finding_holds_the_mod() {
+        let bad = || file("user", LayerScope::User, "mods:\n  ways-theme:\n    install: true\n    bogus_key: 1\n");
+        let target_off = file("target", LayerScope::Target, "mods:\n  ways-theme:\n    install: false\n");
+        assert!(mod_entry_ignored_in("ways-theme", &[bad(), target_off]).is_none(), "the target's clean false decides");
+        let target_silent = file("target", LayerScope::Target, "mods:\n  attend:\n    install: true\n");
+        assert!(mod_entry_ignored_in("ways-theme", &[bad(), target_silent]).is_some(), "the user file decides, with its finding");
+        let written_off = file("user", LayerScope::User, "mods:\n  ways-theme:\n    install: false\n    bogus_key: 1\n");
+        assert!(mod_entry_ignored_in("ways-theme", &[written_off]).is_none(), "an uninstall the operator wrote is not held");
+        let bad_value = file("user", LayerScope::User, "mods:\n  ways-theme:\n    install: maybe\n");
+        assert!(mod_entry_ignored_in("ways-theme", &[bad_value]).is_some());
+    }
+
+    /// A user file whose whole `mods` section fell back holds every mod no
+    /// file sets; the same in a target's file leaves the user file to decide.
+    #[test]
+    fn a_whole_mods_section_falling_back_in_the_user_file_holds() {
+        let list = "mods:\n  - ways-theme:\n      install: true\n";
+        let user = file("user", LayerScope::User, list);
+        let f = mod_entry_ignored_in("ways-theme", std::slice::from_ref(&user)).expect("the section's finding");
+        assert_eq!(f.section.as_deref(), Some("mods"));
+        assert!(mod_entry_ignored_in("ways-theme", &[file("user", LayerScope::User, ""), file("target", LayerScope::Target, list)]).is_none());
     }
 
     /// `copy_as` was removed by ADR-514: a file that still holds it is told
     /// so, and the rest of the entry loads, `install` with it.
     #[test]
     fn copy_as_is_retired_and_the_entry_still_loads() {
-        let l = layer("user", LayerScope::User, "mods:\n  ways-theme:\n    install: true\n    copy_as: markdown\n");
+        let (l, text) = file("user", LayerScope::User, "mods:\n  ways-theme:\n    install: true\n    copy_as: markdown\n");
         assert!(mod_install_in("ways-theme", std::slice::from_ref(&l)));
-        assert!(mod_entry_ignored_in("ways-theme", std::slice::from_ref(&l)).is_none());
+        assert!(mod_entry_ignored_in("ways-theme", &[(l.clone(), text)]).is_none());
         let f: Vec<_> = l.findings.iter().map(|f| (f.key.as_deref(), f.line, f.fallback, f.message.as_str())).collect();
         assert_eq!(f, [(Some("mods.ways-theme.copy_as"), Some(4), false, COPY_AS_RETIRED)]);
     }
