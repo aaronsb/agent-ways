@@ -3,6 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On, RenderElement } from 'claude-code'
 
 import { parseExport } from '../hooks/skins/config.ts'
+import { oneLine } from '../hooks/skins/format.ts'
 import { PICKUP_MS } from '../hooks/skins/hub.tsx'
 import { widthOf } from '../hooks/skins/markdown.ts'
 import { pathLines } from '../hooks/skins/rows.tsx'
@@ -20,7 +21,7 @@ const INDENT = 2
 const at = (props: Record<string, unknown>, surface = 'terminal', columns = COLUMNS) =>
   ({ plugin: 'ways-theme', surface, component: 'ToolUse', requestId: 'r1', viewport: { columns, rows: 30 }, props }) as never
 
-// A path past summarize's 120 characters, under no folder the session shortens it against.
+// A path of 129 characters, under no folder the session shortens it against.
 const LONG = '/tmp/claude-1000/-home-aaron-Projects-ai-harness-agent-ways/55c9c23f-22df-457e-9446-90894eb6c3f4/scratchpad/ai-notes-for-review.md'
 const PATCH = { structuredPatch: [{ lines: ['-old', '+new'] }] }
 const edit = (file_path: string, extra: Record<string, unknown> = {}) => ({
@@ -175,18 +176,34 @@ describe('where the row draws as before', () => {
     await ui.unmount()
   })
 
-  test('truncate keeps a long path on the tool line, cut at 120 characters', async ($, on) => {
+  test('truncate keeps a long path on the tool line, which the terminal cuts with an ellipsis', async ($, on) => {
     const tree = await drawn($, on, edit(LONG), { mod: withPaths('truncate') })
     expect(wrapped(tree)).toBeUndefined()
     const line = walk(tree).find(n => n.type === 'Text' && n.props?.wrap === 'truncate-end' && textOf(n).includes('Edit'))
-    expect(textOf(line)).toContain(`  ${LONG.slice(0, 120)}`)
-    expect(textOf(line)).not.toContain(LONG)
+    expect(textOf(line)).toContain(`  ${LONG}`)
   })
 
-  test('a command is no path, and stays on its line', async ($, on) => {
-    const command = `grep -rn ${'needle/'.repeat(12)} .`
+  test('a command is no path: it stays on its line, whole, and wraps', async ($, on) => {
+    const command = `grep -rn ${'needle/'.repeat(30)} .`
     const tree = await drawn($, on, { tool_use_id: 't3', tool: 'Grep', input: { pattern: command }, isRunning: false, isErrored: false, isInterrupted: false, isExpanded: false, output: undefined })
     expect(wrapped(tree)).toBeUndefined()
+    const line = walk(tree).find(n => n.type === 'Text' && n.props?.wrap === 'wrap' && textOf(n).includes('Grep'))
+    expect(textOf(line)).toContain(`  ${command}`)
+  })
+
+  test('a Bash command past the row draws whole and wraps', async ($, on) => {
+    const command = `git log --oneline ${'--author=someone '.repeat(10)}`.trim()
+    const tree = await drawn($, on, { tool_use_id: 't5', tool: 'Bash', input: { command }, isRunning: false, isErrored: false, isInterrupted: false, isExpanded: false, output: undefined })
+    const line = walk(tree).find(n => n.type === 'Text' && textOf(n).includes('Bash'))
+    expect(line?.props?.wrap).toBe('wrap')
+    expect(textOf(line)).toContain(`  ${command}`)
+  })
+
+  test("a command's later lines show as an ellipsis", async ($, on) => {
+    const tree = await drawn($, on, { tool_use_id: 't6', tool: 'Bash', input: { command: 'cat <<EOF\nline two\nEOF' }, isRunning: false, isErrored: false, isInterrupted: false, isExpanded: false, output: undefined })
+    const line = walk(tree).find(n => n.type === 'Text' && textOf(n).includes('Bash'))
+    expect(textOf(line)).toContain('  cat <<EOF …')
+    expect(textOf(line)).not.toContain('line two')
   })
 
   // An MCP tool's target is its first non-empty string field, which need not be its path.
@@ -196,12 +213,12 @@ describe('where the row draws as before', () => {
     ['a query beside an empty file_path', mcp('mcp__x__y', { file_path: '', query: 'q/'.repeat(300) }), 'q/'.repeat(300)],
   ]
   for (const [name, props, field] of MCP_CASES) {
-    test(`an MCP tool with ${name} stays on its line, cut at 120 characters`, async ($, on) => {
+    test(`an MCP tool with ${name} stays on its line, cut at 120 characters with an ellipsis`, async ($, on) => {
       const tree = await drawn($, on, props)
       expect(wrapped(tree)).toBeUndefined()
-      const line = walk(tree).find(n => n.type === 'Text' && n.props?.wrap === 'truncate-end' && textOf(n).includes(':'))
-      expect(textOf(line)).toContain(`  ${field.slice(0, 120)}`)
-      expect(textOf(line)).not.toContain(field.slice(0, 121))
+      const line = walk(tree).find(n => n.type === 'Text' && n.props?.wrap === 'wrap' && textOf(n).includes(':'))
+      expect(textOf(line)).toContain(`  ${oneLine(field).slice(0, 120)}…`)
+      expect(textOf(line)).not.toContain(oneLine(field).slice(0, 121))
     })
   }
 

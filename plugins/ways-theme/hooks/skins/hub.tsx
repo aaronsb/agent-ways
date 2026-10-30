@@ -28,14 +28,14 @@ import { FRAME, FRAME_INSET, FRAME_PAD_X, isExpandedView, shouldFrame } from '..
 
 import { MOD_EXPORT_ARGV, parseExport, setupOf } from './config.ts'
 import type { Setup } from './config.ts'
-import { clipLines, diffstat, pick, shortenPath } from './format.ts'
+import { diffstat, MAX_DRAWN, pick, shortenPath } from './format.ts'
 import { bodyOf, inputFields, isOpen } from './detail.ts'
-import { DISCLOSE_INSET, disclosedRow, openedRows } from './detail-rows.tsx'
+import { DISCLOSE_INSET, disclosedRow, drawsBody, openedRows } from './detail-rows.tsx'
 import { commandSegments } from './command-output.ts'
 import { askBand, diffCard, footerRow, groupRow, promptRow, quietResult, relayedRows, replyRows, spinnerRow, terminalCard, toolRow, usageBand, desktopSpinnerRow } from './rows.tsx'
 import type { Framing, Look, SvgElement, Ui } from './rows.tsx'
 import { keepsOwnRow, SHELLS, shellResultOf } from './shell.ts'
-import { OUTPUT_FOLD, shellRows } from './shell-rows.tsx'
+import { shellRows } from './shell-rows.tsx'
 import { sightings } from './sightings.ts'
 import { ICONS } from './skin.ts'
 import { hunksOf } from './svg-diff.ts'
@@ -44,8 +44,9 @@ import { countdownsOf, limitLabel, metersOf } from './svg-usage.ts'
 import { NO_ROW, PATH_TOOLS, kindOf, showsImage, summarize, toolLabel } from './tools.ts'
 import { fitted, namesImage, withRow } from './pictures.ts'
 import { commandOf, errorLine, isQuiet, quietLabel } from './quiet.ts'
-import { MAX_MARKDOWN, replySegments } from './reply.ts'
-import { holdsCommand } from './commands.ts'
+import { replySegments } from './reply.ts'
+import { holdsCopy, notRoot } from './commands.ts'
+import type { IsCommand } from './commands.ts'
 import { fileHref, hyperlinksFrom, touchOf } from './links.ts'
 import { MIN_WIDTH, axisFor, boxLines, canMeasure, gradientBox, gradientRuns } from './prompt-box.tsx'
 import { holdsPaste, pasteIdOf, shownText } from './pastes.ts'
@@ -61,8 +62,6 @@ export const PICKUP_MS = 5000
 const MAX_PROMPT = 4000
 // The most of a message body the engine draws.
 const MAX_RELAYED = 100_000
-const CLIP_HEAD = 8
-const CLIP_TAIL = 4
 const FRAME_MS = 90
 const SETTLE_LEAD_MS = FRAME_MS
 const FAST_RETRIES = 4
@@ -82,9 +81,7 @@ const usageAtom = atom({ plugin: 'ways-theme', key: 'usage' } as const, { contex
 const countdownsAtom = atom({ plugin: 'ways-theme', key: 'countdowns' } as const, {} as Record<string, string>)
 const settleAtom = atom({ plugin: 'ways-theme', key: 'settle' } as const, 0)
 const disclosureAtom = atom({ plugin: 'ways-theme', key: 'disclosure' } as const, 'auto' as 'auto' | 'open' | 'closed')
-const allAtom = atom({ plugin: 'ways-theme', key: 'showAll' } as const, false)
 const touchedAtom = atom({ plugin: 'ways-theme', key: 'touched' } as const, {} as Record<string, Touch>)
-const foldsAtom = atom({ plugin: 'ways-theme', key: 'folds' } as const, [] as string[])
 
 const WRITES = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit'])
 const EDITS = new Set(['Edit', 'MultiEdit', 'Write'])
@@ -125,7 +122,7 @@ export type View = { isVerbose: boolean; isTranscriptExpanded: boolean; isWaysTh
  *  its own, and neither under `verbose` (isExpandedView). */
 const isExpanded = (view: View, row: unknown): boolean => isExpandedView(view.isTranscriptExpanded || row === true, view.isVerbose)
 
-type Row = { component: string; surface: RenderSurface; props: object }
+type Row = { component: string; surface: RenderSurface; props: object; viewport?: { columns: number } }
 
 const drawsRow = (call: unknown): boolean => !NO_ROW.has(String((call as { tool?: unknown }).tool))
 
@@ -151,19 +148,23 @@ function isFramedAround(setup: Setup | null, e: Row, view: View): boolean {
   return true
 }
 
-/** Whether a reply's drawing holds a `! <command>` block, which keeps out of
- *  every frame (replyRows). */
-function holdsCommandBlock(setup: Setup, e: Row): boolean {
+/** The columns a reply's prose is drawn in, inside the frame or not. */
+const proseWidth = (e: Row, framed: boolean): number => (e.viewport?.columns ?? 100) - (framed ? FRAME_INSET : 0)
+
+/** Whether a framed reply's drawing holds a copy block (commands.ts), which
+ *  keeps out of every frame (replyRows). */
+function holdsCopyBlock(setup: Setup, e: Row): boolean {
   const text = (e.props as { text?: unknown }).text
-  return typeof text === 'string' && holdsCommand(text) && (replySegments(text, setup.prefs as Look['prefs'], e.surface)?.some(segment => segment.kind === 'command') ?? false)
+  const width = proseWidth(e, true)
+  return typeof text === 'string' && holdsCopy(text, width, isCommand) && (replySegments(text, setup.prefs as Look['prefs'], e.surface, width, isCommand)?.some(segment => segment.kind === 'copy') ?? false)
 }
 
 /** Whether the frame wraps this row whole. The register module asks it to
  *  draw the frame and this layer to draw the row inside it, of the same look
  *  and view, so the two never disagree. This layer frames a reply holding a
- *  command block itself, in pieces around the block. */
+ *  copy block itself, in pieces around the block. */
 export function isFramed(setup: Setup | null, e: Row, view: View): boolean {
-  return setup !== null && isFramedAround(setup, e, view) && !(e.component === 'AssistantMessage' && holdsCommandBlock(setup, e))
+  return setup !== null && isFramedAround(setup, e, view) && !(e.component === 'AssistantMessage' && holdsCopyBlock(setup, e))
 }
 
 /** `inner` inside a frame. The engine's row opens with a blank margin row;
@@ -243,6 +244,23 @@ let hasTouched = false
 
 const cwdOf = async ($: EngineInterface): Promise<string> => sessionCwd ?? (await $.session.cwd())
 
+// The slash commands the person can run, by name, as `$.command.list()` last answered:
+// built-in, plugin and MCP alike. Null until it has answered, and where the engine has no
+// list or the read failed; a reply's slash blocks then fall back to `notRoot` (commands.ts).
+let commandNames: ReadonlySet<string> | null = null
+
+const isCommand: IsCommand = name => (commandNames === null ? notRoot(name) : commandNames.has(name))
+
+// Reads the command list, and redraws when it changed. Claude Code names no event for a
+// change to it, and an MCP server or another mod's command can arrive after the session
+// starts, so it is read at the session's start and at each turn of the main loop.
+async function readCommands($: EngineInterface): Promise<void> {
+  const names = new Set((await $.command.list()).map(command => command.name))
+  if (commandNames !== null && commandNames.size === names.size && [...names].every(name => commandNames!.has(name))) return
+  commandNames = names
+  $.ui.invalidate('ui.render')
+}
+
 // The id Claude Code gives this session's pastes, worked out by `idOf` once per
 // session id; null when the session id or its digest cannot be had.
 let pastes: { session: string; id: string } | undefined
@@ -266,29 +284,19 @@ const lookOf = (ui: Ui & { Svg?: SvgElement }, setup: Setup, surface: RenderSurf
   ...(copy === undefined || !setup.prefs.copy ? {} : { copy }),
 })
 
-type Needs = { links?: boolean; touched?: boolean; folds?: boolean; cwd?: string }
+type Needs = { links?: boolean; touched?: boolean; cwd?: string }
 
 async function sessionLook($: EngineInterface, e: { requestId: string; surface: RenderSurface }, look: Look, needs: Needs): Promise<Look> {
-  const folds = memberOf(foldsAtom, e)
   const links = needs.links === true && look.prefs.links && (e.surface !== 'terminal' || hyperlinks)
   // A `file://` URL names this machine, which only the terminal is on.
   const paths = links && e.surface === 'terminal' ? { cwd: needs.cwd ?? (await cwdOf($)), ...(home === undefined ? {} : { home }) } : undefined
   const touched = needs.touched === true && hasTouched ? { files: await read($, touchedAtom), cwd: needs.cwd ?? (await cwdOf($)) } : undefined
-  const open = needs.folds === true && look.prefs.fold ? new Set(await read($, folds)) : undefined
 
   return {
     ...look,
     links,
     ...(paths === undefined ? {} : { paths }),
     ...(touched === undefined ? {} : { touched }),
-    ...(open === undefined
-      ? {}
-      : {
-          folds: {
-            open,
-            toggle: (key: string) => void update($, folds, keys => (keys.includes(key) ? keys.filter(kept => kept !== key) : [...keys, key])),
-          },
-        }),
   }
 }
 
@@ -298,7 +306,6 @@ const hasPathish = (text: string): boolean => /[\w.-]\/[\w.-]|\w\.[A-Za-z]{1,5}\
 const replyNeeds = (text: string, segments: readonly { kind: string }[]): Needs => ({
   links: /https?:\/\//.test(text) || hasPathish(text),
   touched: hasPathish(text),
-  folds: segments.some(segment => segment.kind === 'code' || segment.kind === 'table'),
 })
 
 // Whether the terminal draws links, and the home a `~/` path links under.
@@ -422,6 +429,7 @@ export function registerSkins(on: On, shared: Shared): void {
     sessionCwd = e.cwd
     await readLinkEnv($).catch(quietly($, 'link check'))
     await refreshUsage($).catch(quietly($, 'usage'))
+    await readCommands($).catch(quietly($, 'command list'))
     ticker?.cancel()
     pickup?.cancel()
     ticker = $.clock.every(FRAME_MS, () => {
@@ -444,6 +452,7 @@ export function registerSkins(on: On, shared: Shared): void {
   })
 
   on('turn.start', async ($, e, next) => {
+    if (e.agentId === undefined) await readCommands($).catch(quietly($, 'command list'))
     stats = NO_STATS
     isWorking = true
     sessionCwd = await $.session.cwd()
@@ -514,12 +523,10 @@ export function registerSkins(on: On, shared: Shared): void {
     const fields = (e.props.input ?? {}) as { file_path?: unknown; notebook_path?: unknown }
     const path = fields.file_path ?? fields.notebook_path
     const isPathRow = PATH_TOOLS.has(e.props.tool) && typeof path === 'string'
-    // A path that may wrap is drawn whole.
-    const wraps = e.surface === 'terminal' && setup.prefs.paths === 'wrap' && isPathRow
-    const target = summarize(e.props.tool, e.props.input, cwd, wraps ? Infinity : undefined)
+    const target = summarize(e.props.tool, e.props.input, cwd)
     const disclosure = memberOf(disclosureAtom, e)
     const open = isOpen(await read($, disclosure), e.props.isErrored)
-    const base = await sessionLook($, e, lookOf($.ui.resolve(e), setup, e.surface, copier($, e.surface)), { links: open || typeof path === 'string', touched: typeof path === 'string', folds: open, cwd })
+    const base = await sessionLook($, e, lookOf($.ui.resolve(e), setup, e.surface, copier($, e.surface)), { links: open || typeof path === 'string', touched: typeof path === 'string', cwd })
     const framed = isFramed(setup, e, shared.view())
     const plain = base.svg === undefined ? base : { ...base, isFirstDraw: await firstDraws($, e) }
     const look = framed ? forFrame(plain) : plain
@@ -547,8 +554,6 @@ export function registerSkins(on: On, shared: Shared): void {
 
     if (!open) return drawn(disclosedRow(look, row, false, toggle))
 
-    const all = memberOf(allAtom, e)
-    const isAll = await read($, all)
     const opened = await openedRows(look, {
       fields: inputFields(e.props.tool, e.props.input, cwd),
       body: bodyOf(e.props.tool, e.props.output, e.props.isErrored, e.props.isRunning, cwd),
@@ -556,8 +561,6 @@ export function registerSkins(on: On, shared: Shared): void {
       isErrored: e.props.isErrored,
       cwd,
       columns: e.viewport?.columns ?? 100,
-      isAll,
-      toggleAll: () => void update($, all, () => !isAll),
       stock,
     })
     return drawn(disclosedRow(look, row, true, toggle, opened))
@@ -588,16 +591,12 @@ export function registerSkins(on: On, shared: Shared): void {
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
     const setup = await activeSetup($)
     if (setup === null) return next(e)
-    const output = e.props.output as { stdout?: unknown } | null
-    const needs = { folds: e.surface === 'terminal' && SHELLS.has(e.props.tool) }
-    const look = await sessionLook($, e, lookOf($.ui.resolve(e), setup, e.surface, copier($, e.surface)), needs)
+    const look = await sessionLook($, e, lookOf($.ui.resolve(e), setup, e.surface, copier($, e.surface)), {})
     const columns = e.viewport?.columns ?? 100
     // An opened row draws the answer itself; one it cannot draw keeps Claude Code's here.
-    const isOpened =
-      kindOf(e.props.tool) !== null &&
-      isOpen(await read($, memberOf(disclosureAtom, e)), e.props.isErrored) &&
-      bodyOf(e.props.tool, e.props.output, e.props.isErrored, false, '').kind !== 'stock'
-    if (isOpened) {
+    const isOpened = kindOf(e.props.tool) !== null && isOpen(await read($, memberOf(disclosureAtom, e)), e.props.isErrored)
+    const cwd = isOpened ? await cwdOf($) : ''
+    if (isOpened && drawsBody(look, { body: bodyOf(e.props.tool, e.props.output, e.props.isErrored, false, cwd), command: '', isErrored: e.props.isErrored, cwd, columns })) {
       const { Box } = $.ui.resolve(e)
       return <Box />
     }
@@ -606,29 +605,22 @@ export function registerSkins(on: On, shared: Shared): void {
     }
     if (look.svg !== undefined && EDITS.has(e.props.tool) && !e.props.isErrored) {
       const diff = hunksOf(e.props.output)
-      if (diff !== null) {
-        const shown = shortenPath(diff.path, await $.session.cwd())
-        return withSettle($, e, diffCard({ ...look, isFirstDraw: await firstDraws($, e) }, look.svg, diff, shown, columns))
-      }
+      const card = diff === null ? null : diffCard({ ...look, isFirstDraw: await firstDraws($, e) }, look.svg, diff, shortenPath(diff.path, await $.session.cwd()), columns)
+      if (card !== null) return withSettle($, e, card)
     }
     const isShellCard = look.prefs.shell && SHELLS.has(e.props.tool) && !keepsOwnRow(e.props.output)
     if (look.svg !== undefined && isShellCard) {
       const shell = shellOutputOf(e.props.output)
-      if (shell !== null) return withSettle($, e, terminalCard({ ...look, isFirstDraw: await firstDraws($, e) }, look.svg, shell, e.props.isErrored, columns))
+      const card = shell === null ? null : terminalCard({ ...look, isFirstDraw: await firstDraws($, e) }, look.svg, shell, e.props.isErrored, columns)
+      if (card !== null) return withSettle($, e, card)
     }
     if (e.surface === 'terminal' && isShellCard) {
       const shell = shellResultOf(e.props.output, e.props.isErrored)
-      if (shell !== null) {
-        const isWhole = !look.prefs.fold || look.folds?.open.has(OUTPUT_FOLD) === true
-        const fold = isWhole ? null : { head: CLIP_HEAD, tail: CLIP_TAIL }
-        return shellRows(look, await read($, memberOf(commandAtom, e)), shell, e.props.isErrored, { stdout: fold, stderr: fold })
-      }
+      if (shell !== null) return shellRows(look, await read($, memberOf(commandAtom, e)), shell, e.props.isErrored)
     }
     // A framed result opens on a blank line for the frame to take back.
     if (isFramed(setup, e, shared.view())) return marginRow(look, await next(e))
-    if (!look.prefs.clipOutput || !SHELLS.has(e.props.tool) || typeof output?.stdout !== 'string') return next(e)
-    const stdout = clipLines(output.stdout, CLIP_HEAD, CLIP_TAIL)
-    return stdout === output.stdout ? next(e) : next({ ...e, props: { ...e.props, output: { ...output, stdout } } })
+    return next(e)
   })
 
   // The person's message, after `render.prompt_box`, its pastes unwrapped as Claude Code
@@ -674,7 +666,8 @@ export function registerSkins(on: On, shared: Shared): void {
     const setup = await activeSetup($)
     if (setup === null) return next(e)
     const text = e.props.text
-    const segments = replySegments(text, setup.prefs as Look['prefs'], e.surface)
+    const framed = isFramedAround(setup, e, shared.view())
+    const segments = replySegments(text, setup.prefs as Look['prefs'], e.surface, proseWidth(e, framed), isCommand)
     if (segments === null) return next(e)
     const ui = $.ui.resolve(e)
     const svg = e.surface !== 'terminal' && setup.prefs.tables === 'on' && 'Svg' in ui ? ui.Svg : undefined
@@ -685,9 +678,9 @@ export function registerSkins(on: On, shared: Shared): void {
     // A reply that names an image file keeps the picture a mod beneath draws (pictures.ts).
     const pictured = async (rows: ReturnType<Ui['Box']>) => (e.surface === 'terminal' && namesImage(text) ? withRow(await next(e), rows) : rows)
     // A framed reply is laid out inside the frame the register module draws around it,
-    // or, holding a command, in frames of this layer's around each run of blocks.
-    if (!isFramedAround(setup, e, shared.view())) return withSettle($, e, await pictured(replyRows(look, segments, columns, svg, whole)))
-    if (segments.some(segment => segment.kind === 'command')) {
+    // or, holding a copy block, in frames of this layer's around each run of blocks.
+    if (!framed) return withSettle($, e, await pictured(replyRows(look, segments, columns, svg, whole)))
+    if (segments.some(segment => segment.kind === 'copy')) {
       const framing: Framing = { inset: FRAME_INSET, frame: rows => framedRow(ui, marginRow(look, rows), FRAME.reply) }
       return withSettle($, e, await pictured(replyRows(look, segments, columns, svg, whole, framing)))
     }
@@ -698,7 +691,7 @@ export function registerSkins(on: On, shared: Shared): void {
   on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => {
     const setup = await activeSetup($)
     if (setup === null || !setup.prefs.commands || setup.prefs.tables === 'off' || e.props.isErrored) return next(e)
-    const segments = e.props.text.length > MAX_MARKDOWN ? null : commandSegments(e.props.text, e.props.command)
+    const segments = e.props.text.length > MAX_DRAWN ? null : commandSegments(e.props.text, e.props.command)
     if (segments === null) return next(e)
     const ui = $.ui.resolve(e)
     const svg = e.surface !== 'terminal' && setup.prefs.tables === 'on' && 'Svg' in ui ? ui.Svg : undefined

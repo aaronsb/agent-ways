@@ -1,14 +1,15 @@
 // Ported from skins by hellosverre (MIT; LICENSE beside this file),
 // https://github.com/hellosverre/claude-skins at 985ad63, hooks/markdown.ts.
 
-import type { Command } from './commands'
+import type { Copy } from './commands'
 
 // Finds the tables and fenced code in a reply so they can be drawn as cards; the rest
 // stays markdown.
 
 export type Align = 'left' | 'right' | 'center'
 
-export type Table = { kind: 'table'; header: string[]; align: Align[]; rows: string[][] }
+// `raw` is the table as written, where it came from markdown.
+export type Table = { kind: 'table'; header: string[]; align: Align[]; rows: string[][]; raw?: string }
 
 // `raw` is the fence as written, for the surfaces that keep Claude Code's own drawing.
 export type Code = { kind: 'code'; lang: string; code: string; raw: string }
@@ -16,8 +17,8 @@ export type Code = { kind: 'code'; lang: string; code: string; raw: string }
 // `tex` is the formula alone; `raw` the block as written, kept for the copy button.
 export type Math = { kind: 'math'; tex: string; raw: string }
 
-// A command is a `! <command>` suggestion (commands.ts).
-export type Segment = { kind: 'text'; text: string } | Table | Code | Math | Command
+// A copy is the text the person copies, as a block of its own (commands.ts).
+export type Segment = { kind: 'text'; text: string } | Table | Code | Math | Copy
 
 // Fences the desktop marks runnable with a Run button of its own. A card is an image and
 // cannot carry it, so these keep Claude Code's drawing there.
@@ -50,15 +51,70 @@ export function fenceClose(lines: readonly string[], i: number): number {
   })
 }
 
-// Inline emphasis and code ticks read as noise in a padded cell.
-const clean = (cell: string): string =>
-  cell.replace(/\*\*|__|`/g, '').replace(/\\\|/g, '|').trim()
-
-export function cellsOf(line: string): string[] {
-  const inner = line.trim().replace(/^\|/, '').replace(/(?<!\\)\|$/, '')
-
-  return inner.split(/(?<!\\)\|/).map(clean)
+// Columns of leading whitespace, a tab to the next multiple of four.
+export function indentOf(line: string): number {
+  let width = 0
+  for (const char of line) {
+    if (char === ' ') width += 1
+    else if (char === '\t') width += 4 - (width % 4)
+    else break
+  }
+  return width
 }
+
+// `line` less up to `columns` of its indentation; a tab that runs past them leaves the
+// rest of its columns as spaces.
+function outdent(line: string, columns: number): string {
+  let width = 0
+  let at = 0
+  while (at < line.length && width < columns && (line[at] === ' ' || line[at] === '\t')) {
+    width += line[at] === '\t' ? 4 - (width % 4) : 1
+    at++
+  }
+  return ' '.repeat(Math.max(0, width - columns)) + line.slice(at)
+}
+
+// The code between a fence's opening on line `open` and its closing on line `close`, each
+// line less up to as many columns of indentation as the opening has, spaces or tabs, as
+// CommonMark reads a fence: a fence in a list item keeps none of the item's indentation.
+export function fenceCode(lines: readonly string[], open: number, close: number): string {
+  const indent = indentOf(lines[open] ?? '')
+
+  return lines
+    .slice(open + 1, close)
+    .map(line => outdent(line, indent))
+    .join('\n')
+}
+
+// A code span in a cell: a run of backticks, the content, a run of the same length.
+const CELL_SPAN = /(?<![`\\])(`+)(?!`)(.+?)(?<!`)\1(?!`)/g
+
+// A span's content as CommonMark reads it: one space off each side when both have one.
+const spanText = (inner: string): string => (inner.length > 1 && inner.startsWith(' ') && inner.endsWith(' ') && inner.trim() !== '' ? inner.slice(1, -1) : inner)
+
+// `cell` with `reduce` applied outside its code spans, and each span as its content
+// verbatim, its ticks off. While `reduce` runs, each span is held out as its index between
+// two private-use marks, so a link or emphasis around a span still reads whole; the mark
+// is one the cell does not hold, so none of the cell's own text reads as a span.
+function outsideCode(cell: string, reduce: (text: string) => string): string {
+  const spans: string[] = []
+  let code = 0xe000
+  while (cell.includes(String.fromCharCode(code))) code++
+  const mark = String.fromCharCode(code)
+  const masked = cell.replace(CELL_SPAN, (_, _ticks: string, inner: string) => `${mark}${spans.push(spanText(inner)) - 1}${mark}`)
+
+  return reduce(masked).replace(new RegExp(`${mark}(\\d+)${mark}`, 'g'), (_, at: string) => spans[Number(at)] ?? '')
+}
+
+// A cell as written, `\|` read as `|`, which GFM takes inside code spans too.
+const cellSource = (cell: string): string => cell.replace(/\\\|/g, '|').trim()
+
+// Bold read as noise in a padded cell; a code span as its content.
+const clean = (cell: string): string => outsideCode(cellSource(cell), text => text.replace(/\*\*|__/g, ''))
+
+const splitCells = (line: string): string[] => line.trim().replace(/^\|/, '').replace(/(?<!\\)\|$/, '').split(/(?<!\\)\|/)
+
+export const cellsOf = (line: string): string[] => splitCells(line).map(clean)
 
 const alignOf = (cell: string): Align => {
   const spec = cell.trim()
@@ -74,14 +130,14 @@ const fit = (cells: string[], width: number): string[] =>
   Array.from({ length: width }, (_, i) => cells[i] ?? '')
 
 // `tables` off leaves tables as text; a fence `fence` turns down stays text too, so a
-// reply can be split for its charts alone. `math` takes display formulas out as their own
+// reply can be split for its charts alone. A CRLF line ending reads as LF. `math` takes display formulas out as their own
 // segments: ````math`` fences, `$$…$$` and `\[…\]`.
 export type SplitOptions = { tables: boolean; fence: (lang: string, code: string) => boolean; math?: boolean }
 
 const SPLIT_ALL: SplitOptions = { tables: true, fence: () => true }
 
 export function splitReply(markdown: string, options: SplitOptions = SPLIT_ALL): Segment[] {
-  const lines = markdown.split('\n')
+  const lines = markdown.replace(/\r\n/g, '\n').split('\n')
   const segments: Segment[] = []
   let text: string[] = []
 
@@ -121,7 +177,7 @@ export function splitReply(markdown: string, options: SplitOptions = SPLIT_ALL):
       }
 
       const lang = (fence[2] ?? '').toLowerCase()
-      const code = lines.slice(i + 1, close).join('\n')
+      const code = fenceCode(lines, i, close)
 
       if (!options.fence(lang, code)) {
         text.push(...lines.slice(i, close + 1))
@@ -150,6 +206,7 @@ export function splitReply(markdown: string, options: SplitOptions = SPLIT_ALL):
 
     flush()
 
+    const start = i
     const rows: string[][] = []
     i += 2
 
@@ -159,7 +216,7 @@ export function splitReply(markdown: string, options: SplitOptions = SPLIT_ALL):
     }
 
     i--
-    segments.push({ kind: 'table', header, align: cellsOf(next).map(alignOf), rows })
+    segments.push({ kind: 'table', header, align: cellsOf(next).map(alignOf), rows, raw: lines.slice(start, i + 1).join('\n') })
   }
 
   flush()
@@ -430,6 +487,48 @@ export function copyOf(reply: string, code: boolean): { text: string } | { messa
   const last = splitReply(reply).findLast((segment): segment is Code => segment.kind === 'code')
 
   return last === undefined ? { message: 'No code block in the last reply' } : { text: last.code }
+}
+
+// A cell's inline markdown as its text: an image or a link as its text, an autolink as its
+// address, `<br>` as a line break, emphasis and strikethrough as the words inside them, a
+// backslash escape as the character, and a code span as its content verbatim. A link's
+// address may hold one level of parentheses, `(https://x.com/(p))`.
+const plainCell = (cell: string): string =>
+  outsideCode(cellSource(cell), text =>
+    text
+      .replace(/!?\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)/g, '$1')
+      .replace(/<((?:[a-z][a-z0-9+.-]{1,31}:[^\s<>]*)|(?:[^\s<>@]+@[^\s<>]+))>/gi, '$1')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/\*\*(.+?)\*\*|__(.+?)__/g, '$1$2')
+      .replace(/~~(.+?)~~/g, '$1')
+      .replace(/(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])/g, '$1')
+      .replace(/(?<!\w)_(?!\s)(.+?)(?<!\s)_(?!\w)/g, '$1')
+      .replace(/\\([\\`*_{}[\]()#+\-.!|~<>])/g, '$1'),
+  )
+
+// The cells of a table as written, for the copy: its header and rows from `raw` where it
+// came from markdown, since the drawn cells have lost their code spans' ticks.
+function writtenCells(table: Table): string[][] {
+  const lines = table.raw?.split('\n')
+
+  if (lines === undefined) {
+    return [table.header, ...table.rows]
+  }
+
+  return [lines[0] ?? '', ...lines.slice(2)].map(line => fit(splitCells(line), table.header.length))
+}
+
+// A table as CSV, its header row first. A cell holding a comma, a quote or a line break is
+// quoted and its quotes doubled, as RFC 4180 has it; rows end in a line feed.
+export function tableCsv(table: Table): string {
+  const field = (cell: string) => {
+    const text = plainCell(cell)
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+  }
+
+  return writtenCells(table)
+    .map(cells => cells.map(field).join(','))
+    .join('\n')
 }
 
 // A table as it is drawn, boxed in monospace, for pasting where markdown does not render.

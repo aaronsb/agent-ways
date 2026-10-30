@@ -3,7 +3,6 @@
 
 import { highlight, outputTokens, roleColors } from './highlight'
 import type { Token } from './highlight'
-import { FOLD_CODE, foldButton, shownCount } from './fold'
 import { onBorder } from './rows'
 import type { Look, Ui } from './rows'
 
@@ -26,29 +25,50 @@ export function tokenSpans(look: Look, tokens: readonly Token[]) {
 export function outputLine(look: Look, text: string) {
   const { Text } = look.ui
 
-  return <Text wrap="truncate-end">{tokenSpans(look, outputTokens(text))}</Text>
+  return <Text>{tokenSpans(look, outputTokens(text))}</Text>
 }
 
 // A fenced block: the language and a control (Copy) on the frame, then each line highlighted.
-// Past FOLD_CODE lines it folds under `foldKey`.
-export function codeRows(look: Look, lang: string, code: string, control?: ReturnType<Ui['Button']>, foldKey = 'fold-code') {
+export function codeRows(look: Look, lang: string, code: string, control?: ReturnType<Ui['Button']>) {
   const { Box, Text } = look.ui
   const { palette } = look.skin
   const lines = highlight(code.replace(/\t/g, '  ').replace(/\n$/, ''), lang)
-  const shown = lines.slice(0, shownCount(look, foldKey, lines.length, FOLD_CODE))
 
   return (
     <Box flexDirection="column" marginY={1}>
       {onBorder(
         look,
         <Box flexDirection="column" borderStyle="round" borderColor={palette.muted} paddingX={1}>
-          {shown.map(tokens => (
+          {lines.map(tokens => (
             <Text>{tokens.length === 0 || tokens.every(token => token.text === '') ? ' ' : tokenSpans(look, tokens)}</Text>
           ))}
         </Box>,
         { label: <Text color={palette.muted}>{` ${lang} `}</Text>, control },
       )}
-      {foldButton(look, foldKey, lines.length, FOLD_CODE)}
+    </Box>
+  )
+}
+
+// A fence's code as a copy block (commands.ts): the language and Copy on the line above,
+// then each line highlighted with no border, padding or margin beside it, so a selection
+// over the lines takes the code alone. A blank line draws nothing, not a space. A fence
+// with no language and no Copy draws no line above.
+export function codeCopyRows(look: Look, lang: string, code: string, control: ReturnType<Ui['Button']> | undefined, margins: Record<string, number>) {
+  const { Box, Text } = look.ui
+  const { palette } = look.skin
+  const lines = highlight(code.replace(/\t/g, '  '), look.prefs.highlight ? lang : '')
+
+  return (
+    <Box flexDirection="column" {...margins}>
+      {lang === '' && control === undefined ? (
+        ''
+      ) : (
+        <Box flexDirection="row" justifyContent="space-between">
+          <Text color={palette.muted}>{lang}</Text>
+          {control ?? ''}
+        </Box>
+      )}
+      {lines.map(tokens => (tokens.every(token => token.text === '') ? <Box height={1} /> : <Text>{tokenSpans(look, tokens)}</Text>))}
     </Box>
   )
 }

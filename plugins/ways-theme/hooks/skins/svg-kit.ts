@@ -11,8 +11,10 @@ import type { Palette } from './skin'
 export const FONT = `ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Inter, sans-serif`
 export const MONO = `ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, monospace`
 
+// Text for an SVG document: the markup characters escaped, and the C0 controls XML 1.0
+// forbids taken out.
 export const escape = (text: string): string =>
-  text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 // Width of a string in pixels, close enough to lay out a card without a renderer.
 export function measure(text: string, isMono: boolean, size: number): number {
@@ -66,6 +68,34 @@ export function fitText(text: string, width: number, isMono: boolean, size: numb
 
   return `${chars.slice(0, Math.max(1, kept)).join('')}…`
 }
+
+// `text` cut into pieces that each fit `width`, never inside a character; one piece for
+// text that fits. A card wraps a long line of code or output onto these instead of
+// cutting it.
+export function breakText(text: string, width: number, isMono: boolean, size: number): string[] {
+  const pieces: string[] = []
+  let piece = ''
+  let used = 0
+
+  for (const char of text) {
+    const next = measure(char, isMono, size)
+
+    if (piece !== '' && used + next > width) {
+      pieces.push(piece)
+      piece = ''
+      used = 0
+    }
+
+    piece += char
+    used += next
+  }
+
+  return [...pieces, piece]
+}
+
+// The Svg element takes a document of at most this many characters. A card past it is
+// handed back to Claude Code's own drawing.
+export const MAX_SVG = 131072
 
 // The room a reply gives a card, from the width the desktop reports in cells of its code
 // font, kept to a range a card reads well at. Measured against the desktop's reply column,

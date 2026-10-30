@@ -3,6 +3,15 @@
 
 // Plain string helpers behind the row builders.
 
+// One drawing draws at most 100000 characters in all, its `Code` and `Markdown` blocks of
+// any length; text longer than this keeps Claude Code's own drawing.
+export const MAX_DRAWN = 90000
+
+// A terminal's escape sequences, payload and all: CSI (colour, cursor moves), OSC (a
+// title, a hyperlink) to its BEL or ST, and two-character escapes; then every C0 control
+// but tab and newline, and DEL. None of them can be drawn, and XML forbids the C0 ones.
+export const CONTROLS = /\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b\n]*(?:\u0007|\u001b\\)?|\u001b[ -/]*[0-~]|[\u0000-\u0008\u000b-\u001f\u007f]/g
+
 export const oneLine = (text: string): string =>
   (text.split('\n', 1)[0] ?? '').replace(/\s+/g, ' ').trim()
 
@@ -68,20 +77,4 @@ export function pick<T>(items: readonly T[], seed: string): T | undefined {
   }
 
   return items[hash % items.length]
-}
-
-// Keeps the first `head` and last `tail` lines of a long text and names how many it hid.
-export function clipLines(text: string, head: number, tail: number): string {
-  const lines = text.split('\n')
-  const hidden = lines.length - head - tail
-
-  if (hidden <= 1) {
-    return text
-  }
-
-  return [
-    ...lines.slice(0, head),
-    `… ${hidden} lines hidden`,
-    ...lines.slice(lines.length - tail),
-  ].join('\n')
 }

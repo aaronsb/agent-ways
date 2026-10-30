@@ -1,7 +1,7 @@
 // Ported from skins by hellosverre (MIT; LICENSE beside this file),
 // https://github.com/hellosverre/claude-skins at 985ad63, hooks/detail.ts.
 
-import { shortenPath } from './format'
+import { CONTROLS, shortenPath } from './format'
 import { SHELLS, shellResultOf } from './shell'
 import type { ShellResult } from './shell'
 import { hunksOf } from './svg-diff'
@@ -22,19 +22,13 @@ export type Body =
   | { kind: 'none' }
   | { kind: 'stock' }
 
-// Lines of a read or a search shown before the rest folds behind a `show all` control.
-export const DETAIL_LINES = 20
-
-// The engine's `Code` and `Markdown` take at most 10000 characters a block.
-export const MAX_BLOCK = 9000
-
 export const isOpen = (disclosure: string, isErrored: boolean): boolean =>
   disclosure === 'open' || (disclosure !== 'closed' && isErrored)
 
 type Fields = Readonly<Record<string, unknown>>
 
 // Tab and newline are the only control characters a drawn string may hold.
-export const clean = (text: string): string => text.replace(/\r\n?/g, '\n').replace(/\u001b\[[0-9;?]*[A-Za-z]|[\u0000-\u0008\u000b-\u001f\u007f]/g, '')
+export const clean = (text: string): string => text.replace(/\r\n?/g, '\n').replace(CONTROLS, '')
 
 const fieldsOf = (value: unknown): Fields => (typeof value === 'object' && value !== null ? (value as Fields) : {})
 
@@ -231,28 +225,4 @@ export function unifiedDiff(diff: DiffInput): string {
       return [`@@ -${hunk.oldStart},${oldCount} +${hunk.newStart},${newCount} @@`, ...lines].join('\n')
     })
     .join('\n')
-}
-
-// Text cut into blocks the engine takes, each with the line number it starts at.
-export function chunksOf(lines: readonly string[], startLine: number, max = MAX_BLOCK): { text: string; startLine: number }[] {
-  const chunks: { text: string; startLine: number }[] = []
-  let current: string[] = []
-  let size = 0
-  let at = startLine
-
-  for (const [i, line] of lines.entries()) {
-    const cut = line.length > max ? `${line.slice(0, max - 1)}…` : line
-
-    if (current.length > 0 && size + cut.length + 1 > max) {
-      chunks.push({ text: current.join('\n'), startLine: at })
-      at = startLine + i
-      current = []
-      size = 0
-    }
-
-    current.push(cut)
-    size += cut.length + 1
-  }
-
-  return current.length === 0 ? chunks : [...chunks, { text: current.join('\n'), startLine: at }]
 }

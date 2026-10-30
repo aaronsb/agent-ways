@@ -1,7 +1,6 @@
 // Ported from skins by hellosverre (MIT; LICENSE beside this file),
 // https://github.com/hellosverre/claude-skins at 985ad63, hooks/diff-fence.tsx.
 
-import { FOLD_CODE, foldButton, shownCount } from './fold'
 import { highlight, languageOf, roleColors } from './highlight'
 import type { Token } from './highlight'
 import { onBorder } from './rows'
@@ -105,18 +104,16 @@ export function diffRows(
   look: Look,
   diff: DiffInput,
   control: ReturnType<Ui['Button']> | ReturnType<Ui['Box']> | undefined,
-  foldKey: string,
   fenceLang?: string,
 ) {
   const { Box, Text } = look.ui
   const { palette } = look.skin
   const lines = diffLines(diff.hunks)
-  const shown = lines.slice(0, shownCount(look, foldKey, lines.length, FOLD_CODE))
   const digits = String(Math.max(1, ...lines.map(line => ('kind' in line && line.kind !== 'gap' ? Math.max(line.old ?? 0, line.new ?? 0) : 0)))).length
   const number = (value: number | undefined) => (value === undefined ? ' '.repeat(digits) : String(value).padStart(digits))
   const added = lines.filter(line => line.kind === 'add').length
   const removed = lines.filter(line => line.kind === 'del').length
-  const syntax = look.prefs.highlight ? diffTokens(shown, diffLanguage(diff, fenceLang)) : undefined
+  const syntax = look.prefs.highlight ? diffTokens(lines, diffLanguage(diff, fenceLang)) : undefined
   const colors = roleColors(palette)
 
   return (
@@ -124,31 +121,38 @@ export function diffRows(
       {onBorder(
         look,
         <Box flexDirection="column" borderStyle="round" borderColor={palette.muted} paddingX={1}>
-          {shown.map((line, i) =>
-            line.kind === 'gap' ? (
-              <Text color={palette.muted}>{`${' '.repeat(digits * 2 + 2)}⋯ line ${line.at}`}</Text>
-            ) : syntax?.[i] !== undefined && line.text !== '' ? (
-              // The marker keeps the change's colour; the code after it takes the language's.
-              <Text wrap="truncate-end">
-                <Text color={palette.muted}>{`${number(line.old)} ${number(line.new)} `}</Text>
-                <Text color={line.kind === 'add' ? palette.ok : line.kind === 'del' ? palette.err : palette.muted}>
-                  {`${line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' '} `}
-                </Text>
-                {(syntax[i] ?? []).map(token => (
-                  <Text color={colors[token.role]} dimColor={line.kind === 'del'}>
-                    {token.text}
+          {lines.map((line, i) => {
+            if (line.kind === 'gap') return <Text color={palette.muted}>{`${' '.repeat(digits * 2 + 2)}⋯ line ${line.at}`}</Text>
+            const sign = line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' '
+            const signColor = line.kind === 'add' ? palette.ok : line.kind === 'del' ? palette.err : palette.muted
+
+            // The numbers and the sign in a gutter of their own, so a wrapped line goes on
+            // under its code.
+            return (
+              <Box flexDirection="row">
+                <Box flexShrink={0}>
+                  <Text>
+                    <Text color={palette.muted}>{`${number(line.old)} ${number(line.new)} `}</Text>
+                    <Text color={signColor}>{`${sign} `}</Text>
                   </Text>
-                ))}
-              </Text>
-            ) : (
-              <Text wrap="truncate-end">
-                <Text color={palette.muted}>{`${number(line.old)} ${number(line.new)} `}</Text>
-                <Text color={line.kind === 'add' ? palette.ok : line.kind === 'del' ? palette.err : palette.muted}>
-                  {`${line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' '} ${line.text === '' ? ' ' : line.text}`}
-                </Text>
-              </Text>
-            ),
-          )}
+                </Box>
+                <Box flexShrink={1} flexGrow={1}>
+                  {syntax?.[i] !== undefined && line.text !== '' ? (
+                    // The sign keeps the change's colour; the code takes the language's.
+                    <Text>
+                      {(syntax[i] ?? []).map(token => (
+                        <Text color={colors[token.role]} dimColor={line.kind === 'del'}>
+                          {token.text}
+                        </Text>
+                      ))}
+                    </Text>
+                  ) : (
+                    <Text color={signColor}>{line.text === '' ? ' ' : line.text}</Text>
+                  )}
+                </Box>
+              </Box>
+            )
+          })}
         </Box>,
         {
           label: (
@@ -161,7 +165,6 @@ export function diffRows(
           control,
         },
       )}
-      {foldButton(look, foldKey, lines.length, FOLD_CODE)}
     </Box>
   )
 }

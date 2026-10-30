@@ -18,6 +18,7 @@ const BUILTIN: Readonly<Record<string, ToolKind>> = {
   WebSearch: 'web',
 }
 
+// The characters of another tool's first string field a row's target takes.
 const MAX_TARGET = 120
 
 // The tools whose target is the file they name, so it may wrap and is drawn whole.
@@ -79,10 +80,12 @@ const textOf = (value: unknown): string => (typeof value === 'string' ? value : 
 const firstString = (fields: Fields): string =>
   Object.values(fields).map(textOf).find(value => value !== '') ?? ''
 
-// The one thing about a call worth a glance: the command, the file, the pattern. `max`
-// bounds its characters.
-export function summarize(tool: string, input: unknown, cwd: string, max = MAX_TARGET): string {
+// The one thing about a call worth a glance, on one line: the command, the file, the
+// pattern, whole. A command's later lines show as `…`, and another tool's first string
+// field is cut at MAX_TARGET characters with `…`; the opened row shows the input in full.
+export function summarize(tool: string, input: unknown, cwd: string): string {
   const fields = fieldsOf(input)
+  let isLabel = false
 
   const summary = ((): string => {
     switch (tool) {
@@ -110,9 +113,15 @@ export function summarize(tool: string, input: unknown, cwd: string, max = MAX_T
       case 'WebSearch':
         return textOf(fields.query)
       default:
+        isLabel = true
         return firstString(fields)
     }
   })()
 
-  return oneLine(summary).slice(0, max)
+  const line = oneLine(summary)
+  const chars = [...line]
+  const shown = isLabel && chars.length > MAX_TARGET ? `${chars.slice(0, MAX_TARGET).join('')}…` : line
+  const hasMore = summary.trim().includes('\n')
+
+  return hasMore ? `${shown} …` : shown
 }

@@ -31,7 +31,13 @@ export type World = {
   /** What `$.session.id()` answers; `session-1` when not given, a rejection
    *  when null. */
   sessionId?: string | null
+  /** The names `$.command.list()` answers; BUILT_INS when not given, a
+   *  rejection when null. */
+  commands?: readonly string[] | null
 }
+
+/** Some of Claude Code's own slash commands. */
+export const BUILT_INS = ['agents', 'clear', 'compact', 'config', 'context', 'cost', 'help', 'init', 'mcp', 'memory', 'model', 'resume', 'review', 'status', 'theme']
 
 export const INTERACTIVE = { cwd: '/work/proj', surface: 'terminal', isInteractive: true } as const
 
@@ -49,6 +55,10 @@ export function host(on: On, world: World) {
   on('session.id', () => {
     if (world.sessionId === null) throw new Error('no session id')
     return { value: world.sessionId ?? 'session-1' } as never
+  })
+  on('command.list', () => {
+    if (world.commands === null) throw new Error('no command list')
+    return { value: (world.commands ?? BUILT_INS).map(name => ({ name, description: '', source: 'builtin' })) } as never
   })
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent: 42 }, rateLimits: [] } }) as never)
   on('ui.log', ($, e) => {

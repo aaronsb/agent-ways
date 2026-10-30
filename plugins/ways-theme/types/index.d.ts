@@ -45,7 +45,6 @@ export type Prefs = {
   band: boolean
   // When each plan limit resets, beside its meter in the band.
   countdown: boolean
-  clipOutput: boolean
   markdown: boolean
   quiet: boolean
   charts: boolean
@@ -53,7 +52,7 @@ export type Prefs = {
   math: boolean
   // Tables and code in slash-command output drawn the way replies are.
   commands: boolean
-  // Shell output as a card: the command, its exit status, stderr apart, long output folded.
+  // Shell output as a card: the command, its exit status, stderr apart.
   shell: boolean
   // Fenced code on the terminal and shell output in the skin's colours.
   highlight: boolean
@@ -61,11 +60,11 @@ export type Prefs = {
   links: boolean
   // Copy buttons on tables, code, diagrams and whole replies.
   copy: boolean
+  // What a block's Copy takes: its content, or the markdown it was written as.
+  copyAs: 'content' | 'markdown'
   // A tool row's target path too long for its line: on lines of its own under the tool's
   // name, or cut short with an ellipsis.
   paths: 'wrap' | 'truncate'
-  // Long code, tables and shell output folded behind a `▾ N more` control.
-  fold: boolean
   // Runs of reads and searches drawn open, as if each had been expanded, not as one line.
   expand: boolean
   // Kept for the drawing, which reads it for motion; always null here.
@@ -102,13 +101,10 @@ declare module 'claude-code' {
       quiet: StateFamily<boolean>
       // A shell call's command, for its output card's header: ToolResult does not carry it.
       command: StateFamily<string>
-      // Each tool row's chevron, and whether its opened answer shows past the fold.
+      // Each tool row's chevron.
       disclosure: StateFamily<Disclosure>
-      showAll: StateFamily<boolean>
       // Files the turn created or edited, by absolute path, for their colour in rows and prose.
       touched: Record<string, Touch>
-      // Per drawing, the keys of the blocks the person unfolded.
-      folds: StateFamily<string[]>
       settle: number
     }
   }

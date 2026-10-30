@@ -4,13 +4,12 @@
 import type { ElementTable, RenderSurface } from 'claude-code'
 
 import type { Prefs, Touch, TurnStats } from '../../types'
-import { formatDuration, formatMs } from './format'
+import { formatDuration, formatMs, MAX_DRAWN } from './format'
 import type { PathBase } from './links'
-import { columnWidths, graphemes, isShell, tableArt, widthOf, wrapLines } from './markdown'
+import { columnWidths, graphemes, isShell, tableArt, tableCsv, widthOf, wrapLines } from './markdown'
 import { diffFenceTag, diffRows, fenceDiff, newOnly } from './diff-fence'
-import { FOLD_CODE, FOLD_ROWS, foldButton, shownCount } from './fold'
-import type { Segment, Table } from './markdown'
-import type { Command } from './commands'
+import type { Code, Segment, Table } from './markdown'
+import type { Copy } from './commands'
 import { splitBlocks } from './blocks'
 import { artRows, chartRows } from './chart-rows'
 import { chartArt } from './chart-art'
@@ -19,7 +18,6 @@ import { mermaidArt } from './mermaid-art'
 import type { Art } from './mermaid-art'
 import type { Chart } from './mermaid'
 import { blockRows } from './prose'
-import { MAX_MARKDOWN } from './reply'
 import type { Icons, Kind, Skin } from './skin'
 import { spinnerColor, spinnerIcon, toolIcon } from './icons'
 import type { SpinnerMode } from './icons'
@@ -32,7 +30,7 @@ import { tableSvg } from './svg-table'
 import { terminalSvg } from './svg-terminal'
 import type { ShellOutput } from './svg-terminal'
 import { metersKey, usageLine, usageSvg } from './svg-usage'
-import { codeRows } from './code-rows'
+import { codeCopyRows, codeRows } from './code-rows'
 import { languageOf } from './highlight'
 import type { Meter } from './svg-usage'
 import { kindOf, toolLabel } from './tools'
@@ -65,8 +63,6 @@ export type Look = {
   paths?: PathBase
   // The files this turn created or edited, by absolute path, and the folder paths are under.
   touched?: { files: Readonly<Record<string, Touch>>; cwd: string }
-  // The blocks the person unfolded, by key, and how to flip one. Absent, nothing folds.
-  folds?: { open: ReadonlySet<string>; toggle: (key: string) => void }
 }
 
 export type Call = {
@@ -163,7 +159,7 @@ function metaWidth(look: Look, meta: Meta): number {
 }
 
 // A line with its facts flush right on the terminal and trailing it on the desktop,
-// which lays a row out its own way.
+// which lays a row out its own way and wraps it.
 function withMeta(look: Look, main: ReturnType<Ui['Text']>, meta: Meta) {
   const { Box, Text } = look.ui
   const spans = metaSpans(look, meta)
@@ -174,7 +170,7 @@ function withMeta(look: Look, main: ReturnType<Ui['Text']>, meta: Meta) {
 
   if (look.surface !== 'terminal') {
     return (
-      <Text wrap="truncate-end">
+      <Text wrap="wrap">
         {main}
         {'   '}
         {spans}
@@ -263,9 +259,10 @@ export function pathLines(path: string, width: number): string[] {
 
 // `touch` colours the target of a file this turn created (ok) or edited (warn); `href`, the
 // file's link where the surface draws one, makes the target a link drawn the same.
-// `room` is the cells the row has on the terminal. Given, under `paths: wrap`, a target
-// that does not fit beside the label and the facts goes on lines of its own under the
-// label, each piece in the target's colour and linked to the same file.
+// `room` is the cells a file's row has on the terminal. Given, under `paths: wrap`, a
+// target that does not fit beside the label and the facts goes on lines of its own under
+// the label, each piece in the target's colour and linked to the same file; under `paths:
+// truncate` it stays on the line, cut with an ellipsis. Every other target wraps.
 export function toolRow(look: Look, call: Call, kind: Kind, target: string, meta: Meta, label = toolLabel(call.tool), touch?: Touch, href?: string | null, room?: number) {
   const { Box, Link, Text } = look.ui
   const { palette } = look.skin
@@ -310,7 +307,7 @@ export function toolRow(look: Look, call: Call, kind: Kind, target: string, meta
 
   if (look.svg !== undefined) {
     const line = (
-      <Text wrap="truncate-end">
+      <Text wrap="wrap">
         <Text color={palette[kind]} bold>
           {label}
         </Text>
@@ -322,7 +319,7 @@ export function toolRow(look: Look, call: Call, kind: Kind, target: string, meta
   }
 
   const main = (
-    <Text wrap="truncate-end">
+    <Text wrap={room === undefined ? 'wrap' : 'truncate-end'}>
       {node(look, [call])}
       <Text color={palette[kind]}>{label}</Text>
       {targetText}
@@ -339,7 +336,7 @@ export function quietResult(look: Look, failure: string | null) {
   return failure === null ? (
     <Box />
   ) : (
-    <Text color={look.skin.palette.err} wrap="truncate-end">{`${look.prefs.icons === 'ascii' ? 'x' : '✖'} ${failure}`}</Text>
+    <Text color={look.skin.palette.err}>{`${look.prefs.icons === 'ascii' ? 'x' : '✖'} ${failure}`}</Text>
   )
 }
 
@@ -410,7 +407,7 @@ export const literal = (text: string): string =>
 // Claude Code. `/skin prompt right` puts it on the right, where the desktop app draws it,
 // and `/skin prompt plain` drops the outline for the skin's prompt marker.
 // On the desktop app the text is the app's own Markdown, which can be selected and copied;
-// a prompt too long for one Markdown block keeps the Text.
+// a prompt past one drawing keeps the Text.
 export function promptRow(look: Look, text: string, images?: ReturnType<Ui['Text']>) {
   const { Box, Markdown, Text } = look.ui
   const markdown = look.surface === 'terminal' ? null : literal(text)
@@ -420,7 +417,7 @@ export function promptRow(look: Look, text: string, images?: ReturnType<Ui['Text
     <Box flexDirection="column" alignItems={look.prefs.prompt === 'right' ? 'flex-end' : 'flex-start'} marginY={1}>
       <Box {...(plain ? {} : { borderStyle: 'round' as const, borderColor: look.skin.palette.muted, paddingX: 1 })} flexShrink={1}>
         {plain ? <Text color={look.skin.palette.user}>{`${look.icons.prompt} `}</Text> : ''}
-        {markdown === null || markdown.length > MAX_MARKDOWN ? (
+        {markdown === null || markdown.length > MAX_DRAWN ? (
           <Text color={look.skin.palette.fg}>{text}</Text>
         ) : (
           <Markdown text={markdown} />
@@ -465,8 +462,7 @@ const NATURAL_SHARE = 0.55
 // A grid of cells, so columns line up in the terminal's monospace and in the desktop
 // app's proportional font alike. `control`, such as a Copy button, sits on the frame's
 // top border at the right, as ╭──── Copy ─╮.
-// Past FOLD_ROWS rows it folds under `foldKey`. Long cells wrap within their column in
-// full: unlike the desktop card, the terminal has no tooltip to read a cut cell by (#59).
+// Every row is drawn. Long cells wrap within their column in full: unlike the desktop card, the terminal has no tooltip to read a cut cell by (#59).
 // `maxWidth` is the room the table is drawn in, not the terminal's width: in a frame it
 // is the frame's inside.
 //
@@ -475,9 +471,8 @@ const NATURAL_SHARE = 0.55
 // lines. Elsewhere the font is proportional, so the cells' lines wrap again where the
 // surface needs them to, and a wide table splits its container between columns; so does
 // a terminal table of more columns than its room holds at one cell each.
-export function tableRows(look: Look, table: Table, maxWidth: number, control?: ReturnType<Ui['Button']>, foldKey = 'fold-table') {
+export function tableRows(look: Look, table: Table, maxWidth: number, control?: ReturnType<Ui['Button']>) {
   const { Box, Text } = look.ui
-  const rows = table.rows.slice(0, shownCount(look, foldKey, table.rows.length, FOLD_ROWS))
   const { palette } = look.skin
   const widths = columnWidths(table, maxWidth - 4, CELL_PAD * 2)
   const natural = widths.reduce((sum, width) => sum + width + CELL_PAD * 2, 2)
@@ -495,7 +490,7 @@ export function tableRows(look: Look, table: Table, maxWidth: number, control?: 
       {cells.map((cell, i) => (
         <Box {...size(i)} flexDirection="column" paddingX={CELL_PAD} alignItems={JUSTIFY[table.align[i] ?? 'left']}>
           {wrapLines(cell, widths[i] ?? 0, Infinity).map(line => (
-            <Text color={palette.fg} bold={isHeader} wrap={isTerminal && !isFluid ? 'truncate-end' : 'wrap'}>
+            <Text color={palette.fg} bold={isHeader}>
               {line}
             </Text>
           ))}
@@ -504,23 +499,13 @@ export function tableRows(look: Look, table: Table, maxWidth: number, control?: 
     </Box>
   )
 
-  const fold = foldButton(look, foldKey, table.rows.length, FOLD_ROWS)
-  const frame = onBorder(
+  return onBorder(
     look,
     <Box flexDirection="column" borderStyle="round" borderColor={palette.muted}>
       {row(table.header, true, palette.surface)}
-      {rows.map((cells, i) => row(cells, false, i % 2 === 1 ? palette.zebra : undefined))}
+      {table.rows.map((cells, i) => row(cells, false, i % 2 === 1 ? palette.zebra : undefined))}
     </Box>,
-    { control, box: { marginY: fold === '' ? 1 : 0, ...(isFluid ? { width: '100%' } : { alignSelf: 'flex-start' }) } },
-  )
-
-  return fold === '' ? (
-    frame
-  ) : (
-    <Box flexDirection="column" marginY={1}>
-      {frame}
-      {fold}
-    </Box>
+    { control, box: { marginY: 1, ...(isFluid ? { width: '100%' } : { alignSelf: 'flex-start' }) } },
   )
 }
 
@@ -557,21 +542,21 @@ function tableCard(look: Look, table: Table, Svg: SvgElement, columns: number, k
 
   return (
     <Box flexDirection="column">
-      {cardWithCopy(look, Svg, card, key, tableMarkdown(table))}
+      {cardWithCopy(look, Svg, card, key, copyText(look, table))}
       {copyRow(look, `${key}-art`, tableArt(table), 'Copy as text')}
     </Box>
   )
 }
 
-// The table's two copies on its frame: markdown, and the table as drawn.
+// The table's two copies on its frame: Copy (`copyText`), and the table as drawn.
 function tableControls(look: Look, key: string, table: Table) {
   const { Box } = look.ui
-  const markdown = copyButton(look, key, tableMarkdown(table))
+  const whole = copyButton(look, key, copyText(look, table))
   const art = copyButton(look, `${key}-art`, tableArt(table), ' as text ')
 
-  return markdown === undefined || art === undefined ? undefined : (
+  return whole === undefined || art === undefined ? undefined : (
     <Box flexDirection="row">
-      {markdown}
+      {whole}
       {art}
     </Box>
   )
@@ -603,9 +588,27 @@ function mathRows(look: Look, tex: string, maxWidth: number, key: string) {
   )
 }
 
-// A table as markdown again, for the clipboard.
+// A table as markdown again, for one that has no source of its own.
 const tableMarkdown = (table: Table): string =>
   [table.header, table.header.map(() => '---'), ...table.rows].map(cells => `| ${cells.join(' | ')} |`).join('\n')
+
+// What a block's Copy takes, after `copy_as`. As content: a suggestion as typed, a fence's
+// code, a table as CSV, a span's text. As markdown: a suggestion as typed, a fence, a table
+// and a span as written. The `as text`, `new only` and `copy reply` controls take what they
+// always have.
+export function copyText(look: Look, block: Copy | Code | Table): string {
+  const isMarkdown = look.prefs.copyAs === 'markdown'
+
+  if (block.kind === 'table') {
+    return isMarkdown ? (block.raw ?? tableMarkdown(block)) : tableCsv(block)
+  }
+
+  if (block.kind === 'code') {
+    return isMarkdown ? block.raw : block.code
+  }
+
+  return isMarkdown && (block.form === 'code' || block.form === 'span') ? block.raw : block.text
+}
 
 // A frame with a label and a control on its top border. They are laid over it from a plain
 // Box around the frame, not from inside it: inside a bordered Box, Windows Terminal drew the
@@ -662,23 +665,35 @@ export function copyRow(look: Look, key: string, text: string, label = 'Copy') {
   )
 }
 
-// A `! <command>` suggestion as a block of its own: one Text the terminal wraps, nothing
-// beside it on any of its lines, so a selection over it crosses no border or margin glyph,
-// and Copy on the line under it, which copies the command whole. `gapBelow` keeps a blank
-// line under it for prose that follows, which opens on none; a frame opens on one.
-export function commandRows(look: Look, command: Command, key: string, gapBelow: boolean) {
+// A copy block (commands.ts): its text as one Text the terminal wraps, nothing beside it
+// on any of its lines, so a selection over it crosses no border, padding or margin glyph,
+// and Copy on the line under it, which copies the text whole. A suggestion's `!` or `/`
+// is drawn bold; a fence's code is drawn by `codeCopyRows`. `gapBelow` keeps a blank line
+// under it for prose that follows, which opens on none; a frame opens on one.
+export function copyRows(look: Look, copy: Copy, key: string, gapBelow: boolean) {
   const { Box, Text } = look.ui
   const { palette } = look.skin
+  const margins = { marginTop: 1, marginBottom: gapBelow ? 1 : 0 }
+
+  if (copy.form === 'code') {
+    return codeCopyRows(look, copy.lang, copy.text, copyButton(look, key, copyText(look, copy)), margins)
+  }
+
+  const lead = copy.form === 'span' ? 0 : 1
 
   return (
-    <Box flexDirection="column" marginTop={1} marginBottom={gapBelow ? 1 : 0}>
+    <Box flexDirection="column" {...margins}>
       <Text>
-        <Text color={palette.user} bold>
-          {command.command.slice(0, 1)}
-        </Text>
-        <Text color={palette.search}>{command.command.slice(1)}</Text>
+        {lead === 0 ? (
+          ''
+        ) : (
+          <Text color={palette.user} bold>
+            {copy.text.slice(0, lead)}
+          </Text>
+        )}
+        <Text color={palette.search}>{copy.text.slice(lead)}</Text>
       </Text>
-      {copyRow(look, key, command.command)}
+      {copyRow(look, key, copyText(look, copy))}
     </Box>
   )
 }
@@ -697,8 +712,8 @@ function segmentRow(look: Look, segment: Segment, i: number, maxWidth: number, S
     )
   }
 
-  if (segment.kind === 'command') {
-    return commandRows(look, segment, `copy-${i}`, true)
+  if (segment.kind === 'copy') {
+    return copyRows(look, segment, `copy-${i}`, true)
   }
 
   if (segment.kind === 'math') {
@@ -716,7 +731,7 @@ function segmentRow(look: Look, segment: Segment, i: number, maxWidth: number, S
     const diff = tag === null ? null : fenceDiff(segment.code)
 
     if (diff !== null) {
-      return diffFence(look, diff, segment.code, maxWidth, i, Svg, tag?.lang)
+      return diffFence(look, segment, diff, maxWidth, i, Svg, tag?.lang)
     }
 
     const { chart, art } = drawingOf(look, segment, maxWidth, Svg)
@@ -725,13 +740,13 @@ function segmentRow(look: Look, segment: Segment, i: number, maxWidth: number, S
       return (
         <Box flexDirection="column">
           {artRows(look, art, chart === null ? '' : chartHeading(chart).count)}
-          {copyRow(look, `copy-${i}`, segment.code)}
+          {copyRow(look, `copy-${i}`, copyText(look, segment))}
         </Box>
       )
     }
 
     if (chart !== null && Svg !== undefined) {
-      return chartCard(look, chart, segment.code, Svg, maxWidth, `copy-${i}`)
+      return chartCard(look, chart, segment, Svg, maxWidth, `copy-${i}`)
     }
 
     // A terminal too narrow for a drawing falls back to rows, or to the code.
@@ -739,28 +754,21 @@ function segmentRow(look: Look, segment: Segment, i: number, maxWidth: number, S
       return (
         <Box flexDirection="column">
           {chartRows(look, chart, maxWidth)}
-          {copyRow(look, `copy-${i}`, segment.code)}
+          {copyRow(look, `copy-${i}`, copyText(look, segment))}
         </Box>
       )
     }
 
     // The terminal highlights the languages it knows in the skin's colours.
     if (look.surface === 'terminal' && look.prefs.highlight && languageOf(segment.lang) !== undefined) {
-      return codeRows(look, segment.lang, segment.code, copyButton(look, `copy-${i}`, segment.code), `fold-${i}`)
+      return codeRows(look, segment.lang, segment.code, copyButton(look, `copy-${i}`, copyText(look, segment)))
     }
 
-    return Svg === undefined ? (
-      <Box flexDirection="column">
-        <Markdown text={segment.raw} />
-        {copyRow(look, `copy-${i}`, segment.code)}
-      </Box>
-    ) : (
-      codeCard(look, segment.lang, segment.code, Svg, maxWidth, `copy-${i}`, `fold-${i}`)
-    )
+    return (Svg === undefined ? null : codeCard(look, segment.lang, segment.code, Svg, maxWidth, `copy-${i}`, copyText(look, segment))) ?? stockFence(look, segment, `copy-${i}`)
   }
 
   return Svg === undefined ? (
-    tableRows(look, segment, maxWidth, tableControls(look, `copy-${i}`, segment), `fold-${i}`)
+    tableRows(look, segment, maxWidth, tableControls(look, `copy-${i}`, segment))
   ) : (
     tableCard(look, segment, Svg, maxWidth, `copy-${i}`)
   )
@@ -792,16 +800,18 @@ function drawingOf(look: Look, segment: Segment & { kind: 'code' }, maxWidth: nu
 }
 
 // A diff fence: the diff card on the desktop, numbered rows on the terminal, with Copy for
-// the fence and `new only` for the code as it stands after the change.
-function diffFence(look: Look, diff: DiffInput, code: string, maxWidth: number, i: number, Svg?: SvgElement, fenceLang?: string) {
-  const { Box } = look.ui
-  const whole = copyButton(look, `copy-${i}`, code)
+// the fence and `new only` for the code as it stands after the change. A diff past what a
+// card holds keeps Claude Code's drawing of the fence.
+function diffFence(look: Look, fence: Code, diff: DiffInput, maxWidth: number, i: number, Svg?: SvgElement, fenceLang?: string) {
+  const { Box, Markdown } = look.ui
+  const whole = copyButton(look, `copy-${i}`, copyText(look, fence))
   const fresh = copyButton(look, `copy-${i}-new`, newOnly(diff), ' new only ')
+  const built = Svg === undefined ? null : diffCard(look, Svg, diff, diff.path === '' ? 'diff' : diff.path, maxWidth)
 
   if (Svg !== undefined) {
     return (
       <Box flexDirection="column">
-        {diffCard(look, Svg, diff, diff.path === '' ? 'diff' : diff.path, maxWidth)}
+        {built ?? <Markdown text={fence.raw} />}
         <Box flexDirection="row" justifyContent="flex-end">
           {whole ?? ''}
           {fresh ?? ''}
@@ -818,7 +828,7 @@ function diffFence(look: Look, diff: DiffInput, code: string, maxWidth: number, 
       </Box>
     )
 
-  return diffRows(look, diff, controls, `fold-${i}`, fenceLang)
+  return diffRows(look, diff, controls, fenceLang)
 }
 
 // Columns between blocks laid side by side.
@@ -914,13 +924,13 @@ function packRun(run: readonly Placed[], maxWidth: number, Svg?: SvgElement): Pl
   return [...rows, ...(row.length === 0 ? [] : [row])].map(placed => (placed.length === 1 ? placed.map(one => ({ ...one, width: maxWidth })) : placed))
 }
 
-/** A reply the frame would wrap, laid out in frames of its own around its commands
+/** A reply the frame would wrap, laid out in frames of its own around its copy blocks
  *  (replyRows): `frame` wraps a run of blocks, and takes `inset` columns of the width. */
 export type Framing = { inset: number; frame: (rows: ReturnType<Ui['Box']>) => ReturnType<Ui['Box']> }
 
 // `whole`, the reply as Claude wrote it, adds a `copy reply` control under it. With
-// `framing`, each run of blocks between `! <command>` suggestions sits in a frame of its
-// own and each command between the frames, the whole width wide, so no frame line runs
+// `framing`, each run of blocks between copy blocks (commands.ts) sits in a frame of its
+// own and each copy block between the frames, the whole width wide, so no frame line runs
 // beside a line of it.
 export function replyRows(look: Look, segments: readonly Segment[], maxWidth: number, Svg?: SvgElement, whole?: string, framing?: Framing) {
   const { Box } = look.ui
@@ -938,15 +948,15 @@ export function replyRows(look: Look, segments: readonly Segment[], maxWidth: nu
         ))}
       </Box>
     )
-  const commandOf = (row: Placed[]) => (row.length === 1 && row[0]!.segment.kind === 'command' ? { command: row[0]!.segment, i: row[0]!.i } : null)
-  const runs: (Placed[][] | { command: Command; i: number })[] = []
+  const copyOf = (row: Placed[]) => (row.length === 1 && row[0]!.segment.kind === 'copy' ? { copy: row[0]!.segment, i: row[0]!.i } : null)
+  const runs: (Placed[][] | { copy: Copy; i: number })[] = []
 
   for (const row of framing === undefined ? [] : rows) {
-    const command = commandOf(row)
+    const copy = copyOf(row)
     const last = runs.at(-1)
 
-    if (command !== null) {
-      runs.push(command)
+    if (copy !== null) {
+      runs.push(copy)
     } else if (Array.isArray(last)) {
       last.push(row)
     } else {
@@ -959,7 +969,7 @@ export function replyRows(look: Look, segments: readonly Segment[], maxWidth: nu
       {framing === undefined
         ? rows.map(drawn)
         : runs.map(run =>
-            Array.isArray(run) ? framing.frame(<Box flexDirection="column">{run.map(drawn)}</Box>) : commandRows(look, run.command, `copy-${run.i}`, false),
+            Array.isArray(run) ? framing.frame(<Box flexDirection="column">{run.map(drawn)}</Box>) : copyRows(look, run.copy, `copy-${run.i}`, false),
           )}
       {whole === undefined ? '' : copyRow(look, 'copy-reply', whole, 'copy reply')}
     </Box>
@@ -1049,40 +1059,49 @@ function card(look: Look, Svg: SvgElement, built: { source: string; alt: string;
   )
 }
 
-// Past FOLD_CODE lines the card is cut there, with `▾ N more` under it; opened, it runs to
-// the card's own 80-line cap.
-export function codeCard(look: Look, lang: string, code: string, Svg: SvgElement, columns: number, key = 'copy-code', foldKey = `${key}-fold`) {
-  const { Box } = look.ui
-  const count = code.split('\n').length
-  const shown = shownCount(look, foldKey, count, FOLD_CODE)
-  const card = cardWithCopy(look, Svg, codeSvg(code, lang, look.skin.palette, cardWidth(columns), look.copy !== undefined, shown === count ? undefined : shown), key, code)
+// A code block as a card, every line drawn. Copy takes `copied`. Null for code past what
+// a card holds (MAX_SVG), which the caller leaves to Claude Code's own drawing.
+export function codeCard(look: Look, lang: string, code: string, Svg: SvgElement, columns: number, key = 'copy-code', copied = code) {
+  const built = codeSvg(code, lang, look.skin.palette, cardWidth(columns), look.copy !== undefined)
 
-  return look.folds === undefined || count <= FOLD_CODE ? (
-    card
-  ) : (
+  return built === null ? null : cardWithCopy(look, Svg, built, key, copied)
+}
+
+// A fence in Claude Code's own drawing, with Copy under it.
+function stockFence(look: Look, fence: Code, key: string) {
+  const { Box, Markdown } = look.ui
+
+  return (
     <Box flexDirection="column">
-      {card}
-      {foldButton(look, foldKey, count, FOLD_CODE)}
+      <Markdown text={fence.raw} />
+      {copyRow(look, key, copyText(look, fence))}
     </Box>
   )
 }
 
 // A chart too crowded to draw at this width keeps its source as a code card.
-function chartCard(look: Look, chart: Chart, source: string, Svg: SvgElement, columns: number, key: string) {
+function chartCard(look: Look, chart: Chart, fence: Code, Svg: SvgElement, columns: number, key: string) {
   const built = chartSvg(chart, look.skin.palette, cardWidth(columns), look.copy !== undefined)
 
-  return built === null ? codeCard(look, 'mermaid', source, Svg, columns, key) : cardWithCopy(look, Svg, built, key, source)
+  return built === null
+    ? (codeCard(look, 'mermaid', fence.code, Svg, columns, key, copyText(look, fence)) ?? stockFence(look, fence, key))
+    : cardWithCopy(look, Svg, built, key, copyText(look, fence))
 }
 
+// An edit as a card, or null for one past what a card holds (MAX_SVG).
 export function diffCard(look: Look, Svg: SvgElement, input: DiffInput, shownPath: string, columns: number) {
-  return card(look, Svg, diffSvg(input, shownPath, look.skin.palette, cardWidth(columns)), 'diff')
+  const built = diffSvg(input, shownPath, look.skin.palette, cardWidth(columns))
+
+  return built === null ? null : card(look, Svg, built, 'diff')
 }
 
+// Shell output as a card, or null for output past what a card holds (MAX_SVG).
 export function terminalCard(look: Look, Svg: SvgElement, output: ShellOutput, isErrored: boolean, columns: number, key = 'copy-output') {
   const text = [output.stdout, output.stderr].filter(part => part.trim() !== '').join('\n')
   const withCopy = text === '' ? { ...look, copy: undefined } : look
+  const built = terminalSvg(output, isErrored, look.skin.palette, cardWidth(columns), withCopy.copy !== undefined, look.prefs.highlight)
 
-  return cardWithCopy(withCopy, Svg, terminalSvg(output, isErrored, look.skin.palette, cardWidth(columns), withCopy.copy !== undefined, look.prefs.highlight), key, text)
+  return built === null ? null : cardWithCopy(withCopy, Svg, built, key, text)
 }
 
 // From this full, the band suggests compacting and makes it the main action.

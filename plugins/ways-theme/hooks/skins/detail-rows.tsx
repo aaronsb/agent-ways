@@ -3,16 +3,18 @@
 
 import type { RenderElement } from 'claude-code'
 
-import { chunksOf, DETAIL_LINES, MAX_BLOCK, unifiedDiff } from './detail'
+import { unifiedDiff } from './detail'
 import type { Body, Field } from './detail'
-import { shortenPath } from './format'
+import { MAX_DRAWN, shortenPath } from './format'
 import { fileHref } from './links'
 import { diffCard, terminalCard } from './rows'
 import type { Look } from './rows'
-import { OUTPUT_FOLD, shellRows } from './shell-rows'
+import { shellRows } from './shell-rows'
 
 // An opened tool row: what the call was asked, then what it answered, under the row the
-// chevron sits on. Long answers fold behind a `show all` control of their own.
+// chevron sits on, every line of it and each long line wrapped. The terminal prints a
+// transcript row into scrollback, where no control can be pressed, so nothing folds. An
+// answer this cannot draw (drawsBody) keeps Claude Code's own drawing, under the row.
 
 export type Opened = {
   fields: readonly Field[]
@@ -22,16 +24,9 @@ export type Opened = {
   isErrored: boolean
   cwd: string
   columns: number
-  isAll: boolean
-  toggleAll: () => void
   // Claude Code's own drawing of the call, for a body this cannot draw.
   stock: () => Promise<RenderElement>
 }
-
-const SHELL_FOLD = { head: 8, tail: 4 }
-
-// Shell output shows whole when folding is off or the person opened it.
-const isWhole = (look: Look, opened: Opened): boolean => opened.isAll || !look.prefs.fold || look.folds?.open.has(OUTPUT_FOLD) === true
 
 // Cells the chevron takes at a row's right: its padding and its glyph.
 export const DISCLOSE_INSET = 2
@@ -67,103 +62,81 @@ function fieldRows(look: Look, fields: readonly Field[]) {
   const { palette } = look.skin
 
   return fields.map(field => {
-    const isWhole = field.value.length <= MAX_BLOCK
-    const href = isWhole && field.label === 'path' && look.links === true && look.paths !== undefined ? fileHref(field.value, look.paths) : null
+    const href = field.label === 'path' && look.links === true && look.paths !== undefined ? fileHref(field.value, look.paths) : null
 
     return (
       <Text>
         <Text color={palette.muted}>{`${field.label}  `}</Text>
-        <Text color={palette.fg}>{href !== null ? <Link href={href}>{field.value}</Link> : isWhole ? field.value : `${field.value.slice(0, MAX_BLOCK)}…`}</Text>
+        <Text color={palette.fg}>{href !== null ? <Link href={href}>{field.value}</Link> : field.value}</Text>
       </Text>
     )
   })
 }
 
-// `show all 120 lines` under a folded answer, `show less` once it is open.
-function moreButton(look: Look, total: number, opened: Opened) {
-  const { Button } = look.ui
-
-  return total <= DETAIL_LINES ? (
-    ''
-  ) : (
-    <Button key="show-all" label={opened.isAll ? 'show less' : `show all ${total} lines`} plain dimColor onPress={opened.toggleAll} />
-  )
-}
-
-function textLines(look: Look, lines: readonly string[], color: string, opened: Opened) {
+function textLines(look: Look, lines: readonly string[], color: string) {
   const { Box, Text } = look.ui
-  const shown = opened.isAll ? lines : lines.slice(0, DETAIL_LINES)
 
   return (
     <Box flexDirection="column">
-      {shown.map(line => (
-        <Text color={color} wrap="truncate-end">
-          {line === '' ? ' ' : line}
-        </Text>
+      {lines.map(line => (
+        <Text color={color}>{line === '' ? ' ' : line}</Text>
       ))}
-      {moreButton(look, lines.length, opened)}
     </Box>
   )
 }
 
-async function bodyRows(look: Look, opened: Opened): Promise<RenderElement | string> {
+// Whether an answer of `text` fits one drawing.
+const isDrawable = (text: string): boolean => text.length <= MAX_DRAWN
+
+// What an opened row draws of the call's answer.
+export type Answer = Omit<Opened, 'fields' | 'stock'>
+
+// The answer's drawing, or null where the row falls back to Claude Code's own: an answer
+// past one drawing (MAX_DRAWN), a card past what a card holds (MAX_SVG), a body this
+// cannot read.
+function answerRows(look: Look, answer: Answer): RenderElement | string | null {
   const { Box, Code, Text } = look.ui
   const { palette } = look.skin
-  const { body } = opened
+  const { body } = answer
 
   switch (body.kind) {
-    case 'file': {
-      const lines = body.text.split('\n')
-      const shown = opened.isAll ? lines : lines.slice(0, DETAIL_LINES)
-
-      return (
-        <Box flexDirection="column">
-          {chunksOf(shown, body.startLine).map(chunk => (
-            <Code source={chunk.text} path={body.path} startLine={chunk.startLine} wrap="truncate-end" />
-          ))}
-          {moreButton(look, lines.length, opened)}
-        </Box>
-      )
-    }
+    case 'file':
+      return isDrawable(body.text) ? <Code source={body.text} path={body.path} startLine={body.startLine} /> : null
     case 'matches':
-      return (
+      return isDrawable(body.lines.join('\n')) ? (
         <Box flexDirection="column">
           {body.note === '' ? '' : <Text color={palette.muted}>{body.note}</Text>}
-          {textLines(look, body.lines, palette.fg, opened)}
+          {textLines(look, body.lines, palette.fg)}
         </Box>
-      )
+      ) : null
     case 'shell':
-      return look.svg !== undefined
-        ? terminalCard(look, look.svg, body.result, opened.isErrored, opened.columns)
-        : shellRows(look, opened.command, body.result, opened.isErrored, {
-            stdout: isWhole(look, opened) ? null : SHELL_FOLD,
-            stderr: isWhole(look, opened) || opened.isErrored ? null : SHELL_FOLD,
-          })
+      return look.svg !== undefined ? terminalCard(look, look.svg, body.result, answer.isErrored, answer.columns) : shellRows(look, answer.command, body.result, answer.isErrored)
     case 'diff': {
-      const path = shortenPath(body.diff.path, opened.cwd)
-
       if (look.svg !== undefined) {
-        return diffCard(look, look.svg, body.diff, path, opened.columns)
+        return diffCard(look, look.svg, body.diff, shortenPath(body.diff.path, answer.cwd), answer.columns)
       }
 
       const source = unifiedDiff(body.diff)
 
-      // A diff cut mid-hunk no longer parses: one too long for a block is Claude Code's.
-      return source.length > MAX_BLOCK ? opened.stock() : <Code source={source} format="diff" path={body.diff.path} wrap="truncate-end" />
+      return isDrawable(source) ? <Code source={source} format="diff" path={body.diff.path} /> : null
     }
     case 'text':
-      return textLines(look, body.text.split('\n'), body.isError ? palette.err : palette.fg, opened)
+      return isDrawable(body.text) ? textLines(look, body.text.split('\n'), body.isError ? palette.err : palette.fg) : null
     case 'none':
       return ''
     case 'stock':
-      return opened.stock()
+      return null
   }
 }
+
+// Whether an opened row draws the answer itself. Where it does not, Claude Code's result
+// row keeps its own drawing of it.
+export const drawsBody = (look: Look, answer: Answer): boolean => answerRows(look, answer) !== null
 
 // What an opened row holds: the input, a line's breath, the answer.
 export async function openedRows(look: Look, opened: Opened) {
   const { Box } = look.ui
-  const body = await bodyRows(look, opened)
+  const body = answerRows(look, opened) ?? (await opened.stock())
 
   return (
     <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
