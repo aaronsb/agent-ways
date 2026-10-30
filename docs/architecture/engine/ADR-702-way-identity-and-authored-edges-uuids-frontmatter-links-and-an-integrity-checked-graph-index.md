@@ -43,12 +43,17 @@ considered:
   - operator: aaronsb
     said: "yes"
     via: "chat, session 796c50d0, 2026-10-05, approving the split with ADR-702 leading on UUIDs, parents: and related: and the reviewer's simpler forms as alternatives"
+  - operator: aaronsb
+    said: "Amend the clause now (Recommended): edit ADR-702 so toggles keep ADR-710's rule, and following the graph becomes an explicit selector beside toggle patterns"
+    via: session 2026-10-30, chosen in an interview question on the ADR-702 / ADR-710 conflict; the operator had earlier said 'we can take both types of toggles'
 status: proposed
 date: 2026-10-05
 deciders:
   - aaronsb
 related:
   - ADR-105
+  - ADR-518
+  - ADR-710
   - ADR-110
   - ADR-125
   - ADR-131
@@ -63,7 +68,7 @@ related:
 
 ## Summary
 
-- **Decided (proposed):** each way carries a UUID minted by the template. Authors write further edges by name in frontmatter, `parents:` and `related:`, as `[[name]]` links, with directory nesting as the default parent. Corpus build resolves names to UUIDs, checks three integrity rules, and writes a graph index keyed by UUID that adds each way's nearest semantic neighbours. Toggles name ways by UUID or name, and the enabled state follows the parent graph at scan time. This record stays proposed until a concrete need for multiple parents or non-directory edges appears; ADR-701 does not depend on it.
+- **Decided (proposed):** each way carries a UUID minted by the template. Authors write further edges by name in frontmatter, `parents:` and `related:`, as `[[name]]` links, with directory nesting as the default parent. Corpus build resolves names to UUIDs, checks three integrity rules, and writes a graph index keyed by UUID that adds each way's nearest semantic neighbours. Toggles name ways by UUID or name. A toggle key decides only the ways it matches (ADR-710); following the parent graph is a separate graph selector placed beside toggle patterns. This record stays proposed until a concrete need for multiple parents or non-directory edges appears; ADR-701 does not depend on it.
 - **Trades away:** three frontmatter fields and the lint that guards them, a one-time minting pass, a path-to-UUID alias map, and multi-parent rules in four places that today assume string-prefix ancestry.
 - **One-way?** Reversible until UUIDs reach installed toggles and logged events; expensive after, because both then key on them.
 - **Probes:** *Confident (uuid-at-creation):* identity is a UUID minted when a way is created from the template, and lint refuses a duplicate within a root. *Not confident (frontmatter-edges):* reference edges move from the body See Also section into `related:` in frontmatter, with See Also kept as prose that must agree.
@@ -112,9 +117,12 @@ Lint fails the author. Corpus build degrades and reports: a dangling edge is dro
 
 ### 4. Enabling across several parents
 
-- Toggles stay where ADR-131 and the user config put them: `disabled_domains` in user scope, per-way toggles in project scope. Per-way toggles in user scope stay out, as ADR-131 decided.
-- A domain disable and a path-prefix toggle are subtree toggles. A per-way toggle is a node toggle.
-- The effective state is computed at scan time, because project toggles are only known then: an explicit toggle on the way decides; otherwise a way with no parents is enabled; otherwise a way is enabled when any parent is enabled.
+- Toggles follow ADR-710 and ADR-518. Keys under `ways:` are toggle patterns over way ids in the project and the user file; a project key beats a user key for the same way, and `disabled_domains` stays as it is.
+- A toggle key decides only the ways it matches. A key that names one way never reaches that way's children, by path or by graph.
+- Following the graph is a graph selector, a key form of its own beside toggle patterns, for example one that names a way and everything reachable from it by `parents:` edges. Its syntax and its rank against toggle patterns are settled when this record is taken up.
+- The effective state is computed at scan time, because project toggles are only known then: the winning toggle pattern or graph selector decides, and a way no key matches is enabled.
+
+> Note 2026-10-30: §4 rewritten so toggles follow ADR-710 and ADR-518. The earlier rule, that a way is enabled when any parent is enabled, made a parent's toggle reach its children, which ADR-710 rules out for a toggle key.
 - The parent boost (ADR-105), parent withholding and the judge's ancestor block apply when any ancestor qualifies. The nearest-ancestor choice in `gate.rs` becomes the nearest by graph distance.
 - `ways status` and `ways author tree` show each way's state and the toggle or parent that decided it.
 
@@ -160,7 +168,7 @@ Accept when a way needs a second parent or an edge the tree cannot express, or w
 
 - **Path ids, as today, with an optional `formerly:` field or a committed `moved.tsv`.** Old toggles, events and edges resolve through the alias, lint checks it against `git diff -M`, and an accidental copy is caught by alias-vector cosine of 0.98 or more. The cheapest option at today's move rate; it keeps location as identity and cannot tell an override from a duplicate by id.
 - **Readable slugs as ids.** Rejected: a copied way keeps its slug, so lint cannot tell an override from a duplicate.
-- **Subtree toggles as path prefixes in the project `ways:` map, with no `parents:`.** Covers today's toggling need with string ancestry and no graph walk. ADR-701 adopts this form now; it does not give a way two parents.
+- **Subtree toggles as path patterns in the `ways:` map, with no `parents:`.** Covers today's toggling need with string ancestry and no graph walk. ADR-710 adopts this form as toggle patterns (`dir/**`); it does not give a way two parents.
 - **See Also as the only reference-edge source, with a resolution lint and no `related:`.** One source of truth, no sync lint, no amendment to ADR-110 §2. Fits until edges need types the prose section cannot carry.
 - **Semantic neighbours computed on request** with `ways author siblings`, not stored in the index. Adequate for authoring; storing them serves the lookup tools without recomputation.
 - **Rename detection through the previous build's index.** Rejected: the build would depend on the previous build, and a fresh clone has none.

@@ -43,6 +43,7 @@ Run these before the push. The cargo workspace is `tools/Cargo.toml`.
 | `make test-hooks` | the hook scripts and the Makefile targets |
 | `CLAUDE_CODE_TYPES=<path>/claude-code.d.ts make test-plugins` | the mods; the type check needs the `claude-code.d.ts` that Claude Code bundles, and skips without it |
 | `ways author lint <way-dir>`, `scripts/check-register.sh` | a changed way |
+| `scripts/check-portability.sh` | line endings, shebangs and hardcoded home paths in shell scripts and fixtures, as CI's portability job runs it |
 | `make test` | lint, smoke, unit, simulation, ADR tool, statusline and hook suites |
 
 A TUI change gets its scenario script: `tools/ways-cli/shots/verify.sh` or `tools/attend-chat/shots/shots.sh`. The tui-verification way has the procedure.
