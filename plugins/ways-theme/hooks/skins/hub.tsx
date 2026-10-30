@@ -523,9 +523,7 @@ export function registerSkins(on: On, shared: Shared): void {
     const fields = (e.props.input ?? {}) as { file_path?: unknown; notebook_path?: unknown }
     const path = fields.file_path ?? fields.notebook_path
     const isPathRow = PATH_TOOLS.has(e.props.tool) && typeof path === 'string'
-    // A path that may wrap is drawn whole.
-    const wraps = e.surface === 'terminal' && setup.prefs.paths === 'wrap' && isPathRow
-    const target = summarize(e.props.tool, e.props.input, cwd, wraps ? Infinity : undefined)
+    const target = summarize(e.props.tool, e.props.input, cwd)
     const disclosure = memberOf(disclosureAtom, e)
     const open = isOpen(await read($, disclosure), e.props.isErrored)
     const base = await sessionLook($, e, lookOf($.ui.resolve(e), setup, e.surface, copier($, e.surface)), { links: open || typeof path === 'string', touched: typeof path === 'string', cwd })

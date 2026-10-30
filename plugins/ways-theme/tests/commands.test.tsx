@@ -788,6 +788,32 @@ describe('nothing folds and nothing is cut', () => {
     expect(trees.some(tree => shows(tree, last))).toBe(true)
   })
 
+  const LONG_COMMAND = `rsync -av --exclude node_modules --exclude target ${'/work/proj/some/deep/folder/ '.repeat(6)}/backup/`.trim()
+  const bash = (surface: string) =>
+    ({ plugin: 'ways-theme', surface, component: 'ToolUse', requestId: 't7', viewport: { columns: 80, rows: 40 }, props: { tool_use_id: 't7', tool: 'Bash', input: { command: LONG_COMMAND }, isRunning: false, isErrored: true, isInterrupted: false, isExpanded: false, output: { stdout: '', stderr: 'rsync: failed', interrupted: false, isImage: false } } }) as never
+
+  test("an opened shell card's `$ command` header draws the whole command and wraps", async ($, on) => {
+    hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
+    await $.session.start(INTERACTIVE)
+    const ui = await $.ui.mount(bash('terminal'))
+    const tree = await ui.drawn()
+    await ui.unmount()
+    const header = nodes(tree, n => n.type === 'Text' && strings(n) === `$ ${LONG_COMMAND}`)
+    expect(header.length).toBe(1)
+    expect(header[0]!.props?.wrap).toBe('wrap')
+  })
+
+  test('on the desktop a tool row draws its whole target and wraps', async ($, on) => {
+    hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
+    await $.session.start({ ...INTERACTIVE, surface: 'desktop' })
+    const ui = await $.ui.mount(bash('desktop'))
+    const tree = await ui.drawn()
+    await ui.unmount()
+    const row = nodes(tree, n => n.type === 'Text' && strings(n).startsWith('Bash') && strings(n).includes(LONG_COMMAND))
+    expect(row.length).toBeGreaterThan(0)
+    expect(row.every(n => n.props?.wrap === 'wrap')).toBe(true)
+  })
+
   test('a code card draws every line and wraps a long one, with no `more lines`', () => {
     const card = codeSvg(`${lines(200)}\n${'y'.repeat(300)}`, 'ts', PALETTE, 800)!
     expect(card.source).toContain('>201<')

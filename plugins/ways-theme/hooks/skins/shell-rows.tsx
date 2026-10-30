@@ -32,7 +32,7 @@ export function shellRows(look: Look, command: string, result: ShellResult, isEr
     <Box flexDirection="column" borderStyle="round" borderColor={palette.muted}>
       <Box key="command" flexDirection="row" paddingX={1} backgroundColor={palette.surface}>
         <Box flexGrow={1} flexShrink={1}>
-          <Text wrap="truncate-end">
+          <Text wrap="wrap">
             <Text color={palette.run}>$ </Text>
             <Text color={palette.fg} bold>
               {command === '' ? 'Output' : command}

@@ -160,7 +160,7 @@ function metaWidth(look: Look, meta: Meta): number {
 }
 
 // A line with its facts flush right on the terminal and trailing it on the desktop,
-// which lays a row out its own way.
+// which lays a row out its own way and wraps it.
 function withMeta(look: Look, main: ReturnType<Ui['Text']>, meta: Meta) {
   const { Box, Text } = look.ui
   const spans = metaSpans(look, meta)
@@ -171,7 +171,7 @@ function withMeta(look: Look, main: ReturnType<Ui['Text']>, meta: Meta) {
 
   if (look.surface !== 'terminal') {
     return (
-      <Text wrap="truncate-end">
+      <Text wrap="wrap">
         {main}
         {'   '}
         {spans}
@@ -260,9 +260,10 @@ export function pathLines(path: string, width: number): string[] {
 
 // `touch` colours the target of a file this turn created (ok) or edited (warn); `href`, the
 // file's link where the surface draws one, makes the target a link drawn the same.
-// `room` is the cells the row has on the terminal. Given, under `paths: wrap`, a target
-// that does not fit beside the label and the facts goes on lines of its own under the
-// label, each piece in the target's colour and linked to the same file.
+// `room` is the cells a file's row has on the terminal. Given, under `paths: wrap`, a
+// target that does not fit beside the label and the facts goes on lines of its own under
+// the label, each piece in the target's colour and linked to the same file; under `paths:
+// truncate` it stays on the line, cut with an ellipsis. Every other target wraps.
 export function toolRow(look: Look, call: Call, kind: Kind, target: string, meta: Meta, label = toolLabel(call.tool), touch?: Touch, href?: string | null, room?: number) {
   const { Box, Link, Text } = look.ui
   const { palette } = look.skin
@@ -307,7 +308,7 @@ export function toolRow(look: Look, call: Call, kind: Kind, target: string, meta
 
   if (look.svg !== undefined) {
     const line = (
-      <Text wrap="truncate-end">
+      <Text wrap="wrap">
         <Text color={palette[kind]} bold>
           {label}
         </Text>
@@ -319,7 +320,7 @@ export function toolRow(look: Look, call: Call, kind: Kind, target: string, meta
   }
 
   const main = (
-    <Text wrap="truncate-end">
+    <Text wrap={room === undefined ? 'wrap' : 'truncate-end'}>
       {node(look, [call])}
       <Text color={palette[kind]}>{label}</Text>
       {targetText}
