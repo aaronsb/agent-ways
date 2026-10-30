@@ -3,6 +3,7 @@
 //! `agent.yaml`, which also extends a shipped one. Its kind is its provider
 //! and its source its model.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use agent_settings::item::{Entry, Family, How, Item, ItemKind, Origin, Override, ProfileState};
@@ -24,42 +25,61 @@ pub struct ProfileFields {}
 /// Every profile, shipped ones first in name order, then the user's own,
 /// from the agent file at `path`. The engine the gate resolves to is
 /// `active`, judged with `has_key`; a profile of the user's that does not
-/// build is `invalid`, and a shipped one whose change does not build runs
-/// as shipped, saying so.
+/// pass the schema or does not build is `invalid`, and a shipped one whose
+/// change does not pass or build runs as shipped, saying so. When the file
+/// turns the gate off (it does not parse, or its `mode` is refused) no
+/// profile is `active` and each says why.
 pub fn all(path: &Path, has_key: impl Fn(Provider) -> bool) -> Vec<Entry<ProfileFields>> {
-    let user = UserLayer::load_with_findings(path).map(|(u, _)| u).unwrap_or_default();
+    let (user, findings) = UserLayer::load_with_findings(path).unwrap_or_default();
+    let closed = profile::fails_closed(&findings).map(|f| format!("{f}; the gate is off until it is fixed"));
+    // The first finding of each `gate.profiles.<name>` unit that fell out.
+    let mut refused: BTreeMap<&str, String> = BTreeMap::new();
+    for f in &findings {
+        if let Some(name) = f.unit.as_deref().and_then(|u| u.strip_prefix("gate.profiles.")) {
+            refused.entry(name).or_insert_with(|| f.to_string());
+        }
+    }
     let shipped = profile::shipped();
     let built = profile::profiles(&user);
     let dropped = profile::dropped_profiles(&user);
-    let engine = profile::resolve(&user, has_key).ok().flatten().map(|s| s.engine);
-    let names = shipped.keys().chain(user.profiles.keys().filter(|n| !shipped.contains_key(*n)));
+    let engine = match closed {
+        Some(_) => None,
+        None => profile::resolve(&user, has_key).ok().flatten().map(|s| s.engine),
+    };
+    let extra: BTreeSet<String> = user.profiles.keys().cloned().chain(refused.keys().map(|n| n.to_string())).filter(|n| !shipped.contains_key(n)).collect();
+    let names = shipped.keys().cloned().chain(extra);
     names
         .map(|name| {
-            let ours = user.profiles.contains_key(name);
-            let why = dropped.iter().find(|(n, _)| n == name).map(|(_, e)| format!("{e:#}"));
-            let mut item = match shipped.contains_key(name) {
-                true => Item::new(Family::Profile, name, Origin::Builtin),
-                false => Item { path: Some(path.to_path_buf()), ..Item::new(Family::Profile, name, Origin::User) },
+            let ours = user.profiles.contains_key(&name);
+            let why = dropped.iter().find(|(n, _)| *n == name).map(|(_, e)| format!("{e:#}"));
+            let why = why.or_else(|| refused.get(name.as_str()).cloned());
+            let mut item = match shipped.contains_key(&name) {
+                true => Item::new(Family::Profile, name.clone(), Origin::Builtin),
+                false => Item { path: Some(path.to_path_buf()), ..Item::new(Family::Profile, name.clone(), Origin::User) },
             };
-            if ours && shipped.contains_key(name) {
+            if ours && shipped.contains_key(&name) {
                 item = item.with_overrides(vec![Override { origin: Origin::User, how: How::Extends, path: path.to_path_buf() }]);
             }
-            let patch = user.profiles.get(name);
-            let (provider, model) = match built.get(name) {
+            let patch = user.profiles.get(&name);
+            let (provider, model) = match built.get(&name) {
                 Some(p) => (Some(p.provider), Some(p.model.clone())),
                 None => (patch.and_then(|p| p.provider), patch.and_then(|p| p.model.clone())),
             };
             item.kind = provider.map(kind);
             item.source = model;
-            let state = match (&why, built.contains_key(name), engine.as_deref() == Some(name.as_str())) {
+            let state = match (&why, built.contains_key(&name), engine.as_deref() == Some(name.as_str())) {
                 (Some(_), false, _) => ProfileState::Invalid,
                 (_, _, true) => ProfileState::Active,
                 _ => ProfileState::Inactive,
             };
-            item.detail = match (why, state) {
+            let own = match (why, state) {
                 (Some(e), ProfileState::Invalid) => Some(e),
                 (Some(e), _) => Some(format!("agent.yaml's change is dropped: {e}")),
                 (None, _) => None,
+            };
+            item.detail = match (own, &closed) {
+                (Some(o), Some(c)) => Some(format!("{o}; {c}")),
+                (o, c) => o.or_else(|| c.clone()),
             };
             Entry { item: item.with_state(state), fields: ProfileFields {} }
         })
@@ -94,5 +114,46 @@ mod tests {
         assert_eq!((bad.origin, bad.state), (Origin::User, ProfileState::Invalid.into()));
         assert!(bad.detail.as_deref().is_some_and(|d| d.contains("must set model")), "{:?}", bad.detail);
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    fn listed(tag: &str, text: &str) -> (Vec<Entry<ProfileFields>>, std::path::PathBuf) {
+        let d = std::env::temp_dir().join(format!("ways-items-profiles-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let path = d.join("agent.yaml");
+        std::fs::write(&path, text).unwrap();
+        (all(&path, |_| true), d)
+    }
+
+    fn get(all: &[Entry<ProfileFields>], n: &str) -> Item {
+        all.iter().find(|e| e.item.name == n).unwrap_or_else(|| panic!("no {n}")).item.clone()
+    }
+
+    #[test]
+    fn a_user_profile_that_fails_the_schema_is_listed_invalid_with_the_finding() {
+        let (all, d) = listed("schema-user", "profiles:\n  typo:\n    provider: openrouter\n    model: vendor/m\n    threshold: high\n");
+        let typo = get(&all, "typo");
+        assert_eq!((typo.origin, typo.state), (Origin::User, ProfileState::Invalid.into()));
+        assert!(typo.detail.as_deref().is_some_and(|d| d.contains("threshold")), "{:?}", typo.detail);
+        assert_eq!(all.iter().filter(|e| e.item.name == "typo").count(), 1);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_shipped_profile_whose_patch_fails_the_schema_keeps_its_state_and_names_the_drop() {
+        let (all, d) = listed("schema-shipped", "engine: anthropic\nprofiles:\n  anthropic:\n    threshold: lots\n");
+        let a = get(&all, "anthropic");
+        assert_eq!((a.origin, a.state), (Origin::Builtin, ProfileState::Active.into()));
+        assert!(a.detail.as_deref().is_some_and(|d| d.contains("dropped") && d.contains("threshold")), "{:?}", a.detail);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_file_that_turns_the_gate_off_leaves_no_profile_active_and_says_why() {
+        for (tag, text) in [("closed-mode", "mode: bogus\nengine: anthropic\n"), ("closed-parse", "engine: anthropic\nprofiles: [\n")] {
+            let (all, d) = listed(tag, text);
+            assert!(all.iter().all(|e| e.item.state != ProfileState::Active.into()), "{tag}");
+            assert!(all.iter().all(|e| e.item.detail.as_deref().is_some_and(|d| d.contains("the gate is off"))), "{tag}: {:?}", get(&all, "anthropic").detail);
+            let _ = std::fs::remove_dir_all(&d);
+        }
     }
 }
