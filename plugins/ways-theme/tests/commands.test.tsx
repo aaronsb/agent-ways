@@ -777,6 +777,13 @@ describe('copy_as', () => {
     expect(csvOf('| [`run`](https://x.com) | *it* `*it*` |')).toBe('run,it *it*')
   })
 
+  test("a cell holding the private-use marks keeps them, beside a code span of its own", () => {
+    const cell = 'it\uE0000\uE001s \uE0000\uE000'
+    const table = splitReply(`| a | b |\n|---|---|\n| ${cell} | \`x\` ${cell} |`)[0] as Table
+    expect(table.rows).toEqual([[cell, `x ${cell}`]])
+    expect(tableCsv(table).split('\n')[1]).toBe(`${cell},x ${cell}`)
+  })
+
   test('the drawn cell keeps a code span as written and drops bold around it', () => {
     const table = splitReply('| a | b |\n|---|---|\n| `**kwargs` | **bold** `__init__` |')[0] as Table
     expect(table.rows).toEqual([['**kwargs', 'bold __init__']])

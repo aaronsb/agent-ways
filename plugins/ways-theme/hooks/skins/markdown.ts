@@ -71,13 +71,17 @@ const CELL_SPAN = /(?<![`\\])(`+)(?!`)(.+?)(?<!`)\1(?!`)/g
 const spanText = (inner: string): string => (inner.length > 1 && inner.startsWith(' ') && inner.endsWith(' ') && inner.trim() !== '' ? inner.slice(1, -1) : inner)
 
 // `cell` with `reduce` applied outside its code spans, and each span as its content
-// verbatim, its ticks off. The spans are held out behind private-use marks while
-// `reduce` runs, so a link or emphasis around a span still reads whole.
+// verbatim, its ticks off. While `reduce` runs, each span is held out as its index between
+// two private-use marks, so a link or emphasis around a span still reads whole; the mark
+// is one the cell does not hold, so none of the cell's own text reads as a span.
 function outsideCode(cell: string, reduce: (text: string) => string): string {
   const spans: string[] = []
-  const masked = cell.replace(CELL_SPAN, (_, _ticks: string, inner: string) => `\uE000${spans.push(spanText(inner)) - 1}\uE001`)
+  let code = 0xe000
+  while (cell.includes(String.fromCharCode(code))) code++
+  const mark = String.fromCharCode(code)
+  const masked = cell.replace(CELL_SPAN, (_, _ticks: string, inner: string) => `${mark}${spans.push(spanText(inner)) - 1}${mark}`)
 
-  return reduce(masked).replace(/\uE000(\d+)\uE001/g, (_, at: string) => spans[Number(at)] ?? '')
+  return reduce(masked).replace(new RegExp(`${mark}(\\d+)${mark}`, 'g'), (_, at: string) => spans[Number(at)] ?? '')
 }
 
 // A cell as written, `\|` read as `|`, which GFM takes inside code spans too.
