@@ -701,6 +701,25 @@ fn the_wheel_scrolls_the_feed_and_not_outside_it() {
     assert_eq!(c.scroll(), 0);
 }
 
+/// A channel's participants take a row above its feed, beneath the tab
+/// bar: its member, then its invitee set back. The operator view has no
+/// strip and its feed starts under the tab bar. The wheel scrolls the feed
+/// where it is drawn, a row lower, and not over the strip.
+#[test]
+fn a_channel_lists_who_takes_part_above_its_feed_and_the_operator_view_does_not() {
+    let mut c = chat();
+    let merged = text(&mut c, 80, 16);
+    assert!(merged.lines().nth(1).is_some_and(|r| r.starts_with('╭')), "no strip on ⋯all:\n{merged}");
+    press(&mut c, alt('2'));
+    assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
+    let deploy = text(&mut c, 80, 16);
+    let rows: Vec<&str> = deploy.lines().collect();
+    assert!(rows[1].contains("◌ invited") && !rows[1].contains('╭'), "the strip under the tab bar:\n{deploy}");
+    assert!(rows[2].starts_with('╭'), "the feed a row lower:\n{deploy}");
+    c.mouse(mouse(MouseEventKind::ScrollUp, 10, 1));
+    assert_eq!(c.scroll(), 0, "the strip is not the feed");
+}
+
 /// Ctrl-C over a draft asks first, as the settings shell does over
 /// pending edits; Esc goes back to it, and D quits and drops it with no
 /// second confirm on the bar.
