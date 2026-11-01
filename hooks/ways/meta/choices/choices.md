@@ -38,6 +38,8 @@ Some calls sit on the line, and a qualifier decides:
 - A setting's name is above it once a release has shipped it, and below it while it exists only on an unmerged branch.
 - The wording of a user-facing message is below it. Removing information users relied on is above it.
 
+The lists are examples drawn from a wider test: how costly a call is to reverse, and whether the operator would want a say in it. Judge a call they don't name by that test, and judge a listed call by the situation in front of you: a listed kind that is trivial here may sit below the line, and an unlisted call that sets direction sits above it. Say which way you read it.
+
 When more calls qualify than one batch holds, rank them by reversal cost, ask about the top few, and settle the rest with each lean stated so the operator can overrule any of them. A series of these is an interview (choices/interview).
 
 ## When to surface a choice

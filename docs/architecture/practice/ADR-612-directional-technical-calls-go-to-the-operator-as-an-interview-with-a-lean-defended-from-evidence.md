@@ -38,6 +38,15 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "keep list and pairs, but we need to grant permission to extrapolate based on the actual situation"
+    via: AskUserQuestion in the head agent-ways session, 2026-11-01, over the drafted probe; the option labels were agent-written
+    covers: [waterline]
+  - operator: aaronsb
+    said: "As drafted (Recommended)"
+    via: AskUserQuestion in the head agent-ways session, 2026-11-01; the operator picked the agent-written option label
+    covers: [handoff]
 status: proposed
 date: 2026-11-01
 deciders:
