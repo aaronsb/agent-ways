@@ -1105,13 +1105,15 @@ impl Pane for ChatPane {
     }
 
     /// Messages waiting to send are sent by the exit guard's Send and quit,
-    /// or discarded by its Quit and discard all; never dropped unasked.
+    /// drafts kept by it or by Quit, keep the drafts, or both discarded by
+    /// Quit and discard all; never dropped unasked.
     fn quit_keeping(&self) -> Option<(String, char)> {
         self.pending_quit_keeping()
     }
 
-    /// Send and quit: what waits is sent and the draft is kept for the
-    /// next chat; false, and the chat stays open, when either did not go.
+    /// Send and quit, or Quit, keep the drafts: what waits is sent and the
+    /// drafts are kept for the next chat; false, and the chat stays open,
+    /// when either did not go.
     fn keep_on_quit(&mut self) -> bool {
         let kept = self.send_all_now() && self.keep_draft();
         if kept {

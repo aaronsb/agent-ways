@@ -607,8 +607,12 @@ impl ChatPane {
         (!parts.is_empty()).then(|| parts.join(" and "))
     }
 
-    /// The exit guard's button that sends the messages waiting. Its label
-    /// says when a draft, in the box or parked, is kept for the next chat.
+    /// The exit guard's button that keeps what the chat can keep and quits:
+    /// with messages waiting, Send and quit, which sends them; with none,
+    /// Quit, keep the drafts, so drafts alone, or drafts a Send and quit
+    /// could not keep after its message went, can always be kept rather
+    /// than dropped. Its label says when a draft, in the box or parked, is
+    /// kept for the next chat.
     pub(super) fn pending_quit_keeping(&self) -> Option<(String, char)> {
         let drafts = usize::from(!self.input.is_empty()) + self.pending.iter().filter(|h| matches!(h.source, Source::Parked { .. })).count();
         let draft = match drafts {
@@ -617,7 +621,8 @@ impl ChatPane {
             _ => ", keep the drafts",
         };
         match self.pending.sendable() {
-            0 => None,
+            0 if drafts == 0 => None,
+            0 => Some((format!("Quit{draft}"), 'k')),
             1 => Some((format!("Send and quit{draft}"), 's')),
             n => Some((format!("Send {n} and quit{draft}"), 's')),
         }
@@ -733,6 +738,10 @@ impl ChatPane {
                 }
             }
         }
+        // What is noted is what stays after this keep, whether or not all
+        // of it was kept, the box's draft with the file it is now in: a
+        // panic now writes no text a second time.
+        self.note_unsent();
         if let Some((path, e)) = failed {
             // The reason first: a narrow status line keeps it, and the
             // path after it.
@@ -741,7 +750,8 @@ impl ChatPane {
             return false;
         }
         // All kept: the box's draft is in its new file, which the shell's
-        // discard at the end of the chat must leave in place.
+        // discard at the end of the chat must leave in place. The caller
+        // ends the chat and clears what is noted ([`unsent::clear`]).
         self.box_origins.clear();
         true
     }

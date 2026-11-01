@@ -636,6 +636,99 @@ fn the_quit_guard_names_everything_at_80_columns() {
     }
 }
 
+/// With drafts and no message waiting, the guard offers Quit, keep the
+/// drafts, so drafts are never left with only discard to quit by; that is
+/// the case after a Send and quit whose message went but whose draft could
+/// not be kept (#1235 review, L1).
+#[test]
+fn the_guard_keeps_drafts_when_no_message_waits() {
+    let kept = unsent("keep-drafts");
+    let mut c = chat().unsent_dir(&kept);
+    typed(&mut c, "a draft alone");
+    press(&mut c, KeyCode::Char('c'), KeyModifiers::CONTROL);
+    assert!(c.app().guarding());
+    let s = screen(&mut c);
+    assert!(s.contains("Quit, keep the draft (k)"), "{s}");
+    // At 80 columns the three buttons take two rows rather than one cut
+    // at the guard's edge.
+    let narrow = testkit::text(&testkit::render_screen(&mut c, 80, 25));
+    assert!(narrow.contains("Quit, keep the draft (k)") && narrow.contains("Quit and discard all (D)"), "{narrow}");
+    assert!(!key(&mut c, KeyCode::Char('k')), "k keeps the draft and quits");
+    let c = chat().unsent_dir(&kept).restore_unsent();
+    assert_eq!(c.input().text(), "a draft alone", "the next chat opens on it");
+}
+
+#[test]
+fn after_a_send_and_quit_that_could_not_keep_the_draft_the_guard_still_keeps_it() {
+    use std::os::unix::fs::PermissionsExt;
+    // SAFETY: geteuid reads our own id.
+    if unsafe { libc::geteuid() } == 0 {
+        eprintln!("skipped: root writes to a read-only directory");
+        return;
+    }
+    let kept = unsent("keep-after-fail");
+    let mut c = chat().unsent_dir(&kept);
+    send(&mut c, "goes at the quit");
+    typed(&mut c, "the draft that stays");
+    std::fs::create_dir_all(&kept).unwrap();
+    std::fs::set_permissions(&kept, std::fs::Permissions::from_mode(0o555)).unwrap();
+    press(&mut c, KeyCode::Char('c'), KeyModifiers::CONTROL);
+    let stayed = key(&mut c, KeyCode::Char('s'));
+    std::fs::set_permissions(&kept, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(stayed, "the draft could not be kept: the chat stays");
+    assert!(on_open("goes at the quit"), "the message went");
+    press(&mut c, KeyCode::Char('c'), KeyModifiers::CONTROL);
+    let s = screen(&mut c);
+    assert!(s.contains("Quit, keep the draft (k)") && !s.contains("Send and quit"), "{s}");
+    assert!(!key(&mut c, KeyCode::Char('k')), "k keeps the draft and quits");
+    let c = chat().unsent_dir(&kept).restore_unsent();
+    assert_eq!(c.input().text(), "the draft that stays");
+    assert_eq!(files(&kept).len(), 1, "{:?}", files(&kept));
+}
+
+#[test]
+#[ignore = "run by a_panic_after_a_partly_failed_keep_keeps_the_box_draft_once"]
+fn child_panics_after_a_partly_failed_keep() {
+    let Some(kept) = std::env::var_os("ATTEND_CHAT_PARTIAL_DIR").map(std::path::PathBuf::from) else { return };
+    let mut c = chat().unsent_dir(&kept);
+    attend_chat::app::keep_on_panic();
+    send(&mut c, "held, sent at the quit");
+    side_click(&mut c, &nick("beta"));
+    typed(&mut c, &"a long parked draft ".repeat(200));
+    // Esc recalls the held message into its view and parks the long draft.
+    key(&mut c, KeyCode::Esc);
+    press(&mut c, KeyCode::Enter, KeyModifiers::NONE);
+    typed(&mut c, "the box draft");
+    // A file size limit fails the long draft's write and lets the short
+    // one through: a keep that partly fails.
+    // SAFETY: setrlimit and signal on this process alone.
+    unsafe {
+        libc::signal(libc::SIGXFSZ, libc::SIG_IGN);
+        let lim = libc::rlimit { rlim_cur: 1024, rlim_max: libc::RLIM_INFINITY };
+        assert_eq!(libc::setrlimit(libc::RLIMIT_FSIZE, &lim), 0);
+    }
+    press(&mut c, KeyCode::Char('c'), KeyModifiers::CONTROL);
+    assert!(key(&mut c, KeyCode::Char('s')), "the long draft could not be kept: the chat stays");
+    assert!(c.status().starts_with("not kept ("), "{}", c.status());
+    panic!("a panic after the partly failed keep");
+}
+
+/// A panic right after a keep that partly failed writes the box draft no
+/// second time (#1235 review, L2): what is noted follows the keep.
+#[test]
+fn a_panic_after_a_partly_failed_keep_keeps_the_box_draft_once() {
+    let kept = unsent("partial-keep");
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["child_panics_after_a_partly_failed_keep", "--exact", "--ignored", "--test-threads=1"])
+        .env("ATTEND_CHAT_PARTIAL_DIR", &kept)
+        .output()
+        .unwrap();
+    let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(said.contains("a panic after the partly failed keep"), "the child reached its panic: {said}");
+    let bodies: Vec<String> = files(&kept).iter().filter_map(|f| std::fs::read_to_string(kept.join(f)).ok()).collect();
+    assert_eq!(bodies.iter().filter(|b| b.ends_with("the box draft")).count(), 1, "the box draft once: {bodies:?}");
+}
+
 // ── a recall that shows another view ─────────────────────────────
 
 /// A recall that shows the message's view parks the draft in the box as a
