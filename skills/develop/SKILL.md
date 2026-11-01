@@ -39,7 +39,7 @@ Work the stages. At each one, **borrow** rather than rebuild:
 - review + fix + merge — hand the tail to **`/merge`** (the four-square gate lives there)
 - release, if warranted — **`/release`**
 
-Let the stage ways fire on their own as you go; `develop` doesn't repeat what they teach. When the piece is landed, that's one turn of the loop — pick up the next, or `wrap` if the session is done.
+Let the stage ways fire on their own as you go; `develop` doesn't repeat what they teach. Calls above the waterline (the `choices` way) go to the operator as an interview, each with your lean and its evidence; settle the rest and say what you chose. When the piece is landed, that's one turn of the loop — pick up the next, or `wrap` if the session is done.
 
 ## Delegation
 

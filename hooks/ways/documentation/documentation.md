@@ -33,7 +33,7 @@ The children of this way cover two levels: the **model**, which defines the grap
 | Craft | Code-level docs (docstrings, JSDoc, rustdoc) | `docstrings` |
 | Craft | Structural diagrams | `mermaid` |
 | Craft | House norms — style, conventions, accessibility | `standards` |
-| Craft | A cold read by a fresh agent, and a linter proven by a planted violation | `validate` |
+| Craft | A cold read by a fresh agent, and a linter proven by a planted defect | `validate` |
 
 The model ways marked *forthcoming* get written as ADR-302 is implemented. Until then, this parent lists them so that each one has a place in the corpus.
 
