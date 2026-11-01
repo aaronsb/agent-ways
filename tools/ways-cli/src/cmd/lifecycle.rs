@@ -627,7 +627,7 @@ mod tests {
         let root = crate::test_dir::TestDir::at(std::env::temp_dir().join(format!("ways-lifecycle-busy-{}", std::process::id())));
         std::fs::create_dir_all(&*root).unwrap();
         let bin = root.join("fresh");
-        let mut f = std::fs::OpenOptions::new().write(true).create(true).mode(0o755).open(&bin).unwrap();
+        let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o755).open(&bin).unwrap();
         f.write_all(b"#!/bin/sh\necho ran\n").unwrap();
         let held = std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(15));
