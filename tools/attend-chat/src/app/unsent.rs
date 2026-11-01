@@ -98,21 +98,22 @@ pub(super) fn decode(body: &str) -> (Record, bool) {
 }
 
 /// Write each record to a file of its own in `dir`. Every record is
-/// tried; the first failure is returned with its path.
-pub(super) fn write(dir: &Path, records: &[Record]) -> Result<(), (PathBuf, io::Error)> {
+/// tried. The outcome of each, in order, is the path written, or the path
+/// tried with the error.
+pub(super) fn write(dir: &Path, records: &[Record]) -> Vec<Result<PathBuf, (PathBuf, io::Error)>> {
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let mut first = Ok(());
-    for r in records {
-        let nanos = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
-        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = dir.join(format!("{}-{nanos:020}-{seq}", std::process::id()));
-        if let Err(e) = agent_settings::writer::write_atomic(&path, encode(r)) {
-            if first.is_ok() {
-                first = Err((path, e));
+    records
+        .iter()
+        .map(|r| {
+            let nanos = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+            let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let path = dir.join(format!("{}-{nanos:020}-{seq}", std::process::id()));
+            match agent_settings::writer::write_atomic(&path, encode(r)) {
+                Ok(()) => Ok(path),
+                Err(e) => Err((path, e)),
             }
-        }
-    }
-    first
+        })
+        .collect()
 }
 
 /// One file this chat claimed, and what it holds.
@@ -285,7 +286,7 @@ pub(super) fn note(dir: &Path, records: Vec<Record>, origins: Vec<PathBuf>) {
 pub fn keep_noted() {
     let Ok(mut n) = NOTED.try_lock() else { return };
     let Some((dir, records, origins)) = n.take() else { return };
-    if records.is_empty() || write(&dir, &records).is_ok() {
+    if write(&dir, &records).iter().all(Result::is_ok) {
         settle(origins);
     }
 }

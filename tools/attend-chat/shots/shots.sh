@@ -87,13 +87,17 @@ sweep
 #   chat:          the chat started from the shell an hup-* scenario opens
 #   sent:TEXT      until a post in #open's room holds TEXT
 #   kept:TEXT      until a file in the unsent directory holds TEXT
+#   chmod:MODE     the unsent directory's mode set to MODE, made first if absent
 # An hup-* scenario ends the chat with a message held and a draft, and
 # passes when the message was sent and the draft kept: hup-twice sends two
 # SIGHUPs, hup-term a SIGTERM then a SIGHUP, hup-down closes the pane, and
 # hup-bash runs the chat as a foreground job of an interactive bash whose
 # pane closes, so bash sends its own SIGHUP after the kernel's. wait-park
 # recalls an #open post while a draft for gamma is in the box, which is
-# parked as a draft of gamma's DM view; wait-kept opens on what an earlier
+# parked as a draft of gamma's DM view. wait-unkept does the same, holds
+# the post again, and presses Send and quit with the unsent directory
+# read-only: the post is sent, and the draft, not kept, stays in the feed
+# with the reason on the status line. wait-kept opens on what an earlier
 # chat kept (the kept fixture): the draft in alpha's DM view, and the
 # message held for a channel since gone as an entry, not sent.
 # The fixture is base, crowd (fifteen more agents), many (24 more channels,
@@ -183,6 +187,7 @@ wait-gone    | wait  | wait:Agents M-3 wait:#infra_0 text:plan_for_infra Enter w
 wait-refused | wait  | wait:Agents rside:○ wait:Address click:Address_@ text:ping Enter wait:Esc_recall text:#deploy_unrelated wait:not_sent
 wait-dm-back | wait  | wait:Agents side:○ wait:DMs text:for_gamma_alone Enter wait:Esc_recall M-0 wait:not_sent Escape wait:recalled
 wait-park    | wait  | wait:Agents text:an_open_post Enter wait:Esc_recall side:○ wait:DMs text:for_gamma_only Escape wait:recalled
+wait-unkept  | wait  | wait:Agents text:an_open_post Enter wait:Esc_recall side:○ wait:DMs text:for_gamma_only Escape wait:recalled Enter wait:sending_in chmod:555 C-c wait:Send_and_quit s wait:not_kept sent:an_open_post chmod:755
 wait-kept    | kept  | wait:Agents wait:restored
 hup-twice    | wait  | wait:Agents text:said_before_the_hangup Enter wait:Esc_recall paste:a_draft_at_the_hangup wait:at_the_hangup signal:HUP signal:HUP sent:said_before_the_hangup kept:a_draft_at_the_hangup
 hup-term     | wait  | wait:Agents text:said_before_the_hangup Enter wait:Esc_recall paste:a_draft_at_the_hangup wait:at_the_hangup signal:TERM signal:HUP sent:said_before_the_hangup kept:a_draft_at_the_hangup
@@ -571,6 +576,7 @@ step() { # name step
     chat:) $TH send "$n" -l "$BIN/attend-chat"; $TH send "$n" Enter; return ;;
     sent:*) poll_file "$F/cache/attend/signals/_broadcast" "$arg"; return ;;
     kept:*) poll_file "$F/state/attend-chat/unsent" "$arg"; return ;;
+    chmod:*) mkdir -p "$F/state/attend-chat/unsent"; chmod "$arg" "$F/state/attend-chat/unsent"; return ;;
     paste:*) $TH send "$n" -l $'\e[200~'"$(printf '%b' "$arg")"$'\e[201~' ;;
     rawpaste:*) $TH send "$n" -l "$(printf '%b' "$arg")" ;;
     bigpaste:*) # in pieces: tmux refuses one send-keys this long

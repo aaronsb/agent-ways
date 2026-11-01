@@ -624,16 +624,14 @@ impl ChatPane {
     /// typed is lost unsaid. A restored entry stays in its kept file. The
     /// operator said: "I don't want to drop messages".
     pub(super) fn keep_what_did_not_go(&mut self) {
-        let left = self.pending.take_where(|h| !matches!(h.source, Source::Kept { .. }));
-        self.keep(left);
+        self.keep(|h| !matches!(h.source, Source::Kept { .. }));
     }
 
     /// Send and quit keeps the draft in the box and the drafts parked for
     /// the next chat; false, with the reason on the status line, when they
     /// could not be kept.
     pub(super) fn keep_draft(&mut self) -> bool {
-        let parked = self.pending.take_where(|h| matches!(h.source, Source::Parked { .. }));
-        self.keep(parked)
+        self.keep(|h| matches!(h.source, Source::Parked { .. }))
     }
 
     /// The draft in the box as a record of the view shown, a channel
@@ -655,30 +653,59 @@ impl ChatPane {
     fn origins(&self, held: &[Held]) -> Vec<std::path::PathBuf> {
         let mut o = self.box_origins.clone();
         for h in held {
-            if let Source::Parked { origins } = &h.source {
-                o.extend(origins.iter().cloned());
-            }
+            o.extend(Self::parked_origins(h));
         }
         o
     }
 
-    /// Keep `held` and the draft in the box, a file each, then remove the
-    /// kept files they carried. True when all were kept, or there was
-    /// nothing to keep; false, with the reason on the status line and the
-    /// carried files left, when one could not be. A dry run writes nothing.
-    fn keep(&mut self, held: Vec<Held>) -> bool {
+    /// The kept files a parked draft carries.
+    fn parked_origins(h: &Held) -> Vec<std::path::PathBuf> {
+        match &h.source {
+            Source::Parked { origins } => origins.clone(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Keep the entries `which` picks, and the draft in the box, a file
+    /// each. An entry leaves the feed only once its file is written, and
+    /// the kept files a written text carried are removed then. True when
+    /// all were kept, or there was nothing to keep. False, with the reason
+    /// on the status line, when one could not be: it stays in the feed,
+    /// or in the box, with the files it carried. A box draft that was
+    /// written while another text failed carries its new file, so keeping
+    /// again replaces it. A dry run writes nothing and takes the entries.
+    fn keep(&mut self, which: impl Fn(&Held) -> bool) -> bool {
         if self.dry_run {
+            self.pending.take_where(which);
             return true;
         }
-        let origins = self.origins(&held);
+        let held: Vec<Held> = self.pending.iter().filter(|h| which(h)).cloned().collect();
         let mut records: Vec<unsent::Record> = held.iter().map(Self::record).collect();
         records.extend(self.box_record());
-        if let Err((path, e)) = unsent::write(&self.unsent_dir, &records) {
+        let (mut written, mut settled, mut failed) = (Vec::new(), Vec::new(), None);
+        for (i, outcome) in unsent::write(&self.unsent_dir, &records).into_iter().enumerate() {
+            match (outcome, held.get(i)) {
+                (Ok(_), Some(h)) => {
+                    written.push(h.id);
+                    settled.extend(Self::parked_origins(h));
+                }
+                (Ok(path), None) => {
+                    settled.append(&mut self.box_origins);
+                    self.box_origins.push(path);
+                }
+                (Err(e), _) => {
+                    failed.get_or_insert(e);
+                }
+            }
+        }
+        self.pending.take_where(|h| written.contains(&h.id));
+        unsent::settle(settled);
+        if let Some((path, e)) = failed {
             self.say(format!("not kept: {} ({e})", path.display()), true);
+            self.invalidate();
             return false;
         }
         self.box_origins.clear();
-        unsent::settle(origins);
         true
     }
 

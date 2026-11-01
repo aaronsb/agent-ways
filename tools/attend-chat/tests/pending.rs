@@ -589,6 +589,45 @@ fn a_parked_draft_is_kept_at_the_end() {
     assert_eq!(c.pending(), ["parked for beta"], "the parked draft an entry of its own");
 }
 
+/// Send and quit sends what waits, and a parked draft whose file cannot be
+/// written stays in the feed: the chat stays open, the status line says
+/// why, and the guard still names the draft. Kept once the directory takes
+/// it, it opens the next chat.
+#[test]
+fn a_parked_draft_that_cannot_be_kept_stays_in_the_feed() {
+    use std::os::unix::fs::PermissionsExt;
+    // SAFETY: geteuid reads our own id.
+    if unsafe { libc::geteuid() } == 0 {
+        eprintln!("skipped: root writes to a read-only directory");
+        return;
+    }
+    let kept = unsent("parked-unwritable");
+    let mut c = chat().unsent_dir(&kept);
+    send(&mut c, "held, then sent at the quit");
+    side_click(&mut c, &nick("beta"));
+    typed(&mut c, "parked and not lost");
+    key(&mut c, KeyCode::Esc);
+    press(&mut c, KeyCode::Enter, KeyModifiers::NONE);
+    assert_eq!(c.pending(), ["parked and not lost", "held, then sent at the quit"], "one draft parked and one message waiting");
+    std::fs::create_dir_all(&kept).unwrap();
+    std::fs::set_permissions(&kept, std::fs::Permissions::from_mode(0o555)).unwrap();
+    press(&mut c, KeyCode::Char('c'), KeyModifiers::CONTROL);
+    let stayed = key(&mut c, KeyCode::Char('s'));
+    std::fs::set_permissions(&kept, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(stayed, "s did not quit: the draft could not be kept");
+    assert!(on_open("held, then sent at the quit"), "the message went");
+    assert!(c.status().starts_with("not kept: ") && c.status().contains("Permission denied"), "{}", c.status());
+    assert_eq!(c.pending(), ["parked and not lost"], "the draft stays in the feed");
+    assert!(files(&kept).is_empty(), "nothing was written: {:?}", files(&kept));
+    press(&mut c, KeyCode::Char('c'), KeyModifiers::CONTROL);
+    assert!(c.app().guarding(), "the next Ctrl-C is guarded");
+    assert!(screen(&mut c).contains("a draft written for"), "the guard names the draft");
+    key(&mut c, KeyCode::Esc);
+    c.into_app().end_unasked(libc::SIGHUP, "stopped: the terminal hung up");
+    let c = chat().unsent_dir(&kept).restore_unsent();
+    assert_eq!(c.input().text(), "parked and not lost", "kept at the end, it opens the next chat: {}", c.status());
+}
+
 // ── the delay set to 0 ───────────────────────────────────────────
 
 /// With a message waiting, a delay set to 0 sends the next message to its
