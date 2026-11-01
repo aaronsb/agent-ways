@@ -243,6 +243,7 @@ impl Signals {
         #[cfg(not(unix))]
         let caught = [signal_hook::consts::SIGTERM, signal_hook::consts::SIGINT];
         save_termios();
+        stdin_was_tty();
         for sig in caught {
             #[cfg(unix)]
             {
@@ -283,7 +284,7 @@ impl Signals {
     }
 
     fn watch(&self) {
-        let tty = stdin_is_tty();
+        let tty = stdin_was_tty();
         let mut since: Option<Instant> = None;
         loop {
             std::thread::sleep(Duration::from_millis(50));
@@ -311,7 +312,7 @@ impl Signals {
 /// `more` is set after an event, when crossterm may hold more already read.
 pub(crate) fn next_event(wait: Duration, more: bool) -> io::Result<Option<Event>> {
     #[cfg(unix)]
-    if stdin_is_tty() {
+    if stdin_was_tty() {
         let ms = if more { 0 } else { wait.as_millis().min(i32::MAX as u128) as i32 };
         let mut pfd = libc::pollfd { fd: 0, events: libc::POLLIN, revents: 0 };
         // SAFETY: one pollfd we own, on fd 0.
@@ -331,9 +332,16 @@ pub(crate) fn next_event(wait: Duration, more: bool) -> io::Result<Option<Event>
     }
 }
 
-fn stdin_is_tty() -> bool {
-    use std::io::IsTerminal;
-    io::stdin().is_terminal()
+/// Whether stdin was a terminal when first asked, which [`Signals::install`]
+/// does at startup. The answer is kept: `isatty` fails on a terminal that
+/// has hung up, and asked again then, it would send [`next_event`] to
+/// crossterm's poll, which spins on the dead terminal.
+fn stdin_was_tty() -> bool {
+    static TTY: OnceLock<bool> = OnceLock::new();
+    *TTY.get_or_init(|| {
+        use std::io::IsTerminal;
+        io::stdin().is_terminal()
+    })
 }
 
 /// Whether the terminal on stdin has gone: its attributes can no longer be
