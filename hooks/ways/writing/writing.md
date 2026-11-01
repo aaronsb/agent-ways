@@ -46,27 +46,21 @@ Where a genre's needs and a general style rule disagree, the genre wins.
 
 ## Prose Style
 
-Write prose, not bullet points wearing a trenchcoat. Let ideas develop across sentences. Vary sentence length and rhythm — short sentences create urgency, longer ones let complex ideas breathe.
+Sentences, tense and terms follow writing/plain. Write ideas that depend on each other as connected sentences, and keep a list for items that stand alone.
 
-**Defaults (override per user preference):**
-- Prefer active voice. Use passive only when the actor is irrelevant or unknown.
-- Avoid staccato sentence fragments for rhetorical impact. Let the substance carry the weight.
 - Lead with the conclusion when the audience is busy. Lead with context when the audience needs persuading.
-- Cut filler on revision. "In order to" → "To". "It should be noted that" → delete.
-- Name the real term, then gloss it. For domain vocabulary, give the precise term *and* a plain-language gloss on first use — neither a jargon wall nor analogy-mush. Analogies illustrate; they don't carry the argument.
-
-**Avoid:**
-- Corporate filler — hollow superlatives, engagement bait, breathless enthusiasm disconnected from substance.
-- Constructivism framing — "it's not X, it's Y" patterns that define by negation. Say what it is.
-- Adjective stacking. One precise adjective beats three vague ones.
+- Cut filler on revision. "In order to" becomes "To". "It should be noted that" goes.
+- Say what a thing is, and leave out a definition by negation ("it's not X, it's Y").
+- Use one precise adjective where three vague ones would stack up.
+- Leave out corporate filler: hollow superlatives, engagement bait, and enthusiasm the substance does not support.
 
 ## Revision
 
-Revise in passes, not all at once:
-1. **Structure** — is the argument in the right order?
-2. **Clarity** — can each sentence be misread? Fix ambiguity.
-3. **Tone** — does it match the audience and purpose?
-4. **Concision** — what can be cut without losing meaning?
+Revise in passes:
+1. **Structure.** Is the argument in the right order?
+2. **Clarity.** Rewrite any sentence you had to read twice (writing/plain).
+3. **Tone.** Does it match the audience and purpose?
+4. **Concision.** What can be cut without losing meaning?
 
 ## Pushback
 
@@ -85,3 +79,4 @@ If the format doesn't fit the content (a slide deck for something that needs a d
 - writing/status-report(writing) — recurring reports that follow the last approved one
 - writing/own-words(writing) — editing the user's own text in their voice
 - writing/register(writing) — shifting register for a reader, and holding a user's style rules
+- writing/plain(writing) — present tense, each fact once, whole sentences, terms defined, who does what

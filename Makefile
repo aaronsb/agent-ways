@@ -389,6 +389,7 @@ test-hooks:
 	@bash tests/gh-tasks-test.sh
 	@bash tests/workflow-crates-test.sh
 	@bash tests/workflow-crates-selftest.sh
+	@bash tests/register-wrap-test.sh
 
 test-unit:
 	@echo "Running Rust unit tests..."

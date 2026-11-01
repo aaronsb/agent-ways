@@ -212,6 +212,7 @@ _The ways method, way authoring, the development loop_
 | [ADR-609](./practice/ADR-609-outward-writes-need-the-user-s-ask-or-a-grant-in-their-claude-md-and-ways-offer-them-otherwise.md) | Outward writes need the user's ask or a grant in their CLAUDE.md, and ways offer them otherwise | accepted |
 | [ADR-610](./practice/ADR-610-every-wrap-is-recorded-by-one-ways-command-and-a-session-start-way-steers-the-next-session-by-its-distance-from-the-writer.md) | Every wrap is recorded by one ways command, and a session-start way steers the next session by its distance from the writer | accepted |
 | [ADR-611](./practice/ADR-611-working-branch-github-writes-need-no-grant-and-merging-into-a-consequential-branch-does.md) | Working-branch GitHub writes need no grant, and merging into a consequential branch does | accepted |
+| [ADR-612](./practice/ADR-612-directional-technical-calls-go-to-the-operator-as-an-interview-with-a-lean-defended-from-evidence.md) | Directional technical calls go to the operator as an interview with a lean defended from evidence | accepted |
 
 ## Ways engine
 _The ways engine, continued after the full 100-199 band: matching, disclosure and the corpus_

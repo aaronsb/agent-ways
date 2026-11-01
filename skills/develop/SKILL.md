@@ -6,15 +6,11 @@ allowed-tools: Bash, Read, Grep, Glob, TaskList, TaskCreate, TaskUpdate, Agent
 
 # Develop — carry the loop
 
-The core loop, between `start` (open) and `wrap` (close). `develop` is a **router,
-not an orchestrator**: it establishes the loop, chooses the front order, lays the
-TaskList, then delegates to the stage skills and lets the stage ways disclose as you
-hit them. It does not reimplement design, review, or merge — it *sequences* them.
+The core loop, between `start` (open) and `wrap` (close). `develop` is a **router, not an orchestrator**: it establishes the loop, chooses the front order, lays the TaskList, then delegates to the stage skills and lets the stage ways disclose as you hit them. It does not reimplement design, review, or merge — it *sequences* them.
 
 ## Step 1 — Name the load-bearing uncertainty
 
-Before choosing an order, find the one question the work turns on, and locate it (the
-`core.md` uncertainty map):
+Before choosing an order, find the one question the work turns on, and locate it (the `core.md` uncertainty map):
 
 - **In the external world** — an API's behavior, a latency budget, a payload size.
 - **In the trade-offs** — several plausible shapes, none yet obviously right.
@@ -28,16 +24,11 @@ The front reorders by where the uncertainty lives:
 - **Design-first** → open trade-offs. Deliberate and converge. (`design` way)
 - **ADR-first** → direction is the point. Record the decision, then earn it with evidence. (`adr` skill/way)
 
-Often more than one, in sequence — but lead with the stage that answers the
-load-bearing question. Don't default to ADR-first out of habit; the ledger is part of
-the method, not the whole of it.
+Often more than one, in sequence — but lead with the stage that answers the load-bearing question. Don't default to ADR-first out of habit; the ledger is part of the method, not the whole of it.
 
 ## Step 3 — Lay the stable tail
 
-The tail is the same almost every time: **build → review → fix → merge**. Lay the
-stages into the TaskList (`TaskCreate`) with resume-cold detail — file paths, the ADR
-reference if any, dependencies, isolation strategy. This is the `delivery/implement`
-briefing discipline: defend the plan before creating tasks.
+The tail is the same almost every time: **build → review → fix → merge**. Lay the stages into the TaskList (`TaskCreate`) with resume-cold detail — file paths, the ADR reference if any, dependencies, isolation strategy. This is the `delivery/implement` briefing discipline: defend the plan before creating tasks.
 
 ## Step 4 — Carry it, borrowing
 
@@ -48,24 +39,17 @@ Work the stages. At each one, **borrow** rather than rebuild:
 - review + fix + merge — hand the tail to **`/merge`** (the four-square gate lives there)
 - release, if warranted — **`/release`**
 
-Let the stage ways fire on their own as you go; `develop` doesn't repeat what they
-teach. Calls above the waterline (the `choices` way) go to the operator as an
-interview, each with your lean and its evidence; settle the rest and say what you chose. When the piece is landed, that's one turn of the loop — pick up the next, or
-`wrap` if the session is done.
+Let the stage ways fire on their own as you go; `develop` doesn't repeat what they teach. Calls above the waterline (the `choices` way) go to the operator as an interview, each with your lean and its evidence; settle the rest and say what you chose. When the piece is landed, that's one turn of the loop — pick up the next, or `wrap` if the session is done.
 
 ## Delegation
 
-Invoking `/develop` is the operator's request for the delegation its stages call for
-(subagents(meta)). Where it pays:
+Invoking `/develop` is the operator's request for the delegation its stages call for (subagents(meta)). Where it pays:
 
-- **front** — a read-only survey of unfamiliar code goes to `Explore`; a design read
-  that must not anchor on your reasoning goes to `system-architect` or `skeptic`
-- **build** — edits with no shared state run in parallel `general-purpose` workers,
-  each briefed with file paths and the check to run
+- **front** — a read-only survey of unfamiliar code goes to `Explore`; a design read that must not anchor on your reasoning goes to `system-architect` or `skeptic`
+- **build** — edits with no shared state run in parallel `general-purpose` workers, each briefed with file paths and the check to run
 - **tail** — `/merge` spawns its own reviewers
 
-Pick the model by the job (the way's model section), name the payoff in a clause, and
-keep it one level deep. Coupled work stays inline.
+Pick the model by the job (the way's model section), name the payoff in a clause, and keep it one level deep. Coupled work stays inline.
 
 ## Key Principles
 

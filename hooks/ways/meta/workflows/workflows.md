@@ -8,11 +8,11 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Workflows
 
-A workflow is **deterministic orchestration**: a script that fans agents out, pipelines them through stages, verifies, and synthesizes — control flow you *encode* (loops, conditionals, fan-out) rather than improvise turn by turn. Per ADR-138 it's the third *how*-carrier: a skill is one procedure, a macro is one injected command, a workflow is many agents coordinated. This way is *when* to reach for one.
+A workflow is a script that runs agents: it starts several in parallel, passes their work through stages, checks the results and combines them. The script holds the control flow (loops, conditionals, fan-out), so nobody decides it turn by turn. ADR-138 names three carriers for a procedure: a skill runs one procedure, a macro injects one command's output, and a workflow coordinates many agents. This way says when to use a workflow.
 
 ## The substrate ladder
 
-Most work doesn't need a workflow. Climb only as far as the task demands:
+Most work does not need a workflow. The substrate ladder lists the setups from smallest to largest; use the smallest one that handles the task:
 
 | Substrate | Use when |
 |---|---|
@@ -21,17 +21,15 @@ Most work doesn't need a workflow. Climb only as far as the task demands:
 | **Task list + subagents** | independent sub-jobs that parallelize, still one driver (see subagents way) |
 | **Workflow** | many items × stages, needs deterministic fan-out / verify / synthesis, or scale beyond one context |
 
-Reach for a workflow to be **comprehensive** (decompose and cover in parallel),
-**confident** (independent perspectives + adversarial verification before committing), or to take on **scale one context can't hold** (migrations, audits, broad sweeps).
+Use a workflow when the task needs **full coverage** (split the work and cover every part in parallel), **confidence** (independent views and an adversarial check before committing to an answer), or **more scale than one context holds** (migrations, audits, broad sweeps).
 
 ## The opt-in cost
 
-A workflow can spawn dozens of agents and burn a large amount of tokens, so it is
-**explicit opt-in** — never inferred from a task that merely *would* benefit. Scout inline first to discover the work-list (list the files, scope the diff), *then* fan out over it. Match the fan-out to the real scale, and **log what you deliberately leave uncovered** so a bounded sweep never reads as exhaustive.
+A workflow can start dozens of agents and spend a large amount of tokens, so **run one only when the user opts in explicitly**. A task that would benefit from a workflow is not a request for one. First find the work list inline (list the files, scope the diff), *then* fan out over it. Size the fan-out to the real amount of work, and **record what you deliberately leave uncovered**, so that nobody reads a partial sweep as a complete one.
 
 ## Worked example: the deliver workflow
 
-`develop → pr → review → remediate → merge` is workflow-shaped: pipeline each unit of work through the stages independently; fan the *review* out across dimensions (bugs, security, reuse) and adversarially verify each finding; remediate per finding; **gate at merge** per the four-square (`delivery/merge`): the human gate applies when the work sets direction, and the irreversible one-way door is *release*, not the merge itself (see the autonomy design note). The payoff is wall-clock and rigor, not novelty.
+`develop → pr → review → remediate → merge` suits a workflow. Each unit of work passes through the stages on its own. The *review* fans out across dimensions (bugs, security, reuse), and an adversarial check verifies each finding. Each finding is fixed, or the reason it is declined is recorded, on its own. The four-square in `delivery/merge` **gates the merge**: a person approves when the work sets direction. The step that cannot be undone is the *release*, which comes after the merge (see the autonomy design note). The workflow saves wall-clock time and reviews more thoroughly than one agent does.
 
 ## See also
 

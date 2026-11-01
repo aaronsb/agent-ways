@@ -6,9 +6,7 @@ allowed-tools: Bash, Read, Grep, Glob
 
 # Release — publish a versioned release
 
-The occasional, heavier tail: turning merged work into a published, versioned
-artifact. This is **not** landing an increment (that's `/merge`) — it's the one-way
-door of putting a version into the world. Confirm before anything publishes.
+The occasional, heavier tail: turning merged work into a published, versioned artifact. This is **not** landing an increment (that's `/merge`) — it's the one-way door of putting a version into the world. Confirm before anything publishes.
 
 The doctrine lives in the `delivery/release` way; this skill runs it.
 
@@ -19,9 +17,7 @@ make help 2>/dev/null | grep -iE 'release|dist|publish|deploy'
 grep -E '^(release|dist|publish):' Makefile 2>/dev/null
 ```
 
-If a target exists, **use it** — the Makefile is the canonical release interface; it
-knows the project's packaging, signing, and publishing steps. Confirm with the user,
-then run it.
+If a target exists, **use it** — the Makefile is the canonical release interface; it knows the project's packaging, signing, and publishing steps. Confirm with the user, then run it.
 
 ## When there's no `make release`
 
@@ -49,24 +45,20 @@ Keep a Changelog format, grouped Added / Changed / Fixed / Removed.
 
 ### 4. Reconcile the issue tracker
 
-A release is when "fixed in X" becomes a true statement. Find what this release claims
-to close, before the tag makes the claim public:
+A release is when "fixed in X" becomes a true statement. Find what this release claims to close, before the tag makes the claim public:
 
 ```bash
 git log $(git describe --tags --abbrev=0)..HEAD --format='%s%n%b' \
   | grep -oiE '(clos|fix|resolv)(e[sd])? +#?[A-Z]+-?[0-9]+'
 ```
 
-That catches `#123` and `PROJ-456` alike. What to do with the hits depends on what the
-project's tracker offers:
+That catches `#123` and `PROJ-456` alike. What to do with the hits depends on what the project's tracker offers:
 
 - Items the commits closed — stamp the released version, if there's a fix-version field.
 - Items referenced without a closing keyword — check whether this release resolves them.
 - An item named in the changelog that the tracker still shows open — one of the two is wrong.
 
-Use whatever CLI the project already uses (`gh issue`, `glab`, `jira`, an MCP tool, a
-`TODO.md`). Detect it; don't assume one. **No tracker is a valid answer** — say so and
-move on rather than inventing one.
+Use whatever CLI the project already uses (`gh issue`, `glab`, `jira`, an MCP tool, a `TODO.md`). Detect it; don't assume one. **No tracker is a valid answer** — say so and move on rather than inventing one.
 
 ### 5. Tag
 
@@ -85,8 +77,7 @@ git push origin main --tags
 | Cargo | `cargo publish` |
 | Container | `docker build -t repo:vX.Y.Z . && docker push` |
 
-For multi-platform binaries, build per-platform and attach all to one GitHub Release
-with a `checksums.txt`.
+For multi-platform binaries, build per-platform and attach all to one GitHub Release with a `checksums.txt`.
 
 ## Key Principles
 

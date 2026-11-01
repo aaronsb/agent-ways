@@ -7,7 +7,7 @@ refire: 0.2
 <!-- epistemic: heuristic -->
 # Prose Check
 
-Long session. Hold the register core set: state each fact once and move to the next one.
+Long session. Hold the plain-writing rules (writing/plain): state each fact once and move to the next one.
 
 | Padded | Delivered |
 |---|---|

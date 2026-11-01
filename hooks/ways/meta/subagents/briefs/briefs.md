@@ -12,7 +12,7 @@ A subagent, workflow agent or headless run starts with nothing from this session
 
 ## Put it in the brief
 
-- **The user's writing rules, verbatim**, when the worker writes text the user will read. Paste the positive rule. "Match the user's style" carries nothing, and a list of banned phrases plants the phrases.
+- **The writing rules, verbatim**, when the worker writes prose that people will read: the user's rules, the project's rules from its CLAUDE.md or AGENTS.md, and the rules in writing/plain. Paste each positive rule. "Match the user's style" carries nothing, and a list of banned phrases plants the phrases.
 - **Drafts only** for any worker that touches email, chat or other messages. Write "never send" in those words.
 - **The model the user named**, on every agent the run starts. A named version means that exact version. A newer model in the same family is a different model.
 - **The skills or tools the user named**, by name, such as "use the <named> skill throughout".
@@ -53,3 +53,4 @@ For a goal condition another agent will run toward, use the goal-author skill.
 - subagents/agent-teams(meta) — several agents on one repository
 - workflows(meta) — scripted multi-agent runs that use these briefs
 - goals(meta) — goal mode and the condition it runs toward
+- writing/plain(writing) — the plain-writing rules a prose-writing worker receives

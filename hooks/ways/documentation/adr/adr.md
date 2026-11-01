@@ -59,3 +59,4 @@ Tag every ADR with one of three grades: reversible (changed in one session, no d
 - adr-context(documentation) — read existing ADRs before building
 - adr/migration(documentation) — adopting ADR tooling in existing projects
 - delivery/implement(softwaredev) — ADRs feed implementation planning
+- writing/plain(writing) — plain sentences and terms defined on first use in a record

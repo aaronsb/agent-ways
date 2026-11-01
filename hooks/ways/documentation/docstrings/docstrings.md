@@ -1,6 +1,6 @@
 ---
-description: code documentation, docstrings, JSDoc, Godoc, rustdoc, inline comments
-vocabulary: docstring jsdoc godoc pydoc rustdoc comment annotation type hint documentation google-style getters exported idiomatic self-evident
+description: adding doc comments or docstrings to code, such as JSDoc, TSDoc, Godoc, rustdoc and Python docstrings, whose sentences explain what the code does, and deciding which code needs one
+vocabulary: docstring doc comment jsdoc tsdoc javadoc godoc pydoc rustdoc explain what it does exported public helpers google-style getters idiomatic self-evident
 scope: agent, subagent
 refire: 0.15
 ---
@@ -21,3 +21,7 @@ Match the docstring density of the surrounding code, in the language's idiomatic
 - Public APIs, exported functions, classes, modules
 - Complex internal logic where intent isn't obvious from the name
 - Not needed for trivial getters, one-line helpers, or self-evident code
+
+## See Also
+
+- writing/plain(writing) — a comment states what the code does now, in plain sentences

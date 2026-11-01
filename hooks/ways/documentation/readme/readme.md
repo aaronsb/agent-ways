@@ -56,3 +56,8 @@ docs/
 └── reference/
     └── api.md
 ```
+
+## See Also
+
+- writing/plain(writing) — plain sentences, the present tense and terms defined on first use
+- validate(documentation) — a cold read by a fresh agent

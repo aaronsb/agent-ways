@@ -47,7 +47,7 @@ considered:
     said: "As drafted (Recommended)"
     via: AskUserQuestion in the head agent-ways session, 2026-11-01; the operator picked the agent-written option label
     covers: [handoff]
-status: proposed
+status: accepted
 date: 2026-11-01
 deciders:
   - aaronsb

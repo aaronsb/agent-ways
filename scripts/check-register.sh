@@ -18,7 +18,17 @@
 # session in many, and core reaches all of them. The rest of the corpus is
 # reported for context and never fails the build.
 #
-# Exit code: 0 = clean, 1 = core.md violates. Advisory corpus rows never set it.
+# One check covers every way body and every skills/**/SKILL.md: each
+# paragraph of prose stays on one line, as core.md and documentation/markdown
+# state. An agent reads a skill's SKILL.md in full when the skill is invoked,
+# and edits it with the same exact-string tool. A wrapped paragraph has a
+# mechanical definition, two lines of one paragraph one under the other, so
+# the check fails on any of these files. It leaves structure alone: lists,
+# tables, headings, blockquotes, fences, HTML comments, bold-label field
+# lines, and a line that ends in a hard break.
+#
+# Exit code: 0 = clean, 1 = core.md violates or a way body or SKILL.md has a
+# wrapped paragraph. Advisory corpus rows never set it.
 
 set -uo pipefail
 
@@ -91,6 +101,70 @@ bold_runs() {
   ' "$1"
 }
 
+# Prints `file:line: text` for each line whose paragraph continues onto the
+# next line. A list item or a bold-label line can start such a pair, because a
+# continuation line under it is a wrap too. A blank line, a structural line, a
+# new list item or a new label line ends the paragraph.
+#
+# A line indented four or more spaces is a continuation when it follows a
+# prose, list or label line, since an indented code block cannot interrupt a
+# paragraph. After a blank line it is an indented code block. A fence closes
+# only on a line of the same character, at least as long as the opening fence,
+# with nothing after it, so a ``` line inside a ```` fence stays content.
+# Setext underlines (`===`) and link reference definitions are structure.
+wrapped_lines() {
+  awk '
+    function kind(l) {
+      if (l ~ /^[[:space:]]*$/) return "blank"
+      if (l ~ /^[[:space:]]*\|/ || l ~ /^#/ || l ~ /^[[:space:]]*>/) return "struct"
+      if (l ~ /^[[:space:]]*</) return "struct"
+      if (l ~ /^[[:space:]]*(-{3,}|\*{3,}|_{3,})[[:space:]]*$/) return "struct"
+      if (l ~ /^ {0,3}=+[[:space:]]*$/ || l ~ /^ {0,3}\[[^]]+\]:/) return "struct"
+      if (l ~ /^[[:space:]]*([-*+]|[0-9]+[.)])[[:space:]]/) return "list"
+      if (l ~ /^(    |\t)/) return (pk == "prose" || pk == "list" || pk == "label") ? "prose" : "struct"
+      if (l ~ /^\*\*[^*]+\*\*[[:space:]]*[:=]/ || l ~ /^\*\*[^*]+:\*\*/) return "label"
+      return "prose"
+    }
+    # The fence character and its run length on a fence line.
+    function fence_run(l,    c, n) {
+      sub(/^[[:space:]]*/, "", l)
+      c = substr(l, 1, 1); n = 0
+      while (substr(l, n + 1, 1) == c) n++
+      fr_char = c; fr_len = n; fr_tail = substr(l, n + 1)
+    }
+    FNR == 1            { pk = "blank"; fm = 0; fence = 0; cmt = 0 }
+    FNR == 1 && /^---$/ { fm = 1; next }
+    fm && /^---$/       { fm = 0; next }
+    fm                  { next }
+    /^[[:space:]]*(```|~~~)/ {
+      fence_run($0)
+      if (!fence) { fence = 1; fc = fr_char; fl = fr_len; pk = "blank"; next }
+      if (fr_char == fc && fr_len >= fl && fr_tail ~ /^[[:space:]]*$/) { fence = 0; pk = "blank" }
+      next
+    }
+    fence               { next }
+    cmt                 { if ($0 ~ /-->/) cmt = 0; pk = "blank"; next }
+    /<!--/ && !/-->/    { cmt = 1; pk = "blank"; next }
+    {
+      k = kind($0)
+      if (k == "prose" && (pk == "prose" || pk == "list" || pk == "label") && prev !~ /(  |\\|<br>)$/)
+        printf "%s:%d: %s\n", FILENAME, FNR - 1, prev
+      prev = $0; pk = k
+    }
+  ' "$@"
+}
+
+# `--wrapped FILE...` runs only the paragraph check, on the named files, and
+# exits 1 when it reports a line. tests/register-wrap-test.sh drives it over
+# the fixtures in tests/fixtures/register.
+if [[ "${1:-}" == "--wrapped" ]]; then
+  shift
+  WRAPPED="$(wrapped_lines "$@")"
+  [[ -z "$WRAPPED" ]] && exit 0
+  printf '%s\n' "$WRAPPED"
+  exit 1
+fi
+
 echo "Register lint — always-on surface"
 
 if [[ ! -f "$CORE" ]]; then
@@ -134,6 +208,20 @@ if (( ANTI > 0 || SIG > 0 || SLOGAN > 0 || ASIDE > 0 || CONTRA > 0 || CHAT > 0 |
   note "Offending lines:"
   grep -nEi "$ANTITHESIS|$SIGNIFICANCE|^\*\*[^*]+\*\*\.?( |\$)| — [^—]{3,80} — |$CONTRAST|$CHATBOT|$ARGUING" "$CORE" \
     | sed 's/^/    /' | head -20
+fi
+
+# Line handling over every way body, core.md included, and every SKILL.md.
+WAY_FILES=()
+while IFS= read -r f; do WAY_FILES+=("$f"); done < <(find hooks/ways -name '*.md' | sort)
+SKILL_FILES=()
+while IFS= read -r f; do SKILL_FILES+=("$f"); done < <(find skills -name 'SKILL.md' | sort)
+WRAPPED="$(wrapped_lines "${WAY_FILES[@]}" "${SKILL_FILES[@]}")"
+NWRAP=$(printf '%s' "$WRAPPED" | grep -c . | tr -d ' ')
+if (( NWRAP == 0 )); then
+  ok "no wrapped paragraphs in ${#WAY_FILES[@]} way files and ${#SKILL_FILES[@]} SKILL.md files"
+else
+  fail "$NWRAP wrapped paragraph line(s) in way or SKILL.md files — join each paragraph onto one line"
+  printf '%s\n' "$WRAPPED" | sed 's/^/    /' | head -20
 fi
 
 # Corpus context. Advisory only — these fire on triggers, so their register

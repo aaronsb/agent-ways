@@ -5,29 +5,19 @@ description: Produce a "catch me up" briefing — a synthesized start-of-day / o
 
 # Catch-Me-Up Briefing
 
-Synthesize one prioritized brief across the user's inboxes, calendar, tasks, and
-chat. The job is **surface and suggest** — present what needs attention and a
-ranked list of suggested actions; the user decides. Never send, schedule, or
-mutate anything without approval.
+Synthesize one prioritized brief across the user's inboxes, calendar, tasks, and chat. The job is **surface and suggest** — present what needs attention and a ranked list of suggested actions; the user decides. Never send, schedule, or mutate anything without approval.
 
-This skill is the runnable procedure; the **briefing** way carries *when* to reach
-for it and when a single-source query is enough instead.
+This skill is the runnable procedure; the **briefing** way carries *when* to reach for it and when a single-source query is enough instead.
 
 ## Tool-agnostic by design
 
-Map the scout *domains* below to whatever accounts and services are actually
-connected this session — email, calendar, task, and chat tools vary per setup, so
-discover them rather than assuming a provider. If a domain has no connected tool,
-**say so in the brief** rather than skipping it silently.
+Map the scout *domains* below to whatever accounts and services are actually connected this session — email, calendar, task, and chat tools vary per setup, so discover them rather than assuming a provider. If a domain has no connected tool, **say so in the brief** rather than skipping it silently.
 
-This skill deliberately sets **no `allowed-tools`**: it must reach whatever EA
-tools are connected and spawn scout subagents, which can't be enumerated ahead of
-time. Its tight description is what keeps it in its lane.
+This skill deliberately sets **no `allowed-tools`**: it must reach whatever EA tools are connected and spawn scout subagents, which can't be enumerated ahead of time. Its tight description is what keeps it in its lane.
 
 ## Gather in parallel
 
-For a multi-account, multi-service briefing, spawn parallel scout subagents so the
-slow I/O overlaps — and so each scout's raw fetch stays out of the lead's context:
+For a multi-account, multi-service briefing, spawn parallel scout subagents so the slow I/O overlaps — and so each scout's raw fetch stays out of the lead's context:
 
 | Scout | Domain | Shares with |
 |---|---|---|
@@ -35,10 +25,7 @@ slow I/O overlaps — and so each scout's raw fetch stays out of the lead's cont
 | ops-scout | calendar + tasks — schedule, status, cross-ref vs. inbox | the lead |
 | + specialists | chat, meeting recaps, files — as connected | the lead |
 
-Keep it to 3–5 scouts. Scouts share cross-reference-worthy findings as they go;
-each returns one structured report; the lead waits for **all** reports before
-synthesizing. **Skip the team** for a single account/service or a quick query —
-just gather directly (that judgment lives in the **briefing** way).
+Keep it to 3–5 scouts. Scouts share cross-reference-worthy findings as they go; each returns one structured report; the lead waits for **all** reports before synthesizing. **Skip the team** for a single account/service or a quick query — just gather directly (that judgment lives in the **briefing** way).
 
 ## Synthesize (priority order)
 
@@ -54,8 +41,7 @@ just gather directly (that judgment lives in the **briefing** way).
 
 ## Then: suggested task mutations
 
-From the cross-references, surface a numbered list the user can **approve, modify,
-or dismiss** — never applied automatically:
+From the cross-references, surface a numbered list the user can **approve, modify, or dismiss** — never applied automatically:
 
 - **Create** — obligations from email not yet tracked.
 - **Complete** — tasks the sent mail appears to resolve.
@@ -64,11 +50,9 @@ or dismiss** — never applied automatically:
 
 ## Not for
 
-- Acting on findings — sending replies, scheduling, creating/closing tasks. It
-  surfaces and suggests; the user approves each.
+- Acting on findings — sending replies, scheduling, creating/closing tasks. It surfaces and suggests; the user approves each.
 - Single-source lookups — just query that inbox/calendar directly.
-- Deep person/topic/meeting preparation — that's the **intelligence** way's
-  cross-referencing research, a separate workflow.
+- Deep person/topic/meeting preparation — that's the **intelligence** way's cross-referencing research, a separate workflow.
 
 ## See also
 

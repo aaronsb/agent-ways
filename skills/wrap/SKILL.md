@@ -6,18 +6,11 @@ allowed-tools: Bash, Read, Grep, Glob, TaskList, TaskCreate, TaskUpdate, TaskGet
 
 # Wrap
 
-Close out a session at its end. This is the on-demand sibling of the
-`meta/compaction-checkpoint` way — the way fires automatically near the context limit;
-`/wrap` runs the same muscle whenever you decide the session is done.
+Close out a session at its end. This is the on-demand sibling of the `meta/compaction-checkpoint` way — the way fires automatically near the context limit; `/wrap` runs the same muscle whenever you decide the session is done.
 
-**Wrap is not merge.** Landing is *iterative* — many merges happen across a session as
-each piece of work lands. Wrap is *terminal* — it runs once, at the end. By the time you
-wrap, the session's work should already be merged. So `/wrap` does **not** land work; it
-confirms nothing got stranded, then produces the artifacts that outlive the session.
+**Wrap is not merge.** Landing is *iterative* — many merges happen across a session as each piece of work lands. Wrap is *terminal* — it runs once, at the end. By the time you wrap, the session's work should already be merged. So `/wrap` does **not** land work; it confirms nothing got stranded, then produces the artifacts that outlive the session.
 
-The deliverable is two things that survive a reset: a **TaskList that honestly mirrors
-reality**, and a **copy-paste continuation prompt**. The skill ends by handing you a
-ready-to-run `/compact` line — it cannot run it for you (see Step 4).
+The deliverable is two things that survive a reset: a **TaskList that honestly mirrors reality**, and a **copy-paste continuation prompt**. The skill ends by handing you a ready-to-run `/compact` line — it cannot run it for you (see Step 4).
 
 ## Arguments
 
@@ -32,29 +25,16 @@ Before anything else, check where the session sits. Same source as `context-stat
 ways context --json   # used / total tokens, pct filled; total auto-detected from model
 ```
 
-The fill level calibrates the entire wrap, and is worth saying out loud — the user may be
-wrapping early *on purpose*, and that's valid. Locate it against the ways trigger curves
-(the `todos` way fires ~75%, `compaction-checkpoint` ~85%):
+The fill level calibrates the entire wrap, and is worth saying out loud — the user may be wrapping early *on purpose*, and that's valid. Locate it against the ways trigger curves (the `todos` way fires ~75%, `compaction-checkpoint` ~85%):
 
-- **Early** (well below the curves — e.g. 300k/1M, 30%): lots of headroom. Say so plainly
-  ("we'd be wrapping early — 300k of 1M used"), but **don't talk the user out of it** —
-  end-of-day, task-switching, or banking a clean state are all good reasons. When early,
-  `/compact` reclaims little and costs you the live thread, so in Step 4 *offer the lighter
-  paths*: checkpoint-and-continue (no compact), or `/clear`+paste later. The handoff can be
-  leaner — less accumulated context means less to reconstruct.
-- **Late** (near or past the curves): compaction is imminent or already mandatory. This is
-  the urgent case — be thorough and quick. A lot is about to be summarized away, so the
-  continuation prompt and TaskList carry more weight; get them down before auto-compact
-  fires on its own.
+- **Early** (well below the curves — e.g. 300k/1M, 30%): lots of headroom. Say so plainly ("we'd be wrapping early — 300k of 1M used"), but **don't talk the user out of it** — end-of-day, task-switching, or banking a clean state are all good reasons. When early, `/compact` reclaims little and costs you the live thread, so in Step 4 *offer the lighter paths*: checkpoint-and-continue (no compact), or `/clear`+paste later. The handoff can be leaner — less accumulated context means less to reconstruct.
+- **Late** (near or past the curves): compaction is imminent or already mandatory. This is the urgent case — be thorough and quick. A lot is about to be summarized away, so the continuation prompt and TaskList carry more weight; get them down before auto-compact fires on its own.
 
-Let this scale Steps 2–3: **how much detail the handoff needs is proportional to how much
-context is about to be lost.** A near-full window deserves a dense, complete prompt; an
-early wrap can be crisp. Knowing the *total* window (1M vs 200k) is what makes that call.
+Let this scale Steps 2–3: **how much detail the handoff needs is proportional to how much context is about to be lost.** A near-full window deserves a dense, complete prompt; an early wrap can be crisp. Knowing the *total* window (1M vs 200k) is what makes that call.
 
 ## Step 1 — Loose-ends check (not a merge step)
 
-Wrap assumes the session's work already merged. This step only confirms that and catches
-anything stranded — it is **not** the place to run a full delivery. Assess in parallel:
+Wrap assumes the session's work already merged. This step only confirms that and catches anything stranded — it is **not** the place to run a full delivery. Assess in parallel:
 
 ```bash
 git status --short              # uncommitted changes?
@@ -66,14 +46,11 @@ git log --oneline main..HEAD    # unmerged commits?
 - **Something stranded** (uncommitted changes, or commits never PR'd) → this is a guard, not wrap's job. Surface it and let the user decide: invoke `merge` to land it, or leave it parked.
 - **Parked on purpose** (`/wrap stay`, or user chooses to leave it) → do **not** merge. Record *exactly* what's uncommitted, on which branch, and why it's parked — verbatim into Step 3 so post-reset-you can resume the partial work cold.
 
-The rule: wrap never silently drops stranded work, and never lands it behind your back.
-Either the user lands it (via `merge`), or it's described in the handoff.
+The rule: wrap never silently drops stranded work, and never lands it behind your back. Either the user lands it (via `merge`), or it's described in the handoff.
 
 ## Step 2 — TaskList honesty pass (load-bearing)
 
-This is the point of the skill, not a footnote. Post-compaction-you (or a fresh session)
-inherits the TaskList with **zero memory of this conversation** — so the list must be
-*true*, not optimistic. Use `TaskList` to read current state, then reconcile it:
+This is the point of the skill, not a footnote. Post-compaction-you (or a fresh session) inherits the TaskList with **zero memory of this conversation** — so the list must be *true*, not optimistic. Use `TaskList` to read current state, then reconcile it:
 
 **Close the books** (`TaskUpdate`):
 - Mark genuinely-finished tasks `completed`.
@@ -84,12 +61,9 @@ inherits the TaskList with **zero memory of this conversation** — so the list 
 - Each `description` must be resumable cold: file paths, decisions already made (so they aren't re-litigated), what was tried, and the next concrete step. The `subject` is imperative; `activeForm` is present-continuous.
 - Mark the genuine next task `in_progress`.
 
-**The bar is honesty.** Before moving on, sanity-check: does any "pending" task describe
-work that's actually done? Does any real remaining thread have no task? A dishonest list
-is worse than none — it hands the next session a confident lie.
+**The bar is honesty.** Before moving on, sanity-check: does any "pending" task describe work that's actually done? Does any real remaining thread have no task? A dishonest list is worse than none — it hands the next session a confident lie.
 
-**Then print the list.** Reconciling silently gives the user nothing to check against.
-Enumerate every task — finished, in progress, and backlog — with its full description:
+**Then print the list.** Reconciling silently gives the user nothing to check against. Enumerate every task — finished, in progress, and backlog — with its full description:
 
 ```
 #1 [IN PROGRESS] <subject>
@@ -104,22 +78,13 @@ Enumerate every task — finished, in progress, and backlog — with its full de
 #4 [DONE] <subject>
 ```
 
-Number in the order the next session should work them, not creation order. Mark blocking
-relationships inline (`[OPEN, blocked by #2]`). Finished tasks get subject only — enough to
-confirm they were closed deliberately, not enough to crowd the live work.
+Number in the order the next session should work them, not creation order. Mark blocking relationships inline (`[OPEN, blocked by #2]`). Finished tasks get subject only — enough to confirm they were closed deliberately, not enough to crowd the live work.
 
-Do not compress the descriptions here. This block and Step 3's prompt carry different
-weight: the prompt is the cold-start narrative, this is the per-thread detail, and a
-summarized description is exactly the content post-reset-you cannot reconstruct.
+Do not compress the descriptions here. This block and Step 3's prompt carry different weight: the prompt is the cold-start narrative, this is the per-thread detail, and a summarized description is exactly the content post-reset-you cannot reconstruct.
 
 ## Step 3 — Write the continuation prompt
 
-Produce a single copy-pastable block. Compaction keeps the session alive; this prompt is
-the harder guarantee — it survives even a `/clear` or a brand-new window. Also save it to
-`.claude/handoff.wrap.md` at the repository root (`git rev-parse --show-toplevel`), where
-`start` and a successor session look for it, with the date and the HEAD commit on its first
-line. When `.gitignore` does not cover it, list it in `.git/info/exclude` so the working tree
-stays clean. Tailor sections to the work, but cover:
+Produce a single copy-pastable block. Compaction keeps the session alive; this prompt is the harder guarantee — it survives even a `/clear` or a brand-new window. Also save it to `.claude/handoff.wrap.md` at the repository root (`git rev-parse --show-toplevel`), where `start` and a successor session look for it, with the date and the HEAD commit on its first line. When `.gitignore` does not cover it, list it in `.git/info/exclude` so the working tree stays clean. Tailor sections to the work, but cover:
 
 ```
 Continue work on <project> (<path>) — <one-line what it is and its purpose>.
@@ -149,21 +114,13 @@ quirks, verification patterns>.
 KEY FILES / BRANCHES — <the handful that matter, with paths>.
 ```
 
-If a `/goal` is active, **restate the goal condition** at the top — it's the anchor the
-post-compaction turns steer by, and it survives compaction.
+If a `/goal` is active, **restate the goal condition** at the top — it's the anchor the post-compaction turns steer by, and it survives compaction.
 
-The `TASKS` section carries the Step 2 enumeration in full and tells the next session to
-rehydrate it with `TaskCreate`. Pasting this prompt into a `/clear`ed or brand-new window
-arrives with an empty task list, so spell the instruction out — "recreate these as tasks
-before starting" — rather than assuming the list travels with the prompt.
+The `TASKS` section carries the Step 2 enumeration in full and tells the next session to rehydrate it with `TaskCreate`. Pasting this prompt into a `/clear`ed or brand-new window arrives with an empty task list, so spell the instruction out — "recreate these as tasks before starting" — rather than assuming the list travels with the prompt.
 
-Keep it dense and concrete. The gold standard is a prompt a stranger could resume from.
-Test that before moving on. A stranger holding only the repository and this prompt can:
-run the project, run the verification gates, find the current plan, and name the next
-step. Fix the prompt for any of the four that fails.
+Keep it dense and concrete. The gold standard is a prompt a stranger could resume from. Test that before moving on. A stranger holding only the repository and this prompt can: run the project, run the verification gates, find the current plan, and name the next step. Fix the prompt for any of the four that fails.
 
-Number every decision left to the operator, in the prompt and in the chat, so the reply
-can be "1 and 3". A decision buried in a paragraph gets paraphrased back or missed.
+Number every decision left to the operator, in the prompt and in the chat, so the reply can be "1 and 3". A decision buried in a paragraph gets paraphrased back or missed.
 
 ### Working mode
 
@@ -179,8 +136,7 @@ Name the subagent types and the worktree location this project uses, so the next
 
 ## Close-out: what the session taught
 
-Walk four categories. Each item lands in an issue, a design note, or a way edit, or gets
-the line "nothing of interest, because <reason>":
+Walk four categories. Each item lands in an issue, a design note, or a way edit, or gets the line "nothing of interest, because <reason>":
 
 - A sharp edge that bit, and the tell that would spot it next time.
 - A corrected assumption: the session started believing X and the work proved it false.
@@ -191,15 +147,10 @@ the line "nothing of interest, because <reason>":
 
 First, let Step 0 decide whether compaction even applies:
 
-- **Early wrap** → `/compact` is *optional*; it reclaims little and ends the live thread.
-  Lead with the lighter paths: checkpoint-and-continue (keep working in the same session —
-  the TaskList and handoff are already saved), or `/clear`+paste later for a clean switch.
-  Mention `/compact` as available, not as the default.
+- **Early wrap** → `/compact` is *optional*; it reclaims little and ends the live thread. Lead with the lighter paths: checkpoint-and-continue (keep working in the same session — the TaskList and handoff are already saved), or `/clear`+paste later for a clean switch. Mention `/compact` as available, not as the default.
 - **Late wrap** → compaction is the point. Make the directed `/compact` the headline action.
 
-A skill **cannot** trigger `/compact` — Claude Code forbids hooks/skills from invoking
-`/` commands. So when compaction is the move, end by handing the user a one-keystroke
-directed compaction, and explain why directed beats generic:
+A skill **cannot** trigger `/compact` — Claude Code forbids hooks/skills from invoking `/` commands. So when compaction is the move, end by handing the user a one-keystroke directed compaction, and explain why directed beats generic:
 
 > The synthesis above is now the freshest content in context. Run `/compact` with these
 > focus instructions and it'll preserve the synthesis as the anchor instead of the system
@@ -211,11 +162,9 @@ Then output the exact line, with focus instructions tailored to what should surv
 /compact keep the continuation prompt and TaskList state; <project>'s next step is <X>; drop the exploratory back-and-forth
 ```
 
-Offer the alternative explicitly: for a hard reset (switching tasks entirely), `/clear`
-then paste the Step 3 prompt into a fresh session — the old one stays in `/resume`.
+Offer the alternative explicitly: for a hard reset (switching tasks entirely), `/clear` then paste the Step 3 prompt into a fresh session — the old one stays in `/resume`.
 
-Make the `/compact ...` line the **last thing** in your response so it's immediately
-copyable. Do not claim the session is compacted — you've prepared it; the user pulls the trigger.
+Make the `/compact ...` line the **last thing** in your response so it's immediately copyable. Do not claim the session is compacted — you've prepared it; the user pulls the trigger.
 
 ## Key Principles
 

@@ -6,10 +6,7 @@ allowed-tools: Bash, Read, Grep, Glob, TaskList, TaskGet, AskUserQuestion
 
 # Start — open the session
 
-Open a working session by getting oriented *first*, then handing the operator a warm
-runway into planning. This is the on-demand opening bookend to `wrap`: `wrap` reads
-the context gauge to confirm the session is near its **end**; `start` reads the same
-gauge to confirm it's near its **beginning**.
+Open a working session by getting oriented *first*, then handing the operator a warm runway into planning. This is the on-demand opening bookend to `wrap`: `wrap` reads the context gauge to confirm the session is near its **end**; `start` reads the same gauge to confirm it's near its **beginning**.
 
 ## Step 0 — Read the gauge, and guard the beginning
 
@@ -22,11 +19,7 @@ ways context --json   # used / total tokens, pct filled
 Starting is a beginning-of-session act. Locate the fill level:
 
 - **Early** (well below the curves — e.g. under ~30%): the expected state. Proceed.
-- **Mid/late** (half or more of the window spent): **dissuade, don't pretend.** Opening
-  fresh work deep into a used window strands it against the next compaction. Say so
-  plainly, and offer the better move: `/wrap` if a piece just finished, or `/clear` and
-  a fresh window if switching tasks. Only continue a `start` here if the operator
-  insists.
+- **Mid/late** (half or more of the window spent): **dissuade, don't pretend.** Opening fresh work deep into a used window strands it against the next compaction. Say so plainly, and offer the better move: `/wrap` if a piece just finished, or `/clear` and a fresh window if switching tasks. Only continue a `start` here if the operator insists.
 
 ## Step 1 — Read the state (where did we leave off?)
 
@@ -39,47 +32,26 @@ git branch --show-current
 git log --oneline -5
 ```
 
-Also check for continuity markers: the `TaskList` (via the tool), mirrored from the
-GitHub issues that carry the `tasklist` label (ADR-180), a handoff file in `.claude/` at the
-repository root (`handoff.wrap.md` from `/wrap`, `handoff.local.md` from a compaction
-checkpoint; its first line's date and commit, against `git log`, say whether it is stale),
-and the `CLAUDE.md` where this was invoked. delivery/issues(softwaredev) is the discipline here — read what is already
-open before beginning anything.
+Also check for continuity markers: the `TaskList` (via the tool), mirrored from the GitHub issues that carry the `tasklist` label (ADR-180), a handoff file in `.claude/` at the repository root (`handoff.wrap.md` from `/wrap`, `handoff.local.md` from a compaction checkpoint; its first line's date and commit, against `git log`, say whether it is stale), and the `CLAUDE.md` where this was invoked. delivery/issues(softwaredev) is the discipline here — read what is already open before beginning anything.
 
-On a repo too large to read in a few calls, hand the state read to an `Explore` agent
-with the investigation-brief rules from subagents(meta), on a cheap model. Invoking
-`/start` is that request. The interview in Step 3 stays inline.
+On a repo too large to read in a few calls, hand the state read to an `Explore` agent with the investigation-brief rules from subagents(meta), on a cheap model. Invoking `/start` is that request. The interview in Step 3 stays inline.
 
 ## Step 2 — Branch on what you found
 
-- **Work in flight** (uncommitted changes, an open branch, live TaskList tasks, a
-  handoff file in `.claude/`) → this is a *resume*, not a cold start. Read a handoff
-  file first, unless its commit shows it is stale. Summarize where things stand and what the next
-  concrete step is. Read the TaskList to square your understanding before proposing
-  work — mutating it is the job of `/wrap` and `/develop`, not start.
-- **Clean `main`, prior history** → a fresh piece of work in an established project.
-  Read `CLAUDE.md` and recent history for the project's shape; propose candidate
-  directions grounded in what the repo is.
-- **Greenfield** (empty repo, or no repo) → nothing to pick up. Do **not** invent a
-  plausible task. Go to Step 3.
+- **Work in flight** (uncommitted changes, an open branch, live TaskList tasks, a handoff file in `.claude/`) → this is a *resume*, not a cold start. Read a handoff file first, unless its commit shows it is stale. Summarize where things stand and what the next concrete step is. Read the TaskList to square your understanding before proposing work — mutating it is the job of `/wrap` and `/develop`, not start.
+- **Clean `main`, prior history** → a fresh piece of work in an established project. Read `CLAUDE.md` and recent history for the project's shape; propose candidate directions grounded in what the repo is.
+- **Greenfield** (empty repo, or no repo) → nothing to pick up. Do **not** invent a plausible task. Go to Step 3.
 
 ## Step 3 — Greenfield: structured interview
 
-When there's nothing to resume, the referent of "let's start" is itself the
-uncertainty — name it, don't hunt for it. Interview the operator, structured
-(`AskUserQuestion` where it helps): what are we building, what's the end-state, what
-constraints bound it, what's the first load-bearing question. Enough to frame intent —
-not a full plan yet.
+When there's nothing to resume, the referent of "let's start" is itself the uncertainty — name it, don't hunt for it. Interview the operator, structured (`AskUserQuestion` where it helps): what are we building, what's the end-state, what constraints bound it, what's the first load-bearing question. Enough to frame intent — not a full plan yet.
 
 Pace it:
 
 - One to three questions per turn. Each set of answers reshapes the next question.
-- After every two answers, reflect back in a paragraph: "I now believe X. Tell me where
-  I'm wrong." The operator can then disagree precisely.
-- Cap at nine questions. Past nine, the interview is trying to specify and plan at once.
-  Accept the gaps, mark each as an assumption, and move on.
-- A question that picks between shaped options carries a brief, the case for and
-  against, and your lean with its evidence (the `choices/interview` way).
+- After every two answers, reflect back in a paragraph: "I now believe X. Tell me where I'm wrong." The operator can then disagree precisely.
+- Cap at nine questions. Past nine, the interview is trying to specify and plan at once. Accept the gaps, mark each as an assumption, and move on.
+- A question that picks between shaped options carries a brief, the case for and against, and your lean with its evidence (the `choices/interview` way).
 
 The interview has converged when you can write each of these without hand-waving:
 
@@ -94,17 +66,11 @@ The interview has converged when you can write each of these without hand-waving
 
 ## Step 4 — Recommend planning (warm context, can't self-invoke)
 
-By now the context is *warm* — state read, intent framed. That's the whole reason the
-order is start-then-plan: plan mode should inherit an oriented situation, not a blank
-page.
+By now the context is *warm* — state read, intent framed. That's the whole reason the order is start-then-plan: plan mode should inherit an oriented situation, not a blank page.
 
-A skill **cannot** flip plan mode for you — Claude Code forbids skills/hooks from
-firing `/` commands (the same constraint `wrap` has with `/compact`). So either run a
-lightweight planning pass inline, or **recommend** the operator enter plan mode now
-that the ground is prepared. Don't claim to have entered a mode you can't.
+A skill **cannot** flip plan mode for you — Claude Code forbids skills/hooks from firing `/` commands (the same constraint `wrap` has with `/compact`). So either run a lightweight planning pass inline, or **recommend** the operator enter plan mode now that the ground is prepared. Don't claim to have entered a mode you can't.
 
-If the work is multi-turn with a checkable end-state, mention `/goal` and the
-`goal-author` skill as the autonomy path.
+If the work is multi-turn with a checkable end-state, mention `/goal` and the `goal-author` skill as the autonomy path.
 
 ## Key Principles
 
