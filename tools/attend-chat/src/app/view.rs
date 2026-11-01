@@ -90,9 +90,12 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     let shown = rows.len().clamp(1, INPUT_ROWS);
     let input_h = if composes { shown as u16 + 3 + u16::from(!attachments.is_empty()) } else { 0 };
     // Who takes part in the view shown, on up to three rows over the feed
-    // (`super::participants`); the feed keeps the rows it does not take.
+    // (`super::participants`). The strip takes only rows the feed's least,
+    // the compose box and the helper row leave, so a short pane keeps the
+    // compose box whole and the cut mark on the last strip row drawn.
     let who = chat.participants(&fg);
-    let strip = super::participants::lines(chat, &who, area.width.saturating_sub(1));
+    let spare = area.height.saturating_sub(3 + input_h + helper_h);
+    let strip = super::participants::lines(chat, &who, area.width.saturating_sub(1), usize::from(spare));
     let strip_h = strip.len() as u16;
     let [strip_row, feed, compose, helper_row] =
         Layout::vertical([Constraint::Length(strip_h), Constraint::Min(3), Constraint::Length(input_h), Constraint::Length(helper_h)]).areas(area);
