@@ -12,8 +12,8 @@
 // the Compact button, and the classic.SessionStart reload.
 //
 // The look comes from one call, `ways settings theme export --mod`, at an
-// interactive session's start and every PICKUP_MS after; a turn that finds
-// that interval ended by the host starts it again. Any failure leaves
+// interactive session's start and every PICKUP_MS after; a timer the host
+// ends is started again by the other timer or the next turn. Any failure leaves
 // the look as it was (none at the start, so every row is the engine's own) and
 // logs one debug line per distinct reason. After each later read follow.ts
 // takes its turn on the same timer (onPickup), handed the look as it stands. Whether a row is framed is `isFramed`, which the register
@@ -419,28 +419,65 @@ function copier($: EngineInterface, e: { surface: RenderSurface; viewport?: { is
 let isWorking = false
 let ticker: Timer | undefined
 let pickup: Timer | undefined
-/** When the pickup last ran, once an interactive session has started. */
+/** When each timer last ran, once an interactive session has started. */
+let tickedAt: number | undefined
 let polledAt: number | undefined
 
 /** One pickup: the look, then follow.ts's turn with it. */
 async function poll($: EngineInterface): Promise<void> {
-  polledAt = await $.clock.now()
+  const now = await $.clock.now()
+  polledAt = now
+  keepTimers($, now)
   await pickUp($)
   await onPickup($, await read($, lookAtom)).catch(quietly($, 'pickup'))
 }
 
-/** Starts the two timers, or starts them again. An interval ends for good
- *  when one of its periods is refused, and the pickup is the only thing that
- *  reads the look, the selected theme and the theme file again, so a turn
- *  that finds it quiet starts it again (turn.start below). */
-function arm($: EngineInterface): void {
+/** The animation's timer: the spinner's frames and the entrances settling. */
+function startTicker($: EngineInterface): void {
   ticker?.cancel()
-  pickup?.cancel()
   ticker = $.clock.every(FRAME_MS, () => {
     if (isWorking) void update($, frameAtom, frame => frame + 1)
     if (settling.size > 0) void settleEntrances($)
+    void $.clock
+      .now()
+      .then(now => {
+        tickedAt = now
+        keepTimers($, now)
+      })
+      .catch(quietly($, 'tick'))
   })
+}
+
+/** The pickup's timer: the only thing that reads the look, the selected
+ *  theme and the theme file again after the session starts. */
+function startPickup($: EngineInterface): void {
+  pickup?.cancel()
   pickup = $.clock.every(PICKUP_MS, () => poll($))
+}
+
+/** Starts both timers at a session's start. */
+function arm($: EngineInterface, now: number): void {
+  tickedAt = now
+  polledAt = now
+  startTicker($)
+  startPickup($)
+}
+
+/** Starts again a timer that has not run for two of its periods. An
+ *  interval ends for good when one of its periods is refused, so each timer
+ *  checks the other, and each turn checks both (turn.start below). A pickup
+ *  started again polls at once without being awaited, so its `ways` export
+ *  never holds up the turn that found it quiet. */
+function keepTimers($: EngineInterface, now: number): void {
+  if (tickedAt !== undefined && now - tickedAt > 2 * FRAME_MS) {
+    tickedAt = now
+    startTicker($)
+  }
+  if (polledAt !== undefined && now - polledAt > 2 * PICKUP_MS) {
+    polledAt = now
+    startPickup($)
+    void poll($).catch(quietly($, 'pickup'))
+  }
 }
 
 /** What the register module shares: the terminal's view. */
@@ -453,13 +490,15 @@ export function registerSkins(on: On, shared: Shared): void {
   // A headless session draws nothing, so it reads nothing.
   on('session.start', { isInteractive: true }, async ($, e, next) => {
     lastFailure = undefined
-    polledAt = await $.clock.now()
+    const startedAt = await $.clock.now()
+    tickedAt = startedAt
+    polledAt = startedAt
     await pickUp($)
     sessionCwd = e.cwd
     await readLinkEnv($).catch(quietly($, 'link check'))
     await refreshUsage($).catch(quietly($, 'usage'))
     await readCommands($).catch(quietly($, 'command list'))
-    arm($)
+    arm($, await $.clock.now())
     return next(e)
   })
 
@@ -480,11 +519,7 @@ export function registerSkins(on: On, shared: Shared): void {
     await update($, touchedAtom, () => ({}))
     const now = await $.clock.now()
     await update($, startedAtom, () => now)
-    // The pickup has not run for two of its periods: its interval ended.
-    if (polledAt !== undefined && now - polledAt > 2 * PICKUP_MS) {
-      await poll($)
-      arm($)
-    }
+    keepTimers($, now)
     return next(e)
   })
 

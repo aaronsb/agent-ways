@@ -52,6 +52,11 @@ type World = {
   /** Given, the host's own clock stands in for the mock's, and while true
    *  it refuses the next period of the pickup's interval, which ends it. */
   refusesPickup?: boolean
+  /** With the host's clock, while true it refuses the next period of the
+   *  animation's interval. */
+  refusesTick?: boolean
+  /** With the host's clock, while true it refuses every period asked. */
+  refusesEvery?: boolean
 }
 
 /** The runtime's own timer, which the test's types leave out: a turn of the
@@ -74,6 +79,11 @@ function refusingClock(on: On, world: World) {
   on('clock.every', async ($, e) => {
     if (e.ms === PICKUP_MS && world.refusesPickup) {
       world.refusesPickup = false
+      return { deny: 'the host refused the period' } as never
+    }
+    if (world.refusesEvery) return { deny: 'the host refused the period' } as never
+    if (e.ms !== PICKUP_MS && world.refusesTick) {
+      world.refusesTick = false
       return { deny: 'the host refused the period' } as never
     }
     await wait(e.ms)
@@ -700,8 +710,8 @@ describe('a read that fails once is read again', () => {
     expect(h.writes).toEqual([{ path: FILE, text: themeText(MIAMI) }])
   })
 
-  test('an interval the host ends is started again by the next turn, which reads the rows', async ($, on) => {
-    const world: World = { ...THEMED, selected: 'dark', refusesPickup: false }
+  test('a pickup the host ends is started again by the animation timer', async ($, on) => {
+    const world: World = { ...THEMED, selected: 'dark', refusesPickup: false, refusesTick: false }
     const h = host(on, world)
     await $.session.start(INTERACTIVE)
     expect(await framed($)).toBe(false)
@@ -709,12 +719,54 @@ describe('a read that fails once is read again', () => {
     await h.clock.advance(PICKUP_MS)
     world.selected = 'custom:ways'
     await h.clock.advance(PICKUP_MS * 3)
+    expect(await framed($)).toBe(true)
+  })
+
+  test('both timers ended: the next turn starts them again, which reads the rows', async ($, on) => {
+    const world: World = { ...THEMED, selected: 'dark', refusesPickup: false, refusesTick: false }
+    const h = host(on, world)
+    await $.session.start(INTERACTIVE)
+    expect(await framed($)).toBe(false)
+    world.refusesEvery = true
+    await h.clock.advance(PICKUP_MS * 2)
+    world.refusesEvery = false
+    world.selected = 'custom:ways'
+    await h.clock.advance(PICKUP_MS * 3)
     expect(await framed($)).toBe(false)
     await $.turn.start({ text: 'go on', turnId: 't1' } as never)
+    await h.clock.advance(0)
     expect(await framed($)).toBe(true)
     world.selected = 'dark'
     await h.clock.advance(PICKUP_MS)
     expect(await framed($)).toBe(false)
+  })
+})
+
+describe('the animation outlives a refused period', () => {
+  const SPINNER = { plugin: 'ways-theme', component: 'Spinner', requestId: 's1', props: { word: 'Working', message: null, suffix: '', mode: 'requesting' } } as const
+  /** How many distinct drawings the spinner gives over `n` frames. */
+  const drawings = async ($: Parameters<TestBody>[0], h: { clock: { advance: (ms: number) => Promise<void> } }, n: number) => {
+    const ui = await $.ui.mount({ ...SPINNER, surface: 'terminal' } as never)
+    const seen = new Set<string>()
+    for (let i = 0; i < n; i++) {
+      seen.add(JSON.stringify(await ui.drawn()))
+      await h.clock.advance(90)
+    }
+    await ui.unmount()
+    return seen.size
+  }
+
+  test('the pickup starts the animation again after the host ends it', async ($, on) => {
+    const world: World = { ...THEMED, refusesPickup: false, refusesTick: false }
+    const h = host(on, world)
+    await $.session.start(INTERACTIVE)
+    await $.turn.start({ text: 'work', turnId: 't1' } as never)
+    expect(await drawings($, h, 6)).toBeGreaterThan(1)
+    world.refusesTick = true
+    await h.clock.advance(90 * 3)
+    expect(await drawings($, h, 6)).toBe(1)
+    await h.clock.advance(PICKUP_MS)
+    expect(await drawings($, h, 6)).toBeGreaterThan(1)
   })
 })
 
