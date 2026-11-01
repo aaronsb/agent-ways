@@ -297,6 +297,10 @@ pub struct ChatPane {
     /// when the chat ends without sending it, for the next chat's compose
     /// box ([`pending`]).
     unsent_dir: std::path::PathBuf,
+    /// This chat as the writer of the files it keeps there, so the next
+    /// chat tells a text kept twice from two chats' alike
+    /// ([`unsent::writer_id`]).
+    writer: String,
     /// The kept files whose text the compose box holds, recalled or
     /// restored: removed once the box's text is sent, held or kept again.
     box_origins: Vec<std::path::PathBuf>,
@@ -367,6 +371,7 @@ impl ChatPane {
             pending_from: 0,
             started: Instant::now(),
             unsent_dir: crate::hidden::state_dir().join("unsent"),
+            writer: unsent::writer_id(),
             box_origins: Vec::new(),
             fixed_delay: None,
         }

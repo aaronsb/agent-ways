@@ -4,7 +4,10 @@
 //! A chat writes each file whole, by a temporary file and a rename, named
 //! for the process and the moment (`<pid>-<nanos>-<n>`). The file names the
 //! view the text was written in, its route, its label, and whether Enter
-//! held it, it was a draft, or it was being sent as the chat ended. A chat
+//! held it, it was a draft, or it was being sent as the chat ended. It names
+//! its writer, the chat that wrote it, and the kept files whose text it
+//! carries on, so the next chat can tell a text kept twice from two chats
+//! that each kept the same words ([`claim`]). A chat
 //! that restores a file first claims it: it takes an `flock` on the file,
 //! renames it to `.claim.<pid>.<name>`, and holds the lock while it runs.
 //! A claim is live only while its lock is held, whatever its pid names, so
@@ -76,10 +79,41 @@ fn tab_of(s: &str) -> Option<Tab> {
     }
 }
 
+/// Who wrote a kept file, and which kept files its text carries on.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct Stamp {
+    /// The chat that wrote it ([`writer_id`]); `None` in a file of an
+    /// earlier build, which did not note it.
+    pub(super) writer: Option<String>,
+    /// The names of the kept files whose text it carries on: a text
+    /// restored and kept again names the file it came from.
+    pub(super) from: Vec<String>,
+}
+
+/// A name for one chat as a writer of kept files, made once when the chat
+/// starts: its pid, the moment and a count, so two chats never share one,
+/// a pid reused by another process included.
+pub(super) fn writer_id() -> String {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+    format!("{}.{nanos}.{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed))
+}
+
+/// The kept file's name a kept or claimed path stands for.
+fn kept_name(p: &Path) -> Option<String> {
+    let n = p.file_name()?.to_string_lossy().to_string();
+    match name_of(&n) {
+        Name::Kept => Some(n),
+        Name::Claimed { name } => Some(name),
+        _ => None,
+    }
+}
+
 /// `r` as a file holds it: the header lines, a blank line, the text. The
 /// header's `bytes` is the text's length, so a file cut short is told
-/// from a whole one.
-pub(super) fn encode(r: &Record) -> String {
+/// from a whole one. The writer and the files it carries on come before
+/// it, so a file cut anywhere in its text still names them.
+pub(super) fn encode(r: &Record, stamp: &Stamp) -> String {
     let kind = match r.kind {
         Kind::Held => "held",
         Kind::Draft => "draft",
@@ -87,7 +121,35 @@ pub(super) fn encode(r: &Record) -> String {
     };
     let view = r.tab.as_ref().map(tab_key).unwrap_or_default();
     let line = |s: &str| s.replace('\n', " ");
-    format!("{MAGIC}\nkind: {kind}\nview: {}\ndest: {}\nlabel: {}\nbytes: {}\n\n{}", line(&view), line(&r.dest), line(&r.label), r.text.len(), r.text)
+    let writer = stamp.writer.as_deref().unwrap_or_default();
+    format!(
+        "{MAGIC}\nkind: {kind}\nview: {}\ndest: {}\nlabel: {}\nwriter: {}\nfrom: {}\nbytes: {}\n\n{}",
+        line(&view),
+        line(&r.dest),
+        line(&r.label),
+        line(writer),
+        line(&stamp.from.join(" ")),
+        r.text.len(),
+        r.text
+    )
+}
+
+/// The header lines of a file this version writes, before the text.
+fn header(body: &str) -> Option<&str> {
+    let rest = body.strip_prefix(MAGIC)?.strip_prefix('\n')?;
+    Some(rest.split_once("\n\n").map_or(rest, |(h, _)| h))
+}
+
+/// The value of header field `k`, empty when it is absent.
+fn field<'a>(head: &'a str, k: &str) -> &'a str {
+    head.lines().find_map(|l| l.strip_prefix(k).and_then(|v| v.strip_prefix(": "))).unwrap_or("")
+}
+
+/// The writer and the files carried on that a file names.
+pub(super) fn stamp_of(body: &str) -> Stamp {
+    let Some(head) = header(body) else { return Stamp::default() };
+    let writer = Some(field(head, "writer").to_string()).filter(|w| !w.is_empty());
+    Stamp { writer, from: field(head, "from").split_whitespace().map(String::from).collect() }
 }
 
 /// The record a file holds. A file without the header is an earlier
@@ -101,7 +163,7 @@ pub(super) fn decode(body: &str) -> (Record, bool) {
         Some((h, t)) => (h, t, true),
         None => (rest, "", false),
     };
-    let field = |k: &str| head.lines().find_map(|l| l.strip_prefix(k).and_then(|v| v.strip_prefix(": "))).unwrap_or("");
+    let field = |k: &str| field(head, k);
     let bytes: Option<usize> = field("bytes").parse().ok();
     let kind = match field("kind") {
         "held" => Kind::Held,
@@ -112,18 +174,20 @@ pub(super) fn decode(body: &str) -> (Record, bool) {
     (Record { kind, tab: tab_of(field("view")), dest: field("dest").into(), label: field("label").into(), text: text.to_string() }, whole)
 }
 
-/// Write each record to a file of its own in `dir`. Every record is
-/// tried. The outcome of each, in order, is the path written, or the path
-/// tried with the error.
-pub(super) fn write(dir: &Path, records: &[Record]) -> Vec<Result<PathBuf, (PathBuf, io::Error)>> {
+/// Write each text to a file of its own in `dir`, stamped with `writer`
+/// and the kept files the text carries on. Every text is tried. The
+/// outcome of each, in order, is the path written, or the path tried with
+/// the error.
+pub(super) fn write(dir: &Path, writer: &str, texts: &[(Record, Vec<PathBuf>)]) -> Vec<Result<PathBuf, (PathBuf, io::Error)>> {
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    records
+    texts
         .iter()
-        .map(|r| {
+        .map(|(r, origins)| {
             let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
             let seq = SEQ.fetch_add(1, Ordering::Relaxed);
             let path = dir.join(format!("{}-{nanos:020}-{seq}", std::process::id()));
-            match agent_settings::writer::write_atomic(&path, encode(r)) {
+            let stamp = Stamp { writer: Some(writer.to_string()), from: origins.iter().filter_map(|p| kept_name(p)).collect() };
+            match agent_settings::writer::write_atomic(&path, encode(r, &stamp)) {
                 Ok(()) => Ok(path),
                 Err(e) => Err((path, e)),
             }
@@ -308,11 +372,13 @@ fn move_in_single_file(dir: &Path) {
 ///   with no text in it at all is removed.
 /// - A file that cannot be read, or is not UTF-8, goes back to its kept
 ///   name and is named in [`Found::unreadable`].
-/// - Two files holding the same text for the same view and route are one
-///   text kept twice: the later file is removed.
+/// - A file whose text another file holds whole, for the same view and
+///   route, is a copy, removed only when the two have one writer, or one
+///   carries the other's text on ([`copy_of`]). Two chats that each kept
+///   the same words keep a file each.
 /// - An earlier build kept one file at `dir`'s own path: it is moved into
 ///   the directory as a kept file first.
-pub(super) fn claim(dir: &Path) -> Found {
+pub(super) fn claim(dir: &Path, writer: &str) -> Found {
     let me = std::process::id();
     move_in_single_file(dir);
     let mut found = Found::default();
@@ -370,22 +436,22 @@ pub(super) fn claim(dir: &Path) -> Found {
         }
     }
     mine.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
+    let mut read = Vec::new();
     for (_, name, path, mut file) in mine {
         let mut bytes = Vec::new();
         match file.read_to_end(&mut bytes).ok().and_then(|_| text_of(bytes)) {
             Some((body, cut)) => {
                 let (mut record, whole) = decode(&body);
+                let sending = record.kind == Kind::Sending;
                 let partial = cut || !whole;
                 if partial {
                     record.kind = Kind::Draft;
                 }
-                let twice = found.claimed.iter().any(|c| c.record == record);
-                if record.text.trim().is_empty() || twice {
+                if record.text.trim().is_empty() {
                     let _ = std::fs::remove_file(&path);
                     continue;
                 }
-                locks().push((path.clone(), file));
-                found.claimed.push(Claimed { path, record, partial });
+                read.push(Taken { name, path, file, record, partial, sending, stamp: stamp_of(&body) });
             }
             None => {
                 let _ = std::fs::rename(&path, dir.join(&name));
@@ -393,7 +459,84 @@ pub(super) fn claim(dir: &Path) -> Found {
             }
         }
     }
+    for t in drop_copies(dir, writer, read) {
+        locks().push((t.path.clone(), t.file));
+        found.claimed.push(Claimed { path: t.path, record: t.record, partial: t.partial });
+    }
     found
+}
+
+/// One file claimed and read.
+struct Taken {
+    /// Its kept name.
+    name: String,
+    path: PathBuf,
+    file: File,
+    record: Record,
+    partial: bool,
+    /// Its header said it was being sent, whether or not it is whole.
+    sending: bool,
+    stamp: Stamp,
+}
+
+/// Whether `b` is a copy of `a`: `a` holds `b`'s text whole, for the same
+/// view and route, and the two are one text, not two chats' alike. They
+/// are one text when one writer wrote both, or one carries the other on
+/// ([`Stamp::from`]); a file of an earlier build names no writer and is
+/// never a copy. `b` cut short is a copy when its text starts `a`'s. `b`
+/// whole is a copy when its text is `a`'s, and `a` says at least what
+/// `b` does: the same kind, or `a` was being sent.
+fn copy_of(b: &Taken, a: &Taken) -> bool {
+    let same_writer = b.stamp.writer.is_some() && b.stamp.writer == a.stamp.writer;
+    let carried = b.stamp.from.contains(&a.name) || a.stamp.from.contains(&b.name);
+    let route = b.record.tab == a.record.tab && b.record.dest == a.record.dest && b.record.label == a.record.label;
+    if !(same_writer || carried) || !route || a.partial {
+        return false;
+    }
+    if b.partial {
+        a.record.text.starts_with(&b.record.text)
+    } else {
+        b.record.text == a.record.text && (b.record.kind == a.record.kind || a.sending)
+    }
+}
+
+/// `texts` with each copy of another removed, its file with it ([`copy_of`]):
+/// the later of two that are each other's copy. A copy cut short that was
+/// being sent leaves its mark on the text it copies: that is written again
+/// marked [`Kind::Sending`], and claimed in its place, before either file
+/// goes. When it cannot be, both stay.
+fn drop_copies(dir: &Path, writer: &str, mut texts: Vec<Taken>) -> Vec<Taken> {
+    let mut i = texts.len();
+    while i > 0 {
+        i -= 1;
+        let Some(a) = (0..texts.len()).find(|&a| a != i && copy_of(&texts[i], &texts[a])) else { continue };
+        if texts[i].sending && texts[a].record.kind != Kind::Sending {
+            let Some((path, file)) = mark_sending(dir, writer, &texts[a]) else { continue };
+            let old = std::mem::replace(&mut texts[a].path, path);
+            let _ = std::fs::remove_file(old);
+            texts[a].file = file;
+            texts[a].record.kind = Kind::Sending;
+            texts[a].sending = true;
+        }
+        let b = texts.remove(i);
+        let _ = std::fs::remove_file(&b.path);
+    }
+    texts
+}
+
+/// `t` written again by `writer` as a new kept file marked
+/// [`Kind::Sending`], carrying `t` on, and claimed: its claimed path and
+/// the open file holding its lock.
+fn mark_sending(dir: &Path, writer: &str, t: &Taken) -> Option<(PathBuf, File)> {
+    let record = Record { kind: Kind::Sending, ..t.record.clone() };
+    let path = write(dir, writer, &[(record, vec![t.path.clone()])]).remove(0).ok()?;
+    let file = File::open(&path).ok()?;
+    if !matches!(try_lock(&file), Ok(true)) {
+        return None;
+    }
+    let to = dir.join(format!(".claim.{}.{}", std::process::id(), kept_name(&path)?));
+    std::fs::rename(&path, &to).ok()?;
+    Some((to, file))
 }
 
 /// Remove kept files whose text has gone elsewhere: sent, held again, or
@@ -421,7 +564,7 @@ pub(super) struct Noted {
 /// exit: the directory and each text. The chat notes it after each key,
 /// paste, frame and tick, around each send and as each text is kept, and
 /// clears it once its ending has kept what it keeps.
-static NOTED: Mutex<Option<(PathBuf, Vec<Noted>)>> = Mutex::new(None);
+static NOTED: Mutex<Option<(PathBuf, String, Vec<Noted>)>> = Mutex::new(None);
 
 /// Held while a text leaves the chat (a send, a keep, a discard) and the
 /// noting that follows it, so a forced exit never keeps a text half gone.
@@ -431,13 +574,14 @@ static MOVING: Mutex<()> = Mutex::new(());
 /// other keeps nothing more.
 static KEPT: AtomicBool = AtomicBool::new(false);
 
-fn noted() -> MutexGuard<'static, Option<(PathBuf, Vec<Noted>)>> {
+fn noted() -> MutexGuard<'static, Option<(PathBuf, String, Vec<Noted>)>> {
     NOTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Note what the chat would keep now ([`keep_noted`]).
-pub(super) fn note(dir: &Path, texts: Vec<Noted>) {
-    *noted() = Some((dir.to_path_buf(), texts));
+/// Note what the chat would keep now ([`keep_noted`]), written by
+/// `writer`.
+pub(super) fn note(dir: &Path, writer: &str, texts: Vec<Noted>) {
+    *noted() = Some((dir.to_path_buf(), writer.to_string(), texts));
 }
 
 /// Nothing is left to keep: the chat's ending kept it.
@@ -453,10 +597,10 @@ pub(super) fn moving() -> MutexGuard<'static, ()> {
 /// Write each text noted to a file of its own, a text being sent as
 /// [`Kind::Sending`], then remove the claimed files the written ones
 /// carried.
-fn keep_texts(dir: &Path, texts: Vec<Noted>) {
-    let records: Vec<Record> = texts.iter().map(|t| Record { kind: if t.flight { Kind::Sending } else { t.record.kind }, ..t.record.clone() }).collect();
+fn keep_texts(dir: &Path, writer: &str, texts: Vec<Noted>) {
+    let records: Vec<(Record, Vec<PathBuf>)> = texts.iter().map(|t| (Record { kind: if t.flight { Kind::Sending } else { t.record.kind }, ..t.record.clone() }, t.origins.clone())).collect();
     let mut done = Vec::new();
-    for (t, outcome) in texts.into_iter().zip(write(dir, &records)) {
+    for (t, outcome) in texts.into_iter().zip(write(dir, writer, &records)) {
         if outcome.is_ok() {
             done.extend(t.origins);
         }
@@ -497,8 +641,8 @@ pub fn keep_noted() {
     }
     let _moving = try_take(&MOVING);
     let Some(mut n) = try_take(&NOTED) else { return };
-    if let Some((dir, texts)) = n.take() {
-        keep_texts(&dir, texts);
+    if let Some((dir, writer, texts)) = n.take() {
+        keep_texts(&dir, &writer, texts);
     }
 }
 
@@ -514,8 +658,8 @@ pub fn keep_noted_waiting() {
     }
     let moving = take_within(&MOVING, Duration::from_secs(1));
     let Some(mut n) = take_within(&NOTED, Duration::from_secs(1)) else { return };
-    if let Some((dir, texts)) = n.take() {
-        keep_texts(&dir, texts);
+    if let Some((dir, writer, texts)) = n.take() {
+        keep_texts(&dir, &writer, texts);
     }
     std::mem::forget(n);
     std::mem::forget(moving);
@@ -551,15 +695,27 @@ mod tests {
     fn a_record_reads_back_as_written() {
         for tab in [Tab::Merged, Tab::Channel("infra".into()), Tab::Dm("a1".into()), Tab::Review("a1".into())] {
             let r = record(Kind::Held, Some(tab), "two lines\n\nand a blank between");
-            assert_eq!(decode(&encode(&r)), (r, true));
+            assert_eq!(decode(&encode(&r, &Stamp::default())), (r, true));
         }
     }
 
     #[test]
     fn a_file_cut_short_is_not_whole() {
-        let body = encode(&record(Kind::Draft, Some(Tab::Merged), "the whole text"));
+        let body = encode(&record(Kind::Draft, Some(Tab::Merged), "the whole text"), &Stamp::default());
         assert!(!decode(&body[..body.len() - 3]).1, "text short of its bytes");
         assert!(!decode(&body[..30]).1, "header cut");
+    }
+
+    /// The writer and the files carried on read back, from a file cut
+    /// short in its text too; a file with none names none.
+    #[test]
+    fn a_stamp_reads_back_from_a_whole_or_cut_file() {
+        let stamp = Stamp { writer: Some("12.34.0".into()), from: vec!["1-00000000000000000001-0".into(), "2-00000000000000000002-1".into()] };
+        let body = encode(&record(Kind::Held, Some(Tab::Merged), "the text"), &stamp);
+        assert_eq!(stamp_of(&body), stamp);
+        assert_eq!(stamp_of(&body[..body.len() - 3]), stamp, "cut in its text");
+        assert_eq!(stamp_of(&encode(&record(Kind::Held, None, "t"), &Stamp::default())), Stamp::default());
+        assert_eq!(stamp_of("bare text of an earlier build"), Stamp::default());
     }
 
     #[test]

@@ -746,7 +746,7 @@ impl ChatPane {
         let mut failed = None;
         for id in ids {
             let Some(h) = self.pending.iter().find(|h| h.id == id).cloned() else { continue };
-            match unsent::write(&self.unsent_dir, &[Self::record(&h)]).remove(0) {
+            match unsent::write(&self.unsent_dir, &self.writer, &[(Self::record(&h), Self::parked_origins(&h))]).remove(0) {
                 Ok(_) => {
                     self.pending.take_where(|o| o.id == id);
                     unsent::settle(Self::parked_origins(&h));
@@ -758,7 +758,7 @@ impl ChatPane {
             }
         }
         if let Some(r) = self.box_record() {
-            match unsent::write(&self.unsent_dir, &[r]).remove(0) {
+            match unsent::write(&self.unsent_dir, &self.writer, &[(r, self.box_origins.clone())]).remove(0) {
                 Ok(path) => {
                     unsent::settle(std::mem::replace(&mut self.box_origins, vec![path]));
                     self.note_unsent();
@@ -806,7 +806,7 @@ impl ChatPane {
             texts.extend(self.box_noted());
         }
         texts.extend(flight);
-        unsent::note(&self.unsent_dir, texts);
+        unsent::note(&self.unsent_dir, &self.writer, texts);
     }
 
     /// `h` as a text noted.
@@ -837,7 +837,7 @@ impl ChatPane {
     /// A file that could not be read stays where it is, named on the
     /// status line. The files claimed stay until their text has gone.
     pub(super) fn restore_unsent(&mut self) {
-        let found = unsent::claim(&self.unsent_dir);
+        let found = unsent::claim(&self.unsent_dir, &self.writer);
         let names = self.strip_names();
         let live = |t: &Option<Tab>| t.as_ref().is_some_and(|t| t.composes() && tabs::normalize(t.clone(), &names) == *t);
         let boxed = if self.input.is_empty() { found.claimed.iter().rposition(|c| c.record.kind == unsent::Kind::Draft && !c.partial && live(&c.record.tab)) } else { None };

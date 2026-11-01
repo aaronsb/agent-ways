@@ -515,6 +515,79 @@ fn two_chats_ending_at_once_keep_both_texts() {
     assert!(files(&kept).iter().all(|f| f.starts_with(".claim.")), "both claimed, neither removed: {:?}", files(&kept));
 }
 
+/// Two chats that each keep the same words keep a text each, and both
+/// come back: the operator said "I don't want to drop messages" (the
+/// review's N2).
+#[test]
+fn two_chats_that_keep_the_same_reply_get_both_back() {
+    let kept = unsent("same-reply");
+    let mut first = chat().unsent_dir(&kept);
+    typed(&mut first, "yes");
+    let mut second = chat().unsent_dir(&kept);
+    typed(&mut second, "yes");
+    first.into_app().end_unasked(libc::SIGHUP, "stopped: the terminal hung up");
+    second.into_app().end_unasked(libc::SIGHUP, "stopped: the terminal hung up");
+    assert_eq!(files(&kept).len(), 2, "a file each");
+    let c = chat().unsent_dir(&kept).restore_unsent();
+    assert_eq!((c.input().text(), c.pending()), ("yes", vec!["yes".to_string()]), "both back: {}", c.status());
+    assert_eq!(files(&kept).len(), 2, "neither file removed: {:?}", files(&kept));
+}
+
+/// One chat's text in two files is one text: the copy is removed and the
+/// text comes back once.
+#[test]
+fn one_chats_text_kept_twice_comes_back_once() {
+    let kept = unsent("one-writer");
+    let mut c = chat().unsent_dir(&kept);
+    typed(&mut c, "kept twice by one chat");
+    c.into_app().end_unasked(libc::SIGHUP, "stopped: the terminal hung up");
+    let name = files(&kept).remove(0);
+    std::fs::copy(kept.join(&name), kept.join(format!("{name}9"))).unwrap();
+    let c = chat().unsent_dir(&kept).restore_unsent();
+    assert_eq!(c.input().text(), "kept twice by one chat");
+    assert!(c.pending().is_empty(), "once: {:?}", c.pending());
+    assert_eq!(files(&kept).len(), 1, "the copy removed: {:?}", files(&kept));
+}
+
+/// A third signal can cut short a forced exit's copy of a restored text,
+/// while the file the text came from is still whole: the copy names that
+/// file as the one it carries on, so the next chat drops the cut copy and
+/// restores the text once, whole. A copy cut short while the text was
+/// being sent leaves its mark: the text comes back marked "may have been
+/// sent".
+#[test]
+fn a_cut_copy_of_a_kept_text_is_dropped_for_the_whole_one() {
+    for sending in [false, true] {
+        let kept = unsent(if sending { "cut-copy-sending" } else { "cut-copy" });
+        let mut c = chat().unsent_dir(&kept);
+        typed(&mut c, "the whole text, carried on");
+        c.into_app().end_unasked(libc::SIGHUP, "stopped: the terminal hung up");
+        let origin = files(&kept).remove(0);
+        let body = std::fs::read_to_string(kept.join(&origin)).unwrap();
+        let writer = body.lines().find_map(|l| l.strip_prefix("writer: ")).unwrap().to_string();
+        let mut copy = body.replace(&format!("writer: {writer}"), "writer: 999999999.1.0").replace("from: \n", &format!("from: {origin}\n"));
+        if sending {
+            copy = copy.replace("kind: draft", "kind: sending");
+        }
+        std::fs::write(kept.join(".1-00000000000000000009-0.999999999.0.tmp"), &copy[..copy.len() - 8]).unwrap();
+        let mut c = chat().unsent_dir(&kept).restore_unsent();
+        assert!(!c.status().contains("cut short"), "no cut copy restored: {}", c.status());
+        if sending {
+            assert_eq!(c.input().text(), "", "never in the box: Enter there would send it");
+            assert_eq!(c.pending(), ["the whole text, carried on"], "{}", c.status());
+            assert!(screen(&mut c).contains("may have been sent"), "the mark carried over");
+        } else {
+            assert_eq!(c.input().text(), "the whole text, carried on", "{}", c.status());
+            assert!(c.pending().is_empty(), "once: {:?}", c.pending());
+        }
+        let left = files(&kept);
+        assert_eq!(left.len(), 1, "one file, holding the whole text: {left:?}");
+        let held = std::fs::read_to_string(kept.join(&left[0])).unwrap();
+        assert!(held.ends_with("\n\nthe whole text, carried on"), "{held}");
+        assert_eq!(held.contains("kind: sending"), sending, "{held}");
+    }
+}
+
 // ── restoring into the view written in ───────────────────────────
 
 /// A draft written in a DM view opens the next chat in that view, its
