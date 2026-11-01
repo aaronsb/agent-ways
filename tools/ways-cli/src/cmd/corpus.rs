@@ -477,31 +477,11 @@ enum VectorSupport {
 }
 
 fn vector_support(bin: &Path) -> VectorSupport {
-    match retry_if_busy(|| std::process::Command::new(bin).arg("--version").output()) {
+    match super::proc::retry_if_busy(|| std::process::Command::new(bin).arg("--version").output()) {
         Err(e) => VectorSupport::Unknown(format!("way-embed --version could not run: {e}")),
         Ok(o) if !o.status.success() => VectorSupport::Unknown(format!("way-embed --version failed ({})", o.status)),
         Ok(o) => classify_version(&String::from_utf8_lossy(&o.stdout)),
     }
-}
-
-/// Run `spawn`, trying again a few times while the binary is busy (ETXTBSY: a
-/// concurrent install or a forked child still holds it open for writing).
-fn retry_if_busy<T>(mut spawn: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
-    const TRIES: u32 = 5;
-    let mut tries = 1;
-    loop {
-        match spawn() {
-            Err(e) if tries < TRIES && is_text_file_busy(&e) => {
-                tries += 1;
-                std::thread::sleep(std::time::Duration::from_millis(20));
-            }
-            other => return other,
-        }
-    }
-}
-
-fn is_text_file_busy(e: &std::io::Error) -> bool {
-    cfg!(unix) && e.raw_os_error() == Some(26)
 }
 
 fn classify_version(out: &str) -> VectorSupport {
@@ -1759,33 +1739,6 @@ mod tests {
         assert!(matches!(classify_version(""), VectorSupport::Unknown(_)));
         assert!(matches!(classify_version("Segmentation fault"), VectorSupport::Unknown(_)));
         assert!(matches!(classify_version("way-embed dev"), VectorSupport::Unknown(_)));
-    }
-
-    /// A busy binary is tried again a bounded number of times.
-    #[cfg(unix)]
-    #[test]
-    fn a_busy_binary_is_retried_a_few_times() {
-        let busy = || std::io::Error::from_raw_os_error(26);
-        let mut n = 0;
-        let r = retry_if_busy(|| {
-            n += 1;
-            if n < 3 { Err(busy()) } else { Ok(n) }
-        });
-        assert_eq!(r.unwrap(), 3);
-        let mut n = 0;
-        let r: std::io::Result<()> = retry_if_busy(|| {
-            n += 1;
-            Err(busy())
-        });
-        assert!(r.is_err());
-        assert_eq!(n, 5, "unbounded or no retry");
-        let mut n = 0;
-        let r: std::io::Result<()> = retry_if_busy(|| {
-            n += 1;
-            Err(std::io::ErrorKind::NotFound.into())
-        });
-        assert!(r.is_err());
-        assert_eq!(n, 1, "retried an error that is not busy");
     }
 
     /// What `--version` of a real executable decides.
