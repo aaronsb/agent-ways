@@ -617,8 +617,8 @@ mod tests {
     }
 
     /// A binary whose write handle is still open, as one just installed can
-    /// be, runs once the handle closes: the update's `ways corpus` and
-    /// `ways reconcile` go through here on the binary it just wrote.
+    /// be, runs once the handle closes: the update's corpus and reconcile
+    /// runs of the binary it just wrote go through here.
     #[cfg(target_os = "linux")]
     #[test]
     fn a_binary_still_open_for_writing_runs_once_it_closes() {
