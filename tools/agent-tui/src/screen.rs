@@ -13,10 +13,10 @@
 use std::io;
 use std::time::{Duration, Instant};
 
-use ratatui::crossterm::event::{self, Event, KeyEvent, KeyEventKind, MouseEvent};
+use ratatui::crossterm::event::{Event, KeyEvent, KeyEventKind, MouseEvent};
 use ratatui::{DefaultTerminal, Frame};
 
-use crate::app::term::{kill_job_group, restore, Signals, HANGUP, POLL};
+use crate::app::term::{kill_job_group, next_event, restore, Signals, HANGUP, POLL};
 use crate::theme::{self, Palette};
 
 /// What an application supplies for one screen session.
@@ -141,6 +141,7 @@ pub fn run_screen(s: &mut dyn Screen) -> io::Result<Option<i32>> {
 /// screen always gets the guard, the signals and the panic hook.
 pub(crate) fn run_on(s: &mut dyn Screen, term: &mut DefaultTerminal, signals: &Signals) -> io::Result<Option<i32>> {
     let mut ticker = Ticker::new(Instant::now());
+    let mut more = false;
     loop {
         if let Some(sig) = signals.caught() {
             signals.take_up();
@@ -149,13 +150,13 @@ pub(crate) fn run_on(s: &mut dyn Screen, term: &mut DefaultTerminal, signals: &S
         let wait = ticker.wait(s.tick_every(), Instant::now());
         // A terminal that can no longer be drawn on or read from has hung
         // up: end as on SIGHUP.
-        let event = match term.draw(|f| frame(s, f)).and_then(|_| event::poll(wait)) {
-            Ok(true) => event::read().map(Some),
-            Ok(false) => Ok(None),
-            Err(e) => Err(e),
-        };
+        let event = term.draw(|f| frame(s, f)).and_then(|_| next_event(wait, more));
+        more = matches!(event, Ok(Some(_)));
         match event {
-            Err(_) => return Ok(Some(HANGUP)),
+            Err(_) => {
+                signals.take_up();
+                return Ok(Some(HANGUP));
+            }
             // A repeat is a key too: holding Backspace in a text entry.
             Ok(Some(Event::Key(k))) if k.kind != KeyEventKind::Release && !s.key(k) => return Ok(None),
             Ok(Some(Event::Paste(mut text))) => {

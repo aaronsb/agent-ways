@@ -303,6 +303,34 @@ impl Signals {
     }
 }
 
+/// The next input event within `wait`, or none; an error once the terminal
+/// has hung up. crossterm's poll never returns on a terminal that hung up:
+/// its read loop takes a read of nothing, or an error, as no event yet and
+/// reads again. So on Unix the terminal is polled here first, and crossterm
+/// is asked without waiting, only while the terminal is still there.
+/// `more` is set after an event, when crossterm may hold more already read.
+pub(crate) fn next_event(wait: Duration, more: bool) -> io::Result<Option<Event>> {
+    #[cfg(unix)]
+    if stdin_is_tty() {
+        let ms = if more { 0 } else { wait.as_millis().min(i32::MAX as u128) as i32 };
+        let mut pfd = libc::pollfd { fd: 0, events: libc::POLLIN, revents: 0 };
+        // SAFETY: one pollfd we own, on fd 0.
+        if unsafe { libc::poll(&mut pfd, 1, ms) } < 0 {
+            let e = io::Error::last_os_error();
+            return if e.kind() == io::ErrorKind::Interrupted { Ok(None) } else { Err(e) };
+        }
+        if pfd.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0 || hung_up() {
+            return Err(io::Error::new(io::ErrorKind::BrokenPipe, "the terminal hung up"));
+        }
+        return if event::poll(Duration::ZERO)? { event::read().map(Some) } else { Ok(None) };
+    }
+    if event::poll(wait)? {
+        event::read().map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
 fn stdin_is_tty() -> bool {
     use std::io::IsTerminal;
     io::stdin().is_terminal()
@@ -472,6 +500,7 @@ impl App {
     /// guard the caller holds turns it off with the rest.
     pub fn run(mut self, term: &mut DefaultTerminal, signals: &Signals) -> io::Result<Session> {
         let mut captured = false;
+        let mut more = false;
         let mut schedule = Schedule::new(Instant::now());
         if self.pane.as_ref().is_some_and(|p| p.keyboard_enhancement()) {
             // A frame first: the probe waits on the terminal's answer, up
@@ -501,14 +530,15 @@ impl App {
             }
             let wait = self.schedule_wait(&schedule, Instant::now());
             // A terminal that can no longer be drawn on or read from has hung
-            // up: end as on SIGHUP.
-            let event = match term.draw(|f| self.draw(f)).and_then(|_| event::poll(wait)) {
-                Ok(true) => event::read().map(Some),
-                Ok(false) => Ok(None),
-                Err(e) => Err(e),
-            };
+            // up: end as on SIGHUP, taken up so the watch thread gives the
+            // pane's ending its time.
+            let event = term.draw(|f| self.draw(f)).and_then(|_| next_event(wait, more));
+            more = matches!(event, Ok(Some(_)));
             match event {
-                Err(_) => return Ok(self.end_unasked(HANGUP, "stopped: the terminal hung up")),
+                Err(_) => {
+                    signals.take_up();
+                    return Ok(self.end_unasked(HANGUP, "stopped: the terminal hung up"));
+                }
                 // A repeat is a key too: holding Backspace in a text entry.
                 Ok(Some(Event::Key(k))) if k.kind != KeyEventKind::Release && !self.key(k) => {
                     // A check still running ends with the screen.
