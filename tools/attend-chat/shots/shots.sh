@@ -97,7 +97,11 @@ sweep
 # at 16 colours, where the cut is `...`), dm2 (dm, and the
 # operator's DM to alpha and a second human, bob) or plain (no Nerd Font). An agent's name comes from the temp
 # path, and a long one cuts its project, so the quiet agent is clicked by
-# the column's first `○`, its row being the agents' last.
+# the column's first `○`, its row being the agents' last. In own, the
+# first frame lists the operator under #deploy but not among the agents;
+# the operator's own row joins the agents a frame later and moves every
+# channel row down by one. A scenario on own waits on `Agents 3/4`, the
+# settled count, before it clicks a row.
 SCENARIOS="
 side         | base  | wait:Agents
 off          | base  | wait:Agents F3 gone:Agents
@@ -122,7 +126,7 @@ hide-chan    | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Hid
 paste        | base  | wait:Agents text:see: paste:line_one\\nline_two\\nline_three
 rawpaste     | base  | wait:Agents rawpaste:one\\ntwo
 plain        | plain | wait:Agents
-own-row      | own   | wait:operator click:#deploy click:#deploy wait:pick Escape gone:pick side:operator wait:Leave_#deploy
+own-row      | own   | wait:Agents_3/4 click:#deploy click:#deploy wait:pick Escape gone:pick side:operator wait:Leave_#deploy
 quiet-send   | base  | wait:Agents rside:○ wait:Address click:Address_@ text:are_you_there Enter wait:no_heartbeat
 paste-asked  | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:hide_the_messages_so_far_in_⋯all? paste:yes_please\\nsecond_line wait:kept
 ask          | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide
