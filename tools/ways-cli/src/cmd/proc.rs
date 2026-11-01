@@ -87,9 +87,54 @@ pub(crate) fn output_within(mut cmd: Command, limit: Duration) -> Result<String,
     }
 }
 
+/// Run `spawn`, trying again a few times while the executable is busy. A file
+/// written a moment ago, by this process or a parallel one, refuses to exec
+/// with ETXTBSY while a forked child still holds its write handle. That clears
+/// in milliseconds, so a few short retries tell it apart from a broken binary.
+pub(crate) fn retry_if_busy<T>(mut spawn: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    const TRIES: u32 = 5;
+    let mut tries = 1;
+    loop {
+        match spawn() {
+            Err(e) if tries < TRIES && e.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            other => return other,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A busy binary is tried again a bounded number of times.
+    #[test]
+    fn a_busy_binary_is_retried_a_few_times() {
+        let busy = || std::io::Error::from(std::io::ErrorKind::ExecutableFileBusy);
+        let mut n = 0;
+        let r = retry_if_busy(|| {
+            n += 1;
+            if n < 3 { Err(busy()) } else { Ok(n) }
+        });
+        assert_eq!(r.unwrap(), 3);
+        let mut n = 0;
+        let r: std::io::Result<()> = retry_if_busy(|| {
+            n += 1;
+            Err(busy())
+        });
+        assert!(r.is_err());
+        assert_eq!(n, 5, "unbounded or no retry");
+        let mut n = 0;
+        let r: std::io::Result<()> = retry_if_busy(|| {
+            n += 1;
+            Err(std::io::ErrorKind::NotFound.into())
+        });
+        assert!(r.is_err());
+        assert_eq!(n, 1, "retried an error that is not busy");
+    }
+
 
     #[cfg(unix)]
     #[test]

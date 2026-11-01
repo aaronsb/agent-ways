@@ -337,10 +337,7 @@ fn checks(m: &Mod, v: &View, shipped: Option<&str>, claude_code: bool, default_r
 fn imagemagick_check(path: Option<&std::ffi::OsStr>) -> (Mark, String) {
     use super::mcp_register::on_path;
     let is_imagemagick = |tool: &PathBuf| {
-        std::process::Command::new(tool)
-            .arg("-version")
-            .stdin(std::process::Stdio::null())
-            .output()
+        super::proc::retry_if_busy(|| std::process::Command::new(tool).arg("-version").stdin(std::process::Stdio::null()).output())
             .is_ok_and(|o| o.status.success() && String::from_utf8_lossy(&o.stdout).contains("ImageMagick"))
     };
     match ["magick", "convert"].iter().filter_map(|n| on_path(n, path)).find(is_imagemagick) {
