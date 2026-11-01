@@ -1,2 +1,4 @@
 {"kind":"direct","prompt":"add a figure to the adr that draws the panel layout it decides"}
 {"kind":"situational","prompt":"the record settles how the sidebar panels sit on screen and i want to see a picture of it before you build anything"}
+{"kind":"situational","prompt":"the maintainer answered the probes and the budget changed, so check the pipeline svg still matches the record and render it again before they accept"}
+{"kind":"situational","prompt":"send me one contact sheet of all eight figures in the record so i can review them together"}
