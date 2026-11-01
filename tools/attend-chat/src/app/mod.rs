@@ -21,6 +21,8 @@ mod ix;
 mod keys;
 mod menu;
 mod participants;
+mod pending;
+mod unsent;
 mod settings_view;
 mod sidebar;
 mod view;
@@ -46,6 +48,8 @@ use crate::signal::Signal;
 use crate::tabs::{self, Tab};
 use crate::watcher::Delivery;
 
+/// Keep what the chat last noted unsent, as a panic ends it.
+pub use unsent::{keep_noted, keep_noted_waiting, keep_on_forced_exit, keep_on_panic};
 pub use keys::{destination_label, handle_enter, handle_tab, EnterAction, TabCycle, TabResult};
 
 /// How long a freshly executed command's result asserts itself OVER
@@ -218,9 +222,10 @@ pub struct ChatPane {
     /// were asked, which numbers their ids.
     asked: Option<(String, menu::Step)>,
     asks: u64,
-    /// The terminal reports Ctrl+digits as themselves. Without it Ctrl+3
-    /// arrives as Esc, which closes and clears and never quits (ADR-409),
-    /// and a setting that asks for Ctrl+digits says they do not arrive.
+    /// The terminal reports Ctrl+digits as themselves (the kitty keyboard
+    /// protocol). Without it Ctrl+3 arrives as Esc, which recalls or clears
+    /// and never quits (ADR-409), so Ctrl+digits jump nowhere and a setting
+    /// that asks for them says they do not arrive.
     enhanced: bool,
     /// The draft a quiet refusal offered to send anyway, and the tab it was
     /// refused on: Enter again on it unchanged, on that tab, sends it, as
@@ -279,6 +284,29 @@ pub struct ChatPane {
     /// ([`cleanup::DELETE_QUESTION_LIFE`]): a delete's once its count is
     /// shown, Delete channel's, Tombstone…'s and Remove agent's at once.
     delete_question_life: Duration,
+    /// The messages Enter held for `attend.chat.send_delay` before they
+    /// are sent ([`pending`]), the countdowns the feed last showed, and the
+    /// feed's index of the first of them, which follow the messages.
+    pending: pending::Pending,
+    pending_shown: Vec<Option<u64>>,
+    pending_from: usize,
+    /// When the pane was made: the origin of the monotonic clock a
+    /// countdown runs on ([`ChatPane::mono`]).
+    started: Instant,
+    /// The directory where text typed and not sent is kept, a file a chat,
+    /// when the chat ends without sending it, for the next chat's compose
+    /// box ([`pending`]).
+    unsent_dir: std::path::PathBuf,
+    /// This chat as the writer of the files it keeps there, so the next
+    /// chat tells a text kept twice from two chats' alike
+    /// ([`unsent::writer_id`]).
+    writer: String,
+    /// The kept files whose text the compose box holds, recalled or
+    /// restored: removed once the box's text is sent, held or kept again.
+    box_origins: Vec<std::path::PathBuf>,
+    /// The send delay [`Chat::send_delay`] fixed, which a reload of the
+    /// settings keeps.
+    fixed_delay: Option<Duration>,
 }
 
 impl ChatPane {
@@ -338,7 +366,20 @@ impl ChatPane {
             undo: None,
             removing: None,
             delete_question_life: cleanup::DELETE_QUESTION_LIFE,
+            pending: pending::Pending::default(),
+            pending_shown: Vec::new(),
+            pending_from: 0,
+            started: Instant::now(),
+            unsent_dir: crate::hidden::state_dir().join("unsent"),
+            writer: unsent::writer_id(),
+            box_origins: Vec::new(),
+            fixed_delay: None,
         }
+    }
+
+    /// Whether the last result still asserts itself on the status line.
+    fn status_fresh(&self) -> bool {
+        self.status_set_at.is_some_and(|t| t.elapsed() < STATUS_ASSERT)
     }
 
     /// A status message, as a command's result shows it.
@@ -557,6 +598,7 @@ impl ChatPane {
             if self.world.is_some() {
                 self.refocus();
             }
+            self.draft_back();
         }
     }
 
@@ -568,11 +610,15 @@ impl ChatPane {
     }
 
     /// Enter in the compose box. On a draft a quiet refusal offered to
-    /// send anyway, unchanged since, it sends anyway.
+    /// send anyway, unchanged since, it sends anyway. A message waits
+    /// `attend.chat.send_delay` in the feed first ([`pending`]); a slash
+    /// command runs at once.
     fn enter(&mut self) {
         let here = (self.input.text().to_string(), self.normal_tab());
         let again = self.send_anyway.as_ref() == Some(&here);
-        self.send(again);
+        if again || !self.hold_draft(&here.1) {
+            self.send(again);
+        }
     }
 
     /// Send the draft, or run the command. `anyway` sends to an agent that
@@ -580,52 +626,88 @@ impl ChatPane {
     /// once: Ctrl+Enter, or Enter again after the refusal.
     fn send(&mut self, anyway: bool) {
         self.send_anyway = None;
-        if self.dry_run {
-            return self.enter_dry();
-        }
         // Normalize against the live strip (PR #395 finding 6): after a
         // peer dissolves the foregrounded channel, Enter agrees with the
         // destination flag, which has degraded to #open.
         let fg = self.normal_tab();
-        let sets_jump = self.input.text().trim_start().starts_with("/config tabs.jump");
-        match handle_enter(self.input.text(), &self.signals, &fg, self.person().as_deref(), anyway, &mut self.releases) {
-            EnterAction::None => {}
+        let text = self.input.text().to_string();
+        // The box's text is noted as being sent until the send returns
+        // ([`ChatPane::send_held`] does the same for a held message).
+        let _moving = unsent::moving();
+        let flight = self.box_noted().map(|n| unsent::Noted { flight: true, ..n });
+        self.note_flight(flight, false);
+        self.send_text(&text, fg, anyway, true);
+        self.note_unsent();
+    }
+
+    /// Send `text` as Enter sends it from the view `fg`, or run the command
+    /// it is; true when it was taken. Typed in the compose box (`from_box`),
+    /// a taken line leaves the box, and a refused one stays there. A message
+    /// that waited ([`pending`]) and is refused stays in the feed, not
+    /// sent, so nothing is lost.
+    fn send_text(&mut self, text: &str, fg: Tab, anyway: bool, from_box: bool) -> bool {
+        if self.dry_run {
+            return self.enter_dry(text, &fg, from_box);
+        }
+        // A line from the box leaves it. A send at the end of a countdown
+        // leaves the box, and the feed's scroll, as the operator has them.
+        let took = |c: &mut ChatPane| {
+            if from_box {
+                c.input.clear();
+                c.settle_box();
+            }
+        };
+        let newest = |c: &mut ChatPane| {
+            if from_box {
+                c.show_newest();
+            }
+        };
+        let sets_jump = text.trim_start().starts_with("/config tabs.jump");
+        let mut taken = true;
+        match handle_enter(text, &self.signals, &fg, self.person().as_deref(), anyway, &mut self.releases) {
+            EnterAction::None => taken = false,
             EnterAction::ClearWithStatus(s) => {
                 self.say(s, false);
-                self.input.clear();
-                self.show_newest();
+                took(self);
+                newest(self);
             }
             EnterAction::ClearWithStatusAndEcho { status, echo } => {
                 self.say(status, false);
-                self.input.clear();
-                self.show_newest();
+                took(self);
+                newest(self);
                 for s in echo {
                     self.push(s);
                 }
             }
-            EnterAction::StatusOnly(s) => self.say(s, true),
+            EnterAction::StatusOnly(s) => {
+                self.say(s, true);
+                taken = false;
+            }
             EnterAction::Quiet(name) => {
                 // The key first, so a narrow status line keeps it; only a
                 // key that arrives on this terminal is named (ADR-409).
                 let how = if self.enhanced { "Ctrl+Enter or Enter again to send now" } else { "press Enter again to send" };
                 self.say(format!("{how}: @{name} is quiet (no heartbeat)"), true);
-                self.send_anyway = Some((self.input.text().to_string(), self.normal_tab()));
+                self.send_anyway = Some((text.to_string(), fg.clone()));
+                taken = false;
             }
             EnterAction::ClearWithStatusAndFocus { status, focus } => {
                 self.say(status, false);
-                self.input.clear();
+                took(self);
                 // `/dissolve` closed the foreground tab: move focus where
                 // the handler advanced it.
                 self.set_tab(focus);
             }
             EnterAction::HideHere => {
-                self.input.clear();
+                took(self);
                 self.ask_hide(fg);
             }
             // Refused while a delete runs, the command stays in the box.
             EnterAction::DeleteRead(c) => {
-                if !self.refused_while_removing() {
-                    self.input.clear();
+                if self.refused_while_removing() {
+                    taken = false;
+                } else {
+                    took(self);
                     self.delete_read(crate::attend_cli::Scope::channel(&c), "all");
                 }
             }
@@ -636,6 +718,7 @@ impl ChatPane {
             self.say(said, false);
         }
         self.stale();
+        taken
     }
 
     /// Read the chat's settings again: a `/config` set applies at once.
@@ -645,30 +728,36 @@ impl ChatPane {
 
     /// Take `config` as the chat's settings. A `sidebar_key` newly set to
     /// `none` shows the column: no key would bring a hidden one back.
-    fn apply_settings(&mut self, config: attend_config::ChatConfig) {
+    fn apply_settings(&mut self, mut config: attend_config::ChatConfig) {
         if config.sidebar_key == "none" && self.config.sidebar_key != "none" {
             self.sidebar = true;
             self.invalidate();
         }
+        if let Some(d) = self.fixed_delay {
+            config.send_delay = d;
+        }
         self.config = config;
     }
 
-    /// Enter in a dry run: say what would happen, change nothing.
-    fn enter_dry(&mut self) {
-        let text = self.input.text().trim_end().to_string();
+    /// Enter in a dry run: say what would happen, change nothing but the
+    /// compose box, which a line from it leaves.
+    fn enter_dry(&mut self, text: &str, shown: &Tab, from_box: bool) -> bool {
+        let text = text.trim_end();
         if text.is_empty() {
-            return;
+            return false;
         }
-        let what = match crate::slash::parse(&text) {
+        let what = match crate::slash::parse(text) {
             Some((cmd, _)) => format!("dry run: /{cmd} not run"),
             None => {
-                let shown = self.normal_tab();
-                let to = self.flag_label(&text, &shown).unwrap_or(format!("#{}", tabs::send_scope(&shown)));
+                let to = self.flag_label(text, shown).unwrap_or(format!("#{}", tabs::send_scope(shown)));
                 format!("dry run: not sent to {to}")
             }
         };
         self.say(what, false);
-        self.input.clear();
+        if from_box {
+            self.input.clear();
+        }
+        true
     }
 
     /// Back to the newest messages: after a success, so the sent message
@@ -801,6 +890,9 @@ impl Pane for ChatPane {
     }
 
     fn draw(&mut self, f: &mut Frame, area: Rect) {
+        // Before the loop waits for input again: what is noted is what the
+        // screen shows, for a forced exit while the loop waits.
+        self.note_unsent();
         if !self.dirty {
             if let Some((at, cells)) = &self.last_frame {
                 if *at == area {
@@ -834,10 +926,11 @@ impl Pane for ChatPane {
     /// box their single-key forms (`1`..`9`, `m`, `?`, `q`) are the shell's
     /// too.
     ///
-    /// Esc never quits (ADR-409): in the compose box it clears the message
-    /// selected and what the bar says, the draft kept; elsewhere it brings
-    /// the focus back to the box. Where Ctrl+3 arrives as Esc it is the same
-    /// Esc, so a tab key can never close the chat.
+    /// Esc never quits (ADR-409): in the compose box it recalls the newest
+    /// message waiting to send, and with none it clears the message selected
+    /// and what the bar says, the draft kept; elsewhere it moves along the
+    /// Esc cycle. Where Ctrl+3 arrives as Esc it is the same Esc, so no
+    /// Ctrl+digit is a jump there ([`crate::settings::tab_keys`]).
     fn key(&mut self, k: KeyEvent) -> Keyed {
         self.dirty = true;
         if self.is_sidebar_key(&k) {
@@ -846,6 +939,7 @@ impl Pane for ChatPane {
             return Keyed::Done;
         }
         self.dispatch(ix::Ev::Key(k));
+        self.note_unsent();
         Keyed::Done
     }
 
@@ -862,8 +956,9 @@ impl Pane for ChatPane {
         self.ix.ctx()
     }
 
-    /// The column numbers its channels, from 1, for Ctrl+digit, Alt+digit
-    /// and a plain digit on a channel's row; the shell's tab bar carries no
+    /// The column numbers its channels, from 1, for Alt+digit, Ctrl+digit
+    /// where the kitty keyboard protocol reports it, and a plain digit on a
+    /// channel's row; the shell's tab bar carries no
     /// numbers of its own, and the chat's tabs carry the column's while it
     /// is hidden ([`view::tabs`]).
     fn own_numbers(&self) -> Option<&'static str> {
@@ -919,6 +1014,7 @@ impl Pane for ChatPane {
         self.input.insert_str(&kept);
         self.tab_cycle = None;
         self.dirty = true;
+        self.note_unsent();
     }
 
     /// The wheel scrolls what is under it: one of the column's lists, or
@@ -931,7 +1027,8 @@ impl Pane for ChatPane {
         }
     }
 
-    /// A click on a message selects it and brings it whole into view; on
+    /// A click on a message selects it and brings it whole into view, and
+    /// on one waiting to send recalls it into the compose box; on
     /// the compose box's text it puts the cursor there; on a chip of the
     /// helper row it completes what is being typed to it. The keyboard goes
     /// back to the compose box, but for a click on the column while it has
@@ -950,8 +1047,11 @@ impl Pane for ChatPane {
             return self.flag_menu();
         }
         if feed {
+            // A message waiting to send is recalled; any other is selected.
             if let Some(i) = self.feed.entry_at(at.y - self.hits.feed.y) {
-                self.feed.reveal(i);
+                if !self.recall_entry(i) {
+                    self.feed.reveal(i);
+                }
             }
             return;
         }
@@ -985,9 +1085,13 @@ impl Pane for ChatPane {
     /// The status slot (#398, #400): a fresh result asserts itself, an
     /// error in the error role; past [`STATUS_ASSERT`] a delete or a
     /// tombstone still running says so, else the help of a command being
-    /// typed, or the last result, set back.
+    /// typed, or the last result, set back. A countdown the feed does not
+    /// show comes after a fresh result and before the rest.
     fn status(&mut self) -> Option<(String, Tone)> {
-        let fresh = self.status_set_at.is_some_and(|t| t.elapsed() < STATUS_ASSERT);
+        if let Some(countdown) = self.countdown_status() {
+            return Some((countdown, Tone::Said));
+        }
+        let fresh = self.status_fresh();
         let help = crate::slash::contextual_help(self.input.text()).map(|h| (h, self.input.text().starts_with('/')));
         let (line, how) = status_slot(fresh, self.status_is_error, self.busy_line(), help, &self.status);
         let tone = match how {
@@ -1006,11 +1110,42 @@ impl Pane for ChatPane {
         self.config.mouse
     }
 
-    /// What quitting now would lose: a draft, and a delete or tombstone
-    /// still running, which would go on unseen.
+    /// What quitting now would lose: a draft, messages waiting to send, and
+    /// a delete or tombstone still running, which would go on unseen.
     fn unsaved(&self) -> Option<String> {
-        let parts: Vec<&str> = [(!self.input.is_empty()).then_some("a draft in the compose box"), self.running_what()].into_iter().flatten().collect();
+        let waiting = self.pending_unsaved();
+        let parts: Vec<&str> = [(!self.input.is_empty()).then_some("a draft in the compose box"), waiting.as_deref(), self.running_what()].into_iter().flatten().collect();
         (!parts.is_empty()).then(|| parts.join(" and "))
+    }
+
+    /// Messages waiting to send are sent by the exit guard's Send and quit,
+    /// drafts kept by it or by Quit, keep the drafts, or both discarded by
+    /// Quit and discard all; never dropped unasked.
+    fn quit_keeping(&self) -> Option<(String, char)> {
+        self.pending_quit_keeping()
+    }
+
+    /// Send and quit, or Quit, keep the drafts: what waits is sent and the
+    /// drafts are kept for the next chat; false, and the chat stays open,
+    /// when either did not go.
+    fn keep_on_quit(&mut self) -> bool {
+        let kept = self.send_all_now() && self.keep_draft();
+        if kept {
+            // The chat ends with this: a panic after it keeps nothing twice.
+            unsent::clear();
+        }
+        kept
+    }
+
+    /// The chat ends unasked, by a signal or the terminal hanging up: what
+    /// waits to send goes now ([`ChatPane::send_waiting_at_unasked_exit`]),
+    /// and what did not go, the draft included, is kept for the next chat.
+    fn ending(&mut self) {
+        self.send_waiting_at_unasked_exit();
+        self.keep_what_did_not_go();
+        // What could be kept is kept: a panic or a forced exit after this
+        // keeps nothing more, so nothing sent or kept here is kept twice.
+        unsent::clear();
     }
 
     fn has_tab_menus(&self) -> bool {
@@ -1061,7 +1196,7 @@ impl Pane for ChatPane {
     }
 
     fn quit_help(&self) -> Option<String> {
-        Some("quit; q asks first, ^C over a draft; so does ≡ → Quit".into())
+        Some("quit; q asks first, ^C over a draft or a message waiting; so does ≡ → Quit".into())
     }
 
     fn take_open(&mut self) -> Option<Open> {
@@ -1092,7 +1227,7 @@ impl Pane for ChatPane {
     }
 
     fn tab_keys(&self) -> agent_tui::TabKeys {
-        crate::settings::tab_keys(&self.config)
+        crate::settings::tab_keys(&self.config, self.enhanced)
     }
 
     fn set_keyboard_enhanced(&mut self, on: bool) {
@@ -1101,17 +1236,18 @@ impl Pane for ChatPane {
 
     fn discard(&mut self) {
         self.input.clear();
+        self.discard_pending();
     }
 
     fn help(&self) -> Option<String> {
         Some(
             "Enter sends to the shown channel; ⋯all, every channel together, sends to\n\
              #open. @name or #channel at the start addresses the message; Tab completes\n\
-             them, and with nothing to complete moves on. /help lists the slash commands.\n\
-             The column numbers the channels: Ctrl+digit shows one, 0 the operator view.\n\
+             them; /help lists the commands. A message waits a few seconds; Esc recalls it.\n\
+             The column numbers the channels: Alt+digit shows one, 0 the operator view.\n\
              Tab and Shift+Tab walk the tabs, the column, the feed and the box, and Enter\n\
-             opens a menu. Esc goes to the feed, then the ≡ menu, then back to where you\n\
-             were. `attend message` reads and sends on the same bus outside the screen."
+             opens a menu. Outside the box Esc opens the ≡ menu, then goes back to where\n\
+             you were. `attend message` reads and sends on the same bus outside the screen."
                 .into(),
         )
     }
@@ -1124,6 +1260,7 @@ impl Pane for ChatPane {
 
     fn tick(&mut self) {
         self.drain();
+        self.tick_pending();
         self.attend_answered();
         self.new_day();
         if self.refreshed.is_none_or(|t| t.elapsed() >= REFRESH) {
@@ -1216,9 +1353,47 @@ impl Chat {
     }
 
     /// Show timestamps against a fixed `now` at a UTC `offset` in seconds.
+    /// A message waiting to send counts down on the same clock, so it is
+    /// still until [`Chat::advance`] moves it.
     pub fn pinned(mut self, now: SystemTime, offset: i64) -> Chat {
         self.pane_mut().clock = Clock::Pinned { now, offset };
         self
+    }
+
+    /// Move a pinned clock on by `d`, as time passing would: a countdown
+    /// that ends is sent on the next tick. A live clock moves by itself.
+    pub fn advance(&mut self, d: Duration) {
+        if let Clock::Pinned { now, offset } = self.pane().clock {
+            self.pane_mut().clock = Clock::Pinned { now: now + d, offset };
+        }
+    }
+
+    /// `attend.chat.send_delay` for this chat, whatever the settings file
+    /// says, then or after a `/config`.
+    pub fn send_delay(mut self, d: Duration) -> Chat {
+        let pane = self.pane_mut();
+        pane.config.send_delay = d;
+        pane.fixed_delay = Some(d);
+        self
+    }
+
+    /// Keep text typed and not sent in the directory `dir` rather than
+    /// attend-chat's state directory ([`ChatPane::keep_unsent`]).
+    pub fn unsent_dir(mut self, dir: impl Into<std::path::PathBuf>) -> Chat {
+        self.pane_mut().unsent_dir = dir.into();
+        self
+    }
+
+    /// Open with what the last chat kept unsent in the compose box
+    /// ([`ChatPane::restore_unsent`]).
+    pub fn restore_unsent(mut self) -> Chat {
+        self.pane_mut().restore_unsent();
+        self
+    }
+
+    /// The messages waiting to send, oldest first.
+    pub fn pending(&self) -> Vec<String> {
+        self.pane().pending.iter().map(|h| h.text.clone()).collect()
     }
 
     /// Draw with the theme `name` names, or the terminal's own palette for

@@ -110,11 +110,17 @@ impl Hidden {
 
 /// attend-chat's state file for the watermarks.
 pub fn default_path() -> PathBuf {
+    state_dir().join("hidden")
+}
+
+/// attend-chat's state directory: `$XDG_STATE_HOME/attend-chat`, or
+/// `~/.local/state/attend-chat`.
+pub fn state_dir() -> PathBuf {
     let state = std::env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
         .unwrap_or_else(|| claude_sessions::home_dir().join(".local").join("state"));
-    state.join("attend-chat").join("hidden")
+    state.join("attend-chat")
 }
 
 #[cfg(test)]

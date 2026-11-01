@@ -8,10 +8,13 @@ use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
+/// A fixture home whose attend file sets `attend.chat.send_delay: 0`, so
+/// Enter sends at once, as before the delay.
 fn home(tag: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("attend-chat-life-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
+    attend_config::write_within(&d.join("config/attend/config.yaml"), None, &[("attend.chat.send_delay", 0.into())]).unwrap();
     d
 }
 
@@ -133,6 +136,19 @@ mod on_a_terminal {
 
     /// [`start`] with `config` as the user's attend config file.
     fn start_with(tag: &str, config: Option<&str>) -> Pty {
+        start_on(tag, config, false, false)
+    }
+
+    /// [`start_with`]; with `leader`, the chat leads a session of its own
+    /// whose controlling terminal is the pty, as under a shell in a
+    /// terminal window, so the kernel sends it SIGHUP when the pty closes.
+    /// With `blocking`, the master has one descriptor, which the reader
+    /// blocks in `read` on, as a terminal emulator's reader thread does.
+    /// Closing it then frees the master only when that read returns, just
+    /// after the chat's next frame. The chat and the reader share one CPU,
+    /// so the reader the frame wakes runs, and frees the master, before the
+    /// chat goes on.
+    fn start_on(tag: &str, config: Option<&str>, leader: bool, blocking: bool) -> Pty {
         let home = super::home(tag);
         if let Some(c) = config {
             std::fs::create_dir_all(home.join("config/attend")).unwrap();
@@ -147,7 +163,33 @@ mod on_a_terminal {
             libc::fcntl(m, libc::F_SETFD, libc::FD_CLOEXEC);
             (OwnedFd::from_raw_fd(m), OwnedFd::from_raw_fd(s))
         };
-        let child = Command::new(env!("CARGO_BIN_EXE_attend-chat"))
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_attend-chat"));
+        let cpu = one_cpu();
+        if blocking {
+            use std::os::unix::process::CommandExt;
+            // SAFETY: sched_setaffinity is async-signal-safe, and runs in
+            // the child between fork and exec, on a set copied in.
+            unsafe {
+                cmd.pre_exec(move || {
+                    pin(&cpu);
+                    Ok(())
+                });
+            }
+        }
+        if leader {
+            use std::os::unix::process::CommandExt;
+            // SAFETY: setsid and the ioctl are async-signal-safe, and run
+            // in the child between fork and exec.
+            unsafe {
+                cmd.pre_exec(|| {
+                    if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) < 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+        }
+        let child = cmd
             .env("HOME", &home)
             .env("XDG_CONFIG_HOME", home.join("config"))
             .env("XDG_CACHE_HOME", home.join("cache"))
@@ -162,10 +204,30 @@ mod on_a_terminal {
             .spawn()
             .expect("the binary starts");
         let seen = Arc::new(Mutex::new(Vec::new()));
-        let mut reader = std::fs::File::from(master.try_clone().unwrap());
         let sink = seen.clone();
         let stop = Arc::new(AtomicBool::new(false));
         let halt = stop.clone();
+        if blocking {
+            let fd = master.as_raw_fd();
+            let handle = std::thread::spawn(move || {
+                pin(&cpu);
+                let mut b = [0u8; 4096];
+                // The flag is set before the descriptor is closed, so no
+                // read follows the one the close lands in.
+                while !halt.load(Ordering::SeqCst) {
+                    // SAFETY: a read into our own buffer; a closed fd fails.
+                    let n = unsafe { libc::read(fd, b.as_mut_ptr().cast(), b.len()) };
+                    if n <= 0 {
+                        break;
+                    }
+                    sink.lock().unwrap().extend_from_slice(&b[..n as usize]);
+                }
+            });
+            let pty = Pty { child, master: Some(std::fs::File::from(master)), seen, stop, reader: Some(handle), home };
+            pty.wait_for("⋯all".as_bytes());
+            return pty;
+        }
+        let mut reader = std::fs::File::from(master.try_clone().unwrap());
         let handle = std::thread::spawn(move || {
             let mut b = [0u8; 4096];
             while !halt.load(Ordering::SeqCst) {
@@ -184,6 +246,25 @@ mod on_a_terminal {
         pty
     }
 
+    /// A set of one CPU this process may run on.
+    fn one_cpu() -> libc::cpu_set_t {
+        // SAFETY: cpu_set_t is plain data; the calls read and fill our own.
+        unsafe {
+            let mut all: libc::cpu_set_t = std::mem::zeroed();
+            libc::sched_getaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &mut all);
+            let first = (0..libc::CPU_SETSIZE as usize).find(|&c| libc::CPU_ISSET(c, &all)).unwrap_or(0);
+            let mut one: libc::cpu_set_t = std::mem::zeroed();
+            libc::CPU_SET(first, &mut one);
+            one
+        }
+    }
+
+    /// Keep the calling thread to the CPUs in `set`.
+    fn pin(set: &libc::cpu_set_t) {
+        // SAFETY: pid 0 is the calling thread; the set is ours to read.
+        unsafe { libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), set) };
+    }
+
     impl Pty {
         fn has(&self, needle: &[u8]) -> bool {
             self.seen.lock().unwrap().windows(needle.len()).any(|w| w == needle)
@@ -192,17 +273,27 @@ mod on_a_terminal {
         fn wait_for(&self, needle: &[u8]) {
             let start = Instant::now();
             while !self.has(needle) {
-                assert!(start.elapsed() < Duration::from_secs(10), "the screen never showed {:?}", String::from_utf8_lossy(needle));
+                if start.elapsed() >= Duration::from_secs(10) {
+                    let seen = self.seen.lock().unwrap().clone();
+                    let tail = String::from_utf8_lossy(&seen[seen.len().saturating_sub(1500)..]).replace('\x1b', "^");
+                    panic!("the screen never showed {:?}; last bytes: {tail}", String::from_utf8_lossy(needle));
+                }
                 std::thread::sleep(Duration::from_millis(20));
             }
         }
 
         /// The exit code, failing if the process still runs after ten seconds.
         fn exit_code(&mut self) -> Option<i32> {
+            let code = self.ended();
+            let _ = std::fs::remove_dir_all(&self.home);
+            code
+        }
+
+        /// [`Pty::exit_code`], leaving the fixture home to look in.
+        fn ended(&mut self) -> Option<i32> {
             let start = Instant::now();
             loop {
                 if let Some(st) = self.child.try_wait().unwrap() {
-                    let _ = std::fs::remove_dir_all(&self.home);
                     return st.code();
                 }
                 if start.elapsed() > Duration::from_secs(10) {
@@ -244,6 +335,131 @@ mod on_a_terminal {
         assert_eq!(p.exit_code(), Some(0), "Ctrl-C with nothing typed quits at once");
         std::thread::sleep(Duration::from_millis(100));
         assert!(p.restored());
+    }
+
+    /// A chat whose Enter holds a message five seconds, with a message held
+    /// and a draft in the box.
+    fn holding(tag: &str, leader: bool) -> Pty {
+        holding_on(tag, leader, false)
+    }
+
+    /// [`holding`], with the reader `blocking` as [`start_on`] has it.
+    fn holding_on(tag: &str, leader: bool, blocking: bool) -> Pty {
+        let mut p = start_on(tag, Some("chat:\n  send_delay: 5\n"), leader, blocking);
+        p.master.as_mut().unwrap().write_all(b"said just before the hangup\r").unwrap();
+        p.wait_for(b"sending in");
+        // A paste is one event. The frame that draws it rewrites only the
+        // cells that changed, so the text is not looked for on the screen;
+        // the kept file shows whether it reached the box.
+        // A bracketed paste, built from the ESC byte so the SGR lint, which looks for
+        // escape literals, has nothing to flag.
+        let paste = [&[0x1b][..], b"[200~a draft at the hangup", &[0x1b], b"[201~"].concat();
+        p.master.as_mut().unwrap().write_all(&paste).unwrap();
+        std::thread::sleep(Duration::from_millis(400));
+        p
+    }
+
+    fn kill(p: &Pty, sig: i32) {
+        // SAFETY: a signal to our own child.
+        unsafe { libc::kill(p.child.id() as i32, sig) };
+    }
+
+    /// Wait until the child has taken `sig` from its process's pending set.
+    /// Two signals pending at once are delivered lowest number first, so a
+    /// SIGHUP sent straight after a SIGTERM can arrive before it.
+    fn taken(p: &Pty, sig: i32) {
+        let start = Instant::now();
+        let bit = 1u64 << (sig - 1);
+        loop {
+            let status = std::fs::read_to_string(format!("/proc/{}/status", p.child.id())).unwrap_or_default();
+            let pending = status.lines().find_map(|l| l.strip_prefix("ShdPnd:")).and_then(|v| u64::from_str_radix(v.trim(), 16).ok());
+            if pending.is_none_or(|m| m & bit == 0) {
+                return;
+            }
+            assert!(start.elapsed() < Duration::from_secs(10), "signal {sig} was never taken");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    /// The held message reached #open's room, and the draft is in a kept
+    /// file: what the chat's own ending does, which a signal that forced
+    /// the exit would have skipped.
+    fn sent_and_kept(p: &Pty) {
+        let all = super::walk(&p.home);
+        let has = |dir: &str, body: &str| all.iter().any(|f| f.components().any(|c| c.as_os_str() == dir) && std::fs::read_to_string(f).is_ok_and(|t| t.contains(body)));
+        assert!(has("_broadcast", "said just before the hangup"), "the held message was sent: {:?}", all.iter().map(|f| (f.strip_prefix(&p.home).unwrap().display().to_string(), std::fs::read_to_string(f).unwrap_or_default().chars().take(80).collect::<String>())).filter(|(n, _)| n.contains("signal") || n.contains("unsent")).collect::<Vec<_>>());
+        assert!(has("unsent", "a draft at the hangup"), "the draft was kept");
+    }
+
+    /// A closing terminal sends SIGHUP more than once: a repeat is no
+    /// forced exit, so the chat's ending runs.
+    #[test]
+    fn two_hangups_still_send_what_waits_and_keep_the_draft() {
+        let mut p = holding("hup2", false);
+        kill(&p, libc::SIGHUP);
+        // Apart, so the two are two deliveries: two sent at once are one.
+        std::thread::sleep(Duration::from_millis(5));
+        kill(&p, libc::SIGHUP);
+        assert_eq!(p.ended(), Some(128 + libc::SIGHUP));
+        sent_and_kept(&p);
+        let _ = std::fs::remove_dir_all(&p.home);
+    }
+
+    /// A SIGHUP after a SIGTERM is no forced exit either; the exit reports
+    /// the first signal.
+    #[test]
+    fn a_hangup_after_a_term_still_sends_and_keeps() {
+        let mut p = holding("termhup", false);
+        kill(&p, libc::SIGTERM);
+        taken(&p, libc::SIGTERM);
+        kill(&p, libc::SIGHUP);
+        assert_eq!(p.ended(), Some(128 + libc::SIGTERM));
+        sent_and_kept(&p);
+        let _ = std::fs::remove_dir_all(&p.home);
+    }
+
+    /// The terminal closes under the chat as a terminal window's does: the
+    /// kernel hangs up its session, and the shell's own SIGHUP follows.
+    #[test]
+    fn a_closed_terminal_sends_what_waits_and_keeps_the_draft() {
+        let mut p = holding("close", true);
+        p.stop.store(true, Ordering::SeqCst);
+        p.reader.take().unwrap().join().unwrap();
+        drop(p.master.take());
+        kill(&p, libc::SIGHUP);
+        assert_eq!(p.ended(), Some(128 + libc::SIGHUP));
+        sent_and_kept(&p);
+        let _ = std::fs::remove_dir_all(&p.home);
+    }
+
+    /// The pty closes with no signal at all: crossterm's poll would spin
+    /// on the dead terminal, and the chat must see the hangup itself.
+    #[test]
+    fn a_terminal_closed_with_no_signal_still_sends_and_keeps() {
+        let mut p = holding("nosig", false);
+        p.stop.store(true, Ordering::SeqCst);
+        p.reader.take().unwrap().join().unwrap();
+        drop(p.master.take());
+        assert_eq!(p.ended(), Some(128 + libc::SIGHUP));
+        sent_and_kept(&p);
+        let _ = std::fs::remove_dir_all(&p.home);
+    }
+
+    /// The master closes while a reader is blocked on it, so the hangup
+    /// lands just after a frame, outside the chat's wait for input. The
+    /// chat still sees the terminal it started on and ends as on SIGHUP;
+    /// asked afresh whether stdin is a terminal, it would answer no and
+    /// spin in crossterm's poll until the watch thread exits without the
+    /// ending.
+    #[test]
+    fn a_terminal_closed_just_after_a_frame_still_sends_and_keeps() {
+        let mut p = holding_on("afterframe", false, true);
+        p.stop.store(true, Ordering::SeqCst);
+        drop(p.master.take());
+        p.reader.take().unwrap().join().unwrap();
+        assert_eq!(p.ended(), Some(128 + libc::SIGHUP));
+        sent_and_kept(&p);
+        let _ = std::fs::remove_dir_all(&p.home);
     }
 
     #[test]

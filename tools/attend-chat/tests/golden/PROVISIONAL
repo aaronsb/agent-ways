@@ -10,7 +10,8 @@
 # A frame listed here is never asserted or blessed, in CI too. A drift or a
 # missing golden prints one note. Every frame not listed is settled and
 # always asserted. The anchors are the default chat view, with the column
-# shown, at 80x25 and at the reference size: sidebar-80x25, sidebar-120x40.
+# shown, at 80x25 and at the reference size: sidebar-80x25, and
+# sidebar-120x40 once its footer is accepted (listed below).
 # The interaction behaviour is pinned by the table and property tests of
 # `step` (tools/attend-chat/src/app/ix.rs).
 #
@@ -27,6 +28,7 @@ compose-multiline-80x25
 ctrl-n-new-channel-draft-80x25
 esc-menu-80x25
 guard-draft-80x25
+guard-pending-80x25
 keys-80x25
 legend-agents-80x25
 legend-groups-80x25
@@ -36,10 +38,14 @@ message-menu-80x25
 mouse-on-80x25
 new-channel-prompt-80x25
 no-color-80x25
+pending-80x25
+pending-joined-80x25
+recalled-80x25
 review-dms-120x40
 review-dms-80x25
 scrolled-back-80x25
 sent-deploy-80x25
+sidebar-120x40  # 2026-11-01: the footer row drops "Esc the feed", since Esc in the box recalls a message waiting to send (ADR-409, note of 2026-11-01); bless it when the operator accepts the footer
 sidebar-keyboard-80x25
 sidebar-narrow-70x25
 sidebar-off-80x25

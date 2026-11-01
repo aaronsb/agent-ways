@@ -120,30 +120,142 @@ fn save_termios() {
     });
 }
 
-/// A second signal while the first is not yet acted on: end the command's
-/// process group, put the terminal back and exit, from the handler. Only
-/// async-signal-safe calls: an atomic load, killpg, write, tcsetattr and
-/// _exit.
+/// What the application keeps before a forced exit, set once by
+/// [`on_forced_exit`].
+static BEFORE_FORCED_EXIT: OnceLock<fn()> = OnceLock::new();
+
+/// Set once a forced exit has begun, so a signal that comes while the hook
+/// runs ends the process from the handler.
+static FORCING: AtomicBool = AtomicBool::new(false);
+
+/// A forcing signal the handler hands to the watch thread ([`forces`]); 0
+/// while there is none.
+static FORCE: AtomicI32 = AtomicI32::new(0);
+
+/// Run `keep` before every forced exit: the watch thread's two limits
+/// ([`UNSEEN`], [`SEEN`]) and a second SIGTERM or SIGINT ([`forces`]).
+/// The pane's ending ([`crate::Pane::ending`]) does not run on those
+/// exits, so this is what keeps the application's unsaved work there.
+/// `keep` runs on a thread of its own while the run loop may be wedged,
+/// even inside crossterm's read: it may write files from state the
+/// application noted, and must not wait on a lock the loop could hold
+/// without a bound. The terminal is put back before it. It has
+/// [`HOOK_BOUND`] to end; past that the process exits without it, so a
+/// write that blocks, on a hung network mount for one, never holds the
+/// exit. Set once; false when a hook was set already.
+pub fn on_forced_exit(keep: fn()) -> bool {
+    BEFORE_FORCED_EXIT.set(keep).is_ok()
+}
+
+/// How long a forced exit waits for the hook ([`on_forced_exit`]) before
+/// it exits without it.
+const HOOK_BOUND: Duration = Duration::from_secs(3);
+
+/// The thread that runs the hook, started with the watch
+/// ([`Signals::install`]) so a forced exit starts no thread.
+static KEEPER: OnceLock<std::thread::Thread> = OnceLock::new();
+
+/// Set by a forced exit to start the hook on [`KEEPER`].
+static KEEP_START: AtomicBool = AtomicBool::new(false);
+
+/// Set by [`KEEPER`] once the hook has returned.
+static KEEP_DONE: AtomicBool = AtomicBool::new(false);
+
+/// The keeper thread: it waits for a forced exit, runs the hook once, and
+/// says so.
+fn keeper() {
+    while !KEEP_START.load(Ordering::SeqCst) {
+        std::thread::park();
+    }
+    if let Some(keep) = BEFORE_FORCED_EXIT.get() {
+        keep();
+    }
+    KEEP_DONE.store(true, Ordering::SeqCst);
+}
+
+/// Run the hook on [`KEEPER`] and wait until it returns or `bound` has
+/// passed, whichever comes first. With no keeper, which only a failed
+/// [`Signals::install`] leaves, the hook runs here.
+fn keep_within(bound: Duration) {
+    let Some(keep) = BEFORE_FORCED_EXIT.get() else { return };
+    let Some(keeper) = KEEPER.get() else {
+        keep();
+        return;
+    };
+    KEEP_START.store(true, Ordering::SeqCst);
+    keeper.unpark();
+    let start = Instant::now();
+    while !KEEP_DONE.load(Ordering::SeqCst) && start.elapsed() < bound {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// End the process without the pane's ending: the terminal back first,
+/// then the hook ([`on_forced_exit`]) for at most [`HOOK_BOUND`], then the
+/// command's process group and the exit, by [`emergency_exit`], which
+/// takes no lock the loop could hold.
+fn forced_exit(sig: i32) -> ! {
+    FORCING.store(true, Ordering::SeqCst);
+    reset_terminal();
+    keep_within(HOOK_BOUND);
+    emergency_exit(sig)
+}
+
+/// Set once a forced exit has written the terminal's reset, so it is
+/// written once.
+static RESET_WRITTEN: AtomicBool = AtomicBool::new(false);
+
+/// Put the terminal back with no lock taken: the keyboard enhancement
+/// popped, the reset escapes written once, the line settings from before.
+/// Only async-signal-safe calls: atomics, write and tcsetattr.
 #[cfg(unix)]
-fn emergency_exit(sig: i32) -> ! {
-    let pg = JOB_GROUP.load(Ordering::SeqCst);
+fn reset_terminal() {
     // SAFETY: each call below is async-signal-safe and touches only data
     // set up before the handler was installed.
     unsafe {
-        if pg > 0 {
-            libc::killpg(pg, libc::SIGKILL);
-        }
-        if KEYBOARD_PUSHED.load(Ordering::SeqCst) {
-            libc::write(1, KEYBOARD_POP.as_ptr().cast(), KEYBOARD_POP.len());
-        }
-        if let Some(r) = RESET.get() {
-            libc::write(1, r.as_ptr().cast(), r.len());
+        if !RESET_WRITTEN.swap(true, Ordering::SeqCst) {
+            if KEYBOARD_PUSHED.load(Ordering::SeqCst) {
+                libc::write(1, KEYBOARD_POP.as_ptr().cast(), KEYBOARD_POP.len());
+            }
+            if let Some(r) = RESET.get() {
+                libc::write(1, r.as_ptr().cast(), r.len());
+            }
         }
         if let Some(t) = SAVED_TERMIOS.get() {
             libc::tcsetattr(0, libc::TCSANOW, t);
         }
-        libc::_exit(128 + sig)
     }
+}
+
+/// Elsewhere [`emergency_exit`] puts the terminal back, by [`restore`],
+/// which takes the stdout lock.
+#[cfg(not(unix))]
+fn reset_terminal() {}
+
+/// End the command's process group, put the terminal back and exit with
+/// 128 plus `sig`, with no lock taken. Only async-signal-safe calls: an
+/// atomic load, killpg, [`reset_terminal`]'s and _exit, so a signal that
+/// comes while [`forced_exit`]'s hook runs ends the process from the
+/// handler.
+#[cfg(unix)]
+fn emergency_exit(sig: i32) -> ! {
+    let pg = JOB_GROUP.load(Ordering::SeqCst);
+    // SAFETY: killpg and _exit are async-signal-safe.
+    unsafe {
+        if pg > 0 {
+            libc::killpg(pg, libc::SIGKILL);
+        }
+    }
+    reset_terminal();
+    // SAFETY: as above.
+    unsafe { libc::_exit(128 + sig) }
+}
+
+#[cfg(not(unix))]
+fn emergency_exit(sig: i32) -> ! {
+    kill_job_group();
+    restore();
+    std::process::exit(128 + sig)
 }
 
 /// The process group of the command in flight, which a forced exit and the
@@ -192,20 +304,49 @@ const UNSEEN: Duration = Duration::from_millis(500);
 const SEEN: Duration = Duration::from_secs(3);
 
 /// The termination signals, caught into a flag the loop reads, so it can
-/// stop a running command and restore the terminal before the process ends.
+/// stop a running command, let the pane end its work ([`crate::Pane::ending`])
+/// and restore the terminal before the process ends.
 ///
 /// The loop can be kept from reading it: on a terminal that hung up,
 /// crossterm's read returns nothing over and over inside one poll. So a
-/// watch thread gives the loop [`UNSEEN`] to take the signal up, then ends
-/// the command's process group, restores what it can and exits with 128
-/// plus the signal; a hung-up terminal, seen as `tcgetattr` failing on a
-/// stdin that was a terminal, counts as SIGHUP. A second signal exits at
-/// once, whatever state the process is in.
+/// watch thread gives the loop [`UNSEEN`] to take the signal up, and
+/// [`SEEN`] to end once it has, then makes a forced exit: the terminal,
+/// the hook the application set ([`on_forced_exit`]) for at most
+/// [`HOOK_BOUND`], the command's process group and an exit with 128 plus
+/// the first signal. A hung-up
+/// terminal, seen as `tcgetattr` failing on a stdin that was a terminal,
+/// counts as SIGHUP.
+///
+/// Which signal forces an exit at once is [`forces`]: a second SIGTERM or
+/// SIGINT, while the loop has not yet taken the first signal up. The
+/// handler hands it to the watch thread, which makes the same forced exit
+/// within its next 50 ms. A SIGHUP never forces. A terminal
+/// that closes sends several: the kernel signals the foreground group, the
+/// shell sends it again to its jobs, and tmux signals the pane's group.
+/// Once the loop has taken a signal up, no signal forces, so the pane's
+/// ending runs to its end or to [`SEEN`].
 #[derive(Clone, Default)]
 pub struct Signals {
     caught: Arc<AtomicUsize>,
     /// Set by the loop when it acts on the signal.
     seen: Arc<AtomicBool>,
+}
+
+/// Whether a SIGTERM or SIGINT has come, for [`forces`].
+#[cfg(unix)]
+static DELIBERATE: AtomicBool = AtomicBool::new(false);
+
+/// Whether a signal forces an exit at once, without the pane's ending:
+/// only a SIGTERM or SIGINT (`deliberate`) that follows an earlier one
+/// (`earlier`), while the loop has not yet taken the first signal up
+/// (`seen`). There the loop may be wedged, even on the stdout lock, so the
+/// forced exit takes no lock of the loop's ([`forced_exit`]). A SIGHUP is
+/// never the forcing signal.
+/// Once the loop has taken a signal up, its exit runs, the pane's ending
+/// with it, and the watch thread's [`SEEN`] bounds an exit that hangs.
+#[cfg_attr(not(unix), allow(dead_code))]
+pub(crate) fn forces(deliberate: bool, earlier: bool, seen: bool) -> bool {
+    deliberate && earlier && !seen
 }
 
 impl Signals {
@@ -217,22 +358,37 @@ impl Signals {
         #[cfg(not(unix))]
         let caught = [signal_hook::consts::SIGTERM, signal_hook::consts::SIGINT];
         save_termios();
+        stdin_was_tty();
         for sig in caught {
-            // The first signal of any kind arms it; a second, of any kind,
-            // ends the process from the handler, the job and terminal first.
             #[cfg(unix)]
             {
-                static ARMED: AtomicBool = AtomicBool::new(false);
-                // SAFETY: the handler makes only async-signal-safe calls.
+                let (first, seen) = (s.caught.clone(), s.seen.clone());
+                // SAFETY: the handler makes only async-signal-safe calls:
+                // atomic loads and stores, and `emergency_exit`'s.
                 unsafe {
                     signal_hook::low_level::register(sig, move || {
-                        if ARMED.swap(true, Ordering::SeqCst) {
-                            emergency_exit(sig);
+                        // The first signal is the one the exit reports.
+                        let _ = first.compare_exchange(0, sig as usize, Ordering::SeqCst, Ordering::SeqCst);
+                        let deliberate = sig != libc::SIGHUP;
+                        let earlier = deliberate && DELIBERATE.swap(true, Ordering::SeqCst);
+                        if forces(deliberate, earlier, seen.load(Ordering::SeqCst)) {
+                            // The watch thread runs the forced exit; a
+                            // signal that comes once the exit has begun
+                            // ends the process here.
+                            if FORCING.load(Ordering::SeqCst) {
+                                emergency_exit(sig);
+                            }
+                            let _ = FORCE.compare_exchange(0, sig, Ordering::SeqCst, Ordering::SeqCst);
                         }
                     })?;
                 }
             }
+            #[cfg(not(unix))]
             signal_hook::flag::register_usize(sig, s.caught.clone(), sig as usize)?;
+        }
+        if KEEPER.get().is_none() {
+            let keeper = std::thread::Builder::new().name("agent-tui-keeper".into()).spawn(keeper)?;
+            let _ = KEEPER.set(keeper.thread().clone());
         }
         let w = s.clone();
         std::thread::Builder::new().name("agent-tui-signals".into()).spawn(move || w.watch())?;
@@ -253,10 +409,14 @@ impl Signals {
     }
 
     fn watch(&self) {
-        let tty = stdin_is_tty();
+        let tty = stdin_was_tty();
         let mut since: Option<Instant> = None;
         loop {
             std::thread::sleep(Duration::from_millis(50));
+            match FORCE.load(Ordering::SeqCst) {
+                0 => {}
+                sig => forced_exit(sig),
+            }
             if self.caught().is_none() && tty && hung_up() {
                 #[cfg(unix)]
                 self.caught.store(libc::SIGHUP as usize, Ordering::SeqCst);
@@ -265,17 +425,50 @@ impl Signals {
             let start = *since.get_or_insert_with(Instant::now);
             let limit = if self.seen.load(Ordering::SeqCst) { SEEN } else { UNSEEN };
             if start.elapsed() >= limit {
-                kill_job_group();
-                restore();
-                std::process::exit(128 + sig);
+                forced_exit(sig);
             }
         }
     }
 }
 
-fn stdin_is_tty() -> bool {
-    use std::io::IsTerminal;
-    io::stdin().is_terminal()
+/// The next input event within `wait`, or none; an error once the terminal
+/// has hung up. crossterm's poll never returns on a terminal that hung up:
+/// its read loop takes a read of nothing, or an error, as no event yet and
+/// reads again. So on Unix the terminal is polled here first, and crossterm
+/// is asked without waiting, only while the terminal is still there.
+/// `more` is set after an event, when crossterm may hold more already read.
+pub(crate) fn next_event(wait: Duration, more: bool) -> io::Result<Option<Event>> {
+    #[cfg(unix)]
+    if stdin_was_tty() {
+        let ms = if more { 0 } else { wait.as_millis().min(i32::MAX as u128) as i32 };
+        let mut pfd = libc::pollfd { fd: 0, events: libc::POLLIN, revents: 0 };
+        // SAFETY: one pollfd we own, on fd 0.
+        if unsafe { libc::poll(&mut pfd, 1, ms) } < 0 {
+            let e = io::Error::last_os_error();
+            return if e.kind() == io::ErrorKind::Interrupted { Ok(None) } else { Err(e) };
+        }
+        if pfd.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0 || hung_up() {
+            return Err(io::Error::new(io::ErrorKind::BrokenPipe, "the terminal hung up"));
+        }
+        return if event::poll(Duration::ZERO)? { event::read().map(Some) } else { Ok(None) };
+    }
+    if event::poll(wait)? {
+        event::read().map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
+/// Whether stdin was a terminal when first asked, which [`Signals::install`]
+/// does at startup. The answer is kept: `isatty` fails on a terminal that
+/// has hung up, and asked again then, it would send [`next_event`] to
+/// crossterm's poll, which spins on the dead terminal.
+fn stdin_was_tty() -> bool {
+    static TTY: OnceLock<bool> = OnceLock::new();
+    *TTY.get_or_init(|| {
+        use std::io::IsTerminal;
+        io::stdin().is_terminal()
+    })
 }
 
 /// Whether the terminal on stdin has gone: its attributes can no longer be
@@ -442,6 +635,7 @@ impl App {
     /// guard the caller holds turns it off with the rest.
     pub fn run(mut self, term: &mut DefaultTerminal, signals: &Signals) -> io::Result<Session> {
         let mut captured = false;
+        let mut more = false;
         let mut schedule = Schedule::new(Instant::now());
         if self.pane.as_ref().is_some_and(|p| p.keyboard_enhancement()) {
             // A frame first: the probe waits on the terminal's answer, up
@@ -454,8 +648,7 @@ impl App {
         loop {
             if let Some(sig) = signals.caught() {
                 signals.take_up();
-                self.stop_run("stopped by a signal");
-                return Ok(self.session(Some(sig)));
+                return Ok(self.end_unasked(sig, "stopped by a signal"));
             }
             if self.mouse != captured {
                 if self.mouse {
@@ -472,16 +665,14 @@ impl App {
             }
             let wait = self.schedule_wait(&schedule, Instant::now());
             // A terminal that can no longer be drawn on or read from has hung
-            // up: end as on SIGHUP.
-            let event = match term.draw(|f| self.draw(f)).and_then(|_| event::poll(wait)) {
-                Ok(true) => event::read().map(Some),
-                Ok(false) => Ok(None),
-                Err(e) => Err(e),
-            };
+            // up: end as on SIGHUP, taken up so the watch thread gives the
+            // pane's ending its time.
+            let event = term.draw(|f| self.draw(f)).and_then(|_| next_event(wait, more));
+            more = matches!(event, Ok(Some(_)));
             match event {
                 Err(_) => {
-                    self.stop_run("stopped: the terminal hung up");
-                    return Ok(self.session(Some(HANGUP)));
+                    signals.take_up();
+                    return Ok(self.end_unasked(HANGUP, "stopped: the terminal hung up"));
                 }
                 // A repeat is a key too: holding Backspace in a text entry.
                 Ok(Some(Event::Key(k))) if k.kind != KeyEventKind::Release && !self.key(k) => {
@@ -507,6 +698,19 @@ impl App {
             // otherwise starve them.
             self.run_due(&mut schedule, Instant::now());
         }
+    }
+
+    /// End the session without the exit guard, by `signal`, which is
+    /// SIGHUP when the terminal hung up: a check still running stops with
+    /// `why`, the pane does what it does with unsaved work at such an end
+    /// ([`crate::Pane::ending`]), and the session is handed back. The run
+    /// loop's two unasked exits come here.
+    pub fn end_unasked(mut self, signal: i32, why: &str) -> Session {
+        self.stop_run(why);
+        if let Some(p) = self.pane.as_mut() {
+            p.ending();
+        }
+        self.session(Some(signal))
     }
 
     fn session(self, signal: Option<i32>) -> Session {
@@ -582,5 +786,122 @@ mod schedule_tests {
         assert_eq!(s.due(None, false, true, t0 + ms(1000)), Due { pane: false, shell: true, watch: true });
         let mut s = Schedule::new(t0);
         assert!((1..=20).all(|i| !s.due(None, false, false, t0 + ms(100 * i)).shell), "no question, no shell tick");
+    }
+}
+
+#[cfg(test)]
+mod signal_tests {
+    use super::*;
+
+    /// A terminal closing sends SIGHUP more than once; none of them, nor a
+    /// SIGHUP after a SIGTERM, ends the process before the pane's ending.
+    #[test]
+    fn a_hangup_never_forces_an_exit() {
+        for earlier in [false, true] {
+            for seen in [false, true] {
+                assert!(!forces(false, earlier, seen), "SIGHUP, earlier {earlier}, seen {seen}");
+            }
+        }
+    }
+
+    /// A second SIGTERM or SIGINT forces only while the loop has not taken
+    /// the first up; once it has, the pane's ending runs, bounded by SEEN.
+    #[test]
+    fn a_second_deliberate_signal_forces_only_before_the_loop_acts() {
+        assert!(!forces(true, false, false), "the first is caught, not forced");
+        assert!(forces(true, true, false), "a second before the loop acts");
+        assert!(!forces(true, true, true), "a second while the ending runs");
+    }
+
+    /// The child of [`a_forced_exit_bounds_a_hook_that_blocks`]: what its
+    /// hook does, `fifo:<path>` to open a FIFO no one reads, which blocks,
+    /// or `quick` to return at once.
+    const CHILD: &str = "AGENT_TUI_FORCED_EXIT_CHILD";
+
+    /// Says on stdout whether the terminal was put back before it, then
+    /// does what [`CHILD`] says.
+    fn child_hook() {
+        let said: &[u8] = if RESET_WRITTEN.load(Ordering::SeqCst) { b"hook after reset\n" } else { b"hook before reset\n" };
+        // SAFETY: a write of bytes we own to fd 1.
+        unsafe { libc::write(1, said.as_ptr().cast(), said.len()) };
+        if let Some(fifo) = std::env::var(CHILD).ok().and_then(|m| m.strip_prefix("fifo:").map(String::from)) {
+            let _ = std::fs::OpenOptions::new().write(true).open(fifo);
+        }
+    }
+
+    /// Run by [`a_forced_exit_bounds_a_hook_that_blocks`] in a process of
+    /// its own: two SIGTERMs force an exit, whose hook is [`child_hook`].
+    #[test]
+    #[ignore = "run by a_forced_exit_bounds_a_hook_that_blocks"]
+    fn child_forced_exit() {
+        if std::env::var(CHILD).is_err() {
+            return;
+        }
+        on_forced_exit(child_hook);
+        let _signals = Signals::install().unwrap();
+        // SAFETY: raise sends a signal to this thread.
+        unsafe {
+            libc::raise(libc::SIGTERM);
+            libc::raise(libc::SIGTERM);
+        }
+        loop {
+            std::thread::sleep(Duration::from_secs(1));
+        }
+    }
+
+    /// Run the child with `mode`: its exit code, how long it ran, and its
+    /// stdout. A child still running after 15 s is killed, and its code is
+    /// `None`.
+    fn run_child(mode: &str) -> (Option<i32>, Duration, String) {
+        use std::io::Read;
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "app::term::signal_tests::child_forced_exit", "--ignored", "--nocapture", "--test-threads=1"])
+            .env(CHILD, mode)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let start = Instant::now();
+        let status = loop {
+            if let Some(st) = child.try_wait().unwrap() {
+                break st;
+            }
+            if start.elapsed() > Duration::from_secs(15) {
+                let _ = child.kill();
+                break child.wait().unwrap();
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        let took = start.elapsed();
+        let mut out = String::new();
+        child.stdout.take().unwrap().read_to_string(&mut out).unwrap();
+        (status.code(), took, out)
+    }
+
+    /// A forced exit whose hook blocks, here opening a FIFO no one reads as
+    /// a write to a hung network mount would, ends once the hook has had
+    /// HOOK_BOUND; the terminal is put back before the hook. A hook that
+    /// returns at once is not waited on past it.
+    #[cfg(unix)]
+    #[test]
+    fn a_forced_exit_bounds_a_hook_that_blocks() {
+        let fifo = std::env::temp_dir().join(format!("agent-tui-forced-exit-{}", std::process::id()));
+        let c = std::ffi::CString::new(fifo.to_string_lossy().as_bytes()).unwrap();
+        // SAFETY: mkfifo on a path we own.
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0, "mkfifo {}", fifo.display());
+        let blocked = run_child(&format!("fifo:{}", fifo.display()));
+        let quick = run_child("quick");
+        let _ = std::fs::remove_file(&fifo);
+        for (what, (code, _, out)) in [("blocked", &blocked), ("quick", &quick)] {
+            assert_eq!(*code, Some(128 + libc::SIGTERM), "{what}: exit code; None is a forced exit that never ended");
+            let reset = out.find("\x1b[?1049l").unwrap_or_else(|| panic!("{what}: no reset in {out:?}"));
+            let hook = out.find("hook after reset").unwrap_or_else(|| panic!("{what}: the hook ran before the reset: {out:?}"));
+            assert!(reset < hook, "{what}: the terminal is put back before the hook: {out:?}");
+        }
+        let (_, took, _) = blocked;
+        assert!(took >= HOOK_BOUND && took < HOOK_BOUND + Duration::from_secs(2), "blocked: ended after {took:?}, the bound is {HOOK_BOUND:?}");
+        let (_, took, _) = quick;
+        assert!(took < Duration::from_millis(1500), "quick: ended after {took:?}, not waiting out the bound");
     }
 }

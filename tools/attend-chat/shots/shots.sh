@@ -37,7 +37,31 @@ WORK=${SHOTS_DIR:-$REPO/target/tui-verify/attend-chat}
 # fixture_temp_dir does.
 TMPROOT=${TMPDIR:-/tmp}
 case "$TMPROOT/" in */.claude/worktrees/*) TMPROOT=/tmp ;; esac
-F=$(mktemp -d "$TMPROOT/attend-chat-shots.XXXXXX")
+# An agent's nickname is agent-identity's pick from its cwd, which holds the
+# random temp path: FNV-1a 64 of the path, modulo the size of the pool in
+# names.rs. Two of alpha, beta and gamma can then share a name, and an
+# `@Name` meant for the quiet one reaches a live one (#1242). The fixture
+# takes a temp path under which the three names differ.
+POOL=$(sed -n '/^pub const NAMES/,/^];/p' "$REPO/tools/agent-identity/src/names.rs" | grep -o '"[^"]*"' | wc -l)
+nick_index() { # cwd: the index of its nickname in the pool
+  local s=$1 h=$((0xcbf29ce484222325)) i c
+  for ((i = 0; i < ${#s}; i++)); do
+    printf -v c '%d' "'${s:i:1}"
+    h=$(((h ^ c) * 0x100000001b3))
+  done
+  # The hash is unsigned; bash's integers are signed.
+  if ((h >= 0)); then
+    echo $((h % POOL))
+  else
+    echo $((((h & 0x7fffffffffffffff) % POOL + 0x7fffffffffffffff % POOL + 1) % POOL))
+  fi
+}
+for _ in $(seq 50); do
+  F=$(mktemp -d "$TMPROOT/attend-chat-shots.XXXXXX")
+  a=$(nick_index "$F/work/alpha") b=$(nick_index "$F/work/beta") c=$(nick_index "$F/work/gamma")
+  [ "$a" != "$b" ] && [ "$a" != "$c" ] && [ "$b" != "$c" ] && break
+  rmdir "$F"
+done
 SESSION=
 cleanup() {
   [ -z "$SESSION" ] || $TH down "$SESSION" >/dev/null 2>&1 || true
@@ -74,13 +98,39 @@ sweep
 #   rclick: rside: rfeed: rlast:  the same with the right button
 #   wait:TEXT      until TEXT is on the screen
 #   gone:TEXT      until TEXT is off the screen
-#   resize:COLS    the terminal narrowed (or widened) to COLS columns
+#   resize:COLS    the terminal narrowed (or widened) to COLS columns;
+#                  resize:COLSxROWS sets the rows too
 #   pause:SECS     SECS on the clock, for what the screen does not show:
 #                  a question's yes arms a second after it is ready
 #   paste:TEXT     a bracketed paste of TEXT, \n for a newline
 #   rawpaste:TEXT  TEXT sent as typed, newlines and all, with no brackets
 #   bigpaste:N     a bracketed paste of N x characters
 #   newdm:TEXT     a direct message TEXT from alpha to the operator, arriving now
+#   signal:SIG     kill -SIG to the chat (Linux: found by its fixture HOME)
+#   down:          the session killed, as a closed tmux pane: tmux sends
+#                  SIGHUP and closes the pty; nothing is captured after
+#   chat:          the chat started from the shell an hup-* scenario opens
+#   sent:TEXT      until a post in #open's room holds TEXT
+#   kept:TEXT      until a file in the unsent directory holds TEXT
+#   chmod:MODE     the unsent directory's mode set to MODE, made first if absent
+# An hup-* scenario ends the chat with a message held and a draft, and
+# passes when the message was sent and the draft kept: hup-twice sends two
+# SIGHUPs, hup-term a SIGTERM then a SIGHUP, hup-down closes the pane, and
+# hup-bash runs the chat as a foreground job of an interactive bash whose
+# pane closes, so bash sends its own SIGHUP after the kernel's. wait-park
+# recalls an #open post while a draft for gamma is in the box, which is
+# parked as a draft of gamma's DM view. wait-unkept does the same, holds
+# the post again, waiting on the box to empty (at 80x11 the feed's three
+# rows show the post's body and not its countdown), and presses Send and
+# quit with the unsent directory read-only: the post is sent, and the
+# draft, not kept, stays in the feed with the reason on the status line.
+# wait-short holds a message and shrinks the pane to 80x11, where the
+# feed's three rows leave its countdown out and the status line counts
+# down instead, with where it goes and Esc recall. wait-keep-drafts shows
+# the guard over a draft with nothing waiting, which offers Quit, keep the
+# draft. wait-kept opens on what an earlier
+# chat kept (the kept fixture): the draft in alpha's DM view, and the
+# message held for a channel since gone as an entry, not sent.
 # The fixture is base, crowd (fifteen more agents), many (24 more channels,
 # so the last channel row sits at the foot), own (the operator in
 # #deploy), long (a fourth agent whose project name outruns any row),
@@ -89,14 +139,20 @@ sweep
 # session, and the agents' DMs with each other), proj (alpha, where the
 # chat runs, a project whose .claude/ways.yaml sets
 # mods.attend.listening: active, and beta a git checkout), relic (@relic/,
-# two messages an earlier channel left, that no entry names), full (the
+# two messages an earlier channel left, that no entry names), wait (base
+# with attend.chat.send_delay at its default of 5 seconds, where every other
+# fixture sets 0 so Enter sends at once), full (the
 # crowd, and #five, #eight and #everyone with that many members, the
 # participant strip's one, two and three rows and its cut, and #long, whose
 # invitees have no record and are named by their ids; full16 the same
 # at 16 colours, where the cut is `...`), dm2 (dm, and the
 # operator's DM to alpha and a second human, bob) or plain (no Nerd Font). An agent's name comes from the temp
 # path, and a long one cuts its project, so the quiet agent is clicked by
-# the column's first `○`, its row being the agents' last.
+# the column's first `○`, its row being the agents' last. In own, the
+# first frame lists the operator under #deploy but not among the agents;
+# the operator's own row joins the agents a frame later and moves every
+# channel row down by one. A scenario on own waits on `Agents 3/4`, the
+# settled count, before it clicks a row.
 SCENARIOS="
 side         | base  | wait:Agents
 off          | base  | wait:Agents F3 gone:Agents
@@ -121,7 +177,7 @@ hide-chan    | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Hid
 paste        | base  | wait:Agents text:see: paste:line_one\\nline_two\\nline_three
 rawpaste     | base  | wait:Agents rawpaste:one\\ntwo
 plain        | plain | wait:Agents
-own-row      | own   | wait:operator click:#deploy click:#deploy wait:pick Escape gone:pick side:operator wait:Leave_#deploy
+own-row      | own   | wait:Agents_3/4 click:#deploy click:#deploy wait:pick Escape gone:pick side:operator wait:Leave_#deploy
 quiet-send   | base  | wait:Agents rside:○ wait:Address click:Address_@ text:are_you_there Enter wait:no_heartbeat
 paste-asked  | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:hide_the_messages_so_far_in_⋯all? paste:yes_please\\nsecond_line wait:kept
 ask          | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide
@@ -152,6 +208,24 @@ entry-desc   | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Des
 entry-tab    | base  | wait:Agents text:draft C-n wait:new_channel_name text:abc click:#open gone:new_channel_name
 entry-row    | base  | wait:Agents click:+ wait:new_channel_name side:#infra gone:new_channel_name text:abc
 esc-twice    | base  | wait:Agents side:#infra side:#infra wait:pick Escape Escape wait:pick_one:_attend-chat
+wait-pending | wait  | wait:Agents text:first_thought,_still_forming Enter wait:Esc_recall
+wait-joined  | wait  | wait:Agents text:first_thought,_still_forming Enter wait:Esc_recall text:and_the_line_that_caught_up Enter wait:caught_up
+wait-recall  | wait  | wait:Agents text:first_thought,_still_forming Enter wait:Esc_recall text:typed_since Escape wait:recalled
+wait-up      | wait  | wait:Agents text:first_thought,_still_forming Enter wait:Esc_recall Up wait:recalled
+wait-sent    | wait  | wait:Agents text:first_thought,_still_forming Enter wait:Esc_recall gone:Esc_recall wait:sent
+wait-quit    | wait  | wait:Agents text:say_this_before_I_go Enter wait:Esc_recall C-c wait:Send_and_quit
+wait-short   | wait  | wait:Agents text:first_thought,_still_forming Enter wait:Esc_recall resize:80x11 wait:#open_·_Esc_recall
+wait-keep-drafts | wait | wait:Agents text:a_draft_with_nothing_waiting C-c wait:Quit,_keep_the_draft
+wait-gone    | wait  | wait:Agents M-3 wait:#infra_0 text:plan_for_infra Enter wait:Esc_recall paste:/dissolve_infra Enter wait:not_sent
+wait-refused | wait  | wait:Agents rside:○ wait:Address click:Address_@ text:ping Enter wait:Esc_recall text:#deploy_unrelated wait:not_sent
+wait-dm-back | wait  | wait:Agents side:○ wait:DMs text:for_gamma_alone Enter wait:Esc_recall M-0 wait:not_sent Escape wait:recalled
+wait-park    | wait  | wait:Agents text:an_open_post Enter wait:Esc_recall side:○ wait:DMs text:for_gamma_only Escape wait:recalled
+wait-unkept  | wait  | wait:Agents text:an_open_post Enter wait:Esc_recall side:○ wait:DMs text:for_gamma_only Escape wait:recalled Enter gone:>_an_open_post chmod:555 C-c wait:Send_and_quit s wait:not_kept sent:an_open_post chmod:755
+wait-kept    | kept  | wait:Agents wait:restored
+hup-twice    | wait  | wait:Agents text:said_before_the_hangup Enter wait:Esc_recall paste:a_draft_at_the_hangup wait:at_the_hangup signal:HUP signal:HUP sent:said_before_the_hangup kept:a_draft_at_the_hangup
+hup-term     | wait  | wait:Agents text:said_before_the_hangup Enter wait:Esc_recall paste:a_draft_at_the_hangup wait:at_the_hangup signal:TERM signal:HUP sent:said_before_the_hangup kept:a_draft_at_the_hangup
+hup-down     | wait  | wait:Agents text:said_before_the_hangup Enter wait:Esc_recall paste:a_draft_at_the_hangup wait:at_the_hangup down: sent:said_before_the_hangup kept:a_draft_at_the_hangup
+hup-bash     | wait  | wait:$ chat: wait:Agents text:said_before_the_hangup Enter wait:Esc_recall paste:a_draft_at_the_hangup wait:at_the_hangup down: sent:said_before_the_hangup kept:a_draft_at_the_hangup
 common-quit  | base  | wait:Agents click:≡ wait:Quit
 quit-click   | base  | wait:Agents text:half click:≡ wait:Quit click:Quit wait:Quit_and_discard
 menu-waits   | base  | wait:Agents side:#deploy side:#deploy wait:needs_ADR-404_D4 Down
@@ -214,10 +288,11 @@ digit-row    | base  | wait:Agents F2 Down End Up 2 wait:rollout
 digit-typed  | base  | wait:Agents F2 2 wait:>_2
 tab-leaves   | base  | wait:Agents text:hello Tab wait:▸≡
 feed-type    | base  | wait:Agents BTab wait:_feed_ q wait:>_q
-esc-feed     | base  | wait:Agents text:draft Escape wait:_feed_
-esc-menu     | base  | wait:Agents Escape wait:_feed_ Escape wait:pick_one:_attend-chat
+esc-feed     | base  | wait:Agents text:draft BTab wait:_feed_
+esc-stays    | base  | wait:Agents text:draft Escape wait:>_draft
+esc-menu     | base  | wait:Agents BTab wait:_feed_ Escape wait:pick_one:_attend-chat
 esc-back     | base  | wait:Agents BTab BTab Escape wait:pick_one:_attend-chat Escape gone:pick wait:_column_
-esc-feed-back | base | wait:Agents Escape Escape wait:pick_one:_attend-chat Escape gone:pick wait:_feed_
+esc-feed-back | base | wait:Agents BTab Escape wait:pick_one:_attend-chat Escape gone:pick wait:_feed_
 msg-menu     | base  | wait:Agents BTab Up wait:select Enter wait:message_from
 msg-quote    | base  | wait:Agents BTab Up wait:select Enter wait:message_from click:Quote wait:>_>
 msg-copy     | base  | wait:Agents BTab Up wait:select Enter wait:message_from click:Copy wait:clipboard
@@ -264,9 +339,18 @@ strip-narrow16 | full16 | wait:Agents M-7 wait:long_names resize:40 gone:Agents 
 # plain shape; `dm` a direct message from alpha to the operator; `trays`
 # that, a direct message the operator sent beta in an earlier session, in
 # beta's tray, and direct messages between the agents in their trays;
-# `gone` has gamma exited rather than quiet. No attend config is written:
-# the mouse is on by default.
+# `gone` has gamma exited rather than quiet. The attend config sets only
+# attend.chat.send_delay: 0, so Enter sends at once, except in `wait`,
+# which writes none and keeps the default delay; the mouse is on by default.
 fixture() { # kind
+  # A chat the last scenario downed may still be ending: sending what
+  # waits and keeping what did not go, into this fixture. Removing the
+  # fixture under it races its writes, so wait for it to exit first.
+  local t=0
+  while chat_pid >/dev/null 2>&1 && [ $t -lt 100 ]; do
+    sleep 0.1
+    t=$((t + 1))
+  done
   rm -rf "$F"
   local cache=$F/cache/attend sig=$F/cache/attend/signals now shape=round
   [ "$1" = plain ] && shape=plain
@@ -382,6 +466,17 @@ YAML
   fi
   [ "$1" = long ] && msg "$sig/_broadcast" s5 60 "claude:eeeeeeee-0000-4000-8000-000000000005" "$F/work/the-delta-project-with-a-name-far-too-long-for-a-row" "a project name longer than any row: the band cuts it and keeps the time"
   printf 'theme:\n  active: nord\n  shape: %s\n' "$shape" > "$F/config/agent-ways/config.yaml"
+  [ "$1" = wait ] || [ "$1" = kept ] || printf 'chat:\n  send_delay: 0\n' > "$F/config/attend/config.yaml"
+  if [ "$1" = kept ]; then
+    # What an earlier chat kept: a message held for #retired, a channel
+    # gone since, and a draft written in alpha's DM view.
+    local u=$F/state/attend-chat/unsent t
+    mkdir -p "$u"
+    t='plan for the retired channel'
+    printf 'attend-chat unsent 2\nkind: held\nview: channel retired\ndest: post #retired\nlabel: #retired\nbytes: %s\n\n%s' "${#t}" "$t" > "$u/1-00000000000000000001-0"
+    t='for alpha only: the staging creds rotate tonight'
+    printf 'attend-chat unsent 2\nkind: draft\nview: dm %s\ndest: dm %s\nlabel: @alpha\nbytes: %s\n\n%s' "$A" "$A" "${#t}" "$t" > "$u/1-00000000000000000002-0"
+  fi
   if [ "$1" = proj ]; then
     mkdir -p "$F/work/alpha/.claude" "$F/work/beta/.git"
     printf 'mods:\n  attend:\n    listening: active\n' > "$F/work/alpha/.claude/ways.yaml"
@@ -416,7 +511,7 @@ launch() { # name cols rows
     XDG_CACHE_HOME="$F/cache" XDG_CONFIG_HOME="$F/config" XDG_STATE_HOME="$F/state" XDG_DATA_HOME="$F/data" \
     PATH="$BIN:$PATH" \
     TERM=xterm-256color COLORTERM=truecolor \
-    $TH launch "$1" --cols "$2" --rows "$3" --font "$FONT" -- "$BIN/attend-chat" ${DEPTH[@]+"${DEPTH[@]}"} >/dev/null)
+    PS1='$ ' $TH launch "$1" --cols "$2" --rows "$3" --font "$FONT" -- "${LAUNCH[@]}" >/dev/null)
 }
 
 # Poll the pane's text every 0.1 s, up to 10 s, until `test` holds for it.
@@ -428,7 +523,8 @@ poll() { # name what test...
     if "$@" "$t"; then return 0; fi
     sleep 0.1
   done
-  echo "$n: timed out waiting for $what" >&2
+  echo "$n: timed out waiting for $what; the screen was:" >&2
+  printf '%s\n' "$t" >&2
   return 1
 }
 has() { [[ "$2" == *"$1"* ]]; }
@@ -467,10 +563,33 @@ else:
 }
 
 # The harness has no resize verb: its private tmux server resizes the window.
-resize() { # name cols
+resize() { # name cols[xrows]
   local s
   s=$(tmux -L agent-ways-tui list-sessions -F '#S' | grep -Fx "tui-$1" | head -1)
-  tmux -L agent-ways-tui resize-window -t "$s" -x "$2"
+  case $2 in
+    *x*) tmux -L agent-ways-tui resize-window -t "$s" -x "${2%x*}" -y "${2#*x}" ;;
+    *) tmux -L agent-ways-tui resize-window -t "$s" -x "$2" ;;
+  esac
+}
+
+# The pid of this run's chat: the attend-chat whose HOME is the fixture's.
+chat_pid() {
+  local p
+  for p in $(pgrep -x attend-chat); do
+    tr '\0' '\n' <"/proc/$p/environ" 2>/dev/null | grep -qx "HOME=$F/home" && { echo "$p"; return; }
+  done
+  echo "no attend-chat runs in this fixture" >&2
+  return 1
+}
+
+# Poll the files under DIR, every 0.1 s, up to 10 s, until one holds TEXT.
+poll_file() { # dir text
+  for _ in $(seq 100); do
+    grep -rqF -- "$2" "$1" 2>/dev/null && return 0
+    sleep 0.1
+  done
+  echo "timed out waiting for '$2' under $1" >&2
+  return 1
 }
 
 step() { # name step
@@ -492,6 +611,17 @@ step() { # name step
       mkdir -p "$tray"
       printf '%s|%s|%s|%s\n' "claude:$A" alpha "$F/work/alpha" "$arg" > "$tray/new-$(date +%s%N).signal" ;;
     pause:*) sleep "$arg"; return ;;
+    signal:*)
+      # The pid once, so a second signal reaches the chat that is ending.
+      CHAT_PID=${CHAT_PID:-$(chat_pid)}
+      kill -"$arg" "$CHAT_PID" 2>/dev/null || true
+      DOWNED=1
+      return ;;
+    down:) $TH down "$n" >/dev/null; SESSION= DOWNED=1; return ;;
+    chat:) $TH send "$n" -l "$BIN/attend-chat"; $TH send "$n" Enter; return ;;
+    sent:*) poll_file "$F/cache/attend/signals/_broadcast" "$arg"; return ;;
+    kept:*) poll_file "$F/state/attend-chat/unsent" "$arg"; return ;;
+    chmod:*) mkdir -p "$F/state/attend-chat/unsent"; chmod "$arg" "$F/state/attend-chat/unsent"; return ;;
     paste:*) $TH send "$n" -l $'\e[200~'"$(printf '%b' "$arg")"$'\e[201~' ;;
     rawpaste:*) $TH send "$n" -l "$(printf '%b' "$arg")" ;;
     bigpaste:*) # in pieces: tmux refuses one send-keys this long
@@ -523,11 +653,20 @@ while IFS='|' read -r name kind steps; do
     out=$WORK/$size
     mkdir -p "$out"
     s=ac-$$-$name
-    SESSION=$s
+    SESSION=$s DOWNED= CHAT_PID=
+    LAUNCH=("$BIN/attend-chat" ${DEPTH[@]+"${DEPTH[@]}"})
+    [ "$name" != hup-bash ] || LAUNCH=(bash --norc --noprofile -i)
     launch "$s" "$c" "$r"
     for k in $steps; do
       step "$s" "$k"
     done
+    if [ -n "$DOWNED" ]; then
+      $TH down "$s" >/dev/null 2>&1 || true
+      SESSION=
+      echo "$out/$name: sent and kept"
+      n=$((n + 1))
+      continue
+    fi
     $TH text "$s" >"$out/$name.txt"
     HOME=$REALHOME $TH shot "$s" --out "$out/$name.png" >/dev/null
     $TH down "$s" >/dev/null

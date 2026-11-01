@@ -40,6 +40,10 @@ attend-instances = { path = "../attend-instances" }
 attend-state = { path = "../attend-state" }
 claude-sessions = { path = "../claude-sessions" }
 
+[target.'cfg(unix)'.dependencies]
+# kill(pid, 0): whether the chat that claimed a kept file still runs.
+libc = "0.2"
+
 [target.'cfg(unix)'.dev-dependencies]
 # openpty and kill, for the lifecycle test of the binary on a terminal.
 libc = "0.2"

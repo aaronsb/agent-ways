@@ -11,26 +11,39 @@ const HELP: &str = "attend-chat — interactive chat TUI for attend (ADR-120)
 
 usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
 
-  Ctrl-C                    exit; with a draft in the compose box, asks first.
-                            ≡ → Quit does the same
-  Esc                       closes a menu, a question, the help or the entry
-                            dialog; with nothing open, the Esc cycle: the compose
-                            box, the feed, the ≡ menu, the tab or column row last
-                            focused, the ≡ menu again. It never exits, so Ctrl+3
-                            arriving as Esc cannot close the chat
-  Enter                     send to the foreground channel; outside the compose
-                            box, the focused element's menu (in the feed, the
-                            message's: Reply, Quote, Address, Copy)
-  Ctrl+1..9, Ctrl+0         show the column's channel N (#open is 1), or with 0
+  Ctrl-C                    exit; with a draft in the compose box, asks first,
+                            and with a message waiting to send asks whether to
+                            send it (s) or discard it (D). ≡ → Quit does the same
+  Enter                     send to the foreground channel, after
+                            attend.chat.send_delay seconds (5; 0 sends at once)
+                            in which the message waits in the feed counting
+                            down. Enter again to the same place joins it on a
+                            new line and counts down again. Slash commands run
+                            at once. Outside the compose box, the focused
+                            element's menu (in the feed, the message's: Reply,
+                            Quote, Address, Copy)
+  Esc                       in the compose box, recall the newest message
+                            waiting into the box, before the draft, unsent; ↑
+                            in an empty box does the same, and a click on a
+                            waiting message recalls that one. With
+                            nothing waiting it clears the status line. Outside
+                            the box it closes a menu, a question, the help or
+                            the entry dialog, and with nothing open moves along
+                            the Esc cycle: the ≡ menu, the tab or column row
+                            last focused, the ≡ menu again. It never exits
+  Alt+1..9, Alt+0           show the column's channel N (#open is 1), or with 0
                             the operator view ⋯all; again on the channel shown,
-                            its menu. Needs a terminal that speaks the kitty
-                            keyboard protocol; F1 says whether yours does
-  Alt+0..9                  the same where Ctrl+digits do not arrive (Konsole and
-                            GNOME Terminal keep Alt+digits for their own tabs)
+                            its menu. Konsole and GNOME Terminal keep Alt+digits
+                            for their own tabs; F2 reaches the tabs everywhere
+  Ctrl+1..9, Ctrl+0         the same, only where the terminal speaks the kitty
+                            keyboard protocol (F1 says whether yours does):
+                            without it Ctrl+3 arrives as Esc and the others as
+                            other control keys
   F2 / Ctrl+T               the focus to the tab shown (reversed behind a ▸), and
                             again back to the compose box
-  Shift+Tab, ↑ ↓            leave the compose box: Shift+Tab; with text, ↑ at
-                            the start of its first line or ↓ at the end of its
+  Shift+Tab, ↑ ↓            leave the compose box for the feed: Shift+Tab, the
+                            Esc cycle's first step; with text, ↑ at the start of
+                            its first line or ↓ at the end of its
                             last. Outside it Tab, →, Shift+Tab and ← walk the
                             tabs, the column, the feed and the box. In the feed a
                             character is typed in the box; on the tab bar and the
@@ -201,7 +214,13 @@ fn main() {
 
     // The shell's signal handler stays installed after it closes, so the
     // process ends here, with 128 plus the signal when one ended it.
-    let code = match agent_tui::run(chat.into_app()) {
+    // What the last chat kept unsent, at a hangup or Send and quit, opens
+    // in the compose box.
+    // A panic keeps what waits and the draft, as the unasked end does, and
+    // so does a forced exit, which ends the process without that end.
+    attend_chat::app::keep_on_panic();
+    attend_chat::app::keep_on_forced_exit();
+    let code = match agent_tui::run(chat.restore_unsent().into_app()) {
         Ok(session) => session.signal.map_or(0, |sig| 128 + sig),
         Err(e) => {
             eprintln!("attend-chat: terminal: {e}");

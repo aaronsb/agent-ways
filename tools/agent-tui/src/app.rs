@@ -107,6 +107,9 @@ enum Btn {
     Review,
     /// The exit guard's quit-and-discard.
     Quit,
+    /// The exit guard's quit keeping what the pane can keep
+    /// ([`crate::Pane::quit_keeping`]).
+    KeepQuit,
     /// A flow's buttons: on to the next step, finish on the last, or drop it.
     Next,
     Finish,

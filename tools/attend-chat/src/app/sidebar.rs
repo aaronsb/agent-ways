@@ -3,7 +3,8 @@
 //! marked, each claude followed by the rows of its DM views while they are
 //! listed, the operator's DMs with it and then its own; then Channels,
 //! every channel, including empty ones and ones only `_groups.yaml` still
-//! names, numbered from 1 for Ctrl+digit, each followed by a row for each
+//! names, numbered from 1 for Alt+digit (and Ctrl+digit where the kitty
+//! keyboard protocol reports it), each followed by a row for each
 //! of its members (amendment of 2026-10-15): those in its members
 //! participate and are drawn as their Agents rows are, then those with a
 //! pending invitation there are invited, set back and marked `◌ invited`
@@ -12,7 +13,7 @@
 //!
 //! A click on a claude's row shows the DMs between the operator and it,
 //! and lists that view under the row; a click on a channel shows it. A
-//! click on what is shown already opens its menu, as Ctrl+digit does; a
+//! click on what is shown already opens its menu, as Alt+digit does; a
 //! human's row and a member's row open the agent's menu at once. A menu
 //! docks on the line under its row. `attend.chat.sidebar_key` shows or
 //! hides the column, and a terminal too narrow for it beside the feed hides
@@ -495,7 +496,7 @@ fn member_line(chat: &ChatPane, label: &str, who: Option<&Seen>, invited: Option
 /// name, then its member count and the time since its last message, then
 /// the live mark when a member is live (where D5's seal marker will go). The
 /// shown channel is marked at the left. A channel with no live member, or
-/// none on disk, is set back. `number` counts the channels from 1, for Ctrl+digit;
+/// none on disk, is set back. `number` counts the channels from 1, for Alt+digit;
 /// past the ninth a row has none.
 #[allow(clippy::too_many_arguments)]
 fn channel_line(chat: &ChatPane, row: &ChannelRow, live: usize, age: &str, shown: bool, w: usize, mark: Style, focused: bool, number: usize) -> Line<'static> {

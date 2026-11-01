@@ -38,11 +38,11 @@ const NOTICE_MARK: &str = "⚠";
 /// Buttons on one line, each on its ground and recorded as a click target.
 /// `focus` marks the one Enter would press.
 ///
-/// [`Ground::Keep`] is green on a row that holds a button on [`Ground::Err`],
-/// as the bar's keep answer is beside its drop answer; elsewhere it takes
-/// the dim accent.
-pub(super) fn button_row(sh: Shape, at: Rect, focus: Option<Btn>, buttons: &[(Btn, String, Ground)], hits: &mut Vec<(Rect, Btn)>) -> Line<'static> {
-    let destructive = buttons.iter().any(|(_, _, g)| *g == Ground::Err);
+/// [`Ground::Keep`] is green when the buttons it is offered with, on this
+/// line or another, include one on [`Ground::Err`] (`destructive`), as the
+/// bar's keep answer is beside its drop answer; elsewhere it takes the dim
+/// accent.
+pub(super) fn button_row(sh: Shape, at: Rect, focus: Option<Btn>, buttons: &[(Btn, String, Ground)], destructive: bool, hits: &mut Vec<(Rect, Btn)>) -> Line<'static> {
     let mut spans = vec![Span::raw(" ")];
     for (b, label, ground) in buttons {
         let on = focus == Some(*b);

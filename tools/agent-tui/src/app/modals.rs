@@ -109,6 +109,9 @@ pub(super) fn mode_lozenge(app: &App, label: &str, g: Ground) -> Vec<Span<'stati
     app.shape.lozenge(&[Seg::on(format!(" {label} "), g).bold()])
 }
 
+/// The keys the exit guard binds for its own buttons.
+const GUARD_KEYS: [char; 3] = ['b', 'r', 'D'];
+
 impl Modal for Guard {
     fn dialog(&self, app: &App, _: bool) -> Dialog<'static> {
         app.guard_dialog()
@@ -120,6 +123,15 @@ impl Modal for Guard {
                 app.mode = Mode::Browse;
                 app.discard_all();
                 return false;
+            }
+            // What the pane can keep is kept first, and the rest goes as
+            // Quit; what it could not keep stays, and so does the screen.
+            Answer::Button(Btn::KeepQuit) => {
+                app.mode = Mode::Browse;
+                if app.pane.as_mut().is_none_or(|p| p.keep_on_quit()) {
+                    app.discard_all();
+                    return false;
+                }
             }
             Answer::Button(Btn::Review) => {
                 app.mode = Mode::Browse;
@@ -146,7 +158,15 @@ impl Modal for Guard {
         let mut spans = mode_lozenge(app, "quit", Ground::Warn);
         // A pane's work alone has nothing to review.
         let review = app.pending() > 0 || app.theme_dirty();
-        spans.push(Span::styled(if review { "  Esc back · r review · D quit and discard all" } else { "  Esc back · D quit and discard all" }, theme::hint()));
+        let mut hint = String::from(if review { "  Esc back · r review" } else { "  Esc back" });
+        if let Some((label, key)) = app.quit_keeping() {
+            hint += &match key {
+                Some(key) => format!(" · {key} {}", label.to_lowercase()),
+                None => format!(" · {}", label.to_lowercase()),
+            };
+        }
+        hint += " · D quit and discard all";
+        spans.push(Span::styled(hint, theme::hint()));
         Some(spans)
     }
 
@@ -373,6 +393,16 @@ impl App {
         }
     }
 
+    /// The pane's button for what it keeps as the shell quits
+    /// ([`crate::Pane::quit_keeping`]), and its key unless the guard binds
+    /// that key already: Back's `b`, Review's `r`, Quit and discard all's
+    /// `D`. A pane's clashing key is dropped and its button is reached by
+    /// the arrows and a click.
+    pub(crate) fn quit_keeping(&self) -> Option<(String, Option<char>)> {
+        let (label, key) = self.pane.as_ref().and_then(|p| p.quit_keeping())?;
+        Some((label, Some(key).filter(|k| !GUARD_KEYS.contains(k))))
+    }
+
     /// Act on what modal `m` was answered. Once answered, its drawing is
     /// no target for the next press; a mark keeps the list open, and its
     /// drawing with it. False ends the session.
@@ -404,12 +434,30 @@ impl App {
         // A pane's work alone is in no tab.
         let heading = if reviewable { format!(" {total} unsaved in {} tabs", tabs.len()) } else { format!(" {total} unsaved") };
         let mut lines = vec![Line::raw(""), Line::from(Span::styled(heading, theme::changed()))];
-        lines.extend(tabs.iter().map(|(name, n, note)| Line::from(vec![Span::raw(format!("   {name:<12}")), Span::styled(format!("●{n}"), theme::changed()), Span::styled(note.clone(), theme::hint())])));
+        // A note wraps under itself, so a long one, such as a pane naming
+        // a draft and several messages waiting, is never cut at the
+        // dialog's edge.
+        for (name, n, note) in &tabs {
+            let count = format!("●{n}");
+            let lead = 15 + crate::wrap::str_width(&count);
+            let width = GUARD_WIDTH.saturating_sub(2 + lead + 3).max(10);
+            for (i, part) in crate::wrap::wrap_line(&Line::raw(note.trim_start().to_string()), width).into_iter().enumerate() {
+                let text: String = part.spans.iter().map(|s| s.content.as_ref()).collect();
+                let head = if i == 0 { vec![Span::raw(format!("   {name:<12}")), Span::styled(count.clone(), theme::changed())] } else { vec![Span::raw(" ".repeat(lead))] };
+                lines.push(Line::from([head, vec![Span::styled(format!("  {text}"), theme::hint())]].concat()));
+            }
+        }
         lines.push(Line::raw(""));
-        let mut d = Dialog::new("quit with unsaved changes", 74).body(lines).button(Button::new(Btn::Back, "Back (Esc)", Ground::Keep).key('b').cancel().default());
+        let mut d = Dialog::new("quit with unsaved changes", GUARD_WIDTH as u16).body(lines).button(Button::new(Btn::Back, "Back (Esc)", Ground::Keep).key('b').cancel().default());
         // Nothing in a pane is reviewed: back to it, or quit.
         if reviewable {
             d = d.button(Button::new(Btn::Review, format!("Review {} (r)", tabs[0].0), Ground::Accent).key('r'));
+        }
+        // What the pane can keep as it quits, such as messages waiting to send.
+        match self.quit_keeping() {
+            Some((label, Some(key))) => d = d.button(Button::new(Btn::KeepQuit, format!("{label} ({key})"), Ground::Accent).key(key)),
+            Some((label, None)) => d = d.button(Button::new(Btn::KeepQuit, label, Ground::Accent)),
+            None => {}
         }
         d.button(Button::new(Btn::Quit, "Quit and discard all (D)", Ground::Err).key('D')).build().expect("Back is the cancel and the default")
     }
@@ -445,3 +493,6 @@ impl App {
         lines
     }
 }
+
+/// The quit guard's width, at most: it fits an 80-column terminal.
+const GUARD_WIDTH: usize = 74;
