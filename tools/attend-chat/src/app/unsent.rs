@@ -290,6 +290,19 @@ pub fn keep_noted() {
     }
 }
 
+/// Install the panic hook that keeps what the chat last noted unsent
+/// ([`keep_noted`]), before the hook that was in place. agent-tui's own
+/// hook restores the terminal first and then runs this one, which it finds
+/// in place when the chat's screen opens; text typed since the last tick,
+/// a tenth of a second, is the most a panic can take.
+pub fn keep_on_panic() {
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        keep_noted();
+        prev(info);
+    }));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

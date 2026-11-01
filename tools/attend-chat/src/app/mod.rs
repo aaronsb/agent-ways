@@ -49,7 +49,7 @@ use crate::tabs::{self, Tab};
 use crate::watcher::Delivery;
 
 /// Keep what the chat last noted unsent, as a panic ends it.
-pub use unsent::keep_noted;
+pub use unsent::{keep_noted, keep_on_panic};
 pub use keys::{destination_label, handle_enter, handle_tab, EnterAction, TabCycle, TabResult};
 
 /// How long a freshly executed command's result asserts itself OVER
