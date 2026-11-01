@@ -220,8 +220,9 @@ impl ChatPane {
                 // arrives in every terminal; it rides on Enter's line so
                 // every key still fits the help at 80x25.
                 Binding::new("Enter", "send; C-x C-s sends now").short("send"),
-                // On the footer, beside Enter, while a message waits to send.
-                on(Binding::new("Esc", "recall the newest message waiting to send; so does ↑ in an empty box").short("recall"), self.has_pending()),
+                // On the footer, beside Enter, while a message waits to
+                // send, unless the status line's countdown names it.
+                on(Binding::new("Esc", "recall the newest message waiting to send; so does ↑ in an empty box").short("recall"), self.has_pending() && self.countdown_status().is_none()),
                 Binding::new("Tab", "complete, else next").short("complete"),
                 Binding::new("S-Tab", "or ↑ at the top leaves the box, to the feed").short("or ↑ leaves"),
                 Binding::help("← →", "move the cursor; outside the box, the element before or next"),

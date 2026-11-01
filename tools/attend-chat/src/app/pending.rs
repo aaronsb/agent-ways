@@ -553,6 +553,36 @@ impl ChatPane {
         }
     }
 
+    /// The status line's countdown, while a message counts down whose
+    /// header the last frame did not draw: a short pane, a feed scrolled
+    /// back, or a view whose feed shows nothing waiting. The soonest, where
+    /// it goes, and with several how many count down; then `Esc recall`
+    /// while the box has the keyboard, which the footer then leaves out,
+    /// since at 80 columns the countdown leaves the footer no room for it.
+    /// `None` while every countdown's header is on screen, so none is shown
+    /// twice, and while a fresh result holds the status line. The tick that
+    /// moves the feed's countdown redraws this one.
+    pub(super) fn countdown_status(&self) -> Option<String> {
+        if self.status_fresh() {
+            return None;
+        }
+        let shown = self.foreground.composes();
+        let counting: Vec<(usize, &Held)> = self.pending.iter().enumerate().filter(|(_, h)| h.refused.is_none()).collect();
+        if counting.iter().all(|(n, _)| shown && self.feed.header_row(self.pending_from + n).is_some()) {
+            return None;
+        }
+        let (_, next) = counting.iter().min_by_key(|(_, h)| h.due)?;
+        let left = left(next, self.mono());
+        let mut said = match counting.len() {
+            1 => format!("sending in {left}s → {}", next.label),
+            n => format!("{n} waiting, next in {left}s → {}", next.label),
+        };
+        if self.focus_kind() == super::focus::Kind::Compose {
+            said.push_str(" · Esc recall");
+        }
+        Some(said)
+    }
+
     /// The feed's entries for the messages waiting, after the messages: each
     /// marked on the warning ground with its countdown, on the error ground
     /// as not sent, or as a draft, where it goes, and the key that recalls

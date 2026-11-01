@@ -372,6 +372,11 @@ impl ChatPane {
         }
     }
 
+    /// Whether the last result still asserts itself on the status line.
+    fn status_fresh(&self) -> bool {
+        self.status_set_at.is_some_and(|t| t.elapsed() < STATUS_ASSERT)
+    }
+
     /// A status message, as a command's result shows it.
     pub fn say(&mut self, s: impl Into<String>, error: bool) {
         self.status = s.into();
@@ -1075,9 +1080,13 @@ impl Pane for ChatPane {
     /// The status slot (#398, #400): a fresh result asserts itself, an
     /// error in the error role; past [`STATUS_ASSERT`] a delete or a
     /// tombstone still running says so, else the help of a command being
-    /// typed, or the last result, set back.
+    /// typed, or the last result, set back. A countdown the feed does not
+    /// show comes after a fresh result and before the rest.
     fn status(&mut self) -> Option<(String, Tone)> {
-        let fresh = self.status_set_at.is_some_and(|t| t.elapsed() < STATUS_ASSERT);
+        if let Some(countdown) = self.countdown_status() {
+            return Some((countdown, Tone::Said));
+        }
+        let fresh = self.status_fresh();
         let help = crate::slash::contextual_help(self.input.text()).map(|h| (h, self.input.text().starts_with('/')));
         let (line, how) = status_slot(fresh, self.status_is_error, self.busy_line(), help, &self.status);
         let tone = match how {

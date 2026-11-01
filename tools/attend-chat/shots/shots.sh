@@ -74,7 +74,8 @@ sweep
 #   rclick: rside: rfeed: rlast:  the same with the right button
 #   wait:TEXT      until TEXT is on the screen
 #   gone:TEXT      until TEXT is off the screen
-#   resize:COLS    the terminal narrowed (or widened) to COLS columns
+#   resize:COLS    the terminal narrowed (or widened) to COLS columns;
+#                  resize:COLSxROWS sets the rows too
 #   pause:SECS     SECS on the clock, for what the screen does not show:
 #                  a question's yes arms a second after it is ready
 #   paste:TEXT     a bracketed paste of TEXT, \n for a newline
@@ -99,8 +100,11 @@ sweep
 # rows show the post's body and not its countdown), and presses Send and
 # quit with the unsent directory read-only: the post is sent, and the
 # draft, not kept, stays in the feed with the reason on the status line.
-# wait-keep-drafts shows the guard over a draft with nothing waiting,
-# which offers Quit, keep the draft. wait-kept opens on what an earlier
+# wait-short holds a message and shrinks the pane to 80x11, where the
+# feed's three rows leave its countdown out and the status line counts
+# down instead, with where it goes and Esc recall. wait-keep-drafts shows
+# the guard over a draft with nothing waiting, which offers Quit, keep the
+# draft. wait-kept opens on what an earlier
 # chat kept (the kept fixture): the draft in alpha's DM view, and the
 # message held for a channel since gone as an entry, not sent.
 # The fixture is base, crowd (fifteen more agents), many (24 more channels,
@@ -186,6 +190,7 @@ wait-recall  | wait  | wait:Agents text:first_thought,_still_forming Enter wait:
 wait-up      | wait  | wait:Agents text:first_thought,_still_forming Enter wait:Esc_recall Up wait:recalled
 wait-sent    | wait  | wait:Agents text:first_thought,_still_forming Enter wait:Esc_recall gone:Esc_recall wait:sent
 wait-quit    | wait  | wait:Agents text:say_this_before_I_go Enter wait:Esc_recall C-c wait:Send_and_quit
+wait-short   | wait  | wait:Agents text:first_thought,_still_forming Enter wait:Esc_recall resize:80x11 wait:#open_·_Esc_recall
 wait-keep-drafts | wait | wait:Agents text:a_draft_with_nothing_waiting C-c wait:Quit,_keep_the_draft
 wait-gone    | wait  | wait:Agents M-3 wait:#infra_0 text:plan_for_infra Enter wait:Esc_recall paste:/dissolve_infra Enter wait:not_sent
 wait-refused | wait  | wait:Agents rside:○ wait:Address click:Address_@ text:ping Enter wait:Esc_recall text:#deploy_unrelated wait:not_sent
@@ -534,10 +539,13 @@ else:
 }
 
 # The harness has no resize verb: its private tmux server resizes the window.
-resize() { # name cols
+resize() { # name cols[xrows]
   local s
   s=$(tmux -L agent-ways-tui list-sessions -F '#S' | grep -Fx "tui-$1" | head -1)
-  tmux -L agent-ways-tui resize-window -t "$s" -x "$2"
+  case $2 in
+    *x*) tmux -L agent-ways-tui resize-window -t "$s" -x "${2%x*}" -y "${2#*x}" ;;
+    *) tmux -L agent-ways-tui resize-window -t "$s" -x "$2" ;;
+  esac
 }
 
 # The pid of this run's chat: the attend-chat whose HOME is the fixture's.

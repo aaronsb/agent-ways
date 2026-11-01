@@ -345,6 +345,71 @@ fn a_send_at_the_end_of_a_countdown_keeps_the_scroll() {
     assert_eq!(c.scroll(), back, "the feed stays where it was read");
 }
 
+/// How many times `text` is on the screen at `w`x`h`, and the screen.
+fn shown(c: &mut Chat, w: u16, h: u16, text: &str) -> (usize, String) {
+    let s = testkit::rows(&testkit::render_screen(c, w, h)).join("\n");
+    (s.matches(text).count(), s)
+}
+
+/// At 80x11 the feed has three rows and a held message's header is out of
+/// them: the status line counts down instead, with where it goes and the
+/// key that recalls it, until it is sent.
+#[test]
+fn a_countdown_the_feed_cannot_show_is_on_the_status_line() {
+    let mut c = chat();
+    send(&mut c, "held in a short pane");
+    let (n, s) = shown(&mut c, 80, 11, "sending in 5s → #open · Esc recall");
+    assert_eq!(n, 1, "the countdown is on screen once:\n{s}");
+    assert_eq!(s.matches("Esc recall").count(), 1, "the footer does not repeat the key:\n{s}");
+    wait(&mut c, 2);
+    let (n, s) = shown(&mut c, 80, 11, "sending in 3s → #open");
+    assert_eq!(n, 1, "it counts down:\n{s}");
+    wait(&mut c, 3);
+    assert!(on_open("held in a short pane"));
+    let (n, s) = shown(&mut c, 80, 11, "sending in");
+    assert_eq!(n, 0, "sent, no countdown is left:\n{s}");
+}
+
+/// With several waiting and none on screen, the status line names the
+/// soonest and how many wait.
+#[test]
+fn several_countdowns_off_screen_name_the_soonest() {
+    let mut c = chat();
+    send(&mut c, "first, to open");
+    wait(&mut c, 2);
+    show(&mut c, Tab::Channel("deploy".into()));
+    send(&mut c, "second, to deploy");
+    let (n, s) = shown(&mut c, 80, 11, "2 waiting, next in 3s → #open");
+    assert_eq!(n, 1, "the soonest and the count:\n{s}");
+}
+
+/// At 80x25 the header is in the feed: nothing more is drawn, so the
+/// countdown is not shown twice.
+#[test]
+fn a_countdown_the_feed_shows_is_not_repeated() {
+    let mut c = chat();
+    send(&mut c, "held in a tall pane");
+    let (n, s) = shown(&mut c, 80, 25, "sending in 5s");
+    assert_eq!(n, 1, "the feed's header alone:\n{s}");
+    assert!(s.contains("Esc or click recalls"), "the one shown is the header:\n{s}");
+    assert_eq!(s.matches("Esc recall").count(), 1, "the footer names the key:\n{s}");
+}
+
+/// Paged back past it at 80x25, the header is out of view and the status
+/// line counts down.
+#[test]
+fn a_countdown_scrolled_out_of_view_is_on_the_status_line() {
+    let mut c = chat();
+    for i in 0..40 {
+        c.push(sig(&format!("s-back-{i}"), &format!("filler {i}")));
+    }
+    send(&mut c, "held while reading back");
+    testkit::render_screen(&mut c, 80, 25);
+    testkit::drive(&mut c, &[KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE)]);
+    let (n, s) = shown(&mut c, 80, 25, "sending in 5s → #open");
+    assert_eq!(n, 1, "on the status line:\n{s}");
+}
+
 // ── quitting ─────────────────────────────────────────────────────
 
 /// Send and quit with a message that cannot go: the chat stays open, the
