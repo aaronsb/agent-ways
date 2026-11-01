@@ -498,11 +498,39 @@ impl<'a> Dialog<'a> {
         }
     }
 
+    /// The buttons, by index, a line each as many as fit across `room`:
+    /// one line when they all fit, as they do on most dialogs, and more
+    /// rather than a button cut at the box's edge. A button takes its
+    /// label, its focus mark and padding and a lozenge's two caps, with a
+    /// gap of two between buttons and one column before the first
+    /// ([`button_row`]).
+    fn button_lines(&self, room: u16, sh: Shape) -> Vec<Vec<usize>> {
+        // A lozenge's caps, which the plain shape draws as nothing.
+        let caps = usize::from(width(&sh.lozenge(&[Seg::on("x", Ground::Keep)]))).saturating_sub(1);
+        let mut lines: Vec<Vec<usize>> = Vec::new();
+        let mut used = 0;
+        for (i, b) in self.buttons.iter().enumerate() {
+            let w = str_width(&b.label) + 4 + caps;
+            match lines.last_mut() {
+                Some(line) if used + 2 + w <= usize::from(room) => {
+                    line.push(i);
+                    used += 2 + w;
+                }
+                _ => {
+                    lines.push(vec![i]);
+                    used = 1 + w;
+                }
+            }
+        }
+        lines
+    }
+
     /// Its rect over `area`, before it is drawn: a box in the middle, as tall
-    /// as its body and button row with the borders, unless it was given a
+    /// as its body and button rows with the borders, unless it was given a
     /// height.
-    pub(super) fn rect(&self, area: Rect) -> Rect {
-        let row = u16::from(!self.buttons.is_empty());
+    pub(super) fn rect(&self, area: Rect, sh: Shape) -> Rect {
+        let inside = self.width.min(area.width).saturating_sub(2 + 2 * self.padding);
+        let row = self.button_lines(inside, sh).len() as u16;
         let lines = self.menu.as_ref().map_or(self.body.len(), |m| m.items.len());
         let h = self.height.unwrap_or_else(|| (lines.min(usize::from(u16::MAX - 3)) as u16) + 2 + row);
         match (self.placement, &self.menu) {
@@ -520,7 +548,7 @@ impl<'a> Dialog<'a> {
         if self.placement == Placement::Bar {
             return self.draw_bar(f, Rect { height: area.height.min(1), ..area }, sh);
         }
-        let r = self.rect(area);
+        let r = self.rect(area, sh);
         let border = self.border.unwrap_or_else(theme::modal_border);
         let title = match &self.countdown {
             Some((long, _)) => format!("{} · {long}", self.title),
@@ -531,7 +559,8 @@ impl<'a> Dialog<'a> {
             block = block.title_style(s);
         }
         let inner = block.inner(r);
-        let row = u16::from(!self.buttons.is_empty() && inner.height > 0);
+        let lines = self.button_lines(inner.width, sh);
+        let row = (lines.len() as u16).min(inner.height);
         let room = usize::from(inner.height - row);
         let body = Rect { height: inner.height - row, ..inner };
         if let Some(m) = &self.menu {
@@ -547,11 +576,15 @@ impl<'a> Dialog<'a> {
         f.render_widget(Clear, r);
         f.render_widget(Paragraph::new(shown).block(block), r);
         let mut buttons = Vec::new();
-        if row == 1 {
-            let at = Rect { y: inner.bottom() - 1, height: 1, ..inner };
-            let row: Vec<(Btn, String, Ground)> = self.buttons.iter().map(|b| (b.id, b.label.clone(), b.drawn_ground())).collect();
-            let focus = self.default_button().map(|b| b.id);
-            f.render_widget(Paragraph::new(button_row(sh, at, focus, &row, &mut buttons)), at);
+        let focus = self.default_button().map(|b| b.id);
+        // Grounds follow the whole set of buttons, whichever line each is on.
+        let destructive = self.buttons.iter().any(|b| b.drawn_ground() == Ground::Err);
+        // Each line of buttons on its own row, the last on the last row
+        // inside the border.
+        for (i, line) in lines.iter().skip(lines.len() - usize::from(row)).enumerate() {
+            let at = Rect { y: inner.bottom() - row + i as u16, height: 1, ..inner };
+            let line: Vec<(Btn, String, Ground)> = line.iter().map(|&j| &self.buttons[j]).map(|b| (b.id, b.label.clone(), b.drawn_ground())).collect();
+            f.render_widget(Paragraph::new(button_row(sh, at, focus, &line, destructive, &mut buttons)), at);
         }
         Drawn { rect: r, body, buttons, rows: Vec::new(), scroll, max }
     }
@@ -1045,9 +1078,9 @@ mod tests {
         let d = Dialog::new("pick one: x", 50).menu(items.clone(), 0, MenuKeys::default()).dock(Some(dock)).build().unwrap();
         assert_eq!(d.placement(), Placement::Dock(dock));
         let area = Rect::new(0, 1, 80, 20);
-        assert_eq!(d.rect(area), docked(area, dock, "pick one: x", &items));
+        assert_eq!(d.rect(area, Shape::PLAIN), docked(area, dock, "pick one: x", &items));
         let centred = Dialog::new("pick one: x", 50).menu(items, 0, MenuKeys::default()).dock(None).build().unwrap();
-        assert_eq!((centred.placement(), centred.rect(area)), (Placement::Center, modal_rect(area, 50, 5)));
+        assert_eq!((centred.placement(), centred.rect(area, Shape::PLAIN)), (Placement::Center, modal_rect(area, 50, 5)));
     }
 
     #[test]

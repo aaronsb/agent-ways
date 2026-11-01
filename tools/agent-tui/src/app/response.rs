@@ -337,7 +337,7 @@ impl App {
         let i = s.wrap(w.saturating_sub(4) as usize);
         let h = s.wrapped[i].1.len().saturating_add(2).min(u16::MAX as usize) as u16;
         // Wrapped again at the width the modal takes, which a short screen widens.
-        let r = s.dialog(&[], w).height(h).build().expect("a response is answered by its keys").rect(area);
+        let r = s.dialog(&[], w).height(h).build().expect("a response is answered by its keys").rect(area, self.shape);
         let i = s.wrap(r.width.saturating_sub(4) as usize);
         s.dialog(&s.wrapped[i].1, w).height(h).build().expect("a response is answered by its keys").draw(f, area, self.shape)
     }
