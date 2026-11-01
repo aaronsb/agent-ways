@@ -28,6 +28,16 @@ Keep a question to about a hundred words, with detail moved to the framing or th
 
 Name the unknowns your evidence leaves open. Offer a research pass before asking where a call needs knowledge the operator may lack, and a "hold, I'll research first" option where they may want to look before committing, as between libraries. A hold pauses only the work that depends on the call.
 
+## How to ask: escalate only as far as the decision needs
+
+The question tool holds your turn open until the operator answers, so background work finishes unread. Start every piece of work that does not depend on the answers before you ask, then take the first step that fits:
+
+1. **In the conversation.** Put the questions in your reply in a layout the operator can answer in a few words: a numbered table with each question's brief, the case for and against, and the lean, so "1 yes, 2 hold" is a full answer. End the turn. Keep working on what does not depend on the answers, and act on a stated lean only where the step is easy to reverse.
+2. **Over attend.** When this session listens on attend, tell the operator they can answer there, and post the questions to them as a direct message. Their answers arrive as messages while the work continues.
+3. **The question tool.** Use it when the decision blocks: each turn of work built past it would make it more costly to undo. Then the work waits for the answer.
+
+An answer that overturns a lean you acted on is applied as a revision, and you say what changed.
+
 ## Rounds
 
 - Ask one to four questions per round, the call that most changes the work first.

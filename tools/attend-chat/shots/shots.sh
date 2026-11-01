@@ -89,8 +89,12 @@ sweep
 # session, and the agents' DMs with each other), proj (alpha, where the
 # chat runs, a project whose .claude/ways.yaml sets
 # mods.attend.listening: active, and beta a git checkout), relic (@relic/,
-# two messages an earlier channel left, that no entry names) or plain (no
-# Nerd Font). An agent's name comes from the temp
+# two messages an earlier channel left, that no entry names), full (the
+# crowd, and #five, #eight and #everyone with that many members, the
+# participant strip's one, two and three rows and its cut, and #long, whose
+# invitees have no record and are named by their ids; full16 the same
+# at 16 colours, where the cut is `...`), dm2 (dm, and the
+# operator's DM to alpha and a second human, bob) or plain (no Nerd Font). An agent's name comes from the temp
 # path, and a long one cuts its project, so the quiet agent is clicked by
 # the column's first `○`, its row being the agents' last.
 SCENARIOS="
@@ -239,6 +243,16 @@ review-open  | trays | wait:Agents_3/4 rside:alpha wait:Review_DMs click:Review_
 review-type  | trays | wait:Agents_3/4 rside:alpha wait:Review_DMs click:Review_DMs wait:read_only text:hello BTab
 review-menu  | trays | wait:Agents_3/4 rside:alpha wait:Review_DMs click:Review_DMs wait:read_only side:DMs wait:Hide_review
 review-both  | trays | wait:Agents_3/4 side:alpha wait:DMs rside:alpha wait:Review_DMs click:Review_DMs wait:read_only
+strip-chan   | base  | wait:Agents side:#deploy wait:rollout_is_green
+strip-open   | base  | wait:Agents side:#open wait:signing_off
+strip-dm     | dm2   | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:bob_and_I
+strip-review | trays | wait:Agents_3/4 rside:alpha wait:Review_DMs click:Review_DMs wait:read_only
+strip-five   | full  | wait:Agents M-5 wait:five_members
+strip-eight  | full  | wait:Agents M-3 wait:eight_members
+strip-cut    | full  | wait:Agents M-4 wait:every_agent
+strip-16     | full16 | wait:Agents M-4 wait:every_agent
+strip-narrow | full  | wait:Agents M-7 wait:long_names resize:40 gone:Agents wait:invited
+strip-narrow16 | full16 | wait:Agents M-7 wait:long_names resize:40 gone:Agents wait:invited
 "
 
 # The fixture: three claudes (alpha and beta live, gamma quiet), #deploy
@@ -262,8 +276,11 @@ fixture() { # kind
   B=bbbbbbbb-0000-4000-8000-000000000002
   C=cccccccc-0000-4000-8000-000000000003
   local i=1 s
+  # The chat's colour depth: the terminal's, but 16 for full16.
+  DEPTH=()
+  [ "$1" = full16 ] && DEPTH=(--depth 16)
   local sessions=("$A:$F/work/alpha" "$B:$F/work/beta" "$C:$F/work/gamma")
-  if [ "$1" = crowd ]; then
+  if [ "$1" = crowd ] || [ "${1%16}" = full ]; then
     for n in $(seq -w 1 15); do
       sessions+=("dddddddd-0000-4000-8000-0000000000$n:$F/work/crowd-$n")
       mkdir -p "$F/work/crowd-$n"
@@ -278,6 +295,7 @@ fixture() { # kind
   if [ "$1" = many ]; then
     for n in $(seq -w 1 24); do mkdir -p "$sig/@ch$n"; done
   fi
+  [ "${1%16}" = full ] && mkdir -p "$sig/@five" "$sig/@eight" "$sig/@everyone" "$sig/@long"
   # In `gone`, gamma's record names a pid no process holds: it has
   # exited, so its row offers Tombstone… and attend accepts it. Elsewhere
   # it is quiet, and a send to it is refused as one to a quiet agent.
@@ -305,8 +323,27 @@ archive:
   members:
     - $A
 YAML
+  if [ "${1%16}" = full ]; then
+    local m members=() k
+    for m in "$A" "$B" "$C"; do members+=("$m"); done
+    for n in $(seq -w 1 15); do members+=("dddddddd-0000-4000-8000-0000000000$n"); done
+    for k in five:5:five_members eight:8:eight_members everyone:18:every_agent; do
+      printf '%s:\n  pinned: true\n  description: %s\n  members:\n' "${k%%:*}" "$(echo "${k##*:}" | tr _ ' ')" >> "$sig/_groups.yaml"
+      for m in "${members[@]:0:$(echo "$k" | cut -d: -f2)}"; do printf '    - %s\n' "$m" >> "$sig/_groups.yaml"; done
+    done
+    printf 'long:\n  pinned: true\n  description: long names\n  members: []\n' >> "$sig/_groups.yaml"
+  fi
   now=$(date +%s)
   printf 'by: operator\nat: %s\n' "$((now - 240))" > "$sig/@deploy/$C.invite"
+  # In full, #long has no members and has invited four sessions with no
+  # record, whose heartbeats keep the invitations from the prune: the strip
+  # names each by its 36-column id, cut to fit its row beside the cut mark.
+  if [ "${1%16}" = full ]; then
+    for n in 1 2 3 4; do
+      printf 'by: operator\nat: %s\n' "$((now - 240))" > "$sig/@long/ffffffff-0000-4000-8000-00000000009$n.invite"
+      touch "$cache/heartbeat/ffffffff-0000-4000-8000-00000000009$n"
+    done
+  fi
   msg() { # dir id age from cwd text
     printf '%s|%s|%s|%s\n' "$4" "$(basename "$5")" "$5" "$6" > "$1/$2.signal"
     touch -d "@$((now - $3))" "$1/$2.signal"
@@ -319,7 +356,7 @@ YAML
   msg "$sig/_broadcast" s2 600 "claude:$A" "$F/work/alpha" "starting the theme port; the legend moves first"
   msg "$sig/@deploy" s3 300 "claude:$B" "$F/work/beta" "rollout is green on staging"
   [ "$1" = own ] && msg "$sig/@deploy" s4 120 "external:operator@kitty" "$F/work/alpha" "watching the rollout"
-  if [ "$1" = dm ] || [ "$1" = trays ]; then
+  if [ "$1" = dm ] || [ "$1" = dm2 ] || [ "$1" = trays ]; then
     mkdir -p "$sig/_people/operator"
     msg "$sig/_people/operator" s6 450 "claude:$A" "$F/work/alpha" "the legend moved; want a look before I push?"
   fi
@@ -331,6 +368,12 @@ YAML
     dm "$tb" s8 400 "claude:$A" "$F/work/alpha" agent "$A" "$B" "the legend moved; can you check the tab bar?"
     dm "$ta" s9 350 "claude:$B" "$F/work/beta" agent "$B" "$A" "checked: the bar holds"
     dm "$tb" s10 300 "claude:$C" "$F/work/gamma" agent "$C" "$B" "gamma to beta, not alpha's"
+  fi
+  if [ "$1" = dm2 ]; then
+    local ta
+    ta=$sig/$(tray "$F/work/alpha")
+    mkdir -p "$ta"
+    dm "$ta" s11 200 "external:operator@kitty" "$F/work/alpha" human operator "$A,bob" "bob and I both want a look"
   fi
   if [ "$1" = relic ]; then
     mkdir -p "$sig/@relic"
@@ -373,7 +416,7 @@ launch() { # name cols rows
     XDG_CACHE_HOME="$F/cache" XDG_CONFIG_HOME="$F/config" XDG_STATE_HOME="$F/state" XDG_DATA_HOME="$F/data" \
     PATH="$BIN:$PATH" \
     TERM=xterm-256color COLORTERM=truecolor \
-    $TH launch "$1" --cols "$2" --rows "$3" --font "$FONT" -- "$BIN/attend-chat" >/dev/null)
+    $TH launch "$1" --cols "$2" --rows "$3" --font "$FONT" -- "$BIN/attend-chat" ${DEPTH[@]+"${DEPTH[@]}"} >/dev/null)
 }
 
 # Poll the pane's text every 0.1 s, up to 10 s, until `test` holds for it.
