@@ -365,32 +365,51 @@ fn send_and_quit_keeps_the_chat_open_when_a_message_cannot_go() {
     assert!(!anywhere("too late for this one"));
 }
 
-/// The guard's Send and quit names a draft in the compose box, which the
-/// quit drops.
+/// The guard's Send and quit names the draft in the compose box and keeps
+/// it: the next chat opens with it in the box.
 #[test]
-fn send_and_quit_names_the_draft_it_drops() {
-    let mut c = chat().dry_run(true);
-    send(&mut c, "waiting");
-    typed(&mut c, "a draft");
+fn send_and_quit_keeps_the_draft_for_the_next_chat() {
+    let kept = unsent("send-and-quit");
+    let mut c = chat().unsent_file(&kept);
+    send(&mut c, "waiting at the quit");
+    typed(&mut c, "a draft not yet sent");
     press(&mut c, KeyCode::Char('c'), KeyModifiers::CONTROL);
     let s = screen(&mut c);
-    assert!(s.contains("Send and quit, drop the draft (s)") && s.contains("a draft in the compose box"), "{s}");
+    assert!(s.contains("Send and quit, keep the draft (s)") && s.contains("a draft in the compose box"), "{s}");
+    assert!(!key(&mut c, KeyCode::Char('s')), "s sends and quits");
+    assert!(on_open("waiting at the quit"));
+    let c = chat().unsent_file(&kept).restore_unsent();
+    assert_eq!(c.input().text(), "a draft not yet sent", "the draft opens the next chat");
+    assert!(!kept.exists(), "taken from the file once restored");
+}
+
+/// A file of the fixture's for text kept unsent, one per test.
+fn unsent(tag: &str) -> std::path::PathBuf {
+    let root = support::fixture("pending", |_| unreachable!("set up by fixture()"));
+    root.join(format!("unsent-{tag}"))
 }
 
 /// A signal or the terminal hanging up ends the chat with no one asked:
-/// what waits is sent, once, through the shell's own exit path.
+/// what waits is sent, once, through the shell's own exit path, and what
+/// cannot go, with the draft, is kept for the next chat. The operator said:
+/// "I don't want to drop messages".
 #[test]
-fn the_unasked_end_sends_what_waits() {
-    let mut c = chat();
+fn the_unasked_end_sends_what_waits_and_keeps_what_cannot_go() {
+    let kept = unsent("unasked");
+    let mut c = chat().unsent_file(&kept);
     send(&mut c, "said as the terminal closed");
     show(&mut c, Tab::Channel("gone3".into()));
     send(&mut c, "held for a channel about to go");
+    typed(&mut c, "typed, not sent");
     dissolve("gone3");
     c.refresh();
     let session = c.into_app().end_unasked(libc::SIGHUP, "stopped: the terminal hung up");
     assert_eq!(session.signal, Some(libc::SIGHUP));
     assert!(on_open("said as the terminal closed"), "sent as the chat ended");
-    assert!(!anywhere("held for a channel about to go"), "and nothing sent elsewhere in a vanished channel's place");
+    assert!(!anywhere("held for a channel about to go"), "nothing sent elsewhere in a vanished channel's place");
+    let c = chat().unsent_file(&kept).restore_unsent();
+    assert_eq!(c.input().text(), "held for a channel about to go\ntyped, not sent", "both open the next chat");
+    assert!(c.status().starts_with("restored"), "{}", c.status());
 }
 
 // ── the delay set to 0 ───────────────────────────────────────────

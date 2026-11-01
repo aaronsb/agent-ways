@@ -290,6 +290,9 @@ pub struct ChatPane {
     /// When the pane was made: the origin of the monotonic clock a
     /// countdown runs on ([`ChatPane::mono`]).
     started: Instant,
+    /// Where text typed and not sent is kept when the chat ends without
+    /// sending it, for the next chat's compose box ([`pending`]).
+    unsent_path: std::path::PathBuf,
     /// The send delay [`Chat::send_delay`] fixed, which a reload of the
     /// settings keeps.
     fixed_delay: Option<Duration>,
@@ -356,6 +359,7 @@ impl ChatPane {
             pending_shown: Vec::new(),
             pending_from: 0,
             started: Instant::now(),
+            unsent_path: crate::hidden::state_dir().join("unsent"),
             fixed_delay: None,
         }
     }
@@ -1085,14 +1089,18 @@ impl Pane for ChatPane {
         self.pending_quit_keeping()
     }
 
+    /// Send and quit: what waits is sent and the draft is kept for the
+    /// next chat; false, and the chat stays open, when either did not go.
     fn keep_on_quit(&mut self) -> bool {
-        self.send_all_now()
+        self.send_all_now() && self.keep_draft()
     }
 
     /// The chat ends unasked, by a signal or the terminal hanging up: what
-    /// waits to send goes now ([`ChatPane::send_waiting_at_unasked_exit`]).
+    /// waits to send goes now ([`ChatPane::send_waiting_at_unasked_exit`]),
+    /// and what did not go, the draft included, is kept for the next chat.
     fn ending(&mut self) {
         self.send_waiting_at_unasked_exit();
+        self.keep_what_did_not_go();
     }
 
     fn has_tab_menus(&self) -> bool {
@@ -1321,6 +1329,20 @@ impl Chat {
         let pane = self.pane_mut();
         pane.config.send_delay = d;
         pane.fixed_delay = Some(d);
+        self
+    }
+
+    /// Keep text typed and not sent in `path` rather than attend-chat's
+    /// state file ([`ChatPane::keep_unsent`]).
+    pub fn unsent_file(mut self, path: impl Into<std::path::PathBuf>) -> Chat {
+        self.pane_mut().unsent_path = path.into();
+        self
+    }
+
+    /// Open with what the last chat kept unsent in the compose box
+    /// ([`ChatPane::restore_unsent`]).
+    pub fn restore_unsent(mut self) -> Chat {
+        self.pane_mut().restore_unsent();
         self
     }
 

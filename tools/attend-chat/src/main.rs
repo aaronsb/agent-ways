@@ -214,7 +214,9 @@ fn main() {
 
     // The shell's signal handler stays installed after it closes, so the
     // process ends here, with 128 plus the signal when one ended it.
-    let code = match agent_tui::run(chat.into_app()) {
+    // What the last chat kept unsent, at a hangup or Send and quit, opens
+    // in the compose box.
+    let code = match agent_tui::run(chat.restore_unsent().into_app()) {
         Ok(session) => session.signal.map_or(0, |sig| 128 + sig),
         Err(e) => {
             eprintln!("attend-chat: terminal: {e}");

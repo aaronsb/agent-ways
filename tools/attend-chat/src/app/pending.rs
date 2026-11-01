@@ -438,10 +438,9 @@ impl ChatPane {
     }
 
     /// The exit guard's button that sends the messages waiting. Its label
-    /// says when the draft in the compose box goes with the quit, so the
-    /// button never drops a draft unnamed.
+    /// says when the draft in the compose box is kept for the next chat.
     pub(super) fn pending_quit_keeping(&self) -> Option<(String, char)> {
-        let draft = if self.input.is_empty() { "" } else { ", drop the draft" };
+        let draft = if self.input.is_empty() { "" } else { ", keep the draft" };
         match self.pending.len() {
             0 => None,
             1 => Some((format!("Send and quit{draft}"), 's')),
@@ -466,10 +465,65 @@ impl ChatPane {
     /// ([`agent_tui::Pane::ending`]). Enter meant send, and closing the
     /// terminal is no recall, so each message waiting is sent now, once, as
     /// Send and quit sends it, with no retry; one that does not go then is
-    /// lost with the chat. This is the one place the choice is made: to drop
-    /// what waits instead, call [`ChatPane::discard_pending`] here.
+    /// kept for the next chat ([`ChatPane::keep_what_did_not_go`]). This is
+    /// the one place the choice is made: to keep what waits unsent instead,
+    /// leave it waiting here.
     pub(super) fn send_waiting_at_unasked_exit(&mut self) {
         self.send_all_now();
+    }
+
+    /// The chat ends unasked: what waits that did not go, and the draft,
+    /// are kept for the next chat, so nothing typed is lost unsaid. The
+    /// operator said: "I don't want to drop messages".
+    pub(super) fn keep_what_did_not_go(&mut self) {
+        let mut left: Vec<String> = self.pending.take_all().into_iter().map(|h| h.text).collect();
+        left.extend(self.draft());
+        self.keep_unsent(&left);
+    }
+
+    /// Send and quit keeps the draft for the next chat; false, with the
+    /// reason on the status line, when it could not be kept.
+    pub(super) fn keep_draft(&mut self) -> bool {
+        let draft: Vec<String> = self.draft().into_iter().collect();
+        self.keep_unsent(&draft)
+    }
+
+    fn draft(&self) -> Option<String> {
+        Some(self.input.text().trim_end().to_string()).filter(|d| !d.is_empty())
+    }
+
+    /// Add `texts`, typed and not sent, to the unsent file, after what it
+    /// holds, a line apart; the next chat opens with them in its compose
+    /// box ([`ChatPane::restore_unsent`]). True when they were kept, or
+    /// there was nothing to keep. A dry run writes nothing.
+    fn keep_unsent(&mut self, texts: &[String]) -> bool {
+        if texts.is_empty() || self.dry_run {
+            return true;
+        }
+        let held = std::fs::read_to_string(&self.unsent_path).unwrap_or_default();
+        let all: Vec<&str> = std::iter::once(held.trim_end()).filter(|h| !h.is_empty()).chain(texts.iter().map(String::as_str)).collect();
+        let kept = self.unsent_path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| agent_settings::writer::write_atomic(&self.unsent_path, format!("{}\n", all.join("\n"))));
+        if let Err(e) = kept {
+            self.say(format!("not kept: {} ({e})", self.unsent_path.display()), true);
+            return false;
+        }
+        true
+    }
+
+    /// Put what the last chat kept unsent in the compose box, before any
+    /// draft, and take it from the file: the chat that kept it could not
+    /// send it.
+    pub(super) fn restore_unsent(&mut self) {
+        let Ok(text) = std::fs::read_to_string(&self.unsent_path) else { return };
+        let _ = std::fs::remove_file(&self.unsent_path);
+        let text = text.trim_end();
+        if text.is_empty() {
+            return;
+        }
+        let draft = self.input.text().to_string();
+        self.input.set(with_draft(text, &draft), text.chars().count());
+        self.say("restored: what the last chat could not send is in the box".to_string(), false);
+        self.dirty = true;
     }
 
     /// Quitting, the operator chose to discard what waits.
