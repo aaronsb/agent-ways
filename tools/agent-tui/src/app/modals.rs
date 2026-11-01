@@ -434,9 +434,21 @@ impl App {
         // A pane's work alone is in no tab.
         let heading = if reviewable { format!(" {total} unsaved in {} tabs", tabs.len()) } else { format!(" {total} unsaved") };
         let mut lines = vec![Line::raw(""), Line::from(Span::styled(heading, theme::changed()))];
-        lines.extend(tabs.iter().map(|(name, n, note)| Line::from(vec![Span::raw(format!("   {name:<12}")), Span::styled(format!("●{n}"), theme::changed()), Span::styled(note.clone(), theme::hint())])));
+        // A note wraps under itself, so a long one, such as a pane naming
+        // a draft and several messages waiting, is never cut at the
+        // dialog's edge.
+        for (name, n, note) in &tabs {
+            let count = format!("●{n}");
+            let lead = 15 + crate::wrap::str_width(&count);
+            let width = GUARD_WIDTH.saturating_sub(2 + lead + 3).max(10);
+            for (i, part) in crate::wrap::wrap_line(&Line::raw(note.trim_start().to_string()), width).into_iter().enumerate() {
+                let text: String = part.spans.iter().map(|s| s.content.as_ref()).collect();
+                let head = if i == 0 { vec![Span::raw(format!("   {name:<12}")), Span::styled(count.clone(), theme::changed())] } else { vec![Span::raw(" ".repeat(lead))] };
+                lines.push(Line::from([head, vec![Span::styled(format!("  {text}"), theme::hint())]].concat()));
+            }
+        }
         lines.push(Line::raw(""));
-        let mut d = Dialog::new("quit with unsaved changes", 74).body(lines).button(Button::new(Btn::Back, "Back (Esc)", Ground::Keep).key('b').cancel().default());
+        let mut d = Dialog::new("quit with unsaved changes", GUARD_WIDTH as u16).body(lines).button(Button::new(Btn::Back, "Back (Esc)", Ground::Keep).key('b').cancel().default());
         // Nothing in a pane is reviewed: back to it, or quit.
         if reviewable {
             d = d.button(Button::new(Btn::Review, format!("Review {} (r)", tabs[0].0), Ground::Accent).key('r'));
@@ -481,3 +493,6 @@ impl App {
         lines
     }
 }
+
+/// The quit guard's width, at most: it fits an 80-column terminal.
+const GUARD_WIDTH: usize = 74;
