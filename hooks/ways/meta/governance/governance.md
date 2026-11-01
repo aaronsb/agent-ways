@@ -20,8 +20,7 @@ Don't force a citation into every response — use one when it adds authority or
 
 ## How to phrase it
 
-Quote the *justification* along with the standard — the justification is the evidence
-that maps a specific directive to a specific control requirement.
+Quote the *justification* along with the standard — the justification is the evidence that maps a specific directive to a specific control requirement.
 
 **Inline** (brief):
 > We use conventional commit format — per NIST CM-3, this "creates structured change records with type classification" for auditable change control.

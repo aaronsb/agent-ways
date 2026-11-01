@@ -23,9 +23,7 @@ Children of this way cover the journey from local changes to production:
 | Implementation planning | `delivery/implement` |
 | Readiness of an area before changing it | `delivery/groundwork` |
 
-Deploying a schema migration is a delivery step, but the migration *discipline*
-— design, numbering, idempotency, consolidation — lives in its own domain now:
-see `data/migrations`.
+Deploying a schema migration is a delivery step, but the migration *discipline* — design, numbering, idempotency, consolidation — lives in its own domain now: see `data/migrations`.
 
 ## See Also
 

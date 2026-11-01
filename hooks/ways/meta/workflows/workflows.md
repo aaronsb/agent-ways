@@ -21,13 +21,11 @@ Most work doesn't need a workflow. Climb only as far as the task demands:
 | **Task list + subagents** | independent sub-jobs that parallelize, still one driver (see subagents way) |
 | **Workflow** | many items × stages, needs deterministic fan-out / verify / synthesis, or scale beyond one context |
 
-Reach for a workflow to be **comprehensive** (decompose and cover in parallel),
-**confident** (independent perspectives + adversarial verification before committing), or to take on **scale one context can't hold** (migrations, audits, broad sweeps).
+Reach for a workflow to be **comprehensive** (decompose and cover in parallel), **confident** (independent perspectives + adversarial verification before committing), or to take on **scale one context can't hold** (migrations, audits, broad sweeps).
 
 ## The opt-in cost
 
-A workflow can spawn dozens of agents and burn a large amount of tokens, so it is
-**explicit opt-in** — never inferred from a task that merely *would* benefit. Scout inline first to discover the work-list (list the files, scope the diff), *then* fan out over it. Match the fan-out to the real scale, and **log what you deliberately leave uncovered** so a bounded sweep never reads as exhaustive.
+A workflow can spawn dozens of agents and burn a large amount of tokens, so it is **explicit opt-in** — never inferred from a task that merely *would* benefit. Scout inline first to discover the work-list (list the files, scope the diff), *then* fan out over it. Match the fan-out to the real scale, and **log what you deliberately leave uncovered** so a bounded sweep never reads as exhaustive.
 
 ## Worked example: the deliver workflow
 

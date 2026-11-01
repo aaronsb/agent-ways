@@ -40,11 +40,9 @@ The translation embeds far from the English original: a mistranslation, or a stu
 ### 2. Negative discrimination — collides with another way
 
 The stub embeds closer to a *different* way than its own anchor. **Fix** by what the confuser is:
-- **Sibling way** (e.g. `delivery/commits` vs `delivery/branching`) — genuine neighbors;
-  sharpen both so each holds a distinct region.
+- **Sibling way** (e.g. `delivery/commits` vs `delivery/branching`) — genuine neighbors; sharpen both so each holds a distinct region.
 - **Parent/ancestor** (e.g. `delivery/commits` vs `delivery`) — some overlap is expected; add child-specific terminology.
-- **Unrelated** (e.g. outranked by `code/quality`) — accidental vocabulary overlap,
-  often a generic term doing too much work. Remove or specialize it.
+- **Unrelated** (e.g. outranked by `code/quality`) — accidental vocabulary overlap, often a generic term doing too much work. Remove or specialize it.
 
 A broad-vocabulary way that keeps appearing as the confuser across many stubs is a signal to trim *its* vocabulary so it stops hoovering traffic meant for specialized children.
 

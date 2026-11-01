@@ -17,8 +17,7 @@ This is what lets the rigor scale: a typed graph that would take a human minutes
 
 ## Two altitudes
 
-Children of this way split into the **model** that types the corpus and the
-**craft** of authoring one artifact well:
+Children of this way split into the **model** that types the corpus and the **craft** of authoring one artifact well:
 
 | Altitude | Concern | Way |
 |----------|---------|-----|
@@ -36,13 +35,11 @@ Children of this way split into the **model** that types the corpus and the
 | Craft | House norms — style, conventions, accessibility | `standards` |
 | Craft | A cold read by a fresh agent, and a linter proven by a planted violation | `validate` |
 
-*Forthcoming* model ways are authored as ADR-302 lands; until then this parent
-names the shape so the corpus has somewhere to grow into.
+*Forthcoming* model ways are authored as ADR-302 lands; until then this parent names the shape so the corpus has somewhere to grow into.
 
 ## Principles
 
-- **Type once, serialize many** — one graph; many views (dev tree, published site,
-  Obsidian graph, audience bundles). Audience drives the *view*, never the type.
+- **Type once, serialize many** — one graph; many views (dev tree, published site, Obsidian graph, audience bundles). Audience drives the *view*, never the type.
 - **An invariant earns its place only if its violation is a real defect** — a dangling edge, a supersede cycle, an id that disagrees with its mode. Rigor that tracks nothing is just a tax.
 - **Progressive disclosure, task-orientation, currency** — overview before detail; organize by reader job; an outdated page is a broken front door.
 
@@ -54,3 +51,4 @@ names the shape so the corpus has somewhere to grow into.
 - mermaid(documentation) — structural diagrams
 - validate(documentation) — a fresh agent given only the entry point grades the docs; a wrong answer is a docs defect
 - instruction-files(documentation) — the CLAUDE.md or AGENTS.md file every session loads
+- writing/plain(writing) — plain sentences, the present tense and terms defined on first use in a page

@@ -8,8 +8,7 @@ scope: agent
 refire: 0.15
 ---
 
-Context usage is elevated and no reflection has been captured recently.
-This is the window closing — take a moment to capture what matters:
+Context usage is elevated and no reflection has been captured recently. This is the window closing — take a moment to capture what matters:
 
 1. **What decisions were made** and why — the reasoning behind choices
 2. **What didn't work** and what you learned from it

@@ -18,7 +18,15 @@
 # session in many, and core reaches all of them. The rest of the corpus is
 # reported for context and never fails the build.
 #
-# Exit code: 0 = clean, 1 = core.md violates. Advisory corpus rows never set it.
+# One check covers every way body: each paragraph of prose stays on one line,
+# as core.md and documentation/markdown state. A wrapped paragraph has a
+# mechanical definition, two lines of one paragraph one under the other, so
+# the check fails on any way file. It leaves structure alone: lists, tables,
+# headings, blockquotes, fences, HTML comments, bold-label field lines, and a
+# line that ends in a hard break.
+#
+# Exit code: 0 = clean, 1 = core.md violates or a way body has a wrapped
+# paragraph. Advisory corpus rows never set it.
 
 set -uo pipefail
 
@@ -91,6 +99,38 @@ bold_runs() {
   ' "$1"
 }
 
+# Prints `file:line: text` for each line whose paragraph continues onto the
+# next line. A list item or a bold-label line can start such a pair, because a
+# continuation line under it is a wrap too. A blank line, a structural line, a
+# new list item or a new label line ends the paragraph.
+wrapped_lines() {
+  awk '
+    function kind(l) {
+      if (l ~ /^[[:space:]]*$/) return "blank"
+      if (l ~ /^[[:space:]]*\|/ || l ~ /^#/ || l ~ /^[[:space:]]*>/) return "struct"
+      if (l ~ /^[[:space:]]*</ || l ~ /^(    |\t)/) return "struct"
+      if (l ~ /^[[:space:]]*(-{3,}|\*{3,}|_{3,})[[:space:]]*$/) return "struct"
+      if (l ~ /^[[:space:]]*([-*+]|[0-9]+[.)])[[:space:]]/) return "list"
+      if (l ~ /^\*\*[^*]+\*\*[[:space:]]*[:=]/ || l ~ /^\*\*[^*]+:\*\*/) return "label"
+      return "prose"
+    }
+    FNR == 1            { pk = "blank"; fm = 0; fence = 0; cmt = 0 }
+    FNR == 1 && /^---$/ { fm = 1; next }
+    fm && /^---$/       { fm = 0; next }
+    fm                  { next }
+    /^[[:space:]]*(```|~~~)/ { fence = !fence; pk = "blank"; next }
+    fence               { next }
+    cmt                 { if ($0 ~ /-->/) cmt = 0; pk = "blank"; next }
+    /<!--/ && !/-->/    { cmt = 1; pk = "blank"; next }
+    {
+      k = kind($0)
+      if (k == "prose" && (pk == "prose" || pk == "list" || pk == "label") && prev !~ /(  |\\|<br>)$/)
+        printf "%s:%d: %s\n", FILENAME, FNR - 1, prev
+      prev = $0; pk = k
+    }
+  ' "$@"
+}
+
 echo "Register lint — always-on surface"
 
 if [[ ! -f "$CORE" ]]; then
@@ -134,6 +174,18 @@ if (( ANTI > 0 || SIG > 0 || SLOGAN > 0 || ASIDE > 0 || CONTRA > 0 || CHAT > 0 |
   note "Offending lines:"
   grep -nEi "$ANTITHESIS|$SIGNIFICANCE|^\*\*[^*]+\*\*\.?( |\$)| — [^—]{3,80} — |$CONTRAST|$CHATBOT|$ARGUING" "$CORE" \
     | sed 's/^/    /' | head -20
+fi
+
+# Line handling over every way body, core.md included.
+WAY_FILES=()
+while IFS= read -r f; do WAY_FILES+=("$f"); done < <(find hooks/ways -name '*.md' | sort)
+WRAPPED="$(wrapped_lines "${WAY_FILES[@]}")"
+NWRAP=$(printf '%s' "$WRAPPED" | grep -c . | tr -d ' ')
+if (( NWRAP == 0 )); then
+  ok "no wrapped paragraphs in ${#WAY_FILES[@]} way files"
+else
+  fail "$NWRAP wrapped paragraph line(s) in way files — join each paragraph onto one line"
+  printf '%s\n' "$WRAPPED" | sed 's/^/    /' | head -20
 fi
 
 # Corpus context. Advisory only — these fire on triggers, so their register

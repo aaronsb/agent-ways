@@ -8,12 +8,9 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Diátaxis — picking a documentation mode
 
-Every catalog page is exactly **one** of four modes. The mode is the page's
-*pole* (the `P` in its `DD.NNN.P` id) and it is enforced — pick it deliberately,
-because a page that serves two modes serves neither.
+Every catalog page is exactly **one** of four modes. The mode is the page's *pole* (the `P` in its `DD.NNN.P` id) and it is enforced — pick it deliberately, because a page that serves two modes serves neither.
 
-The tool computes the id and writes the frontmatter; **this is the one judgment
-it can't make for you.** Decide the mode, then scaffold:
+The tool computes the id and writes the frontmatter; **this is the one judgment it can't make for you.** Decide the mode, then scaffold:
 
 ```bash
 docs/scripts/doc new <domain> <mode> "<title>"   # mode: tutorial|how-to|reference|explanation
@@ -25,8 +22,7 @@ docs/scripts/doc lint                            # the page is lint-clean by con
 Two questions place every page:
 
 1. **Is the reader _studying_ or _working_?** Building understanding for later, or solving a task right now?
-2. **Is the content _practical steps_ or _theoretical knowledge_?** Things to *do*,
-   or things that *are* / *why*?
+2. **Is the content _practical steps_ or _theoretical knowledge_?** Things to *do*, or things that *are* / *why*?
 
 |                       | Practical steps (action) | Theoretical knowledge (cognition) |
 |-----------------------|--------------------------|-----------------------------------|
@@ -42,8 +38,7 @@ Two questions place every page:
 
 - **There is no fifth mode.** If a page won't fit one quadrant, it is two pages.
 - **One mode per page.** The classic failure is a tutorial that keeps stopping to explain, or a reference padded with how-to steps — each interrupts the other's job. Split them and `related:`-link across.
-- **The mode is a promise to the reader** about what kind of help they're getting.
-  Keep the page faithful to its quadrant; if it drifts, reclassify or split.
+- **The mode is a promise to the reader** about what kind of help they're getting. Keep the page faithful to its quadrant; if it drifts, reclassify or split.
 
 ## See Also
 

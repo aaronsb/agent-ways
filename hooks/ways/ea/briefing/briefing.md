@@ -15,8 +15,7 @@ Reach for a full briefing at the start of the day, after time away, or whenever 
 
 ## When to use a team (vs. a single query)
 
-The briefing skill can gather with parallel scout subagents or directly. Use the
-**team** when the briefing spans multiple accounts AND services AND benefits from cross-referencing — the parallelism hides slow I/O and keeps raw fetches out of the lead's context. **Skip the team** for a single account or service, an interactive task (drafting, scheduling), or a quick lookup — there the orchestration overhead costs more than it saves.
+The briefing skill can gather with parallel scout subagents or directly. Use the **team** when the briefing spans multiple accounts AND services AND benefits from cross-referencing — the parallelism hides slow I/O and keeps raw fetches out of the lead's context. **Skip the team** for a single account or service, an interactive task (drafting, scheduling), or a quick lookup — there the orchestration overhead costs more than it saves.
 
 ## Surface, don't act
 

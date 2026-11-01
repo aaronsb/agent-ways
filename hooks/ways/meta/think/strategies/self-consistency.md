@@ -20,5 +20,4 @@ Compare the answers:
 - **Split**: No consensus → the disagreement IS the finding. The question may be ambiguous or context-dependent.
 
 ### 5. Consensus or Escalation
-If majority agrees: that's the answer, with the divergent path noted as a caveat.
-If split: present the split to the user. The uncertainty is more valuable than a forced answer.
+If majority agrees: that's the answer, with the divergent path noted as a caveat. If split: present the split to the user. The uncertainty is more valuable than a forced answer.

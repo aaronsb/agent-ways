@@ -32,9 +32,7 @@ Classify the increment on two axes and pick the path:
 | **human gate: required** (sets direction, or unread one-way door) | **review + offer** — single-agent review → "want to read before I merge?" | **full gate** — swarm review **and** operator approval before merge |
 
 - **The X axis** is driven by **complexity and blast-radius**: diff size, number of files, core-vs-leaf, test coverage, reversibility. A sprawling change to a core path earns a swarm; a contained leaf edit earns a single pass.
-- **The Y axis** is driven by **whether the work sets direction** — an ADR that steers architecture lands in the bottom row no matter how small the diff — and by
-  **whether the operator has already read it**. If they wrote it or reviewed it live,
-  the human gate is already satisfied.
+- **The Y axis** is driven by **whether the work sets direction** — an ADR that steers architecture lands in the bottom row no matter how small the diff — and by **whether the operator has already read it**. If they wrote it or reviewed it live, the human gate is already satisfied.
 
 When the classification is ambiguous, **surface the call** rather than silently picking a corner. Inside a `/goal` loop, bias toward the autonomous corners; outside one, ask.
 
