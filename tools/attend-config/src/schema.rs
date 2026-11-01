@@ -61,7 +61,7 @@ const SECTIONS: &[SectionSpec] = &[
         entry: None,
         repair: None,
         columns: None,
-        doc: "attend-chat, the operator's screen: how its tabs are reached and whether it starts with the mouse.",
+        doc: "attend-chat, the operator's screen: how its tabs are reached, whether it starts with the mouse, and how long a message waits before it is sent.",
     },
     SectionSpec {
         name: "attend.project_sensors",
@@ -267,7 +267,7 @@ const KEYS: &[KeySpec] = &[
         default: DefaultValue::Yaml("auto"),
         scope: Scope::User,
         doc: "Which modifier with a digit jumps to a tab: auto, ctrl, alt, both or none.",
-        long: "auto is Ctrl+digit where the terminal speaks the kitty keyboard protocol and reports Ctrl+digits, else Alt+digit. Konsole and GNOME Terminal keep Alt+digits for their own tabs; F2 reaches the tabs everywhere.",
+        long: "auto and both are Alt+digit in every terminal, and Ctrl+digit as well where the terminal speaks the kitty keyboard protocol; ctrl is Ctrl+digit there only. Without the protocol Ctrl+3 arrives as Esc and Ctrl+2, Ctrl+4..8 as other control keys, so a Ctrl+digit jumps nowhere. Konsole and GNOME Terminal keep Alt+digits for their own tabs; F2 reaches the tabs everywhere.",
         ..BASE
     },
     KeySpec {
@@ -312,6 +312,17 @@ const KEYS: &[KeySpec] = &[
         scope: Scope::User,
         doc: "Whether attend-chat starts with the mouse on.",
         long: "On, a click reaches tabs, the left column, messages and chips, and Shift-drag selects text in most terminals. Off, the terminal selects text and middle-click pastes, and no click reaches the chat. Alt+m switches it while the chat runs.",
+        ..BASE
+    },
+    KeySpec {
+        name: "attend.chat.send_delay",
+        section: "attend.chat",
+        path: &["chat", "send_delay"],
+        kind: Kind::Int { min: 0, max: 60 },
+        default: DefaultValue::Yaml("5"),
+        scope: Scope::User,
+        doc: "Seconds a message waits in the feed after Enter before attend-chat sends it; 0 sends at once.",
+        long: "While it waits, Esc in the compose box recalls it into the box to edit, and a click on it does the same. Another Enter to the same destination joins it on a new line and starts the wait again. Slash commands run at once.",
         ..BASE
     },
     KeySpec {

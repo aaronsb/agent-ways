@@ -660,6 +660,23 @@ pub trait Pane: Any {
     /// Drop the unsaved work: the operator chose to quit anyway.
     fn discard(&mut self) {}
 
+    /// Some of the unsaved work can be kept as the shell quits, such as
+    /// messages still waiting to be sent: the exit guard's button that does
+    /// it, its label and its key (`("Send 2 waiting and quit", 's')`).
+    /// `None`, the default, offers only Back and Quit and discard all.
+    fn quit_keeping(&self) -> Option<(String, char)> {
+        None
+    }
+
+    /// The operator pressed the exit guard's [`Pane::quit_keeping`] button:
+    /// keep that work now. True when it was kept: the shell then discards
+    /// the rest ([`Pane::discard`]) and quits. False when some of it could
+    /// not be kept: the shell goes back to the pane, which says why, rather
+    /// than quit and lose it.
+    fn keep_on_quit(&mut self) -> bool {
+        true
+    }
+
     /// Text for the key help, below the keys.
     fn help(&self) -> Option<String> {
         None

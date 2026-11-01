@@ -35,12 +35,20 @@ pub fn fixture(name: &str, setup: impl FnOnce(&Path)) -> &'static Path {
         std::env::set_var("XDG_STATE_HOME", root.join("state"));
         std::env::set_var("XDG_DATA_HOME", root.join("data"));
         std::env::set_var("USER", "aaron");
+        send_at_once(&root);
         remove_at_exit();
         let base = attend_chat::signal::signals_base();
         std::fs::create_dir_all(&base).unwrap();
         (setup.take().expect("set up once"))(&base);
         root
     })
+}
+
+/// `attend.chat.send_delay: 0` in the fixture's attend file: Enter sends at
+/// once, as it did before the delay. A test of the delay sets its own
+/// ([`attend_chat::app::Chat::send_delay`]).
+pub fn send_at_once(dir: &Path) {
+    attend_chat::settings::set("send_delay", "0", &attend_config::user_path(), dir).expect("the fixture's attend file takes the delay");
 }
 
 /// Keep `session` live for the whole run: its heartbeat is dated an hour

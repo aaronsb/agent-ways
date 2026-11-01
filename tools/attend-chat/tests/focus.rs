@@ -509,9 +509,10 @@ fn q_outside_the_box_goes_through_the_exit_guard_over_a_draft() {
     assert_eq!(c.input().text(), "draft");
 }
 
-/// The Esc cycle, through the real keys: the box, the feed, the `≡` menu,
-/// the tab or column row last focused (the feed when there is none), the
-/// `≡` menu again. The draft stays through it all.
+/// The Esc cycle, through the real keys: Shift+Tab from the box to the
+/// feed, then Esc to the `≡` menu, the tab or column row last focused (the
+/// feed when there is none), the `≡` menu again. Esc in the box leaves
+/// nothing (ADR-409, note of 2026-11-01). The draft stays through it all.
 #[test]
 fn esc_moves_along_one_cycle() {
     let common = |c: &mut Chat| menu(c).is_some_and(|m| m.starts_with("attend-chat"));
@@ -519,7 +520,9 @@ fn esc_moves_along_one_cycle() {
         let mut c = chat();
         typed(&mut c, draft);
         press(&mut c, KeyCode::Esc);
-        assert_eq!(focused(&mut c), "mode feed", "{draft:?}: the box, then the feed");
+        assert_eq!(focused(&mut c), "mode chat", "{draft:?}: Esc in the box stays there");
+        press(&mut c, KeyCode::BackTab);
+        assert_eq!(focused(&mut c), "mode feed", "{draft:?}: Shift+Tab, the feed");
         press(&mut c, KeyCode::Esc);
         assert!(common(&mut c), "{draft:?}: then the ≡ menu: {}", screen(&mut c));
         assert_eq!(focused(&mut c), "tab ≡", "the focus on ≡ while it is open");

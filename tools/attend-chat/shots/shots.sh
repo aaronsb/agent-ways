@@ -89,7 +89,9 @@ sweep
 # session, and the agents' DMs with each other), proj (alpha, where the
 # chat runs, a project whose .claude/ways.yaml sets
 # mods.attend.listening: active, and beta a git checkout), relic (@relic/,
-# two messages an earlier channel left, that no entry names), full (the
+# two messages an earlier channel left, that no entry names), wait (base
+# with attend.chat.send_delay at its default of 5 seconds, where every other
+# fixture sets 0 so Enter sends at once), full (the
 # crowd, and #five, #eight and #everyone with that many members, the
 # participant strip's one, two and three rows and its cut; full16 the same
 # at 16 colours, where the cut is `...`), dm2 (dm, and the
@@ -151,6 +153,12 @@ entry-desc   | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Des
 entry-tab    | base  | wait:Agents text:draft C-n wait:new_channel_name text:abc click:#open gone:new_channel_name
 entry-row    | base  | wait:Agents click:+ wait:new_channel_name side:#infra gone:new_channel_name text:abc
 esc-twice    | base  | wait:Agents side:#infra side:#infra wait:pick Escape Escape wait:pick_one:_attend-chat
+wait-pending | wait  | wait:Agents text:first_thought,_still_forming Enter wait:sending_in
+wait-joined  | wait  | wait:Agents text:first_thought,_still_forming Enter wait:sending_in text:and_the_line_that_caught_up Enter wait:caught_up
+wait-recall  | wait  | wait:Agents text:first_thought,_still_forming Enter wait:sending_in text:typed_since Escape wait:recalled
+wait-up      | wait  | wait:Agents text:first_thought,_still_forming Enter wait:sending_in Up wait:recalled
+wait-sent    | wait  | wait:Agents text:first_thought,_still_forming Enter wait:sending_in gone:sending_in wait:sent
+wait-quit    | wait  | wait:Agents text:say_this_before_I_go Enter wait:sending_in C-c wait:Send_and_quit
 common-quit  | base  | wait:Agents click:≡ wait:Quit
 quit-click   | base  | wait:Agents text:half click:≡ wait:Quit click:Quit wait:Quit_and_discard
 menu-waits   | base  | wait:Agents side:#deploy side:#deploy wait:needs_ADR-404_D4 Down
@@ -213,10 +221,11 @@ digit-row    | base  | wait:Agents F2 Down End Up 2 wait:rollout
 digit-typed  | base  | wait:Agents F2 2 wait:>_2
 tab-leaves   | base  | wait:Agents text:hello Tab wait:▸≡
 feed-type    | base  | wait:Agents BTab wait:_feed_ q wait:>_q
-esc-feed     | base  | wait:Agents text:draft Escape wait:_feed_
-esc-menu     | base  | wait:Agents Escape wait:_feed_ Escape wait:pick_one:_attend-chat
+esc-feed     | base  | wait:Agents text:draft BTab wait:_feed_
+esc-stays    | base  | wait:Agents text:draft Escape wait:>_draft
+esc-menu     | base  | wait:Agents BTab wait:_feed_ Escape wait:pick_one:_attend-chat
 esc-back     | base  | wait:Agents BTab BTab Escape wait:pick_one:_attend-chat Escape gone:pick wait:_column_
-esc-feed-back | base | wait:Agents Escape Escape wait:pick_one:_attend-chat Escape gone:pick wait:_feed_
+esc-feed-back | base | wait:Agents BTab Escape wait:pick_one:_attend-chat Escape gone:pick wait:_feed_
 msg-menu     | base  | wait:Agents BTab Up wait:select Enter wait:message_from
 msg-quote    | base  | wait:Agents BTab Up wait:select Enter wait:message_from click:Quote wait:>_>
 msg-copy     | base  | wait:Agents BTab Up wait:select Enter wait:message_from click:Copy wait:clipboard
@@ -261,8 +270,9 @@ strip-16     | full16 | wait:Agents M-4 wait:every_agent
 # plain shape; `dm` a direct message from alpha to the operator; `trays`
 # that, a direct message the operator sent beta in an earlier session, in
 # beta's tray, and direct messages between the agents in their trays;
-# `gone` has gamma exited rather than quiet. No attend config is written:
-# the mouse is on by default.
+# `gone` has gamma exited rather than quiet. The attend config sets only
+# attend.chat.send_delay: 0, so Enter sends at once, except in `wait`,
+# which writes none and keeps the default delay; the mouse is on by default.
 fixture() { # kind
   rm -rf "$F"
   local cache=$F/cache/attend sig=$F/cache/attend/signals now shape=round
@@ -369,6 +379,7 @@ YAML
   fi
   [ "$1" = long ] && msg "$sig/_broadcast" s5 60 "claude:eeeeeeee-0000-4000-8000-000000000005" "$F/work/the-delta-project-with-a-name-far-too-long-for-a-row" "a project name longer than any row: the band cuts it and keeps the time"
   printf 'theme:\n  active: nord\n  shape: %s\n' "$shape" > "$F/config/agent-ways/config.yaml"
+  [ "$1" = wait ] || printf 'chat:\n  send_delay: 0\n' > "$F/config/attend/config.yaml"
   if [ "$1" = proj ]; then
     mkdir -p "$F/work/alpha/.claude" "$F/work/beta/.git"
     printf 'mods:\n  attend:\n    listening: active\n' > "$F/work/alpha/.claude/ways.yaml"

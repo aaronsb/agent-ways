@@ -8,10 +8,13 @@ use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
+/// A fixture home whose attend file sets `attend.chat.send_delay: 0`, so
+/// Enter sends at once, as before the delay.
 fn home(tag: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("attend-chat-life-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
+    attend_config::write_within(&d.join("config/attend/config.yaml"), None, &[("attend.chat.send_delay", 0.into())]).unwrap();
     d
 }
 

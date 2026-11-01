@@ -50,6 +50,7 @@ fn view() -> View {
         feed_len: 3,
         feed_selected: None,
         menu_on_repeat: false,
+        pending: false,
         read_only: false,
     }
 }
@@ -159,9 +160,22 @@ fn the_compose_box_types_every_key_but_its_ways_out() {
         cell("Tab after plain text leaves forward", compose.clone(), Ev::Key(key(KeyCode::Tab)), drafted(), tab(Slot::Common), vec![Redraw]),
         cell("Shift+Tab leaves backward", compose.clone(), Ev::Key(key(KeyCode::BackTab)), view(), feed.clone(), vec![Redraw]),
         cell("Shift+Tab leaves backward over a word to complete", compose.clone(), Ev::Key(key(KeyCode::BackTab)), View { completable: true, ..drafted() }, feed.clone(), vec![Redraw]),
-        cell("Esc on an empty box clears and goes to the feed", compose.clone(), Ev::Key(key(KeyCode::Esc)), view(), feed.clone(), vec![Clear, Redraw]),
-        cell("Esc over a draft clears and goes to the feed, the draft kept", compose.clone(), Ev::Key(key(KeyCode::Esc)), drafted(), feed.clone(), vec![Clear, Redraw]),
+        cell("Esc on an empty box clears and stays", compose.clone(), Ev::Key(key(KeyCode::Esc)), view(), compose.clone(), vec![Clear]),
+        cell("Esc over a draft clears and stays, the draft kept", compose.clone(), Ev::Key(key(KeyCode::Esc)), drafted(), compose.clone(), vec![Clear]),
+        cell("Esc with a message waiting recalls it and stays", compose.clone(), Ev::Key(key(KeyCode::Esc)), View { pending: true, ..view() }, compose.clone(), vec![Recall]),
+        cell("Esc over a draft with a message waiting recalls it", compose.clone(), Ev::Key(key(KeyCode::Esc)), View { pending: true, ..drafted() }, compose.clone(), vec![Recall]),
         cell("↑ in an empty box does nothing", compose.clone(), Ev::Key(key(KeyCode::Up)), view(), compose.clone(), vec![]),
+        cell("↑ in an empty box with a message waiting recalls it", compose.clone(), Ev::Key(key(KeyCode::Up)), View { pending: true, ..view() }, compose.clone(), vec![Recall]),
+        cell("↓ in an empty box with a message waiting does nothing", compose.clone(), Ev::Key(key(KeyCode::Down)), View { pending: true, ..view() }, compose.clone(), vec![]),
+        cell("↑ in a draft with a message waiting moves the caret", compose.clone(), Ev::Key(key(KeyCode::Up)), View { pending: true, ..drafted() }, compose.clone(), vec![Caret { up: true }]),
+        cell(
+            "↑ at the top of a draft with a message waiting leaves the box, as without",
+            compose.clone(),
+            Ev::Key(key(KeyCode::Up)),
+            View { pending: true, caret_start: true, ..drafted() },
+            feed.clone(),
+            vec![Redraw],
+        ),
         cell("↓ in an empty box does nothing", compose.clone(), Ev::Key(key(KeyCode::Down)), view(), compose.clone(), vec![]),
         cell("↑ in a draft moves the caret", compose.clone(), Ev::Key(key(KeyCode::Up)), drafted(), compose.clone(), vec![Caret { up: true }]),
         cell("↓ in a draft moves the caret", compose.clone(), Ev::Key(key(KeyCode::Down)), drafted(), compose.clone(), vec![Caret { up: false }]),
@@ -377,9 +391,11 @@ fn esc_menu(by_esc: bool) -> Overlay {
     Overlay::Menu { id: "common".into(), by_esc }
 }
 
-/// The Esc cycle: the box, the feed, the `≡` menu, the tab or column row
-/// the focus was last on (the feed when there is none), the `≡` menu again.
-/// The whole state is compared, the cycle's memory with it.
+/// The Esc cycle, which Shift+Tab enters from the box: the feed, the `≡`
+/// menu, the tab or column row the focus was last on (the feed when there
+/// is none), the `≡` menu again. Esc in the box recalls or clears and
+/// leaves nothing (ADR-409, note of 2026-11-01). The whole state is
+/// compared, the cycle's memory with it.
 #[test]
 fn esc_moves_along_one_cycle() {
     use Effect::*;
@@ -389,7 +405,8 @@ fn esc_moves_along_one_cycle() {
     let row3 = on_row(3).last_nav;
     let with_rows = |rows: Vec<SideHit>| View { world: Some(Laid { rows, ..view().world.unwrap() }), ..view() };
     check_all(vec![
-        cell("the box: Esc is the feed", at(Focus::Compose), Ev::Key(key(KeyCode::Esc)), drafted(), at(Focus::Feed), vec![Clear, Redraw]),
+        cell("the box: Shift+Tab is the feed", at(Focus::Compose), Ev::Key(key(KeyCode::BackTab)), drafted(), at(Focus::Feed), vec![Redraw]),
+        cell("the box: Esc stays in the box", at(Focus::Compose), Ev::Key(key(KeyCode::Esc)), drafted(), at(Focus::Compose), vec![Clear]),
         cell("the feed: Esc opens ≡, the focus on it", at(Focus::Feed), Ev::Key(key(KeyCode::Esc)), view(), at(Focus::Tab(Slot::Common)), menu_fx()),
         cell(
             "the menu Esc opened closes: back to the feed when no tab or row was focused",
@@ -816,6 +833,7 @@ fn any_view(r: &mut Rng) -> View {
         feed_len,
         feed_selected: (feed_len > 0 && r.coin()).then(|| r.below(feed_len)),
         menu_on_repeat: r.coin(),
+        pending: r.coin(),
     }
 }
 

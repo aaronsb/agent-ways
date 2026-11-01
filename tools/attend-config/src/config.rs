@@ -22,7 +22,8 @@ pub struct Config {
     pub project_sensors: Vec<String>,
 }
 
-/// attend-chat's own keys: how its tabs are reached, and the mouse.
+/// attend-chat's own keys: how its tabs are reached, the mouse, and how
+/// long a message waits before it is sent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatConfig {
     /// `auto`, `ctrl`, `alt`, `both` or `none`.
@@ -33,6 +34,9 @@ pub struct ChatConfig {
     pub mouse: bool,
     /// `f3`, `ctrl-b` or `none`: the key that toggles the left column.
     pub sidebar_key: String,
+    /// How long a message waits after Enter before it is sent, while it can
+    /// be recalled; zero sends at once.
+    pub send_delay: Duration,
 }
 
 /// Background signal-file cleanup inside `attend run`. Reaping is by
@@ -111,6 +115,7 @@ impl Config {
             focus_key: text("attend.chat.tabs.focus_key", "both"),
             mouse: get("attend.chat.mouse", layers).and_then(|v| v.as_bool()).unwrap_or(true),
             sidebar_key: text("attend.chat.sidebar_key", "f3"),
+            send_delay: secs(get("attend.chat.send_delay", layers), 5),
         };
         let project_sensors = list(get("attend.project_sensors", layers)).unwrap_or_default();
         Config { governor, engagement, cleanup, chat, project_sensors }

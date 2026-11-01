@@ -121,6 +121,15 @@ impl Modal for Guard {
                 app.discard_all();
                 return false;
             }
+            // What the pane can keep is kept first, and the rest goes as
+            // Quit; what it could not keep stays, and so does the screen.
+            Answer::Button(Btn::KeepQuit) => {
+                app.mode = Mode::Browse;
+                if app.pane.as_mut().is_none_or(|p| p.keep_on_quit()) {
+                    app.discard_all();
+                    return false;
+                }
+            }
             Answer::Button(Btn::Review) => {
                 app.mode = Mode::Browse;
                 app.clear_filter();
@@ -146,7 +155,12 @@ impl Modal for Guard {
         let mut spans = mode_lozenge(app, "quit", Ground::Warn);
         // A pane's work alone has nothing to review.
         let review = app.pending() > 0 || app.theme_dirty();
-        spans.push(Span::styled(if review { "  Esc back · r review · D quit and discard all" } else { "  Esc back · D quit and discard all" }, theme::hint()));
+        let mut hint = String::from(if review { "  Esc back · r review" } else { "  Esc back" });
+        if let Some((label, key)) = app.pane.as_ref().and_then(|p| p.quit_keeping()) {
+            hint += &format!(" · {key} {}", label.to_lowercase());
+        }
+        hint += " · D quit and discard all";
+        spans.push(Span::styled(hint, theme::hint()));
         Some(spans)
     }
 
@@ -410,6 +424,10 @@ impl App {
         // Nothing in a pane is reviewed: back to it, or quit.
         if reviewable {
             d = d.button(Button::new(Btn::Review, format!("Review {} (r)", tabs[0].0), Ground::Accent).key('r'));
+        }
+        // What the pane can keep as it quits, such as messages waiting to send.
+        if let Some((label, key)) = self.pane.as_ref().and_then(|p| p.quit_keeping()) {
+            d = d.button(Button::new(Btn::KeepQuit, format!("{label} ({key})"), Ground::Accent).key(key));
         }
         d.button(Button::new(Btn::Quit, "Quit and discard all (D)", Ground::Err).key('D')).build().expect("Back is the cancel and the default")
     }

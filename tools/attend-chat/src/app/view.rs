@@ -124,7 +124,7 @@ pub(super) const VIEW_LABEL: &str = "⋯all";
 /// the mark its row carries, shaded as a view), the `+` slot, then the
 /// reserved tabs pinned right, `#open` and the operator view
 /// ([`VIEW_LABEL`]), shaded as a view. The left column numbers the
-/// channels for Ctrl+digit, and 0 is the operator view ([`ChatPane::jump`]);
+/// channels for Alt+digit, and 0 is the operator view ([`ChatPane::jump`]);
 /// while the column is hidden, by its key or for want of width, each
 /// channel's tab carries the column's number in its place. A channel tab
 /// (#393) is led by the channel's glyph in its identity colour, and the
@@ -258,7 +258,8 @@ fn attachment_line(chat: &ChatPane, files: &[String]) -> Line<'static> {
 }
 
 /// The feed of the foreground tab (#393): merged shows the whole stream,
-/// a channel tab its own traffic and local notices.
+/// a channel tab its own traffic and local notices; then, in a view that
+/// sends, the messages waiting to send ([`super::pending`]).
 fn draw_feed(chat: &mut ChatPane, f: &mut Frame, area: Rect, fg: &Tab) {
     if chat.entries.is_none() {
         chat.world();
@@ -269,8 +270,13 @@ fn draw_feed(chat: &mut ChatPane, f: &mut Frame, area: Rect, fg: &Tab) {
                 memberships.entry(m.as_str()).or_default().push(kg);
             }
         }
-        let (entries, members): (Vec<Entry>, Vec<Option<String>>) =
+        let (mut entries, mut members): (Vec<Entry>, Vec<Option<String>>) =
             chat.in_view(fg).map(|s| entry(chat, s, &memberships)).unzip();
+        // The messages waiting to send follow the messages, newest last.
+        chat.pending_from = entries.len();
+        let waiting = chat.pending_entries(fg);
+        members.extend(waiting.iter().map(|_| None));
+        entries.extend(waiting);
         chat.entries = Some(entries);
         chat.entry_members = members;
     }

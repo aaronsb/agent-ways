@@ -24,7 +24,7 @@ use agent_tui::{Jump, TabKeys};
 use attend_config::{ChatConfig, Config, SCHEMA};
 
 /// The chat's keys, by their short names under `attend.chat.`.
-pub const KEYS: &[&str] = &["tabs.jump", "tabs.menu_on_repeat", "tabs.focus_key", "mouse", "sidebar_key"];
+pub const KEYS: &[&str] = &["tabs.jump", "tabs.menu_on_repeat", "tabs.focus_key", "mouse", "sidebar_key", "send_delay"];
 
 const PREFIX: &str = "attend.chat.";
 
@@ -43,15 +43,28 @@ pub fn load(dir: &Path) -> ChatConfig {
     Config::from_layers(&layers(dir)).chat
 }
 
-/// The tab keys `c` asks for.
-pub fn tab_keys(c: &ChatConfig) -> TabKeys {
+/// The tab keys `c` asks for, on a terminal that does (`enhanced`) or does
+/// not speak the kitty keyboard protocol.
+///
+/// Alt+digit jumps in every terminal (`auto`, `both`, `alt`). Ctrl+digit
+/// jumps only where the protocol reports it as itself (`auto`, `both`,
+/// `ctrl`): without it Ctrl+3 is the Esc byte, which recalls a message
+/// waiting to send, Ctrl+2 is NUL, Ctrl+4..7 are FS, GS, RS and US and
+/// Ctrl+8 is DEL, so no Ctrl+digit may stand for a channel there.
+pub fn tab_keys(c: &ChatConfig, enhanced: bool) -> TabKeys {
     let (f2, ctrl_t) = match c.focus_key.as_str() {
         "f2" => (true, false),
         "ctrl-t" => (false, true),
         "none" => (false, false),
         _ => (true, true),
     };
-    TabKeys { jump: Jump::parse(&c.jump).unwrap_or(Jump::Auto), menu_on_repeat: c.menu_on_repeat, f2, ctrl_t }
+    let jump = match (Jump::parse(&c.jump).unwrap_or(Jump::Auto), enhanced) {
+        (Jump::Auto | Jump::Both, true) => Jump::Both,
+        (Jump::Auto | Jump::Both | Jump::Alt, _) => Jump::Alt,
+        (Jump::Ctrl, true) => Jump::Ctrl,
+        (Jump::Ctrl | Jump::None, _) => Jump::None,
+    };
+    TabKeys { jump, menu_on_repeat: c.menu_on_repeat, f2, ctrl_t }
 }
 
 /// One line on every chat key: its value and the layer it comes from.
@@ -112,10 +125,24 @@ mod tests {
     #[test]
     fn tab_keys_follow_the_settings() {
         let mut c = Config::default().chat;
-        assert_eq!(tab_keys(&c), TabKeys::default(), "the defaults are the shell's");
+        assert_eq!(tab_keys(&c, true), TabKeys { jump: Jump::Both, ..TabKeys::default() }, "Alt+digit, and Ctrl+digit where it arrives");
+        assert_eq!(tab_keys(&c, false), TabKeys { jump: Jump::Alt, ..TabKeys::default() }, "Alt+digit alone without the kitty protocol");
         c.jump = "alt".into();
         c.focus_key = "ctrl-t".into();
         c.menu_on_repeat = false;
-        assert_eq!(tab_keys(&c), TabKeys { jump: Jump::Alt, menu_on_repeat: false, f2: false, ctrl_t: true });
+        assert_eq!(tab_keys(&c, true), TabKeys { jump: Jump::Alt, menu_on_repeat: false, f2: false, ctrl_t: true });
+    }
+
+    /// No setting makes a Ctrl+digit jump where it arrives as Esc or as
+    /// another control key.
+    #[test]
+    fn a_ctrl_digit_jumps_only_with_the_kitty_protocol() {
+        let mut c = Config::default().chat;
+        for jump in ["auto", "ctrl", "alt", "both", "none"] {
+            c.jump = jump.into();
+            assert!(!tab_keys(&c, false).ctrl(false), "{jump}");
+            assert_eq!(tab_keys(&c, false).alt(false), jump != "ctrl" && jump != "none", "{jump}");
+            assert_eq!(tab_keys(&c, true).ctrl(true), jump != "alt" && jump != "none", "{jump}");
+        }
     }
 }

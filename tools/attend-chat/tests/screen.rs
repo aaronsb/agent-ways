@@ -56,6 +56,9 @@ fn fixture() -> &'static Fixture {
         std::env::set_var("XDG_STATE_HOME", root.join("state"));
         std::env::set_var("XDG_DATA_HOME", root.join("data"));
         std::env::set_var("USER", "aaron");
+        // Enter sends at once, as before the send delay; the delay's own
+        // frames set it (`Chat::send_delay`).
+        attend_chat::settings::set("send_delay", "0", &attend_config::user_path(), &root).unwrap();
         remove_at_exit(&root);
         let base = attend_chat::signal::signals_base();
         std::fs::create_dir_all(&base).unwrap();
@@ -1616,8 +1619,8 @@ fn golden_the_keyboard_walks_the_column() {
 fn golden_the_esc_cycle_and_the_message_menu() {
     let mut g = goldens();
     let mut c = chat_side().enhanced(true).dry_run(true);
-    drawn(&mut c, &[key(KeyCode::Esc), key(KeyCode::Esc)], 80, 25);
-    assert!(text(&mut c, 80, 25).contains("pick one: attend-chat"), "the box, the feed, then the ≡ menu: {}", text(&mut c, 80, 25));
+    drawn(&mut c, &[KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT), key(KeyCode::Esc)], 80, 25);
+    assert!(text(&mut c, 80, 25).contains("pick one: attend-chat"), "Shift+Tab to the feed, then Esc, the ≡ menu: {}", text(&mut c, 80, 25));
     g.check("esc-menu-80x25", &testkit::render_screen(&mut c, 80, 25));
     drawn(&mut c, &[key(KeyCode::Esc)], 80, 25);
     assert!(bar(&mut c).trim_start().starts_with("feed"), "back to the feed: {}", bar(&mut c));
@@ -1906,4 +1909,191 @@ fn a_gradient_theme_grounds_every_cell_of_the_chat() {
             assert_eq!(testkit::ungrounded(&testkit::render_screen(&mut c, w, h)), None, "sidebar {side}, {w}x{h}: a cell off the theme's ground");
         }
     }
+}
+
+/// Whether a message on the fixture's `#open` reads `body`.
+fn on_open(body: &str) -> bool {
+    std::fs::read_dir(attend_chat::signal::broadcast_dir()).into_iter().flatten().flatten().any(|e| std::fs::read_to_string(e.path()).is_ok_and(|t| t.contains(body)))
+}
+
+/// A chat whose Enter holds a message five seconds before it is sent
+/// (`attend.chat.send_delay`), on the frames' pinned clock.
+fn chat_waits() -> Chat {
+    chat_side().send_delay(Duration::from_secs(5))
+}
+
+/// Time passing on the pinned clock, and the tick that sends what is due.
+fn wait(c: &mut Chat, secs: u64) {
+    c.advance(Duration::from_secs(secs));
+    Screen::tick(c);
+}
+
+/// Enter on a message holds it in the feed with its countdown; another
+/// Enter to the same place joins it on a new line and starts the countdown
+/// again; when the countdown ends it is sent as one message, through
+/// Enter's own path (ADR-409, note of 2026-11-01).
+#[test]
+fn golden_a_message_waits_in_the_feed_and_a_burst_goes_as_one() {
+    let mut g = goldens();
+    let mut c = chat_waits();
+    drawn(&mut c, &chars("first thought, waiting"), 80, 25);
+    drawn(&mut c, &[key(KeyCode::Enter)], 80, 25);
+    assert_eq!(c.pending(), ["first thought, waiting"]);
+    assert!(c.input().is_empty(), "the box is free for the next line");
+    assert!(!on_open("first thought, waiting"), "nothing is sent yet");
+    let shown = text(&mut c, 80, 25);
+    assert!(shown.contains("sending in 5s") && shown.contains("→ #open"), "{shown}");
+    assert!(bar(&mut c).contains("Esc recall"), "the footer names the recall: {}", bar(&mut c));
+    g.check("pending-80x25", &testkit::render_screen(&mut c, 80, 25));
+    wait(&mut c, 2);
+    assert!(text(&mut c, 80, 25).contains("sending in 3s"), "the countdown redraws as it ticks");
+    drawn(&mut c, &chars("and a second line"), 80, 25);
+    drawn(&mut c, &[key(KeyCode::Enter)], 80, 25);
+    assert_eq!(c.pending(), ["first thought, waiting\nand a second line"], "joined, a line apart");
+    assert!(text(&mut c, 80, 25).contains("sending in 5s"), "the countdown starts again");
+    g.check("pending-joined-80x25", &testkit::render_screen(&mut c, 80, 25));
+    wait(&mut c, 3);
+    assert!(!on_open("and a second line"), "the first countdown's end is not the second's");
+    wait(&mut c, 2);
+    assert!(c.pending().is_empty());
+    assert!(c.status().starts_with("sent:"), "{}", c.status());
+    assert!(on_open("first thought, waiting\nand a second line"), "the burst went out as one message");
+    assert!(!text(&mut c, 80, 25).contains("sending in"), "and left the feed's waiting entries");
+    g.finish();
+}
+
+/// Send now (Ctrl+X Ctrl+S) sends the draft at once after the message
+/// waiting for its destination, joined, as Claude Code's `chat:sendNow`
+/// sends the queued messages and the draft.
+#[test]
+fn send_now_sends_what_waits_and_the_draft_together() {
+    let mut c = chat_waits();
+    typed(&mut c, "queued first");
+    press(&mut c, key(KeyCode::Enter));
+    typed(&mut c, "then the draft");
+    press(&mut c, ctrl('x'));
+    press(&mut c, ctrl('s'));
+    assert!(c.pending().is_empty() && c.input().is_empty(), "{:?} {:?}", c.pending(), c.input().text());
+    assert!(on_open("queued first\nthen the draft"), "one message, at once");
+}
+
+/// A message to another place waits on its own, and a slash command runs
+/// at once.
+#[test]
+fn another_destination_waits_apart_and_a_command_runs_at_once() {
+    let mut c = chat_waits().dry_run(true);
+    for line in ["to everyone", "#deploy to deploy", "@Laszlo to laszlo"] {
+        typed(&mut c, line);
+        press(&mut c, key(KeyCode::Enter));
+    }
+    assert_eq!(c.pending(), ["to everyone", "#deploy to deploy", "@Laszlo to laszlo"]);
+    typed(&mut c, "/channels");
+    press(&mut c, key(KeyCode::Enter));
+    assert_eq!(c.status(), "dry run: /channels not run", "a command is not held");
+    assert_eq!(c.pending().len(), 3);
+}
+
+/// Esc in the box recalls the newest message waiting, joined text and all,
+/// before the draft typed since; it is never sent. A click on a waiting
+/// message recalls that one. With nothing waiting Esc only clears.
+#[test]
+fn golden_esc_or_a_click_recalls_a_waiting_message_into_the_box() {
+    let mut g = goldens();
+    let mut c = chat_waits();
+    for line in ["held back", "and joined"] {
+        typed(&mut c, line);
+        press(&mut c, key(KeyCode::Enter));
+    }
+    typed(&mut c, "typed since");
+    press(&mut c, key(KeyCode::Esc));
+    assert_eq!(c.input().text(), "held back\nand joined\ntyped since", "recalled first, then the draft");
+    assert!(c.pending().is_empty());
+    assert!(c.status().starts_with("recalled: not sent to #open"), "{}", c.status());
+    assert!(!text(&mut c, 80, 25).contains("sending in"));
+    g.check("recalled-80x25", &testkit::render_screen(&mut c, 80, 25));
+    wait(&mut c, 30);
+    assert!(!on_open("held back"), "a recalled message is never sent");
+    press(&mut c, key(KeyCode::Esc));
+    assert_eq!(c.input().text(), "held back\nand joined\ntyped since", "with nothing waiting Esc keeps the draft");
+    assert!(bar(&mut c).trim_start().starts_with("chat"), "and the focus: {}", bar(&mut c));
+
+    // ↑ in an empty box recalls as Esc does, as Up in Claude Code's input
+    // pulls back the messages it queued; in a draft it stays the caret's.
+    let mut c = chat_waits().dry_run(true);
+    typed(&mut c, "up brings it back");
+    press(&mut c, key(KeyCode::Enter));
+    press(&mut c, key(KeyCode::Up));
+    assert_eq!((c.input().text(), c.pending().len()), ("up brings it back", 0), "↑ in the empty box recalls");
+    press(&mut c, key(KeyCode::Enter));
+    typed(&mut c, "a draft");
+    press(&mut c, key(KeyCode::Up));
+    assert_eq!((c.input().text(), c.pending().len()), ("a draft", 1), "↑ over a draft leaves what waits");
+
+    // A click on the older of two waiting messages recalls that one.
+    let mut c = chat_waits().dry_run(true);
+    for line in ["older one", "#deploy newer one"] {
+        typed(&mut c, line);
+        press(&mut c, key(KeyCode::Enter));
+    }
+    let buf = testkit::render_screen(&mut c, 120, 40);
+    let (x, y) = testkit::find(&buf, "older one").expect("the waiting message");
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+    assert_eq!(c.input().text(), "older one");
+    assert_eq!(c.pending(), ["#deploy newer one"]);
+    g.finish();
+}
+
+/// Quitting with a message waiting asks first: send it now, or discard it.
+/// Never dropped unasked.
+#[test]
+fn golden_quitting_with_a_message_waiting_asks_to_send_or_discard() {
+    let mut g = goldens();
+    let mut c = chat_waits();
+    typed(&mut c, "say this before I go");
+    press(&mut c, key(KeyCode::Enter));
+    assert!(drawn(&mut c, &[ctrl('c')], 80, 25), "a waiting message keeps the chat open");
+    assert!(c.app().guarding());
+    let shown = text(&mut c, 80, 25);
+    assert!(shown.contains("a message waiting to send") && shown.contains("Send and quit (s)") && shown.contains("Quit and discard all (D)"), "{shown}");
+    g.check("guard-pending-80x25", &testkit::render_screen(&mut c, 80, 25));
+    wait(&mut c, 10);
+    assert!(c.app().guarding() && !on_open("say this before I go"), "nothing is sent from under the question");
+    assert!(drawn(&mut c, &[key(KeyCode::Esc)], 80, 25));
+    assert_eq!(c.pending(), ["say this before I go"], "Back keeps it waiting");
+    assert!(drawn(&mut c, &[ctrl('c')], 80, 25));
+    assert!(!drawn(&mut c, &[key(KeyCode::Char('s'))], 80, 25), "s sends and quits");
+    assert!(on_open("say this before I go"), "sent as the chat closed");
+
+    // D discards it and quits; nothing is sent.
+    let mut c = chat_waits();
+    typed(&mut c, "never mind this one");
+    press(&mut c, key(KeyCode::Enter));
+    assert!(drawn(&mut c, &[ctrl('c')], 80, 25));
+    assert!(!drawn(&mut c, &[key(KeyCode::Char('D'))], 80, 25));
+    assert!(!on_open("never mind this one"));
+    g.finish();
+}
+
+/// Alt+digit picks a channel in every terminal; Ctrl+digit only where the
+/// kitty keyboard protocol reports it, since without it Ctrl+3 is Esc,
+/// which recalls a message waiting.
+#[test]
+fn alt_digit_jumps_everywhere_and_ctrl_digit_only_with_the_kitty_protocol() {
+    for enhanced in [false, true] {
+        let mut c = chat().enhanced(enhanced);
+        drawn(&mut c, &[alt('2')], 80, 25);
+        assert_eq!(c.foreground(), &Tab::Channel("deploy".into()), "Alt+2, enhanced {enhanced}");
+        // 0 is a key once the bar is drawn with the reserved tab it reaches.
+        drawn(&mut c, &[alt('0')], 80, 25);
+        assert_eq!(c.foreground(), &Tab::Merged, "Alt+0, the operator view, enhanced {enhanced}");
+        drawn(&mut c, &[ctrl('2')], 80, 25);
+        let want = if enhanced { Tab::Channel("deploy".into()) } else { Tab::Merged };
+        assert_eq!(c.foreground(), &want, "Ctrl+2, enhanced {enhanced}");
+    }
+    // Without the protocol Ctrl+3 is the Esc byte: it recalls, it shows no tab.
+    let mut c = chat_waits();
+    typed(&mut c, "held");
+    press(&mut c, key(KeyCode::Enter));
+    press(&mut c, key(KeyCode::Esc));
+    assert_eq!((c.foreground(), c.input().text()), (&Tab::Merged, "held"));
 }

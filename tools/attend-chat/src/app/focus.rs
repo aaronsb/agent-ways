@@ -27,11 +27,15 @@
 //!   `m`), and on a channel's row the digits pick a channel by its number;
 //!   any other character, a digit on an agent's row among them, goes to the
 //!   compose box and is typed there.
-//! - Esc moves along one cycle: the box, the feed, the `≡` menu, the tab or
-//!   column row the focus was last on (the feed when there is none), the
-//!   `≡` menu again. Tab out of the box onto `≡` is not remembered, so the
-//!   cycle comes back to the tab or row focused before. An overlay that is
-//!   open takes the first Esc.
+//! - Esc in the box, and ↑ in an empty box, recall the newest message
+//!   waiting to send ([`super::pending`]) into the box; with none waiting
+//!   Esc clears the message selected and the status and ↑ does nothing.
+//!   Neither moves the focus. Outside the box Esc
+//!   moves along one cycle, which Shift+Tab enters from the box: the feed,
+//!   the `≡` menu, the tab or column row the focus was last on (the feed
+//!   when there is none), the `≡` menu again. Tab out of the box onto `≡`
+//!   is not remembered, so the cycle comes back to the tab or row focused
+//!   before. An overlay that is open takes the first Esc.
 //!
 //! These rules are [`ix::step`], a pure function over the one interaction
 //! state ([`ix::Ix`]); [`ChatPane::dispatch`] is where every input that can
@@ -131,6 +135,7 @@ impl ChatPane {
             feed_len: self.feed.len(),
             feed_selected: self.feed.selected,
             menu_on_repeat: self.config.menu_on_repeat,
+            pending: self.has_pending(),
             read_only: !self.foreground.composes(),
         }
     }
@@ -172,7 +177,7 @@ impl ChatPane {
                 }
             }
             Effect::Send => self.enter(),
-            Effect::SendNow => self.send(true),
+            Effect::SendNow => self.send_now(),
             Effect::Complete => {
                 self.send_anyway = None;
                 self.tab_key();
@@ -180,6 +185,10 @@ impl ChatPane {
             Effect::Clear => {
                 self.send_anyway = None;
                 self.clear();
+            }
+            Effect::Recall => {
+                self.feed.selected = None;
+                self.recall_newest();
             }
             Effect::Page { up } => self.page(up),
             Effect::ShowTab(t) => self.set_tab(t),
@@ -211,11 +220,12 @@ impl ChatPane {
                 // arrives in every terminal; it rides on Enter's line so
                 // every key still fits the help at 80x25.
                 Binding::new("Enter", "send; C-x C-s sends now").short("send"),
+                // On the footer, beside Enter, while a message waits to send.
+                on(Binding::new("Esc", "recall the newest message waiting to send; so does ↑ in an empty box").short("recall"), self.has_pending()),
                 Binding::new("Tab", "complete, else next").short("complete"),
-                Binding::new("S-Tab", "or ↑ at the top leaves the box").short("or ↑ leaves"),
-                Binding::new("Esc", "the feed"),
+                Binding::new("S-Tab", "or ↑ at the top leaves the box, to the feed").short("or ↑ leaves"),
                 Binding::help("← →", "move the cursor; outside the box, the element before or next"),
-                Binding::help("↑ ↓", "between the box's lines; outside it, a column row or a feed message"),
+                Binding::help("↑ ↓", "between the box's lines; ↑ in an empty box recalls; outside it, a row or a message"),
             ]);
             // Claude Code's `chat:sendNow`; Enter again after a quiet
             // refusal does the same on any terminal.

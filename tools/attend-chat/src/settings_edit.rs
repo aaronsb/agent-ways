@@ -457,6 +457,7 @@ mod tests {
                 "attend.chat.tabs.focus_key = both (default)",
                 "attend.chat.mouse = true (default)",
                 "attend.chat.sidebar_key = f3 (default)",
+                "attend.chat.send_delay = 5 (default)",
             ]
         );
         assert_eq!(name_of(&lines[0]), "mods.attend.listening");

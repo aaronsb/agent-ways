@@ -17,11 +17,12 @@
 //! asks how to route a key ([`Ix::ctx`]) and reads nothing else of it.
 //!
 //! The rules are those of [`super::focus`]: in the compose box every key
-//! edits but for the ways out; outside it the keys walk the ring, a
-//! character goes back to the box and is typed there, and Esc moves along
-//! the Esc cycle: the box, the feed, the `≡` menu, the last tab or column
-//! row the focus was on, the `≡` menu again; Tab out of the box onto `≡`
-//! is not remembered. Walking the tab bar shows
+//! edits but for the ways out, and Esc there recalls a message waiting to
+//! send; outside it the keys walk the ring, a character goes back to the
+//! box and is typed there, and Esc moves along the Esc cycle, which Shift+Tab
+//! enters from the box: the feed, the `≡` menu, the last tab or column row
+//! the focus was on, the `≡` menu again; Tab out of the box onto `≡` is not
+//! remembered. Walking the tab bar shows
 //! nothing: Enter opens the focused tab's menu, and the column's numbers
 //! show a channel.
 //!
@@ -83,6 +84,11 @@ impl Ix {
     /// An overlay of the shell's holds the keyboard over the pane.
     pub(super) fn overlaid(&self) -> bool {
         !self.overlays.is_empty()
+    }
+
+    /// The exit guard is open: quitting is being decided.
+    pub(super) fn guarded(&self) -> bool {
+        self.overlays.contains(&Overlay::Guard)
     }
 
     pub(super) fn on_bar(&self) -> bool {
@@ -156,8 +162,8 @@ pub(super) enum Ev {
     /// The bar's slot `i` is shown (`Pane::set_tab`).
     Jump(usize),
     /// The column's channel `n`, counted from 1, or with 0 the operator
-    /// view: Ctrl+digit or Alt+digit (`menu`), or a plain digit on a column
-    /// row (`Pane::jump`).
+    /// view: Alt+digit, or Ctrl+digit where the kitty keyboard protocol
+    /// reports it (`menu`), or a plain digit on a column row (`Pane::jump`).
     Numbered { n: usize, menu: bool },
     /// The bar's slot `i` activated: Ctrl+digit, a click on it, a right click
     /// (`menu`) (`Pane::activate_tab`).
@@ -214,8 +220,12 @@ pub(super) enum Effect {
     SendNow,
     /// Tab in the box on a word to complete: complete it.
     Complete,
-    /// Esc in the box: the message selected and the status cleared.
+    /// Esc in the box with nothing waiting to send: the message selected and
+    /// the status cleared.
     Clear,
+    /// Esc in the box, or ↑ in an empty box, with a message waiting to send:
+    /// the newest one back in the box, and not sent.
+    Recall,
     Page { up: bool },
     /// Show this tab.
     ShowTab(Tab),
@@ -252,6 +262,8 @@ pub(super) struct View {
     pub(super) feed_selected: Option<usize>,
     /// `attend.chat.tabs.menu_on_repeat`.
     pub(super) menu_on_repeat: bool,
+    /// A message waits to send ([`super::pending`]): Esc in the box recalls it.
+    pub(super) pending: bool,
     /// The view shown has no compose box: an agent's own DMs, which offer
     /// nothing to send. The ring leaves the box out, and the focus that
     /// would go to it goes to the feed.
@@ -510,11 +522,14 @@ impl<'a> Step<'a> {
 
     /// A key while the compose box has the focus: every key edits, but for
     /// the ways out. Tab completes a word that can be completed and
-    /// otherwise leaves forward, as Shift+Tab leaves backward. ↑ at the very
-    /// top and ↓ at the very end leave a box that holds text; in an empty
-    /// box they do nothing (ADR-409). Esc goes to the feed, the draft kept:
-    /// the first step of the Esc cycle. Ctrl+X Ctrl+S sends now; after
-    /// Ctrl+X (`chord`) any other key drops the chord and does what it does.
+    /// otherwise leaves forward, as Shift+Tab leaves backward, to the feed:
+    /// the first step of the Esc cycle. ↑ at the very top and ↓ at the very
+    /// end leave a box that holds text; in an empty box ↑ recalls the newest
+    /// message waiting to send, and otherwise they do nothing (ADR-409).
+    /// Esc recalls the newest message waiting to send too, and with
+    /// none it clears, the draft kept; it never moves the focus (ADR-409,
+    /// note of 2026-11-01). Ctrl+X Ctrl+S sends now; after Ctrl+X (`chord`)
+    /// any other key drops the chord and does what it does.
     fn compose_key(&mut self, k: KeyEvent, chord: bool) -> R {
         let v = self.v;
         if k.modifiers == KeyModifiers::CONTROL {
@@ -531,10 +546,8 @@ impl<'a> Step<'a> {
             }
         }
         match k.code {
-            KeyCode::Esc => {
-                self.fx.push(Effect::Clear);
-                return self.go(Focus::Feed);
-            }
+            KeyCode::Esc if v.pending => self.fx.push(Effect::Recall),
+            KeyCode::Esc => self.fx.push(Effect::Clear),
             KeyCode::Enter if k.modifiers == KeyModifiers::CONTROL => self.fx.push(Effect::SendNow),
             KeyCode::Enter if !k.modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) => self.fx.push(Effect::Send),
             KeyCode::Tab if v.completable => self.fx.push(Effect::Complete),
@@ -544,6 +557,9 @@ impl<'a> Step<'a> {
             KeyCode::Up if !v.draft_empty => return self.walk(false),
             KeyCode::Down if !v.caret_end => self.fx.push(Effect::Caret { up: false }),
             KeyCode::Down if !v.draft_empty => return self.walk(true),
+            // Up in an empty box recalls, as Up in Claude Code's input pulls
+            // back the messages it queued.
+            KeyCode::Up if v.pending => self.fx.push(Effect::Recall),
             KeyCode::Up | KeyCode::Down => {}
             KeyCode::PageUp => self.fx.push(Effect::Page { up: true }),
             KeyCode::PageDown => self.fx.push(Effect::Page { up: false }),

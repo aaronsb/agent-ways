@@ -123,7 +123,7 @@ pub(super) const PRESETS: &[(&str, &str, &str)] = &[
     ("ctrl: Ctrl+1-9, F2, Ctrl+T", "ctrl", "both"),
     ("alt: Alt+1-9, F2, Ctrl+T", "alt", "both"),
     ("fallback only: F2, Ctrl+T, Tab", "none", "both"),
-    ("auto: Ctrl+1-9 where it arrives, else Alt+1-9", "auto", "both"),
+    ("auto: Alt+1-9, and Ctrl+1-9 where it arrives", "auto", "both"),
 ];
 
 /// What the ids of the chat's questions start with
@@ -614,9 +614,13 @@ impl ChatPane {
     }
 
     /// Enter on the feed: the selected message's menu, docked under its
-    /// header. With no message selected, the newest is selected first.
+    /// header; on a message waiting to send, that message recalled. With no
+    /// message selected, the newest sent is selected first.
     pub(super) fn message_menu(&mut self) {
-        let n = self.feed.len();
+        if self.feed.selected.is_some_and(|i| self.recall_entry(i)) {
+            return;
+        }
+        let n = self.pending_from.min(self.feed.len());
         let Some(i) = self.feed.selected.or(n.checked_sub(1)) else {
             return self.say("no message to act on", false);
         };
