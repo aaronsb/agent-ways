@@ -7,7 +7,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Locale Alias Audit
 
-`ways tune locale` is the **acceptance gate** for a localization an adopter runs: it decides whether the translated stubs are ready (ADR-139). It runs only in **localized mode** (a non-English `ways.language`); in English mode there is nothing to audit and it returns clean. It measures how well each translated alias embeds in the multilingual model, and it writes no thresholds. No way has a threshold of its own: firing uses the global τ_s and τ_k on the calibrated g(s) (ADR-156, engine-reference.md). A weak stub is fixed by rewriting it.
+`ways tune locale` is the **acceptance gate** for a localization an adopter runs: it decides whether the translated stubs are ready (ADR-139). It runs only in **localized mode** (a non-English `ways.language`); in English mode there is nothing to audit and it returns clean. It measures how well each translated alias embeds in the multilingual model, and it writes no thresholds. No way has a threshold of its own: firing uses the global τ_s and τ_k on the calibrated g(s) (ADR-156, engine-reference.md). A weak stub is fixed by rewriting it, never by moving the global τ_s or τ_k to make it pass.
 
 English is the **source of truth.** The tool embeds each way's English frontmatter into the multilingual corpus as that way's **anchor**, and it scores every localized alias *against the anchor*, never against the other translations. Bad translations that agree with each other therefore cannot pass on that agreement; each one passes only if it aligns with the English.
 

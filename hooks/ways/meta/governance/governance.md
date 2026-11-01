@@ -34,7 +34,7 @@ Quote the control's *justification* along with the standard's name. The justific
 ## Principles
 
 - **Quote the justification** — "parameterized queries required as default" tells the reader more than "per NIST IA-5."
-- **Cite one control** — give the one relevant control with its justification instead of listing every standard that touches the practice.
+- **Cite the controls that apply, usually one** — give each control that governs the practice with its justification, and leave out the standards that only touch it.
 - **Cite from the data** — run the lookup (the **governance-cite** skill) to get current controls; the controls may have changed since your training data was collected.
 
 ## See also

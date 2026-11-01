@@ -24,7 +24,7 @@ It copies the original aside first and prints that path, repairs only the paragr
 
 ## If you already fixed this file and it is still flagging
 
-The detector is a heuristic. It cannot tell column wrapping from verse or other text whose lines are deliberate units. When a second flag lands on lines like that, say so and move on, and leave the lines as they are. When it lands on a paragraph of prose, join the paragraph.
+The detector is a heuristic. It cannot tell column wrapping from verse or other text whose lines are deliberate units. When a second flag lands on lines like that, keep the lines and end each one with a hard break (`\` or two trailing spaces). The detector and the wrap check accept a line that ends in a hard break. When it lands on a paragraph of prose, join the paragraph.
 
 ## When to leave it alone entirely
 

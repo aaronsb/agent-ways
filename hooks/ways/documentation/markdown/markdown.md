@@ -28,7 +28,7 @@ Keep a line break where the break is the structure. These stay on their own line
 | Headings, thematic breaks | Block-level, line-initial |
 | Blockquote label lines (`**Status:**`, `**Next:**`) | Reads as a field list; joining makes one run-on line |
 | Deliberate hard breaks (two trailing spaces, or `\`) | The break renders as `<br>` — joining silently deletes it |
-| Verse, an address, or other text where each line is its own unit | Each line is the unit, and joining changes the text |
+| Verse, an address, or other text where each line is its own unit | Each line is the unit, and joining changes the text. End each such line with a hard break (`\` or two trailing spaces), so the renderer keeps it on its own line and the wrap check accepts it |
 
 A paragraph of prose is never one of these. When two lines of the same paragraph sit one under the other, join them.
 
@@ -52,7 +52,7 @@ It repairs the paragraph around each detection and leaves the rest of the file b
 
 Before writing, it reparses the result and compares the document's structure with the original. If anything moved beyond the line breaks inside a paragraph, it writes nothing and says so. Read the diff anyway, because that comparison cannot see two things: a join that erased a deliberate line break, and non-CommonMark syntax such as `:::` directives.
 
-The detector looks for line lengths clustered under a fill width, so it misses a paragraph wrapped by hand at uneven points. In this repository, `scripts/check-register.sh` fails on any two prose lines of one paragraph in a way file.
+The detector looks for line lengths clustered under a fill width, so it misses a paragraph wrapped by hand at uneven points. In this repository, `scripts/check-register.sh` fails on any two prose lines of one paragraph in a way body or SKILL.md.
 
 ## See Also
 
