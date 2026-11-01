@@ -410,6 +410,32 @@ fn a_countdown_scrolled_out_of_view_is_on_the_status_line() {
     assert_eq!(n, 1, "on the status line:\n{s}");
 }
 
+/// One held message's header in the feed and another's out of view: the
+/// status line counts only the one out of view, so neither countdown is on
+/// screen twice. The review's N1: hold for #open, then for #deploy, and
+/// scroll up two notches at 80x25.
+#[test]
+fn the_status_line_counts_only_the_countdowns_out_of_view() {
+    let mut c = chat();
+    for i in 0..8 {
+        c.push(sig(&format!("s-two-{i}"), &format!("filler {i}")));
+    }
+    send(&mut c, "first to open");
+    wait(&mut c, 1);
+    show(&mut c, Tab::Channel("deploy".into()));
+    send(&mut c, "second one");
+    show(&mut c, Tab::Merged);
+    testkit::render_screen(&mut c, 80, 25);
+    for _ in 0..2 {
+        c.mouse(MouseEvent { kind: MouseEventKind::ScrollUp, column: 60, row: 10, modifiers: KeyModifiers::NONE });
+    }
+    let (_, s) = shown(&mut c, 80, 25, "");
+    assert_eq!(s.matches("sending in 4s").count(), 1, "the feed's #open header, once:\n{s}");
+    assert!(!s.contains("in 4s → #open"), "the status line does not repeat the #open countdown the feed shows:\n{s}");
+    assert_eq!(s.matches("1 more waiting, next in 5s → #deploy").count(), 1, "the one out of view, on the status line:\n{s}");
+    assert!(!s.contains("sending in 5s"), "#deploy's header is out of view:\n{s}");
+}
+
 // ── quitting ─────────────────────────────────────────────────────
 
 /// Send and quit with a message that cannot go: the chat stays open, the
