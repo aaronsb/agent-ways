@@ -33,7 +33,7 @@ The cycle assumes you can state what the code should do. On inherited code with 
 2. Run it. It passes.
 3. Make the change. The characterization test now fails in the way you intended. That failure is the RED, and the cycle resumes.
 
-An inherited suite that is green when you arrive is unproven until you have watched it fail. Pick a test that claims to guard against a past defect, reintroduce that defect in the production code, confirm the suite fails for that reason, then revert.
+An inherited suite that is green when you arrive is unproven until a planted defect has turned it red (core.md). For the plant, pick a test that claims to guard against a past defect and reintroduce that defect in the production code. Confirm the suite fails for that reason.
 
 ## Common Rationalizations
 
@@ -41,7 +41,7 @@ An inherited suite that is green when you arrive is unproven until you have watc
 |---|---|
 | "This is simple, tests aren't needed" | If it's simple, the test is trivial to write. Write it. |
 | "I'll add tests later" | Later never comes. The test verifies understanding NOW. |
-| "Existing tests cover this" | Prove it. Reintroduce the defect they claim to catch and watch them fail (see Untested Code First). |
+| "Existing tests cover this" | Prove it with a planted defect: reintroduce the defect they claim to catch (see Untested Code First). |
 | "Just a refactor, behavior doesn't change" | Then existing tests pass. Run them. If none exist, write them first. |
 | "Writing tests would take too long" | Debugging the regression takes longer. |
 | "The user didn't ask for tests" | The user asked for working code. Tests prove it works. |
@@ -49,5 +49,5 @@ An inherited suite that is green when you arrive is unproven until you have watc
 ## See Also
 
 - code/testing(softwaredev) — parent: what to cover, test levels, test data
-- code/testing/gates(softwaredev) — a gate earns trust once a planted violation has turned it red
+- code/testing/gates(softwaredev) — a gate earns trust once a planted defect has turned it red
 - freshness/groundtruth(softwaredev) — the golden-master baseline captured before a refactor or migration

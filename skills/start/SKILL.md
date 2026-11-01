@@ -78,6 +78,8 @@ Pace it:
   I'm wrong." The operator can then disagree precisely.
 - Cap at nine questions. Past nine, the interview is trying to specify and plan at once.
   Accept the gaps, mark each as an assumption, and move on.
+- A question that picks between shaped options carries a brief, the case for and
+  against, and your lean with its evidence (the `choices/interview` way).
 
 The interview has converged when you can write each of these without hand-waving:
 
