@@ -120,11 +120,48 @@ fn save_termios() {
     });
 }
 
-/// A second SIGTERM or SIGINT while the first signal is not yet acted on
-/// ([`forces`]): end the command's
-/// process group, put the terminal back and exit, from the handler. Only
-/// async-signal-safe calls: an atomic load, killpg, write, tcsetattr and
-/// _exit.
+/// What the application keeps before a forced exit, set once by
+/// [`on_forced_exit`].
+static BEFORE_FORCED_EXIT: OnceLock<fn()> = OnceLock::new();
+
+/// Set once a forced exit has begun, so a signal that comes while the hook
+/// runs ends the process from the handler.
+static FORCING: AtomicBool = AtomicBool::new(false);
+
+/// A forcing signal the handler hands to the watch thread ([`forces`]); 0
+/// while there is none.
+static FORCE: AtomicI32 = AtomicI32::new(0);
+
+/// Run `keep` before every forced exit: the watch thread's two limits
+/// ([`UNSEEN`], [`SEEN`]) and a second SIGTERM or SIGINT ([`forces`]).
+/// The pane's ending ([`crate::Pane::ending`]) does not run on those
+/// exits, so this is what keeps the application's unsaved work there.
+/// `keep` runs on the watch thread while the run loop may be wedged, even
+/// inside crossterm's read: it may write files from state the application
+/// noted, and must not wait on a lock the loop could hold without a bound.
+/// The terminal is put back after it. Set once; false when a hook was set
+/// already.
+pub fn on_forced_exit(keep: fn()) -> bool {
+    BEFORE_FORCED_EXIT.set(keep).is_ok()
+}
+
+/// End the process without the pane's ending: the hook first
+/// ([`on_forced_exit`]), then the command's process group, the terminal
+/// and the exit, by [`emergency_exit`], which takes no lock the loop could
+/// hold.
+fn forced_exit(sig: i32) -> ! {
+    FORCING.store(true, Ordering::SeqCst);
+    if let Some(keep) = BEFORE_FORCED_EXIT.get() {
+        keep();
+    }
+    emergency_exit(sig)
+}
+
+/// End the command's process group, put the terminal back and exit with
+/// 128 plus `sig`, with no lock taken. Only async-signal-safe calls: an
+/// atomic load, killpg, write, tcsetattr and _exit, so a signal that
+/// comes while [`forced_exit`]'s hook runs ends the process from the
+/// handler.
 #[cfg(unix)]
 fn emergency_exit(sig: i32) -> ! {
     let pg = JOB_GROUP.load(Ordering::SeqCst);
@@ -145,6 +182,13 @@ fn emergency_exit(sig: i32) -> ! {
         }
         libc::_exit(128 + sig)
     }
+}
+
+#[cfg(not(unix))]
+fn emergency_exit(sig: i32) -> ! {
+    kill_job_group();
+    restore();
+    std::process::exit(128 + sig)
 }
 
 /// The process group of the command in flight, which a forced exit and the
@@ -199,17 +243,20 @@ const SEEN: Duration = Duration::from_secs(3);
 /// The loop can be kept from reading it: on a terminal that hung up,
 /// crossterm's read returns nothing over and over inside one poll. So a
 /// watch thread gives the loop [`UNSEEN`] to take the signal up, and
-/// [`SEEN`] to end once it has, then ends the command's process group,
-/// restores what it can and exits with 128 plus the first signal; a hung-up
+/// [`SEEN`] to end once it has, then makes a forced exit: the hook the
+/// application set ([`on_forced_exit`]), the command's process group, the
+/// terminal and an exit with 128 plus the first signal. A hung-up
 /// terminal, seen as `tcgetattr` failing on a stdin that was a terminal,
 /// counts as SIGHUP.
 ///
-/// Which signal forces an exit from the handler is [`forces`]: a second
-/// SIGTERM or SIGINT, while the loop has not yet taken the first signal up.
-/// A SIGHUP never forces. A terminal that closes sends several: the kernel
-/// signals the foreground group, the shell sends it again to its jobs, and
-/// tmux signals the pane's group. Once the loop has taken a signal up, no
-/// signal forces, so the pane's ending runs to its end or to [`SEEN`].
+/// Which signal forces an exit at once is [`forces`]: a second SIGTERM or
+/// SIGINT, while the loop has not yet taken the first signal up. The
+/// handler hands it to the watch thread, which makes the same forced exit,
+/// hook first, within its next 50 ms. A SIGHUP never forces. A terminal
+/// that closes sends several: the kernel signals the foreground group, the
+/// shell sends it again to its jobs, and tmux signals the pane's group.
+/// Once the loop has taken a signal up, no signal forces, so the pane's
+/// ending runs to its end or to [`SEEN`].
 #[derive(Clone, Default)]
 pub struct Signals {
     caught: Arc<AtomicUsize>,
@@ -221,12 +268,12 @@ pub struct Signals {
 #[cfg(unix)]
 static DELIBERATE: AtomicBool = AtomicBool::new(false);
 
-/// Whether a signal ends the process from its handler, at once, without the
-/// pane's ending: only a SIGTERM or SIGINT (`deliberate`) that follows an
-/// earlier one (`earlier`), while the loop has not yet taken the first
-/// signal up (`seen`). There the loop may be wedged, even on the stdout
-/// lock the watch thread's restore needs, and the handler's exit works
-/// whatever state the process is in. A SIGHUP is never the forcing signal.
+/// Whether a signal forces an exit at once, without the pane's ending:
+/// only a SIGTERM or SIGINT (`deliberate`) that follows an earlier one
+/// (`earlier`), while the loop has not yet taken the first signal up
+/// (`seen`). There the loop may be wedged, even on the stdout lock, so the
+/// forced exit takes no lock of the loop's ([`forced_exit`]). A SIGHUP is
+/// never the forcing signal.
 /// Once the loop has taken a signal up, its exit runs, the pane's ending
 /// with it, and the watch thread's [`SEEN`] bounds an exit that hangs.
 #[cfg_attr(not(unix), allow(dead_code))]
@@ -257,7 +304,13 @@ impl Signals {
                         let deliberate = sig != libc::SIGHUP;
                         let earlier = deliberate && DELIBERATE.swap(true, Ordering::SeqCst);
                         if forces(deliberate, earlier, seen.load(Ordering::SeqCst)) {
-                            emergency_exit(sig);
+                            // The watch thread runs the forced exit, its
+                            // hook first; a signal that comes once the
+                            // exit has begun ends the process here.
+                            if FORCING.load(Ordering::SeqCst) {
+                                emergency_exit(sig);
+                            }
+                            let _ = FORCE.compare_exchange(0, sig, Ordering::SeqCst, Ordering::SeqCst);
                         }
                     })?;
                 }
@@ -288,6 +341,10 @@ impl Signals {
         let mut since: Option<Instant> = None;
         loop {
             std::thread::sleep(Duration::from_millis(50));
+            match FORCE.load(Ordering::SeqCst) {
+                0 => {}
+                sig => forced_exit(sig),
+            }
             if self.caught().is_none() && tty && hung_up() {
                 #[cfg(unix)]
                 self.caught.store(libc::SIGHUP as usize, Ordering::SeqCst);
@@ -296,9 +353,7 @@ impl Signals {
             let start = *since.get_or_insert_with(Instant::now);
             let limit = if self.seen.load(Ordering::SeqCst) { SEEN } else { UNSEEN };
             if start.elapsed() >= limit {
-                kill_job_group();
-                restore();
-                std::process::exit(128 + sig);
+                forced_exit(sig);
             }
         }
     }

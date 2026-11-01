@@ -43,7 +43,7 @@ use ratatui::DefaultTerminal;
 pub use adapter::{Adapter, ClaudeCode, Render, Unwired, Write};
 pub use app::flow;
 pub use app::theme;
-pub use app::term::{clear_job_group, kill_group, kill_job_group, register_job_group, restore, Signals, TermGuard};
+pub use app::term::{clear_job_group, kill_group, kill_job_group, on_forced_exit, register_job_group, restore, Signals, TermGuard};
 pub use app::pane::{binding_conflicts, Anchor, Binding, Ctx, Expiry, Item, Keyed, Open, Overlay, Pane, PaneTab, Question, Tone, EXPIRED};
 pub use app::{App, Jump, Session, TabKeys, Themes};
 pub use screen::quiet_panics_here;
