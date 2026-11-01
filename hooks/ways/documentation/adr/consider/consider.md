@@ -12,7 +12,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Considering a Decision
 
-The consider step records the operator's intent (ADR-304 §12 and its notes). The agent owns the technical calls by default and grounds each one in its `basis`: evidence, a standard, upstream, or a precedent. A technical call that sets the direction of the work goes to the operator, by the waterline in choices(meta): a choice of library, framework, protocol or language, a persisted format, a default users will feel, a call that is costly to reverse. The rest of what goes to the operator is a check that the decision serves what they wanted, and why they wanted it.
+The consider step records the operator's intent (ADR-304 §12 and its notes). The agent owns the technical calls by default and grounds each one in its `basis`: evidence, a standard, upstream, or a precedent. A technical call that sets the direction of the work goes to the operator, by the waterline in choices(meta): a choice of library, framework, protocol, storage engine or language, a persisted format, a default users will feel, a call that is costly to reverse. The rest of what goes to the operator is a check that the decision serves what they wanted, and why they wanted it.
 
 ## Handing a decision over
 
@@ -22,7 +22,7 @@ The consider step records the operator's intent (ADR-304 §12 and its notes). Th
 - The inversion names the two ends the decision sits between. Put it to the operator only when it turns on what they want.
 - When the decision carries `observable` entries, show them where you can: run the command, show the output, open the page. Say in `via` what was shown (ADR-307).
 - When the record has a figure, show it before the probes, and say in `via` that it was shown (adr/figure).
-- Ask the probes as part of your reply, one short line each. With more than one pending, ask them through the choice tool as one batch when it is available. An answer is never required. `adr accept` reads no answer and records nothing on the operator's behalf.
+- Ask the probes in your reply, one short line each, laid out so a word answers each, or over attend when this session listens there (choices/interview, how to ask). A probe never blocks the work, because `adr accept` reads no answer and records nothing on the operator's behalf. So an answer is never required, and a probe never goes through the question tool.
 
 ## A canary
 
