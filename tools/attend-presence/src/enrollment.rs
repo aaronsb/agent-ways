@@ -496,7 +496,7 @@ pub fn withdraw(session_id: &str, source: Source) -> io::Result<()> {
 /// does ([`is_enrolled`] applies it). The record keeps the session's
 /// process ([`process_has_exited`]).
 pub fn opt_out(session_id: &str) -> io::Result<()> {
-    let live = crate::heartbeat::run_is_live(session_id);
+    let live = crate::heartbeat::run_is_live(session_id) && run_enrolled(session_id);
     edit(session_id, |r| {
         r.sources.retain(|s| *s == Source::Run);
         if live && r.sources.contains(&Source::Run) {
@@ -505,6 +505,29 @@ pub fn opt_out(session_id: &str) -> io::Result<()> {
             r.sources.clear();
         }
     })
+}
+
+/// How long [`opt_out`] waits for a run that holds the session lock to
+/// enroll. `attend run` takes the lock, then enrolls as a run a moment
+/// later.
+const RUN_ENROLL_WAIT: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Whether `session_id`'s record lists the run, waiting up to
+/// [`RUN_ENROLL_WAIT`] for it: the caller saw the run's lock held. An
+/// opt-out that read the record in the moment between the run's lock and
+/// its enrollment found no run to keep, cleared nothing, and the run then
+/// enrolled over it, so the session went on listening after the run.
+fn run_enrolled(session_id: &str) -> bool {
+    let deadline = std::time::Instant::now() + RUN_ENROLL_WAIT;
+    loop {
+        if read(session_id).is_some_and(|r| r.sources.contains(&Source::Run)) {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
 }
 
 /// Move `old`'s enrollment to `new`, for a session whose id changed under
@@ -891,6 +914,27 @@ mod tests {
             assert_eq!(Record::parse(&read("s").unwrap().render()).sources, vec![Source::Listen, Source::Join]);
             opt_out("s").unwrap();
             assert!(!is_enrolled("s"), "no run holds it, so every way ends");
+        });
+    }
+
+    /// An opt-out in the moment between a run taking the session lock and
+    /// enrolling as a run waits for the enrollment: it keeps the run and
+    /// takes effect once the run exits, as it does later in the run's life.
+    #[test]
+    fn an_opt_out_as_a_run_starts_waits_for_the_run_to_enroll() {
+        with_cache(|| {
+            enroll("s", Source::Listen, None).unwrap();
+            let lock = crate::heartbeat::try_acquire_session_lock("s").unwrap().expect("the run's lock");
+            let run = std::thread::spawn(|| {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                enroll("s", Source::Run, None).unwrap();
+            });
+            opt_out("s").unwrap();
+            run.join().unwrap();
+            assert!(is_enrolled("s"), "the run holds the session, so it listens");
+            assert_eq!(sources("s"), vec![Source::Run]);
+            drop(lock);
+            assert!(!is_enrolled("s"), "the opt-out applies once the run is gone");
         });
     }
 

@@ -137,17 +137,28 @@ fn lock_path(session_id: &str) -> PathBuf {
     heartbeat_dir().join(format!("{session_id}.lock"))
 }
 
+/// How long an attempt on a session lock that is held keeps trying. A
+/// [`run_is_live`] probe holds the lock for the moment it takes to ask,
+/// microseconds unless the probing process is preempted; an `attend run`
+/// holds it for its life. A lock still held after this wait is another
+/// run's.
+const PROBE_WAIT: Duration = Duration::from_millis(200);
+
 /// Try to acquire the exclusive process lock for a session. Returns
 /// `Ok(Some(_))` when this process owns the lock, `Ok(None)` when
-/// another process already holds it (caller should exit cleanly), or
-/// `Err` for IO failures opening the file.
+/// another process holds it past [`PROBE_WAIT`] (caller should exit
+/// cleanly), or `Err` for IO failures opening the file.
 ///
 /// This is the duplicate-attend guard. The orphan / re-launched
 /// attend case (parent shell killed, child reparented to init,
 /// then a new attend started) is exactly what file locking is
 /// designed for: the orphan still holds the OS lock, so the new
-/// attend's non-blocking attempt fails fast instead of silently
-/// double-running.
+/// attend's attempt fails instead of silently double-running.
+///
+/// The attempt waits out a [`run_is_live`] probe that holds the lock at
+/// that moment. Without the wait, a run that started while a drain, a
+/// `listen status` or the mod's beat asked whether a run was live took
+/// the probe for a second run and exited.
 ///
 /// Self-reload via `exec()` (Unix) keeps the same PID. Rust's standard
 /// library opens files with `O_CLOEXEC`, so the lock's descriptor closes
@@ -167,48 +178,68 @@ pub fn try_acquire_session_lock(session_id: &str) -> io::Result<Option<SessionLo
         .truncate(false)
         .write(true)
         .open(&path)?;
-    let ret = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-    if ret == 0 {
-        return Ok(Some(SessionLock { _file: file }));
-    }
-    let err = io::Error::last_os_error();
-    if err.raw_os_error() == Some(libc::EWOULDBLOCK) {
-        Ok(None)
-    } else {
-        Err(err)
-    }
+    let taken = wait_out_probes(|| {
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            return Ok(true);
+        }
+        let err = io::Error::last_os_error();
+        if err.raw_os_error() == Some(libc::EWOULDBLOCK) {
+            Ok(false)
+        } else {
+            Err(err)
+        }
+    })?;
+    Ok(taken.then_some(SessionLock { _file: file }))
 }
 
 #[cfg(windows)]
 pub fn try_acquire_session_lock(session_id: &str) -> io::Result<Option<SessionLock>> {
     fs::create_dir_all(heartbeat_dir())?;
     let path = lock_path(session_id);
+    let mut held = None;
     // share_mode(0): exclusive access. A second process attempting
     // to open the same path gets ERROR_SHARING_VIOLATION (raw 32) —
     // which is exactly the duplicate-attend signal we want.
-    match fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .share_mode(0)
-        .open(&path)
-    {
-        Ok(file) => Ok(Some(SessionLock { _file: file })),
-        Err(e) if e.raw_os_error() == Some(32) => Ok(None),
+    wait_out_probes(|| match fs::OpenOptions::new().create(true).truncate(false).write(true).share_mode(0).open(&path) {
+        Ok(file) => {
+            held = Some(file);
+            Ok(true)
+        }
+        Err(e) if e.raw_os_error() == Some(32) => Ok(false),
         Err(e) => Err(e),
+    })?;
+    Ok(held.map(|file| SessionLock { _file: file }))
+}
+
+/// Repeat `attempt` while it reports the lock held, for up to
+/// [`PROBE_WAIT`]: whether it took the lock.
+fn wait_out_probes(mut attempt: impl FnMut() -> io::Result<bool>) -> io::Result<bool> {
+    let deadline = std::time::Instant::now() + PROBE_WAIT;
+    loop {
+        if attempt()? {
+            return Ok(true);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Ok(false);
+        }
+        std::thread::sleep(Duration::from_millis(5));
     }
 }
 
 /// Whether an `attend run` holds the session lock for `session_id`.
 /// Unlike [`try_acquire_session_lock`] this never creates the heartbeat
 /// file, so asking does not make the session look alive.
+///
+/// On Unix the probe takes a shared lock, so two probes at once do not
+/// take each other for a run. A run that starts while a probe holds it
+/// waits the probe out.
 pub fn run_is_live(session_id: &str) -> bool {
     #[cfg(unix)]
     {
         let Ok(file) = fs::OpenOptions::new().write(true).open(heartbeat_path(session_id)) else {
             return false;
         };
-        let ret = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        let ret = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) };
         if ret == 0 {
             unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
             return false;
@@ -352,6 +383,27 @@ mod tests {
             assert!(run_is_live("sess-live"));
             drop(lock);
             assert!(!run_is_live("sess-live"));
+        });
+    }
+
+    /// A run that starts while a probe asks is not turned away as a
+    /// duplicate, and a probe is not taken for a run by another probe.
+    #[cfg(unix)]
+    #[test]
+    fn a_probe_holding_the_lock_is_neither_a_run_nor_a_duplicate() {
+        with_home(|_| {
+            fs::create_dir_all(heartbeat_dir()).unwrap();
+            let probe = fs::OpenOptions::new().create(true).truncate(false).write(true).open(heartbeat_path("sess-probe")).unwrap();
+            assert_eq!(unsafe { libc::flock(probe.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) }, 0);
+            assert!(!run_is_live("sess-probe"), "a probe mid-ask is no run");
+            let release = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(30));
+                drop(probe);
+            });
+            let lock = try_acquire_session_lock("sess-probe").unwrap();
+            release.join().unwrap();
+            assert!(lock.is_some(), "the run waited the probe out");
+            assert!(run_is_live("sess-probe"));
         });
     }
 
