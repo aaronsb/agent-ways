@@ -3,8 +3,8 @@
 //! message joins on, a channel dissolved during the countdown, a send
 //! refused at its end, quitting and the unasked end. In its own file, so
 //! its own fixture, on a bus the sends really write: alpha and beta live,
-//! gamma quiet; #deploy with alpha in it; #gone, #gone2 and #gone3, which
-//! one test each dissolves.
+//! gamma quiet; #deploy with alpha in it; #gone to #gone4, which one test
+//! each dissolves.
 
 mod support;
 
@@ -48,7 +48,7 @@ fn fixture() {
         attend_presence::heartbeat::touch(GAMMA_SID).unwrap();
         let beat = std::fs::File::options().write(true).open(attend_presence::heartbeat::heartbeat_path(GAMMA_SID)).unwrap();
         beat.set_modified(std::time::SystemTime::now() - Duration::from_secs(3600)).unwrap();
-        for c in ["deploy", "gone", "gone2", "gone3"] {
+        for c in ["deploy", "gone", "gone2", "gone3", "gone4"] {
             attend_groups::Groups::new(base, ALPHA_SID).join(c, true).unwrap();
         }
     });
@@ -370,7 +370,7 @@ fn send_and_quit_keeps_the_chat_open_when_a_message_cannot_go() {
 #[test]
 fn send_and_quit_keeps_the_draft_for_the_next_chat() {
     let kept = unsent("send-and-quit");
-    let mut c = chat().unsent_file(&kept);
+    let mut c = chat().unsent_dir(&kept);
     send(&mut c, "waiting at the quit");
     typed(&mut c, "a draft not yet sent");
     press(&mut c, KeyCode::Char('c'), KeyModifiers::CONTROL);
@@ -378,12 +378,12 @@ fn send_and_quit_keeps_the_draft_for_the_next_chat() {
     assert!(s.contains("Send and quit, keep the draft (s)") && s.contains("a draft in the compose box"), "{s}");
     assert!(!key(&mut c, KeyCode::Char('s')), "s sends and quits");
     assert!(on_open("waiting at the quit"));
-    let c = chat().unsent_file(&kept).restore_unsent();
+    let c = chat().unsent_dir(&kept).restore_unsent();
     assert_eq!(c.input().text(), "a draft not yet sent", "the draft opens the next chat");
-    assert!(!kept.exists(), "taken from the file once restored");
+    assert_eq!(std::fs::read_dir(&kept).map(|d| d.count()).unwrap_or(0), 0, "taken from the directory once restored");
 }
 
-/// A file of the fixture's for text kept unsent, one per test.
+/// A directory of the fixture's for text kept unsent, one per test.
 fn unsent(tag: &str) -> std::path::PathBuf {
     let root = support::fixture("pending", |_| unreachable!("set up by fixture()"));
     root.join(format!("unsent-{tag}"))
@@ -396,7 +396,7 @@ fn unsent(tag: &str) -> std::path::PathBuf {
 #[test]
 fn the_unasked_end_sends_what_waits_and_keeps_what_cannot_go() {
     let kept = unsent("unasked");
-    let mut c = chat().unsent_file(&kept);
+    let mut c = chat().unsent_dir(&kept);
     send(&mut c, "said as the terminal closed");
     show(&mut c, Tab::Channel("gone3".into()));
     send(&mut c, "held for a channel about to go");
@@ -407,9 +407,29 @@ fn the_unasked_end_sends_what_waits_and_keeps_what_cannot_go() {
     assert_eq!(session.signal, Some(libc::SIGHUP));
     assert!(on_open("said as the terminal closed"), "sent as the chat ended");
     assert!(!anywhere("held for a channel about to go"), "nothing sent elsewhere in a vanished channel's place");
-    let c = chat().unsent_file(&kept).restore_unsent();
-    assert_eq!(c.input().text(), "held for a channel about to go\ntyped, not sent", "both open the next chat");
+    let c = chat().unsent_dir(&kept).restore_unsent();
+    assert_eq!(c.input().text(), "held for a channel about to go\n\ntyped, not sent", "both open the next chat, a blank line apart");
     assert!(c.status().starts_with("restored"), "{}", c.status());
+}
+
+/// Two chats ending unasked at once each keep their own text: the next
+/// chat opens with both, in the order they were kept, a blank line apart.
+#[test]
+fn two_chats_ending_at_once_keep_both_texts() {
+    let kept = unsent("two");
+    let mut first = chat().unsent_dir(&kept);
+    show(&mut first, Tab::Channel("gone4".into()));
+    send(&mut first, "the first chat's message");
+    let mut second = chat().unsent_dir(&kept);
+    typed(&mut second, "the second chat's draft");
+    dissolve("gone4");
+    first.refresh();
+    first.into_app().end_unasked(libc::SIGHUP, "stopped: the terminal hung up");
+    second.into_app().end_unasked(libc::SIGTERM, "stopped by a signal");
+    assert_eq!(std::fs::read_dir(&kept).unwrap().count(), 2, "a file each");
+    let c = chat().unsent_dir(&kept).restore_unsent();
+    assert_eq!(c.input().text(), "the first chat's message\n\nthe second chat's draft");
+    assert_eq!(std::fs::read_dir(&kept).unwrap().count(), 0, "each file removed once its text is in the box");
 }
 
 // ── the delay set to 0 ───────────────────────────────────────────

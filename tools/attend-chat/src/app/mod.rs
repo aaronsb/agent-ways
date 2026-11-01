@@ -290,9 +290,10 @@ pub struct ChatPane {
     /// When the pane was made: the origin of the monotonic clock a
     /// countdown runs on ([`ChatPane::mono`]).
     started: Instant,
-    /// Where text typed and not sent is kept when the chat ends without
-    /// sending it, for the next chat's compose box ([`pending`]).
-    unsent_path: std::path::PathBuf,
+    /// The directory where text typed and not sent is kept, a file a chat,
+    /// when the chat ends without sending it, for the next chat's compose
+    /// box ([`pending`]).
+    unsent_dir: std::path::PathBuf,
     /// The send delay [`Chat::send_delay`] fixed, which a reload of the
     /// settings keeps.
     fixed_delay: Option<Duration>,
@@ -359,7 +360,7 @@ impl ChatPane {
             pending_shown: Vec::new(),
             pending_from: 0,
             started: Instant::now(),
-            unsent_path: crate::hidden::state_dir().join("unsent"),
+            unsent_dir: crate::hidden::state_dir().join("unsent"),
             fixed_delay: None,
         }
     }
@@ -1332,10 +1333,10 @@ impl Chat {
         self
     }
 
-    /// Keep text typed and not sent in `path` rather than attend-chat's
-    /// state file ([`ChatPane::keep_unsent`]).
-    pub fn unsent_file(mut self, path: impl Into<std::path::PathBuf>) -> Chat {
-        self.pane_mut().unsent_path = path.into();
+    /// Keep text typed and not sent in the directory `dir` rather than
+    /// attend-chat's state directory ([`ChatPane::keep_unsent`]).
+    pub fn unsent_dir(mut self, dir: impl Into<std::path::PathBuf>) -> Chat {
+        self.pane_mut().unsent_dir = dir.into();
         self
     }
 

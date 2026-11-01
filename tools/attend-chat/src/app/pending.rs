@@ -492,38 +492,61 @@ impl ChatPane {
         Some(self.input.text().trim_end().to_string()).filter(|d| !d.is_empty())
     }
 
-    /// Add `texts`, typed and not sent, to the unsent file, after what it
-    /// holds, a line apart; the next chat opens with them in its compose
-    /// box ([`ChatPane::restore_unsent`]). True when they were kept, or
-    /// there was nothing to keep. A dry run writes nothing.
+    /// Write `texts`, typed and not sent, a blank line apart, to a file of
+    /// this chat's own in the unsent directory, named for the process and
+    /// the moment (`<pid>-<nanos>-<n>`), by a temporary file and a rename:
+    /// two chats ending at once each keep their own, and a crash leaves no
+    /// half-written file. The next chat opens with them in its compose box
+    /// ([`ChatPane::restore_unsent`]). True when they were kept, or there
+    /// was nothing to keep. A dry run writes nothing.
     fn keep_unsent(&mut self, texts: &[String]) -> bool {
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         if texts.is_empty() || self.dry_run {
             return true;
         }
-        let held = std::fs::read_to_string(&self.unsent_path).unwrap_or_default();
-        let all: Vec<&str> = std::iter::once(held.trim_end()).filter(|h| !h.is_empty()).chain(texts.iter().map(String::as_str)).collect();
-        let kept = self.unsent_path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| agent_settings::writer::write_atomic(&self.unsent_path, format!("{}\n", all.join("\n"))));
-        if let Err(e) = kept {
-            self.say(format!("not kept: {} ({e})", self.unsent_path.display()), true);
+        let nanos = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path = self.unsent_dir.join(format!("{}-{nanos:020}-{seq}", std::process::id()));
+        if let Err(e) = agent_settings::writer::write_atomic(&path, format!("{}\n", texts.join("\n\n"))) {
+            self.say(format!("not kept: {} ({e})", path.display()), true);
             return false;
         }
         true
     }
 
-    /// Put what the last chat kept unsent in the compose box, before any
-    /// draft, and take it from the file: the chat that kept it could not
-    /// send it.
+    /// Put every text the earlier chats kept unsent in the compose box, in
+    /// the order they were kept, a blank line apart and before any draft;
+    /// then remove each file whose text is in the box.
     pub(super) fn restore_unsent(&mut self) {
-        let Ok(text) = std::fs::read_to_string(&self.unsent_path) else { return };
-        let _ = std::fs::remove_file(&self.unsent_path);
-        let text = text.trim_end();
-        if text.is_empty() {
-            return;
+        // A build of this branch before the directory kept one file at
+        // the directory's path: its text comes back first, and the file
+        // makes way for the directory.
+        let single = self.unsent_dir.is_file().then(|| (0, String::new(), self.unsent_dir.clone()));
+        let mut kept: Vec<(u128, String, std::path::PathBuf)> = std::fs::read_dir(&self.unsent_dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_file() && !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')))
+            .filter_map(|p| {
+                let name = p.file_name()?.to_string_lossy().to_string();
+                let nanos = name.split('-').nth(1).and_then(|n| n.parse().ok()).unwrap_or(0);
+                Some((nanos, name, p))
+            })
+            .collect();
+        kept.extend(single);
+        kept.sort();
+        let texts: Vec<String> = kept.iter().filter_map(|(_, _, p)| std::fs::read_to_string(p).ok()).map(|t| t.trim_end().to_string()).filter(|t| !t.is_empty()).collect();
+        if !texts.is_empty() {
+            let text = texts.join("\n\n");
+            let draft = self.input.text().to_string();
+            self.input.set(with_draft(&text, &draft), text.chars().count());
+            self.say("restored: what the last chat could not send is in the box".to_string(), false);
+            self.dirty = true;
         }
-        let draft = self.input.text().to_string();
-        self.input.set(with_draft(text, &draft), text.chars().count());
-        self.say("restored: what the last chat could not send is in the box".to_string(), false);
-        self.dirty = true;
+        for (_, _, p) in kept {
+            let _ = std::fs::remove_file(p);
+        }
     }
 
     /// Quitting, the operator chose to discard what waits.
