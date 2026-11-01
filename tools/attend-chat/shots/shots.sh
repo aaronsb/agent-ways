@@ -37,7 +37,31 @@ WORK=${SHOTS_DIR:-$REPO/target/tui-verify/attend-chat}
 # fixture_temp_dir does.
 TMPROOT=${TMPDIR:-/tmp}
 case "$TMPROOT/" in */.claude/worktrees/*) TMPROOT=/tmp ;; esac
-F=$(mktemp -d "$TMPROOT/attend-chat-shots.XXXXXX")
+# An agent's nickname is agent-identity's pick from its cwd, which holds the
+# random temp path: FNV-1a 64 of the path, modulo the size of the pool in
+# names.rs. Two of alpha, beta and gamma can then share a name, and an
+# `@Name` meant for the quiet one reaches a live one (#1242). The fixture
+# takes a temp path under which the three names differ.
+POOL=$(sed -n '/^pub const NAMES/,/^];/p' "$REPO/tools/agent-identity/src/names.rs" | grep -o '"[^"]*"' | wc -l)
+nick_index() { # cwd: the index of its nickname in the pool
+  local s=$1 h=$((0xcbf29ce484222325)) i c
+  for ((i = 0; i < ${#s}; i++)); do
+    printf -v c '%d' "'${s:i:1}"
+    h=$(((h ^ c) * 0x100000001b3))
+  done
+  # The hash is unsigned; bash's integers are signed.
+  if ((h >= 0)); then
+    echo $((h % POOL))
+  else
+    echo $((((h & 0x7fffffffffffffff) % POOL + 0x7fffffffffffffff % POOL + 1) % POOL))
+  fi
+}
+for _ in $(seq 50); do
+  F=$(mktemp -d "$TMPROOT/attend-chat-shots.XXXXXX")
+  a=$(nick_index "$F/work/alpha") b=$(nick_index "$F/work/beta") c=$(nick_index "$F/work/gamma")
+  [ "$a" != "$b" ] && [ "$a" != "$c" ] && [ "$b" != "$c" ] && break
+  rmdir "$F"
+done
 SESSION=
 cleanup() {
   [ -z "$SESSION" ] || $TH down "$SESSION" >/dev/null 2>&1 || true
