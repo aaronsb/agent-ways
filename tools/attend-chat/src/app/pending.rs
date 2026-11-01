@@ -718,7 +718,7 @@ impl ChatPane {
             }
             self.input.set(c.record.text.clone(), c.record.text.chars().count());
             self.box_origins.push(c.path.clone());
-            said.push(format!("restored: the draft written for {} is in the box", c.record.label));
+            said.push(format!("restored: the draft for {} is in the box", c.record.label));
         }
         let (mut entries, mut gone) = (0, Vec::new());
         for (i, c) in found.claimed.into_iter().enumerate() {
@@ -734,10 +734,11 @@ impl ChatPane {
             self.pending.add(Held { id: 0, text: r.text, tab: r.tab.unwrap_or_default(), dest: r.dest, label: r.label, due: Duration::ZERO, refused: None, touched: 0, source }, true);
             entries += 1;
         }
+        let lead = if said.is_empty() { "restored: " } else { "" };
         match entries {
             0 => {}
-            1 => said.push("restored: one text the last chat kept is in the feed; Esc or a click recalls it".into()),
-            n => said.push(format!("restored: {n} texts the last chats kept are in the feed; a click recalls each")),
+            1 => said.push(format!("{lead}one kept text is in the feed; Esc or a click recalls it")),
+            n => said.push(format!("{lead}{n} kept texts are in the feed; a click recalls each")),
         }
         if !gone.is_empty() {
             said.push(format!("the view of the draft for {} is gone", gone.join(", ")));

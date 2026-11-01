@@ -91,7 +91,11 @@ sweep
 # passes when the message was sent and the draft kept: hup-twice sends two
 # SIGHUPs, hup-term a SIGTERM then a SIGHUP, hup-down closes the pane, and
 # hup-bash runs the chat as a foreground job of an interactive bash whose
-# pane closes, so bash sends its own SIGHUP after the kernel's.
+# pane closes, so bash sends its own SIGHUP after the kernel's. wait-park
+# recalls an #open post while a draft for gamma is in the box, which is
+# parked as a draft of gamma's DM view; wait-kept opens on what an earlier
+# chat kept (the kept fixture): the draft in alpha's DM view, and the
+# message held for a channel since gone as an entry, not sent.
 # The fixture is base, crowd (fifteen more agents), many (24 more channels,
 # so the last channel row sits at the foot), own (the operator in
 # #deploy), long (a fourth agent whose project name outruns any row),
@@ -169,15 +173,17 @@ entry-desc   | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Des
 entry-tab    | base  | wait:Agents text:draft C-n wait:new_channel_name text:abc click:#open gone:new_channel_name
 entry-row    | base  | wait:Agents click:+ wait:new_channel_name side:#infra gone:new_channel_name text:abc
 esc-twice    | base  | wait:Agents side:#infra side:#infra wait:pick Escape Escape wait:pick_one:_attend-chat
-wait-pending | wait  | wait:Agents text:first_thought,_still_forming Enter wait:sending_in
-wait-joined  | wait  | wait:Agents text:first_thought,_still_forming Enter wait:sending_in text:and_the_line_that_caught_up Enter wait:caught_up
-wait-recall  | wait  | wait:Agents text:first_thought,_still_forming Enter wait:sending_in text:typed_since Escape wait:recalled
-wait-up      | wait  | wait:Agents text:first_thought,_still_forming Enter wait:sending_in Up wait:recalled
-wait-sent    | wait  | wait:Agents text:first_thought,_still_forming Enter wait:sending_in gone:sending_in wait:sent
+wait-pending | wait  | wait:Agents text:first_thought,_still_forming Enter wait:Esc_recall
+wait-joined  | wait  | wait:Agents text:first_thought,_still_forming Enter wait:Esc_recall text:and_the_line_that_caught_up Enter wait:caught_up
+wait-recall  | wait  | wait:Agents text:first_thought,_still_forming Enter wait:Esc_recall text:typed_since Escape wait:recalled
+wait-up      | wait  | wait:Agents text:first_thought,_still_forming Enter wait:Esc_recall Up wait:recalled
+wait-sent    | wait  | wait:Agents text:first_thought,_still_forming Enter wait:Esc_recall gone:Esc_recall wait:sent
 wait-quit    | wait  | wait:Agents text:say_this_before_I_go Enter wait:Esc_recall C-c wait:Send_and_quit
 wait-gone    | wait  | wait:Agents M-3 wait:#infra_0 text:plan_for_infra Enter wait:Esc_recall paste:/dissolve_infra Enter wait:not_sent
 wait-refused | wait  | wait:Agents rside:○ wait:Address click:Address_@ text:ping Enter wait:Esc_recall text:#deploy_unrelated wait:not_sent
 wait-dm-back | wait  | wait:Agents side:○ wait:DMs text:for_gamma_alone Enter wait:Esc_recall M-0 wait:not_sent Escape wait:recalled
+wait-park    | wait  | wait:Agents text:an_open_post Enter wait:Esc_recall side:○ wait:DMs text:for_gamma_only Escape wait:recalled
+wait-kept    | kept  | wait:Agents wait:restored
 hup-twice    | wait  | wait:Agents text:said_before_the_hangup Enter wait:Esc_recall paste:a_draft_at_the_hangup wait:at_the_hangup signal:HUP signal:HUP sent:said_before_the_hangup kept:a_draft_at_the_hangup
 hup-term     | wait  | wait:Agents text:said_before_the_hangup Enter wait:Esc_recall paste:a_draft_at_the_hangup wait:at_the_hangup signal:TERM signal:HUP sent:said_before_the_hangup kept:a_draft_at_the_hangup
 hup-down     | wait  | wait:Agents text:said_before_the_hangup Enter wait:Esc_recall paste:a_draft_at_the_hangup wait:at_the_hangup down: sent:said_before_the_hangup kept:a_draft_at_the_hangup
@@ -414,7 +420,17 @@ YAML
   fi
   [ "$1" = long ] && msg "$sig/_broadcast" s5 60 "claude:eeeeeeee-0000-4000-8000-000000000005" "$F/work/the-delta-project-with-a-name-far-too-long-for-a-row" "a project name longer than any row: the band cuts it and keeps the time"
   printf 'theme:\n  active: nord\n  shape: %s\n' "$shape" > "$F/config/agent-ways/config.yaml"
-  [ "$1" = wait ] || printf 'chat:\n  send_delay: 0\n' > "$F/config/attend/config.yaml"
+  [ "$1" = wait ] || [ "$1" = kept ] || printf 'chat:\n  send_delay: 0\n' > "$F/config/attend/config.yaml"
+  if [ "$1" = kept ]; then
+    # What an earlier chat kept: a message held for #retired, a channel
+    # gone since, and a draft written in alpha's DM view.
+    local u=$F/state/attend-chat/unsent t
+    mkdir -p "$u"
+    t='plan for the retired channel'
+    printf 'attend-chat unsent 2\nkind: held\nview: channel retired\ndest: post #retired\nlabel: #retired\nbytes: %s\n\n%s' "${#t}" "$t" > "$u/1-00000000000000000001-0"
+    t='for alpha only: the staging creds rotate tonight'
+    printf 'attend-chat unsent 2\nkind: draft\nview: dm %s\ndest: dm %s\nlabel: @alpha\nbytes: %s\n\n%s' "$A" "$A" "${#t}" "$t" > "$u/1-00000000000000000002-0"
+  fi
   if [ "$1" = proj ]; then
     mkdir -p "$F/work/alpha/.claude" "$F/work/beta/.git"
     printf 'mods:\n  attend:\n    listening: active\n' > "$F/work/alpha/.claude/ways.yaml"

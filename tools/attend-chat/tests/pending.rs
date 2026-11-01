@@ -422,7 +422,7 @@ fn the_unasked_end_sends_what_waits_and_keeps_what_cannot_go() {
     let c = chat().unsent_dir(&kept).restore_unsent();
     assert_eq!(c.input().text(), "", "nothing merged into the box");
     assert_eq!(c.pending(), ["held for a channel about to go", "typed, not sent"], "each an entry of its own");
-    assert!(c.status().contains("restored: 2 texts") && c.status().contains("the view of the draft for #gone3 is gone"), "{}", c.status());
+    assert!(c.status().contains("restored: 2 kept texts") && c.status().contains("the view of the draft for #gone3 is gone"), "{}", c.status());
 }
 
 /// Two chats ending unasked at once each keep their own text: the next
