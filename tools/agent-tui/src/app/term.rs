@@ -120,7 +120,8 @@ fn save_termios() {
     });
 }
 
-/// A second signal while the first is not yet acted on: end the command's
+/// A second SIGTERM or SIGINT while the first signal is not yet acted on
+/// ([`forces`]): end the command's
 /// process group, put the terminal back and exit, from the handler. Only
 /// async-signal-safe calls: an atomic load, killpg, write, tcsetattr and
 /// _exit.
@@ -192,20 +193,45 @@ const UNSEEN: Duration = Duration::from_millis(500);
 const SEEN: Duration = Duration::from_secs(3);
 
 /// The termination signals, caught into a flag the loop reads, so it can
-/// stop a running command and restore the terminal before the process ends.
+/// stop a running command, let the pane end its work ([`crate::Pane::ending`])
+/// and restore the terminal before the process ends.
 ///
 /// The loop can be kept from reading it: on a terminal that hung up,
 /// crossterm's read returns nothing over and over inside one poll. So a
-/// watch thread gives the loop [`UNSEEN`] to take the signal up, then ends
-/// the command's process group, restores what it can and exits with 128
-/// plus the signal; a hung-up terminal, seen as `tcgetattr` failing on a
-/// stdin that was a terminal, counts as SIGHUP. A second signal exits at
-/// once, whatever state the process is in.
+/// watch thread gives the loop [`UNSEEN`] to take the signal up, and
+/// [`SEEN`] to end once it has, then ends the command's process group,
+/// restores what it can and exits with 128 plus the first signal; a hung-up
+/// terminal, seen as `tcgetattr` failing on a stdin that was a terminal,
+/// counts as SIGHUP.
+///
+/// Which signal forces an exit from the handler is [`forces`]: a second
+/// SIGTERM or SIGINT, while the loop has not yet taken the first signal up.
+/// A SIGHUP never forces. A terminal that closes sends several: the kernel
+/// signals the foreground group, the shell sends it again to its jobs, and
+/// tmux signals the pane's group. Once the loop has taken a signal up, no
+/// signal forces, so the pane's ending runs to its end or to [`SEEN`].
 #[derive(Clone, Default)]
 pub struct Signals {
     caught: Arc<AtomicUsize>,
     /// Set by the loop when it acts on the signal.
     seen: Arc<AtomicBool>,
+}
+
+/// Whether a SIGTERM or SIGINT has come, for [`forces`].
+#[cfg(unix)]
+static DELIBERATE: AtomicBool = AtomicBool::new(false);
+
+/// Whether a signal ends the process from its handler, at once, without the
+/// pane's ending: only a SIGTERM or SIGINT (`deliberate`) that follows an
+/// earlier one (`earlier`), while the loop has not yet taken the first
+/// signal up (`seen`). There the loop may be wedged, even on the stdout
+/// lock the watch thread's restore needs, and the handler's exit works
+/// whatever state the process is in. A SIGHUP is never the forcing signal.
+/// Once the loop has taken a signal up, its exit runs, the pane's ending
+/// with it, and the watch thread's [`SEEN`] bounds an exit that hangs.
+#[cfg_attr(not(unix), allow(dead_code))]
+pub(crate) fn forces(deliberate: bool, earlier: bool, seen: bool) -> bool {
+    deliberate && earlier && !seen
 }
 
 impl Signals {
@@ -218,20 +244,24 @@ impl Signals {
         let caught = [signal_hook::consts::SIGTERM, signal_hook::consts::SIGINT];
         save_termios();
         for sig in caught {
-            // The first signal of any kind arms it; a second, of any kind,
-            // ends the process from the handler, the job and terminal first.
             #[cfg(unix)]
             {
-                static ARMED: AtomicBool = AtomicBool::new(false);
-                // SAFETY: the handler makes only async-signal-safe calls.
+                let (first, seen) = (s.caught.clone(), s.seen.clone());
+                // SAFETY: the handler makes only async-signal-safe calls:
+                // atomic loads and stores, and `emergency_exit`'s.
                 unsafe {
                     signal_hook::low_level::register(sig, move || {
-                        if ARMED.swap(true, Ordering::SeqCst) {
+                        // The first signal is the one the exit reports.
+                        let _ = first.compare_exchange(0, sig as usize, Ordering::SeqCst, Ordering::SeqCst);
+                        let deliberate = sig != libc::SIGHUP;
+                        let earlier = deliberate && DELIBERATE.swap(true, Ordering::SeqCst);
+                        if forces(deliberate, earlier, seen.load(Ordering::SeqCst)) {
                             emergency_exit(sig);
                         }
                     })?;
                 }
             }
+            #[cfg(not(unix))]
             signal_hook::flag::register_usize(sig, s.caught.clone(), sig as usize)?;
         }
         let w = s.clone();
@@ -591,5 +621,30 @@ mod schedule_tests {
         assert_eq!(s.due(None, false, true, t0 + ms(1000)), Due { pane: false, shell: true, watch: true });
         let mut s = Schedule::new(t0);
         assert!((1..=20).all(|i| !s.due(None, false, false, t0 + ms(100 * i)).shell), "no question, no shell tick");
+    }
+}
+
+#[cfg(test)]
+mod signal_tests {
+    use super::forces;
+
+    /// A terminal closing sends SIGHUP more than once; none of them, nor a
+    /// SIGHUP after a SIGTERM, ends the process before the pane's ending.
+    #[test]
+    fn a_hangup_never_forces_an_exit() {
+        for earlier in [false, true] {
+            for seen in [false, true] {
+                assert!(!forces(false, earlier, seen), "SIGHUP, earlier {earlier}, seen {seen}");
+            }
+        }
+    }
+
+    /// A second SIGTERM or SIGINT forces only while the loop has not taken
+    /// the first up; once it has, the pane's ending runs, bounded by SEEN.
+    #[test]
+    fn a_second_deliberate_signal_forces_only_before_the_loop_acts() {
+        assert!(!forces(true, false, false), "the first is caught, not forced");
+        assert!(forces(true, true, false), "a second before the loop acts");
+        assert!(!forces(true, true, true), "a second while the ending runs");
     }
 }
