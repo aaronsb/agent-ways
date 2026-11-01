@@ -95,9 +95,12 @@ sweep
 # pane closes, so bash sends its own SIGHUP after the kernel's. wait-park
 # recalls an #open post while a draft for gamma is in the box, which is
 # parked as a draft of gamma's DM view. wait-unkept does the same, holds
-# the post again, and presses Send and quit with the unsent directory
-# read-only: the post is sent, and the draft, not kept, stays in the feed
-# with the reason on the status line. wait-kept opens on what an earlier
+# the post again, waiting on the box to empty (at 80x11 the feed's three
+# rows show the post's body and not its countdown), and presses Send and
+# quit with the unsent directory read-only: the post is sent, and the
+# draft, not kept, stays in the feed with the reason on the status line.
+# wait-keep-drafts shows the guard over a draft with nothing waiting,
+# which offers Quit, keep the draft. wait-kept opens on what an earlier
 # chat kept (the kept fixture): the draft in alpha's DM view, and the
 # message held for a channel since gone as an entry, not sent.
 # The fixture is base, crowd (fifteen more agents), many (24 more channels,
@@ -183,11 +186,12 @@ wait-recall  | wait  | wait:Agents text:first_thought,_still_forming Enter wait:
 wait-up      | wait  | wait:Agents text:first_thought,_still_forming Enter wait:Esc_recall Up wait:recalled
 wait-sent    | wait  | wait:Agents text:first_thought,_still_forming Enter wait:Esc_recall gone:Esc_recall wait:sent
 wait-quit    | wait  | wait:Agents text:say_this_before_I_go Enter wait:Esc_recall C-c wait:Send_and_quit
+wait-keep-drafts | wait | wait:Agents text:a_draft_with_nothing_waiting C-c wait:Quit,_keep_the_draft
 wait-gone    | wait  | wait:Agents M-3 wait:#infra_0 text:plan_for_infra Enter wait:Esc_recall paste:/dissolve_infra Enter wait:not_sent
 wait-refused | wait  | wait:Agents rside:○ wait:Address click:Address_@ text:ping Enter wait:Esc_recall text:#deploy_unrelated wait:not_sent
 wait-dm-back | wait  | wait:Agents side:○ wait:DMs text:for_gamma_alone Enter wait:Esc_recall M-0 wait:not_sent Escape wait:recalled
 wait-park    | wait  | wait:Agents text:an_open_post Enter wait:Esc_recall side:○ wait:DMs text:for_gamma_only Escape wait:recalled
-wait-unkept  | wait  | wait:Agents text:an_open_post Enter wait:Esc_recall side:○ wait:DMs text:for_gamma_only Escape wait:recalled Enter wait:sending_in chmod:555 C-c wait:Send_and_quit s wait:not_kept sent:an_open_post chmod:755
+wait-unkept  | wait  | wait:Agents text:an_open_post Enter wait:Esc_recall side:○ wait:DMs text:for_gamma_only Escape wait:recalled Enter gone:>_an_open_post chmod:555 C-c wait:Send_and_quit s wait:not_kept sent:an_open_post chmod:755
 wait-kept    | kept  | wait:Agents wait:restored
 hup-twice    | wait  | wait:Agents text:said_before_the_hangup Enter wait:Esc_recall paste:a_draft_at_the_hangup wait:at_the_hangup signal:HUP signal:HUP sent:said_before_the_hangup kept:a_draft_at_the_hangup
 hup-term     | wait  | wait:Agents text:said_before_the_hangup Enter wait:Esc_recall paste:a_draft_at_the_hangup wait:at_the_hangup signal:TERM signal:HUP sent:said_before_the_hangup kept:a_draft_at_the_hangup
