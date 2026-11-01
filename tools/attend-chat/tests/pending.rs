@@ -740,7 +740,7 @@ fn a_text_kept_while_being_sent_is_marked_may_have_been_sent() {
     let mut c = chat().unsent_dir(&kept).restore_unsent();
     assert_eq!(c.input().text(), "", "never in the box: Enter there would send it");
     assert_eq!(c.pending(), ["the body"]);
-    assert!(c.status().contains("may have gone: check before Enter"), "{}", c.status());
+    assert!(c.status().starts_with("restored: one text may have been sent: check before Enter; "), "the warning first: {}", c.status());
     assert!(screen(&mut c).contains("may have been sent"), "the entry is marked");
     wait(&mut c, 60);
     assert!(!on_open("the body"), "nothing sends it by itself");

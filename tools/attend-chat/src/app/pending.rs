@@ -842,7 +842,10 @@ impl ChatPane {
         let names = self.strip_names();
         let live = |t: &Option<Tab>| t.as_ref().is_some_and(|t| t.composes() && tabs::normalize(t.clone(), &names) == *t);
         let boxed = if self.input.is_empty() { found.claimed.iter().rposition(|c| c.record.kind == unsent::Kind::Draft && !c.partial && live(&c.record.tab)) } else { None };
+        // What came back, in order, the warning that one may have been sent
+        // first, so a narrow status line keeps it.
         let mut said = Vec::new();
+        let mut boxed_said = None;
         if let Some(c) = boxed.map(|i| &found.claimed[i]) {
             let tab = c.record.tab.clone().unwrap_or_default();
             if self.foreground != tab {
@@ -850,7 +853,7 @@ impl ChatPane {
             }
             self.input.set(c.record.text.clone(), c.record.text.chars().count());
             self.box_origins.push(c.path.clone());
-            said.push(format!("restored: the draft for {} is in the box", c.record.label));
+            boxed_said = Some(format!("the draft for {} is in the box", c.record.label));
         }
         let (mut entries, mut gone, mut unsure, mut partial) = (0, Vec::new(), 0, 0);
         for (i, c) in found.claimed.into_iter().enumerate() {
@@ -870,16 +873,16 @@ impl ChatPane {
             self.pending.add(Held { id: 0, text: r.text, tab: r.tab.unwrap_or_default(), dest: r.dest, label: r.label, due: Duration::ZERO, refused: None, touched: 0, source }, true);
             entries += 1;
         }
-        let lead = if said.is_empty() { "restored: " } else { "" };
-        match entries {
-            0 => {}
-            1 => said.push(format!("{lead}one kept text is in the feed; Esc or a click recalls it")),
-            n => said.push(format!("{lead}{n} kept texts are in the feed; a click recalls each")),
-        }
         match unsure {
             0 => {}
-            1 => said.push("one was being sent as a chat ended and may have gone: check before Enter".into()),
-            n => said.push(format!("{n} were being sent as a chat ended and may have gone: check before Enter")),
+            1 => said.push("one text may have been sent: check before Enter".into()),
+            n => said.push(format!("{n} texts may have been sent: check before Enter")),
+        }
+        said.extend(boxed_said);
+        match entries {
+            0 => {}
+            1 => said.push("one kept text is in the feed; Esc or a click recalls it".into()),
+            n => said.push(format!("{n} kept texts are in the feed; a click recalls each")),
         }
         match partial {
             0 => {}
@@ -888,6 +891,9 @@ impl ChatPane {
         }
         if !gone.is_empty() {
             said.push(format!("the view of the draft for {} is gone", gone.join(", ")));
+        }
+        if let Some(first) = said.first_mut() {
+            *first = format!("restored: {first}");
         }
         let error = !found.unreadable.is_empty() || !found.unjudged.is_empty();
         // The reason first, so a narrow status line keeps it; the names and
