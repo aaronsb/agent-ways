@@ -1,7 +1,8 @@
 ---
-description: drafting a commit message, a PR description, an issue, a README section, a doc page or a code comment so that a newcomer understands it on the first read; whole sentences in plain words and the present tense, each fact said once, a project term defined where it first appears, and each sentence naming who does what
-vocabulary: readme section doc page docs documentation explain explaining comment commit message pr description issue body write draft plain clear readable sentence present tense past tense newcomer first read define term everyday word who does what compressed reread
+description: drafting a commit message, a PR description, an issue, a README section, a doc page, a docstring or a code comment so that a newcomer understands it on the first read; whole sentences in plain words and the present tense, each fact said once, a project term defined where it first appears, and each sentence naming who does what
+vocabulary: readme section doc page docs documentation explain explaining add a comment doc comment docstring code comment what this function does commit message pr description issue body write draft plain clear readable sentence present tense past tense newcomer first read define term everyday word who does what compressed reread
 files: \.md$
+pattern: \b(doc ?comments?|docstrings?|jsdoc|tsdoc|rustdoc|godoc|pydoc|javadoc)\b
 refire: 0.15
 scope: agent, subagent
 ---
