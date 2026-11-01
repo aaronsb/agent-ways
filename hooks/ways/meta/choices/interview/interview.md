@@ -14,20 +14,20 @@ Some work reaches a point where several decisions are open at once: the open que
 
 Settle the calls below the waterline yourself, with your subagents, and list what you chose in a line each so the operator can overrule any of them. If you cannot write a real case against your lean, the call is yours: make it and say so. A call made under high doubt, as core.md describes it, goes to the operator even when it sits below the waterline.
 
-Then write a short framing in prose: the decisions that are open, what each would change in the finished work, and the order you will take them in. Where running the work shows the answer better than a description, run it and show the output first.
+Then write a short framing in the reply: the decisions that are open, what each would change in the finished work, and the order you will take them in. A list of several open questions goes in a markdown table with numbered rows, so an answer can name rows; keep artifact pages for things the operator looks at or uses. Where running the work shows the answer better than a description, run it and show the output first.
 
 ## Each question
 
 Each question carries four parts, in the words of that decision:
 
-- A brief of the concern, with enough context to answer without opening a file.
+- A brief of the concern in plain words: what the setting or rule does and what a user would see under each option, with an everyday example. A newcomer to the domain follows it, and the operator answers without opening a file. Keep mode numbers, protocol names and spec terms out of the question, or define each in a few words.
 - The case for the leading option.
 - The case against it.
 - Your lean and its defence, from evidence the operator can check: a file and line, a record, a measurement, a spec, a precedent. A lean with no evidence is a defect. Find the evidence, or say that the call turns only on what the operator wants.
 
 The lean is the first option, marked (Recommended). Each other option says in one line what it trades. Keep a question to about a hundred words, and move detail past that into the framing or the record.
 
-Name the unknowns your evidence leaves open, so the operator can see what more research would settle. Where they might want to look before committing, as with a choice between libraries, offer "hold, I'll research first" as an option. A hold pauses the work that depends on the call. Carry on with the work that does not.
+Name the unknowns your evidence leaves open, so the operator can see what more research would settle. The operator is not an expert in every domain a project touches. Where a call needs knowledge they may lack, offer a research pass before asking. Where they might want to look before committing, as with a choice between libraries, offer "hold, I'll research first" as an option. A hold pauses the work that depends on the call. Carry on with the work that does not.
 
 A short example: *Cache budget, one per tenant or one shared? For one per tenant: what a tenant keeps depends only on its own traffic, so one tenant cannot evict another's entries. Against: memory grows with the tenant count, four times the shared budget at four tenants. Lean one per tenant: the spec's isolation rule is per tenant (its section and line), and the record that split the tenants made them independent sessions.*
 
