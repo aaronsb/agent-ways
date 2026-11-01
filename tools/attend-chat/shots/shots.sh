@@ -81,6 +81,17 @@ sweep
 #   rawpaste:TEXT  TEXT sent as typed, newlines and all, with no brackets
 #   bigpaste:N     a bracketed paste of N x characters
 #   newdm:TEXT     a direct message TEXT from alpha to the operator, arriving now
+#   signal:SIG     kill -SIG to the chat (Linux: found by its fixture HOME)
+#   down:          the session killed, as a closed tmux pane: tmux sends
+#                  SIGHUP and closes the pty; nothing is captured after
+#   chat:          the chat started from the shell an hup-* scenario opens
+#   sent:TEXT      until a post in #open's room holds TEXT
+#   kept:TEXT      until a file in the unsent directory holds TEXT
+# An hup-* scenario ends the chat with a message held and a draft, and
+# passes when the message was sent and the draft kept: hup-twice sends two
+# SIGHUPs, hup-term a SIGTERM then a SIGHUP, hup-down closes the pane, and
+# hup-bash runs the chat as a foreground job of an interactive bash whose
+# pane closes, so bash sends its own SIGHUP after the kernel's.
 # The fixture is base, crowd (fifteen more agents), many (24 more channels,
 # so the last channel row sits at the foot), own (the operator in
 # #deploy), long (a fourth agent whose project name outruns any row),
@@ -163,10 +174,14 @@ wait-joined  | wait  | wait:Agents text:first_thought,_still_forming Enter wait:
 wait-recall  | wait  | wait:Agents text:first_thought,_still_forming Enter wait:sending_in text:typed_since Escape wait:recalled
 wait-up      | wait  | wait:Agents text:first_thought,_still_forming Enter wait:sending_in Up wait:recalled
 wait-sent    | wait  | wait:Agents text:first_thought,_still_forming Enter wait:sending_in gone:sending_in wait:sent
-wait-quit    | wait  | wait:Agents text:say_this_before_I_go Enter wait:sending_in C-c wait:Send_and_quit
+wait-quit    | wait  | wait:Agents text:say_this_before_I_go Enter wait:Esc_recall C-c wait:Send_and_quit
 wait-gone    | wait  | wait:Agents M-3 wait:#infra_0 text:plan_for_infra Enter wait:Esc_recall paste:/dissolve_infra Enter wait:not_sent
 wait-refused | wait  | wait:Agents rside:○ wait:Address click:Address_@ text:ping Enter wait:Esc_recall text:#deploy_unrelated wait:not_sent
 wait-dm-back | wait  | wait:Agents side:○ wait:DMs text:for_gamma_alone Enter wait:Esc_recall M-0 wait:not_sent Escape wait:recalled
+hup-twice    | wait  | wait:Agents text:said_before_the_hangup Enter wait:Esc_recall paste:a_draft_at_the_hangup wait:at_the_hangup signal:HUP signal:HUP sent:said_before_the_hangup kept:a_draft_at_the_hangup
+hup-term     | wait  | wait:Agents text:said_before_the_hangup Enter wait:Esc_recall paste:a_draft_at_the_hangup wait:at_the_hangup signal:TERM signal:HUP sent:said_before_the_hangup kept:a_draft_at_the_hangup
+hup-down     | wait  | wait:Agents text:said_before_the_hangup Enter wait:Esc_recall paste:a_draft_at_the_hangup wait:at_the_hangup down: sent:said_before_the_hangup kept:a_draft_at_the_hangup
+hup-bash     | wait  | wait:$ chat: wait:Agents text:said_before_the_hangup Enter wait:Esc_recall paste:a_draft_at_the_hangup wait:at_the_hangup down: sent:said_before_the_hangup kept:a_draft_at_the_hangup
 common-quit  | base  | wait:Agents click:≡ wait:Quit
 quit-click   | base  | wait:Agents text:half click:≡ wait:Quit click:Quit wait:Quit_and_discard
 menu-waits   | base  | wait:Agents side:#deploy side:#deploy wait:needs_ADR-404_D4 Down
@@ -434,7 +449,7 @@ launch() { # name cols rows
     XDG_CACHE_HOME="$F/cache" XDG_CONFIG_HOME="$F/config" XDG_STATE_HOME="$F/state" XDG_DATA_HOME="$F/data" \
     PATH="$BIN:$PATH" \
     TERM=xterm-256color COLORTERM=truecolor \
-    $TH launch "$1" --cols "$2" --rows "$3" --font "$FONT" -- "$BIN/attend-chat" ${DEPTH[@]+"${DEPTH[@]}"} >/dev/null)
+    PS1='$ ' $TH launch "$1" --cols "$2" --rows "$3" --font "$FONT" -- "${LAUNCH[@]}" >/dev/null)
 }
 
 # Poll the pane's text every 0.1 s, up to 10 s, until `test` holds for it.
@@ -491,6 +506,26 @@ resize() { # name cols
   tmux -L agent-ways-tui resize-window -t "$s" -x "$2"
 }
 
+# The pid of this run's chat: the attend-chat whose HOME is the fixture's.
+chat_pid() {
+  local p
+  for p in $(pgrep -x attend-chat); do
+    tr '\0' '\n' <"/proc/$p/environ" 2>/dev/null | grep -qx "HOME=$F/home" && { echo "$p"; return; }
+  done
+  echo "no attend-chat runs in this fixture" >&2
+  return 1
+}
+
+# Poll the files under DIR, every 0.1 s, up to 10 s, until one holds TEXT.
+poll_file() { # dir text
+  for _ in $(seq 100); do
+    grep -rqF -- "$2" "$1" 2>/dev/null && return 0
+    sleep 0.1
+  done
+  echo "timed out waiting for '$2' under $1" >&2
+  return 1
+}
+
 step() { # name step
   local n=$1 k=$2 at arg
   arg=${k#*:}
@@ -510,6 +545,16 @@ step() { # name step
       mkdir -p "$tray"
       printf '%s|%s|%s|%s\n' "claude:$A" alpha "$F/work/alpha" "$arg" > "$tray/new-$(date +%s%N).signal" ;;
     pause:*) sleep "$arg"; return ;;
+    signal:*)
+      # The pid once, so a second signal reaches the chat that is ending.
+      CHAT_PID=${CHAT_PID:-$(chat_pid)}
+      kill -"$arg" "$CHAT_PID" 2>/dev/null || true
+      DOWNED=1
+      return ;;
+    down:) $TH down "$n" >/dev/null; SESSION= DOWNED=1; return ;;
+    chat:) $TH send "$n" -l "$BIN/attend-chat"; $TH send "$n" Enter; return ;;
+    sent:*) poll_file "$F/cache/attend/signals/_broadcast" "$arg"; return ;;
+    kept:*) poll_file "$F/state/attend-chat/unsent" "$arg"; return ;;
     paste:*) $TH send "$n" -l $'\e[200~'"$(printf '%b' "$arg")"$'\e[201~' ;;
     rawpaste:*) $TH send "$n" -l "$(printf '%b' "$arg")" ;;
     bigpaste:*) # in pieces: tmux refuses one send-keys this long
@@ -541,11 +586,20 @@ while IFS='|' read -r name kind steps; do
     out=$WORK/$size
     mkdir -p "$out"
     s=ac-$$-$name
-    SESSION=$s
+    SESSION=$s DOWNED= CHAT_PID=
+    LAUNCH=("$BIN/attend-chat" ${DEPTH[@]+"${DEPTH[@]}"})
+    [ "$name" != hup-bash ] || LAUNCH=(bash --norc --noprofile -i)
     launch "$s" "$c" "$r"
     for k in $steps; do
       step "$s" "$k"
     done
+    if [ -n "$DOWNED" ]; then
+      $TH down "$s" >/dev/null 2>&1 || true
+      SESSION=
+      echo "$out/$name: sent and kept"
+      n=$((n + 1))
+      continue
+    fi
     $TH text "$s" >"$out/$name.txt"
     HOME=$REALHOME $TH shot "$s" --out "$out/$name.png" >/dev/null
     $TH down "$s" >/dev/null

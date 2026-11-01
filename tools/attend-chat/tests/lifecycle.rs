@@ -315,6 +315,8 @@ mod on_a_terminal {
     fn two_hangups_still_send_what_waits_and_keep_the_draft() {
         let mut p = holding("hup2", false);
         kill(&p, libc::SIGHUP);
+        // Apart, so the two are two deliveries: two sent at once are one.
+        std::thread::sleep(Duration::from_millis(5));
         kill(&p, libc::SIGHUP);
         assert_eq!(p.ended(), Some(128 + libc::SIGHUP));
         sent_and_kept(&p);
@@ -342,6 +344,19 @@ mod on_a_terminal {
         p.reader.take().unwrap().join().unwrap();
         drop(p.master.take());
         kill(&p, libc::SIGHUP);
+        assert_eq!(p.ended(), Some(128 + libc::SIGHUP));
+        sent_and_kept(&p);
+        let _ = std::fs::remove_dir_all(&p.home);
+    }
+
+    /// The pty closes with no signal at all: crossterm's poll would spin
+    /// on the dead terminal, and the chat must see the hangup itself.
+    #[test]
+    fn a_terminal_closed_with_no_signal_still_sends_and_keeps() {
+        let mut p = holding("nosig", false);
+        p.stop.store(true, Ordering::SeqCst);
+        p.reader.take().unwrap().join().unwrap();
+        drop(p.master.take());
         assert_eq!(p.ended(), Some(128 + libc::SIGHUP));
         sent_and_kept(&p);
         let _ = std::fs::remove_dir_all(&p.home);
