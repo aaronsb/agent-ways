@@ -21,7 +21,7 @@ The consider step records the operator's intent (ADR-304 §12 and its notes). Th
 - A probe on a call above the waterline carries a brief of the concern, the case for and against, and your lean defended from evidence the operator can check (choices/interview). It stays answerable in a word, because the lean is the first option. Several such calls open in a draft go to the operator as an interview before the decision is written.
 - The inversion names the two ends the decision sits between. Put it to the operator only when it turns on what they want.
 - When the decision carries `observable` entries, show them where you can: run the command, show the output, open the page. Say in `via` what was shown (ADR-307).
-- When the record has a figure, show it before the probes, and say in `via` that it was shown (adr/figure).
+- When the record has a figure, show it before the probes, and say in `via` that it was shown (adr/figure). When answers or findings change the text, check every figure against the final text, redraw what no longer matches, and render each figure again and show it to the operator before `adr accept` (adr/figure).
 - Ask the probes in your reply, one short line each, laid out so a word answers each, or over attend when this session listens there (choices/interview, how to ask). A probe never blocks the work, because `adr accept` reads no answer and records nothing on the operator's behalf. So an answer is never required, and a probe never goes through the question tool.
 
 ## A canary
