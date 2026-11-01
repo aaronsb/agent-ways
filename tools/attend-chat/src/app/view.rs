@@ -89,11 +89,20 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     let rows = chat.input.rows(inner, theme::body());
     let shown = rows.len().clamp(1, INPUT_ROWS);
     let input_h = if composes { shown as u16 + 3 + u16::from(!attachments.is_empty()) } else { 0 };
-    let [feed, compose, helper_row] = Layout::vertical([Constraint::Min(3), Constraint::Length(input_h), Constraint::Length(helper_h)]).areas(area);
+    // Who takes part in the view shown, on up to three rows over the feed
+    // (`super::participants`); the feed keeps the rows it does not take.
+    let who = chat.participants(&fg);
+    let strip = super::participants::lines(chat, &who, area.width.saturating_sub(1));
+    let strip_h = strip.len() as u16;
+    let [strip_row, feed, compose, helper_row] =
+        Layout::vertical([Constraint::Length(strip_h), Constraint::Min(3), Constraint::Length(input_h), Constraint::Length(helper_h)]).areas(area);
 
     chat.hits = Hits { text_width: inner, lead: lead_w, side_area: side.unwrap_or_default(), ..Hits::default() };
     if let Some(side) = side {
         super::sidebar::draw(chat, f, side);
+    }
+    if strip_h > 0 {
+        super::participants::draw(f, strip_row, strip);
     }
     draw_feed(chat, f, feed, &fg);
     if composes {
