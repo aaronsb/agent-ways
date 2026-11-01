@@ -45,7 +45,7 @@ Each strategy is a step-by-step scaffold that surfaces your reasoning visibly.
 
 ## Engaging the Human
 
-During any strategy, if you encounter unknowns that your tools can't resolve, use `AskUserQuestion` to engage the human. Your job is to **frame the unknown precisely** — not "what should I do?" but:
+During any strategy, if you meet an unknown your tools can't resolve, ask the human, escalating as choices/interview describes: in the reply first, then over attend, and the question tool only when the unknown blocks the work. Your job is to **frame the unknown precisely** — not "what should I do?" but:
 
 - "I've narrowed this to X or Y. Here's what I can't determine — which is true in your context?"
 - "This depends on [specific constraint] that I don't have visibility into."
