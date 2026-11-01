@@ -364,6 +364,23 @@ mod on_a_terminal {
         unsafe { libc::kill(p.child.id() as i32, sig) };
     }
 
+    /// Wait until the child has taken `sig` from its process's pending set.
+    /// Two signals pending at once are delivered lowest number first, so a
+    /// SIGHUP sent straight after a SIGTERM can arrive before it.
+    fn taken(p: &Pty, sig: i32) {
+        let start = Instant::now();
+        let bit = 1u64 << (sig - 1);
+        loop {
+            let status = std::fs::read_to_string(format!("/proc/{}/status", p.child.id())).unwrap_or_default();
+            let pending = status.lines().find_map(|l| l.strip_prefix("ShdPnd:")).and_then(|v| u64::from_str_radix(v.trim(), 16).ok());
+            if pending.is_none_or(|m| m & bit == 0) {
+                return;
+            }
+            assert!(start.elapsed() < Duration::from_secs(10), "signal {sig} was never taken");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
     /// The held message reached #open's room, and the draft is in a kept
     /// file: what the chat's own ending does, which a signal that forced
     /// the exit would have skipped.
@@ -394,6 +411,7 @@ mod on_a_terminal {
     fn a_hangup_after_a_term_still_sends_and_keeps() {
         let mut p = holding("termhup", false);
         kill(&p, libc::SIGTERM);
+        taken(&p, libc::SIGTERM);
         kill(&p, libc::SIGHUP);
         assert_eq!(p.ended(), Some(128 + libc::SIGTERM));
         sent_and_kept(&p);
