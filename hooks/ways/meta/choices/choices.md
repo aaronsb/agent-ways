@@ -58,7 +58,7 @@ When more calls qualify than one batch holds, rank them by reversal cost, ask ab
 - **Make options genuinely distinct.** If two collapse to the same outcome, it's one option. State the *tradeoff* along with the label.
 - **Keep it small.** Two to four options per question, a handful of questions at most. The goal is calibration.
 - **Carry the context in each question.** Say what was built or decided and what the answer changes, so the human can answer without opening the PR, file or record. "Merge #588?" sends them to look; "#588 makes CI run on records-only PRs; merge it?" does not.
-- **Batch what is pending.** When several decisions have stacked up, or the human asks what you are waiting on, put them through the tool together, one question each, not as a list in prose.
+- **Batch what is pending.** When several decisions have stacked up, or the human asks what you are waiting on, ask them together, one question each. Ask in the reply first, and use the tool only when the decision blocks the work (choices/interview, how to ask).
 - **Shape the interaction to the decision, and vary it.** A decision whose options each fit in a line suits the tool, and there it removes most of the friction. A complex one is a flow: lay out the argument in prose or a doc, then ask the questions it leaves open, which may differ from the ones you started with. One step of the flow can be the work itself, where that is possible: run it and show what it does (the output, a screenshot, a page to try) before asking, so the human decides from what they saw. The same interaction every time fatigues the human as surely as a wall of prose does.
 - **Don't ask what you've been told.** If the human already decided, act on it.
 
