@@ -28,7 +28,7 @@ A record and its figure pair together and remain as published. In the operator's
 
 The text moves before acceptance: the operator answers the probes and reviewers return findings. A figure that shows anything the text no longer decides is a defect. On each change to the text:
 
-1. Check each figure against the final text. Redraw any part that no longer matches, in the same commit as the text change.
+1. Check each figure against the final text. Redraw any part that no longer matches, in the same change as the text.
 2. Rewrite the figure's alt text and the sentence that introduces it to match.
 3. Render each figure to a PNG again and show the operator before acceptance.
 
@@ -38,8 +38,8 @@ When a subagent writes the record, the brief carries these three steps, names ea
 
 - Save the figure as `figures/ADR-NNN-<slug>.svg` in the record's folder, committed with the record.
 - Embed it beside the decision item it draws, introduced by a sentence that says what it shows, with alt text that states its content.
-- Before asking the probes, render the SVG to a PNG in the session scratchpad, for example with `rsvg-convert`, and send it to the operator. A probe about appearance names the figure.
-- When a record carries several figures, or several records go to the operator together, put the PNGs on one contact sheet, each labelled with its file name, for example with ImageMagick `montage -label '%t' *.png -geometry +8+8 sheet.png`. Send the sheet first and the single PNGs on request.
+- Before asking the probes, render the SVG to a PNG in a `figures/` folder in the session scratchpad, for example with `rsvg-convert`, and send it to the operator. A probe about appearance names the figure.
+- When a record carries several figures, or several records go to the operator together, put the PNGs on one contact sheet, each labelled with its file name. With ImageMagick, where `$SCRATCH` is the session scratchpad, the command is `montage -label '%f' "$SCRATCH"/figures/ADR-NNN-*.png -geometry +8+8 "$SCRATCH/ADR-NNN-sheet.png"`. The sheet goes outside `figures/`, so a second run does not tile the old sheet into the new one. On ImageMagick 7 without the legacy links, the command starts `magick montage`. Send the sheet first and the single PNGs on request.
 
 ## See Also
 
