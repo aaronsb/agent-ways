@@ -310,6 +310,14 @@ strip-narrow16 | full16 | wait:Agents M-7 wait:long_names resize:40 gone:Agents 
 # attend.chat.send_delay: 0, so Enter sends at once, except in `wait`,
 # which writes none and keeps the default delay; the mouse is on by default.
 fixture() { # kind
+  # A chat the last scenario downed may still be ending: sending what
+  # waits and keeping what did not go, into this fixture. Removing the
+  # fixture under it races its writes, so wait for it to exit first.
+  local t=0
+  while chat_pid >/dev/null 2>&1 && [ $t -lt 100 ]; do
+    sleep 0.1
+    t=$((t + 1))
+  done
   rm -rf "$F"
   local cache=$F/cache/attend sig=$F/cache/attend/signals now shape=round
   [ "$1" = plain ] && shape=plain
@@ -482,7 +490,8 @@ poll() { # name what test...
     if "$@" "$t"; then return 0; fi
     sleep 0.1
   done
-  echo "$n: timed out waiting for $what" >&2
+  echo "$n: timed out waiting for $what; the screen was:" >&2
+  printf '%s\n' "$t" >&2
   return 1
 }
 has() { [[ "$2" == *"$1"* ]]; }
