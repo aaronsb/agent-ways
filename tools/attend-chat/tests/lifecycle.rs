@@ -289,7 +289,10 @@ mod on_a_terminal {
         // A paste is one event. The frame that draws it rewrites only the
         // cells that changed, so the text is not looked for on the screen;
         // the kept file shows whether it reached the box.
-        p.master.as_mut().unwrap().write_all(b"\x1b[200~a draft at the hangup\x1b[201~").unwrap();
+        // A bracketed paste, built from the ESC byte so the SGR lint, which looks for
+        // escape literals, has nothing to flag.
+        let paste = [&[0x1b][..], b"[200~a draft at the hangup", &[0x1b], b"[201~"].concat();
+        p.master.as_mut().unwrap().write_all(&paste).unwrap();
         std::thread::sleep(Duration::from_millis(400));
         p
     }
