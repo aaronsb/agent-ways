@@ -12,12 +12,13 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Considering a Decision
 
-The consider step records the operator's intent (ADR-304 §12 and its notes). The agent owns the technical calls and grounds each one in its `basis`: evidence, a standard, upstream, or a precedent. The operator is never asked to approve a technical call. What goes to the operator is a check that the decision serves what they wanted, and why they wanted it.
+The consider step records the operator's intent (ADR-304 §12 and its notes). The agent owns the technical calls by default and grounds each one in its `basis`: evidence, a standard, upstream, or a precedent. A technical call that sets the direction of the work goes to the operator, by the waterline in choices(meta): a choice of library, framework, protocol or language, a persisted format, a default users will feel, a call that is costly to reverse. The rest of what goes to the operator is a check that the decision serves what they wanted, and why they wanted it.
 
 ## Handing a decision over
 
 - Open with a Summary a reader can judge alone: what is decided, what it trades away and forecloses, whether it is one-way (said first when it is), the probes, and an inversion.
-- Probes are intent checks, at most one or two, each in the operator's terms and answerable in a word. Write "you wanted list pages to feel fast; is data up to 30 seconds old fine for that?" in place of "is the latency win real?". Label each probe `*Confident (name):*` or `*Not confident (name):*` for how sure you are that you read their intent right. The tool names probes by that label.
+- Probes are intent checks or calls above the waterline, at most one or two, each in the operator's terms and answerable in a word. Write "you wanted list pages to feel fast; is data up to 30 seconds old fine for that?" in place of "is the latency win real?". Label each probe `*Confident (name):*` or `*Not confident (name):*` for how sure you are that you read their intent right. The tool names probes by that label.
+- A probe on a call above the waterline carries a brief of the concern, the case for and against, and your lean defended from evidence the operator can check (choices/interview). It stays answerable in a word, because the lean is the first option. Several such calls open in a draft go to the operator as an interview before the decision is written.
 - The inversion names the two ends the decision sits between. Put it to the operator only when it turns on what they want.
 - When the decision carries `observable` entries, show them where you can: run the command, show the output, open the page. Say in `via` what was shown (ADR-307).
 - When the record has a figure, show it before the probes, and say in `via` that it was shown (adr/figure).
@@ -69,4 +70,6 @@ Field names such as `basis`, `considered` and `level` belong in the record. Ask 
 ## See Also
 
 - adr(documentation) — the record format and commands for this project
+- choices(meta) — the waterline for calls that go to the operator
+- choices/interview(meta) — a series of open calls, each with a brief, the case for and against, and a lean from evidence
 - trust/autonomy(meta) — when to act without asking

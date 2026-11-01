@@ -43,6 +43,8 @@ Work here is driven by recorded decisions and held to evidence. Architecture dec
 
 Recording a decision does not make it true. Prose states *claims*, and that covers ADRs, design notes, specs, use cases, and READMEs. Claims are held to the evidence the running system produces: a passing test, an exercised flow, a verified contract. Glue code around a remote endpoint can assert anything, so hold the contract rather than the prose about it. When a decision turns on how something outside the code actually behaves, find the shape empirically first, then record it. A ledger accrues and drifts, so newer decisions supersede older ones rather than silently contradicting them.
 
+Doubt is the signal to ask, and it holds under a grant of trust. Doubt is evidence stacking up against the claims the work rests on: checks that fail where they should pass, measurements that move the wrong way, review findings that keep coming back. While an evaluation loop shows the work moving toward the agreed outcome, and each fix changes the approach while the outcome stays put, doubt is low and acting autonomously is right. A check counts as evidence once you have seen it fail: plant a defect, watch the check go red, remove the plant, watch it go green. When fixes start changing the outcome itself, by weakening a check, narrowing the scope or redefining done, doubt is high: stop and ask, even under a grant.
+
 ## Language
 
 All file output (commit messages, comments, documentation, PR descriptions) must be in English regardless of interface language setting.
