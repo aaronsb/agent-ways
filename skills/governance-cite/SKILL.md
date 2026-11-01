@@ -6,12 +6,7 @@ allowed-tools: Bash, Read, Grep, Glob
 
 # Governance Citation Lookup
 
-A governance traceability system maps agent guidance (ways) to the regulatory
-controls their guidance *claims* to address, each with asserted justifications —
-control-*design* claims, not evidence the control operates. This skill is the
-**lookup** — run it to fetch the control IDs and justification text behind a
-practice. For *when*
-to cite and *how* to phrase it, see the **governance citation** way.
+A governance traceability system maps agent guidance (ways) to the regulatory controls their guidance *claims* to address, each with asserted justifications — control-*design* claims, not evidence the control operates. This skill is the **lookup** — run it to fetch the control IDs and justification text behind a practice. For *when* to cite and *how* to phrase it, see the **governance citation** way.
 
 ## Look up controls
 
@@ -36,8 +31,7 @@ ways-audit trace WAY --json
 ways-audit matrix --json            # the complete traceability matrix
 ```
 
-Read the governed ways and controls **from the data** — run `ways-audit
-matrix` for the current set. Never cite from memory; provenance changes.
+Read the governed ways and controls **from the data** — run `ways-audit matrix` for the current set. Never cite from memory; provenance changes.
 
 ## Not for
 

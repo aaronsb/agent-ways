@@ -126,9 +126,7 @@ No action needed — direnv automatically loads/unloads when you `cd`. Just set 
 
 ## Reference: Claude Code env vars
 
-The full, current list of Claude Code environment variables — providers, model,
-effort, token limits, config dir — lives in the canonical settings reference.
-Don't reproduce it here; it drifts:
+The full, current list of Claude Code environment variables — providers, model, effort, token limits, config dir — lives in the canonical settings reference. Don't reproduce it here; it drifts:
 
 > https://code.claude.com/docs/en/settings.md
 

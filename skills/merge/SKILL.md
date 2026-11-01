@@ -6,10 +6,7 @@ allowed-tools: Bash, Read, Edit, Grep, Glob, Agent
 
 # Merge — land an increment
 
-Land current work to main. This is the **stable tail** of the develop loop: review →
-fix → merge → clean up. Assess the current state and pick up from wherever the user
-is. Landing an increment is **not** cutting a release — versioning and publishing are
-`/release`.
+Land current work to main. This is the **stable tail** of the develop loop: review → fix → merge → clean up. Assess the current state and pick up from wherever the user is. Landing an increment is **not** cutting a release — versioning and publishing are `/release`.
 
 ## Arguments
 
@@ -50,8 +47,7 @@ git checkout -b <branch-name>
 
 ### 2. Commit (if uncommitted changes)
 
-Stage and commit in conventional-commit format. Split into atomic commits if there
-are genuinely separate concerns. Ask for message direction if intent isn't clear.
+Stage and commit in conventional-commit format. Split into atomic commits if there are genuinely separate concerns. Ask for message direction if intent isn't clear.
 
 ### 3. Push
 
@@ -76,32 +72,19 @@ Title under 70 chars. Summary 1–3 bullets.
 
 ### 5. Review Gate — the four-square
 
-The gate is **not one policy**. Classify the increment on two axes and pick the path
-(the full rationale lives in the `delivery/merge` way):
+The gate is **not one policy**. Classify the increment on two axes and pick the path (the full rationale lives in the `delivery/merge` way):
 
 |                          | machine review: **light** | machine review: **deep / swarm** |
 |--------------------------|---------------------------|----------------------------------|
 | **human gate: none**     | quick `code-reviewer` (or skip for trivial) → merge | swarm review + adversarial verify → agent-gated merge |
 | **human gate: required** | single `code-reviewer` → offer to read before merge | swarm review **and** operator approval before merge |
 
-- **X (review depth)** ← complexity and blast-radius: diff size, files touched,
-  core-vs-leaf, test coverage, reversibility. The same change class sets the gate
-  depth (`code/testing/gates` way): choose review depth and gate depth together, and
-  report each gate as executed, discovered, or absent.
-- **Y (human gate)** ← does the work set direction (an ADR, an architecture change →
-  human gate required, however small), and has the operator already read it (wrote it
-  or reviewed it live → gate already satisfied).
+- **X (review depth)** ← complexity and blast-radius: diff size, files touched, core-vs-leaf, test coverage, reversibility. The same change class sets the gate depth (`code/testing/gates` way): choose review depth and gate depth together, and report each gate as executed, discovered, or absent.
+- **Y (human gate)** ← does the work set direction (an ADR, an architecture change → human gate required, however small), and has the operator already read it (wrote it or reviewed it live → gate already satisfied).
 
-When the classification is ambiguous, **state your read and let the operator decide**
-rather than silently picking a corner. Inside a `/goal` loop, bias to the autonomous
-corners; outside one, ask. Team repos always gate; `/merge full-sail` is rejected for
-them and for direction-setting changes — say why.
+When the classification is ambiguous, **state your read and let the operator decide** rather than silently picking a corner. Inside a `/goal` loop, bias to the autonomous corners; outside one, ask. Team repos always gate; `/merge full-sail` is rejected for them and for direction-setting changes — say why.
 
-Invoking `/merge` is the request for the review this gate specifies, in whichever corner you
-landed — dispatch the reviewers, don't stop to ask permission for them. Say why in a clause as
-you go ("review needs a reader who hasn't seen my reasoning"). For a swarm, state the number
-before spawning it. Reviewers run on the model their agent definition names; a review is
-judgment work, so never pass a cheaper `model` to save tokens. See ADR-175.
+Invoking `/merge` is the request for the review this gate specifies, in whichever corner you landed — dispatch the reviewers, don't stop to ask permission for them. Say why in a clause as you go ("review needs a reader who hasn't seen my reasoning"). For a swarm, state the number before spawning it. Reviewers run on the model their agent definition names; a review is judgment work, so never pass a cheaper `model` to save tokens. See ADR-175.
 
 **Running a single review:**
 
@@ -110,14 +93,11 @@ Agent(subagent_type="code-reviewer", prompt="Review PR #<number> in this repo.
 Run gh pr diff <number> to see the changes. Post findings as a gh pr comment.")
 ```
 
-For the swarm corner, fan `code-reviewer` agents across dimensions (correctness,
-security, reuse) and adversarially verify each finding before trusting it.
+For the swarm corner, fan `code-reviewer` agents across dimensions (correctness, security, reuse) and adversarially verify each finding before trusting it.
 
 ### 6. Remediate
 
-A review is only worth running if the findings get fixed. Before the merge gate,
-**remediate per finding** — apply the fix, or record why a finding is declined. Don't
-carry known findings past the gate. "Reviewed" is not "landed clean."
+A review is only worth running if the findings get fixed. Before the merge gate, **remediate per finding** — apply the fix, or record why a finding is declined. Don't carry known findings past the gate. "Reviewed" is not "landed clean."
 
 ### 7. Merge
 
@@ -125,8 +105,7 @@ carry known findings past the gate. "Reviewed" is not "landed clean."
 gh pr merge <number> --merge
 ```
 
-Regular merge (not squash/rebase) unless the user prefers otherwise — preserve the
-branch's narrative.
+Regular merge (not squash/rebase) unless the user prefers otherwise — preserve the branch's narrative.
 
 ### 8. Cleanup
 
@@ -140,8 +119,7 @@ Always run the full sequence — stale branches and dangling refs accumulate fas
 
 ### 9. Reconcile the ADR status
 
-If the merged work implements an ADR, that ADR is still `Draft` or `Proposed`. Flip it
-now, while you know which one it was.
+If the merged work implements an ADR, that ADR is still `Draft` or `Proposed`. Flip it now, while you know which one it was.
 
 ```bash
 docs/scripts/adr list --status Draft      # implemented by this merge?
@@ -155,34 +133,28 @@ docs/scripts/adr index -y                 # regenerate the index
 docs/scripts/adr lint                     # 0 errors before committing
 ```
 
-If the merge supersedes an ADR, or the work proved one unnecessary, archive it instead
-of leaving it in the active set:
+If the merge supersedes an ADR, or the work proved one unnecessary, archive it instead of leaving it in the active set:
 
 ```bash
 docs/scripts/adr archive <n> --superseded-by ADR-<m> --reason "..." --dry-run
 docs/scripts/adr archive <n> --status Rejected --reason "..."    # never built
 ```
 
-`adr lint` requires the reciprocal `supersedes:` on the superseding ADR. Add it, or the
-link rots one-directionally.
+`adr lint` requires the reciprocal `supersedes:` on the superseding ADR. Add it, or the link rots one-directionally.
 
 Commit as `docs(adr): accept ADR-<n> post-merge and regenerate index`.
 
 ### 10. Release? (only if warranted)
 
-Landing is not releasing. If the merged change warrants a versioned release (new
-feature, breaking change, artifact-bearing project), **suggest `/release`** — don't
-auto-publish. Publishing is a one-way door.
+Landing is not releasing. If the merged change warrants a versioned release (new feature, breaking change, artifact-bearing project), **suggest `/release`** — don't auto-publish. Publishing is a one-way door.
 
 ## Key Principles
 
 - **Don't ask permission per step** — assess, propose the remaining flow, execute.
 - **Pause at decision points**: commit wording, PR description, the review gate.
-- **The four-square drives the gate**, not change size alone — a one-line ADR still
-  gates on the operator; a big leaf refactor may not.
+- **The four-square drives the gate**, not change size alone — a one-line ADR still gates on the operator; a big leaf refactor may not.
 - **Remediate before merge** — findings that aren't fixed aren't findings, they're debt.
-- **Reconcile the ledger at land time** — a Draft ADR whose work just merged is a stale
-  record. The correction costs one line now and a corpus audit later.
+- **Reconcile the ledger at land time** — a Draft ADR whose work just merged is a stale record. The correction costs one line now and a corpus audit later.
 - **If mid-flow**, pick up from current state — don't restart.
 - **Merge ≠ release** — landing an increment is the daily act; releasing is `/release`.
 

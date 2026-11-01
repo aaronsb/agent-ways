@@ -68,7 +68,7 @@ Each suite binary in `tools/suite-bins` is a package of the same name, so `-p <n
 |---|---|
 | `make lint` | clippy on the workspace, warnings as errors |
 | `make test` | lint, then the smoke, unit, simulation, ADR tool, statusline and hook suites |
-| `scripts/check-register.sh` | `hooks/ways/core.md` has none of the register shapes ADR-178 bans, and no way file keeps a paragraph of prose on more than one line; `--corpus` adds an advisory register report over every way |
+| `scripts/check-register.sh` | `hooks/ways/core.md` has none of the register shapes ADR-178 bans, and no way file or `skills/**/SKILL.md` keeps a paragraph of prose on more than one line; `--corpus` adds an advisory register report over every way |
 | `scripts/check-facts.sh [REV]` | Counts, paths, identifiers, headings and links that left a markdown file you reworded. Advisory |
 | `scripts/check-portability.sh` | CRLF endings, non-portable shebangs, hard-coded home paths |
 | `scripts/check-rust.sh` | Rust 1.89 or later; every source build runs it first |

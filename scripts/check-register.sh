@@ -18,15 +18,17 @@
 # session in many, and core reaches all of them. The rest of the corpus is
 # reported for context and never fails the build.
 #
-# One check covers every way body: each paragraph of prose stays on one line,
-# as core.md and documentation/markdown state. A wrapped paragraph has a
+# One check covers every way body and every skills/**/SKILL.md: each
+# paragraph of prose stays on one line, as core.md and documentation/markdown
+# state. An agent reads a skill's SKILL.md in full when the skill is invoked,
+# and edits it with the same exact-string tool. A wrapped paragraph has a
 # mechanical definition, two lines of one paragraph one under the other, so
-# the check fails on any way file. It leaves structure alone: lists, tables,
-# headings, blockquotes, fences, HTML comments, bold-label field lines, and a
-# line that ends in a hard break.
+# the check fails on any of these files. It leaves structure alone: lists,
+# tables, headings, blockquotes, fences, HTML comments, bold-label field
+# lines, and a line that ends in a hard break.
 #
-# Exit code: 0 = clean, 1 = core.md violates or a way body has a wrapped
-# paragraph. Advisory corpus rows never set it.
+# Exit code: 0 = clean, 1 = core.md violates or a way body or SKILL.md has a
+# wrapped paragraph. Advisory corpus rows never set it.
 
 set -uo pipefail
 
@@ -176,15 +178,17 @@ if (( ANTI > 0 || SIG > 0 || SLOGAN > 0 || ASIDE > 0 || CONTRA > 0 || CHAT > 0 |
     | sed 's/^/    /' | head -20
 fi
 
-# Line handling over every way body, core.md included.
+# Line handling over every way body, core.md included, and every SKILL.md.
 WAY_FILES=()
 while IFS= read -r f; do WAY_FILES+=("$f"); done < <(find hooks/ways -name '*.md' | sort)
-WRAPPED="$(wrapped_lines "${WAY_FILES[@]}")"
+SKILL_FILES=()
+while IFS= read -r f; do SKILL_FILES+=("$f"); done < <(find skills -name 'SKILL.md' | sort)
+WRAPPED="$(wrapped_lines "${WAY_FILES[@]}" "${SKILL_FILES[@]}")"
 NWRAP=$(printf '%s' "$WRAPPED" | grep -c . | tr -d ' ')
 if (( NWRAP == 0 )); then
-  ok "no wrapped paragraphs in ${#WAY_FILES[@]} way files"
+  ok "no wrapped paragraphs in ${#WAY_FILES[@]} way files and ${#SKILL_FILES[@]} SKILL.md files"
 else
-  fail "$NWRAP wrapped paragraph line(s) in way files — join each paragraph onto one line"
+  fail "$NWRAP wrapped paragraph line(s) in way or SKILL.md files — join each paragraph onto one line"
   printf '%s\n' "$WRAPPED" | sed 's/^/    /' | head -20
 fi
 

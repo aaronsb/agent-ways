@@ -73,10 +73,7 @@ docs/scripts/adr contract                 # The contract adr.yaml declares, and 
 docs/scripts/adr contract --upgrade       # Bring adr.yaml to the tool's contract; edits lines, keeps comments
 ```
 
-Under adr/v1, a record's folder decides its area (ADR-310), and its number is
-its permanent identity: a move keeps the number, and `ADR-N` citations stay
-valid. An area's range only allocates numbers for new records. Under adr/v0,
-domain and number range are the same thing, unchanged from before.
+Under adr/v1, a record's folder decides its area (ADR-310), and its number is its permanent identity: a move keeps the number, and `ADR-N` citations stay valid. An area's range only allocates numbers for new records. Under adr/v0, domain and number range are the same thing, unchanged from before.
 
 ## Workflow
 
@@ -89,9 +86,7 @@ domain and number range are the same thing, unchanged from before.
 
 ## Configuration
 
-Each project defines its structure in `docs/architecture/adr.yaml`, always
-discovered with `docs/scripts/adr domains` / `docs/scripts/adr config` rather
-than assumed:
+Each project defines its structure in `docs/architecture/adr.yaml`, always discovered with `docs/scripts/adr domains` / `docs/scripts/adr config` rather than assumed:
 - **domains**: name, number range, description, folder for each domain (adr/v1: the folder is the record's area; the range only allocates new numbers, ADR-310)
 - **statuses**: valid v0 status values (Draft, Proposed, Accepted, Superseded, Deprecated); adr/v1 has a fixed status set (proposed, accepted, rejected, abandoned, superseded, archived)
 - **defaults**: default deciders and initial status for new ADRs
@@ -104,9 +99,7 @@ than assumed:
 
 ## ADR Format
 
-The record's shape follows the project's contract, so ask `adr config` rather
-than assume one. `adr lint` is the authority on what a given record needs; it
-reads the contract and reports what is missing rather than a fixed checklist.
+The record's shape follows the project's contract, so ask `adr config` rather than assume one. `adr lint` is the authority on what a given record needs; it reads the contract and reports what is missing rather than a fixed checklist.
 
 **adr/v1** (`docs/scripts/adr new` writes this shape):
 ```markdown
@@ -184,11 +177,7 @@ related: []
 
 ## Vendoring the tool into a project
 
-`docs/scripts/adr` is **not** part of a project by default — it's vendored from
-the agent-ways install. When it's missing (the `adr` way's macro will observe
-this and remind you), install a standalone **copy** — never a symlink, since a
-symlink into `~/.claude` breaks for collaborators and CI who don't have that
-directory:
+`docs/scripts/adr` is **not** part of a project by default — it's vendored from the agent-ways install. When it's missing (the `adr` way's macro will observe this and remind you), install a standalone **copy** — never a symlink, since a symlink into `~/.claude` breaks for collaborators and CI who don't have that directory:
 
 ```bash
 mkdir -p docs/scripts docs/architecture
@@ -197,52 +186,26 @@ cp ~/.claude/hooks/ways/documentation/adr/adr.yaml.template docs/architecture/ad
 chmod +x docs/scripts/adr
 ```
 
-Then edit `docs/architecture/adr.yaml` for the project's domains and ranges, and
-validate: `docs/scripts/adr domains && docs/scripts/adr lint`. The template
-declares `contract: adr/v1` with the decision, spec and evidence kinds, a
-placeholder capability `core`, and `process` and `adr`: replace `core` with the
-project's capabilities. To stay on
-adr/v0, delete the `contract` line and the v1 blocks under it.
+Then edit `docs/architecture/adr.yaml` for the project's domains and ranges, and validate: `docs/scripts/adr domains && docs/scripts/adr lint`. The template declares `contract: adr/v1` with the decision, spec and evidence kinds, a placeholder capability `core`, and `process` and `adr`: replace `core` with the project's capabilities. To stay on adr/v0, delete the `contract` line and the v1 blocks under it.
 
-For a full repo scaffold (ADRs + GitHub config + CODEOWNERS + project ways), run
-`/project-init` instead — it vendors this tool as one step of a larger setup. The
-**docs** skill is the catalog half and shares this `adr.yaml`.
+For a full repo scaffold (ADRs + GitHub config + CODEOWNERS + project ways), run `/project-init` instead — it vendors this tool as one step of a larger setup. The **docs** skill is the catalog half and shares this `adr.yaml`.
 
-A project with existing decision records in another shape (a flat directory,
-inline metadata, a different tool) converts them with `docs/scripts/adr import
-scan <paths>` then `docs/scripts/adr import apply` (ADR-306) rather than by
-hand-editing frontmatter — the import sheets are editable and re-lintable
-before anything is written as an adr/v1 record. `import apply` does not edit
-`adr.yaml`; when the records it writes declare a newer contract than `adr.yaml`,
-it says so, and `docs/scripts/adr contract --upgrade` brings `adr.yaml` to it.
+A project with existing decision records in another shape (a flat directory, inline metadata, a different tool) converts them with `docs/scripts/adr import scan <paths>` then `docs/scripts/adr import apply` (ADR-306) rather than by hand-editing frontmatter — the import sheets are editable and re-lintable before anything is written as an adr/v1 record. `import apply` does not edit `adr.yaml`; when the records it writes declare a newer contract than `adr.yaml`, it says so, and `docs/scripts/adr contract --upgrade` brings `adr.yaml` to it.
 
 ## Updating a vendored copy
 
-The tool carries a `TOOL_VERSION` stamp (`docs/scripts/adr --version`), and the
-`adr` way's macro compares it against the installed template — so a disclosure
-saying the copy is *out of date* means ways ships a newer tool (ADR-177).
+The tool carries a `TOOL_VERSION` stamp (`docs/scripts/adr --version`), and the `adr` way's macro compares it against the installed template — so a disclosure saying the copy is *out of date* means ways ships a newer tool (ADR-177).
 
-- **Unmodified copy** (only the `TOOL_VERSION` line differs, if anything):
-  re-run the `cp` from the vendoring steps above. `adr.yaml` is untouched —
-  config and tool update independently. When the new tool writes a newer
-  contract than `adr.yaml` declares, `adr contract` says so, and
-  `adr contract --upgrade` brings `adr.yaml` to it.
-- **Customized copy**: diff first, then carry the local changes forward onto
-  the new version — never overwrite on sight:
+- **Unmodified copy** (only the `TOOL_VERSION` line differs, if anything): re-run the `cp` from the vendoring steps above. `adr.yaml` is untouched — config and tool update independently. When the new tool writes a newer contract than `adr.yaml` declares, `adr contract` says so, and `adr contract --upgrade` brings `adr.yaml` to it.
+- **Customized copy**: diff first, then carry the local changes forward onto the new version — never overwrite on sight:
 
 ```bash
 diff docs/scripts/adr ~/.claude/hooks/ways/documentation/adr/adr-tool
 ```
 
-From 1.2.0, lint checks are registered rule functions in one "Lint rules"
-section, and `adr lint` runs them. They no longer run inline in
-`parse_adr`. A local check added to `parse_adr` in an older copy belongs there
-as a `@file_rule`, or as a `@corpus_rule` when it resolves against other
-ADRs.
+From 1.2.0, lint checks are registered rule functions in one "Lint rules" section, and `adr lint` runs them. They no longer run inline in `parse_adr`. A local check added to `parse_adr` in an older copy belongs there as a `@file_rule`, or as a `@corpus_rule` when it resolves against other ADRs.
 
-If the macro instead says the *installed template* is behind the project's
-copy, the agent-ways install is stale — update it (`/ways-update`), don't
-downgrade the project.
+If the macro instead says the *installed template* is behind the project's copy, the agent-ways install is stale — update it (`/ways-update`), don't downgrade the project.
 
 ## Key Rules
 
