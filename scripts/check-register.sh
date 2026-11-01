@@ -105,22 +105,43 @@ bold_runs() {
 # next line. A list item or a bold-label line can start such a pair, because a
 # continuation line under it is a wrap too. A blank line, a structural line, a
 # new list item or a new label line ends the paragraph.
+#
+# A line indented four or more spaces is a continuation when it follows a
+# prose, list or label line, since an indented code block cannot interrupt a
+# paragraph. After a blank line it is an indented code block. A fence closes
+# only on a line of the same character, at least as long as the opening fence,
+# with nothing after it, so a ``` line inside a ```` fence stays content.
+# Setext underlines (`===`) and link reference definitions are structure.
 wrapped_lines() {
   awk '
     function kind(l) {
       if (l ~ /^[[:space:]]*$/) return "blank"
       if (l ~ /^[[:space:]]*\|/ || l ~ /^#/ || l ~ /^[[:space:]]*>/) return "struct"
-      if (l ~ /^[[:space:]]*</ || l ~ /^(    |\t)/) return "struct"
+      if (l ~ /^[[:space:]]*</) return "struct"
       if (l ~ /^[[:space:]]*(-{3,}|\*{3,}|_{3,})[[:space:]]*$/) return "struct"
+      if (l ~ /^ {0,3}=+[[:space:]]*$/ || l ~ /^ {0,3}\[[^]]+\]:/) return "struct"
       if (l ~ /^[[:space:]]*([-*+]|[0-9]+[.)])[[:space:]]/) return "list"
+      if (l ~ /^(    |\t)/) return (pk == "prose" || pk == "list" || pk == "label") ? "prose" : "struct"
       if (l ~ /^\*\*[^*]+\*\*[[:space:]]*[:=]/ || l ~ /^\*\*[^*]+:\*\*/) return "label"
       return "prose"
+    }
+    # The fence character and its run length on a fence line.
+    function fence_run(l,    c, n) {
+      sub(/^[[:space:]]*/, "", l)
+      c = substr(l, 1, 1); n = 0
+      while (substr(l, n + 1, 1) == c) n++
+      fr_char = c; fr_len = n; fr_tail = substr(l, n + 1)
     }
     FNR == 1            { pk = "blank"; fm = 0; fence = 0; cmt = 0 }
     FNR == 1 && /^---$/ { fm = 1; next }
     fm && /^---$/       { fm = 0; next }
     fm                  { next }
-    /^[[:space:]]*(```|~~~)/ { fence = !fence; pk = "blank"; next }
+    /^[[:space:]]*(```|~~~)/ {
+      fence_run($0)
+      if (!fence) { fence = 1; fc = fr_char; fl = fr_len; pk = "blank"; next }
+      if (fr_char == fc && fr_len >= fl && fr_tail ~ /^[[:space:]]*$/) { fence = 0; pk = "blank" }
+      next
+    }
     fence               { next }
     cmt                 { if ($0 ~ /-->/) cmt = 0; pk = "blank"; next }
     /<!--/ && !/-->/    { cmt = 1; pk = "blank"; next }
@@ -132,6 +153,17 @@ wrapped_lines() {
     }
   ' "$@"
 }
+
+# `--wrapped FILE...` runs only the paragraph check, on the named files, and
+# exits 1 when it reports a line. tests/register-wrap-test.sh drives it over
+# the fixtures in tests/fixtures/register.
+if [[ "${1:-}" == "--wrapped" ]]; then
+  shift
+  WRAPPED="$(wrapped_lines "$@")"
+  [[ -z "$WRAPPED" ]] && exit 0
+  printf '%s\n' "$WRAPPED"
+  exit 1
+fi
 
 echo "Register lint — always-on surface"
 
