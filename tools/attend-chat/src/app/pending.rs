@@ -76,8 +76,10 @@ pub(super) enum Source {
     Parked { origins: Vec<std::path::PathBuf> },
     /// Restored from the kept file `path`, which stays claimed until the
     /// text is sent, held or kept again. `draft` when it was kept as a
-    /// draft; `view_known` false for a file of an earlier build.
-    Kept { path: std::path::PathBuf, draft: bool, view_known: bool },
+    /// draft; `view_known` false for a file of an earlier build;
+    /// `partial` when the file was cut short; `maybe_sent` when it was
+    /// being sent as a chat ended ([`unsent::Kind::Sending`]).
+    Kept { path: std::path::PathBuf, draft: bool, view_known: bool, partial: bool, maybe_sent: bool },
 }
 
 impl Held {
@@ -176,7 +178,9 @@ impl Pending {
     }
 
     /// Take every message counting down that is due by `now`, in the order
-    /// they were held.
+    /// they were held. The chat sends them one at a time
+    /// ([`ChatPane::send_due`]); the tests take them together.
+    #[cfg(test)]
     pub(super) fn due(&mut self, now: Duration) -> Vec<Held> {
         let (due, kept) = std::mem::take(&mut self.held).into_iter().partition(|h| h.refused.is_none() && h.due <= now);
         self.held = kept;
@@ -345,9 +349,7 @@ impl ChatPane {
         }
         self.send_anyway = None;
         let Some(dest) = dest.filter(|_| !text.is_empty()) else {
-            for h in self.pending.take_where(Held::sendable) {
-                self.send_held(h, true);
-            }
+            self.send_each(Held::sendable, true);
             return self.invalidate();
         };
         let label = self.flag_label(&text, &fg).unwrap_or_else(|| format!("#{}", tabs::send_scope(&fg)));
@@ -367,14 +369,23 @@ impl ChatPane {
     /// Send each held message whose countdown has ended, through the path
     /// Enter sends by, from the view it was written in.
     pub(super) fn send_due(&mut self) {
-        let due = self.pending.due(self.mono());
-        if due.is_empty() {
-            return;
+        let now = self.mono();
+        if self.send_each(|h| h.refused.is_none() && h.due <= now, false) {
+            self.invalidate();
         }
-        for h in due {
-            self.send_held(h, false);
+    }
+
+    /// Send each entry `which` picks, oldest first, one at a time: the
+    /// others stay in the feed, and noted, until their own send. False
+    /// when it picked none; true once each has been sent or refused.
+    fn send_each(&mut self, which: impl Fn(&Held) -> bool, anyway: bool) -> bool {
+        let ids: Vec<u64> = self.pending.iter().filter(|h| which(h)).map(|h| h.id).collect();
+        for &id in &ids {
+            if let Some(h) = self.pending.recall(id) {
+                self.send_held(h, anyway);
+            }
         }
-        self.invalidate();
+        !ids.is_empty()
     }
 
     /// Send `h` now, from the view it was written in, to the route it was
@@ -384,6 +395,18 @@ impl ChatPane {
     /// elsewhere, holds the message back rather than send it to `#open` or
     /// anywhere else it was not written for.
     fn send_held(&mut self, h: Held, anyway: bool) -> bool {
+        // Noted as being sent until the send returns, so a panic or a
+        // forced exit meanwhile keeps it marked as such, and noted again
+        // once it has gone or is back in the feed.
+        let _moving = unsent::moving();
+        self.note_flight(Some(unsent::Noted { flight: true, ..Self::noted(&h) }), true);
+        let sent = self.send_held_noted(h, anyway);
+        self.note_unsent();
+        sent
+    }
+
+    /// [`ChatPane::send_held`] with the text noted as being sent.
+    fn send_held_noted(&mut self, h: Held, anyway: bool) -> bool {
         let names = self.strip_names();
         let fg = tabs::normalize(h.tab.clone(), &names);
         if self.destination(&h.text, &fg).as_deref() != Some(h.dest.as_str()) {
@@ -467,7 +490,11 @@ impl ChatPane {
         if h.refused.is_some_and(|r| r.quiet) && self.input.text() == h.text {
             self.send_anyway = Some((h.text.clone(), h.tab.clone()));
         }
-        let said = if !view_known {
+        let said = if matches!(h.source, Source::Kept { maybe_sent: true, .. }) {
+            format!("recalled: it was being sent to {} as a chat ended and may have gone; check before Enter", h.label)
+        } else if matches!(h.source, Source::Kept { partial: true, .. }) {
+            format!("recalled: cut short by a crash, the draft written for {}", h.label)
+        } else if !view_known {
             "recalled: kept by an earlier build, which did not note its view; the flag shows where Enter sends it".to_string()
         } else if h.is_draft() {
             format!("recalled: the draft written for {}", h.label)
@@ -544,6 +571,8 @@ impl ChatPane {
                 // its own.
                 let how = if newest == Some(h.id) { " Esc or click recalls " } else { " click recalls " };
                 let state = match h.refused {
+                    _ if matches!(h.source, Source::Kept { maybe_sent: true, .. }) => Seg::on(" may have been sent ", Ground::Err).bold(),
+                    _ if matches!(h.source, Source::Kept { partial: true, .. }) => Seg::on(" draft, cut short ", Ground::Accent).bold(),
                     _ if h.is_draft() => Seg::on(" draft ", Ground::Accent).bold(),
                     None => Seg::on(format!(" sending in {}s ", left(h, now)), Ground::Warn).bold(),
                     Some(_) => Seg::on(" not sent ", Ground::Err).bold(),
@@ -600,12 +629,9 @@ impl ChatPane {
     /// status line, and the chat stays open rather than lose it. A draft
     /// and a restored entry are not sent: Enter never sent them.
     pub(super) fn send_all_now(&mut self) -> bool {
-        let mut all = true;
-        for h in self.pending.take_where(Held::sendable) {
-            all &= self.send_held(h, true);
-        }
+        self.send_each(Held::sendable, true);
         self.invalidate();
-        all
+        !self.pending.iter().any(Held::sendable)
     }
 
     /// The chat ends unasked: a signal, or the terminal hanging up
@@ -668,58 +694,96 @@ impl ChatPane {
 
     /// Keep the entries `which` picks, and the draft in the box, a file
     /// each. An entry leaves the feed only once its file is written, and
-    /// the kept files a written text carried are removed then. True when
-    /// all were kept, or there was nothing to keep. False, with the reason
-    /// on the status line, when one could not be: it stays in the feed,
-    /// or in the box, with the files it carried. A box draft that was
-    /// written while another text failed carries its new file, so keeping
-    /// again replaces it. A dry run writes nothing and takes the entries.
+    /// the kept files a written text carried are removed then; what is
+    /// noted follows each file ([`unsent::note`]). True when all were
+    /// kept, or there was nothing to keep. False, with the reason on the
+    /// status line, when one could not be: it stays in the feed, or in the
+    /// box, with the files it carried. A box draft that was written while
+    /// another text failed carries its new file, so keeping again replaces
+    /// it. A dry run writes nothing and takes the entries.
     fn keep(&mut self, which: impl Fn(&Held) -> bool) -> bool {
         if self.dry_run {
             self.pending.take_where(which);
             return true;
         }
-        let held: Vec<Held> = self.pending.iter().filter(|h| which(h)).cloned().collect();
-        let mut records: Vec<unsent::Record> = held.iter().map(Self::record).collect();
-        records.extend(self.box_record());
-        let (mut written, mut settled, mut failed) = (Vec::new(), Vec::new(), None);
-        for (i, outcome) in unsent::write(&self.unsent_dir, &records).into_iter().enumerate() {
-            match (outcome, held.get(i)) {
-                (Ok(_), Some(h)) => {
-                    written.push(h.id);
-                    settled.extend(Self::parked_origins(h));
+        let _moving = unsent::moving();
+        let ids: Vec<u64> = self.pending.iter().filter(|h| which(h)).map(|h| h.id).collect();
+        let mut failed = None;
+        for id in ids {
+            let Some(h) = self.pending.iter().find(|h| h.id == id).cloned() else { continue };
+            match unsent::write(&self.unsent_dir, &[Self::record(&h)]).remove(0) {
+                Ok(_) => {
+                    self.pending.take_where(|o| o.id == id);
+                    unsent::settle(Self::parked_origins(&h));
+                    self.note_unsent();
                 }
-                (Ok(path), None) => {
-                    settled.append(&mut self.box_origins);
-                    self.box_origins.push(path);
-                }
-                (Err(e), _) => {
+                Err(e) => {
                     failed.get_or_insert(e);
                 }
             }
         }
-        self.pending.take_where(|h| written.contains(&h.id));
-        unsent::settle(settled);
+        if let Some(r) = self.box_record() {
+            match unsent::write(&self.unsent_dir, &[r]).remove(0) {
+                Ok(path) => {
+                    unsent::settle(std::mem::replace(&mut self.box_origins, vec![path]));
+                    self.note_unsent();
+                }
+                Err(e) => {
+                    failed.get_or_insert(e);
+                }
+            }
+        }
         if let Some((path, e)) = failed {
-            self.say(format!("not kept: {} ({e})", path.display()), true);
+            // The reason first: a narrow status line keeps it, and the
+            // path after it.
+            self.say(format!("not kept ({e}): {}", path.display()), true);
             self.invalidate();
             return false;
         }
+        // All kept: the box's draft is in its new file, which the shell's
+        // discard at the end of the chat must leave in place.
         self.box_origins.clear();
         true
     }
 
-    /// Note what a panic now would keep: the messages Enter held, the
-    /// drafts parked and the draft in the box ([`unsent::keep_noted`]).
+    /// What the chat would keep if it ended now, noted for a panic and a
+    /// forced exit ([`unsent::keep_noted`]): the messages Enter held, the
+    /// drafts parked and the draft in the box, each with the kept files it
+    /// carries. A restored entry is still in its kept file.
     pub(super) fn note_unsent(&mut self) {
+        self.note_flight(None, true);
+    }
+
+    /// [`ChatPane::note_unsent`] with `flight`, a text being sent, noted as
+    /// such; `with_box` false leaves out the draft in the box, which is the
+    /// text being sent.
+    pub(super) fn note_flight(&mut self, flight: Option<unsent::Noted>, with_box: bool) {
         if self.dry_run {
             return;
         }
-        let held: Vec<Held> = self.pending.iter().filter(|h| !matches!(h.source, Source::Kept { .. })).cloned().collect();
-        let origins = self.origins(&held);
-        let mut records: Vec<unsent::Record> = held.iter().map(Self::record).collect();
-        records.extend(self.box_record());
-        unsent::note(&self.unsent_dir, records, origins);
+        let mut texts: Vec<unsent::Noted> = self.pending.iter().filter(|h| !matches!(h.source, Source::Kept { .. })).map(Self::noted).collect();
+        if with_box {
+            texts.extend(self.box_noted());
+        }
+        texts.extend(flight);
+        unsent::note(&self.unsent_dir, texts);
+    }
+
+    /// `h` as a text noted.
+    fn noted(h: &Held) -> unsent::Noted {
+        let origins = match &h.source {
+            Source::Parked { origins } => origins.clone(),
+            Source::Kept { path, .. } => vec![path.clone()],
+            Source::Enter => Vec::new(),
+        };
+        unsent::Noted { record: Self::record(h), origins, flight: false }
+    }
+
+    /// The draft in the box as a text noted, with the kept files it
+    /// carries.
+    pub(super) fn box_noted(&mut self) -> Option<unsent::Noted> {
+        let record = self.box_record()?;
+        Some(unsent::Noted { record, origins: self.box_origins.clone(), flight: false })
     }
 
     fn draft(&self) -> Option<String> {
@@ -736,7 +800,7 @@ impl ChatPane {
         let found = unsent::claim(&self.unsent_dir);
         let names = self.strip_names();
         let live = |t: &Option<Tab>| t.as_ref().is_some_and(|t| t.composes() && tabs::normalize(t.clone(), &names) == *t);
-        let boxed = if self.input.is_empty() { found.claimed.iter().rposition(|c| c.record.kind == unsent::Kind::Draft && live(&c.record.tab)) } else { None };
+        let boxed = if self.input.is_empty() { found.claimed.iter().rposition(|c| c.record.kind == unsent::Kind::Draft && !c.partial && live(&c.record.tab)) } else { None };
         let mut said = Vec::new();
         if let Some(c) = boxed.map(|i| &found.claimed[i]) {
             let tab = c.record.tab.clone().unwrap_or_default();
@@ -747,7 +811,7 @@ impl ChatPane {
             self.box_origins.push(c.path.clone());
             said.push(format!("restored: the draft for {} is in the box", c.record.label));
         }
-        let (mut entries, mut gone) = (0, Vec::new());
+        let (mut entries, mut gone, mut unsure, mut partial) = (0, Vec::new(), 0, 0);
         for (i, c) in found.claimed.into_iter().enumerate() {
             if Some(i) == boxed {
                 continue;
@@ -757,7 +821,11 @@ impl ChatPane {
             if draft && r.tab.is_some() && !live(&r.tab) {
                 gone.push(r.label.clone());
             }
-            let source = Source::Kept { path: c.path, draft, view_known: r.tab.is_some() };
+            if r.kind == unsent::Kind::Sending {
+                unsure += 1;
+            }
+            partial += usize::from(c.partial);
+            let source = Source::Kept { path: c.path, draft, view_known: r.tab.is_some(), partial: c.partial, maybe_sent: r.kind == unsent::Kind::Sending };
             self.pending.add(Held { id: 0, text: r.text, tab: r.tab.unwrap_or_default(), dest: r.dest, label: r.label, due: Duration::ZERO, refused: None, touched: 0, source }, true);
             entries += 1;
         }
@@ -767,12 +835,27 @@ impl ChatPane {
             1 => said.push(format!("{lead}one kept text is in the feed; Esc or a click recalls it")),
             n => said.push(format!("{lead}{n} kept texts are in the feed; a click recalls each")),
         }
+        match unsure {
+            0 => {}
+            1 => said.push("one was being sent as a chat ended and may have gone: check before Enter".into()),
+            n => said.push(format!("{n} were being sent as a chat ended and may have gone: check before Enter")),
+        }
+        match partial {
+            0 => {}
+            1 => said.push("one was cut short by a crash".into()),
+            n => said.push(format!("{n} were cut short by a crash")),
+        }
         if !gone.is_empty() {
             said.push(format!("the view of the draft for {} is gone", gone.join(", ")));
         }
-        let error = !found.unreadable.is_empty();
-        if error {
-            said.push(format!("not restored: {} in {} could not be read and stays there", found.unreadable.join(", "), self.unsent_dir.display()));
+        let error = !found.unreadable.is_empty() || !found.unjudged.is_empty();
+        // The reason first, so a narrow status line keeps it; the names and
+        // the directory after.
+        if !found.unreadable.is_empty() {
+            said.push(format!("not restored (unreadable, left in place): {} in {}", found.unreadable.join(", "), self.unsent_dir.display()));
+        }
+        for (name, why) in &found.unjudged {
+            said.push(format!("not restored (its claim could not be checked: {why}): {name} in {}", self.unsent_dir.display()));
         }
         if !said.is_empty() {
             self.say(said.join("; "), error);
@@ -786,12 +869,14 @@ impl ChatPane {
     /// files they carried. A restored entry the operator never recalled
     /// stays in its kept file: the guard did not name it.
     pub(super) fn discard_pending(&mut self) {
+        let _moving = unsent::moving();
         let taken = self.pending.take_all();
         let origins = self.origins(&taken);
         self.box_origins.clear();
         if !self.dry_run {
             unsent::settle(origins);
         }
+        self.note_unsent();
         self.invalidate();
     }
 

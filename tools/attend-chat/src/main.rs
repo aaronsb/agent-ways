@@ -216,8 +216,10 @@ fn main() {
     // process ends here, with 128 plus the signal when one ended it.
     // What the last chat kept unsent, at a hangup or Send and quit, opens
     // in the compose box.
-    // A panic keeps what waits and the draft, as the unasked end does.
+    // A panic keeps what waits and the draft, as the unasked end does, and
+    // so does a forced exit, which ends the process without that end.
     attend_chat::app::keep_on_panic();
+    attend_chat::app::keep_on_forced_exit();
     let code = match agent_tui::run(chat.restore_unsent().into_app()) {
         Ok(session) => session.signal.map_or(0, |sig| 128 + sig),
         Err(e) => {

@@ -49,7 +49,7 @@ use crate::tabs::{self, Tab};
 use crate::watcher::Delivery;
 
 /// Keep what the chat last noted unsent, as a panic ends it.
-pub use unsent::{keep_noted, keep_on_panic};
+pub use unsent::{keep_noted, keep_noted_waiting, keep_on_forced_exit, keep_on_panic};
 pub use keys::{destination_label, handle_enter, handle_tab, EnterAction, TabCycle, TabResult};
 
 /// How long a freshly executed command's result asserts itself OVER
@@ -621,7 +621,13 @@ impl ChatPane {
         // destination flag, which has degraded to #open.
         let fg = self.normal_tab();
         let text = self.input.text().to_string();
+        // The box's text is noted as being sent until the send returns
+        // ([`ChatPane::send_held`] does the same for a held message).
+        let _moving = unsent::moving();
+        let flight = self.box_noted().map(|n| unsent::Noted { flight: true, ..n });
+        self.note_flight(flight, false);
         self.send_text(&text, fg, anyway, true);
+        self.note_unsent();
     }
 
     /// Send `text` as Enter sends it from the view `fg`, or run the command
@@ -874,6 +880,9 @@ impl Pane for ChatPane {
     }
 
     fn draw(&mut self, f: &mut Frame, area: Rect) {
+        // Before the loop waits for input again: what is noted is what the
+        // screen shows, for a forced exit while the loop waits.
+        self.note_unsent();
         if !self.dirty {
             if let Some((at, cells)) = &self.last_frame {
                 if *at == area {
@@ -920,6 +929,7 @@ impl Pane for ChatPane {
             return Keyed::Done;
         }
         self.dispatch(ix::Ev::Key(k));
+        self.note_unsent();
         Keyed::Done
     }
 
@@ -994,6 +1004,7 @@ impl Pane for ChatPane {
         self.input.insert_str(&kept);
         self.tab_cycle = None;
         self.dirty = true;
+        self.note_unsent();
     }
 
     /// The wheel scrolls what is under it: one of the column's lists, or
@@ -1102,7 +1113,12 @@ impl Pane for ChatPane {
     /// Send and quit: what waits is sent and the draft is kept for the
     /// next chat; false, and the chat stays open, when either did not go.
     fn keep_on_quit(&mut self) -> bool {
-        self.send_all_now() && self.keep_draft()
+        let kept = self.send_all_now() && self.keep_draft();
+        if kept {
+            // The chat ends with this: a panic after it keeps nothing twice.
+            unsent::clear();
+        }
+        kept
     }
 
     /// The chat ends unasked, by a signal or the terminal hanging up: what
@@ -1111,6 +1127,9 @@ impl Pane for ChatPane {
     fn ending(&mut self) {
         self.send_waiting_at_unasked_exit();
         self.keep_what_did_not_go();
+        // What could be kept is kept: a panic or a forced exit after this
+        // keeps nothing more, so nothing sent or kept here is kept twice.
+        unsent::clear();
     }
 
     fn has_tab_menus(&self) -> bool {

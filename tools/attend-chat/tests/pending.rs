@@ -519,12 +519,14 @@ fn an_unreadable_file_is_left_in_place_and_named() {
     let c = chat().unsent_dir(&kept).restore_unsent();
     assert_eq!(c.input().text(), "the readable one");
     assert!(files(&kept).contains(&"1-00000000000000000001-0".to_string()), "left under its own name: {:?}", files(&kept));
-    assert!(c.status().contains("not restored: 1-00000000000000000001-0"), "{}", c.status());
+    assert!(c.status().contains("not restored (unreadable, left in place): 1-00000000000000000001-0"), "{}", c.status());
 }
 
-/// A file claimed by a chat still running is left to it; one claimed by a
-/// chat no longer running is claimed again. A temporary file a crashed
-/// writer left is restored when whole and removed when cut short.
+/// A claim is live only while its lock is held (#1240 item 3): a claim
+/// whose lock another open holds is left to it, and one with no lock is
+/// claimed again, whatever its pid, a live pid that another process now
+/// has included. A temporary file a crashed writer left is restored when
+/// whole, and as a draft marked cut short when cut short.
 #[test]
 fn claims_and_crashed_writes_are_sorted_out_at_start() {
     let kept = unsent("claims");
@@ -534,19 +536,104 @@ fn claims_and_crashed_writes_are_sorted_out_at_start() {
     let name = files(&kept).remove(0);
     let body = std::fs::read_to_string(kept.join(&name)).unwrap();
     std::fs::remove_file(kept.join(&name)).unwrap();
-    // pid 1 runs; 999999999 does not.
     let body_of = |t: &str| body.replace("a draft to copy", t).replace("bytes: 15", &format!("bytes: {}", t.len()));
-    std::fs::write(kept.join(".claim.1.1-00000000000000000001-0"), body_of("held by a running chat")).unwrap();
+    // Held: another open of the file holds its lock, as a running chat does.
+    let held = kept.join(".claim.999999998.1-00000000000000000000-0");
+    std::fs::write(&held, body_of("held by a running chat")).unwrap();
+    let lock = std::fs::File::open(&held).unwrap();
+    // SAFETY: flock on a descriptor this File owns.
+    assert_eq!(unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&lock), libc::LOCK_EX | libc::LOCK_NB) }, 0);
+    // pid 1 runs, but holds no lock on this file: its pid was reused.
+    std::fs::write(kept.join(".claim.1.1-00000000000000000001-0"), body_of("claimed under a reused pid")).unwrap();
     std::fs::write(kept.join(".claim.999999999.1-00000000000000000002-0"), body_of("left by a gone chat")).unwrap();
     std::fs::write(kept.join(".1-00000000000000000003-0.999999999.0.tmp"), body_of("written whole")).unwrap();
     let cut = body_of("cut short by a crash");
     std::fs::write(kept.join(".1-00000000000000000004-0.999999999.1.tmp"), &cut[..cut.len() - 5]).unwrap();
     let c = chat().unsent_dir(&kept).restore_unsent();
-    assert_eq!(c.input().text(), "written whole", "the newest draft, in the box: {}", c.status());
-    assert_eq!(c.pending(), ["left by a gone chat"]);
+    assert_eq!(c.input().text(), "written whole", "the newest whole draft, in the box: {}", c.status());
+    assert_eq!(c.pending(), ["claimed under a reused pid", "left by a gone chat", "cut short by a "]);
+    assert!(c.status().contains("one was cut short by a crash"), "{}", c.status());
+    let mut c = c;
+    assert!(screen(&mut c).contains("draft, cut short"), "the cut-short entry is marked");
     let left = files(&kept);
-    assert!(left.contains(&".claim.1.1-00000000000000000001-0".to_string()), "a running chat's claim untouched: {left:?}");
+    assert!(left.contains(&".claim.999999998.1-00000000000000000000-0".to_string()), "a claim whose lock is held is untouched: {left:?}");
     assert!(!left.iter().any(|f| f.ends_with(".tmp")), "no temporary file left: {left:?}");
+    drop(lock);
+}
+
+/// A text that was being sent as a chat ended is restored marked so, and
+/// never sent by itself (#1240 item 2): the forced exit or panic that kept
+/// it could not tell whether the send had gone.
+#[test]
+fn a_text_kept_while_being_sent_is_marked_may_have_been_sent() {
+    let kept = unsent("sending");
+    let mut c = chat().unsent_dir(&kept);
+    typed(&mut c, "the body");
+    c.into_app().end_unasked(libc::SIGHUP, "stopped: the terminal hung up");
+    let name = files(&kept).remove(0);
+    let body = std::fs::read_to_string(kept.join(&name)).unwrap().replace("kind: draft", "kind: sending");
+    std::fs::write(kept.join(&name), body).unwrap();
+    let mut c = chat().unsent_dir(&kept).restore_unsent();
+    assert_eq!(c.input().text(), "", "never in the box: Enter there would send it");
+    assert_eq!(c.pending(), ["the body"]);
+    assert!(c.status().contains("may have gone: check before Enter"), "{}", c.status());
+    assert!(screen(&mut c).contains("may have been sent"), "the entry is marked");
+    wait(&mut c, 60);
+    assert!(!on_open("the body"), "nothing sends it by itself");
+}
+
+/// A claimed file whose lock cannot be tried stays where it is and is
+/// named on the status line, never hidden (#1240 item 3).
+#[test]
+fn a_claim_that_cannot_be_checked_is_named() {
+    use std::os::unix::fs::PermissionsExt;
+    // SAFETY: geteuid reads our own id.
+    if unsafe { libc::geteuid() } == 0 {
+        eprintln!("skipped: root opens a file of mode 000");
+        return;
+    }
+    let kept = unsent("unjudged");
+    std::fs::create_dir_all(&kept).unwrap();
+    let claimed = kept.join(".claim.999999999.1-00000000000000000001-0");
+    std::fs::write(&claimed, "text no one can open").unwrap();
+    std::fs::set_permissions(&claimed, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let c = chat().unsent_dir(&kept).restore_unsent();
+    std::fs::set_permissions(&claimed, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(c.status().starts_with("not restored (its claim could not be checked: Permission denied"), "{}", c.status());
+    assert!(c.status().contains(".claim.999999999.1-00000000000000000001-0"), "{}", c.status());
+    assert!(claimed.exists(), "left in place");
+}
+
+/// An earlier build's single file put aside as `<dir>.moving.<pid>` by a
+/// chat that ended before moving it in is moved in by the next (#1240).
+#[test]
+fn a_file_left_aside_while_moving_in_is_restored() {
+    let kept = unsent("moving");
+    std::fs::create_dir_all(&kept).unwrap();
+    let aside = kept.with_extension("moving.999999999");
+    std::fs::write(&aside, "typed before views were noted\n").unwrap();
+    let c = chat().unsent_dir(&kept).restore_unsent();
+    assert!(!aside.exists(), "moved in");
+    assert_eq!(c.pending(), ["typed before views were noted"], "{}", c.status());
+}
+
+/// The quit guard names everything unsaved at 80 columns: a long note
+/// wraps under itself rather than being cut at the dialog's edge (#1240).
+#[test]
+fn the_quit_guard_names_everything_at_80_columns() {
+    let mut c = chat();
+    send(&mut c, "an open post");
+    side_click(&mut c, &nick("beta"));
+    send(&mut c, "for beta");
+    typed(&mut c, "and a draft in the box");
+    press(&mut c, KeyCode::Char('c'), KeyModifiers::CONTROL);
+    assert!(c.app().guarding());
+    let note = "a draft in the compose box and 2 messages waiting to send";
+    let s = testkit::text(&testkit::render_screen(&mut c, 80, 25));
+    let shown: Vec<&str> = s.split_whitespace().collect();
+    for w in note.split_whitespace() {
+        assert!(shown.contains(&w), "{w:?} of {note:?} is cut from the guard:\n{s}");
+    }
 }
 
 // ── a recall that shows another view ─────────────────────────────
@@ -619,7 +706,7 @@ fn a_parked_draft_that_cannot_be_kept_stays_in_the_feed() {
     std::fs::set_permissions(&kept, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert!(stayed, "s did not quit: the draft could not be kept");
     assert!(on_open("held, then sent at the quit"), "the message went");
-    assert!(c.status().starts_with("not kept: ") && c.status().contains("Permission denied"), "{}", c.status());
+    assert!(c.status().starts_with("not kept (Permission denied"), "the reason first, so a narrow status line keeps it: {}", c.status());
     assert_eq!(c.pending(), ["parked and not lost"], "the draft stays in the feed");
     assert!(files(&kept).is_empty(), "nothing was written: {:?}", files(&kept));
     press(&mut c, KeyCode::Char('c'), KeyModifiers::CONTROL);
