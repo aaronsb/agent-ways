@@ -48,7 +48,7 @@ fn fixture() {
         attend_presence::heartbeat::touch(GAMMA_SID).unwrap();
         let beat = std::fs::File::options().write(true).open(attend_presence::heartbeat::heartbeat_path(GAMMA_SID)).unwrap();
         beat.set_modified(std::time::SystemTime::now() - Duration::from_secs(3600)).unwrap();
-        for c in ["deploy", "gone", "gone2", "gone3", "gone4"] {
+        for c in ["deploy", "gone", "gone2", "gone3", "gone4", "gone5"] {
             attend_groups::Groups::new(base, ALPHA_SID).join(c, true).unwrap();
         }
     });
@@ -366,7 +366,8 @@ fn send_and_quit_keeps_the_chat_open_when_a_message_cannot_go() {
 }
 
 /// The guard's Send and quit names the draft in the compose box and keeps
-/// it: the next chat opens with it in the box.
+/// it: the next chat opens with it in the box of the view it was written
+/// in, and its file stays until the draft is held (N4).
 #[test]
 fn send_and_quit_keeps_the_draft_for_the_next_chat() {
     let kept = unsent("send-and-quit");
@@ -378,9 +379,12 @@ fn send_and_quit_keeps_the_draft_for_the_next_chat() {
     assert!(s.contains("Send and quit, keep the draft (s)") && s.contains("a draft in the compose box"), "{s}");
     assert!(!key(&mut c, KeyCode::Char('s')), "s sends and quits");
     assert!(on_open("waiting at the quit"));
-    let c = chat().unsent_dir(&kept).restore_unsent();
+    let mut c = chat().unsent_dir(&kept).restore_unsent();
     assert_eq!(c.input().text(), "a draft not yet sent", "the draft opens the next chat");
-    assert_eq!(std::fs::read_dir(&kept).map(|d| d.count()).unwrap_or(0), 0, "taken from the directory once restored");
+    assert_eq!(files(&kept).len(), 1, "its file stays, claimed, while the draft is in the box");
+    press(&mut c, KeyCode::Enter, KeyModifiers::NONE);
+    assert_eq!(c.pending(), ["a draft not yet sent"]);
+    assert!(files(&kept).is_empty(), "held again, its file goes");
 }
 
 /// A directory of the fixture's for text kept unsent, one per test.
@@ -389,10 +393,18 @@ fn unsent(tag: &str) -> std::path::PathBuf {
     root.join(format!("unsent-{tag}"))
 }
 
+/// The names of the files in `dir`.
+fn files(dir: &std::path::Path) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+    v.sort();
+    v
+}
+
 /// A signal or the terminal hanging up ends the chat with no one asked:
 /// what waits is sent, once, through the shell's own exit path, and what
 /// cannot go, with the draft, is kept for the next chat. The operator said:
-/// "I don't want to drop messages".
+/// "I don't want to drop messages". The next chat shows each as an entry of
+/// its own: the draft's view, #gone3, is gone, so it is not in the box.
 #[test]
 fn the_unasked_end_sends_what_waits_and_keeps_what_cannot_go() {
     let kept = unsent("unasked");
@@ -408,12 +420,14 @@ fn the_unasked_end_sends_what_waits_and_keeps_what_cannot_go() {
     assert!(on_open("said as the terminal closed"), "sent as the chat ended");
     assert!(!anywhere("held for a channel about to go"), "nothing sent elsewhere in a vanished channel's place");
     let c = chat().unsent_dir(&kept).restore_unsent();
-    assert_eq!(c.input().text(), "held for a channel about to go\n\ntyped, not sent", "both open the next chat, a blank line apart");
-    assert!(c.status().starts_with("restored"), "{}", c.status());
+    assert_eq!(c.input().text(), "", "nothing merged into the box");
+    assert_eq!(c.pending(), ["held for a channel about to go", "typed, not sent"], "each an entry of its own");
+    assert!(c.status().contains("restored: 2 texts") && c.status().contains("the view of the draft for #gone3 is gone"), "{}", c.status());
 }
 
 /// Two chats ending unasked at once each keep their own text: the next
-/// chat opens with both, in the order they were kept, a blank line apart.
+/// chat opens with the second's draft in its box and the first's message
+/// in the feed.
 #[test]
 fn two_chats_ending_at_once_keep_both_texts() {
     let kept = unsent("two");
@@ -426,10 +440,153 @@ fn two_chats_ending_at_once_keep_both_texts() {
     first.refresh();
     first.into_app().end_unasked(libc::SIGHUP, "stopped: the terminal hung up");
     second.into_app().end_unasked(libc::SIGTERM, "stopped by a signal");
-    assert_eq!(std::fs::read_dir(&kept).unwrap().count(), 2, "a file each");
+    assert_eq!(files(&kept).len(), 2, "a file each");
     let c = chat().unsent_dir(&kept).restore_unsent();
-    assert_eq!(c.input().text(), "the first chat's message\n\nthe second chat's draft");
-    assert_eq!(std::fs::read_dir(&kept).unwrap().count(), 0, "each file removed once its text is in the box");
+    assert_eq!(c.input().text(), "the second chat's draft");
+    assert_eq!(c.pending(), ["the first chat's message"]);
+    assert!(files(&kept).iter().all(|f| f.starts_with(".claim.")), "both claimed, neither removed: {:?}", files(&kept));
+}
+
+// ── restoring into the view written in ───────────────────────────
+
+/// A draft written in a DM view opens the next chat in that view, its
+/// flag the agent's: never in the default view, bound for #open (N2).
+#[test]
+fn a_dm_draft_comes_back_in_its_own_dm_view() {
+    let kept = unsent("dm-draft");
+    let mut c = chat().unsent_dir(&kept);
+    side_click(&mut c, &nick("alpha"));
+    typed(&mut c, "for alpha only: staging creds rotate tonight");
+    c.into_app().end_unasked(libc::SIGHUP, "stopped: the terminal hung up");
+    let mut c = chat().unsent_dir(&kept).restore_unsent();
+    assert_eq!(c.foreground(), &Tab::Dm(ALPHA_SID.into()), "shown in the DM view it was written in");
+    assert_eq!(c.input().text(), "for alpha only: staging creds rotate tonight");
+    press(&mut c, KeyCode::Enter, KeyModifiers::NONE);
+    wait(&mut c, 5);
+    assert!(!on_open("staging creds"), "never posted to #open");
+}
+
+/// A message held for a channel dissolved before the end is an entry;
+/// recalled, it comes back alone, and the box keeps the operator's own
+/// draft apart: a recall into the shown view puts it before the draft.
+#[test]
+fn a_kept_message_is_an_entry_recalled_on_its_own() {
+    let kept = unsent("kept-entry");
+    let mut c = chat().unsent_dir(&kept);
+    show(&mut c, Tab::Channel("gone5".into()));
+    send(&mut c, "plan for gone");
+    dissolve("gone5");
+    c.refresh();
+    c.into_app().end_unasked(libc::SIGHUP, "stopped: the terminal hung up");
+    let mut c = chat().unsent_dir(&kept).restore_unsent();
+    assert_eq!(c.input().text(), "");
+    assert_eq!(c.pending(), ["plan for gone"]);
+    assert!(screen(&mut c).contains("not sent"), "an entry marked not sent");
+    key(&mut c, KeyCode::Esc);
+    assert_eq!(c.input().text(), "plan for gone");
+    assert!(c.pending().is_empty());
+    assert_eq!(files(&kept).len(), 1, "claimed until the text goes");
+}
+
+/// A restored text is not sent by the unasked end, and its file survives
+/// it (N4): the chat after that restores it again.
+#[test]
+fn a_restored_text_survives_the_next_unasked_end() {
+    let kept = unsent("survives");
+    let mut c = chat().unsent_dir(&kept);
+    typed(&mut c, "a draft that outlives two chats");
+    c.into_app().end_unasked(libc::SIGHUP, "stopped: the terminal hung up");
+    let c = chat().unsent_dir(&kept).restore_unsent();
+    assert_eq!(c.input().text(), "a draft that outlives two chats");
+    c.into_app().end_unasked(libc::SIGHUP, "stopped: the terminal hung up");
+    let c = chat().unsent_dir(&kept).restore_unsent();
+    assert_eq!(c.input().text(), "a draft that outlives two chats", "kept again by the second chat's end");
+    assert_eq!(files(&kept).len(), 1, "one file: the old one removed once the new one was written");
+}
+
+/// A file that cannot be read stays where it is, named on the status line;
+/// the good one beside it is restored (N5).
+#[test]
+fn an_unreadable_file_is_left_in_place_and_named() {
+    let kept = unsent("unreadable");
+    let mut c = chat().unsent_dir(&kept);
+    typed(&mut c, "the readable one");
+    c.into_app().end_unasked(libc::SIGHUP, "stopped: the terminal hung up");
+    std::fs::write(kept.join("1-00000000000000000001-0"), [0xff, 0xfe, 0x00, 0x41]).unwrap();
+    let c = chat().unsent_dir(&kept).restore_unsent();
+    assert_eq!(c.input().text(), "the readable one");
+    assert!(files(&kept).contains(&"1-00000000000000000001-0".to_string()), "left under its own name: {:?}", files(&kept));
+    assert!(c.status().contains("not restored: 1-00000000000000000001-0"), "{}", c.status());
+}
+
+/// A file claimed by a chat still running is left to it; one claimed by a
+/// chat no longer running is claimed again. A temporary file a crashed
+/// writer left is restored when whole and removed when cut short.
+#[test]
+fn claims_and_crashed_writes_are_sorted_out_at_start() {
+    let kept = unsent("claims");
+    let mut c = chat().unsent_dir(&kept);
+    typed(&mut c, "a draft to copy");
+    c.into_app().end_unasked(libc::SIGHUP, "stopped: the terminal hung up");
+    let name = files(&kept).remove(0);
+    let body = std::fs::read_to_string(kept.join(&name)).unwrap();
+    std::fs::remove_file(kept.join(&name)).unwrap();
+    // pid 1 runs; 999999999 does not.
+    let body_of = |t: &str| body.replace("a draft to copy", t).replace("bytes: 15", &format!("bytes: {}", t.len()));
+    std::fs::write(kept.join(".claim.1.1-00000000000000000001-0"), body_of("held by a running chat")).unwrap();
+    std::fs::write(kept.join(".claim.999999999.1-00000000000000000002-0"), body_of("left by a gone chat")).unwrap();
+    std::fs::write(kept.join(".1-00000000000000000003-0.999999999.0.tmp"), body_of("written whole")).unwrap();
+    let cut = body_of("cut short by a crash");
+    std::fs::write(kept.join(".1-00000000000000000004-0.999999999.1.tmp"), &cut[..cut.len() - 5]).unwrap();
+    let c = chat().unsent_dir(&kept).restore_unsent();
+    assert_eq!(c.input().text(), "written whole", "the newest draft, in the box: {}", c.status());
+    assert_eq!(c.pending(), ["left by a gone chat"]);
+    let left = files(&kept);
+    assert!(left.contains(&".claim.1.1-00000000000000000001-0".to_string()), "a running chat's claim untouched: {left:?}");
+    assert!(!left.iter().any(|f| f.ends_with(".tmp")), "no temporary file left: {left:?}");
+}
+
+// ── a recall that shows another view ─────────────────────────────
+
+/// A recall that shows the message's view parks the draft in the box as a
+/// draft of the view it was written in (N3): the recalled message alone in
+/// the box, and the draft back when its view is shown with the box empty.
+#[test]
+fn a_recall_into_another_view_parks_the_draft_in_its_own() {
+    let mut c = chat();
+    send(&mut c, "an open post");
+    side_click(&mut c, &nick("beta"));
+    typed(&mut c, "for beta only");
+    key(&mut c, KeyCode::Esc);
+    assert_eq!(c.foreground(), &Tab::Merged, "shown where the message was written");
+    assert_eq!(c.input().text(), "an open post", "the recalled message alone");
+    assert_eq!(c.pending(), ["for beta only"], "the draft parked");
+    assert!(screen(&mut c).contains(" draft "), "an entry marked draft");
+    press(&mut c, KeyCode::Enter, KeyModifiers::NONE);
+    side_click(&mut c, &nick("beta"));
+    assert_eq!(c.foreground(), &Tab::Dm(BETA_SID.into()));
+    assert_eq!(c.input().text(), "for beta only", "back in its view's box");
+    assert_eq!(c.pending(), ["an open post"]);
+}
+
+/// A draft parked by a recall is named by the exit guard and kept by the
+/// unasked end, in its own view.
+#[test]
+fn a_parked_draft_is_kept_at_the_end() {
+    let kept = unsent("parked");
+    let mut c = chat().unsent_dir(&kept);
+    send(&mut c, "an open post to recall");
+    side_click(&mut c, &nick("beta"));
+    typed(&mut c, "parked for beta");
+    key(&mut c, KeyCode::Esc);
+    press(&mut c, KeyCode::Char('c'), KeyModifiers::CONTROL);
+    assert!(screen(&mut c).contains("a draft written for"), "the guard names the parked draft");
+    key(&mut c, KeyCode::Esc);
+    c.into_app().end_unasked(libc::SIGHUP, "stopped: the terminal hung up");
+    let c = chat().unsent_dir(&kept).restore_unsent();
+    assert_eq!(c.foreground(), &Tab::Merged, "the box's draft, kept last, opens in its view");
+    assert_eq!(c.input().text(), "an open post to recall");
+    assert_eq!(c.pending(), ["parked for beta"], "the parked draft an entry of its own");
 }
 
 // ── the delay set to 0 ───────────────────────────────────────────

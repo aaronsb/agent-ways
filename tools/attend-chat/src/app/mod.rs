@@ -22,6 +22,7 @@ mod keys;
 mod menu;
 mod participants;
 mod pending;
+mod unsent;
 mod settings_view;
 mod sidebar;
 mod view;
@@ -47,6 +48,8 @@ use crate::signal::Signal;
 use crate::tabs::{self, Tab};
 use crate::watcher::Delivery;
 
+/// Keep what the chat last noted unsent, as a panic ends it.
+pub use unsent::keep_noted;
 pub use keys::{destination_label, handle_enter, handle_tab, EnterAction, TabCycle, TabResult};
 
 /// How long a freshly executed command's result asserts itself OVER
@@ -294,6 +297,9 @@ pub struct ChatPane {
     /// when the chat ends without sending it, for the next chat's compose
     /// box ([`pending`]).
     unsent_dir: std::path::PathBuf,
+    /// The kept files whose text the compose box holds, recalled or
+    /// restored: removed once the box's text is sent, held or kept again.
+    box_origins: Vec<std::path::PathBuf>,
     /// The send delay [`Chat::send_delay`] fixed, which a reload of the
     /// settings keeps.
     fixed_delay: Option<Duration>,
@@ -361,6 +367,7 @@ impl ChatPane {
             pending_from: 0,
             started: Instant::now(),
             unsent_dir: crate::hidden::state_dir().join("unsent"),
+            box_origins: Vec::new(),
             fixed_delay: None,
         }
     }
@@ -581,6 +588,7 @@ impl ChatPane {
             if self.world.is_some() {
                 self.refocus();
             }
+            self.draft_back();
         }
     }
 
@@ -630,6 +638,7 @@ impl ChatPane {
         let took = |c: &mut ChatPane| {
             if from_box {
                 c.input.clear();
+                c.settle_box();
             }
         };
         let newest = |c: &mut ChatPane| {

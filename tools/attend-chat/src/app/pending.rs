@@ -15,6 +15,14 @@
 //! the view it was written in, so the draft being typed meanwhile is left as
 //! it is and routes as it would have.
 //!
+//! A recall that shows another view parks the draft in the box as a draft
+//! entry of its own view, and the draft comes back into the box when that
+//! view is shown again with the box empty. Text the earlier chats kept
+//! ([`super::unsent`]) comes back the same way: each text as an entry of its
+//! own, recalled into its own view, and the newest draft whose view is still
+//! there in the box of that view. Nothing sends a draft or a restored entry
+//! until the operator recalls it and presses Enter.
+//!
 //! The queue is pure state over the chat's monotonic clock
 //! ([`ChatPane::mono`]): every method takes the time it acts at, so the
 //! tests step the clock rather than sleep, and a pinned clock holds a
@@ -27,7 +35,7 @@ use agent_tui::ratatui::text::Line;
 use agent_tui::theme::{self, Ground, Seg};
 
 use super::ix::Ev;
-use super::{ChatPane, Clock};
+use super::{unsent, ChatPane, Clock};
 use crate::legend::{parse_addressed, Addressed};
 use crate::tabs::{self, Tab};
 
@@ -53,6 +61,36 @@ pub(super) struct Held {
     pub(super) refused: Option<Refused>,
     /// When it was last written to: the newest is recalled first.
     touched: u64,
+    /// How it came to be in the feed.
+    pub(super) source: Source,
+}
+
+/// How an entry came to be in the feed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Source {
+    /// Enter held it: it counts down, or a send refused it. Send and quit
+    /// and the unasked end send it.
+    Enter,
+    /// The draft of its view, parked when a recall showed another view.
+    /// `origins` are the kept files whose text it carries.
+    Parked { origins: Vec<std::path::PathBuf> },
+    /// Restored from the kept file `path`, which stays claimed until the
+    /// text is sent, held or kept again. `draft` when it was kept as a
+    /// draft; `view_known` false for a file of an earlier build.
+    Kept { path: std::path::PathBuf, draft: bool, view_known: bool },
+}
+
+impl Held {
+    /// Text the operator never pressed Enter on.
+    pub(super) fn is_draft(&self) -> bool {
+        matches!(self.source, Source::Parked { .. } | Source::Kept { draft: true, .. })
+    }
+
+    /// Whether Send and quit and the unasked end send it: only what Enter
+    /// held in this chat.
+    fn sendable(&self) -> bool {
+        self.source == Source::Enter
+    }
 }
 
 /// A send that did not go at the end of a countdown.
@@ -87,10 +125,6 @@ impl Pending {
         self.held.is_empty()
     }
 
-    pub(super) fn len(&self) -> usize {
-        self.held.len()
-    }
-
     /// The messages held, oldest first.
     pub(super) fn iter(&self) -> impl Iterator<Item = &Held> {
         self.held.iter()
@@ -115,7 +149,7 @@ impl Pending {
             return Hold::Now;
         }
         self.next_id += 1;
-        self.held.push(Held { id: self.next_id, text: text.to_string(), tab, dest, label, due, refused: None, touched: self.writes });
+        self.held.push(Held { id: self.next_id, text: text.to_string(), tab, dest, label, due, refused: None, touched: self.writes, source: Source::Enter });
         Hold::Held(self.next_id)
     }
 
@@ -153,6 +187,31 @@ impl Pending {
     /// the operator quits.
     pub(super) fn take_all(&mut self) -> Vec<Held> {
         std::mem::take(&mut self.held)
+    }
+
+    /// Take every entry `keep` picks, leaving the rest in place.
+    fn take_where(&mut self, keep: impl Fn(&Held) -> bool) -> Vec<Held> {
+        let (taken, left) = std::mem::take(&mut self.held).into_iter().partition(keep);
+        self.held = left;
+        taken
+    }
+
+    /// Add an entry that never counts down: a parked draft, or one
+    /// restored. Its text, view and route are `h`'s; it is numbered here,
+    /// and written to after everything before it unless `last` is false.
+    fn add(&mut self, mut h: Held, last: bool) -> u64 {
+        self.next_id += 1;
+        self.writes += 1;
+        h.id = self.next_id;
+        h.touched = if last { self.writes } else { 0 };
+        h.refused = Some(Refused { quiet: false });
+        self.held.push(h);
+        self.next_id
+    }
+
+    /// How many entries Send and quit would send.
+    fn sendable(&self) -> usize {
+        self.held.iter().filter(|h| h.sendable()).count()
     }
 
     /// The whole seconds left on each message's countdown at `now`, rounded
@@ -261,6 +320,7 @@ impl ChatPane {
                 self.send_anyway = None;
                 self.tab_cycle = None;
                 self.input.clear();
+                self.settle_box();
                 self.show_newest();
                 self.invalidate();
                 // With no delay, a message that joined one still waiting
@@ -280,12 +340,12 @@ impl ChatPane {
         let fg = self.normal_tab();
         let text = self.input.text().trim_end().to_string();
         let dest = self.destination(&text, &fg);
-        if self.pending.is_empty() || !fg.composes() || (dest.is_none() && !text.is_empty()) {
+        if self.pending.sendable() == 0 || !fg.composes() || (dest.is_none() && !text.is_empty()) {
             return self.send(true);
         }
         self.send_anyway = None;
         let Some(dest) = dest.filter(|_| !text.is_empty()) else {
-            for h in self.pending.take_all() {
+            for h in self.pending.take_where(Held::sendable) {
                 self.send_held(h, true);
             }
             return self.invalidate();
@@ -295,6 +355,7 @@ impl ChatPane {
             Hold::Now => self.send(true),
             Hold::Held(id) => {
                 self.input.clear();
+                self.settle_box();
                 if let Some(h) = self.pending.recall(id) {
                     self.send_held(h, true);
                 }
@@ -385,26 +446,91 @@ impl ChatPane {
 
     /// `h` recalled: shown in the view it was written in, while that view
     /// is there, so Enter sends it where it was held for; then back in the
-    /// box. A quiet refusal recalled unchanged is one Enter sends anyway.
+    /// box. A draft in the box of the view left behind is parked as that
+    /// view's draft ([`ChatPane::park_draft`]), never carried along. A
+    /// quiet refusal recalled unchanged is one Enter sends anyway. A kept
+    /// text recalled leaves its file claimed until the box's text goes.
     fn recalled(&mut self, h: Held) {
         let names = self.strip_names();
-        if tabs::normalize(h.tab.clone(), &names) == h.tab && self.normal_tab() != h.tab {
+        let view_known = !matches!(h.source, Source::Kept { view_known: false, .. });
+        if view_known && tabs::normalize(h.tab.clone(), &names) == h.tab && self.normal_tab() != h.tab {
+            self.park_draft();
             self.set_tab(h.tab.clone());
         }
         self.send_anyway = None;
+        match &h.source {
+            Source::Enter => {}
+            Source::Parked { origins } => self.box_origins.extend(origins.iter().cloned()),
+            Source::Kept { path, .. } => self.box_origins.push(path.clone()),
+        }
         self.put_back(&h.text);
         if h.refused.is_some_and(|r| r.quiet) && self.input.text() == h.text {
             self.send_anyway = Some((h.text.clone(), h.tab.clone()));
         }
-        self.say(format!("recalled: not sent to {}", h.label), false);
+        let said = if !view_known {
+            "recalled: kept by an earlier build, which did not note its view; the flag shows where Enter sends it".to_string()
+        } else if h.is_draft() {
+            format!("recalled: the draft written for {}", h.label)
+        } else {
+            format!("recalled: not sent to {}", h.label)
+        };
+        self.say(said, false);
         self.invalidate();
     }
 
+    /// The draft in the box, as a draft entry of the view it was written
+    /// in, with the kept files it carries: the box is then empty.
+    fn park_draft(&mut self) {
+        let Some(text) = self.draft() else { return };
+        let fg = self.foreground.clone();
+        let (dest, label) = self.route_of(&text, &fg);
+        let origins = std::mem::take(&mut self.box_origins);
+        self.pending.add(Held { id: 0, text, tab: fg, dest, label, due: Duration::ZERO, refused: None, touched: 0, source: Source::Parked { origins } }, false);
+        self.input.clear();
+    }
+
+    /// The view shown with the box empty: a draft entry written in it comes
+    /// back into the box.
+    pub(super) fn draft_back(&mut self) {
+        if !self.input.is_empty() || !self.foreground.composes() {
+            return;
+        }
+        let fg = self.foreground.clone();
+        let Some(id) = self.pending.iter().find(|h| h.is_draft() && h.tab == fg && !matches!(h.source, Source::Kept { view_known: false, .. })).map(|h| h.id) else { return };
+        if let Some(h) = self.pending.recall(id) {
+            match h.source {
+                Source::Parked { origins } => self.box_origins.extend(origins),
+                Source::Kept { path, .. } => self.box_origins.push(path),
+                Source::Enter => {}
+            }
+            self.input.set(h.text.clone(), h.text.chars().count());
+            self.say(format!("back: the draft written for {}", h.label), false);
+            self.invalidate();
+        }
+    }
+
+    /// The route and the flag's label `text` has, written in `fg`; a slash
+    /// command has no route.
+    fn route_of(&mut self, text: &str, fg: &Tab) -> (String, String) {
+        let dest = self.destination(text, fg).unwrap_or_default();
+        let label = self.flag_label(text, fg).unwrap_or_else(|| format!("#{}", tabs::send_scope(fg)));
+        (dest, label)
+    }
+
+    /// The box's text was sent, held, or kept: the kept files it carried
+    /// are removed. A dry run removes nothing.
+    pub(super) fn settle_box(&mut self) {
+        let origins = std::mem::take(&mut self.box_origins);
+        if !self.dry_run {
+            unsent::settle(origins);
+        }
+    }
+
     /// The feed's entries for the messages waiting, after the messages: each
-    /// marked on the warning ground with its countdown, or on the error
-    /// ground as not sent, where it goes, and the key that recalls it. Shown
-    /// in every view that sends, since Esc recalls the newest wherever the
-    /// keyboard is in the box.
+    /// marked on the warning ground with its countdown, on the error ground
+    /// as not sent, or as a draft, where it goes, and the key that recalls
+    /// it. Shown in every view that sends, since Esc recalls the newest
+    /// wherever the keyboard is in the box.
     pub(super) fn pending_entries(&self, fg: &Tab) -> Vec<Entry> {
         if !fg.composes() {
             return Vec::new();
@@ -418,43 +544,64 @@ impl ChatPane {
                 // its own.
                 let how = if newest == Some(h.id) { " Esc or click recalls " } else { " click recalls " };
                 let state = match h.refused {
+                    _ if h.is_draft() => Seg::on(" draft ", Ground::Accent).bold(),
                     None => Seg::on(format!(" sending in {}s ", left(h, now)), Ground::Warn).bold(),
                     Some(_) => Seg::on(" not sent ", Ground::Err).bold(),
                 };
-                let header = vec![state, Seg::on(format!(" → {} ", h.label), Ground::AccentDim), Seg::on(how, Ground::Rule)];
+                let to = match h.source {
+                    Source::Kept { view_known: false, .. } => " → where, not noted ".to_string(),
+                    _ => format!(" → {} ", h.label),
+                };
+                let header = vec![state, Seg::on(to, Ground::AccentDim), Seg::on(how, Ground::Rule)];
                 let body = h.text.split('\n').map(|l| Line::styled(l.to_string(), theme::muted())).collect();
                 Entry { header, body }
             })
             .collect()
     }
 
-    /// The messages waiting, as the exit guard names them.
+    /// What quitting now would lose of what waits, as the exit guard names
+    /// it: the messages Enter held, and the drafts parked. A restored entry
+    /// is still in its kept file and is not named.
     pub(super) fn pending_unsaved(&self) -> Option<String> {
-        match self.pending.len() {
+        let waiting = match self.pending.sendable() {
             0 => None,
-            1 => Some("a message waiting to send".into()),
+            1 => Some("a message waiting to send".to_string()),
             n => Some(format!("{n} messages waiting to send")),
-        }
+        };
+        let parked: Vec<&Held> = self.pending.iter().filter(|h| matches!(h.source, Source::Parked { .. })).collect();
+        let parked = match parked.as_slice() {
+            [] => None,
+            [h] => Some(format!("a draft written for {}", h.label)),
+            more => Some(format!("{} drafts written in other views", more.len())),
+        };
+        let parts: Vec<String> = [waiting, parked].into_iter().flatten().collect();
+        (!parts.is_empty()).then(|| parts.join(" and "))
     }
 
     /// The exit guard's button that sends the messages waiting. Its label
-    /// says when the draft in the compose box is kept for the next chat.
+    /// says when a draft, in the box or parked, is kept for the next chat.
     pub(super) fn pending_quit_keeping(&self) -> Option<(String, char)> {
-        let draft = if self.input.is_empty() { "" } else { ", keep the draft" };
-        match self.pending.len() {
+        let drafts = usize::from(!self.input.is_empty()) + self.pending.iter().filter(|h| matches!(h.source, Source::Parked { .. })).count();
+        let draft = match drafts {
+            0 => "",
+            1 => ", keep the draft",
+            _ => ", keep the drafts",
+        };
+        match self.pending.sendable() {
             0 => None,
             1 => Some((format!("Send and quit{draft}"), 's')),
             n => Some((format!("Send {n} and quit{draft}"), 's')),
         }
     }
 
-    /// Quitting, the operator chose to send what waits: each now, once, to
-    /// a quiet agent too, as send-now sends. False when one did not go: it
-    /// stays in the feed, refused, the reason on the status line, and the
-    /// chat stays open rather than lose it.
+    /// Quitting, the operator chose to send what waits: each message Enter
+    /// held, now, once, to a quiet agent too, as send-now sends. False when
+    /// one did not go: it stays in the feed, refused, the reason on the
+    /// status line, and the chat stays open rather than lose it. A draft
+    /// and a restored entry are not sent: Enter never sent them.
     pub(super) fn send_all_now(&mut self) -> bool {
         let mut all = true;
-        for h in self.pending.take_all() {
+        for h in self.pending.take_where(Held::sendable) {
             all &= self.send_held(h, true);
         }
         self.invalidate();
@@ -472,86 +619,151 @@ impl ChatPane {
         self.send_all_now();
     }
 
-    /// The chat ends unasked: what waits that did not go, and the draft,
-    /// are kept for the next chat, so nothing typed is lost unsaid. The
+    /// The chat ends unasked: what waits that did not go, the drafts parked
+    /// and the draft in the box are kept for the next chat, so nothing
+    /// typed is lost unsaid. A restored entry stays in its kept file. The
     /// operator said: "I don't want to drop messages".
     pub(super) fn keep_what_did_not_go(&mut self) {
-        let mut left: Vec<String> = self.pending.take_all().into_iter().map(|h| h.text).collect();
-        left.extend(self.draft());
-        self.keep_unsent(&left);
+        let left = self.pending.take_where(|h| !matches!(h.source, Source::Kept { .. }));
+        self.keep(left);
     }
 
-    /// Send and quit keeps the draft for the next chat; false, with the
-    /// reason on the status line, when it could not be kept.
+    /// Send and quit keeps the draft in the box and the drafts parked for
+    /// the next chat; false, with the reason on the status line, when they
+    /// could not be kept.
     pub(super) fn keep_draft(&mut self) -> bool {
-        let draft: Vec<String> = self.draft().into_iter().collect();
-        self.keep_unsent(&draft)
+        let parked = self.pending.take_where(|h| matches!(h.source, Source::Parked { .. }));
+        self.keep(parked)
+    }
+
+    /// The draft in the box as a record of the view shown, a channel
+    /// dissolved meanwhile included: that is the view it was written in.
+    fn box_record(&mut self) -> Option<unsent::Record> {
+        let text = self.draft()?;
+        let fg = self.foreground.clone();
+        let (dest, label) = self.route_of(&text, &fg);
+        Some(unsent::Record { kind: unsent::Kind::Draft, tab: Some(fg), dest, label, text })
+    }
+
+    /// `h` as a record.
+    fn record(h: &Held) -> unsent::Record {
+        let kind = if h.is_draft() { unsent::Kind::Draft } else { unsent::Kind::Held };
+        unsent::Record { kind, tab: Some(h.tab.clone()), dest: h.dest.clone(), label: h.label.clone(), text: h.text.clone() }
+    }
+
+    /// The kept files the entries `held` and the box carry.
+    fn origins(&self, held: &[Held]) -> Vec<std::path::PathBuf> {
+        let mut o = self.box_origins.clone();
+        for h in held {
+            if let Source::Parked { origins } = &h.source {
+                o.extend(origins.iter().cloned());
+            }
+        }
+        o
+    }
+
+    /// Keep `held` and the draft in the box, a file each, then remove the
+    /// kept files they carried. True when all were kept, or there was
+    /// nothing to keep; false, with the reason on the status line and the
+    /// carried files left, when one could not be. A dry run writes nothing.
+    fn keep(&mut self, held: Vec<Held>) -> bool {
+        if self.dry_run {
+            return true;
+        }
+        let origins = self.origins(&held);
+        let mut records: Vec<unsent::Record> = held.iter().map(Self::record).collect();
+        records.extend(self.box_record());
+        if let Err((path, e)) = unsent::write(&self.unsent_dir, &records) {
+            self.say(format!("not kept: {} ({e})", path.display()), true);
+            return false;
+        }
+        self.box_origins.clear();
+        unsent::settle(origins);
+        true
+    }
+
+    /// Note what a panic now would keep: the messages Enter held, the
+    /// drafts parked and the draft in the box ([`unsent::keep_noted`]).
+    pub(super) fn note_unsent(&mut self) {
+        if self.dry_run {
+            return;
+        }
+        let held: Vec<Held> = self.pending.iter().filter(|h| !matches!(h.source, Source::Kept { .. })).cloned().collect();
+        let origins = self.origins(&held);
+        let mut records: Vec<unsent::Record> = held.iter().map(Self::record).collect();
+        records.extend(self.box_record());
+        unsent::note(&self.unsent_dir, records, origins);
     }
 
     fn draft(&self) -> Option<String> {
         Some(self.input.text().trim_end().to_string()).filter(|d| !d.is_empty())
     }
 
-    /// Write `texts`, typed and not sent, a blank line apart, to a file of
-    /// this chat's own in the unsent directory, named for the process and
-    /// the moment (`<pid>-<nanos>-<n>`), by a temporary file and a rename:
-    /// two chats ending at once each keep their own, and a crash leaves no
-    /// half-written file. The next chat opens with them in its compose box
-    /// ([`ChatPane::restore_unsent`]). True when they were kept, or there
-    /// was nothing to keep. A dry run writes nothing.
-    fn keep_unsent(&mut self, texts: &[String]) -> bool {
-        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        if texts.is_empty() || self.dry_run {
-            return true;
-        }
-        let nanos = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
-        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = self.unsent_dir.join(format!("{}-{nanos:020}-{seq}", std::process::id()));
-        if let Err(e) = agent_settings::writer::write_atomic(&path, format!("{}\n", texts.join("\n\n"))) {
-            self.say(format!("not kept: {} ({e})", path.display()), true);
-            return false;
-        }
-        true
-    }
-
-    /// Put every text the earlier chats kept unsent in the compose box, in
-    /// the order they were kept, a blank line apart and before any draft;
-    /// then remove each file whose text is in the box.
+    /// Restore what the earlier chats kept unsent ([`unsent::claim`]). The
+    /// newest draft whose view is still there opens in the box of that
+    /// view, shown. Every other text is an entry in the feed: a message
+    /// not sent, or a draft, recalled into its own view by Esc or a click.
+    /// A file that could not be read stays where it is, named on the
+    /// status line. The files claimed stay until their text has gone.
     pub(super) fn restore_unsent(&mut self) {
-        // A build of this branch before the directory kept one file at
-        // the directory's path: its text comes back first, and the file
-        // makes way for the directory.
-        let single = self.unsent_dir.is_file().then(|| (0, String::new(), self.unsent_dir.clone()));
-        let mut kept: Vec<(u128, String, std::path::PathBuf)> = std::fs::read_dir(&self.unsent_dir)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| p.is_file() && !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')))
-            .filter_map(|p| {
-                let name = p.file_name()?.to_string_lossy().to_string();
-                let nanos = name.split('-').nth(1).and_then(|n| n.parse().ok()).unwrap_or(0);
-                Some((nanos, name, p))
-            })
-            .collect();
-        kept.extend(single);
-        kept.sort();
-        let texts: Vec<String> = kept.iter().filter_map(|(_, _, p)| std::fs::read_to_string(p).ok()).map(|t| t.trim_end().to_string()).filter(|t| !t.is_empty()).collect();
-        if !texts.is_empty() {
-            let text = texts.join("\n\n");
-            let draft = self.input.text().to_string();
-            self.input.set(with_draft(&text, &draft), text.chars().count());
-            self.say("restored: what the last chat could not send is in the box".to_string(), false);
-            self.dirty = true;
+        let found = unsent::claim(&self.unsent_dir);
+        let names = self.strip_names();
+        let live = |t: &Option<Tab>| t.as_ref().is_some_and(|t| t.composes() && tabs::normalize(t.clone(), &names) == *t);
+        let boxed = if self.input.is_empty() { found.claimed.iter().rposition(|c| c.record.kind == unsent::Kind::Draft && live(&c.record.tab)) } else { None };
+        let mut said = Vec::new();
+        if let Some(c) = boxed.map(|i| &found.claimed[i]) {
+            let tab = c.record.tab.clone().unwrap_or_default();
+            if self.foreground != tab {
+                self.set_tab(tab);
+            }
+            self.input.set(c.record.text.clone(), c.record.text.chars().count());
+            self.box_origins.push(c.path.clone());
+            said.push(format!("restored: the draft written for {} is in the box", c.record.label));
         }
-        for (_, _, p) in kept {
-            let _ = std::fs::remove_file(p);
+        let (mut entries, mut gone) = (0, Vec::new());
+        for (i, c) in found.claimed.into_iter().enumerate() {
+            if Some(i) == boxed {
+                continue;
+            }
+            let r = c.record;
+            let draft = r.kind == unsent::Kind::Draft;
+            if draft && r.tab.is_some() && !live(&r.tab) {
+                gone.push(r.label.clone());
+            }
+            let source = Source::Kept { path: c.path, draft, view_known: r.tab.is_some() };
+            self.pending.add(Held { id: 0, text: r.text, tab: r.tab.unwrap_or_default(), dest: r.dest, label: r.label, due: Duration::ZERO, refused: None, touched: 0, source }, true);
+            entries += 1;
+        }
+        match entries {
+            0 => {}
+            1 => said.push("restored: one text the last chat kept is in the feed; Esc or a click recalls it".into()),
+            n => said.push(format!("restored: {n} texts the last chats kept are in the feed; a click recalls each")),
+        }
+        if !gone.is_empty() {
+            said.push(format!("the view of the draft for {} is gone", gone.join(", ")));
+        }
+        let error = !found.unreadable.is_empty();
+        if error {
+            said.push(format!("not restored: {} in {} could not be read and stays there", found.unreadable.join(", "), self.unsent_dir.display()));
+        }
+        if !said.is_empty() {
+            self.say(said.join("; "), error);
+            self.dirty = true;
+            self.invalidate();
         }
     }
 
-    /// Quitting, the operator chose to discard what waits.
+    /// Quitting, the operator chose to discard what waits: the messages
+    /// held, the drafts parked and the draft in the box, with the kept
+    /// files they carried. A restored entry the operator never recalled
+    /// stays in its kept file: the guard did not name it.
     pub(super) fn discard_pending(&mut self) {
-        self.pending.take_all();
+        let taken = self.pending.take_all();
+        let origins = self.origins(&taken);
+        self.box_origins.clear();
+        if !self.dry_run {
+            unsent::settle(origins);
+        }
         self.invalidate();
     }
 
@@ -568,6 +780,7 @@ impl ChatPane {
             self.pending_shown = shown;
             self.invalidate();
         }
+        self.note_unsent();
     }
 
     /// Whether a message waits, for Esc in the box.
@@ -601,7 +814,7 @@ mod tests {
         assert_eq!(hold(&mut p, "to tamsin", "@tamsin", at(1)), Hold::Held(2), "another destination waits on its own");
         assert_eq!(hold(&mut p, "second", "#deploy", at(2)), Hold::Held(1), "the same destination joins the first");
         assert_eq!(texts(&p), ["first\nsecond", "to tamsin"]);
-        assert_eq!(p.len(), 2);
+        assert_eq!(p.iter().count(), 2);
     }
 
     #[test]
