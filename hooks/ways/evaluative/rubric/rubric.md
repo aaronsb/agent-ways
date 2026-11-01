@@ -25,7 +25,7 @@ A scenario is a fixed setup (a project directory, seeded files, a prompt, someti
 The rubric is an instrument and fails the way instruments fail.
 
 - **Every check script must parse.** A script the shell cannot parse stops partway when it is sourced. The checks after the error never run, and the scenario reports what ran as a full pass. The runner parses each script before running it and fails the scenario when it does not parse.
-- **Each rubric item is tested against a known-good and a known-bad answer.** The good answer hits, the bad one misses. A pattern that hits both is measuring nothing. One that misses the good answer will fail correct runs.
+- **Each rubric item is tested against a known-good and a known-bad answer.** The known-bad answer is the item's planted defect (core.md). The good answer hits, the bad one misses. A pattern that hits both is measuring nothing. One that misses the good answer will fail correct runs.
 - **Quoting is part of the pattern.** Characters the shell interprets inside a quoted pattern change what the pattern is. Prefer single-quoted patterns.
 - **A model used as a judge** is calibrated before its verdicts count (see `evaluative/agent-eval`).
 

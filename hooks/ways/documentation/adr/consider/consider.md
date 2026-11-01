@@ -26,7 +26,7 @@ The consider step records the operator's intent (ADR-304 §12 and its notes). Th
 
 ## A canary
 
-- You may add a canary among the intent checks: a point that is deliberately wrong, harmless if accepted, and never about safety. Ask it in the conversation only. It never goes in the record's text.
+- You may add a canary among the intent checks: a planted defect (core.md) in the form of a point that is deliberately wrong, harmless if accepted, and never about safety. Ask it in the conversation only. It never goes in the record's text.
 - It is a signal probe and is never required. If no one answers it, record nothing about it and continue.
 - When someone answers, reveal the canary right after, and add `--canary caught` or `--canary missed` to that answer's `considered` entry. When an advisor answers, the canary tests the advisor's confidence; record it the same way on the advisor's entry.
 - A missed canary is information. Say so once, and proceed without chasing it or re-asking the probes.

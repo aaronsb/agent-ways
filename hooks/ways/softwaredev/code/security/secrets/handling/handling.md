@@ -28,9 +28,9 @@ refire: 0.2
 
 ## Before Commit or Publish
 
-Run the project's secret scanner over the diff, once you have seen it flag a planted fake token. Check the diff as well for real internal URLs, account-specific ids, and machine or account paths. Use placeholders such as `PROJ-123` and fictional names.
+Run the project's secret scanner over the diff, once you have seen it flag a fake token planted as the defect (core.md). Check the diff as well for real internal URLs, account-specific ids, and machine or account paths. Use placeholders such as `PROJ-123` and fictional names.
 
 ## See Also
 
 - code/security/secrets(softwaredev) — parent: what never gets committed, recording a credential by name, rotation order
-- code/testing/gates(softwaredev) — a scanner earns trust once a planted violation has turned it red
+- code/testing/gates(softwaredev) — a scanner earns trust once a planted defect has turned it red

@@ -1,6 +1,6 @@
 ---
-description: validating documentation with a fresh reader who has not seen your reasoning, testing whether the README or onboarding guide works for a newcomer, a false-premise question to check the docs let the reader push back, and proving a docs linter by planting a violation
-vocabulary: validate validation test docs documentation readme onboarding guide fresh eyes newcomer clean context cold read false premise docs review does the documentation work entry point wrong answer defect linter plant violation cold-read grading self-review navigation
+description: validating documentation with a fresh reader who has not seen your reasoning, testing whether the README or onboarding guide works for a newcomer, a false-premise question to check the docs let the reader push back, and proving a docs linter with a planted defect
+vocabulary: validate validation test docs documentation readme onboarding guide fresh eyes newcomer clean context cold read false premise docs review does the documentation work entry point wrong answer defect linter plant violation planted defect cold-read grading self-review navigation
 files: README\.md$|docs/.*(guide|tutorial|getting.?started|onboarding|index)\.md$
 scope: agent, subagent
 refire: 0.2
@@ -55,11 +55,11 @@ Fix the docs, then re-run with the same questions. A run graded by someone other
 
 ## Enforcement: a check you have only seen pass
 
-A docs linter, a link checker, or a drift check that has only ever reported green is untested. Plant a violation (a dangling link, a malformed id, an edited source behind a generated page), confirm the check goes red with the right message, remove the plant, confirm green. The rule and its reporting form live in code/testing/gates(softwaredev).
+A docs linter, a link checker, or a drift check that has only ever reported green is untested. Prove it with a planted defect (core.md), such as a dangling link, a malformed id, or an edited source behind a generated page. The check must go red with the right message. The report form is in code/testing/gates(softwaredev).
 
 ## See Also
 
 - documentation(documentation) — parent: the typed graph and its linter
 - readme(documentation) — the front door this way tests
-- code/testing/gates(softwaredev) — a gate earns trust once a planted violation has turned it red
+- code/testing/gates(softwaredev) — a gate earns trust once a planted defect has turned it red
 - onboarding-share(collaboration) — publishing the guide once it has passed a cold read

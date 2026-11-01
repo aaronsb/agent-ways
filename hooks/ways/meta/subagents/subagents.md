@@ -80,10 +80,10 @@ For read-only fan-out (`Explore`, or `general-purpose` told to read only), state
 
 ## Planting and Re-review Briefs
 
-A brief that has the worker plant a regression to prove a test catches it names the restore steps:
+A brief that has the worker plant a defect to prove a test catches it (core.md) names the restore steps:
 
 - Back the file up, plant, run the test, move the backup into place: `cp f f.bak`, edit `f`, test, `mv f.bak f`. `git checkout`, `git restore` and `git stash` discard the worker's uncommitted edits along with the plant.
-- Run `touch f` after the `mv`. The moved file keeps the backup's older mtime, so mtime-based build tools (cargo, make) skip the rebuild and run the planted binary. A planted regression that stays red after the restore is the tell.
+- Run `touch f` after the `mv`. The moved file keeps the backup's older mtime, so mtime-based build tools (cargo, make) skip the rebuild and run the binary built with the plant. A test that stays red after the plant is removed is the tell.
 
 A re-review after a fix is sized to the fix. A one-function fix gets that function's tests and the crate's suite. The full gate set runs once, before the push.
 

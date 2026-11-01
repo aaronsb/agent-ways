@@ -16,7 +16,7 @@ An agent eval's scores are about to decide something, such as keeping a change, 
 
 ## A grader proves itself first
 
-- A grader passes a selftest before its scores count. The reference answer passes. An empty answer, an "I don't know", and an answer to a different question each fail. Rerun it after each grader change, and store its runs apart from real ones.
+- A grader passes a selftest before its scores count. The reference answer passes. An empty answer, an "I don't know", and an answer to a different question are planted defects (core.md), and each fails. Rerun it after each grader change, and store its runs apart from real ones.
 - Many failures that look subjective yield to a keyword check or a regex, so try code before a judge. A model judge follows `evaluative/rubric/judge`.
 - For a coding task, keep two test lists: FAIL_TO_PASS tests must start passing, and PASS_TO_PASS tests must keep passing. Run both in a pinned container.
 - Generic metrics do not gate. BLEU, perplexity, and similar off-the-shelf scores say little about the task. Similarity metrics still help for retrieval.

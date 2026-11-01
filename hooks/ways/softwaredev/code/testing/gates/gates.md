@@ -20,7 +20,7 @@ A gate is any check that stands between a change and merge: formatter, linter, t
 | **discovered** | Known to exist, deliberately left unrun | Why it was skipped |
 | **absent** | No such gate exists | The date and the reason |
 
-An exit code of zero counts as executed only when the check did its work. A step that skipped itself, a suite that collected zero tests, a tool configured but inert, a run whose test count came back short: record these as discovered, whatever the runner printed. A failing gate is fixed or handed back. Never record a pass that did not happen. A new gate earns trust once a planted violation has turned it red and the plant's removal has turned it green again.
+An exit code of zero counts as executed only when the check did its work. A step that skipped itself, a suite that collected zero tests, a tool configured but inert, a run whose test count came back short: record these as discovered, whatever the runner printed. A failing gate is fixed or handed back. Never record a pass that did not happen. A new gate earns trust once a planted defect has turned it red and removing the plant has turned it green again (core.md).
 
 An inherited codebase with no test infrastructure still gets a full report: each standard gate on its own line as absent with a date. A blank report reads the same as one nobody wrote.
 
