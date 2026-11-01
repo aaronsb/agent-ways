@@ -164,6 +164,9 @@ wait-recall  | wait  | wait:Agents text:first_thought,_still_forming Enter wait:
 wait-up      | wait  | wait:Agents text:first_thought,_still_forming Enter wait:sending_in Up wait:recalled
 wait-sent    | wait  | wait:Agents text:first_thought,_still_forming Enter wait:sending_in gone:sending_in wait:sent
 wait-quit    | wait  | wait:Agents text:say_this_before_I_go Enter wait:sending_in C-c wait:Send_and_quit
+wait-gone    | wait  | wait:Agents side:#infra wait:#infra_0 text:plan_for_infra Enter wait:sending_in paste:/dissolve_infra Enter wait:not_sent
+wait-refused | wait  | wait:Agents rside:○ wait:Address click:Address_@ text:ping Enter wait:sending_in text:#deploy_unrelated wait:not_sent
+wait-dm-back | wait  | wait:Agents side:○ wait:DMs text:for_gamma_alone Enter wait:sending_in M-0 wait:not_sent Escape wait:recalled
 common-quit  | base  | wait:Agents click:≡ wait:Quit
 quit-click   | base  | wait:Agents text:half click:≡ wait:Quit click:Quit wait:Quit_and_discard
 menu-waits   | base  | wait:Agents side:#deploy side:#deploy wait:needs_ADR-404_D4 Down

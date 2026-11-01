@@ -16,7 +16,7 @@ pub mod schema;
 pub mod sensors;
 pub mod theme;
 
-pub use config::{expand_path, ChatConfig, CleanupConfig, Config, EngagementConfig, GovernorConfig};
+pub use config::{expand_path, ChatConfig, CleanupConfig, Config, EngagementConfig, GovernorConfig, MAX_SEND_DELAY};
 pub use schema::{FILE, SCHEMA};
 
 use agent_settings::schema::LayerScope;

@@ -1,0 +1,420 @@
+//! Messages held after Enter (ADR-409, note of 2026-11-01), through the
+//! shell's real key and mouse handlers and its exit paths: the route a
+//! message joins on, a channel dissolved during the countdown, a send
+//! refused at its end, quitting and the unasked end. In its own file, so
+//! its own fixture, on a bus the sends really write: alpha and beta live,
+//! gamma quiet; #deploy with alpha in it; #gone, #gone2 and #gone3, which
+//! one test each dissolves.
+
+mod support;
+
+use std::time::{Duration, UNIX_EPOCH};
+
+use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use agent_tui::screen::Screen;
+use agent_tui::testkit;
+use agent_tui::theme::{Palette, Shape};
+use attend_chat::app::Chat;
+use attend_chat::signal::{self, Channel, Signal};
+use attend_chat::tabs::Tab;
+
+const ALPHA_SID: &str = "aaaaaaaa-0000-4000-8000-000000000001";
+const BETA_SID: &str = "bbbbbbbb-0000-4000-8000-000000000002";
+/// Its heartbeat an hour old: quiet, so a send to it is refused.
+const GAMMA_SID: &str = "cccccccc-0000-4000-8000-000000000003";
+const W: u16 = 120;
+const H: u16 = 35;
+/// 2026-10-02 14:00 UTC.
+const NOW: u64 = 1_790_949_600;
+
+fn cwd(name: &str) -> String {
+    format!("/work/{name}")
+}
+
+fn nick(name: &str) -> String {
+    agent_identity::Identity::for_cwd(&cwd(name), agent_theme::ColorDepth::NoColor).nickname.to_string()
+}
+
+fn fixture() {
+    support::fixture("pending", |base| {
+        let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
+        std::fs::create_dir_all(home.join(".claude/sessions")).unwrap();
+        for (i, (sid, name)) in [(ALPHA_SID, "alpha"), (BETA_SID, "beta"), (GAMMA_SID, "gamma")].into_iter().enumerate() {
+            let record = format!("{{\"pid\":1,\"sessionId\":\"{sid}\",\"cwd\":\"{}\"}}\n", cwd(name));
+            std::fs::write(home.join(format!(".claude/sessions/{i}.json")), record).unwrap();
+        }
+        support::pin_alive(ALPHA_SID);
+        support::pin_alive(BETA_SID);
+        attend_presence::heartbeat::touch(GAMMA_SID).unwrap();
+        let beat = std::fs::File::options().write(true).open(attend_presence::heartbeat::heartbeat_path(GAMMA_SID)).unwrap();
+        beat.set_modified(std::time::SystemTime::now() - Duration::from_secs(3600)).unwrap();
+        for c in ["deploy", "gone", "gone2", "gone3"] {
+            attend_groups::Groups::new(base, ALPHA_SID).join(c, true).unwrap();
+        }
+    });
+}
+
+/// A chat on the fixture's bus whose Enter holds a message five seconds,
+/// on a pinned clock that [`wait`] moves.
+fn chat() -> Chat {
+    fixture();
+    let mut c = Chat::new(None, Palette::default(), Shape::PLAIN)
+        .sidebar(true)
+        .heartbeat(false)
+        .enhanced(true)
+        .question_arm(Duration::ZERO)
+        .pinned(UNIX_EPOCH + Duration::from_secs(NOW), 0)
+        .send_delay(Duration::from_secs(5));
+    c.push(sig("s-1", "a message so the feed has one"));
+    c
+}
+
+fn sig(id: &str, message: &str) -> Signal {
+    Signal {
+        id: id.into(),
+        from: format!("claude:{ALPHA_SID}"),
+        project: "alpha".into(),
+        cwd: cwd("alpha"),
+        reply_to: None,
+        message: message.into(),
+        ts: NOW - 600,
+        channel: Channel::Open,
+        tray: String::new(),
+        beside_post: false,
+    }
+}
+
+fn rows(c: &mut Chat) -> Vec<String> {
+    testkit::rows(&testkit::render_screen(c, W, H))
+}
+
+fn screen(c: &mut Chat) -> String {
+    rows(c).join("\n")
+}
+
+fn press(c: &mut Chat, code: KeyCode, m: KeyModifiers) -> bool {
+    testkit::render_screen(c, W, H);
+    testkit::drive(c, &[KeyEvent::new(code, m)])
+}
+
+fn key(c: &mut Chat, code: KeyCode) -> bool {
+    press(c, code, KeyModifiers::NONE)
+}
+
+fn typed(c: &mut Chat, s: &str) {
+    for ch in s.chars() {
+        key(c, KeyCode::Char(ch));
+    }
+}
+
+fn send(c: &mut Chat, s: &str) {
+    typed(c, s);
+    key(c, KeyCode::Enter);
+}
+
+/// Time passing on the pinned clock, and the tick that sends what is due.
+fn wait(c: &mut Chat, secs: u64) {
+    c.advance(Duration::from_secs(secs));
+    Screen::tick(c);
+}
+
+/// Show `tab` by the column's Ctrl+digit, whichever number it has; 0 is
+/// the operator view. A digit is pressed only while another tab is shown:
+/// on the tab shown it opens its menu.
+fn show(c: &mut Chat, tab: Tab) {
+    for d in ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'] {
+        if *c.foreground() == tab {
+            return;
+        }
+        press(c, KeyCode::Char(d), KeyModifiers::CONTROL);
+        if *c.foreground() == tab {
+            return;
+        }
+    }
+    panic!("no Ctrl+digit shows {tab:?}: {}", screen(c));
+}
+
+/// A left click on the first `text` in the left column.
+fn side_click(c: &mut Chat, text: &str) {
+    let rows = rows(c);
+    let (x, y) = rows
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find_map(|(y, r)| {
+            let col = r.split('│').next()?;
+            col.find(text).map(|b| (col[..b].chars().count() as u16, y as u16))
+        })
+        .unwrap_or_else(|| panic!("no {text} in the column: {rows:#?}"));
+    c.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x, row: y, modifiers: KeyModifiers::NONE });
+}
+
+/// A left click on `text` right of the column: a waiting message's body.
+fn feed_click(c: &mut Chat, text: &str) {
+    let buf = testkit::render_screen(c, W, H);
+    let rows = testkit::rows(&buf);
+    let (x, y) = rows
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(y, r)| {
+            let (col, rest) = r.split_once('│')?;
+            rest.find(text).map(|b| ((col.chars().count() + 1 + rest[..b].chars().count()) as u16, y as u16))
+        })
+        .unwrap_or_else(|| panic!("no {text} in the feed: {rows:#?}"));
+    c.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x, row: y, modifiers: KeyModifiers::NONE });
+}
+
+/// Whether any message on the bus under `dir` reads `body`.
+fn written(dir: &std::path::Path, body: &str) -> bool {
+    walk(dir).iter().any(|p| std::fs::read_to_string(p).is_ok_and(|t| t.contains(body)))
+}
+
+fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(walk(&p));
+        } else {
+            out.push(p);
+        }
+    }
+    out
+}
+
+fn on_open(body: &str) -> bool {
+    written(&signal::broadcast_dir(), body)
+}
+
+fn anywhere(body: &str) -> bool {
+    written(&signal::signals_base(), body)
+}
+
+fn dissolve(channel: &str) {
+    attend_groups::Groups::new(&signal::signals_base(), ALPHA_SID).dissolve(channel).unwrap();
+}
+
+// ── the route a message joins on ────────────────────────────────
+
+/// The operator view and `#open` send to one place, so a message from
+/// each joins one waiting.
+#[test]
+fn the_operator_view_and_open_share_one_message() {
+    let mut c = chat().dry_run(true);
+    send(&mut c, "from the operator view");
+    show(&mut c, Tab::Channel("open".into()));
+    send(&mut c, "from #open");
+    assert_eq!(c.pending(), ["from the operator view\nfrom #open"]);
+}
+
+/// An unaddressed line in an agent's DM view goes to that agent; it
+/// joins another from the same view and waits apart from `@Name` typed
+/// elsewhere, which is sent by name.
+#[test]
+fn a_dm_views_lines_join_and_wait_apart_from_an_address() {
+    let mut c = chat().dry_run(true);
+    side_click(&mut c, &nick("alpha"));
+    assert_eq!(c.foreground(), &Tab::Dm(ALPHA_SID.into()));
+    send(&mut c, "in alpha's view");
+    show(&mut c, Tab::Merged);
+    send(&mut c, &format!("@{} by name", nick("alpha")));
+    side_click(&mut c, &nick("alpha"));
+    send(&mut c, "again in the view");
+    assert_eq!(c.pending(), ["in alpha's view\nagain in the view".to_string(), format!("@{} by name", nick("alpha"))]);
+}
+
+/// `@Name` in a channel is a post there addressed to them: apart from the
+/// channel's own posts, and apart from `#deploy @Name` typed anywhere,
+/// which is a post and a direct message. In either order.
+#[test]
+fn at_name_in_a_channel_waits_apart_from_the_channel_and_from_an_explicit_run() {
+    let alpha = nick("alpha");
+    let mut c = chat().dry_run(true);
+    show(&mut c, Tab::Channel("deploy".into()));
+    send(&mut c, "to the channel");
+    send(&mut c, &format!("@{alpha} in the channel"));
+    assert_eq!(c.pending().len(), 2, "{:?}", c.pending());
+    show(&mut c, Tab::Merged);
+    send(&mut c, &format!("#deploy @{alpha} post and DM"));
+    assert_eq!(c.pending().len(), 3, "the explicit run waits on its own: {:?}", c.pending());
+    // The other order.
+    let mut c = chat().dry_run(true);
+    send(&mut c, &format!("#deploy @{alpha} post and DM"));
+    show(&mut c, Tab::Channel("deploy".into()));
+    send(&mut c, &format!("@{alpha} in the channel"));
+    assert_eq!(c.pending(), [format!("#deploy @{alpha} post and DM"), format!("@{alpha} in the channel")]);
+}
+
+/// A bare `/` has no route: it is a command being typed and runs at once.
+#[test]
+fn a_bare_slash_is_not_held() {
+    let mut c = chat().dry_run(true);
+    send(&mut c, "/");
+    assert!(c.pending().is_empty(), "{:?}", c.pending());
+}
+
+// ── at the end of a countdown ───────────────────────────────────
+
+/// A channel dissolved during the countdown: the message is not sent to
+/// `#open` in its place. It stays in the feed, not sent, with the reason
+/// on the status line, and Esc recalls it.
+#[test]
+fn a_message_held_for_a_channel_dissolved_meanwhile_is_not_sent_elsewhere() {
+    let mut c = chat();
+    show(&mut c, Tab::Channel("gone".into()));
+    send(&mut c, "rollout plan is X");
+    dissolve("gone");
+    c.refresh();
+    wait(&mut c, 5);
+    assert!(!on_open("rollout plan is X"), "not broadcast in its place");
+    assert!(!anywhere("rollout plan is X"), "nor written anywhere");
+    assert_eq!(c.pending(), ["rollout plan is X"], "kept, not lost");
+    assert_eq!(c.status(), "not sent: #gone is gone");
+    assert!(screen(&mut c).contains("not sent"), "{}", screen(&mut c));
+    wait(&mut c, 30);
+    assert!(!anywhere("rollout plan is X"), "nothing sends it by itself");
+    key(&mut c, KeyCode::Esc);
+    assert_eq!((c.input().text(), c.pending().len()), ("rollout plan is X", 0), "Esc recalls it");
+}
+
+/// A send refused at the end of its countdown leaves the draft typed
+/// since as it is: the caret where it was, and the draft's own first line
+/// still routing it (the review's scenario A). The refused message waits
+/// apart; recalled unchanged, Enter sends it anyway.
+#[test]
+fn a_refusal_at_the_end_of_a_countdown_leaves_the_draft_and_its_route() {
+    let gamma = nick("gamma");
+    let mut c = chat();
+    send(&mut c, &format!("@{gamma} ping"));
+    typed(&mut c, "#deploy unrelated");
+    let caret = c.input().cursor();
+    wait(&mut c, 5);
+    assert!(!anywhere(&format!("@{gamma} ping")), "refused: gamma is quiet");
+    assert_eq!((c.input().text(), c.input().cursor()), ("#deploy unrelated", caret), "the draft and its caret as they were");
+    assert!(c.status().starts_with("not sent:") && c.status().contains("quiet"), "{}", c.status());
+    assert_eq!(c.pending(), [format!("@{gamma} ping")]);
+    // The draft goes where its own first line says, and waits apart.
+    key(&mut c, KeyCode::Enter);
+    assert_eq!(c.pending(), [format!("@{gamma} ping"), "#deploy unrelated".to_string()]);
+    wait(&mut c, 5);
+    assert!(written(&signal::signals_base().join("@deploy"), "#deploy unrelated"), "the draft went to #deploy");
+    // The refused one, recalled into the empty box, is sent anyway.
+    feed_click(&mut c, "ping");
+    assert_eq!(c.input().text(), format!("@{gamma} ping"));
+    assert!(c.pending().is_empty());
+    key(&mut c, KeyCode::Enter);
+    assert!(c.status().starts_with("sent"), "Enter on the recalled refusal sends anyway: {}", c.status());
+    assert!(anywhere(&format!("@{gamma} ping")));
+}
+
+/// A message refused at the end of its countdown is recalled into the view
+/// it was written in, so Enter sends it where it was held for, not to
+/// `#open` from the operator view (the review's scenario B).
+#[test]
+fn a_refused_message_is_recalled_into_its_own_view() {
+    let mut c = chat();
+    side_click(&mut c, &nick("gamma"));
+    assert_eq!(c.foreground(), &Tab::Dm(GAMMA_SID.into()));
+    send(&mut c, "for gamma's eyes");
+    show(&mut c, Tab::Merged);
+    wait(&mut c, 5);
+    assert_eq!(c.pending(), ["for gamma's eyes"], "refused: gamma is quiet");
+    key(&mut c, KeyCode::Esc);
+    assert_eq!(c.foreground(), &Tab::Dm(GAMMA_SID.into()), "back in gamma's DM view");
+    assert_eq!(c.input().text(), "for gamma's eyes");
+    key(&mut c, KeyCode::Enter);
+    assert!(!on_open("for gamma's eyes"), "never to #open");
+    assert!(anywhere("for gamma's eyes"), "sent to gamma anyway: {}", c.status());
+}
+
+/// A send at the end of a countdown leaves the feed where the operator
+/// scrolled it.
+#[test]
+fn a_send_at_the_end_of_a_countdown_keeps_the_scroll() {
+    let mut c = chat();
+    for i in 0..40 {
+        c.push(sig(&format!("s-scroll-{i}"), &format!("filler {i}")));
+    }
+    send(&mut c, "sent while reading back");
+    key(&mut c, KeyCode::PageUp);
+    let back = c.scroll();
+    assert!(back > 0, "scrolled back");
+    wait(&mut c, 5);
+    assert!(on_open("sent while reading back"));
+    assert_eq!(c.scroll(), back, "the feed stays where it was read");
+}
+
+// ── quitting ─────────────────────────────────────────────────────
+
+/// Send and quit with a message that cannot go: the chat stays open, the
+/// message stays, and the status line says why.
+#[test]
+fn send_and_quit_keeps_the_chat_open_when_a_message_cannot_go() {
+    let mut c = chat();
+    show(&mut c, Tab::Channel("gone2".into()));
+    send(&mut c, "too late for this one");
+    dissolve("gone2");
+    c.refresh();
+    assert!(press(&mut c, KeyCode::Char('c'), KeyModifiers::CONTROL));
+    assert!(c.app().guarding());
+    assert!(key(&mut c, KeyCode::Char('s')), "s did not quit: the message could not go");
+    assert!(!c.app().guarding());
+    assert_eq!(c.pending(), ["too late for this one"]);
+    assert_eq!(c.status(), "not sent: #gone2 is gone");
+    assert!(!anywhere("too late for this one"));
+}
+
+/// The guard's Send and quit names a draft in the compose box, which the
+/// quit drops.
+#[test]
+fn send_and_quit_names_the_draft_it_drops() {
+    let mut c = chat().dry_run(true);
+    send(&mut c, "waiting");
+    typed(&mut c, "a draft");
+    press(&mut c, KeyCode::Char('c'), KeyModifiers::CONTROL);
+    let s = screen(&mut c);
+    assert!(s.contains("Send and quit, drop the draft (s)") && s.contains("a draft in the compose box"), "{s}");
+}
+
+/// A signal or the terminal hanging up ends the chat with no one asked:
+/// what waits is sent, once, through the shell's own exit path.
+#[test]
+fn the_unasked_end_sends_what_waits() {
+    let mut c = chat();
+    send(&mut c, "said as the terminal closed");
+    show(&mut c, Tab::Channel("gone3".into()));
+    send(&mut c, "held for a channel about to go");
+    dissolve("gone3");
+    c.refresh();
+    let session = c.into_app().end_unasked(libc::SIGHUP, "stopped: the terminal hung up");
+    assert_eq!(session.signal, Some(libc::SIGHUP));
+    assert!(on_open("said as the terminal closed"), "sent as the chat ended");
+    assert!(!anywhere("held for a channel about to go"), "and nothing sent elsewhere in a vanished channel's place");
+}
+
+// ── the delay set to 0 ───────────────────────────────────────────
+
+/// With a message waiting, a delay set to 0 sends the next message to its
+/// route with it at once, and the one after that at once on its own.
+#[test]
+fn a_delay_set_to_zero_sends_what_waits_with_the_next_message() {
+    fixture();
+    // No delay fixed for this chat: it reads the setting, which the
+    // fixture home sets to 0 and this test to 5 first.
+    let mut c = Chat::new(None, Palette::default(), Shape::PLAIN)
+        .sidebar(true)
+        .heartbeat(false)
+        .enhanced(true)
+        .pinned(UNIX_EPOCH + Duration::from_secs(NOW), 0);
+    send(&mut c, "/config send_delay 5");
+    send(&mut c, "zero first");
+    assert_eq!(c.pending(), ["zero first"]);
+    send(&mut c, "/config send_delay 0");
+    assert_eq!(c.pending(), ["zero first"], "the command ran at once, and the message still waits");
+    send(&mut c, "zero second");
+    assert!(c.pending().is_empty(), "{:?}", c.pending());
+    assert!(on_open("zero first\nzero second"), "joined and sent at once");
+    send(&mut c, "zero third");
+    assert!(c.pending().is_empty() && on_open("zero third"), "sent at once, as Enter did before the delay");
+}

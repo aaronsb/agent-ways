@@ -22,6 +22,10 @@ pub struct Config {
     pub project_sensors: Vec<String>,
 }
 
+/// The longest `attend.chat.send_delay` holds a message, as the schema
+/// bounds it.
+pub const MAX_SEND_DELAY: Duration = Duration::from_secs(60);
+
 /// attend-chat's own keys: how its tabs are reached, the mouse, and how
 /// long a message waits before it is sent.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,7 +119,9 @@ impl Config {
             focus_key: text("attend.chat.tabs.focus_key", "both"),
             mouse: get("attend.chat.mouse", layers).and_then(|v| v.as_bool()).unwrap_or(true),
             sidebar_key: text("attend.chat.sidebar_key", "f3"),
-            send_delay: secs(get("attend.chat.send_delay", layers), 5),
+            // The resolver already refuses a value outside the schema's
+            // 0..60, so the bound here holds only if the two ever part.
+            send_delay: secs(get("attend.chat.send_delay", layers), 5).min(MAX_SEND_DELAY),
         };
         let project_sensors = list(get("attend.project_sensors", layers)).unwrap_or_default();
         Config { governor, engagement, cleanup, chat, project_sensors }

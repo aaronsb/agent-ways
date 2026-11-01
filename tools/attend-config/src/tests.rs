@@ -164,3 +164,17 @@ fn init_never_overwrites() {
     assert_eq!(std::fs::read_to_string(&p).unwrap(), "# mine\n");
     std::fs::remove_dir_all(&d).ok();
 }
+
+#[test]
+fn a_send_delay_over_the_schemas_bound_never_holds_a_message_past_it() {
+    let c = |text: &str| Config::from_layers(&[layer(LayerScope::User, text)]).chat.send_delay;
+    // A hand-edited 600 fails the schema's 0..60: the file's lint says so,
+    // and the setting loads as its default.
+    let l = layer(LayerScope::User, "chat:\n  send_delay: 600\n");
+    assert!(!l.findings.is_empty(), "600 is outside the schema's bound");
+    assert_eq!(c("chat:\n  send_delay: 600\n"), Duration::from_secs(5));
+    assert_eq!(c("chat:\n  send_delay: 61\n"), Duration::from_secs(5));
+    assert_eq!(c("chat:\n  send_delay: 60\n"), MAX_SEND_DELAY);
+    assert_eq!(c("chat:\n  send_delay: 0\n"), Duration::ZERO);
+    assert_eq!(c(""), Duration::from_secs(5), "the default");
+}

@@ -109,6 +109,9 @@ pub(super) fn mode_lozenge(app: &App, label: &str, g: Ground) -> Vec<Span<'stati
     app.shape.lozenge(&[Seg::on(format!(" {label} "), g).bold()])
 }
 
+/// The keys the exit guard binds for its own buttons.
+const GUARD_KEYS: [char; 3] = ['b', 'r', 'D'];
+
 impl Modal for Guard {
     fn dialog(&self, app: &App, _: bool) -> Dialog<'static> {
         app.guard_dialog()
@@ -156,8 +159,11 @@ impl Modal for Guard {
         // A pane's work alone has nothing to review.
         let review = app.pending() > 0 || app.theme_dirty();
         let mut hint = String::from(if review { "  Esc back · r review" } else { "  Esc back" });
-        if let Some((label, key)) = app.pane.as_ref().and_then(|p| p.quit_keeping()) {
-            hint += &format!(" · {key} {}", label.to_lowercase());
+        if let Some((label, key)) = app.quit_keeping() {
+            hint += &match key {
+                Some(key) => format!(" · {key} {}", label.to_lowercase()),
+                None => format!(" · {}", label.to_lowercase()),
+            };
         }
         hint += " · D quit and discard all";
         spans.push(Span::styled(hint, theme::hint()));
@@ -387,6 +393,16 @@ impl App {
         }
     }
 
+    /// The pane's button for what it keeps as the shell quits
+    /// ([`crate::Pane::quit_keeping`]), and its key unless the guard binds
+    /// that key already: Back's `b`, Review's `r`, Quit and discard all's
+    /// `D`. A pane's clashing key is dropped and its button is reached by
+    /// the arrows and a click.
+    pub(crate) fn quit_keeping(&self) -> Option<(String, Option<char>)> {
+        let (label, key) = self.pane.as_ref().and_then(|p| p.quit_keeping())?;
+        Some((label, Some(key).filter(|k| !GUARD_KEYS.contains(k))))
+    }
+
     /// Act on what modal `m` was answered. Once answered, its drawing is
     /// no target for the next press; a mark keeps the list open, and its
     /// drawing with it. False ends the session.
@@ -426,8 +442,10 @@ impl App {
             d = d.button(Button::new(Btn::Review, format!("Review {} (r)", tabs[0].0), Ground::Accent).key('r'));
         }
         // What the pane can keep as it quits, such as messages waiting to send.
-        if let Some((label, key)) = self.pane.as_ref().and_then(|p| p.quit_keeping()) {
-            d = d.button(Button::new(Btn::KeepQuit, format!("{label} ({key})"), Ground::Accent).key(key));
+        match self.quit_keeping() {
+            Some((label, Some(key))) => d = d.button(Button::new(Btn::KeepQuit, format!("{label} ({key})"), Ground::Accent).key(key)),
+            Some((label, None)) => d = d.button(Button::new(Btn::KeepQuit, label, Ground::Accent)),
+            None => {}
         }
         d.button(Button::new(Btn::Quit, "Quit and discard all (D)", Ground::Err).key('D')).build().expect("Back is the cancel and the default")
     }

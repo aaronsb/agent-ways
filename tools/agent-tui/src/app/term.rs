@@ -454,8 +454,7 @@ impl App {
         loop {
             if let Some(sig) = signals.caught() {
                 signals.take_up();
-                self.stop_run("stopped by a signal");
-                return Ok(self.session(Some(sig)));
+                return Ok(self.end_unasked(sig, "stopped by a signal"));
             }
             if self.mouse != captured {
                 if self.mouse {
@@ -479,10 +478,7 @@ impl App {
                 Err(e) => Err(e),
             };
             match event {
-                Err(_) => {
-                    self.stop_run("stopped: the terminal hung up");
-                    return Ok(self.session(Some(HANGUP)));
-                }
+                Err(_) => return Ok(self.end_unasked(HANGUP, "stopped: the terminal hung up")),
                 // A repeat is a key too: holding Backspace in a text entry.
                 Ok(Some(Event::Key(k))) if k.kind != KeyEventKind::Release && !self.key(k) => {
                     // A check still running ends with the screen.
@@ -507,6 +503,19 @@ impl App {
             // otherwise starve them.
             self.run_due(&mut schedule, Instant::now());
         }
+    }
+
+    /// End the session without the exit guard, by `signal`, which is
+    /// SIGHUP when the terminal hung up: a check still running stops with
+    /// `why`, the pane does what it does with unsaved work at such an end
+    /// ([`crate::Pane::ending`]), and the session is handed back. The run
+    /// loop's two unasked exits come here.
+    pub fn end_unasked(mut self, signal: i32, why: &str) -> Session {
+        self.stop_run(why);
+        if let Some(p) = self.pane.as_mut() {
+            p.ending();
+        }
+        self.session(Some(signal))
     }
 
     fn session(self, signal: Option<i32>) -> Session {

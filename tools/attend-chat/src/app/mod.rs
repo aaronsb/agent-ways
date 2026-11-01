@@ -285,8 +285,11 @@ pub struct ChatPane {
     /// are sent ([`pending`]), the countdowns the feed last showed, and the
     /// feed's index of the first of them, which follow the messages.
     pending: pending::Pending,
-    pending_shown: Vec<u64>,
+    pending_shown: Vec<Option<u64>>,
     pending_from: usize,
+    /// When the pane was made: the origin of the monotonic clock a
+    /// countdown runs on ([`ChatPane::mono`]).
+    started: Instant,
     /// The send delay [`Chat::send_delay`] fixed, which a reload of the
     /// settings keeps.
     fixed_delay: Option<Duration>,
@@ -352,6 +355,7 @@ impl ChatPane {
             pending: pending::Pending::default(),
             pending_shown: Vec::new(),
             pending_from: 0,
+            started: Instant::now(),
             fixed_delay: None,
         }
     }
@@ -610,15 +614,22 @@ impl ChatPane {
     /// Send `text` as Enter sends it from the view `fg`, or run the command
     /// it is; true when it was taken. Typed in the compose box (`from_box`),
     /// a taken line leaves the box, and a refused one stays there. A message
-    /// that waited ([`pending`]) and is refused comes back to the box
-    /// ([`ChatPane::put_back`]), so nothing is lost.
+    /// that waited ([`pending`]) and is refused stays in the feed, not
+    /// sent, so nothing is lost.
     fn send_text(&mut self, text: &str, fg: Tab, anyway: bool, from_box: bool) -> bool {
         if self.dry_run {
             return self.enter_dry(text, &fg, from_box);
         }
+        // A line from the box leaves it. A send at the end of a countdown
+        // leaves the box, and the feed's scroll, as the operator has them.
         let took = |c: &mut ChatPane| {
             if from_box {
                 c.input.clear();
+            }
+        };
+        let newest = |c: &mut ChatPane| {
+            if from_box {
+                c.show_newest();
             }
         };
         let sets_jump = text.trim_start().starts_with("/config tabs.jump");
@@ -628,12 +639,12 @@ impl ChatPane {
             EnterAction::ClearWithStatus(s) => {
                 self.say(s, false);
                 took(self);
-                self.show_newest();
+                newest(self);
             }
             EnterAction::ClearWithStatusAndEcho { status, echo } => {
                 self.say(status, false);
                 took(self);
-                self.show_newest();
+                newest(self);
                 for s in echo {
                     self.push(s);
                 }
@@ -1076,6 +1087,12 @@ impl Pane for ChatPane {
 
     fn keep_on_quit(&mut self) -> bool {
         self.send_all_now()
+    }
+
+    /// The chat ends unasked, by a signal or the terminal hanging up: what
+    /// waits to send goes now ([`ChatPane::send_waiting_at_unasked_exit`]).
+    fn ending(&mut self) {
+        self.send_waiting_at_unasked_exit();
     }
 
     fn has_tab_menus(&self) -> bool {

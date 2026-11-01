@@ -677,6 +677,13 @@ pub trait Pane: Any {
         true
     }
 
+    /// The shell ends without its exit guard: a signal (SIGTERM, SIGINT,
+    /// SIGHUP) or the terminal hanging up ([`crate::App::end_unasked`]).
+    /// Nothing is drawn or read after this, and no one is asked, so the
+    /// pane does now, once and without blocking, what it does with unsaved
+    /// work at such an end. The default does nothing.
+    fn ending(&mut self) {}
+
     /// Text for the key help, below the keys.
     fn help(&self) -> Option<String> {
         None

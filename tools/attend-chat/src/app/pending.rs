@@ -4,22 +4,31 @@
 //! it is sent when the countdown ends, through the path Enter sends by. While
 //! it waits, Esc in the compose box recalls the newest one into the box and a
 //! click recalls the one clicked; nothing held is sent then. Enter on another
-//! message to the same destination, while one waits, joins it on a new line
-//! and starts its countdown again, so a burst goes out as one message. A
-//! different destination waits on its own.
+//! message to the same route, while one waits, joins it on a new line and
+//! starts its countdown again, so a burst goes out as one message. A
+//! different route waits on its own.
 //!
-//! The queue is pure state over the chat's clock: every method takes the time
-//! it acts at, so the tests step the clock rather than sleep, and a pinned
-//! clock holds a frame's countdown still.
+//! When a countdown ends the route is resolved again. A message whose route
+//! has changed, such as one held for a channel dissolved meanwhile, is not
+//! sent elsewhere: it stays in the feed marked not sent, as does one the send
+//! refuses then. Either comes back only when Esc or a click recalls it, into
+//! the view it was written in, so the draft being typed meanwhile is left as
+//! it is and routes as it would have.
+//!
+//! The queue is pure state over the chat's monotonic clock
+//! ([`ChatPane::mono`]): every method takes the time it acts at, so the
+//! tests step the clock rather than sleep, and a pinned clock holds a
+//! frame's countdown still.
 
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, UNIX_EPOCH};
 
 use agent_tui::feed::Entry;
 use agent_tui::ratatui::text::Line;
 use agent_tui::theme::{self, Ground, Seg};
 
 use super::ix::Ev;
-use super::ChatPane;
+use super::{ChatPane, Clock};
+use crate::legend::{parse_addressed, Addressed};
 use crate::tabs::{self, Tab};
 
 /// One message held.
@@ -31,22 +40,35 @@ pub(super) struct Held {
     pub(super) text: String,
     /// The view it was written in, which routes it as Enter routed it there.
     pub(super) tab: Tab,
-    /// Where it goes, as the send resolves it ([`super::ChatPane::destination`]):
-    /// what joins two messages.
+    /// Its route as the send resolves it ([`ChatPane::destination`]): what
+    /// joins two messages, and what the send checks again at the end of the
+    /// countdown.
     pub(super) dest: String,
     /// Where it goes, as the destination flag named it.
     pub(super) label: String,
-    /// When it is sent.
-    pub(super) due: SystemTime,
+    /// When it is sent, on the chat's monotonic clock.
+    pub(super) due: Duration,
+    /// Set when the send at the end of the countdown did not go: the
+    /// message stays, recallable, and nothing sends it by itself.
+    pub(super) refused: Option<Refused>,
     /// When it was last written to: the newest is recalled first.
     touched: u64,
+}
+
+/// A send that did not go at the end of a countdown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Refused {
+    /// The agent it addresses was quiet. Recalled unchanged into its own
+    /// view, Enter sends it anyway, as Enter again does after a refusal at
+    /// Enter.
+    pub(super) quiet: bool,
 }
 
 /// What [`Pending::hold`] did with a message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Hold {
-    /// No delay and nothing waiting for its destination: send it now, as
-    /// Enter always did.
+    /// No delay and nothing waiting for its route: send it now, as Enter
+    /// always did.
     Now,
     /// Held as the entry with this id, new or joined.
     Held(u64),
@@ -74,15 +96,16 @@ impl Pending {
         self.held.iter()
     }
 
-    /// Hold `text`, written in `tab`, for `dest`, at `now`, for `delay`. A
-    /// message already waiting for `dest` takes it on a new line and waits
-    /// `delay` again from `now`. With no delay, a message nothing waits for
-    /// is sent at once ([`Hold::Now`]); one that joins a waiting message is
-    /// due at once, so the two go out together.
-    pub(super) fn hold(&mut self, text: &str, tab: Tab, dest: String, label: String, now: SystemTime, delay: Duration) -> Hold {
+    /// Hold `text`, written in `tab`, for the route `dest`, at `now`, for
+    /// `delay`. A message still counting down for `dest` takes it on a new
+    /// line and waits `delay` again from `now`; one a send refused takes
+    /// nothing. With no delay, a message nothing waits for is sent at once
+    /// ([`Hold::Now`]); one that joins a waiting message is due at once, so
+    /// the two go out together.
+    pub(super) fn hold(&mut self, text: &str, tab: Tab, dest: String, label: String, now: Duration, delay: Duration) -> Hold {
         self.writes += 1;
         let due = now + delay;
-        if let Some(h) = self.held.iter_mut().find(|h| h.dest == dest) {
+        if let Some(h) = self.held.iter_mut().find(|h| h.refused.is_none() && h.dest == dest) {
             h.text = format!("{}\n{text}", h.text);
             h.due = due;
             h.touched = self.writes;
@@ -92,8 +115,18 @@ impl Pending {
             return Hold::Now;
         }
         self.next_id += 1;
-        self.held.push(Held { id: self.next_id, text: text.to_string(), tab, dest, label, due, touched: self.writes });
+        self.held.push(Held { id: self.next_id, text: text.to_string(), tab, dest, label, due, refused: None, touched: self.writes });
         Hold::Held(self.next_id)
+    }
+
+    /// Put `h` back as refused, in its place among the others, written to
+    /// last so Esc recalls it first.
+    pub(super) fn refuse(&mut self, mut h: Held, refused: Refused) {
+        self.writes += 1;
+        h.refused = Some(refused);
+        h.touched = self.writes;
+        let at = self.held.iter().position(|o| o.id > h.id).unwrap_or(self.held.len());
+        self.held.insert(at, h);
     }
 
     /// Take the message written to last, which Esc recalls.
@@ -108,31 +141,32 @@ impl Pending {
         Some(self.held.remove(at))
     }
 
-    /// Take every message due by `now`, in the order they were held.
-    pub(super) fn due(&mut self, now: SystemTime) -> Vec<Held> {
-        let (due, kept) = std::mem::take(&mut self.held).into_iter().partition(|h| h.due <= now);
+    /// Take every message counting down that is due by `now`, in the order
+    /// they were held.
+    pub(super) fn due(&mut self, now: Duration) -> Vec<Held> {
+        let (due, kept) = std::mem::take(&mut self.held).into_iter().partition(|h| h.refused.is_none() && h.due <= now);
         self.held = kept;
         due
     }
 
-    /// Take every message, due or not: sent now or discarded as the operator
-    /// quits.
+    /// Take every message, due, refused or not: sent now or discarded as
+    /// the operator quits.
     pub(super) fn take_all(&mut self) -> Vec<Held> {
         std::mem::take(&mut self.held)
     }
 
     /// The whole seconds left on each message's countdown at `now`, rounded
-    /// up, oldest first: what the feed shows, so it is drawn again when one
-    /// of them changes.
-    pub(super) fn countdown(&self, now: SystemTime) -> Vec<u64> {
-        self.held.iter().map(|h| left(h, now)).collect()
+    /// up, oldest first, `None` for one refused: what the feed shows, so it
+    /// is drawn again when one of them changes.
+    pub(super) fn countdown(&self, now: Duration) -> Vec<Option<u64>> {
+        self.held.iter().map(|h| h.refused.is_none().then(|| left(h, now))).collect()
     }
 }
 
 /// The whole seconds left before `h` is sent at `now`, rounded up: `5s` the
 /// moment it is held for five seconds, `1s` in its last second.
-pub(super) fn left(h: &Held, now: SystemTime) -> u64 {
-    let d = h.due.duration_since(now).unwrap_or_default();
+pub(super) fn left(h: &Held, now: Duration) -> u64 {
+    let d = h.due.saturating_sub(now);
     d.as_secs() + u64::from(d.subsec_nanos() > 0)
 }
 
@@ -147,49 +181,81 @@ pub(super) fn with_draft(recalled: &str, draft: &str) -> String {
     }
 }
 
-/// `dest` as a key two messages share when they go to the same place: the
-/// destination flag's names, without its marks, case folded and in order,
-/// so `@Tamsin @Cleo` and `@cleo @tamsin` join and `#deploy` and
-/// `#deploy @Tamsin` do not.
-fn dest_key(label: &str) -> String {
-    let mut names: Vec<String> = label.split_whitespace().filter(|w| w.starts_with(['@', '#'])).map(str::to_lowercase).collect();
+/// The route `text` takes from a view whose send scope is `scope`, as a
+/// key two messages share only when they are sent the same way: the kind of
+/// send, then the names it goes to, case folded and in order. `post` is a
+/// post in each channel named, the scope's for an unaddressed line; `in` is
+/// `@Name` while a channel is shown, one post in that channel addressed to
+/// them; `to` is any other address run, such as `@Tamsin` or `#deploy
+/// @Tamsin`, a direct message to each agent beside each channel's post. So
+/// `#deploy @Tamsin` from the operator view and `@Tamsin` in `#deploy` never
+/// join. `None` for a slash command, a bare `/` among them: it has no route.
+fn route(text: &str, scope: &str, in_channel: bool) -> Option<String> {
+    if crate::slash::parse(text).is_some() || crate::slash::find_slash_partial(text).is_some() {
+        return None;
+    }
+    let recipients = parse_addressed(text);
+    let name = |r: &Addressed| match r {
+        Addressed::Agent(n) => format!("@{}", n.to_lowercase()),
+        Addressed::Group(n) => format!("#{}", n.to_lowercase()),
+    };
+    let mut names: Vec<String> = recipients.iter().map(name).collect();
     names.sort();
-    names.join(" ")
+    names.dedup();
+    let scope = format!("#{}", scope.to_lowercase());
+    let key = if recipients.is_empty() {
+        format!("post {scope}")
+    } else if in_channel && recipients.iter().all(|r| matches!(r, Addressed::Agent(_))) {
+        format!("in {scope} {}", names.join(" "))
+    } else if recipients.iter().all(|r| matches!(r, Addressed::Group(_))) {
+        format!("post {}", names.join(" "))
+    } else {
+        format!("to {}", names.join(" "))
+    };
+    Some(key)
 }
 
 impl ChatPane {
-    /// Where `text`, written in `fg`, goes, as the send resolves it: the
-    /// agent of a DM view for an unaddressed line there, else the
-    /// destination flag's names as the operator view or a channel resolve
-    /// them ([`super::keys::destination_label`]), so the operator view and
-    /// `#open` share `#open`, and `@Name` in a channel is that channel's.
-    pub(super) fn destination(&self, text: &str, fg: &Tab) -> String {
+    /// Now on the chat's monotonic clock, which a countdown runs on: the
+    /// time since the pane was made, on a live clock, so a step of the wall
+    /// clock never moves one; the pinned instant since the epoch, on a
+    /// pinned clock, which [`super::Chat::advance`] moves.
+    pub(super) fn mono(&self) -> Duration {
+        match self.clock {
+            Clock::Live => self.started.elapsed(),
+            Clock::Pinned { now, .. } => now.duration_since(UNIX_EPOCH).unwrap_or_default(),
+        }
+    }
+
+    /// The route `text`, written in `fg`, takes as the send resolves it: the
+    /// agent of a DM view for an unaddressed line there, else [`route`]
+    /// from the view's send scope, so the operator view and `#open` share
+    /// `post #open`. `None` for a slash command.
+    pub(super) fn destination(&self, text: &str, fg: &Tab) -> Option<String> {
         if let Tab::Dm(member) = fg {
-            if crate::legend::parse_addressed(text).is_empty() {
-                return format!("dm {member}");
+            if parse_addressed(text).is_empty() && crate::slash::parse(text).is_none() && crate::slash::find_slash_partial(text).is_none() {
+                return Some(format!("dm {member}"));
             }
         }
-        let in_channel = matches!(fg, Tab::Channel(_));
-        let label = super::destination_label(text, &tabs::send_scope(fg), in_channel, &[], &[]).unwrap_or_default();
-        dest_key(&label)
+        route(text, &tabs::send_scope(fg), matches!(fg, Tab::Channel(_)))
     }
 
     /// Enter on a message with a send delay set: hold it in the feed, or
-    /// join it to the message already waiting for its destination. False
-    /// leaves it to be sent at once, as Enter always sent: a slash command,
-    /// an empty line, a view with nothing to send, no delay.
+    /// join it to the message already waiting for its route. False leaves it
+    /// to be sent at once, as Enter always sent: a slash command, a bare
+    /// `/`, an empty line, a view with nothing to send, no delay.
     pub(super) fn hold_draft(&mut self, fg: &Tab) -> bool {
         // No delay and nothing waiting: Enter's own path, untouched.
         if self.config.send_delay.is_zero() && self.pending.is_empty() {
             return false;
         }
         let text = self.input.text().trim_end().to_string();
-        if text.is_empty() || crate::slash::parse(&text).is_some() || !fg.composes() {
+        if text.is_empty() || !fg.composes() {
             return false;
         }
-        let dest = self.destination(&text, fg);
+        let Some(dest) = self.destination(&text, fg) else { return false };
         let label = self.flag_label(&text, fg).unwrap_or_else(|| format!("#{}", tabs::send_scope(fg)));
-        match self.pending.hold(&text, fg.clone(), dest, label, self.now(), self.config.send_delay) {
+        match self.pending.hold(&text, fg.clone(), dest, label, self.mono(), self.config.send_delay) {
             Hold::Now => false,
             Hold::Held(_) => {
                 self.send_anyway = None;
@@ -206,26 +272,26 @@ impl ChatPane {
     }
 
     /// Send now (Ctrl+Enter, Ctrl+X Ctrl+S): the draft at once, to a quiet
-    /// agent too, after the message waiting for its destination, joined as
-    /// Enter would join it: Claude Code's `chat:sendNow` sends the queued
-    /// messages and the draft. With nothing in the box every message waiting
-    /// goes now. With nothing waiting it is the send-now Enter always had.
+    /// agent too, after the message waiting for its route, joined as Enter
+    /// would join it: Claude Code's `chat:sendNow` sends the queued messages
+    /// and the draft. With nothing in the box every message waiting goes
+    /// now. With nothing waiting it is the send-now Enter always had.
     pub(super) fn send_now(&mut self) {
         let fg = self.normal_tab();
         let text = self.input.text().trim_end().to_string();
-        if self.pending.is_empty() || crate::slash::parse(&text).is_some() || !fg.composes() {
+        let dest = self.destination(&text, &fg);
+        if self.pending.is_empty() || !fg.composes() || (dest.is_none() && !text.is_empty()) {
             return self.send(true);
         }
         self.send_anyway = None;
-        if text.is_empty() {
+        let Some(dest) = dest.filter(|_| !text.is_empty()) else {
             for h in self.pending.take_all() {
                 self.send_held(h, true);
             }
             return self.invalidate();
-        }
-        let dest = self.destination(&text, &fg);
+        };
         let label = self.flag_label(&text, &fg).unwrap_or_else(|| format!("#{}", tabs::send_scope(&fg)));
-        match self.pending.hold(&text, fg, dest, label, self.now(), Duration::ZERO) {
+        match self.pending.hold(&text, fg, dest, label, self.mono(), Duration::ZERO) {
             Hold::Now => self.send(true),
             Hold::Held(id) => {
                 self.input.clear();
@@ -238,10 +304,9 @@ impl ChatPane {
     }
 
     /// Send each held message whose countdown has ended, through the path
-    /// Enter sends by, from the view it was written in. A refused one comes
-    /// back to the compose box with the reason on the status line.
+    /// Enter sends by, from the view it was written in.
     pub(super) fn send_due(&mut self) {
-        let due = self.pending.due(self.now());
+        let due = self.pending.due(self.mono());
         if due.is_empty() {
             return;
         }
@@ -251,33 +316,51 @@ impl ChatPane {
         self.invalidate();
     }
 
-    /// Send `h` now, from the view it was written in as the strip has it
-    /// now; false when it was refused and is back in the box.
+    /// Send `h` now, from the view it was written in, to the route it was
+    /// held for; false when it did not go and stays in the feed, refused,
+    /// with the reason on the status line. The route is resolved again
+    /// first: a channel dissolved meanwhile, or a view that now resolves
+    /// elsewhere, holds the message back rather than send it to `#open` or
+    /// anywhere else it was not written for.
     fn send_held(&mut self, h: Held, anyway: bool) -> bool {
         let names = self.strip_names();
         let fg = tabs::normalize(h.tab.clone(), &names);
-        let sent = self.send_text(&h.text, fg, anyway, false);
-        if !sent {
-            self.put_back(&h.text, true);
+        if self.destination(&h.text, &fg).as_deref() != Some(h.dest.as_str()) {
+            let why = match &h.tab {
+                Tab::Channel(c) if fg != h.tab => format!("not sent: #{c} is gone"),
+                _ => format!("not sent: it no longer goes to {}", h.label),
+            };
+            return self.refuse(h, why, false);
         }
-        sent
+        if self.send_text(&h.text, fg, anyway, false) {
+            return true;
+        }
+        // A quiet agent: the refusal at Enter offers Enter again; this one
+        // offers it once the message is recalled into its view.
+        let quiet = self.send_anyway.take().is_some();
+        let why = match self.status.split_once(": ") {
+            Some((_, what)) if quiet => format!("not sent: {what}; recall it and Enter sends it anyway"),
+            _ => format!("not sent to {}: {}", h.label, self.status),
+        };
+        self.refuse(h, why, quiet)
     }
 
-    /// Put `text` back in the compose box, before what the box holds. A
-    /// recall puts the keyboard in the box and the caret at the end of the
-    /// text recalled; a send refused as its countdown ended (`refused`)
-    /// leaves the keyboard where it is and the caret where it was in the
-    /// draft being typed.
-    fn put_back(&mut self, text: &str, refused: bool) {
+    /// Keep `h` in the feed, refused, and say `why`; false, for
+    /// [`ChatPane::send_held`].
+    fn refuse(&mut self, h: Held, why: String, quiet: bool) -> bool {
+        self.pending.refuse(h, Refused { quiet });
+        self.say(why, true);
+        false
+    }
+
+    /// Put `text`, recalled, back in the compose box, before what the box
+    /// holds, the keyboard in the box and the caret at the end of the text
+    /// recalled.
+    fn put_back(&mut self, text: &str) {
         let draft = self.input.text().to_string();
-        let joined = with_draft(text, &draft);
-        let recalled = text.chars().count();
-        let caret = if refused && !draft.is_empty() { recalled + 1 + self.input.cursor() } else { recalled };
-        self.input.set(joined, caret);
+        self.input.set(with_draft(text, &draft), text.chars().count());
         self.tab_cycle = None;
-        if !refused {
-            self.dispatch(Ev::Compose);
-        }
+        self.dispatch(Ev::Compose);
         self.dirty = true;
     }
 
@@ -300,34 +383,45 @@ impl ChatPane {
         true
     }
 
+    /// `h` recalled: shown in the view it was written in, while that view
+    /// is there, so Enter sends it where it was held for; then back in the
+    /// box. A quiet refusal recalled unchanged is one Enter sends anyway.
     fn recalled(&mut self, h: Held) {
+        let names = self.strip_names();
+        if tabs::normalize(h.tab.clone(), &names) == h.tab && self.normal_tab() != h.tab {
+            self.set_tab(h.tab.clone());
+        }
         self.send_anyway = None;
-        self.put_back(&h.text, false);
+        self.put_back(&h.text);
+        if h.refused.is_some_and(|r| r.quiet) && self.input.text() == h.text {
+            self.send_anyway = Some((h.text.clone(), h.tab.clone()));
+        }
         self.say(format!("recalled: not sent to {}", h.label), false);
         self.invalidate();
     }
 
     /// The feed's entries for the messages waiting, after the messages: each
-    /// marked on the warning ground with its countdown, where it goes, and
-    /// the key that recalls it. Shown in every view that sends, since Esc
-    /// recalls the newest wherever the keyboard is in the box.
+    /// marked on the warning ground with its countdown, or on the error
+    /// ground as not sent, where it goes, and the key that recalls it. Shown
+    /// in every view that sends, since Esc recalls the newest wherever the
+    /// keyboard is in the box.
     pub(super) fn pending_entries(&self, fg: &Tab) -> Vec<Entry> {
         if !fg.composes() {
             return Vec::new();
         }
-        let now = self.now();
+        let now = self.mono();
         let newest = self.pending.iter().max_by_key(|h| h.touched).map(|h| h.id);
         self.pending
             .iter()
             .map(|h| {
                 // A band as a message's header is: each step on a ground of
-                // its own, the countdown on the warning ground.
+                // its own.
                 let how = if newest == Some(h.id) { " Esc or click recalls " } else { " click recalls " };
-                let header = vec![
-                    Seg::on(format!(" sending in {}s ", left(h, now)), Ground::Warn).bold(),
-                    Seg::on(format!(" → {} ", h.label), Ground::AccentDim),
-                    Seg::on(how, Ground::Rule),
-                ];
+                let state = match h.refused {
+                    None => Seg::on(format!(" sending in {}s ", left(h, now)), Ground::Warn).bold(),
+                    Some(_) => Seg::on(" not sent ", Ground::Err).bold(),
+                };
+                let header = vec![state, Seg::on(format!(" → {} ", h.label), Ground::AccentDim), Seg::on(how, Ground::Rule)];
                 let body = h.text.split('\n').map(|l| Line::styled(l.to_string(), theme::muted())).collect();
                 Entry { header, body }
             })
@@ -343,18 +437,21 @@ impl ChatPane {
         }
     }
 
-    /// The exit guard's button that sends the messages waiting.
+    /// The exit guard's button that sends the messages waiting. Its label
+    /// says when the draft in the compose box goes with the quit, so the
+    /// button never drops a draft unnamed.
     pub(super) fn pending_quit_keeping(&self) -> Option<(String, char)> {
+        let draft = if self.input.is_empty() { "" } else { ", drop the draft" };
         match self.pending.len() {
             0 => None,
-            1 => Some(("Send and quit".into(), 's')),
-            n => Some((format!("Send {n} and quit"), 's')),
+            1 => Some((format!("Send and quit{draft}"), 's')),
+            n => Some((format!("Send {n} and quit{draft}"), 's')),
         }
     }
 
-    /// Quitting, the operator chose to send what waits: each now, to a
-    /// quiet agent too, as send-now sends. False when one was refused: it
-    /// is back in the compose box, the reason on the status line, and the
+    /// Quitting, the operator chose to send what waits: each now, once, to
+    /// a quiet agent too, as send-now sends. False when one did not go: it
+    /// stays in the feed, refused, the reason on the status line, and the
     /// chat stays open rather than lose it.
     pub(super) fn send_all_now(&mut self) -> bool {
         let mut all = true;
@@ -363,6 +460,16 @@ impl ChatPane {
         }
         self.invalidate();
         all
+    }
+
+    /// The chat ends unasked: a signal, or the terminal hanging up
+    /// ([`agent_tui::Pane::ending`]). Enter meant send, and closing the
+    /// terminal is no recall, so each message waiting is sent now, once, as
+    /// Send and quit sends it, with no retry; one that does not go then is
+    /// lost with the chat. This is the one place the choice is made: to drop
+    /// what waits instead, call [`ChatPane::discard_pending`] here.
+    pub(super) fn send_waiting_at_unasked_exit(&mut self) {
+        self.send_all_now();
     }
 
     /// Quitting, the operator chose to discard what waits.
@@ -379,7 +486,7 @@ impl ChatPane {
         if !self.ix.guarded() {
             self.send_due();
         }
-        let shown = self.pending.countdown(self.now());
+        let shown = self.pending.countdown(self.mono());
         if shown != self.pending_shown {
             self.pending_shown = shown;
             self.invalidate();
@@ -395,15 +502,14 @@ impl ChatPane {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::UNIX_EPOCH;
 
     const DELAY: Duration = Duration::from_secs(5);
 
-    fn at(secs: u64) -> SystemTime {
-        UNIX_EPOCH + Duration::from_secs(1_790_000_000 + secs)
+    fn at(secs: u64) -> Duration {
+        Duration::from_secs(1_790_000_000 + secs)
     }
 
-    fn hold(p: &mut Pending, text: &str, dest: &str, now: SystemTime) -> Hold {
+    fn hold(p: &mut Pending, text: &str, dest: &str, now: Duration) -> Hold {
         p.hold(text, Tab::Merged, dest.into(), dest.into(), now, DELAY)
     }
 
@@ -425,10 +531,10 @@ mod tests {
     fn a_joined_message_starts_the_countdown_again() {
         let mut p = Pending::default();
         hold(&mut p, "first", "#deploy", at(0));
-        assert_eq!(p.countdown(at(0)), [5]);
-        assert_eq!(p.countdown(at(3)), [2]);
+        assert_eq!(p.countdown(at(0)), [Some(5)]);
+        assert_eq!(p.countdown(at(3)), [Some(2)]);
         hold(&mut p, "second", "#deploy", at(4));
-        assert_eq!(p.countdown(at(4)), [5], "five seconds from the second Enter");
+        assert_eq!(p.countdown(at(4)), [Some(5)], "five seconds from the second Enter");
         assert!(p.due(at(5)).is_empty(), "not due when the first countdown would have ended");
         assert_eq!(p.due(at(9)).into_iter().map(|h| h.text).collect::<Vec<_>>(), ["first\nsecond"]);
         assert!(p.is_empty());
@@ -438,9 +544,9 @@ mod tests {
     fn the_countdown_rounds_up_to_whole_seconds() {
         let mut p = Pending::default();
         hold(&mut p, "x", "#open", at(0));
-        assert_eq!(p.countdown(at(0) + Duration::from_millis(100)), [5]);
-        assert_eq!(p.countdown(at(4) + Duration::from_millis(900)), [1]);
-        assert_eq!(p.countdown(at(6)), [0], "past due reads as nothing left");
+        assert_eq!(p.countdown(at(0) + Duration::from_millis(100)), [Some(5)]);
+        assert_eq!(p.countdown(at(4) + Duration::from_millis(900)), [Some(1)]);
+        assert_eq!(p.countdown(at(6)), [Some(0)], "past due reads as nothing left");
     }
 
     #[test]
@@ -504,5 +610,49 @@ mod tests {
         hold(&mut p, "b", "@tamsin", at(1));
         assert_eq!(p.take_all().len(), 2);
         assert!(p.is_empty());
+    }
+
+    #[test]
+    fn a_refused_message_waits_apart_takes_nothing_and_is_never_due() {
+        let mut p = Pending::default();
+        hold(&mut p, "to lark", "to @lark", at(0));
+        hold(&mut p, "to deploy", "post #deploy", at(1));
+        let due = p.due(at(5));
+        let h = due.into_iter().next().expect("due");
+        p.refuse(h, Refused { quiet: true });
+        assert_eq!(texts(&p), ["to lark", "to deploy"], "back in its place among the others");
+        assert_eq!(p.countdown(at(5)), [None, Some(1)], "no countdown on a refused one");
+        assert_eq!(hold(&mut p, "again", "to @lark", at(6)), Hold::Held(3), "a refused message takes nothing: a new one waits apart");
+        assert!(p.due(at(60)).iter().all(|h| h.refused.is_none()), "nothing sends a refused message by itself");
+        assert_eq!(texts(&p), ["to lark"]);
+        // Esc recalls the refused one: written to last.
+        hold(&mut p, "older", "post #infra", at(70));
+        let first = p.iter().next().map(|h| h.id).unwrap();
+        let h = p.recall(first).unwrap();
+        p.refuse(h, Refused { quiet: false });
+        assert_eq!(p.recall_newest().map(|h| h.text), Some("to lark".into()));
+    }
+
+    #[test]
+    fn a_route_names_the_kind_of_send_and_who_it_goes_to() {
+        let r = |t: &str, scope: &str, in_channel: bool| route(t, scope, in_channel);
+        // The operator view and #open share #open.
+        assert_eq!(r("hello", "open", false), r("also", "open", true));
+        assert_eq!(r("hello", "open", false).as_deref(), Some("post #open"));
+        assert_eq!(r("#open hi", "open", false).as_deref(), Some("post #open"), "an explicit #open is #open's post");
+        // `@Name` in a channel is a post there, apart from the channel's
+        // own and from a DM to them.
+        assert_eq!(r("@Tamsin y", "deploy", true).as_deref(), Some("in #deploy @tamsin"));
+        assert_ne!(r("@Tamsin y", "deploy", true), r("plain", "deploy", true));
+        assert_ne!(r("@Tamsin y", "deploy", true), r("@Tamsin y", "open", false));
+        // `#deploy @Tamsin` is a post and a DM, never `@Tamsin` in #deploy.
+        assert_eq!(r("#deploy @Tamsin x", "open", false).as_deref(), Some("to #deploy @tamsin"));
+        assert_eq!(r("#deploy @Tamsin x", "deploy", true).as_deref(), Some("to #deploy @tamsin"));
+        assert_ne!(r("#deploy @Tamsin x", "open", false), r("@Tamsin y", "deploy", true));
+        // Order and case do not split a route.
+        assert_eq!(r("@Tamsin @Cleo a", "open", false), r("@cleo @tamsin b", "open", false));
+        // A slash command, a bare `/` among them, has none.
+        assert_eq!(r("/", "open", false), None);
+        assert_eq!(r("/channels", "deploy", true), None);
     }
 }

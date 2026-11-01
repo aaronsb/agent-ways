@@ -2124,6 +2124,95 @@ mod tests {
         assert!(footer.contains("Ctrl+1-9 tab (again: menu)"), "{footer}");
     }
 
+    /// A pane with work it can keep as the shell quits: the guard's third
+    /// button, under `key`, keeps it when `keeps`; `ending` counts the
+    /// unasked ends it was told of.
+    struct Keeps {
+        key: char,
+        keeps: bool,
+        kept: usize,
+        endings: std::rc::Rc<std::cell::Cell<usize>>,
+    }
+
+    impl Pane for Keeps {
+        fn palette(&self) -> theme::Palette {
+            theme::Palette::default()
+        }
+        fn tabs(&mut self) -> Vec<PaneTab> {
+            vec![PaneTab::new("one")]
+        }
+        fn tab(&mut self) -> usize {
+            0
+        }
+        fn set_tab(&mut self, _: usize) {}
+        fn draw(&mut self, _: &mut Frame, _: Rect) {}
+        fn key(&mut self, k: KeyEvent) -> Keyed {
+            if k.code == KeyCode::Esc {
+                return Keyed::Pass;
+            }
+            Keyed::Done
+        }
+        fn bindings(&self) -> Vec<Binding> {
+            Vec::new()
+        }
+        fn unsaved(&self) -> Option<String> {
+            Some("a message waiting".into())
+        }
+        fn quit_keeping(&self) -> Option<(String, char)> {
+            Some(("Keep and quit".into(), self.key))
+        }
+        fn keep_on_quit(&mut self) -> bool {
+            self.kept += 1;
+            self.keeps
+        }
+        fn ending(&mut self) {
+            self.endings.set(self.endings.get() + 1);
+        }
+    }
+
+    fn keeps(key: char, keeps: bool) -> App {
+        let mut a = App::with_pane("keeps", Keeps { key, keeps, kept: 0, endings: Default::default() });
+        a.key(k(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(a.guarding());
+        a
+    }
+
+    /// The guard's keep button quits once the pane kept its work; when the
+    /// pane could not, the shell goes back to the pane and stays open.
+    #[test]
+    fn the_keep_button_quits_only_once_the_pane_kept_its_work() {
+        let mut a = keeps('s', false);
+        let text = testkit::text(&testkit::render(&mut a, 80, 16));
+        assert!(text.contains("Keep and quit (s)"), "{text}");
+        assert!(a.key(k(KeyCode::Char('s'), KeyModifiers::NONE)), "not kept: the shell stays");
+        assert!(!a.guarding(), "back to the pane");
+        assert_eq!(a.pane_mut::<Keeps>().expect("the pane").kept, 1);
+        let mut a = keeps('s', true);
+        assert!(!a.key(k(KeyCode::Char('s'), KeyModifiers::NONE)), "kept: the shell quits");
+    }
+
+    /// A pane's key the guard already binds is dropped: `b` stays Back,
+    /// and the pane's button is shown without it.
+    #[test]
+    fn a_keep_key_the_guard_binds_is_not_the_panes() {
+        let mut a = keeps('b', true);
+        let text = testkit::text(&testkit::render(&mut a, 80, 16));
+        assert!(text.contains("Keep and quit") && !text.contains("Keep and quit (b)"), "{text}");
+        assert!(a.key(k(KeyCode::Char('b'), KeyModifiers::NONE)), "b is Back");
+        assert!(!a.guarding());
+        assert_eq!(a.pane_mut::<Keeps>().expect("the pane").kept, 0, "nothing kept");
+    }
+
+    /// The run loop's unasked end, a signal or the terminal hanging up,
+    /// tells the pane once, guard open or not, and hands back the signal.
+    #[test]
+    fn an_unasked_end_tells_the_pane_once() {
+        let mut a = keeps('s', true);
+        let endings = a.pane_mut::<Keeps>().expect("the pane").endings.clone();
+        let session = a.end_unasked(crate::app::term::HANGUP, "stopped: the terminal hung up");
+        assert_eq!((session.signal, endings.get()), (Some(crate::app::term::HANGUP), 1));
+    }
+
     #[test]
     fn quitting_over_unsaved_work_asks_first() {
         let mut a = app(false);
