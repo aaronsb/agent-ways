@@ -11,14 +11,15 @@ pub fn run(args: &[String]) -> Result<()> {
     // outlives a signal sent to it.
     #[cfg(unix)]
     {
-        let e = std::os::unix::process::CommandExt::exec(std::process::Command::new(&bin).args(args));
+        let mut cmd = std::process::Command::new(&bin);
+        cmd.args(args);
+        // exec returns only when it fails.
+        let e = super::proc::retry_if_busy(|| Err::<(), _>(std::os::unix::process::CommandExt::exec(&mut cmd))).unwrap_err();
         Err(e).with_context(|| format!("running {}", bin.display()))
     }
     #[cfg(not(unix))]
     {
-        let status = std::process::Command::new(&bin)
-            .args(args)
-            .status()
+        let status = super::proc::retry_if_busy(|| std::process::Command::new(&bin).args(args).status())
             .with_context(|| format!("running {}", bin.display()))?;
         std::process::exit(status.code().unwrap_or(1));
     }

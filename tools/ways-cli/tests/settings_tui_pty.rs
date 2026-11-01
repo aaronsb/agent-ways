@@ -195,13 +195,20 @@ impl Screens {
         panic!("`{needle}` never appeared:\n{}", self.text());
     }
 
+    /// The pid the stand-in wrote to `file`. The shell's `> file` creates
+    /// the file empty before `echo` writes the line, so the file existing
+    /// is not the pid being there: wait for the whole line.
     fn pid(&self, file: &str) -> i32 {
         let p: &Path = &self.root.join(file);
         let start = Instant::now();
-        while !p.exists() && start.elapsed() < Duration::from_secs(10) {
+        loop {
+            let text = std::fs::read_to_string(p).unwrap_or_default();
+            if let Some(pid) = text.strip_suffix('\n').and_then(|l| l.parse().ok()) {
+                return pid;
+            }
+            assert!(start.elapsed() < Duration::from_secs(10), "{file} was not written: {text:?}");
             std::thread::sleep(Duration::from_millis(20));
         }
-        std::fs::read_to_string(p).unwrap_or_default().trim().parse().unwrap_or_else(|_| panic!("{file} was not written"))
     }
 
     /// Wait for the screens to exit, at most `secs`.

@@ -102,6 +102,9 @@ impl Host {
 struct Record {
     sources: Vec<Source>,
     optout: bool,
+    /// When the opt-out was made, in milliseconds since the epoch. A run
+    /// that took the session lock at or before then keeps it (enroll_run).
+    optout_at: Option<u64>,
     host: Option<HostRecord>,
     claude: Option<String>,
     since: Option<u64>,
@@ -134,6 +137,8 @@ impl Record {
                         r.claude = Some(key.to_string());
                     } else if let Some(sid) = line.strip_prefix("previous ") {
                         r.previous.push(sid.trim().to_string());
+                    } else if let Some(ms) = line.strip_prefix("optout_at ") {
+                        r.optout_at = ms.trim().parse().ok();
                     } else if let Some(secs) = line.strip_prefix("since ") {
                         r.since = secs.trim().parse().ok();
                     } else if let Some(rest) = line.strip_prefix("host ") {
@@ -153,6 +158,9 @@ impl Record {
         let mut out: String = self.sources.iter().map(|s| format!("{}\n", s.as_str())).collect();
         if self.optout {
             out.push_str("optout\n");
+        }
+        if let Some(ms) = self.optout_at {
+            out.push_str(&format!("optout_at {ms}\n"));
         }
         if let Some(h) = &self.host {
             match &h.claude {
@@ -414,7 +422,24 @@ pub fn sources(session_id: &str) -> Vec<Source> {
 /// mod-hosted. A session that was not enrolled starts listening now
 /// ([`listening_since`]).
 pub fn enroll(session_id: &str, source: Source, host: Option<Host>) -> io::Result<()> {
-    enroll_in(&dir(), session_id, source, host, own_claude_key())
+    enroll_in(&dir(), session_id, source, host, own_claude_key(), None)
+}
+
+/// Record that the `attend run` which took `session_id`'s lock at
+/// `since` (milliseconds since the epoch, [`now_ms`]) enrolled. An opt-out
+/// made at or after `since` was made while this run held the session, so
+/// it stands: the run listens until it exits. A self-reload or an id
+/// hand-over re-executes the same run and passes the same `since`. An
+/// older opt-out is the person's choice before this run started, which
+/// starting attend again overrides.
+pub fn enroll_run(session_id: &str, since: u64) -> io::Result<()> {
+    enroll_in(&dir(), session_id, Source::Run, None, own_claude_key(), Some(since))
+}
+
+/// Milliseconds since the epoch, the clock an opt-out and a run's start
+/// are compared on.
+pub fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
 /// Record, under the records in `dir` ([`records_dir`]), that another member
@@ -424,7 +449,7 @@ pub fn enroll(session_id: &str, source: Source, host: Option<Host>) -> io::Resul
 /// the record names no process and the session's liveness rests on its
 /// heartbeat.
 pub fn enroll_added_in(dir: &Path, session_id: &str, claude: Option<String>) -> io::Result<()> {
-    enroll_in(dir, session_id, Source::Add, None, claude)
+    enroll_in(dir, session_id, Source::Add, None, claude, None)
 }
 
 /// Whether `session_id` is enrolled under the records in `dir`
@@ -441,7 +466,7 @@ pub fn withdraw_in(dir: &Path, session_id: &str, source: Source) -> io::Result<(
     edit_in(dir, session_id, |r| r.sources.retain(|s| *s != source))
 }
 
-fn enroll_in(dir: &Path, session_id: &str, source: Source, host: Option<Host>, claude: Option<String>) -> io::Result<()> {
+fn enroll_in(dir: &Path, session_id: &str, source: Source, host: Option<Host>, claude: Option<String>, run_since: Option<u64>) -> io::Result<()> {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     edit_in(dir, session_id, |r| {
         if r.sources.is_empty() {
@@ -450,7 +475,10 @@ fn enroll_in(dir: &Path, session_id: &str, source: Source, host: Option<Host>, c
         if !r.sources.contains(&source) {
             r.sources.push(source);
         }
-        r.optout = false;
+        if !run_since.is_some_and(|since| r.optout_at.is_some_and(|at| at >= since)) {
+            r.optout = false;
+            r.optout_at = None;
+        }
         if let Some(host) = host {
             r.host = Some(HostRecord { host, claude: claude.clone() });
         }
@@ -495,17 +523,28 @@ pub fn withdraw(session_id: &str, source: Source) -> io::Result<()> {
 /// run` holds the session; then the run's enrollment ends once it no longer
 /// does ([`is_enrolled`] applies it). The record keeps the session's
 /// process ([`process_has_exited`]).
+///
+/// A run that holds the lock may not have enrolled yet: `attend run` takes
+/// the lock, then enrolls a moment later. The run is recorded here all the
+/// same, with the time of the opt-out, and its enrollment keeps the
+/// opt-out ([`enroll_run`]).
 pub fn opt_out(session_id: &str) -> io::Result<()> {
     let live = crate::heartbeat::run_is_live(session_id);
+    let at = now_ms();
     edit(session_id, |r| {
-        r.sources.retain(|s| *s == Source::Run);
-        if live && r.sources.contains(&Source::Run) {
+        if live {
+            r.sources.retain(|s| *s == Source::Run);
+            if r.sources.is_empty() {
+                r.sources.push(Source::Run);
+            }
             r.optout = true;
+            r.optout_at = Some(at);
         } else {
             r.sources.clear();
         }
     })
 }
+
 
 /// Move `old`'s enrollment to `new`, for a session whose id changed under
 /// the same process (`/clear`). Keeps any way `new` already had, and records
@@ -531,6 +570,7 @@ pub fn carry_in(dir: &Path, old: &str, new: &str) -> io::Result<()> {
             }
         }
         r.optout |= from.optout;
+        r.optout_at = r.optout_at.max(from.optout_at);
         if r.host.is_none() {
             r.host = from.host;
         }
@@ -707,7 +747,7 @@ mod tests {
             assert!(sources("off").is_empty() && listening_since("off").is_none() && host("off").is_none());
             assert!(!crate::alive("off", &none) && !crate::has_exited("off"), "its process runs, and it does not listen");
             assert_eq!(previous_id(&own_key(), "after-clear"), None, "no enrollment to adopt");
-            super::enroll_in(&records_dir(), "off", Source::Listen, None, None).unwrap();
+            super::enroll_in(&records_dir(), "off", Source::Listen, None, None, None).unwrap();
             assert_eq!(read("off").map(|r| (r.host, r.since.is_some_and(|s| s > 1))), Some((None, true)), "listening again starts a fresh record");
 
             let gone = format!("{}-1@{}", gone_pid(), crate::process::host_name());
@@ -891,6 +931,66 @@ mod tests {
             assert_eq!(Record::parse(&read("s").unwrap().render()).sources, vec![Source::Listen, Source::Join]);
             opt_out("s").unwrap();
             assert!(!is_enrolled("s"), "no run holds it, so every way ends");
+        });
+    }
+
+    /// A session that ran attend before still lists the run. An opt-out
+    /// while a new run starts must outlast that run's enrollment.
+    #[test]
+    fn an_opt_out_as_a_later_run_starts_outlasts_its_enrollment() {
+        with_cache(|| {
+            enroll("s", Source::Run, None).unwrap();
+            let lock = crate::heartbeat::try_acquire_session_lock("s").unwrap().expect("the new run's lock");
+            let since = now_ms();
+            opt_out("s").unwrap();
+            enroll_run("s", since).unwrap();
+            assert!(is_enrolled("s"), "the run holds the session, so it listens");
+            drop(lock);
+            assert!(!is_enrolled("s"), "the opt-out applies once the run is gone");
+        });
+    }
+
+    /// A run that reloads itself, or hands over to a new id, enrolls again
+    /// with its first start, and an opt-out made while it ran stands. A run
+    /// started after the opt-out listens.
+    #[test]
+    fn a_reloaded_run_keeps_the_opt_out_made_while_it_ran_and_a_new_run_clears_it() {
+        with_cache(|| {
+            let lock = crate::heartbeat::try_acquire_session_lock("s").unwrap().expect("the run's lock");
+            let since = now_ms();
+            enroll_run("s", since).unwrap();
+            opt_out("s").unwrap();
+            enroll_run("s", since).unwrap();
+            assert!(is_enrolled("s"));
+            drop(lock);
+            assert!(!is_enrolled("s"), "the opt-out outlasts the reload");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            let lock = crate::heartbeat::try_acquire_session_lock("s").unwrap().expect("a later run's lock");
+            enroll_run("s", now_ms()).unwrap();
+            drop(lock);
+            assert!(is_enrolled("s"), "starting attend again listens");
+        });
+    }
+
+    /// An opt-out in the moment between a run taking the session lock and
+    /// enrolling as a run waits for the enrollment: it keeps the run and
+    /// takes effect once the run exits, as it does later in the run's life.
+    #[test]
+    fn an_opt_out_as_a_run_starts_waits_for_the_run_to_enroll() {
+        with_cache(|| {
+            enroll("s", Source::Listen, None).unwrap();
+            let lock = crate::heartbeat::try_acquire_session_lock("s").unwrap().expect("the run's lock");
+            let since = now_ms();
+            let run = std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                enroll_run("s", since).unwrap();
+            });
+            opt_out("s").unwrap();
+            run.join().unwrap();
+            assert!(is_enrolled("s"), "the run holds the session, so it listens");
+            assert_eq!(sources("s"), vec![Source::Run]);
+            drop(lock);
+            assert!(!is_enrolled("s"), "the opt-out applies once the run is gone");
         });
     }
 

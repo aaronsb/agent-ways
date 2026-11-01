@@ -288,7 +288,7 @@ fn judge_setup() {
 /// it. A binary without the name prints nothing here. The update rewrites
 /// none of the files.
 fn retired_settings(ways_bin: &Path) {
-    let Ok(out) = Command::new(ways_bin).arg("retired-settings").output() else { return };
+    let Ok(out) = super::proc::retry_if_busy(|| Command::new(ways_bin).arg("retired-settings").output()) else { return };
     let text = String::from_utf8_lossy(&out.stdout);
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
     if !out.status.success() || lines.is_empty() {
@@ -978,7 +978,7 @@ pub(super) fn source_describe(app: &Path) -> Option<String> {
 /// the parenthesized provenance in `ways X.Y.Z (ways-v...-g<sha>)`. None when the
 /// binary predates baked provenance (no parenthetical) or can't be run.
 fn read_build_describe(bin: &Path) -> Option<String> {
-    let out = Command::new(bin).arg("--version").output().ok()?;
+    let out = super::proc::retry_if_busy(|| Command::new(bin).arg("--version").output()).ok()?;
     if !out.status.success() {
         return None;
     }

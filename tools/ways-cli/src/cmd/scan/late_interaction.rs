@@ -933,7 +933,7 @@ pub(crate) fn chunk_sections(content: &str) -> Vec<String> {
 /// (chunks/pairs), so writing it fully before draining stdout cannot deadlock.
 fn run_stdin(mut cmd: Command, input: &str) -> Option<String> {
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
-    let mut child = cmd.spawn().ok()?;
+    let mut child = crate::cmd::proc::retry_if_busy(|| cmd.spawn()).ok()?;
     // A child that exits early is a failed run, not the end of `ways`.
     agent_fmt::write_to_child(&mut child.stdin.take()?, input.as_bytes()).ok()?;
     let out = child.wait_with_output().ok()?;

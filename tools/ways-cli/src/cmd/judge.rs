@@ -258,7 +258,7 @@ pub fn setup() -> Result<()> {
         if let Some(var) = p.key_env() {
             check.env_remove(var);
         }
-        let _ = check.status();
+        let _ = super::proc::retry_if_busy(|| check.status());
         state = readiness();
     }
     let Some(warning) = warning(&state) else {
@@ -312,9 +312,7 @@ pub fn setup() -> Result<()> {
 /// stores it, then names the provider's engine in `gate.engine` once the key
 /// file passed its check: the operator chose that engine.
 fn add_key(bin: &std::path::Path, provider: Provider) -> Result<()> {
-    Command::new(bin)
-        .args(["key", "add", "--provider", provider.as_str()])
-        .status()
+    super::proc::retry_if_busy(|| Command::new(bin).args(["key", "add", "--provider", provider.as_str()]).status())
         .with_context(|| format!("running {}", bin.display()))?;
     if keys::key_engine_ready(provider.as_str()) {
         engine(Some(provider.as_str()))?;
