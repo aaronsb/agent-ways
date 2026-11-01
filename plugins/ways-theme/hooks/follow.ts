@@ -2,7 +2,8 @@
 // `custom:ways`, and the two `/config` rows the frames read, `verbose` and
 // `theme`. The register module calls it at session start and from its
 // `config.set` hook; the skins layer calls `onPickup` after each later read of
-// its export, so one timer carries every mid-session read. Every failure
+// its export, so one timer carries every mid-session read, and a failed read
+// is read again at the next one. Every failure
 // does nothing but log one debug line per distinct reason, as register.tsx's
 // header says.
 
