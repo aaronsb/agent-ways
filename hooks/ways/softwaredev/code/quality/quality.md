@@ -36,12 +36,12 @@ When the file length scan (macro output) shows priority files, call them out exp
 | Rationalization | Counter |
 |---|---|
 | "Splitting this file would make it harder to follow" | A 900-line file is already hard to follow. Split at natural seam lines. |
-| "There's no good place to split" | Can't find a split point = coupling problem worth solving. |
+| "There's no good place to split" | When no split point exists, the code is too tightly coupled, and that is worth fixing. |
 | "I'll refactor later" | The file will only grow. Propose the split now, while the logic is fresh. |
 
 ## What to Enforce
 
-A validation — a lint rule, an assertion, a schema constraint, a CI check — **earns its place only if its violation is a real defect** someone would eventually hit. The good ones track genuine failure: a dangling reference, a state that can't be reached, a contract that's silently broken. The trap is the internally-consistent invariant that tracks *nothing* real ("every page must have exactly three links") — it passes, it feels rigorous, and it costs maintenance forever while catching no bug. This matters more when an agent sustains the checks: an agent will happily maintain a pointless invariant indefinitely, so nothing surfaces that it was never worth adding. Before adding a check, name the defect its failure would represent. If you can't, don't add it.
+**Add a validation, such as a lint rule, an assertion, a schema constraint or a CI check, only when breaking it is a real defect** that someone would eventually hit. A useful check catches a real failure: a reference to something that does not exist, a state the code cannot reach, a contract that breaks without an error. A rule such as "every page must have exactly three links" can be consistent and always pass, yet it catches no bug and still costs maintenance. An agent that maintains the checks keeps such a rule alive indefinitely, so nobody notices that it was never worth adding. Before adding a check, name the defect its failure would represent. If you can't, don't add it.
 
 ## See Also
 

@@ -7,7 +7,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Governance Citation
 
-When you recommend a practice — a commit convention, a security default, a quality threshold, a documentation rule — there is often a real regulatory control behind it. Citing it grounds the recommendation in an actual standard instead of general knowledge. The control data lives in a traceability system; the **governance-cite** skill is the *how* (the lookup commands). This way is the *when, and how to phrase*.
+When you recommend a practice — a commit convention, a security default, a quality threshold, a documentation rule — there is often a real regulatory control behind it. Citing it grounds the recommendation in an actual standard instead of general knowledge. The controls live in a traceability system, and the **governance-cite** skill has the commands that look them up. This way covers when to cite a control and how to word the citation.
 
 ## When to cite
 
@@ -20,7 +20,7 @@ Don't force a citation into every response — use one when it adds authority or
 
 ## How to phrase it
 
-Quote the *justification* along with the standard — the justification is the evidence that maps a specific directive to a specific control requirement.
+Quote the control's *justification* along with the standard's name. The justification is the text that ties a specific directive to a specific requirement of the control.
 
 **Inline** (brief):
 > We use conventional commit format — per NIST CM-3, this "creates structured change records with type classification" for auditable change control.
@@ -33,9 +33,9 @@ Quote the *justification* along with the standard — the justification is the e
 
 ## Principles
 
-- **Quote the justification** — "parameterized queries required as default" beats "per NIST IA-5."
-- **Don't over-cite** — one relevant control with its justification beats listing every standard that tangentially applies.
-- **Cite from the data** — run the lookup (the **governance-cite** skill) to get current controls; provenance may have changed since training.
+- **Quote the justification** — "parameterized queries required as default" tells the reader more than "per NIST IA-5."
+- **Cite one control** — give the one relevant control with its justification instead of listing every standard that touches the practice.
+- **Cite from the data** — run the lookup (the **governance-cite** skill) to get current controls; the controls may have changed since your training data was collected.
 
 ## See also
 

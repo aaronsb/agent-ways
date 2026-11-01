@@ -9,11 +9,11 @@ scope: agent
 <!-- epistemic: heuristic -->
 # Merging
 
-Landing an increment is the **stable tail** of the develop loop: review → fix → merge → clean up. The **`merge` skill** runs it. The judgement this way carries is that the *review gate is not one policy* — how hard to review, and whether a human reads before merge, depend on the work.
+Landing an increment is the **stable tail** of the develop loop, the part that runs the same way every time: review → fix → merge → clean up. The **`merge` skill** runs it. This way sets the review gate for each change: how deep the review goes, and whether a person reads the change before the merge, depend on the work.
 
 ## The repository's enforcement decides first
 
-Every project sets its own review policy, and the strict ones encode it mechanically: a ruleset or protected branch that requires approvals, a CODEOWNERS file, required status checks, commit hooks. Before classifying, read what this repository enforces. That enforcement is the project's policy and it decides. The judgement below applies only where nothing enforces, and it can add review on top of a mechanism but never subtract from one. When the policy cannot be read (no forge CLI, no access, an unfamiliar host), treat review as required.
+Every project sets its own review policy, and the strict ones encode it mechanically: a ruleset or protected branch that requires approvals, a CODEOWNERS file, required status checks, commit hooks. Before classifying, read what this repository enforces. That enforcement is the project's policy and it decides. The judgement below applies only where nothing enforces review, and it can add review to what a mechanism requires but never remove any. When the policy cannot be read (no forge CLI, no access, an unfamiliar host), treat review as required.
 
 | Where | What to read |
 |---|---|
@@ -31,12 +31,12 @@ Classify the increment on two axes and pick the path:
 | **human gate: none** (routine, or already read) | **run it** — a quick `code-review` (or skip) → merge | **swarm-gate** — fan review across dimensions, adversarially verify → agent-gated merge |
 | **human gate: required** (sets direction, or unread one-way door) | **review + offer** — single-agent review → "want to read before I merge?" | **full gate** — swarm review **and** operator approval before merge |
 
-- **The X axis** is driven by **complexity and blast-radius**: diff size, number of files, core-vs-leaf, test coverage, reversibility. A sprawling change to a core path earns a swarm; a contained leaf edit earns a single pass.
+- **The X axis** is driven by **complexity and blast-radius**: diff size, number of files, core-vs-leaf, test coverage, reversibility. A large change to a core path gets a swarm of reviewers, and a small change to a leaf gets a single review.
 - **The Y axis** is driven by **whether the work sets direction** — an ADR that steers architecture lands in the bottom row no matter how small the diff — and by **whether the operator has already read it**. If they wrote it or reviewed it live, the human gate is already satisfied.
 
-When the classification is ambiguous, **surface the call** rather than silently picking a corner. Inside a `/goal` loop, bias toward the autonomous corners; outside one, ask.
+When the classification is unclear, **raise it with the operator** instead of picking a corner silently. Inside a `/goal` loop, lean toward the corners without a human gate; outside one, ask which corner applies.
 
-Whichever corner you land in, asking to merge is asking for the review this gate specifies — dispatch the reviewer rather than re-requesting permission to, and name the payoff in a clause as you do. The ambiguity worth surfacing is *which corner*, never *whether to review*. See ADR-175.
+In every corner, a request to merge is a request for the review that corner names. Start the reviewer without asking permission again, and say in a clause what the review buys. The question to raise is *which corner* applies; *whether to review* is already settled. See ADR-175.
 
 ## Version bumps merge on green CI
 
@@ -44,21 +44,21 @@ A release bump PR whose diff is only the package's version line and its lockfile
 
 ## Green CI is a command
 
-Green CI means `gh pr checks <n> --json bucket -q 'all(.[]; .bucket=="pass" or .bucket=="skipping")'` prints `true`. Run it as its own command and read the result before `gh pr merge`. Do not parse the text table. A pipeline's exit status is its last command's, so `gh pr checks 5 | cut -f1 && gh pr merge 5` merges whatever the checks say. A repository with no checks has no green CI to merge under; `gh pr checks` exits 1 there. A guard script counts once it has been seen refusing a red case. After a merge or an auto-merge request, a hook names any check that was not green; tell the operator when it does.
+Green CI means `gh pr checks <n> --json bucket -q 'all(.[]; .bucket=="pass" or .bucket=="skipping")'` prints `true`. Run it as its own command and read the result before `gh pr merge`. Do not parse the text table. A pipeline's exit status is its last command's, so `gh pr checks 5 | cut -f1 && gh pr merge 5` merges whatever the checks say. A repository with no checks has no green CI to merge under; `gh pr checks` exits 1 there. Trust a guard script once you have seen it refuse a red case. After a merge or an auto-merge request, a hook names any check that was not green; tell the operator when it does.
 
 ## Remediate before you merge
 
-A review that finds nothing changes nothing; a review that finds something is only worth running if the findings get fixed. **Remediate per finding** before the merge gate — apply the fix, or record why a finding is declined. Don't carry known findings past the gate. This is the step the loop is easy to skip: "reviewed" is not "landed clean."
+A review is worth running only if its findings get fixed. **Handle each finding** before the merge gate: apply the fix, or record why you declined it. Do not merge with known findings open. This step is the easiest one in the loop to skip.
 
 ## Then land it
 
-Merge (regular merge commit, preserving the branch's narrative — see `delivery/github`), then run the full cleanup: back to `main`, pull, prune, delete the merged branch. Landing an increment is **not** cutting a release — versioning, changelogs, and artifacts are `delivery/release` and the `/release` skill, a separate, heavier act.
+Merge with a regular merge commit, which keeps the branch's commits in the history (see `delivery/github`), then run the full cleanup: back to `main`, pull, prune, and delete the merged branch. Merging an increment does **not** cut a release. Versions, changelogs and artifacts belong to `delivery/release` and the `/release` skill, a separate and larger step.
 
 ## Reconcile the decision ledger
 
-An ADR that authorized the work sits at `Draft` for as long as the work is unmerged. Merging is the moment its claim becomes true, so flip it to `Accepted` in the same pass as the cleanup. An ADR that the merge supersedes, or one the work proved unnecessary, leaves the active set through `adr archive`.
+An ADR that authorized the work stays at `Draft` until the work merges. Once the merge lands, the ADR describes the system, so set it to `Accepted` during the cleanup. Run `adr archive` on an ADR that the merge supersedes, or that the work showed was unnecessary.
 
-Skipping this costs nothing per merge and compounds. An audit in August 2026 found seventeen ADRs still at `Draft` or `Proposed` with their implementation long shipped — one of them carrying thirteen source references while marked "Proposed" — and four documents that had been abandoned or quietly solved by a neighbour. The archive command had existed for weeks and had never been run. Nothing fails while this drifts; the ledger simply stops describing the system, and the correction arrives as a corpus-wide audit instead of a one-line edit.
+Skipping this costs nothing at any one merge, but the cost adds up. An audit in August 2026 found seventeen ADRs still at `Draft` or `Proposed` with their implementation long shipped — one of them carrying thirteen source references while marked "Proposed" — and four documents that had been abandoned or quietly solved by a neighbour. The archive command had existed for weeks, and nobody had run it. No check fails while the records drift. They stop describing the system, and fixing them then takes an audit of the whole corpus instead of a one-line edit at each merge.
 
 ## See Also
 
@@ -66,5 +66,5 @@ Skipping this costs nothing per merge and compounds. An audit in August 2026 fou
 - delivery/commits(softwaredev) — the commit quality the PR is built from.
 - delivery/release(softwaredev) — the heavier sibling: publishing a versioned release.
 - delivery/groundwork/sequence(softwaredev) — a hold for an area that cannot yet be verified, decided before the four-square classifies the review.
-- develop(meta) — the loop whose stable tail this is.
+- develop(meta) — the loop that this way finishes.
 - code-reviewer (subagent, `agents/code-reviewer.md`) — the reviewer `merge` spawns at the gate; the built-in `/code-review` is the operator's manual equivalent.

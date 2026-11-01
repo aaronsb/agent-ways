@@ -11,15 +11,15 @@ refire: 0.15
 <!-- epistemic: premise -->
 # Documentation
 
-Documentation is **one typed graph**, not a pile of files. Each page and each decision record is a *node*; `related`/`supersedes` references are *edges*. The node's **type lives in frontmatter and is enforced by a linter** — not in its filename. The **filesystem is a serialization** of that graph for human readers: folders, names, and the rendered site are *views*, refactor-freely, never the source of truth.
+Documentation is **one typed graph**. Each page and each decision record is a *node*, and its `related` and `supersedes` references are *edges*. A node's **type lives in its frontmatter, and a linter enforces it**; the filename carries no type. The **filesystem lays the graph out for human readers**: folders, file names and the rendered site are *views* of the graph. Rearrange them freely, because the frontmatter stays the source of truth.
 
-This is what lets the rigor scale: a typed graph that would take a human minutes to reason through, an agent and a linter sustain in one pass. Push the structure into frontmatter and lint where it is cheap to maintain; keep the filesystem friendly for the humans who still read it. (Decision: ADR-302.)
+A person would take minutes to check the graph's types and links by hand, and an agent with a linter checks them in one pass. So keep the structure in frontmatter and in the linter, where it is cheap to maintain, and keep the folders easy for people to browse. (Decision: ADR-302.)
 
-## Two altitudes
+## Two levels
 
-Children of this way split into the **model** that types the corpus and the **craft** of authoring one artifact well:
+The children of this way cover two levels: the **model**, which defines the graph's types, and the **craft** of writing one page or record well:
 
-| Altitude | Concern | Way |
+| Level | Concern | Way |
 |----------|---------|-----|
 | Model | The graph itself — nodes, edges, one corpus for docs + decisions | `graph` *(forthcoming)* |
 | Model | The typed node — `id` (`DD.NNN.P`), `domain`, `mode`, `aliases`, edges | `frontmatter` *(forthcoming)* |
@@ -27,7 +27,7 @@ Children of this way split into the **model** that types the corpus and the **cr
 | Model | A node *type* — the decision record | `adr` |
 | Model | The type-checker — `doclint`, the invariant set, the coverage matrix | `linting` *(forthcoming)* |
 | Model | Projecting the graph for human readers — folders, nav, mkdocs, Obsidian | `serialization` *(forthcoming)* |
-| Craft | The front door | `readme` |
+| Craft | The README, the page a newcomer opens first | `readme` |
 | Craft | The CLAUDE.md or AGENTS.md file every session in a repository loads | `instruction-files` |
 | Craft | Reference for HTTP/REST surfaces | `api` |
 | Craft | Code-level docs (docstrings, JSDoc, rustdoc) | `docstrings` |
@@ -35,18 +35,18 @@ Children of this way split into the **model** that types the corpus and the **cr
 | Craft | House norms — style, conventions, accessibility | `standards` |
 | Craft | A cold read by a fresh agent, and a linter proven by a planted violation | `validate` |
 
-*Forthcoming* model ways are authored as ADR-302 lands; until then this parent names the shape so the corpus has somewhere to grow into.
+The model ways marked *forthcoming* get written as ADR-302 is implemented. Until then, this parent lists them so that each one has a place in the corpus.
 
 ## Principles
 
-- **Type once, serialize many** — one graph; many views (dev tree, published site, Obsidian graph, audience bundles). Audience drives the *view*, never the type.
-- **An invariant earns its place only if its violation is a real defect** — a dangling edge, a supersede cycle, an id that disagrees with its mode. Rigor that tracks nothing is just a tax.
-- **Progressive disclosure, task-orientation, currency** — overview before detail; organize by reader job; an outdated page is a broken front door.
+- **One graph, many views.** Each page's type is set once, in its frontmatter, and the graph is rendered as several views: the dev tree, the published site, an Obsidian graph, and bundles for one audience. The audience decides which *view* it reads, and never changes a page's type.
+- **Add a lint rule only when breaking it is a real defect**, such as a link to a missing page, a cycle of supersessions, or an id that disagrees with its mode. A rule that catches no defect still costs maintenance.
+- **Overview before detail, organized by the reader's task, and kept current.** An outdated page misleads every reader who opens it.
 
 ## See Also
 
 - adr(documentation) — decision records as nodes in the graph
-- readme(documentation) — README as the front door
+- readme(documentation) — the README, the first page a newcomer reads
 - standards(documentation) — documentation house norms
 - mermaid(documentation) — structural diagrams
 - validate(documentation) — a fresh agent given only the entry point grades the docs; a wrong answer is a docs defect

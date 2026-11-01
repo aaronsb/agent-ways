@@ -15,9 +15,9 @@ State each path's conclusion clearly. One sentence per path.
 
 ### 4. Consistency Analysis
 Compare the answers:
-- **Agreement**: All paths converge → high confidence in the answer
-- **Majority**: Most agree, one diverges → examine the divergent path for errors or edge cases
-- **Split**: No consensus → the disagreement IS the finding. The question may be ambiguous or context-dependent.
+- **Agreement**: all paths reach the same answer, so confidence in it is high.
+- **Majority**: most paths agree and one differs. Examine the differing path for errors or edge cases.
+- **Split**: the paths do not agree. Report the disagreement as the finding; the question may be ambiguous or depend on context.
 
 ### 5. Consensus or Escalation
-If majority agrees: that's the answer, with the divergent path noted as a caveat. If split: present the split to the user. The uncertainty is more valuable than a forced answer.
+If most paths agree, give their answer and note the differing path as a caveat. If the paths split, show the split to the user instead of forcing an answer.

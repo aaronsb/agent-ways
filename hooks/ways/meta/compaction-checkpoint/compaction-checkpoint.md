@@ -7,7 +7,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Compaction Checkpoint
 
-We're nearing the context limit where compaction becomes mandatory. Before that happens, this is a good moment to sync with the user — they have continuous persistence and can provide the synthesis that survives compaction best.
+The session is nearing the context limit, where compaction becomes mandatory. Before it runs, check in with the user. The user remembers the whole session, and compaction does not touch that memory, so the user's view of what matters survives compaction best.
 
 ## Step 1: Summarize Where Things Stand
 
@@ -28,9 +28,9 @@ Put the summary and the questions below in your final message, and keep working 
 **Question 2** — "What should survive compaction?" (header: "Priority")
 - Options based on the active work: which threads matter most going forward
 
-Keep it to 1-2 focused questions. The goal is calibration, not a survey.
+Ask one or two focused questions, enough to check the direction.
 
-Frame this as a collaboration checkpoint, not a limitation apology. Something like:
+Present this as a check-in on the work, and do not apologize for the context limit. For example:
 
 > "We're approaching context limits and compaction will happen soon. Before it does, here's where I think we are — I'd like your take on what's landed and where to focus next."
 
@@ -41,21 +41,19 @@ After the user responds, combine your summary with their steering into a synthes
 1. Keep the synthesis available for the successor session, in the convention this session started with: the task list, a `tasklist` issue (ADR-180), or a handoff file the project already uses
 2. With no known convention, add the synthesis to `.claude/handoff.wrap.md` when `/wrap` has written one, and otherwise write `.claude/handoff.local.md`, both at the repository root. When `.gitignore` does not cover the file, list it in `.git/info/exclude`
 3. Include the user's priorities and direction — their words, not your paraphrase
-4. **Produce a copy-pastable continuance prompt** — a short block the user can paste into a *fresh* session if this one ends: the goal/intent, what's landed, the immediate next step, and the key files/branches in play. When several tasks remain, add the working mode from the `/wrap` skill: the main session steers, subagents carry implementation and review, and each branch gets its own worktree. Compaction keeps the session alive; a continuance prompt is the handoff that survives even a hard reset.
+4. **Produce a copy-pastable continuance prompt** — a short block the user can paste into a *fresh* session if this one ends: the goal/intent, what's landed, the immediate next step, and the key files/branches in play. When several tasks remain, add the working mode from the `/wrap` skill: the main session steers, subagents carry implementation and review, and each branch gets its own worktree. Compaction keeps the session running, and the continuance prompt still works if the session ends.
 
 ## Step 4: Hand Over Directed Compaction
 
-After writing the synthesis, hand the user a ready-to-run `/compact <focus>` line, with the focus naming their priorities. No way or skill can run a slash command, so the user runs it (see wrap(meta)). The synthesis is the freshest, highest-signal content in context, so compaction preserves it as the dominant signal.
-
-This is the difference between controlled compaction (user-directed, synthesis-anchored) and uncontrolled compaction (generic, whatever the system decides to keep).
+After writing the synthesis, hand the user a ready-to-run `/compact <focus>` line, with the focus naming their priorities. No way or skill can run a slash command, so the user runs it (see wrap(meta)). The synthesis is the newest and most informative text in context, so compaction gives it the most weight in the summary. Without a focus line, compaction keeps whatever its generic summary picks.
 
 ## If a Goal Is Active
 
-A `/goal` survives compaction — it's session-scoped, and compaction doesn't end the session, so the evaluator keeps driving toward the condition on the other side. When a goal is active:
+A `/goal` survives compaction. The goal belongs to the session, and compaction does not end the session, so the goal's evaluator keeps working toward the condition afterwards. When a goal is active:
 
-- **Restate the goal condition in the synthesis** — it's the anchor the post-compaction turns will steer by.
-- **Keep the checkpoint light** — the goal already carries the direction, so confirm it still holds rather than re-deriving priorities from scratch.
-- **Consider finishing first** — if the goal's work is nearly done, completing it *before* compacting beats carrying a near-complete loop across the boundary.
+- **Restate the goal condition in the synthesis.** The turns after compaction steer by it.
+- **Keep the checkpoint light.** The goal already sets the direction, so confirm that it still holds instead of working out the priorities again.
+- **Consider finishing first.** If the goal's work is nearly done, complete it *before* compacting.
 
 ## See Also
 

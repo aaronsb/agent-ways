@@ -9,7 +9,7 @@ refire: 0.15
 
 **Before ad-hoc commands, check `make help`.** If the project has a Makefile, it likely has `make release`, `make dist`, `make deploy`, or similar targets that encode the project's actual publishing workflow. Use those.
 
-Children of this way cover the journey from local changes to production:
+The children of this way cover each step from a local change to production:
 
 | Stage | Way |
 |-------|-----|
@@ -23,7 +23,7 @@ Children of this way cover the journey from local changes to production:
 | Implementation planning | `delivery/implement` |
 | Readiness of an area before changing it | `delivery/groundwork` |
 
-Deploying a schema migration is a delivery step, but the migration *discipline* — design, numbering, idempotency, consolidation — lives in its own domain now: see `data/migrations`.
+Deploying a schema migration is a delivery step. Designing, numbering, consolidating and writing idempotent migrations is covered in `data/migrations`.
 
 ## See Also
 
@@ -32,6 +32,6 @@ Deploying a schema migration is a delivery step, but the migration *discipline* 
 - delivery/merge(softwaredev) — the review gate and landing an increment
 - delivery/implement(softwaredev) — implementation planning
 - delivery/groundwork(softwaredev) — build, verify, deliver, recover before adding primitives
-- data/migrations(data) — schema migration discipline (moved out of delivery)
+- data/migrations(data) — designing, numbering and consolidating schema migrations
 - delivery/atlassian(softwaredev) — Jira transitions and Confluence pages through the API
 - delivery/deploy(softwaredev) — the right account before a push, and proof the live build changed

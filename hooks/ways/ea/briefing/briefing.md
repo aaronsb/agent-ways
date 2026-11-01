@@ -7,7 +7,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Catch-Me-Up Briefing
 
-A unified briefing across inboxes, calendar, tasks, and chat — the most comprehensive EA workflow. The runnable procedure (parallel scouts, the priority structure, suggested task mutations) lives in the **briefing** skill. This way is *when* to reach for it, and when a lighter query serves better.
+A briefing is one unified summary across the user's inboxes, calendar, tasks and chat, and it is the most comprehensive of the EA workflows. The **briefing** skill runs the procedure: parallel scouts, the priority structure and the suggested task changes. This way says when to run it, and when a smaller query does the job.
 
 ## When to brief
 
@@ -15,11 +15,11 @@ Reach for a full briefing at the start of the day, after time away, or whenever 
 
 ## When to use a team (vs. a single query)
 
-The briefing skill can gather with parallel scout subagents or directly. Use the **team** when the briefing spans multiple accounts AND services AND benefits from cross-referencing — the parallelism hides slow I/O and keeps raw fetches out of the lead's context. **Skip the team** for a single account or service, an interactive task (drafting, scheduling), or a quick lookup — there the orchestration overhead costs more than it saves.
+The briefing skill can gather with parallel scout subagents or directly. Use the **team** when the briefing spans multiple accounts AND services AND benefits from cross-referencing — the scouts fetch in parallel, so a slow service does not hold up the rest, and the raw results stay out of the lead's context. **Skip the team** for a single account or service, an interactive task (drafting, scheduling), or a quick lookup. For those, starting scouts costs more time and tokens than it saves.
 
-## Surface, don't act
+## Suggest, then wait for approval
 
-A briefing ends in *suggestions* — a ranked action list and proposed task mutations the user approves, modifies, or dismisses. It never sends, schedules, or mutates on its own. Acting is a separate, approved step.
+A briefing ends in suggestions: a ranked list of actions and proposed task changes, which the user approves, changes or dismisses. The briefing itself never sends, schedules or changes anything. Each action happens later, after the user approves it.
 
 ## See also
 
