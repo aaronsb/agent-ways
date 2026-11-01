@@ -93,7 +93,8 @@ sweep
 # with attend.chat.send_delay at its default of 5 seconds, where every other
 # fixture sets 0 so Enter sends at once), full (the
 # crowd, and #five, #eight and #everyone with that many members, the
-# participant strip's one, two and three rows and its cut; full16 the same
+# participant strip's one, two and three rows and its cut, and #long, whose
+# invitees have no record and are named by their ids; full16 the same
 # at 16 colours, where the cut is `...`), dm2 (dm, and the
 # operator's DM to alpha and a second human, bob) or plain (no Nerd Font). An agent's name comes from the temp
 # path, and a long one cuts its project, so the quiet agent is clicked by
@@ -263,6 +264,8 @@ strip-five   | full  | wait:Agents M-5 wait:five_members
 strip-eight  | full  | wait:Agents M-3 wait:eight_members
 strip-cut    | full  | wait:Agents M-4 wait:every_agent
 strip-16     | full16 | wait:Agents M-4 wait:every_agent
+strip-narrow | full  | wait:Agents M-7 wait:long_names resize:40 gone:Agents wait:invited
+strip-narrow16 | full16 | wait:Agents M-7 wait:long_names resize:40 gone:Agents wait:invited
 "
 
 # The fixture: three claudes (alpha and beta live, gamma quiet), #deploy
@@ -306,7 +309,7 @@ fixture() { # kind
   if [ "$1" = many ]; then
     for n in $(seq -w 1 24); do mkdir -p "$sig/@ch$n"; done
   fi
-  [ "${1%16}" = full ] && mkdir -p "$sig/@five" "$sig/@eight" "$sig/@everyone"
+  [ "${1%16}" = full ] && mkdir -p "$sig/@five" "$sig/@eight" "$sig/@everyone" "$sig/@long"
   # In `gone`, gamma's record names a pid no process holds: it has
   # exited, so its row offers Tombstone… and attend accepts it. Elsewhere
   # it is quiet, and a send to it is refused as one to a quiet agent.
@@ -342,9 +345,19 @@ YAML
       printf '%s:\n  pinned: true\n  description: %s\n  members:\n' "${k%%:*}" "$(echo "${k##*:}" | tr _ ' ')" >> "$sig/_groups.yaml"
       for m in "${members[@]:0:$(echo "$k" | cut -d: -f2)}"; do printf '    - %s\n' "$m" >> "$sig/_groups.yaml"; done
     done
+    printf 'long:\n  pinned: true\n  description: long names\n  members: []\n' >> "$sig/_groups.yaml"
   fi
   now=$(date +%s)
   printf 'by: operator\nat: %s\n' "$((now - 240))" > "$sig/@deploy/$C.invite"
+  # In full, #long has no members and has invited four sessions with no
+  # record, whose heartbeats keep the invitations from the prune: the strip
+  # names each by its 36-column id, cut to fit its row beside the cut mark.
+  if [ "${1%16}" = full ]; then
+    for n in 1 2 3 4; do
+      printf 'by: operator\nat: %s\n' "$((now - 240))" > "$sig/@long/ffffffff-0000-4000-8000-00000000009$n.invite"
+      touch "$cache/heartbeat/ffffffff-0000-4000-8000-00000000009$n"
+    done
+  fi
   msg() { # dir id age from cwd text
     printf '%s|%s|%s|%s\n' "$4" "$(basename "$5")" "$5" "$6" > "$1/$2.signal"
     touch -d "@$((now - $3))" "$1/$2.signal"
@@ -418,7 +431,7 @@ launch() { # name cols rows
     XDG_CACHE_HOME="$F/cache" XDG_CONFIG_HOME="$F/config" XDG_STATE_HOME="$F/state" XDG_DATA_HOME="$F/data" \
     PATH="$BIN:$PATH" \
     TERM=xterm-256color COLORTERM=truecolor \
-    $TH launch "$1" --cols "$2" --rows "$3" --font "$FONT" -- "$BIN/attend-chat" "${DEPTH[@]}" >/dev/null)
+    $TH launch "$1" --cols "$2" --rows "$3" --font "$FONT" -- "$BIN/attend-chat" ${DEPTH[@]+"${DEPTH[@]}"} >/dev/null)
 }
 
 # Poll the pane's text every 0.1 s, up to 10 s, until `test` holds for it.

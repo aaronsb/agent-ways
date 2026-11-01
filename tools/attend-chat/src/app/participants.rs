@@ -161,8 +161,8 @@ fn empty() -> Signal {
     Signal { id: String::new(), from: String::new(), project: String::new(), cwd: String::new(), reply_to: None, message: String::new(), ts: 0, channel: Channel::Info, tray: String::new(), beside_post: false }
 }
 
-/// How the strip lays its chips out in `width` columns on at most
-/// [`MAX_ROWS`] rows: how many chips each row holds, in order, and how
+/// How the strip lays its chips out in `width` columns on the rows it is
+/// given: how many chips each row holds, in order, and how
 /// many are left out, which the [`cut`] mark at the end of the last row stands for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Laid {
@@ -181,15 +181,15 @@ pub(super) fn cut(depth: agent_theme::ColorDepth) -> &'static str {
 }
 
 /// Lay out chips of `widths` in rows of `width` columns, a space before
-/// each chip, one row when they fit and up to [`MAX_ROWS`]. A chip wider
+/// each chip, one row when they fit and up to `max_rows`. A chip wider
 /// than a row takes a row of its own; the caller cuts its name to fit.
 /// When the last row cannot hold the rest it ends with the cut mark,
 /// `mark` columns wide, which the space it needs is kept for.
-pub(super) fn lay(widths: &[usize], width: usize, mark: usize) -> Laid {
+pub(super) fn lay(widths: &[usize], width: usize, mark: usize, max_rows: usize) -> Laid {
     let mut rows = Vec::new();
     let mut i = 0;
-    while i < widths.len() && rows.len() < MAX_ROWS {
-        let last = rows.len() + 1 == MAX_ROWS;
+    while i < widths.len() && rows.len() < max_rows {
+        let last = rows.len() + 1 == max_rows;
         let start = i;
         let mut used = 0;
         while i < widths.len() && (i == start || used + 1 + widths[i] <= width) {
@@ -211,12 +211,13 @@ pub(super) fn lay(widths: &[usize], width: usize, mark: usize) -> Laid {
 /// One participant's chip: a lozenge in the chat's shape, the name on the
 /// identity colour and the live or idle mark on its darkest step, as a
 /// member row in the column; an invited one set back, marked [`INVITED`];
-/// an unknown one set back. The name is cut to `max` columns.
-fn chip(chat: &ChatPane, who: &Who, max: usize) -> Vec<Span<'static>> {
+/// an unknown one set back. The name is cut so the chip, its lead space
+/// and the cut mark, `mark` columns wide, fit `width`: the chip's own
+/// overhead is measured from the spans it builds, whatever its shape.
+fn chip(chat: &ChatPane, who: &Who, width: usize, mark: usize) -> Vec<Span<'static>> {
     let dot = theme::presence()[usize::from(!who.live)];
     let faded = Seg::faded("").style;
-    let label = super::sidebar::fit(&who.label, max.max(1));
-    let (styles, mark) = match (&who.look, who.invited) {
+    let (styles, tail) = match (&who.look, who.invited) {
         (Some((palette, style)), false) => {
             let [name, _, mark] = super::sidebar::identity_styles(chat.palette.depth(), *palette, who.live, style.bold);
             let name = if style.italic { name.add_modifier(Modifier::ITALIC) } else { name };
@@ -225,8 +226,10 @@ fn chip(chat: &ChatPane, who: &Who, max: usize) -> Vec<Span<'static>> {
         (_, true) => ([faded; 2], format!("{INVITED} {dot}")),
         (None, false) => ([faded; 2], dot.to_string()),
     };
-    let segs = [Seg::styled(format!(" {label} "), styles[0]), Seg::styled(format!(" {mark} "), styles[1])];
-    chat.shape.lozenge(&segs)
+    let build = |label: &str| chat.shape.lozenge(&[Seg::styled(format!(" {label} "), styles[0]), Seg::styled(format!(" {tail} "), styles[1])]);
+    let room = width.saturating_sub(spans_width(&build("")) + 1 + 1 + mark);
+    let label = if room == 0 { String::new() } else { super::sidebar::fit(&who.label, room) };
+    build(&label)
 }
 
 fn spans_width(spans: &[Span]) -> usize {
@@ -234,17 +237,16 @@ fn spans_width(spans: &[Span]) -> usize {
 }
 
 /// The strip's rows for `who` in `width` columns, ready to draw: one
-/// [`Line`] per row, the last ending in the [`cut`] mark when names are
-/// left out.
-/// None at all when `who` is empty.
-pub(super) fn lines(chat: &ChatPane, who: &[Who], width: u16) -> Vec<Line<'static>> {
+/// [`Line`] per row, at most `max_rows`, the last ending in the [`cut`]
+/// mark when names are left out. None at all when `who` is empty or
+/// `max_rows` is 0.
+pub(super) fn lines(chat: &ChatPane, who: &[Who], width: u16, max_rows: usize) -> Vec<Line<'static>> {
     let width = usize::from(width);
-    // A name is cut so its chip fits a row with its lead space and the mark.
     let mark = cut(chat.palette.depth());
-    let max = width.saturating_sub(12);
-    let chips: Vec<Vec<Span<'static>>> = who.iter().map(|w| chip(chat, w, max)).collect();
+    let mark_w = str_width(mark);
+    let chips: Vec<Vec<Span<'static>>> = who.iter().map(|w| chip(chat, w, width, mark_w)).collect();
     let widths: Vec<usize> = chips.iter().map(|c| spans_width(c)).collect();
-    let laid = lay(&widths, width, str_width(mark));
+    let laid = lay(&widths, width, mark_w, max_rows.min(MAX_ROWS));
     let n = laid.rows.len();
     let mut next = chips.iter();
     laid.rows
@@ -271,8 +273,17 @@ pub(super) fn draw(f: &mut Frame, area: Rect, lines: Vec<Line<'static>>) {
 }
 
 impl ChatPane {
-    /// Who the strip lists for `tab`: none for the operator view.
+    /// Who the strip lists for `tab`, the foreground tab: read once, then
+    /// kept until the feed's entries are rebuilt ([`ChatPane::invalidate`]).
     pub(super) fn participants(&mut self, tab: &Tab) -> Vec<Who> {
+        if self.strip.is_none() {
+            self.strip = Some(self.read_participants(tab));
+        }
+        self.strip.clone().unwrap_or_default()
+    }
+
+    /// Who the strip lists for `tab`: none for the operator view.
+    fn read_participants(&mut self, tab: &Tab) -> Vec<Who> {
         let depth = self.palette.depth();
         self.world();
         let world = self.world.as_ref().expect("just read");
@@ -395,28 +406,122 @@ mod tests {
     fn the_strip_takes_one_row_when_the_names_fit_and_grows_to_three() {
         // One row: 3 chips of 9, each with its lead space, in 40 columns;
         // four fill 40 exactly.
-        assert_eq!(lay(&[9; 4], 40, 1), Laid { rows: vec![4], more: 0 });
-        assert_eq!(lay(&[9, 9, 9], 40, 1), Laid { rows: vec![3], more: 0 });
+        assert_eq!(lay(&[9; 4], 40, 1, MAX_ROWS), Laid { rows: vec![4], more: 0 });
+        assert_eq!(lay(&[9, 9, 9], 40, 1, MAX_ROWS), Laid { rows: vec![3], more: 0 });
         // Two rows.
-        assert_eq!(lay(&[9, 9, 9, 9, 9], 35, 1), Laid { rows: vec![3, 2], more: 0 });
+        assert_eq!(lay(&[9, 9, 9, 9, 9], 35, 1, MAX_ROWS), Laid { rows: vec![3, 2], more: 0 });
         // Three rows, exactly full: no mark, so no room kept for one.
-        assert_eq!(lay(&[9; 9], 30, 3), Laid { rows: vec![3, 3, 3], more: 0 });
+        assert_eq!(lay(&[9; 9], 30, 3, MAX_ROWS), Laid { rows: vec![3, 3, 3], more: 0 });
         // Nobody, no row.
-        assert_eq!(lay(&[], 40, 1), Laid { rows: vec![], more: 0 });
+        assert_eq!(lay(&[], 40, 1, MAX_ROWS), Laid { rows: vec![], more: 0 });
     }
 
     #[test]
     fn names_past_the_third_row_end_it_with_the_cut_mark() {
         // Ten chips of 9 at 30 columns: three a row; the third row gives a
         // chip up for the mark, whichever width it is.
-        assert_eq!(lay(&[9; 10], 30, 1), Laid { rows: vec![3, 3, 2], more: 2 });
-        assert_eq!(lay(&[9; 10], 30, 3), Laid { rows: vec![3, 3, 2], more: 2 });
+        assert_eq!(lay(&[9; 10], 30, 1, MAX_ROWS), Laid { rows: vec![3, 3, 2], more: 2 });
+        assert_eq!(lay(&[9; 10], 30, 3, MAX_ROWS), Laid { rows: vec![3, 3, 2], more: 2 });
         // Room the last row has for the mark is used, not given up: at 32
         // columns three chips and ` …` fit, ` ...` does not.
-        assert_eq!(lay(&[9; 10], 32, 1), Laid { rows: vec![3, 3, 3], more: 1 });
-        assert_eq!(lay(&[9; 10], 32, 3), Laid { rows: vec![3, 3, 2], more: 2 });
+        assert_eq!(lay(&[9; 10], 32, 1, MAX_ROWS), Laid { rows: vec![3, 3, 3], more: 1 });
+        assert_eq!(lay(&[9; 10], 32, 3, MAX_ROWS), Laid { rows: vec![3, 3, 2], more: 2 });
         // A chip wider than a row takes a row of its own.
-        assert_eq!(lay(&[50, 5], 40, 1), Laid { rows: vec![1, 1], more: 0 });
+        assert_eq!(lay(&[50, 5], 40, 1, MAX_ROWS), Laid { rows: vec![1, 1], more: 0 });
+    }
+
+    #[test]
+    fn a_message_to_the_person_unseen_names_the_person_drawn_as_their_messages_are() {
+        // The agent writes to the person's member id, and the chat has seen
+        // neither: the person is drawn as a message from them would be,
+        // live, not set back by the id as an unknown addressee is.
+        let person = Person { member: "aaron", from: "external:aaron@pts" };
+        let msgs = vec![sig("claude:s1", Channel::Elsewhere("aaron,bob".into()))];
+        let who = dm_who(&msgs, &[], "s1", &person, false, look, |m: &str| m.to_string());
+        assert_eq!(labels(&who), vec![("s1".into(), false, false), ("aaron".into(), true, false), ("bob".into(), false, false)]);
+        assert!(who[1].look.is_some() && who[2].look.is_none(), "the person in a colour, bob set back");
+    }
+
+    #[test]
+    fn a_channel_with_no_members_lists_no_one() {
+        let rows = vec![row("open", &[], true), row("quiet", &[], false)];
+        assert!(channel_who(&rows, &Invites::new(), &[], "quiet").is_empty());
+    }
+
+    /// A pane at `depth` in the round shape, with the theme the frame
+    /// would set.
+    fn pane(depth: ColorDepth) -> ChatPane {
+        let palette = agent_tui::theme::Palette::terminal(depth);
+        theme::set(palette);
+        let mut c = ChatPane::new(None, palette);
+        c.shape = agent_tui::theme::Shape::ROUND;
+        c
+    }
+
+    fn text(line: &Line) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    fn named(label: &str, live: bool, invited: bool) -> Who {
+        let look = Some((agent_identity::Identity::for_cwd("/w", ColorDepth::Ansi16).palette, IdStyle::default()));
+        Who { member: label.into(), label: label.into(), look, live, invited }
+    }
+
+    #[test]
+    fn every_chip_fits_the_row_invited_cut_and_unknown_at_both_depths() {
+        // 40 columns with the column hidden: the strip has 39. An invitee
+        // that exited, named by its 36-column id; a known name longer than
+        // the row; an unknown id.
+        let id = "dddddddd-0000-4000-8000-000000000004";
+        let long = "a-name-longer-than-the-row-it-is-drawn-on";
+        for depth in [ColorDepth::Ansi16, ColorDepth::TrueColor] {
+            let c = pane(depth);
+            let who = vec![Who { invited: true, ..Who::unknown(id, id.into()) }, named(long, true, false), Who::unknown(id, id.into())];
+            let lines = lines(&c, &who, 39, MAX_ROWS);
+            assert_eq!(lines.len(), 3, "one chip a row at {depth:?}");
+            for l in &lines {
+                assert!(str_width(&text(l)) <= 39, "{} columns at {depth:?}: {:?}", str_width(&text(l)), text(l));
+            }
+            assert!(text(&lines[0]).contains(&format!("{INVITED} ○")), "the invited mark whole at {depth:?}: {:?}", text(&lines[0]));
+        }
+    }
+
+    #[test]
+    fn the_last_row_keeps_a_chip_beside_the_cut_mark_at_16_colours() {
+        // Four names too long for a row each: three rows, and the third
+        // holds its chip and `...`, not `...` alone.
+        let c = pane(ColorDepth::Ansi16);
+        let who: Vec<Who> = (0..4).map(|i| named(&format!("name-{i}-longer-than-the-row-it-is-drawn-on"), true, false)).collect();
+        let lines = lines(&c, &who, 39, MAX_ROWS);
+        assert_eq!(lines.len(), 3);
+        let last = text(&lines[2]);
+        assert!(last.ends_with(" ...") && last.contains("name-2"), "{last:?}");
+        assert!(lines.iter().all(|l| str_width(&text(l)) <= 39));
+    }
+
+    #[test]
+    fn lines_take_two_rows_three_and_the_cut_and_no_more_than_they_are_given() {
+        // A round chip of a six-column name is 14 columns, 15 with its
+        // lead: two a row in 39 columns.
+        for depth in [ColorDepth::Ansi16, ColorDepth::TrueColor] {
+            let c = pane(depth);
+            let who = |n: usize| (0..n).map(|i| named(&format!("Name-{i}"), true, false)).collect::<Vec<_>>();
+            assert_eq!(lines(&c, &who(4), 39, MAX_ROWS).len(), 2);
+            let three = lines(&c, &who(6), 39, MAX_ROWS);
+            assert_eq!(three.len(), 3);
+            assert!(!text(&three[2]).contains(cut(depth)), "six fit three rows: no mark");
+            let over = lines(&c, &who(7), 39, MAX_ROWS);
+            assert_eq!(over.len(), 3);
+            assert!(text(&over[2]).ends_with(&format!(" {}", cut(depth))), "the mark on the third row: {:?}", text(&over[2]));
+            // Given one row, the strip ends that row with the mark; given
+            // none, it draws nothing.
+            let one = lines(&c, &who(7), 39, 1);
+            assert_eq!(one.len(), 1);
+            assert!(text(&one[0]).ends_with(&format!(" {}", cut(depth))), "{:?}", text(&one[0]));
+            assert!(lines(&c, &who(7), 39, 0).is_empty());
+            // More rows than the strip's most are not taken.
+            assert_eq!(lines(&c, &who(7), 39, 9).len(), 3);
+        }
     }
 
     #[test]
