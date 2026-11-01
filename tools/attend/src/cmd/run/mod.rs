@@ -29,6 +29,10 @@ use crate::{config, emit, groups, sensors, state};
 
 const RELOAD_CHECK_INTERVAL: Duration = Duration::from_secs(10);
 
+/// When this run first took its session's lock, in milliseconds since the
+/// epoch, passed to the process a reload or an id hand-over re-executes.
+const RUN_SINCE: &str = "ATTEND_RUN_SINCE";
+
 pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     emit::log("starting attend");
 
@@ -71,6 +75,10 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     // sensor loop never returns under normal operation, so the lock
     // effectively lives for the life of the process.
     let reloaded = std::env::var("ATTEND_RELOADED_FROM").is_ok();
+    // When this run first took the session, carried across its own
+    // re-executions (a reload, an id hand-over) and nowhere else: an
+    // opt-out made since then stands through them (enroll_run).
+    let inherited_since = (reloaded || moved_from.is_some()).then(|| std::env::var(RUN_SINCE).ok()?.parse::<u64>().ok()).flatten();
     let _session_lock = match attend_presence::heartbeat::try_acquire_session_lock(&session_id) {
         Ok(Some(lock)) => Some(lock),
         Ok(None) if reloaded => {
@@ -99,6 +107,9 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
         }
     };
 
+    let run_since = inherited_since.unwrap_or_else(attend_presence::enrollment::now_ms);
+    std::env::set_var(RUN_SINCE, run_since.to_string());
+
     // Instance registry (ADR-129). Register or reclaim our slot in
     // this cwd. Logged at startup so the operator can correlate a
     // running attend with its discriminator suffix without reading
@@ -120,7 +131,7 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     // listening has its cold start reopened here, before the state below is
     // restored into the peers sensor.
     if ident.resolved() {
-        crate::util::enroll_as(&ident, attend_presence::enrollment::Source::Run, None).ok();
+        crate::util::enroll_run(&ident, run_since).ok();
     }
     let my_instance = if ident.resolved() {
         match instance_registry.register(&focus.working_dir, &session_id) {

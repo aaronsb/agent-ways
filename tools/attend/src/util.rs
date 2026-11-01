@@ -118,8 +118,18 @@ pub(crate) fn enroll_as(
     source: attend_presence::enrollment::Source,
     host: Option<attend_presence::enrollment::Host>,
 ) -> std::io::Result<bool> {
+    enroll_with(ident, |sid| attend_presence::enrollment::enroll(sid, source, host))
+}
+
+/// [`enroll_as`] for the `attend run` that took the session's lock at
+/// `since` ([`attend_presence::enrollment::enroll_run`]).
+pub(crate) fn enroll_run(ident: &Session, since: u64) -> std::io::Result<bool> {
+    enroll_with(ident, |sid| attend_presence::enrollment::enroll_run(sid, since))
+}
+
+fn enroll_with(ident: &Session, write: impl FnOnce(&str) -> std::io::Result<()>) -> std::io::Result<bool> {
     let was = adopt_previous_enrollment(ident);
-    attend_presence::enrollment::enroll(&ident.session_id, source, host)?;
+    write(&ident.session_id)?;
     if !was {
         attend_state::StateStore::new(Some(ident.session_id.clone())).reopen_cold_start();
     }
