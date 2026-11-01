@@ -20,6 +20,7 @@ mod focus;
 mod ix;
 mod keys;
 mod menu;
+mod participants;
 mod settings_view;
 mod sidebar;
 mod view;
@@ -176,6 +177,9 @@ pub struct ChatPane {
     /// sender by membership id.
     entries: Option<Vec<Entry>>,
     entry_members: Vec<Option<String>>,
+    /// Who the participant strip lists for the foreground tab, read when
+    /// the entries are and dropped with them.
+    strip: Option<Vec<participants::Who>>,
     /// Whether to keep `heartbeat/<username>` fresh (ADR-170). Off for a
     /// headless frame, which is no presence.
     heartbeat: bool,
@@ -297,6 +301,7 @@ impl ChatPane {
             clock: Clock::Live,
             world: None,
             entries: None,
+            strip: None,
             entry_members: Vec::new(),
             heartbeat: true,
             releases: keys::Releases::here(),
@@ -355,6 +360,7 @@ impl ChatPane {
     /// on the next frame.
     fn invalidate(&mut self) {
         self.entries = None;
+        self.strip = None;
         self.generation += 1;
         self.dirty = true;
     }
