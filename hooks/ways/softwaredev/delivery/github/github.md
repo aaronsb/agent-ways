@@ -47,4 +47,5 @@ Issues for requirements and bugs, a basic label set, no project boards or milest
 - delivery/merge(softwaredev) — the review-gate decision and landing an increment
 - delivery/issues(softwaredev) — issues mirrored into the session task list
 - adr(documentation) — reference ADRs in PR descriptions
+- writing/plain(writing) — plain sentences and the present tense in a PR body or an issue
 - delivery/github/follow-through(softwaredev) — CI on main after the merge, parked and closed issues, contributing to another project

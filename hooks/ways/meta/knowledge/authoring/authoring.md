@@ -75,7 +75,7 @@ Ways are authored **English-only** (ADR-139): localization is adopter-run, not a
 
 ## Writing Ways Well
 
-Write as a collaborator, not an authority. Include the *why* — an agent that understands the reason applies better judgment at the edges. Write for a reader with no prior context.
+Write the way a collaborator explains a practice to a peer, and include the reason, because an agent that knows the reason applies better judgment at the edges. Way text follows writing/plain. An agent imitates the sentences of the text injected into its context, so a way's own prose is a style sample (ADR-178).
 
 For state transitions and process flows, prefer Cypher-style notation over ASCII diagrams — it's compact, the model parses it natively, and it saves tokens:
 ```
@@ -123,3 +123,4 @@ Each line is `{"kind":"direct","prompt":"..."}`; a way that fires on a tool call
 - knowledge/authoring/tool-agnostic(meta) — ways describe intent, not tool calls
 - knowledge/authoring/pii-free(meta) — privacy constraint on way content
 - knowledge/optimization(meta) — vocabulary tuning, sparsity, discrimination
+- writing/plain(writing) — the sentences a way is written in

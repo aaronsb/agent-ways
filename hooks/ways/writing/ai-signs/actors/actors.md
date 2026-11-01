@@ -29,6 +29,6 @@ When rewriting prose so it says who acted, give each full sentence the person or
 
 ## See Also
 
-- writing(writing) — active voice among the prose defaults
+- writing/plain(writing) — naming who does what among the plain-writing rules
 - writing/ai-signs(writing) — parent: other marks of generated prose
 - trust/prose(meta) — decoration and self-explanation in long prose

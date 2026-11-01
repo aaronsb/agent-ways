@@ -21,3 +21,7 @@ Match the docstring density of the surrounding code, in the language's idiomatic
 - Public APIs, exported functions, classes, modules
 - Complex internal logic where intent isn't obvious from the name
 - Not needed for trivial getters, one-line helpers, or self-evident code
+
+## See Also
+
+- writing/plain(writing) — a comment states what the code does now, in plain sentences

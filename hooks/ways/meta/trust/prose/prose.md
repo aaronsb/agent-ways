@@ -9,17 +9,17 @@ refire: 0.15
 <!-- epistemic: heuristic -->
 # Prose — Delivering vs Decorating
 
-Core states the rule in two lines. This way carries the expanded version, because the rule fails in one specific place: long drafting sessions, many turns after core landed.
+This way covers decoration in long drafts: a clause whose only job is to tell the reader that the fact before it matters. The rule fails most in long drafting sessions, many turns after the session's first guidance arrived. Sentences, tense and terms are in writing/plain.
 
 ## The failure this way is written against
 
 Measured in this repo. An 11,500-word document drafted across a dozen turns contained significance clauses at 3.4 per thousand words against 0.5 in prose that had been reviewed, plus eleven instances of a construction core explicitly bans. Core had fired. The writing way had fired, fifty epochs earlier, carrying "use em dashes sparingly."
 
-Two lessons sit in that.
+The measurement shows two things.
 
-**A style rule holds for short output and decays across a long draft.** The failure is in detection rather than compliance. You do not notice the violation while producing it, so a rule you were told once does not survive an essay.
+A style rule holds for short output and decays across a long draft. You do not notice the violation while you produce it, so a rule you were told once does not survive an essay.
 
-**A rule with an adverb in it cannot be checked.** "Sparingly" has no threshold, so there is no moment at which you can test yourself against it. "Cut any clause that explains why the previous clause matters" is a search you can actually run.
+A rule with an adverb in it cannot be checked. "Sparingly" has no threshold, so there is no moment at which you can test yourself against it. "Cut any clause that explains why the previous clause matters" is a search you can actually run.
 
 ## What decoration looks like
 
@@ -41,19 +41,15 @@ Watch for these specifically, because they are the productive forms:
 - `X matters more than Y` where nothing downstream depends on the ranking
 - A one-sentence paragraph that only announces the previous paragraph's significance
 
-## Directness and sentence length
+## Volume
 
-A short sentence is not automatically a direct one. Directness means going straight at the point, which a long sentence can do perfectly well. Connect clauses with *and*, *because*, *so* rather than breaking for emphasis. Emphasis by fragment asks the reader to supply the drama.
-
-## Density is a symptom, not a rule
-
-In file prose, em-dashes, dramatic colons, and antithesis constructions are not wrong individually. They become a tic at volume, and volume is the thing to watch. Nobody should be counting punctuation while drafting; the count belongs to the check that runs afterward.
+In file prose, em-dashes, dramatic colons and antithesis constructions become a tic at volume. Watch the volume after drafting, with the check that counts (markdown/density). Counting punctuation while drafting gets in the way of the draft.
 
 ## When you are editing your own draft
 
 Two passes, in this order:
 
-1. Search for the patterns above and cut. Cutting is almost always the correct fix; rewriting rarely is.
+1. Search for the patterns above and cut. Cutting is almost always the fix.
 2. Reread, and cut whatever you added back to preserve rhythm.
 
 ## See Also
@@ -61,4 +57,5 @@ Two passes, in this order:
 - trust(meta) — the relational model this posture derives from
 - trust/voice(meta) — whose voice to write in, a separate question from how it reads
 - writing(writing) — structure, audience, and format for content creation
+- writing/plain(writing) — whole sentences in plain words, each fact once
 - markdown/density(documentation) — the postcheck that counts what you just wrote

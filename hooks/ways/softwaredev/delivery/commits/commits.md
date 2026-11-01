@@ -1,5 +1,5 @@
 ---
-description: git commit messages, branch naming, conventional commits, atomic changes
+description: git commit messages, conventional commits, atomic changes
 vocabulary: commit message branch conventional feat fix refactor scope atomic squash amend stash rebase cherry trailers emoji co-authored-by
 pattern: push.{0,30}(remote|origin|upstream)
 commands: git\ commit
@@ -20,21 +20,16 @@ Scopes match the area of change: `ways`, `hooks`, `adr`, `docs`, `config`, `gove
 - `test(scope): description` - Tests
 - `chore(scope): description` - Maintenance
 
-## Branch Names
-
-- `adr-NNN-topic` - Implementing an ADR
-- `feature/name` - New feature work
-- `fix/issue` - Bug fixes
-- `refactor/area` - Code improvements
-
 ## Rules
 
 - Attribution trailers follow the `attribution` setting; add no other trailer
-- Focus commit message on the "why" not the "what"
-- Keep commits atomic - one logical change per commit
+- Keep commits atomic: one logical change per commit
+- Write the subject and body in plain sentences, in the present tense for what the code does now (writing/plain). The body's contents are in delivery/commits/prepare. Branch names are in delivery/branching.
 
 ## See Also
 
 - delivery/github(softwaredev) — commits feed into PRs
 - delivery/release(softwaredev) — commit types drive version bumps
 - delivery/commits/prepare(softwaredev) — when to commit, what to clear before it, what the body records
+- delivery/branching(softwaredev) — branch names
+- writing/plain(writing) — plain sentences and the present tense in a message
