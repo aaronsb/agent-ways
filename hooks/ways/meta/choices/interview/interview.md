@@ -28,6 +28,14 @@ Keep a question to about a hundred words, with detail moved to the framing or th
 
 Name the unknowns your evidence leaves open. Offer a research pass before asking where a call needs knowledge the operator may lack, and a "hold, I'll research first" option where they may want to look before committing, as between libraries. A hold pauses only the work that depends on the call.
 
+## Asking without stopping the work
+
+The question tool holds your turn open until the operator answers. Background agents keep running, but you cannot act on what they report.
+
+- Before you ask, start every piece of work that does not depend on the answers: agents, builds, test runs.
+- When other work can go on, ask in the reply as a numbered table and end the turn, so a finished agent's notice can wake you. Use the tool when the answers gate everything left, or just before a one-way step.
+- Say which leans you are acting on while you wait. Act on a lean only where the step is easy to reverse, and apply an overturned lean as a revision.
+
 ## Rounds
 
 - Ask one to four questions per round, the call that most changes the work first.
