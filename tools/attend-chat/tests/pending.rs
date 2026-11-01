@@ -387,8 +387,11 @@ fn send_and_quit_keeps_the_draft_for_the_next_chat() {
     assert!(files(&kept).is_empty(), "held again, its file goes");
 }
 
-/// A directory of the fixture's for text kept unsent, one per test.
+/// A directory of the fixture's for text kept unsent, one per test. The
+/// fixture is set up first: called before any [`chat`], the root would
+/// otherwise be made here, with no setup.
 fn unsent(tag: &str) -> std::path::PathBuf {
+    fixture();
     let root = support::fixture("pending", |_| unreachable!("set up by fixture()"));
     root.join(format!("unsent-{tag}"))
 }
