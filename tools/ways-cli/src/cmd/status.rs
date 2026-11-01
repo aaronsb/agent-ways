@@ -440,7 +440,7 @@ fn install_json() -> serde_json::Value {
 
 /// `bin` with what its `--version` prints, if it answers.
 fn version_of(bin: &Path) -> Option<String> {
-    let out = std::process::Command::new(bin).arg("--version").output().ok()?;
+    let out = super::proc::retry_if_busy(|| std::process::Command::new(bin).arg("--version").output()).ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 

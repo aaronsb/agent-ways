@@ -69,11 +69,8 @@ pub fn described() -> Attend {
 
 /// What `cmd` answers as attend's account of its sensors.
 pub fn described_by(mut cmd: std::process::Command) -> Attend {
-    let spawned = cmd
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn();
+    cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null());
+    let spawned = crate::cmd::proc::retry_if_busy(|| cmd.spawn());
     let mut child = match spawned {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Attend::Absent,

@@ -368,11 +368,12 @@ impl Steps {
 /// `--verbose`).
 pub fn run_quiet(cmd: &mut Command) -> std::io::Result<(bool, Output)> {
     if verbose() {
-        let status = cmd.status()?;
+        let status = super::proc::retry_if_busy(|| cmd.status())?;
         let empty = Output { status, stdout: Vec::new(), stderr: Vec::new() };
         return Ok((status.success(), empty));
     }
-    let out = cmd.stdin(std::process::Stdio::null()).output()?;
+    cmd.stdin(std::process::Stdio::null());
+    let out = super::proc::retry_if_busy(|| cmd.output())?;
     if !out.status.success() {
         Steps::output(&out);
     }
@@ -613,5 +614,28 @@ mod tests {
         assert!(dev_links(&[&app, &dev], &["attend".into()], std::slice::from_ref(&bins)).is_empty(), "a link into an own app is not a dev link");
         assert_eq!(found[0].link, bins.join("attend"));
         assert_eq!(std::fs::canonicalize(&found[0].checkout).unwrap(), std::fs::canonicalize(&*dev).unwrap());
+    }
+
+    /// A binary whose write handle is still open, as one just installed can
+    /// be, runs once the handle closes: the update's `ways corpus` and
+    /// `ways reconcile` go through here on the binary it just wrote.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_binary_still_open_for_writing_runs_once_it_closes() {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let root = crate::test_dir::TestDir::at(std::env::temp_dir().join(format!("ways-lifecycle-busy-{}", std::process::id())));
+        std::fs::create_dir_all(&*root).unwrap();
+        let bin = root.join("fresh");
+        let mut f = std::fs::OpenOptions::new().write(true).create(true).mode(0o755).open(&bin).unwrap();
+        f.write_all(b"#!/bin/sh\necho ran\n").unwrap();
+        let held = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(15));
+            drop(f);
+        });
+        let (ok, out) = run_quiet(&mut Command::new(&bin)).expect("a busy binary is retried, not reported as failing to start");
+        held.join().unwrap();
+        assert!(ok);
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "ran\n");
     }
 }

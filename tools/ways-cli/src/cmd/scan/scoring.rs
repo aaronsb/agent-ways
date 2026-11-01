@@ -259,14 +259,9 @@ pub(crate) fn way_embed_match(
     model: &std::path::Path,
     query: &str,
 ) -> std::io::Result<Option<Vec<(String, f64)>>> {
-    let output = std::process::Command::new(bin)
-        .arg("match")
-        .arg("--corpus")
-        .arg(corpus)
-        .arg("--model")
-        .arg(model)
-        .args(["--query", query, "--threshold", "0.0"])
-        .output()?;
+    let mut cmd = std::process::Command::new(bin);
+    cmd.arg("match").arg("--corpus").arg(corpus).arg("--model").arg(model).args(["--query", query, "--threshold", "0.0"]);
+    let output = crate::cmd::proc::retry_if_busy(|| cmd.output())?;
 
     if !output.status.success() {
         return Ok(None);

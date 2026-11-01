@@ -636,13 +636,9 @@ fn run_generate(
         model.display()
     ));
     let t = Instant::now();
-    let status = std::process::Command::new(bin)
-        .args(["generate", "--corpus"])
-        .arg(corpus)
-        .args(["--model"])
-        .arg(model)
-        .stderr(embed_stderr(verbose))
-        .status();
+    let mut cmd = std::process::Command::new(bin);
+    cmd.args(["generate", "--corpus"]).arg(corpus).args(["--model"]).arg(model).stderr(embed_stderr(verbose));
+    let status = super::proc::retry_if_busy(|| cmd.status());
 
     match status {
         Ok(s) if s.success() => Ok(t),
@@ -1445,13 +1441,9 @@ fn batch_similarity(bin: &Path, model: &Path, pairs: &[String], verbose: bool) -
     // site has never used. Quiet stays `null()` on every platform, as before;
     // `--verbose` only adds the inherit case.
     let stderr = if verbose { Stdio::inherit() } else { Stdio::null() };
-    let mut child = Command::new(bin)
-        .args(["similarity", "--model", model.to_str()?, "--batch"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(stderr)
-        .spawn()
-        .ok()?;
+    let mut cmd = Command::new(bin);
+    cmd.args(["similarity", "--model", model.to_str()?, "--batch"]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(stderr);
+    let mut child = super::proc::retry_if_busy(|| cmd.spawn()).ok()?;
     {
         let mut stdin = child.stdin.take()?;
         let mut input = pairs.join("\n");
