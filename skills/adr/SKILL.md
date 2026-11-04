@@ -81,7 +81,7 @@ Under adr/v1, a record's folder decides its area (ADR-310), and its number is it
 2. **Create**: `docs/scripts/adr new <domain> "Decision Title"` (adr/v1: add `--kind`, `--verb`, `--capability`, `--agent`/`--model`) — assigns the next number, seeds frontmatter for the project's contract
 3. **Fill in the body** matching the record's kind — a v1 decision opens with `## Summary` and its `basis`; a v0 record uses Context, Decision, Consequences, Alternatives Considered
 4. **Lint**: `docs/scripts/adr lint` before committing
-5. **For a v1 decision with an operator basis, check the operator's intent and record what they say**: you make the technical calls and ground them in the basis. The Summary's probes are one or two checks that the decision serves what the operator wanted, in their terms and answerable in a word. Ask them briefly as part of the reply, and record any answer with `docs/scripts/adr consider <n> --said "..." --via "..." [--covers PROBE...]`. An approval given before the probes were asked is recorded with no `covers`, and a later answer is another entry. `docs/scripts/adr accept <n>` does not wait on an answer. With no one present, as under `/goal`, cite the goal condition as the operator basis, and an advisor (a second model or the `skeptic` subagent) may answer the probes: record it with `--operator advisor` and `via` naming the advisor. An optional canary, a deliberately wrong and harmless probe asked only in the conversation, is recorded as `--canary caught|missed` on the entry that answered it, whether from the operator or an advisor. The adr/consider way covers this and reviewing past decisions with the operator.
+5. **For a v1 decision with an operator basis, check the operator's intent and record what they say**: you make the technical calls and ground them in the basis. The Summary's probes are one or two checks that the decision serves what the operator wanted, in their terms and answerable in a word. When the operator is present, ask them through the question tool, or in the reply where there is none, and record any answer with `docs/scripts/adr consider <n> --said "..." --via "..." [--covers PROBE...]`. An approval given before the probes were asked is recorded with no `covers`, and a later answer is another entry. `docs/scripts/adr accept <n>` does not wait on an answer. With no one present, as under `/goal` or a grant to carry on, cite the goal condition or the grant as the operator basis, and an advisor (a second model or the `skeptic` subagent) may answer the probes: record it with `--operator advisor` and `via` naming the advisor. An optional canary, a deliberately wrong and harmless probe asked with the probes, is recorded as `--canary caught|missed` on the entry that answered it, whether from the operator or an advisor. The adr/consider way covers this and reviewing past decisions with the operator.
 6. **Index**: `docs/scripts/adr index -y` after adding or changing ADRs
 
 ## Configuration
@@ -111,7 +111,7 @@ capability: adr
 basis:
   - operator: <name>
     level: guided            # authored | directed | guided, see below
-    said: "<their words, quoted verbatim>"
+    said: "<their words, quoted verbatim and trimmed>"
     via: <where they said it>
   - evidence: "<a finding, measurement or audit, with where it came from>"
   - standard: <a named standard or specification>

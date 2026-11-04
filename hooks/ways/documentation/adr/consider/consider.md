@@ -22,22 +22,22 @@ The consider step records the operator's intent (ADR-304 §12 and its notes). Th
 - The inversion names the two ends the decision sits between. Put it to the operator only when it turns on what they want.
 - When the decision carries `observable` entries, show them where you can: run the command, show the output, open the page. Say in `via` what was shown (ADR-307).
 - When the record has a figure, show it before the probes, and say in `via` that it was shown (adr/figure). When answers or findings change the text, check every figure against the final text, redraw what no longer matches, and render each figure again and show it to the operator before `adr accept` (adr/figure).
-- When the operator is present, put the probes to them through the question tool: each probe with a line of context, your lean first, an alternative with its tradeoff, and room to answer in their own words. Start the work that does not depend on the answers before you ask. When the operator is away and listens on attend, post the probes there. When no one is present, see below (choices/interview, how to ask). `adr accept` reads no answer, so an absent operator never blocks acceptance.
+- When the operator is present (choices/interview, how to ask), put the probes to them through the question tool: each probe with a line of context, your lean first, an alternative with its tradeoff, and room to answer in their own words. Where the session has no question tool, as in a headless run, ask in your reply, one short line each. When the operator is away and listens on attend, post the probes there. When no one is present, follow "When no one is present" below. `adr accept` reads no answer, so an absent operator never blocks acceptance.
 
 ## A canary
 
-- You may add a canary among the intent checks: a planted defect (core.md) in the form of a point that is deliberately wrong, harmless if accepted, and never about safety. Ask it in the conversation only. It never goes in the record's text.
+- You may add a canary among the intent checks: a planted defect (core.md) in the form of a point that is deliberately wrong, harmless if accepted, and never about safety. Ask it with the probes, through the same channel. It never goes in the record's text.
 - It is a signal probe and is never required. If no one answers it, record nothing about it and continue.
-- When someone answers, reveal the canary right after, and add `--canary caught` or `--canary missed` to that answer's `considered` entry. When an advisor answers, the canary tests the advisor's confidence; record it the same way on the advisor's entry.
+- When someone answers, reveal the canary right after, and add `--canary caught` or `--canary missed` to that answer's `considered` entry. When an advisor answers, record it the same way on the advisor's entry.
 - A missed canary is information. Say so once, and proceed without chasing it or re-asking the probes.
 
 ## When the answer comes
 
 - Record what was said with `adr consider N --said "..." --via "..."`, and `--covers NAME...` for the probes the words settled. The tool refuses a probe name the Summary does not have.
-- `said` quotes the operator's written words. Trim the quote to the words that answer, and mark each cut with `…`. Where the words do not stand alone, add the context in square brackets: `"yes [data up to 30 seconds old is fine for list pages]"`. Leave the quoted words as written, typos included. A spoken answer, such as one on a call, is a summary marked `--paraphrase`.
+- `said` quotes the operator's written words. Trim the quote to the words that answer, and mark each cut with `…`. Where the words do not stand alone, add the context in square brackets: `"yes [data up to 30 seconds old is fine for list pages]"`. Leave the quoted words as written, typos included. A spoken answer is a summary marked `--paraphrase`.
 - Never trim away disagreement, doubt, a condition or a requested change. Check a question, such as whether another record already covers this, before you go on, and keep it in the quote only when the check turns something up.
-- If the operator approves or says to accept before the probes were asked, record their words with no `covers`, trimmed and bracketed the same way. Do what they said, and put the probes to them in the same reply. Do not wait for the answer.
-- Take a short yes as given. A minimal answer is still recorded, with its context in brackets, and you continue without re-asking. No answer records nothing.
+- If the operator approves or says to accept before the probes were asked, record their words with no `covers`, trimmed and bracketed the same way. Do what they said, such as `adr accept`, then put the probes to them. Acceptance does not wait on the answer.
+- Take a short yes as given. A minimal answer is still recorded, and you continue without re-asking. No answer records nothing.
 - A later answer is another `considered` entry. A "no" changes the record. On substantially the same topic, alter the record in place with dated notes; for a different direction or concept, supersede it or write a new record (adr).
 - Accept when the work calls for it. A decision with no operator basis may be accepted directly.
 

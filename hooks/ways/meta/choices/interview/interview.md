@@ -30,7 +30,7 @@ Name the unknowns your evidence leaves open. Offer a research pass before asking
 
 ## How to ask: by whether the operator is present
 
-The question tool (`AskUserQuestion`) puts each question as options with context, your lean first, and room for the operator to answer in their own words. That shape draws a clearer answer than prose does, and a clearer answer quotes cleanly in a record (adr/consider). The tool holds your turn open until the operator answers, so start every piece of work that does not depend on the answers before you ask. Treat the operator as present when they have been answering in this session. A `/goal` run, a scheduled run, or a grant to carry on means they are not.
+The question tool (`AskUserQuestion`) puts each question as options with context, your lean first, and room for the operator to answer in their own words. That shape draws a clearer answer than prose does, and a clearer answer quotes cleanly in a record (adr/consider). The tool holds your turn open until the operator answers, so start every piece of work that does not depend on the answers before you ask. Treat the operator as present when they have written in this session and no `/goal` run, schedule or grant to carry on applies.
 
 1. **The operator is present.** Ask through the question tool, one round at a time. Where the session has no question tool, as in a headless run, ask in your reply in the layout of step 3 and end the turn.
 2. **The operator is away and listens on attend.** Post the questions to them as a direct message, laid out so "1 yes, 2 hold" is a full answer. Their answers arrive as messages while the work continues.

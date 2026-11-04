@@ -39,9 +39,9 @@ If `docs/architecture/adr.yaml` declares no `contract:` key, the project is adr/
 - Write each `basis` entry honestly. Quote the operator verbatim (`said`, `via`, `level`: authored|directed|guided) when they said it, trimmed to the words that answer with `…` at each cut and context added in `[brackets]` (adr/consider). Cite evidence, standard, upstream, or precedent otherwise. Never invent an operator statement — when a decision's option label was agent-written rather than said by the operator, mark `via` saying so.
 
 ### 5. Hand the Probes Back
-You run as a subagent, so the operator is not in your conversation. Return the Summary's probes to the calling session in plain words; the session asks the operator, or an advisor when no one is present. When an answer reaches you verbatim, record it, with `--operator advisor` and `via` naming the advisor when an advisor gave it:
+You run as a subagent, so the operator is not in your conversation. Return the Summary's probes to the calling session in plain words; the session asks the operator, or an advisor when no one is present. When an answer reaches you verbatim, record the words that answer, trimmed and bracketed as adr/consider says, with `--operator advisor` and `via` naming the advisor when an advisor gave it:
 ```bash
-docs/scripts/adr consider <n> --said "<verbatim>" --via "<where it was said>" --covers <probe...>
+docs/scripts/adr consider <n> --said "<their words, trimmed>" --via "<where it was said>" --covers <probe...>
 docs/scripts/adr consider <n> --operator advisor --said "..." --via "<advisor, model, run>"
 ```
 
