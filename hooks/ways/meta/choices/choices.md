@@ -10,7 +10,7 @@ refire: 0.15
 
 A real branch point is a set of distinct options whose answer changes what you do next. When you hit one, **present it as an explicit choice**. Burying it in a paragraph makes the human parse it; picking silently makes them discover it from the result.
 
-Ask in your reply first, laid out so the human can answer in a few words. When this session listens on attend, the human can answer there while the work continues. The harness also has a question tool (`AskUserQuestion`), with structured options, short headers, a recommended default and one-line tradeoffs. The tool holds the turn open until the human answers, so use it only when the decision blocks the work, meaning each turn built past it would make it more costly to undo (choices/interview, how to ask). Each of these surfaces costs the human less than a wall of prose that ends in "let me know how you'd like to proceed", and less than a guess they have to undo.
+Ask in your reply first, laid out so the human can answer in a few words. When this session listens on attend, the human can answer there while the work continues. The harness also has a question tool (`AskUserQuestion`), with structured options, short headers, a recommended default and one-line tradeoffs. The tool holds the turn open until the human answers, so for a single choice use it only when the decision blocks the work, meaning each turn built past it would make it more costly to undo. A series of calls above the waterline, and a decision record's probes, go through the tool whenever the operator is present (choices/interview, how to ask). Each of these surfaces costs the human less than a wall of prose that ends in "let me know how you'd like to proceed", and less than a guess they have to undo.
 
 ## The waterline
 

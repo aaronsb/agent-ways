@@ -867,3 +867,25 @@ The paragraph in §12 headed "Canary probes" still holds, as amended by the cana
 ## Note (2026-10-22): tool-triggered ways are delivered before the tool runs
 
 §12 says tool-triggered ways are delivered after the tool runs, citing ADR-188. That rested on the first draft of ADR-188, which moved tool-lane matching to PostToolUse because PreToolUse context appeared never to reach the model. The cause was this project's emit shape, and #528 closed on 2026-09-29 with PreToolUse delivery verified. ADR-188 was rewritten in place: `commands:` and `files:` ways fire on PreToolUse, before the tool runs, and only the judged meaning-based Bash guidance arrives after it, through ADR-606's deferred pipeline. A way that matches `adr accept` with a `commands:` regex therefore reaches the agent before acceptance, not just after it. The reasoning in §12 holds either way.
+
+## Note (2026-11-04): quotes are trimmed and bracketed, and probes go through the question tool when the operator is present
+
+Appended to §11 and §12. The text above is unchanged.
+
+A session in another project reported that agents following the consider way recorded each operator message word for word: thinking aloud, typos, asides and bare approvals. Two agents given only the way's text and the same four-message answer showed it. The agent with the current way recorded four entries, one per message, typos included. The agent with a draft that paraphrased chatty answers recorded two clean entries, and it also dropped a tolerance the operator had stated. The operator placed the fix in how answers are asked for and how they are quoted. Their answers, through the question tool in session 2026-11-04, follow. Each question and option label was written by the agent:
+
+1. "it works fine right now, but we just need to decide what to quote, or almost, solicit a quote from the operator. of the operator says nothing helpful, then its still collected. … when you offer choices, and a fill it in option, with context, it's a lot easier to provide a higher quality answer." (asked whether the rule covers `basis` as well as `considered`)
+2. "if the operator says 'yes' then it can be used as a [in the context of the question asked] (sort of an editorial clarification)" (asked what `said` holds for a bare yes to a probe; the brackets are the operator's)
+3. "keep, trimmed, but like 'bare yes', editorial context can be added [in brackets]" (asked whether an approval given before the probes were asked is still recorded; the brackets are the operator's)
+4. "Forward only" (asked whether existing records are cleaned)
+5. "so maybe the real problem is that the way of interacting with the operator isn't pushing interview tools enough"
+6. "probes + interviews -> … it's dependent on if the operator is present or not. in some cases the operator isn't around to answer, or more trust is put into an autonomous approach" (asked how far to push the question tool)
+
+What changed:
+
+- `said` still quotes written words. The quote is trimmed to the words that answer, with `…` at each cut, and context the words need is added in square brackets. The quoted words stay as written, typos included. Disagreement, doubt, a condition and a requested change are never trimmed away. A question is checked first, and stays in the quote only when the check turns something up. A spoken channel still gets a summary marked `paraphrase: true`.
+- An approval given before the probes were asked is still recorded with no `covers`, trimmed and bracketed the same way. A minimal answer is still recorded. No answer records nothing.
+- When the operator is present, the agent puts the probes to them through the question tool: each probe with context, the lean first, an alternative with its tradeoff, and room for their own words. When the operator is away and listens on attend, the probes go there. With no one present, or under the operator's grant to carry on, the consider step runs as for `/goal`, and the grant is cited as the operator basis. `adr accept` still reads no answer. This replaces the consider way's rule of 2026-11-01 (commit 877db687, following ADR-612), under which a probe never went through the question tool. ADR-612's note of the same date changes the interview the same way.
+- Records written before this note keep their entries as written (ADR-313).
+
+The consider way, choices, choices/interview, the adr way's macro, the adr skill and the system-architect agent say the same.
