@@ -35,7 +35,7 @@ The consider step records the operator's intent (ADR-304 §12 and its notes). Th
 
 - Record what was said with `adr consider N --said "..." --via "..."`, and `--covers NAME...` for the probes the words settled. The tool refuses a probe name the Summary does not have.
 - `said` quotes the operator's written words. Trim the quote to the words that answer, and mark each cut with `…`. Where the words do not stand alone, add the context in square brackets: `"yes [data up to 30 seconds old is fine for list pages]"`. Leave the quoted words as written, typos included. A spoken answer, such as one on a call, is a summary marked `--paraphrase`.
-- Never trim away disagreement, doubt, a condition, a requested change, or a question. Check a question, such as whether another record already covers this, before you go on.
+- Never trim away disagreement, doubt, a condition or a requested change. Check a question, such as whether another record already covers this, before you go on, and keep it in the quote only when the check turns something up.
 - If the operator approves or says to accept before the probes were asked, record their words with no `covers`, trimmed and bracketed the same way. Do what they said, and put the probes to them in the same reply. Do not wait for the answer.
 - Take a short yes as given. A minimal answer is still recorded, with its context in brackets, and you continue without re-asking. No answer records nothing.
 - A later answer is another `considered` entry. A "no" changes the record. On substantially the same topic, alter the record in place with dated notes; for a different direction or concept, supersede it or write a new record (adr).
