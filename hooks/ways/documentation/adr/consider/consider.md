@@ -22,7 +22,7 @@ The consider step records the operator's intent (ADR-304 §12 and its notes). Th
 - The inversion names the two ends the decision sits between. Put it to the operator only when it turns on what they want.
 - When the decision carries `observable` entries, show them where you can: run the command, show the output, open the page. Say in `via` what was shown (ADR-307).
 - When the record has a figure, show it before the probes, and say in `via` that it was shown (adr/figure). When answers or findings change the text, check every figure against the final text, redraw what no longer matches, and render each figure again and show it to the operator before `adr accept` (adr/figure).
-- When the operator is present, put the probes to them through the question tool: each probe with a line of context, your lean first, an alternative with its tradeoff, and room to answer in their own words. Start the work that does not depend on the answers before you ask. When the operator is away and listens on attend, post the probes there. When no one is present, see below (choices/interview, how to ask). `adr accept` reads no answer and records nothing on the operator's behalf, so an absent operator never blocks acceptance.
+- When the operator is present, put the probes to them through the question tool: each probe with a line of context, your lean first, an alternative with its tradeoff, and room to answer in their own words. Start the work that does not depend on the answers before you ask. When the operator is away and listens on attend, post the probes there. When no one is present, see below (choices/interview, how to ask). `adr accept` reads no answer, so an absent operator never blocks acceptance.
 
 ## A canary
 
