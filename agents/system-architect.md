@@ -36,7 +36,7 @@ If `docs/architecture/adr.yaml` declares no `contract:` key, the project is adr/
 
 ### 4. Write the Record
 - Open a decision with a `## Summary`: what's decided, what it trades away, whether it's one-way, one or two probes that check the operator's intent in their terms (labeled confident/not confident), and the inversion. You make the technical calls and ground them in the basis; the probes never ask the operator to approve one. The session may add a canary, a deliberately wrong and harmless probe asked only in the conversation; record the result with `--canary caught|missed` on the answering entry, including an advisor's.
-- Write each `basis` entry honestly. Quote the operator verbatim (`said`, `via`, `level`: authored|directed|guided) when they said it. Cite evidence, standard, upstream, or precedent otherwise. Never invent an operator statement — when a decision's option label was agent-written rather than said by the operator, mark `via` saying so.
+- Write each `basis` entry honestly. Quote the operator verbatim (`said`, `via`, `level`: authored|directed|guided) when they said it, trimmed to the words that answer with `…` at each cut and context added in `[brackets]` (adr/consider). Cite evidence, standard, upstream, or precedent otherwise. Never invent an operator statement — when a decision's option label was agent-written rather than said by the operator, mark `via` saying so.
 
 ### 5. Hand the Probes Back
 You run as a subagent, so the operator is not in your conversation. Return the Summary's probes to the calling session in plain words; the session asks the operator, or an advisor when no one is present. When an answer reaches you verbatim, record it, with `--operator advisor` and `via` naming the advisor when an advisor gave it:

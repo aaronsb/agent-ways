@@ -22,7 +22,7 @@ The consider step records the operator's intent (ADR-304 §12 and its notes). Th
 - The inversion names the two ends the decision sits between. Put it to the operator only when it turns on what they want.
 - When the decision carries `observable` entries, show them where you can: run the command, show the output, open the page. Say in `via` what was shown (ADR-307).
 - When the record has a figure, show it before the probes, and say in `via` that it was shown (adr/figure). When answers or findings change the text, check every figure against the final text, redraw what no longer matches, and render each figure again and show it to the operator before `adr accept` (adr/figure).
-- Ask the probes in your reply, one short line each, laid out so a word answers each, or over attend when this session listens there (choices/interview, how to ask). A probe never blocks the work, because `adr accept` reads no answer and records nothing on the operator's behalf. So an answer is never required, and a probe never goes through the question tool.
+- When the operator is present, put the probes to them through the question tool: each probe with a line of context, your lean first, an alternative with its tradeoff, and room to answer in their own words. Start the work that does not depend on the answers before you ask. When the operator is away and listens on attend, post the probes there. When no one is present, see below (choices/interview, how to ask). `adr accept` reads no answer and records nothing on the operator's behalf, so an absent operator never blocks acceptance.
 
 ## A canary
 
@@ -34,16 +34,18 @@ The consider step records the operator's intent (ADR-304 §12 and its notes). Th
 ## When the answer comes
 
 - Record what was said with `adr consider N --said "..." --via "..."`, and `--covers NAME...` for the probes the words settled. The tool refuses a probe name the Summary does not have.
-- If the operator approves or says to accept before the probes were asked, record their words with no `covers`, do what they said, and put the probes to them in the same reply. Do not wait for the answer.
-- Take a short yes as given. A minimal answer, or none, is recorded as said, and you continue without re-asking.
+- `said` quotes the operator's written words. Trim the quote to the words that answer, and mark each cut with `…`. Where the words do not stand alone, add the context in square brackets: `"yes [data up to 30 seconds old is fine for list pages]"`. Leave the quoted words as written, typos included. A spoken answer, such as one on a call, is a summary marked `--paraphrase`.
+- Never trim away disagreement, doubt, a condition, a requested change, or a question. Check a question, such as whether another record already covers this, before you go on.
+- If the operator approves or says to accept before the probes were asked, record their words with no `covers`, trimmed and bracketed the same way. Do what they said, and put the probes to them in the same reply. Do not wait for the answer.
+- Take a short yes as given. A minimal answer is still recorded, with its context in brackets, and you continue without re-asking. No answer records nothing.
 - A later answer is another `considered` entry. A "no" changes the record. On substantially the same topic, alter the record in place with dated notes; for a different direction or concept, supersede it or write a new record (adr).
 - Accept when the work calls for it. A decision with no operator basis may be accepted directly.
 
 ## When no one is present
 
-A run under `/goal`, or any unattended run, completes the consider step with no human reply.
+A run under `/goal`, any unattended run, or work under the operator's grant to carry on alone (choices/interview) completes the consider step with no human reply.
 
-- The goal condition is the operator's stated intent. Cite it as the `operator` basis at `level: directed`: `said` quotes the condition verbatim, `via` names the goal and the session.
+- The goal condition, or the operator's grant, is their stated intent. Cite it as the `operator` basis at `level: directed`: `said` quotes the condition or the grant verbatim, `via` names the goal or the grant, and the session.
 - You may put the probes to an advisor: a second model, or the `skeptic` subagent. Give the advisor the goal condition or the operator's words, and ask whether the decision serves that intent.
 - Record the advisor's answer as a `considered` entry attributed to the advisor: `adr consider N --operator advisor --said "..." --via "<which advisor and model, and the run>"`. Pass `--operator advisor` every time, since the default is the git user.
 - That entry is a complete record of an autonomous run. Nothing flags it or asks for a human answer later.

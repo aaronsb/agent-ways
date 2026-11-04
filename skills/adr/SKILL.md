@@ -135,7 +135,7 @@ The `level` on an operator basis says who made the call:
 | `directed` | made the call, and the agent wrote it up | the operator's, written by the agent |
 | `guided` | gave direction or a constraint, and the agent decided within it | the agent's |
 
-One record can carry several operator entries at different levels: a call the operator made is `directed`, and a constraint the agent decided within is `guided`. Quote written words verbatim, typos included, and mark spoken ones `paraphrase: true`. `observable` is a frontmatter list, not a body section.
+One record can carry several operator entries at different levels: a call the operator made is `directed`, and a constraint the agent decided within is `guided`. Quote written words verbatim, typos included, trimmed to the words that answer with `…` at each cut and context added in `[brackets]`, and mark spoken ones `paraphrase: true`. `observable` is a frontmatter list, not a body section.
 
 # ADR-NNN: Decision Title
 
