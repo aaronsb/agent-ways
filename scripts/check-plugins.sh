@@ -12,10 +12,14 @@
 #   2. `claude plugin validate` on the marketplace and on each plugin;
 #   3. `claude plugin test` on each plugin;
 #   4. a TypeScript check against Claude Code's declarations, where they can
-#      be found: $CLAUDE_CODE_TYPES (the API's claude-code.d.ts), or the copy
+#      be found, in this order: $CLAUDE_CODE_TYPES (the API's
+#      claude-code.d.ts); the copy the plugin-authoring skill writes for the
+#      Claude Code this machine runs, each time the skill loads; or the copy
 #      the engine lays in <plugin>/.claude-plugin/types/ when it loads the
-#      plugin from a folder it hot-reloads. Claude Code ships no command that
-#      writes them, so a CI runner reports this step skipped.
+#      plugin from a folder it hot-reloads. Each check names the version the
+#      declarations came from, and warns when it is not the version this
+#      machine runs. Claude Code ships no command that writes them, so a CI
+#      runner reports this step skipped.
 #
 # Usage: scripts/check-plugins.sh
 set -euo pipefail
@@ -117,14 +121,27 @@ done
 # 4. Type check. One scratch directory holds each plugin's tsconfig in turn.
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
+# The Claude Code this machine runs, and the declarations the plugin-authoring
+# skill wrote for it, in the folder the skill names as it loads.
+running="$(claude --version 2>/dev/null | awk '{print $1}')"
+skill_decl=""
+if [[ -n "$running" ]]; then
+  for f in "${CLAUDE_CODE_TMPDIR:-${TMPDIR:-/tmp}}/claude-$(id -u)/bundled-skills/$running"/*/plugin-authoring/types/claude-code.d.ts; do
+    [[ -f "$f" ]] && skill_decl="$f"
+  done
+fi
 for dir in plugins/*/; do
   dir="${dir%/}"
   [[ -f "$dir/.claude-plugin/plugin.json" ]] || continue
-  decl="${CLAUDE_CODE_TYPES:-}"
+  decl="${CLAUDE_CODE_TYPES:-$skill_decl}"
   [[ -n "$decl" ]] || decl="$dir/.claude-plugin/types/claude-code/index.d.ts"
   if [[ ! -f "$decl" ]]; then
-    echo "typecheck: $dir skipped, no Claude Code declarations (set CLAUDE_CODE_TYPES to claude-code.d.ts)"
+    echo "typecheck: $dir skipped, no Claude Code declarations (load the plugin-authoring skill in a session, or set CLAUDE_CODE_TYPES to claude-code.d.ts)"
     continue
+  fi
+  written="$(sed -n '1s|^// Written by Claude Code \(.*\)\.$|\1|p' "$decl")"
+  if [[ -n "$running" && "$written" != "$running" ]]; then
+    echo "typecheck: warning: $dir is checked against declarations from Claude Code ${written:-of an unknown version}, and this machine runs $running; load the plugin-authoring skill in a session to write current ones, or set CLAUDE_CODE_TYPES"
   fi
   abs="$ROOT/$dir"
   cat > "$tmp/tsconfig.json" <<EOF
@@ -145,5 +162,5 @@ EOF
   else
     npx --yes --package typescript@5.6.3 -- tsc -p "$tmp/tsconfig.json"
   fi
-  echo "typecheck: $dir"
+  echo "typecheck: $dir, against Claude Code ${written:-of an unknown version}"
 done
