@@ -145,7 +145,7 @@ A review answers two questions, separately.
 | Fix in this change when any of these holds | File, with its reopen trigger, when any of these holds |
 |---|---|
 | The change introduced it: a regression against main | The fix is far larger than the change itself |
-| It makes a statement false, in the change or in a file that describes what the change altered | The fix needs a call that sets direction for the operator: a dependency, a format, a default users will feel |
+| It makes a statement false, in the change or in a doc or comment that describes what the change altered | The fix needs a call that sets direction for the operator: a dependency, a format, a default users will feel |
 | You traced its cause and the fix you name stays inside the change's files | The fix lands in the files of other work in flight |
 | Users would feel it | The fix needs verification this change cannot run |
 

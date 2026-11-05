@@ -53,7 +53,7 @@ A review is worth running only if its findings get fixed. Whether a change may m
 | Fix it in this change when any of these holds | File it, with its reopen trigger, when any of these holds |
 |---|---|
 | The change introduced it: a regression against main | The fix is far larger than the change itself |
-| It makes a statement false, in the change or in a doc that describes what the change altered | The fix needs a call above the waterline (choices(meta)): a dependency, a format, a default users will feel |
+| It makes a statement false, in the change or in a doc or comment that describes what the change altered | The fix needs a call above the waterline (choices(meta)): a dependency, a format, a default users will feel |
 | Its cause is traced and the named fix stays inside the change's files | The fix lands in the files of other work in flight |
 | Users would feel it | The fix needs verification this change cannot run |
 

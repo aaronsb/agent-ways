@@ -105,9 +105,11 @@ Every review finding is given one of two dispositions, by the cost of fixing it 
 | Fix in this change when any of these holds | File it, with its reopen trigger, when any of these holds |
 |---|---|
 | The change introduced it: a regression against main | The fix is far larger than the change in flight |
-| It makes a statement false, in the change or in a doc that describes what the change altered | The fix needs a call above the waterline (ADR-612): a dependency, a format, a default users will feel |
+| It makes a statement false, in the change or in a doc or comment that describes what the change altered | The fix needs a call above the waterline (ADR-612): a dependency, a format, a default users will feel |
 | Its cause is traced and the named fix stays inside the card's files | The fix lands in another open card's files |
 | Users would feel it | The fix needs verification the card cannot run |
+
+> Edited 2026-11-05: review of #1258 found a stale statement outside a change's files fit neither column. The statement-false row now also covers a doc or comment that describes what the change altered. It read: "It makes a statement in the change false: a doc, a comment, a help string".
 
 The right-hand column wins. A fix far larger than the change it would ride on is a sign of a deeper, systemic or architectural flaw, or of a misunderstanding of the problem, and it gets its own card with a focused look, starting from the design stage. When the change itself introduced that defect, the change does not merge as it is: it goes back to design with the finding, since the approach is what the finding questions.
 
