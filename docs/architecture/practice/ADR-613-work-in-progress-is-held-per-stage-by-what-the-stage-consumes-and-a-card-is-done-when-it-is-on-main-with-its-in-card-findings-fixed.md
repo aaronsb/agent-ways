@@ -26,6 +26,15 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "yes thats it, but...: if fix now is a significant change (something where the 'fix' is actually far greater than what's already in flight) it's not something we need to fix now, it's likely a deeper, more systemic or architectural flaw or a misunderstanding of the problem and needs a focused look."
+    via: Claude Code session 2026-11-05, question tool, the fix-in-card probe; Decision item 4 edited to match
+    covers: [fix-in-card]
+  - operator: aaronsb
+    said: "Judgment + count first"
+    via: Claude Code session 2026-11-05, question tool, the wip-limits probe
+    covers: [wip-limits]
 status: proposed
 date: 2026-11-05
 deciders:
@@ -46,10 +55,10 @@ observable:
 
 ## Summary
 
-- **Decided:** A unit of work (a card) is one issue. It is done when it is merged to main, its issue is closed, and every finding fixed-in-the-card has been fixed; until then it counts as open work. How many cards are open at each stage is judged by what that stage consumes: overlapping files at build, the operator's attention at a direction-setting review, the integration window where parts must meet, CI turnaround, and the lead's attention. A plan is a parent issue with sub-issues; `blockedBy` gives the serial order, and a wave is the ready cards that share few files. Review findings get a disposition by the cost of fixing now against later, not a blocking tier: a finding the change introduced, that makes its own text false, or whose traced fix stays inside the card's files is fixed in the card. The open count is measured from GitHub and git and reported when work starts, across sessions; any guard ships off.
-- **Trades away:** A card's cycle time grows when its review findings are fixed inside it, and some findings a reviewer would have deferred now hold a merge. The limits stay judgment with a measured count, so nothing stops a session that ignores the count.
+- **Decided:** A unit of work (a card) is one issue. It is done when it is merged to main, its issue is closed, and every finding fixed-in-the-card has been fixed; until then it counts as open work. How many cards are open at each stage is judged by what that stage consumes: overlapping files at build, the operator's attention at a direction-setting review, the integration window where parts must meet, CI turnaround, and the lead's attention. A plan is a parent issue with sub-issues; `blockedBy` gives the serial order, and a wave is the ready cards that share few files. Review findings get a disposition by the cost of fixing now against later, not a blocking tier: a finding the change introduced, that makes its own text false, or whose traced fix stays inside the card's files is fixed in the card, unless the fix is far larger than the change in flight, which marks a deeper flaw or a misread problem and gets its own focused card. The open count is measured from GitHub and git and reported when work starts, across sessions; any guard ships off.
+- **Trades away:** A card's cycle time grows when its review findings are fixed inside it, and some findings a reviewer would have deferred now hold a merge. A change whose defect needs a fix far larger than itself goes back to design instead of merging. The limits stay judgment with a measured count, so nothing stops a session that ignores the count.
 - **One-way?** No. It changes way text, the reviewer agent, the merge skill, and adds a macro and a `gh-tasks` subcommand; each comes out with a revert.
-- **Probes:** *Confident:* a finding with its cause traced and its fix named inside the change's own files is fixed before the merge, whatever severity the reviewer gave it. *Not confident:* that limits stay judgment plus a measured count for now, with no numbers in `ways.yaml` until the counts show what the real limits are.
+- **Probes:** *Confident (fix-in-card):* a finding with its cause traced and its fix named inside the change's own files is fixed before the merge, whatever severity the reviewer gave it. *Not confident (wip-limits):* that limits stay judgment plus a measured count for now, with no numbers in `ways.yaml` until the counts show what the real limits are.
 - **Inversion:** All serial (one card at a time from start to merge) against all parallel (every step across every card at once). The answer is per stage: parallel where files barely overlap and nothing must integrate, one at a time where a person reviews or everything is touched, and integration kept continuous where parts must meet.
 
 ## Context
@@ -93,14 +102,18 @@ A card declares its file set, the paths or areas it expects to touch, in its iss
 
 Every review finding is given one of two dispositions, by the cost of fixing it now against later:
 
-| Fix in this card when any of these holds | File it, with its reopen trigger, when |
+| Fix in this card when any of these holds | File it, with its reopen trigger, when any of these holds |
 |---|---|
-| The change introduced it: a regression against main | The fix needs a call above the waterline (ADR-612): a dependency, a format, a default users will feel |
-| It makes a statement in the change false: a doc, a comment, a help string | The fix lands in another open card's files |
-| Its cause is traced and the named fix stays inside the card's files | The fix needs verification the card cannot run |
-| Users would feel it, at any fix cost | The fix is large and its impact small |
+| The change introduced it: a regression against main | The fix is far larger than the change in flight |
+| It makes a statement in the change false: a doc, a comment, a help string | The fix needs a call above the waterline (ADR-612): a dependency, a format, a default users will feel |
+| Its cause is traced and the named fix stays inside the card's files | The fix lands in another open card's files |
+| Users would feel it | The fix needs verification the card cannot run |
 
-A finding users would feel holds the card open whatever the fix costs. A finding filed carries the reason from the right-hand column and the condition that reopens it (delivery/issues, residuals). The merge verdict (may this merge) stays, and is a separate question from the disposition: a change can be safe to merge and still not done.
+The right-hand column wins. A fix far larger than the change it would ride on is a sign of a deeper, systemic or architectural flaw, or of a misunderstanding of the problem, and it gets its own card with a focused look, starting from the design stage. When the change itself introduced that defect, the change does not merge as it is: it goes back to design with the finding, since the approach is what the finding questions.
+
+> Edited 2026-11-05: the operator said "if fix now is a significant change (something where the 'fix' is actually far greater than what's already in flight) it's not something we need to fix now, it's likely a deeper, more systemic or architectural flaw or a misunderstanding of the problem and needs a focused look." It read: a fourth fix-in-card row "Users would feel it, at any fix cost" and a fourth filing row "The fix is large and its impact small", with "A finding users would feel holds the card open whatever the fix costs."
+
+A finding filed carries the reason from the right-hand column and the condition that reopens it (delivery/issues, residuals). The merge verdict (may this merge) stays, and is a separate question from the disposition: a change can be safe to merge and still not done.
 
 ### 5. Counting open work
 
