@@ -29,7 +29,7 @@ A workflow can start dozens of agents and spend a large amount of tokens, so **r
 
 ## Worked example: the deliver workflow
 
-`develop → pr → review → remediate → merge` suits a workflow. Each unit of work passes through the stages on its own. The *review* fans out across dimensions (bugs, security, reuse), and an adversarial check verifies each finding. Each finding is fixed, or the reason it is declined is recorded, on its own. The four-square in `delivery/merge` **gates the merge**: a person approves when the work sets direction. The step that cannot be undone is the *release*, which comes after the merge (see the autonomy design note). The workflow saves wall-clock time and reviews more thoroughly than one agent does.
+`develop → pr → review → remediate → merge` suits a workflow. Each unit of work passes through the stages on its own. The *review* fans out across dimensions (bugs, security, reuse), and an adversarial check verifies each finding. Each finding gets its disposition by the table in `delivery/merge`, on its own. The four-square in `delivery/merge` **gates the merge**: a person approves when the work sets direction. The step that cannot be undone is the *release*, which comes after the merge (see the autonomy design note). The workflow saves wall-clock time and reviews more thoroughly than one agent does.
 
 ## See also
 

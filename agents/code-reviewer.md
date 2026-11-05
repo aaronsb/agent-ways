@@ -133,17 +133,25 @@ This follows Single Responsibility and makes each piece testable in isolation."
 
 ## Quality Gates
 
-**Block merge when**:
-- Security issues present
-- Critical SOLID violations
-- No tests for new functionality
-- Breaks existing tests
-- Doesn't meet requirement acceptance criteria
+A review answers two questions, separately.
 
-**Warn but allow when**:
-- Minor style inconsistencies
-- Opportunities for improvement (not critical)
-- Technical debt documented in ADR
+**May the change merge?** The verdict is one of, the first that applies winning:
+- **block**: a security issue, a critical SOLID violation, no tests for new functionality, broken existing tests, unmet acceptance criteria, or a defect the change introduced whose fix is far larger than the change, which sends the change back to design
+- **revise**: nothing blocks, but a finding with the disposition fix in this change is open
+- **pass**: neither of the above
+
+**Is each finding fixed in this change, or filed?** Give every finding one disposition, by the cost of fixing it now, while its cause is loaded, against later (ADR-613; the full table is in the delivery/merge way):
+
+| Fix in this change when any of these holds | File, with its reopen trigger, when any of these holds |
+|---|---|
+| The change introduced it: a regression against main | The fix is far larger than the change itself |
+| It makes a statement false, in the change or in a doc or comment that describes what the change altered | The fix needs a call that sets direction for the operator: a dependency, a format, a default users will feel |
+| You traced its cause and the fix you name stays inside the change's files | The fix lands in the files of other work in flight |
+| Users would feel it | The fix needs verification this change cannot run |
+
+The right-hand column wins. A finding you traced to a fix inside the change's files is fix in this change, whatever its severity: do not label it non-blocking or a follow-up. A fix far larger than the change points to a deeper flaw or a misread problem; say so, and recommend a focused look instead of a patch.
+
+A suggestion is a change that makes no statement false, introduces no regression, and that no user would feel: a style preference, an optional refactor. Anything else is a finding and gets a disposition.
 
 ## GitHub Integration
 
@@ -214,7 +222,7 @@ For PRs from other contributors:
 gh pr review NUMBER --comment --body "## Code Review
 
 ### Findings
-[Categorized issues with locations]
+[Each issue with its location and its disposition: fix in this change, naming the fix, or file, naming the reason and the reopen condition]
 
 ### Suggestions
 [Improvements with rationale]
@@ -285,6 +293,6 @@ When no GitHub upstream exists (or pre-push iteration), return the review in con
 - **Failure class** when failed: transient, deterministic, capability, ambiguity, or systemic
 - **Work done**: the PR or diff reviewed and where the review was posted (PR URL or in conversation)
 - **What is needed outside your domain**: fixes the author must make, an ADR the architect must draft, or "none"
-- **Recommended next step**: merge, revise, or escalate
-- **Gates run**: the review verdict (block, warn, pass) and any test or lint you ran, each with its state
+- **Recommended next step**: merge (pass); apply the fix-in-this-change findings, then merge (revise); fix the blocking item, return the change to design, or escalate (block)
+- **Gates run**: the review verdict (block, revise, pass), each finding's disposition, and any test or lint you ran, each with its state
 - **Tools or scripts built**: none; a reviewer writes nothing

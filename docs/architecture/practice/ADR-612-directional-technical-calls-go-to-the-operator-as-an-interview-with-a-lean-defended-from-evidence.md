@@ -57,8 +57,8 @@ related:
   - ADR-608
   - ADR-611
 observable:
-  - "run: ways match 'before you write up the decision, interview me on the open questions, and give me your lean on each with the evidence behind it' ranks meta/choices/interview as firing"
-  - "run: ways match on a one-line factual question, such as which port the dev server listens on, fires neither meta/choices nor meta/choices/interview"
+  - "run: ways author match 'before you write up the decision, interview me on the open questions, and give me your lean on each with the evidence behind it' ranks meta/choices/interview as firing"
+  - "run: ways author match on a one-line factual question, such as which port the dev server listens on, fires neither meta/choices nor meta/choices/interview"
   - "see: given a draft record with several open questions, the session settles the ones below the waterline in a line each, writes a framing, and asks the rest, each with a brief, the case for and against, and a lean that cites a file, record or measurement; it asks through the question tool when the operator is present"
   - "see: at a choice between two libraries the session asks the operator and offers a hold option, and names the unknowns its evidence leaves open"
 ---

@@ -58,4 +58,5 @@ Tasks are listed in dependency order. A task that depends on a later one is miso
 ## See Also
 
 - adr(documentation) — implementation follows ADR decisions
+- delivery/implement/wip(softwaredev) — child: more than one card open, stage limits, waves, when a card is done
 - subagents(meta) — parallelization uses subagents
