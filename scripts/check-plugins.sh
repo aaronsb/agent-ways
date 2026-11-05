@@ -122,21 +122,32 @@ done
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 # The Claude Code this machine runs, and the declarations the plugin-authoring
-# skill wrote for it, in the folder the skill names as it loads.
-running="$(claude --version 2>/dev/null | awk '{print $1}')"
+# skill wrote for it, under <tmp>/claude-<uid>/bundled-skills/<version>/. Claude
+# Code's tmp folder is CLAUDE_CODE_TMPDIR, from the environment or from the env
+# block of its user settings, else TMPDIR, else /tmp.
+running="$(claude --version 2>/dev/null | awk '{print $1}' || true)"
+settings_tmp=""
+if command -v jq >/dev/null; then
+  settings_tmp="$(jq -r '.env.CLAUDE_CODE_TMPDIR // empty' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" 2>/dev/null || true)"
+fi
+skill_dirs=()
+for base in "${CLAUDE_CODE_TMPDIR:-}" "$settings_tmp" "${TMPDIR:-}" /tmp; do
+  [[ -n "$base" && -n "$running" ]] && skill_dirs+=("$base/claude-$(id -u)/bundled-skills/$running")
+done
 skill_decl=""
-if [[ -n "$running" ]]; then
-  for f in "${CLAUDE_CODE_TMPDIR:-${TMPDIR:-/tmp}}/claude-$(id -u)/bundled-skills/$running"/*/plugin-authoring/types/claude-code.d.ts; do
+for d in ${skill_dirs[@]+"${skill_dirs[@]}"}; do
+  for f in "$d"/*/plugin-authoring/types/claude-code.d.ts; do
     [[ -f "$f" ]] && skill_decl="$f"
   done
-fi
+  [[ -n "$skill_decl" ]] && break
+done
 for dir in plugins/*/; do
   dir="${dir%/}"
   [[ -f "$dir/.claude-plugin/plugin.json" ]] || continue
   decl="${CLAUDE_CODE_TYPES:-$skill_decl}"
   [[ -n "$decl" ]] || decl="$dir/.claude-plugin/types/claude-code/index.d.ts"
   if [[ ! -f "$decl" ]]; then
-    echo "typecheck: $dir skipped, no Claude Code declarations (load the plugin-authoring skill in a session, or set CLAUDE_CODE_TYPES to claude-code.d.ts)"
+    echo "typecheck: $dir skipped, no Claude Code declarations: none in $dir/.claude-plugin/types/ or under ${skill_dirs[*]:-a skill folder (claude --version gave no version)}; load the plugin-authoring skill in a session, or set CLAUDE_CODE_TYPES to claude-code.d.ts"
     continue
   fi
   written="$(sed -n '1s|^// Written by Claude Code \(.*\)\.$|\1|p' "$decl")"

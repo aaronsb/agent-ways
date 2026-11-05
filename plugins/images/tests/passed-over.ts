@@ -62,20 +62,21 @@ function describesBuiltInsOnly(r: Registration): boolean {
 
 /** The registrations the policy plugin would pass over, every time or for
  *  some events, as `pattern` or `pattern{door=...}`. A session.append hook
- *  with no door matcher, or one naming a passed-over door, counts. */
+ *  with no door matcher, or one whose door matcher (a name, a RegExp, or a
+ *  list of them) takes a passed-over door, counts. */
 export function passedOverHits(regs: readonly Registration[]): string[] {
-  const always = [...PASSED_OVER_EVENTS, ...PROVIDER_GATED_EVENTS, ...CALLER_GATED_EVENTS]
+  const counted = [...PASSED_OVER_EVENTS, ...PROVIDER_GATED_EVENTS, ...CALLER_GATED_EVENTS]
   const doorsPassed: readonly string[] = [...PASSED_OVER_DOORS, ...SOMETIMES_PASSED_OVER_DOORS]
   const hits: string[] = []
   for (const r of regs) {
     const isClassic = r.pattern.startsWith('classic.') || reaches(r.pattern, 'classic.SessionStart')
-    if (isClassic || always.some(e => reaches(r.pattern, e) && !describesBuiltInsOnly({ ...r, pattern: e }))) {
+    if (isClassic || counted.some(e => reaches(r.pattern, e) && !describesBuiltInsOnly({ ...r, pattern: e }))) {
       hits.push(r.pattern)
       continue
     }
     if (!reaches(r.pattern, 'session.append')) continue
-    const doors = named(r.matcher, 'door') ?? doorsPassed
-    const passed = doors.filter(d => doorsPassed.includes(d as string))
+    const doors = named(r.matcher, 'door')
+    const passed = doorsPassed.filter(d => doors === undefined || doors.some(m => (m instanceof RegExp ? m.test(d) : m === d)))
     if (passed.length > 0) hits.push(`${r.pattern}{door=${passed.join('|')}}`)
   }
   return hits
