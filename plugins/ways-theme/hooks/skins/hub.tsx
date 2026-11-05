@@ -9,7 +9,8 @@
 // AskUserQuestion. Gone: the /skin command and its panes, the design
 // tool, the settings store, the update check and star toast, the model-only
 // chart hint, the `$.skins` API for other mods, the system-appearance probe,
-// the usage band above the prompt, the Compact button, and the classic.SessionStart reload.
+// the usage band above the prompt, the Compact button, and the
+// classic.SessionStart reload.
 //
 // The look comes from one call, `ways settings theme export --mod`, at an
 // interactive session's start and every PICKUP_MS after; a timer the host
