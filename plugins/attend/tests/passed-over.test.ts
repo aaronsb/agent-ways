@@ -25,6 +25,18 @@ describe('what the mod hooks reaches it on every host', () => {
       { pattern: 'session.append' },
       { pattern: 'session.append', matcher: { door: 'compaction' } },
       { pattern: 'session.append', matcher: { door: ['prompt', 'hook-context'] } },
+      { pattern: 'session.append', matcher: { door: 'tool-message' } },
+      { pattern: 'session.append', matcher: { door: 'note' } },
+      { pattern: 'tool.*' },
+      { pattern: 'tool.describe' },
+      { pattern: 'tool.describe', matcher: { tool: ['Read', 'mcp__docs__search'] } },
+      { pattern: 'command.describe' },
+      { pattern: 'agent.offer' },
+      { pattern: 'agent.spawn' },
+      { pattern: 'tool.register' },
+      { pattern: 'ui.log' },
+      { pattern: 'env.get' },
+      { pattern: 'env.set' },
     ]
     expect(passedOverHits(regs)).toEqual([
       'classic.SessionStart',
@@ -35,9 +47,21 @@ describe('what the mod hooks reaches it on every host', () => {
       'session.compact',
       'settings.read',
       'prompt.context',
-      'session.append{door=attachment|hook-context|compaction}',
+      'session.append{door=attachment|hook-context|compaction|tool-message|note}',
       'session.append{door=compaction}',
       'session.append{door=hook-context}',
+      'session.append{door=tool-message}',
+      'session.append{door=note}',
+      'tool.*',
+      'tool.describe',
+      'tool.describe',
+      'command.describe',
+      'agent.offer',
+      'agent.spawn',
+      'tool.register',
+      'ui.log',
+      'env.get',
+      'env.set',
     ])
   })
 
@@ -46,8 +70,11 @@ describe('what the mod hooks reaches it on every host', () => {
       { pattern: 'session.end' },
       { pattern: 'session.measure' },
       { pattern: 'command.run', matcher: { command: 'compact' } },
-      { pattern: 'tool.*' },
       { pattern: 'session.append', matcher: { door: 'prompt' } },
+      { pattern: 'tool.describe', matcher: { tool: 'Read' } },
+      { pattern: 'tool.describe', matcher: { tool: ['Read', 'SendUserFile'] } },
+      { pattern: 'tool.list' },
+      { pattern: 'tool.check' },
     ]
     expect(passedOverHits(regs)).toEqual([])
   })
