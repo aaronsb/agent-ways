@@ -99,7 +99,7 @@ import {
   toolImages,
 } from './lib.ts'
 import type { CellPixels, ImageRef, Options, Renderer, Room } from './lib.ts'
-import { currentOptions, freshOptions, readOptions } from './options.ts'
+import { freshOptions, readOptions, settledOptions } from './options.ts'
 import { run } from './run.ts'
 
 const KITTY_GRAPHICS = { plugin: 'images', key: 'kittyGraphics' } as const
@@ -119,13 +119,15 @@ const IMAGE_MENTION = /\.(png|jpe?g|gif|webp)\b/i
 const MESSAGE_INDENT = 2
 /** How long the render log's on/off answer is kept before the flag is looked for again. */
 const TRACE_RECHECK_MS = 2_000
-/** The paragraph added to Read's description, by whether the session offers SendUserFile. */
-const STEER_WITH_SEND =
-  'This terminal draws images inline. When the user asks to see or be shown an image, send it with SendUserFile, ' +
-  'which shows it here and in remote and web views. A Read of an image, or an absolute image path in your reply, also draws it.'
-const STEER_WITHOUT_SEND =
-  'This terminal draws images inline. When the user asks to see or be shown an image, Read it or name its absolute ' +
-  'path in your reply, and it is drawn here.'
+/** Whether Read carries the steer, kept for the session. */
+const STEERS_READ = { plugin: 'images', key: 'steersRead' } as const
+/** The paragraph added to Read's description. One text for every thread: the
+ *  engine keeps one answer for the process, subagents included, and some of
+ *  them are offered no SendUserFile. */
+const STEER =
+  'This terminal draws images inline. When the user asks to see or be shown an image, send it with SendUserFile ' +
+  'where that tool is offered: it shows the image here and in remote and web views. A Read of an image, or an ' +
+  'absolute image path in your reply, also draws it here.'
 /** The components a tool call or a message can be drawn through. */
 const TRACED = ['ToolUse', 'ToolResult', 'ToolGroup', 'ToolProgress', 'AssistantMessage', 'UserMessage', 'CommandOutput'] as const
 
@@ -529,6 +531,24 @@ async function withPictures(
   )
 }
 
+/**
+ * Whether Read's description carries the steer. The engine asks for a
+ * description again whenever any mod loads or reloads, and sends a changed
+ * answer over the one a live conversation already holds, which costs its
+ * prompt cache. So the first ask of the session decides, once the options
+ * read at its start has settled, and the decision is kept in `$.state`,
+ * which a reload keeps: a later change to the option takes effect in a new
+ * Claude Code process.
+ */
+async function steersRead($: EngineInterface): Promise<boolean> {
+  const { value: kept } = await $.state.get(STEERS_READ)
+  if (kept !== undefined) return kept
+  const { steerToSendUserFile } = await settledOptions()
+  const steers = steerToSendUserFile && (await $.session.surfaces()).includes('terminal')
+  await $.state.set(STEERS_READ, steers)
+  return steers
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
@@ -536,17 +556,11 @@ export const register: Register = on => {
     return started
   })
 
-  // One paragraph after Read's own description, where the terminal draws. The
-  // engine asks once, as it first lists Read, and keeps the answer for the
-  // conversation; an option changed later takes effect in the next one.
+  // One paragraph after Read's own description, where the terminal draws.
   on('tool.describe', { tool: 'Read' }, async ($, e, next) => {
     const described = await next(e)
-    if (!currentOptions().steerToSendUserFile) return described
-    const surfaces: readonly string[] = await $.session.surfaces().catch(() => [])
-    if (!surfaces.includes('terminal')) return described
-    const tools: readonly { name: string }[] = await $.tool.list().catch(() => [])
-    const text = tools.some(t => t.name === 'SendUserFile') ? STEER_WITH_SEND : STEER_WITHOUT_SEND
-    return { ...described, description: `${described.description}\n\n${text}` }
+    if (!(await steersRead($))) return described
+    return { ...described, description: `${described.description}\n\n${STEER}` }
   })
 
   // The render log sees each component before the drawing hooks below do.

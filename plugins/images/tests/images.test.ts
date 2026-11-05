@@ -702,50 +702,52 @@ describe('render log', () => {
 describe("the steer in Read's description", () => {
   const OWN = 'Reads a file from the local filesystem.'
 
-  /** The engine beneath the mod: the session's surfaces and tools, and each tool's own description. */
-  function session(on: On, surfaces: string[], tools: string[]) {
-    on('session.surfaces', () => ({ value: surfaces }) as never)
-    on('tool.list', () => ({ value: tools.map(name => ({ name, description: '', mcp: false })) }) as never)
-    on('tool.describe', ($, e) => ({ description: e.description }))
+  /** The engine beneath the mod: the session's surfaces, and each tool's own description and placement. */
+  function session(on: On, surfaces: () => string[]) {
+    on('session.surfaces', () => ({ value: surfaces() }) as never)
+    on('tool.describe', ($, e) => ({ description: e.description, isDeferred: false }))
   }
   const described = ($: Engine, tool = 'Read') =>
     $.tool.describe({ tool, description: OWN, provider: { plugin: 'engine', tier: 'core' } })
 
-  test("on the terminal: one paragraph after Read's own text, naming SendUserFile", async ($, on) => {
-    session(on, ['terminal'], ['Read', 'SendUserFile'])
+  test("on the terminal: one paragraph after Read's own text, the placement kept", async ($, on) => {
+    session(on, () => ['terminal'])
     const { description, isDeferred } = await described($)
     expect(description.startsWith(`${OWN}\n\n`)).toBe(true)
-    expect(description).toContain('send it with SendUserFile')
+    expect(description).toContain('send it with SendUserFile where that tool is offered')
+    expect(description).toContain('absolute image path in your reply')
     expect(description).not.toMatch(/MUST/)
-    expect(isDeferred).toBeUndefined()
-  })
-
-  test('without SendUserFile offered: Read or a path, nothing about SendUserFile', async ($, on) => {
-    session(on, ['terminal'], ['Read'])
-    const { description } = await described($)
-    expect(description).toContain('Read it or name its absolute path')
-    expect(description).not.toContain('SendUserFile')
+    expect(isDeferred).toBe(false)
   })
 
   test('with a remote surface beside the terminal: the paragraph stays', async ($, on) => {
-    session(on, ['terminal', 'desktop'], ['Read', 'SendUserFile'])
+    session(on, () => ['terminal', 'desktop'])
     expect((await described($)).description).toContain('This terminal draws images inline')
   })
 
   test('with no terminal surface: Read keeps its own text', async ($, on) => {
-    session(on, ['desktop'], ['Read', 'SendUserFile'])
+    session(on, () => ['desktop'])
     expect((await described($)).description).toBe(OWN)
   })
 
   test('another tool keeps its own text', async ($, on) => {
-    session(on, ['terminal'], ['Read', 'SendUserFile'])
+    session(on, () => ['terminal'])
     expect((await described($, 'SendUserFile')).description).toBe(OWN)
   })
 
+  test('a later ask answers as the first did, whatever changed between', async ($, on) => {
+    let surfaces = ['terminal']
+    session(on, () => surfaces)
+    const first = (await described($)).description
+    surfaces = ['desktop']
+    expect((await described($)).description).toBe(first)
+  })
+
+  // Last: the options module keeps what this session's start read.
   test('steer_to_send_user_file off: Read keeps its own text', async ($, on) => {
     const world: World = { hasMagick: true, blit: undefined, ran: [], ways: [], settings: { steer_to_send_user_file: false } }
     engine(on, world)
-    session(on, ['terminal'], ['Read', 'SendUserFile'])
+    session(on, () => ['terminal'])
     await $.session.start({ cwd: '/work/proj', surface: 'terminal', isInteractive: true })
     expect((await described($)).description).toBe(OWN)
     // Describing reads nothing: the session's start read the options once.
