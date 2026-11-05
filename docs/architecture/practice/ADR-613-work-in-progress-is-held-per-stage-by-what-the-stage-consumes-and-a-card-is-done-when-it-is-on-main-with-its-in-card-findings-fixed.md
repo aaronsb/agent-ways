@@ -35,7 +35,7 @@ considered:
     said: "Judgment + count first"
     via: Claude Code session 2026-11-05, question tool, the wip-limits probe
     covers: [wip-limits]
-status: proposed
+status: accepted
 date: 2026-11-05
 deciders:
   - aaronsb
@@ -133,7 +133,7 @@ The limits stay judgment with this measured count. Numbers in `ways.yaml` (for e
 | `gh-tasks ready` | Lists ready sub-issues of a parent with the file overlap between each pair, from the declared file sets |
 | The `/develop` skill | A planning step that lays waves when the work is more than one card |
 
-The first increment lands the disposition rule (reviewer, merge way and skill) and the way. The count macro and `gh-tasks ready` follow as their own increments.
+The first increment lands the disposition rule (reviewer, merge way and skill) and the way. The count macro (#1256) and `gh-tasks ready` with the `/develop` planning step (#1257) follow as their own increments.
 
 ## Consequences
 
