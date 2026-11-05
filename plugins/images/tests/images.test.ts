@@ -699,41 +699,66 @@ describe('render log', () => {
   })
 })
 
-describe('prompt section', () => {
-  const BASE = { sections: [{ id: 'intro', text: 'base', scope: 'shared' }] } as const
-  const TOOLS = ['Read', 'SendUserFile']
-  const FACTS = { model: 'claude-opus-5-5', promptModel: 'claude-opus-5-5', outputStyle: null, traits: [] } as const
+describe("the steer in Read's description", () => {
+  const OWN = 'Reads a file from the local filesystem.'
 
-  test('on the terminal: one session section, added last, naming SendUserFile', async ($, on) => {
-    on('prompt.compose', () => BASE as never)
-    const { sections } = await $.prompt.compose({ ...FACTS, surfaces: ['terminal'], tools: TOOLS })
-    expect(sections).toHaveLength(2)
-    expect(sections[1]).toMatchObject({ id: 'images:show-images', scope: 'session' })
-    expect(sections[1]?.text).toContain('send it with SendUserFile')
-    expect(sections[1]?.text).not.toMatch(/MUST/)
+  /** The engine beneath the mod: the session's surfaces, and each tool's own description and placement. */
+  function session(on: On, surfaces: () => string[]) {
+    on('session.surfaces', () => ({ value: surfaces() }) as never)
+    on('tool.describe', ($, e) => ({ description: e.description, isDeferred: false }))
+  }
+  const described = ($: Engine, tool = 'Read') =>
+    $.tool.describe({ tool, description: OWN, provider: { plugin: 'engine', tier: 'core' } })
+
+  test("on the terminal: one paragraph after Read's own text, the placement kept", async ($, on) => {
+    session(on, () => ['terminal'])
+    const { description, isDeferred } = await described($)
+    expect(description.startsWith(`${OWN}\n\n`)).toBe(true)
+    expect(description).toContain('send it with SendUserFile where that tool is offered')
+    expect(description).toContain('absolute image path in your reply')
+    expect(description).not.toMatch(/MUST/)
+    expect(isDeferred).toBe(false)
   })
 
-  test('without SendUserFile offered: Read or a path, nothing about SendUserFile', async ($, on) => {
-    on('prompt.compose', () => BASE as never)
-    const { sections } = await $.prompt.compose({ ...FACTS, surfaces: ['terminal'], tools: ['Read'] })
-    expect(sections[1]?.text).toContain('Read it or name its absolute path')
-    expect(sections[1]?.text).not.toContain('SendUserFile')
+  test('with a remote surface beside the terminal: the paragraph stays', async ($, on) => {
+    session(on, () => ['terminal', 'desktop'])
+    expect((await described($)).description).toContain('This terminal draws images inline')
   })
 
-  test('on another surface: no section', async ($, on) => {
-    on('prompt.compose', () => BASE as never)
-    const { sections } = await $.prompt.compose({ ...FACTS, surfaces: ['desktop'], tools: TOOLS })
-    expect(sections.map(s => s.id)).toEqual(['intro'])
+  test('with no terminal surface: Read keeps its own text', async ($, on) => {
+    session(on, () => ['desktop'])
+    expect((await described($)).description).toBe(OWN)
   })
 
-  test('steer_to_send_user_file off: no section', async ($, on) => {
+  test('another tool keeps its own text', async ($, on) => {
+    session(on, () => ['terminal'])
+    expect((await described($, 'SendUserFile')).description).toBe(OWN)
+  })
+
+  test('a later ask answers as the first did, whatever changed between', async ($, on) => {
+    let surfaces = ['terminal']
+    session(on, () => surfaces)
+    const first = (await described($)).description
+    surfaces = ['desktop']
+    expect((await described($)).description).toBe(first)
+  })
+
+  test('a decision against the steer is kept too, when a terminal appears later', async ($, on) => {
+    let surfaces = ['desktop']
+    session(on, () => surfaces)
+    expect((await described($)).description).toBe(OWN)
+    surfaces = ['terminal']
+    expect((await described($)).description).toBe(OWN)
+  })
+
+  // Last: the options module keeps what this session's start read.
+  test('steer_to_send_user_file off: Read keeps its own text', async ($, on) => {
     const world: World = { hasMagick: true, blit: undefined, ran: [], ways: [], settings: { steer_to_send_user_file: false } }
     engine(on, world)
-    on('prompt.compose', () => BASE as never)
+    session(on, () => ['terminal'])
     await $.session.start({ cwd: '/work/proj', surface: 'terminal', isInteractive: true })
-    const { sections } = await $.prompt.compose({ ...FACTS, surfaces: ['terminal'], tools: TOOLS })
-    expect(sections.map(s => s.id)).toEqual(['intro'])
-    // Composing reads nothing: the session's start read them once.
+    expect((await described($)).description).toBe(OWN)
+    // Describing reads nothing: the session's start read the options once.
     expect(world.ways).toHaveLength(1)
   })
 })
@@ -1152,13 +1177,11 @@ describe('the frame contract', () => {
 })
 
 describe('what the mod hooks reaches it on every host', () => {
-  test("the one hook an organization's policy plugin passes over is the prompt section, and none is classic", () => {
+  test("no hook of the mod is on an event an organization's policy plugin passes over", () => {
     const regs = registrationsOf(register as never)
-    // The recording saw the module's hooks: the control for the lists below.
+    // The recording saw the module's hooks: the control for the empty list below.
     expect(regs.map(r => r.pattern)).toContain('ui.render')
-    expect(regs.map(r => r.pattern)).toContain('session.start')
-    expect(regs.filter(r => r.pattern.startsWith('classic.'))).toEqual([])
-    // Where the policy plugin sits, the steer section is left out; every picture still draws.
-    expect(passedOverHits(regs)).toEqual(['prompt.compose'])
+    expect(regs.map(r => r.pattern)).toContain('tool.describe')
+    expect(passedOverHits(regs)).toEqual([])
   })
 })

@@ -19,9 +19,13 @@
 // when it frames a row the mod drew beneath it (ADR-517 item 6).
 //
 // The options are the `mods.images.*` ways settings (options.ts). With
-// `steer_to_send_user_file` (the default), a short system-prompt section on
-// the terminal surface tells the model the terminal draws images, so a request
-// to see one ends with SendUserFile (or a Read, or a path) and a picture.
+// `steer_to_send_user_file` (the default), a paragraph added to Read's tool
+// description in a session with a terminal surface tells the model the
+// terminal draws images, so a request to see one ends with SendUserFile (or a
+// Read, or a path) and a picture. Read's description carries it because Read
+// is always listed in full, where SendUserFile can wait behind ToolSearch, and
+// because an organization's policy plugin runs a person's hooks on a built-in
+// tool's description while it passes over the system-prompt events.
 //
 // Two renderers. Where Claude Code draws kitty graphics with Unicode
 // placeholders, the terminal's `Image` element carries the pixels, read by the
@@ -95,7 +99,7 @@ import {
   toolImages,
 } from './lib.ts'
 import type { CellPixels, ImageRef, Options, Renderer, Room } from './lib.ts'
-import { currentOptions, freshOptions, readOptions } from './options.ts'
+import { freshOptions, readOptions } from './options.ts'
 import { run } from './run.ts'
 
 const KITTY_GRAPHICS = { plugin: 'images', key: 'kittyGraphics' } as const
@@ -115,15 +119,16 @@ const IMAGE_MENTION = /\.(png|jpe?g|gif|webp)\b/i
 const MESSAGE_INDENT = 2
 /** How long the render log's on/off answer is kept before the flag is looked for again. */
 const TRACE_RECHECK_MS = 2_000
+/** Whether Read carries the steer, kept for the session. */
+const STEERS_READ = { plugin: 'images', key: 'steersRead' } as const
+/** The paragraph added to Read's description. One text for every thread: the
+ *  engine keeps one answer for the process, subagents included, and some of
+ *  them are offered no SendUserFile. */
+const STEER =
+  'This terminal draws images inline. When the user asks to see or be shown an image, send it with SendUserFile ' +
+  'where that tool is offered: it shows the image here and in remote and web views. A Read of an image, or an ' +
+  'absolute image path in your reply, also draws it here.'
 /** The components a tool call or a message can be drawn through. */
-/** The system-prompt section, by whether the request offers SendUserFile. */
-const STEER_ID = 'images:show-images'
-const STEER_WITH_SEND =
-  'This terminal draws images inline. When the user asks to see or be shown an image, send it with SendUserFile, ' +
-  'which shows it here and in remote and web views. A Read of an image, or an absolute image path in your reply, also draws it.'
-const STEER_WITHOUT_SEND =
-  'This terminal draws images inline. When the user asks to see or be shown an image, Read it or name its absolute ' +
-  'path in your reply, and it is drawn here.'
 const TRACED = ['ToolUse', 'ToolResult', 'ToolGroup', 'ToolProgress', 'AssistantMessage', 'UserMessage', 'CommandOutput'] as const
 
 /** The line under a picture: its file's name, linked to the file where there is one, and its sizes. */
@@ -526,6 +531,29 @@ async function withPictures(
   )
 }
 
+/** The steer decision, for this load of the module. */
+let steersReadHere: boolean | undefined
+
+/**
+ * Whether Read's description carries the steer. The engine keeps one answer
+ * for the process, asks again whenever any mod loads or reloads, and sends a
+ * changed answer over the one a live conversation already holds, which costs
+ * its prompt cache. So the first ask decides, from options read for this
+ * load, and the decision is kept twice: in a module variable, which a
+ * `/resume` or `/clear` keeps, and in `$.state`, which a reload of this mod
+ * keeps. A later change to the option takes effect in a new Claude Code
+ * process.
+ */
+async function steersRead($: EngineInterface): Promise<boolean> {
+  if (steersReadHere !== undefined) return steersReadHere
+  const { value: kept } = await $.state.get(STEERS_READ)
+  if (kept !== undefined) return (steersReadHere = kept)
+  const { steerToSendUserFile } = await freshOptions($)
+  const steers = steerToSendUserFile && (await $.session.surfaces()).includes('terminal')
+  await $.state.set(STEERS_READ, steers)
+  return (steersReadHere = steers)
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
@@ -533,12 +561,11 @@ export const register: Register = on => {
     return started
   })
 
-  // One section, added last on the session side, where the terminal draws.
-  on('prompt.compose', async ($, e, next) => {
-    const composed = await next(e)
-    if (!currentOptions().steerToSendUserFile || !e.surfaces.includes('terminal')) return composed
-    const text = e.tools.includes('SendUserFile') ? STEER_WITH_SEND : STEER_WITHOUT_SEND
-    return { sections: [...composed.sections, { id: STEER_ID, text, scope: 'session' }] }
+  // One paragraph after Read's own description, where the terminal draws.
+  on('tool.describe', { tool: 'Read' }, async ($, e, next) => {
+    const described = await next(e)
+    if (!(await steersRead($))) return described
+    return { ...described, description: `${described.description}\n\n${STEER}` }
   })
 
   // The render log sees each component before the drawing hooks below do.

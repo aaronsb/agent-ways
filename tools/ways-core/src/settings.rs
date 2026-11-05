@@ -765,8 +765,8 @@ const KEYS: &[KeySpec] = &[
         path: &["mods", "images", "steer_to_send_user_file"],
         kind: Kind::Bool,
         default: DefaultValue::Yaml("true"),
-        doc: "Whether the system prompt tells the model the terminal draws images.",
-        long: "On, a short section on the terminal surface says a request to see an image is answered with SendUserFile, or with a Read or an absolute path where SendUserFile is not offered. Off, the prompt is left as Claude Code composes it. Where an organization manages Claude Code, its policy plugin passes over the hook that adds the section, so the section is absent there.",
+        doc: "Whether Read's tool description tells the model the terminal draws images.",
+        long: "On, a paragraph after Read's tool description, in a session with a terminal surface, says a request to see an image is answered with SendUserFile where that tool is offered, and that a Read or an absolute path also draws one. Off, Read keeps the description Claude Code gives it. It reaches the model where an organization manages Claude Code too. A change takes effect in a new Claude Code process.",
         ..BASE
     },
     KeySpec {
