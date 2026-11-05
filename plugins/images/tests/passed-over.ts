@@ -76,7 +76,7 @@ export function passedOverHits(regs: readonly Registration[]): string[] {
     }
     if (!reaches(r.pattern, 'session.append')) continue
     const doors = named(r.matcher, 'door')
-    const passed = doorsPassed.filter(d => doors === undefined || doors.some(m => (m instanceof RegExp ? m.test(d) : m === d)))
+    const passed = doorsPassed.filter(d => doors === undefined || doors.some(m => (m instanceof RegExp ? ((m.lastIndex = 0), m.test(d)) : m === d)))
     if (passed.length > 0) hits.push(`${r.pattern}{door=${passed.join('|')}}`)
   }
   return hits

@@ -743,6 +743,14 @@ describe("the steer in Read's description", () => {
     expect((await described($)).description).toBe(first)
   })
 
+  test('a decision against the steer is kept too, when a terminal appears later', async ($, on) => {
+    let surfaces = ['desktop']
+    session(on, () => surfaces)
+    expect((await described($)).description).toBe(OWN)
+    surfaces = ['terminal']
+    expect((await described($)).description).toBe(OWN)
+  })
+
   // Last: the options module keeps what this session's start read.
   test('steer_to_send_user_file off: Read keeps its own text', async ($, on) => {
     const world: World = { hasMagick: true, blit: undefined, ran: [], ways: [], settings: { steer_to_send_user_file: false } }

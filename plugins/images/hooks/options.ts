@@ -60,12 +60,6 @@ export function readOptions($: EngineInterface): Promise<void> {
   return reading
 }
 
-/** The options once a read in flight has settled; the options as last read when none is. */
-export async function settledOptions(): Promise<Options> {
-  if (reading !== null) await reading
-  return options
-}
-
 /** Reads the options again when the last read is over OPTIONS_MAX_AGE_MS old. */
 export async function freshOptions($: EngineInterface): Promise<Options> {
   if (reading === null && (await now($)) - readAt > OPTIONS_MAX_AGE_MS) await readOptions($)

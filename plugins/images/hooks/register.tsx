@@ -99,7 +99,7 @@ import {
   toolImages,
 } from './lib.ts'
 import type { CellPixels, ImageRef, Options, Renderer, Room } from './lib.ts'
-import { freshOptions, readOptions, settledOptions } from './options.ts'
+import { freshOptions, readOptions } from './options.ts'
 import { run } from './run.ts'
 
 const KITTY_GRAPHICS = { plugin: 'images', key: 'kittyGraphics' } as const
@@ -531,22 +531,27 @@ async function withPictures(
   )
 }
 
+/** The steer decision, for this load of the module. */
+let steersReadHere: boolean | undefined
+
 /**
- * Whether Read's description carries the steer. The engine asks for a
- * description again whenever any mod loads or reloads, and sends a changed
- * answer over the one a live conversation already holds, which costs its
- * prompt cache. So the first ask of the session decides, once the options
- * read at its start has settled, and the decision is kept in `$.state`,
- * which a reload keeps: a later change to the option takes effect in a new
- * Claude Code process.
+ * Whether Read's description carries the steer. The engine keeps one answer
+ * for the process, asks again whenever any mod loads or reloads, and sends a
+ * changed answer over the one a live conversation already holds, which costs
+ * its prompt cache. So the first ask decides, from options read for this
+ * load, and the decision is kept twice: in a module variable, which a
+ * `/resume` or `/clear` keeps, and in `$.state`, which a reload of this mod
+ * keeps. A later change to the option takes effect in a new Claude Code
+ * process.
  */
 async function steersRead($: EngineInterface): Promise<boolean> {
+  if (steersReadHere !== undefined) return steersReadHere
   const { value: kept } = await $.state.get(STEERS_READ)
-  if (kept !== undefined) return kept
-  const { steerToSendUserFile } = await settledOptions()
+  if (kept !== undefined) return (steersReadHere = kept)
+  const { steerToSendUserFile } = await freshOptions($)
   const steers = steerToSendUserFile && (await $.session.surfaces()).includes('terminal')
   await $.state.set(STEERS_READ, steers)
-  return steers
+  return (steersReadHere = steers)
 }
 
 export const register: Register = on => {
