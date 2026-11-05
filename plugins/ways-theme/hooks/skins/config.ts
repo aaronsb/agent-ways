@@ -249,8 +249,6 @@ export function setupOf(x: ModExport): Setup {
     rail: r.rail,
     tables: r.tables,
     shimmer: r.shimmer,
-    band: true,
-    countdown: false,
     markdown: r.markdown,
     quiet: false,
     charts: r.charts,

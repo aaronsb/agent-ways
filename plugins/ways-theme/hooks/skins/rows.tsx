@@ -29,12 +29,10 @@ import { cardWidth, settled } from './svg-kit'
 import { tableSvg } from './svg-table'
 import { terminalSvg } from './svg-terminal'
 import type { ShellOutput } from './svg-terminal'
-import { metersKey, usageLine, usageSvg } from './svg-usage'
 import { codeCopyRows, codeRows } from './code-rows'
 import { copiesOf, copyControl, copyRow, replyCopies, single } from './copy-rows'
 import type { CopyAs } from './copy-rows'
 import { languageOf } from './highlight'
-import type { Meter } from './svg-usage'
 import { kindOf, toolLabel } from './tools'
 import { inlineMath, mathArt, parseTex } from './math'
 import { mathSvg } from './svg-math'
@@ -1041,69 +1039,4 @@ export function terminalCard(look: Look, Svg: SvgElement, output: ShellOutput, i
   const built = terminalSvg(output, isErrored, look.skin.palette, cardWidth(columns), hasCorner(look, copies), look.prefs.highlight)
 
   return built === null ? null : cardWithCopy(look, Svg, built, key, copies)
-}
-
-// From this full, the band suggests compacting and makes it the main action.
-export const COMPACT_NUDGE = 70
-
-export const COMPACT_HOTKEY = '0'
-
-// One drawing or line per meter, so the band can spread them evenly across its width. Whether
-// the rings fill in is still decided once for the whole band, keyed on every meter, so they
-// fill together when any number changes and hold still together otherwise.
-function meterView(look: Look, meters: readonly Meter[]) {
-  const { Text } = look.ui
-  const { palette } = look.skin
-
-  if (look.svg !== undefined) {
-    const Svg = look.svg
-    const builds = meters.map(meter => ({ meter, built: usageSvg([meter], palette, true) }))
-    const entranceMs = Math.max(0, ...builds.map(({ built }) => built.entranceMs))
-    const isFirst = look.isFirstDraw === undefined || look.isFirstDraw(`usage:${metersKey(meters)}`, entranceMs)
-
-    return builds.map(({ meter, built }) => (
-      <Svg key={`usage-${meter.label}`} source={isFirst ? built.source : settled(built.source)} alt={built.alt} width={built.width} height={built.height} />
-    ))
-  }
-
-  return usageLine(meters).map(meter => (
-    <Text color={palette.muted}>
-      <Text color={palette.user}>{meter.bar}</Text>
-      {` ${meter.text}`}
-    </Text>
-  ))
-}
-
-// The band above the prompt: the meters, spread evenly, and a Compact button that becomes
-// the main action, with a word on why, once the context is full enough to be worth it.
-// `/skin compact off` drops the button and the word, and the meters take the whole width.
-export function usageBand(look: Look, meters: readonly Meter[], canCompact: boolean, compact: () => void) {
-  const { Box, Text, Button } = look.ui
-  const { palette } = look.skin
-  const context = meters.find(meter => meter.label === 'context')?.percent ?? 0
-  const isNudge = context >= COMPACT_NUDGE
-
-  return (
-    // The right edge stays clear: the band draws its own collapse mark ([-]) there.
-    <Box flexDirection="row" alignItems="center" columnGap={2} paddingRight={5}>
-      <Box flexDirection="row" alignItems="center" columnGap={3} justifyContent="space-evenly" flexGrow={1}>
-        {meterView(look, meters)}
-      </Box>
-      {canCompact && isNudge ? <Text color={palette.warn}>{`Context is ${context}% full`}</Text> : ''}
-      {canCompact ? (
-        // A digit hotkey: typed alone into an empty prompt it presses the band's button, which
-        // is the only way in where the terminal reports no clicks. `plain` shows it: `0: Compact`.
-        <Button
-          key="compact"
-          label={isNudge ? 'Compact now' : 'Compact'}
-          hotkey={COMPACT_HOTKEY}
-          plain
-          {...(isNudge ? { variant: 'primary' as const } : { dimColor: true })}
-          onPress={compact}
-        />
-      ) : (
-        ''
-      )}
-    </Box>
-  )
 }

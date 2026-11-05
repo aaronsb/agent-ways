@@ -42,9 +42,6 @@ export type Prefs = {
   // 'text' keeps the skin but draws tables and code as text the desktop can select.
   tables: 'on' | 'text' | 'off'
   shimmer: boolean
-  band: boolean
-  // When each plan limit resets, beside its meter in the band.
-  countdown: boolean
   markdown: boolean
   quiet: boolean
   charts: boolean
@@ -71,10 +68,6 @@ export type Prefs = {
   calm: null
 }
 
-// How full the context window is and how much of each plan limit is spent, in percent,
-// as the band above the prompt shows them, and when each limit resets (epoch ms) where known.
-export type UsageSnap = { context: number | null; limits: { label: string; percent: number; resetsAt?: number }[] }
-
 // What one turn did, shown in its footer.
 export type TurnStats = { tools: number; added: number; removed: number }
 
@@ -94,9 +87,6 @@ declare module 'claude-code' {
       frame: number
       turns: Record<string, TurnStats>
       duration: StateFamily<number>
-      usage: UsageSnap
-      // The usage band's countdowns by limit label, as last drawn.
-      countdowns: Record<string, string>
       images: StateFamily<boolean>
       quiet: StateFamily<boolean>
       // A shell call's command, for its output card's header: ToolResult does not carry it.

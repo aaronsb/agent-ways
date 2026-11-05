@@ -125,7 +125,6 @@ function host(on: On, world: World) {
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: '/work/proj' }) as never)
   on('turn.start', ($, e) => ({ turnId: e.turnId }) as never)
-  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent: 42 }, rateLimits: [] } }) as never)
   on('ui.log', ($, e) => {
     if (String((e as { text?: unknown }).text).startsWith('ways-theme skins:')) return { value: undefined } as never
     logs.push(String((e as { text?: unknown }).text ?? JSON.stringify(e)))
@@ -774,7 +773,7 @@ describe('what the mod hooks reaches it on every host', () => {
   test("no hook is on an event an organization's policy plugin passes over, and none is classic", () => {
     const regs = registrationsOf(register as never)
     // The recording saw the module's hooks: the control for the empty lists below.
-    const skins = ['session.start', 'ui.invalidate', 'turn.start', 'session.append', 'session.measure', 'turn.complete', 'tool.call', ...Array(10).fill('ui.render')]
+    const skins = ['session.start', 'ui.invalidate', 'turn.start', 'session.append', 'turn.complete', 'tool.call', ...Array(9).fill('ui.render')]
     expect(regs.map(r => r.pattern)).toEqual(['session.start', 'config.set', 'ui.render', 'ui.render', 'ui.render', 'ui.render', 'ui.render', ...skins])
     expect(regs.filter(r => r.pattern.startsWith('classic.'))).toEqual([])
     expect(passedOverHits(regs)).toEqual([])
