@@ -5,11 +5,12 @@
 // https://github.com/hellosverre/claude-skins at 985ad63, hooks/register.tsx.
 // Kept: the tool rows on a rail with their fold, expand and copy, the shell
 // card, replies and command output as tables, code, math, charts and markdown
-// blocks, the spinner and its words, the turn footer, the usage band and the
-// band over AskUserQuestion. Gone: the /skin command and its panes, the design
+// blocks, the spinner and its words, the turn footer and the band over
+// AskUserQuestion. Gone: the /skin command and its panes, the design
 // tool, the settings store, the update check and star toast, the model-only
 // chart hint, the `$.skins` API for other mods, the system-appearance probe,
-// the Compact button, and the classic.SessionStart reload.
+// the usage band above the prompt, the Compact button, and the
+// classic.SessionStart reload.
 //
 // The look comes from one call, `ways settings theme export --mod`, at an
 // interactive session's start and every PICKUP_MS after; a timer the host
@@ -34,7 +35,7 @@ import { bodyOf, inputFields, isOpen } from './detail.ts'
 import { copiedToast } from './copy-rows.tsx'
 import { DISCLOSE_INSET, disclosedRow, drawsBody, openedRows } from './detail-rows.tsx'
 import { commandSegments } from './command-output.ts'
-import { askBand, diffCard, footerRow, groupRow, promptRow, quietResult, relayedRows, replyRows, spinnerRow, terminalCard, toolRow, usageBand, desktopSpinnerRow } from './rows.tsx'
+import { askBand, diffCard, footerRow, groupRow, promptRow, quietResult, relayedRows, replyRows, spinnerRow, terminalCard, toolRow, desktopSpinnerRow } from './rows.tsx'
 import type { Framing, Look, SvgElement, Ui } from './rows.tsx'
 import { keepsOwnRow, SHELLS, shellResultOf } from './shell.ts'
 import { shellRows } from './shell-rows.tsx'
@@ -42,7 +43,6 @@ import { sightings } from './sightings.ts'
 import { ICONS } from './skin.ts'
 import { hunksOf } from './svg-diff.ts'
 import { shellOutputOf } from './svg-terminal.ts'
-import { countdownsOf, limitLabel, metersOf } from './svg-usage.ts'
 import { NO_ROW, PATH_TOOLS, kindOf, showsImage, summarize, toolLabel } from './tools.ts'
 import { fitted, namesImage, withRow } from './pictures.ts'
 import { commandOf, errorLine, isQuiet, quietLabel } from './quiet.ts'
@@ -53,7 +53,7 @@ import { fileHref, hyperlinksFrom, touchOf } from './links.ts'
 import { MIN_WIDTH, axisFor, boxLines, canMeasure, gradientBox, gradientRuns } from './prompt-box.tsx'
 import { holdsPaste, pasteIdOf, shownText } from './pastes.ts'
 import { holdsBlock, parts } from './wrappers.ts'
-import type { Touch, TurnStats, UsageSnap } from '../../types'
+import type { Touch, TurnStats } from '../../types'
 
 /** Each export call's bound. */
 export const WAYS_TIMEOUT_MS = 1500
@@ -79,8 +79,6 @@ const durationAtom = atom({ plugin: 'ways-theme', key: 'duration' } as const, -1
 const imagesAtom = atom({ plugin: 'ways-theme', key: 'images' } as const, false)
 const quietAtom = atom({ plugin: 'ways-theme', key: 'quiet' } as const, false)
 const commandAtom = atom({ plugin: 'ways-theme', key: 'command' } as const, '')
-const usageAtom = atom({ plugin: 'ways-theme', key: 'usage' } as const, { context: null, limits: [] } as UsageSnap)
-const countdownsAtom = atom({ plugin: 'ways-theme', key: 'countdowns' } as const, {} as Record<string, string>)
 const settleAtom = atom({ plugin: 'ways-theme', key: 'settle' } as const, 0)
 const disclosureAtom = atom({ plugin: 'ways-theme', key: 'disclosure' } as const, 'auto' as 'auto' | 'open' | 'closed')
 const touchedAtom = atom({ plugin: 'ways-theme', key: 'touched' } as const, {} as Record<string, Touch>)
@@ -389,21 +387,6 @@ async function settleEntrances($: EngineInterface, isForced = false): Promise<bo
   )
 }
 
-async function refreshUsage($: EngineInterface): Promise<void> {
-  const usage = await $.session.usage()
-  const snap: UsageSnap = {
-    context: usage.context.percent ?? null,
-    limits: usage.rateLimits.map(limit => {
-      const resetsAt = limit.resetsAt === undefined ? NaN : Date.parse(limit.resetsAt)
-      return { label: limitLabel(limit.kind), percent: limit.percentUsed, ...(Number.isNaN(resetsAt) ? {} : { resetsAt }) }
-    }),
-  }
-  const drawn = (of: UsageSnap) => JSON.stringify([metersOf(of), of.limits.map(limit => limit.resetsAt ?? null)])
-  if (drawn(await read($, usageAtom)) === drawn(snap)) return
-  await settleEntrances($, true)
-  await update($, usageAtom, () => snap)
-}
-
 const quietly = ($: EngineInterface, what: string) => (error: unknown) => debug($, `${what}: ${error instanceof Error ? error.message : String(error)}`)
 
 /** Puts a card's text on the clipboard of the surface that drew it. */
@@ -496,7 +479,6 @@ export function registerSkins(on: On, shared: Shared): void {
     await pickUp($)
     sessionCwd = e.cwd
     await readLinkEnv($).catch(quietly($, 'link check'))
-    await refreshUsage($).catch(quietly($, 'usage'))
     await readCommands($).catch(quietly($, 'command list'))
     arm($, await $.clock.now())
     return next(e)
@@ -532,14 +514,8 @@ export function registerSkins(on: On, shared: Shared): void {
     return stored
   })
 
-  on('session.measure', async ($, e, next) => {
-    await refreshUsage($).catch(quietly($, 'usage'))
-    return next(e)
-  })
-
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {
-      await refreshUsage($).catch(quietly($, 'usage'))
       isWorking = false
       const finished = stats
       await update($, turnsAtom, turns => Object.fromEntries([...Object.entries(turns), [String(e.durationMs), finished]].slice(-KEPT_TURNS)))
@@ -783,27 +759,6 @@ export function registerSkins(on: On, shared: Shared): void {
     const turns = await read($, turnsAtom)
     const word = setup.prefs.words === 'claude' ? e.props.word : (pick(setup.skin.done, e.props.word) ?? e.props.word)
     return footerRow(lookOf($.ui.resolve(e), setup, e.surface), word, e.props.durationMs, turns[String(e.props.durationMs)])
-  })
-
-  // The band above the prompt: context and plan limits. Another mod's drawing there,
-  // and a survey, keep their place.
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const setup = await activeSetup($)
-    const usage = await read($, usageAtom)
-    const meters = metersOf(usage, setup?.prefs.countdown === true ? (await read($, countdownsAtom), countdownsOf(usage, await $.clock.now())) : {})
-    if (setup === null || !setup.prefs.band || e.props.hasSurvey || meters.length === 0) return next(e)
-    const plain = lookOf($.ui.resolve(e), setup, e.surface)
-    const { Box } = plain.ui
-    const theirs = await next(e)
-    const look = { ...plain, ...(plain.svg === undefined ? {} : { isFirstDraw: await firstDraws($, e) }) }
-    return withSettle(
-      $,
-      e,
-      <Box flexDirection="column">
-        {usageBand(look, meters, false, () => undefined)}
-        {theirs}
-      </Box>,
-    )
   })
 
   // Claude Code's own dialog stays whole: the skin only adds a band above it.

@@ -60,7 +60,6 @@ export function host(on: On, world: World) {
     if (world.commands === null) throw new Error('no command list')
     return { value: (world.commands ?? BUILT_INS).map(name => ({ name, description: '', source: 'builtin' })) } as never
   })
-  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent: 42 }, rateLimits: [] } }) as never)
   on('ui.log', ($, e) => {
     if (String(e.text).startsWith('ways-theme skins:')) logs.push(String(e.text))
     return { value: undefined } as never
