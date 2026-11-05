@@ -19,9 +19,13 @@
 // when it frames a row the mod drew beneath it (ADR-517 item 6).
 //
 // The options are the `mods.images.*` ways settings (options.ts). With
-// `steer_to_send_user_file` (the default), a short system-prompt section on
-// the terminal surface tells the model the terminal draws images, so a request
-// to see one ends with SendUserFile (or a Read, or a path) and a picture.
+// `steer_to_send_user_file` (the default), a paragraph added to Read's tool
+// description in a session with a terminal surface tells the model the
+// terminal draws images, so a request to see one ends with SendUserFile (or a
+// Read, or a path) and a picture. Read's description carries it because Read
+// is always listed in full, where SendUserFile can wait behind ToolSearch, and
+// because an organization's policy plugin runs a person's hooks on a built-in
+// tool's description while it passes over the system-prompt events.
 //
 // Two renderers. Where Claude Code draws kitty graphics with Unicode
 // placeholders, the terminal's `Image` element carries the pixels, read by the
@@ -115,15 +119,14 @@ const IMAGE_MENTION = /\.(png|jpe?g|gif|webp)\b/i
 const MESSAGE_INDENT = 2
 /** How long the render log's on/off answer is kept before the flag is looked for again. */
 const TRACE_RECHECK_MS = 2_000
-/** The components a tool call or a message can be drawn through. */
-/** The system-prompt section, by whether the request offers SendUserFile. */
-const STEER_ID = 'images:show-images'
+/** The paragraph added to Read's description, by whether the session offers SendUserFile. */
 const STEER_WITH_SEND =
   'This terminal draws images inline. When the user asks to see or be shown an image, send it with SendUserFile, ' +
   'which shows it here and in remote and web views. A Read of an image, or an absolute image path in your reply, also draws it.'
 const STEER_WITHOUT_SEND =
   'This terminal draws images inline. When the user asks to see or be shown an image, Read it or name its absolute ' +
   'path in your reply, and it is drawn here.'
+/** The components a tool call or a message can be drawn through. */
 const TRACED = ['ToolUse', 'ToolResult', 'ToolGroup', 'ToolProgress', 'AssistantMessage', 'UserMessage', 'CommandOutput'] as const
 
 /** The line under a picture: its file's name, linked to the file where there is one, and its sizes. */
@@ -533,12 +536,17 @@ export const register: Register = on => {
     return started
   })
 
-  // One section, added last on the session side, where the terminal draws.
-  on('prompt.compose', async ($, e, next) => {
-    const composed = await next(e)
-    if (!currentOptions().steerToSendUserFile || !e.surfaces.includes('terminal')) return composed
-    const text = e.tools.includes('SendUserFile') ? STEER_WITH_SEND : STEER_WITHOUT_SEND
-    return { sections: [...composed.sections, { id: STEER_ID, text, scope: 'session' }] }
+  // One paragraph after Read's own description, where the terminal draws. The
+  // engine asks once, as it first lists Read, and keeps the answer for the
+  // conversation; an option changed later takes effect in the next one.
+  on('tool.describe', { tool: 'Read' }, async ($, e, next) => {
+    const described = await next(e)
+    if (!currentOptions().steerToSendUserFile) return described
+    const surfaces: readonly string[] = await $.session.surfaces().catch(() => [])
+    if (!surfaces.includes('terminal')) return described
+    const tools: readonly { name: string }[] = await $.tool.list().catch(() => [])
+    const text = tools.some(t => t.name === 'SendUserFile') ? STEER_WITH_SEND : STEER_WITHOUT_SEND
+    return { ...described, description: `${described.description}\n\n${text}` }
   })
 
   // The render log sees each component before the drawing hooks below do.

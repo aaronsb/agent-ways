@@ -38,7 +38,7 @@ The options are ways settings under `mods.images`, set at user, target or projec
 
 `show_paths_in_replies` (default `true`): draw images a reply names by a bare path. Off, a reply draws only its markdown images.
 
-`steer_to_send_user_file` (default `true`): add a short section to the system prompt, on the terminal surface only, saying the terminal draws images and that a request to see one is answered with SendUserFile, which also shows it in remote and web views. Where the request does not offer SendUserFile, the section names Read and absolute paths instead. Off, the prompt is left as Claude Code composes it. Where an organization manages Claude Code, its policy plugin passes over the hook that adds the section.
+`steer_to_send_user_file` (default `true`): add a short paragraph to the Read tool's description, in a session with a terminal surface, saying the terminal draws images and that a request to see one is answered with SendUserFile, which also shows it in remote and web views. Where the session does not offer SendUserFile, the paragraph names Read and absolute paths instead. Off, Read keeps the description Claude Code gives it. The paragraph sits on Read because Read is always listed in full, and because where an organization manages Claude Code, its policy plugin runs a person's mods on a built-in tool's description while it skips their hooks on the system prompt. Claude Code asks for the description once per conversation, so a change to this option takes effect in the next one.
 
 `scale` (default `1`, from `0.25` to `4`): picture size against one screen pixel per image pixel. `2` doubles every picture, `0.5` halves it; the width and height limits and the 24-column floor still apply.
 
