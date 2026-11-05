@@ -44,9 +44,9 @@ related:
   - ADR-175
   - ADR-181
 observable:
-  - "run: ways match 'we have six cards open and two PRs waiting on review, should I start the next one or finish these' ranks the work-in-progress way as firing"
-  - "see: a code-reviewer report gives each finding a disposition, fix in this card or file with a named reason, and a finding with a traced cause and a fix inside the change's files is marked fix in this card"
-  - "see: /merge applies every fix-in-this-card finding before the merge, and files only findings whose recorded reason is one of the filing reasons"
+  - "run: ways author match 'we have six cards open and two PRs waiting on review, should I start the next one or finish these' ranks the work-in-progress way as firing"
+  - "see: a code-reviewer report gives each finding a disposition, fix in this change or file with a named reason, and a finding with a traced cause and a fix inside the change's files is marked fix in this change"
+  - "see: /merge applies every fix-in-this-change finding before the merge, and files only findings whose recorded reason is one of the filing reasons"
   - "see: starting a branch or worktree, or assigning yourself an issue, shows the count of open cards (in-progress issues, open pull requests, unmerged branches and worktrees), and says so when a card of yours is waiting in review or CI"
   - "run: a planning step over a parent issue lists the ready sub-issues and the file overlap between each pair, and proposes a wave"
 ---
@@ -55,7 +55,7 @@ observable:
 
 ## Summary
 
-- **Decided:** A unit of work (a card) is one issue. It is done when it is merged to main, its issue is closed, and every finding fixed-in-the-card has been fixed; until then it counts as open work. How many cards are open at each stage is judged by what that stage consumes: overlapping files at build, the operator's attention at a direction-setting review, the integration window where parts must meet, CI turnaround, and the lead's attention. A plan is a parent issue with sub-issues; `blockedBy` gives the serial order, and a wave is the ready cards that share few files. Review findings get a disposition by the cost of fixing now against later, not a blocking tier: a finding the change introduced, that makes its own text false, or whose traced fix stays inside the card's files is fixed in the card, unless the fix is far larger than the change in flight, which marks a deeper flaw or a misread problem and gets its own focused card. The open count is measured from GitHub and git and reported when work starts, across sessions; any guard ships off.
+- **Decided:** A unit of work (a card) is one issue. It is done when it is merged to main, its issue is closed, and every finding with the disposition fix in this change has been fixed; until then it counts as open work. How many cards are open at each stage is judged by what that stage consumes: overlapping files at build, the operator's attention at a direction-setting review, the integration window where parts must meet, CI turnaround, and the lead's attention. A plan is a parent issue with sub-issues; `blockedBy` gives the serial order, and a wave is the ready cards that share few files. Review findings get a disposition by the cost of fixing now against later, not a blocking tier: a finding the change introduced, that makes a statement false, whose traced fix stays inside the card's files, or that users would feel is fixed in the change, unless the fix is far larger than the change in flight, which marks a deeper flaw or a misread problem and gets its own focused card. The open count is measured from GitHub and git and reported when work starts, across sessions; any guard ships off.
 - **Trades away:** A card's cycle time grows when its review findings are fixed inside it, and some findings a reviewer would have deferred now hold a merge. A change whose defect needs a fix far larger than itself goes back to design instead of merging. The limits stay judgment with a measured count, so nothing stops a session that ignores the count.
 - **One-way?** No. It changes way text, the reviewer agent, the merge skill, and adds a macro and a `gh-tasks` subcommand; each comes out with a revert.
 - **Probes:** *Confident (fix-in-card):* a finding with its cause traced and its fix named inside the change's own files is fixed before the merge, whatever severity the reviewer gave it. *Not confident (wip-limits):* that limits stay judgment plus a measured count for now, with no numbers in `ways.yaml` until the counts show what the real limits are.
@@ -73,7 +73,7 @@ Two cases surfaced the need. A release plan staged its cards by file overlap: se
 
 ### 1. A card, and when it is done
 
-A card is one issue carrying the `tasklist` label (ADR-180). A card is done when its change is merged to main, its issue is closed, and every finding with the fix-in-this-card disposition (item 5) is fixed. Until all three hold, the card is open: its issue, branch, worktree and pull request all count toward work in progress. A card is sliced through every stage it needs, from code to tests to docs, by default; a card that does one stage across many areas is a sweep (item 4).
+A card is one issue carrying the `tasklist` label (ADR-180). A card is done when its change is merged to main, its issue is closed, and every finding with the disposition fix in this change (item 4) is fixed. Until all three hold, the card is open: its issue, branch, worktree and pull request all count toward work in progress. A card is sliced through every stage it needs, from code to tests to docs, by default; a card that does one stage across many areas is a sweep (item 3).
 
 ### 2. What limits open work, by stage
 
@@ -102,10 +102,10 @@ A card declares its file set, the paths or areas it expects to touch, in its iss
 
 Every review finding is given one of two dispositions, by the cost of fixing it now against later:
 
-| Fix in this card when any of these holds | File it, with its reopen trigger, when any of these holds |
+| Fix in this change when any of these holds | File it, with its reopen trigger, when any of these holds |
 |---|---|
 | The change introduced it: a regression against main | The fix is far larger than the change in flight |
-| It makes a statement in the change false: a doc, a comment, a help string | The fix needs a call above the waterline (ADR-612): a dependency, a format, a default users will feel |
+| It makes a statement false, in the change or in a doc that describes what the change altered | The fix needs a call above the waterline (ADR-612): a dependency, a format, a default users will feel |
 | Its cause is traced and the named fix stays inside the card's files | The fix lands in another open card's files |
 | Users would feel it | The fix needs verification the card cannot run |
 
@@ -126,8 +126,8 @@ The limits stay judgment with this measured count. Numbers in `ways.yaml` (for e
 | Target | Change |
 |---|---|
 | A new way, `softwaredev/delivery/implement/wip` | Items 1 to 3: the card, the stage table, waves, sweeps, file sets |
-| `agents/code-reviewer.md` | Findings carry a disposition from item 4; a finding with a traced cause and a fix inside the change's files defaults to fix in this card; the merge verdict stays separate |
-| `delivery/merge` and the `/merge` skill | The remediation step applies every fix-in-this-card finding before the merge and files only with a right-hand reason recorded; the definition of done from item 1 |
+| `agents/code-reviewer.md` | Findings carry a disposition from item 4; a finding with a traced cause and a fix inside the change's files defaults to fix in this change; the merge verdict is block, revise or pass, and block covers a change that must go back to design |
+| `delivery/merge` and the `/merge` skill | The remediation step applies every fix-in-this-change finding before the merge and files only with a right-hand reason recorded; the definition of done from item 1 |
 | `delivery/implement` | Points at the new way for more than one card |
 | A macro on the new way | Item 5's count and warnings |
 | `gh-tasks ready` | Lists ready sub-issues of a parent with the file overlap between each pair, from the declared file sets |
@@ -152,7 +152,7 @@ The first increment lands the disposition rule (reviewer, merge way and skill) a
 
 ### Neutral
 
-- The reviewer's block and warn wording moves from a tier on findings to a verdict on the merge.
+- Block stays as a verdict on the merge, gaining a defect whose fix is far larger than the change it came in with; warn becomes revise, plus a disposition for each finding.
 - GitHub sub-issues become part of planning; a repository without them can keep the plan in the parent issue's body.
 
 ## Alternatives Considered
@@ -160,5 +160,5 @@ The first increment lands the disposition rule (reviewer, merge way and skill) a
 - **Fixed numeric limits in `ways.yaml` from the start.** Rejected for now: no measurement says what the limits are, and a number set by guess trains sessions to work around it. The count in item 5 gathers that measurement first.
 - **A guard that refuses a new branch or worktree over the limit.** Deferred: a refusal on a guessed limit blocks legitimate work, such as an urgent fix while cards wait in CI. It may ship later, deactivated by default.
 - **The plan as a file in the repository, as SPE plans are.** Rejected: issues are already the shared truth (ADR-180), other sessions read them without the checkout, and `blockedBy` already reaches the task list.
-- **Keeping block and warn tiers and adding "fix it if cheap".** Rejected: "cheap" has no threshold, and the tier still answers the wrong question. The disposition rows name checkable conditions: introduced by the change, makes its text false, traced fix inside the card's files.
+- **Keeping block and warn tiers and adding "fix it if cheap".** Rejected: "cheap" has no threshold, and the tier still answers the wrong question. Three disposition rows name checkable conditions: introduced by the change, makes a statement false, traced fix inside the card's files. The fourth, users would feel it, and the filing row for a fix far larger than the change are judgment calls, kept because the operator named them and because each names what to judge.
 - **A board tool, such as GitHub Projects columns, as the source of the count.** Rejected for the first increment: it needs project setup in every repository, where issues, pull requests, branches and worktrees already exist everywhere. A project board can read the same states later.

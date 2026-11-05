@@ -97,7 +97,7 @@ For the swarm corner, fan `code-reviewer` agents across dimensions (correctness,
 
 ### 6. Remediate
 
-A review is only worth running if the findings get fixed. Give each finding its disposition by the table in `delivery/merge` (ADR-613): fix it in this change when the change introduced it, when it makes the change's own text false, when its traced fix stays inside the change's files, or when users would feel it; file it only for a reason from that table's right-hand column, the first being a fix far larger than the change itself. A reviewer's "non-blocking" settles whether the change may merge, not whether the finding waits. Apply every fix-in-this-change finding before the merge gate, and record each filed finding's reason and reopen condition. "Reviewed" is not "landed clean."
+A review is only worth running if the findings get fixed. Give each finding its disposition by the table in `delivery/merge` (ADR-613): fix it in this change, or file it for one of that table's right-hand reasons. The right-hand column wins, and a change that introduced a defect whose fix is far larger than itself goes back to design instead of merging. A reviewer's "non-blocking" settles whether the change may merge, not whether the finding waits. Apply every fix-in-this-change finding before the merge gate, and record each filed finding's reason and reopen condition. "Reviewed" is not "landed clean."
 
 ### 7. Merge
 

@@ -12,7 +12,7 @@ A card is one piece of work, tracked as one issue. Each open card holds context,
 ## A card and when it is done
 
 - A card is one issue in the project's tracker. Where issues are mirrored into the task list, it carries the mirror's label (delivery/issues).
-- A card is done when three things hold: its change is merged to main, its issue is closed, and every review finding marked fix-in-this-card is fixed (delivery/merge). Until then its issue, branch, worktree and pull request all count as open work.
+- A card is done when three things hold: its change is merged to main, its issue is closed, and every review finding with the disposition fix in this change is fixed (delivery/merge). Until then its issue, branch, worktree and pull request all count as open work.
 - Slice a card through every stage it needs, from code to tests to docs. A card that does one stage across many areas is a sweep, covered below.
 
 ## What limits open work at each stage
@@ -50,10 +50,10 @@ When you plan a card, write the paths or areas you expect it to touch in its iss
 | Rationalization | Counter |
 |---|---|
 | "I'll start the next card while this one is in review" | Finish the review first, unless the wait is out of your hands and the files do not overlap. |
-| "The finding is non-blocking, so I'll file it" | A finding the card introduced, or one with a traced fix inside the card's files, is part of the card (delivery/merge). |
+| "The finding is non-blocking, so I'll file it" | Non-blocking answers whether the change may merge. The finding's disposition comes from delivery/merge, and non-blocking is not one of its filing reasons. |
 | "Running everything in parallel is faster" | Faster to start. Count the reintegration on overlapping files and the reviews it queues. |
 | "The sweep can run alongside the code changes" | Each code change reopens the sweep's conflicts. Run it after the code stops moving. |
-| "It's merged, so it's done" | Done also means the issue is closed and the in-card findings are fixed. |
+| "It's merged, so it's done" | Done also means the issue is closed and the fix-in-this-change findings are fixed. |
 
 ## See Also
 
