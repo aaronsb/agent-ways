@@ -44,7 +44,7 @@ A rename is trivial while the identifier stays inside one compiled unit. It beco
 A defect found in one place is often one defect with N locations: the same wrong path in six pipelines, the same unguarded call in four adapters. The location you were handed holds no privilege.
 
 1. State the defect so a search can find it, then search.
-2. Land the fix once, at the seam that owns it. Collapse the copies into one shared implementation each member invokes. Where the copies cannot collapse in this increment (a generated file per consumer, a library outside the change), fix each site in its local conventions, verify uniformity by diff, and ask the operator whether the collapse lands here or in its own increment. File it only when the collapse lies outside what the change owns (delivery/merge).
+2. Land the fix once, at the seam that owns it. Collapse the copies into one shared implementation each member invokes. Where the copies cannot collapse in this increment (a generated file per consumer, a library outside the change), fix each site in its local conventions, verify uniformity by diff, and ask the operator whether the collapse lands here or in its own increment. File it when the operator puts it in its own increment, or when the collapse lies outside what the change owns (delivery/merge).
 3. Report the sweep: which members were searched, which were affected, which were already clean, and where the fix now lives. A sweep you cannot enumerate is a claim.
 
 If the class looks too large for this increment, fix the instance, name the remaining members with what each costs, and ask the operator whether they land in this change or in their own increment. A silent partial fix reads as a complete one.
