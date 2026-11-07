@@ -97,7 +97,7 @@ For the swarm corner, fan `code-reviewer` agents across dimensions (correctness,
 
 ### 6. Remediate
 
-A review is only worth running if the findings get fixed. Before the merge gate, **remediate per finding** — apply the fix, or record why a finding is declined. Don't carry known findings past the gate. "Reviewed" is not "landed clean."
+A review is only worth running if the findings get fixed. Give each finding its disposition by the table in `delivery/merge` (ADR-613): fix it in this change, or file it for one of that table's right-hand reasons. The right-hand column wins, and a change that introduced a defect whose fix is far larger than itself goes back to design instead of merging. A reviewer's "non-blocking" settles whether the change may merge, not whether the finding waits. Apply every fix-in-this-change finding before the merge gate, and record each filed finding's reason and reopen condition. "Reviewed" is not "landed clean."
 
 ### 7. Merge
 

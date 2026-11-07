@@ -1,6 +1,6 @@
 ---
-description: Landing an increment to main — the review gate is a four-square decision, not one policy. Choose machine-review depth by complexity and blast-radius, choose the human gate by whether the work sets direction, remediate the findings, then merge and clean up. Route to the /merge skill.
-vocabulary: merge land increment ship it review gate code review findings fix remediate approve pull request pr blast radius complexity swarm single agent operator read direction architecture merge cleanup delete branch four square gate before merge reviewer codeowners swarm-gate dispatch
+description: Landing an increment to main — the review gate is a four-square decision, not one policy. Choose machine-review depth by complexity and blast-radius, choose the human gate by whether the work sets direction, give each review finding a disposition (fix it in this change, or file it with a reason) instead of deferring what was marked non-blocking, then merge and clean up. Route to the /merge skill.
+vocabulary: merge land increment ship it review gate code review findings fix remediate approve pull request pr blast radius complexity swarm single agent operator read direction architecture merge cleanup delete branch four square gate before merge reviewer codeowners swarm-gate dispatch non-blocking follow-up defer later disposition traced root cause fix now regression
 pattern: /merge\b|merge (this|it|the pr)|land (this|it)|review.{0,20}(fix|and merge)|fix the findings|ship (it|this)|squash.?merge|rebase.?merge
 commands: gh pr (merge|checks)
 refire: 0.15
@@ -48,7 +48,18 @@ Green CI means `gh pr checks <n> --json bucket -q 'all(.[]; .bucket=="pass" or .
 
 ## Remediate before you merge
 
-A review is worth running only if its findings get fixed. **Handle each finding** before the merge gate: apply the fix, or record why you declined it. Do not merge with known findings open. This step is the easiest one in the loop to skip.
+A review is worth running only if its findings get fixed. Whether a change may merge is one question. Whether each finding is fixed in this change is another, and a finding short of blocking is not thereby deferred. Give each finding a disposition, by the cost of fixing it now against later, when its cause is loaded in someone's head (ADR-613):
+
+| Fix it in this change when any of these holds | File it, with its reopen trigger, when any of these holds |
+|---|---|
+| The change introduced it: a regression against main | The fix is far larger than the change itself |
+| It makes a statement false, in the change or in a doc or comment that describes what the change altered | The fix needs a call above the waterline (choices(meta)): a dependency, a format, a default users will feel |
+| Its cause is traced and the named fix stays inside the change's files | The fix lands in the files of other work in flight |
+| Users would feel it | The fix needs verification this change cannot run |
+
+The right-hand column wins. A fix far larger than the change it would ride on points to a deeper flaw, or to a misread problem, so it gets its own card and a focused look from the design stage. When the change itself introduced that defect, the change goes back to design instead of merging.
+
+Apply every fix-in-this-change finding before the merge gate. A filed finding records its reason from the right-hand column and the condition that reopens it (delivery/issues, residuals). This step is the easiest one in the loop to skip.
 
 ## Then land it
 
