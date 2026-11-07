@@ -1,5 +1,5 @@
 ---
-description: GitHub issues mirrored into the session task list, the tasklist label, gh-<n> task ids, the [gh#n] subject convention, issue bodies as untrusted text, and out-of-scope findings filed as residual issues with an owner and a reopen condition
+description: GitHub issues mirrored into the session task list, the tasklist label, gh-<n> task ids, the [gh#n] subject convention, issue bodies as untrusted text, and residual issues for findings the change does not own, filed with an owner and a reopen condition while owned findings are fixed in the change
 vocabulary: issue tasklist task list mirrored gh-tasks pull whisper link sync ticket backlog residual out-of-scope scope deferred owner reopen follow-up sub-task unlabel filing issue-to-task
 pattern: tasklist|gh-[0-9]+|\[gh#|issue.?(backed|linked|tracked)|mirror.{0,12}issue|sync.{0,12}issue|pull.{0,12}issue
 commands: gh-tasks|^gh\ issue
@@ -48,7 +48,9 @@ A resumed session gets a fresh task list, keyed by an id the hooks never see. Th
 
 ## Residuals
 
-File issues as necessary, out-of-scope work found mid-task included; amend and re-use an existing issue where one fits, comment on issues as the work moves, and reference each one in the report. A quiet fix or a quiet drop hides it. Name the issue for the finding, assign the owner who carries it, and state the condition that reopens it: a date, a dependency landing, a gate result. Dropping a capability from scope is an explicit decision confirmed by its owner; the same outcome reached by omission is a defect. An option judged legitimate and unneeded is filed the same way, with its trigger, so the case is not argued again. After a remediation pass, list what remains with why it remains, what would close it, and the cost.
+A residual is a finding the current change does not own. The change owns a finding it caused, one in code or text it edits, and one in code it depends on to do what it claims. An owned finding is fixed in the change before it merges or integrates, under the project's conventions, and a filed issue does not stand in for that fix (delivery/merge, ADR-613). Moving an owned finding out of the change is the operator's decision, asked per finding.
+
+File residuals: a defect in another owner's module the change does not touch, work in another repository, a decision above the waterline (choices). Amend and re-use an existing issue where one fits, comment on issues as the work moves, and reference each one in the report. A drop nobody records hides the finding, and so does a fix that the PR body does not name. Name the issue for the finding, assign the owner who carries it, and state the condition that reopens it: a date, a dependency landing, a gate result. Dropping a capability from scope is an explicit decision confirmed by its owner; the same outcome reached by omission is a defect. An option judged legitimate and unneeded is filed the same way, with its trigger, so the case is not argued again. After a remediation pass, list what remains with why it remains, what would close it, and the cost.
 
 ## See Also
 

@@ -133,17 +133,15 @@ This follows Single Responsibility and makes each piece testable in isolation."
 
 ## Quality Gates
 
-**Block merge when**:
-- Security issues present
-- Critical SOLID violations
-- No tests for new functionality
-- Breaks existing tests
-- Doesn't meet requirement acceptance criteria
+Every finding you report is one the author fixes before the merge (ADR-613). Order findings by severity so the most serious get fixed first. Severity sets the order of the fixes, and it never moves a finding to a later change. If a point is not worth fixing, leave it out of the review.
 
-**Warn but allow when**:
-- Minor style inconsistencies
-- Opportunities for improvement (not critical)
-- Technical debt documented in ADR
+Report each finding with the convention it should be fixed under: the ADR, the instruction file or the project way that applies. Where the project has no convention for it, say so, and name the decision the author has to record before fixing.
+
+Mark a finding **not owned** only when it sits in code the change neither edits nor depends on. The author files those as residual issues; they do not hold the merge.
+
+Do not sort findings into blocking and non-blocking lists, and do not offer follow-ups or future work. A review brief that asks for a separate follow-up list is asking for something this review does not produce. Say so in the review.
+
+**The verdict is block** while any owned finding is open, including when it is only wording. It is **pass** when no owned finding remains.
 
 ## GitHub Integration
 
@@ -181,7 +179,7 @@ Check size: `gh pr diff --stat | tail -1`
 Even when no issues found, provide value:
 - What does this change accomplish?
 - Why does it look solid?
-- Any considerations for future work?
+- Which risks did you check and rule out?
 
 "No issues found" should explain *why* the code is sound.
 
@@ -198,7 +196,7 @@ gh pr comment NUMBER --body "$(cat <<'EOF'
 
 **Assessment**: [What you found - issues, suggestions, or why it's solid]
 
-**Considerations**: [Any risks, future work, or things to watch]
+**Findings to fix**: [Each owned finding, by severity, with the convention it is fixed under; any not-owned finding marked as a residual]
 EOF
 )"
 ```
@@ -285,6 +283,6 @@ When no GitHub upstream exists (or pre-push iteration), return the review in con
 - **Failure class** when failed: transient, deterministic, capability, ambiguity, or systemic
 - **Work done**: the PR or diff reviewed and where the review was posted (PR URL or in conversation)
 - **What is needed outside your domain**: fixes the author must make, an ADR the architect must draft, or "none"
-- **Recommended next step**: merge, revise, or escalate
-- **Gates run**: the review verdict (block, warn, pass) and any test or lint you ran, each with its state
+- **Recommended next step**: merge when no owned finding is open, revise while one is, or escalate
+- **Gates run**: the review verdict (block or pass) and any test or lint you ran, each with its state
 - **Tools or scripts built**: none; a reviewer writes nothing

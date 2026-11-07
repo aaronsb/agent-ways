@@ -61,6 +61,8 @@ This is the point of the skill, not a footnote. Post-compaction-you (or a fresh 
 - Each `description` must be resumable cold: file paths, decisions already made (so they aren't re-litigated), what was tried, and the next concrete step. The `subject` is imperative; `activeForm` is present-continuous.
 - Mark the genuine next task `in_progress`.
 
+**Open findings are work, not backlog.** A review or test finding that the session's work owns and that is still unfixed gets a task to fix it, under the project convention it falls under (ADR-613). Do not turn it into an issue to close the books. If something merged with an owned finding open, the task says so and names the PR. When the project's instruction file or its review briefs send findings to a follow-up by default, note the line in the continuation as something to change.
+
 **The bar is honesty.** Before moving on, sanity-check: does any "pending" task describe work that's actually done? Does any real remaining thread have no task? A dishonest list is worse than none — it hands the next session a confident lie.
 
 **Then print the list.** Reconciling silently gives the user nothing to check against. Enumerate every task — finished, in progress, and backlog — with its full description:

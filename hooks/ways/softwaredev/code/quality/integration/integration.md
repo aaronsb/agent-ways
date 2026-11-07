@@ -47,11 +47,11 @@ A defect found in one place is often one defect with N locations: the same wrong
 2. Land the fix once, at the seam that owns it. Collapse the copies into one shared implementation each member invokes. Where the copies cannot collapse in this increment (a generated file per consumer, a library outside the change), fix each site in its local conventions, verify uniformity by diff, and file the collapse as its own increment.
 3. Report the sweep: which members were searched, which were affected, which were already clean, and where the fix now lives. A sweep you cannot enumerate is a claim.
 
-If the class is too large for this increment, fix the instance, name the remaining members, and file them. A silent partial fix reads as a complete one.
+If the class looks too large for this increment, fix the instance, name the remaining members with what each costs, and ask the operator whether they land in this change or in their own increment. A silent partial fix reads as a complete one.
 
 ## Scope
 
-The sweep is bounded by the defect's identity. The scope rule (do the task asked, file the rest) is bounded by relevance. Both bounds hold at once. A sibling carrying the defect you were sent to fix is the same work; a different defect you noticed on the way gets filed. When integration touches files the request did not name, including the seam that should own the fix, list them before editing.
+The sweep is bounded by the defect's identity. The scope rule is bounded by ownership. Both bounds hold at once. A sibling carrying the defect you were sent to fix is the same work. A different defect is the change's own when it sits in code the change edits or depends on, and it is fixed in the change under the project's conventions (delivery/merge, ADR-613). A defect outside that, in code the change neither edits nor depends on, is filed as a residual (delivery/issues). When integration touches files the request did not name, including the seam that should own the fix, list them before editing.
 
 ## History-keeping artifacts
 
