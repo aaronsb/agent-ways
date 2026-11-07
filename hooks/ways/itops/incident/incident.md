@@ -56,7 +56,7 @@ The first move on a failure is the smallest forward fix or the smallest reversib
 
 ## Closure
 
-An incident closes with three artifacts: a regression test that reproduces the failure, a gate where one would have caught it, and a prevention rule recorded where the system keeps its durable rules. The narrative is the least durable part of the record and never counts as closure. A hazard seen twice is recorded as a fact with an owner, and the earlier one-off note is retired. Findings outside the incident's scope become named residual issues with an owner and the condition that reopens them.
+An incident closes with three artifacts: a regression test that reproduces the failure, a gate where one would have caught it, and a prevention rule recorded where the system keeps its durable rules. The narrative is the least durable part of the record and never counts as closure. A hazard seen twice is recorded as a fact with an owner, and the earlier one-off note is retired. Findings that the incident's fix does not own become named residual issues with an owner and the condition that reopens them (delivery/issues).
 
 ## See Also
 

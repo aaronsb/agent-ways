@@ -214,6 +214,7 @@ _The ways method, way authoring, the development loop_
 | [ADR-611](./practice/ADR-611-working-branch-github-writes-need-no-grant-and-merging-into-a-consequential-branch-does.md) | Working-branch GitHub writes need no grant, and merging into a consequential branch does | accepted |
 | [ADR-612](./practice/ADR-612-directional-technical-calls-go-to-the-operator-as-an-interview-with-a-lean-defended-from-evidence.md) | Directional technical calls go to the operator as an interview with a lean defended from evidence | accepted |
 | [ADR-613](./practice/ADR-613-work-in-progress-is-held-per-stage-by-what-the-stage-consumes-and-a-card-is-done-when-it-is-on-main-with-its-in-card-findings-fixed.md) | Work in progress is held per stage by what the stage consumes, and a card is done when it is on main with its in-card findings fixed | accepted |
+| [ADR-614](./practice/ADR-614-findings-are-fixed-in-the-change-that-surfaced-them.md) | Findings are fixed in the change that surfaced them | accepted |
 
 ## Ways engine
 _The ways engine, continued after the full 100-199 band: matching, disclosure and the corpus_

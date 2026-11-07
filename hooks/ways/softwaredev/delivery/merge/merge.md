@@ -1,6 +1,6 @@
 ---
-description: Landing an increment to main — the review gate is a four-square decision, not one policy. Choose machine-review depth by complexity and blast-radius, choose the human gate by whether the work sets direction, give each review finding a disposition (fix it in this change, or file it with a reason) instead of deferring what was marked non-blocking, then merge and clean up. Route to the /merge skill.
-vocabulary: merge land increment ship it review gate code review findings fix remediate approve pull request pr blast radius complexity swarm single agent operator read direction architecture merge cleanup delete branch four square gate before merge reviewer codeowners swarm-gate dispatch non-blocking follow-up defer later disposition traced root cause fix now regression
+description: Landing an increment to main — the review gate is a four-square decision, not one policy. Choose machine-review depth by complexity and blast-radius, choose the human gate by whether the work sets direction, fix every review finding the change owns before the merge instead of filing what was marked non-blocking, then merge and clean up. Route to the /merge skill.
+vocabulary: merge land increment ship it review gate code review findings fix remediate approve pull request pr blast radius complexity swarm single agent operator read direction architecture merge cleanup delete branch four square gate before merge reviewer codeowners swarm-gate dispatch non-blocking follow-up defer later disposition traced root cause fix now regression owned finding fix round review round
 pattern: /merge\b|merge (this|it|the pr)|land (this|it)|review.{0,20}(fix|and merge)|fix the findings|ship (it|this)|squash.?merge|rebase.?merge
 commands: gh pr (merge|checks)
 refire: 0.15
@@ -48,18 +48,22 @@ Green CI means `gh pr checks <n> --json bucket -q 'all(.[]; .bucket=="pass" or .
 
 ## Remediate before you merge
 
-A review is worth running only if its findings get fixed. Whether a change may merge is one question. Whether each finding is fixed in this change is another, and a finding short of blocking is not thereby deferred. Give each finding a disposition, by the cost of fixing it now against later, when its cause is loaded in someone's head (ADR-613):
+A review is worth running only if its findings get fixed, and one short of blocking is not thereby deferred (ADR-613, ADR-614).
 
-| Fix it in this change when any of these holds | File it, with its reopen trigger, when any of these holds |
+- **The change owns a finding** when the change caused it, when it sits inside a function, section or config block the diff touches, or when it sits in this repository's code that the behaviour the change claims runs through. A defect in a dependency maintained elsewhere is not owned, and a workaround for it in the change's own code is. A finding about a whole file, such as its length, is owned only when the change made it worse.
+- **Fix every owned finding in the branch before the merge**, wording included, under the project's conventions. Where no convention covers the fix and the call sits below the waterline (choices), settle it as an ADR, a project way or an instruction-file line, and say so in the PR.
+- **Filing an issue does not fix an owned finding.** Decline one only with evidence in the PR that it is wrong.
+
+| Fix an owned finding in this change when any of these holds | It leaves the change only this way |
 |---|---|
-| The change introduced it: a regression against main | The fix is far larger than the change itself |
-| It makes a statement false, in the change or in a doc or comment that describes what the change altered | The fix needs a call above the waterline (choices(meta)): a dependency, a format, a default users will feel |
-| Its cause is traced and the named fix stays inside the change's files | The fix lands in the files of other work in flight |
-| Users would feel it | The fix needs verification this change cannot run |
+| The change introduced it: a regression against main | The fix is far larger than the change: its own card and a design look |
+| It makes a statement false, in the change or in a doc or comment that describes what the change altered | The fix needs a call above the waterline: ask the operator; it stays open until they answer |
+| Its cause is traced and the named fix stays inside the change's files | The fix lands in another in-flight change's files: its owner fixes it before integration |
+| Users would feel it | The fix needs verification this change cannot run: ask the operator whether it waits |
 
-The right-hand column wins. A fix far larger than the change it would ride on points to a deeper flaw, or to a misread problem, so it gets its own card and a focused look from the design stage. When the change itself introduced that defect, the change goes back to design instead of merging.
+A fix far larger than the change marks a deeper flaw or a misread problem; a change that caused one goes back to design. Any other deferral is the operator's call, per finding, with what the fix costs now; without that answer, fix it. A finding the change does not own is a residual (`delivery/issues`) and does not hold the merge.
 
-Apply every fix-in-this-change finding before the merge gate. A filed finding records its reason from the right-hand column and the condition that reopens it (delivery/issues, residuals). This step is the easiest one in the loop to skip.
+A cap on review rounds limits rounds, not fixes; a review brief asks for no follow-up list.
 
 ## Then land it
 
@@ -69,7 +73,7 @@ Merge with a regular merge commit, which keeps the branch's commits in the histo
 
 An ADR that authorized the work stays at `Draft` until the work merges. Once the merge lands, the ADR describes the system, so set it to `Accepted` during the cleanup. Run `adr archive` on an ADR that the merge supersedes, or that the work showed was unnecessary.
 
-Skipping this costs nothing at any one merge, but the cost adds up. An audit in August 2026 found seventeen ADRs still at `Draft` or `Proposed` with their implementation long shipped — one of them carrying thirteen source references while marked "Proposed" — and four documents that had been abandoned or quietly solved by a neighbour. The archive command had existed for weeks, and nobody had run it. No check fails while the records drift. They stop describing the system, and fixing them then takes an audit of the whole corpus instead of a one-line edit at each merge.
+No check fails while records drift. An audit in August 2026 found seventeen ADRs still at `Draft` or `Proposed` with their work long shipped; a one-line edit at each merge would have kept them current.
 
 ## See Also
 

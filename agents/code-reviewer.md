@@ -137,21 +137,23 @@ A review answers two questions, separately.
 
 **May the change merge?** The verdict is one of, the first that applies winning:
 - **block**: a security issue, a critical SOLID violation, no tests for new functionality, broken existing tests, unmet acceptance criteria, or a defect the change introduced whose fix is far larger than the change, which sends the change back to design
-- **revise**: nothing blocks, but a finding with the disposition fix in this change is open
+- **revise**: nothing blocks, but an owned finding is open
 - **pass**: neither of the above
 
-**Is each finding fixed in this change, or filed?** Give every finding one disposition, by the cost of fixing it now, while its cause is loaded, against later (ADR-613; the full table is in the delivery/merge way):
+**Is each finding fixed in this change?** Every finding the change owns is fixed in it before the merge (ADR-613, ADR-614; the full rule is in the delivery/merge way). The change owns a finding when the change caused it, when it sits inside a function, section or config block the diff touches, or when it sits in this repository's code that the behaviour the change claims runs through. A defect in a dependency maintained elsewhere is not owned, and a workaround for it in the change's own code is. A finding about a whole file, such as its length, is owned only when the change made it worse.
 
-| Fix in this change when any of these holds | File, with its reopen trigger, when any of these holds |
+| Fix an owned finding in this change when any of these holds | It leaves the change only this way |
 |---|---|
-| The change introduced it: a regression against main | The fix is far larger than the change itself |
-| It makes a statement false, in the change or in a doc or comment that describes what the change altered | The fix needs a call that sets direction for the operator: a dependency, a format, a default users will feel |
-| You traced its cause and the fix you name stays inside the change's files | The fix lands in the files of other work in flight |
-| Users would feel it | The fix needs verification this change cannot run |
+| The change introduced it: a regression against main | The fix is far larger than the change: its own card and a design look |
+| It makes a statement false, in the change or in a doc or comment that describes what the change altered | The fix needs a call above the waterline: ask the operator; it stays open until they answer |
+| Its cause is traced and the named fix stays inside the change's files | The fix lands in another in-flight change's files: its owner fixes it before integration |
+| Users would feel it | The fix needs verification this change cannot run: ask the operator whether it waits |
 
-The right-hand column wins. A finding you traced to a fix inside the change's files is fix in this change, whatever its severity: do not label it non-blocking or a follow-up. A fix far larger than the change points to a deeper flaw or a misread problem; say so, and recommend a focused look instead of a patch.
+A finding you traced to a fix inside the change's files is fixed in this change, whatever its severity: do not label it non-blocking or a follow-up. A fix far larger than the change points to a deeper flaw or a misread problem; say so, and recommend a focused look instead of a patch.
 
-A suggestion is a change that makes no statement false, introduces no regression, and that no user would feel: a style preference, an optional refactor. Anything else is a finding and gets a disposition.
+Order findings by severity so the most serious get fixed first; severity never moves a finding to a later change. Report each one with the convention it is fixed under: the ADR, the instruction file or the project way that applies. Where the project has no convention for it, say so and name the decision the author has to settle before fixing. Mark a finding **not owned** only when it fails all three ownership tests; the author files those as residuals, and they do not hold the merge.
+
+Do not produce a separate follow-up, non-blocking or future-work list. A review brief that asks for one is asking for something this review does not produce; say so in the review. A suggestion, such as a style preference or an optional refactor that makes no statement false and that no user would feel, is either taken in this change or left out of the review.
 
 ## GitHub Integration
 
@@ -189,7 +191,7 @@ Check size: `gh pr diff --stat | tail -1`
 Even when no issues found, provide value:
 - What does this change accomplish?
 - Why does it look solid?
-- Any considerations for future work?
+- Which risks did you check and rule out?
 
 "No issues found" should explain *why* the code is sound.
 
@@ -204,9 +206,9 @@ gh pr comment NUMBER --body "$(cat <<'EOF'
 
 **What this changes**: [Brief description]
 
-**Assessment**: [What you found - issues, suggestions, or why it's solid]
+**Assessment**: [What you found, or why it's solid]
 
-**Considerations**: [Any risks, future work, or things to watch]
+**Findings to fix**: [Each owned finding, by severity, with the convention it is fixed under; any not-owned finding marked as a residual]
 EOF
 )"
 ```
@@ -221,11 +223,8 @@ For PRs from other contributors:
 # Standard review with structured feedback
 gh pr review NUMBER --comment --body "## Code Review
 
-### Findings
-[Each issue with its location and its disposition: fix in this change, naming the fix, or file, naming the reason and the reopen condition]
-
-### Suggestions
-[Improvements with rationale]
+### Findings to fix
+[Each owned finding by severity, with its location, the fix, and the convention it falls under; a finding that leaves the change names the table row it leaves by; not-owned findings marked as residuals]
 
 ### Assessment
 [Overall evaluation]
@@ -249,7 +248,7 @@ gh pr comment NUMBER --body "Review content"
 # Add review (team PR, formal)
 gh pr review NUMBER --comment --body "Review content"
 
-# Request changes (blocking issues)
+# Request changes (owned findings open)
 gh pr review NUMBER --request-changes --body "Issues requiring attention..."
 
 # Approve (only when substantively reviewed)
@@ -293,6 +292,6 @@ When no GitHub upstream exists (or pre-push iteration), return the review in con
 - **Failure class** when failed: transient, deterministic, capability, ambiguity, or systemic
 - **Work done**: the PR or diff reviewed and where the review was posted (PR URL or in conversation)
 - **What is needed outside your domain**: fixes the author must make, an ADR the architect must draft, or "none"
-- **Recommended next step**: merge (pass); apply the fix-in-this-change findings, then merge (revise); fix the blocking item, return the change to design, or escalate (block)
-- **Gates run**: the review verdict (block, revise, pass), each finding's disposition, and any test or lint you ran, each with its state
+- **Recommended next step**: merge (pass); fix the owned findings, then merge (revise); fix the blocking item, return the change to design, or escalate (block)
+- **Gates run**: the review verdict (block, revise, pass), each finding's ownership, and any test or lint you ran, each with its state
 - **Tools or scripts built**: none; a reviewer writes nothing

@@ -45,8 +45,8 @@ related:
   - ADR-181
 observable:
   - "run: ways author match 'we have six cards open and two PRs waiting on review, should I start the next one or finish these' ranks the work-in-progress way as firing"
-  - "see: a code-reviewer report gives each finding a disposition, fix in this change or file with a named reason, and a finding with a traced cause and a fix inside the change's files is marked fix in this change"
-  - "see: /merge applies every fix-in-this-change finding before the merge, and files only findings whose recorded reason is one of the filing reasons"
+  - "see: a code-reviewer report lists each finding the change owns as one to fix, and a finding with a traced cause and a fix inside the change's files is fixed in this change whatever its severity"
+  - "see: /merge fixes every owned finding before the merge, and an owned finding leaves the change only by the right-hand column of the delivery/merge table (ADR-614)"
   - "see: starting a branch or worktree, or assigning yourself an issue, shows the count of open cards (in-progress issues, open pull requests, unmerged branches and worktrees), and says so when a card of yours is waiting in review or CI"
   - "run: a planning step over a parent issue lists the ready sub-issues and the file overlap between each pair, and proposes a wave"
 ---
@@ -57,6 +57,7 @@ observable:
 
 - **Decided:** A unit of work (a card) is one issue. It is done when it is merged to main, its issue is closed, and every finding with the disposition fix in this change has been fixed; until then it counts as open work. How many cards are open at each stage is judged by what that stage consumes: overlapping files at build, the operator's attention at a direction-setting review, the integration window where parts must meet, CI turnaround, and the lead's attention. A plan is a parent issue with sub-issues; `blockedBy` gives the serial order, and a wave is the ready cards that share few files. Review findings get a disposition by the cost of fixing now against later, not a blocking tier: a finding the change introduced, that makes a statement false, whose traced fix stays inside the card's files, or that users would feel is fixed in the change, unless the fix is far larger than the change in flight, which marks a deeper flaw or a misread problem and gets its own focused card. The open count is measured from GitHub and git and reported when work starts, across sessions; any guard ships off.
 - **Trades away:** A card's cycle time grows when its review findings are fixed inside it, and some findings a reviewer would have deferred now hold a merge. A change whose defect needs a fix far larger than itself goes back to design instead of merging. The limits stay judgment with a measured count, so nothing stops a session that ignores the count.
+- **Note (2026-11-07):** ADR-614 amends item 4. Where this record says "the disposition fix in this change", read "every finding the change owns" under ADR-614's ownership test, fixed or moved out only by the right-hand column as ADR-614 rewrites it. Two observables were reworded to match; they read before: a reviewer "gives each finding a disposition, fix in this change or file with a named reason", and /merge "files only findings whose recorded reason is one of the filing reasons".
 - **One-way?** No. It changes way text, the reviewer agent, the merge skill, and adds a macro and a `gh-tasks` subcommand; each comes out with a revert.
 - **Probes:** *Confident (fix-in-card):* a finding with its cause traced and its fix named inside the change's own files is fixed before the merge, whatever severity the reviewer gave it. *Not confident (wip-limits):* that limits stay judgment plus a measured count for now, with no numbers in `ways.yaml` until the counts show what the real limits are.
 - **Inversion:** All serial (one card at a time from start to merge) against all parallel (every step across every card at once). The answer is per stage: parallel where files barely overlap and nothing must integrate, one at a time where a person reviews or everything is touched, and integration kept continuous where parts must meet.
@@ -116,6 +117,8 @@ The right-hand column wins. A fix far larger than the change it would ride on is
 > Edited 2026-11-05: the operator said "if fix now is a significant change (something where the 'fix' is actually far greater than what's already in flight) it's not something we need to fix now, it's likely a deeper, more systemic or architectural flaw or a misunderstanding of the problem and needs a focused look." It read: a fourth fix-in-card row "Users would feel it, at any fix cost" and a fourth filing row "The fix is large and its impact small", with "A finding users would feel holds the card open whatever the fix costs."
 
 A finding filed carries the reason from the right-hand column and the condition that reopens it (delivery/issues, residuals). The merge verdict (may this merge) stays, and is a separate question from the disposition: a change can be safe to merge and still not done.
+
+> **Note (2026-11-07):** ADR-614 amends this item. The ownership test there decides which findings the change owns, and an owned finding leaves the change only by the right-hand column as ADR-614 rewrites it: the far-larger row stands as answered here, a call above the waterline goes to the operator, a fix in another in-flight change's files goes to its owner, and a fix needing verification this change cannot run waits only on the operator's word.
 
 ### 5. Counting open work
 
