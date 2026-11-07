@@ -43,7 +43,7 @@ Project agents live in `agents/`. The harness also supplies built-ins — `Explo
 
 ## What Comes Back
 
-Ask for the same return shape in every brief, and read it before the report body:
+Ask for the same return shape at the top of every report, and read it before the report body. A report that stops mid-sentence was cut off; ask the worker for the rest before acting on it:
 
 - **Status**: complete, blocked out of domain, or failed
 - **Failure class** when failed: transient, deterministic, capability, ambiguity, or systemic (the classes in environment/recovery)
@@ -129,12 +129,10 @@ The harness emits a generic "shared-state" / "SECURITY WARNING" prefix around an
 
 Calibrate the wrapper against the agent's documented purpose:
 
-- **code-reviewer posts a comment on the PR it was invoked to review** — that's its deliverable in GitHub-mode projects, the documented happy path. The wrapper is noise here. Don't escalate to the user as if a violation occurred.
+- **code-reviewer posts a comment on the PR it was invoked to review** — that's its deliverable in GitHub-mode projects (`agents/code-reviewer.md`), the documented happy path. The wrapper is noise here. Don't escalate to the user as if a violation occurred.
 - **A subagent does something outside its stated scope** — different story. Surface it.
 
 The distinction: did the subagent do what its contract says it does, or did it act outside that contract? The wrapper alone doesn't tell you; the agent file does. Read the contract, then judge.
-
-PR-comment destination is a workflow question (GitHub-mode vs. local-mode). See `agents/code-reviewer.md` for the mode breakdown.
 
 ## See Also
 
