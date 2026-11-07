@@ -99,10 +99,10 @@ For the swarm corner, fan `code-reviewer` agents across dimensions (correctness,
 
 A review is only worth running if the findings get fixed. Before the merge gate, fix every finding the change owns, in the branch, wording included (ADR-613):
 
-- **Owned** means the change caused it, it sits in code or text the change edits, or it sits in code the change depends on to do what it claims.
-- **Fix under the project's conventions**: its ADRs, instruction files and project ways. Where none covers the fix, settle one first (a short ADR or an instruction-file line), then fix.
+- **Owned** is defined in the `delivery/merge` way: the change caused it, it sits inside what the diff touches, or it sits in this repository's code the claimed behaviour runs through.
+- **Fix under the project's conventions**: its ADRs, instruction files and project ways. Where none covers the fix and the call sits below the waterline (choices), settle it as an ADR, a project way or an instruction-file line, and say so in the PR. Above the waterline, ask the operator; the finding stays owned and open until they answer.
 - **Filing an issue is not a fix.** Decline a finding only with evidence that it is wrong, and put the evidence in the PR.
-- **Deferring an owned finding is the operator's call**, asked per finding with what the fix costs now.
+- **Deferring an owned finding is the operator's call**, asked per finding with what the fix costs now. Without that answer, fix it.
 - **A finding the change does not own** is filed as a residual (`delivery/issues`) and does not hold the merge.
 - **One fix round takes every owned finding.** A cap on review rounds limits the rounds, not the fixes. A review brief asks for findings to fix, not for a follow-up list.
 
@@ -162,7 +162,7 @@ Landing is not releasing. If the merged change warrants a versioned release (new
 - **Don't ask permission per step** — assess, propose the remaining flow, execute.
 - **Pause at decision points**: commit wording, PR description, the review gate.
 - **The four-square drives the gate**, not change size alone — a one-line ADR still gates on the operator; a big leaf refactor may not.
-- **Remediate before merge** — every finding the change owns is fixed in the branch; a filed issue is debt with a receipt, not a fix.
+- **Remediate before merge** — every finding the change owns is fixed in the branch; filing an issue does not fix it.
 - **Reconcile the ledger at land time** — a Draft ADR whose work just merged is a stale record. The correction costs one line now and a corpus audit later.
 - **If mid-flow**, pick up from current state — don't restart.
 - **Merge ≠ release** — landing an increment is the daily act; releasing is `/release`.

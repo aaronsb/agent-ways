@@ -135,9 +135,9 @@ This follows Single Responsibility and makes each piece testable in isolation."
 
 Every finding you report is one the author fixes before the merge (ADR-613). Order findings by severity so the most serious get fixed first. Severity sets the order of the fixes, and it never moves a finding to a later change. If a point is not worth fixing, leave it out of the review.
 
-Report each finding with the convention it should be fixed under: the ADR, the instruction file or the project way that applies. Where the project has no convention for it, say so, and name the decision the author has to record before fixing.
+Report each finding with the convention it should be fixed under: the ADR, the instruction file or the project way that applies. Where the project has no convention for it, say so, and name the decision the author has to settle before fixing.
 
-Mark a finding **not owned** only when it sits in code the change neither edits nor depends on. The author files those as residual issues; they do not hold the merge.
+The change owns a finding when the change caused it, when it sits inside a function, section or config block the diff touches, or when it sits in this repository's code that the behaviour the change claims runs through. A defect in a dependency maintained elsewhere is not owned, and a workaround for it in the change's own code is. A finding about a whole file, such as its length, is owned only when the change made it worse. Mark a finding **not owned** only when it fails all three tests. The author files those as residual issues; they do not hold the merge.
 
 Do not sort findings into blocking and non-blocking lists, and do not offer follow-ups or future work. A review brief that asks for a separate follow-up list is asking for something this review does not produce. Say so in the review.
 
@@ -194,7 +194,7 @@ gh pr comment NUMBER --body "$(cat <<'EOF'
 
 **What this changes**: [Brief description]
 
-**Assessment**: [What you found - issues, suggestions, or why it's solid]
+**Assessment**: [What you found, or why it's solid]
 
 **Findings to fix**: [Each owned finding, by severity, with the convention it is fixed under; any not-owned finding marked as a residual]
 EOF
@@ -211,11 +211,8 @@ For PRs from other contributors:
 # Standard review with structured feedback
 gh pr review NUMBER --comment --body "## Code Review
 
-### Findings
-[Categorized issues with locations]
-
-### Suggestions
-[Improvements with rationale]
+### Findings to fix
+[Each owned finding by severity, with location, fix and the convention it falls under; not-owned findings marked as residuals]
 
 ### Assessment
 [Overall evaluation]
@@ -239,7 +236,7 @@ gh pr comment NUMBER --body "Review content"
 # Add review (team PR, formal)
 gh pr review NUMBER --comment --body "Review content"
 
-# Request changes (blocking issues)
+# Request changes (owned findings open)
 gh pr review NUMBER --request-changes --body "Issues requiring attention..."
 
 # Approve (only when substantively reviewed)

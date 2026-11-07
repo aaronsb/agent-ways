@@ -50,11 +50,11 @@ Green CI means `gh pr checks <n> --json bucket -q 'all(.[]; .bucket=="pass" or .
 
 A review is worth running only if its findings get fixed. This step is the easiest one in the loop to skip (ADR-613).
 
-- **The change owns a finding** when the change caused it, when it sits in code or text the change edits, or when it sits in code the change depends on to do what it claims. A pre-existing defect inside an edited function is owned.
-- **Fix every owned finding in the branch before the merge**, wording included, under the project's ADRs, instruction files and project ways. Where no convention covers the fix, settle one first (a short ADR or an instruction-file line), then fix.
+- **The change owns a finding** when the change caused it, when it sits inside a function, section or config block the diff touches, or when it sits in this repository's code that the behaviour the change claims runs through. A defect in a dependency maintained elsewhere is not owned, and a workaround for it in the change's own code is. A finding about a whole file, such as its length, is owned only when the change made it worse.
+- **Fix every owned finding in the branch before the merge**, wording included, under the project's ADRs, instruction files and project ways. Where no convention covers the fix and the call sits below the waterline (choices), settle it, record it as an ADR, a project way or an instruction-file line, and say so in the PR. Above the waterline, ask the operator (choices/interview); the finding stays owned and open until they answer.
 - **Filing an issue does not fix an owned finding.** Decline one only with evidence in the PR that it is wrong. Severity, cost and review fatigue are not grounds.
 - **Deferring an owned finding is the operator's call.** Ask per finding, with what the fix costs now. Without that answer, fix it.
-- **A finding the change does not own** is filed as a residual (`delivery/issues`) and does not hold the merge.
+- **A finding the change does not own** is a residual (`delivery/issues`) and does not hold the merge.
 - **A cap on review rounds** limits how many rounds run, not what a round fixes. A review brief asks for findings to fix, not for a follow-up list.
 
 Do not merge with an owned finding open.
@@ -74,7 +74,7 @@ Merge with a regular merge commit, which keeps the branch's commits in the histo
 
 An ADR that authorized the work stays at `Draft` until the work merges. Once the merge lands, the ADR describes the system, so set it to `Accepted` during the cleanup. Run `adr archive` on an ADR that the merge supersedes, or that the work showed was unnecessary.
 
-Skipping this costs nothing at any one merge, but the cost adds up. An audit in August 2026 found seventeen ADRs still at `Draft` or `Proposed` with their implementation long shipped — one of them carrying thirteen source references while marked "Proposed" — and four documents that had been abandoned or quietly solved by a neighbour. The archive command had existed for weeks, and nobody had run it. No check fails while the records drift. They stop describing the system, and fixing them then takes an audit of the whole corpus instead of a one-line edit at each merge.
+No check fails while records drift. An audit in August 2026 found seventeen ADRs still at `Draft` or `Proposed` with their work long shipped; a one-line edit at each merge would have kept them current.
 
 ## See Also
 
