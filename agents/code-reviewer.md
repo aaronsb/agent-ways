@@ -133,15 +133,27 @@ This follows Single Responsibility and makes each piece testable in isolation."
 
 ## Quality Gates
 
-Every finding you report is one the author fixes before the merge (ADR-613). Order findings by severity so the most serious get fixed first. Severity sets the order of the fixes, and it never moves a finding to a later change. If a point is not worth fixing, leave it out of the review.
+A review answers two questions, separately.
 
-Report each finding with the convention it should be fixed under: the ADR, the instruction file or the project way that applies. Where the project has no convention for it, say so, and name the decision the author has to settle before fixing.
+**May the change merge?** The verdict is one of, the first that applies winning:
+- **block**: a security issue, a critical SOLID violation, no tests for new functionality, broken existing tests, unmet acceptance criteria, or a defect the change introduced whose fix is far larger than the change, which sends the change back to design
+- **revise**: nothing blocks, but an owned finding is open
+- **pass**: neither of the above
 
-The change owns a finding when the change caused it, when it sits inside a function, section or config block the diff touches, or when it sits in this repository's code that the behaviour the change claims runs through. A defect in a dependency maintained elsewhere is not owned, and a workaround for it in the change's own code is. A finding about a whole file, such as its length, is owned only when the change made it worse. Mark a finding **not owned** only when it fails all three tests. The author files those as residual issues; they do not hold the merge.
+**Is each finding fixed in this change?** Every finding the change owns is fixed in it before the merge (ADR-613, ADR-614; the full rule is in the delivery/merge way). The change owns a finding when the change caused it, when it sits inside a function, section or config block the diff touches, or when it sits in this repository's code that the behaviour the change claims runs through. A defect in a dependency maintained elsewhere is not owned, and a workaround for it in the change's own code is. A finding about a whole file, such as its length, is owned only when the change made it worse.
 
-Do not sort findings into blocking and non-blocking lists, and do not offer follow-ups or future work. A review brief that asks for a separate follow-up list is asking for something this review does not produce. Say so in the review.
+| Fix an owned finding in this change when any of these holds | It leaves the change only this way |
+|---|---|
+| The change introduced it: a regression against main | The fix is far larger than the change: its own card and a design look |
+| It makes a statement false, in the change or in a doc or comment that describes what the change altered | The fix needs a call above the waterline: the operator is asked, and it stays open until they answer |
+| You traced its cause and the fix you name stays inside the change's files | The fix lands in another in-flight change's files: its owner fixes it before integration |
+| Users would feel it | The fix needs verification this change cannot run: the operator decides whether it waits |
 
-**The verdict is block** while any owned finding is open, including when it is only wording. It is **pass** when no owned finding remains.
+A finding you traced to a fix inside the change's files is fixed in this change, whatever its severity: do not label it non-blocking or a follow-up. A fix far larger than the change points to a deeper flaw or a misread problem; say so, and recommend a focused look instead of a patch.
+
+Order findings by severity so the most serious get fixed first; severity never moves a finding to a later change. Report each one with the convention it is fixed under: the ADR, the instruction file or the project way that applies. Where the project has no convention for it, say so and name the decision the author has to settle before fixing. Mark a finding **not owned** only when it fails all three ownership tests; the author files those as residuals, and they do not hold the merge.
+
+Do not produce a separate follow-up, non-blocking or future-work list. A review brief that asks for one is asking for something this review does not produce; say so in the review. A suggestion, such as a style preference or an optional refactor that makes no statement false and that no user would feel, is either taken in this change or left out of the review.
 
 ## GitHub Integration
 
@@ -212,7 +224,7 @@ For PRs from other contributors:
 gh pr review NUMBER --comment --body "## Code Review
 
 ### Findings to fix
-[Each owned finding by severity, with location, fix and the convention it falls under; not-owned findings marked as residuals]
+[Each owned finding by severity, with its location, the fix, and the convention it falls under; a finding that leaves the change names the table row it leaves by; not-owned findings marked as residuals]
 
 ### Assessment
 [Overall evaluation]
@@ -280,6 +292,6 @@ When no GitHub upstream exists (or pre-push iteration), return the review in con
 - **Failure class** when failed: transient, deterministic, capability, ambiguity, or systemic
 - **Work done**: the PR or diff reviewed and where the review was posted (PR URL or in conversation)
 - **What is needed outside your domain**: fixes the author must make, an ADR the architect must draft, or "none"
-- **Recommended next step**: merge when no owned finding is open, revise while one is, or escalate
-- **Gates run**: the review verdict (block or pass) and any test or lint you ran, each with its state
+- **Recommended next step**: merge (pass); fix the owned findings, then merge (revise); fix the blocking item, return the change to design, or escalate (block)
+- **Gates run**: the review verdict (block, revise, pass), each finding's ownership, and any test or lint you ran, each with its state
 - **Tools or scripts built**: none; a reviewer writes nothing

@@ -1,6 +1,6 @@
 ---
-description: Landing an increment to main — the review gate is a four-square decision, not one policy. Choose machine-review depth by complexity and blast-radius, choose the human gate by whether the work sets direction, fix every finding the change owns before the merge rather than filing it for later, then merge and clean up. Route to the /merge skill.
-vocabulary: merge land increment ship it review gate code review findings fix remediate approve pull request pr blast radius complexity swarm single agent operator read direction architecture merge cleanup delete branch four square gate before merge reviewer codeowners swarm-gate dispatch defer deferred follow-up non-blocking nit optional finding owned finding fix round review round filed later
+description: Landing an increment to main — the review gate is a four-square decision, not one policy. Choose machine-review depth by complexity and blast-radius, choose the human gate by whether the work sets direction, fix every review finding the change owns before the merge instead of filing what was marked non-blocking, then merge and clean up. Route to the /merge skill.
+vocabulary: merge land increment ship it review gate code review findings fix remediate approve pull request pr blast radius complexity swarm single agent operator read direction architecture merge cleanup delete branch four square gate before merge reviewer codeowners swarm-gate dispatch non-blocking follow-up defer later disposition traced root cause fix now regression owned finding fix round review round
 pattern: /merge\b|merge (this|it|the pr)|land (this|it)|review.{0,20}(fix|and merge)|fix the findings|ship (it|this)|squash.?merge|rebase.?merge
 commands: gh pr (merge|checks)
 refire: 0.15
@@ -48,23 +48,22 @@ Green CI means `gh pr checks <n> --json bucket -q 'all(.[]; .bucket=="pass" or .
 
 ## Remediate before you merge
 
-A review is worth running only if its findings get fixed. This step is the easiest one in the loop to skip (ADR-613).
+A review is worth running only if its findings get fixed, and one short of blocking is not thereby deferred (ADR-613, ADR-614).
 
 - **The change owns a finding** when the change caused it, when it sits inside a function, section or config block the diff touches, or when it sits in this repository's code that the behaviour the change claims runs through. A defect in a dependency maintained elsewhere is not owned, and a workaround for it in the change's own code is. A finding about a whole file, such as its length, is owned only when the change made it worse.
-- **Fix every owned finding in the branch before the merge**, wording included, under the project's ADRs, instruction files and project ways. Where no convention covers the fix and the call sits below the waterline (choices), settle it, record it as an ADR, a project way or an instruction-file line, and say so in the PR. Above the waterline, ask the operator (choices/interview); the finding stays owned and open until they answer.
-- **Filing an issue does not fix an owned finding.** Decline one only with evidence in the PR that it is wrong. Severity, cost and review fatigue are not grounds.
-- **Deferring an owned finding is the operator's call.** Ask per finding, with what the fix costs now. Without that answer, fix it.
-- **A finding the change does not own** is a residual (`delivery/issues`) and does not hold the merge.
-- **A cap on review rounds** limits how many rounds run, not what a round fixes. A review brief asks for findings to fix, not for a follow-up list.
+- **Fix every owned finding in the branch before the merge**, wording included, under the project's conventions. Where no convention covers the fix and the call sits below the waterline (choices), settle it as an ADR, a project way or an instruction-file line, and say so in the PR.
+- **Filing an issue does not fix an owned finding.** Decline one only with evidence in the PR that it is wrong.
 
-Do not merge with an owned finding open.
-
-| Rationalization | Counter |
+| Fix an owned finding in this change when any of these holds | It leaves the change only this way |
 |---|---|
-| "None of these blocks the merge" | Blocking is not the test. Ownership is. Fix what the change owns. |
-| "It's only wording, it can go in a follow-up" | Wording is the cheapest fix there is. Make it in this round. |
-| "I filed an issue, so it's recorded" | A filed issue is a record that the fix was skipped. |
-| "Another round would cost a cycle" | Fix it in the round already running. The cap limits rounds, not fixes. |
+| The change introduced it: a regression against main | The fix is far larger than the change: its own card and a design look |
+| It makes a statement false, in the change or in a doc or comment that describes what the change altered | The fix needs a call above the waterline: ask the operator; it stays open until they answer |
+| Its cause is traced and the named fix stays inside the change's files | The fix lands in another in-flight change's files: its owner fixes it before integration |
+| Users would feel it | The fix needs verification this change cannot run: ask the operator whether it waits |
+
+A fix far larger than the change marks a deeper flaw or a misread problem; a change that caused one goes back to design. Any other deferral is the operator's call, per finding, with what the fix costs now; without that answer, fix it. A finding the change does not own is a residual (`delivery/issues`) and does not hold the merge.
+
+A cap on review rounds limits rounds, not fixes; a review brief asks for no follow-up list.
 
 ## Then land it
 

@@ -51,7 +51,7 @@ If the class looks too large for this increment, fix the instance, name the rema
 
 ## Scope
 
-The sweep is bounded by the defect's identity. What else the change fixes is bounded by ownership, which delivery/merge defines (ADR-613). Both bounds hold at once. A sibling carrying the defect you were sent to fix is the same work. A different defect the change owns, including one the change caused in code it did not edit, is fixed in the change under the project's conventions. A defect the change does not own is a residual (delivery/issues). When integration touches files the request did not name, including the seam that should own the fix, list them before editing.
+The sweep is bounded by the defect's identity. What else the change fixes is bounded by ownership, which delivery/merge defines (ADR-614). Both bounds hold at once. A sibling carrying the defect you were sent to fix is the same work. A different defect the change owns, including one the change caused in code it did not edit, is fixed in the change under the project's conventions. A defect the change does not own is a residual (delivery/issues). When integration touches files the request did not name, including the seam that should own the fix, list them before editing.
 
 ## History-keeping artifacts
 

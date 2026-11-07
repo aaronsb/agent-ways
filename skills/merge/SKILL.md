@@ -97,13 +97,14 @@ For the swarm corner, fan `code-reviewer` agents across dimensions (correctness,
 
 ### 6. Remediate
 
-A review is only worth running if the findings get fixed. Before the merge gate, fix every finding the change owns, in the branch, wording included (ADR-613):
+A review is only worth running if the findings get fixed. Before the merge gate, fix every finding the change owns, in the branch, wording included (ADR-613, ADR-614). The `delivery/merge` way holds the ownership test and the table of the only ways an owned finding leaves the change:
 
-- **Owned** is defined in the `delivery/merge` way: the change caused it, it sits inside what the diff touches, or it sits in this repository's code the claimed behaviour runs through.
-- **Fix under the project's conventions**: its ADRs, instruction files and project ways. Where none covers the fix and the call sits below the waterline (choices), settle it as an ADR, a project way or an instruction-file line, and say so in the PR. Above the waterline, ask the operator; the finding stays owned and open until they answer.
-- **Filing an issue is not a fix.** Decline a finding only with evidence that it is wrong, and put the evidence in the PR.
-- **Deferring an owned finding is the operator's call**, asked per finding with what the fix costs now. Without that answer, fix it.
-- **A finding the change does not own** is filed as a residual (`delivery/issues`) and does not hold the merge.
+- **Owned** means the change caused it, it sits inside what the diff touches, or it sits in this repository's code the claimed behaviour runs through.
+- **Fix under the project's conventions.** Where none covers the fix and the call sits below the waterline (choices), settle it as an ADR, a project way or an instruction-file line, and say so in the PR. Above the waterline, ask the operator; the finding stays open until they answer.
+- **Filing an issue is not a fix.** Decline a finding only with evidence in the PR that it is wrong. A reviewer's "non-blocking" settles whether the change may merge, not whether the finding waits.
+- **A fix far larger than the change** gets its own card and a design look; a change that introduced such a defect goes back to design instead of merging.
+- **Any other deferral is the operator's call**, asked per finding with what the fix costs now. Without that answer, fix it.
+- **A finding the change does not own** is a residual (`delivery/issues`) and does not hold the merge.
 - **One fix round takes every owned finding.** A cap on review rounds limits the rounds, not the fixes. A review brief asks for findings to fix, not for a follow-up list.
 
 "Reviewed" is not "landed clean."

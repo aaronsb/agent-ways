@@ -55,7 +55,7 @@ Ask for the same return shape in every brief, and read it before the report body
 
 A blocked or failed worker still returns the whole shape. What it finished is where the next attempt starts.
 
-Owned findings a worker returns are the orchestrator's to fix before the work integrates (delivery/merge, ADR-613). A finding in another worker's files goes to that worker, or the orchestrator fixes it. A split of files between workers is not a reason to file the finding for later. Only a finding the change does not own becomes an issue.
+Owned findings a worker returns are the orchestrator's to fix before the work integrates (delivery/merge, ADR-614). A finding in another worker's files goes to that worker, or the orchestrator fixes it. A split of files between workers is not a reason to file the finding for later. Only a finding the change does not own becomes an issue.
 
 ## Brief Fidelity
 
