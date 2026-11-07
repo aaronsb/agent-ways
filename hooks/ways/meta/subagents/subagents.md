@@ -43,7 +43,7 @@ Project agents live in `agents/`. The harness also supplies built-ins — `Explo
 
 ## What Comes Back
 
-Ask for the same return shape at the top of every report, and read it before the report body. A report that stops mid-sentence was cut off; ask the worker for the rest before acting on it:
+Ask in every brief for the same return shape, placed at the top of the report, and read it before the report body:
 
 - **Status**: complete, blocked out of domain, or failed
 - **Failure class** when failed: transient, deterministic, capability, ambiguity, or systemic (the classes in environment/recovery)
@@ -53,7 +53,7 @@ Ask for the same return shape at the top of every report, and read it before the
 - **Gates run**, each with its state, or "none"
 - **Tools or scripts built** that a later session could run again, with path and invocation. An unreported tool is a lost capability.
 
-A blocked or failed worker still returns the whole shape. What it finished is where the next attempt starts.
+A blocked or failed worker still returns the whole shape. What it finished is where the next attempt starts. A report that stops mid-sentence was cut off; ask the worker for the rest before acting on it.
 
 Owned findings a worker returns are the orchestrator's to fix before the work integrates (delivery/merge, ADR-614). A finding in another worker's files goes to that worker, or the orchestrator fixes it. A split of files between workers is not a reason to file the finding for later. Only a finding the change does not own becomes an issue.
 

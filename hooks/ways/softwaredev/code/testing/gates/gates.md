@@ -20,9 +20,9 @@ A gate is any check that stands between a change and merge: formatter, linter, t
 | **discovered** | Known to exist, deliberately left unrun | Why it was skipped |
 | **absent** | No such gate exists | The date and the reason |
 
-An exit code of zero counts as executed only when the check did its work. A step that skipped itself, a suite that collected zero tests, a tool configured but inert, a run whose test count came back short: record these as discovered, whatever the runner printed. A failing gate is fixed or handed back. Never record a pass that did not happen. A new gate earns trust once a planted defect has turned it red and removing the plant has turned it green again (core.md). A plant counts only after a check shows the file changed: the edit reports exactly one replacement, or `diff f.bak f` shows the planted line. When that check fails, stop before the test run. A green run on a file the plant never reached proves nothing.
+An exit code of zero counts as executed only when the check did its work. A step that skipped itself, a suite that collected zero tests, a tool configured but inert, a run whose test count came back short: record these as discovered, whatever the runner printed. A failing gate is fixed or handed back. Never record a pass that did not happen. A new gate earns trust once a planted defect has turned it red and removing the plant has turned it green again (core.md). A plant counts only after a check shows the file changed: the edit reports exactly one replacement, or `diff f.bak f` against the backup taken before the plant (meta/subagents) shows the planted line. When that check fails, stop before the test run. A green run on a file the plant never reached proves nothing.
 
-A runner that stops at the first failure reports a lower bound. When `cargo test --workspace` fails in one crate, the crates after it never ran, and their failures appear only on the next run. Run test gates without fail-fast (`cargo test --no-fail-fast`, `pytest` without `-x`), or report the count as partial.
+A runner that stops at the first failure under-reports: its failure count is a lower bound. `cargo test` stops after the first test binary that fails, so the remaining test targets, in that crate and in the crates after it, never run. Their failures show up only once the first is fixed, or with `--no-fail-fast`. Run test gates without fail-fast (`cargo test --no-fail-fast`, `pytest` with no `-x` or `--maxfail` on the command line or in `addopts`), or report the count as partial.
 
 An inherited codebase with no test infrastructure still gets a full report: each standard gate on its own line as absent with a date. A blank report reads the same as one nobody wrote.
 
@@ -80,7 +80,7 @@ Close the report with what was deliberately left unverified, blocked distinguish
 | "The check was wrong, so I fixed the file it reads" | The declaration now records a bug. Fix the instrument. |
 | "The step exited zero" | An exit code says a process ended. Did its assertions run? |
 | "I planted the defect and the tests still pass" | Check the plant landed. A pattern that matched nothing leaves the file unchanged. |
-| "Only one test failed" | A fail-fast runner stopped there. Rerun without fail-fast before counting. |
+| "Only one test failed" | If the runner stops at the first failure, the count ends there. Rerun without fail-fast before counting. |
 
 ## See Also
 
