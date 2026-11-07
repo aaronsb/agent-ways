@@ -53,12 +53,12 @@ When you plan a card, write the paths or areas you expect it to touch in its iss
 | "The finding is non-blocking, so I'll file it" | Non-blocking answers whether the change may merge. Whether an owned finding leaves the change comes from delivery/merge, and non-blocking is not one of its reasons. |
 | "Running everything in parallel is faster" | Faster to start. Count the reintegration on overlapping files and the reviews it queues. |
 | "The sweep can run alongside the code changes" | Each code change reopens the sweep's conflicts. Run it after the code stops moving. |
-| "It's merged, so it's done" | Done also means the issue is closed and the fix-in-this-change findings are fixed. |
+| "It's merged, so it's done" | Done also means the issue is closed and every owned finding is fixed or has left by the table in delivery/merge. |
 
 ## See Also
 
 - delivery/implement(softwaredev) — parent: planning one change, safe parallelization, the task shape
-- delivery/merge(softwaredev) — review findings and their disposition, the merge gate
+- delivery/merge(softwaredev) — review findings the change owns, and the merge gate
 - delivery/issues(softwaredev) — issues as the task list, blockedBy, residuals
 - delivery/groundwork/sequence(softwaredev) — holding a card while its area cannot be verified
 - subagents/agent-teams(meta) — one worktree and one owner per file

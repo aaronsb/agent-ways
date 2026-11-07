@@ -145,9 +145,9 @@ A review answers two questions, separately.
 | Fix an owned finding in this change when any of these holds | It leaves the change only this way |
 |---|---|
 | The change introduced it: a regression against main | The fix is far larger than the change: its own card and a design look |
-| It makes a statement false, in the change or in a doc or comment that describes what the change altered | The fix needs a call above the waterline: the operator is asked, and it stays open until they answer |
-| You traced its cause and the fix you name stays inside the change's files | The fix lands in another in-flight change's files: its owner fixes it before integration |
-| Users would feel it | The fix needs verification this change cannot run: the operator decides whether it waits |
+| It makes a statement false, in the change or in a doc or comment that describes what the change altered | The fix needs a call above the waterline: ask the operator; it stays open until they answer |
+| Its cause is traced and the named fix stays inside the change's files | The fix lands in another in-flight change's files: its owner fixes it before integration |
+| Users would feel it | The fix needs verification this change cannot run: ask the operator whether it waits |
 
 A finding you traced to a fix inside the change's files is fixed in this change, whatever its severity: do not label it non-blocking or a follow-up. A fix far larger than the change points to a deeper flaw or a misread problem; say so, and recommend a focused look instead of a patch.
 
