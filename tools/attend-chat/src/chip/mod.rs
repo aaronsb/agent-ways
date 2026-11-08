@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Sender-chip module: rendering, identity registry, and `@`-routing.
 //!
 //! Split into three submodules around independent concerns so each

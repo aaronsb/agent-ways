@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `inbox`: the messages in this session's receive set, read-only.
 //!
 //! Listing and reading consult no seen-set and mark nothing: consumption is

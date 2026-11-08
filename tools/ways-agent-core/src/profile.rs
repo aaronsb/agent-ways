@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Engine profiles and the user layer over them (ADR-196 §5, ADR-502 §5).
 //!
 //! The shipped profiles live in `profiles.yaml`, compiled in. The user layer at

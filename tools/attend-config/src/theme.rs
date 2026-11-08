@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The one user-level theme choice, read only (ADR-503, ADR-504 §5). The
 //! keys are ways' `theme.active` and `theme.shape`, in the user
 //! `config.yaml` that `ways settings` writes; their declarations are

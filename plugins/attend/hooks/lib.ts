@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 // Pure pieces of the attend mod (ADR-406): argv building, parsing what the
 // attend and ways CLIs print, framing a delivery, and the timing rules. No `$`
 // here, so the tests exercise them directly.

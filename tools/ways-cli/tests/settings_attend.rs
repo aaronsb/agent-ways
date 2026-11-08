@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! attend's settings in `ways settings` (ADR-503 §13, #698): its keys are
 //! read, set, linted and fixed through the same registry and writer as
 //! ways', in attend's own files and paths.

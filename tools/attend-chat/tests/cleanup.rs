@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The cleanup items (ADR-405, amendment of 2026-10-13): Hide messages
 //! here, Delete read messages for everyone… and Tombstone…, through the
 //! shell's real key and mouse handlers. The attend CLI is a fake `attend`

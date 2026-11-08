@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The channel membership one member makes for another (ADR-404 D1): an
 //! add, which enrolls the member, and an invitation, which asks it to join.
 //!

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways-agent`: the ways agent's command line. `ways agent …` runs it.
 //!
 //! It runs the agent (`serve`, started on demand by hooks) and carries its

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! State-directory hygiene that needs no tmux: an interrupted launch must
 //! not leave the caller's environment on disk where nothing can find it.
 

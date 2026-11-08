@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The ways settings schema (ADR-503 §1): every key of `config.yaml`, of a
 //! target's `config.yaml` and of a project's `.claude/ways.yaml`, with its
 //! type, range, default, scope and help. [`crate::config::Config`] loads

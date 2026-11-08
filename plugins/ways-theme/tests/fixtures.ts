@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 // `ways settings theme export --mod` for the themes the tests and the
 // screenshots use: the roles and words as the ways build of
 // feature/ways-theme-controller derived them. TAMPA's words are dropped, to

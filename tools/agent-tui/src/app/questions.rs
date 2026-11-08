@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The questions on the bottom bar, each a [`Dialog`] placed on the bar
 //! behind a [`Modal`]: the confirm before an action is queued, the discard
 //! of a tab's items from the tree and from review, the delete of a named

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The app shell over a tree of settings (ADR-504 §3): one tab per root and
 //! a theme tab after them, then browse, filter, edit, run actions, and review
 //! and apply as a read-only mode of the browser. Key handling and state live

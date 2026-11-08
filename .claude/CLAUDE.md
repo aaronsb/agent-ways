@@ -43,6 +43,7 @@ Run these before the push. The cargo workspace is `tools/Cargo.toml`.
 | `make test-hooks` | the hook scripts and the Makefile targets |
 | `CLAUDE_CODE_TYPES=<path>/claude-code.d.ts make test-plugins` | the mods; the type check needs the `claude-code.d.ts` that Claude Code bundles, and skips without it |
 | `ways author lint <way-dir>`, `scripts/check-register.sh` | a changed way |
+| `reuse lint` | every file carries copyright and license information (REUSE 3.3); add a header to a new source file with `scripts/spdx-header FILE`, or `--license MIT` for the ADR and doc tooling |
 | `scripts/check-portability.sh` | line endings, shebangs and hardcoded home paths in shell scripts and fixtures, as CI's portability job runs it |
 | `make test` | lint, smoke, unit, simulation, ADR tool, statusline and hook suites |
 

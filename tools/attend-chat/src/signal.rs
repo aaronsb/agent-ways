@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Signal wire format, paths, and I/O for `attend-chat`.
 //!
 //! The TUI is a first-class endpoint on the signal bus — it reads and

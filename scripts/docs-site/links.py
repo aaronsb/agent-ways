@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """Resolve relative markdown links for the published site.
 
 Pages in docs/ and the generated ways pages link to files by their position in

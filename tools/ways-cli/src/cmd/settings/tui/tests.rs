@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The guided flows through the real app: keys, clicks, the queue and the
 //! review, over a fixture home. Nothing here runs `ways`: the adapter
 //! serves the flows over the fixture and logs what an apply would do.

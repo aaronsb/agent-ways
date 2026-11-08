@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The prompt lane's handoff to a Claude Code judge host (ADR-708 §2, §5).
 //!
 //! A session's judge state is in two places. Its engine resolution and its

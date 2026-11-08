@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Messages held after Enter (ADR-409, note of 2026-11-01), through the
 //! shell's real key and mouse handlers and its exit paths: the route a
 //! message joins on, a channel dissolved during the countdown, a send

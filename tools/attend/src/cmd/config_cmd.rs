@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `attend config show` and `lint`, over attend's schema (ADR-503 §13).
 //! Named `config_cmd` to avoid shadowing the `config` alias.
 //!

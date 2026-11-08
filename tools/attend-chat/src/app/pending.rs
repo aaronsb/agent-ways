@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Messages held after Enter before they are sent (`attend.chat.send_delay`).
 //!
 //! Enter on a message holds it here, shown in the feed with a countdown, and

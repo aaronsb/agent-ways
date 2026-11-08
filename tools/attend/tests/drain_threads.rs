@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A drained reply names the message it answers, and `attend message reply` to a
 //! message delivered from a channel stays in that channel (#900, ADR-406
 //! item 10). Both through the CLI, as the mod and the Stop hook run it.

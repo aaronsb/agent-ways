@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The task lane: a subagent or teammate dispatch (`PreToolUse` on the task
 //! tool), whose matched ways are stashed for `SubagentStart` to claim.
 

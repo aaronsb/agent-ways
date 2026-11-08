@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """Metrics for the yes/no gate evaluation. Writes results.jsonl and metrics.json.
 
 Gate rule: a fire is blocked when p_yes < threshold.

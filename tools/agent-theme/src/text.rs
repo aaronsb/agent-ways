@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The theme file format, its parser and its writer (ADR-504 §4).
 //!
 //! A theme file has the structure of the dotfiles palettes: bare uppercase

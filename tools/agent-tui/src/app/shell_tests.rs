@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! What the shell adds over the spike's screens: the adapter does the real
 //! work of an apply, a typed secret reaches only its command's stdin, a
 //! locked value and a finding show and refuse, the tree reloads from the

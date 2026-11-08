@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The swatch is the tool's regression target. `fixtures/swatch.sh` prints a
 //! row per colour mode, attribute and glyph class; `fixtures/swatch.ansi` is
 //! its capture through tmux (100x14). These tests render that capture, so

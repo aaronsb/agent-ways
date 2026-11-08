@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Every `ways …` call site in the repository names a command the CLI accepts
 //! (ADR-507). A renamed command leaves no caller behind: hooks, skills,
 //! commands, scripts, the Makefiles, CI, settings.json, the docs, and the

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Per-section checking and layered loading (ADR-503 §3-5).
 //!
 //! A file is parsed once. Each top-level key belongs to a section, and the

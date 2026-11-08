@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways manage reinstall` (ADR-509 §3), run in a sandboxed HOME and XDG
 //! tree against a local origin. The app is a clone of a small agent-ways
 //! checkout carrying the repository's real `scripts/install.sh`, whose stage

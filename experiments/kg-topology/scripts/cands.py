@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """Vocabulary candidates per way: words from kg concept labels + search terms, absent from the frontmatter."""
 import json, re, collections, math
 T = '/tmp/kgtopo-a3601'

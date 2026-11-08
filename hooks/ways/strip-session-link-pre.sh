@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # PreToolUse (Bash): deny commit / PR / issue authoring commands that carry a
 # Claude-Session transcript link in trailer/footer position. See ADR-167
 # (supersedes ADR-162). # adr-cite-ignore

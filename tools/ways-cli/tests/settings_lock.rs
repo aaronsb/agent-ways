@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The settings writer's lock keeps writers apart (ADR-503 §6), on every
 //! platform CI runs. It lives here, in the `ways` package, because the
 //! Windows CI job runs this package's tests: Windows is where the lock file's

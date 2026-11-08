@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways author golden` — export the golden-prompt sidecars (ADR-701 §9) as the
 //! `prompt<TAB>expected_way<TAB>kind` rows the content-corpus experiments read.
 //!

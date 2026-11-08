@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Hosting a screen that is not the settings shell (ADR-504 §3): how it is
 //! opened, on the terminal or headless for snapshots and tests, in the look
 //! the settings choose, and the bordered pane its tables sit in. The session

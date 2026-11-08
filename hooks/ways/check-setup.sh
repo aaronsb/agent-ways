@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-FileCopyrightText: 2026 Jonathan Muse
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # SessionStart: Check if ways installation is complete.
 # Runs as the first startup hook. If setup is incomplete, emits a
 # diagnostic and exits cleanly so other hooks don't error.

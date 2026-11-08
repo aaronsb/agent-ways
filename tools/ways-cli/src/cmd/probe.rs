@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways author probe` — score a probe file through the real scan (ADR-701).
 //!
 //! Each row of the probe file (`prompt`, `expected_way`, `kind`, `role`,

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways judge host|take|answer`: the verbs a Claude Code judge host runs
 //! (ADR-708 §3, §5). The ways mod registers as its session's host before the
 //! session's first prompt, takes the job the prompt lane's gate writes, sends

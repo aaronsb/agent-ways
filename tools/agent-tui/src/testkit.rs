@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The test half of the engine (ADR-504 §12): a headless render of the real
 //! app into a [`Buffer`], a text frame format that holds each cell's glyph,
 //! colours and modifiers, and golden-frame checks against reviewed frames.

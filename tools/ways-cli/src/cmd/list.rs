@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! List ways triggered in the current session with epoch and disclosure state.
 //! Shows conversation-ordered progression of way firings, epoch distances,
 //! check fire counts, and predicted next-allowed-fire epochs.

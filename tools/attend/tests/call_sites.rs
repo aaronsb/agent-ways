@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! No caller or text names a flat attend verb that ADR-413 moved under a
 //! group (item 6.4). The scan covers plugins/, hooks/, skills/, statusline.sh,
 //! README.md, docs/, tests/, attend's own crate and every crate attend names

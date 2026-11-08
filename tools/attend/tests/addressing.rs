@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Who a message is for, and where it lands (ADR-401 `to`, ADR-406 items 2,
 //! 7 and 10). A reply goes to its parent's sender as a direct message, a send
 //! that names someone is direct, and a send that names no one goes to

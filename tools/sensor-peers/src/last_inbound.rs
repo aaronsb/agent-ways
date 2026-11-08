@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Per-session "last inbound signal" tracking.
 //!
 //! Sensor-peers and the drain write the most-recently-surfaced peer signal

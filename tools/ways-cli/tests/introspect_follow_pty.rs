@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A live replay following its session on a real terminal (#780): a pty,
 //! the real binary and its real loop, so the ticks are the terminal loop's
 //! own. `ways session live` opens following; events appended to the log

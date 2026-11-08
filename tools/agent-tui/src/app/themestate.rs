@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The theme tab's state: the themes on offer and the active choice, with
 //! the file operations that write theme files, and the slot editor (ADR-504
 //! §7). Theme files are written at once into the user theme directory and

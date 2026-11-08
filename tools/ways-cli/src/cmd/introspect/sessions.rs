@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Session enumeration: the sessions the event log records, the plain
 //! table `session list` prints, and which of them Claude Code still has a
 //! transcript for, found through claude-sessions.

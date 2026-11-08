@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways settings items [<family>]` (ADR-516 §5): every theme, mod, sensor,
 //! way and judge profile as the settings screens' cards describe them, from
 //! the same producers ([`crate::cmd::modules`]).

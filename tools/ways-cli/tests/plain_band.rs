@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A plain report under a theme with a ground is a band: every cell of every
 //! row, blank rows included, sits on the theme's ground out to the width.
 //! Only a terminal installs the theme; forced colour on a pipe keeps the

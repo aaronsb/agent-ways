@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A theme as an item: a bundled theme is builtin, a file in the user's
 //! themes directory is the user's, a file that takes a bundled theme's name
 //! is that builtin, replaced, and a file that does not load is the user's,

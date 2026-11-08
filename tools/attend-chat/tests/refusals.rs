@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A send to a target Tab completes but nobody would read is refused in
 //! its own words, through the real Enter: a quiet agent (no heartbeat),
 //! and a channel whose directory was swept with no live member left. In

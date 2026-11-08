@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Roles derived from the slots, and the contrast arithmetic that keeps them
 //! readable (ADR-504 §4). The blend formulas follow the dotfiles `dottheme`
 //! tool's status-line generator; the `SL_*` names below are its own.

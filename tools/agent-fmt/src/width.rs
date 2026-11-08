@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! ANSI-visible width: measure, truncate, clip and pad styled terminal text.
 //!
 //! Width is counted in `char`s and an escape sequence counts for nothing. A

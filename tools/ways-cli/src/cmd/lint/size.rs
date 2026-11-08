@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Delivered-size rule: a way's body against the hook context cap.
 //!
 //! Claude Code caps one hook's `additionalContext` at

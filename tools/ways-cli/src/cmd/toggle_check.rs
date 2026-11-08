@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Per-way toggles (ADR-131) that name no way, and toggle patterns that do
 //! not mean what they say. A key in a project's `.claude/ways.yaml` `ways:`
 //! map is a toggle pattern over way ids (`ways_core::config::toggle_matches`).

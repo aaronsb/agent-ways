@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! What the judge has spent, read from `judge_call` events: the
 //! aggregation `ways agent cost` prints and `ways session` reports.
 //!

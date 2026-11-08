@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The agent-ways theme engine (ADR-504 §4-§6).
 //!
 //! Every surface that prints colour draws it from here: terminal colour

@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # Print, write or check the `paths:` filter of each Rust build-<component>.yml.
 #
 # A component's workflow must run when the component's crate changes, when any

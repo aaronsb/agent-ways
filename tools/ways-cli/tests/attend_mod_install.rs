@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways manage repair` and `ways manage mod` install, update and remove the
 //! mods through Claude Code's plugin CLI, each to its wanted state
 //! `mods.<name>.install` (ADR-512): attend wanted by default, ways-judge

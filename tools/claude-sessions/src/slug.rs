@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The directory name Claude Code gives a project under `~/.claude/projects`.
 
 /// The longest slug Claude Code writes before it truncates and appends a hash.

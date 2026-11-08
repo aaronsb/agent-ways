@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A tree of typed settings and the edits made to it: the content model of
 //! the tree-and-detail screen. Nothing here knows what the settings are; an
 //! adapter builds the tree and applies what it holds (ADR-504 §3).

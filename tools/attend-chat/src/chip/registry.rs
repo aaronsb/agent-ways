@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Identity registry: dedup'd list of peers the legend / completion /
 //! `@`-resolver consume, built from buffered signals plus a seed of
 //! discovered claude sessions.

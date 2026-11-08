@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A feed: entries in arrival order, each a header band across the row, a
 //! rule under it, and a body wrapped to the full row, with a blank row
 //! after it. The newest entry sits at the bottom. While the feed is taller

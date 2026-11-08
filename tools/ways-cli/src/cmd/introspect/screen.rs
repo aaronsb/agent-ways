@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The introspect screens on agent-tui (ADR-504 §1, §9), as the tabs of
 //! one screen (#738): the session picker; a session's timeline, replayed
 //! or live, with its why-fired view; the session's semantic fires; and the

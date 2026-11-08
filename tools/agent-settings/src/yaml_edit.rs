@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A YAML text editor that changes only the keys it is told to (ADR-503 §6).
 //!
 //! `serde_yaml` round trips drop comments and order, so edits are made on the

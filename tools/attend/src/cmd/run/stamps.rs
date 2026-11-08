@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Per-session stamps in the state dir: where the banner stamp lives, and
 //! the startup sweep that removes stamps of sessions long gone.
 //!

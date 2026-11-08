@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! What attend reads about another process: its parent and its command
 //! line. Linux reads `/proc` directly; other Unix systems ask `ps`, and
 //! Windows asks PowerShell.

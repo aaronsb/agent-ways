@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A dry run reads the bus and changes nothing on it: the prune of
 //! invitations to sessions that have gone, which a world read runs, is
 //! skipped. In its own file, so its own fixture: no other test's world

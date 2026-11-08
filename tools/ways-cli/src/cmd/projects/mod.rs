@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways projects`: list, search, show, summarize, clean up and relocate
 //! Claude Code's projects (ADR-504). The port of `tools/claude-projects`.
 //!

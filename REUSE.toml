@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Licensing for files that carry no SPDX header. Source files carry their own
+# header (scripts/spdx-header adds it). Way bodies, skills, agents, docs and
+# data files stay header-free because hooks inject many of them into agent
+# context, so they are licensed here instead. Later annotations take
+# precedence over earlier ones; "override" beats a file's own header.
+
+version = 1
+
+[[annotations]]
+path = "**"
+precedence = "closest"
+SPDX-FileCopyrightText = ["2025-2026 Aaron Bockelie", "agent-ways contributors"]
+SPDX-License-Identifier = "AGPL-3.0-or-later"
+
+# The ADR and doc tooling that other projects copy is MIT. adr-tool is
+# assembled from src/; header.py carries the header into the assembled file.
+[[annotations]]
+path = ["hooks/ways/documentation/adr/src/**", "hooks/ways/documentation/adr/adr.yaml.template"]
+precedence = "closest"
+SPDX-FileCopyrightText = "2025-2026 Aaron Bockelie"
+SPDX-License-Identifier = "MIT"
+
+# Third-party material, under its own terms.
+[[annotations]]
+path = "catalog/commands/tldr/summaries.tsv"
+precedence = "override"
+SPDX-FileCopyrightText = "2014-present the tldr-pages team and contributors"
+SPDX-License-Identifier = "CC-BY-4.0"
+
+[[annotations]]
+path = "docs/assets/fonts/monoid/**"
+precedence = "override"
+SPDX-FileCopyrightText = "2015 Andreas Larsen and contributors"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = "docs/reference/model-context-decay/*.png"
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Anthropic PBC"
+SPDX-License-Identifier = "LicenseRef-Anthropic-fair-use-figure"
+
+# The skins renderer, ported from hellosverre/claude-skins (MIT) with its
+# LICENSE beside the files. Each ported file names its source in its own
+# first lines. Files written here for the port carry their own SPDX header,
+# which "closest" keeps.
+[[annotations]]
+path = ["plugins/ways-theme/hooks/skins/**", "plugins/ways-theme/types/index.d.ts"]
+precedence = "closest"
+SPDX-FileCopyrightText = ["2026 hellosverre", "2026 Aaron Bockelie"]
+SPDX-License-Identifier = "MIT"
+
+# beautiful-mermaid, bundled by scripts/vendor/build.mjs.
+[[annotations]]
+path = "plugins/ways-theme/hooks/skins/vendor/**"
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Craft Docs"
+SPDX-License-Identifier = "MIT"

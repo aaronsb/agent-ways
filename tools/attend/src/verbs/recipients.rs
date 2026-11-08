@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Who reads the bus: the live agent sessions and the ids each reads as
 //! (`attend_groups::readers`, which attend-chat's Tombstone… offer asks
 //! too), and the ids the caller reads as. `delete` and `tombstone` both ask

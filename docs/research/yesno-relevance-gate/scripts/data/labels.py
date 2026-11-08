@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # (moment_ref, way_override, category, label, rationale)
 # moment_ref: "C<n>" = pool.json cid, "X<n>" = rest.json index. way_override None = the way that fired.
 RR, RI, HN, EN, MR, AM = 'real_relevant', 'real_irrelevant', 'synthetic_hard_neg', 'synthetic_easy_neg', 'missed_relevant', 'ambiguous'

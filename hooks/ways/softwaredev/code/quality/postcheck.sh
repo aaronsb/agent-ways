@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-FileCopyrightText: 2026 Jonathan Muse
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # Reactive firing for softwaredev/code/quality (ADR-123 Phase D).
 #
 # Exits 0 (requesting fire) when the just-completed Edit/Write touched

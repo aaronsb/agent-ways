@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A guided flow: a short run of steps in a modal, for a job that takes
 //! several decisions. Pick from a list, preview what would change, confirm.
 //! Finishing hands back the commands to queue; the tab that launched the flow

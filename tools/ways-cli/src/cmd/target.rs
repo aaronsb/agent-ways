@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways manage target` (ADR-184, ADR-185, ADR-507): the projection targets, the
 //! Claude Code config directories agent-ways is active in.
 //!

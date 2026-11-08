@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Shared focus-group state I/O for attend and attend-chat (ADR-170).
 //!
 //! Groups are named signal namespaces that agents — and, since

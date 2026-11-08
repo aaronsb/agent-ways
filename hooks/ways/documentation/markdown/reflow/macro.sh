@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # Macro for documentation/markdown/reflow (#415) — names the file.
 #
 # postcheck.sh detects and records; this reads the record. That handoff exists

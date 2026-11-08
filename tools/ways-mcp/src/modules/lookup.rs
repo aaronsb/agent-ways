@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The lookup tools of the `ways` module: `ways_search`, `ways_read` and
 //! `ways_neighbors` (ADR-701 §5).
 //!

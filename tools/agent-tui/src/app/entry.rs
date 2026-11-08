@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A pane's entry dialog ([`crate::Open::Entry`]): one line typed in a small
 //! box docked where a menu would dock, under the tab or row it belongs to.
 //! The pane's own text entry is never borrowed for it, so a chat's compose

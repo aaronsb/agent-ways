@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways settings theme list|copy|rename|delete` (#851): the theme tab's
 //! file actions on the command line (ADR-503: the screens and the CLI are
 //! two ways in). Both go through `agent_tui::named` over the same

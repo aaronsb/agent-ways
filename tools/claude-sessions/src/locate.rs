@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Finding projects and transcripts under a Claude Code projects directory.
 //!
 //! Every function here takes the projects directory explicitly, so tests and

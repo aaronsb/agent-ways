@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # Pre-built binary download for every agent-ways component (the Rust suite and
 # way-embed). Sourced, not executed: tools/scripts/download-prebuilt.sh is the
 # command-line entry point, and tests/prebuilt-lib-test.sh drives these

@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # scripts/release.sh refuses a release whose range changed plugins/attend/
 # without moving the plugin's version (ADR-406 item 8). Runs `release.sh check`
 # in a scratch repository with a tag, a change, and a bump.

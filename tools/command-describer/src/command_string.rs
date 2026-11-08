@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A command string the shell parses again: the arguments of `eval`, or the
 //! operand of `bash -c`. Its text is the words' values joined by spaces, as
 //! bash joins `eval`'s arguments, and its spans map back to the source.

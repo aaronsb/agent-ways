@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Other programs' themes, made from a theme's roles (ADR-514). Each target
 //! maps roles to its own keys; a theme pins any of those keys in its
 //! `[target.<name>]` table, and a pin wins over the mapping.

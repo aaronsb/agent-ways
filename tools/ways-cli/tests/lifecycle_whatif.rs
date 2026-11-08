@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The lifecycle convention (ADR-511) on the verbs other than `update`
 //! (`tests/update_whatif.rs` has that one): without `--commit` a verb prints
 //! what it would change and changes nothing; with `--commit` it applies; the

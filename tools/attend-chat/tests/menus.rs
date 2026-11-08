@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The chat's menus through the shell's real key and mouse handlers: each
 //! docks at what opened it (a tab, a column row, or beside the row of the
 //! menu it was picked from), marks the current value, and draws an item

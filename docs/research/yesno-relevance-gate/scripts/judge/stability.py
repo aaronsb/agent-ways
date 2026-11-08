@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """Repeatability, wording sensitivity, and Haiku latency/agreement, driven through judge.py.
 
   stability.py --backend local --engine llamacpp|transformers

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A sender's header is attend's, never text from the environment: a
 //! newline or markup in `USER` is cut to a safe word before it is written,
 //! and a stored line whose header carries a control character reads as

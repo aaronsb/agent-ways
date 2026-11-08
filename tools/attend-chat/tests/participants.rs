@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The participant strip over the feed (ADR-409's note), through the
 //! shell's real key and mouse handlers. In its own file, so its own
 //! fixture: eighteen live claudes, all in #crowd, enough for the strip's

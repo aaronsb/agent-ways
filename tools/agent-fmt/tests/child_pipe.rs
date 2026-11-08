@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `write_to_child` under the default SIGPIPE, as the suite's binaries run.
 //! This binary holds one test, so setting the default here reaches nothing
 //! else.

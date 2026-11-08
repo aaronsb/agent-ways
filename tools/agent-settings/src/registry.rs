@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The registry: several components' schemas composed into one tree
 //! (ADR-503 §1), and the canonical or effective fragments emitted from it (§2).
 

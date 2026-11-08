@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 // Rows that carry another mod's picture, and rows Claude Code draws empty.
 // The stand-in below draws as the images mod (plugins/images) does: under
 // the row `next(e)` gave it, a column holding a Box keyed `images-picture-0`

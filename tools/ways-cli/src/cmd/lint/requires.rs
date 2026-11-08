@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! ADR-116 `requires:` field helpers: infer permissions from a
 //! macro.sh script, validate permission strings, and format/insert
 //! the requires field back into frontmatter.

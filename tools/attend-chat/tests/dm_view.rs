@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! An agent's DM view (ADR-405, amendment of 2026-10-13): a click on an
 //! agent's row opens the direct messages between the operator and that
 //! agent, listed under the agent's row and shown as a tab; the compose box

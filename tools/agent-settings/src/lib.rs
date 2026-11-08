@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Settings registry machinery shared by ways and attend (ADR-503). It owns the
 //! schema types, the registry, layered loading with per-section fallback, lint,
 //! fragment emit, the file writer, and the item descriptor every surface

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! An item's card ([`Card`]): the head of the detail pane on a mod, a
 //! sensor or a theme, drawn the same on every tab from the item's
 //! descriptor (ADR-516 §6).

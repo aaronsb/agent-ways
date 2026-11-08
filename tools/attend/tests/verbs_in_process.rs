@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The message verbs called as a library, in this test process, the way a
 //! long-lived frontend (an MCP server, a mod) calls them (ADR-501 item 4).
 //!

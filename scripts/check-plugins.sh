@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # Gates for the Claude Code mods under plugins/ (ADR-406):
 #
 #   1. the attend plugin carries attend's version (the plugin is released

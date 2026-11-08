@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-FileCopyrightText: 2026 Jonathan Muse
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The attend library: the message verbs as typed calls, and the CLI over them.
 //!
 //! [`verbs`] holds the message verb bodies (send, reply, inbox, peers,

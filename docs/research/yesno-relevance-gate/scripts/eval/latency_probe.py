@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """Call the judge exactly as ways-agent does (net.rs / judge.rs), outside the
 daemon's 2 s deadline, and record latency, token usage and verdicts.
 

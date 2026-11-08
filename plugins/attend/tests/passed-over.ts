@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 // What Claude Code's built-in policy plugin (cc-plugin-sec-default) sends
 // past the plugins a person installs, where an organization manages Claude
 // Code (Team and Enterprise, or a machine with managed settings). A hook a

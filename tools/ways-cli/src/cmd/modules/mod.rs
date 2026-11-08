@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Themes, mods, sensors, ways and judge profiles as items (ADR-516). One
 //! function per family builds each item: its descriptor
 //! ([`agent_settings::item::Item`]) and the family's own fields, in an

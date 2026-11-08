@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The left column (ADR-405): Agents, every identity the chat has seen,
 //! live ones first and the rest set back, those in the channel shown
 //! marked, each claude followed by the rows of its DM views while they are

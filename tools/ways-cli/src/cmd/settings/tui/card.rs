@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! An item's card as the detail pane draws it (ADR-516 §6): the entry a
 //! family's producer builds ([`crate::cmd::modules`]), with the family's
 //! fields as rows, and paths under home written `~` and with `/` between

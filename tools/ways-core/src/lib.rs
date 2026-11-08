@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways-core` — the shared engine for the ways toolchain.
 //!
 //! Extracted from the `ways` binary (ADR-151) so both the `ways` runtime and

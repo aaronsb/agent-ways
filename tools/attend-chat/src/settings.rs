@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The chat's settings: the `attend.chat.*` keys of attend's schema
 //! (ADR-503), in attend's user file, the one `ways settings` edits. The
 //! chat reads them through `attend-config` at start and after `/config`

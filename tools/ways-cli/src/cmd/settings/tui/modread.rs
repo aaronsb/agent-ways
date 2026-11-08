@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The mod tab's state, read off the screen's thread (ADR-512 item 6). The
 //! read calls Claude Code for every enabled target, so it runs on a worker
 //! and the screens show the last result until the next lands.

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! attend's sensor files (ADR-403 §2): where each layer lives, the shipped
 //! files embedded in the build, and the load that layers them by name,
 //! applies project trust and checks the result. attend runs what this

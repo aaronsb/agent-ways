@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Items and their cards: sensors of each kind and layer (attend present,
 //! absent and unlisted), a mod in each state, and a bundled, a user and an
 //! overriding theme.

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Display ways, checks, and core guidance — session-aware, idempotent.
 //!
 //! Replaces: show-way.sh, show-check.sh, show-core.sh

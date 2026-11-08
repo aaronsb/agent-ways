@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `attend message cleanup` — reap signal files whose owning project is gone, and
 //! prune the empty project dirs left behind. The core `run_cleanup` is
 //! also used by the in-loop auto-sweep in `cmd::run`, so it and

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `attend message send` and `attend message reply`: argv in, `verbs::send` called, its
 //! result rendered. The verb bodies live in the library (ADR-501 item 2);
 //! what stays here is what only a shell caller needs: the flag-shaped

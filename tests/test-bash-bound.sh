@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # Verdict battery for the guard hook hooks/ways/check-bash-bound.py (ADR-181).
 # Each case is: expected exit code, run_in_background flag, command.
 # Exit 2 means refused; exit 0 means allowed. Anything else is a bug.

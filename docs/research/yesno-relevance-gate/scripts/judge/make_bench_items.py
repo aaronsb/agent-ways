@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """Write bench_items.jsonl: 8 synthetic conversations x 6 candidate ways = 48 items.
 
 `expect` is the author's intended answer, used only to sanity-check input

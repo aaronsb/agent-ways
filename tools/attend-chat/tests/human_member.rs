@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The person at attend-chat is a member of a channel they post in, as of
 //! one they `/join`, so an agent alone in the channel with them can answer
 //! them (ADR-404 D1). This is the reproduction of the bug observed on

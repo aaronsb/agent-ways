@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The projection manifest (ADR-144 §1).
 //!
 //! The manifest is the *desired state* of `~/.claude`: the list of entries the

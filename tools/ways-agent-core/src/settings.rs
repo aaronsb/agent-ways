@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The agent daemon's settings schema (ADR-503 §1): `agent.yaml`, the user
 //! layer over the shipped engine profiles, and the provider keys, which the
 //! schema shows as present or absent and never reads (§12).

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Firing-event log reader (ADR-151 §1).
 //!
 //! Reads the append-only JSONL log of way-firing events and aggregates it.

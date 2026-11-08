@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! An idle refresh of an unchanged world draws nothing new. In its own
 //! file, so its own process and fixture: the screen suite's other tests
 //! write to their shared fixture (a join, a send) while they run, and a

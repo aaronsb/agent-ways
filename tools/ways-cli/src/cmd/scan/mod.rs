@@ -1,3 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-FileCopyrightText: 2026 Clayton Chancey
+// SPDX-FileCopyrightText: 2026 Jonathan Muse
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Scan ways and output matched content — replaces hook scan loops.
 //!
 //! Combines file walking, frontmatter extraction, matching (pattern + semantic),

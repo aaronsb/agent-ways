@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The Stop/prompt round trip (ADR-155 §3). At Stop, Claude's last response
 //! is stored raw for the session; the next UserPromptSubmit hands it to the
 //! prompt scan's embed lane, never its keyword lane. The scan-time reducer

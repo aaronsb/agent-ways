@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The ways of the other projects Claude Code knows, on the ways tab: one
 //! row counting them by default, a group per project in the all projects
 //! view. Each switch there is read from and written to that project's

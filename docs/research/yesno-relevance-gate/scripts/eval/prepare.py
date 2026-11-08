@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """Build the scoring units: one row per (item, way variant, context variant).
 
 Writes units.jsonl (id, set, way_id, wv, cv, doc, query) and ways_meta.json

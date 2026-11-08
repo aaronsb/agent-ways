@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The resident agent (ADR-502 §1-4, §8).
 //!
 //! One per user, listening on a Unix socket of mode 0600 and answering only

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 import json, subprocess, sys
 from concurrent.futures import ThreadPoolExecutor
 OUT = '/tmp/kgtopo-a3601'

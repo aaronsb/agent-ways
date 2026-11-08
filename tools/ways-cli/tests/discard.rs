@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A switched-off way does not fire on any lane, whatever switched it off.
 //!
 //! Each test builds its own home (ways under `~/.claude/hooks/ways`, user

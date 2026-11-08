@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Read-only reader for Claude-Code session transcripts (ADR-153 §3).
 //!
 //! Transcripts live at `~/.claude/projects/<slug>/<session>.jsonl`

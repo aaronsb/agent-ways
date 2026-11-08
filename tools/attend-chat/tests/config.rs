@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `/config`: the chat's settings (`attend.chat.*`) listed, set through
 //! attend's writer into its user file, and applied at once. Its own test
 //! binary, so the file it writes changes no other test's screen.

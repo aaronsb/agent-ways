@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The fires tab: each semantic fire of the session as score, way and the
 //! text it matched, the borderline fires first, as `ways session fires`
 //! lists them.

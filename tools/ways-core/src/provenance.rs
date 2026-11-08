@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-FileCopyrightText: 2026 Jonathan Muse
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Compliance claim sidecar model and manifest builder (ADR-151 §1, ADR-110).
 //!
 //! A claim lives in a `provenance.yaml` sidecar beside a way (ADR-110). This

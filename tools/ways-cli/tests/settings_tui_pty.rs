@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The settings screens on a real terminal: a pty, the real binary, and an
 //! apply that waits on a slow command whose stand-in starts a process of
 //! its own and waits on it, as `ways agent key check` waits on a provider.

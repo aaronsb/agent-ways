@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Path attachments (#390): a token that is an existing absolute
 //! file path renders as an attachment chip — in the compose box and
 //! in message cells.

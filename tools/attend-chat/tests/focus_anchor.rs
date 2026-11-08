@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The tab bar's focus kept by what it is while channels come and go, and
 //! Add agent to chat's live path: the pick adds a live peer and tells it. In its own file, so its own fixture, which the tests change:
 //! a live claude with a sessions record, #deploy and #infra.

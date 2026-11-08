@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Seed the identity registry from `~/.claude/sessions/*.json`.
 //!
 //! Without this, the TUI only knows about agents who have emitted a

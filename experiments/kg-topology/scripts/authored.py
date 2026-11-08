@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """Parse the authored graph: frontmatter + See Also + parent/child for each ingested way."""
 import json, os, re, sys
 W = sys.argv[1]  # worktree

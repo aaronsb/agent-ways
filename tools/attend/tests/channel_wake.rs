@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A post in a named channel wakes the channel's idle members (ADR-406
 //! item 2), addressed or not. `#open` posts still wait for the next turn
 //! unless they name the session, the sender's own session is never woken by

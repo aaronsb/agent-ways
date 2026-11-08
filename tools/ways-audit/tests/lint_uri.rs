@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways-audit lint` resolves a relative policy URI against fixed bases, not
 //! the working directory: the app under `$XDG_DATA_HOME/agent-ways` (where the
 //! shipped `governance/` lives since ADR-142), the `~/.claude` projection, and

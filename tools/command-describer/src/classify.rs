@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A raw segment into a described [`Segment`]: keywords stripped, program
 //! resolved past assignments and wrappers, subcommand and flags read, role
 //! and class assigned from the tables.

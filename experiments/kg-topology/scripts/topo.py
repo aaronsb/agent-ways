@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """Readback + topology from the kg dump. Writes compact JSON into experiments/kg-topology."""
 import json, itertools, collections, sys, os
 OUT = sys.argv[1]

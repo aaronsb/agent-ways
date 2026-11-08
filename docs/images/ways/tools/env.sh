@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # Shared setup for the screenshot scripts beside it. Sourced, not run.
 #
 # Paths: REPO is the checkout; BIN holds the debug `ways`, `ways-agent` and

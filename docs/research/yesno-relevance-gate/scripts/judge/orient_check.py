@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """Compare result files against bench_items `expect`: accuracy at 0.5, AUC, per-item p_yes."""
 import json, sys
 exp = {j["id"]: j["expect"] for j in map(json.loads, open("bench_items.jsonl"))}

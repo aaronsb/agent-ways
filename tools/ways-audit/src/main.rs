@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways-audit` — the compliance operator surface for the ways toolchain.
 //!
 //! A deliberately-invoked sibling to the `ways` runtime (ADR-151). It reads the

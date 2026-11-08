@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # Dynamic context for the start way: whisper the current context-window gauge so
 # /start can immediately judge whether this really is a beginning-of-session moment.
 # Best-effort and fast — if the gauge can't be read, emit nothing.

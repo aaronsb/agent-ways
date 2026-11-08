@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The ADR-120 signal wire format: one line, `from|project|cwd|message`, or
 //! `from|project|cwd|re:<signal-id>|message` for a threaded reply. ADR-401
 //! adds tagged fields between `cwd` and the message, in a fixed order:

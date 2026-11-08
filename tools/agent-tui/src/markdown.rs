@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Markdown to styled text (ADR-504 §3, the document shape).
 //!
 //! pulldown-cmark parses; this maps its events to ratatui spans in the

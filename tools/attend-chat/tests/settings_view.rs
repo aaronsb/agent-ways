@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `≡` → Settings ▸ through the shell's real mouse and key handlers: the
 //! settings listed with their values and layers, the place a mod key is
 //! written to chosen (the user, the chat's project, a live agent's, or one

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways manage uninstall`: the last step of the install lifecycle (ADR-198).
 //!
 //! Withdraws agent-ways from every target and from `~/.claude`, stops the ways

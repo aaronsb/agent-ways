@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """Batched judge probe (ADR-195 addendum): one Haiku call per prompt carrying every candidate.
 
 Compares AUC with the single-call scores already in results.jsonl (wv=B, cv=T1).

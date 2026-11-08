@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Descriptions and the ordered described block, against the shipped tldr
 //! extract (`catalog/commands/tldr/summaries.tsv`, tldr-pages v2.3). The
 //! expected summaries are that release's text; a new pin may change them.

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A forced exit keeps what the chat had noted, and nothing it had sent or
 //! kept already (#1240 items 1 and 2). agent-tui's watch thread makes the
 //! exit when the run loop never takes a signal up, as when crossterm's read

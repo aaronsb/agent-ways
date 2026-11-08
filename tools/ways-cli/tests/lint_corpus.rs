@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! ADR-701 §3 corpus checks through the real binary: a broken See Also
 //! reference is an error in a core root, so `--check` exits 1, and a warning in
 //! a user root, so the same lint exits 0.

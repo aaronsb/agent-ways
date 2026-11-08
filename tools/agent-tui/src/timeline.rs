@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The timeline screen shape (ADR-504 §3): a run of frames, a position in
 //! it, playback, and for a live source a follow of the newest frame; a
 //! scrubber that draws the position; and the bottom bar of a screen that

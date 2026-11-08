@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The name prompt and the named-item flow on a tab (#851). The prompt
 //! takes a name for a copy or a rename of the tab's named items, or for a
 //! theme tab action of its own; the y/n comes before a delete, on the bar

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The introspect screens (ADR-504 §9) through the real binary, headless:
 //! `--keys` feeds the real key handler and `--snap WxH` prints the frame in
 //! the test kit's format. Each test runs `ways` with HOME and every XDG

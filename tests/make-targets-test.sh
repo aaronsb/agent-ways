@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # The suite list in tools/suite-bins drives the Makefile's get-or-build and
 # -rebuild pattern rules, `make link`, scripts/install.sh, and one
 # build-<name>.yml workflow per binary. Check each consumer against the list.

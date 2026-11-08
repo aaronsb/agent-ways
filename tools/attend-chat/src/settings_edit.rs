@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! What the `≡` menu's Settings ▸ lists and writes: the attend mod's
 //! `mods.attend.listening`, `mods.attend.keepwarm` and keepalive policy
 //! (`mods.attend.keepalive.*`, ADR-414), ways keys a project can set, then

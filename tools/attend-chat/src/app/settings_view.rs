@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The `≡` menu's Settings ▸: the settings the chat and the attend mod
 //! read ([`crate::settings_edit`]), each as `name = value (layer)`. Picking
 //! one walks to a value through the shell's pickers:

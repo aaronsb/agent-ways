@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The chat screen through `agent-tui`'s test kit (ADR-504 §12): golden
 //! frames of the tab strip, the legend, the message feed, the slash input
 //! and the theme, at 80x25 and the reference size, and the keys driven

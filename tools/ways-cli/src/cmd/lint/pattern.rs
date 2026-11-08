@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Pattern-hygiene lint (ADR-155 §5): the `pattern:` field is the
 //! high-precision keyword lane. Suggestive common words belong in
 //! `vocabulary:` where the embedding lane weighs them contextually; the

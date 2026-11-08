@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Removed legacy CLI surface stays removed (#692, ADR-505).
 //!
 //! `ways embed` was an alias for the top-level match command (now `ways

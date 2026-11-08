@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The keepalive policy's time windows (ADR-414 item 5): a list of entries,
 //! each `<days> <HH:MM>-<HH:MM>`, read in an IANA zone or the host's own.
 //!

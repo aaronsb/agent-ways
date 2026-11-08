@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! What an application supplies to the shell (ADR-504 §3): the writes and
 //! commands an apply performs, a fresh tree after them, guided flows, help
 //! text, and where the theme choice is kept. The shell holds the tree and

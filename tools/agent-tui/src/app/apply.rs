@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! What review mode shows and applies: a tab's pending items as tree rows,
 //! and the run over them. The run decides the order, value writes first and
 //! one step per file, then the queued commands in order, and stops at the

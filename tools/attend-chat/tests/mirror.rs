@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Tab and Shift+Tab as mirrors through the shell's real keys, in a chat
 //! with no agents and a single channel, `#open` (the review of #972). In its
 //! own file, so its own fixture: an empty bus.

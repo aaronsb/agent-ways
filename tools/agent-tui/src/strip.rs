@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! One-row strips: tabs as lozenges, and rows of chips such as a legend of
 //! names Tab completes. A tab is the shell's look in every application:
 //! the active one bold on the accent, the others on the accent stepped

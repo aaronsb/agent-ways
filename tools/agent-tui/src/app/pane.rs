@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A pane: a screen's content that is not a tree, drawn and driven by the
 //! application inside the shell (ADR-504 §3). A chat's feed and compose
 //! box is one: content that changes while nobody types, and a text entry

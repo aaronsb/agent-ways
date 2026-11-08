@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-FileCopyrightText: 2026 Jonathan Muse
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # Sourced by every hook adapter under hooks/ways. A hook script is a transport
 # adapter (ADR-504 §11): `ways hook <event>` reads Claude Code's payload on
 # stdin, decides, and prints what the hook returns.

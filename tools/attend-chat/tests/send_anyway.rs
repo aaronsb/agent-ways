@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A send refused because its agent is quiet can be sent anyway, as Claude
 //! Code's `chat:sendNow` sends a message at once: Ctrl+Enter where the
 //! terminal reports it, and Enter pressed again on the unchanged draft

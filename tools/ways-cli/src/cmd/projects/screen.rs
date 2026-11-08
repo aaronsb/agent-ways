@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The `ways projects` screen (#748): the projects, most recently active
 //! first, and the selected one's detail as `show` prints it. The filter
 //! narrows the table by `search`'s shallow match. Each pane's border names

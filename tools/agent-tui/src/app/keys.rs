@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Key and mouse handling, mode by mode. A click reaches the same paths a
 //! key does, so the confirm and secret rules hold for both.
 

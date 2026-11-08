@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The shell around a [`Pane`]: its tab bar, the frame between the bars,
 //! the bottom bar with the footer, and the keys and clicks the shell takes
 //! before the pane gets the rest. The overlays (the key help, the exit

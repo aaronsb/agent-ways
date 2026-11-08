@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A panic during a screen session ends the command in flight, as one
 //! under `agent_tui::run` does. Its own test binary: the panic hook is
 //! process-wide.

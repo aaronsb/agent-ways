@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """Exercise the haiku backend against a mocked anthropic client. No network, no key.
 
 Checks the request shape (model, temperature 0, small max_tokens, forced strict tool)

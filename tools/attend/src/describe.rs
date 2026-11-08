@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! One description per message verb, read by every frontend (ADR-501 item 4).
 //!
 //! The CLI renders each as the verb's clap `about`, so `--help` and the

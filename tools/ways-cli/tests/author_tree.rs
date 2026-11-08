@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways author tree --ways-dir`: a contributor points the command at a
 //! checkout's ways, and every name prints relative to that tree rather than
 //! as a truncated absolute path.

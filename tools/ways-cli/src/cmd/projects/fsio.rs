@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! File primitives for `ways projects`' writers: atomic replacement that
 //! keeps mtime, fsync before the swap, timestamped backups, and a trash
 //! directory in place of deletion.

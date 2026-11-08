@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The chat screen on `agent-tui`'s shell (ADR-504 §1, §3): the channels
 //! on the shell's tab bar, then the message feed, the compose box and the
 //! helper row (legend, slash commands, hints), then the shell's bottom bar

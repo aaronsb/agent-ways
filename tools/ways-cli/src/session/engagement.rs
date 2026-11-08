@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! ADR-123 firing-dynamics engine integration for the session state module.
 //!
 //! This is the per-way `EngagementState` persistence layer plus the

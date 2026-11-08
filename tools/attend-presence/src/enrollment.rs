@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Whether a session enrolled in attend (#720).
 //!
 //! A session enrolls by running `attend run` (`/attend`), by joining a

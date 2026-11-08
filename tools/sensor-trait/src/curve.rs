@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Firing-dynamics curve shapes (ADR-123 Decision 2).
 //!
 //! `Curve` is a first-class parameter of the firing engine. It describes

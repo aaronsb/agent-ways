@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The theme tab's Claude Code section: the mod that draws the theme in
 //! Claude Code, the palette the theme maps to there, the mod's render
 //! settings and the words in effect. The adapter supplies all but the

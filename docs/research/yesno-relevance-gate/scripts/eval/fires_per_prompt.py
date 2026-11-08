@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """Prompt-lane ways per prompt, last 30 days, from the event log.
 
 No prompt event is logged, so a prompt is a run of prompt-lane events in one session
