@@ -11,17 +11,18 @@ Usage:
 The license defaults to AGPL-3.0-or-later. The ADR and doc tooling that other
 projects copy uses --license MIT (see REUSE.toml).
 
-The header goes after a shebang line and a Python encoding line. Each author
-other than the maintainer who committed to the file in git gets their own
-SPDX-FileCopyrightText line with the years of their commits. Files that cannot
-carry a comment are covered by REUSE.toml instead.
+The header goes after a shebang line and a PEP 263 encoding line. Each author
+who committed to the file in git gets an SPDX-FileCopyrightText line with the
+years of their commits; a file with no history gets the git user and the
+current year. Files that cannot carry a comment are covered by REUSE.toml
+instead.
 """
+import datetime
 import os
+import re
 import subprocess
 import sys
 
-MAINTAINER = "Aaron Bockelie"
-MAINTAINER_LINE = "2025-2026 Aaron Bockelie"
 DEFAULT_LICENSE = "AGPL-3.0-or-later"
 ORIGIN = "From agent-ways: https://github.com/aaronsb/agent-ways"
 
@@ -40,7 +41,7 @@ def comment_prefix(path, first_line):
     return None
 
 
-def other_authors(path):
+def holders(path):
     out = subprocess.run(
         ["git", "log", "--follow", "--format=%aN\t%ad", "--date=format:%Y", "--", path],
         capture_output=True, text=True, check=False,
@@ -48,14 +49,23 @@ def other_authors(path):
     years = {}
     for line in out.splitlines():
         name, _, year = line.partition("\t")
-        if name and name != MAINTAINER:
+        if name:
             years.setdefault(name, set()).add(year)
     lines = []
     for name in sorted(years):
         ys = sorted(years[name])
         span = ys[0] if ys[0] == ys[-1] else f"{ys[0]}-{ys[-1]}"
         lines.append(f"{span} {name}")
+    if not lines:
+        user = subprocess.run(["git", "config", "user.name"], capture_output=True,
+                              text=True, check=False).stdout.strip()
+        if not user:
+            raise SystemExit(f"spdx-header: no git history for {path} and no git user.name")
+        lines.append(f"{datetime.date.today().year} {user}")
     return lines
+
+
+CODING = re.compile(r"^[ \t\f]*#.*?coding[:=][ \t]*[-\w.]+")
 
 
 def has_header(text):
@@ -75,10 +85,10 @@ def add_header(path, license_id):
     keep = 0
     if first.startswith("#!"):
         keep = 1
-        if len(lines) > 1 and "coding" in lines[1] and lines[1].lstrip().startswith("#"):
-            keep = 2
-    holders = [MAINTAINER_LINE] + other_authors(path)
-    header = [f"{prefix} SPDX-FileCopyrightText: {h}\n" for h in holders]
+    for i in range(keep, min(2, len(lines))):
+        if CODING.match(lines[i]):
+            keep = i + 1
+    header = [f"{prefix} SPDX-FileCopyrightText: {h}\n" for h in holders(path)]
     # REUSE-IgnoreStart
     header += [f"{prefix} SPDX-License-Identifier: {license_id}\n", f"{prefix} {ORIGIN}\n"]
     # REUSE-IgnoreEnd

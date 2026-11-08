@@ -37,6 +37,7 @@ PLATFORMS = ("common", "linux", "osx")
 SKIP = re.compile(r"(More information|See also|Note)\b", re.I)
 ALIAS = re.compile(r"This command is an alias of `([^`]+)`")
 
+# REUSE-IgnoreStart
 NOTICE = """\
 tldr-pages extract
 ==================
@@ -61,6 +62,7 @@ directory.
 
 Regenerate with `make tldr-data` (scripts/tldr-extract.py).
 """
+# REUSE-IgnoreEnd
 
 
 def fetch():

@@ -39,7 +39,7 @@ while [[ $# -gt 0 ]]; do
         --range)    SINCE="$2"; UNTIL="$3"; shift 3 ;;
         --full)     FULL=true; shift ;;
         --help|-h)
-            sed -n '2,/^$/{ s/^# //; s/^#//; p }' "$0"
+            sed -n '/^# Project Pulse/,/^$/{ s/^# //; s/^#//; p }' "$0"
             exit 0
             ;;
         *)

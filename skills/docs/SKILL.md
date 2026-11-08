@@ -71,7 +71,7 @@ chmod +x docs/scripts/doc docs/scripts/doclint.py
 ln -s doclint.py docs/scripts/doclint
 ```
 
-Both files are MIT-licensed. Keep their SPDX headers in the copies: the header is the notice MIT asks every copy to carry, and it says where the tools came from.
+Both files are MIT-licensed. Keep their headers in the copies: each holds the copyright line, the MIT permission notice that every copy must carry, and where the tool came from.
 
 The catalog **requires `docs/architecture/adr.yaml`** — it reuses the ADR domain bands. If that's missing, vendor the ADR half too (see the **adr** skill). Validate: `docs/scripts/doc coverage && docs/scripts/doc lint`. For a full repo scaffold, run `/project-init`. To decline the catalog for a project: `touch .claude/no-doc-tooling`.
 

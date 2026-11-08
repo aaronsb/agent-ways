@@ -724,4 +724,15 @@ check "any other failure from attend ends the turn normally" "0:" "$(drain_with 
 check "no attend on PATH ends the turn normally" "0:" \
     "$(rc=0; out=$(PATH="$WORK/empty-bin" /bin/bash "$HOOKS/attend-drain-stop.sh" </dev/null) || rc=$?; echo "$rc:$out")"
 
+echo ""
+echo "=== Usage text read from a script's own comments carries no license header ==="
+# These scripts print their leading comment block as --help. The SPDX header
+# sits above that block, so a usage reader that counts lines from the top
+# would print the header into an agent's context instead of the usage.
+for script in "$HOOKS/softwaredev/delivery/issues/gh-tasks" "$ROOT/scripts/doc-graph.sh" "$ROOT/scripts/project-pulse"; do
+    help=$(bash "$script" --help 2>&1 || true)
+    check "$(basename "$script") --help prints usage, not the SPDX header" "usage:no-spdx" \
+        "$([[ -n "$help" ]] && echo usage || echo empty):$(grep -q 'SPDX-' <<<"$help" && echo spdx || echo no-spdx)"
+done
+
 exit $fail

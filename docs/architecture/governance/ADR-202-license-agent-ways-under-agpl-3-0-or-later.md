@@ -56,6 +56,8 @@ What copyleft does and does not cover shaped the choice:
 3. **The cutover.** The license applies from 2026-10-01. Releases and commits before it were published under MIT and remain available under MIT.
 4. **Third-party material keeps its license.** The fonts under `tools/agent-fmt/fonts/`, the `llama.cpp` submodule, and the Cypress bound-hook adapted in `hooks/ways/check-bash-bound.py` are MIT and keep their notices. The Rust dependency tree is under permissive licenses the AGPL-3.0 can include (MIT, Apache-2.0, ISC, BSD, Zlib, Unicode-3.0, CDLA-Permissive-2.0, BSL-1.0, CC0).
 
+> **Note (2026-11-07):** The operator relicensed the ADR and doc tooling that adopting repositories copy in. `adr-tool` with its `src/` modules, `adr.yaml.template`, `doc-tool` and `doclint.py` are MIT, with the copyright line and the MIT permission notice in each file's header. In the operator's words: "the reality is I don't mind if someone uses it in their commerical stuff I just don't want them to resell it as /theirs/ - they need to at least disclose who it came from". The operator wrote every commit to these files. Item 1 no longer covers them, and the consequence that the copied tools carry the AGPL into adopting repositories now holds only for `chart-tool`, which stays AGPL-3.0-or-later. Each file's license is recorded in an SPDX header or in `REUSE.toml`, and `reuse lint` checks it in CI. Item 4's list of third-party material grew: the skins renderer ported from hellosverre/claude-skins and the bundled beautiful-mermaid (MIT), the Monoid fonts (MIT), and two charts quoted with attribution from Anthropic's Claude 4.6 model card.
+
 ## Consequences
 
 ### Positive
