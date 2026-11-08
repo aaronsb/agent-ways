@@ -26,6 +26,14 @@ imported:
 
 # ADR-164: File artifacts distributed across hosts must be carried by value not host-absolute reference
 
+## Summary
+
+- **Decided:** A file artifact carried through the config pipeline travels as its content, never as a reference that holds a host-local absolute path. The file dotfiles tracks is the real file, and `dotfiles deploy` links `~/.claude/<artifact>` to that copy, which sits under `$HOME` and so resolves the same for any user name or install location. No artifact in the pipeline may be a symbolic link into a per-host application, cache or home directory. Dotfiles owns the content of a managed artifact, so the operator can change it, and the copy the app ships is no longer followed once dotfiles manages that file.
+- **Trades away:** A newer default that the app ships, such as a new `statusline.sh`, no longer reaches a host that manages that file through dotfiles, and the operator copies the new content in when they want it. A file carried by value does not show which app version produced it. The record rejected a relative link into the app directory, a link target that expands `$HOME`, and writing the artifact again on each host.
+- **One-way?** No. The record expects that a file projection built into agent-ways may later replace the dotfiles mechanism, as long as it also carries files by value. The record does not discuss dropping the rule itself.
+- **Probes:** *Not confident (app-defaults):* Is it acceptable that a host managing `statusline.sh` through dotfiles stops receiving new defaults from the app? Yes or no. *Not confident (customise):* Do you want to customise managed files such as `statusline.sh` on your hosts? Yes or no.
+- **Inversion:** At one end each host points at the application's own copy of a file. At the other each host carries its own copy of the file's content. This decision sits at the second end for every file carried through the config pipeline.
+
 ## Context
 
 ADR-163 split config artifact ownership: the settings fragment store owns

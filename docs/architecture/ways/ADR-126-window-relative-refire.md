@@ -27,6 +27,14 @@ imported:
 
 # ADR-126: Window-relative refire with named presets
 
+## Summary
+
+- **Decided:** A way states how often it may fire again with a `refire:` frontmatter field, either a number read as a fraction of the session's context window or a preset name. The presets (`once` 1.0, `rare` 0.4, `normal` 0.15, `frequent` 0.05) live in the `refire_presets` section of the ways config file, where a user or project can change values or add names. At each firing check, `ways` multiplies the value by the current model's context window to get a half-life in tokens and passes a plain exponential curve to the shared engine, so the engine in `sensor-trait` does not change. Raw `half_life:` inside a `curve:` block stays valid.
+- **Trades away:** The `refire:` field accepts two types, so the parser and lint grow. Each firing check re-reads or caches the config file. The claim that presets keep their relative order across model generations is untested. An unknown model falls back to a default window unless `CLAUDE_CONTEXT_WINDOW` is set, which can surprise. The record rejected presets only, numbers only, a "fires per session" unit, a new curve variant and per-model preset tables.
+- **One-way?** No. The record does not discuss reversal. Numbers and presets coexist, raw `half_life:` remains as an escape hatch, and preset values are retuned in one config file.
+- **Probes:** *Not confident (window-fraction):* Should a way's re-fire cadence scale with the model's context window rather than stay a fixed token count? Yes or no. *Not confident (preset-default):* Should authors reach for a preset name before a number? Yes or no.
+- **Inversion:** At one end each way pins a raw token count that goes stale whenever the window changes. At the other, every way picks from a fixed list of named cadences. This decision sits between: a fraction of the window, written either as a number the author pins or as a name the operator can retune in one place.
+
 ## Context
 
 Way frontmatter currently carries a raw token count for refractory decay:

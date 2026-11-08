@@ -31,6 +31,14 @@ imported:
 
 # ADR-151: Extract ways-core crate and ways-audit sibling binary
 
+## Summary
+
+- **Decided:** The reusable engine moves out of the `ways` binary into a new `ways-core` library crate in the Cargo workspace: way discovery and scanning, frontmatter parsing, path and projection resolution, the firing-event log reader, and the claim sidecar model (`provenance.yaml`) with its manifest builder. A new `ways-audit` binary depends on it and takes over the compliance commands, renamed to ADR-200's vocabulary of claims and findings, plus the pipeline that produces findings and an assist that proposes control mappings for a way. The `ways` binary drops its `governance` subcommand. The claim type, including the criterion an assessor uses to judge it, lives in `ways-core`. `ways-audit` has its own tag series and CI build, and `make install`, `make setup` and `ways update` always include it with the other binaries.
+- **Trades away:** The extraction is a real refactor of modules and imports across the workspace, it adds a second binary to build, ship and version, and `ways-core` gains a public API that must stay stable for two consumers. The record rejected keeping compliance inside `ways`, a second binary that copies the engine, and moving the subsystem to its own repository now.
+- **One-way?** No. The record calls drawing the library seam now the reversible half of a later choice about a separate repository, and it says the retired `ways governance` command was never a consumed surface.
+- **Probes:** *Not confident (default-install):* Should `ways-audit` always install with the suite, never as an opt-in? Yes or no. *Not confident (separate-repo):* Should the compliance toolkit stay in this workspace for now? Yes or no.
+- **Inversion:** At one end, all compliance code stays inside the core `ways` binary. At the other, it moves to its own repository. This sits between them: a sibling binary in the same workspace shares a library with `ways`, and a later move to a separate repository stays open.
+
 ## Context
 
 ADR-200 reframes the compliance subsystem into an operator-invoked claim/finding

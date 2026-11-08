@@ -30,6 +30,14 @@ imported:
 
 # ADR-144: Install / repair / migrate as one manifest reconciler
 
+## Summary
+
+- **Decided:** One idempotent reconciler brings `~/.claude` into line with a manifest, and it replaces the separate install, update, sync and repair scripts. The manifest lists each entry in `~/.claude` and the source in `$XDG_DATA` it points to. It is built from `git ls-files` in the application directory instead of a hard-coded list of folders, so files present but not tracked are the user's and are left alone. Links and copies are both driven from that manifest. The SessionStart hook that starts repair is the one deliberate exception to linking: it is a copied script or a call to a binary at a stable path, never a link into the tree it repairs. At session start the check stays silent when all is well, repairs and says so when it can, and reports loudly when it cannot. Migration from an in-place clone runs only when the user invokes it, backs up the whole `~/.claude` first, and resumes from its last finished phase after a crash. The migrator ships dormant in 1.0.0, nudges more strongly in each 1.0.x release, and is removed in 1.1.0 while staying available at the last 1.0.x tag.
+- **Trades away:** The copied bootstrap entry point must be kept in step with the engine by some means other than the manifest. A manifest built from git treats hand edits to core files as drift and may revert them unless the migrator rescues them into user scope. Crash-safe migration over a directory that live sessions have open is hard to get right. The `settings.json` merge still writes to a file the user owns. The in-place check and the reconciler both ship through 1.0.x. A bootstrap through a thin Claude Code plugin was recorded as viable but not chosen, because it ties the bootstrap to a plugin system agent-ways does not control.
+- **One-way?** No for the engine, yes for each migration. The record does not discuss splitting the engine again. A migration rewrites the user's `~/.claude` with the full backup as the way back, and after 1.1.0 the migrator survives only at the last 1.0.x tag.
+- **Probes:** *Not confident (hand-edits):* When migration finds a hand-edited core file, should it keep the edit as a user-scope copy rather than revert it to the shipped version? Yes or no. *Not confident (plugin-bootstrap):* Should the bootstrap stay outside Claude Code's plugin system? Yes or no.
+- **Inversion:** At one end separate scripts each handle one step of the install lifecycle with their own logic. At the other one engine does every step silently. This decision sits between them: one engine serves all four starting states, it runs silently for update and repair, and migration waits for the user's consent.
+
 ## Context
 
 This is a child of ADR-142 (agent-ways 1.0). The spine declared **one reconciler engine,

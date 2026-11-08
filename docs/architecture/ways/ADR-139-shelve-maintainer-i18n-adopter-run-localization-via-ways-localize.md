@@ -29,6 +29,14 @@ imported:
 
 # ADR-139: Shelve maintainer i18n; adopter-run localization via ways-localize
 
+## Summary
+
+- **Decided:** The maintainer stops shipping translations of ways. The packed locale files (about 3,094 entries in 91 `.locales.jsonl` files) are deleted, new ways get no translation stubs, and a default English install no longer downloads the 127 MB multilingual model. The Rust localization code, the model handling and the `ways tune` and `ways language` audits stay in place, unused until someone localizes. Localization moves to the adopter: a `ways-localize` skill interviews the operator for a language, runs a workflow that translates each way's description and vocabulary and checks them with `ways tune`, and writes Claude Code's `language` setting. A state-triggered way recommends `ways-localize` when that setting is non-English and no locale data exists for it, and goes quiet once the data exists.
+- **Trades away:** Non-English ways no longer work out of the box, and the first adopter in a language pays the model download and the translation and tuning tokens. A skill, a workflow and a detection way replace static data and have to be built and maintained. The Rust engine carries code that English installs never run. The record rejected keeping maintainer translations, keeping the stale data, and deleting the engine too.
+- **One-way?** No. The record calls the engine fully reversible: only data was deleted, it remains in git history, and `ways-localize` regenerates it on demand.
+- **Probes:** *Not confident (adopter-pays):* Should the cost and the quality of a translation rest with the native-speaker adopter rather than the maintainer? Yes or no. *Not confident (keep-engine):* Should the unused localization code stay in the binary? Yes or no.
+- **Inversion:** At one end the maintainer translates and ships every way in many languages. At the other, ways are English only with no path to other languages. This decision sits between: English ships, and the machinery to localize stays ready for an adopter to run.
+
 > Decision record for GitHub issue #160. Supersedes the maintainer-side
 > obligations of the locale layer introduced in ADR-107 and elaborated (still in
 > Draft) in ADR-125. The retrieval machinery those ADRs describe is **kept** — only

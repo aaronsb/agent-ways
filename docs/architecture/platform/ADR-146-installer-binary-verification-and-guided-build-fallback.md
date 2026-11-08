@@ -26,6 +26,14 @@ imported:
 
 # ADR-146: installer binary verification and guided build fallback
 
+## Summary
+
+- **Decided:** The installer runs `--version` on every binary it downloads and treats one that fails as not acquired. It then checks, without installing anything, whether cmake and a C++ compiler are present. At the first binary that does not launch it stops and prints a recovery card. The card first suggests opening Claude Code in the staged application directory and pasting a ready-made prompt, and then gives the exact `make` commands that build from the source already on disk. A new `make deps` target, which the user runs, is the only place system packages get installed. A plain document in the application directory, not a way or a skill, tells the agent how to finish the build safely. An installer run directly in a real terminal may also offer to build on the spot. The model download no longer waits on the binary build.
+- **Trades away:** The installer gains more branches, and `make deps` carries a matrix of package managers to maintain. The optional interactive build depends on `/dev/tty`, which behaves differently across terminals, SSH sessions and containers. A user without a toolchain goes through two steps, `make deps` and then the installer again, instead of one. The record rejected silent dependency installs and builds, prebuilt-only installs, an in-band prompt as the main fallback, and verification by checksum alone.
+- **One-way?** No. The change adds checks and messages to the installer and one make target. The record does not discuss reversal.
+- **Probes:** *Not confident (agent-handoff):* Should the recovery card send the user to Claude Code first, ahead of the manual commands? Yes or no. *Not confident (no-sudo):* Should the piped installer never install system packages itself, even when it could? Yes or no.
+- **Inversion:** At one end the installer does whatever it takes, installing packages and compiling without asking. At the other it accepts only a working prebuilt binary and fails otherwise. This decision sits between them: the installer verifies what it downloaded, stops when a binary will not run, and leaves the build to the user or the agent with exact instructions.
+
 ## Context
 
 The install (ADR-142/144) acquires platform binaries — `ways`, `attend`, and the

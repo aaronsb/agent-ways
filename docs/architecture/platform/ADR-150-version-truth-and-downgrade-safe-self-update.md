@@ -24,6 +24,14 @@ imported:
 
 # ADR-150: Version-truth and downgrade-safe self-update
 
+## Summary
+
+- **Decided:** The `ways` build records the output of `git describe --tags --always --dirty` as `WAYS_BUILD`, and `ways --version` prints it, so a development build shows its nearest tag, how many commits it is ahead, and its commit. Before `ways update` installs a downloaded binary, it checks that the binary is at least as new as the pulled source. When it is not, `ways update` builds from source if a toolchain is present, and otherwise keeps the current binary and warns; it never replaces a binary with an older one. `make cut-release COMPONENT=<c> LEVEL=<level>` bumps the version, commits, tags and pushes, and the maintainer cuts a release whenever a user-affecting change to a shipped binary lands. Each component keeps its own version. An amendment dated 2026-07-05 exempts `ways update --ref` from the guard, because pinning a named ref is a deliberate choice.
+- **Trades away:** The build depends on `git describe`. A build without `.git` reports `unknown`, which the guard treats as not provably newer. The guard needs the source checkout's `git describe` at update time. Cutting a release adds one more step for the maintainer to remember. The record rejected always building from source, comparing version strings alone, cutting a release on every merge, and a build counter.
+- **One-way?** No. The changes touch the build script, the version output, the update command and a release helper. The record does not discuss reversal.
+- **Probes:** *Not confident (keep-current):* With no toolchain and no newer download, should `ways update` keep the installed binary and warn rather than install the published one? Yes or no. *Not confident (cut-cadence):* Should a release be cut whenever a user-affecting change to a shipped binary lands? Yes or no.
+- **Inversion:** At one end the updater always installs the latest published binary. At the other it always builds from source. This decision sits between them: the updater downloads first, installs the download only when it is at least as new as the source, and otherwise builds or keeps what is installed.
+
 ## Context
 
 `ways update` (the self-update command, ADR-142's projection lifecycle) refreshes

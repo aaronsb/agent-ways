@@ -31,6 +31,14 @@ imported:
 
 # ADR-109: Project-Scope Way Embedding with Manifest-Based Staleness Detection
 
+## Summary
+
+- **Decided:** Corpus generation embeds project-local ways into the same corpus as global ways, so both get embedding-based matching. Each project's way ids are prefixed with a key derived from the project's real path, and the matcher derives the same key. A marker file at `<project>/.claude/.ways-embed` says whether a project's ways are included; a project with valid ways and no marker gets one set to include. Ways that fail lint are never embedded. A manifest in the XDG cache records a content hash for each scope, and a check at session start regenerates the corpus only when a hash differs or a new project appears. Embeddings for deleted ways stay until the next regeneration and never match.
+- **Trades away:** Session start gains a scan of `~/.claude/projects/`, regeneration cost grows with the number of projects, and the manifest is one more cache file. The marker is a write into each project's `.claude/` directory, outside the framework's own tree. Per-project corpus files, regeneration at every session start, and caches stored in the project tree were rejected.
+- **One-way?** No. The record does not discuss reversal. The corpus and manifest are caches: losing the manifest costs one full regeneration.
+- **Probes:** *Not confident (default-include):* Should a project with valid ways be included by default when it has no marker file? Yes or no. *Not confident (project-writes):* Is it acceptable for the framework to write the marker file into each project's `.claude/` directory? Yes or no.
+- **Inversion:** At one end, only global ways are embedded and project ways rely on keyword scoring. At the other, every session start re-embeds every way in every project. This sits between them: one shared corpus covers both scopes, and it is regenerated only when a content hash changes.
+
 ## Context
 
 ADR-108 shipped embedding-based way matching using all-MiniLM-L6-v2. The corpus currently contains only global ways (`~/.claude/hooks/ways/`). But Claude Code's way system supports project-local ways at `/path/to/project/.claude/ways/`, and these participate in matching via BM25 and NCD — the embedding engine should cover them too.

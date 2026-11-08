@@ -26,6 +26,14 @@ imported:
 
 # ADR-302: A unified documentation model — typed graph, ways packaging, cross-repo convergence
 
+## Summary
+
+- **Decided:** Docs and ADRs form one graph: each document is a node, and its `related` and `supersedes` fields are its links. A document's type lives in frontmatter that a linter checks, not in its filename. Each catalog page carries an id of the form `DD.NNN.P` (a domain band from `adr.yaml`, a serial within the domain, and a trailing letter for its mode), a `domain`, and one of the four Diátaxis modes (tutorial, how-to, reference, explanation), with no fifth mode. The linter, `doclint`, checks frontmatter, link integrity, and which pairs of domain and mode have pages; its errors fail CI on catalog pages and are warnings on ADRs. Folders, the published site and audience bundles are views of the graph, and audience is never a type. The model ships as a `documentation/` ways root with skills, the adr way moves into it, and repositories converge on a frozen version: knowledge-graph-system first, agent-ways second, then others through `project-init`.
+- **Trades away:** Every catalog page needs frontmatter, which costs authoring and migration effort. Creating the `documentation/` root and moving the adr way touches symlinks, skill definitions, disclosure parents and the corpus build. The model has more parts than putting docs in folders, and it pays off only if the linter gates. The record rejected a fifth `operations` mode, an id with the mode in the middle, Diátaxis folders as the structure, docs and ADRs as separate systems, a standalone explainer doc, and a new tool for converging repositories.
+- **One-way?** No. The record does not discuss reversal as a whole. It says folders and the published site are views that can be refactored freely; the fixed part is the page id, which is assigned once and never reused.
+- **Probes:** *Not confident (gate-tier):* Should `doclint` errors fail CI on catalog pages while ADRs get only warnings? Yes or no. *Not confident (ways-typing):* Should the ways corpus stay untyped by Diátaxis mode? Yes or no.
+- **Inversion:** At one end, docs are loose files in folders arranged by convention. At the other, every document is a typed node whose rules a linter enforces. This sits near the typed end on purpose, on the record's reasoning that an agent keeps up the bookkeeping cheaply, and it leaves folders as a loose view for human readers.
+
 > **Scope note.** This ADR was first drafted (2026-06-16) as "Diátaxis as the
 > documentation classification model" and grew off the rails by stapling three
 > things together. It is rewritten here around a single spine, renamed to match

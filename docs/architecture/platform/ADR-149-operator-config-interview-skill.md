@@ -27,6 +27,14 @@ imported:
 
 # ADR-149: operator config interview skill
 
+## Summary
+
+- **Decided:** A skill interviews the operator about Claude Code configuration and drives the `ways settings` commands from ADR-147 to scaffold, lint, compile and project the result. The skill does not re-encode what Claude Code knows about its own settings. It combines that knowledge with the settings schema, and in a second version with ways telemetry and the latest `/insights` report, which Claude reads in context as HTML instead of parsing it. The operator's answer to "why do you want this?" becomes the body of the fragment. The first version is the interview loop, and suggestions drawn from telemetry come later. The skill has a narrow trigger with a "not for" clause. The record's status is superseded.
+- **Trades away:** A conversational skill proposes changes to the live `settings.json`, which adds a trust surface on top of the dry-run and backup that `ways settings project` already has. The suggestion feature would tie the skill to the internal shape of ways data. A loose trigger would capture unrelated requests. The record rejected a settings GUI or TUI, re-encoding Claude Code's settings knowledge, a way in place of a skill, a subcommand in the `ways` binary, and an HTML parser for `/insights`.
+- **One-way?** No. The skill only calls the existing CLI and adds no mechanism of its own, and a later record superseded it. The record does not discuss reversal further.
+- **Probes:** *Not confident (insights-input):* Should the skill read your `/insights` report when it suggests settings? Yes or no. *Not confident (interview-first):* Should the interview ship before any suggestions drawn from telemetry? Yes or no.
+- **Inversion:** At one end the operator hand-writes every fragment. At the other a tool picks the operator's settings from usage data. This decision sits between them: Claude interviews the operator and writes what the operator agrees to, and suggestions drawn from usage wait for a later version.
+
 ## Context
 
 ADR-147 built the `ways settings` CLI: deterministic primitives for managing

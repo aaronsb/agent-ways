@@ -27,6 +27,14 @@ imported:
 
 # ADR-201: Findings assembled as classifier-ready assessment records
 
+## Summary
+
+- **Decided:** `ways-audit` assembles each finding and never decides it. For each claimed pair of way and control, it writes a record with the claim's criterion (`satisfied_when`), the firing evidence (fire count, session ids that point to transcripts, first and last seen), a tier (process when the claim has no criterion, outcome when it has one), and who assembled the record and when. The `determination` field, and the fields that record who filled it, when and on what basis, stay empty, and no code path in `ways-audit` writes them. A separate classifier, which this record neither designs nor constrains, fills them later. The ledger is append-only: each run appends a fresh snapshot of the rows.
+- **Trades away:** The finding record carries more structure than a bare verdict, and its schema must stay stable enough to serve as a dataset over time. Findings have no determinations until a separate effort supplies a classifier. The record rejected letting the tool write the determination, requiring a person to decide every finding, and storing only the verdict.
+- **One-way?** No. The record does not discuss reversal. It fixes a record shape and a boundary in `ways-audit`, and it leaves the classifier and any compaction of the ledger to later work.
+- **Probes:** *Not confident (no-determination):* Should `ways-audit` stay unable to write a determination? Yes or no. *Not confident (append-only):* Should the ledger keep appending snapshots instead of updating rows? Yes or no.
+- **Inversion:** At one end, the tool decides each finding itself. At the other, a person reads every transcript and decides. This sits between them: the tool gathers the inputs into a record with the decision left empty, for a classifier outside this design to fill.
+
 ## Context
 
 ADR-200 separated a **compliance claim** (a control-*design* assertion; SOC 2 Type I;

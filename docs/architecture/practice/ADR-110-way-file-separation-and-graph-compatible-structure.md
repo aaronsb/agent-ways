@@ -32,6 +32,14 @@ imported:
 
 # ADR-110: Way File Separation and Graph-Compatible Structure
 
+## Summary
+
+- **Decided:** Each way directory splits its contents by who reads them. Governance provenance moves from frontmatter into a `provenance.yaml` sidecar that only the governance tooling reads, and a way with no mapping has no sidecar. Frontmatter keeps only the fields the matching pipeline reads, at most about ten lines. Relationships go in the body: an `<!-- epistemic: ... -->` comment declares one of four stances (premise, convention, heuristic, constraint), and a `## See Also` section lists related ways as `name(domain)`. A generator builds derived artifacts such as `ways-graph.jsonl`, which are never authoritative. `way-embed siblings` scores each way against the others to help authors tune vocabulary. The format names no visualization tool, and way files are renamed from `way.md` to `{dirname}.md`.
+- **Trades away:** The change needed a migration across 84 way files, and the rename touched every scanner script and the linter. The governance tooling and the frontmatter schema needed code changes, the generator is new code to maintain, and See Also sections are manual authoring work. Provenance as a markdown section, one provenance manifest per domain, wikilinks in frontmatter, graph fields in frontmatter, and the knowledge-graph MCP as the graph store were rejected.
+- **One-way?** No, but reversal is costly. The record calls the provenance extraction and the rename one-time migrations across every way and scanner, so undoing them would take another migration of the same size. The derived artifacts are regenerated on demand.
+- **Probes:** *Not confident (frontmatter-scope):* Should frontmatter stay limited to the fields the matcher reads? Yes or no. *Not confident (epistemic-required):* Should every way be required to declare an epistemic stance? Yes or no.
+- **Inversion:** At one end, everything about a way sits in one file's frontmatter. At the other, a central index or graph store holds the metadata and the relationships. This sits between them: each way's own directory holds its files, split by consumer, and any index is generated from them.
+
 > **Accepted as implemented; reconciled with later ADRs.** The `provenance.yaml` sidecar
 > defined here is the storage for what **ADR-200** reframes as a compliance **claim** (a
 > control-*design* assertion, not evidence). Its consumers named below — `governance.sh`

@@ -30,6 +30,14 @@ imported:
 
 # ADR-105: Progressive Disclosure for Way Trees
 
+## Summary
+
+- **Decided:** A complex domain is written as a tree of ways rather than one large way. The root uses threshold 1.8 to catch broad mentions, middle ways 2.0, and leaves 2.5 for narrow topics. Sibling ways keep vocabulary overlap (Jaccard similarity) below 0.15, checked by `way-tree-analyze.sh`. When a parent way has fired, its children's thresholds drop by 20%. `show-way.sh` logs each disclosure with its parent, depth and distance. High-stakes leaves carry a Common Rationalizations table. A way under 80 lines with one concern stays flat.
+- **Trades away:** Domains split into more files (docs went from one to four), authors have to learn the threshold and vocabulary conventions, and checking the parent marker adds about 0.1 ms per way in the scan loop. The record rejected loading through the Skill tool because it relies on the agent choosing to load, and rejected longer vocabularies because they increase overlap between ways.
+- **One-way?** No. The record does not discuss reversal. The change is to file layout, thresholds and one marker check, and a tree can be merged back into a flat way.
+- **Probes:** *Not confident (hooks-over-skills):* Should guidance load from hooks rather than from the agent choosing a skill? Yes or no. *Not confident (parent-boost):* Should a fired parent make its children easier to fire? Yes or no.
+- **Inversion:** At one end a domain is one way that injects everything on one trigger. At the other, the agent loads each piece itself on demand. This decision sits between: hooks still decide what loads, and the tree lets them load only the branch the conversation reaches.
+
 ## Context
 
 As the ways corpus grows (48+ ways at time of writing), flat ways create two problems:

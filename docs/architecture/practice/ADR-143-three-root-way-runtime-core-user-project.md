@@ -28,6 +28,14 @@ imported:
 
 # ADR-143: Three-root way runtime — core, user, project
 
+## Summary
+
+- **Decided:** The ways runtime scans three roots instead of two. Core holds the shipped ways in `$XDG_DATA_HOME/agent-ways/hooks/ways` and is replaced on update. User holds the operator's ways in `$XDG_CONFIG_HOME/agent-ways/ways`, which update never touches. Project holds `<project>/.claude/ways`. All three load as one kind of way, each tagged with the root it came from. When a way name appears in more than one root, project beats user and user beats core, and the losing copy is dropped, so an operator overrides a shipped way by placing a way of the same name in the user root. For 1.0 an override replaces the whole file. The corpus builder hashes each root separately, and `ways status` reports core and user counts and any shadowing.
+- **Trades away:** Precedence adds a new reason a way may not fire, so `ways status` has to show shadowing. Name collisions now matter and need a policy, and each corpus build scans more roots. Overriding one field means copying the whole way, which then stops receiving upstream improvements. Field-level overlay was deferred, and keeping two roots with a marker or adding a fourth root were rejected.
+- **One-way?** No. The record does not discuss reversal. It changes where the runtime looks and how it resolves name collisions, and leaves the matcher, progressive disclosure and the corpus format unchanged apart from a root tag.
+- **Probes:** *Not confident (overlay):* Do you want field-level overlay to follow the whole-file override? Yes or no. *Not confident (team-root):* Should a team or organization root be added later? Yes or no.
+- **Inversion:** At one end, shipped and user ways share one global directory, and changing a shipped way means editing it in place. At the other, ways from each root merge field by field. This sits between them: separate roots, with a whole-file override by name.
+
 ## Context
 
 This is a child of ADR-142 (agent-ways 1.0). The spine moves the *application* to

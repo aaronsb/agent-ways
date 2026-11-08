@@ -23,6 +23,14 @@ imported:
 
 # ADR-137: Boundedness — a unit of work must be bounded within its cycle
 
+## Summary
+
+- **Decided:** A unit of work that runs once per cycle, such as a sensor polled by attend's loop, does bounded work in each cycle. It finishes well inside the cycle's time budget, handles a capped amount of data, and looks at a bounded slice of what it watches. Work that cannot be bounded runs outside the cycle in some longer-lived process, and the unit inside the cycle reads the prepared result. A unit killed for running over budget reports that it was killed, so running over budget is never read as having nothing to report.
+- **Trades away:** Some useful observations are unbounded by nature and can no longer run inline, so they need a separate process outside the cycle, which adds moving parts. The record rejected raising the per-cycle budget, running unbounded work asynchronously within the cycle, and capping work while dropping the excess silently.
+- **One-way?** No. The record does not discuss reversal. It states a principle and leaves the choice of out-of-cycle mechanism to each case, so it changes no code by itself.
+- **Probes:** *Not confident (drop-default):* When an observation would need its own process outside the cycle, should the default be to go without it? Yes or no. *Not confident (beyond-attend):* Should this rule bind recurring work outside attend's sensors too? Yes or no.
+- **Inversion:** At one end, each unit does whatever work its source demands and the cycle waits. At the other, the cycle cuts units off silently at a fixed timeout. This record rejects both: units bound their own work, and a unit that overruns says so.
+
 ## Context
 
 Several parts of this system run **cyclically**: a unit of work is invoked

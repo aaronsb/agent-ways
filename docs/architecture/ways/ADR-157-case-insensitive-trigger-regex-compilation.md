@@ -24,6 +24,14 @@ imported:
 
 # ADR-157: Case-insensitive trigger regex compilation
 
+## Summary
+
+- **Decided:** The two shared helpers that compile trigger regexes build every `pattern:`, command and file pattern case-insensitively, so `\bpr\b` matches the `PR` a user types. The tool-description path stops lowercasing its text first, which keeps the matched text in its original case in telemetry. The five inline `(?i)` flags added in PR #301 are removed. Authors write patterns in lowercase and mean the concept.
+- **Trades away:** An author can no longer get case-sensitive matching from the shared helpers by default; a pattern that needs it would have to carry an inline `(?-i)` scope. File and command patterns match a little more widely, such as `.ENV` matching `\.env$`, which the record reviewed as desirable. The record rejected lowercasing the text, a keyword-only change, and continuing to patch ways one at a time.
+- **One-way?** No. The record does not discuss reversal. The change sits in two helper functions, and per-pattern overrides remain available.
+- **Probes:** *Not confident (concept-not-case):* Should a trigger keyword always mean the concept regardless of how it is capitalised? Yes or no. *Not confident (all-lanes):* Should file and command patterns ignore case too, not only prompt keywords? Yes or no.
+- **Inversion:** At one end every pattern matches only the exact case its author wrote. At the other, every pattern ignores case with no way back. This decision makes case-insensitive matching the default for all lanes and keeps the regex engine's per-pattern override as an exception.
+
 ## Context
 
 The keyword lane compiles each way's `pattern:` (and the `cmds:` / `files:`

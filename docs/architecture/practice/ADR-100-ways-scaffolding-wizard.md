@@ -24,6 +24,14 @@ imported:
 
 # ADR-100: Ways Scaffolding Wizard
 
+## Summary
+
+- **Decided:** The `/ways` command changes from a list of the ways that fired this session into a wizard skill that creates and revises project-local ways. The wizard reads the matching and extending docs, checks the project's `.claude/ways/` directory, interviews the human with AskUserQuestion, recommends a matching mode, writes the way's directory and file, lints it, scores a semantic way against sample prompts, and points to `/ways-tests` for further tuning. Global ways stay a maintainer task. `/test-way` is renamed `/ways-tests` and stays a separate skill.
+- **Trades away:** The wizard spends context tokens reading documentation at the start. The human still has to finish vocabulary tuning, and the skill prompt needs iteration to guide Claude without scripting every branch. A management hub with subcommands, a project dashboard and a template gallery were set aside, and the old fired-ways display may be dropped.
+- **One-way?** No. The record does not discuss reversal. The change is a skill prompt in `commands/ways.md` and one rename, and the record names subcommands and templates as possible later additions.
+- **Probes:** *Not confident (revision):* Should `/ways` serve revising existing ways as much as creating new ones? Yes or no. *Not confident (global-ways):* Should the wizard stay out of scaffolding global ways? Yes or no.
+- **Inversion:** At one end, a human learns the way format from the documentation and writes each way by hand. At the other, the human picks a prebuilt way from a template gallery. The wizard sits between them: it asks about intent in conversation and writes the way from the answers.
+
 ## Context
 
 The ways system has a cold-start problem. Creating a project-local way requires knowledge spread across multiple documents (extending.md, matching.md, authoring/way.md) and familiarity with directory conventions, YAML frontmatter, matching modes, and vocabulary design. This knowledge is well-documented but not discoverable at the moment a human thinks "I want Claude to do X differently in my project."

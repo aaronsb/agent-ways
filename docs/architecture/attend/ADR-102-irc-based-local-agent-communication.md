@@ -26,6 +26,14 @@ imported:
 
 # ADR-102: IRC-based local agent communication
 
+## Summary
+
+- **Decided:** Two Claude Code instances on the same machine exchange messages over IRC. miniircd, a single-file Python IRC server, runs on localhost, and each instance connects with ii, a client that exposes the channel as files and named pipes. Each instance takes a nickname from a hash of its working directory. A UserPromptSubmit hook delivers new messages on each turn, a counter nudges the agent to post a short recap about every 15 turns, and a SessionStart hook tells the agent after compaction that messages arrived before it. The human passes host, port and channel between the instances. ADR-113 later superseded this record.
+- **Trades away:** It works only on one machine and sends messages without encryption. It requires ii installed and bundles miniircd in the skill directory. The record rejected Matrix, raw named pipes, Tailscale with socat, and IRC servers such as UnrealIRCd that need configuration. Separate topic channels were deferred until the one shared channel gets noisy.
+- **One-way?** No. The record does not discuss reversal. The setup is one Python process plus hook scripts and settings entries on one machine.
+- **Probes:** *Not confident (cross-machine):* Was chat between agents on different machines meant to follow? Yes or no. *Not confident (hub-channel):* If channels multiply, should every agent stay in one shared channel? Yes or no.
+- **Inversion:** At one end, agents use a transport with accounts and encryption that reaches across networks. At the other, they use the least infrastructure that gives ordered, buffered, two-way messages on one machine. This record sits at the second end.
+
 ## Context
 
 ADR-101 proposed a manifest-based relay protocol over magic-wormhole for cross-instance agent communication. Experimental testing (2026-02-26) revealed fundamental limitations: wormhole codes are single-use and role-asymmetric (one sender, one receiver). When both sides race to the relay server, codes are permanently consumed by collisions. The protocol achieved 6/10 successful turns with 3 collisions requiring out-of-band resync — essentially UDP with destructive packet loss.

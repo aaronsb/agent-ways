@@ -30,6 +30,14 @@ imported:
 
 # ADR-111: Unified `ways` CLI — Single Binary Tool Consolidation
 
+## Summary
+
+- **Decided:** One Rust binary named `ways` replaces the C, C++, Bash and Python tools that work on ways, and each old tool becomes one of its subcommands. BM25 scoring is ported to Rust. The embedding engine stays a separate C++ binary, `way-embed`, which `ways embed` runs as a subprocess. The hook scripts stay as thin dispatchers that call `ways scan`. An extension dated 2026-05-09 gives `attend` the same clap-based command structure and makes it the standard shape for command-line tools in the workspace.
+- **Trades away:** Development needs a Rust toolchain, CI cross-compiles for four platforms with cargo-zigbuild, and the port took more lines than the bash it replaced. The record rejected Go, a full Rust rewrite of the inference code, and extending the C++.
+- **One-way?** No, but costly. The record does not discuss reversal. It records that the replaced scripts, such as `governance.sh`, were deleted, so going back would mean writing them again.
+- **Probes:** *Not confident (embed-engine):* Should the embedding engine stay a separate C++ binary rather than move into the Rust binary? Yes or no. *Not confident (one-shape):* Should every new command-line tool in the workspace follow the structure `ways` uses? Yes or no.
+- **Inversion:** At one end each job has its own small script in whatever language suits it. At the other one program in one language does everything. This decision sits near the second end: one Rust binary holds the logic, and only the embedding engine and the hook dispatch scripts stay outside it.
+
 ## Context
 
 The ways tooling has grown organically across multiple languages and entry points:

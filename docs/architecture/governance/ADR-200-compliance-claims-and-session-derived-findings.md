@@ -33,6 +33,14 @@ imported:
 
 # ADR-200: Compliance claims and session-derived findings
 
+## Summary
+
+- **Decided:** The control mappings in provenance sidecars are compliance claims, meaning statements that a way is designed to steer toward a control, not evidence that it does. Each claim carries a determination criterion: the behaviour in a session that would let an assessor mark it satisfied or other than satisfied, the two outcomes NIST SP 800-53A defines. Findings come from sessions: an auditor reads a claim, its firing events and the transcript, and records a finding in an append-only ledger, and each finding of other than satisfied becomes a tracked gap (a POA&M entry). Process evidence, that the guidance fired, comes from the firing log alone; outcome evidence, that the work took the intended shape, is judged by a model and labelled as opinion. Compliance review runs only when the operator invokes it, through `ways-audit` and a `compliance-reviewer` agent. The project borrows OSCAL and assurance-case vocabulary without implementing the standard, `gaps` reports claimed controls that no way steers toward, and the operator surface says compliance instead of governance. This record supersedes ADR-005 and refines ADR-013.
+- **Trades away:** The change takes real work: the rename, removing the proof framing from existing sidecars, the `ways-audit` toolkit, the auditor agent and skills, and a format for the finding ledger. The outcome tier has an unsolved credibility problem, since a model grades whether a model followed guidance a model injected. Borrowed OSCAL vocabulary invites readers to assume the project conforms to the standard. The record rejected keeping the old framing, deleting the subsystem, building a full compliance platform, and a mandatory path from claim to finding to certification.
+- **One-way?** No. The record does not discuss reversal. Existing sidecars stay valid data and are reclassified, not rewritten, and compliance review is an optional stage that nobody is required to run.
+- **Probes:** *Not confident (outcome-tier):* Should the outcome tier ship only when labelled as opinion? Yes or no. *Not confident (operator-invoked):* Should compliance review stay a stage the operator chooses, never a gate? Yes or no.
+- **Inversion:** At one end, hand-written control citations stand as proof of compliance. At the other, the project becomes a compliance platform that certifies conformance. This sits between them: the project keeps claims and session-derived findings, labels each honestly, and stops below certification, which it leaves to independent auditors and the tools built for them.
+
 ## Context
 
 The framework carries a provenance subsystem (ADR-005) and a rationale for it

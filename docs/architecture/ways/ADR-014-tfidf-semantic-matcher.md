@@ -25,6 +25,14 @@ imported:
 
 # ADR-014: TF-IDF/BM25 Binary for Semantic Way Matching
 
+## Summary
+
+- **Decided:** Semantic way matching moves from keyword counting plus gzip compression distance (NCD, a byte-level similarity score) to BM25, a relevance score that weights rare terms above common ones. One portable C binary, `way-match`, built with Cosmopolitan Libc and checked into the repository, scores a prompt against each way's description and vocabulary with the standard parameters k1 = 1.2 and b = 0.75 and a default threshold of 0.4. When the binary is missing or fails, matching falls back to the gzip NCD script. The `claude -p` model matching mode stays in the code with no further investment.
+- **Trades away:** Rebuilding the binary needs the Cosmopolitan toolchain, the repository carries a binary of about 100 to 300 KB, and every per-way threshold needs a one-time recalibration from the NCD scale. BM25 still misses paraphrases that share no terms. The record deferred embeddings because they need a model file of 25 to 130 MB.
+- **One-way?** No. The `match: semantic` field and the exit-code interface stay the same, and the gzip NCD script remains as the fallback, so the binary can be removed without breaking matching.
+- **Probes:** *Not confident (checked-in-binary):* Should the built binary live in the repository beside its source? Yes or no. *Not confident (no-embeddings):* Is a small binary worth missing the paraphrases a local embedding model would catch? Yes or no.
+- **Inversion:** At one end matching uses only tools already on the machine, such as bash and gzip. At the other it uses a learned model or an outside service. This decision sits near the first end: one small binary built from readable source, with the bash fallback kept.
+
 ## Context
 
 Ways use three matching modes: regex, semantic (gzip NCD), and state triggers. A fourth mode — model-based matching via `claude -p` subprocess (`model-match.sh`) — is wired up but unused, and increasingly fragile due to Anthropic's January 2026 crackdown on third-party tools invoking Claude subscriptions programmatically (see [References](#references)).

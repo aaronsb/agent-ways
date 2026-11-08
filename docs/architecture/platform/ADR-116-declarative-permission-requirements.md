@@ -30,6 +30,14 @@ imported:
 
 # ADR-116: Declarative Permission Requirements
 
+## Summary
+
+- **Decided:** Ways and attend sensors declare the tool permissions they need in a `requires:` list, written in the same strings as the `permissions.allow` list in Claude Code's `settings.json`. The commands `ways permissions audit` and `attend permissions audit` compare those lists with what `settings.json` grants and report what is missing. A broader grant covers a narrower requirement, as Claude Code's own check does. The audit reports and blocks nothing. `requires: ["*"]` marks a need for unrestricted access. The `~/.claude/trusted-project-macros` file is deprecated.
+- **Trades away:** Existing ways need `requires:` fields added, and the requirements of attend's built-in sensors are hard-coded in the binary. The per-project trust list, which granted a project everything or nothing, is given up.
+- **One-way?** No. The field is optional and the audit is advisory, so a way without the field keeps working. The record does not discuss reversal beyond that.
+- **Probes:** *Not confident (advisory):* Should the audit stay advisory rather than stop a way whose permission is missing? Yes or no. *Not confident (wildcard):* Should a project-local way be able to claim unrestricted access with `"*"`? Yes or no.
+- **Inversion:** At one end a project is trusted for everything or for nothing. At the other each command needs its own grant before it runs. This decision sits between them: each way names what it needs, `settings.json` stays the only place that grants, and the audit reports the gap without enforcing it.
+
 ## Context
 
 Ways macros and attend sensors both execute shell commands that require tool permissions in `~/.claude/settings.json`. Neither tool currently declares what permissions it needs. When a required permission is missing, the tool silently fails or prompts the user mid-session.

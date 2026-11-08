@@ -25,6 +25,14 @@ imported:
 
 # ADR-176: Contract identification as the develop-loop front gate
 
+## Summary
+
+- **Decided:** The develop loop gains a first step, contract identification, which runs before the order of the early stages is chosen. A new short way checks the work in hand against what already binds it in the project's records: ADRs, issues and their acceptance criteria, backlog items, design notes, and the previous session's plan or task list. It states what the work commits to, its acceptance test, and what is still open. If a binding is found, the agent states it and proceeds. If it is partial, the gaps become questions batched for the operator. If there is none, the agent says so and routes to an ADR, a design or the implement briefing to create one, and does not build. The `/start`, `/develop` and `/implement` skills use the result.
+- **Trades away:** The loop has one more front stage to teach, and it risks ceremony if it reads as mandatory on trivial edits. Folding the check into the implement briefing, limiting it to session start, and generating a contract by self-interrogation as the socratic skill does were rejected.
+- **One-way?** No. The record does not discuss reversal. The change adds one way file and wiring into three skills, and refines the ADR-165 loop without replacing any part of it.
+- **Probes:** *Not confident (no-binding):* When nothing binds the work, should the agent stop and route to an ADR or design instead of building? Yes or no. *Not confident (trivial-edits):* Should edits that never enter the develop loop skip the check? Yes or no.
+- **Inversion:** At one end, the agent builds without checking what binds the work. At the other, it writes a fresh contract by questioning itself before every build. This sits between them: it recovers the existing contract from the project's records and writes one only when none exists.
+
 ## Context
 
 A cross-check against socratic (m4vic/socratic) — a self-interrogation skill that makes an agent question itself before writing code — surfaced one gap the corpus does not already cover better.

@@ -33,6 +33,14 @@ imported:
 
 # ADR-113: `attend` — Active Awareness Module
 
+## Summary
+
+- **Decided:** agent-ways adds attend, a Rust binary in the same Cargo workspace as ways and separate from it. attend runs for the length of a session and polls sensors for context-window use, git state, peer sessions and running applications, on intervals that shorten when something changes and lengthen slowly when nothing does. It writes one-line observations to stdout, and Claude Code's Monitor tool delivers each line to Claude as a notification. A rate limiter allows at most three notifications per 120 seconds. Sessions find each other through Claude Code's session files and send messages as signal files under `~/.cache/attend/signals/`. attend starts only when someone runs it, and it only reports; it never forces an action.
+- **Trades away:** The project maintains one more binary. Delivery depends on Monitor. Signal files go stale when no attend instance cleans them, and instances of different versions may run side by side. The record rejected a ways subcommand, hooks alone, external transports such as wormhole and IRC, fixed polling intervals and a separate repository.
+- **One-way?** No. The record does not discuss reversal. attend is optional, and ways that use its signals do nothing when it is not running, so the rest of the system works without it.
+- **Probes:** *Not confident (rate-cap):* Should the cap of three notifications per two minutes apply to every session? Yes or no. *Not confident (filesystem-only):* Should attend keep the filesystem as its only transport between sessions? Yes or no.
+- **Inversion:** At one end, Claude learns about its context and surroundings only when it spends a turn checking. At the other, a background process reports every change as it happens. attend sits near the second end, held back by the rate limit and by only reporting.
+
 ## Context
 
 The [Cognitive Loop and the Awareness Layer](../practice/ADR-600-cognitive-loop-and-the-awareness-layer.md) design note reads the agent-ways system as a cognitive loop with one missing stage: **active perception**. Every other stage is in place — reactive guidance (ADR-100, ADR-103, ADR-105, ADR-108), attention allocation via disclosure gating (ADR-104), episodic memory (ADR-112 ledger), associative recall (ADR-112 KG), consolidation (compaction plus compaction-checkpoint way), project-level awareness at session entry (ADR-106), and the scoring infrastructure that binds these together. What has been missing is a mechanism by which Claude gains cheap peripheral awareness of its own approaching consequences and the environment around it, without spending reasoning tokens to compute either.

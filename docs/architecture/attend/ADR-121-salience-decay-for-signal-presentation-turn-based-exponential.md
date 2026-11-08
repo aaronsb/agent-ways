@@ -30,6 +30,14 @@ imported:
 
 # ADR-121: Salience decay for signal presentation — turn-based exponential
 
+## Summary
+
+- **Decided:** Each attend signal carries a salience that starts at 1.0 on arrival and halves every 20 turns. Below a floor of 0.3 the peer sensor stops showing the signal, and the file stays on disk until the 30-day cleanup. A reply or reference resets salience to 1.0. The record also split firing into an inward gate, which decides whether a new event fires, and an outward gate, which decides whether a signal that already fired is still shown. ADR-123 superseded it on 2026-04-14: the two-gate split shipped in the shared curve engine, and ways uses the outward gate on token position, while turn-based aging of attend signals is still deferred.
+- **Trades away:** It adds per-signal state and decay machinery, depends on counting turns from Claude Code's transcript format, detects re-engagement by guesswork, and takes its 20-turn default from one survey of 18 sessions. The record rejected a hard cutoff at a fixed number of turns, aging by wall-clock time, linear decay, a half-life per signal type, and folding presentation aging into the ADR-119 refractory machinery.
+- **One-way?** No. The decay acts only on what the sensor shows and never deletes or changes a signal on disk, so removing it leaves storage as it was.
+- **Probes:** *Not confident (still-wanted):* Is turn-based aging of attend signals still wanted? Yes or no. *Not confident (turn-axis):* Should attend signals age by turns, not by time? Yes or no.
+- **Inversion:** At one end, a fired signal is shown until its file is deleted. At the other, it vanishes after a fixed number of turns. This record sits between them: signals fade smoothly and come back when someone engages them.
+
 ## Status: Superseded by ADR-123
 
 **Superseded 2026-04-14** while the specific attend-side application remained deferred. This ADR introduced two ideas: (1) firing dynamics decompose into an **inward gate** ("should this new stimulus fire?") and an **outward gate** ("should this already-fired signal still be presented?"), and (2) the outward gate for attend's peer signals should be turn-based exponential salience decay with a configurable floor. The inward/outward gate framing became the load-bearing architectural contribution of [ADR-123](../ways/ADR-123-firing-dynamics-progression-axis-unification.md), which generalized both gates across tools via the shared curve engine.

@@ -33,6 +33,14 @@ imported:
 
 # ADR-107: Corpus, Matching Pipeline, and Locale Support
 
+## Summary
+
+- **Decided:** The `ways` binary builds the way corpus as a cache file under `~/.cache/claude-ways/user/` and scores a prompt against every way in one call. The output language resolves from `ways.json`, then Claude Code's `language` setting, then the system locale, then English, and replaces the English-only line in `core.md` at render time. Way bodies stay in English. Each way can have a `.locales.jsonl` file beside it holding a description and vocabulary per language, scored by a second, multilingual embedding model, and a real `{name}.{lang}.md` file overrides that language's entry. A test per language checks that the embedding model actually supports it. The two-tier pipeline with BM25 as fallback that the record also describes was superseded by ADR-125.
+- **Trades away:** Multilingual matching needs a model about six times larger than the English one (127 MB against 21 MB). Similarity across languages scores lower than within one language, so thresholds may need tuning per language. Languages without word spacing or with root-based word forms, such as Japanese, Thai and Arabic, get no BM25 matching and depend on the embedding model. The record rejected translating way bodies as too costly to keep in step.
+- **One-way?** No. The record calls an embedding model upgrade a configuration change, adding a language is a data entry, and the default `output_language: "en"` leaves existing users unchanged.
+- **Probes:** *Not confident (english-bodies):* Should way bodies stay in English for every user? Yes or no. *Not confident (native-stubs):* Should each language get its own description and vocabulary rather than rely on matching across languages? Yes or no.
+- **Inversion:** At one end everything is English and other languages match poorly. At the other, every way is fully translated into each language. This decision sits between: what the agent reads stays in English, and only the text used for matching is written in each language.
+
 > **Note (2026-04-17):** The matching pipeline architecture described here (two-tier embedding → BM25 → keyword/regex) has been superseded by [ADR-125: Authored Disclosure Graph and Removal of BM25](ADR-125-authored-disclosure-graph-and-removal-of-bm25.md). BM25 is removed; the embedding model is the sole retrieval tier. Locale stubs remain as specified (packed `.locales.jsonl`, one file per way), but the per-locale `embed_threshold` field is removed — thresholds are per-node, in English frontmatter. Sections below describing the two-tier pipeline, BM25 stemmer selection, and the `bm25_stemmer` field in `languages.json` are historical; refer to ADR-125 for the current model.
 
 ## Context

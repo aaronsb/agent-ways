@@ -26,6 +26,14 @@ imported:
 
 # ADR-158: Calibration boundary quality — hard negatives and a fire-breadth ship gate
 
+## Summary
+
+- **Decided:** A calibration counts as good only if its boundary is in the right place, not just if it separates probe prompts well. The probe corpus adds hard negatives: prompts from a neighbouring domain that score high against a way but must not fire it. A committed fire-breadth panel (`tools/scripts/fire-panel.{py,json}`) counts how many ways fire on off-topic, narrow, adjacent and broad prompts, and a corpus build fails if any off-topic prompt fires a way or a bucket's count rises materially over its baseline. Ways whose description and vocabulary bleed into other domains get their vocabulary tightened, and a word moved out of `pattern:` goes into `vocabulary:` only if it discriminates for that way. The semantic threshold τ_s stays at 0.5; the boundary moves by refitting the curve.
+- **Trades away:** Writing and maintaining hard-negative probes and the panel is ongoing work. Hard negatives can push AUC (how well the curve separates relevant from unrelated prompts) below its floor when a way's intents and neighbours cannot be told apart, and the record says the fix then is to tighten the way's vocabulary. The panel ignores the parent boost, so it gives a lower bound rather than an exact production count. The record rejected raising τ_s as the main fix, per-way thresholds, and accepting the breadth.
+- **One-way?** No. The record does not discuss reversal. The changes are probe data, a test panel and vocabulary edits, and raising τ_s stays available as an emergency relief valve.
+- **Probes:** *Not confident (fix-the-fit):* Should over-firing be fixed by refitting the calibration rather than by raising the threshold? Yes or no. *Not confident (breadth-gate):* Should a corpus build fail when ways fire too broadly on the panel? Yes or no.
+- **Inversion:** At one end the calibration is judged only by how well it separates easy probes. At the other, every way's firing is tuned by hand against real prompts. This decision sits between: one global curve, judged also by how many ways fire on realistic prompts, with vocabulary tightened where the panel shows bleed.
+
 ## Context
 
 Observed in a live session: *nearly every way fired.* Telemetry confirmed it —

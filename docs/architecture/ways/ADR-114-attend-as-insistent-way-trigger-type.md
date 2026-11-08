@@ -31,6 +31,14 @@ imported:
 
 # ADR-114: `attend` Events as an Insistent Way Trigger Type
 
+## Summary
+
+- **Decided:** A way can declare `trigger.type: attend` with a `signals` list, which makes it the handler for those signal names from `attend`, the background awareness process. Such a way never fires from a hook. It runs only when Claude chooses to run `ways show attend/<signal>`, usually because an `attend` notification delivered by the Monitor tool names that command. The lookup goes through the normal matcher and the ADR-104 disclosure gate, so these ways follow the same repeat-suppression rules as every other way. Without `attend` running, the ways stay unused and nothing breaks.
+- **Trades away:** Authors of these ways have to understand that they fire when Claude runs a command, not when a sensor fires. The `ways show attend/<signal>` command format becomes a contract that `attend` and the ways system both have to keep. Without `attend`, these ways are reachable only by explicit request. The record rejected automatic firing because it would inject guidance without Claude choosing it, and rejected a new hook event because Monitor already delivers notifications.
+- **One-way?** No. The record does not discuss reversal. It adds one trigger type and one command convention and changes no existing trigger.
+- **Probes:** *Not confident (claude-chooses):* Should Claude always be the one to decide whether to pull in a signal's guidance, never `attend`? Yes or no. *Not confident (source-specific):* Should each future source of outside signals get its own trigger type rather than share a general one? Yes or no.
+- **Inversion:** At one end outside events reach Claude only as one-line notifications. At the other, outside events inject full guidance automatically. This decision sits between: the notification offers a command, and the full guidance arrives only when Claude runs it.
+
 ## Context
 
 [ADR-113](../attend/ADR-113-attend-active-awareness-module.md) introduces `attend`, a sibling binary in the agent-ways workspace that implements the active awareness layer described in the [Cognitive Loop and the Awareness Layer](../practice/ADR-600-cognitive-loop-and-the-awareness-layer.md) design note. `attend` observes Claude Code session state and environmental signal, tracks approaching mechanical consequences (context pressure, reflection deferral, etc.), and produces emissions that need to reach Claude.

@@ -31,6 +31,14 @@ imported:
 
 # ADR-155: Semantic gating of the keyword channel and reasoning-channel rebuild
 
+## Summary
+
+- **Decided:** A `pattern:` hit on a prompt fires its way only when the way's embedding score, which the scan has already computed, also reaches a floor of 0.4 times the way's threshold. A way that sets `pattern_strict: true` skips this check. URLs and fenced code blocks are hidden from the regex patterns, though not from the embedding. The Stop hook stops grepping Claude's reply for 24 fixed words and stores the reply text, which feeds only the next prompt's embedding query, never the regex patterns. Ways also gain the embedding lane before Bash tool calls, and a later pass moves common words out of `pattern:` into `vocabulary:`, with lint rules to keep them out. Each vetoed hit is logged as a `way_keyword_gated` event.
+- **Trades away:** A way with an exact pattern but weak description and vocabulary text can be wrongly vetoed. The keyword lane is no longer decided by the way file alone, so "why didn't my pattern fire" has a second cause. Some ways that fired on existing installs go quiet. The record rejected a language-model classifier on cost, weighted lexical scoring as contrary to ADR-125, a fix by editing patterns alone, raising semantic thresholds, and removing the keyword lane.
+- **One-way?** No. The record does not discuss reversal. The floor is a global setting tuned from telemetry, and `pattern_strict: true` restores the old behaviour for any way.
+- **Probes:** *Not confident (semantic-veto):* Should the embedding score be able to stop a keyword match from firing? Yes or no. *Not confident (reply-context):* Should what Claude said last turn feed the next prompt's matching, but only through the embedding? Yes or no.
+- **Inversion:** At one end a keyword hit fires its way regardless of context. At the other, the keyword lane is removed and only the embedding decides. This decision sits between: keywords still trigger, but the embedding can veto a hit that is clearly off topic.
+
 ## Context
 
 ADR-125 named the matching architecture: retrieval is embedding-only, the model's

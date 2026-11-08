@@ -28,6 +28,14 @@ imported:
 
 # ADR-174: Progressive core — decoration guidance and the core re-disclosure gap
 
+## Summary
+
+- **Decided:** Guidance against decorative prose (clauses whose only job is to say the last clause mattered, antithesis constructions, dense em-dashes) is delivered in three tiers instead of in `core.md` alone. `core.md` gets two short bullets read at turn 1. A child way `meta/trust/prose` carries the full account with before-and-after examples and can fire again as the session grows; after a first test it was split into a keyword-triggered way and a short `prose/sustain` way that re-fires as context fills. A postcheck way `documentation/markdown/density` measures significance clauses and em-dashes in markdown just written and reports the counts when they pass 3 or 15 per thousand words. The record also writes down, without fixing, that `core.md` has no path to re-disclose as distance grows.
+- **Trades away:** Three tiers have to stay consistent with each other. The postcheck adds a check on every Write and Edit. Regex detection of a rhetorical pattern has false positives, and the bare ", not X" form went unchecked because it over-fired. Core's `refire: 0.15` stays inert. A first test showed no measurable effect, partly because the tier-2 way never fired, and the record calls the central claim unfalsified, not validated. The record rejected putting everything in `core.md` or the writing way and banning em-dashes, and deferred a commit-time lint gate and a re-disclosure curve for core.
+- **One-way?** No. The record calls the postcheck reversible, and the tiers are way files and two bullets that can be edited or removed.
+- **Probes:** *Not confident (measure-not-ban):* Should em-dashes be counted and reported rather than banned outright? Yes or no. *Not confident (core-refire-later):* Should giving `core.md` its own re-disclosure path wait for a separate decision? Yes or no.
+- **Inversion:** At one end style rules are stated once at session start and trusted to hold. At the other, every piece of prose is gated by a hard check. This decision sits between: a short rule at the start, a fuller way that returns as the session runs, and a measurement that reports counts without blocking.
+
 ## Context
 
 Two findings arrived together in one session. The second is the architectural one.

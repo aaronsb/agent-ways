@@ -28,6 +28,14 @@ imported:
 
 # ADR-162: Mechanical session-link suppression as defense against transcript disclosure
 
+## Summary
+
+- **Decided:** A PreToolUse hook on `Bash` denies `git commit`, `gh pr create|edit|comment` and `gh issue create|edit|comment` commands that carry a `Claude-Session:` trailer or a bare `claude.ai/code/session_…` URL at the start of a line, and tells the model to remove the link and run the command again. A session URL mentioned inside prose passes. The hook denies instead of rewriting the command, because Claude Code applies a rewrite only when the hook also approves the command, which would bypass the operator's own permission rules. The hook runs at user scope so it covers every repository. The record did not set `attribution.sessionUrl: false`, because it believed that setting did not reach the model. The record's status is superseded by ADR-167, which found that belief false and keeps this hook as a backstop.
+- **Trades away:** Every `git` and `gh` call through Bash runs one more hook and adds a little latency. Each appended link costs one extra round trip. The hook sees only the command string, so a message passed with `--body-file` or `-F`, a commit message written in `$EDITOR`, and commands such as `git tag -m` or `gh release create` get past it. A change in Claude Code's link format means updating the hook's patterns. The record rejected relying on the setting alone, rewriting the command silently, an instruction in a way or in memory, and rewriting history after a leak.
+- **One-way?** No. The control is a hook script and its entry in `settings.json`, and the record does not discuss removing it. ADR-167 later replaced this record's reasoning while keeping the hook.
+- **Probes:** *Not confident (deny-not-rewrite):* Should the hook block the command and ask for a retry rather than strip the link and let the command run? Yes or no. *Not confident (user-scope):* Should the hook cover every repository you work in, not only the ones that opt in? Yes or no.
+- **Inversion:** At one end the session link is left to Claude Code's settings and to the model following them. At the other every outgoing text is scanned and cleaned before it leaves. This decision put the defence in a hook the project owns, which blocks the link on the commands it can read and leaves the forms it cannot see uncovered.
+
 ## Status: Superseded by ADR-167
 
 **Superseded 2026-07-16.** The threat model below is correct and load-bearing: the

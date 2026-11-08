@@ -60,7 +60,9 @@ REPAIRED = {
 }
 
 TITLE = re.compile(r'^# ADR-[0-9.]+:.*$', re.M)
-SUMMARY = re.compile(r'\A\s*## Summary[^\n]*\n.*?(?=^## |\Z)', re.M | re.S)
+# The Summary is its heading and bullet lines. A note or blockquote the
+# original body opened with follows it, and stays part of the body.
+SUMMARY = re.compile(r'\A\s*## Summary[^\n]*\n(?:[ \t]*\n|- [^\n]*\n)*')
 
 def split(text):
     if not text.startswith('---\n'):

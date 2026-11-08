@@ -26,6 +26,14 @@ imported:
 
 # ADR-156: Calibrated relevance scoring for the semantic lane
 
+## Summary
+
+- **Decided:** Each embedding model gets a calibration curve `g(s) = σ(a·s + b)` that turns a cosine score into a probability that the way is relevant. The curve is fitted offline from a committed set of probe prompts, checked on held-out probes and rejected below an AUC floor (a measure of how well it separates relevant from unrelated prompts), and stamped with the model and corpus version so a corpus rebuild triggers a refit. A way fires when that probability reaches a global semantic threshold τ_s (around 0.5), or when a keyword matched and the probability reaches a separate global keyword floor τ_k (around 0.15). Raw-cosine thresholds, `keyword_gate_fraction` and the per-way `embed_threshold` field are removed in one cutover with no compatibility mode, and `pattern_strict` still bypasses the floor.
+- **Trades away:** The calibration is a new fitted file to own, and a bad fit degrades every way at once, which the AUC check is meant to catch. The set of ways that fire changes for existing installs, per-way thresholds disappear, and the only rollback is reverting the release. The record rejected keeping hand-tuned raw cosine, fusing lexical and embedding scores, per-way curves, fitting from telemetry on day one, and running both scoring paths side by side.
+- **One-way?** Mostly yes. The record says there is no rollback short of reverting the release, because the old fields are stripped from way files in the same change. It accepts this because the install is versioned and the operator deploys it deliberately.
+- **Probes:** *Not confident (global-only):* Should every way share one pair of thresholds, with no per-way override for now? Yes or no. *Not confident (clean-cutover):* Should the old scoring be removed in one release rather than kept as a fallback? Yes or no.
+- **Inversion:** At one end every way has its own hand-set threshold on the raw score. At the other, one fitted curve and two global numbers decide for all ways. This decision sits at the second end and leaves room to add a per-way override later if telemetry shows one is needed.
+
 ## Context
 
 The matching engine thresholds **raw cosine similarity**. The semantic lane

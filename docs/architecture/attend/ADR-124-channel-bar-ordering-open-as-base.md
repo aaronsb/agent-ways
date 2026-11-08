@@ -26,6 +26,14 @@ imported:
 
 # ADR-124: TUI Legend Architecture — Base Channel, Liveness, and Ordering
 
+## Summary
+
+- **Decided:** In the attend-chat interface, `#open` is the base channel. It is always first in the channel bar, shown in bold, never removed or dimmed, and it receives plain-text messages and `attend send` with no flags. `#open` is the display name for the `_broadcast/` directory, which keeps its name on disk; the separate `@open/` group is migrated into it and the name `open` is reserved. Other channels follow in the order the scan returns, today alphabetical. The agent legend shows a Claude session at full weight when its process is alive, dimmed when its session file remains but the process is dead, and not at all without a session file. Dimmed agents stay addressable, because a message waits on disk for the next session in that directory. The channel bar applies the same three states to groups. attend-chat checks liveness itself, with a two-second cache.
+- **Trades away:** Any existing `@open/` directory needs a one-time migration, which breaks hand-made scenes that relied on it. The attend CLI must use the same `#open` name, or the two surfaces disagree. Ordering by pin and recent activity, pin marks and unread dots were deferred. The liveness check is duplicated in attend-chat in place of a shared state file.
+- **One-way?** No. The record does not discuss reversal. The rename is display only and `_broadcast/` stays on disk, so the wire format does not change; the `@open/` migration moves messages and is the one step that is harder to undo.
+- **Probes:** *Not confident (cli-liveness):* Should `attend peers` dim dead sessions the same way the interface does? Yes or no. *Not confident (richer-order):* Do you want channels ordered by pin and recent activity? Yes or no.
+- **Inversion:** At one end, the legends show every session file and group on disk as equals. At the other, they show only what is live. This sits between them: dead sessions and empty groups show dimmed and stay addressable, and `#open` always shows first.
+
 ## Context
 
 The attend-chat TUI has two legend strips — a **channel bar** across

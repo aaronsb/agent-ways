@@ -35,6 +35,14 @@ imported:
 
 # ADR-169: agent-ways relinquishes user-scoped settings.json; retains only its operational baseline
 
+## Summary
+
+- **Decided:** agent-ways stops managing the user's own Claude Code settings and keeps only its operational baseline in `~/.claude/settings.json`. That baseline is the hooks it ships, the allow entries for its own binaries and `Edit(~/.claude/**)`, and the ADR-152 secret-path deny list. `ways reconcile` keeps writing that slice with its three-way merge, so a fresh install is safe without dotfiles. The `ways settings` commands, the `ways-settings` skill and the schema files are removed, and this supersedes ADR-147 and ADR-149. The operator's dotfiles tool takes over user configuration with its own standalone three-way merger and does not need the `ways` binary. Every user-scope key belongs to exactly one owner: the agent-ways baseline, the user's dotfiles, or Claude Code's own runtime writes, which neither tool manages. The inert `Write(~/.claude/**)` and `Write(~/.ssh/**)` entries are removed. Removing the projector leaves the user-fragment keys in place for the dotfiles tool to adopt.
+- **Trades away:** The three-way merge logic exists twice, once in each repository, so that neither tool depends on the other. Operators who used `ways settings` must move their fragments to the dotfiles tool. Two recently accepted records, ADR-147 and ADR-149, are reversed. An operator who runs agent-ways without dotfiles has the baseline and Claude Code's own `/config`, and no managed user configuration.
+- **One-way?** No. The record calls a minimal user-config feature a purely additive future change, though the removed code would have to be written again.
+- **Probes:** *Not confident (no-user-surface):* Should agent-ways offer no user-config feature at all to operators without dotfiles? Yes or no. *Not confident (two-mergers):* Is it acceptable to keep two copies of the merge logic so that each tool runs alone? Yes or no.
+- **Inversion:** At one end agent-ways manages the whole of the user's Claude Code configuration. At the other it writes nothing to `settings.json`. This decision sits near the second end: agent-ways writes only the narrow slice it needs to run and to stay safe.
+
 ## Context
 
 `~/.claude/settings.json` is Claude Code's declarative user configuration file. It

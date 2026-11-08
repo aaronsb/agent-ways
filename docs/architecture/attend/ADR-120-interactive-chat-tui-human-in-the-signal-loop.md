@@ -27,6 +27,14 @@ imported:
 
 # ADR-120: Interactive Chat TUI — Human in the Signal Loop
 
+## Summary
+
+- **Decided:** attend gains `attend chat`, a terminal interface built on the iocraft library, where the human reads and sends signals through the same channels the agents use. A sidebar lists focus groups with unread marks and agents with their status, and the main pane shows the message stream. A message that starts with `@name` goes to that focus group, a message with no prefix goes to broadcast, and `#NNN` is left for the receiving agent to look up in its own repository. The signal format gains an optional `re:` field for one level of replies. A new GitHub sensor reports issue and pull request changes in each agent's own repository. The interface is for steering; deep work stays in each agent's terminal.
+- **Trades away:** It adds iocraft, a dependency still before version 1.0, and one more process to run. Existing signal readers must handle the new reply field, and the GitHub sensor needs `gh` signed in for each agent. The record rejected a web dashboard, a tmux wrapper, extending session managers such as Agent Deck, and ratatui as the main framework.
+- **One-way?** No. The record does not discuss reversal. The interface is a separate subcommand, though the reply field changes the signal format that every reader handles.
+- **Probes:** *Not confident (broadcast-default):* Should a human message with no prefix go to every agent? Yes or no. *Not confident (separate-binary):* Should the chat interface live in its own binary? Yes or no.
+- **Inversion:** At one end, the human watches each agent's full session output, as a tmux wrapper would show it. At the other, the human sees only a status board. This sits between them: the human sees the coordination messages and each agent's status, and switches to an agent's terminal for its full work.
+
 ## Context
 
 attend provides inter-session signaling for Claude Code agents, but the human has no first-person view of the signal topology. The human's current tools are:

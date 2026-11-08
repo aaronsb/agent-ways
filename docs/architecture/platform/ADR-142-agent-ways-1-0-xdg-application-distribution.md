@@ -28,6 +28,14 @@ imported:
 
 # ADR-142: agent-ways 1.0 — XDG application distribution
 
+## Summary
+
+- **Decided:** agent-ways becomes an application installed in the XDG base directories, and `~/.claude` becomes a thin projection of it. The application, exactly as shipped on GitHub, lives in `$XDG_DATA_HOME/agent-ways` and is replaced whole on update. The operator's own ways and `ways.json` live in `$XDG_CONFIG_HOME/agent-ways`, session state lives in `$XDG_STATE_HOME/agent-ways`, and derived files such as the corpus live in `$XDG_CACHE_HOME/agent-ways`. A manifest built from the files agent-ways tracks in git says what `~/.claude` should hold. Symbolic links are the default way to project it, with copies as the fallback where links fail; this replaces the defaults ADR-140 set. One reconciler engine installs, repairs, updates and migrates. Update and repair run silently and updates apply automatically. Migration from an in-place clone backs up `~/.claude`, asks for consent first, and can resume after a crash. Release 1.1.0 is the last one that migrates in-place installs. An amendment dated 2026-07-05 adds `ways update --ref` to deploy an unpublished branch, tag or commit built from source.
+- **Trades away:** The `settings.json` merge remains one file with two writers, and a bad merge can corrupt a file the operator owns. Migration rewrites the user's `~/.claude`, the riskiest operation the project has performed. A user debugging the setup reasons across four XDG directories plus the projection, and `git status` in `~/.claude` no longer shows the truth. Windows and low-privilege installs still copy and still drift. The first session after install needs a restart. The project maintains both the in-place check and the XDG runtime through the 1.0.x releases.
+- **One-way?** Yes, in practice. Migration rewrites each user's `~/.claude`, with a full backup kept as the way back, and releases after 1.1.0 drop the in-place check and the migrator. The record does not describe moving the project back to the in-place layout.
+- **Probes:** *Not confident (auto-update):* Should updates apply automatically without asking the operator? Yes or no. *Not confident (frozen-users):* Is it acceptable that a user who never updates past 1.1.0 stays on a working but unsupported version? Yes or no.
+- **Inversion:** At one end agent-ways is a repo cloned as `~/.claude` and owns it. At the other it is an application that never writes to `~/.claude`. This decision sits near the second end: the application and the operator's files live in XDG directories, and agent-ways writes only its links or copies and one merge into `settings.json` in `~/.claude`.
+
 ## Context
 
 Since its first release agent-ways has held one identity invariant: **`~/.claude`

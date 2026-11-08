@@ -28,6 +28,14 @@ imported:
 
 # ADR-128: Memory as repo-portable ways — seed routing over accumulated snapshots
 
+## Summary
+
+- **Decided:** agent-ways seeds Claude Code's auto-memory file, `MEMORY.md`, with routing guidance instead of disabling it. The seed says that project knowledge belongs in repo artifacts (ways, ADRs, design notes, issues, PR descriptions, commit messages) and that memory holds only short facts about the user that apply across projects. `ways init` runs at session start and compares the seeded body byte for byte with a copy built into the binary. On any difference it saves a diff file, rewrites the seed while keeping everything under `## User Context`, and prints a prompt asking the session to sort the diff into repo artifacts or discard it. The memory way carries the same routing table for prompts mid-session. A note of 2026-09-28 adds that `ways init` also creates `.claude/ways/`, `.claude/.gitignore` and a way template when they are missing.
+- **Trades away:** Edits to the seeded part of the file are treated as drift and overwritten, and no opt-in flag exists. The mechanism depends on Claude Code loading `MEMORY.md` directly at session start. Sessions in a directory with neither `.claude/` nor `.git/` get no seed, and each memory compaction (Claude Code's periodic rewrite of memory) costs a review at the next session. Disabling memory writes, relying on the memory way alone, and an opt-in flag were rejected.
+- **One-way?** No. The record changes no permissions and does not modify the memory feature. The seed is text that `ways init` writes, and the record does not discuss removing it.
+- **Probes:** *Not confident (seed-edits):* Should your own edits to the seeded part of `MEMORY.md` be overwritten as drift? Yes or no. *Not confident (scratch-dirs):* Should sessions in folders with no `.claude/` or `.git/` stay unseeded? Yes or no.
+- **Inversion:** At one end, memory runs on Claude Code's defaults and holds whatever the session writes. At the other, memory writes are disabled. This sits between them: memory stays writable, and its first lines route project knowledge to repo artifacts.
+
 ## Context
 
 Claude Code ships an official auto-memory feature (v2.1.59+, browsable via the `/memory` slash command). It stores `MEMORY.md` at `~/.claude/projects/<project-normalized>/memory/MEMORY.md`, loads the first 200 lines or 25 KB unconditionally at every session start, and encourages the session to review and extend the file. Topic files as `.md` siblings in the same directory load on demand via pointer lines in `MEMORY.md`. Reference: [Claude Code Memory docs](https://code.claude.com/docs/en/memory).

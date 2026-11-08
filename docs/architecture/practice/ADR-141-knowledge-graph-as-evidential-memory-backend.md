@@ -26,6 +26,14 @@ imported:
 
 # ADR-141: Knowledge Graph as Evidential Memory Backend
 
+## Summary
+
+- **Decided:** agent-ways treats an external evidential knowledge graph as an optional memory backend. An evidential graph keeps statements that contradict each other and scores the balance of evidence, instead of keeping one. The integration is active when an ontology named after the project's slug exists in the graph, inactive when it does not, and off when `reflection.kg = false` in `ways.json` vetoes it. Detection treats an unreachable backend as absent and never blocks a turn. When active, the framework copies its ledger entries and auto-memory writes to the ontology's ingest target in the background. A later stage projects the graph back into the native memory files as a read-only `MEMORY.md` index and topic files. The framework detects and routes, the graph does the curation, and any backend that meets the ingest and projection contract can replace the reference one.
+- **Trades away:** The return path depends on turning off Auto-Dream (Claude Code's memory compaction) and on solving how to mount over the populated memory directory, so it is staged. Detection needs timeouts against dead or stuck backends, and the session sees only a ranked slice of the graph inside the 25 KB load window. A per-project config flag as the opt-in, MCP queries as the main return path, and disabling native memory were rejected.
+- **One-way?** No. Deactivation sets the veto flag and never deletes data. The ledger stays the source of truth, and the graph is a derived view that can be regenerated.
+- **Probes:** *Not confident (presence-opt-in):* Should the ontology's existence alone count as the project opting in? Yes or no. *Not confident (auto-dream):* Are you willing to turn Auto-Dream off to get the read-only memory projection? Yes or no.
+- **Inversion:** At one end, cross-session memory is editorial: it keeps one current view and discards what it supersedes. At the other, the framework itself curates an evidential store. This sits between them: the framework detects the backend and routes artifacts to it, and leaves the curation to the external graph.
+
 ## Context
 
 Cross-session knowledge has two homes in this framework, and both are *editorial* — they keep a single current view and discard what they supersede:

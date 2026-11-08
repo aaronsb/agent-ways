@@ -28,6 +28,14 @@ imported:
 
 # ADR-130: Sentence-salience input reduction for embed matching
 
+## Summary
+
+- **Decided:** Before `ways` passes a hook input to the embedding model, a reduction step checks its length. An input that fits the model's working window passes through unchanged. A longer one is split into sentences, each sentence is scored by the average weight of its words, where the weights are a softmax over word counts in the whole input, and the highest-scoring sentences that fit a token budget are kept in their original order. The budgets are about 60 tokens for commands, 100 for subagent prompts and user prompts, and 30 for file paths, under the model's 128-position limit. The step lives in the Rust scan code and never reads the ways corpus. The character caps from PRs #94 to #96 stay in the hook scripts as a safety net.
+- **Trades away:** Sentences are chosen by word frequency, so an unusual phrasing of a central idea scores no higher than a common one. Prompts full of repeated template text may have that template chosen over their substance. The step adds about 80 lines of Rust to maintain. The record rejected embedding several chunks per input as too slow, BM25 against way vocabulary as contrary to ADR-125, and a small language model to extract intent as too costly per call.
+- **One-way?** No. The record does not discuss reversal. The reducer is one function in front of the embed call, the truncation caps remain beneath it, and the record names a planned simplification to word-level selection if sentences add no recall.
+- **Probes:** *Not confident (cost-over-quality):* Should input reduction stay a cheap word-count method rather than use a model, even at some loss of quality? Yes or no. *Not confident (sentence-unit):* Should the reducer keep whole sentences rather than single words? Yes or no.
+- **Inversion:** At one end a long input is cut off at a fixed length. At the other, every part of it is embedded separately. This decision sits between: it keeps the sentences that carry the input's main terms, chosen at a cost far below the embed step.
+
 ## Context
 
 Way matching today passes hook payloads — user prompts, bash command lines,

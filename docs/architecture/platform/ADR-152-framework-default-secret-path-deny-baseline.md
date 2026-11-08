@@ -28,6 +28,14 @@ imported:
 
 # ADR-152: Framework-default secret-path deny baseline
 
+## Summary
+
+- **Decided:** agent-ways adds a fixed `WAYS_DENY` list to `permissions.deny` in `settings.json`, through the same merge it uses for its own allow entries. The list blocks Read, Edit and Write under `~/.ssh`; Read of `~/.aws`, `~/.gnupg`, `~/.config/gcloud`, `~/.kube/config` and `~/.netrc`; and Read of the project-root `.env` and `.env.local`. The reconciler applies the list again on every run. The operator turns the whole list off with `secret_path_deny: false` in `$XDG_CONFIG_HOME/agent-ways/config.yaml`. The list blocks only Claude Code's file tools, not shell commands.
+- **Trades away:** A user whose task needs a protected path stays blocked until they find the opt-out, because a user `allow` cannot override a deny. The list is a judgment call to maintain: too broad breaks workflows, and too narrow misses secrets. Shell commands, such as `cat` on a key file, stay outside its reach. The record rejected adding the list once and letting the user's removals stick, prompting with `ask` in place of denying, and doing nothing.
+- **One-way?** No. One config line removes the whole list, and the merge's tracked base removes entries that are later dropped from it.
+- **Probes:** *Not confident (all-or-nothing):* Should the opt-out stay one switch for the whole list, with no way to drop a single entry? Yes or no. *Not confident (env-scope):* Should the `.env` rules stay limited to the files at the project root? Yes or no.
+- **Inversion:** At one end the agent's file tools can read any path the user can. At the other every sensitive path is blocked with no way out. This decision sits between them: a short list of credential paths is blocked by default, and the operator can switch the whole list off with one line.
+
 ## Context
 
 agent-ways already owns a slice of Claude Code's `settings.json`. During

@@ -26,6 +26,14 @@ imported:
 
 # ADR-117: Sensor Crate Extraction and Feature Flags
 
+## Summary
+
+- **Decided:** Each built-in attend sensor (git, context, peers, processes) moves into its own crate in the Cargo workspace, and a sensor-trait crate defines the Sensor trait and the types attend uses to run a sensor. attend pulls in each sensor crate through a Cargo feature, all on by default, so a build can leave a sensor out. The attend.yaml config turns sensors off at run time, and a compiled sensor wins over a script sensor of the same name. An addendum of 2026-10-01 records that #701 (ADR-505) folded the git, context and disclosure sensors back into attend as modules that always compile, so the minimal build no longer exists.
+- **Trades away:** The workspace grows from three to seven crates, a change to the Sensor trait means editing every sensor crate, and moving the code touched every sensor file.
+- **One-way?** No. The default features reproduce the earlier behaviour, and ADR-505 later moved three sensors back into attend.
+- **Probes:** *Not confident (minimal-build):* Do you still want a build of attend that leaves sensors out? Yes or no. *Not confident (script-first):* Should new sensors still start as scripts and move to Rust when speed matters? Yes or no.
+- **Inversion:** At one end, every sensor is compiled into attend as a module. At the other, each sensor is a separate crate that a build can include or leave out. This record moved attend to the second end, and the addendum records a partial return toward the first.
+
 ## Context
 
 attend (ADR-113) ships with four built-in sensors: context, git, peers, and processes. These are compiled directly into the attend binary as modules under `src/sensors/`. The ScriptSensor runner (shipped in PR #4) provides an extensibility path for shell-script sensors, but built-in sensors have no separation from the orchestrator.

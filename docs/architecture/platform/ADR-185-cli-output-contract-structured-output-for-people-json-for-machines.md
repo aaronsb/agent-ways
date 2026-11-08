@@ -25,6 +25,14 @@ imported:
 
 # ADR-185: CLI output contract: structured output for people, JSON for machines
 
+## Summary
+
+- **Decided:** Every command in `ways` and `attend` prints structured output for a person by default, through the shared `agent-fmt` formatter, and prints one JSON document on stdout under `--json`, with diagnostics on stderr. A debug rendering never reaches stdout. Where a resolved value differs from the stored one, `--json` shows what the file says and `--json --effective` shows the resolved state, and only the first can be fed back to an `apply` command. A command that shows a configuration object has a partner that accepts the same JSON back. Exit 0 means done, 1 means a failure the command reports, and 2 means bad usage; a refusal to act gets a code that callers can tell apart from failure. A note dated 2026-10-10 fixes the JSON shape of a refusal as an `error` object with a `kind`, plus a `message`.
+- **Trades away:** Only three of forty commands met the contract when it was written, and the rest convert during ordinary work. The split between effective and stored values is one more flag to explain. `agent-fmt` becomes a dependency of every output path in `ways`. The record rejected JSON by default, YAML for round trips, and leaving output to each command.
+- **One-way?** No. The record calls it reversible: each command converts on its own, and nothing depends on the order.
+- **Probes:** *Not confident (human-default):* Should the default output be written for people rather than for scripts? Yes or no. *Not confident (round-trip):* Should every command that shows a configuration object have a partner that takes the same JSON back? Yes or no.
+- **Inversion:** At one end each command prints whatever its author chose. At the other every command speaks only JSON. This decision sits between them: a formatted view for people by default, and one fixed JSON document for scripts on request.
+
 ## Context
 
 `ways config show` prints a Rust debug rendering of the config struct. Three of the binary's forty verbs take `--json`. `attend` renders tables through `agent-fmt` while `ways` prints ad hoc lines. ADR-111 chose the argument parser and said nothing about output, so every verb has decided for itself.
