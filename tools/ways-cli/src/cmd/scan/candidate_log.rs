@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! scan/candidate_log.rs — a scan's ranked candidates (ADR-701 §2, §4).
 //!
 //! Every prompt and task scan records its top candidates with cosine, share and

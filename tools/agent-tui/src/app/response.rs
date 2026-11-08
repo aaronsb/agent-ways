@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The response modal (#778): what a command printed, in a scrollable text
 //! area over the screen, closed by a key. One view serves every screen; an
 //! action declares what it answers with ([`tree::Response`]), and the

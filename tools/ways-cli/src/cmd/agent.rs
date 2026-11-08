@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways agent …`: the ways agent's command line (ADR-502), run as its own
 //! binary so the `ways` hook process links no TLS or provider code.
 

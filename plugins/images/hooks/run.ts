@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 // The mod's children, one at a time, from `/`: the host refuses a child
 // started while another runs, and a session's working directory can vanish
 // under it (a removed worktree or temp dir), which fails every spawn that

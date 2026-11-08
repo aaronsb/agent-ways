@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 // Claude Code follows the active agent-ways theme (ADR-514).
 //
 // Two layers. The theme file (follow.ts): Claude Code keeps one custom theme

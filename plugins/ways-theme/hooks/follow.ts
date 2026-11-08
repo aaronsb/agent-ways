@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 // What the mod keeps in step with Claude Code (ADR-514): the theme file,
 // `custom:ways`, and the two `/config` rows the frames read, `verbose` and
 // `theme`. The register module calls it at session start and from its

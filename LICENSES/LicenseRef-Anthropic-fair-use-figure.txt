@@ -1,0 +1,10 @@
+These figures are quoted from Anthropic's Claude 4.6 model card (March 2026),
+published on Anthropic's public website:
+
+  https://www-cdn.anthropic.com/14e4fb01875d2a69f646fa5e574dea2b1c0ff7b5.pdf
+
+They are reproduced with attribution, as reference for the benchmark data
+that ADR-104 cites, under fair use.
+
+Copyright remains with Anthropic PBC. No license grant is claimed, and the
+agent-ways licenses do not cover these files.

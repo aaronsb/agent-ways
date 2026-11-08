@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The operator's direct messages read back from every tray (issue #995):
 //! a DM the operator sent to an agent in another project is on disk in that
 //! project's tray, and the chat reads it from there, whatever session sent

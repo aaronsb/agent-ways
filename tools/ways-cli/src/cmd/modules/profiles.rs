@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A judge profile as an item: shipped in `profiles.yaml`, compiled into
 //! `ways-agent-core`, or the user's own under `gate.profiles.<name>` in
 //! `agent.yaml`, which also extends a shipped one. Its kind is its provider

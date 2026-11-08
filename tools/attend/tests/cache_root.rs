@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `attend peer whoami` and `attend peer status` name the cache root they use.
 //!
 //! Two processes with different `XDG_CACHE_HOME` read different trees and

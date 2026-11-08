@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `attend listen` and `attend message unread` through the CLI (ADR-406 item 10).
 //!
 //! Listening is what the Stop-hook drain delivers to. A session listens

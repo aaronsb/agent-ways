@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A fixture home for a test binary that wants one of its own: `HOME` and
 //! the XDG directories point into a temp directory set up once, before any
 //! test reads them, and removed when the process exits. A test whose

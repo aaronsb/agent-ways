@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The look the chat draws with: the one user-level theme choice of
 //! agent-ways (ADR-504), read only through `attend_config::theme`, which
 //! reads ways' `theme.active` and `theme.shape` with the declarations

@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """Judge input A/B (ADR-701 §4, issue #664): does the relevance judge reject more
 irrelevant candidates without losing relevant ones when its candidate text
 carries the matcher's share, margin and band, the described route, or both?

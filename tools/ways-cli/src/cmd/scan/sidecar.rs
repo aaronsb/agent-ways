@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! scan/sidecar.rs — the body sidecar (ADR-701 §6, §7).
 //!
 //! `ways corpus` embeds every way's heading sections

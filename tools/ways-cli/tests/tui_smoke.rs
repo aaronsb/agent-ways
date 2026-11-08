@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The interactive screens in a real terminal: tui-harness launches `ways`
 //! in a private tmux pane at 80x25, sends keys, and reads the pane. The
 //! golden frames are checked headless in the unit tests; this catches a

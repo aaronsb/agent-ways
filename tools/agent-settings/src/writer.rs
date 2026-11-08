@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The one settings writer (ADR-503 §6), generalised from the `ways-core`
 //! targets writer: a lock file beside the target, the edit made on the text by
 //! [`crate::yaml_edit`] and verified, and a temporary file synced and renamed

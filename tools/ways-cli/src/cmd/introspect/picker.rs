@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The sessions tab: the sessions in scope, newest first, one of which
 //! the screen opens. A session whose transcript is being written to is
 //! marked live, from the stat [`Sampler`] (#780), and the session the

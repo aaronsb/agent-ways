@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """Regenerate catalog/commands/tldr/ from a pinned tldr-pages release (ADR-706 item 7).
 
 Usage: python3 -I scripts/tldr-extract.py [OUT_DIR]
@@ -33,6 +37,7 @@ PLATFORMS = ("common", "linux", "osx")
 SKIP = re.compile(r"(More information|See also|Note)\b", re.I)
 ALIAS = re.compile(r"This command is an alias of `([^`]+)`")
 
+# REUSE-IgnoreStart
 NOTICE = """\
 tldr-pages extract
 ==================
@@ -57,6 +62,7 @@ directory.
 
 Regenerate with `make tldr-data` (scripts/tldr-extract.py).
 """
+# REUSE-IgnoreEnd
 
 
 def fetch():

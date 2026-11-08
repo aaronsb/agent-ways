@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Registration of the agent-ways MCP server with Claude Code (ADR-501).
 //!
 //! A user-scope MCP server lives in Claude Code's `.claude.json`, which

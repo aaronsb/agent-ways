@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """Append proposed terms to each way's vocabulary: line. Usage: apply.py <worktree> [--dry] [--skip way,...] [--drop way:term,...]"""
 import sys, re, os, json
 sys.path.insert(0, '/tmp/kgtopo-a3601')

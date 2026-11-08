@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-FileCopyrightText: 2026 Clayton Chancey
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways hook <event>`: the one interface the hook scripts call (ADR-504 §11).
 //!
 //! A hook script is a transport adapter: it hands Claude Code's payload on

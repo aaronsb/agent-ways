@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """AUC, ΔAUC vs base (paired bootstrap over prompt groups), operating point at the
 shipped threshold, latency and output tokens for each judge variant."""
 import collections, json, os, random, statistics

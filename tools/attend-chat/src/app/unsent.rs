@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The unsent directory: text a chat kept, one file a text, for the next
 //! chat to restore ([`super::ChatPane::restore_unsent`]).
 //!

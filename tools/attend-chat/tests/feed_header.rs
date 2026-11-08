@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The feed's message header through real drawing and input: one band per
 //! message across the feed, in the sender's colour as the left column draws
 //! it, holding the channel marks and the time, the name and the project;

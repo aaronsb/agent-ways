@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """Score chosen configurations with Haiku 4.5, under a hard cap of 800 API calls in total.
 
 usage: score_haiku.py SET:WV:CV [SET:WV:CV ...]     e.g. s1:A:T4 s2:A:T4

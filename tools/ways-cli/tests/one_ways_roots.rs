@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! One definition of the ways roots (#797).
 //!
 //! `ways manage repair` points the projection (`~/.claude/hooks/ways`) at a dev

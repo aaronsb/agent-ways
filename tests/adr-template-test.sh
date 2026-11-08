@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # The adr.yaml template, vendored into an empty repo as the adr skill does,
 # lints clean before any record exists, and the blocks `adr contract
 # --upgrade` appends match it.

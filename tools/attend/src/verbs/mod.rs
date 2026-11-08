@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The message verbs as library calls (ADR-501 items 2 and 4).
 //!
 //! Each verb takes typed arguments and returns a value or a typed error.

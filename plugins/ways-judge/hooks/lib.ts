@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 // The ways-judge mod's plain parts: the ways CLI's argv, what `ways judge
 // take` prints, and the answer `ways judge answer` reads (ADR-708 §4, §5).
 // The shapes mirror JudgeJob and JudgeAnswer in

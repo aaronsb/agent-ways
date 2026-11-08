@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # Fire a few ways through the real scan lanes for the infra project's
 # session, so `ways session ways` has session markers to read. shots.sh runs
 # it after fixture.py.

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Terminal colour depth, from the environment (ADR-504 §6, terminal capability).
 //!
 //! This is the one place in the workspace that decides whether, and how

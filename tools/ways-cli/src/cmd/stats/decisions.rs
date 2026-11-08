@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The decisions section of `ways tune stats`: turns, outcomes, the judge and
 //! pulls, read from the decision log (ADR-701 §2, §8).
 //!

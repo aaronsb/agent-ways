@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The judge's question, independent of engine (ADR-196 §2-3).
 //!
 //! One request per prompt carries the recent turns and every candidate. Each

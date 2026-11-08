@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Every attend argv the mod and the hook scripts build parses against this
 //! binary (ADR-413 item 6.2). The argv is read from its source: the
 //! `[ATTEND, ...]` literals and `argv.push('--flag', ...)` calls in

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The ways agent (ADR-502): one resident process per user that judges whether
 //! a way the matcher picked is relevant to the conversation (ADR-196) and is
 //! the one process that reads the provider key.

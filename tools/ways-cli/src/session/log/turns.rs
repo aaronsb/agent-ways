@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The decision log's live bound, counted in turns (ADR-701 §2).
 //!
 //! A turn is a decision record with `"turn_start":true` together with every

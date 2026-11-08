@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The hook's side of the socket (ADR-502 §1, §4, §8).
 //!
 //! A hook connects, sends one request, and reads one reply. When no agent is

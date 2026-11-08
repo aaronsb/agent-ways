@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """A synthetic HOME and XDG tree for the ways-cli reference screenshots.
 
 Project /home/dev/shop has four sessions. Session A fires ways in main and

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Slash-command parser, registry, and autocomplete.
 //!
 //! Slash commands are a TUI-local grammar: they never touch the

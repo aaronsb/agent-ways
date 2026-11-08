@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A click on a channel in the left column, through the shell's real mouse
 //! handler: the first click shows the channel, a click on the channel
 //! shown opens its menu, as the first and second Ctrl+digit do. The column

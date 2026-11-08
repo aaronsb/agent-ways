@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # `make link` must not replace a real file at ~/.claude/bin/way-embed: that is
 # a pre-1.0 in-place clone's own file, and nothing under ~/.claude moves
 # without `ways manage repair --force` (the same real-path rule reconcile uses).

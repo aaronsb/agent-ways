@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways manage mod` (ADR-512 item 5): the lifecycle of the Claude Code mods
 //! agent-ways ships, over every enabled target.
 //!

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 import json,os,collections
 W=os.path.dirname(os.path.abspath(__file__)); D=W+'/../data/'
 rows=json.load(open(W+'/session_rows.json'))

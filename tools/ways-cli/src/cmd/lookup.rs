@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways lookup`: the machine interface behind the MCP lookup tools (ADR-701 §5).
 //!
 //! `ways-mcp` calls this binary and reads one JSON object from stdout, so the

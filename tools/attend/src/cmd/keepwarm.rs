@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `attend keepwarm` — arm, disarm, and read the cache-warming floor
 //! (ADR-182), and the keepalive policy the attend mod runs (ADR-414). The
 //! sensor and the check do the judging; these verbs own the arm file, the

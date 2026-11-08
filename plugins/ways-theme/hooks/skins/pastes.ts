@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 // The person's pastes as Claude Code shows them. A paste reaches the message
 // wrapped, `<pasted_content id="ab12">\n...\n</pasted_content id="ab12">`,
 // with two newlines around it, and the id is the session's: the first four

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The mark store under `signals/_tombstones/` (ADR-404 D3e).
 //!
 //! A delete marks a message instead of removing its file, and every reader

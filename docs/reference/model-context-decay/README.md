@@ -6,7 +6,7 @@ Empirical benchmarks for context degradation across models. These numbers inform
 
 ## Source Data
 
-Benchmarks from Anthropic's Claude 4.6 model card (March 2026).
+Benchmarks from Anthropic's [Claude 4.6 model card](https://www-cdn.anthropic.com/14e4fb01875d2a69f646fa5e574dea2b1c0ff7b5.pdf) (March 2026).
 
 - **GraphWalks BFS** — Long-context reasoning (multi-hop graph traversal)
 - **MRCR v2, 8-needle** — Long-context retrieval (find 8 specific facts in a long context)

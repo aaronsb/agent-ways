@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-FileCopyrightText: 2026 Clayton Chancey
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The `settings.json` three-way merge (ADR-142's shared-write seam).
 //!
 //! `settings.json` is owned by Claude Code; agent-ways co-owns only its

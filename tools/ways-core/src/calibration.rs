@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Calibration of embedding cosine into a relevance probability (ADR-156).
 //!
 //! The matcher no longer thresholds raw cosine. Instead each model carries a

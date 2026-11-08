@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! attend's settings (ADR-503 §13): the schema in a library crate, so ways
 //! composes it into `ways settings` without depending on the attend binary,
 //! and the typed configuration attend runs on, loaded through it.

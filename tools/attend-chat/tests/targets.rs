@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The chat's targets through the shell's real key and mouse handlers: a
 //! tab, a column row, a sender's name and the destination flag each reach
 //! one activation path. A left click (a digit, Enter on the column) selects

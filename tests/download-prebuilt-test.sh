@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # tools/scripts/download-prebuilt.sh against the fake `gh` (tests/fixtures/prebuilt):
 # component validation, --release, the <COMPONENT>_RELEASE override, the
 # way-embed output dir, and way-embed's `match --batch` gate. HOME and

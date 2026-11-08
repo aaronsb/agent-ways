@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Drawing for the TUI: the tab bar, the tree, the detail and pending panes, the action
 //! menu and the status line. Review mode draws its own tree and detail in
 //! `review`, and the boxed modals draw in `modals`. Each frame also records where the

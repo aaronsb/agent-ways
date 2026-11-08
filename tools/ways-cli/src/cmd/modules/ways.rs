@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A way as an item: found in the three roots of ADR-143, the shipped
 //! corpus, the user's own and the project's. The lowest root that holds a
 //! way's id is its origin, and a way of the same id in a higher root

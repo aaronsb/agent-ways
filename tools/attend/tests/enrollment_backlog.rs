@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Messages that arrived before a session enrolled (#725 review, finding 2).
 //!
 //! One cold-start rule for both conduits: a message addressed to the

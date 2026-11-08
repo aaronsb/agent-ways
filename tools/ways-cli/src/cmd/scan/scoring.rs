@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-FileCopyrightText: 2026 Jonathan Muse
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Batch scoring and subprocess calls for the embedding matcher (ADR-125).
 //!
 //! The two models (EN-only 384-dim, multilingual 768-dim) produce cosine

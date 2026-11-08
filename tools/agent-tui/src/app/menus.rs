@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The menus over the shell, each a [`Dialog`] with a menu body behind a
 //! [`Modal`]: the action menu of a row, the theme tab's menu, and the
 //! picker, which is a choice's options or a pane's menu ([`Open::Pick`]).

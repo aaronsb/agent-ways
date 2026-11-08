@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The one width measure and the one wrap of agent-tui. Text wraps to a
 //! width in terminal columns: words move whole to the next row, a word
 //! longer than a row is broken, an explicit newline starts a row, the

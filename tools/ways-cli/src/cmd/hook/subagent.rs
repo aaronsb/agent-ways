@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Two-phase subagent injection (ADR-123): `ways hook task` matches the
 //! delegation and writes a stash, and SubagentStart claims the oldest stash
 //! and injects its ways. Subagents get the ways fresh, whatever the parent

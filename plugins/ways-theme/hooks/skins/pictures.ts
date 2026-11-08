@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 // Another mod's picture in a row the theme frames. The images mod (ADR-517)
 // draws an `Image` or a `Raster` and a caption line under the row Claude Code
 // drew, the two in one Box keyed `images-picture-<n>`; the runtime stamps each

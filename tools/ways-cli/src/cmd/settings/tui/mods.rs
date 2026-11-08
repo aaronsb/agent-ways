@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The mod tab's level above the settings (ADR-512 item 6): one node per
 //! shipped mod, labelled with its shipped version and its state in a word,
 //! holding a read-only row per enabled target, the mod's settings, and the

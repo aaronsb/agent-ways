@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # usage: jac.sh <worktree>
 mkdir -p /tmp/kgtopo-a3601/mainx && tar -xf /tmp/kgtopo-a3601/main-ways.tar -C /tmp/kgtopo-a3601/mainx
 for d in collaboration data documentation ea evaluative itops meta softwaredev workstation; do

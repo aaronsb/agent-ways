@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Sentence-salience input reduction for embed matching (ADR-130).
 //!
 //! When a hook payload exceeds the embedding model's working window (MiniLM's

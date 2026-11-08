@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! One activation path. Every input on something the chat can act on
 //! reaches [`ChatPane::activate`]: a click on a tab or its digit, a click
 //! on a column row or Enter on it, a right click on any of those, on a

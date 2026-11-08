@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Removed attend surface stays removed (#692, ADR-505).
 //!
 //! `send --broadcast` was a no-op and `--focus` an alias of `--channel`. Both

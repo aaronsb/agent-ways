@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Enrollment is durable (#720 review, finding 3): liveness does not undo it.
 //!
 //! A session that joined a channel and was then pruned from it, its

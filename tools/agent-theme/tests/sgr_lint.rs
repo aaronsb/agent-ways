@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The raw-colour lint (ADR-504 §6): a raw SGR escape literal in a Rust
 //! source under `tools/` outside `agent-theme` is a finding. Colour goes through agent-theme's painter, which honours the
 //! theme, the terminal's depth and `NO_COLOR`; a literal does none of that.

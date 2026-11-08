@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The theme tab's keys and clicks: previewing and choosing a theme, the
 //! file actions, and the slot editor. State is in `themestate`, drawing in
 //! `themeview`.

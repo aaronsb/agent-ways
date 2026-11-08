@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 import csv, sys
 a, b = sys.argv[1], sys.argv[2]
 for name in ['tree-sample', 'tree-sample-joined', 'tree-sample-pleasantry']:

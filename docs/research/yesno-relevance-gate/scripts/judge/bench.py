@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """Latency benchmark for the local backend. Writes bench_results.json and prints a table.
 
   bench.py [--threads 16] [--reps 3] [--skip-transformers] [--gpu]   (the ROCm stage segfaults; off by default)

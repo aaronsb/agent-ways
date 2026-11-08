@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # The ADR way's macro discloses guidance for the project's tool and contract
 # (ADR-304 §10, #563). Each case builds a throwaway project and runs the macro
 # against it, with the installed template pointed at this checkout's tool.

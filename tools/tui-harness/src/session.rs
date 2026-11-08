@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Detached tmux sessions: launch, send keys, capture, stop, list.
 //!
 //! tmux owns the PTY, the input, and a clean screen buffer. Each session has

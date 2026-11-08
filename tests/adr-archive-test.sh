@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # Test `adr archive`, active-set semantics, and supersession reading (ADR-303 / issue #438)
 #
 # Runs entirely against a throwaway git repo in a temp dir — never the host repo.

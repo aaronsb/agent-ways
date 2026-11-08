@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """Body confirmation: per-call sentence embedding vs precomputed section vectors.
 
 ADR-701 §6 proposes that late-interaction body confirmation read a precomputed

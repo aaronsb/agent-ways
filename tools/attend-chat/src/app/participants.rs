@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The participant strip: who takes part in the channel or DM view shown,
 //! on up to three rows above the feed, beneath the shell's tab bar, across
 //! the right-hand content area only. The operator view (⋯all) has none.

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The run loop on a real terminal: drawing, input, the tick of a running
 //! apply and the file watch, and the guard that restores the terminal on
 //! every way out: a quit, an error, a panic, or a signal (SIGTERM, SIGHUP,

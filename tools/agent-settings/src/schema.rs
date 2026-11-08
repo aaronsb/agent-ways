@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Schema types (ADR-503 §1). A component declares its settings as a static
 //! [`Schema`]: the sections of each file kind it owns and every key in them.
 //! Parsing, validation, lint, emit and help all read these declarations.

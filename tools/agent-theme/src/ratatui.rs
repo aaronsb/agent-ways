@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The ratatui output (ADR-504 §4): the painter's resolution as ratatui
 //! styles. Behind the `ratatui` feature, so the engine's core, and every
 //! binary on a hook path, carries no ratatui dependency. It maps onto

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Joining a channel late does not deliver its history (ADR-136 Decision 2,
 //! the cold-start rule of ADR-172 applied per room).
 //!

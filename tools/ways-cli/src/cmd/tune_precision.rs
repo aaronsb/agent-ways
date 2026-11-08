@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Relevance / precision audit from fire telemetry (ADR-134 Decision 3).
 //!
 //! The cadence audit (`tune-curves`) asks *how often* a way fires; this asks

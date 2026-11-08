@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A fresh directory per test. The pid and clock alone collide when two
 //! parallel tests start in one clock tick (#788), so a per-process counter
 //! makes each name unique. And the one lock for the environment: unit tests

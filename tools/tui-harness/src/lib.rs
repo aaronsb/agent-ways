@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Drive a TUI in a detached terminal and screenshot what it renders.
 //!
 //! tmux owns the PTY, the input and the screen buffer. This crate launches a

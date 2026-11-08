@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-FileCopyrightText: 2026 Clayton Chancey
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The hook payload Claude Code writes on stdin, read once into the request
 //! each event needs. Pure: no filesystem, no environment beyond what the
 //! caller passes, so each event's parse is pinned by a test.

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Positive-prose lint (ADR-160 §6): a way's **embedded alias** — the
 //! `description:` and `vocabulary:` fields — is what the late-interaction
 //! matcher ranks and gates on. Dense bi-encoders cannot represent negation, so

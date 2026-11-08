@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A text entry of one or more lines: the buffer, a cursor, the editing
 //! keys, and its rows at a width with the cursor drawn as a reverse-video
 //! cell. Enter is the application's; Shift-Enter and Alt-Enter insert a

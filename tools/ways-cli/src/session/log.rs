@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The agent-ways log streams' writer: append, size compaction, the daily
 //! pass and archiving (ADR-134 task E, ADR-701 §2). The daily pass bounds the
 //! event log by age and the decision log by turns ([`turns`]).

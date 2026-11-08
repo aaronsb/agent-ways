@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Frame reconstruction — cluster events into epoch frames, load the token
 //! timeline, and read a session's events from the (unioned) event log.
 

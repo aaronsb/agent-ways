@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A post in a channel makes the person its member (ADR-404 D1). When the
 //! join that makes them one is refused because another writer holds the
 //! channels past the chat's wait, the post still goes out and the status

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Each channel's members under its row in the left column (ADR-405,
 //! amendment of 2026-10-15): participating members drawn as their Agents
 //! rows are, invited ones set back and marked `◌ invited` with `●` or `○`; a member row

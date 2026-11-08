@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways manage update` without `--commit` (ADR-511): in a sandboxed HOME and
 //! XDG tree, an app cloned from a local origin that has moved on. The
 //! what-if fetches, reports the versions, the release notes, the delta, the

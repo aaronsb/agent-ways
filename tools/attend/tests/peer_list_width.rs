@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `attend peer list` on a terminal narrower than its table (#1117). The
 //! Agent column is pinned: its labels were already shortened to fit, so the
 //! table narrows the other columns and leaves every label whole.

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The picker: a popup list of a choice's options, the current value
 //! marked, for a fixed choice and a computed one alike. A list choice marks
 //! several. What it picks goes through the same check as typed text, and

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Hit-testing what a frame drew, so each screen maps a click to its own
 //! action and the mouse reads the same on every screen (#739): a click
 //! on a row selects it, a click on the selected row acts on it as Enter

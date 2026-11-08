@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways manage update` — update the agent-ways install from the binary itself.
 //!
 //! The 1.0 lifecycle separates the *app source* (`$XDG_DATA/agent-ways`, a git

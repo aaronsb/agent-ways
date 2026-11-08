@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The JSONPath subset of §8: `$`, `.field`, `[n]`, `[*]` and `..`. A
 //! path is parsed and checked when its file loads; evaluating one over a
 //! poll result is the command and mcp hosts' work.

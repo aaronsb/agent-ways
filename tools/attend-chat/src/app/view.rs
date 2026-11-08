@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Drawing the chat: the pane between the shell's bars, and the channel
 //! tabs the shell draws on its tab bar, in the palette the chat holds.
 //! Every colour is either a theme role, through `agent_tui::theme`, or an

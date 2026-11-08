@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A report printed as a band of the theme: under `THEME_BACKGROUND="fill"`
 //! every line of it sits on the theme's ground, out to the terminal's width.
 

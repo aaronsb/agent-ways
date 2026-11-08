@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The keepalive policy (ADR-414): in an interactive session with autocompact
 //! off, an idle session is kept warm from every turn's end, one `keepwarm:`
 //! wake `margin` before its cache would lapse, counted from the operator's

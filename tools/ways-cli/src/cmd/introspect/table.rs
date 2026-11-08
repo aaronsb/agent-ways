@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The replay's ways table and its context lines on agent-tui: the columns
 //! `ways session ways` prints (Way, Agent, Epoch, Dist, Trigger, the
 //! waypoint, Re-disclose) as ratatui rows, and the token gauge, forecast and re-disclosure zones

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The real binary's lifecycle. `agent-tui` never uninstalls its signal
 //! handler, so the chat must end its process when its screen closes, and
 //! must not take a terminal it does not have: run under a Monitor or a

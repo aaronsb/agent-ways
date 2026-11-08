@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Date and duration maths for every agent-ways tool: the civil-date
 //! conversion, the UTC ISO-8601 stamp the event log and findings carry and
 //! its parser, and the compact message timestamps every attend surface

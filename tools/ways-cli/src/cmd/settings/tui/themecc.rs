@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The theme tab's Claude Code section, read for the screens: the
 //! ways-theme mod in each enabled target, its render settings and the word
 //! lists the settings set. A change goes through `set_one`, as

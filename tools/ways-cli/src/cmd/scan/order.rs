@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Admission order for the ways one scan lane matched.
 //!
 //! Every way shown in one hook invocation draws on one [`ContextBudget`],

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Provider HTTP calls: the zero-cost key check and the model list (ADR-502 §6).
 //!
 //! Requests go over ureq with rustls. Error text returned here comes from the

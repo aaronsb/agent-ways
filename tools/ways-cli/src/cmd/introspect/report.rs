@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The report tabs of the session screen (#738): aggregates over the
 //! sessions in scope, as `ways agent cost` and the `ways tune` reports
 //! print them. The judge's spend comes from the shared aggregation in

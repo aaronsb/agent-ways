@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 // The mod's options, read from ways settings (ADR-517 item 5): `mods.images.*`
 // at user, target or project scope, the project winning, as `ways settings
 // list mods.images --json --effective --project <root>` resolves them. They

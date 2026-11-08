@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # ADR-150 release helper for a Cargo-versioned component. Two steps, because
 # `main` is branch-protected and the repo is PR-first:
 #

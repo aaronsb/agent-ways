@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Generate the `attend` markdown reference from the same `Cli`
 //! definition that drives runtime `--help`. Output goes to stdout;
 //! `make docs` redirects it into `docs/cli/attend.md`.

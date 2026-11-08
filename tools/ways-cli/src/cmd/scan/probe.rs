@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Probe scans (ADR-701): what the prompt and Bash lanes decide for one piece of
 //! text, with nothing carried between calls.
 //!

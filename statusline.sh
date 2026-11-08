@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-FileCopyrightText: 2026 Jonathan Muse
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # statusline.sh — the agent-ways reference status line for Claude Code.
 #
 # Use it as is: point settings.json at it.

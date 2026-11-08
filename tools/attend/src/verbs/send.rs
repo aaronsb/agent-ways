@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `send` and `reply`: write one signal to the bus.
 
 use crate::util::{current_session, encode_project, groups_for, signals_base, Session};

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The judge engine's one writer (ADR-512 item 4). `gate.engine` lives in the
 //! agent file and the ways-judge mod's wanted state, `mods.ways-judge.install`,
 //! in the user's ways config, so the two are written in an order that never

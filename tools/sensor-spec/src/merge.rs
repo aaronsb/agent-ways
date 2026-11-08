@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Layering (§2): a later layer overrides any field of an earlier one.
 //! Mappings merge key by key, `triggers` merge by trigger name, and every
 //! other value, a list included, is replaced whole.

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Who reads the bus: every agent session that may still read it, and the
 //! ids each reads as (ADR-404 D3e). attend's delete and tombstone ask here,
 //! and so does attend-chat before it offers Tombstone…, so the offer and

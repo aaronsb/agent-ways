@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 /** The keepalive policy as the row draws it (ADR-414 item 9). */
 export type KeepaliveRow = {
   state: 'running' | 'wrapped' | 'compacted' | 'stopped'

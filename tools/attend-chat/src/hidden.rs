@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Hide messages here (ADR-405, amendment of 2026-10-13): a watermark per
 //! tab, local to this chat. Hiding a tab's messages records the send order
 //! of the newest bus message the tab holds (the chat's own notices do not

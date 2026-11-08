@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-FileCopyrightText: 2026 Clayton Chancey
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Per-file validation rules: runs every lint rule against a single
 //! way or check frontmatter file and accumulates error/warning/fix
 //! counts. The orchestration lives in `scanning.rs`; this module owns

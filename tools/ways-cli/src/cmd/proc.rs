@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Running a child process under a time limit. Used for the `claude` CLI
 //! calls of a repair ([`super::mcp_register`], [`super::attend_mod`]) and for
 //! way macros ([`super::show`]).

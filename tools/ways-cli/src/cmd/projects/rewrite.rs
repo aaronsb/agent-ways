@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The record rewrites `relocate` applies: transcript `cwd`s and
 //! `history.jsonl` projects, `sessions-index.json` paths and the
 //! `~/.claude.json` key, plus the checks that decide whether a leftover file

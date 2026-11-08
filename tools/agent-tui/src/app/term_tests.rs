@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The terminal guard on a pty that hangs up under it. The guard runs in a
 //! child of this test binary whose stdin, stdout and stderr are the pty's
 //! slave; the parent closes the master and every handle it has on the

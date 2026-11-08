@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Which sessions are being written to, read from `stat` alone (#780).
 //!
 //! A session is live while Claude Code writes its transcript. The sessions

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A closed stdout ends attend quietly, as it ends any Unix filter:
 //! `attend keepwarm status | head -5` must not panic once `head` exits.
 //! The read end of the pipe is closed before attend starts, so its first

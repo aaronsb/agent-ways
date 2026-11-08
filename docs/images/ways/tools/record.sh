@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # Record the README's replay: the timeline of the fixture's session A stepped
 # frame by frame, then the matched view and why a blocked way was kept out,
 # joined at one frame a second into docs/images/ways-introspect.mp4 and .gif.

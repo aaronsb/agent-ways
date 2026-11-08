@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways judge-setup` on a real terminal (ADR-708 §9): a pty, the real binary
 //! and stand-ins for `claude` and `ways-agent`, so the menu it offers, what it
 //! leaves unsaid, and what a choice writes are read as the operator meets

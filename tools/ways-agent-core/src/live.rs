@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The running Claude Code sessions and the engine each judges with
 //! (ADR-708 §7, §8): what `ways status`, `ways agent status` and the gate
 //! screen of `ways settings` list.

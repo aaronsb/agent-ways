@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! One focus owner and the keyboard's ring (ADR-405, #931 increments 5 and
 //! 6; ADR-407's redesign), through the shell's real key and mouse handlers:
 //! the ring's order, Tab and Shift+Tab as mirrors, every way out of the

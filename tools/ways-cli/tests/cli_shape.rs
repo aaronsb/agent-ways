@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The shape of the command line ADR-507 decides, with ADR-509's `manage`
 //! group: the commands `ways --help` lists and their order, the hidden
 //! plumbing, the removed lifecycle aliases, the exit code of a group run with no

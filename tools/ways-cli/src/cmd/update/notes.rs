@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Release notes for a what-if: every published release of a component
 //! between the installed version (exclusive) and the target (inclusive),
 //! read from GitHub Releases of `aaronsb/agent-ways`.

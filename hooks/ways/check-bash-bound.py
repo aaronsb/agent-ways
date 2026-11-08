@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Luigi Lopresto
+# SPDX-FileCopyrightText: 2026 Aaron Bockelie
+# SPDX-License-Identifier: MIT
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """check-bash-bound.py: a guard hook on the Bash tool (ADR-181).
 
 Wired under hooks.PreToolUse with matcher Bash and no `|| true`. The host

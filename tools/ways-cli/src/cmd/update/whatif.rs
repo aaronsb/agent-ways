@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways manage update` without `--commit`: what the update would change,
 //! read from a fetch, with nothing else on disk touched (ADR-511).
 //!

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Drawing for review mode: the tree of one tab's pending rows with a progress
 //! gutter, and the detail pane that describes the change under the cursor.
 //! Review keeps the browser's layout; the rows are what differs.

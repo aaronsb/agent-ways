@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # Drive each interactive screen of `ways` with real keys, at 80x25 and
 # 120x35, and save a PNG and a text capture of each state. The screens run
 # on the synthetic fixture of docs/images/ways/tools (env.sh, fixture.py).

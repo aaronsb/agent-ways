@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! One dialog for the boxes and the bar questions the shell draws (ADR-504,
 //! the note on one `Dialog`): a title, a body of lines scrolled when it
 //! outgrows the frame, and a row of buttons, in a box or on the bottom bar.

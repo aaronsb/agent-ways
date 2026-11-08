@@ -186,6 +186,8 @@ cp ~/.claude/hooks/ways/documentation/adr/adr.yaml.template docs/architecture/ad
 chmod +x docs/scripts/adr
 ```
 
+The tool is MIT-licensed. Keep its header in the copy: it holds the copyright line, the MIT permission notice that every copy must carry, and where the tool came from.
+
 Then edit `docs/architecture/adr.yaml` for the project's domains and ranges, and validate: `docs/scripts/adr domains && docs/scripts/adr lint`. The template declares `contract: adr/v1` with the decision, spec and evidence kinds, a placeholder capability `core`, and `process` and `adr`: replace `core` with the project's capabilities. To stay on adr/v0, delete the `contract` line and the v1 blocks under it.
 
 For a full repo scaffold (ADRs + GitHub config + CODEOWNERS + project ways), run `/project-init` instead — it vendors this tool as one step of a larger setup. The **docs** skill is the catalog half and shares this `adr.yaml`.

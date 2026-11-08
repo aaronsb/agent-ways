@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! One focus owner (ADR-405, #931 U5): the keyboard is on one element at a
 //! time, the tab bar's tabs, the column's rows, the feed or the compose box,
 //! and that element alone is drawn focused.

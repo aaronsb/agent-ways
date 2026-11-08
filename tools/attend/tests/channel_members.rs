@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A member can see who else is in a channel before anyone posts (the
 //! attend mod's clean-slate test, finding 5): `attend channel` and `attend
 //! peers` name each channel's members, through the CLI the attend_peers

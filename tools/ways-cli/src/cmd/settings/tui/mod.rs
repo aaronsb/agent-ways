@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The settings screens (ADR-504 §8): `ways settings` on a terminal, on
 //! `agent-tui`. A tab for each root of the registry's names, then the theme
 //! tab. They read and write only through the registry and the one writer

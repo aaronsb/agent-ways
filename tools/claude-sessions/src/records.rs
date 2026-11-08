@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Claude Code's session records, `~/.claude/sessions/<pid>.json`.
 //!
 //! Claude Code writes one record per running session: its pid, session id and

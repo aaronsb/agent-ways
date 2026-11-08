@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The `theme` section of ways' user `config.yaml` (ADR-503, ADR-504 §5),
 //! declared once. ways' schema includes these declarations as they are, and
 //! attend's crates read the choice through them (`attend_config::theme`),

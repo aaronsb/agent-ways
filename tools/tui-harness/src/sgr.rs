@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! ANSI text from `tmux capture-pane -ep` to a grid of styled cells.
 //!
 //! tmux has already applied every cursor movement, so the capture is a

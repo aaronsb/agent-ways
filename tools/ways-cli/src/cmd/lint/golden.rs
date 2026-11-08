@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! ADR-701 §9 golden-prompt sidecars: `{wayname}.golden.jsonl` beside a way,
 //! and `golden-none.jsonl` at the top of a ways root.
 //!

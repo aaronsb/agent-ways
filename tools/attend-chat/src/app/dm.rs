@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! An agent's two DM views (ADR-405, amendment of 2026-10-13), each a view
 //! of the messages the chat already holds ([`crate::tabs::shows`]), listed
 //! on a row under the agent's and shown with its tab on the bar's left.

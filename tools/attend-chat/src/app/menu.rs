@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The tab menu: what a tab's menu offers and what each item does, the
 //! question a destructive item waits on, and the compose box lent to a
 //! name or a description. Every item runs the slash command that

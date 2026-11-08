@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The keepalive policy over fixed transcript readings and a fixed clock
 //! (ADR-414 item 7): each test steps the judgment as the mod's checks
 //! would, adding the request each submitted turn makes.

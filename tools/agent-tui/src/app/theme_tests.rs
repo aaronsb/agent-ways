@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The theme tab, driven through the real key and mouse handlers against a
 //! themes directory of its own per test. The active choice is kept by the
 //! adapter; here it is a `choice` file beside the themes, standing in for

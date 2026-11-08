@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The agent-ways 1.0 location taxonomy (ADR-142).
 //!
 //! Every file agent-ways touches is classified by *durability and ownership*,

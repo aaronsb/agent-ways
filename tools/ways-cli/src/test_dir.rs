@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A test directory that removes itself, contents and all, when dropped, so
 //! a test run leaves nothing behind in the temp dir. Bind the guard to a name
 //! that lives as long as the test, and as long as anything that was handed

@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # The installer prints the staged report every `ways manage` verb prints
 # (ADR-511): one ruled header per stage, a mark per outcome, plain text in a
 # pipe, under NO_COLOR and with TERM dumb or empty, colour when forced. Run

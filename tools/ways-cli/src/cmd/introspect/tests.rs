@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The introspect screens through agent-tui's test kit (ADR-504 §12): a
 //! fixed session drawn headless, keys through the real handler, and golden
 //! frames at 80x25 and the reference size, 120x40.

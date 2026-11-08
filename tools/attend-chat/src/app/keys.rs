@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The chat's own key handlers: Enter (send, or run a slash command)
 //! and Tab (complete). Each is a free function that takes the buffer,
 //! cursor and cycle and returns the next state, so it can be tested

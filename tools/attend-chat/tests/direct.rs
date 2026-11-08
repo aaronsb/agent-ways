@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! What reaches the operator directly, and what the operator sends directly
 //! (ADR-401 `to`): a reply or a direct message to the person lands in their
 //! person tray, `_people/<member-id>/`, which the chat watches and shows as

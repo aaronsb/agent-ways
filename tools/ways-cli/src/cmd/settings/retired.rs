@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The retired `attend_mod` section (ADR-512 item 2). Nothing configures
 //! anything from it. `lint` and `ways manage update` name every file that
 //! still holds it, with the command that moves it; `fix mods.attend` moves

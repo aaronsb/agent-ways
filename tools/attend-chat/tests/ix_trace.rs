@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A differential trace of the chat's interaction (ADR-407, amendment of
 //! 2026-10-12): seeded random keys, clicks, right clicks, the wheel,
 //! pastes, and messages arriving through the watcher, driven through the

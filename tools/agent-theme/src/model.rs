@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The theme data: slots, kind, background mode, optional role overrides.
 //! The slot names are the dotfiles palette's `THEME_*` keys, lowercased.
 //! A gradient and decoration glyphs are agent-ways' own, and optional.

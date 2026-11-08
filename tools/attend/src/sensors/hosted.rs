@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A sensor as its file configures it (ADR-403 §1): the compiled poll under
 //! the file's name, cadence and threshold, with each poll's outcome
 //! recorded where `attend sensor list` reads it.

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 // The relevance gate's Claude Code internal engine (ADR-708).
 //
 // The prompt lane's gate runs in the settings UserPromptSubmit hooks, which

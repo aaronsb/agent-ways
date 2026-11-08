@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Drive real tmux sessions: launch, send keys, capture text and pixels,
 //! stop. Each test skips when tmux is missing (fails under
 //! `TUI_HARNESS_REQUIRE_TMUX=1`) and cleans up through a `Drop` guard.

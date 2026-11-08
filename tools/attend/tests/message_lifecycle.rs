@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! One message through its whole life: sent, delivered once by the
 //! Stop-hook drain, recorded in the session's seen-set, never delivered
 //! again, and then deletable for everyone by `attend message delete`, since

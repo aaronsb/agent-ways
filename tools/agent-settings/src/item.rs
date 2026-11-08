@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The item descriptor (ADR-516 §1): one shape for a theme, a mod, a sensor,
 //! a way and a judge profile, which the store, the settings screens and the
 //! CLI describe the same way. Each family's state words and their tones are

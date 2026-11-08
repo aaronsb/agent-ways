@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The Stop-hook re-entry ceiling fails closed (#725 re-review, finding 7).
 //!
 //! The round counter lives in the state directory. When that directory

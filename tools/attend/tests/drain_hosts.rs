@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! What the Stop-hook drain prints, by host (ADR-406 items 5, 9 and 10),
 //! through the CLI as the hook runs it.
 //!

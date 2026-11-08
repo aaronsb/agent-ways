@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `attend sensor list`, `poll` and `fire` (ADR-403 §6).
 //!
 //! `list` reports every sensor the files declare as an item (ADR-516): its

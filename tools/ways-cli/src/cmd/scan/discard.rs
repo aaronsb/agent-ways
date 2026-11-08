@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! scan/discard.rs — switched-off ways that would have fired: discarded fires.
 //!
 //! A switched-off way is removed before matching: collection drops it and the

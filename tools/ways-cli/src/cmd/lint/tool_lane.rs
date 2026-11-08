@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Tool-lane rules (ADR-704): `tool_name:` and `tool_event:`.
 //!
 //! The lane reaches only what the shipped settings.json wires on

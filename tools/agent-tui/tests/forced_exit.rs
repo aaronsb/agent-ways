@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Every forced exit runs the hook the application set
 //! (`agent_tui::on_forced_exit`) while the run loop is wedged: the watch
 //! thread's limit before the loop takes a signal up, its limit after, and

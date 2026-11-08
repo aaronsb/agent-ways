@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways corpus` against a stub way-embed: what reaches stderr about the body
 //! sidecar under `--quiet`, and that the manifest is replaced, not written
 //! through. The unit tests in `cmd/corpus.rs` cover the pieces; these drive

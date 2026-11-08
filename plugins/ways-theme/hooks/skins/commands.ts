@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 // The text in a reply that the person copies: a suggestion to type into
 // Claude Code's prompt, a fenced block of code, or a code span too wide for
 // its row. Drawn as prose, a long one wraps inside the reply's frame, and a

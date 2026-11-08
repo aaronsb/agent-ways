@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The left column reads the session lineage and the tombstones from disk
 //! (ADR-404 D3e): a dead sighting under an id a live session had before its
 //! `/clear` is that session's row, and a tombstoned session makes no row.

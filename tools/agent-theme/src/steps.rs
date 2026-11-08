@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The colour steps of an identity lozenge, as the operator's Claude Code
 //! status line draws a session (ADR-405): the name on the identity colour,
 //! the project on a darker step of it, the state marker on the darkest. An

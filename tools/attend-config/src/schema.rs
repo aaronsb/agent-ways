@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! attend's sections and keys (ADR-503 §1, §13). The user file
 //! (`~/.config/attend/config.yaml`) and a project's `.claude/attend.yaml`
 //! take the same keys; the project's are layered on top.

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The gate tab's `judge` section (ADR-708 §7, §8): whether the relevance
 //! judge can gate, read from `cmd::judge::readiness`, the one function setup,
 //! the help footer and `ways status` read; which shipped profile an unset

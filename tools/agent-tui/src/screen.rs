@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A screen that is not the settings shell: an application draws it and
 //! handles its keys, and this runs it on the terminal (ADR-504 §3). The
 //! test kit renders it headless and drives its keys

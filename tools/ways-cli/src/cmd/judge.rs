@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The relevance judge's setup (ADR-196, ADR-502, ADR-708 §9): the warning
 //! the top-level help (bare `ways`, `--help`, `help`) ends with when the judge
 //! cannot gate, and the check and offer that `ways manage update` and the

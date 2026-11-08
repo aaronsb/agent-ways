@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Description templates (§8): text with `{field}` holes. `{field}`,
 //! `{value}` and nested item fields such as `{message.user.name}` read the
 //! item a trigger saw; `{state.<field>}` and `{prev.<field>}` read the

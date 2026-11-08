@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 // The frame contract between the images mod and ways-theme (ADR-517 item 6).
 // Both mods' tests hold this file, one text, which scripts/check-plugins.sh
 // keeps: a test's inline plugin closes over nothing of its file, so neither

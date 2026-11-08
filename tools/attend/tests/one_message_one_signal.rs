@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! One message is one signal, whatever its length (ADR-412). `attend message send`
 //! writes it whole, and every conduit delivers it whole under its one id:
 //! the Stop-hook drain, the attend mod's format, and the Monitor line of

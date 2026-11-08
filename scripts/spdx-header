@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+"""Add the agent-ways SPDX header to source files that lack one.
+
+Usage:
+  scripts/spdx-header [--license ID] FILE...  add the header where it is missing
+  scripts/spdx-header --check FILE...         list files without a header, exit 1 if any
+
+The license defaults to AGPL-3.0-or-later. The ADR and doc tooling that other
+projects copy uses --license MIT (see REUSE.toml).
+
+The header goes after a shebang line and a PEP 263 encoding line. Each author
+who committed to the file in git gets an SPDX-FileCopyrightText line with the
+years of their commits; a file with no history gets the git user and the
+current year. Files that cannot carry a comment are covered by REUSE.toml
+instead.
+"""
+import datetime
+import os
+import re
+import subprocess
+import sys
+
+DEFAULT_LICENSE = "AGPL-3.0-or-later"
+ORIGIN = "From agent-ways: https://github.com/aaronsb/agent-ways"
+
+HASH = {".sh", ".py", ".toml", ".yml", ".yaml", ".mk"}
+SLASH = {".rs", ".ts", ".tsx", ".js", ".mjs", ".cpp", ".c", ".h"}
+
+
+def comment_prefix(path, first_line):
+    ext = os.path.splitext(path)[1]
+    if ext in SLASH:
+        return "//"
+    if ext in HASH or os.path.basename(path) == "Makefile":
+        return "#"
+    if first_line.startswith("#!"):
+        return "#"
+    return None
+
+
+def holders(path):
+    out = subprocess.run(
+        ["git", "log", "--follow", "--format=%aN\t%ad", "--date=format:%Y", "--", path],
+        capture_output=True, text=True, check=False,
+    ).stdout
+    years = {}
+    for line in out.splitlines():
+        name, _, year = line.partition("\t")
+        if name:
+            years.setdefault(name, set()).add(year)
+    lines = []
+    for name in sorted(years):
+        ys = sorted(years[name])
+        span = ys[0] if ys[0] == ys[-1] else f"{ys[0]}-{ys[-1]}"
+        lines.append(f"{span} {name}")
+    if not lines:
+        user = subprocess.run(["git", "config", "user.name"], capture_output=True,
+                              text=True, check=False).stdout.strip()
+        if not user:
+            raise SystemExit(f"spdx-header: no git history for {path} and no git user.name")
+        lines.append(f"{datetime.date.today().year} {user}")
+    return lines
+
+
+CODING = re.compile(r"^[ \t\f]*#.*?coding[:=][ \t]*[-\w.]+")
+
+
+def has_header(text):
+    return "SPDX-License-Identifier" in "\n".join(text.splitlines()[:15])
+
+
+def add_header(path, license_id):
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    if has_header(text):
+        return False
+    lines = text.splitlines(keepends=True)
+    first = lines[0] if lines else ""
+    prefix = comment_prefix(path, first)
+    if prefix is None:
+        raise SystemExit(f"spdx-header: no comment syntax known for {path}")
+    keep = 0
+    if first.startswith("#!"):
+        keep = 1
+    for i in range(keep, min(2, len(lines))):
+        if CODING.match(lines[i]):
+            keep = i + 1
+    header = [f"{prefix} SPDX-FileCopyrightText: {h}\n" for h in holders(path)]
+    # REUSE-IgnoreStart
+    header += [f"{prefix} SPDX-License-Identifier: {license_id}\n", f"{prefix} {ORIGIN}\n"]
+    # REUSE-IgnoreEnd
+    rest = lines[keep:]
+    if rest and rest[0].strip():
+        header.append("\n")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("".join(lines[:keep] + header + rest))
+    return True
+
+
+def main(argv):
+    check = "--check" in argv
+    argv = [a for a in argv if a != "--check"]
+    license_id = DEFAULT_LICENSE
+    if argv[:1] == ["--license"]:
+        if len(argv) < 2:
+            print("spdx-header: --license needs an SPDX identifier", file=sys.stderr)
+            return 2
+        license_id, argv = argv[1], argv[2:]
+    files = argv
+    if not files:
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    missing = 0
+    for path in files:
+        if os.path.islink(path):
+            continue
+        if check:
+            with open(path, encoding="utf-8") as f:
+                if not has_header(f.read()):
+                    print(path)
+                    missing += 1
+        elif add_header(path, license_id):
+            print(f"added: {path}")
+    return 1 if check and missing else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

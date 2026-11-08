@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 // The state of a /clear or an in-session /resume the mod is following to the
 // session id that goes on (ADR-406, ADR-411). Plain data and the rules over
 // it, no `$`: register.tsx drives the watch, since the engine follows `$`

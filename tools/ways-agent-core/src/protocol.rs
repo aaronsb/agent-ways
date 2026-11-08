@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The socket protocol between a hook and the ways agent (ADR-502 §1-4).
 //!
 //! One JSON object per line, one request and one reply per connection. Every

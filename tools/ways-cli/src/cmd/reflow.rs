@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! `ways author reflow` — detect and repair hard-wrapped markdown prose (#415).
 //!
 //! The thin caller over [`ways_core::reflow`]. The detector itself lives in the

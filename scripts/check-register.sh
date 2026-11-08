@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # Register lint for the always-on guidance surface (ADR-178).
 #
 # `hooks/ways/core.md` is prepended to every session before any work begins. It

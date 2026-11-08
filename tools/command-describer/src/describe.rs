@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Segment descriptions from tldr summaries (ADR-706 item 7) and the
 //! ordered described block the Bash lane's judge reads (ADR-188 item 3c).
 //!

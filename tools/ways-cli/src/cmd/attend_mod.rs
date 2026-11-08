@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Installation of the mods agent-ways ships with Claude Code: the attend mod
 //! (ADR-406 item 8) and the ways-judge mod (ADR-708 §9), each kept to its
 //! wanted state, `mods.<name>.install` (ADR-512 item 3).

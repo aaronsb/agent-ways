@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Keeping the tree in step with the files: the watch, and the reload that
 //! takes the adapter's fresh tree while keeping what is pending, open and
 //! under the cursor. Everything carried across is found again by its

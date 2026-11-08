@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Unit-agnostic engagement state (ADR-123).
 //!
 //! `EngagementState` owns a [`Curve`] and a tick-based fire history, and

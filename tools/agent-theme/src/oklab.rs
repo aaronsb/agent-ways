@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! OKLab and OKLCH (Björn Ottosson, 2020): a perceptual space where lightness
 //! moves without dragging hue, and where Euclidean distance (ΔE OK) tracks
 //! how different two colours look.

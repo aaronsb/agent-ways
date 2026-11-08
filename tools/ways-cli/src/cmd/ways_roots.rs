@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Where a machine's ways live (ADR-143): the shipped corpus, the user's own
 //! root, and each project's `.claude/ways/`. `ways corpus` embeds what this
 //! finds and the settings screens list it, so the two never disagree about

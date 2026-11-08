@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Shared per-session sensor state — checkpoint/restore for attend's
 //! sensors and the consumption record the ADR-172 drain writes.
 //!

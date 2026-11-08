@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! Permission matching engine for ADR-116.
 //!
 //! Parses permission strings (Tool, Tool(scope), *) and checks whether

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! A send to an agent whose heartbeat lapsed while its Claude Code process
 //! runs on and it listens goes through; a send to an agent whose process has
 //! exited is refused. A session hosted by the attend mod has no `attend run`

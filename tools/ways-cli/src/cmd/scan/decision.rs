@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! scan/decision.rs — one decision record per prompt or task scan (ADR-701 §2).
 //!
 //! The unit of history is the turn. Each prompt-lane and task-lane scan writes

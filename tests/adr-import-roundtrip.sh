@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 # Round-trip test for `adr import` over this repo's own records (ADR-306 §7).
 #
 # Works on a frozen snapshot of the pre-conversion corpus (tests/fixtures/adr/

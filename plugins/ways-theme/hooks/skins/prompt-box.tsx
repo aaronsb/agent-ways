@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 // The person's message drawn on the theme's gradient. The engine's own box
 // takes one background colour, so the mod lays the text out itself: line by
 // line, each line padded to the box's width, every run of cells on the ground

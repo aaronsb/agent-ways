@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 //! The sensor spec (ADR-403): every sensor is one YAML file. The file
 //! carries the shared core (identity, `enabled`, `where` conditions), the
 //! attend block for the kinds attend hosts (cadence, emission, permissions,

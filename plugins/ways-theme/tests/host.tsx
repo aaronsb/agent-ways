@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
 // The host the skins tests run against: `ways` answered from a world the test
 // holds, a clock it moves, and readers for the trees the mod draws.
 
