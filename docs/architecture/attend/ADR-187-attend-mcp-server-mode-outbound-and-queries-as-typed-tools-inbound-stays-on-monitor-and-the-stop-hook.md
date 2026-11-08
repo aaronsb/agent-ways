@@ -38,6 +38,14 @@ imported:
 
 # ADR-187: Attend MCP server mode: outbound and queries as typed tools, inbound stays on Monitor and the Stop hook
 
+## Summary
+
+- **Decided:** The record proposed two roles for attend. The perceiving role, the Monitor-hosted sensor loop and the Stop-hook drain, owns all mutable session state and stays the only inbound path, because the MCP protocol revision of 2026-07-28 gives a server no way to put content into the model's turn. The acting role covers sending and queries: `send`, `reply`, `peers`, `inbox`, `status`, `join` and `leave` become typed tools on an `attend mcp` server over stdio that shares one library with the CLI, with one description per verb rendered into help, docs and the tool schema. Each tool has its own permission name, and each call derives identity afresh and keeps nothing in memory. The record was abandoned on 2026-09-30 before acceptance and replaced by ADR-501, which makes attend a module of one ways-mcp server and carries most of these items forward.
+- **Trades away:** Seven tool schemas would sit in the context of every request. Moving the verb bodies into a library is a refactor before any new capability, and two frontends mean two test surfaces. Sessions without the server keep every current failure mode, Read and Edit can still reach attend's cache directories, and a host that starts the server outside the session's process tree gives it no identity. The record rejected MCP for inbound messages, keeping the CLI alone with guard hooks, a server that shells out to the CLI, moving `run` and the drain into the server, and activating the guard hooks by default, and it deferred one network server per user.
+- **One-way?** No. The record calls itself reversible: the CLI stays whole, and removing the MCP frontend deletes one subcommand and its settings entries.
+- **Probes:** *Not confident (cli-retire):* After a trial, should the CLI message verbs leave agent use? Yes or no. *Not confident (send-gate):* Do you want sends gated separately from reads? Yes or no.
+- **Inversion:** At one end, agents reach attend only through CLI commands run from Bash. At the other, everything, inbound delivery included, runs through an MCP server. The record sat between them: outbound and queries move to typed tools, and inbound stays on Monitor and the Stop hook.
+
 ## Context
 
 An agent session reaches attend through one surface today: CLI verbs run from the Bash tool. Inbound messages arrive through two conduits, the Monitor-hosted `attend run` sensor loop for an idle session and the Stop-hook drain `attend inbox --drain` for an active one (ADR-172). The skill and the way both state that the CLI is the contract (ADR-124, ADR-136), and the same messaging guidance is held in lockstep across three sources: `skills/attend/SKILL.md`, the sensor-disclosure reheat `messaging.md`, and the attend way.

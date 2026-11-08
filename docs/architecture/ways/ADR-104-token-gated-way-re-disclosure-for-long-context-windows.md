@@ -29,6 +29,14 @@ imported:
 
 # ADR-104: Token-Gated Way Re-Disclosure for Long Context Windows
 
+## Summary
+
+- **Decided:** On 2026-03-13 the project replaced the once-per-session rule for ways with re-disclosure gated by token distance. A way became eligible to fire again once the conversation had grown by 25% of the model's context window since its last disclosure, and it still needed a matching prompt or tool action to fire. Re-disclosure injected the full way again and reset the token and epoch stamps, so its checks started their distance over. ADR-123 superseded the mechanism on 2026-04-14 with a curve that each way declares, and kept token distance as the axis.
+- **Trades away:** Every way evaluation read the token position from the transcript, and the shell scripts had to detect the model to know its window size. One 25% figure applied to every way. The record rejected epoch-based re-disclosure, re-disclosure on every match, longer checks and a manual command.
+- **One-way?** No. ADR-123 replaced the global constant and the model lookup with per-way curves without changing the trigger requirement.
+- **Probes:** *Not confident (token-axis):* Should re-firing be measured in tokens of conversation rather than in tool events? Yes or no. *Not confident (trigger-needed):* Should a faded way still wait for a matching prompt or tool action before it fires again? Yes or no.
+- **Inversion:** At one end a way fires once per session. At the other it fires on every match. This decision let a way fire again after a fixed share of the context window had passed, still only on a match.
+
 ## Status: Superseded by ADR-123
 
 **Superseded 2026-04-14.** The core insight of this ADR — that ways must re-fire on a token-distance axis rather than once-per-session, because retrieval degrades as context accumulates past a way's injection point — is still correct and load-bearing. The specific implementation described below (a global `REDISCLOSE_PCT: u64 = 25` constant, a per-model context-window lookup, a flat step-function that admits re-firing once distance crosses 25% of the window) has been replaced by the per-way curve engine introduced in [ADR-123](ADR-123-firing-dynamics-progression-axis-unification.md).

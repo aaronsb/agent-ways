@@ -28,6 +28,14 @@ imported:
 
 # ADR-180: GitHub issues as the shared truth for the session task list
 
+## Summary
+
+- **Decided:** GitHub issues that carry the `tasklist` label are the shared source of truth for session tasks, and each session's Claude Code task store is a cache of them. A `gh-tasks` executable writes task files straight into the store with ids of the form `gh-<issue number>`. Its `pull` verb reads labeled issues, `push` closes, labels or comments on them, `whisper` prints one line per change, and `link` attaches an existing task to an issue. Hooks run it: pull and whisper at session start, on prompts after a time threshold, and after `gh issue` commands; a `TaskCreated` check rejects labeled work without the `[gh#N]` prefix; push runs at `Stop`. Each field has one owner instead of a two-way merge: GitHub owns the title, body and open or closed state, and the session owns in-progress status, local edges and owner. Issue bodies enter the store marked as untrusted text. An `issues` skill and a way complete the bridge, there is no daemon, and push ships in a second increment after pull.
+- **Trades away:** Nothing wakes an idle session, so an issue opened between prompts appears at the next prompt. Each pull costs a `gh` round trip, the next body change overwrites a local description edit, read-only contributors get pull without push, and the pull side depends on Claude Code's undocumented task file layout. An `attend` sensor, a checklist issue, writing into the transcript, GitHub Projects and the GitHub MCP server were rejected.
+- **One-way?** No. Repositories without the label see no behaviour, and the record says it is superseded if Claude Code ships the bridge requested upstream, with the label and prefix convention carrying over.
+- **Probes:** *Not confident (push-close):* Should the bridge close and comment on labeled issues at `Stop` without asking? Yes or no. *Not confident (idle-wake):* Is it acceptable that a new issue waits for your next prompt to appear? Yes or no.
+- **Inversion:** At one end, each session copies its tasks from issue text by hand and carries nothing back. At the other, a daemon keeps tasks and issues in full two-way sync and wakes idle sessions. This sits between them: hooks pull and push on Claude Code's own events, and each field has one owner.
+
 ## Context
 
 Claude Code ships a task list: `TaskCreate`, `TaskList`, `TaskGet`,

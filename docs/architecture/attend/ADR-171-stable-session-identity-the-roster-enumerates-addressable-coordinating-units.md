@@ -27,6 +27,14 @@ imported:
 
 # ADR-171: Stable session identity — the roster enumerates addressable coordinating units
 
+## Summary
+
+- **Decided:** On attend's message bus, a Claude session's identity is its session ID paired with the working directory in its session record, never the directory of the process that launched attend. A new attend-session crate derives that pair by walking up the process tree to the owning Claude session, and for a process no session owns it falls back to a `pid-<pid>` ID flagged as unresolved. Every attend command, the peers sensor, the instance registry, the heartbeat and focus-group membership use that one derivation, and `attend whoami` prints it. The roster lists only top-level sessions; subagents get no identity and no letter. The Greek-letter suffix is for display and is never a key. Periodic maintenance re-registers a missing entry instead of only updating an existing one.
+- **Trades away:** Each attend command now reads the sessions directory and climbs the process tree, which costs more than reading the current directory. Signals written under old personas still show as separate chips until they leave the buffers. The record rejected letters for subagents by process lineage, keying anything on the displayed suffix, documenting a rule not to `cd` before launching attend, and writing fake session records for other processes.
+- **One-way?** No. The record does not discuss reversal. One crate holds the derivation, so changing it is a change in one place.
+- **Probes:** *Not confident (subagent-chips):* Should subagent activity show on the parent session's chip? Yes or no. *Not confident (old-personas):* Should old signals keep showing superseded personas, not be rewritten? Yes or no.
+- **Inversion:** At one end, every process that speaks on the bus gets its own identity. At the other, each session has one fixed key that only its session record decides. This record sits at the second end and treats subagents as part of their parent session.
+
 ## Context
 
 A live multi-session test (issue #378) surfaced the "multiple personalities"

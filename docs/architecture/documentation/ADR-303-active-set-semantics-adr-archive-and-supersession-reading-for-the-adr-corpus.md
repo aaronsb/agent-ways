@@ -24,6 +24,14 @@ imported:
 
 # ADR-303: Active-set semantics, adr archive, and supersession reading for the ADR corpus
 
+## Summary
+
+- **Decided:** The ADR tool gains `adr archive`, which moves a record to `docs/architecture/archive/<domain>/`, sets its status (by default `Superseded`), and adds a banner with the date, a required reason and any replacing record. `list` and `index` show the active set, meaning the records still in force, by default, while `lint` still checks archived records. The tool parses the `supersedes` and `superseded_by` frontmatter fields; `lint` reports an error for a reference to no known record and a warning for a pair that does not point both ways. Partial supersession is written as a section reference such as `ADR-167#4`, with no new status, and `archive` refuses a partially superseded record.
+- **Trades away:** An archived record no longer matches its last active revision, since its status changes and it gains a banner; git history holds the earlier text. Nothing checks that a section reference names a real section. The record rejected deleting superseded records, a `Partially-Superseded` status, and leaving partial supersession in prose.
+- **One-way?** No. The record does not discuss reversal. Archiving is a `git mv` with a status rewrite and a banner, and the record states that history keeps the earlier revision.
+- **Probes:** *Not confident (lint-archive):* Should `lint` keep checking archived records? Yes or no. *Not confident (partial-status):* Should partial supersession stay a section reference rather than a new status? Yes or no.
+- **Inversion:** At one end, every record stays in one flat list whatever its status. At the other, superseded records are deleted. This sits between them: superseded records move to an archive that stays tracked, linted and linkable, and the default views show only what is in force.
+
 ## Context
 
 Issue #438 laid out the problem against this repo's own numbers: 85 ADRs on

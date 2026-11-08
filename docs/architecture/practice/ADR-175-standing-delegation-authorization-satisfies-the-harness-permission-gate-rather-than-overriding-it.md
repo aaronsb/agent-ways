@@ -26,6 +26,14 @@ imported:
 
 # ADR-175: Standing delegation authorization satisfies the harness permission gate rather than overriding it
 
+## Summary
+
+- **Decided:** The project answers Claude Code's system-prompt line "Do not call the AgentTool unless the user requested it" by showing that the user did request delegation, not by telling the model to ignore the line. The subagents way states that invoking a skill or way whose steps call for delegation counts as the user's request, and asks for a one-clause payoff statement at each delegation, which answers a separate nudge about cost. Each skill or way whose steps dispatch an agent also carries a short authorization clause at that step, because a skill's text is read when it is invoked and does not depend on a way winning a match. The grant covers the Agent tool only; workflows and deep research still wait for the operator's ask. Delegation still needs asking outside an invoked procedure, when it spends significant tokens beyond the task, or when the operator has said to work solo. A procedure authorizes the width it describes, and the agent asks past about six agents.
+- **Trades away:** The clause is repeated across several files, and nothing enforces it on a new delegating skill; a site without it grants nothing, so the model asks as before. The effect can only be checked in live sessions, and the explanation in the subagents way needs pruning if upstream removes the line. Widening the subagents way's trigger, flipping the upstream feature flag, a line in the user's CLAUDE.md, and text that overrides the system prompt were rejected.
+- **One-way?** No. The record calls the change compatible with an upstream fix and cheap to remove if one lands.
+- **Probes:** *Not confident (invocation-grant):* Does invoking a procedure that names a delegation step count as your request to delegate? Yes or no. *Not confident (workflows):* Should workflows and deep research keep waiting for your explicit ask? Yes or no.
+- **Inversion:** At one end, the operator names delegation on every occasion, as the system-prompt line is written. At the other, the corpus overrides the line and the agent delegates freely. This sits between them: the authorization lives in the procedures the operator invokes, meets the line on its own terms, and is bounded in width.
+
 ## Context
 
 Claude Code 2.1.219+ injects a system-prompt section (`heron_brook`) carrying a single

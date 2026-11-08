@@ -31,6 +31,14 @@ imported:
 
 # ADR-125: Authored Disclosure Graph and Removal of BM25
 
+## Summary
+
+- **Decided:** The way library is named an authored disclosure graph: ways are nodes written by people, the directory tree, sibling similarity and See Also references are edges, and each node carries one or more embedding coordinates (aliases), such as its English text and its locale stubs. Matching uses the embedding model only, and a node's score for a prompt is its best cosine similarity over its aliases. BM25 and the fallback that chose an engine by model availability are removed, so the embedding model is required. Each node has at most one `embed_threshold`, in its English frontmatter, and locale entries carry none. `ways tune` reports how close each alias sits to its node's English text instead of tuning per-alias thresholds. The `pattern:` and `commands:` regex triggers stay.
+- **Trades away:** `ways` cannot match at all without the embedding model, so offline installs need the model present. A language whose stubs score low can no longer get its own threshold; the fix is to rewrite the stub or lower the node's threshold for every language. Removing the per-locale field changed 1411 lines across about 83 files. The record rejected keeping BM25 for offline installs and a single global threshold.
+- **One-way?** No. The record does not discuss reversal. The changes are code removal and a mechanical field deletion; bringing BM25 back would mean restoring the removed code paths and fields.
+- **Probes:** *Not confident (model-required):* Should `ways` refuse to match rather than fall back to a weaker matcher when the model is missing? Yes or no. *Not confident (per-node-threshold):* Should thresholds stay per way rather than one number for all ways? Yes or no.
+- **Inversion:** At one end matching layers several engines and many thresholds to patch each failure. At the other, one model and one global threshold decide everything. This decision sits near the second end: one model, one threshold per way, and explicit regex triggers kept as the override.
+
 ## Context
 
 The way matching system has accumulated three matching tiers (embedding → BM25 → keyword/regex) and two parallel threshold systems (English `embed_threshold` in frontmatter, per-locale `embed_threshold` in `.locales.jsonl`). The original ADR-107 specified one threshold per way; in practice, 1411 per-locale entries now carry their own values, individually estimated and uncalibrated.

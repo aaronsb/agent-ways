@@ -30,6 +30,14 @@ imported:
 
 # ADR-148: framework surface ships operator content; dev harness in project scope
 
+## Summary
+
+- **Decided:** The folders the install projects into every operator's `~/.claude` (`skills/`, `agents/`, `commands/` and `hooks/ways/`) carry content for operators only. Tools for developing agent-ways itself live in the repo's own project scope, `.claude/ways/` and `.claude/skills/`, which git tracks and the install does not project. A new skill, way or command goes in the projected folders only if an operator who adopted agent-ways would use it. The `project-pulse` skill and the `meta/project-health` way moved to project scope, and the way lost its `when: project:` gate. The repo's `.gitignore` changed from ignoring everything except listed paths to tracking files by default and ignoring build output and runtime files.
+- **Trades away:** A project-scoped way such as `project-health` fires only once the project corpus includes project-local ways, which may need a `ways corpus` rebuild in the dev checkout. The new `.gitignore` lets an unlisted junk file be committed, where the old one ignored it by default. The record rejected deleting the two tools, turning `project-pulse` into an operator feature, adding a `when: git_remote:` condition, and keeping the old `.gitignore` with extra exceptions.
+- **One-way?** No. The change moved two artifacts and rewrote one ignore file. The record does not discuss reversal.
+- **Probes:** *Not confident (placement-test):* Should "would an operator use this?" be the only test for putting something in the shipped folders? Yes or no. *Not confident (pulse-product):* Should `project-pulse` stay a maintainer tool rather than become something operators run on their own projects? Yes or no.
+- **Inversion:** At one end everything the maintainer writes ships to every install. At the other the maintainer's tools live outside the repo. This decision sits between them: the maintainer's tools stay in the repo and are tracked, but in its project scope, which the install does not project.
+
 ## Context
 
 The projected framework surface — the roots the reconciler symlinks into every

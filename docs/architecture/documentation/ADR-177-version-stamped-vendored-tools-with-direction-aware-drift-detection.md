@@ -28,6 +28,14 @@ imported:
 
 # ADR-177: Version-stamped vendored tools with direction-aware drift detection
 
+## Summary
+
+- **Decided:** Each of the three tools that ways copy into other repositories (`adr-tool`, `doc-tool` and `chart-tool`) carries its own semantic version in a `TOOL_VERSION` line and answers `--version`. The version changes only when the tool changes, not with each ways release. A way macro reads the version from the repository's copy and from the installed template without running either, compares them, and reports one of five states: the copy predates versioning, the copy is stale, the copy is customized, the copy is ahead of the install, or the install is unversioned. The last two both mean the install needs an update. The skill that owns each tool documents how to re-vendor it, with a diff first when the copy is customized so local changes carry forward.
+- **Trades away:** Each tool change needs a manual version bump, and a change without one defeats the check. Copies already vendored have no marker and read as out of date on first contact. The record rejected keeping the byte diff, stamping tools with the ways release version, a registry of checksums, and updating copies automatically, since an automatic update would overwrite local changes.
+- **One-way?** No. The record does not discuss reversal. The change is a version line in three tools, a macro and skill text, all in this repository.
+- **Probes:** *Not confident (auto-update):* Should a stale copy only be reported, never overwritten automatically? Yes or no. *Not confident (per-tool):* Should each tool keep a version separate from the ways release? Yes or no.
+- **Inversion:** At one end, vendored copies are snapshots that nobody checks. At the other, the install overwrites them whenever they differ. This sits between them: each copy carries a version, the session is told which way the copy has drifted, and the operator decides whether to re-vendor.
+
 ## Context
 
 Three tools ship inside ways and get **vendored** — copied, never symlinked —

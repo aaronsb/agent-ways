@@ -27,6 +27,14 @@ imported:
 
 # ADR-118: Focus Groups — Dynamic Agent Grouping
 
+## Summary
+
+- **Decided:** A focus group in attend is a named channel for signals, any string such as `deploy`, that agents join with `attend focus on` and leave with `attend focus off`, in place of the earlier lists of project paths. Every agent is always in its own project's group and in broadcast. A group with no members is deleted on the next poll unless someone pinned it. Scenes are named presets that set group membership and two attention scopes, one for project work and one for coordination, each with its own sensors and its own rate limiter. attend remembers the active scene per project and restores it on restart, and a repository can ship its own scenes.
+- **Trades away:** Agents need some way to learn group names; `attend focus all` lists them, but the first name still comes from convention or a scene. Two rate limiters, one per scope, make the disclosure path more complex.
+- **One-way?** No. The record does not discuss reversal. Project scope and broadcast are unchanged, so existing signals still work, and groups are directories under the signals directory.
+- **Probes:** *Not confident (deep-work):* In a deep-work scene, should an agent see no peer signals at all? Yes or no. *Not confident (auto-scene):* Should attend restore a project's last scene on restart without asking? Yes or no.
+- **Inversion:** At one end, agents address each other by filesystem path. At the other, agents gather under names they choose. This record moves to names and keeps the project path as an implicit group.
+
 ## Context
 
 attend's original grouping model had focus groups implemented as static path lists — `attend focus add ~/Projects/foo` required knowing the exact filesystem path of a peer. This was brittle: paths are implementation details, groups didn't self-clean, and there was no dynamic middle ground between "just me" and "everyone."

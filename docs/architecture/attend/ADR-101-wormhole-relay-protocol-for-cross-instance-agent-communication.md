@@ -24,6 +24,14 @@ imported:
 
 # ADR-101: Wormhole relay protocol for cross-instance agent communication
 
+## Summary
+
+- **Decided:** Two Claude instances on different machines hold a multi-turn conversation over magic-wormhole, a tool that moves files between machines with single-use short codes. Each transfer carries a manifest file that lists the codes for the coming turns and a continuation code that brings a fresh batch, and a comms agent on each team runs the relay. An experiment on 2026-02-26 found the protocol unfit for conversations, so the record was deprecated and wormhole kept for one-shot file transfers only. ADR-113 later superseded it.
+- **Trades away:** Each turn costs a full wormhole handshake, so the protocol is slow and unfit for frequent messages. It depends on the public wormhole relay server, sends future codes in plain text inside the manifest, and needs wormhole installed on both machines. The record rejected SSH, cloud storage, email, a custom relay server and codes generated from a shared seed.
+- **One-way?** No. The record does not discuss reversal. The protocol needs no server and no accounts, and the project dropped it after one experiment.
+- **Probes:** *Not confident (cross-machine):* Is chat between agents on different machines still a goal? Yes or no. *Not confident (one-shot):* Should wormhole stay in use for one-shot file transfers? Yes or no.
+- **Inversion:** At one end, agents talk over a transport built for persistent two-way messaging, which needs a running service. At the other, they borrow a one-shot transfer tool that needs no infrastructure. This record sat at the second end, and its experiment moved the project toward the first.
+
 ## Status: Deprecated
 
 **Deprecated 2026-02-26** after experimental validation. The manifest protocol works mechanically but wormhole's one-shot, role-asymmetric design makes it fundamentally unsuited for conversations. See [Experimental Results](#experimental-results-2026-02-26) below. For agent-to-agent chat, use a persistent bidirectional transport (IRC, Matrix, or similar). Wormhole remains the right tool for one-shot file transfers via the `/wormhole` skill.

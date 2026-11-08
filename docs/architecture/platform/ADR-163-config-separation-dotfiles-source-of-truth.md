@@ -27,6 +27,14 @@ imported:
 
 # ADR-163: Config separation — dotfiles as source-of-truth feeding the settings fragment store
 
+## Summary
+
+- **Decided:** The operator's dotfiles repository is the source of truth for their Claude Code configuration across machines. Dotfiles deploys settings fragments into the ADR-147 store at `$XDG_CONFIG_HOME/agent-ways/settings/`, and `ways settings project` merges them into `~/.claude/settings.json`; dotfiles never writes `settings.json` itself. Dotfiles deploys file artifacts, such as `statusline.sh`, straight to `~/.claude`. Each artifact has one owner: the fragment store owns settings keys and dotfiles owns files. The framework repo's tracked `settings.json` ships only the `hooks` and `permissions` sections that `ways reconcile` shares with the user, so `statusLine` was removed from it. The projector's record of what it last applied stays on its own host, is reset when the set of keys the store owns changes, and is never deployed.
+- **Trades away:** The two settings writers, `ways reconcile` and `ways settings project`, stay separate, and unifying them is left for later. Projection of file artifacts stays outside agent-ways, in dotfiles. The record deferred building file projection into agent-ways, and rejected letting dotfiles write `settings.json` directly and keeping personal config in the framework repo.
+- **One-way?** No. The record defers moving file projection into agent-ways and says to revisit that if the set of files grows.
+- **Probes:** *Not confident (file-owner):* Should dotfiles keep owning file artifacts such as `statusline.sh`, rather than agent-ways? Yes or no. *Not confident (two-writers):* Should `ways reconcile` and `ways settings project` stay two separate writers of `settings.json`? Yes or no.
+- **Inversion:** At one end each host's `~/.claude` is configured by hand on that host. At the other the framework repo carries the operator's personal configuration. This decision sits between them: the operator's own repository carries it, and agent-ways compiles and merges what that repository deploys.
+
 ## Context
 
 ADR-147 built the user-scope settings fragment store (`$XDG_CONFIG_HOME/agent-ways/settings/`)

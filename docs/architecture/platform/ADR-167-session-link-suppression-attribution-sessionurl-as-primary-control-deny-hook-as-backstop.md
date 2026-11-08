@@ -29,6 +29,14 @@ imported:
 
 # ADR-167: Session-link suppression: attribution.sessionUrl as primary control, deny hook as backstop
 
+## Summary
+
+- **Decided:** Setting `attribution.sessionUrl: false` is the main control that keeps the session link out of commits and PRs. The setting lives in the fragment `20-attribution.md` in the ADR-147 settings store, beside `commit: ""` and `pr: ""`, and reaches `~/.claude/settings.json` through the operator's dotfiles. With it set, Claude Code never tells the model to add the link. The ADR-162 deny hook stays unchanged as a backstop, because the key is undocumented upstream and the fragment reaches a host by a different route from the hook. The `github` macro reports the session link from `sessionUrl`, where an absent key means the link is on, and reports the Co-Authored-By footers separately from `commit` and `pr`. A controlled run on 2026-07-16 showed that the setting removes the trailer instruction from the system prompt.
+- **Trades away:** The main control is undocumented upstream, so if Anthropic renames or removes the key the control fails silently, which the hook is there to catch. The SchemaStore schema does not list the key, so `ways settings new` refuses it and the fragment is written by hand. The project maintains two mechanisms where ADR-162 had one. The record rejected keeping the hook alone, dropping the hook, amending ADR-162 in place, and setting the key directly in `~/.claude/settings.json`.
+- **One-way?** No. The setting is one key in one fragment, and the hook code is unchanged. The record does not discuss reversal.
+- **Probes:** *Not confident (keep-backstop):* Should the deny hook stay even though the setting alone suppresses the link? Yes or no. *Not confident (scope-run):* Should someone make the one controlled run with `remoteControlAtStartup` off to settle which session types the setting covers? Yes or no.
+- **Inversion:** At one end a setting the vendor controls is trusted on its own. At the other a hook the project owns is the only defence. This decision sits between them: the setting does the work, the hook stays as insurance, and the status macro reports the control that actually governs the link.
+
 ## Context
 
 The disclosure surface [[ADR-162]] identified is real and unchanged: Claude Code

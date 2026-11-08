@@ -26,6 +26,14 @@ imported:
 
 # ADR-165: Loop-control bookends: start, develop, merge, release, wrap
 
+## Summary
+
+- **Decided:** Five skills that the operator invokes, each paired with a way, carry work through a session: `/start` opens it, `/develop` carries the loop, `/merge` lands an increment, `/release` publishes a release, and `/wrap` closes the session. `/start` and `/wrap` both read the context gauge, `ways context`: `/start` advises against starting late in a session, and `/wrap` scales the handoff to what the session is about to lose. Planning happens inside `/start`, because Claude Code reserves plan mode. `/develop` picks the order of the early stages by where the uncertainty lies, then hands off to the existing stage skills and the code-reviewer subagent instead of reimplementing them. `ship` splits into `/merge` and `/release`. `/merge` picks its review path from two questions: how deep the machine review must be, and whether a human must approve.
+- **Trades away:** Every reference to `ship` across ways, skills and the skills catalog has to move to `merge` or `release`. Five coordinated pieces are more to keep consistent than one skill. Enriching `ship`, a `/develop` that runs every stage itself, a separate `/plan` skill, and a naming metaphor were rejected.
+- **One-way?** No. The record does not discuss reversal. The change adds skills and ways and renames one skill, all as text in the corpus.
+- **Probes:** *Not confident (start-dissuade):* Should `/start` advise against starting when the session is well under way? Yes or no. *Not confident (merge-gate):* Should `/merge` pick the review path itself and ask you only when the case is unclear? Yes or no.
+- **Inversion:** At one end, the operator types each stage request by hand every time. At the other, one orchestrator skill runs every stage itself. This sits between them: named skills open, carry and close the loop, and each hands the stage work to the skills and ways that already exist.
+
 ## Context
 
 The project already teaches every *stage* of software work as a way — design,

@@ -27,6 +27,14 @@ imported:
 
 # ADR-154: `ways introspect` — one model, three front-ends
 
+## Summary
+
+- **Decided:** Session introspection is one command, `ways introspect`, with modes over the shared model from ADR-153: `replay` for a finished session, `live` for the current one, `dump` for JSON an agent reads, `list --json` to enumerate sessions, and a drill-down tab that shows a fired way's body, its trigger criteria and the matched part of the session. The terminal interface stays on crossterm with a small hand-built layout helper instead of adopting ratatui. Live refresh polls and re-reads only when the files' modification time or size changed, instead of using a file watcher; a 2026-10-02 amendment replaced the fixed interval with a backoff from 2 s to 60 s. Scoping defaults to the current project and fails loudly, never widening to all projects, when it cannot detect one. `ways rethink` stays as a deprecated alias.
+- **Trades away:** The layout helper is new hand-written code of about 200 to 400 lines and does less than ratatui's widgets. A live loop that re-reads files has more moving parts than a one-shot dump. The record rejected ratatui for now because of binary size, compile cost and a rewrite of the shared rendering code, and rejected `attend-chat`'s async stack and the `notify` watcher because they bring threads or an async runtime into a synchronous tool.
+- **One-way?** No. The record calls it reversible and names the trigger for moving to ratatui: a drill-down that needs text selection or resizable, mouse-driven panes.
+- **Probes:** *Not confident (lean-binary):* Should keeping the binary small and dependency-free outweigh richer terminal widgets for now? Yes or no. *Not confident (single-command):* Should introspection live under one `ways introspect` command rather than separate verbs? Yes or no.
+- **Inversion:** At one end each surface is its own tool with its own logic. At the other, one rich windowed inspector serves every use. This decision sits between: one model and one command with several thin modes, kept lean until a richer interface is needed.
+
 ## Context
 
 ADR-153 defines a shared `SessionIntrospection` model. This ADR decides the

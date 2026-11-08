@@ -29,6 +29,14 @@ imported:
 
 # ADR-013: Ways, Skills, and Governance Architecture
 
+## Summary
+
+- **Decided:** Skills, ways and provenance are three layers that complement each other. Skills hold what the agent can do, ways hold the policy it must follow, and provenance records which governance controls a way is designed to address. Provenance stays with the way it justifies, not in separate overlay files. Ways fall into four types: compiled governance (Type 1, carries provenance), guidance drawn from experience (Type 2, carries none), guidance about governance itself (Type 3, a special case), and plumbing (operational, outside governance). Way text stays short because it prompts knowledge the model already has. The structure applies to any governance domain. The record's header notes two later changes: ADR-200 reads a provenance mapping as a claim about design, not evidence, and ADR-110 moved provenance into a sidecar file.
+- **Trades away:** Writing provenance needs knowledge of both the controls and the practice, and each provenance block is more to maintain when controls or guidance change. The record states that the system is only as good as the authors of its ways. Organizing ways by governance body, separate governance overlay files, and replacing ways with skills or raw hooks were rejected.
+- **One-way?** No. The record does not discuss reversal. Its own header shows later records changing parts of it: ADR-200 corrected its claims about evidence, and ADR-110 moved provenance out of way frontmatter.
+- **Probes:** *Not confident (type-marker):* Should a way's type still be read from whether it carries provenance, with no separate field? Yes or no. *Not confident (skill-migration):* Should pure reference ways move to skills as Claude Code adds features? Yes or no.
+- **Inversion:** At one end, ways are dropped in favour of Claude Code's own skills and hooks. At the other, ways take over what skills do as well. This sits between them: each primitive keeps the functions the other cannot perform.
+
 > **Refined by [ADR-200](../governance/ADR-200-compliance-claims-and-session-derived-findings.md).**
 > This ADR's core insights stand — ways as *activation cues* for latent knowledge, the
 > Type 1–4 way classification, the author-as-compiler model, and the formation intuition

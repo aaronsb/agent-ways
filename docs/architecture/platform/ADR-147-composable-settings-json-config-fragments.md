@@ -29,6 +29,14 @@ imported:
 
 # ADR-147: Composable settings.json — a store of YAML config fragments
 
+## Summary
+
+- **Decided:** The operator's Claude Code settings are kept as a tree of markdown files, one per concern. Each file's YAML frontmatter holds a `settings:` block, which is a piece of `settings.json` written in YAML, and its body explains why. The `ways settings` command lints each fragment against the community SchemaStore settings schema, then compiles the fragments in filename order under Claude Code's documented merge rules into one `settings.json` and a list of which fragment set each key. The reconciler projects the result into `~/.claude`. The schema ships as a data file, read only when a `ways settings` command needs it. agent-ways leaves the organisation's managed settings to Claude Code and does not merge them, and for a managed deployment it emits `managed-settings.d/*.json` files or a single merged file to paste into the console. The store defaults to `$XDG_CONFIG_HOME/agent-ways/settings/`. The record's status is superseded.
+- **Trades away:** A compile step sits between editing a fragment and the change taking effect. agent-ways maintains its own copy of Claude Code's merge rules, which drifts as the settings schema changes. Writing YAML fragments takes more learning than editing one JSON file. The record declined dependency graphs, content addressing, an epistemic layer and semantic queries, and it dropped two-way sync with the managed-settings console.
+- **One-way?** No. The record keeps the settings code apart from the matching engine so it can move to its own binary cheaply, and a later record superseded this one.
+- **Probes:** *Not confident (fragment-store):* Do you want your Claude Code settings kept as a tree of commented fragments rather than as one `settings.json`? Yes or no. *Not confident (static-lint):* Is a static check against the schema enough, without starting Claude Code against the compiled file? Yes or no.
+- **Inversion:** At one end the user hand-edits a single `settings.json`. At the other a full knowledge-graph system models the settings with dependencies and queries. This decision sits between them: a tree of commented fragments compiled in filename order, with only the checks `settings.json` needs.
+
 ## Context
 
 Claude Code's configuration surface is large — ~90 `settings.json` keys (many

@@ -26,6 +26,14 @@ imported:
 
 # ADR-115: Declarative Configuration with Project-Scope Overlay
 
+## Summary
+
+- **Decided:** Each tool in the agent-ways workspace may read a YAML config file at two scopes. The tool loads the user file at `~/.config/{tool}/config.yaml` first, then the project file at `{project}/.claude/{tool}.yaml` on top of it. In the project file, a `+name` entry adds an item to a collection and a `-name` entry removes one. Each tool offers `config init`, `config show` and `config path`. A project's config carries the same trust as that project's ways. Adoption by `ways` was deferred. Notes added in October 2026 record that attend moved to a typed schema and that the `+` and `-` prefixes were retired; the two-scope layering still holds.
+- **Trades away:** Users have to understand two files and how they layer. The original minimal YAML parser could not read anchors, multi-line values or deep nesting; the later notes record that this parser was replaced.
+- **One-way?** No. The record says tools adopt the pattern one at a time, and the later notes show the prefix syntax was retired without changing the layering.
+- **Probes:** *Not confident (project-trust):* Should a project's config file be trusted as much as that project's ways? Yes or no. *Not confident (ways-adoption):* Should `ways` itself read a config file in this two-scope form? Yes or no.
+- **Inversion:** At one end each tool keeps its settings in code and environment variables. At the other one shared file holds every setting for every project. This decision sits between them: one file per tool for the user, which each project can override.
+
 ## Context
 
 `attend` (ADR-113) introduced a two-layer configuration pattern during implementation: a user-scope config at `~/.config/attend/config.yaml` and a project-scope overlay at `{project}/.claude/attend.yaml`. The project overlay uses `+/-` syntax to add or remove sensors without rewriting the full config. This pattern proved clean enough to propose as the standard for the agent-ways workspace.

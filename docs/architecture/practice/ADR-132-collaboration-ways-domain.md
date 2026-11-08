@@ -23,6 +23,14 @@ imported:
 
 # ADR-132: Collaboration ways domain
 
+## Summary
+
+- **Decided:** A new top-level ways domain, `collaboration`, holds ways about working with other people and their agents. A domain is a top-level directory of ways: it groups them and is the unit a user enables or disables, and it does not affect matching. The first members are the new `collaboration/onboarding-share` way and `teams`, moved from `meta/teams`. `meta/trust` and `meta/subagents` stay in `meta`, and splitting `meta/attend` is deferred. The domain is named `collaboration` rather than `agentic`, and its ways sit directly under it.
+- **Trades away:** The project has one more domain boundary to enforce, or the new domain becomes a catch-all of its own. Moving `teams` required doc updates, and the locale translations and embedding corpus had to be regenerated before `onboarding-share` could match on more than its pattern.
+- **One-way?** No. The record calls a domain boundary a low-risk, reversible choice, because the directory decides organization and grouping, not matching.
+- **Probes:** *Not confident (attend-split):* Should the peer-awareness parts of `meta/attend` move into `collaboration` later? Yes or no. *Not confident (subagents):* Should `subagents` stay in `meta`? Yes or no.
+- **Inversion:** At one end, `meta` keeps every way about how the agent works, collaboration included. At the other, every way that involves another party moves into a collaboration domain. This sits between them: only ways that exist because the collaborators work through agents move, and foundational or execution ways stay in `meta`.
+
 ## Context
 
 Ways are organized into top-level domains (`meta`, `softwaredev`, `ea`, …). A domain is **not** a matching mechanism — disclosure is driven by frontmatter (`description`/`vocabulary`) and triggers (`pattern`/`files`/`commands`/state). The directory governs two other things: **organization** and the **include/exclude unit** (`ways.json` disabled domains, project-scope toggles per ADR-131). So a domain boundary is a low-risk, reversible choice — but it is the unit users reason about and toggle, so it's worth drawing on a real seam.

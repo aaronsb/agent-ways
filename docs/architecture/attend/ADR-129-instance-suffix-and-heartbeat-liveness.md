@@ -28,6 +28,14 @@ imported:
 
 # ADR-129: Instance suffix and heartbeat liveness for attend identity
 
+## Summary
+
+- **Decided:** attend handles naming and liveness with two separate mechanisms. For naming, a registry file per working directory gives each session an instance suffix, Greek letters spelled in ASCII and then numbers past 24, so two sessions in one directory show as `Jovan-alpha` and `Jovan-beta`. A session keeps its suffix for its whole life and gets it back on resume, entries unused for 7 days are reclaimed, and the suffix always shows, even for a session alone in its directory. For liveness, each session's attend touches a heartbeat file on every tick, and a session counts as alive when its Claude process runs and its heartbeat is under 90 seconds old. A stale heartbeat never frees a name. An addendum of 2026-10-13 adds a 30-second beat from the attend mod and counts a session alive while the Claude Code process its enrollment record names still runs on this host.
+- **Trades away:** Every display of a nickname changes at once, and agents see their own names change. attend gains two new state directories to debug, a resume after more than 7 days may get a different suffix, and each tick writes one file per session. The record rejected sequential numbers, hex suffixes from the session ID, having a resumed session give up its letter, assigning letters at render time, a suffix only on collision, SQLite, and storing assignments in `_groups.yaml`.
+- **One-way?** No. The record does not discuss reversal. Both mechanisms are flat files under `~/.cache/attend/`, and `make purge-attend-state` wipes them.
+- **Probes:** *Not confident (always-suffix):* Should a session alone in its directory still show its suffix? Yes or no. *Not confident (gc-window):* Is seven days the right time before an unused suffix is reclaimed? Yes or no.
+- **Inversion:** At one end, names are computed from the live sessions each time they are shown, with no stored state. At the other, a stored registry fixes each session's name for its life. This record sits at the second end and keeps liveness in a separate file so a quiet session keeps its name.
+
 ## Context
 
 attend's identity and liveness systems each have a corner case that has surfaced in real use. The two cases are independent in cause but adjacent in effect — both produce a wrong picture of "who is here" — and they should be addressed in one decision so the design boundary between them is explicit.

@@ -27,6 +27,14 @@ imported:
 
 # ADR-182: Keepwarm: attend keeps the prompt cache warm with a wake floor
 
+## Summary
+
+- **Decided:** A keepwarm sensor in attend wakes the session once after 50 idle minutes, while an armed window is open and the context holds at least 50k tokens, so the next request reads the 1-hour prompt cache instead of rewriting it. Idle time is measured from the last assistant line in the session transcript. The sensor checks the next response's usage: a cache read of at least half the previous context counts as warm, and anything less stops the sensor. attend records cold rewrites and arms a three-hour window by itself after one. The operator uses `attend keepwarm on`, `off` and `status`, with a six-hour default window. `ways context --json` gains a usage tail and a `--session` option. The guidance files tell the agent to answer a keepwarm line with one word and no tools.
+- **Trades away:** Each wake adds about a hundred tokens to the transcript, a model at high effort may think before its one word, and on a subscription the cost against usage limits is unknown. A guard that refuses a cold send was left for a later ADR. The record rejected porting the cache-tax mod as a function hook, a side request from attend, folding keepwarm into the context sensor, arming by default, and a separate emission clock in attend.
+- **One-way?** No. The record does not discuss reversal. Keepwarm does nothing unless a window is armed, and its state is a per-session file under attend's cache.
+- **Probes:** *Not confident (auto-arm):* Should attend arm keepwarm by itself after a paid cold rewrite? Yes or no. *Not confident (subscription):* Should keepwarm run on subscription sessions, where its cost against limits is unknown? Yes or no.
+- **Inversion:** At one end, the cache lapses whenever the session sits idle and the next turn pays the rewrite. At the other, the session is kept warm at all times. This record sits between them: it keeps the cache warm only inside a window the operator armed or a paid rewrite triggered.
+
 ## Context
 
 Claude Code's main conversation is cached on the 1-hour prompt-cache tier. Every request reads the cached prefix and refreshes its timer. A request that arrives after the hour lapses rewrites the whole prefix at the cache-write rate, which on a 200k-token session under Fable 5.1 costs about four dollars against five cents for a warm turn.

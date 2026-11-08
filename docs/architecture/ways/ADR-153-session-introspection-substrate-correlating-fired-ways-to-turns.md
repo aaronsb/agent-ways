@@ -26,6 +26,14 @@ imported:
 
 # ADR-153: Session-introspection substrate — correlating fired ways to turns
 
+## Summary
+
+- **Decided:** One shared model in `ways-core`, `SessionIntrospection`, joins the firing-event log, the Claude Code session transcript and way frontmatter to say which ways fired on which turn and why, for the replay, live and dump front-ends of ADR-154 and for the ADR-201 finding pipeline. First, the shell hooks that hardcoded the old events-log path resolve it from a new `ways events-log-path` command, so every writer and reader use one file. The model reads each turn's transcript message id from the transcript after the fact, records the text a keyword, command or file pattern matched at fire time, and reports semantic fires only at the level of the way's score. Every link the model infers from time or token position rather than a real key is labelled as heuristic.
+- **Trades away:** Recording the matched text touches the hot firing path, which has to stay cheap and keep the log append-only with one record per line. Encoding how confident each join is makes the model more complex than treating every link as exact. The new fields apply only going forward, so older sessions keep the coarse join, and the model depends on transcripts that Claude Code owns. The record rejected reading both log paths as the lasting fix and showing a matched vocabulary word for semantic fires, since none exists.
+- **One-way?** No. The record does not discuss reversal. The new fields are additive, and the model falls back to the heuristic join when they are absent.
+- **Probes:** *Not confident (honest-grain):* Should introspection show semantic fires only as a whole-way score, never a guessed matching word? Yes or no. *Not confident (shared-substrate):* Should introspection and compliance findings read the same join rather than each build their own? Yes or no.
+- **Inversion:** At one end each front-end works out its own guess at why a way fired. At the other, every link is recorded as an exact key at fire time. This decision sits between: one shared join that uses keys where they exist and labels its guesses where they do not.
+
 ## Context
 
 We want to answer, for any past or live session: **which ways were injected into

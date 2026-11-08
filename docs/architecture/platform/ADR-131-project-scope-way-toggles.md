@@ -28,6 +28,14 @@ imported:
 
 # ADR-131: Project-scope way toggles
 
+## Summary
+
+- **Decided:** A project can switch off single ways in its own `{project}/.claude/ways.yaml`, under a `ways:` mapping keyed by each way's full name, with `enabled: false` or the short form `false`. Every way stays on unless the project switches it off. `ways disable <way>` and `ways enable <way>` edit that file, and neither has a global form. `ways scan` and the subagent injection script skip a disabled way entirely, with no scoring and no disclosure. The user-scope `disabled_domains` setting stays as it was and is not extended.
+- **Trades away:** A person debugging why a way does not fire has one more place to look. A way renamed upstream silently stops being disabled. The record rejected per-way switches in user scope, deeper paths in `disabled_domains`, ADR-115's `+`/`-` syntax, and deleting way files.
+- **One-way?** No. The record calls it reversible: `ways enable` restores a way with one command, and a project without a `ways.yaml` behaves as before.
+- **Probes:** *Not confident (global-switch):* Should switching off a single way stay possible only per project, never for all projects at once? Yes or no. *Not confident (unknown-names):* Should `ways disable` write an entry for a way that does not exist yet? Yes or no.
+- **Inversion:** At one end every way fires in every project. At the other each project lists the ways it wants. This decision sits near the first end: every way fires by default, and a project names only the ways it switches off.
+
 ## Context
 
 Ways fire across every project the user opens, but not every way is wanted in every project. A research-heavy repo doesn't need `itops/incident`; a personal scratch project doesn't want `documentation/adr` nagging. Today the only enable/disable knob is `disabled_domains` in user-scope `~/.claude/ways.json` — coarse (domain-level) and global (applies everywhere). The result:

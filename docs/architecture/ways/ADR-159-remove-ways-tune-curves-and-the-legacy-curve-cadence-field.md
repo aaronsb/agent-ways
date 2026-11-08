@@ -28,6 +28,14 @@ imported:
 
 # ADR-159: Remove ways tune-curves and the legacy curve: cadence field
 
+## Summary
+
+- **Decided:** The `ways tune-curves` command and the legacy `curve:` frontmatter field are removed. The command wrote `curve:` blocks with an absolute half-life, which the schema no longer accepts after ADR-126 moved cadence to `refire:`, so `--apply` produced files the linter rejects. The `Frontmatter.curve` field, its read fallback and its special lint case go too, so a stray `curve:` block gets the generic unknown-field warning. `refire:` is the only authored cadence field. The runtime `Curve` type stays, because `refire:` resolves into it at fire time.
+- **Trades away:** Users lose the helper that suggested a cadence from observed firings; the telemetry stays for the deferred ADR-134 auto-tuner. Removing a shipped subcommand is a visible change to the command line. The record rejected fixing the command to write `refire:` because converting a token count to a window fraction ties the value to one model's window again, rejected silencing the lint, and rejected keeping the read fallback as dead code.
+- **One-way?** No. The record does not discuss reversal. The removed command and field remain in git history, and no shipped way used `curve:`.
+- **Probes:** *Not confident (retire-helper):* Is losing the cadence-suggestion helper acceptable until an automatic tuner exists? Yes or no. *Not confident (one-cadence-field):* Should `refire:` be the only way an author sets cadence? Yes or no.
+- **Inversion:** At one end the project keeps every tool it ever shipped and repairs each one. At the other, it deletes anything that conflicts with the current model. This decision deletes the command that conflicts with `refire:` and keeps the runtime type the current model still uses.
+
 ## Context
 
 `ways tune-curves` (ADR-123 Phase E) reads fire telemetry, computes the median

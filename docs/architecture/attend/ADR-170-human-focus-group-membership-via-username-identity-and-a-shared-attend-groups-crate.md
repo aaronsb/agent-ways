@@ -28,6 +28,14 @@ imported:
 
 # ADR-170: Human focus-group membership via username identity and a shared attend-groups crate
 
+## Summary
+
+- **Decided:** A human joins attend focus groups under their sanitized username, one entry per person whatever terminal they use. While attend-chat runs, it touches a heartbeat file under that username every 5 seconds, so human members age out after the same 90-second grace as Claude sessions, with no change to the groups file format. Group reading and writing move into a shared attend-groups crate used by both attend and attend-chat. `attend send --focus` counts a member live when its Claude session is alive or its heartbeat is fresh. attend-chat gains `/join`, `/leave`, `/clear`, `/dissolve` (refused while a member is live), `/channels`, and `/purge`, which deletes a channel's message history on the operator's command and so overrides ADR-136's default that messages stay. Cleanup also removes group directories that have no entry in the groups file.
+- **Trades away:** Member lists mix usernames and session IDs, so tools can no longer assume every member is a session. Two chat windows for one person share one heartbeat, so presence per window is out of scope. One more crate is built and versioned. A Claude session whose process died while its attend still beats now counts as live. The record rejected prefixed human IDs, an identity per terminal, linking attend into attend-chat as a library, a second hand-written YAML writer, and fake session files for humans.
+- **One-way?** No. The record does not discuss reversal. The groups file keeps its format, so dropping human members means only that attend-chat stops writing them.
+- **Probes:** *Not confident (purge-override):* Should a human be able to delete a channel's history by command? Yes or no. *Not confident (per-window):* Should each chat window ever count as its own presence? Yes or no.
+- **Inversion:** At one end, focus groups hold only Claude sessions and humans watch from outside. At the other, humans get a separate kind of membership. This sits between them: humans join on the same terms as sessions, keyed by username and kept alive by the same heartbeat.
+
 ## Context
 
 attend-chat (ADR-120) is the human's seat on the signal bus, but focus-group

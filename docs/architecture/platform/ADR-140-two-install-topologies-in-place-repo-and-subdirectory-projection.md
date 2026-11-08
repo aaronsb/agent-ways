@@ -26,6 +26,14 @@ imported:
 
 # ADR-140: Two install topologies: in-place repo and subdirectory projection
 
+## Summary
+
+- **Decided:** agent-ways supports two install layouts. In the in-place layout, which stays the default, `~/.claude` is the git clone and `make update` updates it. In the subdirectory layout, the clone lives in a folder inside `~/.claude`, and `make sync-to-home` copies its skills, agents, commands, hooks and binaries up into `~/.claude` and merges the hooks block and the ways permissions into the user's `settings.json`. The subdirectory layout copies files by default rather than linking them. The copy step writes a marker that names the source repo and the commit it last copied, so the update checker can say when the repo is behind and when it was pulled but not copied. The installer offers the subdirectory layout as a choice that keeps an existing `~/.claude`. A script behind the make target does the work, a `/sync-to-home` skill tells Claude how to run it, and a `meta/deployment` way explains when to pick each layout.
+- **Trades away:** Every install and update change must be reasoned about and tested for two layouts. Copying keeps drift between the repo and `~/.claude` as a real state; the nudge reduces it but does not remove it. The update checker, which runs at session start, gains a marker file and a new detection branch. Projection by symbolic link was rejected as the default because links are fragile on Windows and in low-privilege environments, and it was kept as an advanced opt-in.
+- **One-way?** No. The record says an opt-in symbolic-link mode can come later without deciding the layout question again, since only the projection method would change.
+- **Probes:** *Not confident (copy-default):* Should the subdirectory layout copy files rather than link them? Yes or no. *Not confident (two-layouts):* Should agent-ways keep both layouts rather than pick one? Yes or no.
+- **Inversion:** At one end `~/.claude` is always the repo, which leaves no drift and no room for a user's existing setup. At the other the repo never touches `~/.claude` except through copies. This decision supports both, with the in-place layout as the default and copying as the method for the subdirectory layout.
+
 ## Context
 
 Since its first release agent-ways has held one identity invariant: **the repo

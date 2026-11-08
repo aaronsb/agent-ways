@@ -34,6 +34,14 @@ imported:
 
 # ADR-193: Cross-encoder rerank gate in a resident daemon for way injection
 
+## Summary
+
+- **Decided:** The record proposed a cross-encoder reranker, a small model that reads the session context and a way's body together, as the last check before a semantically matched way is injected on the prompt, queued-message and subagent lanes. A per-user daemon, `wayd`, built from the `way-embed` tree, would hold the embedders, the reranker and a short rolling session context, and would answer hooks over a Unix socket with a 50 ms connect fallback to the ADR-160 matcher. Candidates were Ettin rerankers of 17M to 33M parameters, trained by distillation from a larger Qwen3 reranker under ADR-194, with a 300 ms p95 budget and a shadow-mode rollout. Pattern-triggered and `pattern_strict` ways would bypass it. The record was abandoned on 2026-10-01 and replaced by ADR-196, after ADR-195's probe found that a hosted judge separated relevant from irrelevant ways where a local cross-encoder did not.
+- **Trades away:** The record named a resident process of a few hundred MB with its own lifecycle code, up to 300 ms added per prompt scan, a training dependency before the gate could turn on, a carried llama.cpp patch, an English-only gate, and another calibrated threshold. It rejected tuning the ADR-160 constants further, small generative judges, remote rerankers, larger local cross-encoders and per-way classifiers.
+- **One-way?** No. The record does not discuss reversal, and it was abandoned before the gate shipped; its rollout kept the ADR-160 matcher as the complete fallback at every stage.
+- **Probes:** *Not confident (local-only):* Was local operation a firm requirement for the injection gate when this was drafted? Yes or no. *Not confident (latency-budget):* Was up to 300 ms added per prompt acceptable for better precision? Yes or no.
+- **Inversion:** At one end the embedding matcher alone decides what is injected. At the other, a large model judges every candidate. The record sat between: a small local model reading context and way body together, gated by a strict latency budget.
+
 ## Context
 
 Ways that do not fit the turn still surface. ADR-160 fixed the worst of the token-collision fires, and it left the operating points hand-set. `late_interaction.rs` labels its constants `HAND-SET and UNCALIBRATED`. Every attempt since then to remove a poorly-matched fire has meant moving one of those constants, and each move is checked against a small labelled set: 41 rows in `tests/routing-golden.tsv` and 143 in `calibration_probes.jsonl`, for a corpus of 161 ways. A move that fixes one fire can break another, and nothing measures the trade. Tuning in this state chases individual fires.

@@ -30,6 +30,14 @@ imported:
 
 # ADR-119: Action Potential Engagement Model
 
+## Summary
+
+- **Decided:** attend models an agent's engagement on the action potential of a neuron. After a burst of notifications from one sensor, that sensor's threshold rises for a time, the refractory period, so the agent stops answering a conversation whose value is falling. In the first seconds after a burst nothing from that sensor is shown; after that only high-magnitude signals pass. Directed messages start at magnitude 7.0 so they pass during the refractory period, and messages from a peer who sends several get a boost. ADR-123 superseded the record on 2026-04-14: a shared curve engine with exponential decay and burst detection by event count replaced the implementation, and the model itself stayed.
+- **Trades away:** Each sensor carries more state, the refractory parameters need tuning from real sessions, and users find it harder to see why an agent does not answer a message, since `attend status` does not show refractory state.
+- **One-way?** No. The record does not discuss reversal. ADR-123 replaced the implementation two days after acceptance and kept the yaml keys, converting them at load time.
+- **Probes:** *Not confident (self-disengage):* Should agents stop answering peers on their own, without the human stepping in? Yes or no. *Not confident (show-refractory):* Should `attend status` show when a sensor is in its refractory period? Yes or no.
+- **Inversion:** At one end, every signal that crosses a fixed threshold is shown, however many came before. At the other, recent activity raises the bar so the agent disengages. This record sits at the second end, with an exception for urgent and directed messages.
+
 ## Status: Superseded by ADR-123
 
 **Superseded 2026-04-14.** The underlying decision — model agent engagement on the neuronal action potential so refractory periods produce natural disengagement from diminishing-value stimuli — is still load-bearing and shipping in production attend. The specific implementation shape described below (linear per-minute decay, time-windowed burst detection, `EngagementState` owning `Instant` timestamps, `step_multiplier` that scales the peak multiplier per fire past threshold) has been replaced by the shared curve engine introduced in [ADR-123](../ways/ADR-123-firing-dynamics-progression-axis-unification.md).

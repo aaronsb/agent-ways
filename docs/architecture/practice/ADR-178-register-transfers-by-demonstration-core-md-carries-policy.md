@@ -25,6 +25,14 @@ imported:
 
 # ADR-178: Register transfers by demonstration - core.md carries policy
 
+## Summary
+
+- **Decided:** `core.md` carries policy and epistemics, and register (how output reads) moves to the operator's Claude Code output style. The record's reason is that the model imitates the prose it reads before it follows the rules in that prose, and `core.md` used the construction it banned. The change removed `core.md`'s list of banned phrases with their literal strings, its prose delivery bullets and its eight bolded lead-ins, cutting it from 1,002 to 632 words. `scripts/check-register.sh` runs in the pre-commit hook and holds `core.md` at zero on four counts: antithesis constructions such as "not X but Y", significance clauses, bolded paragraph lead-ins, and paired em-dash asides. The examples in `meta/trust/prose/prose.md` now delete the evaluation instead of moving it into a subordinate clause. Fourteen way files with high antithesis counts were edited, taking the corpus from 4 to 2 per thousand words.
+- **Trades away:** Operators with no output style lose the register guidance at turn 1. The `density` postcheck still cannot see the antithesis shape, so only `core.md` is checked for it. Because fourteen way files changed in the same change, a later effect cannot be attributed to `core.md` alone. Stronger bans, rewriting only the examples, and a "write plainly" rule were rejected, and an antithesis counter in the `density` postcheck was deferred.
+- **One-way?** No. The record does not discuss reversal. The changes are edits to way text and one check script.
+- **Probes:** *Not confident (no-style):* Is it acceptable that operators without an output style get no register guidance from ways? Yes or no. *Not confident (density-counter):* Should an antithesis counter be added to the `density` postcheck later? Yes or no.
+- **Inversion:** At one end, `core.md` carries both policy and detailed register rules, banned strings included. At the other, nothing constrains how `core.md` itself is written. This sits between them: register authority lives in the output style, and `core.md` is held to plain construction by checked counts of zero.
+
 ## Context
 
 ADR-174 addressed decorated prose with three tiers of guidance and a postcheck that counts. Its own test returned a null result and closed as "unfalsified, not validated." The operator reports output quality has degraded since, and identified `core.md` as the source.

@@ -26,6 +26,14 @@ imported:
 
 # ADR-300: Documentation Structure
 
+## Summary
+
+- **Decided:** Each documentation layer has one purpose and one location: the README as a landing page, guides in `docs/hooks-and-ways/`, reference pages, policy sources in `governance/policies/`, ADRs in `docs/architecture/`, and way files that the model reads at runtime. Content lives in exactly one layer and the other layers link to it. The README shrinks from about 463 lines to about 200, the seven docs for domains that have no ways are removed, a `docs/README.md` map is added, files that still named gzip NCD as the primary matcher are corrected to BM25, and the governance docs gain a getting-started entry. A reference to the Severance television series, the project's theme, stays only where it makes a concept clearer than plain words.
+- **Trades away:** Replacing inline content with links risks broken links, contributors must learn which file holds each topic, and a search of the README finds a summary instead of the explanation. The record rejected fixing only the NCD references, a full restructure into guides, reference and concepts folders, a documentation site generator, and a marker system for canonical files.
+- **One-way?** No. The record does not discuss reversal. The changes are edits, moves and removals of documentation files in this repository.
+- **Probes:** *Not confident (aspirational-docs):* Should a domain get documentation only once its ways exist? Yes or no. *Not confident (severance):* Should Severance references stay limited to places where they make a concept clearer? Yes or no.
+- **Inversion:** At one end, the README holds everything and readers need no navigation. At the other, the docs are rebuilt into a new hierarchy or a generated site. This sits between them: the existing docs tree stays, each topic has one home, and the README links to it.
+
 ## Context
 
 The documentation makes a strong first impression. A reader landing on the README quickly grasps the core concepts: ways inject contextual guidance, skills are semantically discoverable, governance traces policy to agent behavior. The Severance metaphor lands. The pitch works.

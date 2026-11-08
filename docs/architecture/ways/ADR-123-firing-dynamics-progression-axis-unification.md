@@ -37,6 +37,14 @@ imported:
 
 # ADR-123: Firing dynamics — progression-axis unification for attend and ways
 
+## Summary
+
+- **Decided:** `attend` and `ways` share one firing engine in the `sensor-trait` crate. The engine knows only a number that keeps increasing, supplied by the caller: `attend` passes wall-clock seconds and `ways` passes the token position in the conversation. Each way declares a required `curve:` in its frontmatter (exponential decay, a burst-and-recover shape, a fixed schedule of re-fires, or a flat suppression period), and the engine asks two separate questions of it: whether a new event may fire, and whether the last firing has faded enough to inject the way again. The old `redisclose:` field was removed with no compatibility layer. A way may also ship a `postcheck.sh` that runs after a tool call and asks for a firing based on the observed result, such as a file growing past 500 lines, and that request passes the same gate. A `ways tune` command was to suggest curve values from logged firings.
+- **Trades away:** The change touched three crates at once, and every existing way had to be rewritten to declare a curve in one migration, with no period where old and new fields both worked. Every curve query adds one dispatch. Default curve values were guesses until session data was surveyed, and converting `attend`'s per-minute decay rates to half-lives needed a compounding formula for each parameter. The record rejected separate engines per tool, a time-based `Clock` abstraction, turn count or wall clock as the ways axis, and a shim that translated `redisclose:`.
+- **One-way?** Partly. The record calls the schema migration a one-time step with no graceful rollout, and parsing now rejects `redisclose:`, so returning to the old field means another migration of every way. Curve values themselves are meant to be tuned freely.
+- **Probes:** *Not confident (token-axis):* Should ways measure fading in tokens of conversation rather than in turns or minutes? Yes or no. *Not confident (no-shim):* Should a schema change force every way to migrate at once rather than translate old fields? Yes or no.
+- **Inversion:** At one end each tool keeps its own firing logic in its own units. At the other, one engine imposes one unit and one curve on every caller. This decision sits between: one shared engine, with each caller choosing its unit and each way choosing its curve.
+
 ## Context
 
 Two tools in this workspace implement firing dynamics independently:

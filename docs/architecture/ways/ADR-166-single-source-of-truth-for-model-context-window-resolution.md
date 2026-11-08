@@ -29,6 +29,14 @@ imported:
 
 # ADR-166: Single source of truth for model context-window resolution
 
+## Summary
+
+- **Decided:** One function in `ways-core`, `ways_core::context_window`, resolves a model's context window, and every caller uses it. It checks `CLAUDE_CONTEXT_WINDOW` first, then an explicit table of model ids matched as whole components of the model string (so provider prefixes and version suffixes still match, but `sonnet-5` does not match `sonnet-55`), then falls back to 200K. The result carries its source (`EnvOverride`, `ModelTable` or `Default`), which `ways context --json` reports as `window_source`. Transcript scans skip placeholder model values such as `<synthetic>`, and a peer session's window ignores the operator's override. The table is hardcoded rather than fetched from the Models API, because the resolver runs on every prompt hook and must work offline without credentials.
+- **Trades away:** Someone has to update the table whenever a model launches or a window changes. An unknown model still resolves to 200K, which is wrong for any new 1M model until the table is updated, though `window_source` shows it as a default. Older Opus 4 models that the old substring rule called 1M now resolve to the default. The record rejected fixing the four sites separately, a runtime or build-time API lookup, and defaulting unknown models to 1M.
+- **One-way?** No. The record does not discuss reversal. The change consolidates existing logic into one function, and the table is code that can be edited at any release.
+- **Probes:** *Not confident (offline-table):* Should the window table stay hardcoded, accepting an update at each model launch, rather than come from a network lookup? Yes or no. *Not confident (conservative-default):* Should an unknown model default to the smaller 200K window? Yes or no.
+- **Inversion:** At one end each tool guesses the window its own way with loose name matching. At the other, the window comes live from the provider's API. This decision sits between: one offline table in one place, with the operator's override first and each answer labelled with where it came from.
+
 ## Context
 
 The context window is the denominator of nearly everything the toolchain reports

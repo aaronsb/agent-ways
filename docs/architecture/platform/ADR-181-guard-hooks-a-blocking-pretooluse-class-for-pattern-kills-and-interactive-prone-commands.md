@@ -26,6 +26,14 @@ imported:
 
 # ADR-181: Guard hooks: a blocking PreToolUse class, shipped deactivated
 
+## Summary
+
+- **Decided:** Guard hooks are a named class of PreToolUse hook that can refuse a tool call. A guard refuses by exiting 2 with the reason and the accepted form on stderr. It exits only 0 or 2, and any internal failure exits 0, so a broken guard blocks nothing. It is wired without `|| true`, it refuses only a closed list named in the script with a repair for each entry, and it lets through a command run with `run_in_background` or behind a `timeout` prefix. `check-bash-bound.py` ships as a member of the class: it refuses pattern kills, commands that wait on an interactive prompt, commands that never return in the foreground, and piping a download into a shell, and its test runs in the suite. It is not wired in `settings.json`, and an operator who wants it adds one entry. The `bounded-execution` way carries the same discipline as guidance. Turning the guard on by default needs its own ADR and must meet ADR-162's bar. `strip-session-link-pre.sh` counts as a member of the class.
+- **Trades away:** A pattern kill or a piped install that the model runs despite the guidance goes through, and only the harness timeout and the permission prompt are left to stop it. A deactivated script can drift: its test keeps it working, but nobody checks its refused list against the harness until someone turns it on. The record rejected wiring the guard by default, withdrawing it, porting the Cypress guard unchanged, and folding it into the `ways` scan path.
+- **One-way?** No. The guard ships switched off, and an operator turns it on or off with one entry in `settings.json`.
+- **Probes:** *Not confident (fail-open):* Should a guard that hits an internal error let the command through rather than block it? Yes or no. *Not confident (activation-bar):* Should turning a guard on by default require evidence that guidance alone failed, as ADR-162's bar asks? Yes or no.
+- **Inversion:** At one end a hook refuses every risky shell command before it runs. At the other the agent has only guidance and the harness's own limits. By default this decision sits at the second end, and it ships a tested refusing hook that any operator can switch on.
+
 ## Context
 
 Every hook this project ships injects context and exits zero. One departs from that: `strip-session-link-pre.sh` (ADR-162) exits 2 to refuse a commit that would publish a session link. It is the only hook that can stop a tool call, and nothing in the corpus names the class it belongs to.

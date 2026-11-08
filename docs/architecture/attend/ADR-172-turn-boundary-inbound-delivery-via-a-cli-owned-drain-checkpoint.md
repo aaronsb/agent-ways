@@ -30,6 +30,14 @@ imported:
 
 # ADR-172: Turn-boundary inbound delivery via a CLI-owned drain checkpoint
 
+## Summary
+
+- **Decided:** A Stop hook delivers pending messages to an active session when its turn ends, by running `attend inbox --drain`, which returns this session's pending messages and records them as consumed in one step. The hook never reads attend's state itself. The peers sensor under Monitor stays as the only way to reach an idle session. Both paths share one seen-set per session, keyed on the session ID and origin directory from `attend whoami`, and each merges its records into it and never overwrites. Under an unresolved identity the drain records nothing and Monitor delivers. The drain deletes nothing, and the implementation ships with a purge check that refuses to delete messages a live session has not consumed and with a cap on re-draining within one turn. Addenda of 2026-10-01 and 2026-10-02 limit the drain to enrolled sessions, set one cold-start rule for both paths, and count a session as warm only once that rule has run.
+- **Trades away:** The Stop hook runs at every turn end, so the drain must stay cheap. A second delivery path and a second writer to the seen-set add surface, and correctness depends on both sides merging. The hook still cannot wake an idle session. The record rejected letting the hook read attend's state directly, replacing the poller with the hook, a separate consumption record, a shorter poll interval, keying on the displayed name, and, for now, push channels or MCP.
+- **One-way?** No. The record does not discuss reversal. The drain adds a delivery path beside the poller, which stays.
+- **Probes:** *Not confident (continue-turn):* Should a drained message make the turn continue, not wait for the next prompt? Yes or no. *Not confident (push-later):* If push channels can wake an idle session, should they replace the Monitor poller? Yes or no.
+- **Inversion:** At one end, messages wait for the next wall-clock poll whatever the session is doing. At the other, every message interrupts the session at once. This sits between them: an active session gets its messages when its current turn ends, and an idle one at the next poll.
+
 ## Context
 
 Authored messages (ADR-136's message lane — `attend send`/`reply`, `@Name`,

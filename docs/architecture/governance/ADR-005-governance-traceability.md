@@ -26,6 +26,14 @@ imported:
 
 # ADR-005: Governance Traceability for Ways
 
+## Summary
+
+- **Decided:** Ways gain an optional `provenance:` block in their frontmatter. It names the policy documents a way derives from (`github://org/repo/path` for another repository, a relative path otherwise), the regulatory control ids the way addresses, a `verified` date, and a rationale. The hook scripts strip the block before injection, so it never reaches the agent. A scan generates `provenance-manifest.json` with indexes from policy to ways and from control to ways, and a report script lists ways without provenance, stale `verified` dates, and gaps in both directions. The tooling reports and never blocks a way. ADR-200 later superseded this record and treats the mappings as compliance claims, not proof.
+- **Trades away:** A person still writes each way by hand, so provenance makes the link traceable but not automatic. The metadata goes stale when policies change and ways do not, and way authors have one more optional block to learn. The record rejected a separate mapping file, mandatory provenance for every way, and generating ways from policy documents automatically.
+- **One-way?** No. The block is optional and the runtime ignores it, so ways without it work as before. The record does not discuss removing it.
+- **Probes:** *Not confident (optional):* Should provenance stay optional for ways that derive from no policy? Yes or no. *Not confident (report-only):* Should the tooling only report gaps, never block a way? Yes or no.
+- **Inversion:** At one end, the link from policy to way exists only in its author's head. At the other, every way must carry provenance and tooling enforces it. This sits between them: provenance is optional metadata that the runtime ignores, and the tooling reports coverage without blocking.
+
 > **Superseded by [ADR-200](../governance/ADR-200-compliance-claims-and-session-derived-findings.md).**
 > This ADR established provenance traceability but framed the hand-authored mappings as
 > "auditability" and "proof." ADR-200 corrects the epistemics: the mappings are compliance

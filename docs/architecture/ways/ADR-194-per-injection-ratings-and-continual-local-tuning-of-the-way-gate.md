@@ -31,6 +31,14 @@ imported:
 
 # ADR-194: Per-injection ratings and continual local tuning of the way gate
 
+## Summary
+
+- **Decided:** The record proposed rating every way injected into the main agent. Each injected way would end with a footer giving a one-time token (a nonce), and Claude would run `ways flag <nonce>` when the way did not apply; an injection with no flag by the Stop hook counted as weak approval. Canaries (short real ways that plainly do not fit the turn, about one scan in fifty) and an independent local Qwen3 judge would measure how often Claude misses misfires, which sets how much silence counts. The ratings would feed per-way misfire estimates and threshold offsets, a Bayesian last layer, weekly calibration refits and a personal LoRA adapter, all on the user's machine, with human labels from an interview at each checkpoint. Shipped base weights would exclude any label derived from Claude. The record was abandoned on 2026-10-01 together with ADR-193, replaced by ADR-196.
+- **Trades away:** The record named about 20 tokens of footer on every main-agent injection, a scheduled human interview of 25 to 50 rows per checkpoint, a slow-learning subagent lane, context noise from canaries, local compute for the judge, a large maintenance surface, and shipped bases that learn less from real use. It rejected a one-off batch label set, explicit thumbs-up, a `/misfire` command, a marker parsed from response text, and Claude as a judge for shipped weights.
+- **One-way?** No. The record does not discuss reversal, and it was abandoned before it shipped. Its design kept Claude-derived labels in a separate source field so later policy could change without re-collecting data.
+- **Probes:** *Not confident (silence-as-approval):* Was it acceptable for an unflagged injection to count as weak approval once canaries measured its worth? Yes or no. *Not confident (claude-labels-local):* Should labels derived from Claude stay off shipped weights unless Anthropic says otherwise? Yes or no.
+- **Inversion:** At one end way matching is tuned by hand with no feedback from the model that reads the ways. At the other, the model's own ratings retrain the matcher directly. The record sat between: Claude rates every injection, outside checks measure how far to trust those ratings, and only human and open-model labels reach shipped weights.
+
 ## Context
 
 ADR-193 adds a cross-encoder gate behind the ADR-160 matcher. A gate is only as good as the labels it learns from, and labels are the scarce input. The first draft of ADR-193 planned a one-off eval set labelled offline in batch, a shipped checkpoint trained only on synthetic pairs, and a rule that weights trained on session text never ship. That plan had three weaknesses.

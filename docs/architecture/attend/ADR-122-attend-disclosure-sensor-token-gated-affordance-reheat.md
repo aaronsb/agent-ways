@@ -28,6 +28,14 @@ imported:
 
 # ADR-122: Attend disclosure sensor — token-gated affordance reheat
 
+## Summary
+
+- **Decided:** attend gains a disclosure sensor that re-teaches Claude how to use attend's messaging commands. On each poll the sensor reads the session's token count from `ways context --json`. It emits a short block of usage text for each registered topic on its first poll, and again whenever 25% of the context window has passed since the last time, the same threshold ways uses to show a way again. The sensor keeps its record of when it last taught each topic in memory only, so a restarted attend teaches everything again. The text is compiled into the binary and kept terse. Messaging is the only topic at first, and adding one takes an enum variant and a markdown file. An addendum of 2026-10-12 records that ADR-412 removed the peer-message chunking this record added.
+- **Trades away:** Each poll spawns one more process, the text grows wordy unless authors keep it short, every topic shares the 25% threshold, and each attend restart spends tokens re-teaching every topic. The record rejected a ledger on disk, adding the ledger to `state.rs`, a hook in the emit path, a new trait for sensors that react to other sensors, measuring topic drift, and markers on disk that expire.
+- **One-way?** No. The record does not discuss reversal. The sensor plugs into the existing sensor machinery with no framework change and writes nothing to disk.
+- **Probes:** *Not confident (shared-threshold):* Should attend's re-teach threshold stay tied to the one ways uses? Yes or no. *Not confident (restart-cost):* Is it acceptable that each attend restart re-teaches every topic? Yes or no.
+- **Inversion:** At one end, Claude learns attend's commands once, from the skill at session start. At the other, the commands come with every notification. This sits between them: the sensor repeats the teaching after a fixed share of the context window has passed.
+
 ## Context
 
 `attend` exposes interactive surfaces Claude must know how to use — `attend send`, `--to`, `--focus`, `--broadcast`, focus groups, mark-read semantics, the "silence is a valid reply" norm, and the load-bearing rule that `attend run` belongs to Monitor rather than Bash. None of this is re-taught at runtime. Claude learns it from `SKILL.md` at session start and may have forgotten the actionable shape by turn 80. When a peer message arrives via Monitor, the notification reports *that* something happened but not *what affordances exist* to act on it. The user pays an inference turn for Claude to either improvise, ask, or — most commonly — silently fail to engage with a channel that was supposed to be two-way.

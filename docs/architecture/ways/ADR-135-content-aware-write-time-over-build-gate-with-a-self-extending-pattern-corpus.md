@@ -28,6 +28,14 @@ imported:
 
 # ADR-135: Content-aware write-time over-build gate with a self-extending pattern corpus
 
+## Summary
+
+- **Decided:** A write-time gate looks for concrete over-building in code Claude has just written, such as a hand-rolled cache or an email-validation regex, and names the standard replacement. When it does not recognise the code, it stays silent and records an encounter. As amended, it runs after the write through a way's `postcheck.sh` rather than before it through the binary, and it ships as one trigger-inert `softwaredev/code/overbuild` way whose body lists the replacements for a seed of three or four patterns. A separate authoring pass reads the encounters and adds a pattern way, records an exemption, or prunes a pattern that over-fires, so the set of patterns grows and shrinks. The gate keeps the zero-false-positive rule from ADR-134.
+- **Trades away:** The record names a wider hot path for content scanning, which the PostToolUse amendment avoided. The learning loop needs someone to run it on a cadence; without that, the corpus stays at its seed. The encounter stream adds to the log's growth. The record rejected a fixed comprehensive catalog because it flags novel code, a model judging each write because of its cost, and a loop that only adds patterns.
+- **One-way?** No. The record calls it strictly additive: the existing `code.check.md` questions keep working without it, and pattern entries are reviewable, revertible files.
+- **Probes:** *Not confident (silence-on-unknown):* Should the gate stay silent on code it does not recognise, even when that code may be over-built? Yes or no. *Not confident (small-corpus):* Should the pattern set stay small and grow only from reviewed encounters? Yes or no.
+- **Inversion:** At one end the gate asks generic questions and never looks at the code. At the other, a large fixed catalog flags anything that differs from one developer's taste. This decision sits between: a small set of recognised patterns that names what it knows and says nothing about the rest.
+
 ## Context
 
 A write-time check now exists: `softwaredev/code/code.check.md` fires at `PreToolUse(Edit|Write)` on source files and surfaces a short anchor plus verification questions — does this need to exist, is this the codepath that actually runs, is this the minimal change. It ships with no engine change because it needs none: the `ways scan file` path matches a check to a file by its `files:` regex and never inspects what is about to be written. That is its ceiling. A question can ask "did you reach for the stdlib first?"; it cannot *see* the hand-rolled LRU cache, the reinvented email-regex validator, or the new dependency in the diff and name them.

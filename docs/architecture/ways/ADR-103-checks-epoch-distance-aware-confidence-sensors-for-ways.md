@@ -29,6 +29,14 @@ imported:
 
 # ADR-103: Checks — Epoch-Distance-Aware Confidence Sensors for Ways
 
+## Summary
+
+- **Decided:** A way directory can hold a `check.md` beside its `way.md`. A check is a short list of verification questions that fires before Edit, Write or Bash, not on domain entry. A per-session counter (the epoch) goes up on every hook event, and a check's match score is multiplied by a factor that grows with the number of events since its parent way fired (capped at 30) and divided by one plus the number of times the check has already fired. The check fires when that product reaches its threshold. A check that fires before its parent way pulls the way in too, and it adds a one- or two-line anchor to the way when the way fired long ago.
+- **Trades away:** The ways system gets a second file class to maintain, every hook event costs one more file read and write, the scoring needs floating-point math through awk, and the authoring and test tooling has to change. The record names the risk of over-engineering if checks multiply without discipline.
+- **One-way?** No. Check files are optional, ways without them behave as before, and the curve constants are meant to be tuned from logged data.
+- **Probes:** *Not confident (decay-stop):* Should a check stop firing after a few nudges in a session, even if the action still matches? Yes or no. *Not confident (two-classes):* Should way directories stay at two file classes until a third is proven necessary? Yes or no.
+- **Inversion:** At one end nothing prompts verification at the moment of action. At the other, a check fires on every matching action. This decision sits between: checks fire before actions, more readily when the way is old and less readily each time they repeat.
+
 ## Context
 
 Ways inject contextual guidance when a domain becomes relevant — triggered by keywords, tool use, or state conditions. This guidance fires once per session and decays in attentional influence as the conversation progresses (more tokens accumulate between the injection point and the current generation step, reducing relative positional weight via RoPE decay).

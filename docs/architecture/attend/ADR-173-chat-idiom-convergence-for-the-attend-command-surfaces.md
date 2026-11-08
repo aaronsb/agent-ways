@@ -29,6 +29,14 @@ imported:
 
 # ADR-173: Chat-idiom convergence for the attend command surfaces
 
+## Summary
+
+- **Decided:** attend's agent CLI and the attend-chat interface share chat vocabulary. The shared noun is "channel" in place of "focus group", while the directory layout and `_groups.yaml` stay the same. Agents use `join`, `leave`, `channels`, `dissolve` and `send --channel`. The agent's leave-all command folds into `scene private`, so `/clear` keeps its one meaning of clearing the screen. The two surfaces keep different capabilities: `/purge` stays with the operator, session plumbing stays with agents, and the operator gains `/peers` and `/whois`. The messaging docs state where the chat comparison stops, such as no read receipts, typing indicators or edits. The record first kept `focus` as a deprecated alias; an amendment of 2026-10-03 records that commit d2def1d2 removed it along with the `--focus` and `--broadcast` flags.
+- **Trades away:** While the alias lived, the CLI carried two spellings of every channel verb. The messaging docs, the attend way, the skill and the re-teach text had to be reworded together. Each new request for a chat feature must be either built or stated as out of scope. The record rejected keeping both vocabularies with a mapping table, using "focus" everywhere, full chat-platform features, and a rename without aliases, which is where the surface ended after the amendment.
+- **One-way?** No. Storage and wire formats are unchanged, so the decision covers names only, though with the alias removed, scripts that call `focus` now fail.
+- **Probes:** *Not confident (corpus-words):* Should other agent-facing commands also prefer words models already know from common tools over project terms? Yes or no. *Not confident (scene-name):* Should `scene` keep its name? Yes or no.
+- **Inversion:** At one end, each surface keeps vocabulary fitted to its own model, here attention and focus. At the other, both use the words models and people already know from chat tools. This record sits at the second end for names, and leaves the capabilities of the two surfaces different.
+
 ## Context
 
 Attend has two command surfaces that grew separate vocabularies for the

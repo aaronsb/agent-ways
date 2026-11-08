@@ -28,6 +28,14 @@ imported:
 
 # ADR-108: Embedding-Based Way Matching with all-MiniLM-L6-v2
 
+## Summary
+
+- **Decided:** Way matching uses the all-MiniLM-L6-v2 sentence embedding model instead of BM25. Way descriptions are embedded once when the corpus is built and their vectors stored in `ways-corpus.jsonl`. At run time one `way-embed` process, built on llama.cpp's GGML library, embeds the prompt and compares it with each stored vector. The model file, about 21 to 44 MB, downloads to the XDG cache directory and is checked against a committed SHA-256 sum. BM25 stayed as a fallback at the time; ADR-125 later removed it and made the embedding model required.
+- **Trades away:** Users download a model file of 22 to 44 MB that git does not track, and building the binary depends on llama.cpp. The model's understanding is fixed by its training and may miss project-specific senses of words such as "way", which BM25's explicit vocabulary handled. Thresholds need recalibration to the cosine scale. The record rejected larger models, ONNX Runtime, Python inference, fine-tuning for now, and hybrid scoring.
+- **One-way?** No. The record does not discuss reversing it. At the time BM25 remained as a fallback and the corpus format was additive, so the earlier path stayed available until ADR-125 removed it.
+- **Probes:** *Not confident (model-download):* Is a separate download of about 20 to 40 MB acceptable for every install? Yes or no. *Not confident (off-the-shelf):* Should the project keep the stock model rather than fine-tune it on way-matching data? Yes or no.
+- **Inversion:** At one end matching uses word overlap with no download and no model. At the other it uses a large model that understands meaning well. This decision sits near the small-model end: the smallest sentence model the record found to separate meanings, in a single static binary.
+
 > **Amendment note (2026-04-17):** [ADR-125](ADR-125-authored-disclosure-graph-and-removal-of-bm25.md) removed BM25 entirely. The "BM25 remains as a fallback" decision below is historical — the embedding model is now the sole retrieval tier. Sections describing the engine-selection cascade (`way-embed` → `way-match` → NCD), BM25 fields in the corpus, and the "fallback chain is automatic" behavior no longer apply.
 
 ## Context

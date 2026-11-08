@@ -25,6 +25,14 @@ imported:
 
 # ADR-106: Project Pulse — Epoch-Mapped Project Awareness
 
+## Summary
+
+- **Decided:** The project builds a script, `scripts/project-pulse`, and a skill that compare epochs, meaning commits and releases taken in order rather than placed on a calendar. Upstream mode, the default, maps Claude Code releases against this project's commits, and the skill suggests two to five upstream changes that may matter here. Inward mode (`--inward`) compares the ADRs against the commits, branches and PRs that cite them, and flags status mismatches and dormant ADRs. The default window starts at the last release tag and adds one or two upstream releases on each side, a watermark file records where the last run stopped, and the skill writes its output as a conversation with no scores or ratings. A `meta/project-health` way suggests the tool when the topic comes up.
+- **Trades away:** The tool depends on the `gh` CLI and GitHub API access to anthropics/claude-code, the watermark file is one more piece of state to maintain, and inward mode works only while commits and branches keep citing ADR numbers. The record rejected a calendar-based comparison, a ledger that records a disposition for each upstream feature, scraping the changelog website, comparing full history on every run, and separate tools for each direction.
+- **One-way?** No. The record does not discuss reversal. What it adds is a script, a skill, a way and a watermark file, all inside this project.
+- **Probes:** *Not confident (output-tone):* Should the skill's output stay a conversation with no scores or ratings? Yes or no. *Not confident (watermark):* Should the tool keep a watermark file between runs? Yes or no.
+- **Inversion:** At one end, the operator reads upstream changelogs and audits ADR statuses by hand. At the other, a dashboard tracks every upstream feature and scores how far behind the project is. This sits between them: the script gathers data over a bounded window, the skill raises a few suggestions, and the operator decides what to act on.
+
 ## Context
 
 Claude Code releases frequently — often daily. Each release may add features, change behaviors, or introduce capabilities that affect how this project (claude-code-config) should be built. Without a systematic way to compare upstream changes against our own work, we either miss opportunities or discover them accidentally.

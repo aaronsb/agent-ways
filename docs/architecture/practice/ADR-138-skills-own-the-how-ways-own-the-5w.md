@@ -24,6 +24,14 @@ imported:
 
 # ADR-138: Skills own the how, ways own the 5W
 
+## Summary
+
+- **Decided:** Skills hold each executable procedure. Ways hold the who, what, where, when and why: they observe state, explain why it matters, fire at the right moment, and point to the skill. Each procedure has one home, preferably one skill with modes instead of several near-duplicate skills, and a skill must work without assuming a way fired first. A way's macro (the script that adds dynamic content when the way fires) names a gap and hands off to the skill. In the first case, the procedure for copying the `adr` and `doc` tools into a project now lives only in the `adr` and `docs` skills.
+- **Trades away:** Existing near-duplicate skills, and ways that carry procedures, need a migration sweep. Acting on a gap a way observes takes one extra step, from the way to the skill, instead of an inline command. Adding the procedure to the skills while keeping the other copies, and keeping the procedure in the macros, were rejected.
+- **One-way?** No. The record does not discuss reversal. It sets an authoring rule for skill and way text.
+- **Probes:** *Not confident (parametric-skills):* Should near-duplicate skills be merged into one skill with modes? Yes or no. *Not confident (companion-way):* Do you want a meta-way that enforces the split when `skills/` or `hooks/ways/` is edited? Yes or no.
+- **Inversion:** At one end, each way and macro carries its own copy of the steps for what it observes. At the other, skills carry both the steps and the decision of when they apply. This sits between them: the skill holds the steps, and the way holds when and why and points to the skill.
+
 ## Context
 
 An agent trying to vendor the doc-management tools (`adr`, `doc`) into a fresh

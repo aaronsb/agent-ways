@@ -28,6 +28,14 @@ imported:
 
 # ADR-161: Queued mid-turn operator messages as an aggregated scan surface
 
+## Summary
+
+- **Decided:** Messages the operator types while Claude is mid-turn get their own scan lane. Claude Code queues those messages instead of firing `UserPromptSubmit`, so on each `PostToolUse` pause the existing `check-post.sh` dispatcher reads the session transcript for queued operator messages newer than a per-session scan mark. It joins all of them into one surface, so short fragments add up to enough text for ADR-160's chunked matcher, and runs that surface through the normal scan and firing gate. Fired ways are injected as `PostToolUse` context before Claude's next action, and the mark advances so each message is matched once.
+- **Trades away:** Each tool pause adds a bounded transcript read. Scanning everything pending at each pause can fire on a burst the operator is still typing, and the record leans on the refire gate to absorb the overlap. The selector depends on Claude Code's `queue-operation` transcript entry, an internal detail that may change, so it is isolated in one function. The record rejected scanning fragments one at a time, scanning at Stop, waiting for the next prompt, waiting for the operator to go quiet, and a rolling window.
+- **One-way?** No. The record does not discuss reversal. The lane adds transcript selection, aggregation and a scan mark on top of the existing engine and changes no matcher code.
+- **Probes:** *Not confident (steer-over-complete):* Should a mid-turn message be matched at the next pause, while it can still steer the work, even if the burst is not finished? Yes or no. *Not confident (transcript-coupling):* Is depending on an internal Claude Code transcript entry acceptable to close this gap now? Yes or no.
+- **Inversion:** At one end only the message that starts a turn is matched. At the other, every fragment is matched the moment it is typed. This decision sits between: queued messages are gathered and matched together at each tool pause.
+
 ## Context
 
 The way matcher's highest-value surface is the **operator's own message**: operator

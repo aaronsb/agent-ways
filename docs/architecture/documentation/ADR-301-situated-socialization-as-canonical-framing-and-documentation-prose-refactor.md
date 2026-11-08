@@ -25,6 +25,14 @@ imported:
 
 # ADR-301: Situated socialization as canonical framing and documentation prose refactor
 
+## Summary
+
+- **Decided:** The project describes ways as situated socialization for language-model agents: local norms delivered at the moment of relevant action, on a spaced schedule that stands in for the memory a session lacks. Reader-facing documentation (the README, `docs/hooks-and-ways/`, `docs/attend-and-monitor/`, `docs/design-notes/`, and skill or way prose that describes the system) is revised to name each mechanism by its established term first, such as the forgetting curve or workspace awareness, and then by the project's own term. Project terms stay, and each is introduced against its established term on first use in a document. Content, diagrams and examples are kept, and existing ADRs and the ways corpus are left unchanged. The architecture overview records which half of ways may erode as models improve (the scheduling of re-disclosure) and which half is permanent (delivering local norms the model was never told).
+- **Trades away:** The refactor touches most reader-facing documents and can leave them inconsistent if it is done piecemeal. The established terms are analogies with limits, and claiming equivalence or writing in academic jargon would add a different kind of noise. The record rejected a glossary alone, renaming components to established terms, and leaving the vocabulary as it was.
+- **One-way?** No. The record does not discuss reversal. The change revises the register of prose and renames no component.
+- **Probes:** *Not confident (adr-exempt):* Should existing ADRs stay exempt from the new vocabulary? Yes or no. *Not confident (scheduling):* Should maintainers let the scheduling half erode as models improve? Yes or no.
+- **Inversion:** At one end, the project keeps only its invented vocabulary. At the other, it renames every component to established academic terms. This sits between them: the invented names stay for the implementations, and each is introduced through the established term it implements.
+
 ## Context
 
 The project's documentation describes its mechanisms almost entirely in invented vocabulary — ways, attend, disclosure, reheat, firing, salience floors, insistence. The terms are internally coherent, but they are defined only by reference to each other. A reader arriving from outside (or an agent reasoning about the project) has no anchor: nothing in the prose says what body of existing knowledge any mechanism belongs to, so every document carries a tax of re-explanation, and the project as a whole resists the one-sentence answer to "what is this?"

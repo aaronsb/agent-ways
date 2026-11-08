@@ -28,6 +28,14 @@ imported:
 
 # ADR-136: Split addressed messaging from the sensor-observation bus
 
+## Summary
+
+- **Decided:** attend carries messages that a person or agent wrote, to `@Name`, to `#group` or to `#open`, on a message lane separate from the lane for environmental events such as git changes, process starts and peers appearing. The message lane skips the salience gate and the refractory period, uses its own permissive rate limiter with a 3-second cooldown, and keeps only deduplication. Each session keeps its own saved record of the messages it has seen, and shared rooms stay shared directories. No message is deleted by age: a directed inbox goes when its project leaves `~/.claude/projects/`, and a shared-room message when its sender's project does. A message can address several recipients. A poll that finds more than 8 unseen messages shows one summary line, and `attend inbox` pages through the rest. The event lane keeps its noise controls unchanged.
+- **Trades away:** Two lanes are more to maintain than one pipeline, and the message store on disk grows until a project is removed. Because the lane is chosen per sensor, peer-presence events currently ride the message lane and lose their noise control. The record rejected tuning the gates so messages always pass, fixing only the salience gate, a protocol where every recipient acknowledges each message, and leaving delivery best-effort.
+- **One-way?** No. The record does not discuss reversal. It leaves the storage shape to follow-up work and keeps the CLI as the whole interface, so the lanes can change behind it.
+- **Probes:** *Not confident (open-durable):* Should `#open` messages be as durable as direct messages? Yes or no. *Not confident (split-sensor):* Should message scanning move into its own sensor? Yes or no.
+- **Inversion:** At one end, every signal goes through one lossy, rate-limited pipeline. At the other, everything is delivered reliably. This sits between them: written messages are delivered reliably, and environmental events stay lossy by design.
+
 > **Implemented and live-validated 2026-06-20** on branch
 > `fix/attend-message-durability`. The decisions below are reconciled to
 > what was actually built — see [Validation](#validation). Multi-recipient

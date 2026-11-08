@@ -27,6 +27,14 @@ imported:
 
 # ADR-127: Full-body embedding corpus for way matching
 
+## Summary
+
+- **Decided:** The project does not embed way bodies for matching, either as the first 256 or so tokens or as overlapping chunks pooled into one vector. Matching keeps embedding each way's description and vocabulary. On a 90-way corpus with 18 test prompts, all three variants found the expected way first on 11 of 16 prompts, and the body variants fixed some parent-over-child errors while causing others. The record concludes that text alone cannot separate sibling ways that share vocabulary by design, and points further work at routing that uses the authored graph: parent context, disclosure state and recency.
+- **Trades away:** Keeping the description-and-vocabulary text gives up the fixes the body variants made on two prompts where the parent way beat the expected child. Rejecting it avoided a corpus rebuild 7 to 9 times slower and the lower confidence the body variants showed on correct matches. The experiment harness and full results were discarded, so the record holds the only copy of the evidence.
+- **One-way?** No. Nothing shipped. The record notes the harness was discarded, so revisiting the question means rebuilding the experiment.
+- **Probes:** *Not confident (text-exhausted):* Do you accept that better text representations will not fix sibling confusion, so effort should go to graph-aware routing? Yes or no. *Not confident (vocab-patches):* Should sibling collisions be handled by targeted vocabulary edits until graph routing exists? Yes or no.
+- **Inversion:** At one end each way is matched on a short curated string. At the other it is matched on its full text. The record keeps the short curated string and treats richer text as a direction that has been tested and found to give no net gain.
+
 ## Context
 
 Way matching (ADR-108) embeds a keyword-curated string per way — the

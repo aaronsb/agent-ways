@@ -28,6 +28,14 @@ imported:
 
 # ADR-134: Empirical auto-tuning from fire and near-miss telemetry
 
+## Summary
+
+- **Decided:** The matcher logs the ways that scored just under their threshold on each prompt (within a margin, default 0.05) as `way_nearmiss` events in `events.jsonl`. A tuning command correlates each way's fires with the kind of work the session went on to do and flags ways that keep firing into sessions outside their domain, with a suggested remedy. Tuning reports by default, and `--apply` rewrites `half_life` and `embed_threshold` in frontmatter as ordinary git diffs. Vocabulary changes are never applied automatically. A 2026-06-12 amendment found that cadence calibration already shipped as `ways tune-curves`, so this record's new work was near-miss logging, the precision flag (`ways tune-precision`) and the threshold apply, which waits for logged fire scores to accumulate.
+- **Trades away:** `events.jsonl` grows faster and needs a cap and rotation. The relevance flag is a proxy and can mislabel ways that legitimately span many kinds of work. Applying values from one user's sessions can fix that user's habits into the frontmatter, so suggestions show their sample size. The record rejected a model judging each fire's relevance because of its inference cost.
+- **One-way?** No. Applied changes are git diffs that can be reviewed and reverted, and the flags are reports, not verdicts.
+- **Probes:** *Not confident (no-auto-vocab):* Should vocabulary always stay a human authoring choice, never rewritten from telemetry? Yes or no. *Not confident (cheap-proxy):* Should relevance stay a cheap proxy from the event log rather than a model's judgment? Yes or no.
+- **Inversion:** At one end every threshold and cadence is set by hand with no evidence. At the other, the system retunes itself from telemetry without review. This decision sits between: telemetry produces suggestions, and a person applies them as reviewable diffs, with vocabulary kept manual.
+
 ## Context
 
 The firing engine is tuned by hand. Every threshold, half-life, and vocabulary was set by authorial judgment, and the system collects no evidence that could revise them. Three gaps compound:
