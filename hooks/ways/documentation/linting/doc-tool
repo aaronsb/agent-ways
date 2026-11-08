@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: MIT
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """
 doc — a librarian for the documentation catalog.
 
@@ -31,7 +35,7 @@ from pathlib import Path
 
 # Vendored-tool version (ADR-177). Bump when this tool changes — way macros
 # compare it against the installed template to tell stale from customized.
-TOOL_VERSION = "1.1.0"
+TOOL_VERSION = "1.1.1"
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))

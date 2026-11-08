@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025-2026 Aaron Bockelie
+# SPDX-License-Identifier: MIT
+# From agent-ways: https://github.com/aaronsb/agent-ways
+
 """
 doclint — graph-aware linter for the documentation catalog.
 
