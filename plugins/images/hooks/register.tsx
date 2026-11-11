@@ -33,8 +33,9 @@
 //
 // Two renderers. Where Claude Code draws kitty graphics with Unicode
 // placeholders, the terminal's `Image` element carries the pixels, read by the
-// terminal from the cached PNG file (base64 over ssh, where the terminal cannot
-// read this machine's files). Claude Code frees an Image's pixels when its row
+// terminal from the cached PNG file. Over ssh the terminal cannot read this
+// machine's files, and inside tmux Claude Code sends an Image's bytes only, so
+// there the PNG goes as base64. Claude Code frees an Image's pixels when its row
 // scrolls out of view and sends nothing for a source equal to the last drawn,
 // so a site that comes back into view (`onScreen` null, then set) gets a new
 // `generation` and the terminal reads the file again. Elsewhere
@@ -42,8 +43,10 @@
 // pixel as foreground, bottom as background) stands in. In `auto`, the choice
 // follows Claude Code's own capability, learned once per session by a probe:
 // a 1x1 transparent `Image` drawn beside the first picture, then swapped by
-// `$.ui.blit`, which refuses an Image that draws its alt. Until the probe
-// settles, pictures draw as half-blocks, which every terminal shows.
+// `$.ui.blit`, which refuses an Image that draws its alt. The probe's source is
+// of the kind the pictures will use, a file or bytes, since Claude Code can
+// draw one and not the other. Until the probe settles, pictures draw as
+// half-blocks, which every terminal shows.
 //
 // ImageMagick (`magick`, or `convert`) decodes and resizes; the mod keeps its
 // files in a private cache directory, and writes its own there through a child
@@ -66,7 +69,7 @@
 // line to `render.log` beside it (component, requestId, tool, and the shape
 // of its props, never their bytes).
 
-import type { Elements, EngineInterface, Register, RenderElement, RenderNode, RenderViewport } from 'claude-code'
+import type { Elements, EngineInterface, ImageSource, Register, RenderElement, RenderNode, RenderViewport } from 'claude-code'
 
 import {
   DEFAULT_CELL_PIXELS,
@@ -152,7 +155,9 @@ const memo = new Map<string, Picture>()
 /** Per site (requestId): its Images' generation, and whether it is off screen. */
 const views = new Map<string, { generation: number; hidden: boolean }>()
 const VIEWS_MAX = 512
-let overSsh: boolean | undefined
+let sendsBytesHere: boolean | undefined
+/** The probe's PNG in the cache directory, once written. */
+let probeFile: string | undefined
 /** Per tool_use_id: true when the latest ToolGroup that held it was folded. */
 const folded = new Map<string, boolean>()
 const FOLDED_MAX = 512
@@ -323,10 +328,37 @@ async function measureCell($: EngineInterface): Promise<CellPixels | null> {
   return (ran.exitCode === 0 ? parseCellPixels(ran.stdout) : null) ?? DEFAULT_CELL_PIXELS
 }
 
-/** True when Claude Code runs over ssh, where the terminal cannot read our files. */
-async function isOverSsh($: EngineInterface): Promise<boolean> {
-  if (overSsh === undefined) overSsh = Boolean((await $.env.get('SSH_CONNECTION')) || (await $.env.get('SSH_TTY')))
-  return overSsh
+/**
+ * True where an Image must carry its PNG as bytes: over ssh, where the
+ * terminal cannot read this machine's files, and inside tmux, where Claude
+ * Code sends bytes only and draws a file source's alt.
+ */
+async function sendsBytes($: EngineInterface): Promise<boolean> {
+  if (sendsBytesHere === undefined) {
+    sendsBytesHere = Boolean(
+      (await $.env.get('SSH_CONNECTION')) || (await $.env.get('SSH_TTY')) || (await $.env.get('TMUX')),
+    )
+  }
+  return sendsBytesHere
+}
+
+/**
+ * The probe Image's source, of the kind the pictures will use: bytes where
+ * they travel as bytes, else the probe PNG written to the cache directory.
+ * Bytes too when that file could not be written.
+ */
+async function probeSource($: EngineInterface): Promise<ImageSource> {
+  if (await sendsBytes($)) return { png: PROBE_PNG }
+  if (probeFile === undefined) {
+    const dir = await cacheDirectory($)
+    if (dir === null) return { png: PROBE_PNG }
+    const path = `${dir}/probe.png`
+    const script = 'base64 -d > "$1.$$" && mv -f "$1.$$" "$1"'
+    const wrote = await run($, ['sh', '-c', script, 'sh', path], { stdin: PROBE_PNG })
+    if (wrote?.exitCode !== 0) return { png: PROBE_PNG }
+    probeFile = path
+  }
+  return { file: probeFile, format: 'png' }
 }
 
 /**
@@ -384,9 +416,9 @@ async function picture(
   if (renderer === 'image') {
     const out = `${dir}/${key}.png`
     if ((await run($, pngArgv(tool, source.src, fit, out)))?.exitCode !== 0) return null
-    // The terminal reads the file itself; only over ssh do the bytes travel.
+    // The terminal reads the file itself, except over ssh and inside tmux.
     let png: string | null = null
-    if (await isOverSsh($)) {
+    if (await sendsBytes($)) {
       png = (await $.fs.read(out, { as: 'bytes' })).base64
       if ((png.length * 3) / 4 > IMAGE_BYTES_MAX) return picture($, ref, 'halfblock', room, cell, scale)
     }
@@ -406,25 +438,26 @@ async function picture(
 }
 
 // Blits the probe Image a site drew until the answer settles: taken, the
-// terminal draws kitty graphics; refused for its alt, it does not. Any other
+// terminal draws kitty graphics from that kind of source; refused for its alt,
+// or for a file the terminal cannot read, it does not. Any other
 // refusal (not mounted yet) tries again, then leaves it to the next picture.
-function probe($: EngineInterface, requestId: string): void {
+function probe($: EngineInterface, requestId: string, source: ImageSource): void {
   if (isProbing) return
   isProbing = true
-  probeAttempt($, requestId, 0)
+  probeAttempt($, requestId, source, 0)
 }
 
-function probeAttempt($: EngineInterface, requestId: string, tries: number): void {
+function probeAttempt($: EngineInterface, requestId: string, source: ImageSource, tries: number): void {
   $.clock.after(PROBE_DELAY_MS, async () => {
     const blitted = await $.ui
-      .blit({ requestId, key: PROBE_KEY, source: { png: PROBE_PNG } })
+      .blit({ requestId, key: PROBE_KEY, source })
       .catch(() => ({ deny: 'failed' }))
     const verdict = probeVerdict(blitted.deny)
     if (verdict !== null) {
       await $.state.set(KITTY_GRAPHICS, verdict)
       isProbing = false
     } else if (tries + 1 < PROBE_TRIES) {
-      probeAttempt($, requestId, tries + 1)
+      probeAttempt($, requestId, source, tries + 1)
     } else {
       isProbing = false
     }
@@ -481,8 +514,9 @@ async function pictures(
     )
   }
   if (drawn.length > 0 && needsProbe(options.renderer, capability)) {
-    drawn.push(<Image key={PROBE_KEY} source={{ png: PROBE_PNG }} columns={1} rows={1} alt=" " />)
-    probe($, requestId)
+    const source = await probeSource($)
+    drawn.push(<Image key={PROBE_KEY} source={source} columns={1} rows={1} alt=" " />)
+    probe($, requestId, source)
   }
   if (note !== null) drawn.push(<Text dimColor>{note}</Text>)
   if (drawn.length === 0) return null
