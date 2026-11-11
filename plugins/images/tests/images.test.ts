@@ -13,6 +13,7 @@ import {
   DEFAULT_COLOR,
   LOWER_HALF,
   MIN_COLUMNS,
+  PROBE_PNG,
   SPACE,
   UPPER_HALF,
   cellsToBase64,
@@ -247,6 +248,7 @@ describe('renderer choice', () => {
   test('the probe reads a taken blit as pixels, an alt refusal as none, anything else as unknown', () => {
     expect(probeVerdict(undefined)).toBe(true)
     expect(probeVerdict('the Image draws its alt there: no placeholder images')).toBe(false)
+    expect(probeVerdict('a file this terminal cannot read')).toBe(false)
     expect(probeVerdict('not mounted')).toBeNull()
     expect(probeVerdict('no-surface')).toBeNull()
   })
@@ -407,6 +409,10 @@ type World = {
   uname?: string
   /** More environment, over the defaults. */
   env?: Record<string, string>
+  /** Every source `$.ui.blit` was handed. */
+  blits?: unknown[]
+  /** The probe PNG's `sh -c base64` write fails. */
+  probeUnwritable?: boolean
   /** The `mods.images.*` values `ways settings list` resolves, over the defaults; `fail` exits 2, `garbage` prints no JSON. */
   settings?: Record<string, unknown> | 'fail' | 'garbage'
   /** Every `ways` argv the mod ran. */
@@ -464,6 +470,9 @@ function engine(on: On, world: World) {
       world.mkdirFailures = (world.mkdirFailures ?? 0) - 1
       return { value: { ...ok(), exitCode: 1 } }
     }
+    if (tool === 'sh' && e.argv[1] === '-c' && /^base64\b/.test(e.argv[2] ?? '') && world.probeUnwritable === true) {
+      return { value: { ...ok(), exitCode: 1 } }
+    }
     if (tool === 'sh' && e.argv[1] === '-c' && /\bcat\b/.test(e.argv[2] ?? '')) {
       if (world.unwritable === true) return { value: { ...ok(), exitCode: 1 } }
       const path = e.argv[4] ?? ''
@@ -504,7 +513,10 @@ function engine(on: On, world: World) {
     ;(to === 'debug' ? world.debugLines : world.logs)?.push(String(text ?? ''))
     return { value: undefined }
   })
-  on('ui.blit', () => ({ value: world.blit === undefined ? {} : { deny: world.blit } }))
+  on('ui.blit', ($, e) => {
+    world.blits?.push((e as { source?: unknown }).source)
+    return { value: world.blit === undefined ? {} : { deny: world.blit } }
+  })
   on('ui.render', ($, e) => {
     const { Box, Text } = $.ui.resolve(e)
     const row = h(Text, {}, 'engine-row')
@@ -568,6 +580,40 @@ describe('drawing', () => {
     expect(settled.image).toBeDefined()
     expect(settled.raster).toBeUndefined()
     expect(settled.probe).toBeUndefined()
+  })
+
+  // Inside tmux Claude Code draws bytes and not files, so a bytes probe could
+  // pass where the pictures, read from files, draw only their alt.
+  test('the probe reads its PNG from a cache file where the pictures do', async ($, on) => {
+    const world: World = { hasMagick: true, blit: undefined, ran: [], blits: [] }
+    const clock = mock.clock(on)
+    engine(on, world)
+    const { probe } = await drawn($)
+    const file = '/run/user/1000/claude-images/probe.png'
+    expect(probe?.props.source).toEqual({ file, format: 'png' })
+    expect(world.ran.find(argv => argv[0] === 'sh' && argv.at(-1) === file)?.[2]).toMatch(/^base64 --decode /)
+    await clock.advance(300)
+    expect(world.blits).toEqual([{ file, format: 'png' }])
+  })
+
+  test('a probe file that cannot be written: no probe, and the next picture tries again', async ($, on) => {
+    const world: World = { hasMagick: true, blit: undefined, ran: [], blits: [], probeUnwritable: true }
+    const clock = mock.clock(on)
+    engine(on, world)
+    expect((await drawn($)).probe).toBeUndefined()
+    await clock.advance(300)
+    expect(world.blits).toEqual([])
+    world.probeUnwritable = false
+    expect((await drawn($)).probe?.props.source).toEqual({ file: '/run/user/1000/claude-images/probe.png', format: 'png' })
+  })
+
+  test('inside tmux the probe sends bytes, as the pictures do', async ($, on) => {
+    const world: World = { hasMagick: true, blit: undefined, ran: [], blits: [], env: { TMUX: '/tmp/tmux-1000/default,1,0' } }
+    const clock = mock.clock(on)
+    engine(on, world)
+    expect((await drawn($)).probe?.props.source).toEqual({ png: PROBE_PNG })
+    await clock.advance(300)
+    expect(world.blits).toEqual([{ png: PROBE_PNG }])
   })
 
   test('an unmounted probe tries again, then leaves it unknown', async ($, on) => {
@@ -898,6 +944,13 @@ describe('scroll-back', () => {
 
   test('over ssh: the PNG travels as bytes', async ($, on) => {
     engine(on, { hasMagick: true, blit: undefined, ran: [], settings: { renderer: 'image' }, env: { SSH_CONNECTION: '10.0.0.2 5000 10.0.0.1 22' } })
+    const source = await imageSource($, SHOWN)
+    expect(source?.png).toBe(PNG)
+    expect(source?.file).toBeUndefined()
+  })
+
+  test('inside tmux: the PNG travels as bytes', async ($, on) => {
+    engine(on, { hasMagick: true, blit: undefined, ran: [], settings: { renderer: 'image' }, env: { TMUX: '/tmp/tmux-1000/default,1,0' } })
     const source = await imageSource($, SHOWN)
     expect(source?.png).toBe(PNG)
     expect(source?.file).toBeUndefined()

@@ -136,12 +136,13 @@ export function needsProbe(option: RendererOption, capability: boolean | null): 
 
 /**
  * Reads `$.ui.blit`'s answer for the probe Image: taken means the terminal
- * draws the picture; a refusal naming the alt means it draws only the alt.
- * Any other refusal (not mounted yet, no surface) settles nothing.
+ * draws the picture; a refusal naming the alt, or a file the terminal cannot
+ * read, means it draws only the alt. Any other refusal (not mounted yet, no
+ * surface) settles nothing.
  */
 export function probeVerdict(deny: string | undefined): boolean | null {
   if (deny === undefined) return true
-  return /\balt\b|placeholder/i.test(deny) ? false : null
+  return /\balt\b|placeholder|cannot read/i.test(deny) ? false : null
 }
 
 export type CellFit = {
