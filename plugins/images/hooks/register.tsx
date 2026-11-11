@@ -345,17 +345,18 @@ async function sendsBytes($: EngineInterface): Promise<boolean> {
 /**
  * The probe Image's source, of the kind the pictures will use: bytes where
  * they travel as bytes, else the probe PNG written to the cache directory.
- * Bytes too when that file could not be written.
+ * null when that file could not be written: a bytes probe could pass where
+ * the pictures' files draw only their alt, so the next picture tries again.
  */
-async function probeSource($: EngineInterface): Promise<ImageSource> {
+async function probeSource($: EngineInterface): Promise<ImageSource | null> {
   if (await sendsBytes($)) return { png: PROBE_PNG }
   if (probeFile === undefined) {
     const dir = await cacheDirectory($)
-    if (dir === null) return { png: PROBE_PNG }
+    if (dir === null) return null
     const path = `${dir}/probe.png`
-    const script = 'base64 -d > "$1.$$" && mv -f "$1.$$" "$1"'
+    const script = 'base64 --decode > "$1.$$" && mv -f "$1.$$" "$1" || { rm -f "$1.$$"; exit 1; }'
     const wrote = await run($, ['sh', '-c', script, 'sh', path], { stdin: PROBE_PNG })
-    if (wrote?.exitCode !== 0) return { png: PROBE_PNG }
+    if (wrote?.exitCode !== 0) return null
     probeFile = path
   }
   return { file: probeFile, format: 'png' }
@@ -515,8 +516,10 @@ async function pictures(
   }
   if (drawn.length > 0 && needsProbe(options.renderer, capability)) {
     const source = await probeSource($)
-    drawn.push(<Image key={PROBE_KEY} source={source} columns={1} rows={1} alt=" " />)
-    probe($, requestId, source)
+    if (source !== null) {
+      drawn.push(<Image key={PROBE_KEY} source={source} columns={1} rows={1} alt=" " />)
+      probe($, requestId, source)
+    }
   }
   if (note !== null) drawn.push(<Text dimColor>{note}</Text>)
   if (drawn.length === 0) return null

@@ -411,6 +411,8 @@ type World = {
   env?: Record<string, string>
   /** Every source `$.ui.blit` was handed. */
   blits?: unknown[]
+  /** The probe PNG's `sh -c base64` write fails. */
+  probeUnwritable?: boolean
   /** The `mods.images.*` values `ways settings list` resolves, over the defaults; `fail` exits 2, `garbage` prints no JSON. */
   settings?: Record<string, unknown> | 'fail' | 'garbage'
   /** Every `ways` argv the mod ran. */
@@ -466,6 +468,9 @@ function engine(on: On, world: World) {
     if (tool === 'python3') return { value: ok(world.winsize ?? '') }
     if (tool === 'mkdir' && (world.mkdirFailures ?? 0) > 0) {
       world.mkdirFailures = (world.mkdirFailures ?? 0) - 1
+      return { value: { ...ok(), exitCode: 1 } }
+    }
+    if (tool === 'sh' && e.argv[1] === '-c' && /^base64\b/.test(e.argv[2] ?? '') && world.probeUnwritable === true) {
       return { value: { ...ok(), exitCode: 1 } }
     }
     if (tool === 'sh' && e.argv[1] === '-c' && /\bcat\b/.test(e.argv[2] ?? '')) {
@@ -586,9 +591,20 @@ describe('drawing', () => {
     const { probe } = await drawn($)
     const file = '/run/user/1000/claude-images/probe.png'
     expect(probe?.props.source).toEqual({ file, format: 'png' })
-    expect(world.ran.find(argv => argv[0] === 'sh' && argv.at(-1) === file)?.[2]).toMatch(/^base64 -d /)
+    expect(world.ran.find(argv => argv[0] === 'sh' && argv.at(-1) === file)?.[2]).toMatch(/^base64 --decode /)
     await clock.advance(300)
     expect(world.blits).toEqual([{ file, format: 'png' }])
+  })
+
+  test('a probe file that cannot be written: no probe, and the next picture tries again', async ($, on) => {
+    const world: World = { hasMagick: true, blit: undefined, ran: [], blits: [], probeUnwritable: true }
+    const clock = mock.clock(on)
+    engine(on, world)
+    expect((await drawn($)).probe).toBeUndefined()
+    await clock.advance(300)
+    expect(world.blits).toEqual([])
+    world.probeUnwritable = false
+    expect((await drawn($)).probe?.props.source).toEqual({ file: '/run/user/1000/claude-images/probe.png', format: 'png' })
   })
 
   test('inside tmux the probe sends bytes, as the pictures do', async ($, on) => {
