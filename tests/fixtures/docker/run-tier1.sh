@@ -188,7 +188,10 @@ section "settings.json merge"
 assert "settings.json is valid JSON" jq -e . "$DEST/settings.json"
 assert "backup of the pre-merge file exists" test -f "$DEST/settings.json.bak"
 assert_eq "backup equals the seed" "$SEED_SETTINGS_HASH" "$(file_hash "$DEST/settings.json.bak")"
-assert_eq "model key kept" "opus" "$(jq -r .model "$DEST/settings.json")"
+# The seed model is one the pinned Claude Code never migrates. 2.1.275 rewrites
+# "opus" to "opus[1m]" on its first full run, which `claude mcp add-json` in the
+# repair starts, so an "opus" seed tests Claude Code instead of the merge.
+assert_eq "model key kept" "sonnet" "$(jq -r .model "$DEST/settings.json")"
 for ev in UserPromptSubmit SessionStart Stop; do
   seeded=$(jq -c --arg ev "$ev" '.hooks[$ev][0]' "$FIX/seed/claude/settings.json")
   assert "user hook kept by identity: $ev" \
