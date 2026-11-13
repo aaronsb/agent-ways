@@ -1,0 +1,12 @@
+  ⚠️ src/review/module.mjs:1  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/review/module.mjs:1  ADR-102 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/review/plain.js:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/review/plain.js:2  ADR-102 is in text the program ships; say what it decides instead
+  ⚠️ src/review/widget.tsx:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/review/widget.tsx:2  ADR-102 is in text the program ships; say what it decides instead
+
+════════════════════════════════════════════════════════════
+Citations: 0 errors, 0 warnings
+Placement: 0 errors, 6 warnings
+════════════════════════════════════════════════════════════
+[exit 0]

@@ -9,8 +9,11 @@
 # be misread, and a fixture is the place to pin a case that matters.
 
 _CITE_IDENT = re.compile(r"[A-Za-z0-9_]+")
-_CITE_HEREDOC = re.compile(r"<<(-?)[ \t]*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2")
-_CITE_YAML_BLOCK = re.compile(r"(?::|^\s*-|^)\s*[|>][-+1-9]*\s*$")
+# A heredoc operator: <<WORD, <<-WORD, <<'WORD', <<"WORD" or <<\WORD.
+_CITE_HEREDOC = re.compile(r"<<(-?)[ \t]*(?:\\([A-Za-z_]\w*)|(['\"]?)([A-Za-z_]\w*)\3)")
+# A block scalar indicator (| or >), after a key, a list item or an anchor
+# or tag.
+_CITE_YAML_BLOCK = re.compile(r"(?::|^\s*-|^)\s*(?:[&!]\S+\s+)*[|>][-+1-9]*\s*$")
 
 
 class _CiteSeg:
@@ -67,6 +70,8 @@ def _cite_regex_can_start(text: str, i: int) -> bool:
     k = i - 1
     while k >= 0 and text[k] in ' \t':
         k -= 1
+    if k > 0 and text[k] in '+-' and text[k - 1] == text[k]:
+        return False  # i++ / 2 divides
     if k < 0 or text[k] in '\n(,=:[!&|?{};+-*%<>~^':
         return True
     word = re.search(r'[A-Za-z_$][\w$]*$', text[max(0, k - 10):k + 1])
@@ -159,6 +164,26 @@ def _cite_lex_c_like(text: str, lang: str) -> list:
     return segs
 
 
+def _cite_py_docstring_follows(text: str, line_start: int, segs: list) -> bool:
+    """True when a triple-quoted string that begins the line at line_start is
+    a docstring: the module's first statement, or the first statement after a
+    line of code that ends in a colon (a def, class or other block header)."""
+    end = line_start - 1
+    while end > 0:
+        start = text.rfind('\n', 0, end) + 1
+        line = text[start:end]
+        for seg in reversed(segs):
+            if seg.end <= start:
+                break
+            if seg.kind == 'comment' and seg.start >= start:
+                line = text[start:seg.start]
+        code = line.strip()
+        if code:
+            return code.endswith(':')
+        end = start - 1
+    return True
+
+
 def _cite_lex_python(text: str) -> list:
     """Comments, strings and docstrings in Python. A triple-quoted string that
     begins its line is a docstring, which counts as a comment."""
@@ -192,7 +217,7 @@ def _cite_lex_python(text: str) -> list:
                     k += 1
             end = min(k, n)
             line_start = text.rfind('\n', 0, start) + 1
-            if not text[line_start:start].strip():
+            if not text[line_start:start].strip() and _cite_py_docstring_follows(text, line_start, segs):
                 segs.append(_CiteSeg('comment', start, end, 'block'))
             else:
                 segs.append(_CiteSeg('string', start, end))
@@ -239,10 +264,23 @@ def _cite_lex_shell(text: str) -> list:
             end = _cite_quoted_end(text, i, '"', multiline=True)
             segs.append(_CiteSeg('string', i, end))
             i = end
+        elif text.startswith('((', i):
+            # Arithmetic: a << there shifts bits and opens no heredoc.
+            depth, k = 0, i
+            while k < n:
+                if text[k] == '(':
+                    depth += 1
+                elif text[k] == ')':
+                    depth -= 1
+                    if depth == 0:
+                        k += 1
+                        break
+                k += 1
+            i = k
         elif text.startswith('<<', i) and not text.startswith('<<<', i):
             m = _CITE_HEREDOC.match(text, i)
             if m:
-                pending.append((m.group(3), m.group(1) == '-'))
+                pending.append((m.group(2) or m.group(4), m.group(1) == '-'))
                 i = m.end()
             else:
                 i += 2

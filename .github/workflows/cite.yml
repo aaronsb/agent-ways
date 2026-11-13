@@ -4,7 +4,9 @@ name: Citations
 # where the reader can use them. A citation in a code comment or a docs page
 # goes in a references block at the end, and text that ships names no record.
 # Older lines are swept separately and only warn (cite.placement in
-# docs/architecture/adr.yaml), so this job checks the PR's own lines.
+# docs/architecture/adr.yaml), so placement is checked on the PR's own lines.
+# The job also fails on a citation anywhere in the tree that resolves to no
+# record, since --check fails on every resolution error.
 
 on:
   pull_request:

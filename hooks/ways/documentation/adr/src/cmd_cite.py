@@ -16,9 +16,13 @@ def cmd_cite(args):
     placement section).
     adr.yaml's cite.placement sets the strength: error, warn (the default) or
     off. With --since, placement findings cover only the lines added or
-    changed since the merge base of the ref and HEAD, as errors.
+    changed since the merge base of the ref and HEAD, as errors. A ref git
+    cannot resolve, or one with no merge base, is a usage error (exit 2):
+    the check never falls back to the whole tree on its own.
 
-    Files come from `git ls-files`, so ignored paths are never read.
+    Files come from `git ls-files`, so ignored paths are never read, and a
+    symlink is read only at its target. A file with no extension is read when
+    its shebang names a shell or Python.
     docs/architecture and the paths in adr.yaml cite.exclude are skipped (a
     glob, or a directory prefix when the pattern has no glob character), and
     a line carrying `adr-cite-ignore` (or doclint's `doclint-allow-retired`)
@@ -44,11 +48,13 @@ def cmd_cite(args):
             return 2
 
     changed = None
-    if args.since and placement != 'off':
-        changed = _cite_changed_lines(root, args.since)
-        if changed is None:
-            print(f"Cannot find the merge base of {args.since} and HEAD; "
-                  f"checking placement over the whole scope.")
+    if args.since:
+        changed, problem = _cite_changed_lines(root, args.since)
+        if problem:
+            print(f"Error: {problem}", file=sys.stderr)
+            return 2
+        if placement == 'off':
+            changed = None
     place_severity = 'error' if placement == 'error' or changed is not None else 'warning'
 
     records = get_all_adrs(include_archived=True)
@@ -94,13 +100,20 @@ def cmd_cite(args):
         if path_matches(name, excludes) or not in_scope(name):
             continue
         path = root / name
-        if path.suffix not in CITE_EXTS or path.name in ('adr.yaml', 'INDEX.md'):
+        if (path.suffix and path.suffix not in CITE_EXTS) or path.name in ('adr.yaml', 'INDEX.md'):
+            continue
+        # A symlink is read at its target, which the tree lists on its own
+        # when it sits inside the repository.
+        if path.is_symlink():
             continue
         try:
             text = path.read_text(encoding='utf-8', errors='replace')
         except OSError:
             continue
         if 'ADR-' not in text:
+            continue
+        file_kind = _cite_file_kind(name, text)
+        if file_kind is None:
             continue
         lines = text.split('\n')
         ignored = {ln for ln, line in enumerate(lines, 1)
@@ -114,7 +127,7 @@ def cmd_cite(args):
                 file_findings.append((ln, match.start(), 0, 'resolve', *result))
         if placement != 'off':
             changed_here = changed.get(name) if changed is not None else True
-            for ln, col, message in _cite_placement(name, text, lines, ignored,
+            for ln, col, message in _cite_placement(file_kind, name, text, lines, ignored,
                                                     path_matches(name, shipped_paths)):
                 if changed_here is True or (changed_here and ln in changed_here):
                     file_findings.append((ln, col, 1, 'place', place_severity, message))

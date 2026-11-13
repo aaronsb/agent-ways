@@ -1,0 +1,8 @@
+  ⚠️ src/review/crlf.rs:5  ADR-102 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/review/crlf.rs:6  ADR-101 is in text the program ships; say what it decides instead
+
+════════════════════════════════════════════════════════════
+Citations: 0 errors, 0 warnings
+Placement: 0 errors, 2 warnings
+════════════════════════════════════════════════════════════
+[exit 0]

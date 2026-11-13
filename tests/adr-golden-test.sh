@@ -194,6 +194,44 @@ capture place-shipped-dir    cite shipped
 capture place-shipped-glob   cite docs/guide/notes.ship.md
 capture place-test-code      cite tests src/check_test.go
 capture place-warn-check     cite --check
+# A #[cfg(test)] exempts only the inline module it marks.
+capture place-cfg-test       cite src/review/cfg_attr.rs
+# A triple-quoted string is a docstring only as a module's first statement
+# or after a line ending in a colon.
+capture place-py-docstring   cite src/review/call.py
+capture place-py-hash-refs   cite src/review/hash_refs.py
+# Arithmetic shifts are not heredocs; <<\EOF is one.
+capture place-shell-forms    cite src/review/shell_forms.sh
+capture place-four-slashes   cite src/review/slashes.rs
+# An anchor before a block scalar, and a block scalar under a list item.
+capture place-yaml-anchors   cite src/review/anchors.yaml
+capture place-js-divide      cite src/review/divide.js
+# Every citation in a References block sits in an entry.
+capture place-entries-rs     cite src/review/entries.rs
+capture place-entries-md     cite src/review/entries.md
+capture place-setext         cite src/review/setext.md
+capture place-bom            cite src/review/bom.md
+capture place-tsx-js-mjs     cite src/review/widget.tsx src/review/plain.js src/review/module.mjs
+capture place-go-raw         cite src/review/raw.go
+capture place-rust-nested    cite src/review/nested.rs
+capture place-sql-refs       cite src/review/refs.sql
+capture place-test-names     cite src/review/test_util.py src/review/app.test.ts src/check_test.go
+# More test naming conventions: tests.rs, *_tests.rs, test-*.* and *-test.*.
+# contest.js only contains the word, so its string still ships.
+capture place-test-names-more cite src/review/tests.rs src/review/store_tests.rs src/review/test-embed.sh src/review/run-test.js src/review/contest.js
+capture place-unterminated   cite src/review/unterminated.rs src/review/unterminated.py src/review/unterminated.sh src/review/unterminated_block.ts
+# A file with no suffix is read by its shebang, and skipped without one.
+capture place-shebang        cite src/review/runner src/review/pyrunner src/review/notes
+# A symlink is read at its target only, so its citations count once.
+(cd "$WORK/repo" && ln -s runner src/review/runner-link && git add src/review/runner-link)
+capture place-symlink        cite src/review
+# In a shipped path every citation is out of place, data files included;
+# test code there still follows the comment rule.
+capture place-shipped-data   cite shipped/data.json shipped/conf.yaml shipped/tool.sh shipped/tests
+# Line endings: a CRLF file reads as an LF one. The fixture is written here,
+# since the repository holds no CRLF files.
+(cd "$WORK/repo" && printf '/// Reads the store.\r\n///\r\n/// References:\r\n/// - ADR-101: the store.\r\n// Body: ADR-102\r\nfn f() { println!("ADR-101"); }\r\n' > src/review/crlf.rs)
+capture place-crlf           cite src/review/crlf.rs
 # The project sets the strength: error fails --check, off reports nothing.
 edit docs/architecture/adr.yaml "s.replace('cite:\n', 'cite:\n  placement: error\n', 1)"
 capture place-error-check    cite --check src/rust_comments.rs
@@ -203,21 +241,36 @@ edit docs/architecture/adr.yaml "s.replace('placement: off', 'placement: loud', 
 capture place-config-bad     lint
 
 # --since holds only the lines changed since the merge base to the rule, as
-# errors: a commit on top of the base, an unstaged edit and an untracked
-# file. Older out-of-place citations in the same files are not reported.
+# errors: a commit on top of the base (to a path with a space, and to one git
+# quotes), a rename with an added line, a deleted line, a staged-only edit,
+# an unstaged edit and an untracked file. Older out-of-place citations in the
+# same files are not reported.
 fresh placement
-(cd "$WORK/repo" && git tag base)
+(cd "$WORK/repo" && printf '// spaced\nfn a() {}\n' > 'src/spaced name.rs' \
+  && printf '// quoted\nfn b() {}\n' > 'src/odd"q.rs' && git add -A && git commit -qm paths && git tag base)
 edit src/rust_comments.rs "s + '\n// A committed change names ADR-101 in a body.\nfn later() {}\n'"
+edit 'src/spaced name.rs' "s + '// a committed line in a spaced path: ADR-102\n'"
+edit 'src/odd"q.rs' "s + '// a committed line in a quoted path: ADR-101\n'"
+(cd "$WORK/repo" && git mv src/schema.sql src/schema_renamed.sql)
+edit src/schema_renamed.sql "s + '-- renamed, with an added line: ADR-102\n'"
+edit src/empty_entries.rs "s.replace('/// - ADR-101.\n', '', 1)"
 commit_all "later"
+edit src/run.sh "s + '# a staged-only edit: ADR-101\n'"
+(cd "$WORK/repo" && git add src/run.sh)
 edit src/tool.py "s.replace('import sys\n', 'import sys  # an unstaged edit: ADR-102\n', 1)"
 (cd "$WORK/repo" && printf '// untracked: ADR-101\n' > src/fresh.rs)
 capture place-since          cite --since base src
 capture place-since-check    cite --check --since base src
-# A ref that does not resolve: one line, then the whole scope at the
-# configured strength.
+# The check fails closed: a ref that does not resolve, or one with no merge
+# base, is a usage error, and placement is not checked over the whole tree.
 capture place-since-missing  cite --since no-such-ref src/rust_comments.rs
-edit docs/architecture/adr.yaml "s.replace('cite:\n', 'cite:\n  placement: off\n', 1)"
+(cd "$WORK/repo" && git tag lonely "$(git commit-tree "$(git hash-object -t tree /dev/null)" -m lonely)")
+capture place-since-no-base  cite --check --since lonely src/rust_comments.rs
+edit docs/architecture/adr.yaml "s.replace('cite:\n', 'cite:\n  placement: error\n', 1)"
+capture place-since-error    cite --check --since base src
+edit docs/architecture/adr.yaml "s.replace('placement: error', 'placement: off', 1)"
 capture place-since-off      cite --check --since base src
+capture place-since-off-missing cite --since no-such-ref src
 
 # --- write commands, each on a fresh corpus, keeping the files they write ------
 

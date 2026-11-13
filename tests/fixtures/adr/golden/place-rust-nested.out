@@ -1,0 +1,8 @@
+  ⚠️ src/review/nested.rs:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/review/nested.rs:2  ADR-102 is in text the program ships; say what it decides instead
+
+════════════════════════════════════════════════════════════
+Citations: 0 errors, 0 warnings
+Placement: 0 errors, 2 warnings
+════════════════════════════════════════════════════════════
+[exit 0]

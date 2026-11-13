@@ -1,10 +1,11 @@
   ⚠️ docs/guide/store.md:8  ADR-101 sits in the page body; move it to a References section
   ⚠️ docs/guide/store.md:11  ADR-102 sits in the page body; move it to a References section
   ⚠️ docs/guide/store.md:17  the references entry for ADR-102 says nothing about what the record decides here
+  ⚠️ docs/guide/store.md:21  ADR-102 sits in the References block outside an entry; start an entry with '- '
   ⚠️ docs/guide/store.md:25  ADR-101 sits in the page body; move it to a References section
 
 ════════════════════════════════════════════════════════════
 Citations: 0 errors, 0 warnings
-Placement: 0 errors, 4 warnings
+Placement: 0 errors, 5 warnings
 ════════════════════════════════════════════════════════════
 [exit 0]

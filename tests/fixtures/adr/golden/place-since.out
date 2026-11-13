@@ -1,9 +1,13 @@
   ❌ src/fresh.rs:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ❌ src/odd"q.rs:3  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ❌ src/run.sh:17  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
   ❌ src/rust_comments.rs:28  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ❌ src/schema_renamed.sql:3  ADR-102 sits in the comment body; move it to a References: block at the end of the comment
+  ❌ src/spaced name.rs:3  ADR-102 sits in the comment body; move it to a References: block at the end of the comment
   ❌ src/tool.py:9  ADR-102 sits in the comment body; move it to a References: block at the end of the comment
 
 ════════════════════════════════════════════════════════════
 Citations: 0 errors, 0 warnings
-Placement: 3 errors, 0 warnings (lines changed since base)
+Placement: 7 errors, 0 warnings (lines changed since base)
 ════════════════════════════════════════════════════════════
 [exit 0]

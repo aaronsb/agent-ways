@@ -1,0 +1,2 @@
+Error: --since lonely: lonely and HEAD have no merge base (a shallow clone may stop before it; fetch more history)
+[exit 2]

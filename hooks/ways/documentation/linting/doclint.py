@@ -551,6 +551,11 @@ def main():
             else:
                 errors += int(counts.group(1))
                 warnings += int(counts.group(2))
+                # Placement findings count too; "Placement: off" adds none.
+                placed = re.search(r"Placement: (\d+) errors, (\d+) warnings", result.stdout)
+                if placed:
+                    errors += int(placed.group(1))
+                    warnings += int(placed.group(2))
 
     if not args.quiet and doc_nodes:
         print_coverage(doc_nodes, digits)
