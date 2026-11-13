@@ -292,10 +292,19 @@ fn exec(mut command: Command) -> std::io::Error {
     }
 }
 
+/// How many directories above the running program [`helper_binary`] looks for
+/// `tui-harness`: enough to climb from `<profile>/build/<crate>/<hash>/out`
+/// to `<profile>`.
+const HELPER_SEARCH_DEPTH: usize = 5;
+
 /// The `tui-harness` binary that runs [`exec_env`] in the pane: `explicit`
 /// if given, else `$TUI_HARNESS_BIN`, else the running program if it is
-/// `tui-harness`, else a `tui-harness` beside it or one directory up (a
-/// test binary in `target/<profile>/deps`), else one on `PATH`.
+/// `tui-harness`, else a `tui-harness` in a directory above it, else one on
+/// `PATH`. A test binary sits below the profile directory that holds the
+/// built `tui-harness`: one level down in `target/<profile>/deps` on older
+/// Cargo, and four levels down in `target/<profile>/build/<crate>/<hash>/out`
+/// from Rust 1.100, so every ancestor up to [`HELPER_SEARCH_DEPTH`] levels is
+/// tried.
 pub fn helper_binary(explicit: Option<&Path>) -> Result<PathBuf> {
     if let Some(p) = explicit {
         return Ok(p.to_path_buf());
@@ -308,12 +317,7 @@ pub fn helper_binary(explicit: Option<&Path>) -> Result<PathBuf> {
         if exe.file_name().is_some_and(|n| n == exe_name.as_str()) {
             return Ok(exe);
         }
-        let near = exe
-            .parent()
-            .into_iter()
-            .flat_map(|d| [Some(d), d.parent()])
-            .flatten();
-        for dir in near {
+        for dir in exe.ancestors().skip(1).take(HELPER_SEARCH_DEPTH) {
             let candidate = dir.join(&exe_name);
             if candidate.is_file() {
                 return Ok(candidate);
