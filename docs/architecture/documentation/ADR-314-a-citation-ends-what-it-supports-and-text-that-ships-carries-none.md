@@ -26,7 +26,7 @@ considered:
     said: "Yes, none [text that ships carries no record numbers, not even as a full URL]"
     via: this session, 2026-11-13, answering through the question tool whether shipped text should carry no record numbers or may link a record by full URL
     covers: [shipped]
-status: proposed
+status: accepted
 date: 2026-11-13
 deciders:
   - aaronsb
