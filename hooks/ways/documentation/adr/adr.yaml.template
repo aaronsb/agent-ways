@@ -99,3 +99,16 @@ legacy:
 # Viewer command for `adr view` (use {file} as placeholder)
 # Options: cat {file}, glow {file}, bat {file}
 viewer: cat {file}
+
+# `adr cite` checks each ADR-N citation in the code: that it resolves to a
+# record in force, and where it sits. A comment cites in a `References:`
+# block at its end, a Markdown page under a `References` heading, and each
+# entry says what the record decides there. A string or code in a program
+# source ships with the built program and cites nothing.
+# cite:
+#   placement: warn   # error, warn (the default) or off; `adr cite --since
+#                     # <ref>` holds lines changed since <ref> to it as errors
+#   shipped:          # paths whose text ships whole, such as help pages or
+#     - docs/help     # prompts the program loads (a glob, or a directory)
+#   exclude:          # paths not checked at all
+#     - tests/fixtures

@@ -35,7 +35,7 @@ Usage:
     adr rename <number> [new-title] [--slug SLUG]
     adr archive <number> --reason "..." [--superseded-by ADR-N[,ADR-M]] [--status S] [--dry-run]
     adr lint [--check] [paths...]
-    adr cite [--check] [paths...]
+    adr cite [--check] [--since REF] [paths...]
     adr accept <number> [--dry-run]
     adr reject|abandon <number> --reason "..." [--dry-run]
     adr consider <number> --said "..." --via "..." [--operator NAME] [--covers PROBE...]
@@ -65,6 +65,8 @@ Configuration is loaded from docs/architecture/adr.yaml
 # file may edit its copy (ADR-177).
 
 import argparse
+import bisect
+import fnmatch
 import hashlib
 import json
 import os
@@ -339,6 +341,31 @@ def cite_excludes() -> list:
     exclude = config_section('cite').get('exclude')
     return [str(p) for p in exclude] if isinstance(exclude, list) else []
 
+def path_matches(name: str, patterns: list) -> bool:
+    """True when a repository path matches one of adr.yaml's path patterns: a
+    glob, or a directory prefix when the pattern has no glob character."""
+    for pattern in patterns:
+        if any(c in pattern for c in '*?['):
+            if fnmatch.fnmatch(name, pattern):
+                return True
+        elif name == pattern.rstrip('/') or name.startswith(pattern.rstrip('/') + '/'):
+            return True
+    return False
+
+def cite_shipped() -> list:
+    """adr.yaml's cite.shipped paths, whose text ships with the built
+    software; empty when it lists none."""
+    shipped = config_section('cite').get('shipped')
+    return [str(p) for p in shipped] if isinstance(shipped, list) else []
+
+def cite_placement() -> str:
+    """adr.yaml's cite.placement: error, warn or off. Unset or malformed reads
+    as warn. A plain `off` reaches the tool as YAML's false."""
+    value = config_section('cite').get('placement')
+    if value is False:
+        return 'off'
+    return value if value in CITE_PLACEMENT_LEVELS else 'warn'
+
 def _detect_git_user() -> Optional[str]:
     """Detect current git user (GitHub username or git config name)."""
     # Try GitHub username from gh CLI
@@ -589,8 +616,13 @@ def rule_config_shape(ctx):
         cite = config['cite']
         if not isinstance(cite, dict):
             bad("cite: expected a mapping")
-        elif cite.get('exclude') is not None and not isinstance(cite['exclude'], list):
-            bad("cite.exclude: expected a list of paths")
+        else:
+            for key in ('exclude', 'shipped'):
+                if cite.get(key) is not None and not isinstance(cite[key], list):
+                    bad(f"cite.{key}: expected a list of paths")
+            placement = cite.get('placement')
+            if placement is not None and placement is not False and placement not in CITE_PLACEMENT_LEVELS:
+                bad("cite.placement: expected error, warn or off")
 
 # --- config against records ---------------------------------------------------
 
@@ -3527,20 +3559,11 @@ def _relocation_scope(root: Path) -> tuple:
     """(names in scope, every tracked path and directory). Scope is every file
     git tracks except fixtures, import sheets, the archive (archived records
     are never edited), adr.yaml's cite.exclude list, and INDEX.md."""
-    import fnmatch
     tracked, known = tracked_paths(root)
     patterns = ['tests/fixtures', 'docs/architecture/archive'] + cite_excludes()
 
     def excluded(name: str) -> bool:
-        if '.import' in name.split('/'):
-            return True
-        for pattern in patterns:
-            if any(c in pattern for c in '*?['):
-                if fnmatch.fnmatch(name, pattern):
-                    return True
-            elif name == pattern.rstrip('/') or name.startswith(pattern.rstrip('/') + '/'):
-                return True
-        return False
+        return '.import' in name.split('/') or path_matches(name, patterns)
     # INDEX.md is regenerated after the move, so it is not rewritten. A
     # symlink is skipped: writing through it would edit its target, which is
     # in scope (or excluded) in its own right. docs/scripts/adr is one.
@@ -4237,26 +4260,639 @@ def _contract_upgrade_preview(shown, declared, body, lines, replaced, blocks,
     _print_capability_notes(added, seeded, taken, thin)
     print("Run `adr contract --upgrade` without --dry-run to write it.")
     return 0
-def cmd_cite(args):
-    """Check ADR citations in the code against the records they cite.
+# ============================================================================
+# Citation placement: lexers that mark comments and strings
+# ============================================================================
+#
+# One small lexer per language the placement check reads. Each returns the
+# file's comments and strings as segments, by character offset; text in no
+# segment is code. They are line based and approximate: a regex literal, a
+# quote inside a shell command substitution or a multi-line YAML string can
+# be misread, and a fixture is the place to pin a case that matters.
 
-    ADR-304 §6 gives code citations a maintenance loop:
+_CITE_IDENT = re.compile(r"[A-Za-z0-9_]+")
+_CITE_HEREDOC = re.compile(r"<<(-?)[ \t]*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2")
+_CITE_YAML_BLOCK = re.compile(r"(?::|^\s*-|^)\s*[|>][-+1-9]*\s*$")
+
+
+class _CiteSeg:
+    """A comment or string in a file, by character offset. `marker` is a
+    line comment's marker (`//`, `///`, `#`, `--`), or 'block' for a block
+    comment or a Python docstring."""
+    __slots__ = ('kind', 'start', 'end', 'marker', 'unit')
+
+    def __init__(self, kind, start, end, marker=None):
+        self.kind, self.start, self.end, self.marker, self.unit = kind, start, end, marker, None
+
+
+def _cite_quoted_end(text: str, i: int, quote: str, multiline: bool, escapes: bool = True) -> int:
+    """The offset just past the string opened by the quote at i. A string
+    that may not span lines ends at the line's end when left open."""
+    k, n = i + 1, len(text)
+    while k < n:
+        ch = text[k]
+        if escapes and ch == '\\':
+            k += 2
+            continue
+        if ch == quote:
+            return k + 1
+        if ch == '\n' and not multiline:
+            return k
+        k += 1
+    return n
+
+
+def _cite_line_end(text: str, i: int) -> int:
+    j = text.find('\n', i)
+    return len(text) if j < 0 else j
+
+
+def _cite_block_end(text: str, i: int, nests: bool) -> int:
+    """The offset just past the /* */ comment opened at i."""
+    depth, k, n = 1, i + 2, len(text)
+    while k < n:
+        if nests and text.startswith('/*', k):
+            depth, k = depth + 1, k + 2
+        elif text.startswith('*/', k):
+            depth, k = depth - 1, k + 2
+            if depth == 0:
+                return k
+        else:
+            k += 1
+    return n
+
+
+def _cite_regex_can_start(text: str, i: int) -> bool:
+    """True when a slash at i opens a JavaScript regex literal rather than
+    dividing: it follows an operator, an opening bracket, a line start or a
+    keyword such as return."""
+    k = i - 1
+    while k >= 0 and text[k] in ' \t':
+        k -= 1
+    if k < 0 or text[k] in '\n(,=:[!&|?{};+-*%<>~^':
+        return True
+    word = re.search(r'[A-Za-z_$][\w$]*$', text[max(0, k - 10):k + 1])
+    return bool(word) and word.group(0) in ('return', 'typeof', 'case', 'in', 'of', 'yield', 'await')
+
+
+def _cite_regex_end(text: str, i: int) -> int:
+    """The offset just past the regex literal opened at i, flags included. A
+    regex literal never spans lines."""
+    k, n, in_class = i + 1, len(text), False
+    while k < n and text[k] != '\n':
+        ch = text[k]
+        if ch == '\\':
+            k += 2
+            continue
+        if ch == '[':
+            in_class = True
+        elif ch == ']':
+            in_class = False
+        elif ch == '/' and not in_class:
+            k += 1
+            while k < n and (text[k].isalnum() or text[k] == '_'):
+                k += 1
+            return k
+        k += 1
+    return k
+
+
+def _cite_lex_c_like(text: str, lang: str) -> list:
+    """Comments and strings in Rust, Go, TypeScript or JavaScript."""
+    rust, go, js = lang == 'rust', lang == 'go', lang == 'js'
+    segs, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == '/' and text.startswith('//', i):
+            end = _cite_line_end(text, i)
+            marker = '//'
+            if text.startswith('///', i) and not text.startswith('////', i):
+                marker = '///'
+            elif text.startswith('//!', i):
+                marker = '//!'
+            segs.append(_CiteSeg('comment', i, end, marker))
+            i = end
+        elif c == '/' and text.startswith('/*', i):
+            end = _cite_block_end(text, i, nests=rust)
+            segs.append(_CiteSeg('comment', i, end, 'block'))
+            i = end
+        elif c == '/' and js and _cite_regex_can_start(text, i):
+            end = _cite_regex_end(text, i)
+            segs.append(_CiteSeg('string', i, end))
+            i = end
+        elif c.isalnum() or c == '_':
+            word = _CITE_IDENT.match(text, i).group(0)
+            k = i + len(word)
+            if rust and word in ('r', 'br', 'cr'):
+                hashes = len(text) - len(text[k:].lstrip('#')) - k
+                if text.startswith('"', k + hashes):
+                    close = '"' + '#' * hashes
+                    j = text.find(close, k + hashes + 1)
+                    end = n if j < 0 else j + len(close)
+                    segs.append(_CiteSeg('string', i, end))
+                    i = end
+                    continue
+            i = k
+        elif c == '"':
+            end = _cite_quoted_end(text, i, '"', multiline=rust)
+            segs.append(_CiteSeg('string', i, end))
+            i = end
+        elif c == "'":
+            if rust:
+                # A char literal ('x', '\n', '"') or a lifetime ('a).
+                if text.startswith('\\', i + 1):
+                    j = text.find("'", i + 2)
+                    end = j + 1 if 0 <= j <= i + 12 else i + 1
+                elif text.startswith("'", i + 2):
+                    end = i + 3
+                else:
+                    i += 1
+                    continue
+            else:
+                end = _cite_quoted_end(text, i, "'", multiline=False)
+            segs.append(_CiteSeg('string', i, end))
+            i = end
+        elif c == '`' and (js or go):
+            end = _cite_quoted_end(text, i, '`', multiline=True, escapes=js)
+            segs.append(_CiteSeg('string', i, end))
+            i = end
+        else:
+            i += 1
+    return segs
+
+
+def _cite_lex_python(text: str) -> list:
+    """Comments, strings and docstrings in Python. A triple-quoted string that
+    begins its line is a docstring, which counts as a comment."""
+    segs, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == '#':
+            end = _cite_line_end(text, i)
+            segs.append(_CiteSeg('comment', i, end, '#'))
+            i = end
+            continue
+        start = i
+        if c.isalnum() or c == '_':
+            word = _CITE_IDENT.match(text, i).group(0)
+            i += len(word)
+            if not (len(word) <= 2 and set(word) <= set('rRbBuUfF') and text[i:i + 1] in ('"', "'")):
+                continue
+            c = text[i]
+        if c not in ('"', "'"):
+            i += 1
+            continue
+        if text.startswith(c * 3, i):
+            quote, k = c * 3, i + 3
+            while k < n:
+                if text[k] == '\\':
+                    k += 2
+                elif text.startswith(quote, k):
+                    k += 3
+                    break
+                else:
+                    k += 1
+            end = min(k, n)
+            line_start = text.rfind('\n', 0, start) + 1
+            if not text[line_start:start].strip():
+                segs.append(_CiteSeg('comment', start, end, 'block'))
+            else:
+                segs.append(_CiteSeg('string', start, end))
+        else:
+            end = _cite_quoted_end(text, i, c, multiline=False)
+            segs.append(_CiteSeg('string', start, end))
+        i = end
+    return segs
+
+
+def _cite_lex_shell(text: str) -> list:
+    """Comments, strings and heredoc bodies in a shell script."""
+    segs, pending, i, n = [], [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == '\n':
+            i += 1
+            # Heredoc bodies start on the line after the operator.
+            for delim, strip_tabs in pending:
+                body = i
+                while i < n:
+                    end = _cite_line_end(text, i)
+                    line = text[i:end].rstrip('\r')
+                    if (line.lstrip('\t') if strip_tabs else line) == delim:
+                        segs.append(_CiteSeg('string', body, i))
+                        i = end + 1
+                        break
+                    i = end + 1
+                else:
+                    segs.append(_CiteSeg('string', body, n))
+            pending = []
+        elif c == '\\':
+            i += 2
+        elif c == '#' and (i == 0 or text[i - 1] in ' \t\n;&|()'):
+            end = _cite_line_end(text, i)
+            segs.append(_CiteSeg('comment', i, end, '#'))
+            i = end
+        elif c == "'":
+            ansi = i > 0 and text[i - 1] == '$'
+            end = _cite_quoted_end(text, i, "'", multiline=True, escapes=ansi)
+            segs.append(_CiteSeg('string', i, end))
+            i = end
+        elif c == '"':
+            end = _cite_quoted_end(text, i, '"', multiline=True)
+            segs.append(_CiteSeg('string', i, end))
+            i = end
+        elif text.startswith('<<', i) and not text.startswith('<<<', i):
+            m = _CITE_HEREDOC.match(text, i)
+            if m:
+                pending.append((m.group(3), m.group(1) == '-'))
+                i = m.end()
+            else:
+                i += 2
+        else:
+            i += 1
+    return segs
+
+
+def _cite_lex_yaml(text: str) -> list:
+    """Comments in YAML. Values, block scalars included, are data and are
+    not marked."""
+    segs, offset, block_indent = [], 0, None
+    for raw in text.split('\n'):
+        line = raw.rstrip('\r')
+        line_offset, offset = offset, offset + len(raw) + 1
+        indent = len(line) - len(line.lstrip(' '))
+        if block_indent is not None:
+            if not line.strip() or indent > block_indent:
+                continue
+            block_indent = None
+        quote, k, comment_at = None, 0, None
+        while k < len(line):
+            ch = line[k]
+            if quote:
+                if quote == '"' and ch == '\\':
+                    k += 1
+                elif ch == quote:
+                    quote = None
+            elif ch in '"\'' and (k == 0 or line[k - 1] in ' \t:[{,'):
+                quote = ch
+            elif ch == '#' and (k == 0 or line[k - 1] in ' \t'):
+                comment_at = k
+                break
+            k += 1
+        if comment_at is not None:
+            segs.append(_CiteSeg('comment', line_offset + comment_at, line_offset + len(line), '#'))
+        content = line if comment_at is None else line[:comment_at]
+        if content.strip() and _CITE_YAML_BLOCK.search(content):
+            block_indent = indent
+    return segs
+
+
+def _cite_lex_sql(text: str) -> list:
+    """Comments and strings in SQL."""
+    segs, i, n = [], 0, len(text)
+    while i < n:
+        if text.startswith('--', i):
+            end = _cite_line_end(text, i)
+            segs.append(_CiteSeg('comment', i, end, '--'))
+        elif text.startswith('/*', i):
+            end = _cite_block_end(text, i, nests=False)
+            segs.append(_CiteSeg('comment', i, end, 'block'))
+        elif text[i] in '\'"':
+            # A doubled quote inside the string is the quote character.
+            k = i
+            while True:
+                j = text.find(text[i], k + 1)
+                if j < 0 or not text.startswith(text[i], j + 1):
+                    break
+                k = j + 1
+            end = n if j < 0 else j + 1
+            segs.append(_CiteSeg('string', i, end))
+        else:
+            i += 1
+            continue
+        i = end
+    return segs
+
+
+_CITE_LEXERS = {
+    '.rs': lambda t: _cite_lex_c_like(t, 'rust'),
+    '.go': lambda t: _cite_lex_c_like(t, 'go'),
+    '.ts': lambda t: _cite_lex_c_like(t, 'js'),
+    '.tsx': lambda t: _cite_lex_c_like(t, 'js'),
+    '.js': lambda t: _cite_lex_c_like(t, 'js'),
+    '.mjs': lambda t: _cite_lex_c_like(t, 'js'),
+    '.py': _cite_lex_python,
+    '.sh': _cite_lex_shell,
+    '.yml': _cite_lex_yaml,
+    '.yaml': _cite_lex_yaml,
+    '.sql': _cite_lex_sql,
+}
+# ============================================================================
+# Citation placement: where each citation sits in a file
+# ============================================================================
+#
+# `adr cite` reports a citation that sits where it should not. Text that stays
+# with the repository explains itself in its own words and lists the records
+# behind it in a references block at its end: a `References:` line that runs
+# to the end of a code comment, or a `References` heading that runs to the
+# next heading of the same or a higher level in a Markdown page. Text that
+# ships with the built program (strings and code in a program source, and the
+# paths adr.yaml lists in cite.shipped) names no record, because its reader
+# cannot open one.
+#
+# The lexers in cite_lex mark the comments and strings in a file; a citation
+# that falls in neither sits in code.
+
+CITE_PLACEMENT_LEVELS = ('error', 'warn', 'off')
+CITE_PROGRAM_EXTS = {'.rs', '.py', '.ts', '.tsx', '.js', '.mjs', '.go', '.sh'}
+
+_PLACE_BODY = "{cited} sits in the comment body; move it to a References: block at the end of the comment"
+_PLACE_SHIPPED = "{cited} is in text the program ships; say what it decides instead"
+_PLACE_PAGE = "{cited} sits in the page body; move it to a References section"
+_PLACE_BARE = "the references entry for {cited} says nothing about what the record decides here"
+
+# What an entry may hold besides its citations without saying anything:
+# section markers such as D3 or §2.1, then punctuation and space.
+_CITE_SECTION_MARK = re.compile(r"\bD\d+\b|§\s*\d+(?:\.\d+)*")
+_CITE_PUNCT = re.compile(r"[\W_]+")
+_CITE_MD_HEADING = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$")
+_CITE_MD_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+
+
+class _CiteUnit:
+    """One comment: a run of whole-line comments with the same marker, a
+    block comment or docstring, or a comment trailing code. `refs` is the line
+    of its `References:` line, or None; `entries` are its references entries
+    as (first line, last line, text)."""
+    __slots__ = ('lines', 'refs', 'entries')
+
+    def __init__(self):
+        self.lines, self.refs, self.entries = [], None, []
+
+
+# --- comments and their references blocks ------------------------------------
+
+def _cite_comment_text(text: str, seg) -> list:
+    """The comment's text, one string per line, with its markers removed."""
+    raw = text[seg.start:seg.end]
+    if seg.marker != 'block':
+        body = raw[len(seg.marker):]
+        return [body.lstrip('#') if seg.marker == '#' else body]
+    lines = raw.split('\n')
+    out = []
+    for idx, line in enumerate(lines):
+        line = line.rstrip('\r')
+        if idx == 0:
+            line = re.sub(r'^(/\*[*!]?|[rRbBuUfF]{0,2}("""|\'\'\'))', '', line)
+        else:
+            line = line.lstrip()
+            if line.startswith('*') and not line.startswith('*/'):
+                line = line[1:]
+        if idx == len(lines) - 1:
+            line = re.sub(r'(\*/|"""|\'\'\')\s*$', '', line)
+        out.append(line)
+    return out
+
+
+def _cite_entries(numbered: list) -> list:
+    """References entries from (line, text) pairs after a References line:
+    an entry starts at a `- ` line and runs to the next one. A text of None
+    ends the entry before it, as a Markdown blank line or heading does."""
+    entries, open_entry = [], False
+    for ln, body in numbered:
+        if body is None:
+            open_entry = False
+            continue
+        stripped = body.strip()
+        if stripped == '-' or stripped.startswith('- '):
+            entries.append([ln, ln, stripped[1:]])
+            open_entry = True
+        elif open_entry:
+            entries[-1][1] = ln
+            entries[-1][2] += ' ' + stripped
+    return [tuple(e) for e in entries]
+
+
+def _cite_units(text: str, segs: list, line_starts: list) -> list:
+    """Group comment segments into comments and find each one's references
+    block."""
+    units, last = [], None  # last: (unit, marker, line) of a whole-line comment
+    for seg in segs:
+        if seg.kind != 'comment':
+            continue
+        first = bisect.bisect_right(line_starts, seg.start)
+        whole_line = not text[line_starts[first - 1]:seg.start].strip()
+        lines = _cite_comment_text(text, seg)
+        if (seg.marker != 'block' and whole_line and last is not None
+                and last[1] == seg.marker and last[2] == first - 1):
+            unit = last[0]
+        else:
+            unit = _CiteUnit()
+            units.append(unit)
+        unit.lines.extend((first + k, body) for k, body in enumerate(lines))
+        seg.unit = unit
+        end_line = first + len(lines) - 1
+        last = (unit, seg.marker, end_line) if seg.marker != 'block' and whole_line else None
+    for unit in units:
+        for idx, (ln, body) in enumerate(unit.lines):
+            if body.strip() == 'References:':
+                unit.refs = ln
+                unit.entries = _cite_entries(unit.lines[idx + 1:])
+                break
+    return units
+
+
+def _cite_bare_entry(text: str) -> bool:
+    """True when an entry holds only its citations, section markers and
+    punctuation."""
+    return not _CITE_PUNCT.sub('', _CITE_SECTION_MARK.sub('', CITE_RE.sub('', text)))
+
+
+# --- per-file placement ----------------------------------------------------------
+
+def _cite_is_test_path(name: str) -> bool:
+    """Test code by its path: under a tests/ directory, or named as a test."""
+    parts = name.split('/')
+    base = parts[-1]
+    return ('tests' in parts[:-1] or fnmatch.fnmatch(base, '*_test.*')
+            or fnmatch.fnmatch(base, 'test_*.py') or fnmatch.fnmatch(base, '*.test.*'))
+
+
+def _cite_cites(lines: list, ignored, first: int, last: int):
+    """(line, match) for each citation on lines first..last (1-based)."""
+    for ln in range(first, last + 1):
+        if ln in ignored:
+            continue
+        for match in CITE_RE.finditer(lines[ln - 1]):
+            yield ln, match
+
+
+def _cite_bare_findings(units: list, lines: list, ignored) -> list:
+    """An entry that names records and says nothing else."""
+    findings = []
+    for unit in units:
+        for first, last, body in unit.entries:
+            cites = list(_cite_cites(lines, ignored, first, last))
+            if cites and _cite_bare_entry(body):
+                ln, match = cites[0]
+                findings.append((ln, match.start(), _PLACE_BARE.format(cited=match.group(0))))
+    return findings
+
+
+def _cite_place_markdown(lines: list, ignored, shipped: bool) -> list:
+    """A Markdown page cites in its frontmatter or under a References
+    heading; a shipped page cites only in its frontmatter."""
+    front_end = 0
+    if lines and lines[0].rstrip('\r') == '---':
+        for idx in range(1, len(lines)):
+            if lines[idx].rstrip('\r') in ('---', '...'):
+                front_end = idx + 1
+                break
+    findings, fence, ref_level = [], None, None
+    unit = _CiteUnit()
+    for idx in range(front_end, len(lines)):
+        ln, line = idx + 1, lines[idx].rstrip('\r')
+        in_refs = ref_level is not None
+        if fence is not None:
+            m = _CITE_MD_FENCE.match(line)
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not line.strip(' `~'):
+                fence = None
+        elif _CITE_MD_FENCE.match(line):
+            fence = _CITE_MD_FENCE.match(line).group(1)
+        else:
+            m = _CITE_MD_HEADING.match(line)
+            if m:
+                level, heading = len(m.group(1)), (m.group(2) or '').strip()
+                if ref_level is not None and level <= ref_level:
+                    ref_level = None
+                if heading == 'References' and ref_level is None:
+                    ref_level = level
+                in_refs = ref_level is not None and heading != 'References'
+                if in_refs:
+                    unit.lines.append((ln, None))
+                    continue
+        if in_refs:
+            unit.lines.append((ln, line if line.strip() else None))
+        if ln in ignored:
+            continue
+        for match in CITE_RE.finditer(line):
+            if shipped:
+                findings.append((ln, match.start(), _PLACE_SHIPPED.format(cited=match.group(0))))
+            elif not in_refs:
+                findings.append((ln, match.start(), _PLACE_PAGE.format(cited=match.group(0))))
+    if not shipped:
+        unit.entries = _cite_entries(unit.lines)
+        findings += _cite_bare_findings([unit], lines, ignored)
+    return findings
+
+
+def _cite_placement(name: str, text: str, lines: list, ignored, shipped: bool) -> list:
+    """Placement findings for one file, as (line, column, message).
+
+    A citation in a comment follows the comment rule: it belongs in the
+    comment's references block, whose entries each say what the record
+    decides. In a program source, a citation in a string or in code reaches
+    the built program, unless the code is test code; in a shipped path, every
+    citation in a program source does. Values in data files are left alone.
+    """
+    suffix = Path(name).suffix
+    if suffix == '.md':
+        return _cite_place_markdown(lines, ignored, shipped)
+    lexer = _CITE_LEXERS.get(suffix)
+    if lexer is None:
+        return []
+    program = suffix in CITE_PROGRAM_EXTS
+    segs = lexer(text)
+    line_starts = [0]
+    for line in lines[:-1]:
+        line_starts.append(line_starts[-1] + len(line) + 1)
+    units = _cite_units(text, segs, line_starts)
+    starts = [seg.start for seg in segs]
+
+    test_from = None
+    if _cite_is_test_path(name):
+        test_from = 1
+    elif suffix == '.rs':
+        test_from = next((k + 2 for k, line in enumerate(lines) if line.strip() == '#[cfg(test)]'), None)
+    ships = program and shipped and test_from != 1
+
+    findings = []
+    for ln, match in _cite_cites(lines, ignored, 1, len(lines)):
+        offset = line_starts[ln - 1] + match.start()
+        k = bisect.bisect_right(starts, offset) - 1
+        seg = segs[k] if k >= 0 and segs[k].end > offset else None
+        cited = match.group(0)
+        if seg is not None and seg.kind == 'comment':
+            if ships:
+                findings.append((ln, match.start(), _PLACE_SHIPPED.format(cited=cited)))
+            elif seg.unit.refs is None or ln <= seg.unit.refs:
+                findings.append((ln, match.start(), _PLACE_BODY.format(cited=cited)))
+        elif program and (test_from is None or ln < test_from):
+            findings.append((ln, match.start(), _PLACE_SHIPPED.format(cited=cited)))
+    if not ships:
+        findings += _cite_bare_findings(units, lines, ignored)
+    return findings
+
+
+# --- lines changed since a ref ----------------------------------------------------
+
+def _cite_changed_lines(root: Path, ref: str):
+    """The lines added or changed since the merge base of ref and HEAD, as
+    {path: set of lines, or True for a whole new file}: commits since the base,
+    staged and unstaged edits, and untracked files. None when the merge base
+    cannot be found."""
+    base = _git(['merge-base', ref, 'HEAD'], root)
+    if not base or not base.strip():
+        return None
+    out = _git(['diff', '-U0', '--no-color', '--no-ext-diff', '-M', '--src-prefix=a/', '--dst-prefix=b/',
+                base.strip(), '--'], root)
+    if out is None:
+        return None
+    changed, current = {}, None
+    for line in out.split('\n'):
+        if line.startswith('+++ '):
+            path = line[4:].strip('"')
+            current = path[2:] if path.startswith('b/') else None
+        elif line.startswith('@@') and current is not None:
+            m = re.match(r'@@ -\S+ \+(\d+)(?:,(\d+))? @@', line)
+            if m:
+                start, count = int(m.group(1)), int(m.group(2) or 1)
+                changed.setdefault(current, set()).update(range(start, start + count))
+    untracked = _git(['ls-files', '--others', '--exclude-standard', '-z'], root) or ''
+    for path in untracked.split('\0'):
+        if path:
+            changed[path] = True
+    return changed
+def cmd_cite(args):
+    """Check ADR citations in the code: that each resolves to a record in
+    force, and that each sits where the placement rule puts it.
+
+    Resolution:
 
     - an ADR-N that resolves to no record is an error
     - a citation whose records are all out of force (superseded, deprecated,
       rejected, abandoned, archived) warns and names each status and successor
     - a citation of a proposed or draft record prompts acceptance
 
-    A bare ADR-N resolves to its family {N, N.1, ...}. Files come from
-    `git ls-files`, so ignored paths are never read. docs/architecture and the
-    paths in adr.yaml cite.exclude are skipped (a glob, or a directory prefix
-    when the pattern has no glob character), and a line carrying
-    `adr-cite-ignore` (or doclint's `doclint-allow-retired`) is skipped.
-    """
-    import fnmatch
+    A bare ADR-N resolves to its family {N, N.1, ...}.
 
+    Placement: a comment or page cites in a references block at its end, and
+    text that ships with the built program cites nothing (see the citation
+    placement section).
+    adr.yaml's cite.placement sets the strength: error, warn (the default) or
+    off. With --since, placement findings cover only the lines added or
+    changed since the merge base of the ref and HEAD, as errors.
+
+    Files come from `git ls-files`, so ignored paths are never read.
+    docs/architecture and the paths in adr.yaml cite.exclude are skipped (a
+    glob, or a directory prefix when the pattern has no glob character), and
+    a line carrying `adr-cite-ignore` (or doclint's `doclint-allow-retired`)
+    is skipped.
+    """
     root = get_project_root().resolve()
     excludes = ['docs/architecture/'] + cite_excludes()
+    shipped_paths = cite_shipped()
+    placement = cite_placement()
 
     # Path arguments are resolved against the working directory and must sit
     # inside the repository.
@@ -4271,6 +4907,14 @@ def cmd_cite(args):
         except ValueError:
             print(f"Error: {raw} is outside the repository ({root})", file=sys.stderr)
             return 2
+
+    changed = None
+    if args.since and placement != 'off':
+        changed = _cite_changed_lines(root, args.since)
+        if changed is None:
+            print(f"Cannot find the merge base of {args.since} and HEAD; "
+                  f"checking placement over the whole scope.")
+    place_severity = 'error' if placement == 'error' or changed is not None else 'warning'
 
     records = get_all_adrs(include_archived=True)
 
@@ -4293,21 +4937,26 @@ def cmd_cite(args):
     def is_proposed(adr) -> bool:
         return str(adr.status or '').lower() in ('proposed', 'draft')
 
-    def excluded(name: str) -> bool:
-        for pattern in excludes:
-            if any(c in pattern for c in '*?['):
-                if fnmatch.fnmatch(name, pattern):
-                    return True
-            elif name == pattern.rstrip('/') or name.startswith(pattern.rstrip('/') + '/'):
-                return True
-        return False
+    def resolution(cited: str):
+        """(severity, message) for a citation that does not resolve to a
+        record in force, else None."""
+        members = family(_cite_key(cited[len('ADR-'):]))
+        if not members:
+            return 'error', f"{cited} resolves to no record"
+        if all(is_non_active(m.status) for m in members):
+            named = '; '.join(f"ADR-{m.number} is {str(m.status).lower()}, {successors(m)}" for m in members)
+            return 'warning', f"{cited} is not in force ({named})"
+        if any(is_proposed(m) for m in members):
+            return 'warning', f"{cited} is still proposed; accept it or cite the record in force"
+        return None
 
     def in_scope(name: str) -> bool:
         return not scopes or any(s in ('', '.') or name == s or name.startswith(s + '/') for s in scopes)
 
-    findings = []  # (severity, location, message)
+    found = []  # (severity, location, message)
+    placed = []
     for name in _cite_files(root):
-        if excluded(name) or not in_scope(name):
+        if path_matches(name, excludes) or not in_scope(name):
             continue
         path = root / name
         if path.suffix not in CITE_EXTS or path.name in ('adr.yaml', 'INDEX.md'):
@@ -4318,32 +4967,41 @@ def cmd_cite(args):
             continue
         if 'ADR-' not in text:
             continue
-        for ln, line in enumerate(text.split('\n'), 1):
-            if 'adr-cite-ignore' in line or 'doclint-allow-retired' in line:
-                continue
-            for match in CITE_RE.finditer(line):
-                key = _cite_key(match.group(1) + (match.group(2) or ''))
-                cited = match.group(0)  # as written, e.g. ADR-005
-                where = f"{name}:{ln}"
-                members = family(key)
-                if not members:
-                    findings.append(('error', where, f"{cited} resolves to no record"))
-                    continue
-                if all(is_non_active(m.status) for m in members):
-                    named = '; '.join(f"ADR-{m.number} is {str(m.status).lower()}, {successors(m)}" for m in members)
-                    findings.append(('warning', where, f"{cited} is not in force ({named})"))
-                elif any(is_proposed(m) for m in members):
-                    findings.append(('warning', where, f"{cited} is still proposed; accept it or cite the record in force"))
+        lines = text.split('\n')
+        ignored = {ln for ln, line in enumerate(lines, 1)
+                   if 'adr-cite-ignore' in line or 'doclint-allow-retired' in line}
+        # Each finding sorts by line and column; for one citation the
+        # resolution finding comes before the placement finding.
+        file_findings = []
+        for ln, match in _cite_cites(lines, ignored, 1, len(lines)):
+            result = resolution(match.group(0))
+            if result:
+                file_findings.append((ln, match.start(), 0, 'resolve', *result))
+        if placement != 'off':
+            changed_here = changed.get(name) if changed is not None else True
+            for ln, col, message in _cite_placement(name, text, lines, ignored,
+                                                    path_matches(name, shipped_paths)):
+                if changed_here is True or (changed_here and ln in changed_here):
+                    file_findings.append((ln, col, 1, 'place', place_severity, message))
+        for ln, _col, _order, kind, severity, message in sorted(file_findings):
+            (found if kind == 'resolve' else placed).append((severity, f"{name}:{ln}", message))
+            print(f"  {'❌' if severity == 'error' else '⚠️'} {name}:{ln}  {message}")
 
-    errors = sum(1 for f in findings if f[0] == 'error')
-    warnings = len(findings) - errors
-    for severity, where, message in findings:
-        icon = '❌' if severity == 'error' else '⚠️'
-        print(f"  {icon} {where}  {message}")
+    def counts(findings: list) -> str:
+        errors = sum(1 for f in findings if f[0] == 'error')
+        return f"{errors} errors, {len(findings) - errors} warnings"
+
+    if placement == 'off':
+        place_line = "off"
+    else:
+        place_line = counts(placed)
+        if changed is not None:
+            place_line += f" (lines changed since {args.since})"
     print(f"\n{'═'*60}")
-    print(f"Citations: {errors} errors, {warnings} warnings")
+    print(f"Citations: {counts(found)}")
+    print(f"Placement: {place_line}")
     print(f"{'═'*60}")
-    if args.check and errors:
+    if args.check and any(f[0] == 'error' for f in found + placed):
         return 1
     return 0
 
@@ -5409,6 +6067,8 @@ def main():
     p_cite = subparsers.add_parser('cite', help='Check ADR citations in code against the records')
     p_cite.add_argument('paths', nargs='*', help='Limit the scan to these files or directories')
     p_cite.add_argument('--check', action='store_true', help='Exit 1 if errors (CI mode)')
+    p_cite.add_argument('--since', metavar='REF',
+                        help='Hold the lines changed since the merge base of REF and HEAD to the placement rule, as errors')
     # Accepted and ignored: surface inventories are gone (ADR-311), and a
     # script that still passes the flag keeps working.
     p_cite.add_argument('--no-inventory', action='store_true', help=argparse.SUPPRESS)

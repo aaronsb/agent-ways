@@ -194,8 +194,13 @@ def rule_config_shape(ctx):
         cite = config['cite']
         if not isinstance(cite, dict):
             bad("cite: expected a mapping")
-        elif cite.get('exclude') is not None and not isinstance(cite['exclude'], list):
-            bad("cite.exclude: expected a list of paths")
+        else:
+            for key in ('exclude', 'shipped'):
+                if cite.get(key) is not None and not isinstance(cite[key], list):
+                    bad(f"cite.{key}: expected a list of paths")
+            placement = cite.get('placement')
+            if placement is not None and placement is not False and placement not in CITE_PLACEMENT_LEVELS:
+                bad("cite.placement: expected error, warn or off")
 
 # --- config against records ---------------------------------------------------
 

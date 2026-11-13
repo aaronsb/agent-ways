@@ -228,6 +228,31 @@ def cite_excludes() -> list:
     exclude = config_section('cite').get('exclude')
     return [str(p) for p in exclude] if isinstance(exclude, list) else []
 
+def path_matches(name: str, patterns: list) -> bool:
+    """True when a repository path matches one of adr.yaml's path patterns: a
+    glob, or a directory prefix when the pattern has no glob character."""
+    for pattern in patterns:
+        if any(c in pattern for c in '*?['):
+            if fnmatch.fnmatch(name, pattern):
+                return True
+        elif name == pattern.rstrip('/') or name.startswith(pattern.rstrip('/') + '/'):
+            return True
+    return False
+
+def cite_shipped() -> list:
+    """adr.yaml's cite.shipped paths, whose text ships with the built
+    software; empty when it lists none."""
+    shipped = config_section('cite').get('shipped')
+    return [str(p) for p in shipped] if isinstance(shipped, list) else []
+
+def cite_placement() -> str:
+    """adr.yaml's cite.placement: error, warn or off. Unset or malformed reads
+    as warn. A plain `off` reaches the tool as YAML's false."""
+    value = config_section('cite').get('placement')
+    if value is False:
+        return 'off'
+    return value if value in CITE_PLACEMENT_LEVELS else 'warn'
+
 def _detect_git_user() -> Optional[str]:
     """Detect current git user (GitHub username or git config name)."""
     # Try GitHub username from gh CLI

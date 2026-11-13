@@ -1,0 +1,7 @@
+  ⚠️ tests/check.py:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+
+════════════════════════════════════════════════════════════
+Citations: 0 errors, 0 warnings
+Placement: 0 errors, 1 warnings
+════════════════════════════════════════════════════════════
+[exit 0]

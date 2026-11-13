@@ -1,0 +1,8 @@
+  ⚠️ config/settings.yaml:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ config/settings.yaml:3  ADR-102 sits in the comment body; move it to a References: block at the end of the comment
+
+════════════════════════════════════════════════════════════
+Citations: 0 errors, 0 warnings
+Placement: 0 errors, 2 warnings
+════════════════════════════════════════════════════════════
+[exit 0]

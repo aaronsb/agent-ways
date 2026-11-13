@@ -28,20 +28,11 @@ def _relocation_scope(root: Path) -> tuple:
     """(names in scope, every tracked path and directory). Scope is every file
     git tracks except fixtures, import sheets, the archive (archived records
     are never edited), adr.yaml's cite.exclude list, and INDEX.md."""
-    import fnmatch
     tracked, known = tracked_paths(root)
     patterns = ['tests/fixtures', 'docs/architecture/archive'] + cite_excludes()
 
     def excluded(name: str) -> bool:
-        if '.import' in name.split('/'):
-            return True
-        for pattern in patterns:
-            if any(c in pattern for c in '*?['):
-                if fnmatch.fnmatch(name, pattern):
-                    return True
-            elif name == pattern.rstrip('/') or name.startswith(pattern.rstrip('/') + '/'):
-                return True
-        return False
+        return '.import' in name.split('/') or path_matches(name, patterns)
     # INDEX.md is regenerated after the move, so it is not rewritten. A
     # symlink is skipped: writing through it would edit its target, which is
     # in scope (or excluded) in its own right. docs/scripts/adr is one.

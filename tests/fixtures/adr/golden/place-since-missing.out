@@ -1,0 +1,15 @@
+Cannot find the merge base of no-such-ref and HEAD; checking placement over the whole scope.
+  ⚠️ src/rust_comments.rs:10  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/rust_comments.rs:13  ADR-102 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/rust_comments.rs:14  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/rust_comments.rs:21  ADR-102 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/rust_comments.rs:23  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/rust_comments.rs:24  ADR-102 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/rust_comments.rs:25  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/rust_comments.rs:28  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+
+════════════════════════════════════════════════════════════
+Citations: 0 errors, 0 warnings
+Placement: 0 errors, 8 warnings
+════════════════════════════════════════════════════════════
+[exit 0]

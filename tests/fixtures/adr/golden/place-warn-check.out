@@ -1,0 +1,46 @@
+  ⚠️ config/settings.yaml:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ config/settings.yaml:3  ADR-102 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ docs/guide/notes.ship.md:3  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ docs/guide/store.md:8  ADR-101 sits in the page body; move it to a References section
+  ⚠️ docs/guide/store.md:11  ADR-102 sits in the page body; move it to a References section
+  ⚠️ docs/guide/store.md:17  the references entry for ADR-102 says nothing about what the record decides here
+  ⚠️ docs/guide/store.md:25  ADR-101 sits in the page body; move it to a References section
+  ⚠️ shipped/way.md:8  ADR-102 is in text the program ships; say what it decides instead
+  ⚠️ shipped/way.md:12  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/app.ts:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/app.ts:12  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/app.ts:13  ADR-102 is in text the program ships; say what it decides instead
+  ⚠️ src/app.ts:18  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/empty_entries.rs:4  the references entry for ADR-101 says nothing about what the record decides here
+  ⚠️ src/empty_entries.rs:5  the references entry for ADR-102 says nothing about what the record decides here
+  ⚠️ src/run.sh:7  ADR-102 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/run.sh:8  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/run.sh:10  ADR-102 is in text the program ships; say what it decides instead
+  ⚠️ src/run.sh:13  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/run.sh:15  ADR-102 is in text the program ships; say what it decides instead
+  ⚠️ src/run.sh:16  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/rust_comments.rs:10  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/rust_comments.rs:13  ADR-102 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/rust_comments.rs:14  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/rust_comments.rs:21  ADR-102 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/rust_comments.rs:23  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/rust_comments.rs:24  ADR-102 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/rust_comments.rs:25  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/rust_strings.rs:3  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/rust_strings.rs:4  ADR-102 is in text the program ships; say what it decides instead
+  ⚠️ src/rust_strings.rs:5  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/rust_strings.rs:7  ADR-102 is in text the program ships; say what it decides instead
+  ⚠️ src/rust_strings.rs:13  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/schema.sql:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/tool.py:3  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/tool.py:18  ADR-102 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/tool.py:19  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/tool.py:20  ADR-102 is in text the program ships; say what it decides instead
+  ⚠️ src/tool.py:22  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ tests/check.py:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+
+════════════════════════════════════════════════════════════
+Citations: 0 errors, 0 warnings
+Placement: 0 errors, 40 warnings
+════════════════════════════════════════════════════════════
+[exit 0]

@@ -20,6 +20,10 @@
 #   v1-defects/  one broken record per v1 rule, a malformed adr.yaml, and
 #             keys adr/v1 no longer reads
 #   v1-empty/ adr/v1 declared with no kinds and no capabilities
+#   placement/  citations in each context the placement check reads:
+#             comments with and without a References block, strings,
+#             docstrings, heredocs, data values, Markdown pages, shipped
+#             paths and test code
 #
 # Usage:
 #   tests/adr-golden-test.sh            diff against the goldens
@@ -49,7 +53,7 @@ UPDATE=0
 
 # The date normalization below replaces today's date wherever it appears. It is
 # safe only while no fixture carries today's date as content.
-if grep -rqF "$TODAY" "$FIXTURES/corpus" "$FIXTURES/defects" "$FIXTURES/v1" "$FIXTURES/v1-defects" "$FIXTURES/v1-empty"; then
+if grep -rqF "$TODAY" "$FIXTURES/corpus" "$FIXTURES/defects" "$FIXTURES/v1" "$FIXTURES/v1-defects" "$FIXTURES/v1-empty" "$FIXTURES/placement"; then
   echo "a fixture file contains today's date ($TODAY); fixture dates must be in the past" >&2
   exit 2
 fi
@@ -170,6 +174,50 @@ fresh corpus
   && printf '# ADR-101 as a family.\n# ADR-101.2 on its own.\n' > src/family.py)
 capture cite-family cite src/family.py
 capture config               config
+
+# --- citation placement ----------------------------------------------------------
+
+# Where a citation sits, one context per case. Placement is unset in the
+# fixture's adr.yaml, so the findings are warnings.
+fresh placement
+capture place-rust-comments  cite src/rust_comments.rs
+capture place-rust-strings   cite src/rust_strings.rs
+capture place-empty-entries  cite src/empty_entries.rs
+capture place-python         cite src/tool.py
+capture place-shell          cite src/run.sh
+capture place-ts             cite src/app.ts
+capture place-yaml           cite config/settings.yaml
+capture place-json           cite config/data.json
+capture place-sql            cite src/schema.sql
+capture place-markdown       cite docs/guide/store.md
+capture place-shipped-dir    cite shipped
+capture place-shipped-glob   cite docs/guide/notes.ship.md
+capture place-test-code      cite tests src/check_test.go
+capture place-warn-check     cite --check
+# The project sets the strength: error fails --check, off reports nothing.
+edit docs/architecture/adr.yaml "s.replace('cite:\n', 'cite:\n  placement: error\n', 1)"
+capture place-error-check    cite --check src/rust_comments.rs
+edit docs/architecture/adr.yaml "s.replace('placement: error', 'placement: off', 1)"
+capture place-off-check      cite --check
+edit docs/architecture/adr.yaml "s.replace('placement: off', 'placement: loud', 1).replace('    - shipped\n    - \"*.ship.md\"\n', '', 1).replace('  shipped:\n', '  shipped: 5\n', 1)"
+capture place-config-bad     lint
+
+# --since holds only the lines changed since the merge base to the rule, as
+# errors: a commit on top of the base, an unstaged edit and an untracked
+# file. Older out-of-place citations in the same files are not reported.
+fresh placement
+(cd "$WORK/repo" && git tag base)
+edit src/rust_comments.rs "s + '\n// A committed change names ADR-101 in a body.\nfn later() {}\n'"
+commit_all "later"
+edit src/tool.py "s.replace('import sys\n', 'import sys  # an unstaged edit: ADR-102\n', 1)"
+(cd "$WORK/repo" && printf '// untracked: ADR-101\n' > src/fresh.rs)
+capture place-since          cite --since base src
+capture place-since-check    cite --check --since base src
+# A ref that does not resolve: one line, then the whole scope at the
+# configured strength.
+capture place-since-missing  cite --since no-such-ref src/rust_comments.rs
+edit docs/architecture/adr.yaml "s.replace('cite:\n', 'cite:\n  placement: off\n', 1)"
+capture place-since-off      cite --check --since base src
 
 # --- write commands, each on a fresh corpus, keeping the files they write ------
 

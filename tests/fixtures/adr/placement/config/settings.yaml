@@ -1,0 +1,12 @@
+# Settings for the store. ADR-101 sits in this comment's body.
+store:
+  path: /var/lib/store   # ADR-102 in a trailing comment
+  note: "values are data: ADR-101"
+  script: |
+    # a block scalar is a value, not a comment: ADR-102
+    run --store
+# The cache.
+#
+# References:
+# - ADR-102: the cache size.
+cache: 64

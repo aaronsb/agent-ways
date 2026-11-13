@@ -1,0 +1,25 @@
+# Fixture ADR configuration for the citation-placement cases in
+# tests/adr-golden-test.sh.
+project_name: Placement Fixture
+
+domains:
+  system:
+    range: [100, 199]
+    name: System
+    description: Runtime and storage
+    folder: system
+
+statuses:
+  - Proposed
+  - Accepted
+
+legacy:
+  range: [1, 99]
+  label: "Legacy"
+
+cite:
+  shipped:
+    - shipped
+    - "*.ship.md"
+
+viewer: cat {file}

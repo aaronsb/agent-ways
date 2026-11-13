@@ -1,6 +1,9 @@
+  ⚠️ src/family.py:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
   ⚠️ src/family.py:2  ADR-101.2 is not in force (ADR-101.2 is superseded, see ADR-101)
+  ⚠️ src/family.py:2  ADR-101.2 sits in the comment body; move it to a References: block at the end of the comment
 
 ════════════════════════════════════════════════════════════
 Citations: 0 errors, 1 warnings
+Placement: 0 errors, 2 warnings
 ════════════════════════════════════════════════════════════
 [exit 0]

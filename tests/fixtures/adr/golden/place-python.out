@@ -1,0 +1,11 @@
+  ⚠️ src/tool.py:3  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/tool.py:18  ADR-102 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/tool.py:19  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/tool.py:20  ADR-102 is in text the program ships; say what it decides instead
+  ⚠️ src/tool.py:22  ADR-101 is in text the program ships; say what it decides instead
+
+════════════════════════════════════════════════════════════
+Citations: 0 errors, 0 warnings
+Placement: 0 errors, 5 warnings
+════════════════════════════════════════════════════════════
+[exit 0]
