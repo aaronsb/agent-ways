@@ -45,6 +45,7 @@
   ⚠️ src/review/shell_forms.sh:5  ADR-101 is in text the program ships; say what it decides instead
   ⚠️ src/review/shell_forms.sh:7  ADR-102 sits in the comment body; move it to a References: block at the end of the comment
   ⚠️ src/review/slashes.rs:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/review/star_doc.py:11  ADR-102 is in text the program ships; say what it decides instead
   ⚠️ src/review/test_util.py:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
   ⚠️ src/review/unterminated.py:2  ADR-101 is in text the program ships; say what it decides instead
   ⚠️ src/review/unterminated.rs:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
@@ -81,6 +82,6 @@
 
 ════════════════════════════════════════════════════════════
 Citations: 0 errors, 0 warnings
-Placement: 0 errors, 80 warnings
+Placement: 0 errors, 81 warnings
 ════════════════════════════════════════════════════════════
 [exit 0]

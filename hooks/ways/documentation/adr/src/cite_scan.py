@@ -80,6 +80,9 @@ def _cite_comment_text(text: str, seg) -> list:
         body = raw[len(seg.marker):]
         return [body.lstrip(seg.marker[0]) if seg.marker in ('#', '//') else body]
     lines = raw.split('\n')
+    # A /* */ comment may carry a column of stars down its left margin; a
+    # docstring has none, so a leading star there is an entry marker.
+    starred = raw.startswith('/*')
     out = []
     for idx, line in enumerate(lines):
         line = line.rstrip('\r')
@@ -87,7 +90,7 @@ def _cite_comment_text(text: str, seg) -> list:
             line = re.sub(r'^(/\*[*!]?|[rRbBuUfF]{0,2}("""|\'\'\'))', '', line)
         else:
             line = line.lstrip()
-            if line.startswith('*') and not line.startswith('*/'):
+            if starred and line.startswith('*') and not line.startswith('*/'):
                 line = line[1:]
         if idx == len(lines) - 1:
             line = re.sub(r'(\*/|"""|\'\'\')\s*$', '', line)
@@ -377,6 +380,8 @@ def _cite_changed_lines(root: Path, ref: str) -> tuple:
     changed since the merge base of ref and HEAD, or True for a whole new
     file: commits since the base, staged and unstaged edits, and untracked
     files. When git cannot say, `changed` is None and `problem` says why."""
+    if _git(['rev-parse', '--git-dir'], root) is None:
+        return None, f"--since {ref}: {root} is not in a git repository"
     if _git(['rev-parse', '--verify', '--quiet', f'{ref}^{{commit}}'], root) is None:
         return None, f"--since {ref}: no such commit"
     base = _git(['merge-base', ref, 'HEAD'], root)

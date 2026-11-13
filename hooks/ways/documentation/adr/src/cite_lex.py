@@ -164,10 +164,17 @@ def _cite_lex_c_like(text: str, lang: str) -> list:
     return segs
 
 
+# A line that opens a def or class body: the header itself, or the last line
+# of a signature that spans lines, which closes its parentheses (and may carry
+# a return annotation) before the colon. A dict key line such as `"k":` ends
+# in a colon too and opens no body.
+_CITE_PY_BODY_OPENER = re.compile(r'^(?:async\s+def|def|class)\b.*:$|\)\s*(?:->.*)?:$')
+
+
 def _cite_py_docstring_follows(text: str, line_start: int, segs: list) -> bool:
     """True when a triple-quoted string that begins the line at line_start is
-    a docstring: the module's first statement, or the first statement after a
-    line of code that ends in a colon (a def, class or other block header)."""
+    a docstring: the module's first statement, or the first statement of a
+    def or class body."""
     end = line_start - 1
     while end > 0:
         start = text.rfind('\n', 0, end) + 1
@@ -179,7 +186,7 @@ def _cite_py_docstring_follows(text: str, line_start: int, segs: list) -> bool:
                 line = text[start:seg.start]
         code = line.strip()
         if code:
-            return code.endswith(':')
+            return bool(_CITE_PY_BODY_OPENER.search(code))
         end = start - 1
     return True
 

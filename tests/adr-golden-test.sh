@@ -199,6 +199,7 @@ capture place-cfg-test       cite src/review/cfg_attr.rs
 # A triple-quoted string is a docstring only as a module's first statement
 # or after a line ending in a colon.
 capture place-py-docstring   cite src/review/call.py
+capture place-py-star-entry  cite src/review/star_doc.py
 capture place-py-hash-refs   cite src/review/hash_refs.py
 # Arithmetic shifts are not heredocs; <<\EOF is one.
 capture place-shell-forms    cite src/review/shell_forms.sh
@@ -271,6 +272,10 @@ capture place-since-error    cite --check --since base src
 edit docs/architecture/adr.yaml "s.replace('placement: error', 'placement: off', 1)"
 capture place-since-off      cite --check --since base src
 capture place-since-off-missing cite --since no-such-ref src
+# Outside a git repository, --since says so instead of naming the ref.
+(cd "$WORK/repo" && mv .git .git-away)
+GIT_CEILING_DIRECTORIES="$WORK" capture place-since-no-repo cite --since base src/rust_comments.rs
+(cd "$WORK/repo" && mv .git-away .git)
 
 # --- write commands, each on a fresh corpus, keeping the files they write ------
 
