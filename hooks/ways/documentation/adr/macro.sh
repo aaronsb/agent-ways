@@ -132,7 +132,7 @@ print_v1_guide() {
   echo "| \`$s supersede <old> --by <new>\` | Record a supersession on both records |"
   echo "| \`$s enact <n> <commit>\` | Mark an accepted cut or retire done |"
   echo "| \`$s list --kind K --capability C --field KEY=VALUE --group-by KEY\` | Query the corpus (\`--json\` for scripts) |"
-  echo "| \`$s cite [--check]\` | Check ADR-N citations in code against the records |"
+  echo "| \`$s cite [--check] [--since REF]\` | Check ADR-N citations against the records, and where each one sits; \`--since\` holds only lines changed since REF to the placement rule |"
   echo "| \`$s import scan <paths>\`, \`import apply [--dry-run]\` | Convert v0 or foreign records through editable sheets (ADR-306) |"
   echo "| \`$s domain add\`, \`rename\`, \`move\` | Change the layout; paths are rewritten, numbers never change |"
   echo "| \`$s view <n>\`, \`index -y\`, \`archive\`, \`domains\` | As before |"

@@ -75,7 +75,9 @@ Ways are authored **English-only** (ADR-139): localization is adopter-run, not a
 
 ## Writing Ways Well
 
-Write the way a collaborator explains a practice to a peer, and include the reason, because an agent that knows the reason applies better judgment at the edges. Way text follows writing/plain. An agent imitates the sentences of the text injected into its context, so a way's own prose is a style sample (ADR-178).
+Write the way a collaborator explains a practice to a peer, and include the reason, because an agent that knows the reason applies better judgment at the edges. Way text follows writing/plain. An agent imitates the sentences of the text injected into its context, so a way's own prose is a style sample.
+
+A way body names no decision record. A framework way is injected into sessions in other projects, where the number names a different record or none, so the body says what the decision is. The way's provenance sidecar names the record as a `policy` entry with `type: adr`.
 
 For state transitions and process flows, prefer Cypher-style notation over ASCII diagrams — it's compact, the model parses it natively, and it saves tokens:
 ```

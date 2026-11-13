@@ -22,6 +22,9 @@ Match the docstring density of the surrounding code, in the language's idiomatic
 - Complex internal logic where intent isn't obvious from the name
 - Not needed for trivial getters, one-line helpers, or self-evident code
 
+**When the code follows a recorded decision:** the comment still explains the code in its own words, complete without the record. Citations go in a `References:` block at the end of the comment, one entry per record, each saying what that record decides here. A string the program prints names no record.
+
 ## See Also
 
 - writing/plain(writing) — a comment states what the code does now, in plain sentences
+- adr(documentation) — citing records from code and docs, and the check that enforces it

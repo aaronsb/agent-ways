@@ -30,7 +30,7 @@ docs/scripts/adr new <domain> "Title" [--kind K] [--verb V] [--capability C] [--
 # Maintain
 docs/scripts/adr lint                     # Check all ADRs (archive included) for issues
 docs/scripts/adr lint --check             # Exit 1 on errors (CI mode)
-docs/scripts/adr cite [--check]           # Check ADR-N citations in code against the records
+docs/scripts/adr cite [--check] [--since REF]  # Check ADR-N citations against the records, and where each sits
 docs/scripts/adr index -y                 # Regenerate INDEX.md from the active set
 
 # Lifecycle (adr/v1) — status changes only through these, never by setting the field

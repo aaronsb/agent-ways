@@ -20,7 +20,7 @@ refire: 0.15
 
 ## Commands, Format and Lifecycle
 
-The section above this way, when present, gives this project's ADR commands, record format and lifecycle. It depends on the tool the project vendored and the contract its `adr.yaml` declares (ADR-304 §10). Follow it over any habit from another project.
+The section above this way, when present, gives this project's ADR commands, record format and lifecycle. It depends on the tool the project vendored and the contract its `adr.yaml` declares. Follow it over any habit from another project.
 
 `adr contract` shows the contract `adr.yaml` declares and the one the tool writes. When `adr.yaml` is behind, `adr contract --upgrade` brings it to the tool's contract. Use it rather than editing the contract line by hand.
 
@@ -47,6 +47,26 @@ A generalized ADR is reusable across everything that hits the same force. A disc
 ## Reversibility
 
 Tag every ADR with one of three grades: reversible (changed in one session, no data migration), expensive (a multi-day project), one-way (a rewrite or a migration on live data). Let the tag graduate when the cost changes at a known point: "reversible now, expensive after the first production import". A one-way decision gets the fullest Alternatives section, with a concrete reason each alternative lost.
+
+## Citing Records
+
+Records ship with the codebase and rarely with the software built from it. Where a citation goes depends on whether its reader can open the record.
+
+- **The text stands on its own.** A comment, page, message or way says what the thing does and why in its own words. A reader should never have to open a record to finish a sentence. When you move a citation out and the sentence stops making sense, read the record and write the explanation it was standing in for.
+- **In text that stays with the repository, cite at the end.** In a code comment, a `References:` line opens a block that runs to the end of the comment. In a docs page, a `References` heading opens a section. Each entry names the record and says what it decides for the code or page above it.
+- **Text that ships carries no record numbers.** Program output, error and lint messages, TUI labels, hook messages and way bodies reach readers who cannot open the record. In a tool copied into other projects, the same number names a different record. Say what the record decides. A way that implements a decision names the record in its provenance sidecar as a `policy` entry with `type: adr`.
+
+```rust
+/// Retries the display handoff once a second while this terminal is shown.
+/// Another program may release the display at any moment and nobody may
+/// press a key, so the retry runs on its own instead of waiting for input.
+///
+/// References:
+/// - ADR-1000, "Replies and policy": the slow retry and its pace.
+/// - ADR-1400 D1: why the terminal needs display ownership to draw.
+```
+
+`adr cite` checks where each citation sits. `cite.placement` in `adr.yaml` sets the strength (`error`, `warn` or `off`; unset reads as `warn`), and `cite.shipped` lists paths whose text ships. `adr cite --check --since <ref>` holds only the lines changed since `<ref>` to the rule, so a project with old citations can enforce it on new text first.
 
 ## Fixing ADR Issues
 
