@@ -17,6 +17,15 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "Same rule as code [docs pages cite a record only in a References section at the end, as comments do]"
+    via: this session, 2026-11-13, answering through the question tool whether docs pages should be as strict as code comments or may name the record a page is about
+    covers: [docs-body]
+  - operator: aaronsb
+    said: "Yes, none [text that ships carries no record numbers, not even as a full URL]"
+    via: this session, 2026-11-13, answering through the question tool whether shipped text should carry no record numbers or may link a record by full URL
+    covers: [shipped]
 status: proposed
 date: 2026-11-13
 deciders:
@@ -59,13 +68,13 @@ Two kinds of reader meet these citations. One works in the repository and can op
    /// - ADR-1400 D1: why it needs DRM master to draw.
    ```
 
-3. **Each entry says what the record decides here.** An entry starts with `- ` and a citation, and goes on, on the same line or the lines under it, to say what that record decides for the code or page. An entry that is only a citation is a finding.
+3. **Each citation in the block sits in an entry, and each entry says what the record decides here.** In a comment an entry starts with `- ` or `* `; in a Markdown page it is any list item (`-`, `*`, `+` or a numbered item). The entry names the record and goes on, on the same line or the lines under it, to say what that record decides for the code or page. A citation in the block outside an entry is a finding, and so is an entry that is only a citation.
 
-4. **Text that ships carries no record numbers.** In a program source file (Rust, Python, TypeScript, JavaScript, Go, shell), a citation outside a comment sits in a string or in code, which reaches the built program, so it is out of place. A Python docstring counts as a comment. A project lists further shipped paths in `adr.yaml` as `cite.shipped`; any citation in them outside a Markdown file's frontmatter is out of place. This repository lists its way bodies, skills, agent definitions and slash commands, which are projected into every user's sessions; its hook scripts are program files, so their messages fall under the rule above. A way that implements a decision names the record in its provenance sidecar (ADR-110), as a `policy` entry with `type: adr`, which is not injected.
+4. **Text that ships carries no record numbers.** In a program source file (Rust, Python, TypeScript, JavaScript, Go, shell, and a file with no extension whose shebang names a shell or Python), a citation outside a comment sits in a string or in code, which reaches the built program, so it is out of place. A Python docstring, the first statement of a module or of a `def` or `class` body, counts as a comment; any other triple-quoted string is a string. A project lists further shipped paths in `adr.yaml` as `cite.shipped`; any citation in them, comments and data values included, is out of place, except in a Markdown file's frontmatter. This repository lists its way bodies, skills, agent definitions and slash commands, which are projected into every user's sessions; its hook scripts are program files, so their messages fall under the rule above. A way that implements a decision names the record in its provenance sidecar (ADR-110), as a `policy` entry with `type: adr`, which is not injected.
 
-5. **What the placement check leaves alone.** Values in data files (YAML, JSON, SQL outside comments) and the records under `docs/architecture/` are not checked for placement. Commit messages and PR bodies are outside the tree. A line carrying `adr-cite-ignore` stays skipped. Test code is held to the comment rule but not the shipped rule: files under a `tests/` directory, files named as tests (`*_test.*`, `test_*.py`, `*.test.*`), and in Rust everything after a `#[cfg(test)]` line.
+5. **What the placement check leaves alone.** Values in data files (YAML, JSON, SQL outside comments) and the records under `docs/architecture/` are not checked for placement. Commit messages and PR bodies are outside the tree. A line carrying `adr-cite-ignore` stays skipped. Test code is held to the comment rule but not the shipped rule: files under a `tests/` directory, files named as tests (`*_test.*`, `test_*.py`, `*.test.*`), and in Rust an inline `mod <name> { … }` that a `#[cfg(test)]` attribute marks. A `#[cfg(test)]` on any other item exempts nothing. The shipped rule's test exemption holds in `cite.shipped` paths too.
 
-6. **The check's strength is the project's.** `cite.placement` in `adr.yaml` is `error`, `warn` or `off`; unset reads as `warn`, so a project that refreshes its copy of the tool sees findings without failing its build. `adr cite --since <ref>` holds the lines added or changed since the merge base of `<ref>` and the working tree to the rule as errors, unless placement is `off`. A project runs it on pull requests so new text follows the rule while older text is swept. Resolution findings from ADR-304 §6 are unchanged.
+6. **The check's strength is the project's.** `cite.placement` in `adr.yaml` is `error`, `warn` or `off`; unset reads as `warn`, so a project that refreshes its copy of the tool sees findings without failing its build. `adr cite --since <ref>` holds the lines added or changed since the merge base of `<ref>` and the working tree to the rule as errors, unless placement is `off`. When it cannot work out those lines (the ref does not resolve, there is no merge base, or `git diff` fails) it says which and exits as a usage error, so a gate built on it fails closed and never passes unchecked. A project runs it on pull requests so new text follows the rule while older text is swept. Resolution findings from ADR-304 §6 are unchanged.
 
 7. **A vendored tool cites none of its home project's records.** A tool copied into other projects, such as `docs/scripts/adr`, carries no record numbers from the project that wrote it, in its comments or its messages: in the project it is copied into, the same numbers name that project's records. The sweep of this repository's existing citations, the tool's included, is tracked in #1271.
 
@@ -87,7 +96,7 @@ Two kinds of reader meet these citations. One works in the repository and can op
 ### Neutral
 
 - `adr.yaml` gains `cite.placement` and `cite.shipped`. A project that sets neither gets warnings and no failures.
-- CI that runs `--since` needs the merge base, so a shallow checkout fetches enough history or the check falls back to the whole tree.
+- CI that runs `--since` needs the merge base, so its checkout fetches enough history; without it the check fails rather than passing unchecked.
 
 ## Alternatives Considered
 
