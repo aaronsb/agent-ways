@@ -292,36 +292,32 @@ fn exec(mut command: Command) -> std::io::Error {
     }
 }
 
-/// How many directories above the running program [`helper_binary`] looks for
-/// `tui-harness`: enough to climb from `<profile>/build/<crate>/<hash>/out`
-/// to `<profile>`.
+/// How far above a test binary [`helper_near`] looks for the `deps` or
+/// `build` directory it was built under: four levels from
+/// `<profile>/build/<crate>/<hash>/out`, one from `<profile>/deps`.
 const HELPER_SEARCH_DEPTH: usize = 5;
 
-/// The `tui-harness` binary that runs [`exec_env`] in the pane: `explicit`
-/// if given, else `$TUI_HARNESS_BIN`, else the running program if it is
-/// `tui-harness`, else a `tui-harness` in a directory above it, else one on
-/// `PATH`. A test binary sits below the profile directory that holds the
-/// built `tui-harness`: one level down in `target/<profile>/deps` on older
-/// Cargo, and four levels down in `target/<profile>/build/<crate>/<hash>/out`
-/// from Rust 1.100, so every ancestor up to [`HELPER_SEARCH_DEPTH`] levels is
-/// tried.
+/// The `tui-harness` binary that runs [`exec_env`] in the pane, the first of:
+/// `explicit`; `$TUI_HARNESS_BIN`; `$CARGO_BIN_EXE_tui-harness`, which Cargo
+/// sets for this crate's own tests; the running program, if it is
+/// `tui-harness`; one found next to the running program by [`helper_near`];
+/// one on `PATH`.
 pub fn helper_binary(explicit: Option<&Path>) -> Result<PathBuf> {
     if let Some(p) = explicit {
         return Ok(p.to_path_buf());
     }
-    if let Some(p) = std::env::var_os("TUI_HARNESS_BIN").filter(|p| !p.is_empty()) {
-        return Ok(PathBuf::from(p));
+    for var in ["TUI_HARNESS_BIN", "CARGO_BIN_EXE_tui-harness"] {
+        if let Some(p) = std::env::var_os(var).filter(|p| !p.is_empty()) {
+            return Ok(PathBuf::from(p));
+        }
     }
     let exe_name = format!("tui-harness{}", std::env::consts::EXE_SUFFIX);
     if let Ok(exe) = std::env::current_exe() {
         if exe.file_name().is_some_and(|n| n == exe_name.as_str()) {
             return Ok(exe);
         }
-        for dir in exe.ancestors().skip(1).take(HELPER_SEARCH_DEPTH) {
-            let candidate = dir.join(&exe_name);
-            if candidate.is_file() {
-                return Ok(candidate);
-            }
+        if let Some(found) = helper_near(&exe, &exe_name) {
+            return Ok(found);
         }
     }
     if let Some(path) = std::env::var_os("PATH") {
@@ -336,6 +332,29 @@ pub fn helper_binary(explicit: Option<&Path>) -> Result<PathBuf> {
         "the tui-harness binary was not found to start the command; build it \
          (cargo build -p tui-harness) or set TUI_HARNESS_BIN"
     )
+}
+
+/// A `tui-harness` named `name` near the program at `exe`: in the program's
+/// own directory, the one above it, or, for a test binary, the Cargo profile
+/// directory it was built under. Cargo puts a test binary in
+/// `<profile>/deps` before Rust 1.100 and in `<profile>/build/<crate>/<hash>/out`
+/// from 1.100; the profile directory is the parent of the nearest `deps` or
+/// `build` above the program. The search never goes above that directory.
+/// With `build.build-dir` set, test binaries are built outside the target
+/// directory, so this finds nothing and the caller falls back to `PATH`.
+fn helper_near(exe: &Path, name: &str) -> Option<PathBuf> {
+    let found = |dir: &Path| Some(dir.join(name)).filter(|p| p.is_file());
+    let dir = exe.parent()?;
+    if let Some(p) = found(dir).or_else(|| dir.parent().and_then(found)) {
+        return Some(p);
+    }
+    let profile = exe
+        .ancestors()
+        .skip(1)
+        .take(HELPER_SEARCH_DEPTH)
+        .find(|d| d.file_name().is_some_and(|n| n == "deps" || n == "build"))?
+        .parent()?;
+    found(profile)
 }
 
 fn new_session_args(
@@ -1296,6 +1315,66 @@ fn timestamp() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A fresh directory tree under the system temp dir, removed on drop.
+    struct Tree(PathBuf);
+
+    impl Tree {
+        fn new(label: &str) -> Self {
+            let root = std::env::temp_dir()
+                .join(format!("tui-harness-near-{label}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&root);
+            Tree(root)
+        }
+        /// Creates an empty file at `rel` and returns its path.
+        fn file(&self, rel: &str) -> PathBuf {
+            let path = self.0.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, b"").unwrap();
+            path
+        }
+    }
+
+    impl Drop for Tree {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn helper_near_finds_the_binary_from_the_deps_layout() {
+        let t = Tree::new("deps");
+        let want = t.file("target/debug/tui-harness");
+        let exe = t.file("target/debug/deps/drive-0123abcd");
+        assert_eq!(helper_near(&exe, "tui-harness"), Some(want));
+    }
+
+    #[test]
+    fn helper_near_finds_the_binary_from_the_build_out_layout() {
+        let t = Tree::new("build");
+        let want = t.file("target/debug/tui-harness");
+        let exe = t.file("target/debug/build/tui-harness/0123abcd/out/drive-0123abcd");
+        assert_eq!(helper_near(&exe, "tui-harness"), Some(want));
+    }
+
+    #[test]
+    fn helper_near_finds_the_binary_beside_the_program() {
+        let t = Tree::new("beside");
+        let want = t.file("bin/tui-harness");
+        let exe = t.file("bin/ways");
+        assert_eq!(helper_near(&exe, "tui-harness"), Some(want));
+    }
+
+    #[test]
+    fn helper_near_stops_at_the_profile_directory() {
+        let t = Tree::new("stop");
+        t.file("target/tui-harness");
+        t.file("tui-harness");
+        let exe = t.file("target/debug/build/tui-harness/0123abcd/out/drive-0123abcd");
+        assert_eq!(helper_near(&exe, "tui-harness"), None);
+        let exe = t.file("target/debug/deps/drive-0123abcd");
+        assert_eq!(helper_near(&exe, "tui-harness"), None);
+    }
 
     #[test]
     fn quoting_and_names() {
