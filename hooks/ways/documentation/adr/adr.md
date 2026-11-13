@@ -62,8 +62,8 @@ Records ship with the codebase and rarely with the software built from it. Where
 /// press a key, so the retry runs on its own instead of waiting for input.
 ///
 /// References:
-/// - ADR-1000, "Replies and policy": the slow retry and its pace.
-/// - ADR-1400 D1: why the terminal needs display ownership to draw.
+/// - ADR-NNN, "Replies and policy": the slow retry and its pace.
+/// - ADR-MMM D1: why the terminal needs display ownership to draw.
 ```
 
 `adr cite` checks where each citation sits. `cite.placement` in `adr.yaml` sets the strength (`error`, `warn` or `off`; unset reads as `warn`), and `cite.shipped` lists paths whose text ships. `adr cite --check --since <ref>` holds only the lines changed since `<ref>` to the rule, so a project with old citations can enforce it on new text first.
