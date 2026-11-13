@@ -1,0 +1,12 @@
+  ⚠️ src/run.sh:7  ADR-102 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/run.sh:8  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/run.sh:10  ADR-102 is in text the program ships; say what it decides instead
+  ⚠️ src/run.sh:13  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/run.sh:15  ADR-102 is in text the program ships; say what it decides instead
+  ⚠️ src/run.sh:16  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+
+════════════════════════════════════════════════════════════
+Citations: 0 errors, 0 warnings
+Placement: 0 errors, 6 warnings
+════════════════════════════════════════════════════════════
+[exit 0]

@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# ADR-101 in a comment body of a script with no suffix.
+echo "ADR-102 ships"

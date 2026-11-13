@@ -1,0 +1,7 @@
+  ⚠️ src/review/entries.rs:4  ADR-101 sits in the References block outside an entry; start an entry with '- '
+
+════════════════════════════════════════════════════════════
+Citations: 0 errors, 0 warnings
+Placement: 0 errors, 1 warnings
+════════════════════════════════════════════════════════════
+[exit 0]

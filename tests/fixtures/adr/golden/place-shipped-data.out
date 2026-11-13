@@ -1,0 +1,12 @@
+  ⚠️ shipped/conf.yaml:1  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ shipped/conf.yaml:2  ADR-102 is in text the program ships; say what it decides instead
+  ⚠️ shipped/data.json:1  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ shipped/tests/case.py:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ shipped/tool.sh:2  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ shipped/tool.sh:5  ADR-102 is in text the program ships; say what it decides instead
+
+════════════════════════════════════════════════════════════
+Citations: 0 errors, 0 warnings
+Placement: 0 errors, 6 warnings
+════════════════════════════════════════════════════════════
+[exit 0]

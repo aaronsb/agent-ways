@@ -1,0 +1,19 @@
+
+Scanned: 2 ADRs
+
+Status distribution:
+  Accepted: 2
+
+────────────────────────────────────────────────────────────
+Issues found in 1 files:
+────────────────────────────────────────────────────────────
+
+docs/architecture/adr.yaml
+  ❌ cite.shipped: expected a list of paths
+  ❌ cite.placement: expected error, warn or off
+
+════════════════════════════════════════════════════════════
+Summary: 2 errors, 0 warnings
+════════════════════════════════════════════════════════════
+
+[exit 0]

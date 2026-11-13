@@ -178,6 +178,8 @@ def main():
     p_cite = subparsers.add_parser('cite', help='Check ADR citations in code against the records')
     p_cite.add_argument('paths', nargs='*', help='Limit the scan to these files or directories')
     p_cite.add_argument('--check', action='store_true', help='Exit 1 if errors (CI mode)')
+    p_cite.add_argument('--since', metavar='REF',
+                        help='Hold the lines changed since the merge base of REF and HEAD to the placement rule, as errors')
     # Accepted and ignored: surface inventories are gone (ADR-311), and a
     # script that still passes the flag keeps working.
     p_cite.add_argument('--no-inventory', action='store_true', help=argparse.SUPPRESS)

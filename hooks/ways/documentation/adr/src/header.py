@@ -35,7 +35,7 @@ Usage:
     adr rename <number> [new-title] [--slug SLUG]
     adr archive <number> --reason "..." [--superseded-by ADR-N[,ADR-M]] [--status S] [--dry-run]
     adr lint [--check] [paths...]
-    adr cite [--check] [paths...]
+    adr cite [--check] [--since REF] [paths...]
     adr accept <number> [--dry-run]
     adr reject|abandon <number> --reason "..." [--dry-run]
     adr consider <number> --said "..." --via "..." [--operator NAME] [--covers PROBE...]
@@ -65,6 +65,8 @@ Configuration is loaded from docs/architecture/adr.yaml
 # file may edit its copy (ADR-177).
 
 import argparse
+import bisect
+import fnmatch
 import hashlib
 import json
 import os

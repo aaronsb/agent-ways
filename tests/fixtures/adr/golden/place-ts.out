@@ -1,0 +1,10 @@
+  ⚠️ src/app.ts:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/app.ts:12  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/app.ts:13  ADR-102 is in text the program ships; say what it decides instead
+  ⚠️ src/app.ts:18  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+
+════════════════════════════════════════════════════════════
+Citations: 0 errors, 0 warnings
+Placement: 0 errors, 4 warnings
+════════════════════════════════════════════════════════════
+[exit 0]

@@ -1,0 +1,30 @@
+name: Citations
+
+# Every pull request: the lines it adds or changes must cite decision records
+# where the reader can use them. A citation in a code comment or a docs page
+# goes in a references block at the end, and text that ships names no record.
+# Older lines are swept separately and only warn (cite.placement in
+# docs/architecture/adr.yaml), so placement is checked on the PR's own lines.
+# The job also fails on a citation anywhere in the tree that resolves to no
+# record, since --check fails on every resolution error.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  cite:
+    name: citation placement on changed lines
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The check diffs against the merge base with the target branch.
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: PyYAML for the adr tool
+        run: python -m pip install --quiet pyyaml
+      - name: adr cite on the lines this PR changes
+        run: docs/scripts/adr cite --check --since "origin/${{ github.base_ref || 'main' }}"

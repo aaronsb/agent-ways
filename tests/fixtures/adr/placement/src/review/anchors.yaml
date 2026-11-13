@@ -1,0 +1,7 @@
+steps:
+  - run: &build |
+      # a block scalar after an anchor is a value: ADR-101
+      make
+  - |
+    # a block scalar under a list item is a value: ADR-102
+  - name: done   # ADR-101 in a trailing comment

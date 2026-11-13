@@ -1,0 +1,40 @@
+  ⚠️ src/review/anchors.yaml:7  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/review/app.test.ts:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/review/call.py:8  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/review/cfg_attr.rs:4  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/review/cfg_attr.rs:12  ADR-102 is in text the program ships; say what it decides instead
+  ⚠️ src/review/contest.js:1  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/review/divide.js:2  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/review/entries.md:7  ADR-101 sits in the References block outside an entry; start an entry with '- '
+  ⚠️ src/review/entries.rs:4  ADR-101 sits in the References block outside an entry; start an entry with '- '
+  ⚠️ src/review/module.mjs:1  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/review/module.mjs:1  ADR-102 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/review/nested.rs:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/review/nested.rs:2  ADR-102 is in text the program ships; say what it decides instead
+  ⚠️ src/review/plain.js:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/review/plain.js:2  ADR-102 is in text the program ships; say what it decides instead
+  ⚠️ src/review/pyrunner:2  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/review/raw.go:4  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/review/raw.go:7  ADR-102 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/review/runner:2  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/review/runner:3  ADR-102 is in text the program ships; say what it decides instead
+  ⚠️ src/review/setext.md:4  ADR-101 sits in the page body; move it to a References section
+  ⚠️ src/review/shell_forms.sh:3  ADR-102 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/review/shell_forms.sh:5  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/review/shell_forms.sh:7  ADR-102 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/review/slashes.rs:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/review/star_doc.py:11  ADR-102 is in text the program ships; say what it decides instead
+  ⚠️ src/review/test_util.py:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/review/unterminated.py:2  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/review/unterminated.rs:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/review/unterminated.rs:2  ADR-102 is in text the program ships; say what it decides instead
+  ⚠️ src/review/unterminated.sh:2  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/review/unterminated_block.ts:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/review/widget.tsx:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/review/widget.tsx:2  ADR-102 is in text the program ships; say what it decides instead
+
+════════════════════════════════════════════════════════════
+Citations: 0 errors, 0 warnings
+Placement: 0 errors, 34 warnings
+════════════════════════════════════════════════════════════
+[exit 0]

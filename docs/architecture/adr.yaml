@@ -94,9 +94,22 @@ basis_sources: [operator, evidence, standard, upstream, precedent]
 # the origin remote is used.
 repository: github.com/aaronsb/agent-ways
 
-# adr cite skips these: fixtures, tool sources and subagent prompts carry
-# example numbers.
+# adr cite checks each ADR-N citation in the tree: that it resolves to a
+# record in force, and where it sits. Text that stays with the repository
+# cites in a references block at the end; text that ships carries no record
+# numbers. placement stays at warn until the sweep of existing citations
+# (#1271) is done; CI holds changed lines to the rule with --since.
 cite:
+  placement: warn
+  # Text projected into every user's sessions: way bodies, skills, agent
+  # definitions and slash commands.
+  shipped:
+    - hooks/ways/*.md
+    - skills/*.md
+    - agents/*.md
+    - commands/*.md
+  # Skipped entirely: fixtures, tool sources and subagent prompts carry
+  # example numbers.
   exclude:
     - agents/workflow-orchestrator.md
     - agents/workspace-curator.md

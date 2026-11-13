@@ -1,8 +1,18 @@
+  ⚠️ docs/guide/hooks.md:7  ADR-104 sits in the page body; move it to a References section
+  ⚠️ docs/guide/hooks.md:7  ADR-104 sits in the page body; move it to a References section
   ⚠️ src/search.py:1  ADR-106 is still proposed; accept it or cite the record in force
+  ⚠️ src/search.py:1  ADR-106 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/search.py:1  ADR-111 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/search.py:2  ADR-102 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/search.py:3  ADR-104 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/search.py:3  ADR-104 sits in the comment body; move it to a References: block at the end of the comment
   ❌ src/search.py:4  ADR-1040 resolves to no record
+  ⚠️ src/search.py:4  ADR-1040 sits in the comment body; move it to a References: block at the end of the comment
   ❌ src/search.py:4  ADR-104.1 resolves to no record
+  ⚠️ src/search.py:4  ADR-104.1 sits in the comment body; move it to a References: block at the end of the comment
 
 ════════════════════════════════════════════════════════════
 Citations: 2 errors, 1 warnings
+Placement: 0 errors, 9 warnings
 ════════════════════════════════════════════════════════════
 [exit 0]

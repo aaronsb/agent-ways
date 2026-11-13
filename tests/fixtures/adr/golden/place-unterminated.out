@@ -1,0 +1,11 @@
+  ⚠️ src/review/unterminated.py:2  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/review/unterminated.rs:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/review/unterminated.rs:2  ADR-102 is in text the program ships; say what it decides instead
+  ⚠️ src/review/unterminated.sh:2  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/review/unterminated_block.ts:1  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+
+════════════════════════════════════════════════════════════
+Citations: 0 errors, 0 warnings
+Placement: 0 errors, 5 warnings
+════════════════════════════════════════════════════════════
+[exit 0]

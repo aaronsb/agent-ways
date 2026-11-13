@@ -1,0 +1,9 @@
+  ⚠️ src/review/pyrunner:2  ADR-101 is in text the program ships; say what it decides instead
+  ⚠️ src/review/runner:2  ADR-101 sits in the comment body; move it to a References: block at the end of the comment
+  ⚠️ src/review/runner:3  ADR-102 is in text the program ships; say what it decides instead
+
+════════════════════════════════════════════════════════════
+Citations: 0 errors, 0 warnings
+Placement: 0 errors, 3 warnings
+════════════════════════════════════════════════════════════
+[exit 0]
