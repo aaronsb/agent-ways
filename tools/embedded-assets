@@ -1,0 +1,9 @@
+# Files outside tools/ that a cargo suite binary embeds at compile time with
+# include_str! or include_bytes!. One repo-relative path prefix per line.
+# `ways manage update` reads this file from the pulled checkout and counts a
+# change under a listed prefix as binary source, so a release that adds an
+# embedded file is classified by its own list. The update test
+# embedded_assets_outside_tools_are_classified fails when an include that
+# escapes tools/ is missing here.
+hooks/memory-seed/
+attend/sensors/

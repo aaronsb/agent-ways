@@ -82,11 +82,10 @@ pub fn run(mode: Mode, git_ref: Option<String>, verbose: bool) -> Result<()> {
 
     // 1. Pull. Capture HEAD before/after so we can tell what the pull actually
     //    touched. Content lands far more often than a release is cut, so the common
-    //    update is docs/ways-only (e.g. a change to core.md). Rebuilding the suite for
-    //    that is pure churn: the pre-built binaries lag the source, so "refreshing"
-    //    downloads a binary that is behind, discards it under the ADR-150 guard, and
-    //    rebuilds from source — producing a binary identical to the one installed.
-    //    Gate each build group on whether its own source moved in this pull, and
+    //    update is docs/ways-only (e.g. a change to core.md). Refreshing the suite for
+    //    that is pure churn: every binary it fetches or builds comes from the same
+    //    code as the one installed. Gate each build group on whether its own source
+    //    moved in this pull, and
     //    each suite binary also on whether it is older than its Cargo.toml.
     let head_before = git_head(&app);
     Steps::stage("Pull");
@@ -152,16 +151,18 @@ pub fn run(mode: Mode, git_ref: Option<String>, verbose: bool) -> Result<()> {
     }
 
     // 2. Core — ways. Download-first, rename-revert safe, with the ADR-150
-    //    downgrade guard: a pre-built that is behind the pulled source is refused
-    //    (built from source instead, or the previous binary kept) so the updater
-    //    can never move backward. A failed refresh reverts and CONTINUES (we still
-    //    reproject the pulled source) rather than aborting mid-update. Skipped when
-    //    the cargo suite's source didn't move; a stale ways is refreshed in step 4.
+    //    downgrade guard: a pre-built built from older binary source than the
+    //    pulled checkout is refused (built from source instead, or the previous
+    //    binary kept) so the updater can never move backward. A failed refresh
+    //    reverts and CONTINUES (we still reproject the pulled source) rather than
+    //    aborting mid-update. Skipped when the cargo suite's source didn't move; a
+    //    stale ways is refreshed in step 4. Each refreshed binary's line says
+    //    whether its version moved, read from the binary before and after.
     let ways_refreshed = if cargo_changed {
         Steps::act("ways: pre-built first, downgrade-guarded");
         match refresh_ways(&app, has_toolchain) {
             Ok(()) => {
-                Steps::ok("the ways binary is refreshed");
+                Steps::ok(refreshed_line(&app, "ways", &before));
                 true
             }
             Err(e) => {
@@ -180,7 +181,7 @@ pub fn run(mode: Mode, git_ref: Option<String>, verbose: bool) -> Result<()> {
     if way_embed_changed {
         Steps::act("way-embed: pre-built first");
         match run_step(Command::new("make").args(["-C", "tools/way-embed", "rebuild-binary"]).current_dir(&app), "way-embed refresh") {
-            Ok(()) => Steps::ok("way-embed refreshed"),
+            Ok(()) => Steps::ok(refreshed_line(&app, "way-embed", &before)),
             Err(e) => Steps::warn(format!("way-embed not refreshed ({e}); semantic matching degrades to regex until the next update")),
         }
     }
@@ -193,7 +194,7 @@ pub fn run(mode: Mode, git_ref: Option<String>, verbose: bool) -> Result<()> {
         for comp in suite_bins(&app).iter().filter(|n| *n != "ways") {
             Steps::act(format!("{comp}: pre-built first"));
             match refresh_component(&app, comp, &[comp.as_str()], &app) {
-                Ok(()) => Steps::ok(format!("{comp} refreshed")),
+                Ok(()) => Steps::ok(refreshed_line(&app, comp, &before)),
                 Err(e) => Steps::warn(format!("{comp} not refreshed ({e}); it keeps its current version")),
             }
         }
@@ -201,7 +202,7 @@ pub fn run(mode: Mode, git_ref: Option<String>, verbose: bool) -> Result<()> {
     for s in &stale {
         Steps::act(format!("{} is {}, its source is {}: refreshing it", s.name, s.installed, s.source));
         match refresh_stale(&app, s, has_toolchain) {
-            Ok(()) => Steps::ok(format!("{} refreshed", s.name)),
+            Ok(()) => Steps::ok(refreshed_line(&app, &s.name, &before)),
             Err(e) => Steps::warn(e.to_string()),
         }
     }
@@ -334,27 +335,45 @@ fn changed_build_groups(app: &Path, a: &str, b: &str) -> Option<(bool, bool)> {
         return None;
     }
     let text = String::from_utf8_lossy(&out.stdout);
-    Some(classify_build_groups(text.lines()))
+    Some(classify_build_groups(text.lines(), &embedded_assets(app)))
 }
 
-/// Repo-relative path prefixes for compile-time assets embedded into a cargo-suite
-/// binary via `include_str!`/`include_bytes!` that live OUTSIDE `tools/`. A change
-/// to one of these rebuilds the binary that embeds it, even though the path is not
-/// under `tools/`, so the classifier must treat it as cargo source. KEEP IN SYNC
-/// with the escaping includes in the tree — the `embedded_assets_outside_tools_are_classified`
-/// test walks the source and fails if a new escape isn't listed here.
-/// Currently: `hooks/memory-seed/` → embedded into `ways` (see memory_seed.rs).
-const EMBEDDED_ASSET_PREFIXES: &[&str] = &["hooks/memory-seed/", "attend/sensors/"];
+/// The checked-in list of files outside `tools/` that a cargo suite binary
+/// embeds at compile time (`include_str!`/`include_bytes!`), one path prefix per
+/// line. The update reads it from the pulled checkout, so a release that embeds
+/// a new file classifies a change to it by its own list rather than by the
+/// running updater's.
+pub(super) const EMBEDDED_ASSETS: &str = "tools/embedded-assets";
+
+/// The prefixes a checkout without `tools/embedded-assets` embeds. Such a
+/// checkout is older than the file, and embeds nothing outside `tools/` beyond
+/// these two.
+const EMBEDDED_ASSETS_WITHOUT_THE_FILE: &[&str] = &["hooks/memory-seed/", "attend/sensors/"];
+
+/// The prefixes in the text of a `tools/embedded-assets` file, skipping blank
+/// lines and `#` comments; with no file (`None`), the list a checkout from
+/// before the file embeds.
+pub(super) fn embedded_asset_prefixes(text: Option<&str>) -> Vec<String> {
+    match text {
+        Some(t) => t.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).map(str::to_string).collect(),
+        None => EMBEDDED_ASSETS_WITHOUT_THE_FILE.iter().map(|p| p.to_string()).collect(),
+    }
+}
+
+/// The embedded-asset prefixes of the checkout at `app`.
+pub(super) fn embedded_assets(app: &Path) -> Vec<String> {
+    embedded_asset_prefixes(std::fs::read_to_string(app.join(EMBEDDED_ASSETS)).ok().as_deref())
+}
 
 /// Pure classifier: given changed repo-relative paths, decide which build groups
-/// they touch — `(cargo_suite, way_embed)`. Every binary source lives under
-/// `tools/`; way-embed (C++/cmake) is `tools/way-embed/`, and the cargo suite
-/// (`ways`, `ways-audit`, `attend`, `attend-chat`, and their shared crates) is the
-/// rest of `tools/`. The root `Makefile` drives both builds, so a change to it flags
-/// both. A few compile-time assets embedded into a binary live outside `tools/`
-/// (`EMBEDDED_ASSET_PREFIXES`) and count as cargo source. Anything else (docs,
-/// hooks, skills, `*.md`) feeds no binary.
-fn classify_build_groups<'a>(paths: impl Iterator<Item = &'a str>) -> (bool, bool) {
+/// they touch — `(cargo_suite, way_embed)`. way-embed (C++/cmake) is built from
+/// `tools/way-embed/`, and the cargo suite (`ways`, `ways-audit`, `attend`,
+/// `attend-chat`, and their shared crates) from the rest of `tools/`. The root
+/// `Makefile` drives both builds, so a change to it flags both. The cargo suite
+/// also embeds a few files outside `tools/`; a path under one of the `embedded`
+/// prefixes (`tools/embedded-assets`) counts as cargo source. Any other path,
+/// such as docs, skills, ways and the hooks no binary embeds, feeds no binary.
+fn classify_build_groups<'a>(paths: impl Iterator<Item = &'a str>, embedded: &[String]) -> (bool, bool) {
     let (mut cargo, mut embed) = (false, false);
     for p in paths.map(str::trim).filter(|p| !p.is_empty()) {
         if p == "Makefile" {
@@ -366,7 +385,7 @@ fn classify_build_groups<'a>(paths: impl Iterator<Item = &'a str>) -> (bool, boo
             } else {
                 cargo = true;
             }
-        } else if EMBEDDED_ASSET_PREFIXES.iter().any(|pre| p.starts_with(pre)) {
+        } else if embedded.iter().any(|pre| p.starts_with(pre.as_str())) {
             cargo = true;
         }
     }
@@ -390,7 +409,17 @@ fn working_tree_build_groups(app: &Path) -> (bool, bool) {
     else {
         return (false, false);
     };
-    classify_build_groups(String::from_utf8_lossy(&out.stdout).lines())
+    classify_build_groups(String::from_utf8_lossy(&out.stdout).lines(), &embedded_assets(app))
+}
+
+/// Whether a file the cargo suite builds from differs between commit `a` and
+/// the checkout at `b`: changed in the commits between them, or edited in the
+/// working tree and not yet committed. The guard asks this of a download built
+/// at `a`; an uncommitted edit is source the download lacks, so it counts.
+/// None when git cannot list the diff between the commits.
+fn cargo_source_changed(app: &Path, a: &str, b: &str) -> Option<bool> {
+    let (committed, _) = changed_build_groups(app, a, b)?;
+    Some(committed || working_tree_build_groups(app).0)
 }
 
 /// The suite binaries, from `tools/suite-bins`: the list the pulled Makefile
@@ -448,22 +477,47 @@ fn content_stamp(p: &Path) -> Option<(u64, u64)> {
     Some((bytes.len() as u64, h.finish()))
 }
 
-/// Each binary an update can refresh: the suite under `bin/` and the cached
-/// way-embed. A binary that does not answer `--version` is left out.
-fn binary_versions(app: &Path) -> Vec<(String, Seen)> {
+/// Each binary an update can refresh, by name and path: the suite under
+/// `bin/` and the cached way-embed.
+fn binary_paths(app: &Path) -> Vec<(String, std::path::PathBuf)> {
     let mut bins: Vec<(String, std::path::PathBuf)> =
         suite_bins(app).into_iter().map(|n| (n.clone(), app.join("bin").join(exe(&n)))).collect();
     if let Some(p) = crate::paths::way_embed_in(&crate::paths::corpus_dir()) {
         bins.push(("way-embed".to_string(), p));
     }
-    bins.into_iter()
-        .filter_map(|(name, p)| {
-            let line = version_line(&p)?;
-            let version = line.strip_prefix(name.as_str()).unwrap_or(&line).trim().to_string();
-            let stamp = content_stamp(&p);
-            Some((name, Seen { version, stamp }))
-        })
-        .collect()
+    bins
+}
+
+/// What one binary reports now, or None when it does not answer `--version`.
+fn seen_at(name: &str, p: &Path) -> Option<Seen> {
+    let line = version_line(p)?;
+    let version = line.strip_prefix(name).unwrap_or(&line).trim().to_string();
+    Some(Seen { version, stamp: content_stamp(p) })
+}
+
+/// Each binary an update can refresh, as it is now. A binary that does not
+/// answer `--version` is left out.
+fn binary_versions(app: &Path) -> Vec<(String, Seen)> {
+    binary_paths(app).into_iter().filter_map(|(name, p)| seen_at(&name, &p).map(|s| (name, s))).collect()
+}
+
+/// The line for one binary a refresh step has just re-acquired, against what
+/// `before` held: the move the closing summary names, or that it stays at
+/// its version because the binary fetched is the one already installed.
+fn refreshed_line(app: &Path, name: &str, before: &[(String, Seen)]) -> String {
+    let was: Vec<(String, Seen)> = before.iter().filter(|(n, _)| n == name).cloned().collect();
+    let now: Vec<(String, Seen)> =
+        binary_paths(app).into_iter().filter(|(n, _)| n == name).filter_map(|(n, p)| seen_at(&n, &p).map(|s| (n, s))).collect();
+    refresh_outcome(name, &was, &now)
+}
+
+/// [`refreshed_line`] over the binary's state before and after.
+fn refresh_outcome(name: &str, was: &[(String, Seen)], now: &[(String, Seen)]) -> String {
+    match (version_changes(was, now).pop(), now.first()) {
+        (Some(change), _) => change,
+        (None, Some((_, seen))) => format!("{name} stays at {}: the binary fetched matches the one installed", seen.version),
+        (None, None) => format!("{name} is in place but does not answer --version"),
+    }
 }
 
 /// One entry per binary that moved: `name old → new`, `name v (rebuilt)` for a
@@ -807,9 +861,17 @@ fn refresh_stale(app: &Path, stale: &Stale, has_toolchain: bool) -> Result<()> {
 /// How a candidate binary's build compares to the pulled source (ADR-150).
 #[derive(Debug, PartialEq, Eq)]
 enum Freshness {
-    /// Same commit, or the source is an ancestor of the candidate — safe to install.
+    /// Same commit with no uncommitted binary-source edit in the checkout, or
+    /// the source is an ancestor of the candidate — safe to install.
     AtLeastAsNew,
-    /// The candidate is strictly behind the source — installing it would downgrade.
+    /// The candidate's commit is an ancestor of the source, and no file the
+    /// cargo suite builds from changed between the two: the source builds the
+    /// same code, so the candidate is a valid update. Main usually runs a few
+    /// docs and ways commits past the latest release, and this keeps the
+    /// release in that case.
+    BehindInContentOnly,
+    /// The candidate lacks binary source the checkout holds, committed after
+    /// it or edited and not yet committed — installing it would downgrade.
     Older,
     /// Lineage can't be established (unparseable/absent provenance, sha not in
     /// local history). Caller decides — prefer building when a toolchain exists.
@@ -818,9 +880,10 @@ enum Freshness {
 
 /// Refresh the `ways` binary safely, with the downgrade guard. Download-first
 /// (`make ways`), then compare the freshly-installed binary's baked `git describe`
-/// against the pulled source. Only keep the download when it is at least as new;
-/// otherwise build from source (toolchain present) or restore the previous binary
-/// (none) — never leave an older binary in place, never leave the slot empty.
+/// against the pulled source. Keep the download when it is at least as new, or
+/// behind only in files the cargo suite is not built from; otherwise build from source
+/// (toolchain present) or restore the previous binary (none) — never leave an
+/// older binary in place, never leave the slot empty.
 fn refresh_ways(app: &Path, has_toolchain: bool) -> Result<()> {
     let bin = app.join("bin").join(exe("ways"));
     let backup = app.join("bin").join(format!("{}.pre-update", exe("ways")));
@@ -847,16 +910,26 @@ fn refresh_ways(app: &Path, has_toolchain: bool) -> Result<()> {
         bail!("`make ways` did not produce a ways binary — reverted");
     }
 
-    // Guard: is the just-installed binary at least as new as the pulled source?
+    // Guard: is the just-installed binary built from the pulled source's code?
     let candidate = read_build_describe(&bin);
     let verdict = match (candidate.as_deref(), source.as_deref()) {
-        (Some(c), Some(s)) => compare_freshness(c, s, |a, b| is_ancestor(app, a, b)),
+        (Some(c), Some(s)) => compare_freshness(
+            c,
+            s,
+            |a, b| is_ancestor(app, a, b),
+            |a, b| cargo_source_changed(app, a, b),
+        ),
         _ => Freshness::Unknown,
     };
     match &verdict {
         Freshness::AtLeastAsNew => {}
+        Freshness::BehindInContentOnly => Steps::info(format!(
+            "the downloaded pre-built ({}) is behind the pulled source ({}) only in files the cargo suite is not built from, so it is kept",
+            candidate.as_deref().unwrap_or("?"),
+            source.as_deref().unwrap_or("?"),
+        )),
         Freshness::Older => Steps::warn(format!(
-            "the downloaded pre-built ({}) is behind the pulled source ({}), so it is not a valid update",
+            "the downloaded pre-built ({}) is behind the pulled source ({}) in binary source, so it is not a valid update",
             candidate.as_deref().unwrap_or("?"),
             source.as_deref().unwrap_or("?"),
         )),
@@ -914,14 +987,15 @@ enum GuardAction {
 }
 
 /// The guard's decision table (ADR-150 §3). A download that is provably at least
-/// as new is kept. Anything `Older` or `Unknown` is not trusted: build from source
+/// as new, or behind only in files the cargo suite is not built from, is kept. Anything
+/// `Older` or `Unknown` is not trusted: build from source
 /// when a toolchain is present (the checkout can't be behind itself); else restore
 /// the previously-running binary rather than downgrade. The *only* time an
 /// unprovable/older download is kept is when there is no previous binary AND no
 /// toolchain — an empty slot is worse than an unverifiable one.
 fn guard_action(verdict: &Freshness, had: bool, has_toolchain: bool) -> GuardAction {
     match verdict {
-        Freshness::AtLeastAsNew => GuardAction::KeepDownload,
+        Freshness::AtLeastAsNew | Freshness::BehindInContentOnly => GuardAction::KeepDownload,
         Freshness::Older | Freshness::Unknown => {
             if has_toolchain {
                 GuardAction::BuildFromSource
@@ -1034,14 +1108,19 @@ fn describe_sha(desc: &str) -> Option<String> {
 }
 
 /// Compare a candidate binary's build against the source. `is_ancestor(a, b)`
-/// answers whether commit `a` precedes `b`. The candidate is `Older` only when
-/// its commit is a strict ancestor of the source; equal shas or a
-/// non-ancestor (source behind/diverged) are `AtLeastAsNew`; anything we can't
-/// resolve is `Unknown`.
+/// answers whether commit `a` precedes `b`, and `binary_source_changed(a, b)`
+/// whether a file the cargo suite builds from differs between commit `a` and
+/// the checkout at `b`, uncommitted edits included. At the same commit the
+/// candidate is `Older` when the checkout holds such an edit and `AtLeastAsNew`
+/// otherwise. A non-ancestor (source behind/diverged) is `AtLeastAsNew`. A
+/// strict ancestor is `BehindInContentOnly` when no binary source changed in
+/// between, and `Older` when some did or git cannot list the diff. Anything we
+/// can't resolve is `Unknown`.
 fn compare_freshness(
     candidate: &str,
     source: &str,
     is_ancestor: impl Fn(&str, &str) -> Option<bool>,
+    binary_source_changed: impl Fn(&str, &str) -> Option<bool>,
 ) -> Freshness {
     let (Some(cand), Some(src)) = (describe_sha(candidate), describe_sha(source)) else {
         return Freshness::Unknown;
@@ -1052,9 +1131,10 @@ fn compare_freshness(
     // this, `is_ancestor` reports the commit as its own ancestor → `Older`, and an
     // install with no toolchain keeps its previous binary.
     if cand.starts_with(&src) || src.starts_with(&cand) {
-        return Freshness::AtLeastAsNew;
+        return if binary_source_changed(&cand, &src) == Some(true) { Freshness::Older } else { Freshness::AtLeastAsNew };
     }
     match is_ancestor(&cand, &src) {
+        Some(true) if binary_source_changed(&cand, &src) == Some(false) => Freshness::BehindInContentOnly,
         Some(true) => Freshness::Older,
         Some(false) => Freshness::AtLeastAsNew,
         None => Freshness::Unknown,
@@ -1246,6 +1326,19 @@ mod tests {
     }
 
     #[test]
+    fn a_refresh_line_says_whether_the_version_moved() {
+        let seen = |v: &str, hash: u64| vec![("attend".to_string(), Seen { version: v.to_string(), stamp: Some((20, hash)) })];
+        assert_eq!(refresh_outcome("attend", &seen("0.35.2", 1), &seen("0.36.0", 2)), "attend 0.35.2 → 0.36.0");
+        assert_eq!(
+            refresh_outcome("attend", &seen("0.35.2", 1), &seen("0.35.2", 1)),
+            "attend stays at 0.35.2: the binary fetched matches the one installed"
+        );
+        assert_eq!(refresh_outcome("attend", &seen("0.35.2", 1), &seen("0.35.2", 2)), "attend 0.35.2 (rebuilt)");
+        assert_eq!(refresh_outcome("attend", &[], &seen("0.35.2", 1)), "attend 0.35.2 (new)");
+        assert_eq!(refresh_outcome("attend", &[], &[]), "attend is in place but does not answer --version");
+    }
+
+    #[test]
     fn the_same_bytes_written_again_carry_the_same_stamp() {
         let dir = tmp();
         let (a, b) = (dir.join("a"), dir.join("b"));
@@ -1366,60 +1459,178 @@ mod tests {
     fn compare_freshness_orders_by_commit_ancestry() {
         // Equal shas → at least as new, without consulting git.
         assert_eq!(
-            compare_freshness("ways-v1.0.0-0-gc0ffee", "ways-v1.0.0-0-gc0ffee", |_, _| panic!("not called")),
+            compare_freshness("ways-v1.0.0-0-gc0ffee", "ways-v1.0.0-0-gc0ffee", |_, _| panic!("not called"), |_, _| Some(false)),
             Freshness::AtLeastAsNew
         );
-        // Candidate is an ancestor of source → strictly older → refuse (downgrade).
+        // Candidate is an ancestor of source, binary source changed between them
+        // → older → refuse (downgrade).
         assert_eq!(
-            compare_freshness("ways-v1.0.0-0-gc0ffee", "ways-v1.0.0-78-gbeef00", |a, b| {
-                assert_eq!((a, b), ("c0ffee", "beef00"));
-                Some(true)
-            }),
+            compare_freshness(
+                "ways-v1.0.0-0-gc0ffee",
+                "ways-v1.0.0-78-gbeef00",
+                |a, b| {
+                    assert_eq!((a, b), ("c0ffee", "beef00"));
+                    Some(true)
+                },
+                |a, b| {
+                    assert_eq!((a, b), ("c0ffee", "beef00"));
+                    Some(true)
+                }
+            ),
             Freshness::Older
         );
         // Candidate not an ancestor (source behind / diverged) → not a downgrade.
         assert_eq!(
-            compare_freshness("ways-v1.1.0-0-gaaaa11", "ways-v1.0.0-0-gbbbb22", |_, _| Some(false)),
+            compare_freshness("ways-v1.1.0-0-gaaaa11", "ways-v1.0.0-0-gbbbb22", |_, _| Some(false), |_, _| panic!("not called")),
             Freshness::AtLeastAsNew
         );
         // Git can't resolve the ancestry (sha not local) → Unknown.
         assert_eq!(
-            compare_freshness("ways-v1.0.0-0-gabc123", "ways-v1.0.0-1-gdef456", |_, _| None),
+            compare_freshness("ways-v1.0.0-0-gabc123", "ways-v1.0.0-1-gdef456", |_, _| None, |_, _| panic!("not called")),
             Freshness::Unknown
         );
         // The same commit abbreviated to different lengths (shallow CI checkout vs a
         // full clone) is the same commit, without consulting git.
         assert_eq!(
-            compare_freshness("ways-v1.24.0-0-g64ef02c", "ways-v1.24.0-0-g64ef02cb", |_, _| panic!("not called")),
+            compare_freshness("ways-v1.24.0-0-g64ef02c", "ways-v1.24.0-0-g64ef02cb", |_, _| panic!("not called"), |_, _| Some(false)),
             Freshness::AtLeastAsNew
         );
         assert_eq!(
-            compare_freshness("ways-v1.24.0-0-g64ef02cb", "ways-v1.24.0-0-g64ef02c", |_, _| panic!("not called")),
+            compare_freshness("ways-v1.24.0-0-g64ef02cb", "ways-v1.24.0-0-g64ef02c", |_, _| panic!("not called"), |_, _| Some(false)),
             Freshness::AtLeastAsNew
         );
         // Different lengths that are not prefixes are different commits: git decides.
         assert_eq!(
-            compare_freshness("ways-v1.0.0-0-gabc1234", "ways-v1.0.0-3-gabd12345", |a, b| {
-                assert_eq!((a, b), ("abc1234", "abd12345"));
-                Some(true)
-            }),
+            compare_freshness(
+                "ways-v1.0.0-0-gabc1234",
+                "ways-v1.0.0-3-gabd12345",
+                |a, b| {
+                    assert_eq!((a, b), ("abc1234", "abd12345"));
+                    Some(true)
+                },
+                |_, _| Some(true)
+            ),
             Freshness::Older
         );
         // Unparseable candidate provenance (legacy binary → describe_sha None) → Unknown.
         assert_eq!(
-            compare_freshness("unknown", "ways-v1.0.0-1-gdef456", |_, _| panic!("not called")),
+            compare_freshness("unknown", "ways-v1.0.0-1-gdef456", |_, _| panic!("not called"), |_, _| panic!("not called")),
             Freshness::Unknown
         );
+    }
+
+    #[test]
+    fn a_release_at_the_source_commit_is_older_when_the_checkout_holds_binary_source_edits() {
+        // The checkout sits exactly at the release tag.
+        let at_tag = |dirty_binary_source: bool| {
+            compare_freshness("ways-v1.53.1-0-g67afde3", "ways-v1.53.1-0-g67afde3a-dirty", |_, _| panic!("not called"), move |a, b| {
+                assert_eq!((a, b), ("67afde3", "67afde3a"));
+                Some(dirty_binary_source)
+            })
+        };
+        // An uncommitted edit under tools/: the release lacks it, so it is built.
+        assert_eq!(at_tag(true), Freshness::Older);
+        assert_eq!(guard_action(&at_tag(true), true, true), GuardAction::BuildFromSource);
+        // A clean checkout, or edits outside binary source: the release is kept.
+        assert_eq!(at_tag(false), Freshness::AtLeastAsNew);
+    }
+
+    #[test]
+    fn a_release_behind_main_only_in_docs_is_a_valid_update() {
+        // The release tag at 67afde3, main two docs commits past it: no binary
+        // source changed between them, so the release builds the same code.
+        let docs_only = compare_freshness(
+            "ways-v1.53.1-0-g67afde3",
+            "ways-v1.53.1-2-g98431a9b",
+            |_, _| Some(true),
+            |a, b| {
+                assert_eq!((a, b), ("67afde3", "98431a9b"));
+                Some(false)
+            },
+        );
+        assert_eq!(docs_only, Freshness::BehindInContentOnly);
+        assert_eq!(guard_action(&docs_only, true, false), GuardAction::KeepDownload, "kept with no toolchain");
+        assert_eq!(guard_action(&docs_only, true, true), GuardAction::KeepDownload, "kept, not rebuilt, with one");
+
+        // The same ancestry with binary source changed in between is still a downgrade.
+        let code_changed = compare_freshness("ways-v1.53.1-0-g67afde3", "ways-v1.53.1-2-g98431a9b", |_, _| Some(true), |_, _| Some(true));
+        assert_eq!(code_changed, Freshness::Older);
+        assert_eq!(guard_action(&code_changed, true, true), GuardAction::BuildFromSource);
+
+        // Git cannot list the diff: the guard holds.
+        assert_eq!(
+            compare_freshness("ways-v1.53.1-0-g67afde3", "ways-v1.53.1-2-g98431a9b", |_, _| Some(true), |_, _| None),
+            Freshness::Older
+        );
+    }
+
+    /// A checkout in a temporary git repository, for the guard's diff.
+    fn git_app() -> (crate::test_dir::TestDir, impl Fn(&[&str]) -> String) {
+        let app = tmp();
+        std::fs::create_dir_all(&*app).unwrap();
+        let dir = app.to_path_buf();
+        let git = move |args: &[&str]| {
+            let out = Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"])
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        git(&["init", "-q"]);
+        (app, git)
+    }
+
+    #[test]
+    fn the_guard_counts_binary_source_committed_or_edited_since_the_download() {
+        let (app, git) = git_app();
+        let write = |rel: &str, text: &str| {
+            let p = app.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        };
+        write("tools/x/src/lib.rs", "fn a() {}\n");
+        write("hooks/ways/core.md", "one\n");
+        write("hooks/new-embed/x.md", "one\n");
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "release"]);
+        let release = git(&["rev-parse", "HEAD"]);
+
+        // A docs-only commit past the release: no binary source changed.
+        write("hooks/ways/core.md", "two\n");
+        git(&["commit", "-qam", "docs"]);
+        let docs = git(&["rev-parse", "HEAD"]);
+        assert_eq!(cargo_source_changed(&app, &release, &docs), Some(false));
+
+        // An uncommitted edit to binary source on top of it: the download lacks it.
+        write("tools/x/src/lib.rs", "fn b() {}\n");
+        assert_eq!(cargo_source_changed(&app, &release, &docs), Some(true), "an uncommitted edit under tools/ counts");
+        git(&["checkout", "-q", "--", "tools/x/src/lib.rs"]);
+
+        // An embedded file the checkout's own list names counts as binary source.
+        write("tools/embedded-assets", "hooks/new-embed/\n");
+        write("hooks/new-embed/x.md", "two\n");
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "embed"]);
+        let embed = git(&["rev-parse", "HEAD"]);
+        assert_eq!(changed_build_groups(&app, &docs, &embed), Some((true, false)));
+
+        // Git cannot resolve a commit: the guard holds.
+        assert_eq!(cargo_source_changed(&app, "0000000000", &docs), None);
     }
 
     #[test]
     fn guard_action_never_downgrades() {
         use Freshness::*;
         use GuardAction::*;
-        // A proven-fresh download is always kept, regardless of toolchain/previous.
+        // A proven-fresh download, or one behind only in content, is always kept,
+        // regardless of toolchain/previous.
         for &had in &[true, false] {
             for &tc in &[true, false] {
                 assert_eq!(guard_action(&AtLeastAsNew, had, tc), KeepDownload);
+                assert_eq!(guard_action(&BehindInContentOnly, had, tc), KeepDownload);
             }
         }
         // Older/Unknown with a toolchain → build from source (authoritative checkout).
@@ -1438,12 +1649,11 @@ mod tests {
 
     #[test]
     fn classify_build_groups_routes_changed_paths() {
-        use super::classify_build_groups as c;
+        let embedded = embedded_asset_prefixes(None);
+        let c = |paths: std::array::IntoIter<&str, 1>| classify_build_groups(paths, &embedded);
+        let many = |paths: &[&str]| classify_build_groups(paths.iter().copied(), &embedded);
         // Docs/ways-only pull → no binary group (the churn-report case).
-        assert_eq!(
-            c(["CLAUDE.md", "hooks/ways/core.md", "docs/x.md", "skills/y/SKILL.md"].into_iter()),
-            (false, false)
-        );
+        assert_eq!(many(&["CLAUDE.md", "hooks/ways/core.md", "docs/x.md", "skills/y/SKILL.md"]), (false, false));
         // Cargo suite source → cargo only.
         assert_eq!(c(["tools/ways-cli/src/main.rs"].into_iter()), (true, false));
         assert_eq!(c(["tools/ways-core/src/lib.rs"].into_iter()), (true, false));
@@ -1453,19 +1663,22 @@ mod tests {
         assert_eq!(c(["tools/way-embed/way-embed.cpp"].into_iter()), (false, true));
         // Embedded asset outside tools/ (include_str! into ways) → cargo.
         assert_eq!(c(["hooks/memory-seed/seed-v1.md"].into_iter()), (true, false));
+        assert_eq!(c(["attend/sensors/git.yaml"].into_iter()), (true, false));
+        // The checkout's own list decides: a prefix a later release adds counts.
+        let later = embedded_asset_prefixes(Some("# comment\n\nhooks/memory-seed/\nhooks/new-embed/\n"));
+        assert_eq!(later, ["hooks/memory-seed/", "hooks/new-embed/"]);
+        assert_eq!(classify_build_groups(["hooks/new-embed/x.md"].into_iter(), &later), (true, false));
+        assert_eq!(c(["hooks/new-embed/x.md"].into_iter()), (false, false), "not in the list without the file");
         // Root Makefile drives both builds.
         assert_eq!(c(["Makefile"].into_iter()), (true, true));
         // Mixed change touches both.
-        assert_eq!(
-            c(["tools/way-embed/x.cpp", "tools/attend/src/lib.rs"].into_iter()),
-            (true, true)
-        );
+        assert_eq!(many(&["tools/way-embed/x.cpp", "tools/attend/src/lib.rs"]), (true, true));
         // Blank/whitespace lines are ignored.
-        assert_eq!(c(["", "  ", "CLAUDE.md"].into_iter()), (false, false));
+        assert_eq!(many(&["", "  ", "CLAUDE.md"]), (false, false));
     }
 
     // --- Durability guard for finding #1: an embedded asset that escapes `tools/`
-    // must be reflected in EMBEDDED_ASSET_PREFIXES, or a change to it silently skips
+    // must be listed in tools/embedded-assets, or a change to it silently skips
     // the rebuild. Walk the source for include_str!/include_bytes! literals, resolve
     // each relative to its file, and assert every one that lands outside `tools/` is
     // covered. A future escaping include that isn't listed fails this test. ---
@@ -1546,10 +1759,12 @@ mod tests {
             escaping.iter().any(|r| r.starts_with("hooks/memory-seed/")),
             "expected to find the memory-seed include escape; found: {escaping:?}",
         );
+        let listed = std::fs::read_to_string(repo.join(EMBEDDED_ASSETS)).expect("tools/embedded-assets is checked in");
+        let prefixes = embedded_asset_prefixes(Some(&listed));
         for rel in &escaping {
             assert!(
-                EMBEDDED_ASSET_PREFIXES.iter().any(|pre| rel.starts_with(pre)),
-                "embedded asset `{rel}` escapes tools/ but isn't in EMBEDDED_ASSET_PREFIXES \
+                prefixes.iter().any(|pre| rel.starts_with(pre.as_str())),
+                "embedded asset `{rel}` escapes tools/ but isn't in tools/embedded-assets \
                  — a change to it would skip the rebuild. Add its prefix.",
             );
         }

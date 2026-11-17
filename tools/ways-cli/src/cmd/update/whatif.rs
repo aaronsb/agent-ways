@@ -13,7 +13,7 @@
 
 use super::delta::{self, Delta};
 use super::notes::{self, Release};
-use super::{classify_build_groups, exe, git_head, installed_version, package_field, suite_bins, version_older, way_embed_source_version};
+use super::{classify_build_groups, embedded_asset_prefixes, embedded_assets, exe, git_head, installed_version, package_field, suite_bins, version_older, way_embed_source_version, EMBEDDED_ASSETS};
 use crate::cmd::attend_mod;
 use crate::cmd::lifecycle::{self, DevLink, Mark, Report};
 use crate::cmd::settings::retired::{self, Held};
@@ -35,9 +35,17 @@ pub struct Component {
     pub name: String,
     pub installed: Option<String>,
     pub target: Option<String>,
+    /// The plugin's name when the row is a mod, which repair converges
+    /// through Claude Code rather than the update building it.
+    pub plugin: Option<String>,
 }
 
 impl Component {
+    /// True for a mod's row: a plugin, not a binary the update builds.
+    pub fn is_mod(&self) -> bool {
+        self.plugin.is_some()
+    }
+
     pub fn moves(&self) -> bool {
         match (&self.installed, &self.target) {
             (Some(i), Some(t)) => version_older(i, t),
@@ -83,16 +91,6 @@ pub struct WhatIf {
     /// The files that still hold a retired settings section (ADR-512 item 2).
     pub retired: Vec<Held>,
     pub verbose: bool,
-}
-
-/// The name of the attend mod's row.
-const MOD: &str = attend_mod::ATTEND.label;
-/// The name of the ways-judge mod's row.
-const JUDGE_MOD: &str = attend_mod::JUDGE.label;
-
-/// True for a mod's row: a plugin, not a binary the update builds.
-fn is_mod(name: &str) -> bool {
-    name == MOD || name == JUDGE_MOD
 }
 
 /// Gather the what-if for `channel`. Runs a fetch and reads; writes nothing
@@ -202,8 +200,11 @@ fn versions_at(app: &Path, rev: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-/// The suite at `rev`, the installed suite and way-embed, and the attend
-/// mod, with their versions on each side.
+/// The suite at `rev`, the installed suite and way-embed, and the mods, with
+/// their versions on each side. The mods are those the marketplace lists at
+/// `rev` and in the checkout: the update's reproject runs the newly installed
+/// binary, which converges what the pulled marketplace ships. A mod this
+/// binary does not know is named by its plugin.
 fn components(app: &Path, rev: Option<&str>) -> Vec<Component> {
     let target_versions = rev.map(|r| versions_at(app, r)).unwrap_or_default();
     let mut names = suite_bins(app);
@@ -219,7 +220,7 @@ fn components(app: &Path, rev: Option<&str>) -> Vec<Component> {
         .map(|name| {
             let installed = installed_version(&app.join("bin").join(exe(&name)));
             let target = target_versions.iter().find(|(n, _)| *n == name).map(|(_, v)| v.clone());
-            Component { name, installed, target }
+            Component { name, installed, target, plugin: None }
         })
         .collect();
     let embed_installed = crate::paths::way_embed_in(&crate::paths::corpus_dir()).and_then(|b| installed_version(&b));
@@ -227,24 +228,49 @@ fn components(app: &Path, rev: Option<&str>) -> Vec<Component> {
         Some(r) => show(app, r, "tools/way-embed/way-embed.cpp").and_then(|src| define_version(&src)),
         None => way_embed_source_version(app),
     };
-    out.push(Component { name: "way-embed".into(), installed: embed_installed, target: embed_target });
+    out.push(Component { name: "way-embed".into(), installed: embed_installed, target: embed_target, plugin: None });
     let mod_version = |text: Option<String>| -> Option<String> {
         let json: serde_json::Value = serde_json::from_str(&text?).ok()?;
         json.get("version")?.as_str().map(str::to_string)
     };
-    for (m, row) in [(attend_mod::ATTEND, MOD), (attend_mod::JUDGE, JUDGE_MOD)] {
-        let plugin = format!("plugins/{}/.claude-plugin/plugin.json", m.name);
-        let c = Component {
-            name: row.into(),
-            installed: mod_version(std::fs::read_to_string(app.join(&plugin)).ok()),
-            target: mod_version(rev.and_then(|r| show(app, r, &plugin))),
-        };
-        // An app that ships no ways-judge mod on either side has no row for it.
-        if row == MOD || c.installed.is_some() || c.target.is_some() {
-            out.push(c);
+    const MARKETPLACE: &str = "plugins/.claude-plugin/marketplace.json";
+    let mut plugins = marketplace_plugins(rev.and_then(|r| show(app, r, MARKETPLACE)).as_deref());
+    for name in marketplace_plugins(std::fs::read_to_string(app.join(MARKETPLACE)).ok().as_deref()) {
+        if !plugins.contains(&name) {
+            plugins.push(name);
         }
     }
+    // attend's row always shows, shipped or not.
+    if !plugins.iter().any(|n| n == attend_mod::ATTEND.name) {
+        plugins.insert(0, attend_mod::ATTEND.name.to_string());
+    }
+    for name in plugins {
+        let manifest = format!("plugins/{name}/.claude-plugin/plugin.json");
+        out.push(Component {
+            name: known_mod(&name).map_or_else(|| format!("{name} mod"), |m| m.label.to_string()),
+            installed: mod_version(std::fs::read_to_string(app.join(&manifest)).ok()),
+            target: mod_version(rev.and_then(|r| show(app, r, &manifest))),
+            plugin: Some(name),
+        });
+    }
     out
+}
+
+/// The plugin names a marketplace.json lists, in its order.
+fn marketplace_plugins(text: Option<&str>) -> Vec<String> {
+    let Some(json) = text.and_then(|t| serde_json::from_str::<serde_json::Value>(t).ok()) else { return Vec::new() };
+    json.get("plugins")
+        .and_then(|p| p.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|p| p.get("name")?.as_str().map(str::to_string))
+        .collect()
+}
+
+/// The mod of [`attend_mod::MODS`] that the plugin `name` is, if this binary
+/// knows it.
+fn known_mod(name: &str) -> Option<attend_mod::Mod> {
+    attend_mod::MODS.into_iter().find(|m| m.name == name)
 }
 
 /// The `#define VERSION "x"` of way-embed's source text.
@@ -258,6 +284,9 @@ fn actions(app: &Path, channel: &Channel, relation: Relation, head: Option<&str>
     let dirty = !local.is_empty();
     let mut out = Vec::new();
     let cargo = super::tool_present("cargo");
+    // Whether --commit puts a new ways binary in place: a mod this binary
+    // does not know is converged only by a binary that knows it.
+    let mut ways_replaced = false;
     let short = |s: &str| s.chars().take(8).collect::<String>();
     match channel {
         Channel::Release { upstream } => {
@@ -284,16 +313,20 @@ fn actions(app: &Path, channel: &Channel, relation: Relation, head: Option<&str>
             // The working tree's own edits, from the `status --porcelain`
             // lines already read: `git diff HEAD` would refresh and rewrite
             // the index, and a what-if writes nothing (ADR-511).
-            let (wt_cargo, wt_embed) = classify_build_groups(local.iter().filter_map(|l| porcelain_path(l)));
+            let (wt_cargo, wt_embed) = classify_build_groups(local.iter().filter_map(|l| porcelain_path(l)), &embedded_assets(app));
             cargo_changed |= wt_cargo;
             embed_changed |= wt_embed;
             let mut any = false;
-            for c in comps.iter().filter(|c| !is_mod(&c.name) && c.name != "way-embed") {
+            for c in comps.iter().filter(|c| !c.is_mod() && c.name != "way-embed") {
                 if !(cargo_changed || c.moves()) {
                     continue;
                 }
                 any = true;
-                out.push(binary_action(c, releases, cargo));
+                let action = binary_action(c, releases, cargo);
+                if c.name == "ways" {
+                    ways_replaced = action.0 == Mark::Act;
+                }
+                out.push(action);
             }
             if let Some(e) = comps.iter().find(|c| c.name == "way-embed").filter(|c| embed_changed || c.moves()) {
                 any = true;
@@ -308,6 +341,7 @@ fn actions(app: &Path, channel: &Channel, relation: Relation, head: Option<&str>
                 out.push((Mark::Warn, "local changes that conflict with the ref stop the checkout".to_string()));
             }
             out.push((Mark::Act, format!("check out {r} ({}) on a detached HEAD", target.map(short).unwrap_or_else(|| "unresolved".into()))));
+            ways_replaced = cargo;
             if cargo {
                 out.push((Mark::Act, "build the whole suite from source".to_string()));
             } else {
@@ -318,8 +352,6 @@ fn actions(app: &Path, channel: &Channel, relation: Relation, head: Option<&str>
     }
     out.push((Mark::Act, format!("relink the suite onto PATH in {}", lifecycle::xdg_bin().display())));
     out.push((Mark::Act, "regenerate the corpus".to_string()));
-    let attend = comps.iter().find(|c| c.name == MOD);
-    let judge = comps.iter().find(|c| c.name == JUDGE_MOD);
     let claude_code_chosen = crate::cmd::settings::engine::claude_code_chosen();
     for t in crate::config::global().targets() {
         let dir = t.dir();
@@ -329,38 +361,103 @@ fn actions(app: &Path, channel: &Channel, relation: Relation, head: Option<&str>
         }
         out.push((Mark::Act, format!("reproject {} (ways manage repair)", dir.display())));
         let config = t.config_path();
-        let wants = |m: &attend_mod::Mod| attend_mod::wants_in(m, &config);
-        if wants(&attend_mod::ATTEND) {
-            out.extend(mod_action(&dir, MOD, attend));
-        } else if ways_core::settings::mod_install_in_file(attend_mod::ATTEND.name, &config) == Some(false) {
-            out.extend(kept_out(&dir, &attend_mod::ATTEND, attend));
+        let record = attend_mod::Record::read(&dir);
+        for c in comps.iter().filter(|c| c.is_mod()) {
+            let Some(m) = c.plugin.as_deref().and_then(known_mod) else {
+                out.extend(new_mod_line(&dir, c, ways_replaced));
+                continue;
+            };
+            let here = ModHere {
+                wanted: attend_mod::wants_in(&m, &config),
+                held: ways_core::settings::mod_entry_ignored(m.name, &config),
+                installed: attend_mod::listed_in(&m, &dir),
+                recorded: record.has(m.id),
+                held_out: if m == attend_mod::JUDGE {
+                    claude_code_chosen
+                } else {
+                    ways_core::settings::mod_install_in_file(m.name, &config) == Some(false)
+                },
+            };
+            out.extend(mod_line(&dir, &m, &here, c));
         }
-        out.extend(judge_mod_action(&dir, wants(&attend_mod::JUDGE), judge, claude_code_chosen));
     }
     out.push((Mark::Info, "check the judge's keys".to_string()));
     out
 }
 
-/// The ways-judge mod's line for the target at `dir`. Repair keeps the mod
-/// installed and current where it is `wanted`; with Claude Code internal
-/// chosen and the mod not wanted here, the target's config keeps it out, and
-/// `ways manage mod install` is the way back; under a key engine an absent
-/// mod is nothing to report.
-fn judge_mod_action(dir: &Path, wanted: bool, judge: Option<&Component>, claude_code_chosen: bool) -> Option<(Mark, String)> {
-    if wanted {
-        return mod_action(dir, JUDGE_MOD, judge);
+/// What the preview reads of one mod in one target, the way repair decides
+/// it: from the target's settings, its ways config and repair's record, with
+/// no call to `claude`.
+///
+/// References:
+/// - ADR-511: a what-if writes nothing, and the `claude` CLI rewrites a
+///   target's settings.json as it starts, so the preview never runs it.
+#[derive(Debug, Clone, Default)]
+struct ModHere {
+    /// `mods.<name>.install` resolved for the target.
+    wanted: bool,
+    /// The finding that has the entry ignored; repair then leaves the mod as
+    /// it finds it.
+    held: Option<agent_settings::Finding>,
+    /// The target's settings name the mod, as Claude Code's install writes.
+    installed: bool,
+    /// Repair's record says it installed the mod here.
+    recorded: bool,
+    /// A mod not wanted here is worth a line: the target's config sets its
+    /// `install` to false, or, for the ways-judge mod, Claude Code internal
+    /// is the chosen engine, the one the mod hosts.
+    held_out: bool,
+}
+
+/// Mod `m`'s line for the target at `dir`, following what repair does with
+/// it. A mod the target rev does not ship has none, since repair converges
+/// only what the marketplace ships. One not wanted is removed where it is
+/// installed, left as it is under an ignored entry (with repair's warning),
+/// and otherwise named only where it is `held_out`. One wanted is installed
+/// where it is missing, unless repair installed it before and it was removed
+/// by hand, and otherwise updated or left.
+fn mod_line(dir: &Path, m: &attend_mod::Mod, here: &ModHere, c: &Component) -> Option<(Mark, String)> {
+    let d = dir.display();
+    let target = c.target.as_deref()?;
+    if !here.wanted {
+        if let Some(f) = &here.held {
+            let what = if here.installed { "left installed" } else { "not installed" };
+            return Some((Mark::Warn, format!("{d}: {}: {what}: {}", m.label, attend_mod::held_why(m, dir, f, here.installed))));
+        }
+        if here.installed {
+            return Some((Mark::Act, format!("{d}: remove the {} (mods.{}.install is false)", m.label, m.name)));
+        }
+        return here.held_out.then(|| kept_out(dir, m));
     }
-    if claude_code_chosen {
-        return kept_out(dir, &attend_mod::JUDGE, judge);
+    if !here.installed && here.recorded {
+        return Some((Mark::Act, format!("{d}: the {} was removed by hand, so repair writes mods.{}.install: false and leaves it out", m.label, m.name)));
     }
-    None
+    if !here.installed {
+        // The preview runs no `claude`, so it names the floor rather than
+        // checking it; --commit leaves the mod pending below it.
+        return Some((Mark::Act, format!("{d}: install the {} {target} (needs Claude Code {} or later)", m.label, m.min_claude_code)));
+    }
+    Some(mod_action(dir, m.label, c))
+}
+
+/// The line for a mod the marketplace lists that this binary does not know.
+/// Only a ways binary that knows the mod converges it, so it depends on
+/// whether --commit puts a new ways binary in place (`ways_replaced`); when
+/// it does not, the mod waits for one.
+fn new_mod_line(dir: &Path, c: &Component, ways_replaced: bool) -> Option<(Mark, String)> {
+    c.target.as_ref()?;
+    let d = dir.display();
+    Some(match (ways_replaced, c.installed.is_none()) {
+        (true, true) => (Mark::Act, format!("{d}: install the {} where it is wanted (new in this release)", c.name)),
+        (true, false) => (Mark::Info, format!("{d}: the {} is one this ways binary does not know; the updated binary converges it", c.name)),
+        (false, _) => (Mark::Warn, format!("{d}: the {} waits for a ways binary that knows it; this update keeps the current ways binary", c.name)),
+    })
 }
 
 /// A mod this target's config keeps out (`install: false`), which repair
 /// wrote after a removal by hand or the operator set.
-fn kept_out(dir: &Path, m: &attend_mod::Mod, c: Option<&Component>) -> Option<(Mark, String)> {
-    c?;
-    Some((
+fn kept_out(dir: &Path, m: &attend_mod::Mod) -> (Mark, String) {
+    (
         Mark::Info,
         format!(
             "{}: the {} stays out: mods.{}.install is false in this target's config; `ways manage mod install {} --target {} --commit` installs it",
@@ -370,18 +467,17 @@ fn kept_out(dir: &Path, m: &attend_mod::Mod, c: Option<&Component>) -> Option<(M
             m.name,
             dir.display()
         ),
-    ))
+    )
 }
 
 /// What repair does to an installed mod in the target at `dir`: update it
 /// when its row moves, else leave it.
-fn mod_action(dir: &Path, row: &str, c: Option<&Component>) -> Option<(Mark, String)> {
-    let c = c?;
-    Some(if c.moves() {
+fn mod_action(dir: &Path, row: &str, c: &Component) -> (Mark, String) {
+    if c.moves() {
         (Mark::Act, format!("{}: update the {row} {} → {}", dir.display(), c.installed.as_deref().unwrap_or("none"), c.target.as_deref().unwrap_or("?")))
     } else {
         (Mark::Same, format!("{}: the {row} stays as it is", dir.display()))
-    })
+    }
 }
 
 /// How one suite binary would be refreshed.
@@ -398,9 +494,11 @@ fn binary_action(c: &Component, releases: &[Release], cargo: bool) -> (Mark, Str
     }
 }
 
+/// The build groups the commits `a..b` touch, classified by the embedded-file
+/// list at `b`, the checkout the update would land on.
 fn changed(app: &Path, a: &str, b: &str) -> (bool, bool) {
     let paths = git_lines(app, &["diff", "--name-only", a, b]);
-    classify_build_groups(paths.iter().map(String::as_str))
+    classify_build_groups(paths.iter().map(String::as_str), &embedded_asset_prefixes(show(app, b, EMBEDDED_ASSETS).as_deref()))
 }
 
 /// The path a `git status --porcelain` line names (the destination of a
@@ -446,7 +544,7 @@ pub fn render(w: &WhatIf) -> Report {
         match (&c.installed, &c.target) {
             (Some(i), Some(t)) if version_older(i, t) => r.item(Mark::Up, format!("{name}  {i} → {t}")),
             // `--ref` checks the ref out and builds it, older or not.
-            (Some(i), Some(t)) if on_ref && version_older(t, i) && !is_mod(&c.name) => r.item(Mark::Down, format!("{name}  {i} → {t} (a downgrade: --commit rebuilds it from source)")),
+            (Some(i), Some(t)) if on_ref && version_older(t, i) && !c.is_mod() => r.item(Mark::Down, format!("{name}  {i} → {t} (a downgrade: --commit rebuilds it from source)")),
             (Some(i), Some(t)) if on_ref && version_older(t, i) => r.item(Mark::Down, format!("{name}  {i} → {t} (a downgrade)")),
             (Some(i), Some(t)) if i != t => r.item(Mark::Same, format!("{name}  {i} (ahead of {t}; unchanged)")),
             (Some(i), _) => r.item(Mark::Same, format!("{name}  {i} unchanged")),
@@ -455,8 +553,8 @@ pub fn render(w: &WhatIf) -> Report {
         };
     }
 
-    let moving: Vec<&Component> = w.components.iter().filter(|c| c.moves() && !is_mod(&c.name)).collect();
-    if !moving.is_empty() || w.components.iter().any(|c| is_mod(&c.name) && c.moves()) {
+    let moving: Vec<&Component> = w.components.iter().filter(|c| c.moves() && !c.is_mod()).collect();
+    if !moving.is_empty() || w.components.iter().any(|c| c.is_mod() && c.moves()) {
         r.section("Release notes");
         match &w.notes {
             Err(e) => {
@@ -495,11 +593,12 @@ pub fn render(w: &WhatIf) -> Report {
                     }
                     r.blank();
                 }
-                if w.components.iter().any(|c| c.name == MOD && c.moves()) {
-                    r.muted(2, "The attend mod's changes are in attend's release notes.");
-                }
-                if w.components.iter().any(|c| c.name == JUDGE_MOD && c.moves()) {
-                    r.muted(2, "The ways-judge mod's changes are in the ways release notes.");
+                // The attend mod moves with attend's version, the others this
+                // binary knows with ways's.
+                for c in w.components.iter().filter(|c| c.moves()) {
+                    let Some(m) = c.plugin.as_deref().and_then(known_mod) else { continue };
+                    let notes = if m == attend_mod::ATTEND { "attend's" } else { "the ways" };
+                    r.muted(2, format!("The {}'s changes are in {notes} release notes.", m.label));
                 }
             }
         }
@@ -578,8 +677,15 @@ mod tests {
     use super::*;
     use agent_theme::Painter;
 
+    const MOD: &str = attend_mod::ATTEND.label;
+    const JUDGE_MOD: &str = attend_mod::JUDGE.label;
+
     fn comp(name: &str, i: Option<&str>, t: Option<&str>) -> Component {
-        Component { name: name.into(), installed: i.map(str::to_string), target: t.map(str::to_string) }
+        Component { name: name.into(), installed: i.map(str::to_string), target: t.map(str::to_string), plugin: None }
+    }
+
+    fn modc(m: &attend_mod::Mod, i: Option<&str>, t: Option<&str>) -> Component {
+        Component { plugin: Some(m.name.to_string()), ..comp(m.label, i, t) }
     }
 
     #[test]
@@ -591,7 +697,7 @@ mod tests {
             target: Some("bbbbbbbbbbbb".into()),
             fetch_error: None,
             relation: Relation::Behind,
-            components: vec![comp("ways", Some("1.40.0"), Some("1.41.0")), comp("attend", Some("0.28.1"), Some("0.28.1")), comp(MOD, Some("0.28.1"), Some("0.28.1"))],
+            components: vec![comp("ways", Some("1.40.0"), Some("1.41.0")), comp("attend", Some("0.28.1"), Some("0.28.1")), modc(&attend_mod::ATTEND, Some("0.28.1"), Some("0.28.1"))],
             notes: Ok(notes::Fetched {
                 releases: vec![
                     Release { tag: "ways-v1.41.0".into(), body: "## ways 1.41.0\n\n### Added\n- a thing (#5)\n\n---\nPre-built ways CLI binaries for 4 platforms.\n".into() },
@@ -650,7 +756,7 @@ mod tests {
         assert_eq!(porcelain_path(" M tools/ways-cli/src/main.rs"), Some("tools/ways-cli/src/main.rs"));
         assert_eq!(porcelain_path("R  docs/a.md -> tools/b.rs"), Some("tools/b.rs"));
         assert_eq!(porcelain_path("?? tools/new.rs"), None, "untracked");
-        assert_eq!(classify_build_groups([" M tools/x/src/lib.rs", "?? tools/way-embed/y.cpp"].iter().filter_map(|l| porcelain_path(l))), (true, false));
+        assert_eq!(classify_build_groups([" M tools/x/src/lib.rs", "?? tools/way-embed/y.cpp"].iter().filter_map(|l| porcelain_path(l)), &[]), (true, false));
     }
 
     #[test]
@@ -661,27 +767,104 @@ mod tests {
     #[test]
     fn an_installed_mod_is_updated_or_left_like_attends() {
         let dir = Path::new("/t/claude");
-        let judge = comp(JUDGE_MOD, Some("1.50.0"), Some("1.51.0"));
-        assert_eq!(mod_action(dir, JUDGE_MOD, Some(&judge)), Some((Mark::Act, "/t/claude: update the ways-judge mod 1.50.0 → 1.51.0".into())));
-        let same = comp(JUDGE_MOD, Some("1.51.0"), Some("1.51.0"));
-        assert_eq!(mod_action(dir, JUDGE_MOD, Some(&same)), Some((Mark::Same, "/t/claude: the ways-judge mod stays as it is".into())));
-        let attend = comp(MOD, Some("0.28.1"), Some("0.28.4"));
-        assert_eq!(mod_action(dir, MOD, Some(&attend)), Some((Mark::Act, "/t/claude: update the attend mod 0.28.1 → 0.28.4".into())));
-        assert_eq!(mod_action(dir, JUDGE_MOD, None), None, "no row: the app ships no ways-judge mod");
-        assert!(is_mod(MOD) && is_mod(JUDGE_MOD) && !is_mod("ways"));
+        let judge = modc(&attend_mod::JUDGE, Some("1.50.0"), Some("1.51.0"));
+        assert_eq!(mod_action(dir, JUDGE_MOD, &judge), (Mark::Act, "/t/claude: update the ways-judge mod 1.50.0 → 1.51.0".into()));
+        let same = modc(&attend_mod::JUDGE, Some("1.51.0"), Some("1.51.0"));
+        assert_eq!(mod_action(dir, JUDGE_MOD, &same), (Mark::Same, "/t/claude: the ways-judge mod stays as it is".into()));
+        let attend = modc(&attend_mod::ATTEND, Some("0.28.1"), Some("0.28.4"));
+        assert_eq!(mod_action(dir, MOD, &attend), (Mark::Act, "/t/claude: update the attend mod 0.28.1 → 0.28.4".into()));
+        assert!(attend.is_mod() && !comp("ways", None, None).is_mod());
     }
 
     #[test]
-    fn the_judge_mod_line_follows_the_wanted_state_and_the_chosen_engine() {
+    fn a_mod_line_follows_what_repair_does_with_the_mod() {
         let dir = Path::new("/t/claude");
-        let judge = comp(JUDGE_MOD, Some("1.50.0"), Some("1.51.0"));
-        let wanted = judge_mod_action(dir, true, Some(&judge), false).unwrap();
-        assert_eq!(wanted.0, Mark::Act, "wanted: repair updates it");
-        let out = judge_mod_action(dir, false, Some(&judge), true).unwrap();
+        let line = |m: &attend_mod::Mod, here: ModHere, c: &Component| mod_line(dir, m, &here, c);
+        let installed = ModHere { installed: true, ..ModHere::default() };
+        let wanted = ModHere { wanted: true, installed: true, ..ModHere::default() };
+        let judge = modc(&attend_mod::JUDGE, Some("1.50.0"), Some("1.51.0"));
+
+        // Wanted and installed: updated or left.
+        assert_eq!(line(&attend_mod::JUDGE, wanted.clone(), &judge).unwrap().0, Mark::Act, "wanted: repair updates it");
+        let theme = modc(&attend_mod::THEME, Some("1.53.0"), Some("1.53.1"));
+        assert_eq!(line(&attend_mod::THEME, wanted.clone(), &theme), Some((Mark::Act, "/t/claude: update the ways-theme mod 1.53.0 → 1.53.1".into())));
+        // Wanted and missing: installed, unless it was removed by hand.
+        let missing = ModHere { wanted: true, ..ModHere::default() };
+        assert_eq!(
+            line(&attend_mod::THEME, missing.clone(), &theme),
+            Some((Mark::Act, "/t/claude: install the ways-theme mod 1.53.1 (needs Claude Code 2.1.309 or later)".into()))
+        );
+        let by_hand = line(&attend_mod::THEME, ModHere { recorded: true, ..missing }, &theme).unwrap();
+        assert!(by_hand.1.contains("removed by hand, so repair writes mods.ways-theme.install: false"), "{}", by_hand.1);
+
+        // Not wanted and installed: repair removes it.
+        assert_eq!(
+            line(&attend_mod::IMAGES, installed.clone(), &modc(&attend_mod::IMAGES, Some("1.53.1"), Some("1.53.1"))),
+            Some((Mark::Act, "/t/claude: remove the images mod (mods.images.install is false)".into()))
+        );
+        // Not wanted under an ignored entry: left as it is, with repair's warning.
+        let finding = agent_settings::Finding {
+            file: Some(PathBuf::from("/c/config.yaml")),
+            line: Some(4),
+            section: Some("mods".into()),
+            unit: Some("mods.images".into()),
+            key: None,
+            message: "an unknown key".into(),
+            fallback: true,
+            repair: None,
+            closed: false,
+        };
+        let held = line(&attend_mod::IMAGES, ModHere { held: Some(finding), ..installed }, &modc(&attend_mod::IMAGES, Some("1.53.1"), Some("1.53.1"))).unwrap();
+        assert_eq!(held.0, Mark::Warn);
+        assert!(held.1.starts_with("/t/claude: images mod: left installed: /c/config.yaml:4") && held.1.contains("repair does not uninstall it"), "{}", held.1);
+
+        // Not wanted and absent: named only where it is held out.
+        let out = line(&attend_mod::JUDGE, ModHere { held_out: true, ..ModHere::default() }, &judge).unwrap();
         assert_eq!(out.0, Mark::Info);
         assert!(out.1.contains("mods.ways-judge.install is false in this target's config") && out.1.contains("ways manage mod install ways-judge --target /t/claude --commit"), "{}", out.1);
-        assert_eq!(judge_mod_action(dir, false, Some(&judge), false), None, "a key engine: nothing to say");
-        assert_eq!(judge_mod_action(dir, false, None, true), None, "the app ships no mod");
+        assert_eq!(line(&attend_mod::JUDGE, ModHere::default(), &judge), None, "not held out: nothing to say");
+
+        // The target rev does not ship it: repair converges nothing.
+        assert_eq!(line(&attend_mod::JUDGE, wanted, &modc(&attend_mod::JUDGE, Some("1.50.0"), None)), None);
+    }
+
+    /// The preview once named only the attend and ways-judge mods, while the
+    /// reproject that followed also updated the ways-theme and images mods.
+    /// The rows now come from the marketplace the checkout ships.
+    #[test]
+    fn every_mod_the_marketplace_lists_has_a_row() {
+        let app = crate::test_dir::TestDir::at(std::env::temp_dir().join(format!("ways-whatif-mods-{}", std::process::id())));
+        let names = ["attend", "ways-judge", "ways-theme", "images", "sparkle"];
+        for name in names {
+            let dir = app.join("plugins").join(name).join(".claude-plugin");
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("plugin.json"), "{\"version\": \"1.53.1\"}").unwrap();
+        }
+        std::fs::create_dir_all(app.join("plugins/.claude-plugin")).unwrap();
+        let listed: Vec<String> =names.iter().map(|n| format!("{{\"name\": \"{n}\", \"source\": \"./{n}\"}}")).collect();
+        std::fs::write(app.join("plugins/.claude-plugin/marketplace.json"), format!("{{\"name\": \"agent-ways\", \"plugins\": [{}]}}", listed.join(","))).unwrap();
+        let rows = components(&app, None);
+        for m in attend_mod::MODS {
+            let row = rows.iter().find(|c| c.name == m.label).unwrap_or_else(|| panic!("no row for the {}: {rows:?}", m.label));
+            assert_eq!(row.installed.as_deref(), Some("1.53.1"));
+            assert_eq!(row.plugin.as_deref(), Some(m.name));
+        }
+        let new = rows.iter().find(|c| c.plugin.as_deref() == Some("sparkle")).expect("a mod this binary does not know has a row");
+        assert_eq!(new.name, "sparkle mod");
+    }
+
+    #[test]
+    fn a_mod_new_in_the_release_is_named_for_install() {
+        let dir = Path::new("/t/claude");
+        let new = Component { name: "sparkle mod".into(), installed: None, target: Some("1.0.0".into()), plugin: Some("sparkle".into()) };
+        // A new ways binary is put in place: it converges the mod.
+        assert_eq!(new_mod_line(dir, &new, true), Some((Mark::Act, "/t/claude: install the sparkle mod where it is wanted (new in this release)".into())));
+        // The ways binary is not replaced: the old one knows nothing of the mod.
+        assert_eq!(
+            new_mod_line(dir, &new, false),
+            Some((Mark::Warn, "/t/claude: the sparkle mod waits for a ways binary that knows it; this update keeps the current ways binary".into()))
+        );
+        assert_eq!(new_mod_line(dir, &Component { target: None, ..new }, true), None, "not shipped at the target");
     }
 
     /// Review finding 3: a file holding the retired section is the
