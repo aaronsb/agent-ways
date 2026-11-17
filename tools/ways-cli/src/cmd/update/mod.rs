@@ -861,7 +861,8 @@ fn refresh_stale(app: &Path, stale: &Stale, has_toolchain: bool) -> Result<()> {
 /// How a candidate binary's build compares to the pulled source (ADR-150).
 #[derive(Debug, PartialEq, Eq)]
 enum Freshness {
-    /// Same commit, or the source is an ancestor of the candidate — safe to install.
+    /// Same commit with no uncommitted binary-source edit in the checkout, or
+    /// the source is an ancestor of the candidate — safe to install.
     AtLeastAsNew,
     /// The candidate's commit is an ancestor of the source, and no file the
     /// cargo suite builds from changed between the two: the source builds the
@@ -869,8 +870,8 @@ enum Freshness {
     /// docs and ways commits past the latest release, and this keeps the
     /// release in that case.
     BehindInContentOnly,
-    /// The candidate is behind the source in binary source — installing it
-    /// would downgrade.
+    /// The candidate lacks binary source the checkout holds, committed after
+    /// it or edited and not yet committed — installing it would downgrade.
     Older,
     /// Lineage can't be established (unparseable/absent provenance, sha not in
     /// local history). Caller decides — prefer building when a toolchain exists.
@@ -1108,11 +1109,13 @@ fn describe_sha(desc: &str) -> Option<String> {
 
 /// Compare a candidate binary's build against the source. `is_ancestor(a, b)`
 /// answers whether commit `a` precedes `b`, and `binary_source_changed(a, b)`
-/// whether a file the cargo suite builds from changed between them. Equal shas
-/// or a non-ancestor (source behind/diverged) are `AtLeastAsNew`. A strict
-/// ancestor is `BehindInContentOnly` when no binary source changed in between,
-/// and `Older` when some did or git cannot list the diff. Anything we can't
-/// resolve is `Unknown`.
+/// whether a file the cargo suite builds from differs between commit `a` and
+/// the checkout at `b`, uncommitted edits included. At the same commit the
+/// candidate is `Older` when the checkout holds such an edit and `AtLeastAsNew`
+/// otherwise. A non-ancestor (source behind/diverged) is `AtLeastAsNew`. A
+/// strict ancestor is `BehindInContentOnly` when no binary source changed in
+/// between, and `Older` when some did or git cannot list the diff. Anything we
+/// can't resolve is `Unknown`.
 fn compare_freshness(
     candidate: &str,
     source: &str,
@@ -1128,7 +1131,7 @@ fn compare_freshness(
     // this, `is_ancestor` reports the commit as its own ancestor → `Older`, and an
     // install with no toolchain keeps its previous binary.
     if cand.starts_with(&src) || src.starts_with(&cand) {
-        return Freshness::AtLeastAsNew;
+        return if binary_source_changed(&cand, &src) == Some(true) { Freshness::Older } else { Freshness::AtLeastAsNew };
     }
     match is_ancestor(&cand, &src) {
         Some(true) if binary_source_changed(&cand, &src) == Some(false) => Freshness::BehindInContentOnly,
@@ -1456,7 +1459,7 @@ mod tests {
     fn compare_freshness_orders_by_commit_ancestry() {
         // Equal shas → at least as new, without consulting git.
         assert_eq!(
-            compare_freshness("ways-v1.0.0-0-gc0ffee", "ways-v1.0.0-0-gc0ffee", |_, _| panic!("not called"), |_, _| panic!("not called")),
+            compare_freshness("ways-v1.0.0-0-gc0ffee", "ways-v1.0.0-0-gc0ffee", |_, _| panic!("not called"), |_, _| Some(false)),
             Freshness::AtLeastAsNew
         );
         // Candidate is an ancestor of source, binary source changed between them
@@ -1489,11 +1492,11 @@ mod tests {
         // The same commit abbreviated to different lengths (shallow CI checkout vs a
         // full clone) is the same commit, without consulting git.
         assert_eq!(
-            compare_freshness("ways-v1.24.0-0-g64ef02c", "ways-v1.24.0-0-g64ef02cb", |_, _| panic!("not called"), |_, _| panic!("not called")),
+            compare_freshness("ways-v1.24.0-0-g64ef02c", "ways-v1.24.0-0-g64ef02cb", |_, _| panic!("not called"), |_, _| Some(false)),
             Freshness::AtLeastAsNew
         );
         assert_eq!(
-            compare_freshness("ways-v1.24.0-0-g64ef02cb", "ways-v1.24.0-0-g64ef02c", |_, _| panic!("not called"), |_, _| panic!("not called")),
+            compare_freshness("ways-v1.24.0-0-g64ef02cb", "ways-v1.24.0-0-g64ef02c", |_, _| panic!("not called"), |_, _| Some(false)),
             Freshness::AtLeastAsNew
         );
         // Different lengths that are not prefixes are different commits: git decides.
@@ -1514,6 +1517,22 @@ mod tests {
             compare_freshness("unknown", "ways-v1.0.0-1-gdef456", |_, _| panic!("not called"), |_, _| panic!("not called")),
             Freshness::Unknown
         );
+    }
+
+    #[test]
+    fn a_release_at_the_source_commit_is_older_when_the_checkout_holds_binary_source_edits() {
+        // The checkout sits exactly at the release tag.
+        let at_tag = |dirty_binary_source: bool| {
+            compare_freshness("ways-v1.53.1-0-g67afde3", "ways-v1.53.1-0-g67afde3a-dirty", |_, _| panic!("not called"), move |a, b| {
+                assert_eq!((a, b), ("67afde3", "67afde3a"));
+                Some(dirty_binary_source)
+            })
+        };
+        // An uncommitted edit under tools/: the release lacks it, so it is built.
+        assert_eq!(at_tag(true), Freshness::Older);
+        assert_eq!(guard_action(&at_tag(true), true, true), GuardAction::BuildFromSource);
+        // A clean checkout, or edits outside binary source: the release is kept.
+        assert_eq!(at_tag(false), Freshness::AtLeastAsNew);
     }
 
     #[test]
