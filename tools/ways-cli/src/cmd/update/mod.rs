@@ -153,15 +153,16 @@ pub fn run(mode: Mode, git_ref: Option<String>, verbose: bool) -> Result<()> {
     // 2. Core — ways. Download-first, rename-revert safe, with the ADR-150
     //    downgrade guard: a pre-built built from older binary source than the
     //    pulled checkout is refused (built from source instead, or the previous
-    //    binary kept) so the updater
-    //    can never move backward. A failed refresh reverts and CONTINUES (we still
-    //    reproject the pulled source) rather than aborting mid-update. Skipped when
-    //    the cargo suite's source didn't move; a stale ways is refreshed in step 4.
+    //    binary kept) so the updater can never move backward. A failed refresh
+    //    reverts and CONTINUES (we still reproject the pulled source) rather than
+    //    aborting mid-update. Skipped when the cargo suite's source didn't move; a
+    //    stale ways is refreshed in step 4. Each refreshed binary's line says
+    //    whether its version moved, read from the binary before and after.
     let ways_refreshed = if cargo_changed {
         Steps::act("ways: pre-built first, downgrade-guarded");
         match refresh_ways(&app, has_toolchain) {
             Ok(()) => {
-                Steps::ok("the ways binary is refreshed");
+                Steps::ok(refreshed_line(&app, "ways", &before));
                 true
             }
             Err(e) => {
@@ -180,7 +181,7 @@ pub fn run(mode: Mode, git_ref: Option<String>, verbose: bool) -> Result<()> {
     if way_embed_changed {
         Steps::act("way-embed: pre-built first");
         match run_step(Command::new("make").args(["-C", "tools/way-embed", "rebuild-binary"]).current_dir(&app), "way-embed refresh") {
-            Ok(()) => Steps::ok("way-embed refreshed"),
+            Ok(()) => Steps::ok(refreshed_line(&app, "way-embed", &before)),
             Err(e) => Steps::warn(format!("way-embed not refreshed ({e}); semantic matching degrades to regex until the next update")),
         }
     }
@@ -193,7 +194,7 @@ pub fn run(mode: Mode, git_ref: Option<String>, verbose: bool) -> Result<()> {
         for comp in suite_bins(&app).iter().filter(|n| *n != "ways") {
             Steps::act(format!("{comp}: pre-built first"));
             match refresh_component(&app, comp, &[comp.as_str()], &app) {
-                Ok(()) => Steps::ok(format!("{comp} refreshed")),
+                Ok(()) => Steps::ok(refreshed_line(&app, comp, &before)),
                 Err(e) => Steps::warn(format!("{comp} not refreshed ({e}); it keeps its current version")),
             }
         }
@@ -201,7 +202,7 @@ pub fn run(mode: Mode, git_ref: Option<String>, verbose: bool) -> Result<()> {
     for s in &stale {
         Steps::act(format!("{} is {}, its source is {}: refreshing it", s.name, s.installed, s.source));
         match refresh_stale(&app, s, has_toolchain) {
-            Ok(()) => Steps::ok(format!("{} refreshed", s.name)),
+            Ok(()) => Steps::ok(refreshed_line(&app, &s.name, &before)),
             Err(e) => Steps::warn(e.to_string()),
         }
     }
@@ -448,22 +449,47 @@ fn content_stamp(p: &Path) -> Option<(u64, u64)> {
     Some((bytes.len() as u64, h.finish()))
 }
 
-/// Each binary an update can refresh: the suite under `bin/` and the cached
-/// way-embed. A binary that does not answer `--version` is left out.
-fn binary_versions(app: &Path) -> Vec<(String, Seen)> {
+/// Each binary an update can refresh, by name and path: the suite under
+/// `bin/` and the cached way-embed.
+fn binary_paths(app: &Path) -> Vec<(String, std::path::PathBuf)> {
     let mut bins: Vec<(String, std::path::PathBuf)> =
         suite_bins(app).into_iter().map(|n| (n.clone(), app.join("bin").join(exe(&n)))).collect();
     if let Some(p) = crate::paths::way_embed_in(&crate::paths::corpus_dir()) {
         bins.push(("way-embed".to_string(), p));
     }
-    bins.into_iter()
-        .filter_map(|(name, p)| {
-            let line = version_line(&p)?;
-            let version = line.strip_prefix(name.as_str()).unwrap_or(&line).trim().to_string();
-            let stamp = content_stamp(&p);
-            Some((name, Seen { version, stamp }))
-        })
-        .collect()
+    bins
+}
+
+/// What one binary reports now, or None when it does not answer `--version`.
+fn seen_at(name: &str, p: &Path) -> Option<Seen> {
+    let line = version_line(p)?;
+    let version = line.strip_prefix(name).unwrap_or(&line).trim().to_string();
+    Some(Seen { version, stamp: content_stamp(p) })
+}
+
+/// Each binary an update can refresh, as it is now. A binary that does not
+/// answer `--version` is left out.
+fn binary_versions(app: &Path) -> Vec<(String, Seen)> {
+    binary_paths(app).into_iter().filter_map(|(name, p)| seen_at(&name, &p).map(|s| (name, s))).collect()
+}
+
+/// The line for one binary a refresh step has just re-acquired, against what
+/// `before` held: the move the closing summary names, or that it stays at
+/// its version because the binary fetched is the one already installed.
+fn refreshed_line(app: &Path, name: &str, before: &[(String, Seen)]) -> String {
+    let was: Vec<(String, Seen)> = before.iter().filter(|(n, _)| n == name).cloned().collect();
+    let now: Vec<(String, Seen)> =
+        binary_paths(app).into_iter().filter(|(n, _)| n == name).filter_map(|(n, p)| seen_at(&n, &p).map(|s| (n, s))).collect();
+    refresh_outcome(name, &was, &now)
+}
+
+/// [`refreshed_line`] over the binary's state before and after.
+fn refresh_outcome(name: &str, was: &[(String, Seen)], now: &[(String, Seen)]) -> String {
+    match (version_changes(was, now).pop(), now.first()) {
+        (Some(change), _) => change,
+        (None, Some((_, seen))) => format!("{name} stays at {} (the binary fetched matches the one installed)", seen.version),
+        (None, None) => format!("{name} is in place but does not answer --version"),
+    }
 }
 
 /// One entry per binary that moved: `name old → new`, `name v (rebuilt)` for a
@@ -1266,6 +1292,19 @@ mod tests {
                 "ways-audit 1.0.2 → not answering",
             ]
         );
+    }
+
+    #[test]
+    fn a_refresh_line_says_whether_the_version_moved() {
+        let seen = |v: &str, hash: u64| vec![("attend".to_string(), Seen { version: v.to_string(), stamp: Some((20, hash)) })];
+        assert_eq!(refresh_outcome("attend", &seen("0.35.2", 1), &seen("0.36.0", 2)), "attend 0.35.2 → 0.36.0");
+        assert_eq!(
+            refresh_outcome("attend", &seen("0.35.2", 1), &seen("0.35.2", 1)),
+            "attend stays at 0.35.2 (the binary fetched matches the one installed)"
+        );
+        assert_eq!(refresh_outcome("attend", &seen("0.35.2", 1), &seen("0.35.2", 2)), "attend 0.35.2 (rebuilt)");
+        assert_eq!(refresh_outcome("attend", &[], &seen("0.35.2", 1)), "attend 0.35.2 (new)");
+        assert_eq!(refresh_outcome("attend", &[], &[]), "attend is in place but does not answer --version");
     }
 
     #[test]
