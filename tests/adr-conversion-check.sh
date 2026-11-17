@@ -36,6 +36,7 @@ live = root / 'docs/architecture'
 
 # Bodies edited on purpose after conversion: number -> reason.
 BODY_EDITED = {
+    '178': 'a dated note in the Decision records two sections that left core.md for the SessionStart hook cap (#634), per ADR-313',
     '188': 'rewritten in place while still proposed, on the operator\'s direction (its considered entries); the earlier draft is in git history',
     '302': 'stray tool-call text removed from the end of the body',
 }
