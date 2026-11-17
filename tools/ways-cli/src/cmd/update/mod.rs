@@ -82,11 +82,10 @@ pub fn run(mode: Mode, git_ref: Option<String>, verbose: bool) -> Result<()> {
 
     // 1. Pull. Capture HEAD before/after so we can tell what the pull actually
     //    touched. Content lands far more often than a release is cut, so the common
-    //    update is docs/ways-only (e.g. a change to core.md). Rebuilding the suite for
-    //    that is pure churn: the pre-built binaries lag the source, so "refreshing"
-    //    downloads a binary that is behind, discards it under the ADR-150 guard, and
-    //    rebuilds from source — producing a binary identical to the one installed.
-    //    Gate each build group on whether its own source moved in this pull, and
+    //    update is docs/ways-only (e.g. a change to core.md). Refreshing the suite for
+    //    that is pure churn: every binary it fetches or builds comes from the same
+    //    code as the one installed. Gate each build group on whether its own source
+    //    moved in this pull, and
     //    each suite binary also on whether it is older than its Cargo.toml.
     let head_before = git_head(&app);
     Steps::stage("Pull");
@@ -152,8 +151,9 @@ pub fn run(mode: Mode, git_ref: Option<String>, verbose: bool) -> Result<()> {
     }
 
     // 2. Core — ways. Download-first, rename-revert safe, with the ADR-150
-    //    downgrade guard: a pre-built that is behind the pulled source is refused
-    //    (built from source instead, or the previous binary kept) so the updater
+    //    downgrade guard: a pre-built built from older binary source than the
+    //    pulled checkout is refused (built from source instead, or the previous
+    //    binary kept) so the updater
     //    can never move backward. A failed refresh reverts and CONTINUES (we still
     //    reproject the pulled source) rather than aborting mid-update. Skipped when
     //    the cargo suite's source didn't move; a stale ways is refreshed in step 4.
@@ -809,7 +809,14 @@ fn refresh_stale(app: &Path, stale: &Stale, has_toolchain: bool) -> Result<()> {
 enum Freshness {
     /// Same commit, or the source is an ancestor of the candidate — safe to install.
     AtLeastAsNew,
-    /// The candidate is strictly behind the source — installing it would downgrade.
+    /// The candidate's commit is an ancestor of the source, and no file the
+    /// cargo suite builds from changed between the two: the source builds the
+    /// same code, so the candidate is a valid update. Main usually runs a few
+    /// docs and ways commits past the latest release, and this keeps the
+    /// release in that case.
+    BehindInContentOnly,
+    /// The candidate is behind the source in binary source — installing it
+    /// would downgrade.
     Older,
     /// Lineage can't be established (unparseable/absent provenance, sha not in
     /// local history). Caller decides — prefer building when a toolchain exists.
@@ -818,9 +825,10 @@ enum Freshness {
 
 /// Refresh the `ways` binary safely, with the downgrade guard. Download-first
 /// (`make ways`), then compare the freshly-installed binary's baked `git describe`
-/// against the pulled source. Only keep the download when it is at least as new;
-/// otherwise build from source (toolchain present) or restore the previous binary
-/// (none) — never leave an older binary in place, never leave the slot empty.
+/// against the pulled source. Keep the download when it is at least as new, or
+/// behind only in files no binary is built from; otherwise build from source
+/// (toolchain present) or restore the previous binary (none) — never leave an
+/// older binary in place, never leave the slot empty.
 fn refresh_ways(app: &Path, has_toolchain: bool) -> Result<()> {
     let bin = app.join("bin").join(exe("ways"));
     let backup = app.join("bin").join(format!("{}.pre-update", exe("ways")));
@@ -847,16 +855,26 @@ fn refresh_ways(app: &Path, has_toolchain: bool) -> Result<()> {
         bail!("`make ways` did not produce a ways binary — reverted");
     }
 
-    // Guard: is the just-installed binary at least as new as the pulled source?
+    // Guard: is the just-installed binary built from the pulled source's code?
     let candidate = read_build_describe(&bin);
     let verdict = match (candidate.as_deref(), source.as_deref()) {
-        (Some(c), Some(s)) => compare_freshness(c, s, |a, b| is_ancestor(app, a, b)),
+        (Some(c), Some(s)) => compare_freshness(
+            c,
+            s,
+            |a, b| is_ancestor(app, a, b),
+            |a, b| changed_build_groups(app, a, b).map(|(cargo, _)| cargo),
+        ),
         _ => Freshness::Unknown,
     };
     match &verdict {
         Freshness::AtLeastAsNew => {}
+        Freshness::BehindInContentOnly => Steps::info(format!(
+            "the downloaded pre-built ({}) is behind the pulled source ({}) only in files no binary is built from, so it is kept",
+            candidate.as_deref().unwrap_or("?"),
+            source.as_deref().unwrap_or("?"),
+        )),
         Freshness::Older => Steps::warn(format!(
-            "the downloaded pre-built ({}) is behind the pulled source ({}), so it is not a valid update",
+            "the downloaded pre-built ({}) is behind the pulled source ({}) in binary source, so it is not a valid update",
             candidate.as_deref().unwrap_or("?"),
             source.as_deref().unwrap_or("?"),
         )),
@@ -914,14 +932,15 @@ enum GuardAction {
 }
 
 /// The guard's decision table (ADR-150 §3). A download that is provably at least
-/// as new is kept. Anything `Older` or `Unknown` is not trusted: build from source
+/// as new, or behind only in files no binary is built from, is kept. Anything
+/// `Older` or `Unknown` is not trusted: build from source
 /// when a toolchain is present (the checkout can't be behind itself); else restore
 /// the previously-running binary rather than downgrade. The *only* time an
 /// unprovable/older download is kept is when there is no previous binary AND no
 /// toolchain — an empty slot is worse than an unverifiable one.
 fn guard_action(verdict: &Freshness, had: bool, has_toolchain: bool) -> GuardAction {
     match verdict {
-        Freshness::AtLeastAsNew => GuardAction::KeepDownload,
+        Freshness::AtLeastAsNew | Freshness::BehindInContentOnly => GuardAction::KeepDownload,
         Freshness::Older | Freshness::Unknown => {
             if has_toolchain {
                 GuardAction::BuildFromSource
@@ -1034,14 +1053,17 @@ fn describe_sha(desc: &str) -> Option<String> {
 }
 
 /// Compare a candidate binary's build against the source. `is_ancestor(a, b)`
-/// answers whether commit `a` precedes `b`. The candidate is `Older` only when
-/// its commit is a strict ancestor of the source; equal shas or a
-/// non-ancestor (source behind/diverged) are `AtLeastAsNew`; anything we can't
+/// answers whether commit `a` precedes `b`, and `binary_source_changed(a, b)`
+/// whether a file the cargo suite builds from changed between them. Equal shas
+/// or a non-ancestor (source behind/diverged) are `AtLeastAsNew`. A strict
+/// ancestor is `BehindInContentOnly` when no binary source changed in between,
+/// and `Older` when some did or git cannot list the diff. Anything we can't
 /// resolve is `Unknown`.
 fn compare_freshness(
     candidate: &str,
     source: &str,
     is_ancestor: impl Fn(&str, &str) -> Option<bool>,
+    binary_source_changed: impl Fn(&str, &str) -> Option<bool>,
 ) -> Freshness {
     let (Some(cand), Some(src)) = (describe_sha(candidate), describe_sha(source)) else {
         return Freshness::Unknown;
@@ -1055,6 +1077,7 @@ fn compare_freshness(
         return Freshness::AtLeastAsNew;
     }
     match is_ancestor(&cand, &src) {
+        Some(true) if binary_source_changed(&cand, &src) == Some(false) => Freshness::BehindInContentOnly,
         Some(true) => Freshness::Older,
         Some(false) => Freshness::AtLeastAsNew,
         None => Freshness::Unknown,
@@ -1366,49 +1389,92 @@ mod tests {
     fn compare_freshness_orders_by_commit_ancestry() {
         // Equal shas → at least as new, without consulting git.
         assert_eq!(
-            compare_freshness("ways-v1.0.0-0-gc0ffee", "ways-v1.0.0-0-gc0ffee", |_, _| panic!("not called")),
+            compare_freshness("ways-v1.0.0-0-gc0ffee", "ways-v1.0.0-0-gc0ffee", |_, _| panic!("not called"), |_, _| panic!("not called")),
             Freshness::AtLeastAsNew
         );
-        // Candidate is an ancestor of source → strictly older → refuse (downgrade).
+        // Candidate is an ancestor of source, binary source changed between them
+        // → older → refuse (downgrade).
         assert_eq!(
-            compare_freshness("ways-v1.0.0-0-gc0ffee", "ways-v1.0.0-78-gbeef00", |a, b| {
-                assert_eq!((a, b), ("c0ffee", "beef00"));
-                Some(true)
-            }),
+            compare_freshness(
+                "ways-v1.0.0-0-gc0ffee",
+                "ways-v1.0.0-78-gbeef00",
+                |a, b| {
+                    assert_eq!((a, b), ("c0ffee", "beef00"));
+                    Some(true)
+                },
+                |a, b| {
+                    assert_eq!((a, b), ("c0ffee", "beef00"));
+                    Some(true)
+                }
+            ),
             Freshness::Older
         );
         // Candidate not an ancestor (source behind / diverged) → not a downgrade.
         assert_eq!(
-            compare_freshness("ways-v1.1.0-0-gaaaa11", "ways-v1.0.0-0-gbbbb22", |_, _| Some(false)),
+            compare_freshness("ways-v1.1.0-0-gaaaa11", "ways-v1.0.0-0-gbbbb22", |_, _| Some(false), |_, _| panic!("not called")),
             Freshness::AtLeastAsNew
         );
         // Git can't resolve the ancestry (sha not local) → Unknown.
         assert_eq!(
-            compare_freshness("ways-v1.0.0-0-gabc123", "ways-v1.0.0-1-gdef456", |_, _| None),
+            compare_freshness("ways-v1.0.0-0-gabc123", "ways-v1.0.0-1-gdef456", |_, _| None, |_, _| panic!("not called")),
             Freshness::Unknown
         );
         // The same commit abbreviated to different lengths (shallow CI checkout vs a
         // full clone) is the same commit, without consulting git.
         assert_eq!(
-            compare_freshness("ways-v1.24.0-0-g64ef02c", "ways-v1.24.0-0-g64ef02cb", |_, _| panic!("not called")),
+            compare_freshness("ways-v1.24.0-0-g64ef02c", "ways-v1.24.0-0-g64ef02cb", |_, _| panic!("not called"), |_, _| panic!("not called")),
             Freshness::AtLeastAsNew
         );
         assert_eq!(
-            compare_freshness("ways-v1.24.0-0-g64ef02cb", "ways-v1.24.0-0-g64ef02c", |_, _| panic!("not called")),
+            compare_freshness("ways-v1.24.0-0-g64ef02cb", "ways-v1.24.0-0-g64ef02c", |_, _| panic!("not called"), |_, _| panic!("not called")),
             Freshness::AtLeastAsNew
         );
         // Different lengths that are not prefixes are different commits: git decides.
         assert_eq!(
-            compare_freshness("ways-v1.0.0-0-gabc1234", "ways-v1.0.0-3-gabd12345", |a, b| {
-                assert_eq!((a, b), ("abc1234", "abd12345"));
-                Some(true)
-            }),
+            compare_freshness(
+                "ways-v1.0.0-0-gabc1234",
+                "ways-v1.0.0-3-gabd12345",
+                |a, b| {
+                    assert_eq!((a, b), ("abc1234", "abd12345"));
+                    Some(true)
+                },
+                |_, _| Some(true)
+            ),
             Freshness::Older
         );
         // Unparseable candidate provenance (legacy binary → describe_sha None) → Unknown.
         assert_eq!(
-            compare_freshness("unknown", "ways-v1.0.0-1-gdef456", |_, _| panic!("not called")),
+            compare_freshness("unknown", "ways-v1.0.0-1-gdef456", |_, _| panic!("not called"), |_, _| panic!("not called")),
             Freshness::Unknown
+        );
+    }
+
+    #[test]
+    fn a_release_behind_main_only_in_docs_is_a_valid_update() {
+        // The release tag at 67afde3, main two docs commits past it: no binary
+        // source changed between them, so the release builds the same code.
+        let docs_only = compare_freshness(
+            "ways-v1.53.1-0-g67afde3",
+            "ways-v1.53.1-2-g98431a9b",
+            |_, _| Some(true),
+            |a, b| {
+                assert_eq!((a, b), ("67afde3", "98431a9b"));
+                Some(false)
+            },
+        );
+        assert_eq!(docs_only, Freshness::BehindInContentOnly);
+        assert_eq!(guard_action(&docs_only, true, false), GuardAction::KeepDownload, "kept with no toolchain");
+        assert_eq!(guard_action(&docs_only, true, true), GuardAction::KeepDownload, "kept, not rebuilt, with one");
+
+        // The same ancestry with binary source changed in between is still a downgrade.
+        let code_changed = compare_freshness("ways-v1.53.1-0-g67afde3", "ways-v1.53.1-2-g98431a9b", |_, _| Some(true), |_, _| Some(true));
+        assert_eq!(code_changed, Freshness::Older);
+        assert_eq!(guard_action(&code_changed, true, true), GuardAction::BuildFromSource);
+
+        // Git cannot list the diff: the guard holds.
+        assert_eq!(
+            compare_freshness("ways-v1.53.1-0-g67afde3", "ways-v1.53.1-2-g98431a9b", |_, _| Some(true), |_, _| None),
+            Freshness::Older
         );
     }
 
@@ -1416,10 +1482,12 @@ mod tests {
     fn guard_action_never_downgrades() {
         use Freshness::*;
         use GuardAction::*;
-        // A proven-fresh download is always kept, regardless of toolchain/previous.
+        // A proven-fresh download, or one behind only in content, is always kept,
+        // regardless of toolchain/previous.
         for &had in &[true, false] {
             for &tc in &[true, false] {
                 assert_eq!(guard_action(&AtLeastAsNew, had, tc), KeepDownload);
+                assert_eq!(guard_action(&BehindInContentOnly, had, tc), KeepDownload);
             }
         }
         // Older/Unknown with a toolchain → build from source (authoritative checkout).
