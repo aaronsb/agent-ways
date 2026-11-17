@@ -1,6 +1,4 @@
 ---
-description: listing every way that exists, the full catalog of way paths by domain, which ways are available and where one lives
-vocabulary: catalog list available ways index which exist inventory every all paths domain tree children
 pattern: \bways? (catalog|index|inventory)\b|\bavailable ways\b|\b(installed|which|what) ways (are|exist|do (we|you) have)\b|\blist (all|every) (the )?(installed |available )?ways?\b
 macro: prepend
 scope: agent
