@@ -284,6 +284,9 @@ fn actions(app: &Path, channel: &Channel, relation: Relation, head: Option<&str>
     let dirty = !local.is_empty();
     let mut out = Vec::new();
     let cargo = super::tool_present("cargo");
+    // Whether --commit puts a new ways binary in place: a mod this binary
+    // does not know is converged only by a binary that knows it.
+    let mut ways_replaced = false;
     let short = |s: &str| s.chars().take(8).collect::<String>();
     match channel {
         Channel::Release { upstream } => {
@@ -319,7 +322,11 @@ fn actions(app: &Path, channel: &Channel, relation: Relation, head: Option<&str>
                     continue;
                 }
                 any = true;
-                out.push(binary_action(c, releases, cargo));
+                let action = binary_action(c, releases, cargo);
+                if c.name == "ways" {
+                    ways_replaced = action.0 == Mark::Act;
+                }
+                out.push(action);
             }
             if let Some(e) = comps.iter().find(|c| c.name == "way-embed").filter(|c| embed_changed || c.moves()) {
                 any = true;
@@ -334,6 +341,7 @@ fn actions(app: &Path, channel: &Channel, relation: Relation, head: Option<&str>
                 out.push((Mark::Warn, "local changes that conflict with the ref stop the checkout".to_string()));
             }
             out.push((Mark::Act, format!("check out {r} ({}) on a detached HEAD", target.map(short).unwrap_or_else(|| "unresolved".into()))));
+            ways_replaced = cargo;
             if cargo {
                 out.push((Mark::Act, "build the whole suite from source".to_string()));
             } else {
@@ -356,7 +364,7 @@ fn actions(app: &Path, channel: &Channel, relation: Relation, head: Option<&str>
         let record = attend_mod::Record::read(&dir);
         for c in comps.iter().filter(|c| c.is_mod()) {
             let Some(m) = c.plugin.as_deref().and_then(known_mod) else {
-                out.extend(new_mod_line(&dir, c));
+                out.extend(new_mod_line(&dir, c, ways_replaced));
                 continue;
             };
             let here = ModHere {
@@ -378,7 +386,12 @@ fn actions(app: &Path, channel: &Channel, relation: Relation, head: Option<&str>
 }
 
 /// What the preview reads of one mod in one target, the way repair decides
-/// it, without running `claude` (ADR-511).
+/// it: from the target's settings, its ways config and repair's record, with
+/// no call to `claude`.
+///
+/// References:
+/// - ADR-511: a what-if writes nothing, and the `claude` CLI rewrites a
+///   target's settings.json as it starts, so the preview never runs it.
 #[derive(Debug, Clone, Default)]
 struct ModHere {
     /// `mods.<name>.install` resolved for the target.
@@ -420,19 +433,24 @@ fn mod_line(dir: &Path, m: &attend_mod::Mod, here: &ModHere, c: &Component) -> O
         return Some((Mark::Act, format!("{d}: the {} was removed by hand, so repair writes mods.{}.install: false and leaves it out", m.label, m.name)));
     }
     if !here.installed {
-        return Some((Mark::Act, format!("{d}: install the {} {target}", m.label)));
+        // The preview runs no `claude`, so it names the floor rather than
+        // checking it; --commit leaves the mod pending below it.
+        return Some((Mark::Act, format!("{d}: install the {} {target} (needs Claude Code {} or later)", m.label, m.min_claude_code)));
     }
     Some(mod_action(dir, m.label, c))
 }
 
-/// The line for a mod the marketplace lists that this binary does not know:
-/// the newly installed binary converges it by its own rules.
-fn new_mod_line(dir: &Path, c: &Component) -> Option<(Mark, String)> {
+/// The line for a mod the marketplace lists that this binary does not know.
+/// Only a ways binary that knows the mod converges it, so it depends on
+/// whether --commit puts a new ways binary in place (`ways_replaced`); when
+/// it does not, the mod waits for one.
+fn new_mod_line(dir: &Path, c: &Component, ways_replaced: bool) -> Option<(Mark, String)> {
     c.target.as_ref()?;
-    Some(if c.installed.is_none() {
-        (Mark::Act, format!("{}: install the {} where it is wanted (new in this release)", dir.display(), c.name))
-    } else {
-        (Mark::Info, format!("{}: the {} is one this ways binary does not know; the updated binary converges it", dir.display(), c.name))
+    let d = dir.display();
+    Some(match (ways_replaced, c.installed.is_none()) {
+        (true, true) => (Mark::Act, format!("{d}: install the {} where it is wanted (new in this release)", c.name)),
+        (true, false) => (Mark::Info, format!("{d}: the {} is one this ways binary does not know; the updated binary converges it", c.name)),
+        (false, _) => (Mark::Warn, format!("{d}: the {} waits for a ways binary that knows it; this update keeps the current ways binary", c.name)),
     })
 }
 
@@ -772,7 +790,10 @@ mod tests {
         assert_eq!(line(&attend_mod::THEME, wanted.clone(), &theme), Some((Mark::Act, "/t/claude: update the ways-theme mod 1.53.0 → 1.53.1".into())));
         // Wanted and missing: installed, unless it was removed by hand.
         let missing = ModHere { wanted: true, ..ModHere::default() };
-        assert_eq!(line(&attend_mod::THEME, missing.clone(), &theme), Some((Mark::Act, "/t/claude: install the ways-theme mod 1.53.1".into())));
+        assert_eq!(
+            line(&attend_mod::THEME, missing.clone(), &theme),
+            Some((Mark::Act, "/t/claude: install the ways-theme mod 1.53.1 (needs Claude Code 2.1.309 or later)".into()))
+        );
         let by_hand = line(&attend_mod::THEME, ModHere { recorded: true, ..missing }, &theme).unwrap();
         assert!(by_hand.1.contains("removed by hand, so repair writes mods.ways-theme.install: false"), "{}", by_hand.1);
 
@@ -836,8 +857,14 @@ mod tests {
     fn a_mod_new_in_the_release_is_named_for_install() {
         let dir = Path::new("/t/claude");
         let new = Component { name: "sparkle mod".into(), installed: None, target: Some("1.0.0".into()), plugin: Some("sparkle".into()) };
-        assert_eq!(new_mod_line(dir, &new), Some((Mark::Act, "/t/claude: install the sparkle mod where it is wanted (new in this release)".into())));
-        assert_eq!(new_mod_line(dir, &Component { target: None, ..new }), None, "not shipped at the target");
+        // A new ways binary is put in place: it converges the mod.
+        assert_eq!(new_mod_line(dir, &new, true), Some((Mark::Act, "/t/claude: install the sparkle mod where it is wanted (new in this release)".into())));
+        // The ways binary is not replaced: the old one knows nothing of the mod.
+        assert_eq!(
+            new_mod_line(dir, &new, false),
+            Some((Mark::Warn, "/t/claude: the sparkle mod waits for a ways binary that knows it; this update keeps the current ways binary".into()))
+        );
+        assert_eq!(new_mod_line(dir, &Component { target: None, ..new }, true), None, "not shipped at the target");
     }
 
     /// Review finding 3: a file holding the retired section is the
