@@ -13,7 +13,7 @@
 
 use super::delta::{self, Delta};
 use super::notes::{self, Release};
-use super::{classify_build_groups, exe, git_head, installed_version, package_field, suite_bins, version_older, way_embed_source_version};
+use super::{classify_build_groups, embedded_asset_prefixes, embedded_assets, exe, git_head, installed_version, package_field, suite_bins, version_older, way_embed_source_version, EMBEDDED_ASSETS};
 use crate::cmd::attend_mod;
 use crate::cmd::lifecycle::{self, DevLink, Mark, Report};
 use crate::cmd::settings::retired::{self, Held};
@@ -280,7 +280,7 @@ fn actions(app: &Path, channel: &Channel, relation: Relation, head: Option<&str>
             // The working tree's own edits, from the `status --porcelain`
             // lines already read: `git diff HEAD` would refresh and rewrite
             // the index, and a what-if writes nothing (ADR-511).
-            let (wt_cargo, wt_embed) = classify_build_groups(local.iter().filter_map(|l| porcelain_path(l)));
+            let (wt_cargo, wt_embed) = classify_build_groups(local.iter().filter_map(|l| porcelain_path(l)), &embedded_assets(app));
             cargo_changed |= wt_cargo;
             embed_changed |= wt_embed;
             let mut any = false;
@@ -396,9 +396,11 @@ fn binary_action(c: &Component, releases: &[Release], cargo: bool) -> (Mark, Str
     }
 }
 
+/// The build groups the commits `a..b` touch, classified by the embedded-file
+/// list at `b`, the checkout the update would land on.
 fn changed(app: &Path, a: &str, b: &str) -> (bool, bool) {
     let paths = git_lines(app, &["diff", "--name-only", a, b]);
-    classify_build_groups(paths.iter().map(String::as_str))
+    classify_build_groups(paths.iter().map(String::as_str), &embedded_asset_prefixes(show(app, b, EMBEDDED_ASSETS).as_deref()))
 }
 
 /// The path a `git status --porcelain` line names (the destination of a
@@ -650,7 +652,7 @@ mod tests {
         assert_eq!(porcelain_path(" M tools/ways-cli/src/main.rs"), Some("tools/ways-cli/src/main.rs"));
         assert_eq!(porcelain_path("R  docs/a.md -> tools/b.rs"), Some("tools/b.rs"));
         assert_eq!(porcelain_path("?? tools/new.rs"), None, "untracked");
-        assert_eq!(classify_build_groups([" M tools/x/src/lib.rs", "?? tools/way-embed/y.cpp"].iter().filter_map(|l| porcelain_path(l))), (true, false));
+        assert_eq!(classify_build_groups([" M tools/x/src/lib.rs", "?? tools/way-embed/y.cpp"].iter().filter_map(|l| porcelain_path(l)), &[]), (true, false));
     }
 
     #[test]

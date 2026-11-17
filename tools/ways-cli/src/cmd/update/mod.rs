@@ -335,27 +335,45 @@ fn changed_build_groups(app: &Path, a: &str, b: &str) -> Option<(bool, bool)> {
         return None;
     }
     let text = String::from_utf8_lossy(&out.stdout);
-    Some(classify_build_groups(text.lines()))
+    Some(classify_build_groups(text.lines(), &embedded_assets(app)))
 }
 
-/// Repo-relative path prefixes for compile-time assets embedded into a cargo-suite
-/// binary via `include_str!`/`include_bytes!` that live OUTSIDE `tools/`. A change
-/// to one of these rebuilds the binary that embeds it, even though the path is not
-/// under `tools/`, so the classifier must treat it as cargo source. KEEP IN SYNC
-/// with the escaping includes in the tree — the `embedded_assets_outside_tools_are_classified`
-/// test walks the source and fails if a new escape isn't listed here.
-/// Currently: `hooks/memory-seed/` → embedded into `ways` (see memory_seed.rs).
-const EMBEDDED_ASSET_PREFIXES: &[&str] = &["hooks/memory-seed/", "attend/sensors/"];
+/// The checked-in list of files outside `tools/` that a cargo suite binary
+/// embeds at compile time (`include_str!`/`include_bytes!`), one path prefix per
+/// line. The update reads it from the pulled checkout, so a release that embeds
+/// a new file classifies a change to it by its own list rather than by the
+/// running updater's.
+pub(super) const EMBEDDED_ASSETS: &str = "tools/embedded-assets";
+
+/// The prefixes a checkout without `tools/embedded-assets` embeds. Such a
+/// checkout is older than the file, and embeds nothing outside `tools/` beyond
+/// these two.
+const EMBEDDED_ASSETS_WITHOUT_THE_FILE: &[&str] = &["hooks/memory-seed/", "attend/sensors/"];
+
+/// The prefixes in the text of a `tools/embedded-assets` file, skipping blank
+/// lines and `#` comments; with no file (`None`), the list a checkout from
+/// before the file embeds.
+pub(super) fn embedded_asset_prefixes(text: Option<&str>) -> Vec<String> {
+    match text {
+        Some(t) => t.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).map(str::to_string).collect(),
+        None => EMBEDDED_ASSETS_WITHOUT_THE_FILE.iter().map(|p| p.to_string()).collect(),
+    }
+}
+
+/// The embedded-asset prefixes of the checkout at `app`.
+pub(super) fn embedded_assets(app: &Path) -> Vec<String> {
+    embedded_asset_prefixes(std::fs::read_to_string(app.join(EMBEDDED_ASSETS)).ok().as_deref())
+}
 
 /// Pure classifier: given changed repo-relative paths, decide which build groups
-/// they touch — `(cargo_suite, way_embed)`. Every binary source lives under
-/// `tools/`; way-embed (C++/cmake) is `tools/way-embed/`, and the cargo suite
-/// (`ways`, `ways-audit`, `attend`, `attend-chat`, and their shared crates) is the
-/// rest of `tools/`. The root `Makefile` drives both builds, so a change to it flags
-/// both. A few compile-time assets embedded into a binary live outside `tools/`
-/// (`EMBEDDED_ASSET_PREFIXES`) and count as cargo source. Anything else (docs,
-/// hooks, skills, `*.md`) feeds no binary.
-fn classify_build_groups<'a>(paths: impl Iterator<Item = &'a str>) -> (bool, bool) {
+/// they touch — `(cargo_suite, way_embed)`. way-embed (C++/cmake) is built from
+/// `tools/way-embed/`, and the cargo suite (`ways`, `ways-audit`, `attend`,
+/// `attend-chat`, and their shared crates) from the rest of `tools/`. The root
+/// `Makefile` drives both builds, so a change to it flags both. The cargo suite
+/// also embeds a few files outside `tools/`; a path under one of the `embedded`
+/// prefixes (`tools/embedded-assets`) counts as cargo source. Any other path,
+/// such as docs, skills, ways and the hooks no binary embeds, feeds no binary.
+fn classify_build_groups<'a>(paths: impl Iterator<Item = &'a str>, embedded: &[String]) -> (bool, bool) {
     let (mut cargo, mut embed) = (false, false);
     for p in paths.map(str::trim).filter(|p| !p.is_empty()) {
         if p == "Makefile" {
@@ -367,7 +385,7 @@ fn classify_build_groups<'a>(paths: impl Iterator<Item = &'a str>) -> (bool, boo
             } else {
                 cargo = true;
             }
-        } else if EMBEDDED_ASSET_PREFIXES.iter().any(|pre| p.starts_with(pre)) {
+        } else if embedded.iter().any(|pre| p.starts_with(pre.as_str())) {
             cargo = true;
         }
     }
@@ -391,7 +409,17 @@ fn working_tree_build_groups(app: &Path) -> (bool, bool) {
     else {
         return (false, false);
     };
-    classify_build_groups(String::from_utf8_lossy(&out.stdout).lines())
+    classify_build_groups(String::from_utf8_lossy(&out.stdout).lines(), &embedded_assets(app))
+}
+
+/// Whether a file the cargo suite builds from differs between commit `a` and
+/// the checkout at `b`: changed in the commits between them, or edited in the
+/// working tree and not yet committed. The guard asks this of a download built
+/// at `a`; an uncommitted edit is source the download lacks, so it counts.
+/// None when git cannot list the diff between the commits.
+fn cargo_source_changed(app: &Path, a: &str, b: &str) -> Option<bool> {
+    let (committed, _) = changed_build_groups(app, a, b)?;
+    Some(committed || working_tree_build_groups(app).0)
 }
 
 /// The suite binaries, from `tools/suite-bins`: the list the pulled Makefile
@@ -487,7 +515,7 @@ fn refreshed_line(app: &Path, name: &str, before: &[(String, Seen)]) -> String {
 fn refresh_outcome(name: &str, was: &[(String, Seen)], now: &[(String, Seen)]) -> String {
     match (version_changes(was, now).pop(), now.first()) {
         (Some(change), _) => change,
-        (None, Some((_, seen))) => format!("{name} stays at {} (the binary fetched matches the one installed)", seen.version),
+        (None, Some((_, seen))) => format!("{name} stays at {}: the binary fetched matches the one installed", seen.version),
         (None, None) => format!("{name} is in place but does not answer --version"),
     }
 }
@@ -852,7 +880,7 @@ enum Freshness {
 /// Refresh the `ways` binary safely, with the downgrade guard. Download-first
 /// (`make ways`), then compare the freshly-installed binary's baked `git describe`
 /// against the pulled source. Keep the download when it is at least as new, or
-/// behind only in files no binary is built from; otherwise build from source
+/// behind only in files the cargo suite is not built from; otherwise build from source
 /// (toolchain present) or restore the previous binary (none) — never leave an
 /// older binary in place, never leave the slot empty.
 fn refresh_ways(app: &Path, has_toolchain: bool) -> Result<()> {
@@ -888,14 +916,14 @@ fn refresh_ways(app: &Path, has_toolchain: bool) -> Result<()> {
             c,
             s,
             |a, b| is_ancestor(app, a, b),
-            |a, b| changed_build_groups(app, a, b).map(|(cargo, _)| cargo),
+            |a, b| cargo_source_changed(app, a, b),
         ),
         _ => Freshness::Unknown,
     };
     match &verdict {
         Freshness::AtLeastAsNew => {}
         Freshness::BehindInContentOnly => Steps::info(format!(
-            "the downloaded pre-built ({}) is behind the pulled source ({}) only in files no binary is built from, so it is kept",
+            "the downloaded pre-built ({}) is behind the pulled source ({}) only in files the cargo suite is not built from, so it is kept",
             candidate.as_deref().unwrap_or("?"),
             source.as_deref().unwrap_or("?"),
         )),
@@ -958,7 +986,7 @@ enum GuardAction {
 }
 
 /// The guard's decision table (ADR-150 §3). A download that is provably at least
-/// as new, or behind only in files no binary is built from, is kept. Anything
+/// as new, or behind only in files the cargo suite is not built from, is kept. Anything
 /// `Older` or `Unknown` is not trusted: build from source
 /// when a toolchain is present (the checkout can't be behind itself); else restore
 /// the previously-running binary rather than downgrade. The *only* time an
@@ -1300,7 +1328,7 @@ mod tests {
         assert_eq!(refresh_outcome("attend", &seen("0.35.2", 1), &seen("0.36.0", 2)), "attend 0.35.2 → 0.36.0");
         assert_eq!(
             refresh_outcome("attend", &seen("0.35.2", 1), &seen("0.35.2", 1)),
-            "attend stays at 0.35.2 (the binary fetched matches the one installed)"
+            "attend stays at 0.35.2: the binary fetched matches the one installed"
         );
         assert_eq!(refresh_outcome("attend", &seen("0.35.2", 1), &seen("0.35.2", 2)), "attend 0.35.2 (rebuilt)");
         assert_eq!(refresh_outcome("attend", &[], &seen("0.35.2", 1)), "attend 0.35.2 (new)");
@@ -1517,6 +1545,63 @@ mod tests {
         );
     }
 
+    /// A checkout in a temporary git repository, for the guard's diff.
+    fn git_app() -> (crate::test_dir::TestDir, impl Fn(&[&str]) -> String) {
+        let app = tmp();
+        std::fs::create_dir_all(&*app).unwrap();
+        let dir = app.to_path_buf();
+        let git = move |args: &[&str]| {
+            let out = Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"])
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        git(&["init", "-q"]);
+        (app, git)
+    }
+
+    #[test]
+    fn the_guard_counts_binary_source_committed_or_edited_since_the_download() {
+        let (app, git) = git_app();
+        let write = |rel: &str, text: &str| {
+            let p = app.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        };
+        write("tools/x/src/lib.rs", "fn a() {}\n");
+        write("hooks/ways/core.md", "one\n");
+        write("hooks/new-embed/x.md", "one\n");
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "release"]);
+        let release = git(&["rev-parse", "HEAD"]);
+
+        // A docs-only commit past the release: no binary source changed.
+        write("hooks/ways/core.md", "two\n");
+        git(&["commit", "-qam", "docs"]);
+        let docs = git(&["rev-parse", "HEAD"]);
+        assert_eq!(cargo_source_changed(&app, &release, &docs), Some(false));
+
+        // An uncommitted edit to binary source on top of it: the download lacks it.
+        write("tools/x/src/lib.rs", "fn b() {}\n");
+        assert_eq!(cargo_source_changed(&app, &release, &docs), Some(true), "an uncommitted edit under tools/ counts");
+        git(&["checkout", "-q", "--", "tools/x/src/lib.rs"]);
+
+        // An embedded file the checkout's own list names counts as binary source.
+        write("tools/embedded-assets", "hooks/new-embed/\n");
+        write("hooks/new-embed/x.md", "two\n");
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "embed"]);
+        let embed = git(&["rev-parse", "HEAD"]);
+        assert_eq!(changed_build_groups(&app, &docs, &embed), Some((true, false)));
+
+        // Git cannot resolve a commit: the guard holds.
+        assert_eq!(cargo_source_changed(&app, "0000000000", &docs), None);
+    }
+
     #[test]
     fn guard_action_never_downgrades() {
         use Freshness::*;
@@ -1545,12 +1630,11 @@ mod tests {
 
     #[test]
     fn classify_build_groups_routes_changed_paths() {
-        use super::classify_build_groups as c;
+        let embedded = embedded_asset_prefixes(None);
+        let c = |paths: std::array::IntoIter<&str, 1>| classify_build_groups(paths, &embedded);
+        let many = |paths: &[&str]| classify_build_groups(paths.iter().copied(), &embedded);
         // Docs/ways-only pull → no binary group (the churn-report case).
-        assert_eq!(
-            c(["CLAUDE.md", "hooks/ways/core.md", "docs/x.md", "skills/y/SKILL.md"].into_iter()),
-            (false, false)
-        );
+        assert_eq!(many(&["CLAUDE.md", "hooks/ways/core.md", "docs/x.md", "skills/y/SKILL.md"]), (false, false));
         // Cargo suite source → cargo only.
         assert_eq!(c(["tools/ways-cli/src/main.rs"].into_iter()), (true, false));
         assert_eq!(c(["tools/ways-core/src/lib.rs"].into_iter()), (true, false));
@@ -1560,19 +1644,22 @@ mod tests {
         assert_eq!(c(["tools/way-embed/way-embed.cpp"].into_iter()), (false, true));
         // Embedded asset outside tools/ (include_str! into ways) → cargo.
         assert_eq!(c(["hooks/memory-seed/seed-v1.md"].into_iter()), (true, false));
+        assert_eq!(c(["attend/sensors/git.yaml"].into_iter()), (true, false));
+        // The checkout's own list decides: a prefix a later release adds counts.
+        let later = embedded_asset_prefixes(Some("# comment\n\nhooks/memory-seed/\nhooks/new-embed/\n"));
+        assert_eq!(later, ["hooks/memory-seed/", "hooks/new-embed/"]);
+        assert_eq!(classify_build_groups(["hooks/new-embed/x.md"].into_iter(), &later), (true, false));
+        assert_eq!(c(["hooks/new-embed/x.md"].into_iter()), (false, false), "not in the list without the file");
         // Root Makefile drives both builds.
         assert_eq!(c(["Makefile"].into_iter()), (true, true));
         // Mixed change touches both.
-        assert_eq!(
-            c(["tools/way-embed/x.cpp", "tools/attend/src/lib.rs"].into_iter()),
-            (true, true)
-        );
+        assert_eq!(many(&["tools/way-embed/x.cpp", "tools/attend/src/lib.rs"]), (true, true));
         // Blank/whitespace lines are ignored.
-        assert_eq!(c(["", "  ", "CLAUDE.md"].into_iter()), (false, false));
+        assert_eq!(many(&["", "  ", "CLAUDE.md"]), (false, false));
     }
 
     // --- Durability guard for finding #1: an embedded asset that escapes `tools/`
-    // must be reflected in EMBEDDED_ASSET_PREFIXES, or a change to it silently skips
+    // must be listed in tools/embedded-assets, or a change to it silently skips
     // the rebuild. Walk the source for include_str!/include_bytes! literals, resolve
     // each relative to its file, and assert every one that lands outside `tools/` is
     // covered. A future escaping include that isn't listed fails this test. ---
@@ -1653,10 +1740,12 @@ mod tests {
             escaping.iter().any(|r| r.starts_with("hooks/memory-seed/")),
             "expected to find the memory-seed include escape; found: {escaping:?}",
         );
+        let listed = std::fs::read_to_string(repo.join(EMBEDDED_ASSETS)).expect("tools/embedded-assets is checked in");
+        let prefixes = embedded_asset_prefixes(Some(&listed));
         for rel in &escaping {
             assert!(
-                EMBEDDED_ASSET_PREFIXES.iter().any(|pre| rel.starts_with(pre)),
-                "embedded asset `{rel}` escapes tools/ but isn't in EMBEDDED_ASSET_PREFIXES \
+                prefixes.iter().any(|pre| rel.starts_with(pre.as_str())),
+                "embedded asset `{rel}` escapes tools/ but isn't in tools/embedded-assets \
                  — a change to it would skip the rebuild. Add its prefix.",
             );
         }
