@@ -385,6 +385,7 @@ test-hooks:
 	@echo "Running hook script tests..."
 	@cargo build --manifest-path tools/Cargo.toml -p ways --quiet
 	@bash tests/hooks-test.sh
+	@bash tests/session-start-cap-test.sh
 	@bash tests/make-link-test.sh
 	@bash tests/installer-report-test.sh
 	@bash tests/make-targets-test.sh

@@ -69,9 +69,9 @@ Uses the `scan_exclude:` frontmatter field to skip files that are legitimately l
 
 ## The Core Macro
 
-`macro.sh` at the ways root (`~/.claude/hooks/ways/macro.sh`) generates the Available Ways table shown at session start. It scans all way files, extracts their trigger patterns from frontmatter, and formats them as a markdown table grouped by domain.
+`macro.sh` at the ways root (`~/.claude/hooks/ways/macro.sh`) generates the Available Ways list shown at session start: one line per domain, naming its top-level ways with the number of ways nested under each. A directory that holds ways but is not one names its children instead. The full list of way ids is the `meta/knowledge/catalog` way, which fires when someone asks what ways exist. Both macros take way ids from `way-ids.sh` at the ways root, which applies the engine's rule: a non-check `.md` file that opens with a frontmatter fence is a way, and its directory is its id.
 
-This is invoked by `ways show core` during SessionStart and referenced by `core.md` via `macro: prepend`.
+The state lane runs it at SessionStart through `core.md`'s `macro: prepend`. The lane gives core and the state ways one 10,000-character budget, Claude Code's cap on a hook's `additionalContext`. Core goes first and whole. A state way that does not fit is withheld and shows on the next prompt. `tests/session-start-cap-test.sh` holds the SessionStart payload of the shipped corpus under the cap.
 
 ## Security Model
 

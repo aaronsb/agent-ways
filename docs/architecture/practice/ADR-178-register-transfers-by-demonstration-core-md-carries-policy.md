@@ -101,6 +101,8 @@ Retained: the uncertainty taxonomy, which is epistemic routing carried nowhere e
 
 Result: 632 words, all policy, measured by the same prose extraction the checks use.
 
+*Note (2026-11-17):* Attribution and the paragraph on where ways live left `core.md`. The SessionStart payload had run past Claude Code's 10,000-character hook cap, so sessions received a preview and never saw `core.md` (#634). Both were duplicates: `delivery/commits` states the attribution rule where commits happen, and `meta/knowledge` states where ways live. The rest of the retained list stands.
+
 **2. The constraint on `core.md` is structural and checked, in `scripts/check-register.sh`.**
 
 Any file in the always-on path is a style demonstration whether or not it intends to be. "Write plainly" would drift the way "sparingly" drifted, so the constraint is four counts, all at zero for `core.md`: antithesis constructions, significance clauses, bolded paragraph lead-ins, and paired em-dash asides. The script runs in the pre-commit hook and reports the corpus baseline under `--corpus`.
