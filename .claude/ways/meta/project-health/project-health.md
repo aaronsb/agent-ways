@@ -58,7 +58,7 @@ Components are the six suite binaries in `tools/suite-bins`: `ways`, `ways-audit
 
 Pushing the tag is the one outward step. `build-<c>.yml` then builds every platform and creates the GitHub Release with per-platform binaries and `checksums.txt`. A cancelled runner can leave a platform out, so check that the Release lists an asset for each of linux-x86_64, linux-aarch64, darwin-x86_64 and darwin-arm64.
 
-Tags are GPG-signed, so `publish-release` needs a passphrase from the operator's own terminal. An agent cannot complete it — do everything up to that point and hand over the command.
+Tags are signed with the operator's SSH key (`gpg.format=ssh`, `tag.gpgsign=true`), which ssh-agent holds, so `publish-release` runs from an agent's shell once the operator has asked for the release. When signing fails or waits on a passphrase, stop and hand the operator the command. Check the pushed tag with `git tag -v <c>-vX.Y.Z`.
 
 Bump level follows the commit types, against the *binary*. A corpus-only change with a `fix:` commit is a patch even when it changes what every session sees; the CLI interface is what the version tracks.
 
