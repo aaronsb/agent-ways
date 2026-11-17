@@ -16,6 +16,7 @@ use crate::session;
 use super::candidates::collect_with_off;
 use super::{discard, emit_hook_context};
 use super::scoring::capture_show_way;
+use crate::cmd::show::ContextBudget;
 
 pub fn state(
     session_id: &str,
@@ -44,6 +45,11 @@ pub fn state(
     let (candidates, off) = collect_with_off(&project_dir);
 
     let mut context = String::new();
+    // One hook's `additionalContext` budget. Core is the first unit and is
+    // always admitted; state ways follow while they fit. A way withheld here
+    // is not recorded as fired, so it shows on the next prompt, where this
+    // lane runs again with a fresh budget.
+    let mut budget = ContextBudget::hook();
 
     // Core re-injection safety net. The marker is cleared by `clear-markers.sh`
     // on the `startup`, `compact`, and `clear` SessionStart matchers, so a
@@ -55,8 +61,10 @@ pub fn state(
     if !session::core_is_shown(session_id) {
         let out = capture_show_core(session_id);
         if !out.is_empty() {
+            budget.admit(&out);
             context.push_str(&out);
             context.push_str("\n\n");
+            budget.charge("\n\n");
         }
     }
 
@@ -74,13 +82,11 @@ pub fn state(
         // the branch was dead. (The mark-tasks-active hook still writes the marker;
         // it is dormant, kept as the hook-point should per-way tasks-active
         // suppression be wanted again.)
-        // No context budget on this lane yet: core alone runs past the 10,000
-        // character cap on SessionStart, and a budget would admit core and
-        // then withhold every state way behind it.
-        let out = capture_show_way(&way.id, session_id, "state", None, None, None, None).body;
+        let out = capture_show_way(&way.id, session_id, "state", None, None, None, Some(&mut budget)).body;
         if !out.is_empty() {
             context.push_str(&out);
             context.push_str("\n\n");
+            budget.charge("\n\n");
         }
     }
 

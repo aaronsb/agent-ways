@@ -486,7 +486,7 @@ A project-local macro runs only if the project is listed in `~/.claude/trusted-p
 ```
 $XDG_DATA_HOME/agent-ways/hooks/ways/      # shipped ways, projected as ~/.claude/hooks/ways/
 ├── core.md                     # base guidance, shown by the state scan
-├── macro.sh                    # core.md's macro: the Available Ways table
+├── macro.sh                    # core.md's macro: the Available Ways list
 ├── require-ways.sh             # shared by the adapters: runs ~/.claude/bin/ways hook <event>
 │
 ├── clear-markers.sh            # SessionStart → ways hook session-start

@@ -30,85 +30,38 @@ elif [[ "$skill_count" -gt 5 ]]; then
 fi
 
 # ── Available ways table ───────────────────────────────────────
+# One line per domain: its top-level ways, each with the number of ways
+# nested under it. The per-way trigger columns this table once carried ran
+# past Claude Code's 10,000-character hook cap on their own (#634); triggers
+# fire ways without the model reading them, and the full list of way paths
+# is the ways catalog way, shown on request.
 
 echo "## Available Ways"
 echo ""
 
-current_domain=""
-
-while IFS= read -r wayfile; do
-  relpath="${wayfile#$WAYS_DIR/}"
-  relpath="${relpath%/*}"
-
-  # Skip files not in a domain/way subdirectory
-  [[ "$relpath" != */* ]] && continue
-
-  domain="${relpath%%/*}"
-  wayname="${relpath#*/}"
-  wayname="${wayname//\// > }"
-
-  # Domain header
-  if [[ "$domain" != "$current_domain" ]]; then
-    domain_display="$(echo "${domain:0:1}" | tr '[:lower:]' '[:upper:]')${domain:1}"
-    echo "### ${domain_display}"
-    echo ""
-    echo "| Way | Tool Trigger | Keyword Trigger |"
-    echo "|-----|--------------|-----------------|"
-    current_domain="$domain"
-  fi
-
-  # Parse frontmatter (first YAML block only)
-  frontmatter=$(awk 'NR==1 && /^---$/{p=1; next} p && /^---$/{exit} p{print}' "$wayfile")
-
-  get_field() { echo "$frontmatter" | awk -v f="$1" '$0 ~ "^"f":"{gsub("^"f": *", ""); print}'; }
-
-  match_type=$(get_field match)
-  pattern=$(get_field pattern)
-  commands=$(get_field commands)
-  files=$(get_field files)
-
-  # Tool trigger column
-  tool_trigger="—"
-  if [[ -n "$commands" ]]; then
-    cmd_clean="${commands//\\}"
-    case "$cmd_clean" in
-      *"git commit"*)                     tool_trigger="Run \`git commit\`" ;;
-      *"^gh"*|*"gh "*)                    tool_trigger="Run \`gh\`" ;;
-      *"ssh"*|*"scp"*|*"rsync"*)          tool_trigger="Run \`ssh/scp/rsync\`" ;;
-      *"pytest"*|*"jest"*)                tool_trigger="Run test runner" ;;
-      *"npm install"*|*"pip install"*)    tool_trigger="Run package install" ;;
-      *"git apply"*)                      tool_trigger="Run \`git apply\`" ;;
-      *)                                  tool_trigger="Run command" ;;
-    esac
-  elif [[ -n "$files" ]]; then
-    case "$files" in
-      *"docs/adr"*)       tool_trigger="Edit \`docs/adr/*.md\`" ;;
-      *"\.env"*)          tool_trigger="Edit \`.env\`" ;;
-      *"\.patch"*)        tool_trigger="Edit \`*.patch\`" ;;
-      *"ways/"*)          tool_trigger="Edit \`.claude/ways/*.md\`" ;;
-      *"README"*)         tool_trigger="Edit \`README.md\`" ;;
-      *)                  tool_trigger="Edit files" ;;
-    esac
-  fi
-
-  # Keyword trigger column
-  keyword_display="—"
-  if [[ "$match_type" == "semantic" || "$match_type" == "model" ]]; then
-    keyword_display="_(${match_type})_"
-  elif [[ -n "$pattern" ]]; then
-    # Strip regex syntax to show human-readable keywords
-    keyword_display=$(echo "$pattern" \
-      | sed 's/[.][?+*]/ /g' \
-      | sed 's/\\[bnrst]//g; s/\\//g; s/[?^$]//g; s/[()]/ /g; s/|/, /g; s/[][]//g' \
-      | sed 's/  */ /g; s/ *, */,/g; s/,,*/,/g; s/^,//; s/,$//; s/,/, /g' \
-      | awk -F', ' '{for(i=1;i<=NF;i++) if(!seen[$i]++) printf "%s%s",(i>1?", ":""),$i; print ""}')
-  fi
-
-  echo "| **${wayname}** | ${tool_trigger} | ${keyword_display} |"
-
-done < <(find -L "$WAYS_DIR" -path "*/*/*.md" ! -name "*.check.md" ! -name "*.yaml" -type f | sort)
+find -L "$WAYS_DIR" -mindepth 3 -name "*.md" ! -name "*.check.md" -type f 2>/dev/null \
+  | sed "s|^${WAYS_DIR}/||; s|/[^/]*\.md\$||" \
+  | sort -u \
+  | awk -F/ '
+      { key = $1 "/" $2
+        if (!(key in n)) { order[$1] = (order[$1] == "" ? "" : order[$1] " ") $2; domains[$1] = 1 }
+        n[key]++ }
+      END {
+        cmd = "sort"
+        for (d in domains) {
+          k = split(order[d], ways, " ")
+          line = ""
+          for (i = 1; i <= k; i++) {
+            c = n[d "/" ways[i]] - 1
+            line = line (i > 1 ? ", " : "") ways[i] (c > 0 ? " (" c ")" : "")
+          }
+          print "- **" d "**: " line | cmd
+        }
+        close(cmd)
+      }'
 
 echo ""
+echo "A count is the number of ways nested under that way. Ways fire on their own triggers; \`ways_search\` and \`ways_read\` look one up on request."
 echo "Project-local ways: \`\$PROJECT/.claude/ways/{domain}/{way}/{way}.md\` override global."
 
 # ── AGENTS.md migration notice ─────────────────────────────────
