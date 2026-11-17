@@ -86,11 +86,11 @@ The flow below shows each branch, the pull request that moves a change into it, 
 
 ```mermaid
 flowchart LR
-  W["working branch"] -->|"PR; agent merges when reviewed and green"| I["integration (default)"]
-  I -->|"promotion PR; operator's word"| S["stage (candidate)"]
-  S -->|"promotion PR; operator's word; release tag"| M["main"]
-  H["hotfix branch, cut from main"] -->|"PR; operator's word; patch tag"| M
-  M -.->|"back-merge PR; agent merges"| I
+  W["working branch"] -->|"PR, agent merges when reviewed and green"| I["integration (default)"]
+  I -->|"promotion PR, operator's word"| S["stage (candidate)"]
+  S -->|"promotion PR, operator's word, release tag"| M["main"]
+  H["hotfix branch, cut from main"] -->|"PR, operator's word, patch tag"| M
+  M -.->|"back-merge PR, agent merges"| I
   M --> U["ways manage update and the bootstrap"]
 ```
 
