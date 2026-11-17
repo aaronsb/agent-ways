@@ -29,39 +29,43 @@ elif [[ "$skill_count" -gt 5 ]]; then
   echo ""
 fi
 
-# ── Available ways table ───────────────────────────────────────
+# ── Available ways list ────────────────────────────────────────
 # One line per domain: its top-level ways, each with the number of ways
-# nested under it. The per-way trigger columns this table once carried ran
-# past Claude Code's 10,000-character hook cap on their own (#634); triggers
-# fire ways without the model reading them, and the full list of way paths
-# is the ways catalog way, shown on request.
+# nested under it. A directory that holds ways but is not one names its
+# children instead. The per-way trigger columns this list once carried ran
+# past Claude Code's 10,000-character hook cap on their own (#634); the full
+# list of way paths is the ways catalog way, shown on request.
+
+source "${BASH_SOURCE[0]%/*}/way-ids.sh"
 
 echo "## Available Ways"
 echo ""
 
-find -L "$WAYS_DIR" -mindepth 3 -name "*.md" ! -name "*.check.md" -type f 2>/dev/null \
-  | sed "s|^${WAYS_DIR}/||; s|/[^/]*\.md\$||" \
-  | sort -u \
-  | awk -F/ '
-      { key = $1 "/" $2
-        if (!(key in n)) { order[$1] = (order[$1] == "" ? "" : order[$1] " ") $2; domains[$1] = 1 }
-        n[key]++ }
-      END {
-        cmd = "sort"
-        for (d in domains) {
-          k = split(order[d], ways, " ")
-          line = ""
-          for (i = 1; i <= k; i++) {
-            c = n[d "/" ways[i]] - 1
-            line = line (i > 1 ? ", " : "") ways[i] (c > 0 ? " (" c ")" : "")
-          }
-          print "- **" d "**: " line | cmd
-        }
-        close(cmd)
-      }'
+way_ids "$WAYS_DIR" | awk -F/ '
+  NF == 1 { root[$1] = 1; seen[$1] = 1; next }
+  { d = $1; k = d "/" $2; seen[d] = 1
+    if (!(k in known)) { known[k] = 1; order[d] = (order[d] == "" ? "" : order[d] " ") $2 }
+    if (NF == 2) { own[k] = 1 }
+    else { n[k]++; rest = $0; sub(/^[^\/]*\/[^\/]*\//, "", rest)
+           kids[k] = (kids[k] == "" ? "" : kids[k] ", ") rest } }
+  END {
+    cmd = "sort"
+    for (d in seen) {
+      line = ""
+      m = split(order[d], ways, " ")
+      for (i = 1; i <= m; i++) {
+        k = d "/" ways[i]
+        if (k in own) entry = ways[i] (n[k] > 0 ? " (" n[k] ")" : "")
+        else entry = ways[i] "/{" kids[k] "}"
+        line = line (i > 1 ? ", " : "") entry
+      }
+      print "- **" d "**" (d in root ? " (also a way)" : "") ": " line | cmd
+    }
+    close(cmd)
+  }'
 
 echo ""
-echo "A count is the number of ways nested under that way. Ways fire on their own triggers; \`ways_search\` and \`ways_read\` look one up on request."
+echo "A count is the number of ways nested under that way. Ways fire on their own triggers; \`ways_search\` and \`ways_read\` look one up by id, such as \`softwaredev/code\`."
 echo "Project-local ways: \`\$PROJECT/.claude/ways/{domain}/{way}/{way}.md\` override global."
 
 # ── AGENTS.md migration notice ─────────────────────────────────

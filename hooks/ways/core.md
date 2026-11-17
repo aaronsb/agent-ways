@@ -1,6 +1,6 @@
 ---
 macro: prepend
-requires: ["Bash(awk:*)", "Bash(grep:*)", "Bash(sed:*)", "Bash(sort:*)", "Bash(tr:*)", "Bash(wc:*)"]
+requires: ["Bash(awk:*)", "Bash(find:*)", "Bash(grep:*)", "Bash(sed:*)", "Bash(sort:*)", "Bash(tr:*)", "Bash(wc:*)"]
 refire: 0.15
 ---
 # Core Ways of Working
