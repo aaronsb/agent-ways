@@ -45,10 +45,22 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "Yes, as drafted [the hotfix path: a branch cut from main, merged into main on the operator's word with its own patch release, then a back-merge into integration]"
+    via: question tool in the agent-ways session, 2026-11-17, after the ADR-615 draft and its rendered flowchart
+    covers: [hotfix]
+  - operator: aaronsb
+    said: "Done at integration [a card is done when its change merges into integration, amending ADR-613]"
+    via: question tool in the agent-ways session, 2026-11-17, after the ADR-615 draft and its rendered flowchart
+  - operator: aaronsb
+    said: "Release on every promotion to main [rather than no release for a content-only promotion]"
+    via: question tool in the agent-ways session, 2026-11-17, after the ADR-615 draft and its rendered flowchart
+    covers: [content-only promotion]
 observable:
   - see: gh repo view shows integration as the default branch, and a new pull request opened with no base targets integration
   - see: a reviewed pull request with green CI merges into integration without an ask, and the agent offers the promotion pull requests in one line instead of merging them
-  - see: after a promotion to main that changes a binary, git tag --points-at origin/main lists the component's new tag, and ways manage update on an install that follows main downloads that release binary instead of building from source
+  - see: after a promotion to main, git tag --points-at origin/main lists the component's new tag, and ways manage update on an install that follows main downloads that release binary instead of building from source
   - run: the curl bootstrap one-liner on a clean machine installs a checkout whose branch is main and whose upstream is origin/main
 status: proposed
 date: 2026-11-17
@@ -66,7 +78,7 @@ related:
 
 ## Summary
 
-- **Decided:** agent-ways keeps three long-lived branches. Every working branch merges into `integration`, which becomes the GitHub default branch. `stage` holds a release candidate taken from integration and evaluated on this host. `main` holds what passed evaluation: `ways manage update` follows it, the bootstrap installs it, and release tags go on it. A change moves up a tier only through a promotion pull request, merged by regular merge with green CI. The agent opens promotion pull requests, and each one merges on the operator's word. The agent merges reviewed, green pull requests into integration without asking. A release is cut when a promotion to main carries a change to a binary. This record also moves ADR-613's definition of a done card from main to integration.
+- **Decided:** agent-ways keeps three long-lived branches. Every working branch merges into `integration`, which becomes the GitHub default branch. `stage` holds a release candidate taken from integration and evaluated on this host. `main` holds what passed evaluation: `ways manage update` follows it, the bootstrap installs it, and release tags go on it. A change moves up a tier only through a promotion pull request, merged by regular merge with green CI. The agent opens promotion pull requests, and each one merges on the operator's word. The agent merges reviewed, green pull requests into integration without asking. Every promotion to main cuts a release. This record also moves ADR-613's definition of a done card from main to integration.
 - **Trades away:** Every release takes two promotion pull requests and the operator's word on each. A reviewed change reaches users at the next promotion, not at its merge. A fix found while evaluating stage goes back through integration, and the candidate is evaluated again. A hotfix needs a back-merge into integration. The GitHub front page shows integration, so the bootstrap names main explicitly.
 - **One-way?** No. Reversible: the default-branch setting, the workflow triggers, the scripts and the way text change back in one session. Users' installs follow main before and after, so nothing on their machines migrates.
 - **Probes:** *Not confident (hotfix):* A fix that cannot wait for the next promotion goes on a branch cut from main, merges into main on your word with its own patch release, and then main is merged back into integration. Is that the hotfix path you want? Yes or no. *Confident (content-only promotion):* A promotion to main that changes only ways, skills or docs, and no binary, goes out without a release. Yes or no.
@@ -110,9 +122,9 @@ flowchart LR
 ### 3. Releases and what update follows
 
 - `ways manage update` keeps following main through the app checkout's upstream. Existing installs already track origin/main, so their behaviour does not change.
-- When a batch carries a change to a component's binary source, the agent opens the version bump pull request into integration before promoting it to stage. The candidate on stage then carries the version it ships under.
+- Before each promotion to stage, the agent opens the version bump pull request into integration. Each component whose binary source changed in the batch is bumped by its commit types. A batch that changed no binary source bumps `ways` at patch level, because the `ways` version names the app release. The candidate on stage then carries the versions it ships under.
 - After the stage-to-main promotion merges, the agent tags the merge commit on main with `make publish-release`. The operator's word for that promotion is the ask that covers the release. The tag push builds every platform and publishes the GitHub Release, as today.
-- A promotion that changes no binary source cuts no release. Its ways, skills and docs reach users through the update's pull of main. Probe 2 checks this reading of the operator's choice.
+- Every promotion to main cuts a release, including one that changes only ways, skills or docs. The operator chose this over releasing only binary changes (2026-11-17). Each release tag points at the main commit users pull, so the release binary matches main except after a hotfix's back-merge window.
 
 ### 4. The default branch
 
