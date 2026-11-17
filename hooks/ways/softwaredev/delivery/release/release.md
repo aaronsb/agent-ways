@@ -90,7 +90,7 @@ A protected `main` splits the release in two, and this is common enough to plan 
 
 Tagging is then the single outward step, and CI usually takes it from there: a tag-triggered workflow builds each platform and creates the release. Check for that workflow before hand-building artifacts.
 
-Signed tags stop an agent cold. If the project signs (`tag.gpgsign`, or a `-s` in the release script), the tag command needs a passphrase from a terminal the agent doesn't own. Do everything up to that point, then hand the exact command to the operator rather than retrying into a timeout.
+A signed tag can need a passphrase from a terminal the agent doesn't own. If the project signs (`tag.gpgsign`, or a `-s` in the release script), check `gpg.format` and the key's agent: a key held by ssh-agent or a gpg-agent with a cached passphrase signs without a prompt. Run the tag command once. When it fails or waits on a passphrase, hand the exact command to the operator rather than retrying into a timeout.
 
 ## Promote What Passed
 
