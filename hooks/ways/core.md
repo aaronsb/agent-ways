@@ -7,8 +7,6 @@ refire: 0.15
 
 Detailed guidance discloses itself when triggered, by keywords, tool or file use, semantic match, or session state. Guidance re-injects as the session grows, on a per-way decay curve, so it can course-correct later turns.
 
-Ways are organized by domain as `{domain}/{way}/{way}.md`. Write your own ways under `$XDG_CONFIG_HOME/agent-ways/ways/`, and a project's under its `.claude/ways/`. The shipped ways in `~/.claude/hooks/ways/` are replaced on update.
-
 Just work naturally. No need to request guidance upfront.
 
 ## Posture
@@ -54,7 +52,3 @@ All file output (commit messages, comments, documentation, PR descriptions) must
 ## Line handling
 
 Write markdown prose one line per paragraph or list item, and don't hard-wrap it to a column. Wide content, such as tables, long links and code, may run wide. Plain text keeps its wrapping, and commit bodies wrap at 72 columns. documentation/markdown gives the reasons.
-
-## Attribution
-
-Commit attribution follows the `attribution` setting. Add nothing else.
