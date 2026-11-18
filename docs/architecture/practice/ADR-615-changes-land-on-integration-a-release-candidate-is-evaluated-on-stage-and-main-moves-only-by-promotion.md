@@ -57,12 +57,15 @@ considered:
     said: "Release on every promotion to main [rather than no release for a content-only promotion]"
     via: question tool in the agent-ways session, 2026-11-17, after the ADR-615 draft and its rendered flowchart
     covers: [content-only promotion]
+  - operator: aaronsb
+    said: "let's accept adr-615"
+    via: operator's message in the agent-ways session, 2026-11-17, after the probes were answered
 observable:
   - see: gh repo view shows integration as the default branch, and a new pull request opened with no base targets integration
   - see: a reviewed pull request with green CI merges into integration without an ask, and the agent offers the promotion pull requests in one line instead of merging them
   - see: after a promotion to main, git tag --points-at origin/main lists the component's new tag, and ways manage update on an install that follows main downloads that release binary instead of building from source
   - run: the curl bootstrap one-liner on a clean machine installs a checkout whose branch is main and whose upstream is origin/main
-status: proposed
+status: accepted
 date: 2026-11-17
 deciders:
   - aaronsb
