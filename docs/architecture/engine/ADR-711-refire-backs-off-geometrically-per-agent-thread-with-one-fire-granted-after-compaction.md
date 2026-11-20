@@ -100,7 +100,7 @@ The cost is per thread, not per session. A session can spawn tens of subagents, 
 
 Each (agent thread, way) pair keeps a count n of the fires the gate has recorded for that way in that thread. Threads are keyed as session state is today: main at the session root and each subagent by its agent key, resolved through `current_agent()` from `CLAUDE_AGENT_ID`. Main and every subagent count separately, and nothing sums across them.
 
-The count lives outside the session directory, under the state root (`$XDG_STATE_HOME/agent-ways`), keyed by session id and agent key, so the compaction reset does not erase it. `/clear` starts a new session id, so it starts with no counts. The state is pruned by age, as the subagent switches are.
+The count lives outside the session directory, under the state root (`$XDG_STATE_HOME/agent-ways`), keyed by session id and agent key, so the compaction reset does not erase it. `/clear` starts a new session id, so it starts with no counts. A resume keeps the session id: the SessionStart hook clears the fire clocks, n carries over, and the compaction epoch does not move. The state is pruned by age, as the subagent switches are.
 
 ### 2. Geometric back-off
 
