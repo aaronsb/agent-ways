@@ -14,6 +14,7 @@ use std::path::PathBuf;
 pub use ways_core::{agents, config, frontmatter, paths, scanner, util};
 
 mod cmd;
+mod hook_deadline;
 pub mod session;
 #[cfg(test)]
 mod test_dir;
