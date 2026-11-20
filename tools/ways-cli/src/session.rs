@@ -857,7 +857,9 @@ fn collect_way_ids(dir: &Path, base: &Path) -> Vec<String> {
             .unwrap_or(false);
     if has_marker || dir.join(".value").exists() {
         if let Ok(rel) = dir.strip_prefix(base) {
-            let id = rel.display().to_string();
+            // A way id always uses `/`; on Windows `display()` would give `\`,
+            // and the id would then miss its refire count and its frontmatter.
+            let id = crate::util::path_to_id(rel);
             if !id.is_empty() {
                 ids.push(id);
             }
