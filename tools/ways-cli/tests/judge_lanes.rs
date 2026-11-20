@@ -25,14 +25,25 @@ fn sessions_root() -> String {
     if let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR") {
         return format!("{xdg}/claude-sessions");
     }
-    let uid = Command::new("id")
-        .arg("-u")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "0".to_string());
-    format!("/tmp/.claude-sessions-{uid}")
+    #[cfg(windows)]
+    {
+        let base = std::env::var("LOCALAPPDATA")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| std::env::temp_dir().to_string_lossy().into_owned());
+        format!("{base}/claude-ways/sessions")
+    }
+    #[cfg(not(windows))]
+    {
+        let uid = Command::new("id")
+            .arg("-u")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|| "0".to_string());
+        format!("/tmp/.claude-sessions-{uid}")
+    }
 }
 
 /// One scenario's tree: a home with its own ways, a project, a session.
