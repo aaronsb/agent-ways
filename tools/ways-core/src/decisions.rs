@@ -122,6 +122,9 @@ pub struct Scan {
     pub candidates: Vec<Candidate>,
     pub outcomes: Vec<Outcome>,
     pub judge: Option<Judge>,
+    /// A detached judge's verdicts on a scan, filed under the scan's id: not
+    /// a scan of its own (#1287).
+    pub detached: bool,
 }
 
 /// A `kind: pull` record: one `ways_read` the hook saw, stamped or refused.

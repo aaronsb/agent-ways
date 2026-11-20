@@ -283,7 +283,7 @@ pub(super) fn build_frames_by_agent(
                             by_redisclosure: true,
                         });
                 }
-                "way_judged" if !ev.way.is_empty() && matches!(ev.verdict.as_str(), "block" | "would_block") => judged.push(ev),
+                "way_judged" if !ev.way.is_empty() && !ev.detached && matches!(ev.verdict.as_str(), "block" | "would_block") => judged.push(ev),
                 // #814: a way matched and held back, by its refire window or
                 // the context cap. A check's own suppression is not a row.
                 "way_suppressed" if !ev.way.is_empty() && ev.kind == "way" => held.push(ev),
@@ -537,6 +537,7 @@ pub(crate) fn load_session_events(content: &str, session_id: &str) -> Vec<WayEve
                 check: v["check"].as_str().unwrap_or("").to_string(),
                 p_yes: v["p_yes"].as_str().unwrap_or("").to_string(),
                 verdict: v["verdict"].as_str().unwrap_or("").to_string(),
+                detached: v["detached"].as_str() == Some("true"),
                 ancestor: v["ancestor"].as_str().unwrap_or("").to_string(),
                 switch: v["switch"].as_str().unwrap_or("").to_string(),
                 lane: v["lane"].as_str().unwrap_or("").to_string(),
@@ -607,6 +608,7 @@ mod tests {
             agent_id: String::new(),
             kind: String::new(),
             reason: String::new(),
+            detached: false,
         };
         // Window 1: origin session_start + two fires. A second session_start
         // (a compaction) opens window 2, which starts fresh with one fire.
@@ -655,6 +657,7 @@ mod tests {
             agent_id: String::new(),
             kind: String::new(),
             reason: String::new(),
+            detached: false,
         };
         let events = vec![
             ev("2026-01-01T00:00:00Z", "d/a"),
@@ -814,6 +817,7 @@ mod tests {
             agent_id: String::new(),
             kind: String::new(),
             reason: String::new(),
+            detached: false,
         };
         // A way fires in window 1; after a compaction, it only *re-discloses* (no
         // fresh fire) in window 2 — as a mature window mostly does. It must still show

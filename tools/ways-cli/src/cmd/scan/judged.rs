@@ -492,8 +492,20 @@ pub(crate) fn run_detached(text: &str) -> anyhow::Result<()> {
         std::env::set_var("CLAUDE_AGENT_ID", &job.agent);
     }
     std::env::set_var("CLAUDE_PROJECT_DIR", &job.lane.project_dir);
-    let sink = &crate::session::log_event;
-    let log = job.lane.log(sink);
+    // Every line this judge writes is marked detached, and a held
+    // candidate's lines held_refire, so a reader never takes them for the
+    // hook's own gate decisions (#1287).
+    let held: std::collections::HashSet<&str> =
+        job.entries.iter().filter(|e| e.result == "held_refire").map(|e| e.candidate.key.as_str()).collect();
+    let marked = |fields: &[(&str, &str)]| {
+        let mut line: Vec<(&str, &str)> = fields.to_vec();
+        line.push(("detached", "true"));
+        if fields.iter().any(|(k, v)| *k == "way" && held.contains(v)) {
+            line.push(("held_refire", "true"));
+        }
+        crate::session::log_event(&line);
+    };
+    let log = job.lane.log(&marked);
     let pending: Vec<Pending<'_>> = job
         .entries
         .iter()

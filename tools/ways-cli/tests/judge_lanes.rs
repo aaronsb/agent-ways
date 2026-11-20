@@ -421,4 +421,10 @@ held_sample: 1
     assert_eq!(outcome(&r, "judged/keep")["verdict"], "pass", "{r:#}");
     assert!(r["judge"]["judge_ms"].is_u64(), "{r:#}");
     assert!(!s.fired("judged/drop", None), "blocked twice, never fired");
+    // The detached judge's event lines say so, the held one's twice over.
+    let events = std::fs::read_to_string(s.state.join("agent-ways/events.jsonl")).unwrap();
+    let judged: Vec<serde_json::Value> = events.lines().filter_map(|l| serde_json::from_str(l).ok()).filter(|v: &serde_json::Value| v["event"] == "way_judged" && v["way"] == "judged/keep").collect();
+    let held = judged.iter().find(|v| v["detached"] == "true").expect("a detached verdict");
+    assert_eq!(held["held_refire"], "true", "{held}");
+    assert!(judged.iter().any(|v| v.get("detached").is_none()), "the first call's own verdict is unmarked");
 }
