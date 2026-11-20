@@ -392,9 +392,10 @@ fn ways_list_shows_each_threads_threshold() {
     assert_eq!(threshold(Some("alist")), 50, "the subagent: n = 1 in its own 1M window");
 }
 
-/// `ways session reset --confirm` is the explicit "ways stopped firing"
-/// action, so it clears the thread counts and the compaction epoch with
-/// the clocks: the next match fires as the session's first, at n = 1.
+/// `ways session reset --confirm` is the explicit action for a session
+/// whose guidance went quiet, so it clears the thread counts and the
+/// compaction epoch with the clocks: the next match fires as the session's
+/// first, at n = 1.
 #[test]
 fn session_reset_clears_the_counts_and_the_epoch() {
     let s = Sim::new("reset", None);
