@@ -270,6 +270,11 @@ pub struct Config {
     /// resolves by looking up the preset here and multiplying by the
     /// operator's current context window.
     pub refire_presets: HashMap<String, f64>,
+    /// The refire back-off factor g (ADR-711). After n fires of a way in one
+    /// agent thread, its next refire waits H × g^(n-1), where H is the
+    /// half-life its `refire:` resolves to. Default 2; 1 turns back-off off.
+    /// Read through [`Config::refire_backoff`], which keeps it at 1 or more.
+    pub refire_backoff: f64,
     /// Whether `ways manage repair` projects the framework's secret-path
     /// `permissions.deny` baseline into `settings.json` (ADR-152). Default
     /// `true` — secure by default. Set `secret_path_deny: false` to suppress the
@@ -279,7 +284,18 @@ pub struct Config {
     pub secret_path_deny: bool,
 }
 
+/// The refire back-off factor when the config sets none (ADR-711).
+pub const DEFAULT_REFIRE_BACKOFF: f64 = 2.0;
+
 impl Config {
+    /// The refire back-off factor g (ADR-711): the configured value when it
+    /// is a finite number of at least 1, else the default. A value below 1
+    /// would shorten each wait, which no setting asks for.
+    pub fn refire_backoff(&self) -> f64 {
+        let g = self.refire_backoff;
+        if g.is_finite() && g >= 1.0 { g } else { DEFAULT_REFIRE_BACKOFF }
+    }
+
     /// The active non-English localization language, or `None` in English mode.
     ///
     /// English mode (`en` / `auto` / unset — the default) keeps the intl pipeline
@@ -324,6 +340,7 @@ impl Default for Config {
             event_retention_days: 365,
             decision_retention_turns: 50_000,
             refire_presets,
+            refire_backoff: DEFAULT_REFIRE_BACKOFF,
             secret_path_deny: true,
         }
     }
@@ -543,6 +560,9 @@ impl Config {
                 }
             }
         }
+        if let Some(v) = doc.get("refire_backoff").and_then(|v| v.as_f64()) {
+            self.refire_backoff = v; // the schema holds 1..=10
+        }
         if let Some(v) = doc.get("secret_path_deny").and_then(|v| v.as_bool()) {
             self.secret_path_deny = v;
         }
@@ -744,6 +764,22 @@ mod tests {
         assert_eq!(cfg.refire_presets.get("rare").copied(), Some(0.4));
         assert_eq!(cfg.refire_presets.get("normal").copied(), Some(0.15));
         assert_eq!(cfg.refire_presets.get("frequent").copied(), Some(0.05));
+    }
+
+    /// ADR-711: g defaults to 2, a config value replaces it, and a value
+    /// below 1 or not a number reads as the default.
+    #[test]
+    fn refire_backoff_defaults_to_two_and_never_reads_below_one() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.refire_backoff(), 2.0);
+        cfg.apply_yaml("refire_backoff: 1\n");
+        assert_eq!(cfg.refire_backoff(), 1.0);
+        cfg.apply_yaml("refire_backoff: 3.5\n");
+        assert_eq!(cfg.refire_backoff(), 3.5);
+        cfg.refire_backoff = 0.5;
+        assert_eq!(cfg.refire_backoff(), DEFAULT_REFIRE_BACKOFF);
+        cfg.refire_backoff = f64::NAN;
+        assert_eq!(cfg.refire_backoff(), DEFAULT_REFIRE_BACKOFF);
     }
 
     #[test]
