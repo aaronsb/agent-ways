@@ -83,10 +83,10 @@ impl Lane {
 /// How the gate is set for this call.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum Config {
-    /// No engine and no key, or `gate.mode: off`.
+    /// No engine and no key, `gate.mode: off`, or an agent.yaml the gate
+    /// cannot read.
     Off,
-    /// Judge on the hot path. A broken agent.yaml lands here too, so the
-    /// gate logs why it falls back.
+    /// Judge on the hot path.
     Enforce { held_sample: f64 },
     /// Show everything; judge off the hot path.
     Shadow { held_sample: f64 },
@@ -104,9 +104,10 @@ pub(super) fn configured() -> Config {
                 Mode::Enforce => Config::Enforce { held_sample },
             }
         }
-        // A broken agent.yaml fails closed: the gate is off. The prompt lane
-        // logs why; a tool lane, on every tool call, stays as quiet as it
-        // was before it judged.
+        // A broken agent.yaml turns the gate off, so the lane fails open:
+        // the matcher's decision stands and nothing goes to a provider. The
+        // prompt lane logs why as `gate_fallback`; a tool lane, on every tool
+        // call, stays as quiet as it was before it judged.
         Ok(GateReading::Off | GateReading::NoKey) | Err(_) => Config::Off,
     }
 }
