@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="1000" height="418" viewBox="0 0 1000 418" font-family="DejaVu Sans, Arial, sans-serif">
+<rect width="1000" height="418" fill="#ffffff"/>
+<text x="18" y="28" font-size="16" fill="#222">Fires of one way that matches on every call, in one agent thread, over four context windows</text>
+<text x="18" y="50" font-size="12" fill="#555">H = 0.15 of the window (the normal preset), g = 2, and each window compacts at 0.8 of its size.</text>
+<text x="18" y="66" font-size="12" fill="#555">Red: the way has fired before, compaction removed its text, and it has not fired again.</text>
+<text x="453.8" y="76" font-size="12" fill="#555" text-anchor="middle">window 1</text>
+<text x="601.2" y="76" font-size="12" fill="#555" text-anchor="middle">window 2</text>
+<line x1="527.5" y1="80" x2="527.5" y2="328" stroke="#888" stroke-dasharray="5,4"/>
+<text x="748.8" y="76" font-size="12" fill="#555" text-anchor="middle">window 3</text>
+<line x1="675.0" y1="80" x2="675.0" y2="328" stroke="#888" stroke-dasharray="5,4"/>
+<text x="896.2" y="76" font-size="12" fill="#555" text-anchor="middle">window 4</text>
+<line x1="822.5" y1="80" x2="822.5" y2="328" stroke="#888" stroke-dasharray="5,4"/>
+<text x="18" y="107.0" font-size="13" fill="#222" font-weight="normal">Today: wait H after every fire</text>
+<text x="18" y="125.0" font-size="12" fill="#555">24 fires</text>
+<line x1="380" y1="111.0" x2="970" y2="111.0" stroke="#999"/>
+<line x1="380.0" y1="100.0" x2="380.0" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="407.7" y1="100.0" x2="407.7" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="435.3" y1="100.0" x2="435.3" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="463.0" y1="100.0" x2="463.0" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="490.6" y1="100.0" x2="490.6" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="518.3" y1="100.0" x2="518.3" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="527.5" y1="100.0" x2="527.5" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="555.2" y1="100.0" x2="555.2" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="582.8" y1="100.0" x2="582.8" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="610.5" y1="100.0" x2="610.5" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="638.1" y1="100.0" x2="638.1" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="665.8" y1="100.0" x2="665.8" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="675.0" y1="100.0" x2="675.0" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="702.7" y1="100.0" x2="702.7" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="730.3" y1="100.0" x2="730.3" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="758.0" y1="100.0" x2="758.0" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="785.6" y1="100.0" x2="785.6" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="813.3" y1="100.0" x2="813.3" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="822.5" y1="100.0" x2="822.5" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="850.2" y1="100.0" x2="850.2" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="877.8" y1="100.0" x2="877.8" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="905.5" y1="100.0" x2="905.5" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="933.1" y1="100.0" x2="933.1" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="960.8" y1="100.0" x2="960.8" y2="122.0" stroke="#6b6b6b" stroke-width="3"/>
+<text x="18" y="169.0" font-size="13" fill="#222" font-weight="normal">Not chosen: count resets at compaction</text>
+<text x="18" y="187.0" font-size="12" fill="#555">12 fires</text>
+<line x1="380" y1="173.0" x2="970" y2="173.0" stroke="#999"/>
+<line x1="380.0" y1="162.0" x2="380.0" y2="184.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="407.7" y1="162.0" x2="407.7" y2="184.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="463.0" y1="162.0" x2="463.0" y2="184.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="527.5" y1="162.0" x2="527.5" y2="184.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="555.2" y1="162.0" x2="555.2" y2="184.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="610.5" y1="162.0" x2="610.5" y2="184.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="675.0" y1="162.0" x2="675.0" y2="184.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="702.7" y1="162.0" x2="702.7" y2="184.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="758.0" y1="162.0" x2="758.0" y2="184.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="822.5" y1="162.0" x2="822.5" y2="184.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="850.2" y1="162.0" x2="850.2" y2="184.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="905.5" y1="162.0" x2="905.5" y2="184.0" stroke="#6b6b6b" stroke-width="3"/>
+<text x="18" y="231.0" font-size="13" fill="#222" font-weight="normal">Not chosen: count kept, no grant</text>
+<text x="18" y="249.0" font-size="12" fill="#555">5 fires</text>
+<rect x="527.5" y="223.0" width="46.1" height="24" fill="#c0392b" fill-opacity="0.22"/>
+<rect x="675.0" y="223.0" width="119.8" height="24" fill="#c0392b" fill-opacity="0.22"/>
+<rect x="822.5" y="223.0" width="147.5" height="24" fill="#c0392b" fill-opacity="0.22"/>
+<line x1="380" y1="235.0" x2="970" y2="235.0" stroke="#999"/>
+<line x1="380.0" y1="224.0" x2="380.0" y2="246.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="407.7" y1="224.0" x2="407.7" y2="246.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="463.0" y1="224.0" x2="463.0" y2="246.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="573.6" y1="224.0" x2="573.6" y2="246.0" stroke="#6b6b6b" stroke-width="3"/>
+<line x1="794.8" y1="224.0" x2="794.8" y2="246.0" stroke="#6b6b6b" stroke-width="3"/>
+<rect x="8" y="270" width="984" height="54" fill="#e8f1fa" stroke="#1f6fb2" stroke-width="1"/>
+<text x="18" y="293.0" font-size="13" fill="#222" font-weight="bold">Chosen: count kept, one fire granted a window</text>
+<text x="18" y="311.0" font-size="12" fill="#555">6 fires</text>
+<line x1="380" y1="297.0" x2="970" y2="297.0" stroke="#999"/>
+<line x1="380.0" y1="286.0" x2="380.0" y2="308.0" stroke="#1f6fb2" stroke-width="3"/>
+<line x1="407.7" y1="286.0" x2="407.7" y2="308.0" stroke="#1f6fb2" stroke-width="3"/>
+<line x1="463.0" y1="286.0" x2="463.0" y2="308.0" stroke="#1f6fb2" stroke-width="3"/>
+<line x1="527.5" y1="286.0" x2="527.5" y2="308.0" stroke="#1f6fb2" stroke-width="3"/>
+<line x1="675.0" y1="286.0" x2="675.0" y2="308.0" stroke="#1f6fb2" stroke-width="3"/>
+<line x1="822.5" y1="286.0" x2="822.5" y2="308.0" stroke="#1f6fb2" stroke-width="3"/>
+<text x="18" y="354" font-size="12" fill="#555">Tokens through the session. After n fires in the thread, the next refire waits H x g^(n-1). The fire granted after compaction counts toward n.</text>
+<text x="18" y="374" font-size="12" fill="#555">Dashed line: compaction, which removes the way's text and clears the fire clock but, under the chosen rule, keeps n.</text>
+</svg>
