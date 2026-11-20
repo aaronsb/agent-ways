@@ -312,7 +312,11 @@ fn build_summary(
             }
             continue;
         }
+        // A detached judge's lines are judged after the hook, on candidates
+        // it showed or held: they are no gate decision of the hook's.
+        let detached = v["detached"].as_str() == Some("true");
         match v["event"].as_str() {
+            Some("way_judged" | "gate_fallback") if detached => {}
             Some("way_fired") => {
                 total_fires += 1;
                 if let Some(t) = v["trigger"].as_str() {
@@ -534,6 +538,23 @@ mod tests {
             .iter()
             .map(|w| (s(&w["id"]), s(&w["outcome"]), s(&w["p_yes"]), s(&w["ancestor"])))
             .collect()
+    }
+
+    /// A detached judge's verdicts are not the hook's: a held candidate it
+    /// would block, or a shadow verdict judged after the call, is no block
+    /// and no gate latency in the summary (#1287).
+    #[test]
+    fn the_summary_leaves_out_a_detached_judges_verdicts() {
+        let log = concat!(
+            r#"{"event":"way_judged","session":"dump-det","ts":"2026-01-01T00:00:00Z","way":"d/a","verdict":"block","gate_ms":"900"}"#, "\n",
+            r#"{"event":"way_judged","session":"dump-det","ts":"2026-01-01T00:00:01Z","way":"d/h","verdict":"block","gate_ms":"30000","detached":"true","held_refire":"true"}"#, "\n",
+            r#"{"event":"gate_fallback","session":"dump-det","ts":"2026-01-01T00:00:02Z","reason":"deadline","gate_ms":"30000","detached":"true"}"#, "\n",
+        );
+        let dump = serde_json::to_value(build_dump(log, "dump-det", false).unwrap()).unwrap();
+        let gate = &dump["summary"]["gate"];
+        assert_eq!((gate["judged"].as_u64(), gate["blocked"].as_u64()), (Some(1), Some(1)), "{gate}");
+        assert!(gate["blocked_ways"].get("d/h").is_none(), "{gate}");
+        assert!(gate["fallbacks"].get("deadline").is_none(), "{gate}");
     }
 
     /// `replay --json` marks each way with its outcome and P(yes);

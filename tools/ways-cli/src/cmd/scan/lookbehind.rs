@@ -47,10 +47,13 @@ pub(crate) fn intent(session_id: &str) -> Option<String> {
 
 /// The calling agent's request for the relevance judge: its last human
 /// turn, a subagent's brief for a subagent that had no other. The agent's
-/// narration is left out: ADR-707 measured it letting off-topic ways pass,
-/// and the operator chose the request and the call (ADR-712). Read from
-/// that agent's own transcript, as [`intent`] reads it; empty when there is
-/// none.
+/// narration is left out, because it let off-topic ways pass when measured,
+/// and the operator chose the request and the call. Read from that agent's
+/// own transcript, as [`intent`] reads it; empty when there is none.
+///
+/// References:
+/// - ADR-707: the measurement of narration as judge input.
+/// - ADR-712 §4: the operator's choice of the request and the call.
 pub(crate) fn recent_turns(session_id: &str) -> Vec<ways_agent_core::judge::Turn> {
     recent_turns_in(
         &ways_core::paths::claude_dir(),

@@ -639,8 +639,10 @@ const SHOW_MARGIN: std::time::Duration = std::time::Duration::from_millis(250);
 /// Whether [`way_scored`] would show this way now, budget aside: not disabled,
 /// in scope, and allowed by its refire curve at the token position `tick`,
 /// which a scan reads once for all its candidates. Read-only. The relevance
-/// gate asks it so it judges only ways that would reach the agent (ADR-196
-/// §1).
+/// gate asks it so it judges only ways that would reach the agent.
+///
+/// References:
+/// - ADR-196 §1: the gate judges only what would be shown.
 pub(crate) fn would_fire_at(id: &str, session_id: &str, tick: u64) -> bool {
     match fireable(id, session_id) {
         Ok(Some(f)) => session::way_fire_outcome(id, session_id, &f.curve, tick).outcome.is_allowed(),

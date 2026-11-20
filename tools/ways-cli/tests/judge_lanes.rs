@@ -149,6 +149,30 @@ impl Sim {
         String::from_utf8_lossy(&out.stdout).into_owned()
     }
 
+    /// Writes a way `judged/<rel>` with the frontmatter lines `extra`.
+    fn way(&self, rel: &str, extra: &str) {
+        let name = rel.rsplit('/').next().unwrap();
+        let dir = self.home.join(".claude/hooks/ways/judged").join(rel);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(format!("{name}.md")),
+            format!("---\ndescription: test way {name}\n{extra}\nrefire: 0.15\n---\n# Marker {name}\n\nbody of {name}\n"),
+        )
+        .unwrap();
+    }
+
+    /// Runs `ways hook <event>` on a raw payload, with this session's id.
+    fn raw_hook(&self, event: &str, mut payload: serde_json::Value) -> String {
+        payload["session_id"] = self.session.clone().into();
+        payload["cwd"] = self.project.to_string_lossy().into_owned().into();
+        payload["transcript_path"] = self.transcript().to_string_lossy().into_owned().into();
+        let mut child = self.ways().args(["hook", event]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+        std::io::Write::write_all(&mut child.stdin.take().unwrap(), payload.to_string().as_bytes()).unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success(), "hook {event}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
     fn bash(&self, agent: Option<&str>) -> String {
         self.hook("command", "Bash", serde_json::json!({"command": "git commit -m fix", "description": "Commit the parser fix"}), agent)
     }
@@ -247,7 +271,7 @@ fn answer_one(env: &HostEnv) -> Option<String> {
     let mut judgements = Vec::new();
     for (i, block) in prompt.split("<guidance id=\"g").skip(1).enumerate() {
         let route = block.lines().nth(1).unwrap_or("");
-        let drop = route.contains("drop");
+        let drop = route.rsplit(" › ").next().unwrap_or("").contains("drop");
         judgements.push(serde_json::json!({"id": format!("g{}", i + 1), "relevant": !drop, "confidence": 0.95}));
     }
     let answer = serde_json::json!({"text": serde_json::json!({"judgements": judgements}).to_string()});
@@ -344,29 +368,73 @@ fn shadow_injects_everything_and_logs_the_verdicts() {
     assert_eq!(host.join().unwrap().len(), 1, "one detached request");
 }
 
-/// With no engine and no key the gate is off, and a tool call does what it
-/// did before the gate reached the tool lanes: every candidate injected and
-/// fired, no judge job, no decision record and no gate event. A broken
-/// agent.yaml turns the gate off the same way, with no gate event per call.
+/// The files under a session's directory, relative to it: the fire markers,
+/// the epoch and whatever else a hook leaves there.
+fn session_files(s: &Sim) -> Vec<String> {
+    fn walk(dir: &std::path::Path, base: &std::path::Path, out: &mut Vec<String>) {
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, base, out);
+            } else {
+                out.push(p.strip_prefix(base).unwrap().to_string_lossy().into_owned());
+            }
+        }
+    }
+    let base = PathBuf::from(format!("{}/{}", sessions_root(), s.session));
+    let mut out = Vec::new();
+    walk(&base, &base, &mut out);
+    out.sort();
+    out
+}
+
+/// With the gate off, a tool call does what it did before the gate reached
+/// the tool lanes. With no agent.yaml, a broken one, or `mode: off` with a
+/// held sample asked for, the Bash, tool and file lanes inject the same ways
+/// and leave the same fire markers, refire holds the second call as before,
+/// and there is no judge job, no detached judge, no decision record and no
+/// gate event.
 #[test]
 fn with_the_gate_off_nothing_changes() {
-    for (name, yaml) in [("off", None), ("broken", Some("engine: [unclosed\n"))] {
+    let mut reference: Option<(Vec<String>, Vec<String>)> = None;
+    for (name, yaml) in [
+        ("off", None),
+        ("broken", Some("engine: [unclosed\n")),
+        ("mode-off", Some("engine: claude-code\nmode: off\nheld_sample: 1\n")),
+    ] {
         let s = Sim::new(name, None);
         if let Some(y) = yaml {
             let dir = s.home.join(".config/agent-ways");
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::write(dir.join("agent.yaml"), y).unwrap();
         }
-        let out = s.bash(Some("asub1"));
-        assert!(out.contains("# Marker keep") && out.contains("# Marker drop"), "{name}: {out}");
+        s.way("toolkeep", "tool_name: ^ExitPlanMode$\nscope: agent");
+        let outs = vec![
+            s.bash(Some("asub1")),
+            s.bash(Some("asub1")),
+            s.hook("tool", "ExitPlanMode", serde_json::json!({}), None),
+            s.hook("file", "Edit", serde_json::json!({"file_path": "/srv/p/src/lib.rs"}), None),
+        ];
+        assert!(outs[0].contains("# Marker keep") && outs[0].contains("# Marker drop"), "{name}: {}", outs[0]);
+        assert!(!outs[1].contains("# Marker keep"), "{name}: refire holds as before: {}", outs[1]);
+        assert!(outs[2].contains("# Marker toolkeep"), "{name}: {}", outs[2]);
+        assert!(outs[3].contains("# Marker keepfile") && outs[3].contains("# Marker dropfile"), "{name}: {}", outs[3]);
         assert!(s.fired("judged/keep", Some("asub1")) && s.fired("judged/drop", Some("asub1")), "{name}");
-        let again = s.bash(Some("asub1"));
-        assert!(!again.contains("# Marker keep"), "{name}: refire holds as before: {again}");
+        // A detached judge would write its record a moment after the hook.
+        std::thread::sleep(Duration::from_millis(300));
         let jobs = PathBuf::from(format!("{}/{}/judge", sessions_root(), s.session));
         assert!(!jobs.exists() || std::fs::read_dir(&jobs).unwrap().next().is_none(), "{name}: no judge job");
         assert!(s.decisions().is_empty(), "{name}: no decision record: {:#?}", s.decisions());
         let events = std::fs::read_to_string(s.state.join("agent-ways/events.jsonl")).unwrap_or_default();
-        assert!(!events.contains("gate_fallback") && !events.contains("way_judged"), "{name}: no gate event: {events}");
+        for word in ["gate_fallback", "way_judged", "judge_detach", "\"detached\""] {
+            assert!(!events.contains(word), "{name}: no {word} event: {events}");
+        }
+        let state = (outs, session_files(&s));
+        assert!(state.1.iter().any(|f| f.ends_with("keep/.marker.asub1")), "{name}: the snapshot sees the markers: {:?}", state.1);
+        match &reference {
+            None => reference = Some(state),
+            Some(r) => assert_eq!(&state, r, "{name}: the same output and session state as with no agent.yaml"),
+        }
     }
 }
 
@@ -391,6 +459,133 @@ fn a_hung_judge_and_slow_macros_fail_open_inside_the_hook_bound() {
     assert!(host.join().unwrap().is_some(), "the judge was asked");
     assert!(took < Duration::from_millis(9_500), "the hook took {took:?}, past its 9 s deadline");
     assert!(out.contains("# Marker keep") && out.contains("# Marker drop"), "fails open: {out}");
+}
+
+/// A tool lane whose judge takes the job and never answers fails open
+/// inside the hook bound: both ways shown, and the record names the
+/// fallback.
+#[test]
+fn a_tool_lane_judge_that_times_out_fails_open_inside_the_bound() {
+    let s = Sim::new("tool-hung", Some(ENFORCE));
+    s.way("toolkeep", "tool_name: ^ExitPlanMode$\nscope: agent");
+    s.way("tooldrop", "tool_name: ^ExitPlanMode$\nscope: agent");
+    let env = s.ways_args();
+    let host = std::thread::spawn(move || take_silently(&env));
+    let begun = Instant::now();
+    let out = s.hook("tool", "ExitPlanMode", serde_json::json!({}), None);
+    let took = begun.elapsed();
+    assert!(host.join().unwrap().is_some(), "the judge was asked");
+    assert!(took < Duration::from_millis(9_500), "the hook took {took:?}, past its 9 s deadline");
+    assert!(out.contains("# Marker toolkeep") && out.contains("# Marker tooldrop"), "fails open: {out}");
+    let r = s.wait_decision(|r| r["surface"] == "tool");
+    assert_eq!(r["judge"]["status"], "fallback", "{r:#}");
+    assert_eq!(outcome(&r, "judged/tooldrop")["result"], "fired", "{r:#}");
+}
+
+/// A gate switched on with no judge host registered for the session fails
+/// open at once on a tool lane: nothing waits on a host that is not there.
+#[test]
+fn a_tool_lane_with_no_judge_host_fails_open_at_once() {
+    let s = Sim::new("no-host", None);
+    let dir = s.home.join(".config/agent-ways");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("agent.yaml"), ENFORCE).unwrap();
+    let begun = Instant::now();
+    let out = s.bash(None);
+    let took = begun.elapsed();
+    assert!(took < Duration::from_secs(3), "the hook took {took:?} with no host to wait on");
+    assert!(out.contains("# Marker keep") && out.contains("# Marker drop"), "fails open: {out}");
+    assert!(s.fired("judged/drop", None), "a way shown on fail-open has its fire recorded");
+    let r = s.wait_decision(|r| r["surface"] == "command");
+    assert_eq!(r["judge"]["status"], "fallback", "{r:#}");
+}
+
+/// The dispatch lane judges a subagent's ways against its brief. A dispatch
+/// whose every way the judge blocks still leaves its (empty) stash, so the
+/// next SubagentStart claims that one and not a later dispatch's.
+#[test]
+fn the_dispatch_lane_judges_and_keeps_each_stash_to_its_dispatch() {
+    let s = Sim::new("task", Some(ENFORCE));
+    s.way("taskdrop", "pattern: droptopic\nscope: subagent");
+    s.way("taskkeep", "pattern: keeptopic\nscope: subagent");
+    let host = s.host(2);
+    s.raw_hook("task", serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"prompt": "work on the droptopic"}}));
+    s.raw_hook("task", serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"prompt": "work on the keeptopic"}}));
+    let prompts = host.join().unwrap();
+    assert_eq!(prompts.len(), 2, "both dispatches judged");
+    assert!(prompts[0].contains("work on the droptopic"), "the brief is the judge's input: {}", prompts[0]);
+    let first = s.raw_hook("subagent-start", serde_json::json!({"hook_event_name": "SubagentStart", "agent_id": "afirst"}));
+    let second = s.raw_hook("subagent-start", serde_json::json!({"hook_event_name": "SubagentStart", "agent_id": "asecond"}));
+    assert!(!first.contains("# Marker taskdrop") && !first.contains("# Marker taskkeep"), "the first dispatch's stash is empty: {first}");
+    assert!(second.contains("# Marker taskkeep"), "the second gets its own: {second}");
+    let r = s.wait_decision(|r| r["surface"] == "task" && r["outcomes"][0]["way"] == "judged/taskdrop");
+    assert_eq!(outcome(&r, "judged/taskdrop")["result"], "judge_block", "{r:#}");
+}
+
+/// The tool lane judges a `tool_name:` way like any other candidate.
+#[test]
+fn the_tool_lane_judges_its_candidates() {
+    let s = Sim::new("tool", Some(ENFORCE));
+    s.way("toolkeep", "tool_name: ^ExitPlanMode$\nscope: agent");
+    s.way("tooldrop", "tool_name: ^ExitPlanMode$\nscope: agent");
+    let host = s.host(1);
+    let out = s.raw_hook("tool", serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": "ExitPlanMode", "tool_input": {}}));
+    let prompts = host.join().unwrap();
+    assert!(prompts[0].contains("About to use the ExitPlanMode tool."), "{}", prompts[0]);
+    assert!(out.contains("# Marker toolkeep") && !out.contains("# Marker tooldrop"), "{out}");
+    assert!(!s.fired("judged/tooldrop", None));
+    s.wait_decision(|r| r["surface"] == "tool");
+}
+
+/// The state lane judges its triggered ways against the prompt in hand.
+#[test]
+fn the_state_lane_judges_its_triggered_ways() {
+    let s = Sim::new("state", Some(ENFORCE));
+    s.way("statekeep", "trigger: session-start\nscope: agent");
+    s.way("statedrop", "trigger: session-start\nscope: agent");
+    let host = s.host(1);
+    let out = s.raw_hook("state", serde_json::json!({"hook_event_name": "UserPromptSubmit", "prompt": "tidy the release notes"}));
+    let prompts = host.join().unwrap();
+    assert!(prompts[0].contains("tidy the release notes"), "{}", prompts[0]);
+    assert!(out.contains("# Marker statekeep") && !out.contains("# Marker statedrop"), "{out}");
+    s.wait_decision(|r| r["surface"] == "state");
+}
+
+/// The post-tool lane judges the ways their postchecks asked for.
+#[test]
+fn the_post_tool_lane_judges_what_the_postchecks_ask_for() {
+    let s = Sim::new("post", Some(ENFORCE));
+    for id in ["postkeep", "postdrop"] {
+        s.way(id, "scope: agent");
+        let script = s.home.join(format!(".claude/hooks/ways/judged/{id}/postcheck.sh"));
+        std::fs::write(&script, "#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::PermissionsExt::set_mode(&mut std::fs::metadata(&script).unwrap().permissions(), 0o755);
+        #[cfg(unix)]
+        std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    }
+    let host = s.host(1);
+    let out = s.raw_hook("post-tool", serde_json::json!({"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"}}));
+    let prompts = host.join().unwrap();
+    assert!(prompts[0].contains("Used the Bash tool."), "{}", prompts[0]);
+    assert!(out.contains("# Marker postkeep") && !out.contains("# Marker postdrop"), "{out}");
+    s.wait_decision(|r| r["surface"] == "post_tool");
+}
+
+/// A parent the judge blocks keeps its rank before its child in the record,
+/// and a child the judge passed is still shown: the judge saw it.
+#[test]
+fn a_blocked_parent_keeps_its_place_before_its_child() {
+    let s = Sim::new("tree", Some(ENFORCE));
+    s.way("dropper", "commands: ^make\\b\nscope: agent");
+    s.way("dropper/kid", "commands: ^make\\b\nscope: agent");
+    let host = s.host(1);
+    let out = s.hook("command", "Bash", serde_json::json!({"command": "make test", "description": "Run the tests"}), None);
+    host.join().unwrap();
+    assert!(!out.contains("# Marker dropper") && out.contains("# Marker kid"), "{out}");
+    let r = s.wait_decision(|r| r["surface"] == "command");
+    let order: Vec<(&str, &str)> = r["outcomes"].as_array().unwrap().iter().map(|o| (o["way"].as_str().unwrap(), o["result"].as_str().unwrap())).collect();
+    assert_eq!(order, [("judged/dropper", "judge_block"), ("judged/dropper/kid", "fired")], "{r:#}");
 }
 
 /// A candidate the refire curve holds is never injected and never holds the
@@ -421,6 +616,12 @@ held_sample: 1
     assert_eq!(outcome(&r, "judged/keep")["verdict"], "pass", "{r:#}");
     assert!(r["judge"]["judge_ms"].is_u64(), "{r:#}");
     assert!(!s.fired("judged/drop", None), "blocked twice, never fired");
+    // The detached judge's event lines say so, the held one's twice over.
+    let events = std::fs::read_to_string(s.state.join("agent-ways/events.jsonl")).unwrap();
+    let judged: Vec<serde_json::Value> = events.lines().filter_map(|l| serde_json::from_str(l).ok()).filter(|v: &serde_json::Value| v["event"] == "way_judged" && v["way"] == "judged/keep").collect();
+    let held = judged.iter().find(|v| v["detached"] == "true").expect("a detached verdict");
+    assert_eq!(held["held_refire"], "true", "{held}");
+    assert!(judged.iter().any(|v| v.get("detached").is_none()), "the first call's own verdict is unmarked");
 }
 
 /// The fires `agent`'s thread has counted for `way` for the refire

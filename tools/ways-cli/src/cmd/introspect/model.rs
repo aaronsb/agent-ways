@@ -34,6 +34,9 @@ pub(crate) struct WayEvent {
     /// (`refire` or `context_cap`).
     pub(super) kind: String,
     pub(super) reason: String,
+    /// The line came from a detached judge (#1287): its verdict is no
+    /// decision the hook acted on.
+    pub(super) detached: bool,
 }
 
 /// Ways held back from a subagent by the subagent switch (#768, #786):

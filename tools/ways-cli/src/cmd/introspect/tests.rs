@@ -37,6 +37,16 @@ use super::why::build_why_index;
 const SESSION: &str = "8f3a2c1d-5e6f-4a7b-9c8d-0e1f2a3b4c5d";
 const PROJECT: &str = "/home/dev/proj";
 
+/// A detached judge's verdict, on a held candidate or a shadow call judged
+/// after it ran, does not mark the way in the frame (#1287).
+#[test]
+fn a_detached_verdict_marks_no_row() {
+    let held = WayEvent { verdict: "block".into(), detached: true, ..ev("2026-07-03T16:52:02Z", "way_judged", "itops/incident", "") };
+    let events = vec![ev("2026-07-03T16:52:01Z", "way_fired", "softwaredev/docs/adr", "file"), held];
+    let f = &build_frames(&events, &[], &HashMap::new(), 50)[0];
+    assert!(f.ways.iter().all(|w| w.id != "itops/incident"), "{:?}", f.ways.iter().map(|w| &w.id).collect::<Vec<_>>());
+}
+
 /// The sizes every screen is checked at: the smallest a screen must work
 /// in, and the reference.
 const SIZES: [(u16, u16); 2] = [(80, 25), (120, 40)];
@@ -57,6 +67,7 @@ fn ev(ts: &str, event: &str, way: &str, trigger: &str) -> WayEvent {
         agent_id: String::new(),
         kind: String::new(),
         reason: String::new(),
+        detached: false,
     }
 }
 

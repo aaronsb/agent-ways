@@ -168,7 +168,7 @@ pub fn task(
         .map(|h| Hit { id: h.id.clone(), score: h.score, specificity: h.specificity, payload: h.payload.clone() })
         .collect();
 
-    let stashed = write_stash(&kept, record.scan_id(), session_id, is_teammate, team);
+    let stashed = if hits.is_empty() { Ok(()) } else { write_stash(&kept, record.scan_id(), session_id, is_teammate, team) };
     let result = if stashed.is_ok() { "stashed" } else { "error" };
     let mut shown = Vec::new();
     for (i, hit) in hits.iter().enumerate() {
@@ -187,42 +187,32 @@ pub fn task(
     stashed
 }
 
-/// Write the task lane's matched ways to a stash file for SubagentStart to
-/// claim, with the `scan_id` of the task scan's decision record, which
-/// becomes the subagent's last scan. Nothing is written when nothing matched:
-/// a stash nobody claims (a dispatch the operator denied) would be claimed by
-/// the next subagent instead of its own.
-fn write_stash(hits: &[Hit<String>], scan_id: &str, session_id: &str, is_teammate: bool, team: Option<&str>) -> Result<()> {
-    let matched: Vec<(&str, &str)> = hits.iter().map(|h| (h.id.as_str(), h.payload.as_str())).collect();
-
-    // Write stash file if any ways matched
-    if !matched.is_empty() {
-        let stash_dir = format!(
-            "{}/{session_id}/subagent-stash",
-            session::sessions_root()
-        );
-        std::fs::create_dir_all(&stash_dir)?;
-
-        let ways: Vec<&str> = matched.iter().map(|(id, _)| *id).collect();
-        let channels: Vec<&str> = matched.iter().map(|(_, ch)| *ch).collect();
-
-        let stash = serde_json::json!({
-            "ways": ways,
-            "channels": channels,
-            "is_teammate": is_teammate,
-            "team_name": team.unwrap_or(""),
-            "scan_id": scan_id,
-        });
-
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        // Published whole: SubagentStart may claim the stash the moment it
-        // appears, and the writer's temporary name does not end in `.json`.
-        let stash_file = format!("{stash_dir}/{timestamp}.json");
-        agent_settings::writer::write_atomic(std::path::Path::new(&stash_file), stash.to_string())?;
-    }
-
+/// Write the ways the judge kept for a dispatch to a stash file for
+/// SubagentStart to claim, with the `scan_id` of the task scan's decision
+/// record, which becomes the subagent's last scan. The caller writes one for
+/// every dispatch that matched, with `ways: []` when the judge blocked them
+/// all: SubagentStart claims the oldest stash, so a dispatch that left none
+/// would hand its subagent the next dispatch's ways. A dispatch that matched
+/// nothing writes none, as before the judge.
+fn write_stash(kept: &[Hit<String>], scan_id: &str, session_id: &str, is_teammate: bool, team: Option<&str>) -> Result<()> {
+    let stash_dir = format!("{}/{session_id}/subagent-stash", session::sessions_root());
+    std::fs::create_dir_all(&stash_dir)?;
+    let ways: Vec<&str> = kept.iter().map(|h| h.id.as_str()).collect();
+    let channels: Vec<&str> = kept.iter().map(|h| h.payload.as_str()).collect();
+    let stash = serde_json::json!({
+        "ways": ways,
+        "channels": channels,
+        "is_teammate": is_teammate,
+        "team_name": team.unwrap_or(""),
+        "scan_id": scan_id,
+    });
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    // Published whole: SubagentStart may claim the stash the moment it
+    // appears, and the writer's temporary name does not end in `.json`.
+    let stash_file = format!("{stash_dir}/{timestamp}.json");
+    agent_settings::writer::write_atomic(std::path::Path::new(&stash_file), stash.to_string())?;
     Ok(())
 }

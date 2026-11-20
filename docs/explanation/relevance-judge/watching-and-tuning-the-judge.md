@@ -34,7 +34,7 @@ The judge writes four event types to the event log, beside the matcher's own. Ea
 | `way_judged` | judged candidate | `p_yes` against `threshold`, and `verdict`: `pass`, `block` or `would_block`. `judge_ms` shows how close calls run to the deadline. |
 | `judge_call` | provider call | Tokens and `cost_usd`, which the spend views sum. `reason` when the call ended in a fallback. |
 | `gate_fallback` | failed request | `reason`: why the matcher decided alone. |
-| `gate_capped` | request over the cap, before ADR-712 | `ways`: the candidates that passed unjudged. A current gate judges the rest in further requests and writes none. |
+| `gate_capped` | request over the cap, in releases that judged only the first `max_candidates` | `ways`: the candidates that passed unjudged. A current gate judges the rest in further requests and writes none. |
 
 A `way_judged` block with `reason: ancestor` names the blocked `ancestor` and carries its verdict. The judge never saw that way, so the line has no `judge_ms`, `gate_ms` or `candidates`, and a count of the judge's own verdicts skips it.
 
@@ -80,3 +80,7 @@ ways settings list gate --json --effective
 On the settings screen, Enter on `gate.profiles.<p>.model` opens a picker. It lists the models from a cached copy of the provider's list, `$XDG_CACHE_HOME/agent-ways/agent/models-<provider>.json`, so opening it makes no network call. The recommended model comes first, then Anthropic's models, then the rest. `ways agent models --provider <p>` fetches and caches the list. Until it has run, the key reports "model list not fetched" with that command.
 
 A new model makes the key's last check stale, so the judge falls back until the key is checked against it; [key custody](what-the-judge-sends-and-costs.md#key-custody) explains the check.
+
+## References
+
+- ADR-712: every candidate in every lane and agent thread is judged, after the refire check and before the fire is recorded. It retired `gate_capped`.

@@ -18,17 +18,19 @@ The relevance judge ([the model](relevance-judge-the-model.md)) is the one part 
 
 A request goes out only when all of these hold:
 
-- the prompt or queued-message lane produced candidates that the refire curve lets through and that are not `pattern_strict`;
+- a lane produced candidates that the refire curve lets through, or `gate.held_sample` picked a candidate the curve holds;
 - `gate.mode` is `enforce` or `shadow`;
 - the engine's provider has a key that passed its last check.
 
-Then the agent makes one HTTPS request per gated prompt, to `api.anthropic.com/v1/messages` or `openrouter.ai/api/v1/chat/completions`, depending on the engine's provider. The request holds:
+Then the agent makes one HTTPS request per batch of candidates, to `api.anthropic.com/v1/messages` or `openrouter.ai/api/v1/chat/completions`, depending on the engine's provider. The request holds:
 
 - a fixed system instruction and the `record_judgements` tool schema;
-- for each candidate, up to `max_candidates`: the way's path through the ways tree, with `›` between segments, and its `description`. The way's body is not sent;
+- for each candidate: the way's path through the ways tree, with `›` between segments, and its `description`. The way's body is not sent. A request carries at most `max_candidates` candidates (8 shipped), and a lane with more sends further requests until every candidate has gone;
 - the conversation: the last `turns` turns, each with whitespace collapsed, `<` replaced by `‹`, and cut to its last `max_turn_chars` characters (1,200 shipped).
 
-The hook offers the agent at most two turns: Claude's last reply and the prompt. The reply is the text blocks of Claude's last message, the first 2,000 bytes, as the Stop hook recorded it; tool calls and their results are not part of it. The prompt is sent lowercased, as the matcher sees it. The shipped profiles set `turns: 1`, so by default only the prompt is sent. Setting `turns` to 2 or more adds Claude's reply, and no setting sends more than these two. On the queued-message lane the turn is the queued messages joined together, with no reply.
+On the prompt lane the hook offers the agent at most two turns: Claude's last reply and the prompt. The reply is the text blocks of Claude's last message, the first 2,000 bytes, as the Stop hook recorded it; tool calls and their results are not part of it. The prompt is sent lowercased, as the matcher sees it. The shipped profiles set `turns: 1`, so by default only the prompt is sent. Setting `turns` to 2 or more adds Claude's reply, and no setting sends more than these two. On the queued-message lane the turn is the queued messages joined together, with no reply.
+
+A tool lane offers two turns whatever the profile's `turns`: the agent's last human turn, or a subagent's brief, and then the call in hand. A Bash call reads as `About to run: <description>` and the command, cut to 400 characters, a file edit as `About to edit: <path>`, another tool as `About to use the <tool> tool.`, and a call that has run, on the post-tool lane, as `Used the <tool> tool.` The agent's narration between those turns, its tool results and file contents are not sent. A subagent dispatch sends the subagent's brief alone, and the state lane the prompt in hand, else the last human turn.
 
 The session id, project path, file contents and the rest of the transcript are not sent. OpenRouter requests carry an `X-Title: agent-ways` header.
 

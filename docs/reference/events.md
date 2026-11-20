@@ -164,7 +164,7 @@ The gate could not judge, so nothing was blocked. The gate fails open.
 
 ### `gate_capped`
 
-Written by releases before ADR-712, when more ways matched than the profile's `max_candidates` (default 8) and the rest went unjudged. The gate now judges every candidate in further requests, so a current log has none.
+Written by older releases when more ways matched than the profile's `max_candidates` (default 8) and the rest went unjudged. The gate now judges every candidate in further requests, so a current log has none.
 
 | Field | Meaning |
 |-------|---------|
@@ -205,3 +205,7 @@ jq -r 'select(.event=="way_fired" and .team) | .team' "$(ways events-log-path)" 
 ```
 
 See [stats.md](../hooks-and-ways/stats.md) for the summary reports built on this log.
+
+## References
+
+- ADR-712: every candidate in every lane and agent thread is judged, after the refire check and before the fire is recorded. It retired `gate_capped`.

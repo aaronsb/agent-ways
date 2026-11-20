@@ -492,8 +492,20 @@ pub(crate) fn run_detached(text: &str) -> anyhow::Result<()> {
         std::env::set_var("CLAUDE_AGENT_ID", &job.agent);
     }
     std::env::set_var("CLAUDE_PROJECT_DIR", &job.lane.project_dir);
-    let sink = &crate::session::log_event;
-    let log = job.lane.log(sink);
+    // Every line this judge writes is marked detached, and a held
+    // candidate's lines held_refire, so a reader never takes them for the
+    // hook's own gate decisions (#1287).
+    let held: std::collections::HashSet<&str> =
+        job.entries.iter().filter(|e| e.result == "held_refire").map(|e| e.candidate.key.as_str()).collect();
+    let marked = |fields: &[(&str, &str)]| {
+        let mut line: Vec<(&str, &str)> = fields.to_vec();
+        line.push(("detached", "true"));
+        if fields.iter().any(|(k, v)| *k == "way" && held.contains(v)) {
+            line.push(("held_refire", "true"));
+        }
+        crate::session::log_event(&line);
+    };
+    let log = job.lane.log(&marked);
     let pending: Vec<Pending<'_>> = job
         .entries
         .iter()
@@ -512,7 +524,10 @@ pub(crate) fn run_detached(text: &str) -> anyhow::Result<()> {
 
 /// What a tool lane's judge reads: the calling agent's request, its last
 /// human turn or its brief, then the call in hand as the agent's turn, the
-/// one a profile of `turns: 1` reads. No narration (ADR-712).
+/// one a profile of `turns: 1` reads. The agent's narration is not sent.
+///
+/// References:
+/// - ADR-712 §4: a tool lane's judge input is the request and the call.
 pub(super) fn tool_turns(session_id: &str, call: &str) -> Vec<Turn> {
     with_call(super::lookbehind::recent_turns(session_id), call)
 }
@@ -587,10 +602,13 @@ pub(super) fn declared(way: &super::WayCandidate, channel: &str, scan: &Scan) ->
     }
 }
 
-/// The Bash call as the judge reads it: ADR-188's `About to run:` line with
-/// the tool's description, then the command, cut to [`MAX_COMMAND_CHARS`] so
-/// a long heredoc does not push the description and the prose out of the
+/// The Bash call as the judge reads it: an `About to run:` line with the
+/// tool's description, then the command, cut to [`MAX_COMMAND_CHARS`] so a
+/// long heredoc does not push the description and the prose out of the
 /// profile's `max_turn_chars`.
+///
+/// References:
+/// - ADR-188: the `About to run:` line that describes a Bash call.
 pub(super) fn bash_call(command: &str, description: Option<&str>) -> String {
     let command = match command.char_indices().nth(MAX_COMMAND_CHARS) {
         Some((at, _)) => format!("{}…", &command[..at]),
@@ -697,7 +715,9 @@ mod tests {
     }
 
     /// A child that exits without reading its stdin ends the write with an
-    /// error, never a signal or a hang, even for a job larger than a pipe.
+    /// error, never a signal or a hang, even for a job larger than a pipe:
+    /// the failure is logged and the slot is given back.
+    #[cfg(unix)]
     #[test]
     fn a_child_that_does_not_read_its_job_does_not_hold_the_hook() {
         let dir = slot_dir("noread");
@@ -706,8 +726,11 @@ mod tests {
         let slot = claim_slot(&dir, 1).unwrap();
         let big = "x".repeat(1 << 20);
         let begun = std::time::Instant::now();
-        let _ = spawn_at(std::path::Path::new("/bin/true"), &big, &slot, &sink);
+        let r = spawn_at(std::path::Path::new("/bin/true"), &big, &slot, &sink);
         assert!(begun.elapsed() < Duration::from_secs(3), "{:?}", begun.elapsed());
+        assert!(r.is_err(), "the write fails");
+        assert!(lines.borrow().iter().any(|l| l.contains("event=judge_detach_failed") && l.contains("reason=write")), "{:?}", lines.borrow());
+        assert!(!slot.exists(), "the slot is given back");
         std::fs::remove_dir_all(&dir).ok();
     }
 

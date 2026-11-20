@@ -138,7 +138,9 @@ impl Acc<'_> {
     }
 
     fn scan(&mut self, s: &Scan) {
-        if !self.in_project(&s.project) {
+        // A detached judge's record shares its scan's id: counting it would
+        // count the scan twice, and its held candidates as outcomes.
+        if s.detached || !self.in_project(&s.project) {
             return;
         }
         self.scans += 1;
@@ -481,6 +483,23 @@ mod tests {
         r#"{"ts":"2026-09-03T08:00:00Z","kind":"scan","scan_id":"b2","session":"s2","agent":"main","epoch":1,"turn_start":true,"surface":"prompt","project":"/q","outcomes":[]}"#,
         r#"{"ts":"2026-09-03T08:00:20Z","kind":"pull","session":"s2","agent":"main","epoch":2,"way":"d/bad","window":"none","out_of_band":false,"stamped":false,"reason":"not found","scan_id":"b2"}"#,
     ];
+
+    /// A detached judge's record shares its scan's id. Counting it would
+    /// count the scan twice and its held candidates as blocks (#1287).
+    #[test]
+    fn a_detached_judges_record_is_not_counted_as_a_scan() {
+        let scan = |line: &str| match ways_core::decisions::parse_line(line) {
+            Some(ways_core::decisions::Record::Scan(s)) => s,
+            other => panic!("{other:?}"),
+        };
+        let lane = scan(r#"{"ts":"2026-09-01T10:00:00Z","kind":"scan","scan_id":"c1","session":"s1","agent":"main","epoch":3,"surface":"command","project":"/p","outcomes":[{"way":"d/a","result":"fired","verdict":"pass"}],"judge":{"status":"judged"}}"#);
+        let detached = scan(r#"{"ts":"2026-09-01T10:00:01Z","kind":"scan","scan_id":"c1","session":"s1","agent":"main","epoch":3,"surface":"command","project":"/p","detached":true,"outcomes":[{"way":"d/h","result":"held_refire","verdict":"block"}],"judge":{"status":"judged"}}"#);
+        let mut acc = Acc::default();
+        acc.scan(&lane);
+        acc.scan(&detached);
+        assert_eq!((acc.scans, acc.judge.pass, acc.judge.block, acc.judge.judged_scans), (1, 1, 0, 1));
+        assert!(!acc.by_way.contains_key("d/h"), "a held candidate is no outcome of the scan");
+    }
 
     fn fixture(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("ways-stats-decisions-{tag}-{}", std::process::id()));

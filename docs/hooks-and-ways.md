@@ -257,7 +257,7 @@ The model, `ways-corpus.jsonl`, `ways-corpus-en.jsonl`, `ways-corpus-multi.jsonl
 
 ## Relevance Gate and the Ways Agent
 
-On the prompt and queued lanes, the ways about to be shown are sent in one request to a hosted yes/no judge, together with the last turn (ADR-196). In `enforce` mode a blocked way is not shown, leaves no marker, and keeps its refire budget. In `shadow` mode every verdict is logged and nothing is blocked. Ways with `pattern_strict: true` are not judged, and a failure fails open.
+Every lane that injects ways, in the main agent and in every subagent, sends the ways about to be shown to a hosted yes/no judge before their fire is recorded. That covers the prompt, queued-message, command, file, tool, state, post-tool and task lanes, and every trigger kind, `pattern_strict` ways included. The prompt lane sends the last turn. A tool lane sends the agent's last human turn, or a subagent's brief, and the call in hand. In `enforce` mode a blocked way is not shown, leaves no marker, and keeps its refire budget. In `shadow` mode every verdict is logged and nothing is blocked; on the tool lanes the ways are shown at once and a detached process judges them. A failure fails open.
 
 The judge runs in the **ways agent**, one resident daemon per user on a Unix socket (ADR-502). Hooks start it on demand, and it exits when idle or when its binary is replaced. It holds the provider key and does judging and key custody only. Matching stays in the hook's `ways` process.
 
@@ -473,4 +473,6 @@ The `/ways-tests` skill provides ad-hoc scoring for vocabulary tuning:
 ## References
 
 - ADR-126: a way's `refire:` value is a fraction of the context window, which sets the wait before it re-discloses.
+- ADR-196: the yes/no relevance gate on way injection, judged by a hosted model.
 - ADR-711: each refire in an agent thread waits `refire_backoff` times longer than the one before, the count survives compaction, and fire rows carry the compaction epoch.
+- ADR-712: the gate's reach to every lane, agent thread and trigger kind, and what a tool lane sends.
