@@ -315,7 +315,81 @@ pub(super) fn detach(lane: &Lane, judged: Judged, shown: &[Shown<'_>], scan_id: 
     if entries.is_empty() {
         return;
     }
-    spawn(&Job { lane: lane.clone(), scan_id, agent: crate::session::current_agent(), turns: judged.turns, entries });
+    let sink = &crate::session::log_event;
+    let log = lane.log(sink);
+    let Some(slot) = claim_slot(&slots_dir(), DETACHED_MAX) else {
+        (log.sink)(&[
+            ("event", "judge_detach_dropped"),
+            ("reason", "cap"),
+            ("cap", &DETACHED_MAX.to_string()),
+            ("candidates", &entries.len().to_string()),
+            ("lane", log.lane),
+            ("session", log.session_id),
+            ("agent_id", &crate::session::current_agent()),
+        ]);
+        return;
+    };
+    let job = Job { lane: lane.clone(), scan_id, agent: crate::session::current_agent(), turns: judged.turns, entries, slot: slot.clone() };
+    let Ok(text) = serde_json::to_string(&job) else { return };
+    let exe = match running_binary() {
+        Ok(exe) => exe,
+        Err(e) => {
+            let _ = std::fs::remove_file(&slot);
+            (log.sink)(&[("event", "judge_detach_failed"), ("reason", &format!("current_exe: {e}")), ("lane", log.lane), ("session", log.session_id)]);
+            return;
+        }
+    };
+    let _ = spawn_at(&exe, &text, &slot, log.sink);
+}
+
+/// The most detached judges running at once, across sessions. A job past it
+/// is dropped and logged as `judge_detach_dropped`.
+const DETACHED_MAX: usize = 4;
+
+/// How old a slot file may be before it is taken to belong to a judge that
+/// died: the detached judge's own deadline, with room.
+const SLOT_STALE: Duration = Duration::from_secs(120);
+
+/// Where the slot files live: one per detached judge in flight.
+fn slots_dir() -> std::path::PathBuf {
+    std::path::Path::new(&crate::session::sessions_root()).join("judge-detached")
+}
+
+/// Claims one of `cap` slot files in `dir`, created exclusively so two hooks
+/// never take the same one, and reclaims a stale one. `None` when all are
+/// held.
+fn claim_slot(dir: &std::path::Path, cap: usize) -> Option<std::path::PathBuf> {
+    std::fs::create_dir_all(dir).ok()?;
+    for i in 0..cap {
+        let path = dir.join(format!("slot-{i}"));
+        let stale = std::fs::metadata(&path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > SLOT_STALE);
+        if stale {
+            let _ = std::fs::remove_file(&path);
+        }
+        if std::fs::OpenOptions::new().write(true).create_new(true).open(&path).is_ok() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// The binary this process runs, for starting the detached judge. After an
+/// update replaces it, Linux names the old one `… (deleted)`; the path
+/// without that suffix is the new one.
+fn running_binary() -> std::io::Result<std::path::PathBuf> {
+    let exe = std::env::current_exe()?;
+    if exe.is_file() {
+        return Ok(exe);
+    }
+    let text = exe.to_string_lossy();
+    match text.strip_suffix(" (deleted)") {
+        Some(live) if std::path::Path::new(live).is_file() => Ok(live.into()),
+        _ => Err(std::io::Error::new(std::io::ErrorKind::NotFound, format!("{} is gone", exe.display()))),
+    }
 }
 
 /// One candidate handed to the detached judge, with what the lane did with it.
@@ -333,14 +407,28 @@ pub(crate) struct Job {
     agent: String,
     turns: Vec<Turn>,
     entries: Vec<Entry>,
+    /// The slot file this judge holds, removed when it is done.
+    slot: std::path::PathBuf,
 }
 
-/// Starts `ways judge detached` on `job`, in a session of its own so the
-/// hook's end does not take it down, and returns without waiting.
-fn spawn(job: &Job) {
+/// Removes a detached judge's slot file however its run ends.
+struct SlotGuard(std::path::PathBuf);
+
+impl Drop for SlotGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// Starts `exe judge detached` with `text` on its stdin, in a session of its
+/// own so the hook's end does not take it down, and returns once the job is
+/// written or the child stops reading. The write runs on its own thread
+/// through `agent_fmt::write_to_child`, so a child that exits without
+/// reading ends it with an error, never with SIGPIPE, which the binary
+/// restores to its default. A failure is logged as `judge_detach_failed`
+/// and gives `slot` back; the child gives it back when it is done.
+fn spawn_at(exe: &std::path::Path, text: &str, slot: &std::path::Path, sink: gate::EventSink<'_>) -> std::io::Result<()> {
     use std::process::{Command, Stdio};
-    let Ok(exe) = std::env::current_exe() else { return };
-    let Ok(text) = serde_json::to_string(job) else { return };
     let mut cmd = Command::new(exe);
     cmd.args(["judge", "detached"]).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null());
     #[cfg(unix)]
@@ -355,12 +443,40 @@ fn spawn(job: &Job) {
             });
         }
     }
-    if let Ok(mut child) = cmd.spawn() {
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = std::io::Write::write_all(&mut stdin, text.as_bytes());
+    let failed = |reason: String| {
+        let _ = std::fs::remove_file(slot);
+        sink(&[("event", "judge_detach_failed"), ("reason", &reason)]);
+    };
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            failed(format!("spawn {}: {e}", exe.display()));
+            return Err(e);
+        }
+    };
+    let Some(mut stdin) = child.stdin.take() else { return Ok(()) };
+    let bytes = text.as_bytes().to_vec();
+    let (done, wrote) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = done.send(agent_fmt::write_to_child(&mut stdin, &bytes));
+    });
+    // The child reads its whole job before anything else, so this returns
+    // at once; a child that never reads is not waited on past the bound.
+    match wrote.recv_timeout(JOB_WRITE) {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => {
+            failed(format!("write: {e}"));
+            Err(e)
+        }
+        Err(_) => {
+            failed("write: timed out".into());
+            Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "job write"))
         }
     }
 }
+
+/// The longest a hook waits to hand the detached judge its job.
+const JOB_WRITE: Duration = Duration::from_millis(500);
 
 /// The longest a detached judge waits: it holds no hook, so the profile's
 /// whole deadline applies.
@@ -371,6 +487,7 @@ const DETACHED_WAIT: Duration = Duration::from_secs(30);
 /// is whatever the mode makes of it, and nothing is shown either way.
 pub(crate) fn run_detached(text: &str) -> anyhow::Result<()> {
     let job: Job = serde_json::from_str(text)?;
+    let _slot = SlotGuard(job.slot.clone());
     if job.agent != crate::session::MAIN_AGENT {
         std::env::set_var("CLAUDE_AGENT_ID", &job.agent);
     }
@@ -550,6 +667,65 @@ mod tests {
         assert_eq!(alone, [Turn { role: Role::Assistant, text: call }]);
         let long = bash_call(&"x".repeat(1000), None);
         assert!(long.chars().count() < 450 && long.ends_with('…'), "{long}");
+    }
+
+    type Lines = std::cell::RefCell<Vec<String>>;
+
+    fn recorder(lines: &Lines) -> impl Fn(&[(&str, &str)]) + '_ {
+        move |f: &[(&str, &str)]| lines.borrow_mut().push(f.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(" "))
+    }
+
+    fn slot_dir(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("ways-detached-slots-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    }
+
+    /// A binary that cannot be started is logged, not passed over in
+    /// silence, and gives its slot back.
+    #[test]
+    fn a_spawn_that_fails_is_logged_and_frees_its_slot() {
+        let dir = slot_dir("fail");
+        let lines = Lines::default();
+        let sink = recorder(&lines);
+        let slot = claim_slot(&dir, 1).expect("a free slot");
+        let r = spawn_at(std::path::Path::new("/nonexistent/ways"), "{}", &slot, &sink);
+        assert!(r.is_err());
+        assert!(lines.borrow().iter().any(|l| l.contains("event=judge_detach_failed") && l.contains("reason=")), "{:?}", lines.borrow());
+        assert!(!slot.exists(), "the slot is given back");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A child that exits without reading its stdin ends the write with an
+    /// error, never a signal or a hang, even for a job larger than a pipe.
+    #[test]
+    fn a_child_that_does_not_read_its_job_does_not_hold_the_hook() {
+        let dir = slot_dir("noread");
+        let lines = Lines::default();
+        let sink = recorder(&lines);
+        let slot = claim_slot(&dir, 1).unwrap();
+        let big = "x".repeat(1 << 20);
+        let begun = std::time::Instant::now();
+        let _ = spawn_at(std::path::Path::new("/bin/true"), &big, &slot, &sink);
+        assert!(begun.elapsed() < Duration::from_secs(3), "{:?}", begun.elapsed());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Detached judges are capped: past the cap no slot is given, and a slot
+    /// a dead judge left behind is taken back once it is stale.
+    #[test]
+    fn detached_judges_are_capped_by_slots() {
+        let dir = slot_dir("cap");
+        let a = claim_slot(&dir, 2).unwrap();
+        let b = claim_slot(&dir, 2).unwrap();
+        assert_ne!(a, b);
+        assert!(claim_slot(&dir, 2).is_none(), "past the cap");
+        std::fs::remove_file(&a).unwrap();
+        assert!(claim_slot(&dir, 2).is_some(), "a freed slot is reused");
+        let old = std::time::SystemTime::now() - SLOT_STALE - Duration::from_secs(1);
+        std::fs::File::options().write(true).open(&b).unwrap().set_modified(old).unwrap();
+        assert!(claim_slot(&dir, 2).is_some(), "a stale slot is reclaimed");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
