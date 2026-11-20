@@ -75,8 +75,9 @@ pub fn state(
     // (scan/judged.rs), judged against the agent's request: the prompt in
     // hand, else its last human turn. Refire cadence follows each way's own
     // `refire:` curve (ADR-126), read by the refire check and again by show.
+    let scan = judged::Scan::begin(session_id);
     let judge_candidates: Vec<judged::Candidate> =
-        candidates.iter().filter(|w| state.triggers(w)).map(|w| judged::declared(w, "state", session_id)).collect();
+        candidates.iter().filter(|w| state.triggers(w)).map(|w| judged::declared(w, "state", &scan)).collect();
     let lane = judged::Lane {
         surface: Surface::State,
         hook_event: hook_event.to_string(),
@@ -84,11 +85,11 @@ pub fn state(
         project_dir: project_dir.clone(),
         session_id: session_id.to_string(),
     };
-    let turns = match query.map(str::trim).filter(|q| !q.is_empty() && !envelope_turn) {
+    let turns = || match query.map(str::trim).filter(|q| !q.is_empty() && !envelope_turn) {
         Some(q) => vec![ways_agent_core::judge::Turn { role: ways_agent_core::judge::Role::User, text: q.to_string() }],
         None => super::lookbehind::recent_turns(session_id),
     };
-    judged::run(&lane, &judge_candidates, turns, gate::PROMPT_WAIT, |c| {
+    judged::run(&lane, &scan, &judge_candidates, turns, gate::PROMPT_WAIT, |c| {
         let shown = capture_show_way(&c.key, session_id, "state", None, None, None, Some(&mut budget));
         if !shown.body.is_empty() {
             context.push_str(&shown.body);

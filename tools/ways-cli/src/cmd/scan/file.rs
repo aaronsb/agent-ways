@@ -64,9 +64,10 @@ pub fn file(
 
     // The ways the path fired, then the checks, through the judge before any
     // fire is recorded (scan/judged.rs).
+    let scan = judged::Scan::begin(session_id);
     let by_id: std::collections::HashMap<&str, &WayCandidate> = candidates.iter().map(|w| (w.id.as_str(), w)).collect();
     let mut judge_candidates: Vec<judged::Candidate> =
-        hits.iter().filter_map(|h| by_id.get(h.id.as_str())).map(|w| judged::declared(w, "file", session_id)).collect();
+        hits.iter().filter_map(|h| by_id.get(h.id.as_str())).map(|w| judged::declared(w, "file", &scan)).collect();
     judge_candidates.extend(matched_checks.iter().map(|(check, score)| judged::check_candidate(check, *score, "file")));
     let lane = judged::Lane {
         surface: Surface::File,
@@ -75,8 +76,8 @@ pub fn file(
         project_dir: project_dir.clone(),
         session_id: session_id.to_string(),
     };
-    let turns = judged::tool_turns(session_id, &format!("About to edit: {filepath}"));
-    judged::run(&lane, &judge_candidates, turns, gate::TOOL_WAIT, |c| {
+    let turns = || judged::tool_turns(session_id, &format!("About to edit: {filepath}"));
+    judged::run(&lane, &scan, &judge_candidates, turns, gate::TOOL_WAIT, |c| {
         if let Some((check, score)) = judged::check_of(&c.key).and_then(|id| matched_checks.iter().find(|(w, _)| w.id == id)) {
             let out = capture_show_check(&check.id, session_id, "file", *score, Some(&mut budget));
             let delivered = !out.is_empty();

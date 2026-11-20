@@ -336,16 +336,30 @@ fn shadow_injects_everything_and_logs_the_verdicts() {
     assert_eq!(host.join().unwrap().len(), 1, "one detached request");
 }
 
-/// With no engine and no key the gate is off: every candidate is injected,
-/// as before, and no judge job is written.
+/// With no engine and no key the gate is off, and a tool call does what it
+/// did before the gate reached the tool lanes: every candidate injected and
+/// fired, no judge job, no decision record and no gate event. A broken
+/// agent.yaml turns the gate off the same way, with no gate event per call.
 #[test]
 fn with_the_gate_off_nothing_changes() {
-    let s = Sim::new("off", None);
-    let out = s.bash(Some("asub1"));
-    assert!(out.contains("# Marker keep") && out.contains("# Marker drop"), "{out}");
-    assert!(s.fired("judged/keep", Some("asub1")) && s.fired("judged/drop", Some("asub1")));
-    let jobs = PathBuf::from(format!("{}/{}/judge", sessions_root(), s.session));
-    assert!(!jobs.exists() || std::fs::read_dir(&jobs).unwrap().next().is_none(), "no judge job");
+    for (name, yaml) in [("off", None), ("broken", Some("engine: [unclosed\n"))] {
+        let s = Sim::new(name, None);
+        if let Some(y) = yaml {
+            let dir = s.home.join(".config/agent-ways");
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("agent.yaml"), y).unwrap();
+        }
+        let out = s.bash(Some("asub1"));
+        assert!(out.contains("# Marker keep") && out.contains("# Marker drop"), "{name}: {out}");
+        assert!(s.fired("judged/keep", Some("asub1")) && s.fired("judged/drop", Some("asub1")), "{name}");
+        let again = s.bash(Some("asub1"));
+        assert!(!again.contains("# Marker keep"), "{name}: refire holds as before: {again}");
+        let jobs = PathBuf::from(format!("{}/{}/judge", sessions_root(), s.session));
+        assert!(!jobs.exists() || std::fs::read_dir(&jobs).unwrap().next().is_none(), "{name}: no judge job");
+        assert!(s.decisions().is_empty(), "{name}: no decision record: {:#?}", s.decisions());
+        let events = std::fs::read_to_string(s.state.join("agent-ways/events.jsonl")).unwrap_or_default();
+        assert!(!events.contains("gate_fallback") && !events.contains("way_judged"), "{name}: no gate event: {events}");
+    }
 }
 
 /// A candidate the refire curve holds is never injected and never holds the

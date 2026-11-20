@@ -110,8 +110,8 @@ pub(super) const JUDGED: Judges = Judges::Every;
 /// the judge is never paid for a way that would not be shown; both orders
 /// inject the same set. It is a step of its own so it can move after the
 /// judge without touching the lanes.
-pub(super) fn refire_open(id: &str, session_id: &str) -> bool {
-    crate::cmd::show::would_fire(id, session_id)
+pub(super) fn refire_open(id: &str, session_id: &str, tick: u64) -> bool {
+    crate::cmd::show::would_fire_at(id, session_id, tick)
 }
 
 /// Where gate events go: `session::log_event` in the hook.

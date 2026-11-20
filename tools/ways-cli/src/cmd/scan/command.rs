@@ -73,6 +73,7 @@ pub fn command(
     // The matcher's hits, then the checks, each marked by the read-only
     // refire check, go to the judge (scan/judged.rs) before any fire is
     // recorded.
+    let scan = judged::Scan::begin(session_id);
     let by_id: std::collections::HashMap<&str, &WayCandidate> = candidates.iter().map(|w| (w.id.as_str(), w)).collect();
     let mut judge_candidates: Vec<judged::Candidate> = hits
         .iter()
@@ -84,7 +85,7 @@ pub fn command(
                 trigger: way_trigger(way, &command, hit.payload.1.is_some()),
                 channel: hit.payload.0.to_string(),
                 p: hit.score,
-                open: gate::refire_open(&hit.id, session_id),
+                open: scan.open(&hit.id),
             })
         })
         .collect();
@@ -96,11 +97,11 @@ pub fn command(
         project_dir: project_dir.clone(),
         session_id: session_id.to_string(),
     };
-    let turns = judged::tool_turns(session_id, &judged::bash_call(cmd, description));
 
     let hit_of: std::collections::HashMap<&str, &BashHit> = hits.iter().map(|h| (h.id.as_str(), h)).collect();
     let mut shown: HashSet<String> = HashSet::new();
-    judged::run(&lane, &judge_candidates, turns, gate::TOOL_WAIT, |c| {
+    let turns = || judged::tool_turns(session_id, &judged::bash_call(cmd, description));
+    judged::run(&lane, &scan, &judge_candidates, turns, gate::TOOL_WAIT, |c| {
         if let Some((check, score)) = judged::check_of(&c.key).and_then(|id| matched_checks.iter().find(|(w, _)| w.id == id)) {
             let out = capture_show_check(&check.id, session_id, "bash", *score, Some(&mut budget));
             let delivered = !out.is_empty();
