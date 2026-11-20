@@ -441,7 +441,7 @@ fn with_the_gate_off_nothing_changes() {
             assert!(!events.contains(word), "{name}: no {word} event: {events}");
         }
         let state = (outs, session_files(&s));
-        assert!(state.1.iter().any(|f| f.ends_with("keep/.marker.asub1")), "{name}: the snapshot sees the markers: {:?}", state.1);
+        assert!(state.1.iter().any(|f| f.replace('\\', "/").ends_with("keep/.marker.asub1")),"{name}: the snapshot sees the markers: {:?}", state.1);
         match &reference {
             None => reference = Some(state),
             Some(r) => assert_eq!(&state, r, "{name}: the same output and session state as with no agent.yaml"),
@@ -563,6 +563,10 @@ fn the_state_lane_judges_its_triggered_ways() {
 }
 
 /// The post-tool lane judges the ways their postchecks asked for.
+///
+/// Unix only, like the other postcheck scenarios in session_sim.rs: the
+/// postcheck is a shebang script, which Windows runs through bash.
+#[cfg(unix)]
 #[test]
 fn the_post_tool_lane_judges_what_the_postchecks_ask_for() {
     let s = Sim::new("post", Some(ENFORCE));
