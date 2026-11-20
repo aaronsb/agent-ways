@@ -22,16 +22,17 @@ use super::model::{ActiveWay, Clock, Frame, Outcome, Suppression, WayEvent};
 /// timeline, pre-resolves per-way refire thresholds, and clusters events into
 /// epoch frames. Shared by the replay screens and `session replay --json`.
 ///
-/// Refire thresholds reflect each way's *current* curve — this is a replay,
-/// so a curve edited since the recorded session shows today's value. That's the
-/// best we can do without snapshotting frontmatter into events.jsonl. Each
-/// (agent, way) row's threshold comes from that agent's own window and its
-/// fire count now, so a row shows when its next refire opens.
+/// Each fire or re-disclosure row shows the refire threshold its event
+/// recorded: the wait the hook gave it then, from that agent's own window
+/// and the way's fire count after that fire. A row written before events
+/// carried the threshold falls back to the way's current curve, that
+/// agent's window and its fire count now.
 ///
 /// A frame holds the injected ways, and with `matched` the ways the relevance
 /// judge blocked too (#742). Each way carries its [`Outcome`].
 ///
 /// References:
+/// - ADR-711 §5: fire rows record the threshold the next refire waits.
 /// - ADR-711 §6: thresholds are computed per (agent, way), from the agent's
 ///   window and fire count.
 pub(crate) fn reconstruct_frames(
@@ -125,8 +126,13 @@ pub(super) fn build_frames_by_agent(
     refire_cache: &RefireCache,
     fallback_refire_k: u64,
 ) -> Vec<Frame> {
-    let refire_for = |way_id: &str, agent: &str| -> u64 {
-        refire_cache.get(&(agent.to_string(), way_id.to_string())).copied().unwrap_or(fallback_refire_k)
+    // The threshold the row was logged with, or for an older row the cached
+    // current one.
+    let refire_for = |ev: &WayEvent, agent: &str| -> u64 {
+        ev.refire_threshold.map_or_else(
+            || refire_cache.get(&(agent.to_string(), ev.way.clone())).copied().unwrap_or(fallback_refire_k),
+            |t| t / 1000,
+        )
     };
     let mut frames: Vec<Frame> = Vec::new();
     // A way is a row per agent that fired it (#814): each agent has its
@@ -235,7 +241,7 @@ pub(super) fn build_frames_by_agent(
                         }
                         let is_new = !active_ways.contains_key(&key);
                         let at = clock(&key.1);
-                        let refire_threshold_k = refire_for(&ev.way, &key.1);
+                        let refire_threshold_k = refire_for(ev, &key.1);
                         active_ways.insert(key.clone(), ActiveWay {
                             id: ev.way.clone(),
                             trigger: ev.trigger.clone(),
@@ -277,7 +283,7 @@ pub(super) fn build_frames_by_agent(
                     last_agent.insert(ev.way.clone(), key.1.clone());
                     let checks = check_fires.get(&key).copied().unwrap_or(0);
                     let at = clock(&key.1);
-                    let refire_threshold_k = refire_for(&ev.way, &key.1);
+                    let refire_threshold_k = refire_for(ev, &key.1);
                     // A redisclosure means the way is active (re-injected). Update it
                     // if present; otherwise ADD it — after a compaction-window reset a
                     // still-active way first reappears via redisclosure, not a fresh
@@ -575,6 +581,8 @@ pub(crate) fn load_session_events(content: &str, session_id: &str) -> Vec<WayEve
                 agent_id: v["agent_id"].as_str().unwrap_or("").to_string(),
                 kind: v["kind"].as_str().unwrap_or("").to_string(),
                 reason: v["reason"].as_str().unwrap_or("").to_string(),
+                // Rows before ADR-711 carry no threshold.
+                refire_threshold: v["refire_threshold"].as_str().and_then(|t| t.parse().ok()),
             })
         })
         .collect();
@@ -639,6 +647,7 @@ mod tests {
             kind: String::new(),
             reason: String::new(),
             detached: false,
+            refire_threshold: None,
         };
         // Window 1: origin session_start + two fires. A second session_start
         // (a compaction) opens window 2, which starts fresh with one fire.
@@ -688,6 +697,7 @@ mod tests {
             kind: String::new(),
             reason: String::new(),
             detached: false,
+            refire_threshold: None,
         };
         let events = vec![
             ev("2026-01-01T00:00:00Z", "d/a"),
@@ -848,6 +858,7 @@ mod tests {
             kind: String::new(),
             reason: String::new(),
             detached: false,
+            refire_threshold: None,
         };
         // A way fires in window 1; after a compaction, it only *re-discloses* (no
         // fresh fire) in window 2 — as a mature window mostly does. It must still show

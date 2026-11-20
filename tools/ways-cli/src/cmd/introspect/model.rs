@@ -37,6 +37,10 @@ pub(crate) struct WayEvent {
     /// The line came from a detached judge (#1287): its verdict is no
     /// decision the hook acted on.
     pub(super) detached: bool,
+    /// On a fire or re-disclosure row: the tokens the next refire waited
+    /// after it, as the hook computed it then. `None` on rows written
+    /// before the field.
+    pub(super) refire_threshold: Option<u64>,
 }
 
 /// Ways held back from a subagent by the subagent switch (#768, #786):
