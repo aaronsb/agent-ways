@@ -149,6 +149,30 @@ impl Sim {
         String::from_utf8_lossy(&out.stdout).into_owned()
     }
 
+    /// Writes a way `judged/<rel>` with the frontmatter lines `extra`.
+    fn way(&self, rel: &str, extra: &str) {
+        let name = rel.rsplit('/').next().unwrap();
+        let dir = self.home.join(".claude/hooks/ways/judged").join(rel);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(format!("{name}.md")),
+            format!("---\ndescription: test way {name}\n{extra}\nrefire: 0.15\n---\n# Marker {name}\n\nbody of {name}\n"),
+        )
+        .unwrap();
+    }
+
+    /// Runs `ways hook <event>` on a raw payload, with this session's id.
+    fn raw_hook(&self, event: &str, mut payload: serde_json::Value) -> String {
+        payload["session_id"] = self.session.clone().into();
+        payload["cwd"] = self.project.to_string_lossy().into_owned().into();
+        payload["transcript_path"] = self.transcript().to_string_lossy().into_owned().into();
+        let mut child = self.ways().args(["hook", event]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+        std::io::Write::write_all(&mut child.stdin.take().unwrap(), payload.to_string().as_bytes()).unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success(), "hook {event}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
     fn bash(&self, agent: Option<&str>) -> String {
         self.hook("command", "Bash", serde_json::json!({"command": "git commit -m fix", "description": "Commit the parser fix"}), agent)
     }
@@ -247,7 +271,7 @@ fn answer_one(env: &HostEnv) -> Option<String> {
     let mut judgements = Vec::new();
     for (i, block) in prompt.split("<guidance id=\"g").skip(1).enumerate() {
         let route = block.lines().nth(1).unwrap_or("");
-        let drop = route.contains("drop");
+        let drop = route.rsplit(" › ").next().unwrap_or("").contains("drop");
         judgements.push(serde_json::json!({"id": format!("g{}", i + 1), "relevant": !drop, "confidence": 0.95}));
     }
     let answer = serde_json::json!({"text": serde_json::json!({"judgements": judgements}).to_string()});
@@ -391,6 +415,28 @@ fn a_hung_judge_and_slow_macros_fail_open_inside_the_hook_bound() {
     assert!(host.join().unwrap().is_some(), "the judge was asked");
     assert!(took < Duration::from_millis(9_500), "the hook took {took:?}, past its 9 s deadline");
     assert!(out.contains("# Marker keep") && out.contains("# Marker drop"), "fails open: {out}");
+}
+
+/// The dispatch lane judges a subagent's ways against its brief. A dispatch
+/// whose every way the judge blocks still leaves its (empty) stash, so the
+/// next SubagentStart claims that one and not a later dispatch's.
+#[test]
+fn the_dispatch_lane_judges_and_keeps_each_stash_to_its_dispatch() {
+    let s = Sim::new("task", Some(ENFORCE));
+    s.way("taskdrop", "pattern: droptopic\nscope: subagent");
+    s.way("taskkeep", "pattern: keeptopic\nscope: subagent");
+    let host = s.host(2);
+    s.raw_hook("task", serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"prompt": "work on the droptopic"}}));
+    s.raw_hook("task", serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"prompt": "work on the keeptopic"}}));
+    let prompts = host.join().unwrap();
+    assert_eq!(prompts.len(), 2, "both dispatches judged");
+    assert!(prompts[0].contains("work on the droptopic"), "the brief is the judge's input: {}", prompts[0]);
+    let first = s.raw_hook("subagent-start", serde_json::json!({"hook_event_name": "SubagentStart", "agent_id": "afirst"}));
+    let second = s.raw_hook("subagent-start", serde_json::json!({"hook_event_name": "SubagentStart", "agent_id": "asecond"}));
+    assert!(!first.contains("# Marker taskdrop") && !first.contains("# Marker taskkeep"), "the first dispatch's stash is empty: {first}");
+    assert!(second.contains("# Marker taskkeep"), "the second gets its own: {second}");
+    let r = s.wait_decision(|r| r["surface"] == "task" && r["outcomes"][0]["way"] == "judged/taskdrop");
+    assert_eq!(outcome(&r, "judged/taskdrop")["result"], "judge_block", "{r:#}");
 }
 
 /// A candidate the refire curve holds is never injected and never holds the
