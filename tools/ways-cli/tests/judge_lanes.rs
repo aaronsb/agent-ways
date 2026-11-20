@@ -227,6 +227,14 @@ impl HostEnv {
     }
 }
 
+/// Takes one job and never answers it, as a host that hangs would; the job's
+/// prompt, or `None` when no job came within 10 s.
+fn take_silently(env: &HostEnv) -> Option<String> {
+    let out = env.ways().args(["judge", "take", "--session", &env.session, "--wait", "--timeout-ms", "10000"]).output().unwrap();
+    let line = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!line.is_empty() && line != "standby").then(|| serde_json::from_str::<serde_json::Value>(&line).unwrap()["prompt"].as_str().unwrap().to_string())
+}
+
 /// Takes one job and answers it; `None` when no job came within 10 s.
 fn answer_one(env: &HostEnv) -> Option<String> {
     let out = env.ways().args(["judge", "take", "--session", &env.session, "--wait", "--timeout-ms", "10000"]).output().unwrap();
@@ -360,6 +368,29 @@ fn with_the_gate_off_nothing_changes() {
         let events = std::fs::read_to_string(s.state.join("agent-ways/events.jsonl")).unwrap_or_default();
         assert!(!events.contains("gate_fallback") && !events.contains("way_judged"), "{name}: no gate event: {events}");
     }
+}
+
+/// A judge that takes the job and never answers, and two ways whose macros
+/// each run out their 3 s, still leave the Bash hook done inside its 10 s
+/// bound, with both ways shown: the hook keeps one deadline, the judge
+/// fails open within it, and each macro gets only what is left.
+#[test]
+fn a_hung_judge_and_slow_macros_fail_open_inside_the_hook_bound() {
+    let s = Sim::new("hung", Some(ENFORCE));
+    for id in ["keep", "drop"] {
+        std::fs::write(s.home.join(format!(".claude/hooks/ways/judged/{id}/macro.sh")), "sleep 5\necho late\n").unwrap();
+        let md = s.home.join(format!(".claude/hooks/ways/judged/{id}/{id}.md"));
+        let text = std::fs::read_to_string(&md).unwrap().replacen("refire: 0.15\n", "refire: 0.15\nmacro: append\n", 1);
+        std::fs::write(&md, text).unwrap();
+    }
+    let env = s.ways_args();
+    let host = std::thread::spawn(move || take_silently(&env));
+    let begun = Instant::now();
+    let out = s.bash(None);
+    let took = begun.elapsed();
+    assert!(host.join().unwrap().is_some(), "the judge was asked");
+    assert!(took < Duration::from_millis(9_500), "the hook took {took:?}, past its 9 s deadline");
+    assert!(out.contains("# Marker keep") && out.contains("# Marker drop"), "fails open: {out}");
 }
 
 /// A candidate the refire curve holds is never injected and never holds the

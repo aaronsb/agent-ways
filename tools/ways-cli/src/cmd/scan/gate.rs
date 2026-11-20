@@ -62,6 +62,10 @@ const CLAIM_WINDOW: Duration = Duration::from_millis(500);
 /// open as on any deadline.
 pub(super) const TOOL_WAIT: Duration = Duration::from_secs(6);
 
+/// What the judge leaves of the hook's deadline for showing the ways it
+/// passes, their macros included (each macro is cut to what is left).
+pub(super) const SHOW_RESERVE: Duration = Duration::from_millis(1500);
+
 /// The longest the prompt and state lanes wait on the judge. Their hooks
 /// are bounded at 30 s, which outlasts the longest wait a profile allows.
 pub(super) const PROMPT_WAIT: Duration = Duration::from_secs(28);
@@ -251,6 +255,9 @@ impl Blocked {
 /// Nothing is blocked when the gate is off, in shadow mode, or failed.
 pub(super) fn apply(pending: &[Pending<'_>], turns: Vec<Turn>, wait: Duration, log: &LogContext<'_>) -> Gate {
     use ways_agent_core::keys;
+    // The hook's own deadline comes first: the judge gets what is left of
+    // it, less what showing the ways and their macros take after it.
+    let wait = crate::hook_deadline::within(wait, SHOW_RESERVE);
     let store = Store::for_session(log.session_id);
     // The agent reads the key file, never a hook's environment, so only a key
     // file turns the gate on: an ANTHROPIC_API_KEY set for Claude Code itself
@@ -734,40 +741,17 @@ mod tests {
         assert_eq!(seen.len(), 2, "found both prompt-lane hooks: {seen:?}");
     }
 
-    /// The hooks whose lanes judge at PreToolUse or PostToolUse must outlast
-    /// [`TOOL_WAIT`] with room for the rest of the scan, and the state lane's
-    /// [`PROMPT_WAIT`] (#1287). A hook past its bound is killed and its
-    /// output, the fail-open included, is dropped.
+    /// Inside a hook's deadline the judge leaves [`SHOW_RESERVE`] for the ways
+    /// it passes: the longest wait the gate takes, its agent start and read
+    /// grace included, plus that reserve fits the 9 s deadline of a tool
+    /// hook. The hook deadlines themselves are checked against settings.json
+    /// in `cmd::hook`.
     #[test]
-    fn the_tool_lane_hooks_outlast_the_gates_wait() {
-        let repo_settings = std::path::PathBuf::from(
-            std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").into()),
-        )
-        .join("../../settings.json");
-        let Ok(raw) = std::fs::read_to_string(&repo_settings) else { return }; // not a source checkout
-        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        // The embed pass, the bodies and a macro take the rest of the bound.
-        let scan = Duration::from_secs(3);
-        let lanes: [(&str, Duration); 6] = [
-            ("check-bash-pre.sh", TOOL_WAIT),
-            ("check-file-pre.sh", TOOL_WAIT),
-            ("check-tool.sh", TOOL_WAIT),
-            ("check-task-pre.sh", TOOL_WAIT),
-            ("check-post.sh", TOOL_WAIT),
-            ("check-state.sh", PROMPT_WAIT),
-        ];
-        let mut seen = HashSet::new();
-        for entries in v["hooks"].as_object().unwrap().values() {
-            for cmd in entries.as_array().unwrap().iter().flat_map(|e| e["hooks"].as_array().unwrap()) {
-                let command = cmd["command"].as_str().unwrap_or("");
-                let Some((script, wait)) = lanes.iter().find(|(s, _)| command.ends_with(s)) else { continue };
-                seen.insert(*script);
-                let bound = Duration::from_secs(cmd["timeout"].as_u64().unwrap_or(600));
-                let needed = if *wait == TOOL_WAIT { *wait + scan } else { *wait };
-                assert!(bound >= needed, "{script}: a {bound:?} bound cannot hold a {needed:?} wait");
-            }
-        }
-        assert_eq!(seen.len(), lanes.len(), "found every judging hook: {seen:?}");
+    fn the_judge_and_the_ways_fit_a_tool_hooks_deadline() {
+        let judge = budget_within(TOOL_WAIT) + ways_agent_core::client::START_WAIT + READ_GRACE;
+        assert!(judge <= TOOL_WAIT);
+        assert!(TOOL_WAIT + SHOW_RESERVE <= Duration::from_secs(9), "{TOOL_WAIT:?} + {SHOW_RESERVE:?}");
+        assert!(PROMPT_WAIT <= Duration::from_secs(28));
     }
 
     type Events = std::cell::RefCell<Vec<Vec<(String, String)>>>;

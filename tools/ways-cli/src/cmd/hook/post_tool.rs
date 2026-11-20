@@ -83,8 +83,14 @@ pub const DEADLINE: Duration = Duration::from_secs(3);
 /// postcheck sees `CLAUDE_SESSION_ID` and `WAYS_SESSIONS_ROOT`; its output is
 /// discarded.
 pub fn requests(checks: &[Postcheck], payload: &str, session_id: &str) -> Vec<String> {
-    requests_within(checks, payload, session_id, DEADLINE)
+    // The judge and the ways come after the postchecks, inside the same hook
+    // deadline, so the postchecks leave them their share.
+    requests_within(checks, payload, session_id, crate::hook_deadline::within(DEADLINE, AFTER_POSTCHECKS))
 }
+
+/// What the postchecks leave of the hook's deadline for the judge and the
+/// ways they ask for.
+const AFTER_POSTCHECKS: Duration = Duration::from_secs(5);
 
 fn requests_within(checks: &[Postcheck], payload: &str, session_id: &str, deadline: Duration) -> Vec<String> {
     let root = session::sessions_root();

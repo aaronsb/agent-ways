@@ -40,6 +40,9 @@ pub enum ShowOutcome {
     HeldRefire,
     /// Held back by the hook's context budget.
     HeldContextCap,
+    /// Held back because the hook's deadline is too close to show it; no
+    /// fire is recorded for text that would not reach the agent.
+    HeldDeadline,
     /// Not shown: disabled, out of scope, or no way file.
     NotFireable,
     /// `way_scored` failed. Never returned by it; a caller that absorbs its
@@ -55,6 +58,7 @@ impl ShowOutcome {
             ShowOutcome::Redisclosed => "redisclosed",
             ShowOutcome::HeldRefire => "held_refire",
             ShowOutcome::HeldContextCap => "held_context_cap",
+            ShowOutcome::HeldDeadline => "held_deadline",
             ShowOutcome::NotFireable => "not_fireable",
             ShowOutcome::Error => "error",
         }
@@ -570,6 +574,10 @@ fn stamp_disclosure(id: &str, session_id: &str, tick: u64) -> u64 {
     epoch
 }
 
+/// The least time before the hook's deadline in which a way is still shown:
+/// what writing its record and the envelope take.
+const SHOW_MARGIN: std::time::Duration = std::time::Duration::from_millis(250);
+
 /// Whether [`way_scored`] would show this way now, budget aside: not disabled,
 /// in scope, and allowed by its refire curve at the token position `tick`,
 /// which a scan reads once for all its candidates. Read-only. The relevance
@@ -653,6 +661,11 @@ pub fn way_scored(
     // delivered at most once per refire window. The fire is recorded only once
     // the body is admitted: a way the budget withholds must not start its
     // refire curve, or the curve would hold back guidance the model never saw.
+    // A hook past its deadline is killed with its output, so a fire recorded
+    // now would stand for text the agent never sees.
+    if crate::hook_deadline::nearly_passed(SHOW_MARGIN) {
+        return Ok(Shown::held(ShowOutcome::HeldDeadline));
+    }
     let lock = session::lock_engagement(id, session_id);
     let decision = session::way_fire_outcome(id, session_id, &curve, token_pos);
     if !decision.outcome.is_allowed() {
