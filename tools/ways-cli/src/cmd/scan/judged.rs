@@ -746,7 +746,13 @@ mod tests {
         let slot = claim_slot(&dir, 1).unwrap();
         let big = "x".repeat(1 << 20);
         let begun = std::time::Instant::now();
-        let r = spawn_at(std::path::Path::new("/bin/true"), &big, &slot, &sink);
+        // macOS ships `true` only at /usr/bin; older Linux layouts only at /bin.
+        let truth = ["/usr/bin/true", "/bin/true"]
+            .into_iter()
+            .map(std::path::Path::new)
+            .find(|p| p.exists())
+            .expect("a `true` binary at /usr/bin or /bin");
+        let r = spawn_at(truth, &big, &slot, &sink);
         assert!(begun.elapsed() < Duration::from_secs(3), "{:?}", begun.elapsed());
         assert!(r.is_err(), "the write fails");
         assert!(lines.borrow().iter().any(|l| l.contains("event=judge_detach_failed") && l.contains("reason=write")), "{:?}", lines.borrow());
