@@ -34,9 +34,11 @@ pub(crate) struct WayEvent {
     /// (`refire` or `context_cap`).
     pub(super) kind: String,
     pub(super) reason: String,
-    /// The line came from a detached judge (#1287): its verdict is no
-    /// decision the hook acted on.
-    pub(super) detached: bool,
+    /// A detached judge's verdict on a candidate the refire curve held,
+    /// which was not shown (#1287): it marks no row. A detached verdict on
+    /// a shown candidate is the only verdict a shadow tool lane has, and
+    /// marks its row as the hook's own would.
+    pub(super) held_refire: bool,
     /// On a fire or re-disclosure row: the tokens the next refire waited
     /// after it, as the hook computed it then. `None` on rows written
     /// before the field.

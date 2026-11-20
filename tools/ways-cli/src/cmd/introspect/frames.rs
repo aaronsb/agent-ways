@@ -319,9 +319,14 @@ pub(super) fn build_frames_by_agent(
                             by_redisclosure: true,
                         });
                 }
-                "way_judged" if !ev.way.is_empty() && !ev.detached && matches!(ev.verdict.as_str(), "block" | "would_block") => judged.push(ev),
+                "way_judged" if !ev.way.is_empty() && !ev.held_refire && matches!(ev.verdict.as_str(), "block" | "would_block") => judged.push(ev),
                 // #814: a way matched and held back, by its refire window or
-                // the context cap. A check's own suppression is not a row.
+                // the context cap. A check's own suppression is not a row. A
+                // way held because the hook was near its deadline has no row
+                // mark of its own, so it is a note on the frame.
+                "way_suppressed" if !ev.way.is_empty() && ev.kind == "way" && ev.reason == "deadline" => {
+                    new_events.push(format!("{} held: the hook was near its deadline", ev.way));
+                }
                 "way_suppressed" if !ev.way.is_empty() && ev.kind == "way" => held.push(ev),
                 // #786: the switch held a subagent's ways back. It is a mark
                 // on the frame, not an event note, so `new_events` reads as
@@ -573,7 +578,7 @@ pub(crate) fn load_session_events(content: &str, session_id: &str) -> Vec<WayEve
                 check: v["check"].as_str().unwrap_or("").to_string(),
                 p_yes: v["p_yes"].as_str().unwrap_or("").to_string(),
                 verdict: v["verdict"].as_str().unwrap_or("").to_string(),
-                detached: v["detached"].as_str() == Some("true"),
+                held_refire: v["held_refire"].as_str() == Some("true"),
                 ancestor: v["ancestor"].as_str().unwrap_or("").to_string(),
                 switch: v["switch"].as_str().unwrap_or("").to_string(),
                 lane: v["lane"].as_str().unwrap_or("").to_string(),
@@ -646,7 +651,7 @@ mod tests {
             agent_id: String::new(),
             kind: String::new(),
             reason: String::new(),
-            detached: false,
+            held_refire: false,
             refire_threshold: None,
         };
         // Window 1: origin session_start + two fires. A second session_start
@@ -696,7 +701,7 @@ mod tests {
             agent_id: String::new(),
             kind: String::new(),
             reason: String::new(),
-            detached: false,
+            held_refire: false,
             refire_threshold: None,
         };
         let events = vec![
@@ -857,7 +862,7 @@ mod tests {
             agent_id: String::new(),
             kind: String::new(),
             reason: String::new(),
-            detached: false,
+            held_refire: false,
             refire_threshold: None,
         };
         // A way fires in window 1; after a compaction, it only *re-discloses* (no

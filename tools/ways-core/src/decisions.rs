@@ -341,6 +341,9 @@ pub enum Grouped {
     /// A `turn_start: false` scan with no turn in its session to belong to,
     /// such as one whose turn began before the window.
     Orphan(Scan),
+    /// A detached judge's record: its verdicts on a scan, filed under the
+    /// scan's id. It is no scan, so it joins no turn and is no orphan.
+    Detached(Scan),
     /// A pull, judged when it arrives.
     Pull(Joined),
 }
@@ -472,6 +475,13 @@ impl Turns {
     }
 
     fn scan(&mut self, scan: Scan, emit: &mut impl FnMut(Grouped)) {
+        // A detached judge writes after its scan, maybe once the next turn
+        // has opened. Indexed or grouped, it would replace its scan's entry
+        // and land its ways in whichever turn is open.
+        if scan.detached {
+            emit(Grouped::Detached(scan));
+            return;
+        }
         let now = agent_fmt::when::parse_utc_iso(&scan.ts).unwrap_or(self.last_sweep);
         let agent = self.names.id(&scan.agent);
         let key = (scan.session.clone(), scan.agent.clone());
@@ -719,6 +729,27 @@ mod tests {
         );
     }
 
+    /// A detached judge's record, filed under its scan's id after that
+    /// scan's turn has closed, is no scan: it joins no turn, is no orphan,
+    /// and does not stand in for its scan when a pull names the scan.
+    #[test]
+    fn a_detached_record_joins_no_turn_and_is_no_orphan() {
+        let detached = r#"{"ts":"2026-09-01T10:00:20Z","kind":"scan","scan_id":"c1","session":"s","agent":"main","turn_start":false,"project":"/p","detached":true,"outcomes":[{"way":"d/a","result":"fired","verdict":"would_block"}]}"#;
+        let out = grouped(lines(&[
+            scan("2026-09-01T10:00:00Z", "m1", "main", true, &[]),
+            scan("2026-09-01T10:00:05Z", "c1", "main", false, &[]),
+            scan("2026-09-01T10:00:10Z", "m2", "main", true, &[]),
+            detached.to_string(),
+            pull("2026-09-01T10:00:30Z", "main", "d/a", "c1"),
+        ]));
+        assert_eq!(turns_of(&out), [("m1", vec!["c1"]), ("m2", vec![])]);
+        assert_eq!(joins_of(&out), [("main", "d/a", Join::RecallMiss)], "c1 delivered nothing; its detached record is no delivery");
+        assert!(!out.iter().any(|g| matches!(g, Grouped::Orphan(_))));
+        assert!(out.iter().any(|g| matches!(g, Grouped::Detached(s) if s.scan_id == "c1")), "it is handed on as itself");
+        let alone = grouped(lines(&[detached.to_string()]));
+        assert!(!alone.iter().any(|g| matches!(g, Grouped::Orphan(_))), "a detached record with no open turn is no orphan");
+    }
+
     #[test]
     fn a_continuing_scan_with_no_turn_in_its_session_is_an_orphan() {
         let out = grouped(vec![parse_line(fixture::S1[1]).unwrap()]);
@@ -817,7 +848,7 @@ mod tests {
             pull("2026-09-01T10:00:20Z", "main", "d/a", "m1"),
         ];
         let out = grouped(lines(&ls));
-        let order: Vec<&str> = out.iter().map(|g| match g { Grouped::Turn(t) => t.start.scan_id.as_str(), Grouped::Pull(_) => "pull", Grouped::Orphan(_) => "?" }).collect();
+        let order: Vec<&str> = out.iter().map(|g| match g { Grouped::Turn(t) => t.start.scan_id.as_str(), Grouped::Pull(_) => "pull", Grouped::Orphan(_) | Grouped::Detached(_) => "?" }).collect();
         assert_eq!(order, ["pull", "m1", "f1"], "m1 stays open past the future-dated f1, which is still read");
     }
 
@@ -831,7 +862,7 @@ mod tests {
             pull("2026-09-03T10:02:00Z", "main", "d/a", "m1"),
         ];
         let out = grouped(lines(&ls));
-        let order: Vec<&str> = out.iter().map(|g| match g { Grouped::Turn(t) => t.start.scan_id.as_str(), Grouped::Pull(_) => "pull", Grouped::Orphan(_) => "?" }).collect();
+        let order: Vec<&str> = out.iter().map(|g| match g { Grouped::Turn(t) => t.start.scan_id.as_str(), Grouped::Pull(_) => "pull", Grouped::Orphan(_) | Grouped::Detached(_) => "?" }).collect();
         assert_eq!(order, ["m1", "pull", "x1", "y1"], "y1 confirms the two-day gap and m1 is handed on");
     }
 

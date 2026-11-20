@@ -312,11 +312,16 @@ fn build_summary(
             }
             continue;
         }
-        // A detached judge's lines are judged after the hook, on candidates
-        // it showed or held: they are no gate decision of the hook's.
+        // A detached judge runs after the hook, on candidates the lane
+        // showed or the refire curve held. A verdict on a held one judged
+        // nothing that was shown, so it is left out. A verdict on a shown one
+        // is a shadow tool lane's only verdict, so it counts, but its time
+        // and its fallbacks are not the hook's.
         let detached = v["detached"].as_str() == Some("true");
+        let held = v["held_refire"].as_str() == Some("true");
         match v["event"].as_str() {
-            Some("way_judged" | "gate_fallback") if detached => {}
+            Some("way_judged") if held => {}
+            Some("gate_fallback") if detached => {}
             Some("way_fired") => {
                 total_fires += 1;
                 if let Some(t) = v["trigger"].as_str() {
@@ -340,7 +345,7 @@ fn build_summary(
                     Some("would_block") => gate.would_block += 1,
                     _ => gate.passed += 1,
                 }
-                if let Some(ms) = v["gate_ms"].as_str().and_then(|s| s.parse().ok()) {
+                if let Some(ms) = v["gate_ms"].as_str().and_then(|s| s.parse().ok()).filter(|_| !detached) {
                     gate_ms.push(ms);
                 }
             }
@@ -540,9 +545,8 @@ mod tests {
             .collect()
     }
 
-    /// A detached judge's verdicts are not the hook's: a held candidate it
-    /// would block, or a shadow verdict judged after the call, is no block
-    /// and no gate latency in the summary (#1287).
+    /// A detached judge's verdict on a candidate the refire curve held is no
+    /// block in the summary, and its fallback is not the hook's (#1287).
     #[test]
     fn the_summary_leaves_out_a_detached_judges_verdicts() {
         let log = concat!(
@@ -555,6 +559,22 @@ mod tests {
         assert_eq!((gate["judged"].as_u64(), gate["blocked"].as_u64()), (Some(1), Some(1)), "{gate}");
         assert!(gate["blocked_ways"].get("d/h").is_none(), "{gate}");
         assert!(gate["fallbacks"].get("deadline").is_none(), "{gate}");
+    }
+
+    /// In shadow mode a tool lane's verdicts come only from the detached
+    /// judge. A verdict on a candidate it showed is counted; its latency is
+    /// no hook's, and a held candidate's verdict is left out.
+    #[test]
+    fn the_summary_counts_a_shadow_tool_lanes_detached_verdicts() {
+        let log = concat!(
+            r#"{"event":"way_fired","session":"dump-sh","ts":"2026-01-01T00:00:00Z","way":"d/a","trigger":"command"}"#, "\n",
+            r#"{"event":"way_judged","session":"dump-sh","ts":"2026-01-01T00:00:02Z","way":"d/a","verdict":"would_block","gate_ms":"30000","detached":"true"}"#, "\n",
+            r#"{"event":"way_judged","session":"dump-sh","ts":"2026-01-01T00:00:02Z","way":"d/h","verdict":"would_block","gate_ms":"30000","detached":"true","held_refire":"true"}"#, "\n",
+        );
+        let dump = serde_json::to_value(build_dump(log, "dump-sh", false).unwrap()).unwrap();
+        let gate = &dump["summary"]["gate"];
+        assert_eq!((gate["judged"].as_u64(), gate["would_block"].as_u64(), gate["blocked"].as_u64()), (Some(1), Some(1), Some(0)), "{gate}");
+        assert!(gate["gate_ms_p50"].is_null(), "{gate}");
     }
 
     /// `replay --json` marks each way with its outcome and P(yes);

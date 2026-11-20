@@ -83,10 +83,10 @@ impl Lane {
 /// How the gate is set for this call.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum Config {
-    /// No engine and no key, or `gate.mode: off`.
+    /// No engine and no key, `gate.mode: off`, or an agent.yaml the gate
+    /// cannot read.
     Off,
-    /// Judge on the hot path. A broken agent.yaml lands here too, so the
-    /// gate logs why it falls back.
+    /// Judge on the hot path.
     Enforce { held_sample: f64 },
     /// Show everything; judge off the hot path.
     Shadow { held_sample: f64 },
@@ -104,9 +104,10 @@ pub(super) fn configured() -> Config {
                 Mode::Enforce => Config::Enforce { held_sample },
             }
         }
-        // A broken agent.yaml fails closed: the gate is off. The prompt lane
-        // logs why; a tool lane, on every tool call, stays as quiet as it
-        // was before it judged.
+        // A broken agent.yaml turns the gate off, so the lane fails open:
+        // the matcher's decision stands and nothing goes to a provider. The
+        // prompt lane logs why as `gate_fallback`; a tool lane, on every tool
+        // call, stays as quiet as it was before it judged.
         Ok(GateReading::Off | GateReading::NoKey) | Err(_) => Config::Off,
     }
 }
@@ -360,22 +361,35 @@ fn slots_dir() -> std::path::PathBuf {
 /// held.
 fn claim_slot(dir: &std::path::Path, cap: usize) -> Option<std::path::PathBuf> {
     std::fs::create_dir_all(dir).ok()?;
+    let create = |path: &std::path::Path| std::fs::OpenOptions::new().write(true).create_new(true).open(path).is_ok();
     for i in 0..cap {
         let path = dir.join(format!("slot-{i}"));
-        let stale = std::fs::metadata(&path)
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.elapsed().ok())
-            .is_some_and(|age| age > SLOT_STALE);
-        if stale {
-            let _ = std::fs::remove_file(&path);
-        }
-        if std::fs::OpenOptions::new().write(true).create_new(true).open(&path).is_ok() {
+        if create(&path) || (is_stale(&path) && reclaim(&path) && create(&path)) {
             return Some(path);
         }
     }
     None
 }
+
+/// Whether the slot file at `path` is older than [`SLOT_STALE`].
+fn is_stale(path: &std::path::Path) -> bool {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > SLOT_STALE)
+}
+
+/// Removes the slot file at `path` if it is still stale, under a lock on
+/// the slot directory so that hooks which found it stale at once take it
+/// back once: the first removes it and creates the slot again, and the
+/// others then find it fresh. A hook creating a free slot takes no lock,
+/// since only a reclaim removes a slot another process holds. A hook that
+/// cannot take the lock within [`RECLAIM_WAIT`] leaves the slot.
+fn reclaim(path: &std::path::Path) -> bool {
+    let Some(dir) = path.parent() else { return false };
+    let Ok(Some(_lock)) = agent_settings::writer::Lock::acquire_within(&dir.join("reclaim"), RECLAIM_WAIT) else { return false };
+    is_stale(path) && std::fs::remove_file(path).is_ok()
+}
+
+/// The longest a hook waits for another hook's reclaim of a stale slot.
+const RECLAIM_WAIT: Duration = Duration::from_millis(50);
 
 /// The binary this process runs, for starting the detached judge. After an
 /// update replaces it, Linux names the old one `… (deleted)`; the path
@@ -425,8 +439,13 @@ impl Drop for SlotGuard {
 /// written or the child stops reading. The write runs on its own thread
 /// through `agent_fmt::write_to_child`, so a child that exits without
 /// reading ends it with an error, never with SIGPIPE, which the binary
-/// restores to its default. A failure is logged as `judge_detach_failed`
-/// and gives `slot` back; the child gives it back when it is done.
+/// restores to its default. A failure is logged as `judge_detach_failed`.
+/// Once the child is spawned the slot is the child's, which gives it back
+/// when it is done; a hook gives it back only when the spawn failed or the
+/// child shut its stdin unread, since a child that never read its job never
+/// holds the slot. A write that is still going at the bound leaves the slot
+/// with the child, which may yet read the job; if it never does, the slot
+/// goes stale and is reclaimed.
 fn spawn_at(exe: &std::path::Path, text: &str, slot: &std::path::Path, sink: gate::EventSink<'_>) -> std::io::Result<()> {
     use std::process::{Command, Stdio};
     let mut cmd = Command::new(exe);
@@ -443,9 +462,10 @@ fn spawn_at(exe: &std::path::Path, text: &str, slot: &std::path::Path, sink: gat
             });
         }
     }
+    let log = |reason: &str| sink(&[("event", "judge_detach_failed"), ("reason", reason)]);
     let failed = |reason: String| {
         let _ = std::fs::remove_file(slot);
-        sink(&[("event", "judge_detach_failed"), ("reason", &reason)]);
+        log(&reason);
     };
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -469,7 +489,7 @@ fn spawn_at(exe: &std::path::Path, text: &str, slot: &std::path::Path, sink: gat
             Err(e)
         }
         Err(_) => {
-            failed("write: timed out".into());
+            log("write: timed out");
             Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "job write"))
         }
     }
@@ -748,6 +768,58 @@ mod tests {
         let old = std::time::SystemTime::now() - SLOT_STALE - Duration::from_secs(1);
         std::fs::File::options().write(true).open(&b).unwrap().set_modified(old).unwrap();
         assert!(claim_slot(&dir, 2).is_some(), "a stale slot is reclaimed");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Hooks that find the same slot stale at once take it back once: one
+    /// of them gets it and the rest find it held.
+    #[test]
+    fn a_stale_slot_is_reclaimed_by_one_hook() {
+        let dir = slot_dir("race");
+        let old = std::time::SystemTime::now() - SLOT_STALE - Duration::from_secs(1);
+        for round in 0..100 {
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let slot = dir.join("slot-0");
+            std::fs::write(&slot, "").unwrap();
+            std::fs::File::options().write(true).open(&slot).unwrap().set_modified(old).unwrap();
+            let start = std::sync::Arc::new(std::sync::Barrier::new(8));
+            let won: usize = (0..8)
+                .map(|_| {
+                    let (dir, start) = (dir.clone(), start.clone());
+                    std::thread::spawn(move || {
+                        start.wait();
+                        claim_slot(&dir, 1).is_some()
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|h| usize::from(h.join().unwrap()))
+                .sum();
+            assert_eq!(won, 1, "round {round}: one slot, {won} holders");
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A child that is alive but slow to read holds its slot once it is
+    /// spawned: a hook that stops waiting on the write logs it and leaves
+    /// the slot for the child to give back.
+    #[cfg(unix)]
+    #[test]
+    fn a_write_that_times_out_leaves_the_slot_to_the_child() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = slot_dir("slow");
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("slow-reader");
+        std::fs::write(&exe, "#!/bin/sh\nsleep 3\n").unwrap();
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let lines = Lines::default();
+        let sink = recorder(&lines);
+        let slot = claim_slot(&dir, 1).unwrap();
+        let r = spawn_at(&exe, &"x".repeat(1 << 20), &slot, &sink);
+        assert!(r.is_err(), "the write did not finish");
+        assert!(lines.borrow().iter().any(|l| l.contains("reason=write: timed out")), "{:?}", lines.borrow());
+        assert!(slot.exists(), "the slot belongs to the child");
         std::fs::remove_dir_all(&dir).ok();
     }
 

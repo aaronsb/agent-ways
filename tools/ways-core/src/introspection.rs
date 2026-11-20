@@ -548,12 +548,13 @@ pub struct JudgeBlock {
 }
 
 /// The ways the relevance judge blocked in `session_id`, oldest first, from
-/// the event log's text.
+/// the event log's text. A verdict on a candidate the refire curve held kept
+/// nothing out, so it is no block.
 pub fn judge_blocks(events_text: &str, session_id: &str) -> Vec<JudgeBlock> {
     events_text
         .lines()
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .filter(|e| e["session"].as_str() == Some(session_id) && e["event"].as_str() == Some("way_judged"))
+        .filter(|e| is_judged(e, session_id))
         .filter_map(|e| {
             let verdict = JudgeVerdict::from_value(&e).filter(|v| v.verdict == "block")?;
             Some(JudgeBlock { way: e["way"].as_str()?.to_string(), ts: e["ts"].as_str().unwrap_or("").to_string(), verdict })
@@ -561,15 +562,21 @@ pub fn judge_blocks(events_text: &str, session_id: &str) -> Vec<JudgeBlock> {
         .collect()
 }
 
+/// A `way_judged` line of `session_id`, apart from a detached judge's
+/// verdict on a candidate the refire curve held, which it marks
+/// `held_refire`.
+fn is_judged(e: &Value, session_id: &str) -> bool {
+    e["session"].as_str() == Some(session_id) && e["event"].as_str() == Some("way_judged") && e["held_refire"].as_str() != Some("true")
+}
+
 /// The gate logs `way_judged` just before the fire it allows, in the same
 /// hook run. A pass or a shadow would-block joins the nearest row of the same
 /// way within 3 s that has no verdict yet: a fire, a re-disclosure, or a way
 /// the context cap then withheld. A block becomes a withheld row of its own,
-/// since no fire follows it.
+/// since no fire follows it. A verdict on a candidate the refire curve held
+/// marks nothing: the way was not shown either way.
 fn attach_verdicts(fires: &mut Vec<FireRow>, events: &[Value], session_id: &str) {
-    let judged = events
-        .iter()
-        .filter(|e| e["session"].as_str() == Some(session_id) && e["event"].as_str() == Some("way_judged"));
+    let judged = events.iter().filter(|e| is_judged(e, session_id));
     for e in judged {
         let (Some(way), Some(verdict)) = (e["way"].as_str().filter(|w| !w.is_empty()), JudgeVerdict::from_value(e)) else { continue };
         let ts = e["ts"].as_str().unwrap_or("").to_string();
@@ -1027,6 +1034,23 @@ scope: subagent
         assert_eq!(m.summary.judge_blocked, 2, "the summary still counts what was kept out");
         let blocks = judge_blocks(&text, "s1");
         assert_eq!(blocks.iter().map(|b| b.way.as_str()).collect::<Vec<_>>(), ["d/b", "d/c"]);
+    }
+
+    /// A detached judge's block on a candidate the refire curve held kept
+    /// nothing out: the way was not shown either way. It is no judge-blocked
+    /// row and no judge block.
+    #[test]
+    fn a_held_candidates_detached_block_is_no_judge_block() {
+        let events = vec![
+            json!({"event":"way_fired","session":"s1","ts":"2026-01-01T00:00:00Z","way":"d/a","trigger":"keyword"}),
+            json!({"event":"way_judged","session":"s1","ts":"2026-01-01T00:00:01Z","way":"d/h","p_yes":"0.05","threshold":"0.30","verdict":"block","mode":"enforce","engine":"e","model":"m","judge_ms":"1","detached":"true","held_refire":"true"}),
+        ];
+        let text: String = events.iter().map(|e| format!("{e}\n")).collect();
+        let m = SessionIntrospection::build(&events, "s1", "/p", 200, &CriteriaMap::new());
+        let ways: Vec<&str> = m.turns.iter().flat_map(|t| &t.fired_ways).map(|w| w.way_id.as_str()).collect();
+        assert_eq!(ways, ["d/a"]);
+        assert_eq!(m.summary.judge_blocked, 0);
+        assert!(judge_blocks(&text, "s1").is_empty());
     }
 
     fn verdict_at(ts: &str, way: &str, verdict: &str, p: &str) -> Value {

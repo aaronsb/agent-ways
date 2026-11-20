@@ -37,11 +37,11 @@ use super::why::build_why_index;
 const SESSION: &str = "8f3a2c1d-5e6f-4a7b-9c8d-0e1f2a3b4c5d";
 const PROJECT: &str = "/home/dev/proj";
 
-/// A detached judge's verdict, on a held candidate or a shadow call judged
-/// after it ran, does not mark the way in the frame (#1287).
+/// A detached judge's verdict on a candidate the refire curve held does not
+/// mark the way in the frame (#1287).
 #[test]
 fn a_detached_verdict_marks_no_row() {
-    let held = WayEvent { verdict: "block".into(), detached: true, ..ev("2026-07-03T16:52:02Z", "way_judged", "itops/incident", "") };
+    let held = WayEvent { verdict: "block".into(), held_refire: true, ..ev("2026-07-03T16:52:02Z", "way_judged", "itops/incident", "") };
     let events = vec![ev("2026-07-03T16:52:01Z", "way_fired", "softwaredev/docs/adr", "file"), held];
     let f = &build_frames(&events, &[], &HashMap::new(), 50)[0];
     assert!(f.ways.iter().all(|w| w.id != "itops/incident"), "{:?}", f.ways.iter().map(|w| &w.id).collect::<Vec<_>>());
@@ -94,6 +94,28 @@ fn a_fire_row_threshold_is_read_from_the_log() {
     assert_eq!(evs[1].refire_threshold, None);
 }
 
+/// In shadow mode a tool lane's only verdicts are the detached judge's, so
+/// its would-block on a way the lane showed marks that row.
+#[test]
+fn a_detached_shadow_verdict_on_a_shown_way_marks_its_row() {
+    let shadow = WayEvent { verdict: "would_block".into(), ..ev("2026-07-03T16:52:02Z", "way_judged", "softwaredev/docs/adr", "") };
+    let events = vec![ev("2026-07-03T16:52:01Z", "way_fired", "softwaredev/docs/adr", "file"), shadow];
+    let f = &build_frames(&events, &[], &HashMap::new(), 50)[0];
+    let row = f.ways.iter().find(|w| w.id == "softwaredev/docs/adr").expect("the fired row");
+    assert_eq!(row.outcome, Outcome::WouldBlock);
+}
+
+/// A way held because the hook was near its deadline is no refire hold: it
+/// is a note on its frame, not a held row.
+#[test]
+fn a_deadline_hold_is_a_note_not_a_refire_row() {
+    let held = WayEvent { kind: "way".into(), reason: "deadline".into(), ..ev("2026-07-03T16:52:02Z", "way_suppressed", "itops/incident", "keyword") };
+    let events = vec![ev("2026-07-03T16:52:01Z", "way_fired", "softwaredev/docs/adr", "file"), held];
+    let f = &build_frames(&events, &[], &HashMap::new(), 50)[0];
+    assert!(f.ways.iter().all(|w| w.id != "itops/incident"), "{:?}", f.ways.iter().map(|w| &w.id).collect::<Vec<_>>());
+    assert!(f.new_events.iter().any(|e| e.contains("itops/incident") && e.contains("deadline")), "{:?}", f.new_events);
+}
+
 /// The sizes every screen is checked at: the smallest a screen must work
 /// in, and the reference.
 const SIZES: [(u16, u16); 2] = [(80, 25), (120, 40)];
@@ -114,7 +136,7 @@ fn ev(ts: &str, event: &str, way: &str, trigger: &str) -> WayEvent {
         agent_id: String::new(),
         kind: String::new(),
         reason: String::new(),
-        detached: false,
+        held_refire: false,
         refire_threshold: None,
     }
 }

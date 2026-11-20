@@ -202,6 +202,8 @@ enum Suppression {
     Refire,
     /// The hook's context budget had no room for it.
     ContextCap,
+    /// The hook was too near its deadline to show it.
+    Deadline,
 }
 
 impl Suppression {
@@ -209,18 +211,19 @@ impl Suppression {
         match self {
             Self::Refire => "refire",
             Self::ContextCap => "context_cap",
+            Self::Deadline => "deadline",
         }
     }
 }
 
-/// Record a way or check that matched but was not shown, so the refire
-/// curve's work and the context cap's are countable in the event log. Cheap
-/// by design: no transcript read and no engagement reload.
+/// Record a way or check that matched but was not shown, so the work of the
+/// refire curve, the context cap and the hook's deadline is countable in the
+/// event log. Cheap by design: no transcript read and no engagement reload.
 ///
 /// `kind` is `way` or `check`. Refire rows are deduplicated by the caller to
-/// one per way per fire window; context-cap rows are rare and log as they
-/// happen. A way's row carries its [`RefireState`] at the call; a check has
-/// no refire curve of its own and carries none.
+/// one per way per fire window; context-cap and deadline rows are rare and
+/// log as they happen. A way's row carries its [`RefireState`] at the call;
+/// a check has no refire curve of its own and carries none.
 ///
 /// References:
 /// - ADR-711 §5: suppression rows carry the tick, the backed-off threshold
@@ -691,7 +694,8 @@ pub fn way_scored(
     // the re-check under the lock, the recorded fire, and the stamps below.
     let token_pos = session::get_token_position(session_id);
     // A refire suppression logs once per way per fire window; a context-cap
-    // withhold logs every time (it is rare, and each one is a missed delivery).
+    // or deadline withhold logs every time (it is rare, and each one is a
+    // missed delivery).
     let suppress = |why: Suppression, last_fire: Option<u64>| {
         if why == Suppression::Refire
             && !last_fire.is_some_and(|t| session::first_suppression_in_window(id, session_id, t))
@@ -736,8 +740,10 @@ pub fn way_scored(
     // the body is admitted: a way the budget withholds must not start its
     // refire curve, or the curve would hold back guidance the model never saw.
     // A hook past its deadline is killed with its output, so a fire recorded
-    // now would stand for text the agent never sees.
+    // now would stand for text the agent never sees. The hold is logged, so
+    // a session with the gate off still shows it.
     if crate::hook_deadline::nearly_passed(SHOW_MARGIN) {
+        suppress(Suppression::Deadline, decision.last_fire);
         return Ok(Shown::held(ShowOutcome::HeldDeadline));
     }
     let lock = session::lock_engagement(id, session_id);
@@ -1189,6 +1195,65 @@ mod tests {
             transcript: String::new(),
             usage_tail: Vec::new(),
         }
+    }
+
+    /// Every file under `dir`, for finding the state a fire leaves.
+    fn files_under(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+        entries.flatten().flat_map(|e| if e.path().is_dir() { files_under(&e.path()) } else { vec![e.path()] }).collect()
+    }
+
+    /// A hook too near its deadline to show a way holds it: no fire is
+    /// recorded, and the hold is logged as a suppression with reason
+    /// `deadline`, so a gate-off session still shows it. The deadline is set
+    /// once per process, so the test reruns itself in a child with homes of
+    /// its own, and the child calls the same function a hook does.
+    #[test]
+    fn a_way_held_at_the_deadline_records_no_fire_and_logs_the_hold() {
+        const CHILD: &str = "WAYS_TEST_HELD_DEADLINE";
+        let name = "cmd::show::tests::a_way_held_at_the_deadline_records_no_fire_and_logs_the_hold";
+        if let Some(base) = std::env::var_os(CHILD).map(std::path::PathBuf::from) {
+            crate::hook_deadline::start(std::time::Duration::ZERO);
+            let shown = way_scored("tdl/held", "held-deadline", "keyword", None, None, None, None).unwrap();
+            assert!(matches!(shown.outcome, ShowOutcome::HeldDeadline), "{}", shown.outcome.as_str());
+            let events = std::fs::read_to_string(base.join("state/agent-ways/events.jsonl")).unwrap_or_default();
+            let held: Vec<serde_json::Value> = events
+                .lines()
+                .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+                .filter(|v| v["event"] == "way_suppressed" && v["way"] == "tdl/held")
+                .collect();
+            assert_eq!(held.len(), 1, "{events}");
+            assert_eq!(held[0]["reason"], "deadline");
+            assert!(!events.contains("\"way_fired\""), "{events}");
+            let state = files_under(&base.join("run"));
+            assert!(!state.iter().any(|p| p.to_string_lossy().contains("way-engagement")), "no fire recorded: {state:?}");
+            return;
+        }
+        let base = std::env::temp_dir().join(format!("ways-held-deadline-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let way = base.join("proj/.claude/ways/tdl/held");
+        std::fs::create_dir_all(&way).unwrap();
+        std::fs::write(way.join("held.md"), "---\ndescription: a way the deadline holds\nrefire: 0.15\n---\nbody\n").unwrap();
+        for d in ["run", "state", "config", "data", "cache", "home"] {
+            std::fs::create_dir_all(base.join(d)).unwrap();
+        }
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", name, "--test-threads", "1"])
+            .env(CHILD, &base)
+            .env("XDG_RUNTIME_DIR", base.join("run"))
+            .env("XDG_STATE_HOME", base.join("state"))
+            .env("XDG_CONFIG_HOME", base.join("config"))
+            .env("XDG_DATA_HOME", base.join("data"))
+            .env("XDG_CACHE_HOME", base.join("cache"))
+            .env("HOME", base.join("home"))
+            .env("CLAUDE_PROJECT_DIR", base.join("proj"))
+            .env_remove("CLAUDE_AGENT_ID")
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&base);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success(), "{stdout}{}", String::from_utf8_lossy(&out.stderr));
+        assert!(stdout.contains("1 passed"), "the child ran the test: {stdout}");
     }
 
     fn attend_way(root: &std::path::Path, id: &str, trigger: bool) {
