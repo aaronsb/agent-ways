@@ -49,6 +49,10 @@ considered:
     said: "that diagram looks reasonable"
     via: "the operator in #ways-decay-control, 2026-11-20, after seeing the ADR-711 figure of four refire schedules with the chosen rule (count kept, one fire granted per window) highlighted; confirmed in the head session the same day: \"the diagram was helpful\". The question on what once means was asked alongside and is unanswered"
     covers: [compaction-grant]
+  - operator: aaronsb
+    said: "I think once per context window don't you? a new window would mean it's lost"
+    via: the operator in the head session, 2026-11-20, answering whether the once preset means once per context window or once for the whole session
+    covers: [once]
 status: proposed
 date: 2026-11-20
 deciders:
