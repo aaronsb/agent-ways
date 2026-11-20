@@ -586,7 +586,7 @@ pub(crate) fn load_session_events(content: &str, session_id: &str) -> Vec<WayEve
                 agent_id: v["agent_id"].as_str().unwrap_or("").to_string(),
                 kind: v["kind"].as_str().unwrap_or("").to_string(),
                 reason: v["reason"].as_str().unwrap_or("").to_string(),
-                // Rows before ADR-711 carry no threshold.
+                // Rows written before the back-off carry no threshold.
                 refire_threshold: v["refire_threshold"].as_str().and_then(|t| t.parse().ok()),
             })
         })
