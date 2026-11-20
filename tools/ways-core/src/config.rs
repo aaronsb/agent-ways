@@ -291,12 +291,14 @@ pub struct Config {
 pub const DEFAULT_REFIRE_BACKOFF: f64 = 2.0;
 
 impl Config {
-    /// The refire back-off factor g: the configured value when it is a
-    /// finite number of at least 1, else the default. A value below 1 would
-    /// shorten each wait, which no setting asks for.
+    /// The refire back-off factor g: the configured value, raised to 1 when
+    /// it is below 1, as the back-off itself clamps it; a value that is not
+    /// finite reads as the default. A value below 1 would shorten each
+    /// wait, which no setting asks for, so the nearest it reads as is no
+    /// back-off.
     pub fn refire_backoff(&self) -> f64 {
         let g = self.refire_backoff;
-        if g.is_finite() && g >= 1.0 { g } else { DEFAULT_REFIRE_BACKOFF }
+        if g.is_finite() { g.max(1.0) } else { DEFAULT_REFIRE_BACKOFF }
     }
 
     /// The active non-English localization language, or `None` in English mode.
@@ -769,8 +771,8 @@ mod tests {
         assert_eq!(cfg.refire_presets.get("frequent").copied(), Some(0.05));
     }
 
-    /// g defaults to 2, a config value replaces it, and a value below 1 or
-    /// not a number reads as the default.
+    /// g defaults to 2, a config value replaces it, a finite value below 1
+    /// reads as 1, and a value that is not finite reads as the default.
     #[test]
     fn refire_backoff_defaults_to_two_and_never_reads_below_one() {
         let mut cfg = Config::default();
@@ -779,10 +781,14 @@ mod tests {
         assert_eq!(cfg.refire_backoff(), 1.0);
         cfg.apply_yaml("refire_backoff: 3.5\n");
         assert_eq!(cfg.refire_backoff(), 3.5);
-        cfg.refire_backoff = 0.5;
-        assert_eq!(cfg.refire_backoff(), DEFAULT_REFIRE_BACKOFF);
-        cfg.refire_backoff = f64::NAN;
-        assert_eq!(cfg.refire_backoff(), DEFAULT_REFIRE_BACKOFF);
+        for below in [0.5, 0.0, -2.0] {
+            cfg.refire_backoff = below;
+            assert_eq!(cfg.refire_backoff(), 1.0, "{below}");
+        }
+        for odd in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            cfg.refire_backoff = odd;
+            assert_eq!(cfg.refire_backoff(), DEFAULT_REFIRE_BACKOFF, "{odd}");
+        }
     }
 
     #[test]
