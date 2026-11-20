@@ -224,7 +224,7 @@ impl Suppression {
 ///
 /// References:
 /// - ADR-711 §5: suppression rows carry the tick, the backed-off threshold
-///   and n.
+///   and n; this change adds the compaction epoch to them as well.
 #[allow(clippy::too_many_arguments)]
 fn log_way_suppressed(
     kind: &str,
@@ -261,7 +261,8 @@ fn log_way_suppressed(
 /// `way_fired`, `way_redisclosed` and `way_suppressed` rows record it.
 ///
 /// References:
-/// - ADR-711 §5: the fields the event rows carry.
+/// - ADR-711 §5: the fields the event rows carry, the compaction epoch
+///   among them.
 struct RefireState {
     /// The thread's token position at the call.
     tick: u64,
@@ -271,11 +272,18 @@ struct RefireState {
     /// Tokens after the last fire at which the next refire opens, from the
     /// curve backed off by `n`; `None` for a curve that never reopens.
     threshold: Option<u64>,
+    /// The session's compaction epoch, so a measurement can split a
+    /// thread's rows by context window.
+    epoch: u64,
 }
 
 impl RefireState {
     fn fields(&self) -> Vec<(&'static str, String)> {
-        let mut out = vec![("token_position", self.tick.to_string()), ("refire_n", self.n.to_string())];
+        let mut out = vec![
+            ("token_position", self.tick.to_string()),
+            ("refire_n", self.n.to_string()),
+            ("compaction_epoch", self.epoch.to_string()),
+        ];
         if let Some(t) = self.threshold {
             out.push(("refire_threshold", t.to_string()));
         }
@@ -684,13 +692,18 @@ pub fn way_scored(
     let token_pos = session::get_token_position(session_id);
     // A refire suppression logs once per way per fire window; a context-cap
     // withhold logs every time (it is rare, and each one is a missed delivery).
-    let held = RefireState { tick: token_pos, n: fires, threshold: curve.refire_delta(session::REFIRE_FLOOR) };
     let suppress = |why: Suppression, last_fire: Option<u64>| {
         if why == Suppression::Refire
             && !last_fire.is_some_and(|t| session::first_suppression_in_window(id, session_id, t))
         {
             return;
         }
+        let held = RefireState {
+            tick: token_pos,
+            n: fires,
+            threshold: curve.refire_delta(session::REFIRE_FLOOR),
+            epoch: session::refire_count::compaction_epoch(session_id),
+        };
         log_way_suppressed("way", id, &domain, trigger, why, &scope, &project_dir, session_id, Some(&held));
     };
 
@@ -746,7 +759,12 @@ pub fn way_scored(
     // two hooks that both pass the re-check cannot both count it.
     let n = session::refire_count::bump_fire_count(session_id, id);
     drop(lock);
-    let shown = RefireState { tick: token_pos, n, threshold: next_refire_threshold(&curve, fires, n) };
+    let shown = RefireState {
+        tick: token_pos,
+        n,
+        threshold: next_refire_threshold(&curve, fires, n),
+        epoch: session::refire_count::compaction_epoch(session_id),
+    };
     let is_redisclosure = decision.outcome.is_redisclosure();
 
     let epoch = stamp_disclosure(id, session_id, token_pos);
@@ -804,12 +822,9 @@ pub fn way_scored(
         // parent's session id, so without this a parallel fan-out reads as one
         // session on the read side; `ways tune stats` keys hook invocations on it.
         ("agent_id", agent_id),
-        // The session's compaction epoch, so a measurement can split a
-        // thread's fires by context window.
-        ("compaction_epoch", session::refire_count::compaction_epoch(session_id).to_string()),
     ];
-    // The tick, the fire's n, and the threshold the next refire waits in
-    // this thread.
+    // The tick, the fire's n, the threshold the next refire waits in this
+    // thread, and the session's compaction epoch.
     //
     // References:
     // - ADR-711 §5: fire rows carry the tick, the threshold, n and the

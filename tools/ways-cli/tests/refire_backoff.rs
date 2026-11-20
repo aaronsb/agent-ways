@@ -278,8 +278,8 @@ fn each_agent_thread_keeps_its_own_count() {
 
 /// Compaction clears the clock but not the count: the first match in the
 /// new window fires (the grant), and the refire after it waits
-/// H × g^(n-1) with n counted across both windows. Fire rows carry the
-/// compaction epoch.
+/// H × g^(n-1) with n counted across both windows. Fire and held rows
+/// carry the compaction epoch.
 #[test]
 fn compaction_grants_one_fire_and_keeps_the_count() {
     let s = Sim::new("compact", None);
@@ -294,6 +294,9 @@ fn compaction_grants_one_fire_and_keeps_the_count() {
     let fires = s.fires("bo/w");
     assert_eq!(field(&fires, "refire_n"), vec![1, 2, 3, 4, 5]);
     assert_eq!(field(&fires, "compaction_epoch"), vec![0, 0, 0, 1, 1], "{fires:#?}");
+    // A held row carries the epoch too.
+    let held = s.events(|v| v["event"] == "way_suppressed" && v["way"] == "bo/w");
+    assert_eq!(field(&held, "compaction_epoch"), vec![1], "{held:#?}");
 }
 
 /// `once` fires once per context window: never again within the window,
