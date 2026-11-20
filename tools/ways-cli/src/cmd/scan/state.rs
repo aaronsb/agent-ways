@@ -72,9 +72,9 @@ pub fn state(
     // State trigger evaluation
     let state = StateSurface { session_id, scope: &scope, project_dir: &project_dir, transcript, envelope_turn };
     // The triggered ways go through the judge before any fire is recorded
-    // (scan/judged.rs), judged against the calling agent's recent turns and
-    // the prompt in hand. Refire cadence follows each way's own `refire:`
-    // curve (ADR-126), read by the refire check and again by show.
+    // (scan/judged.rs), judged against the agent's request: the prompt in
+    // hand, else its last human turn. Refire cadence follows each way's own
+    // `refire:` curve (ADR-126), read by the refire check and again by show.
     let judge_candidates: Vec<judged::Candidate> =
         candidates.iter().filter(|w| state.triggers(w)).map(|w| judged::declared(w, "state", session_id)).collect();
     let lane = judged::Lane {
@@ -84,10 +84,10 @@ pub fn state(
         project_dir: project_dir.clone(),
         session_id: session_id.to_string(),
     };
-    let mut turns = super::lookbehind::recent_turns(session_id);
-    if let Some(q) = query.map(str::trim).filter(|q| !q.is_empty() && !envelope_turn) {
-        turns.push(ways_agent_core::judge::Turn { role: ways_agent_core::judge::Role::User, text: q.to_string() });
-    }
+    let turns = match query.map(str::trim).filter(|q| !q.is_empty() && !envelope_turn) {
+        Some(q) => vec![ways_agent_core::judge::Turn { role: ways_agent_core::judge::Role::User, text: q.to_string() }],
+        None => super::lookbehind::recent_turns(session_id),
+    };
     judged::run(&lane, &judge_candidates, turns, gate::PROMPT_WAIT, |c| {
         let shown = capture_show_way(&c.key, session_id, "state", None, None, None, Some(&mut budget));
         if !shown.body.is_empty() {

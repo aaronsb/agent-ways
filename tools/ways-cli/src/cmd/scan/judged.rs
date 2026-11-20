@@ -340,24 +340,15 @@ pub(crate) fn run_detached(text: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The calling agent's recent context with the tool call in hand as its
-/// last turn, the agent's own: the turn the judge reads first, and the only
-/// one under a profile of `turns: 1`. The agent's prose since the last human
-/// turn leads it, so the call reads in the agent's own words.
+/// What a tool lane's judge reads: the calling agent's request, its last
+/// human turn or its brief, then the call in hand as the agent's turn, the
+/// one a profile of `turns: 1` reads. No narration (ADR-712).
 pub(super) fn tool_turns(session_id: &str, call: &str) -> Vec<Turn> {
     with_call(super::lookbehind::recent_turns(session_id), call)
 }
 
 fn with_call(mut turns: Vec<Turn>, call: &str) -> Vec<Turn> {
-    let prose = match turns.last() {
-        Some(t) if t.role == Role::Assistant => turns.pop().map(|t| t.text),
-        _ => None,
-    };
-    let text = match prose {
-        Some(p) => format!("{p}\n{call}"),
-        None => call.to_string(),
-    };
-    turns.push(Turn { role: Role::Assistant, text });
+    turns.push(Turn { role: Role::Assistant, text: call.to_string() });
     turns
 }
 
@@ -497,15 +488,11 @@ mod tests {
     }
 
     #[test]
-    fn the_call_is_the_agents_last_turn_after_its_prose() {
+    fn the_call_follows_the_request_and_no_narration_is_sent() {
         let call = bash_call("git commit -m x", Some("Commit the fix"));
         assert_eq!(call, "About to run: Commit the fix\n$ git commit -m x");
-        let turns = with_call(
-            vec![Turn { role: Role::User, text: "brief".into() }, Turn { role: Role::Assistant, text: "I will commit.".into() }],
-            &call,
-        );
-        assert_eq!(turns.len(), 2);
-        assert_eq!(turns[1], Turn { role: Role::Assistant, text: format!("I will commit.\n{call}") });
+        let turns = with_call(vec![Turn { role: Role::User, text: "brief".into() }], &call);
+        assert_eq!(turns, [Turn { role: Role::User, text: "brief".into() }, Turn { role: Role::Assistant, text: call.clone() }]);
         let alone = with_call(vec![], &call);
         assert_eq!(alone, [Turn { role: Role::Assistant, text: call }]);
         let long = bash_call(&"x".repeat(1000), None);

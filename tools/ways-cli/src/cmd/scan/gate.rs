@@ -391,7 +391,7 @@ fn handoff(store: &Store, settings: &Settings, req: JudgeRequest, begun: Instant
         return Ok(Reply::Fallback { reason: "deadline: before call".into(), latency_ms: 0, call: None });
     }
     let n = req.candidates.len();
-    let turns = judge::render_turns(&req.turns, p.turns, p.max_turn_chars);
+    let turns = judge::render_turns(&req.turns, judge::window(p.turns, req.min_turns), p.max_turn_chars);
     let job = JudgeJob {
         model: p.model.clone(),
         system: judge::SYSTEM.to_string(),
@@ -536,6 +536,9 @@ fn judge_batch(
         turns: turns.to_vec(),
         candidates: batch.iter().map(|p| Candidate { id: p.id.to_string(), text: way_text(p.id, p.description) }).collect(),
         engine: None,
+        // A tool lane's request and call are both its input (ADR-712); the
+        // prompt lane reads the profile's window.
+        min_turns: (log.lane != "prompt").then_some(turns.len()),
     };
     let begun = Instant::now();
     let reply = call(request, timeout);
