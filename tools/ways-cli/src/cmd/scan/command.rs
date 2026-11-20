@@ -12,11 +12,13 @@ use crate::cmd::show::ContextBudget;
 use crate::session;
 
 use super::candidates::{check_when, collect_checks, collect_with_off};
-use super::discard;
+use super::decision::Surface;
+use super::gate::{self, Trigger};
+use super::judged;
 use super::order::{order_hits, Hit};
 use super::scoring::{batch_embed_score, capture_show_check, capture_show_way, EmbedScores};
 use super::{
-    capped_span, check_semantic_score, compile_trigger, effective_thresholds, effective_thresholds_in_scan,
+    capped_span, check_semantic_score, compile_trigger, discard, effective_thresholds, effective_thresholds_in_scan,
     emit_hook_context, has_shown_ancestor, lookbehind, reduce, regex_span, WayCandidate, BUDGET_COMMAND,
 };
 
@@ -65,69 +67,115 @@ pub fn command(
     let command = ShellCommand::parse(cmd);
     let surface = CommandSurface { command: &command, description, session_id, scope: &scope, project_dir: &project_dir };
     let hits = command_hits(&surface, &candidates, &embed_matches, &HashSet::new());
+    let checks = collect_checks(&project_dir);
+    let matched_checks = check_hits(&checks, &command, session_id, &scope, &project_dir, &embed_matches);
+
+    // The matcher's hits, then the checks, each marked by the read-only
+    // refire check, go to the judge (scan/judged.rs) before any fire is
+    // recorded.
+    let by_id: std::collections::HashMap<&str, &WayCandidate> = candidates.iter().map(|w| (w.id.as_str(), w)).collect();
+    let mut judge_candidates: Vec<judged::Candidate> = hits
+        .iter()
+        .filter_map(|hit| {
+            let way = by_id.get(hit.id.as_str())?;
+            Some(judged::Candidate {
+                key: hit.id.clone(),
+                description: way.description.clone(),
+                trigger: way_trigger(way, &command, hit.payload.1.is_some()),
+                channel: hit.payload.0.to_string(),
+                p: hit.score,
+                open: gate::refire_open(&hit.id, session_id),
+            })
+        })
+        .collect();
+    judge_candidates.extend(matched_checks.iter().map(|(check, score)| judged::check_candidate(check, *score, "bash")));
+    let lane = judged::Lane {
+        surface: Surface::Command,
+        hook_event: "PreToolUse".into(),
+        scope: scope.clone(),
+        project_dir: project_dir.clone(),
+        session_id: session_id.to_string(),
+    };
+    let turns = judged::tool_turns(session_id, &judged::bash_call(cmd, description));
+
+    let hit_of: std::collections::HashMap<&str, &BashHit> = hits.iter().map(|h| (h.id.as_str(), h)).collect();
     let mut shown: HashSet<String> = HashSet::new();
-    for hit in &hits {
+    judged::run(&lane, &judge_candidates, turns, gate::TOOL_WAIT, |c| {
+        if let Some((check, score)) = judged::check_of(&c.key).and_then(|id| matched_checks.iter().find(|(w, _)| w.id == id)) {
+            let out = capture_show_check(&check.id, session_id, "bash", *score, Some(&mut budget));
+            let delivered = !out.is_empty();
+            context.push_str(&out);
+            return if delivered { "fired" } else { "held" };
+        }
+        let Some(hit) = hit_of.get(c.key.as_str()) else { return "error" };
         let (channel, span, needs_parent) = &hit.payload;
         if *needs_parent && !has_shown_ancestor(&hit.id, &shown) {
-            continue;
+            return "withheld_for_parent";
         }
         // A regex hit carries its span and no surface; a semantic hit carries
         // the embedded surface and no span.
-        let surface = if span.is_some() { None } else { Some(reduced_for_embed.as_str()) };
-        let out = capture_show_way(
-            &hit.id,
-            session_id,
-            channel,
-            hit.score,
-            span.as_deref(),
-            surface,
-            Some(&mut budget),
-        )
-        .body;
-        if !out.is_empty() {
+        let embedded = if span.is_some() { None } else { Some(reduced_for_embed.as_str()) };
+        let out = capture_show_way(&hit.id, session_id, channel, hit.score, span.as_deref(), embedded, Some(&mut budget));
+        if !out.body.is_empty() {
             shown.insert(hit.id.clone());
-            context.push_str(&out);
+            context.push_str(&out.body);
         }
-    }
+        out.outcome.as_str()
+    });
     let fired: HashSet<String> = hits.iter().map(|h| h.id.clone()).collect();
     log_discarded(&surface, &candidates, &fired, &shown, &off, &embed_matches);
-
-    // Check matching: commands regex + semantic scoring.
-    let checks = collect_checks(&project_dir);
-
-    for check in &checks {
-        if !session::scope_matches(&check.scope, &scope) {
-            continue;
-        }
-        if !check_when(&check.when_project, &check.when_file_exists, &project_dir) {
-            continue;
-        }
-
-        let mut match_score: f64 = 0.0;
-
-        if let Some(ref cmds_pattern) = check.commands {
-            if command.span(cmds_pattern).is_some() {
-                match_score = 3.0;
-            }
-        }
-
-        if match_score == 0.0 && !check.description.is_empty() && !check.vocabulary.is_empty() {
-            match_score = check_semantic_score(check, session_id, &embed_matches);
-        }
-
-        if match_score > 0.0 {
-            let out = capture_show_check(&check.id, session_id, "bash", match_score, Some(&mut budget));
-            if !out.is_empty() {
-                context.push_str(&out);
-            }
-        }
-    }
 
     if !context.is_empty() {
         emit_hook_context("PreToolUse", context.trim_end());
     }
 
     Ok(())
+}
+
+/// What fired a Bash-lane way, for the judge's switch: its `commands:`
+/// regex, its `pattern:` on the description, or the embedding matcher.
+fn way_trigger(way: &WayCandidate, command: &ShellCommand, regex: bool) -> Trigger {
+    if !regex {
+        Trigger::Semantic
+    } else if way.commands.as_deref().is_some_and(|p| command.span(p).is_some()) {
+        Trigger::Declared
+    } else if way.pattern_strict {
+        Trigger::Strict
+    } else {
+        Trigger::Keyword
+    }
+}
+
+/// The checks that match a Bash call, with their match score: 3.0 for a
+/// `commands:` regex, else the semantic score of a check that declares
+/// `description` and `vocabulary`.
+fn check_hits<'c>(
+    checks: &'c [WayCandidate],
+    command: &ShellCommand,
+    session_id: &str,
+    scope: &str,
+    project_dir: &str,
+    embed_matches: &EmbedScores,
+) -> Vec<(&'c WayCandidate, f64)> {
+    let mut out = Vec::new();
+    for check in checks {
+        if !session::scope_matches(&check.scope, scope) || !check_when(&check.when_project, &check.when_file_exists, project_dir) {
+            continue;
+        }
+        let mut match_score: f64 = 0.0;
+        if let Some(ref cmds_pattern) = check.commands {
+            if command.span(cmds_pattern).is_some() {
+                match_score = 3.0;
+            }
+        }
+        if match_score == 0.0 && !check.description.is_empty() && !check.vocabulary.is_empty() {
+            match_score = check_semantic_score(check, session_id, embed_matches);
+        }
+        if match_score > 0.0 {
+            out.push((check, match_score));
+        }
+    }
+    out
 }
 
 /// A Bash call as the `commands:` regexes read it (ADR-188 item 3a): its
@@ -169,6 +217,10 @@ pub(super) struct CommandSurface<'a> {
     pub(super) project_dir: &'a str,
 }
 
+/// A Bash-lane hit; the payload is (channel, matched span, fired only on
+/// this scan's parent boost).
+type BashHit = Hit<(&'static str, Option<String>, bool)>;
+
 /// The Bash lane's way hits for one command, in admission order: the command
 /// and description regexes, then the semantic lane on the tool description.
 /// `fired_in_scan` holds ways already fired in this scan, whose children they
@@ -178,12 +230,12 @@ pub(super) fn command_hits(
     candidates: &[WayCandidate],
     embed_matches: &EmbedScores,
     fired_in_scan: &HashSet<String>,
-) -> Vec<Hit<(&'static str, Option<String>, bool)>> {
+) -> Vec<BashHit> {
     let CommandSurface { command, description, session_id, scope, project_dir } = *surface;
     // Way matching: commands regex + pattern regex + semantic (ADR-155 §4).
     // Hits are collected, then admitted in a fixed order (scan/order.rs).
     // Payload: (channel, matched span, fired only on this scan's parent boost).
-    let mut hits: Vec<Hit<(&'static str, Option<String>, bool)>> = Vec::new();
+    let mut hits: Vec<BashHit> = Vec::new();
     let mut fired_ids: HashSet<String> = fired_in_scan.clone();
     for way in candidates {
         if !session::scope_matches(&way.scope, scope) {
@@ -407,5 +459,48 @@ mod shell_command_tests {
         assert_eq!(span(r"gh", ""), None);
         assert_eq!(span(r"(unclosed", "gh pr list"), None);
         assert_eq!(ShellCommand::default().span(r".*"), None);
+    }
+}
+
+#[cfg(test)]
+mod judge_trigger_tests {
+    //! #1287: the Bash lane's candidates reach the judge as the kind that
+    //! fired them, a semantic hit included.
+    use super::*;
+    use crate::cmd::scan::eligibility_tests::way;
+    use ways_core::calibration::{Calibration, ModelCalibration};
+
+    const CAL: ModelCalibration = ModelCalibration { a: 10.0, b: -2.5, auc: 1.0, n: 0 };
+
+    #[test]
+    fn each_bash_hit_is_judged_as_the_kind_that_fired_it() {
+        let mut regex = way("cmd/way", "agent", None);
+        regex.commands = Some(r"^git\ commit".into());
+        let mut keyword = way("kw/way", "agent", None);
+        keyword.pattern = Some("parser".into());
+        let sem = way("sem/way", "agent", None);
+        let cands = [regex, keyword, sem];
+        let scores = EmbedScores {
+            en: Some(vec![("sem/way".to_string(), 0.9), ("cmd/way".to_string(), 0.0), ("kw/way".to_string(), 0.0)]),
+            multi: None,
+            calibration: Calibration { en: Some(CAL), multi: None },
+        };
+        let command = ShellCommand::parse("git commit -m fix");
+        let surface = CommandSurface {
+            command: &command,
+            description: Some("fix the parser"),
+            session_id: "judge-trigger-test",
+            scope: "agent",
+            project_dir: "/p",
+        };
+        let hits = command_hits(&surface, &cands, &scores, &HashSet::new());
+        let kinds: std::collections::HashMap<&str, Trigger> = hits
+            .iter()
+            .map(|h| (h.id.as_str(), way_trigger(cands.iter().find(|w| w.id == h.id).unwrap(), &command, h.payload.1.is_some())))
+            .collect();
+        assert_eq!(kinds.get("sem/way"), Some(&Trigger::Semantic), "{kinds:?}");
+        assert_eq!(kinds.get("cmd/way"), Some(&Trigger::Declared));
+        assert_eq!(kinds.get("kw/way"), Some(&Trigger::Keyword));
+        assert!(kinds.values().all(|k| gate::JUDGED.judges(*k)), "the switch sends every one");
     }
 }

@@ -12,7 +12,12 @@
 //! before: they remain the debugging trail.
 //!
 //! A prompt scan writes its record even when nothing matched, so the record
-//! count is a turn count on keyword-only installs too.
+//! count is a turn count on keyword-only installs too. The tool-call lanes
+//! (command, file, tool, state, post-tool) write one when the scan had a
+//! candidate, so a day of records can be read per lane (`surface`) and per
+//! agent thread (`agent`). A judge run off the hot path, in shadow mode or
+//! on a sample of held candidates, writes a record of its own under the
+//! same `scan_id`, marked `detached`.
 
 use serde_json::{Map, Value};
 use std::collections::HashMap;
@@ -22,16 +27,28 @@ use super::gate;
 
 /// The surface a scan read.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(super) enum Surface {
     Prompt,
     Task,
+    Command,
+    File,
+    Tool,
+    State,
+    PostTool,
 }
 
 impl Surface {
-    fn as_str(self) -> &'static str {
+    pub(super) fn as_str(self) -> &'static str {
         match self {
             Surface::Prompt => "prompt",
             Surface::Task => "task",
+            Surface::Command => "command",
+            Surface::File => "file",
+            Surface::Tool => "tool",
+            Surface::State => "state",
+            Surface::PostTool => "post_tool",
         }
     }
 }
@@ -59,7 +76,6 @@ pub(super) struct Context<'a> {
 /// once at its end.
 pub(super) struct Record {
     head: Map<String, Value>,
-    surface: Surface,
     session: String,
     scan_id: String,
     epoch: u64,
@@ -70,6 +86,9 @@ pub(super) struct Record {
     candidates: Vec<candidate_log::Candidate>,
     outcomes: Vec<Map<String, Value>>,
     judge: Option<Value>,
+    /// A prompt-lane record becomes the agent's last scan; a detached one
+    /// does not.
+    surface_is_last_scan: bool,
 }
 
 /// Where cosine and share come from: the single-vector rows over the whole
@@ -80,9 +99,23 @@ impl Record {
     /// A record for a scan starting now, with the current agent and its token
     /// position read from the session's state.
     pub(super) fn begin(ctx: &Context<'_>) -> Self {
+        Record::resume(ctx, &scan_id())
+    }
+
+    /// A record under an existing `scan_id`: the detached judge's, for the
+    /// scan that handed it the candidates. It is marked `detached` and never
+    /// becomes the agent's last scan.
+    pub(super) fn detached(ctx: &Context<'_>, scan_id: &str) -> Self {
+        let mut r = Record::resume(ctx, scan_id);
+        r.head.insert("detached".into(), true.into());
+        r.surface_is_last_scan = false;
+        r
+    }
+
+    fn resume(ctx: &Context<'_>, scan_id: &str) -> Self {
         Record::new(
             ctx,
-            &scan_id(),
+            scan_id,
             &agent_fmt::when::now_utc_iso(),
             &crate::session::current_agent(),
             crate::session::get_token_position(ctx.session),
@@ -114,7 +147,6 @@ impl Record {
         head.insert("project".into(), ctx.project.into());
         Record {
             head,
-            surface: ctx.surface,
             session: ctx.session.to_string(),
             scan_id: scan_id.to_string(),
             epoch,
@@ -124,6 +156,7 @@ impl Record {
             candidates: Vec::new(),
             outcomes: Vec::new(),
             judge: None,
+            surface_is_last_scan: ctx.surface == Surface::Prompt,
         }
     }
 
@@ -178,7 +211,7 @@ impl Record {
     /// ancestor block names the ancestor and carries the ancestor's verdict as
     /// `ancestor_p_yes` and `ancestor_threshold`: the judge never saw this way.
     /// Any other judged way carries its `p_yes` and `verdict`.
-    pub(super) fn hit(&mut self, way: &str, rank: usize, channel: &str, p: Option<f64>, result: &'static str, judge: Option<&gate::Gate>) {
+    pub(super) fn hit(&mut self, way: &str, rank: usize, channel: &str, p: Option<f64>, result: &str, judge: Option<&gate::Gate>) {
         let mut o = outcome(way, result);
         o.insert("rank".into(), rank.into());
         o.insert("channel".into(), channel.into());
@@ -231,9 +264,9 @@ impl Record {
                 j.insert("status".into(), "fallback".into());
                 j.insert("reason".into(), reason.as_str().into());
             }
-        }
-        if !g.capped.is_empty() {
-            j.insert("capped".into(), g.capped.clone().into());
+            gate::Status::Detached => {
+                j.insert("status".into(), "detached".into());
+            }
         }
         self.judge = Some(Value::Object(j));
     }
@@ -260,7 +293,7 @@ impl Record {
     /// becomes the agent's last scan, which a pull later in the turn joins to.
     pub(super) fn write(self) {
         crate::session::log_decision(&self.to_json());
-        if self.surface == Surface::Prompt {
+        if self.surface_is_last_scan {
             crate::session::write_last_scan(&self.session, &self.scan_id, self.epoch);
         }
     }
@@ -273,7 +306,7 @@ pub(super) fn block_result(blocked: &gate::Blocked, way: &str) -> Option<&'stati
     Some(if by_ancestor { "ancestor_block" } else { "judge_block" })
 }
 
-fn outcome(way: &str, result: &'static str) -> Map<String, Value> {
+fn outcome(way: &str, result: &str) -> Map<String, Value> {
     let mut o = Map::new();
     o.insert("way".into(), way.into());
     o.insert("result".into(), result.into());
@@ -317,7 +350,7 @@ mod tests {
     fn gate_of(verdicts: &[(&str, f64)], mode: ways_agent_core::profile::Mode) -> gate::Gate {
         let events = Events::default();
         let sink = |f: &[(&str, &str)]| events.borrow_mut().push(f.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect());
-        let lc = gate::LogContext { session_id: "s", project_dir: "/p", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink };
+        let lc = gate::LogContext { lane: "prompt", session_id: "s", project_dir: "/p", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink };
         gate::test_gate(verdicts, mode, &lc)
     }
 
@@ -386,7 +419,7 @@ mod tests {
         use ways_agent_core::profile::Mode;
         let events = Events::default();
         let sink = |f: &[(&str, &str)]| events.borrow_mut().push(f.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect());
-        let lc = gate::LogContext { session_id: "s", project_dir: "/p", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink };
+        let lc = gate::LogContext { lane: "prompt", session_id: "s", project_dir: "/p", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink };
         let mut g = gate::test_gate(&[("p", 0.05)], Mode::Enforce, &lc);
         assert!(g.blocked.with_ancestor("p/c", &lc));
         assert_eq!(block_result(&g.blocked, "p/c"), Some("ancestor_block"));
@@ -401,8 +434,10 @@ mod tests {
     #[test]
     fn the_gate_status_is_named_with_its_reason_or_cap() {
         let mut r = record(Surface::Prompt);
-        r.judge(&gate::Gate { status: gate::Status::Fallback { reason: "deadline".into() }, capped: vec!["w/9".into()], ..Default::default() });
-        assert_eq!(r.to_json()["judge"], json!({"status": "fallback", "reason": "deadline", "capped": ["w/9"]}));
+        r.judge(&gate::Gate { status: gate::Status::Fallback { reason: "deadline".into() }, ..Default::default() });
+        assert_eq!(r.to_json()["judge"], json!({"status": "fallback", "reason": "deadline"}));
+        r.judge(&gate::Gate { status: gate::Status::Detached, ..Default::default() });
+        assert_eq!(r.to_json()["judge"], json!({"status": "detached"}));
         r.judge(&gate::Gate::default());
         assert_eq!(r.to_json()["judge"], json!({"status": "off"}));
     }

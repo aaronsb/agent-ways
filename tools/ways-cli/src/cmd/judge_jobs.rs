@@ -63,6 +63,10 @@ pub enum JudgeCommand {
         #[arg(long)]
         job: String,
     },
+    /// Judge the candidates a lane handed off on stdin and log the verdicts
+    /// (shadow mode, and the sample of held candidates); the lanes start it
+    #[command(hide = true)]
+    Detached,
 }
 
 pub fn run(command: JudgeCommand) -> Result<()> {
@@ -76,6 +80,11 @@ pub fn run(command: JudgeCommand) -> Result<()> {
                 println!("{line}");
             }
             Ok(())
+        }
+        JudgeCommand::Detached => {
+            let mut input = String::new();
+            std::io::stdin().read_to_string(&mut input).context("reading the job")?;
+            crate::cmd::scan::run_detached(&input)
         }
         JudgeCommand::Answer { session, job } => {
             let store = store(&session);

@@ -2157,7 +2157,8 @@ fn scenario_decision_records_name_floor_vetoes_near_misses_and_the_gate() {
     let judge = &records[0]["judge"];
     assert_eq!(judge["status"], "fallback", "{judge}");
     assert!(judge["reason"].as_str().unwrap().starts_with("config:"), "{judge}");
-    assert!(records[1].get("judge").is_none(), "the task lane has no judge");
+    // The task lane judges its hits too (#1287); this dispatch matched none.
+    assert!(records[1].get("judge").is_none(), "the task lane judged nothing");
 
     clean_markers(&session);
     let _ = std::fs::remove_dir_all(&home);

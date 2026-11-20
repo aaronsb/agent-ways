@@ -2,25 +2,29 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-//! The relevance gate on the prompt lane (ADR-196).
+//! The relevance gate (ADR-196), on every lane that injects ways.
 //!
-//! After the matcher and the refire check, and before a fire is recorded, the
-//! ways the lane would show are sent to the ways agent in one request with the
-//! conversation's last turns. In enforce mode a way judged below the engine's
-//! threshold is not shown and keeps its refire budget; in shadow mode every
-//! verdict is logged and nothing is blocked. Ways with `pattern_strict` are not
-//! judged. A request carries at most the profile's `max_candidates`, in the
-//! matcher's order: judge latency grows with each candidate, and past the cap
-//! the rest pass unjudged, except a way whose ancestor the judge blocked, which
-//! is blocked with it and logged as a `block` with `reason: ancestor`, the
-//! ancestor's id and its verdict's fields. A `pattern_strict` child of a
-//! blocked parent is logged the same way, as kept out by the judge, since the
-//! parent's block is what kept it out. Every verdict, cap and fallback is logged to
-//! `events.jsonl`, and any failure fails open: the matcher's decision stands.
-//! Each provider call is logged once more as `judge_call`, with its tokens
-//! and cost, so spend is counted per call, not per way (#741). The gate also
-//! hands every verdict and its own status back to the scan, which writes them
-//! to the turn's decision record (ADR-701 §2).
+//! After the matcher and the read-only refire check, and before a fire is
+//! recorded, the ways a lane would show are sent to the judge with the
+//! calling agent's recent context. In enforce mode a way judged below the
+//! engine's threshold is not shown and keeps its refire budget; in shadow
+//! mode every verdict is logged and nothing is blocked. Which trigger kinds
+//! reach the judge is one switch, [`JUDGED`]: every kind (semantic,
+//! keyword, `pattern_strict` and declared: `commands:`, `files:`,
+//! `tool_name:`, state triggers, postchecks), or only the semantic and
+//! keyword ones ADR-196 first gated. Every candidate sent is judged: a
+//! request carries at most the profile's `max_candidates`, in the matcher's
+//! order, and the rest go in further requests within the same deadline. A
+//! way under a blocked ancestor that the judge did not see is blocked with
+//! it and logged as a `block` with `reason: ancestor`, the ancestor's id and
+//! its verdict's fields. Every verdict and fallback is logged to
+//! `events.jsonl` with its lane and agent, and any failure fails open: the
+//! matcher's decision stands. The wait is bounded by the calling hook's
+//! budget ([`TOOL_WAIT`], [`PROMPT_WAIT`]), so a hook is never killed while
+//! it waits. Each provider call is logged once more as `judge_call`, with
+//! its tokens and cost, so spend is counted per call, not per way (#741).
+//! The gate also hands every verdict and its own status back to the scan,
+//! which writes them to the scan's decision record (ADR-701 §2).
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -51,6 +55,65 @@ const MIN_JOB: Duration = Duration::from_millis(50);
 /// fails open now instead of waiting out the whole budget.
 const CLAIM_WINDOW: Duration = Duration::from_millis(500);
 
+/// The longest a PreToolUse lane waits on the judge, starting the agent
+/// included. Those hooks are bounded at 10 s (settings.json); the rest of a
+/// scan, the embed pass and the bodies, needs the remainder. A profile whose
+/// `timeout_ms` asks for more is cut to fit, and past it the lane fails
+/// open as on any deadline.
+pub(super) const TOOL_WAIT: Duration = Duration::from_secs(6);
+
+/// The longest the prompt and state lanes wait on the judge. Their hooks
+/// are bounded at 30 s, which outlasts the longest wait a profile allows.
+pub(super) const PROMPT_WAIT: Duration = Duration::from_secs(28);
+
+/// What made the matcher pick a candidate, so [`JUDGED`] can say which kinds
+/// reach the judge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(super) enum Trigger {
+    /// The embedding matcher.
+    Semantic,
+    /// A `pattern:` hit under the keyword floor.
+    Keyword,
+    /// A `pattern:` hit on a `pattern_strict` way.
+    Strict,
+    /// A declared trigger: `commands:`, `files:`, `tool_name:`, a state
+    /// trigger or a postcheck.
+    Declared,
+}
+
+/// Which trigger kinds the gate judges.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))] // `Matched` is the switch's other setting.
+pub(super) enum Judges {
+    /// Every candidate, whatever fired it (the operator, 2026-11-20).
+    Every,
+    /// Semantic and keyword candidates only, as ADR-196 §1 and its first
+    /// addendum had it: declared triggers and `pattern_strict` pass unjudged.
+    Matched,
+}
+
+impl Judges {
+    pub(super) fn judges(self, trigger: Trigger) -> bool {
+        match self {
+            Judges::Every => true,
+            Judges::Matched => matches!(trigger, Trigger::Semantic | Trigger::Keyword),
+        }
+    }
+}
+
+/// The one switch for which trigger kinds reach the judge, on every lane.
+pub(super) const JUDGED: Judges = Judges::Every;
+
+/// The read-only refire check every lane runs before the judge: whether
+/// `id` would fire now. A candidate the refire curve holds is not sent, so
+/// the judge is never paid for a way that would not be shown; both orders
+/// inject the same set. It is a step of its own so it can move after the
+/// judge without touching the lanes.
+pub(super) fn refire_open(id: &str, session_id: &str) -> bool {
+    crate::cmd::show::would_fire(id, session_id)
+}
+
 /// Where gate events go: `session::log_event` in the hook.
 pub(super) type EventSink<'a> = &'a dyn Fn(&[(&str, &str)]);
 
@@ -58,11 +121,21 @@ pub(super) type EventSink<'a> = &'a dyn Fn(&[(&str, &str)]);
 pub(super) struct Pending<'a> {
     pub id: &'a str,
     pub description: &'a str,
-    pub pattern_strict: bool,
+    pub trigger: Trigger,
+}
+
+impl Pending<'_> {
+    /// Whether `judges` sends this candidate to the judge.
+    fn judged(&self, judges: Judges) -> bool {
+        judges.judges(self.trigger)
+    }
 }
 
 /// What the gate needs from the scan for its log lines, and where they go.
 pub(super) struct LogContext<'a> {
+    /// The lane asking: `prompt`, `command`, `file`, `tool`, `state`,
+    /// `task` or `post_tool`.
+    pub lane: &'a str,
     pub session_id: &'a str,
     pub project_dir: &'a str,
     pub scope: &'a str,
@@ -91,16 +164,18 @@ pub(super) enum Status {
     Judged { engine: String, model: String, judge_ms: u64 },
     /// The gate failed open; `reason` as its `gate_fallback` line logs it.
     Fallback { reason: String },
+    /// Shadow mode: the candidates were shown and handed to a detached judge,
+    /// whose record carries the verdicts.
+    Detached,
 }
 
-/// What the gate decided on one scan: the ways it blocks, every verdict, how
-/// it ran, and the ways past the cap that went unjudged.
+/// What the gate decided on one scan: the ways it blocks, every verdict and
+/// how it ran.
 #[derive(Default)]
 pub(super) struct Gate {
     pub blocked: Blocked,
     pub judgements: HashMap<String, Judgement>,
     pub status: Status,
-    pub capped: Vec<String>,
 }
 
 impl Gate {
@@ -171,20 +246,16 @@ impl Blocked {
     }
 }
 
-/// What the gate decides. Nothing is blocked when the gate is off, in shadow
-/// mode, or failed.
-pub(super) fn apply(
-    pending: &[Pending<'_>],
-    prompt: &str,
-    response_context: Option<&str>,
-    log: &LogContext<'_>,
-) -> Gate {
+/// What the gate decides on `pending`, judged against `turns`, the calling
+/// agent's recent context, within `wait` ([`TOOL_WAIT`], [`PROMPT_WAIT`]).
+/// Nothing is blocked when the gate is off, in shadow mode, or failed.
+pub(super) fn apply(pending: &[Pending<'_>], turns: Vec<Turn>, wait: Duration, log: &LogContext<'_>) -> Gate {
     use ways_agent_core::keys;
     let store = Store::for_session(log.session_id);
     // The agent reads the key file, never a hook's environment, so only a key
     // file turns the gate on: an ANTHROPIC_API_KEY set for Claude Code itself
     // must not send every prompt to an agent with no key to use.
-    apply_from(&profile::user_layer_path(), |p| keys::locate_file(p).is_some(), store.as_ref(), pending, prompt, response_context, log, |req, timeout| {
+    apply_from(&profile::user_layer_path(), |p| keys::locate_file(p).is_some(), store.as_ref(), pending, turns, wait, log, |req, timeout| {
         ways_agent_core::client::call(Request::Judge(req), timeout, true)
     })
 }
@@ -205,10 +276,10 @@ fn apply_from(
     has_key: impl Fn(Provider) -> bool,
     store: Option<&Store>,
     pending: &[Pending<'_>],
-    prompt: &str,
-    response_context: Option<&str>,
+    turns: Vec<Turn>,
+    wait: Duration,
     log: &LogContext<'_>,
-    call: impl FnOnce(JudgeRequest, Duration) -> Result<Reply, String>,
+    mut call: impl FnMut(JudgeRequest, Duration) -> Result<Reply, String>,
 ) -> Gate {
     let begun = Instant::now();
     let (user, layer) = match settings(path, &has_key, log) {
@@ -216,7 +287,7 @@ fn apply_from(
         Ok(None) => return Gate::default(),
         Err(reason) => return Gate::fallback(&reason),
     };
-    let to_judge = pending.iter().filter(|p| !p.pattern_strict).count().min(layer.profile.max_candidates);
+    let to_judge = pending.iter().filter(|p| p.judged(JUDGED)).count();
     if to_judge == 0 {
         return Gate { status: Status::Idle, ..Gate::default() };
     }
@@ -246,19 +317,30 @@ fn apply_from(
     let Some(profile) = profiles.get(&name).cloned() else {
         return fallback(&format!("{}: {}", engine::CONFIG, profile::names_no_profile(&name)), to_judge, log, "0");
     };
-    let settings = Settings { engine: name, engine_set: layer.engine_set, profile, mode: layer.mode };
+    let mut settings = Settings { engine: name, engine_set: layer.engine_set, profile, mode: layer.mode };
+    // The hook's own bound comes first: a judge still waiting when Claude
+    // Code kills the hook takes the lane's whole output with it.
+    settings.profile.timeout_ms = settings.profile.timeout_ms.min(budget_within(wait).as_millis() as u64);
+    let settings = settings;
     match (settings.profile.provider, store) {
         (Provider::ClaudeCode, Some(store)) => {
-            run(pending, prompt, response_context, &settings, log, |req, _| handoff(store, &settings, req, begun))
+            run(pending, turns, &settings, log, JUDGED, |req, _| handoff(store, &settings, req, begun))
         }
         // `resolve(false)` never names claude-code, so this is a bug; it
         // fails open like any other failure.
         (Provider::ClaudeCode, None) => fallback("internal: a claude-code session with no judge store", to_judge, log, "0"),
-        _ => run(pending, prompt, response_context, &settings, log, |mut req, timeout| {
+        _ => run(pending, turns, &settings, log, JUDGED, |mut req, timeout| {
             req.engine = Some(settings.engine.clone());
             call(req, timeout)
         }),
     }
+}
+
+/// The judge deadline that fits in `wait`: what is left once an agent start
+/// ([`ways_agent_core::client::START_WAIT`]) and the read grace are taken
+/// out, and at least 1 ms.
+fn budget_within(wait: Duration) -> Duration {
+    wait.saturating_sub(ways_agent_core::client::START_WAIT + READ_GRACE).max(Duration::from_millis(1))
 }
 
 /// The gate's agent.yaml and the settings it resolves to. `None` when the
@@ -385,58 +467,85 @@ pub(super) fn test_gate(verdicts: &[(&str, f64)], mode: Mode, log: &LogContext<'
 }
 
 /// The gate with the agent call injected, so tests can stand in an engine.
+/// Every candidate `judges` sends ([`JUDGED`] on the hook path) is judged, `max_candidates` to a request,
+/// in the matcher's order; the requests share one deadline, and a request
+/// that cannot start before it fails open for its candidates alone.
 fn run(
     pending: &[Pending<'_>],
-    prompt: &str,
-    response_context: Option<&str>,
+    turns: Vec<Turn>,
     settings: &Settings,
     log: &LogContext<'_>,
-    call: impl FnOnce(JudgeRequest, Duration) -> Result<Reply, String>,
+    judges: Judges,
+    mut call: impl FnMut(JudgeRequest, Duration) -> Result<Reply, String>,
 ) -> Gate {
-    let mut judged: Vec<&Pending<'_>> = pending.iter().filter(|p| !p.pattern_strict).collect();
+    let judged: Vec<&Pending<'_>> = pending.iter().filter(|p| p.judged(judges)).collect();
     if judged.is_empty() {
         return Gate { status: Status::Idle, ..Gate::default() };
     }
-    let cap = settings.profile.max_candidates;
-    let mut unjudged: Vec<&str> = Vec::new();
-    if judged.len() > cap {
-        unjudged = judged.split_off(cap).iter().map(|p| p.id).collect();
-        (log.sink)(&[
-            ("event", "gate_capped"),
-            ("judged", &cap.to_string()),
-            ("unjudged", &unjudged.len().to_string()),
-            ("ways", &unjudged.join(",")),
-            ("hook", log.hook_event),
-            ("scope", log.scope),
-            ("project", log.project_dir),
-            ("session", log.session_id),
-        ]);
+    let begun = Instant::now();
+    let deadline = Duration::from_millis(settings.profile.timeout_ms) + READ_GRACE;
+    let mut gate = Gate { status: Status::Idle, ..Gate::default() };
+    for batch in judged.chunks(settings.profile.max_candidates.max(1)) {
+        let remaining = deadline.saturating_sub(begun.elapsed());
+        let next = if remaining < MIN_JOB {
+            fallback("deadline: before call", batch.len(), log, &begun.elapsed().as_millis().to_string())
+        } else {
+            judge_batch(batch, &turns, settings, log, remaining, &mut call)
+        };
+        gate.merge(next);
     }
+    // A way's guidance presumes its parent's: a candidate the judge did not
+    // see under a blocked ancestor goes with it.
+    for p in pending.iter().filter(|p| !p.judged(judges)) {
+        gate.blocked.with_ancestor(p.id, log);
+    }
+    gate
+}
+
+impl Gate {
+    /// Folds one request's outcome into the scan's. Judged requests add
+    /// their latencies; a fallback after a judged request leaves the status
+    /// judged, since its own `gate_fallback` line is already logged.
+    fn merge(&mut self, next: Gate) {
+        self.blocked.0.extend(next.blocked.0);
+        self.judgements.extend(next.judgements);
+        self.status = match (std::mem::take(&mut self.status), next.status) {
+            (Status::Idle, s) => s,
+            (Status::Judged { engine, model, judge_ms: a }, Status::Judged { judge_ms: b, .. }) => {
+                Status::Judged { engine, model, judge_ms: a + b }
+            }
+            (s @ Status::Judged { .. }, _) => s,
+            (_, s @ Status::Judged { .. }) => s,
+            (s, _) => s,
+        };
+    }
+}
+
+/// One judge request over `batch`, within `timeout`.
+fn judge_batch(
+    batch: &[&Pending<'_>],
+    turns: &[Turn],
+    settings: &Settings,
+    log: &LogContext<'_>,
+    timeout: Duration,
+    call: &mut impl FnMut(JudgeRequest, Duration) -> Result<Reply, String>,
+) -> Gate {
     let request = JudgeRequest {
         session: log.session_id.to_string(),
         tool: "claude-code".to_string(),
-        turns: turns(prompt, response_context),
-        candidates: judged
-            .iter()
-            .map(|p| Candidate { id: p.id.to_string(), text: way_text(p.id, p.description) })
-            .collect(),
+        turns: turns.to_vec(),
+        candidates: batch.iter().map(|p| Candidate { id: p.id.to_string(), text: way_text(p.id, p.description) }).collect(),
         engine: None,
     };
     let begun = Instant::now();
-    let reply = call(request, Duration::from_millis(settings.profile.timeout_ms) + READ_GRACE);
+    let reply = call(request, timeout);
     let elapsed_ms = begun.elapsed().as_millis().to_string();
-    let mut gate = match reply {
+    match reply {
         Ok(Reply::Judged(j)) => {
             // An agent older than #741 reports no call; the call was still made.
             let call = j.call.clone().unwrap_or_else(|| JudgeCall::priced(&j.engine, &settings.profile, j.verdicts.len(), None));
             log_call(&call, None, log);
-            let mut gate = decide(&j, log, &elapsed_ms);
-            // A way's guidance presumes its parent's: an unjudged way under a
-            // blocked ancestor goes with it.
-            for id in &unjudged {
-                gate.blocked.with_ancestor(id, log);
-            }
-            gate
+            decide(&j, log, &elapsed_ms)
         }
         Ok(Reply::Fallback { reason, call, .. }) => {
             // An agent older than #741 sends no call; its reason says whether
@@ -448,33 +557,29 @@ fn run(
                 && (reason == "deadline" || ["transport", "provider_", "answer"].iter().any(|p| reason.starts_with(p)));
             match call {
                 Some(call) => log_call(&call, Some(&reason), log),
-                None if reached => {
-                    log_call(&JudgeCall::priced(&settings.engine, &settings.profile, judged.len(), None), Some(&reason), log)
-                }
+                None if reached => log_call(&JudgeCall::priced(&settings.engine, &settings.profile, batch.len(), None), Some(&reason), log),
                 None => {}
             }
-            fallback(&reason, judged.len(), log, &elapsed_ms)
+            fallback(&reason, batch.len(), log, &elapsed_ms)
         }
-        Ok(Reply::Error { message }) => fallback(&format!("agent_error: {message}"), judged.len(), log, &elapsed_ms),
-        Ok(other) => fallback(&format!("unexpected_reply: {other:?}"), judged.len(), log, &elapsed_ms),
+        Ok(Reply::Error { message }) => fallback(&format!("agent_error: {message}"), batch.len(), log, &elapsed_ms),
+        Ok(other) => fallback(&format!("unexpected_reply: {other:?}"), batch.len(), log, &elapsed_ms),
         Err(reason) => {
             // The hook stopped reading while the agent was waiting on the
             // provider (the agent answers within its own deadline otherwise):
             // count a call of unknown cost. An agent that dies mid-call
             // (`io`, `agent_closed`) logs nothing; the call is not known.
             if reason == "deadline" {
-                log_call(&JudgeCall::priced(&settings.engine, &settings.profile, judged.len(), None), Some(&reason), log);
+                log_call(&JudgeCall::priced(&settings.engine, &settings.profile, batch.len(), None), Some(&reason), log);
             }
-            fallback(&reason, judged.len(), log, &elapsed_ms)
+            fallback(&reason, batch.len(), log, &elapsed_ms)
         }
-    };
-    gate.capped = unjudged.iter().map(|id| id.to_string()).collect();
-    gate
+    }
 }
 
-/// The turns the judge reads: Claude's last reply, then the prompt. Profiles
+/// The prompt lane's turns: Claude's last reply, then the prompt. Profiles
 /// that ask for more than two turns get these two.
-fn turns(prompt: &str, response_context: Option<&str>) -> Vec<Turn> {
+pub(super) fn turns(prompt: &str, response_context: Option<&str>) -> Vec<Turn> {
     let mut turns = Vec::with_capacity(2);
     if let Some(rc) = response_context.map(str::trim).filter(|r| !r.is_empty()) {
         turns.push(Turn { role: Role::Assistant, text: rc.to_string() });
@@ -511,6 +616,7 @@ fn decide(j: &Judged, log: &LogContext<'_>, elapsed_ms: &str) -> Gate {
             ("gate_ms", elapsed_ms),
             ("candidates", &j.verdicts.len().to_string()),
             ("hook", log.hook_event),
+            ("lane", log.lane),
             ("scope", log.scope),
             ("project", log.project_dir),
             ("session", log.session_id),
@@ -556,7 +662,15 @@ fn log_call(call: &JudgeCall, fallback_reason: Option<&str>, log: &LogContext<'_
     if let Some(cost) = call.cost_usd {
         fields.push(("cost_usd", format!("{cost:.8}")));
     }
-    let tail = [("hook", log.hook_event), ("scope", log.scope), ("project", log.project_dir), ("session", log.session_id)];
+    let agent = crate::session::current_agent();
+    let tail = [
+        ("hook", log.hook_event),
+        ("lane", log.lane),
+        ("scope", log.scope),
+        ("project", log.project_dir),
+        ("session", log.session_id),
+        ("agent_id", agent.as_str()),
+    ];
     let mut line: Vec<(&str, &str)> = fields.iter().map(|(k, v)| (*k, v.as_str())).collect();
     line.extend(tail);
     (log.sink)(&line);
@@ -564,12 +678,15 @@ fn log_call(call: &JudgeCall, fallback_reason: Option<&str>, log: &LogContext<'_
 
 /// Logs a fallback; nothing is blocked.
 fn fallback(reason: &str, candidates: usize, log: &LogContext<'_>, elapsed_ms: &str) -> Gate {
+    let agent = crate::session::current_agent();
     (log.sink)(&[
         ("event", "gate_fallback"),
         ("reason", reason),
         ("gate_ms", elapsed_ms),
         ("candidates", &candidates.to_string()),
         ("hook", log.hook_event),
+        ("lane", log.lane),
+        ("agent_id", &agent),
         ("scope", log.scope),
         ("project", log.project_dir),
         ("session", log.session_id),
@@ -614,6 +731,42 @@ mod tests {
         assert_eq!(seen.len(), 2, "found both prompt-lane hooks: {seen:?}");
     }
 
+    /// The hooks whose lanes judge at PreToolUse or PostToolUse must outlast
+    /// [`TOOL_WAIT`] with room for the rest of the scan, and the state lane's
+    /// [`PROMPT_WAIT`] (#1287). A hook past its bound is killed and its
+    /// output, the fail-open included, is dropped.
+    #[test]
+    fn the_tool_lane_hooks_outlast_the_gates_wait() {
+        let repo_settings = std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").into()),
+        )
+        .join("../../settings.json");
+        let Ok(raw) = std::fs::read_to_string(&repo_settings) else { return }; // not a source checkout
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        // The embed pass, the bodies and a macro take the rest of the bound.
+        let scan = Duration::from_secs(3);
+        let lanes: [(&str, Duration); 6] = [
+            ("check-bash-pre.sh", TOOL_WAIT),
+            ("check-file-pre.sh", TOOL_WAIT),
+            ("check-tool.sh", TOOL_WAIT),
+            ("check-task-pre.sh", TOOL_WAIT),
+            ("check-post.sh", TOOL_WAIT),
+            ("check-state.sh", PROMPT_WAIT),
+        ];
+        let mut seen = HashSet::new();
+        for entries in v["hooks"].as_object().unwrap().values() {
+            for cmd in entries.as_array().unwrap().iter().flat_map(|e| e["hooks"].as_array().unwrap()) {
+                let command = cmd["command"].as_str().unwrap_or("");
+                let Some((script, wait)) = lanes.iter().find(|(s, _)| command.ends_with(s)) else { continue };
+                seen.insert(*script);
+                let bound = Duration::from_secs(cmd["timeout"].as_u64().unwrap_or(600));
+                let needed = if *wait == TOOL_WAIT { *wait + scan } else { *wait };
+                assert!(bound >= needed, "{script}: a {bound:?} bound cannot hold a {needed:?} wait");
+            }
+        }
+        assert_eq!(seen.len(), lanes.len(), "found every judging hook: {seen:?}");
+    }
+
     type Events = std::cell::RefCell<Vec<Vec<(String, String)>>>;
 
     fn recorder(events: &Events) -> impl Fn(&[(&str, &str)]) + '_ {
@@ -621,7 +774,7 @@ mod tests {
     }
 
     fn log(sink: EventSink<'_>) -> LogContext<'_> {
-        LogContext { session_id: "test-gate", project_dir: "/tmp", scope: "agent", hook_event: "UserPromptSubmit", sink }
+        LogContext { lane: "prompt", session_id: "test-gate", project_dir: "/tmp", scope: "agent", hook_event: "UserPromptSubmit", sink }
     }
 
     fn field<'e>(event: &'e [(String, String)], key: &str) -> &'e str {
@@ -643,9 +796,9 @@ mod tests {
 
     fn pending() -> Vec<Pending<'static>> {
         vec![
-            Pending { id: "softwaredev/code/security/secrets", description: "Keep secrets out of source.", pattern_strict: false },
-            Pending { id: "data/migrations", description: "Schema migrations.", pattern_strict: false },
-            Pending { id: "meta/strict", description: "Always.", pattern_strict: true },
+            Pending { id: "softwaredev/code/security/secrets", description: "Keep secrets out of source.", trigger: Trigger::Keyword },
+            Pending { id: "data/migrations", description: "Schema migrations.", trigger: Trigger::Keyword },
+            Pending { id: "meta/strict", description: "Always.", trigger: Trigger::Strict },
         ]
     }
 
@@ -654,7 +807,7 @@ mod tests {
         let events = Events::default();
         let sink = recorder(&events);
         let mut seen = Vec::new();
-        let blocked = run(&pending(), "store the api key", Some("ok"), &settings(Mode::Enforce), &log(&sink), |req, timeout| {
+        let blocked = run(&pending(), turns("store the api key", Some("ok")), &settings(Mode::Enforce), &log(&sink), Judges::Matched, |req, timeout| {
             seen = req.candidates.iter().map(|c| c.id.clone()).collect();
             assert_eq!(req.turns.len(), 2);
             assert_eq!(req.turns[1].role, Role::User);
@@ -691,7 +844,7 @@ mod tests {
         let events = Events::default();
         let sink = recorder(&events);
         let s = settings(Mode::Enforce);
-        run(&pending(), "q", None, &s, &log(&sink), |_, _| {
+        run(&pending(), turns("q", None), &s, &log(&sink), Judges::Matched, |_, _| {
             let Reply::Judged(mut j) = judged(Mode::Enforce, &[("softwaredev/code/security/secrets", 0.9), ("data/migrations", 0.9)]) else { unreachable!() };
             let usage = Usage { input_tokens: 1000, output_tokens: 100, ..Default::default() };
             j.call = Some(JudgeCall::priced("anthropic", &s.profile, 2, Some(usage)));
@@ -722,7 +875,7 @@ mod tests {
         for (reply, outcome, reason) in cases {
             let events = Events::default();
             let sink = recorder(&events);
-            run(&pending(), "q", None, &s, &log(&sink), |_, _| reply);
+            run(&pending(), turns("q", None), &s, &log(&sink), Judges::Matched, |_, _| reply.clone());
             let calls = calls(&events);
             assert_eq!(calls.len(), 1, "{outcome} {reason}");
             let c = &calls[0];
@@ -743,7 +896,7 @@ mod tests {
         ] {
             let events = Events::default();
             let sink = recorder(&events);
-            run(&pending(), "q", None, &s, &log(&sink), |_, _| reply);
+            run(&pending(), turns("q", None), &s, &log(&sink), Judges::Matched, |_, _| reply.clone());
             assert!(calls(&events).is_empty());
         }
     }
@@ -752,7 +905,7 @@ mod tests {
     fn shadow_blocks_nothing_and_logs_would_block() {
         let events = Events::default();
         let sink = recorder(&events);
-        let blocked = run(&pending(), "q", None, &settings(Mode::Shadow), &log(&sink), |_, _| {
+        let blocked = run(&pending(), turns("q", None), &settings(Mode::Shadow), &log(&sink), Judges::Matched, |_, _| {
             Ok(judged(Mode::Shadow, &[("softwaredev/code/security/secrets", 0.1), ("data/migrations", 0.05)]))
         });
         assert!(blocked.ids().is_empty());
@@ -772,7 +925,7 @@ mod tests {
         for (reply, reason) in replies {
             let events = Events::default();
             let sink = recorder(&events);
-            let blocked = run(&pending(), "q", None, &s, &log(&sink), |_, _| reply);
+            let blocked = run(&pending(), turns("q", None), &s, &log(&sink), Judges::Matched, |_, _| reply.clone());
             assert!(blocked.ids().is_empty());
             let events = events.borrow();
             let fallback = events.iter().find(|e| field(e, "event") == "gate_fallback").unwrap();
@@ -782,67 +935,111 @@ mod tests {
     }
 
     #[test]
-    fn past_the_cap_ways_pass_unjudged_and_the_cap_is_logged() {
+    fn past_the_cap_the_rest_go_in_a_further_request() {
         let ids: Vec<String> = (0..10).map(|i| format!("w/{i}")).collect();
         let many: Vec<Pending<'_>> =
-            ids.iter().map(|id| Pending { id, description: "d", pattern_strict: false }).collect();
+            ids.iter().map(|id| Pending { id, description: "d", trigger: Trigger::Keyword }).collect();
         let s = settings(Mode::Enforce);
         assert_eq!(s.profile.max_candidates, 8);
         let events = Events::default();
         let sink = recorder(&events);
-        let blocked = run(&many, "q", None, &s, &log(&sink), |req, _| {
-            let sent: Vec<&str> = req.candidates.iter().map(|c| c.id.as_str()).collect();
-            assert_eq!(sent, ids[..8].iter().map(String::as_str).collect::<Vec<_>>());
-            let low: Vec<(&str, f64)> = sent.iter().map(|id| (*id, 0.05)).collect();
-            Ok(judged(Mode::Enforce, &low))
+        let mut requests: Vec<Vec<String>> = Vec::new();
+        let g = run(&many, turns("q", None), &s, &log(&sink), Judges::Matched, |req, _| {
+            let sent: Vec<String> = req.candidates.iter().map(|c| c.id.clone()).collect();
+            let low: Vec<(&str, f64)> = sent.iter().map(|id| (id.as_str(), 0.05)).collect();
+            let reply = judged(Mode::Enforce, &low);
+            requests.push(sent);
+            Ok(reply)
         });
-        assert_eq!(blocked.ids(), ids[..8].iter().cloned().collect::<HashSet<_>>());
+        assert_eq!(requests, [ids[..8].to_vec(), ids[8..].to_vec()], "8, then the 2 past the cap");
+        assert_eq!(g.ids(), ids.iter().cloned().collect::<HashSet<_>>(), "every candidate judged");
+        assert_eq!(g.status, Status::Judged { engine: "anthropic".into(), model: "claude-haiku-4-5".into(), judge_ms: 1600 });
         let events = events.borrow();
-        assert_eq!(field(&events[0], "event"), "gate_capped");
-        assert_eq!(field(&events[0], "unjudged"), "2");
-        assert_eq!(field(&events[0], "ways"), "w/8,w/9");
-        assert_eq!(events.iter().filter(|e| field(e, "event") == "way_judged").count(), 8);
+        assert!(events.iter().all(|e| field(e, "event") != "gate_capped"));
+        assert_eq!(events.iter().filter(|e| field(e, "event") == "way_judged").count(), 10);
+        assert_eq!(calls_in(&events).len(), 2);
+    }
+
+    /// The switch on its hook-path setting sends every trigger kind, strict
+    /// and declared included (#1287); on `Matched` they pass unjudged.
+    #[test]
+    fn every_trigger_kind_reaches_the_judge_under_the_switch() {
+        assert_eq!(JUDGED, Judges::Every);
+        let all = vec![
+            Pending { id: "s", description: "d", trigger: Trigger::Semantic },
+            Pending { id: "k", description: "d", trigger: Trigger::Keyword },
+            Pending { id: "x", description: "d", trigger: Trigger::Strict },
+            Pending { id: "c", description: "d", trigger: Trigger::Declared },
+        ];
+        let sent = |judges: Judges| {
+            let events = Events::default();
+            let sink = recorder(&events);
+            let mut ids = Vec::new();
+            run(&all, turns("q", None), &settings(Mode::Enforce), &log(&sink), judges, |req, _| {
+                ids = req.candidates.iter().map(|c| c.id.clone()).collect();
+                Ok(judged(Mode::Enforce, &[]))
+            });
+            ids
+        };
+        assert_eq!(sent(JUDGED), ["s", "k", "x", "c"]);
+        assert_eq!(sent(Judges::Matched), ["s", "k"]);
+    }
+
+    /// A PreToolUse lane's wait fits its 10 s hook: the deadline is cut so
+    /// the agent start, the deadline and the read grace end within
+    /// [`TOOL_WAIT`], whatever the profile asks.
+    #[test]
+    fn the_deadline_fits_the_hooks_wait() {
+        let longest = Duration::from_millis(profile::MAX_TIMEOUT_MS);
+        let within = budget_within(TOOL_WAIT);
+        assert!(within < longest);
+        assert!(within + ways_agent_core::client::START_WAIT + READ_GRACE <= TOOL_WAIT);
+        assert_eq!(budget_within(PROMPT_WAIT), Duration::from_millis(25_000), "the prompt lane keeps the longest profile");
+        assert_eq!(budget_within(Duration::ZERO), Duration::from_millis(1));
     }
 
     /// The scan's decision record reads every verdict, not only the blocks,
     /// and how the gate ran (ADR-701 §2).
     #[test]
-    fn the_gate_returns_every_verdict_its_status_and_the_capped_ways() {
+    fn the_gate_returns_every_verdict_and_its_status() {
         let events = Events::default();
         let sink = recorder(&events);
-        let g = run(&pending(), "q", None, &settings(Mode::Enforce), &log(&sink), |_, _| {
+        let g = run(&pending(), turns("q", None), &settings(Mode::Enforce), &log(&sink), Judges::Matched, |_, _| {
             Ok(judged(Mode::Enforce, &[("softwaredev/code/security/secrets", 0.92), ("data/migrations", 0.05)]))
         });
         assert_eq!(g.judgements["softwaredev/code/security/secrets"], Judgement { p_yes: 0.92, verdict: "pass" });
         assert_eq!(g.judgements["data/migrations"], Judgement { p_yes: 0.05, verdict: "block" });
         assert!(!g.judgements.contains_key("meta/strict"), "a strict way is never judged");
         assert_eq!(g.status, Status::Judged { engine: "anthropic".into(), model: "claude-haiku-4-5".into(), judge_ms: 800 });
-        assert!(g.capped.is_empty());
 
         let ids: Vec<String> = (0..10).map(|i| format!("w/{i}")).collect();
-        let g = run(&pending_ids(&ids, 0), "q", None, &settings(Mode::Enforce), &log(&sink), |_, _| Err("deadline".into()));
+        let g = run(&pending_ids(&ids, 0), turns("q", None), &settings(Mode::Enforce), &log(&sink), Judges::Matched, |_, _| Err("deadline".into()));
         assert_eq!(g.status, Status::Fallback { reason: "deadline".into() });
-        assert_eq!(g.capped, ["w/8", "w/9"]);
         assert!(g.judgements.is_empty());
 
-        let strict = vec![Pending { id: "a", description: "d", pattern_strict: true }];
-        assert_eq!(run(&strict, "q", None, &settings(Mode::Enforce), &log(&sink), |_, _| panic!("no call")).status, Status::Idle);
+        let strict = vec![Pending { id: "a", description: "d", trigger: Trigger::Strict }];
+        assert_eq!(run(&strict, turns("q", None), &settings(Mode::Enforce), &log(&sink), Judges::Matched, |_, _| panic!("no call")).status, Status::Idle);
     }
 
     fn pending_ids(ids: &[String], strict: usize) -> Vec<Pending<'_>> {
         ids.iter()
             .enumerate()
-            .map(|(i, id)| Pending { id, description: "d", pattern_strict: i < strict })
+            .map(|(i, id)| Pending { id, description: "d", trigger: if i < strict { Trigger::Strict } else { Trigger::Keyword } })
             .collect()
     }
 
     #[test]
     fn an_unjudged_way_under_a_blocked_ancestor_is_blocked_with_it() {
-        let mut ids: Vec<String> = (0..7).map(|i| format!("w/{i}")).collect();
-        ids.extend(["p".to_string(), "p/c".to_string(), "q/c".to_string()]);
+        // Under `Matched`, the strict ways pass unjudged: `p/c` and `q/c`.
+        let all = vec![
+            Pending { id: "p/c", description: "d", trigger: Trigger::Strict },
+            Pending { id: "q/c", description: "d", trigger: Trigger::Strict },
+            Pending { id: "p", description: "d", trigger: Trigger::Keyword },
+            Pending { id: "q", description: "d", trigger: Trigger::Keyword },
+        ];
         let events = Events::default();
         let sink = recorder(&events);
-        let blocked = run(&pending_ids(&ids, 0), "q", None, &settings(Mode::Enforce), &log(&sink), |req, _| {
+        let blocked = run(&all, turns("q", None), &settings(Mode::Enforce), &log(&sink), Judges::Matched, |req, _| {
             let v: Vec<(&str, f64)> =
                 req.candidates.iter().map(|c| (c.id.as_str(), if c.id == "p" { 0.05 } else { 0.9 })).collect();
             Ok(judged(Mode::Enforce, &v))
@@ -882,37 +1079,38 @@ mod tests {
     }
 
     #[test]
-    fn strict_ways_do_not_count_against_the_cap_and_a_full_request_is_not_capped() {
+    fn ways_the_switch_leaves_unjudged_do_not_count_against_the_cap() {
         let ids: Vec<String> = (0..9).map(|i| format!("w/{i}")).collect();
         let events = Events::default();
         let sink = recorder(&events);
-        run(&pending_ids(&ids, 1), "q", None, &settings(Mode::Enforce), &log(&sink), |req, _| {
-            assert_eq!(req.candidates.len(), 8);
+        let mut sizes = Vec::new();
+        run(&pending_ids(&ids, 1), turns("q", None), &settings(Mode::Enforce), &log(&sink), Judges::Matched, |req, _| {
+            sizes.push(req.candidates.len());
             Ok(judged(Mode::Enforce, &[]))
         });
-        assert!(events.borrow().iter().all(|e| field(e, "event") != "gate_capped"));
+        assert_eq!(sizes, [8], "one full request");
     }
 
     #[test]
-    fn a_fallback_after_the_cap_counts_the_candidates_sent() {
+    fn each_request_that_falls_back_counts_its_own_candidates() {
         let ids: Vec<String> = (0..12).map(|i| format!("w/{i}")).collect();
         let events = Events::default();
         let sink = recorder(&events);
         let blocked =
-            run(&pending_ids(&ids, 0), "q", None, &settings(Mode::Enforce), &log(&sink), |_, _| Err("deadline".into()));
+            run(&pending_ids(&ids, 0), turns("q", None), &settings(Mode::Enforce), &log(&sink), Judges::Matched, |_, _| Err("deadline".into()));
         assert!(blocked.ids().is_empty());
         let events = events.borrow();
-        let fallback = events.iter().find(|e| field(e, "event") == "gate_fallback").unwrap();
-        assert_eq!(field(fallback, "candidates"), "8");
-        assert_eq!(calls_in(&events)[0].iter().find(|(k, _)| k == "candidates").unwrap().1, "8");
+        let counts: Vec<&str> = events.iter().filter(|e| field(e, "event") == "gate_fallback").map(|e| field(e, "candidates")).collect();
+        assert_eq!(counts, ["8", "4"]);
+        assert_eq!(calls_in(&events).iter().map(|c| c.iter().find(|(k, _)| k == "candidates").unwrap().1.clone()).collect::<Vec<_>>(), ["8", "4"]);
     }
 
     #[test]
     fn only_strict_ways_means_no_call_and_no_log() {
         let events = Events::default();
         let sink = recorder(&events);
-        let strict = vec![Pending { id: "a", description: "d", pattern_strict: true }];
-        let blocked = run(&strict, "q", None, &settings(Mode::Enforce), &log(&sink), |_, _| panic!("no call expected"));
+        let strict = vec![Pending { id: "a", description: "d", trigger: Trigger::Strict }];
+        let blocked = run(&strict, turns("q", None), &settings(Mode::Enforce), &log(&sink), Judges::Matched, |_, _| panic!("no call expected"));
         assert!(blocked.ids().is_empty());
         assert!(events.borrow().is_empty());
     }
@@ -944,7 +1142,7 @@ mod tests {
             let events = Events::default();
             let sink = recorder(&events);
             let calls = std::cell::Cell::new(0);
-            let gate = apply_from(&path, |_| true, None, &pending(), "add a secret", None, &log(&sink), |_, _| {
+            let gate = apply_from(&path, |_| true, None, &pending(), turns("add a secret", None), PROMPT_WAIT, &log(&sink), |_, _| {
                 calls.set(calls.get() + 1);
                 Err("stub".into())
             });
@@ -993,7 +1191,7 @@ mod tests {
         /// records each request's engine and answers with `agent`.
         fn gate(&self, has_key: bool, events: &Events, agent: &std::cell::RefCell<Vec<Option<String>>>) -> Gate {
             let sink = recorder(events);
-            apply_from(&self.yaml, |_| has_key, Some(&self.store), &pending(), "store the api key", Some("ok"), &log(&sink), |req, _| {
+            apply_from(&self.yaml, |_| has_key, Some(&self.store), &pending(), turns("store the api key", Some("ok")), PROMPT_WAIT, &log(&sink), |req, _| {
                 agent.borrow_mut().push(req.engine.clone());
                 Ok(judged(Mode::Enforce, &[("softwaredev/code/security/secrets", 0.9), ("data/migrations", 0.9)]))
             })
@@ -1039,11 +1237,11 @@ mod tests {
         s.store.register_host().unwrap();
         let events = Events::default();
         let agent = Default::default();
-        // g1 is the secrets way, g2 the migrations way; the strict way is
-        // never sent.
+        // g1 is the secrets way, g2 the migrations way, g3 the strict way:
+        // every trigger kind is sent (#1287).
         let h = host(&s.store, |_| {
             Some(answer_text(
-                "```json\n{\"judgements\":[{\"id\":\"g1\",\"relevant\":true,\"confidence\":0.9},{\"id\":\"g2\",\"relevant\":false,\"confidence\":0.95}]}\n```",
+                "```json\n{\"judgements\":[{\"id\":\"g1\",\"relevant\":true,\"confidence\":0.9},{\"id\":\"g2\",\"relevant\":false,\"confidence\":0.95},{\"id\":\"g3\",\"relevant\":true,\"confidence\":0.9}]}\n```",
             ))
         });
         let g = s.gate(false, &events, &agent);
@@ -1060,17 +1258,17 @@ mod tests {
         assert_eq!(taken.job.system, ways_agent_core::judge::SYSTEM);
         assert!(taken.job.prompt.ends_with(ways_agent_core::judge::JSON_ONLY), "{}", taken.job.prompt);
         assert!(taken.job.prompt.contains("<guidance id=\"g2\">"));
-        assert_eq!(taken.job.max_tokens, ways_agent_core::judge::max_tokens(2));
+        assert_eq!(taken.job.max_tokens, ways_agent_core::judge::max_tokens(3));
         assert!(taken.job.timeout_ms > 0 && taken.job.timeout_ms <= 2000, "{}", taken.job.timeout_ms);
         // One call, named for its engine, with the answer's usage and no price.
         let calls = calls(&events);
         assert_eq!(calls.len(), 1, "{calls:?}");
         let c = &calls[0];
         let got: Vec<&str> = ["outcome", "engine", "provider", "model", "candidates", "input_tokens", "output_tokens"].iter().map(|k| field(c, k)).collect();
-        assert_eq!(got, ["judged", "claude-code", "claude-code", "claude-haiku-4-5", "2", "1160", "117"]);
+        assert_eq!(got, ["judged", "claude-code", "claude-code", "claude-haiku-4-5", "3", "1160", "117"]);
         assert!(c.iter().all(|(k, _)| k != "cost_usd"), "no provider cost: {c:?}");
         let verdicts: Vec<_> = events.borrow().iter().filter(|e| field(e, "event") == "way_judged").map(|e| (field(e, "way").to_string(), field(e, "engine").to_string())).collect();
-        assert_eq!(verdicts.len(), 2);
+        assert_eq!(verdicts.len(), 3);
         assert!(verdicts.iter().all(|(_, e)| e == "claude-code"));
         assert_eq!(std::fs::read_dir(s.base.join("run/jobs")).unwrap().count(), 0, "the job is cleared");
     }
@@ -1085,12 +1283,12 @@ mod tests {
         // The gate's clock started 500 ms before the job was written.
         let settings = Settings { engine: "claude-code".into(), engine_set: true, profile: profile::shipped()["claude-code"].clone(), mode: Mode::Enforce };
         let begun = Instant::now() - Duration::from_millis(500);
-        run(&pending(), "q", None, &settings, &log(&sink), |req, _| handoff(&s.store, &settings, req, begun));
+        run(&pending(), turns("q", None), &settings, &log(&sink), Judges::Matched, |req, _| handoff(&s.store, &settings, req, begun));
         let taken = h.join().unwrap().unwrap();
         assert!(taken.job.timeout_ms <= 1500 && taken.job.timeout_ms > 1000, "{}", taken.job.timeout_ms);
         // Under the least budget a call can use, no job is written.
         let late = Instant::now() - Duration::from_millis(1970);
-        let g = run(&pending(), "q", None, &settings, &log(&sink), |req, _| handoff(&s.store, &settings, req, late));
+        let g = run(&pending(), turns("q", None), &settings, &log(&sink), Judges::Matched, |req, _| handoff(&s.store, &settings, req, late));
         assert_eq!(g.status, Status::Fallback { reason: "deadline: before call".into() });
         assert_eq!(s.store.take().unwrap(), None);
     }
@@ -1167,7 +1365,7 @@ mod tests {
         let events = Events::default();
         let sink = recorder(&events);
         let agent = std::cell::RefCell::new(Vec::new());
-        let g = apply_from(&s.yaml, |_| true, Some(&store), &pending(), "q", None, &log(&sink), |req, _| {
+        let g = apply_from(&s.yaml, |_| true, Some(&store), &pending(), turns("q", None), PROMPT_WAIT, &log(&sink), |req, _| {
             agent.borrow_mut().push(req.engine.clone());
             Ok(judged(Mode::Enforce, &[]))
         });
@@ -1238,7 +1436,7 @@ mod tests {
         assert!(agent.borrow().is_empty());
         let events = events.borrow();
         let fb = events.iter().find(|e| field(e, "event") == "gate_fallback").expect("logged");
-        assert_eq!((field(fb, "reason"), field(fb, "candidates")), (reason.as_str(), "2"));
+        assert_eq!((field(fb, "reason"), field(fb, "candidates")), (reason.as_str(), "3"), "every trigger kind counts");
     }
 
     #[test]
@@ -1246,8 +1444,7 @@ mod tests {
         let s = Session::new("idle", CLAUDE_CODE);
         let events = Events::default();
         let sink = recorder(&events);
-        let strict = vec![Pending { id: "a", description: "d", pattern_strict: true }];
-        let g = apply_from(&s.yaml, |_| true, Some(&s.store), &strict, "q", None, &log(&sink), |_, _| panic!("no call"));
+        let g = apply_from(&s.yaml, |_| true, Some(&s.store), &[], turns("q", None), PROMPT_WAIT, &log(&sink), |_, _| panic!("no call"));
         assert_eq!(g.status, Status::Idle);
         assert!(s.store.resolution().is_none(), "the first judge request resolves, not the first scan");
     }

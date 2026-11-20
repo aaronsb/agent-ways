@@ -10,10 +10,10 @@ use crate::cmd::show::ContextBudget;
 use crate::session;
 
 use super::candidates::{check_when, collect_with_off};
-use super::discard;
+use super::decision::Surface;
 use super::order::{order_hits, Hit};
 use super::scoring::capture_show_way;
-use super::{emit_hook_context, regex_span, WayCandidate};
+use super::{discard, emit_hook_context, gate, judged, regex_span, WayCandidate};
 
 // ── Tool lane (ADR-704) ─────────────────────────────────────────
 
@@ -81,12 +81,23 @@ pub fn tool(
     let mut budget = ContextBudget::hook();
     let hits = tool_hits(&candidates, tool, hook_event, &scope, &project_dir);
     log_discarded(&off, tool, hook_event, &discard::LaneLog { lane: "tool", scope: &scope, session: session_id, project: &project_dir });
-    for hit in &hits {
-        let out = capture_show_way(&hit.id, session_id, "tool", None, Some(hit.payload.as_str()), None, Some(&mut budget)).body;
-        if !out.is_empty() {
-            context.push_str(&out);
-        }
-    }
+    let by_id: std::collections::HashMap<&str, &WayCandidate> = candidates.iter().map(|w| (w.id.as_str(), w)).collect();
+    let judge_candidates: Vec<judged::Candidate> =
+        hits.iter().filter_map(|h| by_id.get(h.id.as_str())).map(|w| judged::declared(w, "tool", session_id)).collect();
+    let lane = judged::Lane {
+        surface: Surface::Tool,
+        hook_event: hook_event.to_string(),
+        scope: scope.clone(),
+        project_dir: project_dir.clone(),
+        session_id: session_id.to_string(),
+    };
+    let call = if hook_event == "PreToolUse" { format!("About to use the {tool} tool.") } else { format!("Used the {tool} tool.") };
+    judged::run(&lane, &judge_candidates, judged::tool_turns(session_id, &call), gate::TOOL_WAIT, |c| {
+        let Some(hit) = hits.iter().find(|h| h.id == c.key) else { return "error" };
+        let shown = capture_show_way(&hit.id, session_id, "tool", None, Some(hit.payload.as_str()), None, Some(&mut budget));
+        context.push_str(&shown.body);
+        shown.outcome.as_str()
+    });
 
     if !context.is_empty() {
         emit_hook_context(hook_event, context.trim_end());

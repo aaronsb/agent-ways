@@ -16,7 +16,7 @@ use super::matching::{
 };
 use super::order::{order_hits, Hit};
 use super::{
-    body_map, decision, effective_thresholds, eligible, late_interaction, mask_nonlinguistic, reduce, Lane,
+    body_map, decision, effective_thresholds, eligible, gate, judged, late_interaction, mask_nonlinguistic, reduce, Lane,
     BUDGET_TASK,
 };
 
@@ -133,12 +133,60 @@ pub fn task(
     );
 
     order_hits(&mut hits);
-    let stashed = write_stash(&hits, record.scan_id(), session_id, is_teammate, team);
+
+    // The judge reads the dispatch against the brief the subagent will get,
+    // after the dispatching agent's own prose. The subagent starts with no
+    // fires, so nothing is held by refire; a blocked way is not stashed.
+    let by_id: std::collections::HashMap<&str, &super::WayCandidate> = candidates.iter().map(|w| (w.id.as_str(), w)).collect();
+    let judge_candidates: Vec<judged::Candidate> = hits
+        .iter()
+        .filter_map(|hit| {
+            let way = by_id.get(hit.id.as_str())?;
+            Some(judged::Candidate {
+                key: hit.id.clone(),
+                description: way.description.clone(),
+                trigger: judged::matched_trigger(&hit.payload, way.pattern_strict),
+                channel: hit.payload.clone(),
+                p: hit.score,
+                open: true,
+            })
+        })
+        .collect();
+    let lane = judged::Lane {
+        surface: decision::Surface::Task,
+        hook_event: "PreToolUse".into(),
+        scope: task_scope.to_string(),
+        project_dir: project_dir.clone(),
+        session_id: session_id.to_string(),
+    };
+    let mut turns: Vec<_> = super::lookbehind::recent_turns(session_id)
+        .into_iter()
+        .filter(|t| t.role == ways_agent_core::judge::Role::Assistant)
+        .collect();
+    turns.push(ways_agent_core::judge::Turn { role: ways_agent_core::judge::Role::User, text: query.to_string() });
+    let judged = judged::judge(&lane, &judge_candidates, turns, gate::TOOL_WAIT);
+    let kept: Vec<Hit<String>> = hits
+        .iter()
+        .filter(|h| !judged.blocked(&h.id))
+        .map(|h| Hit { id: h.id.clone(), score: h.score, specificity: h.specificity, payload: h.payload.clone() })
+        .collect();
+
+    let stashed = write_stash(&kept, record.scan_id(), session_id, is_teammate, team);
     let result = if stashed.is_ok() { "stashed" } else { "error" };
+    let mut shown = Vec::new();
     for (i, hit) in hits.iter().enumerate() {
-        record.hit(&hit.id, i + 1, &hit.payload, hit.score, result, None);
+        let r = decision::block_result(&judged.gate.blocked, &hit.id).unwrap_or(result);
+        record.hit(&hit.id, i + 1, &hit.payload, hit.score, r, Some(&judged.gate));
+        if let Some(c) = judge_candidates.iter().find(|c| c.key == hit.id) {
+            shown.push(judged::Shown { candidate: c, result: r });
+        }
     }
+    if !judge_candidates.is_empty() {
+        record.judge(&judged.gate);
+    }
+    let scan_id = record.scan_id().to_string();
     record.write();
+    judged::detach(&lane, judged, &shown, &scan_id);
     stashed
 }
 

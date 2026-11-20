@@ -13,7 +13,7 @@ use crate::cmd::show::ContextBudget;
 use crate::session;
 
 use super::candidates::collect_with_off;
-use super::{discard, gate};
+use super::{discard, gate, judged};
 use super::matching::{
     log_keyword_gated, log_near_miss, match_prompt, record_keyword_gated, record_near_miss, PromptMatch,
 };
@@ -311,20 +311,37 @@ fn scan_prompt_surface(
     // it keeps its refire budget.
     let by_id: std::collections::HashMap<&str, &WayCandidate> =
         candidates.iter().map(|w| (w.id.as_str(), w)).collect();
-    let pending: Vec<gate::Pending<'_>> = hits
+    // The read-only refire check splits the hits: the open ones go to the
+    // judge now, a sample of the held ones to the detached judge after.
+    let (open, held): (Vec<_>, Vec<_>) = hits
         .iter()
-        .filter_map(|hit| by_id.get(hit.id.as_str()))
-        .filter(|way| crate::cmd::show::would_fire(&way.id, session_id))
-        .map(|way| gate::Pending { id: &way.id, description: &way.description, pattern_strict: way.pattern_strict })
+        .filter_map(|hit| by_id.get(hit.id.as_str()).map(|way| (hit, *way)))
+        .partition(|(_, way)| gate::refire_open(&way.id, session_id));
+    let pending: Vec<gate::Pending<'_>> = open
+        .iter()
+        .map(|(hit, way)| gate::Pending { id: &way.id, description: &way.description, trigger: judged::matched_trigger(&hit.payload.0, way.pattern_strict) })
+        .collect();
+    let held: Vec<judged::Candidate> = held
+        .iter()
+        .map(|(hit, way)| judged::Candidate {
+            key: way.id.clone(),
+            description: way.description.clone(),
+            trigger: judged::matched_trigger(&hit.payload.0, way.pattern_strict),
+            channel: hit.payload.0.clone(),
+            p: hit.score,
+            open: false,
+        })
         .collect();
     let gate_log = gate::LogContext {
+        lane: "prompt",
         session_id,
         project_dir: &project_dir,
         scope: &scope,
         hook_event,
         sink: &session::log_event,
     };
-    let mut gate = gate::apply(&pending, query, response_context, &gate_log);
+    let turns = gate::turns(query, response_context);
+    let mut gate = gate::apply(&pending, turns.clone(), gate::PROMPT_WAIT, &gate_log);
 
     let shown = admit_hits(&hits, &mut gate, &pending, &gate_log, &mut record, |hit| {
         let (channel, matched_span, _) = &hit.payload;
@@ -345,7 +362,16 @@ fn scan_prompt_surface(
         }
         (shown.outcome, delivered)
     });
+    let scan_id = record.scan_id().to_string();
     record.write();
+    let judge_lane = judged::Lane {
+        surface: decision::Surface::Prompt,
+        hook_event: hook_event.to_string(),
+        scope: scope.clone(),
+        project_dir: project_dir.clone(),
+        session_id: session_id.to_string(),
+    };
+    judged::detach_held(&judge_lane, held, turns, &scan_id);
 
     discard::prompt_shaped(
         &off,
@@ -640,11 +666,11 @@ mod tests {
         let sink = |f: &[(&str, &str)]| {
             events.borrow_mut().push(f.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect())
         };
-        let lc = gate::LogContext { session_id: "s", project_dir: "/tmp", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink };
+        let lc = gate::LogContext { lane: "prompt", session_id: "s", project_dir: "/tmp", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink };
         let mut blocked = gate::test_blocked("p", &lc);
         let pending = vec![
-            gate::Pending { id: "p", description: "", pattern_strict: false },
-            gate::Pending { id: "p/c", description: "", pattern_strict: true },
+            gate::Pending { id: "p", description: "", trigger: gate::Trigger::Keyword },
+            gate::Pending { id: "p/c", description: "", trigger: gate::Trigger::Strict },
         ];
         let shown = HashSet::new();
         assert!(withheld_for_parent("p/c", &shown, &pending, &mut blocked, &lc));
@@ -677,7 +703,7 @@ mod tests {
     /// ways `show` was asked for.
     fn admit(hits: &[Hit<PromptPayload>], mut gate: gate::Gate) -> (serde_json::Value, Vec<String>) {
         let sink = |_: &[(&str, &str)]| {};
-        let lc = gate::LogContext { session_id: "s", project_dir: "/tmp", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink };
+        let lc = gate::LogContext { lane: "prompt", session_id: "s", project_dir: "/tmp", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink };
         let mut record = decision::Record::for_test();
         let mut asked = Vec::new();
         admit_hits(hits, &mut gate, &[], &lc, &mut record, |h| {
@@ -689,7 +715,7 @@ mod tests {
 
     fn gate_of(verdicts: &[(&str, f64)], mode: ways_agent_core::profile::Mode) -> gate::Gate {
         let sink = |_: &[(&str, &str)]| {};
-        let lc = gate::LogContext { session_id: "s", project_dir: "/tmp", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink };
+        let lc = gate::LogContext { lane: "prompt", session_id: "s", project_dir: "/tmp", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink };
         gate::test_gate(verdicts, mode, &lc)
     }
 
