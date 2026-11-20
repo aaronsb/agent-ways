@@ -1204,7 +1204,7 @@ mod tests {
     }
 
     /// A hook too near its deadline to show a way holds it: no fire is
-    /// recorded, and the hold is logged as a suppression with reason
+    /// recorded, its back-off count stays at 0, and the hold is logged as a suppression with reason
     /// `deadline`, so a gate-off session still shows it. The deadline is set
     /// once per process, so the test reruns itself in a child with homes of
     /// its own, and the child calls the same function a hook does.
@@ -1227,6 +1227,9 @@ mod tests {
             assert!(!events.contains("\"way_fired\""), "{events}");
             let state = files_under(&base.join("run"));
             assert!(!state.iter().any(|p| p.to_string_lossy().contains("way-engagement")), "no fire recorded: {state:?}");
+            // Nor does the hold count toward the way's back-off.
+            assert_eq!(crate::session::refire_count::fire_count_for("held-deadline", "main", "tdl/held"), 0, "the hold counted a fire");
+            assert_eq!(held[0]["refire_n"], "0", "{held:?}");
             return;
         }
         let base = std::env::temp_dir().join(format!("ways-held-deadline-{}", std::process::id()));
