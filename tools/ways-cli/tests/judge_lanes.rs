@@ -392,7 +392,8 @@ held_sample: 1
     assert!(!s.fired("judged/drop", None), "blocked twice, never fired");
 }
 
-/// The fires `agent`'s thread has counted for `way` (ADR-711), 0 when none.
+/// The fires `agent`'s thread has counted for `way` for the refire
+/// back-off, 0 when none.
 fn refire_count(s: &Sim, agent: &str, way: &str) -> u64 {
     let path = s.state.join("agent-ways/refire-counts").join(&s.session).join(format!("{agent}.json"));
     std::fs::read_to_string(path)

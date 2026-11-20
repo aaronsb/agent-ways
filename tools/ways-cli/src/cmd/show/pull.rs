@@ -164,7 +164,10 @@ pub fn stamp(id: &str, session_id: &str) -> Result<()> {
 
     // A pull restarts the way's clock but does not count toward its n: the
     // agent asked for the way, which says nothing about whether matching
-    // should bring it back (ADR-711 §4).
+    // should bring it back.
+    //
+    // References:
+    // - ADR-711 §4: a pull does not count toward the refire back-off.
     let lock = session::lock_engagement(id, session_id);
     session::record_way_fire(id, session_id, &fireable.curve, tick);
     drop(lock);

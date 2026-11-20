@@ -303,7 +303,7 @@ Fires once per marker reset: on the first state scan after the session's markers
 
 ## Disclosure Cadence
 
-A way that fires stamps a marker at `{SESSIONS_ROOT}/{session_id}/ways/{way_id}/.marker.{agent_id}` holding the agent's token position. A later match is withheld until the agent has consumed the way's `refire:` fraction of its context window since that stamp (ADR-126), and is then re-disclosed. Each refire in the same agent thread waits `refire_backoff` times longer than the one before (ADR-711). A withheld match is logged as `way_suppressed` with reason `refire`, the token position, the thread's fire count `refire_n` and the wait in force `refire_threshold`. A way that does not fit in the hook's 10,000-character budget is logged with reason `context_cap` and is not recorded as fired. Markers are cleared on SessionStart startup, compact and clear. The fire counts are not: after a compaction the first match fires once, and later refires keep the longer wait. Fire rows carry `compaction_epoch`, the number of compactions the session has had.
+A way that fires stamps a marker at `{SESSIONS_ROOT}/{session_id}/ways/{way_id}/.marker.{agent_id}` holding the agent's token position. A later match is withheld until the agent has consumed the way's `refire:` fraction of its context window since that stamp, and is then re-disclosed. Each refire in the same agent thread waits `refire_backoff` times longer than the one before. A withheld match is logged as `way_suppressed` with reason `refire`, the token position, the thread's fire count `refire_n` and the wait in force `refire_threshold`. A way that does not fit in the hook's 10,000-character budget is logged with reason `context_cap` and is not recorded as fired. Markers are cleared on SessionStart startup, compact and clear. The fire counts are not: after a compaction the first match fires once, and later refires keep the longer wait. Fire rows carry `compaction_epoch`, the number of compactions the session has had.
 
 State is kept per agent. A subagent's fires, token position and window come from its own transcript, so its cadence does not move the main agent's. The state machine is drawn in [architecture.md](architecture.md#disclosure-cadence).
 
@@ -469,3 +469,8 @@ The `/ways-tests` skill provides ad-hoc scoring for vocabulary tuning:
 ```
 /ways-tests "write some unit tests for this module"
 ```
+
+## References
+
+- ADR-126: a way's `refire:` value is a fraction of the context window, which sets the wait before it re-discloses.
+- ADR-711: each refire in an agent thread waits `refire_backoff` times longer than the one before, the count survives compaction, and fire rows carry the compaction epoch.

@@ -69,7 +69,10 @@ pub enum Request {
     Stop { session: String, transcript: String },
     SubagentStart { session: String },
     /// `compact` when the payload's `source` is `compact`: the start of a
-    /// new context window in the same session (ADR-711 §5).
+    /// new context window in the same session.
+    ///
+    /// References:
+    /// - ADR-711 §5: a compaction bumps the session's compaction epoch.
     SessionStart { session: Option<String>, compact: bool },
     TasksActive { session: String },
     Tool { session: String, tool: String, hook_event: String },

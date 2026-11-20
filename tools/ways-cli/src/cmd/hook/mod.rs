@@ -158,7 +158,11 @@ pub fn run(event: HookEvent) -> Result<()> {
             if let Some(sid) = &session {
                 crate::cmd::reset::clear_session(sid);
                 // The clear ends this window's fire clocks; the fire counts
-                // stay, and the epoch marks the new window (ADR-711).
+                // stay, and the epoch marks the new window.
+                //
+                // References:
+                // - ADR-711: the fire count survives compaction, and fire rows
+                //   carry the compaction epoch.
                 if compact {
                     session::refire_count::bump_compaction_epoch(sid);
                 }

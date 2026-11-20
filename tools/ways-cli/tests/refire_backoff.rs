@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-//! Refire back-off per agent thread (ADR-711).
+//! Refire back-off per agent thread.
 //!
 //! Each scenario runs `ways hook <event>` the way Claude Code does, against
 //! an isolated HOME and XDG tree. The agents' transcripts are written by the
@@ -11,6 +11,10 @@
 //! has `refire: 0.05`, so its half-life H is 10,000 tokens. A way refires
 //! once its salience is strictly below one half, at H + 1 tokens after its
 //! last fire; after n fires in a thread it waits H × g^(n-1) + 1.
+//!
+//! References:
+//! - ADR-711: the back-off schedule, per-thread counts, the compaction
+//!   grant, and what pulls and SubagentStart injections count.
 
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -233,8 +237,8 @@ fn the_nth_refire_waits_h_times_two_to_the_n_minus_one() {
     assert_eq!(field(&held, "refire_threshold"), vec![H + 1, 2 * H + 1, 4 * H + 1]);
 }
 
-/// `refire_backoff: 1` restores the schedule before ADR-711: every refire
-/// waits H.
+/// `refire_backoff: 1` restores the schedule before back-off: every
+/// refire waits H.
 #[test]
 fn a_backoff_factor_of_one_keeps_every_wait_at_h() {
     let s = Sim::new("g1", Some("refire_backoff: 1\n"));

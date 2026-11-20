@@ -26,10 +26,14 @@ use super::model::{ActiveWay, Clock, Frame, Outcome, Suppression, WayEvent};
 /// so a curve edited since the recorded session shows today's value. That's the
 /// best we can do without snapshotting frontmatter into events.jsonl. Each
 /// (agent, way) row's threshold comes from that agent's own window and its
-/// fire count now (ADR-711 §6), so a row shows when its next refire opens.
+/// fire count now, so a row shows when its next refire opens.
 ///
 /// A frame holds the injected ways, and with `matched` the ways the relevance
 /// judge blocked too (#742). Each way carries its [`Outcome`].
+///
+/// References:
+/// - ADR-711 §6: thresholds are computed per (agent, way), from the agent's
+///   window and fire count.
 pub(crate) fn reconstruct_frames(
     events: &[WayEvent],
     project_name: &str,

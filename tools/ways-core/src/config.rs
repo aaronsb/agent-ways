@@ -270,10 +270,13 @@ pub struct Config {
     /// resolves by looking up the preset here and multiplying by the
     /// operator's current context window.
     pub refire_presets: HashMap<String, f64>,
-    /// The refire back-off factor g (ADR-711). After n fires of a way in one
-    /// agent thread, its next refire waits H × g^(n-1), where H is the
-    /// half-life its `refire:` resolves to. Default 2; 1 turns back-off off.
-    /// Read through [`Config::refire_backoff`], which keeps it at 1 or more.
+    /// The refire back-off factor g. After n fires of a way in one agent
+    /// thread, its next refire waits H × g^(n-1), where H is the half-life
+    /// its `refire:` resolves to. Default 2; 1 turns back-off off. Read
+    /// through [`Config::refire_backoff`], which keeps it at 1 or more.
+    ///
+    /// References:
+    /// - ADR-711 §2: g sits beside the presets and defaults to 2.
     pub refire_backoff: f64,
     /// Whether `ways manage repair` projects the framework's secret-path
     /// `permissions.deny` baseline into `settings.json` (ADR-152). Default
@@ -284,13 +287,13 @@ pub struct Config {
     pub secret_path_deny: bool,
 }
 
-/// The refire back-off factor when the config sets none (ADR-711).
+/// The refire back-off factor when the config sets none.
 pub const DEFAULT_REFIRE_BACKOFF: f64 = 2.0;
 
 impl Config {
-    /// The refire back-off factor g (ADR-711): the configured value when it
-    /// is a finite number of at least 1, else the default. A value below 1
-    /// would shorten each wait, which no setting asks for.
+    /// The refire back-off factor g: the configured value when it is a
+    /// finite number of at least 1, else the default. A value below 1 would
+    /// shorten each wait, which no setting asks for.
     pub fn refire_backoff(&self) -> f64 {
         let g = self.refire_backoff;
         if g.is_finite() && g >= 1.0 { g } else { DEFAULT_REFIRE_BACKOFF }
@@ -766,8 +769,8 @@ mod tests {
         assert_eq!(cfg.refire_presets.get("frequent").copied(), Some(0.05));
     }
 
-    /// ADR-711: g defaults to 2, a config value replaces it, and a value
-    /// below 1 or not a number reads as the default.
+    /// g defaults to 2, a config value replaces it, and a value below 1 or
+    /// not a number reads as the default.
     #[test]
     fn refire_backoff_defaults_to_two_and_never_reads_below_one() {
         let mut cfg = Config::default();

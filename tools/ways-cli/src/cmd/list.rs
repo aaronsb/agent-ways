@@ -212,7 +212,10 @@ fn collect_fired_ways(
             (state.epoch(), state.token_position() / 1000)
         };
         // Each thread's thresholds come from its own window and its own fire
-        // counts (ADR-711 §6): a subagent may run another model than main.
+        // counts: a subagent may run another model than main.
+        //
+        // References:
+        // - ADR-711 §6: thresholds are shown per (agent, way).
         let window = if agent == session::MAIN_AGENT {
             context_window
         } else {

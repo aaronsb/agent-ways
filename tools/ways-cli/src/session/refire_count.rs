@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-//! How many times each way has fired in each agent thread (ADR-711).
+//! How many times each way has fired in each agent thread.
 //!
 //! The refire back-off reads n, the fires the gate has recorded for a way in
 //! one thread, and waits H × g^(n-1) before the next refire. The fire clock
@@ -20,6 +20,10 @@
 //! start each way at n = 0. `compactions` is the session's compaction epoch:
 //! it grows by one at each compaction, which clears every thread at once.
 //! Whole session directories are pruned by age at SessionStart.
+//!
+//! References:
+//! - ADR-711 §1: a fire count per agent thread, kept outside the session
+//!   directory so compaction does not erase it.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

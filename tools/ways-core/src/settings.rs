@@ -331,7 +331,7 @@ const KEYS: &[KeySpec] = &[
         kind: Kind::Float { min: 1.0, max: 10.0 },
         default: DefaultValue::Yaml("2"),
         doc: "How much longer each refire waits than the one before it, in one agent thread.",
-        long: "After n fires of a way in an agent thread, its next refire waits H × g^(n-1) tokens, where H is the half-life its refire: value resolves to and g is this factor (ADR-711). Main and each subagent count apart, and the count survives compaction, which still grants one fire in the new window. 1 keeps every wait at H, the schedule before back-off.",
+        long: "After n fires of a way in an agent thread, its next refire waits H × g^(n-1) tokens, where H is the half-life its refire: value resolves to and g is this factor. Main and each subagent count apart, and the count survives compaction, which still grants one fire in the new window. 1 keeps every wait at H, the schedule before back-off.",
         ..BASE
     },
     KeySpec {

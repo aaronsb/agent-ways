@@ -215,8 +215,12 @@ impl Suppression {
 ///
 /// `kind` is `way` or `check`. Refire rows are deduplicated by the caller to
 /// one per way per fire window; context-cap rows are rare and log as they
-/// happen. A way's row carries its [`RefireState`] at the call (ADR-711); a
-/// check has no refire curve of its own and carries none.
+/// happen. A way's row carries its [`RefireState`] at the call; a check has
+/// no refire curve of its own and carries none.
+///
+/// References:
+/// - ADR-711 §5: suppression rows carry the tick, the backed-off threshold
+///   and n.
 #[allow(clippy::too_many_arguments)]
 fn log_way_suppressed(
     kind: &str,
@@ -250,8 +254,10 @@ fn log_way_suppressed(
 }
 
 /// Where a way stands on its refire schedule in this agent thread, as its
-/// `way_fired`, `way_redisclosed` and `way_suppressed` rows record it
-/// (ADR-711 §5).
+/// `way_fired`, `way_redisclosed` and `way_suppressed` rows record it.
+///
+/// References:
+/// - ADR-711 §5: the fields the event rows carry.
 struct RefireState {
     /// The thread's token position at the call.
     tick: u64,
@@ -422,7 +428,7 @@ struct Fireable {
     content: String,
     firing: &'static FiringContext,
     /// The way's refire curve for this agent thread: `refire:` resolved
-    /// against the window, then backed off by `fires` (ADR-711).
+    /// against the window, then backed off by `fires`.
     curve: sensor_trait::Curve,
     /// The fires the gate has recorded for the way in this thread, n.
     fires: u64,
@@ -489,10 +495,14 @@ fn fireable_in_scope(id: &str, session_id: &str, enforce_scope: bool) -> Result<
     // yields the model id the event is stamped with. Resolved once per process
     // and shared by every way this invocation fires.
     //
-    // ADR-711: the half-life backs off with each fire recorded for the way in
-    // this agent thread, so the n-th refire waits H × g^(n-1). The count lives
+    // The half-life backs off with each fire recorded for the way in this
+    // agent thread, so the n-th refire waits H × g^(n-1). The count lives
     // outside the session directory and survives compaction; the fire clock
     // does not, so the first match in a new window still fires.
+    //
+    // References:
+    // - ADR-711: geometric back-off per agent thread, with one fire granted
+    //   after compaction.
     let fm = frontmatter::parse(&way_file)?;
     let firing = firing_context(session_id, &project_dir);
     let curve = fm.resolved_curve(firing.window).ok_or_else(|| {
@@ -587,8 +597,11 @@ pub fn subagent_way(id: &str, session_id: &str, scope: &str) -> Result<String> {
 /// fire. Without it the subagent's first match would deliver the way again.
 /// The tick is the subagent's token position, 0 before its transcript exists.
 /// The injection is the subagent's first fire of the way and counts toward
-/// its n (ADR-711 §4), so its first refire waits H.
+/// its n, so its first refire waits H.
 /// Skipped when the payload named no agent: the fire is not main's.
+///
+/// References:
+/// - ADR-711 §4: a SubagentStart injection is the subagent's first fire.
 fn record_injected(id: &str, session_id: &str, way_file: &Path, project_dir: &str) {
     if session::current_agent() == session::MAIN_AGENT {
         return;
@@ -776,12 +789,16 @@ pub fn way_scored(
         // parent's session id, so without this a parallel fan-out reads as one
         // session on the read side; `ways tune stats` keys hook invocations on it.
         ("agent_id", agent_id),
-        // ADR-711 §5: the session's compaction epoch, so a measurement can
-        // split a thread's fires by context window.
+        // The session's compaction epoch, so a measurement can split a
+        // thread's fires by context window.
         ("compaction_epoch", session::refire_count::compaction_epoch(session_id).to_string()),
     ];
-    // ADR-711 §5: the tick, the fire's n, and the threshold the next refire
-    // waits in this thread.
+    // The tick, the fire's n, and the threshold the next refire waits in
+    // this thread.
+    //
+    // References:
+    // - ADR-711 §5: fire rows carry the tick, the threshold, n and the
+    //   compaction epoch.
     log_fields.extend(shown.fields());
     // ADR-134 task D: the calibrated probability that fired this way, feeding the
     // fire-score telemetry that calibration (ADR-156) is fit from. Logged on every

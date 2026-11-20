@@ -265,11 +265,14 @@ fn load_engagement_for_tick(path: &Path, curve: &Curve, current_tick: Tick) -> E
 const MAX_HALF_LIFE: u64 = 1 << 52;
 
 /// The curve a way's refire is checked against after `fires` fires in this
-/// agent thread (ADR-711): its `Curve::Exponential` half-life H stretched to
+/// agent thread: its `Curve::Exponential` half-life H stretched to
 /// H × g^(fires-1). No fire yet, or one, leaves H as it is, so the first
 /// refire waits H as it did before back-off. `g` is
 /// `Config::refire_backoff`, at least 1; other curve shapes are returned
 /// unchanged.
+///
+/// References:
+/// - ADR-711 §2: the n-th refire waits H × g^(n-1).
 pub fn backed_off(curve: &Curve, fires: u64, g: f64) -> Curve {
     let Curve::Exponential { half_life } = curve else { return curve.clone() };
     let exponent = i32::try_from(fires.saturating_sub(1)).unwrap_or(i32::MAX);
@@ -283,10 +286,10 @@ pub fn backed_off(curve: &Curve, fires: u64, g: f64) -> Curve {
 }
 
 /// Resolve a way's re-fire threshold in tokens for one agent thread: its
-/// frontmatter `refire:` resolved against that agent's context window
-/// (ADR-126), backed off by the thread's `fires` of the way (ADR-711), and
-/// asked `Curve::refire_delta(REFIRE_FLOOR)`. `ways session ways` and
-/// introspect render each (agent, way) row's bar from it.
+/// frontmatter `refire:` resolved against that agent's context window,
+/// backed off by the thread's `fires` of the way, and asked
+/// `Curve::refire_delta(REFIRE_FLOOR)`. `ways session ways` and introspect
+/// render each (agent, way) row's bar from it.
 ///
 /// Callers pass the agent's window (typically from its transcript through
 /// `cmd::context`) so the `refire:` fraction resolves to a concrete
@@ -363,9 +366,12 @@ mod tests {
         ));
     }
 
-    /// ADR-711: after n fires the half-life is H × g^(n-1); before the
-    /// second fire it is H, g = 1 keeps it at H, and a count large enough
-    /// to overflow stops at the cap.
+    /// After n fires the half-life is H × g^(n-1); before the second fire
+    /// it is H, g = 1 keeps it at H, and a count large enough to overflow
+    /// stops at the cap.
+    ///
+    /// References:
+    /// - ADR-711 §2: the back-off schedule.
     #[test]
     fn backed_off_stretches_the_half_life_by_g_to_the_n_minus_one() {
         let h = |fires: u64, g: f64| match backed_off(&Curve::Exponential { half_life: 1_000 }, fires, g) {

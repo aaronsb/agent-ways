@@ -267,7 +267,8 @@ impl AgentState<'_> {
         self.transcript().and_then(|t| token_position_of(&t)).unwrap_or(0)
     }
 
-    /// The fires recorded for `way_id` in this agent's thread (ADR-711).
+    /// The fires recorded for `way_id` in this agent's thread, which the
+    /// refire back-off reads.
     pub fn refire_count(&self, way_id: &str) -> u64 {
         refire_count::fire_count_for(self.session_id, self.agent, way_id)
     }

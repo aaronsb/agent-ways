@@ -34,7 +34,7 @@ Numeric values between these presets are fine — for example, the 14 ways migra
 
 ## Back-off
 
-The fraction sets the half-life H of the first refire only. Each agent thread (main and every subagent) counts how many times a way has fired in it, and after n fires the next refire waits H × g^(n-1) (ADR-711). g is `refire_backoff` in the ways config, default 2: the second refire waits 2H, the third 4H. A value of 1 keeps every wait at H. A `ways_read` pull restarts the clock without adding to the count. A way injected at SubagentStart is that subagent's first fire.
+The fraction sets the half-life H of the first refire only. Each agent thread (main and every subagent) counts how many times a way has fired in it, and after n fires the next refire waits H × g^(n-1). g is `refire_backoff` in the ways config, default 2: the second refire waits 2H, the third 4H. A value of 1 keeps every wait at H. A `ways_read` pull restarts the clock without adding to the count. A way injected at SubagentStart is that subagent's first fire.
 
 Compaction removes a way's text from the context. The count survives it, the clock does not, so the first match in the new window fires once and the refires after it keep the longer wait. `once` therefore means once per context window. No preset gives a fixed number of fires per session.
 
