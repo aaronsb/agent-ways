@@ -69,7 +69,7 @@ A way or check matched and was not shown.
 | Field | Meaning |
 |-------|---------|
 | `kind` | `way` or `check` |
-| `reason` | `refire`: the cadence is still holding it back (logged once per way per fire window). `context_cap`: the per-invocation context budget was full. |
+| `reason` | `refire`: the cadence is still holding it back (logged once per way per fire window). `context_cap`: the per-invocation context budget was full. `deadline`: the hook was too near its deadline to show the way, so no fire was recorded. |
 | `way`, `domain`, `trigger`, `scope`, `project`, `session`, `agent_id` | Common fields |
 
 ### `way_nearmiss`

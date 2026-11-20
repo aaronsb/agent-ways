@@ -58,6 +58,17 @@ fn a_detached_shadow_verdict_on_a_shown_way_marks_its_row() {
     assert_eq!(row.outcome, Outcome::WouldBlock);
 }
 
+/// A way held because the hook was near its deadline is no refire hold: it
+/// is a note on its frame, not a held row.
+#[test]
+fn a_deadline_hold_is_a_note_not_a_refire_row() {
+    let held = WayEvent { kind: "way".into(), reason: "deadline".into(), ..ev("2026-07-03T16:52:02Z", "way_suppressed", "itops/incident", "keyword") };
+    let events = vec![ev("2026-07-03T16:52:01Z", "way_fired", "softwaredev/docs/adr", "file"), held];
+    let f = &build_frames(&events, &[], &HashMap::new(), 50)[0];
+    assert!(f.ways.iter().all(|w| w.id != "itops/incident"), "{:?}", f.ways.iter().map(|w| &w.id).collect::<Vec<_>>());
+    assert!(f.new_events.iter().any(|e| e.contains("itops/incident") && e.contains("deadline")), "{:?}", f.new_events);
+}
+
 /// The sizes every screen is checked at: the smallest a screen must work
 /// in, and the reference.
 const SIZES: [(u16, u16); 2] = [(80, 25), (120, 40)];

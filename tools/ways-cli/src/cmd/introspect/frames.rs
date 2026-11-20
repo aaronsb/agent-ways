@@ -285,7 +285,12 @@ pub(super) fn build_frames_by_agent(
                 }
                 "way_judged" if !ev.way.is_empty() && !ev.held_refire && matches!(ev.verdict.as_str(), "block" | "would_block") => judged.push(ev),
                 // #814: a way matched and held back, by its refire window or
-                // the context cap. A check's own suppression is not a row.
+                // the context cap. A check's own suppression is not a row. A
+                // way held because the hook was near its deadline has no row
+                // mark of its own, so it is a note on the frame.
+                "way_suppressed" if !ev.way.is_empty() && ev.kind == "way" && ev.reason == "deadline" => {
+                    new_events.push(format!("{} held: the hook was near its deadline", ev.way));
+                }
                 "way_suppressed" if !ev.way.is_empty() && ev.kind == "way" => held.push(ev),
                 // #786: the switch held a subagent's ways back. It is a mark
                 // on the frame, not an event note, so `new_events` reads as
