@@ -44,7 +44,7 @@ Ways without a `when:` block fire everywhere (the default). Use `when:` sparingl
 
 ## Firing cadence (`refire:`)
 
-Fire-bearing ways should carry a `refire:` field: a fraction of the session's context window (`refire: 0.15`) or a preset name (`refire: normal`) that sets how soon the way re-discloses (ADR-126). Without it the firing gate refuses the way, and `ways author lint` reports an error. Forms, presets, and common choices are in knowledge/authoring/refire(meta).
+Fire-bearing ways should carry a `refire:` field: a fraction of the session's context window (`refire: 0.15`) or a preset name (`refire: normal`) that sets how soon the way first re-discloses (ADR-126). Each later refire in the same agent thread waits longer, by the `refire_backoff` factor (ADR-711). Without it the firing gate refuses the way, and `ways author lint` reports an error. Forms, presets, and common choices are in knowledge/authoring/refire(meta).
 
 ## Other
 

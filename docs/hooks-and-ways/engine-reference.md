@@ -14,6 +14,7 @@ The authoritative statement of how the ways matching engine decides a fire: conf
 | `admission` | `share` (or `chunk_top`; see the late-interaction step 4) |
 | `body_rank` | `scaled-single` (or `off`, `on`, `scaled`). `scaled-single`, the default, ranks one-sentence prompts on `(alias + 0.25 × best body section) / 1.25` and leaves late interaction on alias cosines. `scaled` applies that blend on both paths; `on` is the literal `alias + 0.25 × best section` on both, which runs above the scale the calibration was fitted on. `off` is alias cosines alone. Only while the body sidecar is complete. Under `on` and `scaled`, late-interaction confirmation uses a section other than the one that contributed (ADR-701 §6; results in `experiments/content-corpus/results-body-rank.md`) |
 | `refire_presets` | `once` 1.0, `rare` 0.4, `normal` 0.15, `frequent` 0.05 |
+| `refire_backoff` (g) | **2**; 1 keeps every refire at the way's half-life (ADR-711) |
 
 Retired keys warn and are ignored (`tools/ways-core/src/settings.rs` `RETIRED`): `default_embed_threshold` and `default_multi_embed_threshold` (use `semantic_fire_probability`), `keyword_gate_fraction` (use `keyword_floor_probability`). There is no `embed_threshold` frontmatter field and no per-way threshold.
 
@@ -89,7 +90,7 @@ What the judge sees, its threshold, candidate cap, timeout, failure behaviour an
 ## Related mechanisms
 
 - `ways tune locale`: locale alias audit (fidelity and discrimination against the English root), ADR-139 and ADR-125. Never writes relevance thresholds.
-- Re-disclosure cadence: `refire` as a fraction of the context window (ADR-126), kept per agent (`session::agent_state_dir`). The ADR-123 `curve:` block was removed by ADR-159.
+- Re-disclosure cadence: `refire` as a fraction of the context window (ADR-126), kept per agent (`session::agent_state_dir`). After n fires of a way in one agent thread, the next refire waits H × g^(n-1), where H is the half-life and g is `refire_backoff` (ADR-711). The count is kept per (session, agent) under `$XDG_STATE_HOME/agent-ways/refire-counts/` (`session::refire_count`), so it survives the compaction reset; a pull does not add to it. The ADR-123 `curve:` block was removed by ADR-159.
 - Way roots: project, user, core, with id shadowing (ADR-143, `collect_candidates`).
 - Input reduction by sentence salience (ADR-130), and the authored disclosure graph with no BM25 (ADR-125).
 
