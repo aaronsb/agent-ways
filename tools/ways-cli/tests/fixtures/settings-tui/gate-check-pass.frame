@@ -4,16 +4,16 @@ agent-tui frame 100x30
 |│ ▾ settings                    value                 ││gate.keys.anthropic                        │|
 |│     engine                                          ││                                           │|
 |│     mode                      enforce               ││Whether a provider key is present.         │|
-|│ ▸ profiles · setting          value                 ││                                           │|
-|│ ▾ keys · provider             key                   ││Never shown and never passed as an argument│|
-|│▌    anthropic                 present [a]           ││(ADR-503 §12). Add or rotate one with `ways│|
-|│     openrouter                absent [a]            ││agent key add --provider <p>`, which reads │|
-|│ ▾ judge · state               value                 ││it from stdin or a prompt that shows a dot │|
-|│     readiness   ┌check: pass───────────────────────────────────────────────────┐                 │|
-|│     unset engine│ $ ways agent key check --provider anthropic                  │                 │|
-|│   ▾ sessions    │                                                              │                 │|
-|│       (none live│ provider: anthropic                                          │ers it masked)   │|
-|│                 │ key:      sk-ant-…ture                                       │                 │|
+|│     held_sample               0.1                   ││                                           │|
+|│ ▸ profiles · setting          value                 ││Never shown and never passed as an argument│|
+|│ ▾ keys · provider             key                   ││(ADR-503 §12). Add or rotate one with `ways│|
+|│▌    anthropic                 present [a]           ││agent key add --provider <p>`, which reads │|
+|│     openrouter                absent [a]            ││it from stdin or a prompt that shows a dot │|
+|│ ▾ judge · state ┌check: pass───────────────────────────────────────────────────┐                 │|
+|│     readiness   │ $ ways agent key check --provider anthropic                  │                 │|
+|│     unset engine│                                                              │                 │|
+|│   ▾ sessions    │ provider: anthropic                                          │ers it masked)   │|
+|│       (none live│ key:      sk-ant-…ture                                       │                 │|
 |│                 │ model:    claude-haiku-4-5                                   │                 │|
 |│                 │ result:   accepted                                           │                 │|
 |│                 │                                                              │                 │|
@@ -56,37 +56,36 @@ styles
   4  54-55  - - DIM
   4  99-99  - - DIM
   5   0-0   - - DIM
-  5   2-11  - - BOLD
-  5  12-21  - - DIM
-  5  32-36  - - DIM
   5  54-55  - - DIM
   5  99-99  - - DIM
   6   0-0   - - DIM
-  6   2-7   - - BOLD
-  6   8-18  - - DIM
-  6  32-34  - - DIM
+  6   2-11  - - BOLD
+  6  12-21  - - DIM
+  6  32-36  - - DIM
   6  54-55  - - DIM
   6  99-99  - - DIM
   7   0-0   - - DIM
-  7   1-1   Cyan - BOLD|REVERSED
-  7   2-31  - - BOLD|REVERSED
-  7  32-38  Green - BOLD|REVERSED
-  7  39-42  - - BOLD|DIM|ITALIC|REVERSED
-  7  43-53  - - BOLD|REVERSED
+  7   2-7   - - BOLD
+  7   8-18  - - DIM
+  7  32-34  - - DIM
   7  54-55  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
-  8  32-37  - - DIM
-  8  38-41  - - DIM|ITALIC
+  8   1-1   Cyan - BOLD|REVERSED
+  8   2-31  - - BOLD|REVERSED
+  8  32-38  Green - BOLD|REVERSED
+  8  39-42  - - BOLD|DIM|ITALIC|REVERSED
+  8  43-53  - - BOLD|REVERSED
   8  54-55  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
-  9   2-8   - - BOLD
-  9   9-16  - - DIM
-  9  32-36  - - DIM
+  9  32-37  - - DIM
+  9  38-41  - - DIM|ITALIC
   9  54-55  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
+ 10   2-8   - - BOLD
+ 10   9-16  - - DIM
  10  18-18  Green - -
  10  19-29  Green - BOLD
  10  30-81  Green - -
@@ -97,11 +96,11 @@ styles
  11  81-81  Green - -
  11  99-99  - - DIM
  12   0-0   - - DIM
- 12   2-13  - - BOLD
  12  18-18  Green - -
  12  81-81  Green - -
  12  99-99  - - DIM
  13   0-0   - - DIM
+ 13   2-13  - - BOLD
  13  18-18  Green - -
  13  81-81  Green - -
  13  99-99  - - DIM

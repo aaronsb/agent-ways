@@ -16,7 +16,7 @@ use crate::profile::{self, Provider};
 pub const FILE: &str = "agent";
 
 /// The sections the relevance gate reads on the hook path (ADR-503 §5).
-pub const GATE_SECTIONS: &[&str] = &["gate", "gate.mode", "gate.profiles"];
+pub const GATE_SECTIONS: &[&str] = &["gate", "gate.mode", "gate.profiles", "gate.held_sample"];
 
 /// `mode` is a section of its own, so a bad `engine` never turns a gate the
 /// operator switched off back on; profiles fall back one profile at a time,
@@ -26,6 +26,7 @@ const SECTIONS: &[SectionSpec] = &[
     SectionSpec { name: "gate.mode", file: FILE, top: &["mode"], per_entry: false, entry: None, repair: None, columns: None, doc: "What the gate does with a verdict: enforce, shadow or off." },
     SectionSpec { name: "gate.profiles", file: FILE, top: &["profiles"], per_entry: true, entry: None, repair: None, columns: None, doc: "Changes to the shipped engine profiles, and profiles of your own. Each profile falls back alone." },
     SectionSpec { name: "gate.keys", file: "keys", top: &[], per_entry: false, entry: None, repair: None, columns: Some(("provider", "key")), doc: "Provider API keys, shown present or absent. `ways agent key` adds, rotates, checks and removes them." },
+    SectionSpec { name: "gate.held_sample", file: FILE, top: &["held_sample"], per_entry: false, entry: None, repair: None, columns: None, doc: "The share of held candidates judged off the hot path for the record." },
 ];
 
 /// The profiles a tuning key is listed for with no file setting it: every
@@ -153,8 +154,8 @@ const KEYS: &[KeySpec] = &[
         path: &["profiles", "*", "max_candidates"],
         kind: POSITIVE,
         default: DefaultValue::Fn(|b| shipped_field(b, "max_candidates")),
-        doc: "Candidates judged per request; the rest pass unjudged.",
-        long: "Taken in the matcher's order. Judge latency grows with each candidate.",
+        doc: "Candidates judged per request; more candidates take more requests.",
+        long: "Taken in the matcher's order. Every candidate is judged: past this many the next ones go in a further request within the same deadline. Judge latency grows with each candidate.",
         ..BASE
     },
     KeySpec {
@@ -185,6 +186,17 @@ const KEYS: &[KeySpec] = &[
         doc: "Whether a provider key is present.",
         long: "Never shown and never passed as an argument (ADR-503 §12). Add or rotate one with `ways agent key add --provider <p>`, which reads it from stdin or a prompt that shows a dot per character.",
         instances: KEYED,
+        ..BASE
+    },
+    KeySpec {
+        name: "gate.held_sample",
+        section: "gate.held_sample",
+        path: &["held_sample"],
+        kind: Kind::Float { min: 0.0, max: 1.0 },
+        default: DefaultValue::Yaml("0.1"),
+        instances: &[],
+        doc: "The share of candidates the refire curve holds back that the judge scores off the hot path.",
+        long: "A held candidate is never injected and never waits on the judge. A sampled one is judged by a detached process and logged to the decision log as held_refire with its verdict and judge_ms, so the judge's accuracy on what refire holds can be measured. 0 samples none; 1 judges every held candidate.",
         ..BASE
     },
 ];

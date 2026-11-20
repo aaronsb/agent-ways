@@ -4,14 +4,14 @@ agent-tui frame 100x30
 |│ ▾ settings                    value                 ││gate.mode                                  │|
 |│     engine                                          ││                                           │|
 |│▌    mode                      enforce               ││What the gate does with a verdict: enforce,│|
-|│ ▸ profiles · setting          value                 ││shadow or off.                             │|
-|│ ▸ keys · provider             key                   ││                                           │|
-|│ ▾ judge · state               value                 ││enforce blocks candidates judged           │|
-|│     readiness                 degraded !            ││irrelevant; shadow judges and logs every   │|
-|│     unset engine              none                  ││candidate while the matcher decides; off   │|
-|│   ▾ sessions                                        ││judges nothing (ADR-196 §6).               │|
-|│       (none live)             none                  ││                                           │|
-|│                        ┌pick one: gate.mode─────────────────────────────┐                        │|
+|│     held_sample               0.1                   ││shadow or off.                             │|
+|│ ▸ profiles · setting          value                 ││                                           │|
+|│ ▸ keys · provider             key                   ││enforce blocks candidates judged           │|
+|│ ▾ judge · state               value                 ││irrelevant; shadow judges and logs every   │|
+|│     readiness                 degraded !            ││candidate while the matcher decides; off   │|
+|│     unset engine              none                  ││judges nothing (ADR-196 §6).               │|
+|│   ▾ sessions                                        ││                                           │|
+|│       (none live)      ┌pick one: gate.mode─────────────────────────────┐                        │|
 |│                        │ ● enforce   current                            │orce | shadow | off     │|
 |│                        │   shadow                                       │                        │|
 |│                        │   off                                          │                        │|
@@ -58,38 +58,37 @@ styles
   4  54-55  - - DIM
   4  99-99  - - DIM
   5   0-0   - - DIM
-  5   2-11  - - BOLD
-  5  12-21  - - DIM
-  5  32-36  - - DIM
   5  54-55  - - DIM
   5  99-99  - - DIM
   6   0-0   - - DIM
-  6   2-7   - - BOLD
-  6   8-18  - - DIM
-  6  32-34  - - DIM
+  6   2-11  - - BOLD
+  6  12-21  - - DIM
+  6  32-36  - - DIM
   6  54-55  - - DIM
   6  99-99  - - DIM
   7   0-0   - - DIM
-  7   2-8   - - BOLD
-  7   9-16  - - DIM
-  7  32-36  - - DIM
+  7   2-7   - - BOLD
+  7   8-18  - - DIM
+  7  32-34  - - DIM
   7  54-55  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
-  8  32-39  - - DIM
-  8  40-41  Red - BOLD
+  8   2-8   - - BOLD
+  8   9-16  - - DIM
+  8  32-36  - - DIM
   8  54-55  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
-  9  32-35  - - DIM
+  9  32-39  - - DIM
+  9  40-41  Red - BOLD
   9  54-55  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
- 10   2-13  - - BOLD
+ 10  32-35  - - DIM
  10  54-55  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
- 11  32-35  - - DIM
+ 11   2-13  - - BOLD
  11  54-55  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM

@@ -494,7 +494,7 @@ fn hook_commands_load_only_their_sections() {
     f.write(&f.root.join("xdg/config/attend/config.yaml"), "engagement: [\n");
     let ways_line =
         "settings-trace: load-sections ways:config [ways,ways.switch,ways.subagents,ways.domains,matching,install.targets,install.secret_path_deny,ways.project,ways.log]";
-    let agent_line = "settings-trace: load-sections ways-agent:agent [gate,gate.mode,gate.profiles]";
+    let agent_line = "settings-trace: load-sections ways-agent:agent [gate,gate.mode,gate.profiles,gate.held_sample]";
     for args in [
         vec!["scan", "prompt", "--query=write a unit test", "--session=s1"],
         vec!["scan", "command", "--command=git status", "--session=s1"],
