@@ -169,7 +169,12 @@ impl Sim {
 
     /// Compaction: SessionStart with `source: compact`.
     fn compact(&self) {
-        self.hook("session-start", serde_json::json!({"hook_event_name": "SessionStart", "source": "compact"}), None);
+        self.start("compact");
+    }
+
+    /// SessionStart with `source` (`startup`, `resume`, `clear`, `compact`).
+    fn start(&self, source: &str) {
+        self.hook("session-start", serde_json::json!({"hook_event_name": "SessionStart", "source": source}), None);
     }
 
     /// The fire rows of this session (`way_fired` and `way_redisclosed`)
@@ -405,4 +410,19 @@ fn session_reset_clears_the_counts_and_the_epoch() {
     let fires = s.fires("bo/w");
     assert_eq!(field(&fires, "refire_n"), vec![1, 2, 3, 1], "{fires:#?}");
     assert_eq!(field(&fires, "compaction_epoch"), vec![0, 0, 1, 0]);
+}
+
+/// The `session_start` row names its source and the compaction epoch it
+/// opens, so a later reading can tell a resume, which keeps the epoch,
+/// from a compaction, which moves it.
+#[test]
+fn session_start_logs_its_source_and_the_epoch() {
+    let s = Sim::new("start-row", None);
+    for source in ["startup", "compact", "resume", "compact"] {
+        s.start(source);
+    }
+    let starts = s.events(|v| v["event"] == "session_start");
+    let sources: Vec<&str> = starts.iter().map(|v| v["source"].as_str().unwrap_or("")).collect();
+    assert_eq!(sources, vec!["startup", "compact", "resume", "compact"], "{starts:#?}");
+    assert_eq!(field(&starts, "compaction_epoch"), vec![0, 1, 1, 2]);
 }

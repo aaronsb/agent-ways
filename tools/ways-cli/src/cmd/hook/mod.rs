@@ -177,26 +177,33 @@ pub fn run(event: HookEvent) -> Result<()> {
             emit("SubagentStart", &subagent::inject(&session, &project_dir)?);
             Ok(())
         }
-        Request::SessionStart { session, compact } => {
+        Request::SessionStart { session, source } => {
             if let Some(sid) = &session {
                 crate::cmd::reset::clear_session(sid);
                 // The clear ends this window's fire clocks; the fire counts
-                // stay, and the epoch marks the new window.
+                // stay, and a compaction moves the epoch to mark the new
+                // window. A resume clears the clocks the same way, keeps the
+                // counts, and leaves the epoch where it was.
                 //
                 // References:
                 // - ADR-711: the fire count survives compaction, and fire rows
                 //   carry the compaction epoch.
-                if compact {
+                if source == "compact" {
                     session::refire_count::bump_compaction_epoch(sid);
                 }
             }
             session::prune_subagent_switches(SUBAGENT_SWITCH_MAX_AGE);
             session::refire_count::prune(SUBAGENT_SWITCH_MAX_AGE);
             session::judge_jobs::prune(SUBAGENT_SWITCH_MAX_AGE);
+            // The row names its source and the epoch it opens, so a reading
+            // of the log can tell a resume from a compaction.
+            let epoch = session.as_deref().map(session::refire_count::compaction_epoch).unwrap_or(0).to_string();
             session::log_event(&[
                 ("event", "session_start"),
                 ("project", common.project.as_deref().unwrap_or("unknown")),
                 ("session", session.as_deref().unwrap_or("unknown")),
+                ("source", if source.is_empty() { "unknown" } else { &source }),
+                ("compaction_epoch", &epoch),
             ]);
             Ok(())
         }
