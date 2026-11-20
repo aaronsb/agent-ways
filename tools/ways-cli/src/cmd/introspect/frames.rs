@@ -24,7 +24,9 @@ use super::model::{ActiveWay, Clock, Frame, Outcome, Suppression, WayEvent};
 ///
 /// Refire thresholds reflect each way's *current* curve — this is a replay,
 /// so a curve edited since the recorded session shows today's value. That's the
-/// best we can do without snapshotting frontmatter into events.jsonl.
+/// best we can do without snapshotting frontmatter into events.jsonl. Each
+/// (agent, way) row's threshold comes from that agent's own window and its
+/// fire count now (ADR-711 §6), so a row shows when its next refire opens.
 ///
 /// A frame holds the injected ways, and with `matched` the ways the relevance
 /// judge blocked too (#742). Each way carries its [`Outcome`].
@@ -65,19 +67,37 @@ pub(crate) fn reconstruct_all(
         })
         .collect();
     let fallback_refire_k = context_window_k * 25 / 100;
-    let mut refire_cache: HashMap<String, u64> = HashMap::new();
+    // A subagent's window is its own model's; main's is the session's.
+    let windows: HashMap<String, u64> = timelines
+        .keys()
+        .map(|agent| {
+            let own = (agent != MAIN)
+                .then(|| session::transcript_in(&claude, None, project_name, session_id, agent))
+                .flatten()
+                .and_then(|t| crate::cmd::context::get_context_for_transcript(&t.to_string_lossy()).ok())
+                .map(|c| c.tokens_total);
+            (agent.clone(), own.unwrap_or(context_window))
+        })
+        .collect();
+    let mut refire_cache = RefireCache::new();
     for ev in events {
-        if ev.way.is_empty() || refire_cache.contains_key(&ev.way) {
+        let key = (fired_by(ev), ev.way.clone());
+        if ev.way.is_empty() || refire_cache.contains_key(&key) {
             continue;
         }
-        let threshold_k = session::way_refire_threshold_k(&ev.way, project_name, context_window)
-            .unwrap_or(fallback_refire_k);
-        refire_cache.insert(ev.way.clone(), threshold_k);
+        let window = windows.get(&key.0).copied().unwrap_or(context_window);
+        let fires = session::refire_count::fire_count_for(session_id, &key.0, &key.1);
+        let threshold_k = session::way_refire_threshold(&key.1, project_name, window, fires).map_or(fallback_refire_k, |t| t / 1000);
+        refire_cache.insert(key, threshold_k);
     }
     build_frames_by_agent(events, &timelines, &refire_cache, fallback_refire_k)
 }
 
-/// [`build_frames_by_agent`] with main's token timeline only.
+/// Refire thresholds in thousands of tokens, keyed by (agent, way).
+pub(super) type RefireCache = HashMap<(String, String), u64>;
+
+/// [`build_frames_by_agent`] with main's token timeline only, and one
+/// threshold per way whichever agent fired it.
 #[cfg(test)]
 pub(super) fn build_frames(
     events: &[WayEvent],
@@ -86,7 +106,11 @@ pub(super) fn build_frames(
     fallback_refire_k: u64,
 ) -> Vec<Frame> {
     let timelines = HashMap::from([(MAIN.to_string(), token_timeline.to_vec())]);
-    build_frames_by_agent(events, &timelines, refire_cache, fallback_refire_k)
+    let per_agent: RefireCache = events
+        .iter()
+        .filter_map(|ev| refire_cache.get(&ev.way).map(|t| ((fired_by(ev), ev.way.clone()), *t)))
+        .collect();
+    build_frames_by_agent(events, &timelines, &per_agent, fallback_refire_k)
 }
 
 /// The frames of `events`, each agent's token position read from its own
@@ -94,11 +118,11 @@ pub(super) fn build_frames(
 pub(super) fn build_frames_by_agent(
     events: &[WayEvent],
     timelines: &HashMap<String, Vec<(String, u64)>>,
-    refire_cache: &HashMap<String, u64>,
+    refire_cache: &RefireCache,
     fallback_refire_k: u64,
 ) -> Vec<Frame> {
-    let refire_for = |way_id: &str| -> u64 {
-        refire_cache.get(way_id).copied().unwrap_or(fallback_refire_k)
+    let refire_for = |way_id: &str, agent: &str| -> u64 {
+        refire_cache.get(&(agent.to_string(), way_id.to_string())).copied().unwrap_or(fallback_refire_k)
     };
     let mut frames: Vec<Frame> = Vec::new();
     // A way is a row per agent that fired it (#814): each agent has its
@@ -207,6 +231,7 @@ pub(super) fn build_frames_by_agent(
                         }
                         let is_new = !active_ways.contains_key(&key);
                         let at = clock(&key.1);
+                        let refire_threshold_k = refire_for(&ev.way, &key.1);
                         active_ways.insert(key.clone(), ActiveWay {
                             id: ev.way.clone(),
                             trigger: ev.trigger.clone(),
@@ -216,7 +241,7 @@ pub(super) fn build_frames_by_agent(
                             check_fires: check_fires.get(&key).copied().unwrap_or(0),
                             is_new,
                             is_redisclosed: false,
-                            refire_threshold_k: refire_for(&ev.way),
+                            refire_threshold_k,
                             outcome: Outcome::Injected,
                             p_yes: String::new(),
                             ancestor: String::new(),
@@ -248,6 +273,7 @@ pub(super) fn build_frames_by_agent(
                     last_agent.insert(ev.way.clone(), key.1.clone());
                     let checks = check_fires.get(&key).copied().unwrap_or(0);
                     let at = clock(&key.1);
+                    let refire_threshold_k = refire_for(&ev.way, &key.1);
                     // A redisclosure means the way is active (re-injected). Update it
                     // if present; otherwise ADD it — after a compaction-window reset a
                     // still-active way first reappears via redisclosure, not a fresh
@@ -275,7 +301,7 @@ pub(super) fn build_frames_by_agent(
                             check_fires: checks,
                             is_new: false,
                             is_redisclosed: true,
-                            refire_threshold_k: refire_for(&ev.way),
+                            refire_threshold_k,
                             outcome: Outcome::Injected,
                             p_yes: String::new(),
                             ancestor: String::new(),
@@ -857,7 +883,7 @@ mod tests {
             (MAIN.to_string(), line(&[("2026-01-01T00:00:00Z", 10), ("2026-01-01T00:00:30Z", 20)])),
             ("a1".to_string(), line(&[("2026-01-01T00:00:10Z", 5), ("2026-01-01T00:00:20Z", 50)])),
         ]);
-        let refire = HashMap::from([("d/sub-a".to_string(), 40)]);
+        let refire = HashMap::from([(("a1".to_string(), "d/sub-a".to_string()), 40)]);
         let frames = build_frames_by_agent(&events, &timelines, &refire, 50);
         let last = frames.last().unwrap();
         let row = |id: &str| last.ways.iter().find(|w| w.id == id).unwrap();
@@ -908,7 +934,7 @@ mod tests {
             (MAIN.to_string(), line(&[("2026-01-01T00:00:00Z", 64)])),
             ("a1".to_string(), line(&[("2026-01-01T00:00:10Z", 10)])),
         ]);
-        let refire = HashMap::from([("d/main".to_string(), 40), ("d/sub".to_string(), 40)]);
+        let refire = HashMap::from([((MAIN.to_string(), "d/main".to_string()), 40), (("a1".to_string(), "d/sub".to_string()), 40)]);
         let frames = build_frames_by_agent(&events, &timelines, &refire, 50);
         let last = frames.last().unwrap();
         // Both rows are 40K from re-disclosure in their own context: main's

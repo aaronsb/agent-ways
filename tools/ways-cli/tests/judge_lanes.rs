@@ -374,3 +374,28 @@ held_sample: 1
     assert!(r["judge"]["judge_ms"].is_u64(), "{r:#}");
     assert!(!s.fired("judged/drop", None), "blocked twice, never fired");
 }
+
+/// The fires `agent`'s thread has counted for `way` (ADR-711), 0 when none.
+fn refire_count(s: &Sim, agent: &str, way: &str) -> u64 {
+    let path = s.state.join("agent-ways/refire-counts").join(&s.session).join(format!("{agent}.json"));
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|v| v[way].as_u64())
+        .unwrap_or(0)
+}
+
+/// A candidate the judge blocks leaves the refire back-off as it was: no
+/// fire counted toward its n and no clock started. The way it passed is
+/// counted once.
+#[test]
+fn a_blocked_candidate_leaves_the_refire_count_and_clock_alone() {
+    let s = Sim::new("backoff", Some(ENFORCE));
+    let host = s.host(1);
+    s.bash(Some("asub1"));
+    assert_eq!(host.join().unwrap().len(), 1);
+    assert_eq!(refire_count(&s, "asub1", "judged/drop"), 0, "a blocked way is not counted");
+    assert_eq!(refire_count(&s, "asub1", "judged/keep"), 1);
+    let clock = PathBuf::from(format!("{}/{}/agents/asub1/way-engagement/judged__drop.json", sessions_root(), s.session));
+    assert!(!clock.exists(), "a blocked way starts no clock");
+}

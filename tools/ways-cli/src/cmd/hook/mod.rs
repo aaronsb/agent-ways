@@ -154,11 +154,17 @@ pub fn run(event: HookEvent) -> Result<()> {
             emit("SubagentStart", &subagent::inject(&session, &project_dir)?);
             Ok(())
         }
-        Request::SessionStart { session } => {
+        Request::SessionStart { session, compact } => {
             if let Some(sid) = &session {
                 crate::cmd::reset::clear_session(sid);
+                // The clear ends this window's fire clocks; the fire counts
+                // stay, and the epoch marks the new window (ADR-711).
+                if compact {
+                    session::refire_count::bump_compaction_epoch(sid);
+                }
             }
             session::prune_subagent_switches(SUBAGENT_SWITCH_MAX_AGE);
+            session::refire_count::prune(SUBAGENT_SWITCH_MAX_AGE);
             session::judge_jobs::prune(SUBAGENT_SWITCH_MAX_AGE);
             session::log_event(&[
                 ("event", "session_start"),
@@ -216,7 +222,7 @@ fn request_session(request: &Request) -> Option<&str> {
         | Request::Stop { session, .. }
         | Request::SubagentStart { session }
         | Request::TasksActive { session } => Some(session),
-        Request::SessionStart { session } => session.as_deref(),
+        Request::SessionStart { session, .. } => session.as_deref(),
         Request::Skip => None,
     }
 }

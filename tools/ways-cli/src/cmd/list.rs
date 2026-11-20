@@ -211,13 +211,20 @@ fn collect_fired_ways(
         } else {
             (state.epoch(), state.token_position() / 1000)
         };
+        // Each thread's thresholds come from its own window and its own fire
+        // counts (ADR-711 §6): a subagent may run another model than main.
+        let window = if agent == session::MAIN_AGENT {
+            context_window
+        } else {
+            agent_window(&state).unwrap_or(context_window)
+        };
         for (way_id, epoch_at_fire) in session::list_way_epochs(session_id, &agent) {
             let (trigger, depth, parent) = metrics
                 .get(&(agent.clone(), way_id.clone()))
                 .map(|m| (m.trigger.clone(), m.depth, m.parent.clone()))
                 .unwrap_or_else(|| ("unknown".to_string(), 0, "none".to_string()));
-            let refire_threshold_k = session::way_refire_threshold_k(&way_id, project_dir, context_window)
-                .unwrap_or(fallback_refire_k);
+            let refire_threshold_k = session::way_refire_threshold(&way_id, project_dir, window, state.refire_count(&way_id))
+                .map_or(fallback_refire_k, |t| t / 1000);
             ways.push(FiredWay {
                 token_pos: state.way_tokens(&way_id),
                 check_fires: state.check_fires(&way_id),
@@ -234,6 +241,13 @@ fn collect_fired_ways(
         }
     }
     ways
+}
+
+/// A subagent's context window, from its own transcript; `None` when it has
+/// none to read, and the caller falls back to main's.
+fn agent_window(state: &session::AgentState<'_>) -> Option<u64> {
+    let transcript = state.transcript()?;
+    context::get_context_for_transcript(&transcript.to_string_lossy()).ok().map(|c| c.tokens_total)
 }
 
 /// How many distinct ways fired, whichever agents fired them. The rows are

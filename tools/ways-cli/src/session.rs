@@ -15,15 +15,16 @@ use std::path::{Path, PathBuf};
 mod engagement;
 pub mod judge_jobs;
 mod log;
+pub mod refire_count;
 
 // Re-export the ADR-123 firing-dynamics engagement cluster so the rest
 // of the crate keeps addressing these items as `session::REFIRE_FLOOR`,
 // `session::way_fire_outcome`, etc. — no call-site churn from the
 // structural split (issue #52).
 pub use engagement::{
-    discarded_fire_outcome, discarded_fire_recorded, first_suppression_in_window, lock_discarded_fire, lock_engagement, record_discarded_fire,
-    record_way_fire, way_fire_outcome,
-    way_refire_threshold_k, EngagementLock, FireDecision, FireOutcome, REFIRE_FLOOR,
+    backed_off, discarded_fire_outcome, discarded_fire_recorded, first_suppression_in_window, lock_discarded_fire, lock_engagement,
+    record_discarded_fire, record_way_fire, way_fire_outcome, way_refire_threshold, EngagementLock, FireDecision, FireOutcome,
+    REFIRE_FLOOR,
 };
 pub use log::{log_decision, log_event, log_event_with};
 use log::append_jsonl_line;
@@ -256,16 +257,19 @@ impl AgentState<'_> {
         self.value(&["check-fires", way_id, ".value"])
     }
 
+    /// The agent's own transcript, found as its hooks find it.
+    pub fn transcript(&self) -> Option<PathBuf> {
+        transcript_in(&ways_core::paths::claude_dir(), None, &crate::util::project_dir(), self.session_id, self.agent)
+    }
+
     /// The agent's token position now, from its own transcript; 0 when none.
     pub fn token_position(&self) -> u64 {
-        transcript_in(
-            &ways_core::paths::claude_dir(),
-            None,
-            &crate::util::project_dir(),
-            self.session_id,
-            self.agent,
-        )
-        .and_then(|t| token_position_of(&t)).unwrap_or(0)
+        self.transcript().and_then(|t| token_position_of(&t)).unwrap_or(0)
+    }
+
+    /// The fires recorded for `way_id` in this agent's thread (ADR-711).
+    pub fn refire_count(&self, way_id: &str) -> u64 {
+        refire_count::fire_count_for(self.session_id, self.agent, way_id)
     }
 }
 

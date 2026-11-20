@@ -68,7 +68,9 @@ pub enum Request {
     Queued { session: String, transcript: String },
     Stop { session: String, transcript: String },
     SubagentStart { session: String },
-    SessionStart { session: Option<String> },
+    /// `compact` when the payload's `source` is `compact`: the start of a
+    /// new context window in the same session (ADR-711 §5).
+    SessionStart { session: Option<String>, compact: bool },
     TasksActive { session: String },
     Tool { session: String, tool: String, hook_event: String },
     Skip,
@@ -117,7 +119,7 @@ impl HookInput {
         let Some(session) = self.text("/session_id").filter(|s| crate::session::is_plain_session_id(s)) else {
             // Clearing with no session id logs the start and clears nothing.
             return match event {
-                HookEvent::SessionStart => Request::SessionStart { session: None },
+                HookEvent::SessionStart => Request::SessionStart { session: None, compact: false },
                 _ => Request::Skip,
             };
         };
@@ -166,7 +168,7 @@ impl HookInput {
                 _ => Request::Skip,
             },
             HookEvent::SubagentStart => Request::SubagentStart { session },
-            HookEvent::SessionStart => Request::SessionStart { session: Some(session) },
+            HookEvent::SessionStart => Request::SessionStart { session: Some(session), compact: self.text("/source").as_deref() == Some("compact") },
             HookEvent::TasksActive => Request::TasksActive { session },
             // The event passes through as named: each way's `tool_event:` list
             // decides whether it fires there (ADR-704).
@@ -317,8 +319,12 @@ mod tests {
     fn session_events() {
         assert_eq!(req(E::SubagentStart, r#"{"session_id":"s"}"#), Request::SubagentStart { session: "s".into() });
         assert_eq!(req(E::TasksActive, r#"{"session_id":"s"}"#), Request::TasksActive { session: "s".into() });
-        assert_eq!(req(E::SessionStart, r#"{"session_id":"s"}"#), Request::SessionStart { session: Some("s".into()) });
-        assert_eq!(req(E::SessionStart, r#"{"cwd":"/p"}"#), Request::SessionStart { session: None });
+        assert_eq!(req(E::SessionStart, r#"{"session_id":"s"}"#), Request::SessionStart { session: Some("s".into()), compact: false });
+        for (source, compact) in [("compact", true), ("startup", false), ("resume", false), ("clear", false)] {
+            let raw = format!(r#"{{"session_id":"s","source":"{source}"}}"#);
+            assert_eq!(req(E::SessionStart, &raw), Request::SessionStart { session: Some("s".into()), compact }, "{source}");
+        }
+        assert_eq!(req(E::SessionStart, r#"{"cwd":"/p"}"#), Request::SessionStart { session: None, compact: false });
     }
 
     #[test]
@@ -357,6 +363,6 @@ mod tests {
             let escaping = r#"{"session_id":"../victim","prompt":"x","transcript_path":"/t"}"#;
             assert_eq!(req(e, escaping), Request::Skip, "{e:?}");
         }
-        assert_eq!(req(E::SessionStart, r#"{"session_id":"../x"}"#), Request::SessionStart { session: None });
+        assert_eq!(req(E::SessionStart, r#"{"session_id":"../x"}"#), Request::SessionStart { session: None, compact: false });
     }
 }
