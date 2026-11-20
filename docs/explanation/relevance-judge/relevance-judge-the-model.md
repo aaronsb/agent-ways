@@ -7,6 +7,7 @@ related:
   - "[[ADR-195]]"
   - "[[ADR-197]]"
   - "[[ADR-502]]"
+  - "[[ADR-712]]"
   - "[[01.021.E]]"
   - "[[01.022.E]]"
 aliases: []
@@ -76,9 +77,9 @@ Step by step:
 
 1. On each prompt, Claude Code runs `check-prompt.sh`, which calls `ways hook prompt`. The hook reads the reply that the Stop hook recorded for the previous turn and passes it to the matcher with the prompt.
 2. The matcher's keyword and embedding lanes produce hits, and they are ordered: explicit triggers first, parents before children, siblings by score.
-3. Hits that the refire curve would hold back are dropped before the gate. They would not be shown, so they are not sent.
+3. Hits that the refire curve would hold back are set aside before the gate, because they would not be shown either way. A share of them, `gate.held_sample` (0.1 by default), goes to a detached judge for the record. That judge runs in a process of its own that nothing waits on, and it logs each sampled way as `held_refire` with its verdict. Nothing from the sample is shown.
 4. The gate reads `agent.yaml`. With no engine named and no key file for any provider, or with `gate.mode: off`, it stops here and logs nothing.
-5. Every candidate is judged, `pattern_strict` ways included (ADR-712). They are taken in matcher order, the profile's `max_candidates` to a request, and every request runs within the one deadline.
+5. Every candidate is judged, whatever trigger fired it, `pattern_strict` ways included. They are taken in matcher order, the profile's `max_candidates` to a request, and every request runs within the one deadline.
 6. The hook sends each request to the ways agent over a Unix socket, starting the agent if none is listening. A request carries the conversation turns and, for each candidate, the way's path and description.
 7. The agent re-reads its settings, confirms the key passed its last check, waits for a free provider slot, and renders the prompt.
 8. The agent makes one call to the provider, Anthropic or OpenRouter, that forces a `record_judgements` tool answer. Models that accept sampling run at temperature 0; Haiku 5.5 rejects sampling parameters, so it runs at its default and the forced tool call constrains the output. Each candidate gets `relevant` and `confidence`, which become P(yes): the confidence of a yes, or one minus the confidence of a no.
@@ -87,12 +88,23 @@ Step by step:
 
 ## What it judges
 
-The judge covers two lanes, both of which carry text the operator typed:
+The judge covers every lane that injects ways, in the main agent and in every subagent:
 
 - the prompt lane (`UserPromptSubmit`);
-- the queued-message lane: messages typed while Claude is working, which never reach `UserPromptSubmit` and are scanned at the next `PostToolUse` ([ADR-161](../../architecture/ways/ADR-161-queued-mid-turn-operator-messages-as-an-aggregated-scan-surface.md)). This lane has no assistant reply to send.
+- the queued-message lane: messages typed while Claude is working, which never reach `UserPromptSubmit` and are scanned at the next `PostToolUse`. This lane has no assistant reply to send;
+- the command (Bash), file and tool lanes, which run before a tool call, and the post-tool lane, which runs after one;
+- the state lane, whose ways fire on session conditions such as the context filling up;
+- the task lane, which matches a subagent's brief when the subagent is dispatched. The ways that pass are stashed for the subagent to receive when it starts.
 
-The judge does not cover the command, file, task, state and subagent lanes, the session-start core, or any way marked `pattern_strict`. A Monitor notification that arrives as a prompt is skipped before matching, so it is never judged.
+Every trigger kind goes to the judge: semantic hits, `pattern:` keywords, `pattern_strict` ways, `commands:`, `files:` and `tool_name:` regexes, state triggers, postchecks and checks. A declared trigger proposes a way, and the judge can keep it out.
+
+On a tool lane the judge reads the agent's last human turn, or a subagent's brief, followed by the call in hand. A Bash call reads as `About to run: <description>` and the command, cut to 400 characters, and a file edit reads as `About to edit: <path>`. The agent's own narration between those turns is not sent. The task lane judges against the subagent's brief alone, and the state lane against the prompt in hand, else the last human turn. A state lane call with no context at all, such as a session start before any turn, has nothing to judge against and passes as if the gate were off.
+
+When the judge blocks every way a dispatch matched, the task lane still leaves the dispatch an empty stash. A starting subagent takes the oldest stash, so a dispatch that left none would hand its subagent the next dispatch's ways.
+
+The judge does not cover the session-start core or a `ways_read` lookup, which the agent asks for itself. A Monitor notification that arrives as a prompt is skipped before matching, so it is never judged.
+
+On the tool lanes, shadow mode shows every candidate at once and hands them to the detached judge, so no tool call waits on a verdict that cannot change what is shown. The prompt lane judges shadow mode inside its own hook.
 
 `ways scan prompt` runs the same path as the hook. With a key configured, each run calls the judge, may be billed, and logs its events under the session it names.
 
@@ -112,12 +124,11 @@ The judge does not cover the command, file, task, state and subagent lanes, the 
 
 Each engine profile carries its own threshold, because each model's confidence sits on its own scale. The shipped profiles use 0.3 for Claude Haiku 4.5, the operating point ADR-195 measured. Haiku 5.5 was measured against it and not adopted: it ranks worse and passes more irrelevant candidates at 0.3, and it stays selectable. A verdict with P(yes) at or above the threshold passes.
 
-A judge call takes about 0.6 s plus 0.1 s per candidate, so a request carries at most `max_candidates` ways (8 in the shipped profiles), in matcher order ([ADR-197](../../architecture/ways/ADR-197-cap-the-candidates-the-relevance-gate-judges-per-request.md)). Overflow passes unjudged, with two exceptions that follow the ways tree:
+A judge call takes about 0.6 s plus 0.1 s per candidate, so a request carries at most `max_candidates` ways (8 in the shipped profiles), in matcher order. A lane with more candidates sends further requests, one after another, and every request runs within the lane's one deadline. A request that cannot start before the deadline fails open for its own candidates, and the requests before it keep their verdicts.
 
-- an unjudged way whose ancestor the judge blocked is blocked with it, logged as `way_judged` with `reason: ancestor` and the ancestor's id;
-- a way that fired only on its parent's boost is withheld when the parent is not shown, and when the judge blocked that parent the block is logged for the child the same way.
+On the prompt lane a way that fired only on its parent's boost is withheld when the parent is not shown. When the judge blocked that parent, the block is logged for the child as `way_judged` with `reason: ancestor` and the parent's id.
 
-The agent's deadline is the profile's `timeout_ms` (2,000 ms shipped), and the agent's wait for a provider slot counts against it. The hook reads the reply for `timeout_ms` plus 1.5 s, so the agent's own fallback arrives first. Starting an agent comes before that read and can take up to 1.5 s more, so a prompt that has to start the agent can wait about `timeout_ms` plus 3 s. The prompt-lane hooks (`check-prompt.sh`, `check-queued.sh`) run under a 30 s bound, so a profile's `timeout_ms` is capped at 25,000 ms: past the bound Claude Code kills the hook and drops its output, the fail-open record included.
+The agent's deadline is the profile's `timeout_ms` (2,000 ms shipped), and the agent's wait for a provider slot counts against it. The hook reads the reply for `timeout_ms` plus 1.5 s, so the agent's own fallback arrives first. Starting an agent comes before that read and can take up to 1.5 s more, so a prompt that has to start the agent can wait about `timeout_ms` plus 3 s. The prompt-lane hooks (`check-prompt.sh`, `check-queued.sh`) run under a 30 s bound, so a profile's `timeout_ms` is capped at 25,000 ms: past the bound Claude Code kills the hook and drops its output, the fail-open record included. A tool lane runs under a 10 s bound and gives the judge at most 6 s, the agent's start included, so a profile's `timeout_ms` is cut to fit there and past it the lane fails open.
 
 ## How it fails
 
@@ -180,3 +191,9 @@ The `config` reason is the one case where a broken setting turns the gate off ra
 | Prompt text, P(yes) | `tools/ways-agent-core/src/judge.rs` |
 | Agent: key check, slots, deadline | `tools/ways-agent/src/server.rs` |
 | Provider calls | `tools/ways-agent/src/net.rs` |
+
+## References
+
+- [ADR-712](../../architecture/engine/ADR-712-every-injection-candidate-in-every-lane-and-agent-thread-is-judged-after-the-refire-check-and-before-the-fire.md): every candidate in every lane and agent thread is judged, after the refire check and before the fire; what a tool lane sends; shadow mode and the held sample off the hot path; the hook's one deadline.
+- [ADR-161](../../architecture/ways/ADR-161-queued-mid-turn-operator-messages-as-an-aggregated-scan-surface.md): the queued-message lane.
+- [ADR-197](../../architecture/ways/ADR-197-cap-the-candidates-the-relevance-gate-judges-per-request.md): the cap on candidates per request.
