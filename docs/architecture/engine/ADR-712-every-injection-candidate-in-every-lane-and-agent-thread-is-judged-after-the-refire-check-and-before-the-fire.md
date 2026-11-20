@@ -32,6 +32,11 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "Request + call"
+    via: "the operator's pick in a multiple-choice question in the head session, 2026-11-20; options: request + call (the last human turn or subagent brief plus the call, no assistant narration; agent-written label, marked Recommended), request + narration + call (as built), or a recent-turns window"
+    covers: [context]
 status: proposed
 date: 2026-11-20
 deciders:
