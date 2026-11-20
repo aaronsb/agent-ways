@@ -313,10 +313,11 @@ fn scan_prompt_surface(
         candidates.iter().map(|w| (w.id.as_str(), w)).collect();
     // The read-only refire check splits the hits: the open ones go to the
     // judge now, a sample of the held ones to the detached judge after.
+    let tick = session::get_token_position(session_id);
     let (open, held): (Vec<_>, Vec<_>) = hits
         .iter()
         .filter_map(|hit| by_id.get(hit.id.as_str()).map(|way| (hit, *way)))
-        .partition(|(_, way)| gate::refire_open(&way.id, session_id));
+        .partition(|(_, way)| gate::refire_open(&way.id, session_id, tick));
     let pending: Vec<gate::Pending<'_>> = open
         .iter()
         .map(|(hit, way)| gate::Pending { id: &way.id, description: &way.description, trigger: judged::matched_trigger(&hit.payload.0, way.pattern_strict) })

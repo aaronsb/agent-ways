@@ -104,8 +104,44 @@ pub(super) fn configured() -> Config {
                 Mode::Enforce => Config::Enforce { held_sample },
             }
         }
-        Ok(GateReading::Off | GateReading::NoKey) => Config::Off,
-        Err(_) => Config::Enforce { held_sample: 0.0 },
+        // A broken agent.yaml fails closed: the gate is off. The prompt lane
+        // logs why; a tool lane, on every tool call, stays as quiet as it
+        // was before it judged.
+        Ok(GateReading::Off | GateReading::NoKey) | Err(_) => Config::Off,
+    }
+}
+
+/// One scan's view of the gate, read once: the setting, and the token
+/// position the refire check reads, read only while the gate is on. With the
+/// gate off a lane does what it did before it judged: no refire check, no
+/// context read, no decision record.
+pub(super) struct Scan {
+    pub config: Config,
+    session_id: String,
+    tick: Option<u64>,
+}
+
+impl Scan {
+    pub(super) fn begin(session_id: &str) -> Scan {
+        Scan::with(configured(), session_id)
+    }
+
+    fn with(config: Config, session_id: &str) -> Scan {
+        let tick = (config != Config::Off).then(|| crate::session::get_token_position(session_id));
+        Scan { config, session_id: session_id.to_string(), tick }
+    }
+
+    pub(super) fn is_on(&self) -> bool {
+        self.tick.is_some()
+    }
+
+    /// The read-only refire check, at the scan's one token position. With
+    /// the gate off every candidate reads open, and show decides alone.
+    pub(super) fn open(&self, id: &str) -> bool {
+        match self.tick {
+            Some(t) => gate::refire_open(id, &self.session_id, t),
+            None => true,
+        }
     }
 }
 
@@ -130,24 +166,39 @@ impl Judged {
 /// The judge step on `candidates`, judged against `turns` within `wait`. A
 /// call with no context at all (a state lane at session start) has nothing
 /// to judge relevance against, and passes as with the gate off.
-pub(super) fn judge(lane: &Lane, candidates: &[Candidate], turns: Vec<Turn>, wait: Duration) -> Judged {
+pub(super) fn judge(lane: &Lane, scan: &Scan, candidates: &[Candidate], turns: Vec<Turn>, wait: Duration) -> Judged {
     let sink = &crate::session::log_event;
     let log = lane.log(sink);
-    let config = if turns.is_empty() || candidates.is_empty() { Config::Off } else { configured() };
+    let config = if turns.is_empty() || candidates.is_empty() { Config::Off } else { scan.config };
     judge_with(config, candidates, turns, |pending, turns| gate::apply(pending, turns, wait, &log))
 }
 
 /// The three stages on one lane's `candidates`, in the lane's order: the
 /// judge on the ones the refire check left open, then `show` for each the
 /// judge did not block, which records the fire and says what became of it.
-/// The decision record and the detached judge follow ([`finish`]).
-pub(super) fn run(lane: &Lane, candidates: &[Candidate], turns: Vec<Turn>, wait: Duration, mut show: impl FnMut(&Candidate) -> &'static str) {
-    let judged = judge(lane, candidates, turns, wait);
+/// The decision record and the detached judge follow ([`finish`]). With the
+/// gate off, `show` runs for every candidate and nothing else happens;
+/// `turns` is read only when the gate is on.
+pub(super) fn run(
+    lane: &Lane,
+    scan: &Scan,
+    candidates: &[Candidate],
+    turns: impl FnOnce() -> Vec<Turn>,
+    wait: Duration,
+    mut show: impl FnMut(&Candidate) -> &'static str,
+) {
+    let Some(tick) = scan.tick else {
+        for c in candidates {
+            show(c);
+        }
+        return;
+    };
+    let judged = judge(lane, scan, candidates, turns(), wait);
     let shown: Vec<Shown<'_>> = candidates
         .iter()
         .map(|c| Shown { candidate: c, result: decision::block_result(&judged.gate.blocked, &c.key).unwrap_or_else(|| show(c)) })
         .collect();
-    finish(lane, judged, &shown);
+    finish(lane, judged, &shown, tick);
 }
 
 /// The post-tool lane: the ways whose postchecks asked to fire on a
@@ -157,7 +208,9 @@ pub(crate) fn post_tool(session_id: &str, project_dir: &str, hook_event: &str, t
     if ids.is_empty() {
         return;
     }
-    let ways = super::candidates::collect_candidates(project_dir);
+    let scan = Scan::begin(session_id);
+    // Descriptions are only read for the judge.
+    let ways = if scan.is_on() { super::candidates::collect_candidates(project_dir) } else { Vec::new() };
     let description = |id: &str| ways.iter().find(|w| w.id == id).map(|w| w.description.clone()).unwrap_or_default();
     let candidates: Vec<Candidate> = ids
         .iter()
@@ -167,7 +220,7 @@ pub(crate) fn post_tool(session_id: &str, project_dir: &str, hook_event: &str, t
             trigger: Trigger::Declared,
             channel: "postcheck".into(),
             p: None,
-            open: gate::refire_open(id, session_id),
+            open: scan.open(id),
         })
         .collect();
     let lane = Lane {
@@ -177,8 +230,8 @@ pub(crate) fn post_tool(session_id: &str, project_dir: &str, hook_event: &str, t
         project_dir: project_dir.to_string(),
         session_id: session_id.to_string(),
     };
-    let turns = tool_turns(session_id, &format!("Used the {tool} tool."));
-    run(&lane, &candidates, turns, gate::TOOL_WAIT, |c| show(&c.key));
+    let call = format!("Used the {tool} tool.");
+    run(&lane, &scan, &candidates, || tool_turns(session_id, &call), gate::TOOL_WAIT, |c| show(&c.key));
 }
 
 /// [`judge`] with the setting and the gate given, so a test can stand in a
@@ -234,12 +287,12 @@ pub(super) struct Shown<'a> {
 
 /// Ends the judge step once the lane has shown its ways: writes the scan's
 /// decision record when it had a candidate, then [`detach`]es.
-fn finish(lane: &Lane, judged: Judged, shown: &[Shown<'_>]) {
+fn finish(lane: &Lane, judged: Judged, shown: &[Shown<'_>], tick: u64) {
     if shown.is_empty() {
         return;
     }
     let epoch = crate::session::get_epoch(&lane.session_id);
-    let mut record = decision::Record::begin(&lane.context(epoch));
+    let mut record = decision::Record::begin_at(&lane.context(epoch), tick);
     for (i, s) in shown.iter().enumerate() {
         record.hit(&s.candidate.key, i + 1, &s.candidate.channel, s.candidate.p, s.result, Some(&judged.gate));
     }
@@ -340,24 +393,15 @@ pub(crate) fn run_detached(text: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The calling agent's recent context with the tool call in hand as its
-/// last turn, the agent's own: the turn the judge reads first, and the only
-/// one under a profile of `turns: 1`. The agent's prose since the last human
-/// turn leads it, so the call reads in the agent's own words.
+/// What a tool lane's judge reads: the calling agent's request, its last
+/// human turn or its brief, then the call in hand as the agent's turn, the
+/// one a profile of `turns: 1` reads. No narration (ADR-712).
 pub(super) fn tool_turns(session_id: &str, call: &str) -> Vec<Turn> {
     with_call(super::lookbehind::recent_turns(session_id), call)
 }
 
 fn with_call(mut turns: Vec<Turn>, call: &str) -> Vec<Turn> {
-    let prose = match turns.last() {
-        Some(t) if t.role == Role::Assistant => turns.pop().map(|t| t.text),
-        _ => None,
-    };
-    let text = match prose {
-        Some(p) => format!("{p}\n{call}"),
-        None => call.to_string(),
-    };
-    turns.push(Turn { role: Role::Assistant, text });
+    turns.push(Turn { role: Role::Assistant, text: call.to_string() });
     turns
 }
 
@@ -414,15 +458,15 @@ pub(super) fn check_of(key: &str) -> Option<&str> {
 }
 
 /// A declared trigger's candidate: a way fired by `files:`, `tool_name:` or a
-/// state trigger, marked by the read-only refire check.
-pub(super) fn declared(way: &super::WayCandidate, channel: &str, session_id: &str) -> Candidate {
+/// state trigger, marked by the scan's read-only refire check.
+pub(super) fn declared(way: &super::WayCandidate, channel: &str, scan: &Scan) -> Candidate {
     Candidate {
         key: way.id.clone(),
         description: way.description.clone(),
         trigger: Trigger::Declared,
         channel: channel.to_string(),
         p: None,
-        open: gate::refire_open(&way.id, session_id),
+        open: scan.open(&way.id),
     }
 }
 
@@ -497,15 +541,11 @@ mod tests {
     }
 
     #[test]
-    fn the_call_is_the_agents_last_turn_after_its_prose() {
+    fn the_call_follows_the_request_and_no_narration_is_sent() {
         let call = bash_call("git commit -m x", Some("Commit the fix"));
         assert_eq!(call, "About to run: Commit the fix\n$ git commit -m x");
-        let turns = with_call(
-            vec![Turn { role: Role::User, text: "brief".into() }, Turn { role: Role::Assistant, text: "I will commit.".into() }],
-            &call,
-        );
-        assert_eq!(turns.len(), 2);
-        assert_eq!(turns[1], Turn { role: Role::Assistant, text: format!("I will commit.\n{call}") });
+        let turns = with_call(vec![Turn { role: Role::User, text: "brief".into() }], &call);
+        assert_eq!(turns, [Turn { role: Role::User, text: "brief".into() }, Turn { role: Role::Assistant, text: call.clone() }]);
         let alone = with_call(vec![], &call);
         assert_eq!(alone, [Turn { role: Role::Assistant, text: call }]);
         let long = bash_call(&"x".repeat(1000), None);

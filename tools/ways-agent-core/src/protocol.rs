@@ -49,6 +49,11 @@ pub struct JudgeRequest {
     /// hook built before ADR-708 leaves agent.yaml's engine.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine: Option<String>,
+    /// The turns this request needs read whatever the profile's `turns`: a
+    /// tool lane sends the agent's request and the call in hand, and both are
+    /// the judge's input (ADR-712). `None` reads the profile's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_turns: Option<usize>,
 }
 
 /// Which agent answered: its version, the version of this shared crate it was
@@ -267,6 +272,7 @@ mod tests {
                 turns: vec![Turn { role: Role::User, text: "hi".into() }],
                 candidates: vec![Candidate { id: "a/b".into(), text: "a › b\nd".into() }],
                 engine: Some("anthropic".into()),
+                min_turns: Some(2),
             }),
         };
         let line = serde_json::to_string(&req).unwrap();

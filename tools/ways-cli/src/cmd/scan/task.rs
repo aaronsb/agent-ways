@@ -135,8 +135,8 @@ pub fn task(
     order_hits(&mut hits);
 
     // The judge reads the dispatch against the brief the subagent will get,
-    // after the dispatching agent's own prose. The subagent starts with no
-    // fires, so nothing is held by refire; a blocked way is not stashed.
+    // the subagent's request. The subagent starts with no fires, so nothing
+    // is held by refire; a blocked way is not stashed.
     let by_id: std::collections::HashMap<&str, &super::WayCandidate> = candidates.iter().map(|w| (w.id.as_str(), w)).collect();
     let judge_candidates: Vec<judged::Candidate> = hits
         .iter()
@@ -159,12 +159,9 @@ pub fn task(
         project_dir: project_dir.clone(),
         session_id: session_id.to_string(),
     };
-    let mut turns: Vec<_> = super::lookbehind::recent_turns(session_id)
-        .into_iter()
-        .filter(|t| t.role == ways_agent_core::judge::Role::Assistant)
-        .collect();
-    turns.push(ways_agent_core::judge::Turn { role: ways_agent_core::judge::Role::User, text: query.to_string() });
-    let judged = judged::judge(&lane, &judge_candidates, turns, gate::TOOL_WAIT);
+    let scan = judged::Scan::begin(session_id);
+    let turns = vec![ways_agent_core::judge::Turn { role: ways_agent_core::judge::Role::User, text: query.to_string() }];
+    let judged = judged::judge(&lane, &scan, &judge_candidates, turns, gate::TOOL_WAIT);
     let kept: Vec<Hit<String>> = hits
         .iter()
         .filter(|h| !judged.blocked(&h.id))
@@ -181,7 +178,7 @@ pub fn task(
             shown.push(judged::Shown { candidate: c, result: r });
         }
     }
-    if !judge_candidates.is_empty() {
+    if scan.is_on() && !judge_candidates.is_empty() {
         record.judge(&judged.gate);
     }
     let scan_id = record.scan_id().to_string();

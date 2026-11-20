@@ -616,14 +616,13 @@ fn stamp_disclosure(id: &str, session_id: &str, tick: u64) -> u64 {
 }
 
 /// Whether [`way_scored`] would show this way now, budget aside: not disabled,
-/// in scope, and allowed by its refire curve. Read-only. The relevance gate
-/// asks it so it judges only ways that would reach the agent (ADR-196 §1).
-pub(crate) fn would_fire(id: &str, session_id: &str) -> bool {
+/// in scope, and allowed by its refire curve at the token position `tick`,
+/// which a scan reads once for all its candidates. Read-only. The relevance
+/// gate asks it so it judges only ways that would reach the agent (ADR-196
+/// §1).
+pub(crate) fn would_fire_at(id: &str, session_id: &str, tick: u64) -> bool {
     match fireable(id, session_id) {
-        Ok(Some(f)) => {
-            let tick = session::get_token_position(session_id);
-            session::way_fire_outcome(id, session_id, &f.curve, tick).outcome.is_allowed()
-        }
+        Ok(Some(f)) => session::way_fire_outcome(id, session_id, &f.curve, tick).outcome.is_allowed(),
         _ => false,
     }
 }

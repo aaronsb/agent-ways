@@ -102,6 +102,11 @@ impl Record {
         Record::resume(ctx, &scan_id())
     }
 
+    /// [`Record::begin`] at a token position the scan already read.
+    pub(super) fn begin_at(ctx: &Context<'_>, token_position: u64) -> Self {
+        Record::new(ctx, &scan_id(), &agent_fmt::when::now_utc_iso(), &crate::session::current_agent(), token_position)
+    }
+
     /// A record under an existing `scan_id`: the detached judge's, for the
     /// scan that handed it the candidates. It is marked `detached` and never
     /// becomes the agent's last scan.

@@ -81,9 +81,10 @@ pub fn tool(
     let mut budget = ContextBudget::hook();
     let hits = tool_hits(&candidates, tool, hook_event, &scope, &project_dir);
     log_discarded(&off, tool, hook_event, &discard::LaneLog { lane: "tool", scope: &scope, session: session_id, project: &project_dir });
+    let scan = judged::Scan::begin(session_id);
     let by_id: std::collections::HashMap<&str, &WayCandidate> = candidates.iter().map(|w| (w.id.as_str(), w)).collect();
     let judge_candidates: Vec<judged::Candidate> =
-        hits.iter().filter_map(|h| by_id.get(h.id.as_str())).map(|w| judged::declared(w, "tool", session_id)).collect();
+        hits.iter().filter_map(|h| by_id.get(h.id.as_str())).map(|w| judged::declared(w, "tool", &scan)).collect();
     let lane = judged::Lane {
         surface: Surface::Tool,
         hook_event: hook_event.to_string(),
@@ -92,7 +93,7 @@ pub fn tool(
         session_id: session_id.to_string(),
     };
     let call = if hook_event == "PreToolUse" { format!("About to use the {tool} tool.") } else { format!("Used the {tool} tool.") };
-    judged::run(&lane, &judge_candidates, judged::tool_turns(session_id, &call), gate::TOOL_WAIT, |c| {
+    judged::run(&lane, &scan, &judge_candidates, || judged::tool_turns(session_id, &call), gate::TOOL_WAIT, |c| {
         let Some(hit) = hits.iter().find(|h| h.id == c.key) else { return "error" };
         let shown = capture_show_way(&hit.id, session_id, "tool", None, Some(hit.payload.as_str()), None, Some(&mut budget));
         context.push_str(&shown.body);

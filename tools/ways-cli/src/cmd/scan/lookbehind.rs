@@ -45,10 +45,12 @@ pub(crate) fn intent(session_id: &str) -> Option<String> {
     )
 }
 
-/// The calling agent's recent context for the relevance judge: its last
-/// human turn (a subagent's brief, for a subagent that had no other), then
-/// its prose since. Read from that agent's own transcript, as [`intent`]
-/// reads it; empty when there is none.
+/// The calling agent's request for the relevance judge: its last human
+/// turn, a subagent's brief for a subagent that had no other. The agent's
+/// narration is left out: ADR-707 measured it letting off-topic ways pass,
+/// and the operator chose the request and the call (ADR-712). Read from
+/// that agent's own transcript, as [`intent`] reads it; empty when there is
+/// none.
 pub(crate) fn recent_turns(session_id: &str) -> Vec<ways_agent_core::judge::Turn> {
     recent_turns_in(
         &ways_core::paths::claude_dir(),
@@ -72,14 +74,7 @@ fn recent_turns_in(
     else {
         return Vec::new();
     };
-    let mut turns = Vec::new();
-    if let Some(human) = last_human_text(&tail) {
-        turns.push(Turn { role: Role::User, text: human });
-    }
-    if let Some(prose) = assistant_prose_since_last_human(&tail) {
-        turns.push(Turn { role: Role::Assistant, text: prose });
-    }
-    turns
+    last_human_text(&tail).map(|text| Turn { role: Role::User, text }).into_iter().collect()
 }
 
 /// The text of the last genuine human message in `transcript`, or `None`.
@@ -273,8 +268,8 @@ mod tests {
         std::fs::remove_dir_all(&root).ok();
     }
 
-    /// The judge reads the calling agent's own last human turn and prose: a
-    /// subagent's brief and reasoning, never the lead's.
+    /// The judge reads the calling agent's own last human turn, a subagent's
+    /// brief, never the lead's, and none of the agent's narration.
     #[test]
     fn recent_turns_are_the_calling_agents_own() {
         let root = std::env::temp_dir().join(format!("ways-lookbehind-turns-{}", std::process::id()));
@@ -287,8 +282,8 @@ mod tests {
         std::fs::write(dir.join("sess/subagents/agent-atask.jsonl"), turn("the brief", "subagent reasoning")).unwrap();
         let texts = |agent: &str| recent_turns_in(&claude, None, "/srv/p", "sess", agent).into_iter().map(|t| (t.role, t.text)).collect::<Vec<_>>();
         use ways_agent_core::judge::Role;
-        assert_eq!(texts("atask"), [(Role::User, "the brief".to_string()), (Role::Assistant, "subagent reasoning".to_string())]);
-        assert_eq!(texts(crate::session::MAIN_AGENT), [(Role::User, "ship it".to_string()), (Role::Assistant, "lead narration".to_string())]);
+        assert_eq!(texts("atask"), [(Role::User, "the brief".to_string())]);
+        assert_eq!(texts(crate::session::MAIN_AGENT), [(Role::User, "ship it".to_string())]);
         assert!(texts("agone").is_empty());
         std::fs::remove_dir_all(&root).ok();
     }

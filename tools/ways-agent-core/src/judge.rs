@@ -101,6 +101,12 @@ pub fn way_text(way_id: &str, description: &str) -> String {
     format!("{route}\n{}", description.trim())
 }
 
+/// How many turns a request is rendered with: the profile's `turns`, or
+/// more when the request needs more read ([`crate::protocol::JudgeRequest::min_turns`]).
+pub fn window(profile_turns: usize, min_turns: Option<usize>) -> usize {
+    profile_turns.max(min_turns.unwrap_or(0))
+}
+
 /// The last `n` turns as `User: …` / `Assistant: …` lines, whitespace
 /// collapsed, each cut to its last `max_chars` characters.
 pub fn render_turns(turns: &[Turn], n: usize, max_chars: usize) -> String {
@@ -271,6 +277,10 @@ mod tests {
         assert_eq!(render_turns(&turns, 2, 100), "Assistant: a b c\nUser: abcdefghij");
         assert_eq!(render_turns(&turns, 1, 5), "User: …ghij");
         assert_eq!(render_turns(&turns, 9, 100).lines().count(), 3);
+        // A request that needs two turns read gets them under a profile of one.
+        assert_eq!(window(1, Some(2)), 2);
+        assert_eq!(window(3, Some(2)), 3);
+        assert_eq!(window(1, None), 1);
     }
 
     #[test]
