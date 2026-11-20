@@ -426,3 +426,35 @@ fn session_start_logs_its_source_and_the_epoch() {
     assert_eq!(sources, vec!["startup", "compact", "resume", "compact"], "{starts:#?}");
     assert_eq!(field(&starts, "compaction_epoch"), vec![0, 1, 1, 2]);
 }
+
+/// What each SessionStart source does to the back-off state. A resume or
+/// a startup that reuses the session id clears the clocks, keeps every n
+/// and leaves the epoch where it was, so the next match fires once and is
+/// logged in the epoch it resumed in. `/clear` arrives with a new session
+/// id, which has no counts and epoch 0.
+#[test]
+fn resume_and_startup_keep_the_counts_and_clear_starts_fresh() {
+    let mut s = Sim::new("sources", None);
+    assert!(s.commit_at(None, 1_000));
+    assert!(s.commit_at(None, 11_001));
+    s.compact();
+    assert!(s.commit_at(None, 2_000), "the compaction grant");
+    for source in ["resume", "startup"] {
+        let before = s.count("main", "bo/w");
+        s.start(source);
+        assert_eq!(s.count("main", "bo/w"), before, "{source} keeps n");
+        assert!(s.commit_at(None, 2_100), "{source} clears the clock, so the next match fires");
+        assert_eq!(s.count("main", "bo/w"), before + 1);
+    }
+    let fires = s.fires("bo/w");
+    assert_eq!(field(&fires, "refire_n"), vec![1, 2, 3, 4, 5], "{fires:#?}");
+    assert_eq!(field(&fires, "compaction_epoch"), vec![0, 0, 1, 1, 1], "neither source moves the epoch");
+
+    let old = std::mem::replace(&mut s.session, format!("backoff-sources-cleared-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(format!("{}/{old}", sessions_root()));
+    s.start("clear");
+    assert_eq!(s.count("main", "bo/w"), 0, "a new session id has no counts");
+    assert!(s.commit_at(None, 100));
+    let fires = s.fires("bo/w");
+    assert_eq!((field(&fires, "refire_n"), field(&fires, "compaction_epoch")), (vec![1], vec![0]));
+}
