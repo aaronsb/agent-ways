@@ -524,7 +524,10 @@ pub(crate) fn run_detached(text: &str) -> anyhow::Result<()> {
 
 /// What a tool lane's judge reads: the calling agent's request, its last
 /// human turn or its brief, then the call in hand as the agent's turn, the
-/// one a profile of `turns: 1` reads. No narration (ADR-712).
+/// one a profile of `turns: 1` reads. The agent's narration is not sent.
+///
+/// References:
+/// - ADR-712 §4: a tool lane's judge input is the request and the call.
 pub(super) fn tool_turns(session_id: &str, call: &str) -> Vec<Turn> {
     with_call(super::lookbehind::recent_turns(session_id), call)
 }
@@ -599,10 +602,13 @@ pub(super) fn declared(way: &super::WayCandidate, channel: &str, scan: &Scan) ->
     }
 }
 
-/// The Bash call as the judge reads it: ADR-188's `About to run:` line with
-/// the tool's description, then the command, cut to [`MAX_COMMAND_CHARS`] so
-/// a long heredoc does not push the description and the prose out of the
+/// The Bash call as the judge reads it: an `About to run:` line with the
+/// tool's description, then the command, cut to [`MAX_COMMAND_CHARS`] so a
+/// long heredoc does not push the description and the prose out of the
 /// profile's `max_turn_chars`.
+///
+/// References:
+/// - ADR-188: the `About to run:` line that describes a Bash call.
 pub(super) fn bash_call(command: &str, description: Option<&str>) -> String {
     let command = match command.char_indices().nth(MAX_COMMAND_CHARS) {
         Some((at, _)) => format!("{}…", &command[..at]),

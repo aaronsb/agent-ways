@@ -51,7 +51,10 @@ pub struct JudgeRequest {
     pub engine: Option<String>,
     /// The turns this request needs read whatever the profile's `turns`: a
     /// tool lane sends the agent's request and the call in hand, and both are
-    /// the judge's input (ADR-712). `None` reads the profile's.
+    /// the judge's input. `None` reads the profile's.
+    ///
+    /// References:
+    /// - ADR-712 §4: a tool lane's judge input is the request and the call.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_turns: Option<usize>,
 }

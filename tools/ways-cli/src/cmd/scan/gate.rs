@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-//! The relevance gate (ADR-196), on every lane that injects ways.
+//! The relevance gate, on every lane that injects ways.
 //!
 //! After the matcher and the read-only refire check, and before a fire is
 //! recorded, the ways a lane would show are sent to the judge with the
@@ -12,19 +12,24 @@
 //! reach the judge is one switch, [`JUDGED`]: every kind (semantic,
 //! keyword, `pattern_strict` and declared: `commands:`, `files:`,
 //! `tool_name:`, state triggers, postchecks), or only the semantic and
-//! keyword ones ADR-196 first gated. Every candidate sent is judged: a
-//! request carries at most the profile's `max_candidates`, in the matcher's
-//! order, and the rest go in further requests within the same deadline. A
-//! way under a blocked ancestor that the judge did not see is blocked with
-//! it and logged as a `block` with `reason: ancestor`, the ancestor's id and
-//! its verdict's fields. Every verdict and fallback is logged to
-//! `events.jsonl` with its lane and agent, and any failure fails open: the
-//! matcher's decision stands. The wait is bounded by the calling hook's
-//! budget ([`TOOL_WAIT`], [`PROMPT_WAIT`]), so a hook is never killed while
-//! it waits. Each provider call is logged once more as `judge_call`, with
-//! its tokens and cost, so spend is counted per call, not per way (#741).
-//! The gate also hands every verdict and its own status back to the scan,
-//! which writes them to the scan's decision record (ADR-701 §2).
+//! keyword ones the gate's first release judged. Every candidate sent is
+//! judged: a request carries at most the profile's `max_candidates`, in the
+//! matcher's order, and the rest go in further requests within the same
+//! deadline. A way under a blocked ancestor that the judge did not see is
+//! blocked with it and logged as a `block` with `reason: ancestor`, the
+//! ancestor's id and its verdict's fields. Every verdict and fallback is
+//! logged to `events.jsonl` with its lane and agent, and any failure fails
+//! open: the matcher's decision stands. The wait is bounded by the calling
+//! hook's budget ([`TOOL_WAIT`], [`PROMPT_WAIT`]), so a hook is never
+//! killed while it waits. Each provider call is logged once more as
+//! `judge_call`, with its tokens and cost, so spend is counted per call,
+//! not per way (#741). The gate also hands every verdict and its own status
+//! back to the scan, which writes them to the scan's decision record.
+//!
+//! References:
+//! - ADR-196: the yes/no relevance gate, judged by a hosted model.
+//! - ADR-712: every candidate in every lane and agent thread is judged.
+//! - ADR-701 §2: every lane writes a decision record.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -92,8 +97,11 @@ pub(super) enum Trigger {
 pub(super) enum Judges {
     /// Every candidate, whatever fired it (the operator, 2026-11-20).
     Every,
-    /// Semantic and keyword candidates only, as ADR-196 §1 and its first
-    /// addendum had it: declared triggers and `pattern_strict` pass unjudged.
+    /// Semantic and keyword candidates only, as the gate's first release
+    /// had it: declared triggers and `pattern_strict` pass unjudged.
+    ///
+    /// References:
+    /// - ADR-196 §1 and its first addendum: what the first release judged.
     Matched,
 }
 
@@ -543,8 +551,11 @@ fn judge_batch(
         turns: turns.to_vec(),
         candidates: batch.iter().map(|p| Candidate { id: p.id.to_string(), text: way_text(p.id, p.description) }).collect(),
         engine: None,
-        // A tool lane's request and call are both its input (ADR-712); the
-        // prompt lane reads the profile's window.
+        // A tool lane's request and call are both its input; the prompt
+        // lane reads the profile's window.
+        //
+        // References:
+        // - ADR-712 §4: a tool lane's judge input is the request and the call.
         min_turns: (log.lane != "prompt").then_some(turns.len()),
     };
     let begun = Instant::now();

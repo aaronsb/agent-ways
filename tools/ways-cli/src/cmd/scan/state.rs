@@ -74,7 +74,10 @@ pub fn state(
     // The triggered ways go through the judge before any fire is recorded
     // (scan/judged.rs), judged against the agent's request: the prompt in
     // hand, else its last human turn. Refire cadence follows each way's own
-    // `refire:` curve (ADR-126), read by the refire check and again by show.
+    // `refire:` curve, read by the refire check and again by show.
+    //
+    // References:
+    // - ADR-126: each way's own refire curve.
     let scan = judged::Scan::begin(session_id);
     let judge_candidates: Vec<judged::Candidate> =
         candidates.iter().filter(|w| state.triggers(w)).map(|w| judged::declared(w, "state", &scan)).collect();
