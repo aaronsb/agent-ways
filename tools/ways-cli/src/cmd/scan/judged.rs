@@ -709,7 +709,9 @@ mod tests {
     }
 
     /// A child that exits without reading its stdin ends the write with an
-    /// error, never a signal or a hang, even for a job larger than a pipe.
+    /// error, never a signal or a hang, even for a job larger than a pipe:
+    /// the failure is logged and the slot is given back.
+    #[cfg(unix)]
     #[test]
     fn a_child_that_does_not_read_its_job_does_not_hold_the_hook() {
         let dir = slot_dir("noread");
@@ -718,8 +720,11 @@ mod tests {
         let slot = claim_slot(&dir, 1).unwrap();
         let big = "x".repeat(1 << 20);
         let begun = std::time::Instant::now();
-        let _ = spawn_at(std::path::Path::new("/bin/true"), &big, &slot, &sink);
+        let r = spawn_at(std::path::Path::new("/bin/true"), &big, &slot, &sink);
         assert!(begun.elapsed() < Duration::from_secs(3), "{:?}", begun.elapsed());
+        assert!(r.is_err(), "the write fails");
+        assert!(lines.borrow().iter().any(|l| l.contains("event=judge_detach_failed") && l.contains("reason=write")), "{:?}", lines.borrow());
+        assert!(!slot.exists(), "the slot is given back");
         std::fs::remove_dir_all(&dir).ok();
     }
 
