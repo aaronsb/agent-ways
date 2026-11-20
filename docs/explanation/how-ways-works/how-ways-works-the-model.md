@@ -101,10 +101,7 @@ flowchart TB
     style Match stroke:#2d7d9a,fill:#2d7d9a1a,color:#cbd5e1
 ```
 
-Every lane runs the gate, in the main agent and in every subagent: prompt,
-command, file, tool, state, post-tool and dispatch. Every candidate goes to it,
-declared triggers and `pattern_strict` ways included, after the refire check
-and before the fire is recorded (ADR-712).
+Every lane runs the gate, in the main agent and in every subagent: prompt, command, file, tool, state, post-tool and dispatch. Every candidate goes to it, declared triggers and `pattern_strict` ways included, after the refire check and before the fire is recorded.
 
 **First-fire — precision matching.** A way fires the first time its trigger
 matches: a keyword in the prompt (floor-gated), a semantic match whose
@@ -230,3 +227,7 @@ at what score, against what threshold — is frozen at the moment it happened.
   78-way session and shows the behaviours in its actual numbers.
 - **Pulling the record yourself:** [[01.019.E]] covers `ways session ways`, `ways tune stats`,
   and `ways session replay --json` — what each shows and what the data means.
+
+## References
+
+- ADR-712: every candidate in every lane and agent thread is judged, after the refire check and before the fire is recorded.
