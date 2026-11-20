@@ -386,3 +386,23 @@ fn ways_list_shows_each_threads_threshold() {
     assert_eq!(threshold(None), 40, "main: n = 3 in a 200k window waits 4H");
     assert_eq!(threshold(Some("alist")), 50, "the subagent: n = 1 in its own 1M window");
 }
+
+/// `ways session reset --confirm` is the explicit "ways stopped firing"
+/// action, so it clears the thread counts and the compaction epoch with
+/// the clocks: the next match fires as the session's first, at n = 1.
+#[test]
+fn session_reset_clears_the_counts_and_the_epoch() {
+    let s = Sim::new("reset", None);
+    assert!(s.commit_at(None, 1_000));
+    assert!(s.commit_at(None, 11_001));
+    s.compact();
+    assert!(s.commit_at(None, 2_000));
+    assert_eq!(s.count("main", "bo/w"), 3);
+    let out = s.ways().args(["session", "reset", "--session", &s.session, "--confirm"]).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(!s.state.join("agent-ways/refire-counts").join(&s.session).exists(), "the session's counts are gone");
+    assert!(s.commit_at(None, 2_500), "the clock is cleared too");
+    let fires = s.fires("bo/w");
+    assert_eq!(field(&fires, "refire_n"), vec![1, 2, 3, 1], "{fires:#?}");
+    assert_eq!(field(&fires, "compaction_epoch"), vec![0, 0, 1, 0]);
+}

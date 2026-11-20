@@ -19,7 +19,8 @@
 //! fires, so state from before this record, and a file a crash cut short,
 //! start each way at n = 0. `compactions` is the session's compaction epoch:
 //! it grows by one at each compaction, which clears every thread at once.
-//! Whole session directories are pruned by age at SessionStart.
+//! Whole session directories are pruned by age at SessionStart, and
+//! `ways session reset --confirm` removes one session's directory.
 //!
 //! References:
 //! - ADR-711 §1: a fire count per agent thread, kept outside the session
@@ -95,6 +96,15 @@ impl Store {
         next
     }
 
+    /// Remove the session's counts and its epoch. Returns the number of
+    /// files removed, `None` when the session has none.
+    fn clear(&self, session_id: &str) -> Option<usize> {
+        let dir = self.session(session_id).filter(|d| d.is_dir())?;
+        let files = std::fs::read_dir(&dir).into_iter().flatten().flatten().filter(|f| f.path().is_file()).count();
+        let _ = std::fs::remove_dir_all(&dir);
+        Some(files)
+    }
+
     fn prune(&self, max_age: std::time::Duration) {
         let Ok(sessions) = std::fs::read_dir(&self.root) else { return };
         for session in sessions.flatten() {
@@ -139,6 +149,14 @@ pub fn compaction_epoch(session_id: &str) -> u64 {
 /// Record one compaction of the session and return the new epoch.
 pub fn bump_compaction_epoch(session_id: &str) -> u64 {
     Store::live().bump_epoch(session_id)
+}
+
+/// Remove the session's thread counts and its compaction epoch, so every
+/// thread starts again at n = 0. `ways session reset --confirm` runs it;
+/// SessionStart and compaction keep the counts. Returns the files
+/// removed, `None` when the session has none.
+pub fn clear(session_id: &str) -> Option<usize> {
+    Store::live().clear(session_id)
 }
 
 /// Remove the counts of sessions untouched for longer than `max_age`. A
@@ -214,6 +232,22 @@ mod tests {
         assert_eq!(s.bump_epoch("s1"), 2);
         assert_eq!(s.epoch("s1"), 2);
         assert_eq!(s.epoch("s2"), 0);
+    }
+
+    #[test]
+    fn clear_removes_one_sessions_counts_and_epoch() {
+        let scratch = Scratch::new("clear");
+        let s = &scratch.0;
+        s.bump("s1", "main", "d/w");
+        s.bump("s1", "asub", "d/w");
+        s.bump_epoch("s1");
+        s.bump("s2", "main", "d/w");
+        // Three state files and the locks beside them.
+        assert!(s.clear("s1").is_some_and(|n| n >= 3));
+        assert_eq!((s.count("s1", "main", "d/w"), s.count("s1", "asub", "d/w"), s.epoch("s1")), (0, 0, 0));
+        assert_eq!(s.count("s2", "main", "d/w"), 1, "another session keeps its counts");
+        assert_eq!(s.clear("s1"), None);
+        assert_eq!(s.clear("../s2"), None);
     }
 
     #[test]
