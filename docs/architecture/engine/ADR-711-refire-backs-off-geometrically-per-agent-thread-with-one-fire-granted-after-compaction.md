@@ -44,6 +44,11 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "that diagram looks reasonable"
+    via: "the operator in #ways-decay-control, 2026-11-20, after seeing the ADR-711 figure of four refire schedules with the chosen rule (count kept, one fire granted per window) highlighted; confirmed in the head session the same day: \"the diagram was helpful\". The question on what once means was asked alongside and is unanswered"
+    covers: [compaction-grant]
 status: proposed
 date: 2026-11-20
 deciders:
