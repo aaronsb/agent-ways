@@ -315,6 +315,7 @@ pub(crate) fn report(sources: Vec<PathBuf>, window: Window, project: Option<&str
                 }
                 acc.scan(&s);
             }
+            Grouped::Detached(s) => acc.scan(&s),
             Grouped::Pull(j) => acc.pull(&j),
         },
     );
