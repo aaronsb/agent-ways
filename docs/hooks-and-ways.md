@@ -379,7 +379,7 @@ Firing activity is logged to `$XDG_STATE_HOME/agent-ways/events.jsonl`, one JSON
 | `way_suppressed` | a way or check matched but was held back (`refire` or `context_cap`) |
 | `way_nearmiss` | a way's single-vector probability landed within `near_miss_margin` below `τ_s` and it did not fire |
 | `way_keyword_gated` | a `pattern:` hit was vetoed by the keyword floor `τ_k` |
-| `way_judged`, `judge_call`, `gate_capped`, `gate_fallback` | the relevance gate's verdicts, provider calls, cap overflows and fallbacks |
+| `way_judged`, `judge_call`, `gate_fallback` | the relevance gate's verdicts, provider calls and fallbacks, each naming its `lane` and `agent_id` |
 | `injection_suppressed` | a lane was skipped because ways are switched off for subagents |
 | `check_fired` | a `*.check.md` check was shown |
 

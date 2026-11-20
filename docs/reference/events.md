@@ -164,7 +164,7 @@ The gate could not judge, so nothing was blocked. The gate fails open.
 
 ### `gate_capped`
 
-More ways matched than the profile's `max_candidates` (default 8). The rest went unjudged and fire unless an ancestor was blocked.
+Written by releases before ADR-712, when more ways matched than the profile's `max_candidates` (default 8) and the rest went unjudged. The gate now judges every candidate in further requests, so a current log has none.
 
 | Field | Meaning |
 |-------|---------|

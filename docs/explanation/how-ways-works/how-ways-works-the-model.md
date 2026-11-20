@@ -101,8 +101,10 @@ flowchart TB
     style Match stroke:#2d7d9a,fill:#2d7d9a1a,color:#cbd5e1
 ```
 
-The gate runs only on the prompt lane and skips `pattern_strict` ways. Command,
-file and state matches go straight from match to fire.
+Every lane runs the gate, in the main agent and in every subagent: prompt,
+command, file, tool, state, post-tool and dispatch. Every candidate goes to it,
+declared triggers and `pattern_strict` ways included, after the refire check
+and before the fire is recorded (ADR-712).
 
 **First-fire — precision matching.** A way fires the first time its trigger
 matches: a keyword in the prompt (floor-gated), a semantic match whose

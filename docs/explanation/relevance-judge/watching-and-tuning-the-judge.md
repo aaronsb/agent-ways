@@ -34,7 +34,7 @@ The judge writes four event types to the event log, beside the matcher's own. Ea
 | `way_judged` | judged candidate | `p_yes` against `threshold`, and `verdict`: `pass`, `block` or `would_block`. `judge_ms` shows how close calls run to the deadline. |
 | `judge_call` | provider call | Tokens and `cost_usd`, which the spend views sum. `reason` when the call ended in a fallback. |
 | `gate_fallback` | failed request | `reason`: why the matcher decided alone. |
-| `gate_capped` | request over the cap | `ways`: the candidates that passed unjudged. Frequent caps suggest raising `max_candidates`. |
+| `gate_capped` | request over the cap, before ADR-712 | `ways`: the candidates that passed unjudged. A current gate judges the rest in further requests and writes none. |
 
 A `way_judged` block with `reason: ancestor` names the blocked `ancestor` and carries its verdict. The judge never saw that way, so the line has no `judge_ms`, `gate_ms` or `candidates`, and a count of the judge's own verdicts skips it.
 

@@ -42,10 +42,7 @@ sequenceDiagram
     H->>M: prompt, plus Claude's last reply for the embed lane
     M-->>H: hits in matcher order
     H->>G: hits the refire curve lets through
-    Note over G: read agent.yaml, drop pattern_strict ways, keep the first max_candidates
-    opt more candidates than max_candidates
-        G->>L: gate_capped, the rest pass unjudged
-    end
+    Note over G: read agent.yaml, split the candidates into requests of max_candidates
     alt agent.yaml fails to load, or the agent cannot be started or trusted
         G->>L: gate_fallback with a reason
         G-->>H: nothing blocked
@@ -81,8 +78,8 @@ Step by step:
 2. The matcher's keyword and embedding lanes produce hits, and they are ordered: explicit triggers first, parents before children, siblings by score.
 3. Hits that the refire curve would hold back are dropped before the gate. They would not be shown, so they are not sent.
 4. The gate reads `agent.yaml`. With no engine named and no key file for any provider, or with `gate.mode: off`, it stops here and logs nothing.
-5. Ways marked `pattern_strict` are not judged. The rest are taken in matcher order up to the profile's `max_candidates`. Any overflow is logged as `gate_capped` and passes unjudged.
-6. The hook sends one request to the ways agent over a Unix socket, starting the agent if none is listening. The request carries the conversation turns and, for each candidate, the way's path and description.
+5. Every candidate is judged, `pattern_strict` ways included (ADR-712). They are taken in matcher order, the profile's `max_candidates` to a request, and every request runs within the one deadline.
+6. The hook sends each request to the ways agent over a Unix socket, starting the agent if none is listening. A request carries the conversation turns and, for each candidate, the way's path and description.
 7. The agent re-reads its settings, confirms the key passed its last check, waits for a free provider slot, and renders the prompt.
 8. The agent makes one call to the provider, Anthropic or OpenRouter, that forces a `record_judgements` tool answer. Models that accept sampling run at temperature 0; Haiku 5.5 rejects sampling parameters, so it runs at its default and the forced tool call constrains the output. Each candidate gets `relevant` and `confidence`, which become P(yes): the confidence of a yes, or one minus the confidence of a no.
 9. The hook logs the call as `judge_call` and each verdict as `way_judged`. In enforce mode, a way with P(yes) below the threshold is blocked.
