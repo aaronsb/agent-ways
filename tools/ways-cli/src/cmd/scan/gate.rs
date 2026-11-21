@@ -470,9 +470,12 @@ fn handoff(store: &Store, settings: &Settings, req: JudgeRequest, begun: Instant
     let waited = store.wait_answer(&id, written + CLAIM_WINDOW, begun + budget + READ_GRACE);
     store.finish(&id);
     let latency_ms = written.elapsed().as_millis() as u64;
-    // The spend is the account's usage: no price (ADR-708 §10). A call that
-    // reported tokens is an account call. One with no usage, or a usage block
-    // of zeros (an aborted call sends one), is of unknown cost.
+    // The spend is the account's usage, with no price. A call that reported
+    // tokens is an account call. One with no usage, or a usage block of zeros
+    // (an aborted call sends one), is of unknown cost.
+    //
+    // References:
+    // - ADR-708 §10: account calls carry tokens and no price.
     let call = |usage: Option<Usage>| JudgeCall {
         engine: settings.engine.clone(),
         provider: p.provider,
