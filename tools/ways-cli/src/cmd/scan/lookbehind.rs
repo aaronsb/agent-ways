@@ -15,9 +15,12 @@
 //! command-only) when there is no transcript, no usable prose, or anything
 //! unparseable — lookbehind can only *add* intent context, never break matching.
 //!
-//! **Cheap on the hot path.** Bash is the highest-volume scan surface, so this
-//! reads only the transcript's tail (the current turn lives at the end) rather
-//! than loading a multi-megabyte file on every command.
+//! **Cheap on the hot path.** Bash is the highest-volume scan surface. The
+//! intent prose comes from the transcript's tail, since the current turn lives
+//! at the end. The judge's request can sit far back, so its lookup reads back
+//! a page at a time and parses only the lines that can hold one; a 10 MB
+//! subagent transcript costs some 9 ms warm, and a miss over the whole cap
+//! some 55 ms.
 
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
@@ -29,6 +32,17 @@ use serde_json::Value;
 /// command is vanishingly rare; if the human boundary falls outside the tail we
 /// simply return the prose we found (still useful) or None.
 const TAIL_BYTES: u64 = 64 * 1024;
+
+/// The page the request lookup reads back from the transcript's end.
+const REQUEST_PAGE_BYTES: u64 = 256 * 1024;
+
+/// How far back the request lookup reads before it gives up. A transcript
+/// larger than this still yields a subagent's brief, its first line, through
+/// [`first_line_request`].
+const REQUEST_SCAN_CAP: u64 = 32 * 1024 * 1024;
+
+/// The longest first line [`first_line_request`] reads.
+const FIRST_LINE_CAP: u64 = 1024 * 1024;
 
 /// The calling agent's prose since its last human turn, or `None`.
 ///
@@ -49,7 +63,8 @@ pub(crate) fn intent(session_id: &str) -> Option<String> {
 /// turn, a subagent's brief for a subagent that had no other. The agent's
 /// narration is left out, because it let off-topic ways pass when measured,
 /// and the operator chose the request and the call. Read from that agent's
-/// own transcript, as [`intent`] reads it; empty when there is none.
+/// own transcript, as [`intent`] reads it, but back past its tail
+/// ([`last_human_in_file`]); empty when there is none.
 ///
 /// References:
 /// - ADR-707: the measurement of narration as judge input.
@@ -72,29 +87,88 @@ fn recent_turns_in(
     agent: &str,
 ) -> Vec<ways_agent_core::judge::Turn> {
     use ways_agent_core::judge::{Role, Turn};
-    let Some(tail) = crate::session::transcript_in(claude, hook_transcript, project_dir, session_id, agent)
-        .and_then(|t| read_tail(&t, TAIL_BYTES))
-    else {
-        return Vec::new();
-    };
-    last_human_text(&tail).map(|text| Turn { role: Role::User, text }).into_iter().collect()
+    crate::session::transcript_in(claude, hook_transcript, project_dir, session_id, agent)
+        .and_then(|t| last_human_in_file(&t, REQUEST_PAGE_BYTES, REQUEST_SCAN_CAP).or_else(|| first_line_request(&t, FIRST_LINE_CAP)))
+        .map(|text| Turn { role: Role::User, text })
+        .into_iter()
+        .collect()
 }
 
-/// The text of the last genuine human message in `transcript`, or `None`.
-fn last_human_text(transcript: &str) -> Option<String> {
-    transcript.lines().rev().find_map(|line| {
-        let v = serde_json::from_str::<Value>(line.trim()).ok()?;
-        let msg = v.get("message")?;
-        let content = msg.get("content");
-        if msg.get("role").and_then(|r| r.as_str()) != Some("user") || !is_human_message(content) {
-            return None;
+/// The request one transcript line holds, if it holds one ([`request_text`]).
+fn human_text(line: &[u8]) -> Option<String> {
+    request_text(&serde_json::from_slice::<Value>(line.trim_ascii()).ok()?)
+}
+
+/// The request in the transcript's first line, read up to `cap` bytes. A
+/// subagent's brief is that line, so this finds it when the backward read
+/// stops at its cap first.
+fn first_line_request(path: &Path, cap: u64) -> Option<String> {
+    let mut buf = Vec::new();
+    std::fs::File::open(path).ok()?.take(cap).read_to_end(&mut buf).ok()?;
+    let nl = buf.iter().position(|b| *b == b'\n')?;
+    human_text(&buf[..nl])
+}
+
+/// The newest request in the transcript at `path` ([`request_text`]), read
+/// back from its end a page at a time, at most `cap` bytes.
+///
+/// The request is often far from the end. A subagent's brief is the first
+/// line of its transcript, and Claude Code writes some 300 KB of setup
+/// records (instructions, the skill listing, prompt snapshots) after it
+/// before the agent's first tool call. A fixed tail never reaches it. Only
+/// a line that names the `user` role is parsed, so the pages of assistant
+/// turns and most attachments cost a byte search.
+fn last_human_in_file(path: &Path, page: u64, cap: u64) -> Option<String> {
+    let mut f = std::fs::File::open(path).ok()?;
+    let len = f.metadata().ok()?.len();
+    let floor = len.saturating_sub(cap);
+    let mut end = len;
+    // The start of a line that runs on into the page already read.
+    let mut carry: Vec<u8> = Vec::new();
+    while end > floor {
+        // At the cap, read one byte more: a newline there means the line
+        // that starts at `floor` is whole.
+        let start = match end.saturating_sub(page).max(floor) {
+            s if s == floor && floor > 0 => s - 1,
+            s => s,
+        };
+        let mut buf = vec![0u8; (end - start) as usize];
+        f.seek(SeekFrom::Start(start)).ok()?;
+        f.read_exact(&mut buf).ok()?;
+        buf.extend_from_slice(&carry);
+        // Before the file's start, the page's first line may begin on an
+        // earlier page: keep it for the next read.
+        let body = if start == 0 {
+            carry = Vec::new();
+            &buf[..]
+        } else {
+            match buf.iter().position(|b| *b == b'\n') {
+                Some(nl) => {
+                    carry = buf[..nl].to_vec();
+                    &buf[nl + 1..]
+                }
+                None => {
+                    carry = buf;
+                    end = start;
+                    continue;
+                }
+            }
+        };
+        let found = body
+            .split(|b| *b == b'\n')
+            .rev()
+            .filter(|line| memmem(line, b"\"user\"") || memmem(line, b"\"queued_command\""))
+            .find_map(human_text);
+        if found.is_some() {
+            return found;
         }
-        let mut text = Vec::new();
-        collect_text_blocks(content, &mut text);
-        text.reverse();
-        let joined = text.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
-        (!joined.is_empty()).then_some(joined)
-    })
+        end = start;
+    }
+    None
+}
+
+fn memmem(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.windows(needle.len()).any(|w| w == needle)
 }
 
 /// [`intent`] against an explicit config dir, hook transcript and agent. Read
@@ -124,8 +198,8 @@ fn read_tail(path: &Path, max_bytes: u64) -> Option<String> {
     Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-/// Walk the transcript backward collecting assistant text blocks until a genuine
-/// human message ends the walk. `tool_result` records (also role `user`) are
+/// Walk the transcript backward collecting assistant text blocks until a
+/// request ([`request_text`]) ends the walk. `tool_result` records (also role `user`) are
 /// part of the current turn's tool loop and are skipped, so multi-tool turns
 /// still resolve to the human turn that started them. Returns the collected
 /// prose in chronological order, or `None` if there is none.
@@ -139,13 +213,11 @@ pub(crate) fn assistant_prose_since_last_human(transcript: &str) -> Option<Strin
         let Ok(v) = serde_json::from_str::<Value>(line) else {
             continue; // a partial first line (tail split) or non-JSON — skip
         };
-        let msg = v.get("message");
-        let role = msg.and_then(|m| m.get("role")).and_then(|r| r.as_str());
-        let content = msg.and_then(|m| m.get("content"));
-        match role {
+        let content = v.get("message").and_then(|m| m.get("content"));
+        match turn_role(&v) {
             Some("assistant") => collect_text_blocks(content, &mut prose),
-            Some("user") if is_human_message(content) => break,
-            _ => {} // tool_result user records, summaries, meta — skip
+            _ if request_text(&v).is_some() => break,
+            _ => {} // tool_result user records, notifications, meta — skip
         }
     }
     if prose.is_empty() {
@@ -179,6 +251,88 @@ fn collect_text_blocks(content: Option<&Value>, out: &mut Vec<String>) {
         }
         _ => {}
     }
+}
+
+/// The text of a record that asks the agent for something: what a person
+/// typed, a subagent's brief, or a lead's message to a running subagent.
+///
+/// Claude Code marks most user records with an `origin`, and the origins
+/// [`asks`] names count, as a user record or as a `queued_command`
+/// attachment. A lead's mid-run message comes either way and is marked
+/// `isMeta`; a prompt typed while a turn runs is an attachment with
+/// `humanTurn`. Every other origin (`task-notification`, `plugin`, `peer`)
+/// is something arriving, not a request.
+/// A record with no origin, such as a subagent's brief, counts unless it is
+/// one of Claude Code's own: `isMeta` reminders and skill bodies, a
+/// compaction summary, or a fixed-form echo ([`HARNESS_PREFIXES`]).
+fn request_text(v: &Value) -> Option<String> {
+    if v.get("type").and_then(Value::as_str) == Some("attachment") {
+        let a = v.get("attachment")?;
+        let asked = a.get("type").and_then(Value::as_str) == Some("queued_command")
+            && (a.get("humanTurn").and_then(Value::as_bool) == Some(true)
+                || a.get("origin").and_then(|o| o.get("kind")).and_then(Value::as_str).is_some_and(asks));
+        return asked.then(|| joined_text(a.get("prompt"))).flatten();
+    }
+    if turn_role(v) != Some("user") {
+        return None;
+    }
+    let content = v.get("message").and_then(|m| m.get("content"));
+    if !is_human_message(content) {
+        return None;
+    }
+    match v.get("origin").and_then(|o| o.get("kind")).and_then(Value::as_str) {
+        Some(kind) if asks(kind) => {}
+        Some(_) => return None,
+        None => {
+            let flag = |k: &str| v.get(k).and_then(Value::as_bool) == Some(true);
+            if flag("isMeta") || flag("isCompactSummary") {
+                return None;
+            }
+        }
+    }
+    let text = joined_text(content)?;
+    let harness = v.get("origin").is_none() && HARNESS_PREFIXES.iter().any(|p| text.starts_with(p));
+    (!harness).then_some(text)
+}
+
+/// Whether a record of this origin asks the agent for something: a typed
+/// prompt (`human`), a lead's message (`coordinator`), or the goal condition
+/// a `/goal` run continues on (`auto-continuation`, "Goal set: …").
+fn asks(kind: &str) -> bool {
+    matches!(kind, "human" | "coordinator" | "auto-continuation")
+}
+
+/// The openings of user records Claude Code writes itself, with no origin:
+/// slash-command and shell echoes, an interrupt, and relayed messages.
+const HARNESS_PREFIXES: &[&str] = &[
+    "<command-name>",
+    "<command-message>",
+    "<local-command-",
+    "<bash-input>",
+    "<bash-stdout>",
+    "<bash-stderr>",
+    "<task-notification>",
+    "[Request interrupted",
+    "Another Claude session sent a message",
+];
+
+/// A message content's text blocks, joined with whitespace collapsed.
+fn joined_text(content: Option<&Value>) -> Option<String> {
+    let mut text = Vec::new();
+    collect_text_blocks(content, &mut text);
+    text.reverse();
+    let joined = text.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
+    (!joined.is_empty()).then_some(joined)
+}
+
+/// The role of a conversation turn: a `user` or `assistant` record whose
+/// message has that role. Claude Code also writes `api-request-blob`
+/// records, copies of the composed request whose messages carry `user`,
+/// `assistant` and `system` roles (the CLAUDE.md context among them); they
+/// are not turns.
+fn turn_role(v: &Value) -> Option<&str> {
+    let role = v.get("message")?.get("role")?.as_str()?;
+    (v.get("type").and_then(|t| t.as_str()) == Some(role)).then_some(role)
 }
 
 /// A genuine human turn vs a `tool_result` carrier (both are role `user`). A real
@@ -289,6 +443,223 @@ mod tests {
         assert_eq!(texts(crate::session::MAIN_AGENT), [(Role::User, "ship it".to_string())]);
         assert!(texts("agone").is_empty());
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    fn meta_reminder(t: &str) -> String {
+        format!(r#"{{"type":"user","isMeta":true,"message":{{"role":"user","content":"{t}"}}}}"#)
+    }
+    fn setup_record(bytes: usize) -> String {
+        format!(r#"{{"type":"attachment","attachment":{{"type":"instructions","content":"{}"}}}}"#, "x".repeat(bytes))
+    }
+
+    /// A subagent transcript as Claude Code writes it: the brief, a meta
+    /// reminder, then setup records far past any fixed tail before the
+    /// agent's first tool call.
+    fn subagent_transcript(brief: &str, later: &[String]) -> String {
+        let mut lines = vec![user_text(brief), meta_reminder("Other agents active in this session")];
+        lines.extend((0..12).map(|_| setup_record(30 * 1024)));
+        lines.push(assistant_text("Reading the brief file."));
+        lines.push(tool_result("brief contents"));
+        lines.extend(later.iter().cloned());
+        lines.join("\n") + "\n"
+    }
+
+    /// The judge reads a subagent's brief though 360 KB of setup records
+    /// sit between the brief and the call.
+    #[test]
+    fn the_brief_is_found_past_the_setup_records() {
+        let root = std::env::temp_dir().join(format!("ways-lookbehind-deep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let claude = claude_sessions::ClaudeDir::at(root.join(".claude"));
+        let dir = root.join(".claude/projects/-srv-p/sess/subagents");
+        std::fs::create_dir_all(&dir).unwrap();
+        let t = subagent_transcript("review the parser change", &[]);
+        assert!(t.len() as u64 > 4 * TAIL_BYTES, "the fixture must reach past the old tail");
+        std::fs::write(dir.join("agent-atask.jsonl"), &t).unwrap();
+        std::fs::write(root.join(".claude/projects/-srv-p/sess.jsonl"), user_text("lead prompt") + "\n").unwrap();
+        let texts = recent_turns_in(&claude, None, "/srv/p", "sess", "atask").into_iter().map(|t| t.text).collect::<Vec<_>>();
+        assert_eq!(texts, ["review the parser change"]);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// A message the lead sends mid-run is the newer request.
+    #[test]
+    fn a_later_lead_message_is_the_request() {
+        let path = std::env::temp_dir().join(format!("ways-lookbehind-later-{}.jsonl", std::process::id()));
+        let t = subagent_transcript("the brief", &[user_text("now approve the fonts"), assistant_text("ok"), tool_result("done")]);
+        std::fs::write(&path, &t).unwrap();
+        assert_eq!(last_human_in_file(&path, REQUEST_PAGE_BYTES, REQUEST_SCAN_CAP).as_deref(), Some("now approve the fonts"));
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// Claude Code's reminders are not the request, in the lookup or in the
+    /// prose walk.
+    #[test]
+    fn a_meta_reminder_is_not_human() {
+        let t = [user_text("the brief"), meta_reminder("Other agents active"), assistant_text("working")].join("\n");
+        let path = std::env::temp_dir().join(format!("ways-lookbehind-meta-{}.jsonl", std::process::id()));
+        std::fs::write(&path, &t).unwrap();
+        assert_eq!(last_human_in_file(&path, 64, 1 << 20).as_deref(), Some("the brief"));
+        std::fs::remove_file(&path).ok();
+        let prose = assistant_prose_since_last_human(&[user_text("q"), assistant_text("before"), meta_reminder("r"), assistant_text("after")].join("\n")).unwrap();
+        assert!(prose.contains("before") && prose.contains("after"), "{prose}");
+    }
+
+    /// A copy of the composed request is not a turn, in the lookup or in the
+    /// prose walk.
+    #[test]
+    fn a_request_blob_is_not_a_turn() {
+        let blob = |role: &str, t: &str| format!(r#"{{"type":"api-request-blob","message":{{"role":"{role}","content":[{{"type":"text","text":"{t}"}}]}}}}"#);
+        let t = [user_text("the brief"), blob("user", "CLAUDE.md context"), blob("assistant", "copied narration"), assistant_text("own narration")].join("\n");
+        let path = std::env::temp_dir().join(format!("ways-lookbehind-blob-{}.jsonl", std::process::id()));
+        std::fs::write(&path, &t).unwrap();
+        assert_eq!(last_human_in_file(&path, 64, 1 << 20).as_deref(), Some("the brief"));
+        std::fs::remove_file(&path).ok();
+        let prose = assistant_prose_since_last_human(&t).unwrap();
+        assert_eq!(prose, "own narration");
+    }
+
+    fn origin_user(kind: &str, meta: bool, t: &str) -> String {
+        format!(r#"{{"type":"user","isMeta":{meta},"origin":{{"kind":"{kind}"}},"message":{{"role":"user","content":"{t}"}}}}"#)
+    }
+
+    /// A lead's message to a running subagent is the newest request, though
+    /// Claude Code writes it `isMeta`, and it ends the prose walk.
+    #[test]
+    fn a_coordinator_message_is_the_request() {
+        let t = [
+            user_text("fix issue 1287"),
+            assistant_text("phase one narration"),
+            origin_user("coordinator", true, "The coordinator sent a message while you were working: fix the review findings"),
+            assistant_text("phase two narration"),
+        ]
+        .join("\n");
+        let path = std::env::temp_dir().join(format!("ways-lookbehind-coord-{}.jsonl", std::process::id()));
+        std::fs::write(&path, &t).unwrap();
+        let found = last_human_in_file(&path, 64, 1 << 20).unwrap();
+        assert!(found.contains("fix the review findings"), "{found}");
+        std::fs::remove_file(&path).ok();
+        assert_eq!(assistant_prose_since_last_human(&t).unwrap(), "phase two narration");
+    }
+
+    /// What arrives without being asked for is not the request: notifications,
+    /// plugin and peer messages, a compaction summary, Claude Code's echoes.
+    #[test]
+    fn arrivals_and_echoes_are_not_the_request() {
+        let compact = r#"{"type":"user","isCompactSummary":true,"message":{"role":"user","content":"This session is being continued"}}"#.to_string();
+        let arrivals = [
+            origin_user("task-notification", false, "<task-notification>done</task-notification>"),
+            origin_user("plugin", false, "The attend plugin sent a message: keepwarm"),
+            origin_user("peer", true, "Another Claude session sent a message"),
+            compact,
+            user_text("<command-name>/compact</command-name>"),
+            user_text("<local-command-stdout>Compacted</local-command-stdout>"),
+            user_text("<bash-stdout>ok</bash-stdout>"),
+            user_text("[Request interrupted by user]"),
+            user_text("Another Claude session sent a message: report"),
+        ];
+        let t = std::iter::once(origin_user("human", false, "typed prompt")).chain(arrivals.iter().cloned()).collect::<Vec<_>>().join("\n");
+        let path = std::env::temp_dir().join(format!("ways-lookbehind-arrivals-{}.jsonl", std::process::id()));
+        std::fs::write(&path, &t).unwrap();
+        assert_eq!(last_human_in_file(&path, 64, 1 << 20).as_deref(), Some("typed prompt"));
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// A prompt typed while a turn runs is a queued attachment, and it is
+    /// the newest request.
+    #[test]
+    fn a_queued_prompt_is_the_request() {
+        let queued = r#"{"type":"attachment","attachment":{"type":"queued_command","humanTurn":true,"origin":{"kind":"human"},"prompt":"also check the cap"}}"#;
+        let peer = r#"{"type":"attachment","attachment":{"type":"queued_command","origin":{"kind":"peer"},"prompt":"a peer's note"}}"#;
+        let t = [origin_user("human", false, "first prompt"), assistant_text("working"), queued.to_string(), peer.to_string()].join("\n");
+        let path = std::env::temp_dir().join(format!("ways-lookbehind-queued-{}.jsonl", std::process::id()));
+        std::fs::write(&path, &t).unwrap();
+        assert_eq!(last_human_in_file(&path, 64, 1 << 20).as_deref(), Some("also check the cap"));
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// A lead's message that arrives as a queued attachment, and the goal a
+    /// `/goal` run continues on, are each the newest request.
+    #[test]
+    fn a_queued_lead_message_and_a_goal_are_requests() {
+        let lead = r#"{"type":"attachment","attachment":{"type":"queued_command","origin":{"kind":"coordinator"},"isMeta":true,"prompt":"Another item for this round"}}"#;
+        let goal = r#"{"type":"attachment","attachment":{"type":"queued_command","origin":{"kind":"auto-continuation"},"prompt":"Goal set: finish the fixes"}}"#;
+        let path = std::env::temp_dir().join(format!("ways-lookbehind-qlead-{}.jsonl", std::process::id()));
+        for (rec, want) in [(lead, "Another item for this round"), (goal, "Goal set: finish the fixes")] {
+            let t = [user_text("the brief"), assistant_text("working"), rec.to_string(), assistant_text("more")].join("\n");
+            std::fs::write(&path, &t).unwrap();
+            assert_eq!(last_human_in_file(&path, 64, 1 << 20).as_deref(), Some(want));
+            assert_eq!(assistant_prose_since_last_human(&t).unwrap(), "more");
+        }
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// A brief further back than the cap is still found on the first line.
+    #[test]
+    fn a_brief_past_the_cap_is_read_from_the_first_line() {
+        let root = std::env::temp_dir().join(format!("ways-lookbehind-head-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let claude = claude_sessions::ClaudeDir::at(root.join(".claude"));
+        let dir = root.join(".claude/projects/-srv-p/sess/subagents");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(root.join(".claude/projects/-srv-p/sess.jsonl"), user_text("lead prompt") + "\n").unwrap();
+        let t = subagent_transcript("the long-running brief", &[]);
+        let path = dir.join("agent-atask.jsonl");
+        std::fs::write(&path, &t).unwrap();
+        assert_eq!(last_human_in_file(&path, REQUEST_PAGE_BYTES, 64 * 1024), None, "the cap must stop the backward read");
+        assert_eq!(first_line_request(&path, FIRST_LINE_CAP).as_deref(), Some("the long-running brief"));
+        assert_eq!(first_line_request(&path, 8), None, "a first line longer than its cap is not read");
+        let texts = recent_turns_in(&claude, None, "/srv/p", "sess", "atask").into_iter().map(|t| t.text).collect::<Vec<_>>();
+        assert_eq!(texts, ["the long-running brief"]);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// A whole line that starts exactly at the cap is read.
+    #[test]
+    fn a_line_starting_at_the_cap_is_whole() {
+        let tail = [user_text("at the edge"), assistant_text("end")].join("\n");
+        let t = format!("{}\n{tail}", setup_record(100));
+        let path = std::env::temp_dir().join(format!("ways-lookbehind-edge-{}.jsonl", std::process::id()));
+        std::fs::write(&path, &t).unwrap();
+        for page in [1, 16, 4096] {
+            assert_eq!(last_human_in_file(&path, page, tail.len() as u64).as_deref(), Some("at the edge"), "page {page}");
+            assert_eq!(last_human_in_file(&path, page, tail.len() as u64 - 1), None, "page {page}");
+        }
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// Paging gives the same answer as reading the whole file, whatever the
+    /// page size, including pages shorter than a line.
+    #[test]
+    fn paging_matches_a_whole_file_read() {
+        let t = [
+            user_text("first"),
+            assistant_text(&"a".repeat(300)),
+            user_text("second request"),
+            tool_result(&"r".repeat(500)),
+            meta_reminder("reminder"),
+            assistant_text("end"),
+        ]
+        .join("\n");
+        let path = std::env::temp_dir().join(format!("ways-lookbehind-pages-{}.jsonl", std::process::id()));
+        for body in [t.clone(), t.clone() + "\n"] {
+            std::fs::write(&path, &body).unwrap();
+            for page in [1, 7, 64, 199, 1000, 1 << 20] {
+                assert_eq!(last_human_in_file(&path, page, 1 << 20).as_deref(), Some("second request"), "page {page}");
+            }
+        }
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// The lookup stops at its cap: a request further back is not found.
+    #[test]
+    fn the_cap_bounds_the_read() {
+        let t = [user_text("far back"), setup_record(4096), assistant_text("end")].join("\n");
+        let path = std::env::temp_dir().join(format!("ways-lookbehind-cap-{}.jsonl", std::process::id()));
+        std::fs::write(&path, &t).unwrap();
+        assert_eq!(last_human_in_file(&path, 512, 2048), None);
+        assert_eq!(last_human_in_file(&path, 512, 1 << 20).as_deref(), Some("far back"));
+        std::fs::remove_file(&path).ok();
     }
 
     #[test]
