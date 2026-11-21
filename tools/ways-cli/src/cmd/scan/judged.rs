@@ -317,11 +317,18 @@ fn finish(lane: &Lane, judged: Judged, shown: &[Shown<'_>], tick: u64) {
     for (i, s) in shown.iter().enumerate() {
         record.hit(&s.candidate.key, i + 1, &s.candidate.channel, s.candidate.p, s.result, Some(&judged.gate));
     }
-    record.judge(&judged.gate);
-    record.request(judged.turns.iter().any(|t| t.role == Role::User));
+    close_judge(&mut record, &judged.gate, &judged.turns);
     let scan_id = record.scan_id().to_string();
     record.write();
     detach(lane, judged, shown, &scan_id);
+}
+
+/// Writes the judge's block on a lane's record, the hook's own or the
+/// detached judge's: its status, and whether its turns carried the calling
+/// agent's request.
+fn close_judge(record: &mut decision::Record, gate: &Gate, turns: &[Turn]) {
+    record.judge(gate);
+    record.request(turns.iter().any(|t| t.role == Role::User));
 }
 
 /// Hands what the detached judge should see, in shadow mode the shown
@@ -609,7 +616,7 @@ pub(crate) fn run_detached(text: &str) -> anyhow::Result<()> {
     for (i, e) in job.entries.iter().enumerate() {
         record.hit(&e.candidate.key, i + 1, &e.candidate.channel, None, &e.result, Some(&gate));
     }
-    record.judge(&gate);
+    close_judge(&mut record, &gate, &job.turns);
     record.write();
     Ok(())
 }
@@ -843,6 +850,30 @@ mod tests {
         detach_via(&lane, j, &shown, "scan", || false, &|_| {}, |_, _, _| started.set(started.get() + 1));
         assert_eq!(started.get(), 0, "the record says none starts");
         assert_eq!(readings.get(), 1, "the engine was read once");
+    }
+
+    /// The hook's record and the detached judge's both say whether the
+    /// judge read the agent's request.
+    #[test]
+    fn both_records_say_whether_the_request_was_read() {
+        let lane = Lane {
+            surface: decision::Surface::Command,
+            hook_event: "PreToolUse".into(),
+            scope: "agent".into(),
+            project_dir: "/p".into(),
+            session_id: "s".into(),
+        };
+        let gate = Gate { status: gate::Status::Judged { engine: "e".into(), model: "m".into(), judge_ms: 1 }, ..Gate::default() };
+        let call = Turn { role: Role::Assistant, text: "About to run: x".into() };
+        let brief = Turn { role: Role::User, text: "brief".into() };
+        for (turns, want) in [(vec![brief, call.clone()], "found"), (vec![call], "none")] {
+            let mut hook = decision::Record::begin_at(&lane.context(0), 1);
+            let mut detached = decision::Record::detached(&lane.context(0), "scan");
+            close_judge(&mut hook, &gate, &turns);
+            close_judge(&mut detached, &gate, &turns);
+            assert_eq!(hook.to_json()["judge"]["request"], want);
+            assert_eq!(detached.to_json()["judge"]["request"], want);
+        }
     }
 
     #[test]
