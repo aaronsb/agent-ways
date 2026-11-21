@@ -53,19 +53,16 @@ type TakeStream = HookStream<ProcessSpawnChunk, ProcessSpawnResult>
 
 const debug = ($: EngineInterface, text: string) => $.ui.log(`ways-judge: ${text}`, { to: 'debug' })
 
-/** The judge calls in flight, held by the module. A call outlives the
- *  event whose take claimed its job, which may be another call's. The
- *  module's signal, which the session's end aborts, cuts it, and so does
- *  an interrupt of the claiming call, whose dispatch the engine binds the
- *  model call to. */
-type Judges = { inFlight: Set<Promise<void>>; stop: AbortController }
+/** Holds the signal every judge call runs under, which the session's end
+ *  aborts to cut the calls still running. A judge call outlives the event
+ *  whose take claimed its job, which may be another call's. An interrupt
+ *  of the claiming call cuts it as well, since the engine binds the model
+ *  call to that call's dispatch. */
+type Judges = { stop: AbortController }
 
 /** Judges a claimed job apart from the event that claimed it. */
 function judgeApart($: EngineInterface, calls: Judges, id: string, job: JudgeJob): void {
-  const p: Promise<void> = answer($, id, job, calls.stop.signal)
-    .catch(() => undefined)
-    .finally(() => calls.inFlight.delete(p))
-  calls.inFlight.add(p)
+  void answer($, id, job, calls.stop.signal).catch(() => undefined)
 }
 
 /** Cuts the judge calls still running, and starts a fresh signal for the
@@ -80,7 +77,7 @@ export const register: Register = on => {
   // `ways judge host` took it. A reload starts the map over and registers
   // again, which the verb takes as the same registration.
   const hosted = new Map<string, boolean>()
-  const calls: Judges = { inFlight: new Set(), stop: new AbortController() }
+  const calls: Judges = { stop: new AbortController() }
 
   // Every prompt, whatever its origin: the settings hook that writes the job
   // cannot see the origin, so the mod takes for each one.
