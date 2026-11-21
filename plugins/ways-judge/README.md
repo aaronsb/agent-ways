@@ -22,7 +22,9 @@ At each prompt, whatever its origin, and at each call of a listed tool (the sett
 3. while that runs, keeps one `ways judge take --session <id> --wait` waiting;
 4. on a job, starts the next take at once, so a second job written meanwhile is claimed within the window, sends the job's request through `$.model.complete` unchanged, and pipes `{ text, usage }`, or `{ reason, usage }` when the model gave no text, to `ways judge answer --session <id> --job <job>` as JSON;
 5. on `standby`, calls no model and starts no further take;
-6. when `next(e)` settles, stops the take that is still waiting, and finishes answering any job already claimed: a take claims the session's oldest job, so the gate waiting on it may be another call's.
+6. when `next(e)` settles, stops the take that is still waiting and returns, waiting at most 3 seconds for the take to end.
+
+A take claims the session's oldest job, so a job one call's take claims may be another call's. Each claimed job is judged apart from the event that claimed it: the mod holds the model call itself, under its own signal, and answers the job by its id. The claiming call does not wait for that judge, and interrupting it does not cancel that judge. A take that is stopped just as it claims a job either puts the job back for the next take, or hands it over, and the mod judges it all the same. The mod cuts any judge call still running when the session ends.
 
 ## What it costs
 

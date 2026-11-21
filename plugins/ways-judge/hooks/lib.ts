@@ -45,7 +45,9 @@ export const JUDGED_TOOLS = ['Agent', 'Bash', 'Edit', 'EnterPlanMode', 'ExitPlan
 /** How long the host and answer verbs may run. Each is a file write. */
 export const VERB_TIMEOUT_MS = 5_000
 
-/** How long stopping `take` may hold the event once `next(e)` settled. */
+/** The longest the hook waits, once `next(e)` settled, for the take it
+ *  stopped to end. Past it the hook returns; a job the take still hands
+ *  over is judged apart from the hook. */
 export const STOP_GRACE_MS = 3_000
 
 /** A judge request, as `ways judge take` prints it. */
@@ -69,10 +71,16 @@ export type JudgeAnswer = {
 export type Take = { kind: 'job'; job: JudgeJob } | { kind: 'standby' } | { kind: 'idle' } | { kind: 'none'; why: string }
 
 /** What `take` printed and how it exited: a job, `standby`, nothing (its
- *  wait ran out with no job, or it was stopped), or a failure. */
+ *  wait ran out with no job, or it was stopped), or a failure. A take
+ *  stopped or killed after it printed a whole job line claimed that job,
+ *  so the job is handed over whatever the exit. */
 export function parseTake(stdout: string, code: number | null): Take {
   const out = stdout.trim()
-  if (code !== 0) return { kind: 'none', why: `take exited ${code ?? 'on a signal'}` }
+  if (code !== 0) {
+    const line = stdout.includes('\n') ? stdout.slice(0, stdout.indexOf('\n')) : undefined
+    const job = line === undefined ? undefined : jobOf(line)
+    return job ? { kind: 'job', job } : { kind: 'none', why: `take exited ${code ?? 'on a signal'}` }
+  }
   if (out === '') return { kind: 'idle' }
   if (out === 'standby') return { kind: 'standby' }
   let v: unknown
@@ -82,6 +90,16 @@ export function parseTake(stdout: string, code: number | null): Take {
     return { kind: 'none', why: `take printed neither a job nor standby: ${out.slice(0, 80)}` }
   }
   return isJob(v) ? { kind: 'job', job: v } : { kind: 'none', why: 'take printed a job without its fields' }
+}
+
+/** The job a line holds, if it parses as one. */
+function jobOf(line: string): JudgeJob | undefined {
+  try {
+    const v: unknown = JSON.parse(line)
+    return isJob(v) ? v : undefined
+  } catch {
+    return undefined
+  }
 }
 
 function isJob(v: unknown): v is JudgeJob {

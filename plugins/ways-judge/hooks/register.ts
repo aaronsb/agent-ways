@@ -15,18 +15,20 @@
 //
 // This module carries the jobs. At each prompt, and at each call of a tool
 // those settings hooks judge (JUDGED_TOOLS), it starts `next(e)` without
-// awaiting it and, while that runs, keeps a
-// `ways judge take` waiting beside it. On a job it starts the next take at
-// once, so a second job written meanwhile (a second batch, a second
-// settings hook, another loop's call) is claimed within the window, sends
-// the request through `$.model.complete` unchanged and hands the reply's
-// text and usage, or the failure reason, to `ways judge answer`. The hook
-// side parses and validates the reply; this module never reads it. On
-// `standby` (the session resolved to a key engine) it calls no model. When
-// `next(e)` settles, the waiting take is stopped with the stream's
-// `return()`, since `$.process.run` has no abort. A job already claimed is
-// still judged and answered: any waiting take claims the session's oldest
-// job, so the gate waiting on it may be another call's.
+// awaiting it and, while that runs, keeps a `ways judge take` waiting
+// beside it. On a job it starts the next take at once, so a second job
+// written meanwhile (a second batch, a second settings hook, another
+// loop's call) is claimed within the window. Each claimed job is judged
+// apart from the event that claimed it: the request goes through
+// `$.model.complete` unchanged, and the reply's text and usage, or the
+// failure reason, go to `ways judge answer`. A take claims the session's
+// oldest job, so the job may be another call's; its judge call is held by
+// the module, under the module's own signal, so the claiming call neither
+// waits for it nor cancels it. The hook side parses and validates the
+// reply; this module never reads it. On `standby` (the session resolved to
+// a key engine) it calls no model. When `next(e)` settles, the waiting take
+// is stopped with the stream's `return()`, since `$.process.run` has no
+// abort, and the hook returns within STOP_GRACE_MS.
 //
 // The module registers itself as the session's judge host before each
 // session id's first event reaches `next(e)`, not at `session.start`: a
@@ -49,17 +51,38 @@ type TakeStream = HookStream<ProcessSpawnChunk, ProcessSpawnResult>
 
 const debug = ($: EngineInterface, text: string) => $.ui.log(`ways-judge: ${text}`, { to: 'debug' })
 
+/** The judge calls in flight, held by the module. A call outlives the
+ *  event whose take claimed its job, which may be another call's, and runs
+ *  under the module's signal, which only the session's end aborts. */
+type Judges = { inFlight: Set<Promise<void>>; stop: AbortController }
+
+/** Judges a claimed job apart from the event that claimed it. */
+function judgeApart($: EngineInterface, calls: Judges, id: string, job: JudgeJob): void {
+  const p: Promise<void> = answer($, id, job, calls.stop.signal)
+    .catch(() => undefined)
+    .finally(() => calls.inFlight.delete(p))
+  calls.inFlight.add(p)
+}
+
+/** Cuts the judge calls still running, and starts a fresh signal for the
+ *  next session id. */
+function endJudges(calls: Judges): void {
+  calls.stop.abort()
+  calls.stop = new AbortController()
+}
+
 export const register: Register = on => {
   // Each session id this module has registered as judge host, and whether
   // `ways judge host` took it. A reload starts the map over and registers
   // again, which the verb takes as the same registration.
   const hosted = new Map<string, boolean>()
+  const calls: Judges = { inFlight: new Set(), stop: new AbortController() }
 
   // Every prompt, whatever its origin: the settings hook that writes the job
   // cannot see the origin, so the mod takes for each one.
   on('prompt.submit', async ($, e, next) => {
     const id = await served($, hosted)
-    return id === undefined ? next(e) : bracket($, id, next(e), next.signal)
+    return id === undefined ? next(e) : bracket($, id, calls, next(e))
   })
 
   // Only the tools whose settings hooks judge, in every loop: a hook on a
@@ -68,7 +91,13 @@ export const register: Register = on => {
   // stopped when next(e) settles.
   on('tool.call', { tool: [...JUDGED_TOOLS] }, async ($, e, next) => {
     const id = await served($, hosted)
-    return id === undefined ? next(e) : bracket($, id, next(e), next.signal)
+    return id === undefined ? next(e) : bracket($, id, calls, next(e))
+  })
+
+  // The session ended: no gate waits on a judge call still running.
+  on('session.end', ($, e, next) => {
+    endJudges(calls)
+    return next(e)
   })
 }
 
@@ -102,38 +131,28 @@ async function host($: EngineInterface, hosted: Map<string, boolean>, id: string
   return isHost
 }
 
-/** Serves the session's jobs while `settling`, the event's `next(e)`, runs,
- *  and resolves to what it resolved to. `signal` is the event's own: an
- *  interrupted turn aborts a model call still running. */
-async function bracket<R>($: EngineInterface, id: string, settling: Promise<R>, signal: AbortSignal): Promise<R> {
+/** Serves the session's jobs while `settling`, the event's `next(e)`,
+ *  runs, and resolves to what it resolved to. Once it settles, the waiting
+ *  take is stopped, and the hook waits at most STOP_GRACE_MS for the take
+ *  to end; a job it still hands over is judged all the same. */
+async function bracket<R>($: EngineInterface, id: string, calls: Judges, settling: Promise<R>): Promise<R> {
   let isSettled = false
-  let stopTake: () => Promise<void> = async () => undefined
-  const serving = serve($, id, signal, () => isSettled, take => {
-    stopTake = async () => {
-      await Promise.race([take.return(undefined as never).catch(() => undefined), $.clock.sleep(STOP_GRACE_MS)])
-    }
-  })
+  let waiting: TakeStream | undefined
+  const serving = serve($, id, calls, () => isSettled, take => (waiting = take))
   try {
     return await settling
   } finally {
     // The call went on: a take still waiting has nothing to wait for.
     isSettled = true
-    await stopTake()
-    await serving
+    const stopped = waiting?.return(undefined as never).catch(() => undefined)
+    await Promise.race([Promise.all([stopped, serving]), $.clock.sleep(STOP_GRACE_MS).catch(() => undefined)])
   }
 }
 
-/** Keeps one take waiting until `isSettled`, and judges each job a take
- *  hands over while the next take waits. Resolves once every claimed job
- *  is answered. */
-async function serve(
-  $: EngineInterface,
-  id: string,
-  signal: AbortSignal,
-  isSettled: () => boolean,
-  started: (take: TakeStream) => void,
-): Promise<void> {
-  const answering: Promise<void>[] = []
+/** Keeps one take waiting until `isSettled`, and hands each job a take
+ *  claims to `calls` while the next take waits. Resolves once the last
+ *  take has ended. */
+async function serve($: EngineInterface, id: string, calls: Judges, isSettled: () => boolean, started: (take: TakeStream) => void): Promise<void> {
   while (!isSettled()) {
     // Nothing awaits between the check above and `started`, so a settle
     // always finds the take it has to stop.
@@ -142,7 +161,7 @@ async function serve(
     started(take)
     const t = await read($, take, isSettled)
     if (t.kind === 'job') {
-      answering.push(answer($, id, t.job, signal))
+      judgeApart($, calls, id, t.job)
       continue
     }
     if (t.kind === 'none' && !isSettled()) debug($, t.why)
@@ -153,7 +172,6 @@ async function serve(
     const waited = (await $.clock.now().catch(() => NaN)) - (await begun)
     if (!(waited >= TAKE_WAIT_MS / 2)) break
   }
-  await Promise.all(answering)
 }
 
 /** Reads a take to its end: a job, `standby`, nothing, or a failure. */
