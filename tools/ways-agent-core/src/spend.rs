@@ -225,18 +225,24 @@ impl Group {
     }
 
     /// The group's cost, short: `$0.0123`, `$0.0123 + 2 unknown`, or
-    /// `cost unknown` when no call's cost is known. A group of account calls
-    /// only shows its list-price estimate, `~$0.0123 est`, or `on account`.
+    /// `cost unknown` when no call's cost is known and none is on the
+    /// account. Account calls add their list-price estimate, `~$0.0456 est`,
+    /// or `on account` when their model has none, between the billed cost
+    /// and the unknown count: `$0.0123 + ~$0.0456 est + 2 unknown`.
     pub fn cost_short(&self) -> String {
-        match self.cost_usd {
-            None if self.unknown_calls == 0 && self.account_calls > 0 => match self.account_estimate_usd {
-                Some(e) => format!("~${e:.4} est"),
-                None => "on account".into(),
-            },
-            None => "cost unknown".into(),
-            Some(c) if self.unknown_calls > 0 => format!("${c:.4} + {} unknown", self.unknown_calls),
-            Some(c) => format!("${c:.4}"),
+        if self.account_calls == 0 {
+            return match self.cost_usd {
+                None => "cost unknown".into(),
+                Some(c) if self.unknown_calls > 0 => format!("${c:.4} + {} unknown", self.unknown_calls),
+                Some(c) => format!("${c:.4}"),
+            };
         }
+        let mut parts: Vec<String> = self.cost_usd.map(|c| format!("${c:.4}")).into_iter().collect();
+        parts.push(self.account_estimate_usd.map_or_else(|| "on account".into(), |e| format!("~${e:.4} est")));
+        if self.unknown_calls > 0 {
+            parts.push(format!("{} unknown", self.unknown_calls));
+        }
+        parts.join(" + ")
     }
 }
 
@@ -475,9 +481,35 @@ not json
         assert!(!haiku.contains("unknown"), "{haiku}");
         // A model with no list price shows no estimate.
         assert!(!render_text(&calls[1..2], By::Day, None).contains('$'));
-        assert_eq!(total(&calls[..1]).cost_short(), "~$1.5000 est");
-        assert_eq!(total(&calls[1..2]).cost_short(), "on account");
-        assert_eq!(total(&calls[..3]).cost_short(), "cost unknown");
+    }
+
+    #[test]
+    fn account_calls_beside_unknown_or_billed_ones_print_exactly() {
+        let calls = parse_log(ACCOUNT_LOG);
+        // Account and unknown calls, none of known cost.
+        let text = render_text(&calls[..3], By::Day, None);
+        let clause = "1 call of unknown cost, tokens 1000010 in / 100001 out; \
+2 calls on the Claude Code account, tokens 1000010 in / 100001 out, ~$1.5000 at API list price for 1 of them (estimate)\n";
+        assert_eq!(text, format!("total: 3 calls, {clause}\x20 2026-11-20: 3 calls, {clause}"));
+        // Account calls and a billed one, none unknown.
+        let billed = [calls[0].clone(), calls[3].clone()];
+        let clause = "$0.0300, tokens 1000050 in / 100005 out; \
+1 call on the Claude Code account, tokens 1000000 in / 100000 out, ~$1.5000 at API list price (estimate)\n";
+        assert_eq!(render_text(&billed, By::Day, None), format!("total: 2 calls, {clause}\x20 2026-11-20: 2 calls, {clause}"));
+    }
+
+    #[test]
+    fn the_short_cost_always_shows_account_calls() {
+        let calls = parse_log(ACCOUNT_LOG);
+        let short = |c: &[Call]| total(c).cost_short();
+        assert_eq!(short(&calls[..1]), "~$1.5000 est");
+        assert_eq!(short(&calls[1..2]), "on account");
+        assert_eq!(short(&calls[1..3]), "on account + 1 unknown");
+        assert_eq!(short(&calls[..3]), "~$1.5000 est + 1 unknown", "not \"cost unknown\" (#1301)");
+        assert_eq!(short(&[calls[0].clone(), calls[3].clone()]), "$0.0300 + ~$1.5000 est");
+        assert_eq!(short(&calls), "$0.0300 + ~$1.5000 est + 1 unknown");
+        assert_eq!(short(&calls[2..3]), "cost unknown");
+        assert_eq!(short(&calls[3..]), "$0.0300");
     }
 
     #[test]

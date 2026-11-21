@@ -869,6 +869,45 @@ fn a_heavy_spend_row_fits_at_80_columns() {
     assert!(t.contains("$12.3456 + 12 unknown"), "{t}");
 }
 
+/// Calls on the Claude Code account widen the Cost column: their figure is
+/// shown whole where it fits, Tokens gives way at 80 columns, and a figure
+/// still too wide loses its tail, never its first digits (#1301).
+#[test]
+fn an_account_spend_row_keeps_its_figure() {
+    let call = |cost: Option<f64>, account: bool| ways_agent_core::spend::Call {
+        ts: "2026-07-03T16:52:00Z".into(),
+        session: SESSION.into(),
+        project: PROJECT.into(),
+        cost_usd: cost,
+        input_tokens: 1,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        account,
+        estimate_usd: account.then_some(0.0061),
+    };
+    let tab = |calls: &[ways_agent_core::spend::Call], width: u16| {
+        let mut s = Introspect::showing(replay(false), with_spend(Spend::new(calls.to_vec(), None, "every project".into())), terminal(), Shape::PLAIN);
+        press(&mut s, &[KeyCode::Char('3')]);
+        text(&render(&mut s, width, 25))
+    };
+    // Account calls and deadlines, as on a claude-code host.
+    let mut calls: Vec<_> = (0..300).map(|_| call(None, true)).collect();
+    calls.extend((0..291).map(|_| call(None, false)));
+    let t = tab(&calls, 80);
+    assert!(t.contains("~$1.8300 est + 291 unknown"), "{t}");
+    assert!(!t.contains("Tokens"), "Tokens gives way at 80: {t}");
+    assert!(tab(&calls, 120).contains("Tokens"));
+    // Billed, account and unknown calls at once.
+    let mut mixed = vec![call(Some(12.3456), false)];
+    mixed.extend((0..12).map(|_| call(None, false)));
+    mixed.extend((0..300).map(|_| call(None, true)));
+    let t = tab(&mixed, 120);
+    assert!(t.contains("$12.3456 + ~$1.8300 est + 12 unknown") && t.contains("Tokens"), "{t}");
+    let t = tab(&mixed, 80);
+    assert!(t.contains("$12.3456 + ~$1.8300 est + 12 …"), "{t}");
+}
+
 /// A small log for the usage and precision tabs: two sessions in this
 /// project and one elsewhere.
 fn usage_log() -> String {
