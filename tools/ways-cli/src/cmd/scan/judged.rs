@@ -612,13 +612,19 @@ pub(crate) fn run_detached(text: &str) -> anyhow::Result<()> {
         .collect();
     let gate = gate::apply(&pending, job.turns.clone(), DETACHED_WAIT, &log);
     let epoch = crate::session::get_epoch(&job.lane.session_id);
+    detached_record(&job, &gate, epoch).write();
+    Ok(())
+}
+
+/// The detached judge's record of `job` under `gate`, marked detached and
+/// keyed by the hook's `scan_id`.
+fn detached_record(job: &Job, gate: &Gate, epoch: u64) -> decision::Record {
     let mut record = decision::Record::detached(&job.lane.context(epoch), &job.scan_id);
     for (i, e) in job.entries.iter().enumerate() {
-        record.hit(&e.candidate.key, i + 1, &e.candidate.channel, None, &e.result, Some(&gate));
+        record.hit(&e.candidate.key, i + 1, &e.candidate.channel, None, &e.result, Some(gate));
     }
-    close_judge(&mut record, &gate, &job.turns);
-    record.write();
-    Ok(())
+    close_judge(&mut record, gate, &job.turns);
+    record
 }
 
 /// What a tool lane's judge reads: the calling agent's request, its last
@@ -868,11 +874,18 @@ mod tests {
         let brief = Turn { role: Role::User, text: "brief".into() };
         for (turns, want) in [(vec![brief, call.clone()], "found"), (vec![call], "none")] {
             let mut hook = decision::Record::begin_at(&lane.context(0), 1);
-            let mut detached = decision::Record::detached(&lane.context(0), "scan");
             close_judge(&mut hook, &gate, &turns);
-            close_judge(&mut detached, &gate, &turns);
             assert_eq!(hook.to_json()["judge"]["request"], want);
-            assert_eq!(detached.to_json()["judge"]["request"], want);
+            let job: Job = serde_json::from_value(serde_json::json!({
+                "lane": serde_json::to_value(&lane).unwrap(),
+                "scan_id": "scan",
+                "agent": "main",
+                "turns": serde_json::to_value(&turns).unwrap(),
+                "entries": [],
+                "slot": "/nonexistent",
+            }))
+            .unwrap();
+            assert_eq!(detached_record(&job, &gate, 0).to_json()["judge"]["request"], want);
         }
     }
 

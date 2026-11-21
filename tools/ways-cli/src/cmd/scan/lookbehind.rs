@@ -256,21 +256,22 @@ fn collect_text_blocks(content: Option<&Value>, out: &mut Vec<String>) {
 /// The text of a record that asks the agent for something: what a person
 /// typed, a subagent's brief, or a lead's message to a running subagent.
 ///
-/// Claude Code marks most user records with an `origin`. `human` is a typed
-/// prompt and `coordinator` a lead's mid-run message, which Claude Code
-/// writes `isMeta`; both count. Every other origin (`task-notification`,
-/// `plugin`, `peer`) is something arriving, not a request. A prompt typed
-/// while a turn runs is a `queued_command` attachment with `humanTurn`.
+/// Claude Code marks most user records with an `origin`, and the origins
+/// [`asks`] names count, as a user record or as a `queued_command`
+/// attachment. A lead's mid-run message comes either way and is marked
+/// `isMeta`; a prompt typed while a turn runs is an attachment with
+/// `humanTurn`. Every other origin (`task-notification`, `plugin`, `peer`)
+/// is something arriving, not a request.
 /// A record with no origin, such as a subagent's brief, counts unless it is
 /// one of Claude Code's own: `isMeta` reminders and skill bodies, a
 /// compaction summary, or a fixed-form echo ([`HARNESS_PREFIXES`]).
 fn request_text(v: &Value) -> Option<String> {
     if v.get("type").and_then(Value::as_str) == Some("attachment") {
         let a = v.get("attachment")?;
-        let typed = a.get("type").and_then(Value::as_str) == Some("queued_command")
+        let asked = a.get("type").and_then(Value::as_str) == Some("queued_command")
             && (a.get("humanTurn").and_then(Value::as_bool) == Some(true)
-                || a.get("origin").and_then(|o| o.get("kind")).and_then(Value::as_str) == Some("human"));
-        return typed.then(|| joined_text(a.get("prompt"))).flatten();
+                || a.get("origin").and_then(|o| o.get("kind")).and_then(Value::as_str).is_some_and(asks));
+        return asked.then(|| joined_text(a.get("prompt"))).flatten();
     }
     if turn_role(v) != Some("user") {
         return None;
@@ -280,7 +281,7 @@ fn request_text(v: &Value) -> Option<String> {
         return None;
     }
     match v.get("origin").and_then(|o| o.get("kind")).and_then(Value::as_str) {
-        Some("human" | "coordinator") => {}
+        Some(kind) if asks(kind) => {}
         Some(_) => return None,
         None => {
             let flag = |k: &str| v.get(k).and_then(Value::as_bool) == Some(true);
@@ -292,6 +293,13 @@ fn request_text(v: &Value) -> Option<String> {
     let text = joined_text(content)?;
     let harness = v.get("origin").is_none() && HARNESS_PREFIXES.iter().any(|p| text.starts_with(p));
     (!harness).then_some(text)
+}
+
+/// Whether a record of this origin asks the agent for something: a typed
+/// prompt (`human`), a lead's message (`coordinator`), or the goal condition
+/// a `/goal` run continues on (`auto-continuation`, "Goal set: …").
+fn asks(kind: &str) -> bool {
+    matches!(kind, "human" | "coordinator" | "auto-continuation")
 }
 
 /// The openings of user records Claude Code writes itself, with no origin:
@@ -567,6 +575,22 @@ mod tests {
         let path = std::env::temp_dir().join(format!("ways-lookbehind-queued-{}.jsonl", std::process::id()));
         std::fs::write(&path, &t).unwrap();
         assert_eq!(last_human_in_file(&path, 64, 1 << 20).as_deref(), Some("also check the cap"));
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// A lead's message that arrives as a queued attachment, and the goal a
+    /// `/goal` run continues on, are each the newest request.
+    #[test]
+    fn a_queued_lead_message_and_a_goal_are_requests() {
+        let lead = r#"{"type":"attachment","attachment":{"type":"queued_command","origin":{"kind":"coordinator"},"isMeta":true,"prompt":"Another item for this round"}}"#;
+        let goal = r#"{"type":"attachment","attachment":{"type":"queued_command","origin":{"kind":"auto-continuation"},"prompt":"Goal set: finish the fixes"}}"#;
+        let path = std::env::temp_dir().join(format!("ways-lookbehind-qlead-{}.jsonl", std::process::id()));
+        for (rec, want) in [(lead, "Another item for this round"), (goal, "Goal set: finish the fixes")] {
+            let t = [user_text("the brief"), assistant_text("working"), rec.to_string(), assistant_text("more")].join("\n");
+            std::fs::write(&path, &t).unwrap();
+            assert_eq!(last_human_in_file(&path, 64, 1 << 20).as_deref(), Some(want));
+            assert_eq!(assistant_prose_since_last_human(&t).unwrap(), "more");
+        }
         std::fs::remove_file(&path).ok();
     }
 
