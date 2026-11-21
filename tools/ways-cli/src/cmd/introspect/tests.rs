@@ -678,6 +678,8 @@ fn spend_calls() -> Vec<ways_agent_core::spend::Call> {
         output_tokens: input / 10,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        account: false,
+        estimate_usd: None,
     };
     vec![
         call("2026-06-30T09:00:00Z", "/elsewhere", 9000, Some(0.9)),
@@ -856,6 +858,8 @@ fn a_heavy_spend_row_fits_at_80_columns() {
         output_tokens: 0,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        account: false,
+        estimate_usd: None,
     };
     let mut calls = vec![call(Some(12.3456))];
     calls.extend((0..12).map(|_| call(None)));
