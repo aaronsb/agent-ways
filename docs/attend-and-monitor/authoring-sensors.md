@@ -232,6 +232,28 @@ A trigger fires on a change between two polls, never while a condition merely ho
 
 A trigger tests `state` or `path` with `on`, never both.
 
+### Memory and expiry
+
+Two fields, allowed on any trigger, set where it keeps what it last saw and how long what it reports stays deliverable:
+
+```yaml
+- name: behind
+  path: "$"
+  on: enters
+  where: { behind: true }
+  memory: session
+  expires: session
+  magnitude: 1
+  description: "agent-ways has a newer release: {summary}"
+```
+
+- `memory` is `store` or `session`, and unset is `store`. With `store`, the trigger's memory lives in the sensor's store for the session ([The store](#the-store)) and survives a restart. A fresh store's first poll sets a baseline and fires nothing, and after that the trigger fires on each change.
+- With `memory: session`, the memory lives only in the process that polls for the session. It starts empty and takes no baseline, so the first poll is compared against nothing seen: `on: enters` fires on the first poll whose result meets `where`, even when the condition already held when the session started. The trigger then fires at most once in the session, whatever it tests: a condition that leaves and enters again, a later item or a later state change fires nothing more. Use it for a notice each session should get once, such as an update check.
+- `expires` is a whole number of seconds from 1 to 2592000 (30 days), or `session`. A report lapses that many seconds after it is written, or with `session` stays until the session reads it. Unset is 3600, the event lane's decay window.
+- Any other value of either field makes the sensor invalid, and the lint message says what the field takes.
+
+Both fields parse and lint today. They take effect once attend runs triggers, with slice 2.
+
 ### Templates
 
 A `description` is text with `{…}` holes:
@@ -253,7 +275,7 @@ ADR-136 draws the lane boundary at authored communication: words a person or age
 - `lane` defaults to `event`.
 - `lane: message` needs an author. A `command` or `mcp` file names it with `author` on each trigger: the item field, or for a state trigger the declared state field, that holds who composed the item. A `crate` file names it with a sensor-level `author`, a field the compiled sensor's items have; `peers` has `sender`.
 - A message-lane file without its author is a lint error, and attend runs that sensor on the event lane and says why in `attend sensor list`.
-- `lane_exception` records why a shipped file rides the message lane with no author. `keepwarm`'s shipped file carries the one exception (ADR-182). Only a shipped file may set it; in a user or project file it is an error and is ignored.
+- `lane_exception` is removed from the spec. A file in any layer that still carries it is a lint error that names the removal, and the field changes no lane.
 - The `peers` and `keepwarm` compiled sensors always ride the message lane, under any file name: a lapsed cache drops what the event lane holds, and peers carries messages while keepwarm is the wake that keeps the cache warm. A file that declares `lane: event` for either is a lint error, and the lane is ignored.
 
 ## Testing from the CLI
@@ -271,7 +293,9 @@ A crate sensor's `--input` is a JSON list of `{magnitude, description}` objects 
 
 ## The store
 
-Each poll `attend run` makes is recorded in the sensor's store, one JSON file per sensor and project under `$XDG_STATE_HOME/agent-ways/attend/sensor-state/`, named by a hash of the two. It holds the last poll's time, whether it succeeded, why it failed, and how many observations it returned. `attend sensor list` reads it for the `failing` state and `last_poll`. The declared state and each trigger's memory join it once attend hosts `command` and `mcp` sensors.
+Each poll `attend run` makes is recorded in the sensor's store, one JSON file per sensor, project and session under `$XDG_STATE_HOME/agent-ways/attend/sensor-state/`, named by a hash of the three. Each report goes to one session, so two sessions in one project keep separate stores, and each starts from its own baseline. A caller with no session id, such as an `attend run` whose session did not resolve, uses an empty session, which every such caller in the project shares. The store holds the last poll's time, whether it succeeded, why it failed, and how many observations it returned, and the memory of each trigger with `memory: store`. `attend sensor list` reads it for the `failing` state and `last_poll`: the session's own store, or from a shell the newest poll of any session in the project. The declared state joins it once attend hosts `command` and `mcp` sensors.
+
+Each store file records its format and its sensor, project and session. A file of an older format, such as one keyed by sensor and project alone, or one whose key does not match, reads as no store, so the sensor starts from a baseline; the old file is left in place. After `/clear`, `attend run` moves the session's stores to its new id.
 
 ## The retired forms
 
@@ -306,7 +330,11 @@ Written as heuristics:
 - [`loop.md`](loop.md) — the substrate a sensor plugs into
 - [`engagement.md`](engagement.md) — the action potential model in detail
 - [`delivery.md`](delivery.md) — the message lane and its conduits
+
+## References
+
 - **ADR-403** — sensors as files under one spec
+- **ADR-416** — `memory`, `expires`, stores keyed by session, and the removal of `lane_exception`
 - **ADR-117** — sensor crate extraction and feature flags
 - **ADR-123** — firing dynamics; the action potential engagement model in force
 - **ADR-116** — permission requirements for sensors
