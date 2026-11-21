@@ -348,6 +348,7 @@ fn a_subagents_bash_candidates_reach_the_judge_and_a_blocked_one_stays_out() {
     assert_eq!(outcome(&r, "judged/keep")["verdict"], "pass");
     assert_eq!(r["judge"]["status"], "judged");
     assert!(r["judge"]["judge_ms"].is_u64(), "{r:#}");
+    assert_eq!(r["judge"]["request"], "found", "the record says the judge read the brief: {r:#}");
 }
 
 /// The main agent's Bash call is judged the same way, on its own context.
@@ -569,6 +570,7 @@ fn the_dispatch_lane_judges_and_keeps_each_stash_to_its_dispatch() {
     assert!(second.contains("# Marker taskkeep"), "the second gets its own: {second}");
     let r = s.wait_decision(|r| r["surface"] == "task" && r["outcomes"][0]["way"] == "judged/taskdrop");
     assert_eq!(outcome(&r, "judged/taskdrop")["result"], "judge_block", "{r:#}");
+    assert_eq!(r["judge"]["request"], "found", "a dispatch is judged against its brief: {r:#}");
 }
 
 /// The tool lane judges a `tool_name:` way like any other candidate.
@@ -597,7 +599,8 @@ fn the_state_lane_judges_its_triggered_ways() {
     let prompts = host.join().unwrap();
     assert!(prompts[0].contains("tidy the release notes"), "{}", prompts[0]);
     assert!(out.contains("# Marker statekeep") && !out.contains("# Marker statedrop"), "{out}");
-    s.wait_decision(|r| r["surface"] == "state");
+    let r = s.wait_decision(|r| r["surface"] == "state");
+    assert_eq!(r["judge"]["request"], "found", "{r:#}");
 }
 
 /// The post-tool lane judges the ways their postchecks asked for.
