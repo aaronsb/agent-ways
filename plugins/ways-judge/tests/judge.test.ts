@@ -23,114 +23,164 @@ const JOB: JudgeJob = {
   max_tokens: 224,
   timeout_ms: 2000,
 }
+const JOB_2: JudgeJob = { ...JOB, prompt: 'Candidates: the second batch' }
 
 const USAGE = { input_tokens: 812, output_tokens: 41, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 const ZERO = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+const VERDICT: ModelCompleteResult = { isAnswered: true, text: '{"judgements":[]}', usage: USAGE }
+
+/** How long the ways gate waits for a host to claim its job before it
+ *  withdraws the job and fails open (CLAIM_WINDOW in scan/gate.rs). */
+const CLAIM_MS = 500
+/** How long it waits for the answer once a host claimed the job. */
+const ANSWER_MS = 3000
 
 const ok = (stdout = ''): ProcessRunResult => ({ exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false })
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
 
 type World = {
-  /** What `ways judge take` prints, and how it exits; absent, it waits
-   *  until it is stopped, as with no job and no key engine. */
-  take?: { stdout: string; code?: number }
-  /** What `$.model.complete` resolves to. */
+  /** The jobs the UserPromptSubmit hooks write, all at once, as parallel
+   *  settings hooks (the prompt and state lanes) do. */
+  prompt?: JudgeJob[]
+  /** The jobs the PreToolUse hooks write, one after another. */
+  pre?: JudgeJob[]
+  /** The jobs the PostToolUse hooks write once the tool ran. */
+  post?: JudgeJob[]
+  /** The session resolved to a key engine: `take` says standby. */
+  standby?: boolean
+  /** What `$.model.complete` resolves to, after `modelMs`. */
   model?: ModelCompleteResult
+  modelMs?: number
   /** `ways judge host` fails. */
   hostFails?: boolean
-  /** The scan writes no job: the prompt's chain settles at once. */
-  noScan?: boolean
 }
 
-/** The host beneath the mod: the ways CLI and the model answered from
- *  `world`, every argv, model request and answer recorded. The prompt's
- *  own chain (the settings UserPromptSubmit hooks) settles once the take
- *  has ended and any answer has been written, as the ways scan waits for
- *  the verdict; with a take that waits, it settles at once, as a scan
- *  that matched nothing to judge. */
+type Entry = { job: JudgeJob & { id: string }; claim: () => void; answer: (a: unknown) => void; claimed: Promise<void>; answered: Promise<unknown> }
+
+/** The host beneath the mod: the session's job store, the ways CLI over it
+ *  and the model, answered from `world`, every argv, model request and
+ *  answer recorded. The settings hooks stand where a session runs them: the
+ *  prompt's at the bottom of `prompt.submit`, PreToolUse at
+ *  `classic.PreToolUse` and PostToolUse after the tool, at the bottom of
+ *  `tool.call`. Each writes its job as the ways scan does and records how
+ *  its wait ended: `answered`, or `unclaimed` when no take claimed the job
+ *  within CLAIM_MS. */
 function host(on: On, world: World) {
   const argvs: string[][] = []
   const models: unknown[] = []
   const answers: unknown[] = []
-  const take = { started: 0, ended: 0, stopped: 0 }
-  let tookEnd: () => void = () => undefined
-  const took = new Promise<void>(resolve => (tookEnd = resolve))
-  let answeredEnd: () => void = () => undefined
-  const answered = new Promise<void>(resolve => (answeredEnd = resolve))
+  const outcomes: string[] = []
+  const take = { started: 0, claimed: 0, stopped: 0 }
+  const pending: Entry[] = []
+  const written: Entry[] = []
+  let wake: (() => void)[] = []
+
+  async function scan(job: JudgeJob): Promise<void> {
+    let claim: () => void = () => undefined
+    let answer: (a: unknown) => void = () => undefined
+    const claimed = new Promise<void>(resolve => (claim = resolve))
+    const answered = new Promise<unknown>(resolve => (answer = resolve))
+    const entry: Entry = { job: { ...job, id: `j-${written.length + 1}` }, claim, answer, claimed, answered }
+    written.push(entry)
+    pending.push(entry)
+    for (const w of wake.splice(0)) w()
+    const isClaimed = await Promise.race([claimed.then(() => true), sleep(CLAIM_MS).then(() => false)])
+    if (!isClaimed) {
+      pending.splice(pending.indexOf(entry), 1)
+      outcomes.push('unclaimed')
+      return
+    }
+    const isAnswered = await Promise.race([answered.then(() => true), sleep(ANSWER_MS).then(() => false)])
+    outcomes.push(isAnswered ? 'answered' : 'silent')
+  }
 
   on('session.id', () => ({ value: ID }) as never)
   on('ui.log', () => ({ value: undefined }) as never)
+  on('clock.now', () => ({ value: 0 }) as never)
+  on('clock.sleep', async ($, e) => {
+    await sleep((e as unknown as { ms: number }).ms)
+    return { value: undefined } as never
+  })
   on('process.run', ($, e) => {
     const ev = e as unknown as { argv: string[]; init?: { stdin?: string }; stdin?: string }
     argvs.push([...ev.argv])
     const cmd = ev.argv.slice(1, 3).join(' ')
     if (cmd === 'judge host' && world.hostFails) return { value: { ...ok(), exitCode: 2, stderr: "unrecognized subcommand 'host'" } } as never
     if (cmd === 'judge answer') {
-      answers.push(JSON.parse(ev.init?.stdin ?? ev.stdin ?? 'null'))
-      answeredEnd()
+      const a = JSON.parse(ev.init?.stdin ?? ev.stdin ?? 'null')
+      answers.push(a)
+      const job = ev.argv[ev.argv.indexOf('--job') + 1]
+      written.find(w => w.job.id === job)?.answer(a)
     }
     return { value: ok() } as never
   })
+  // `ways judge take --wait`: claims the oldest pending job, or waits for one
+  // until it is stopped; says standby when the session judges elsewhere.
   on('process.spawn', async function* ($, e, next) {
     argvs.push([...e.argv])
     take.started += 1
-    try {
-      if (world.take === undefined) {
-        await new Promise<void>(resolve => {
-          if (next.signal.aborted) resolve()
-          next.signal.addEventListener('abort', () => resolve())
-        })
+    if (world.standby) {
+      yield { stream: 'stdout' as const, text: 'standby\n' }
+      return { value: { code: 0, signal: null } } as never
+    }
+    for (;;) {
+      const entry = pending.shift()
+      if (entry) {
+        entry.claim()
+        take.claimed += 1
+        yield { stream: 'stdout' as const, text: JSON.stringify(entry.job) + '\n' }
+        return { value: { code: 0, signal: null } } as never
+      }
+      if (next.signal.aborted) {
         take.stopped += 1
         return { value: { code: null, signal: 'SIGTERM' } } as never
       }
-      yield { stream: 'stdout' as const, text: world.take.stdout + '\n' }
-      take.ended += 1
-      return { value: { code: world.take.code ?? 0, signal: null } } as never
-    } finally {
-      tookEnd()
+      await new Promise<void>(resolve => {
+        wake.push(resolve)
+        next.signal.addEventListener('abort', () => resolve())
+      })
     }
   })
-  on('model.complete', ($, e) => {
+  on('model.complete', async ($, e) => {
     models.push({ ...e })
+    if (world.modelMs) await sleep(world.modelMs)
     return { value: world.model } as never
   })
   on('prompt.submit', async ($, e) => {
-    if (world.take !== undefined && !world.noScan) {
-      await took
-      if (parseTake(world.take.stdout, world.take.code ?? 0).kind === 'job') await answered
-      // On standby the scan goes on to a key engine, which takes its time:
-      // the mod has read the take before the chain settles.
-      else await new Promise<void>(resolve => setTimeout(resolve, 50))
-    }
+    await Promise.all((world.prompt ?? []).map(scan))
     return { text: e.text }
   })
-  return { argvs, models, answers, take }
+  on('classic.PreToolUse', async ($, e, next) => {
+    for (const job of world.pre ?? []) await scan(job)
+    return next(e)
+  })
+  on('tool.call', async () => {
+    for (const job of world.post ?? []) await scan(job)
+    return { result: { stdout: 'ran', stderr: '', interrupted: false } } as never
+  })
+  return { argvs, models, answers, outcomes, take }
 }
 
 async function typed($: Engine, kind = 'composer') {
   return $.prompt.submit({ text: 'review the release notes', wait: false, origin: { kind } } as never)
 }
 
-describe('a job: one model call, one answer', () => {
-  test('the job goes to $.model.complete unchanged, and its text and usage to ways judge answer', async ($, on) => {
-    const h = host(on, { take: { stdout: JSON.stringify(JOB) }, model: { isAnswered: true, text: '{"judgements":[]}', usage: USAGE } })
+describe('the prompt lane: a job, one model call, one answer', () => {
+  test('the job goes to $.model.complete unchanged, and its text and usage to ways judge answer for that job', async ($, on) => {
+    const h = host(on, { prompt: [JOB], model: VERDICT })
     await typed($)
+    expect(h.outcomes).toEqual(['answered'])
     expect(h.models.length).toBe(1)
     expect(h.models[0]).toMatchObject({ model: JOB.model, system: JOB.system, prompt: JOB.prompt, maxTokens: JOB.max_tokens, timeoutMs: JOB.timeout_ms })
+    expect(h.models[0]).not.toHaveProperty('id')
     expect(h.answers).toEqual([{ text: '{"judgements":[]}', usage: USAGE }])
     expect(h.argvs).toContainEqual(hostArgv(ID))
     expect(h.argvs).toContainEqual(takeArgv(ID))
-    expect(h.argvs).toContainEqual(['ways', 'judge', 'answer', '--session', ID])
-  })
-
-  test('a job that carries an id is answered for that job', async ($, on) => {
-    const h = host(on, { take: { stdout: JSON.stringify({ ...JOB, id: 'j-42' }) }, model: { isAnswered: true, text: 'v', usage: USAGE } })
-    await typed($)
-    expect(h.models[0]).not.toHaveProperty('id')
-    expect(h.argvs).toContainEqual(['ways', 'judge', 'answer', '--session', ID, '--job', 'j-42'])
+    expect(h.argvs).toContainEqual(['ways', 'judge', 'answer', '--session', ID, '--job', 'j-1'])
   })
 
   test('a model call past its time limit answers the reason and no text', async ($, on) => {
-    const h = host(on, { take: { stdout: JSON.stringify(JOB) }, model: { isAnswered: false, reason: 'aborted', usage: ZERO } })
+    const h = host(on, { prompt: [JOB], model: { isAnswered: false, reason: 'aborted', usage: ZERO } })
     await typed($)
     expect(h.models.length).toBe(1)
     expect(h.answers).toEqual([{ reason: 'aborted', usage: ZERO }])
@@ -141,32 +191,77 @@ describe('a job: one model call, one answer', () => {
   // the mod takes for every prompt, not only the operator's.
   for (const kind of ['plugin', 'task-notification', 'peer']) {
     test(`a ${kind} prompt takes a job and judges it`, async ($, on) => {
-      const h = host(on, { take: { stdout: JSON.stringify(JOB) }, model: { isAnswered: true, text: 'verdict', usage: USAGE } })
+      const h = host(on, { prompt: [JOB], model: { isAnswered: true, text: 'verdict', usage: USAGE } })
       await typed($, kind)
-      expect(h.take.started).toBe(1)
+      expect(h.outcomes).toEqual(['answered'])
       expect(h.models.length).toBe(1)
       expect(h.answers).toEqual([{ text: 'verdict', usage: USAGE }])
     })
   }
 
-  test('the session id is registered as judge host once, before its first prompt', async ($, on) => {
-    const h = host(on, { take: { stdout: 'standby' } })
+  // The prompt and state lanes run as parallel settings hooks, and each
+  // writes its own job: the second is claimed while the first is judged.
+  test('two jobs written at once are both claimed within the window and judged', async ($, on) => {
+    const h = host(on, { prompt: [JOB, JOB_2], model: VERDICT, modelMs: CLAIM_MS + 200 })
+    await typed($)
+    expect(h.outcomes).toEqual(['answered', 'answered'])
+    expect(h.models.length).toBe(2)
+  })
+
+  test('the session id is registered as judge host once, before its first take', async ($, on) => {
+    const h = host(on, { standby: true })
     await typed($)
     await typed($)
+    await $.tool.call({ tool: 'Bash', command: 'ls' })
     const hosts = h.argvs.filter(a => a.slice(1, 3).join(' ') === 'judge host')
     expect(hosts.length).toBe(1)
     expect(h.argvs.findIndex(a => a.slice(1, 3).join(' ') === 'judge host')).toBeLessThan(
       h.argvs.findIndex(a => a.slice(1, 3).join(' ') === 'judge take'),
     )
-    expect(h.take.started).toBe(2)
+    expect(h.take.started).toBe(3)
+  })
+})
+
+describe('the tool lanes: a job from a tool call is judged', () => {
+  test('a Bash call whose PreToolUse hook writes a job has it claimed, judged and answered', async ($, on) => {
+    const h = host(on, { pre: [JOB], model: VERDICT })
+    const r = await $.tool.call({ tool: 'Bash', command: 'git status' })
+    expect(r.deny).toBeUndefined()
+    expect(h.outcomes).toEqual(['answered'])
+    expect(h.models.length).toBe(1)
+    expect(h.answers).toEqual([{ text: '{"judgements":[]}', usage: USAGE }])
+    expect(h.argvs).toContainEqual(takeArgv(ID))
+  })
+
+  test("a subagent's call is served under the session's id", async ($, on) => {
+    const h = host(on, { pre: [JOB], model: VERDICT })
+    await $.tool.call({ tool: 'Edit', file_path: '/p/a.rs', old_string: 'a', new_string: 'b', agentId: 'a1' } as never)
+    expect(h.outcomes).toEqual(['answered'])
+    expect(h.models.length).toBe(1)
+    expect(h.argvs).toContainEqual(takeArgv(ID))
+  })
+
+  test('a job before the tool runs and one after it are each judged', async ($, on) => {
+    const h = host(on, { pre: [JOB], post: [JOB_2], model: VERDICT })
+    await $.tool.call({ tool: 'Bash', command: 'git status' })
+    expect(h.outcomes).toEqual(['answered', 'answered'])
+    expect(h.models.map(m => (m as { prompt: string }).prompt)).toEqual([JOB.prompt, JOB_2.prompt])
+  })
+
+  test('a call that writes no job stops its take once the call settles', async ($, on) => {
+    const h = host(on, {})
+    await $.tool.call({ tool: 'Read', file_path: '/p/a.rs' } as never)
+    expect(h.take.started).toBe(1)
+    expect(h.take.stopped).toBe(1)
+    expect(h.models.length).toBe(0)
   })
 })
 
 describe('no job: no model call', () => {
   test('standby calls no model and writes no answer', async ($, on) => {
-    const h = host(on, { take: { stdout: 'standby' }, model: { isAnswered: true, text: 'x', usage: USAGE } })
+    const h = host(on, { standby: true, model: VERDICT })
     await typed($)
-    expect(h.take.ended).toBe(1)
+    expect(h.take.started).toBe(1)
     expect(h.models.length).toBe(0)
     expect(h.answers.length).toBe(0)
   })
@@ -180,18 +275,22 @@ describe('no job: no model call', () => {
   })
 
   test('a failed host registration starts no take', async ($, on) => {
-    const h = host(on, { hostFails: true, noScan: true, take: { stdout: JSON.stringify(JOB) }, model: { isAnswered: true, text: 'x', usage: USAGE } })
+    const h = host(on, { hostFails: true, prompt: [JOB], pre: [JOB], model: VERDICT })
     await typed($)
+    await $.tool.call({ tool: 'Bash', command: 'ls' })
     expect(h.take.started).toBe(0)
     expect(h.models.length).toBe(0)
+    expect(h.outcomes).toEqual(['unclaimed', 'unclaimed'])
   })
 })
 
 describe('the parts', () => {
-  test('parseTake reads a job, standby, and neither', () => {
+  test('parseTake reads a job, standby, nothing, and a failure', () => {
     expect(parseTake(JSON.stringify(JOB), 0)).toEqual({ kind: 'job', job: JOB })
     expect(parseTake('standby\n', 0)).toEqual({ kind: 'standby' })
+    expect(parseTake('', 0)).toEqual({ kind: 'idle' })
     expect(parseTake('', 1).kind).toBe('none')
+    expect(parseTake('', null).kind).toBe('none')
     expect(parseTake('{"model":"x"}', 0).kind).toBe('none')
     expect(parseTake('not json', 0).kind).toBe('none')
   })
@@ -209,8 +308,8 @@ describe('the parts', () => {
 describe('what the mod hooks reaches it on every host', () => {
   test('no hook is on an event an organization\'s policy plugin passes over, and none is classic', () => {
     const regs = registrationsOf(register as never)
-    // The recording saw the module's hook: the control for the empty lists below.
-    expect(regs.map(r => r.pattern)).toEqual(['prompt.submit'])
+    // The recording saw the module's hooks: the control for the empty lists below.
+    expect(regs.map(r => r.pattern)).toEqual(['prompt.submit', 'tool.call'])
     expect(regs.filter(r => r.pattern.startsWith('classic.'))).toEqual([])
     expect(passedOverHits(regs)).toEqual([])
   })
