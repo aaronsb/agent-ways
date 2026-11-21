@@ -590,7 +590,7 @@ mod tests {
         let gate = &dump["summary"]["gate"];
         assert_eq!((gate["judged"].as_u64(), gate["would_block"].as_u64(), gate["blocked"].as_u64()), (Some(0), Some(0), Some(0)), "{gate}");
         assert!(gate["fallbacks"].as_object().is_none_or(|f| f.is_empty()), "{gate}");
-        assert_eq!(dump["summary"]["total_fires"].as_u64().or(dump["summary"]["fires"].as_u64()), Some(1), "{}", dump["summary"]);
+        assert_eq!(dump["summary"]["total_fires"].as_u64(), Some(1), "{}", dump["summary"]);
     }
 
     /// `replay --json` marks each way with its outcome and P(yes);
