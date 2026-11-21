@@ -237,6 +237,14 @@ impl Sim {
 
 impl Drop for Sim {
     fn drop(&mut self) {
+        // A failed scenario prints its events, a gate's fallback reason
+        // among them, before the tree that holds them goes.
+        if std::thread::panicking() {
+            let events = std::fs::read_to_string(self.state.join("agent-ways/events.jsonl")).unwrap_or_default();
+            for line in events.lines() {
+                eprintln!("{}: {line}", self.session);
+            }
+        }
         let _ = std::fs::remove_dir_all(format!("{}/{}", sessions_root(), self.session));
         let _ = std::fs::remove_dir_all(&self.base);
     }
@@ -262,22 +270,34 @@ impl HostEnv {
     }
 }
 
+/// Takes one job as the mod does, waiting up to 10 s; the job, or `None`
+/// when none came. A take that got none says how long it waited, what it
+/// printed and how it exited, for a failed scenario's output.
+fn take_job(env: &HostEnv) -> Option<serde_json::Value> {
+    let begun = Instant::now();
+    let out = env.ways().args(["judge", "take", "--session", &env.session, "--wait", "--timeout-ms", "10000"]).output().unwrap();
+    let line = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if line.is_empty() || line == "standby" {
+        eprintln!(
+            "judge host: no job after {:?}: stdout {line:?}, {}, stderr {:?}",
+            begun.elapsed(),
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+        return None;
+    }
+    Some(serde_json::from_str(&line).unwrap())
+}
+
 /// Takes one job and never answers it, as a host that hangs would; the job's
 /// prompt, or `None` when no job came within 10 s.
 fn take_silently(env: &HostEnv) -> Option<String> {
-    let out = env.ways().args(["judge", "take", "--session", &env.session, "--wait", "--timeout-ms", "10000"]).output().unwrap();
-    let line = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    (!line.is_empty() && line != "standby").then(|| serde_json::from_str::<serde_json::Value>(&line).unwrap()["prompt"].as_str().unwrap().to_string())
+    take_job(env).map(|job| job["prompt"].as_str().unwrap().to_string())
 }
 
 /// Takes one job and answers it; `None` when no job came within 10 s.
 fn answer_one(env: &HostEnv) -> Option<String> {
-    let out = env.ways().args(["judge", "take", "--session", &env.session, "--wait", "--timeout-ms", "10000"]).output().unwrap();
-    let line = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if line.is_empty() || line == "standby" {
-        return None;
-    }
-    let job: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let job = take_job(env)?;
     let prompt = job["prompt"].as_str().unwrap().to_string();
     let mut judgements = Vec::new();
     for (i, block) in prompt.split("<guidance id=\"g").skip(1).enumerate() {
