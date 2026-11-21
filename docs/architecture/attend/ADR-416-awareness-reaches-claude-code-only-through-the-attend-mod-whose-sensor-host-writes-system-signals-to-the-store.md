@@ -64,6 +64,15 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "Keep Stop-hook drain (Recommended)"
+    via: session 2026-11-21, question tool, option (a) of the turn-end probe
+    covers: [turn-end]
+  - operator: aaronsb
+    said: "Version only (Recommended)"
+    via: session 2026-11-21, question tool, option (a) of the dormant-footer probe
+    covers: [dormant footer]
 status: proposed
 date: 2026-11-21
 deciders:
@@ -126,7 +135,7 @@ The operator set the direction: awareness is furnished through the mod, and a se
    - The envelope gains a third `from_kind`, `system`, for what attend itself writes. `from` is `system:<sensor>` and `from_id` is the sensor's name. Readers render it as a line from attend, not from a person or agent. ADR-401 is a spec. It is edited to match once this record is accepted, and names this record in `decided_by`.
    - A system signal carries its lane and, on the event lane, an expiry. Two tags join ADR-401's fenced set: `lane:` and `expires:`.
    - The lane rule from ADR-136, as ADR-403 §3a states it, has no exception. Words a person or agent composed ride the message lane. A sensor whose items carry an author, such as chat read through an MCP server, names it with `author`. Everything else rides the event lane, whether the environment or attend itself produced it.
-   - An event-lane signal never starts a turn. It reaches the model with the next delivery, the operator's next prompt or the turn's end, whichever the turn-end probe settles. The drain drops it unread once it expires. The expiry is the sensor's decay window, one hour unless the file sets `expires`. The host applies the event lane's salience, refractory period and rate governor before it writes, as `attend run` did before it printed. A message-lane system signal wakes under the same gate as an addressed message.
+   - An event-lane signal never starts a turn. It reaches the model at the end of the turn in progress through the Stop-hook drain, or with the next waking delivery or the operator's next prompt, whichever comes first. The drain drops it unread once it expires. The expiry is the sensor's decay window, one hour unless the file sets `expires`. The host applies the event lane's salience, refractory period and rate governor before it writes, as `attend run` did before it printed. A message-lane system signal wakes under the same gate as an addressed message.
    - Keepwarm's lane exception goes. Its wake is not a signal: the mod runs `attend keepwarm check` and submits the line itself (ADR-406 item 13, ADR-414). So the shipped `keepwarm.yaml`, which existed only for `attend run`, and the `lane_exception` field are removed.
 
 5. **What the host runs, and what leaves.** The host keeps git, processes, context, and the presence half of peers: a session appearing or leaving, on the event lane. The peers sensor's message scanning goes, because the drain carries messages. This settles #139's split for Claude Code. The disclosure sensor and `disclosures/messaging.md` go, because the mod's preamble cadence covers what they re-printed (ADR-406 item 4).
@@ -181,7 +190,7 @@ The operator set the direction: awareness is furnished through the mod, and a se
    - **Once per session.** ADR-403's `on: enters` over `where` does not give this alone. Trigger memory persists across restarts and is keyed by sensor and project, so a second session would never fire. A fresh store's first poll sets a baseline and fires nothing, so a session that starts behind would not fire either. Two fields are added to the spec. `memory: session` holds the trigger's memory in the host's process. It starts empty and has no baseline, so `enters` fires on the first poll whose result meets `where`, and never again in that host's life. Since the host lives as long as the session, that is once per session. `expires: session` keeps the notice until the session reads it, so the notice does not lapse with the one-hour event expiry. Both fields are allowed on any trigger.
    - **Cadence.** Each listening session checks once at start and says it once. Several sessions each saying it is the intended cadence, as with Claude Code's own update notice. There is no machine-wide cache and no daily sentinel. Concurrent fetches in one app source can collide on git's ref lock. A session whose fetch loses compares against the last fetched target, which is the same release unless one landed in between.
 
-7. **The footer reads the binary.** `ways show core` prints `_Ways version: <version>_` from the `ways` binary's own version. `git_version`, `update_status_text`, `render_update_status` and `dirty_status_text` in `show/metrics.rs` go, with the git-describe parsing that serves them. Whether the footer also carries the update notice in a dormant session is the dormant-footer probe. Until it is answered, the footer shows the version only and makes no network call.
+7. **The footer reads the binary.** `ways show core` prints `_Ways version: <version>_` from the `ways` binary's own version. `git_version`, `update_status_text`, `render_update_status` and `dirty_status_text` in `show/metrics.rs` go, with the git-describe parsing that serves them. The footer shows the version only and makes no network call, in every session. A dormant session learns of a release from `ways status` or `ways manage update --what-if` when asked.
 
 8. **Per-session sensor state.** The store and trigger memory of a sensor that uses `memory: store`, the default, are keyed by sensor, project and session, not by sensor and project. Each report goes to one session, so what a sensor last saw is what that session was told. A session's move after `/clear` carries its stores with it, as it carries membership. Two sessions in one project keep separate stores and each hears a change once.
 
@@ -191,22 +200,17 @@ The operator set the direction: awareness is furnished through the mod, and a se
 2. **Spec.** In `tools/sensor-spec`, add the trigger fields `memory` (`store` or `session`) and `expires` (seconds or `session`). Remove `lane_exception`, and its reader in `tools/attend-config/src/sensors.rs`. Key stores by session in `tools/attend/src/sensors/hosted.rs`.
 3. **Host.** Add `attend sensor host --session --cwd`, built from the parts of `cmd/run/` that item 5 keeps. It runs crate, `command` and `mcp` sensors, which is ADR-403's slice 2, and writes system signals. `attend sensor poll` and `fire` deliver through the same writer.
 4. **Mod.** In `plugins/attend/hooks/register.tsx` and `lib.ts`, spawn the host on activation, end it on `listen off`, respawn it on a settled move and after an unexpected exit, and turn a stdout line into a forced tick. Extend `plugins/attend/tests/`.
-5. **Delivery.** Teach the drain that event-lane system signals do not wake and expire. Then settle the turn-end probe (below) and change the mod or the Stop hook to match.
+5. **Delivery.** Teach the drain that event-lane system signals do not wake and expire. Keep the Stop-hook drain (ADR-172) as the mod's turn-end conduit, and limit it to sessions the mod enrolled (`--host mod`).
 6. **Update check.** Add `--json` to `ways manage update --what-if` (`tools/ways-cli/src/cmd/update/`), leaving notes out in that mode. Ship `attend/sensors/ways-update.yaml`. Change the footer in `tools/ways-cli/src/cmd/show/mod.rs` and `metrics.rs`.
 7. **Delete the legacy update hook.** Remove `hooks/check-config-updates.sh`, its SessionStart entry in `settings.json`, its entry in `PROJECTED_FILES` (`tools/ways-cli/src/cmd/manifest.rs`), with the single-file projection kind if nothing else uses it, so repair withdraws the link from existing installs. Remove its fixtures in `tools/ways-cli/src/cmd/reconcile.rs`, `tests/hooks-test.sh` and `tests/installer-report-test.sh`.
 8. **Delete the Monitor path.** Remove the `Run` command in `tools/attend/src/cli.rs` and what item 5 lists from `cmd/run/` and `emit/`. Remove `attend/sensors/keepwarm.yaml`, `disclosure.yaml`, the disclosure sensor and `disclosures/messaging.md`, and the peers sensor's message scanning. Remove the run's enrollment lock and its registration in `attend-presence` and `attend-instances`. Update `tests/make-targets-test.sh`.
 9. **Guidance.** Remove step 2 and the Monitor sections of `skills/attend/SKILL.md`, so that `/attend` calls `attend_listen` or says the mod is not loaded and how to enable it. Remove the "Without the mod" section and the `attend run` lines of `hooks/ways/softwaredev/environment/attend/attend.md` and its `macro.sh`. The synchronized copies drop from three to two. Rewrite or delete the `attend run` pages under `docs/attend-and-monitor/`, `docs/cli/attend.md`, `docs/cognitive-loop.md` and `docs/explanation/attend-messaging/`, and the `Makefile` help line.
 10. **Records.** On acceptance, edit with dated notes: ADR-406 items 2, 9, 11 and 13 and its Consequences, where they keep Monitor; ADR-403 §3, §3a and §3b; ADR-136 item 1's lane sentence; ADR-182's Decision, which describes a sensor under `attend run`.
 
-### Open questions
+### Settled questions
 
-- **Turn-end delivery (probe *turn-end*).** The Stop hook continues the operator's turn with whatever is pending, waking or not. Without it, the mod delivers at a turn's end only what would wake the session, as a new turn 250 ms later, and attaches pending items to the operator's prompt only after a lapsed cache. Non-waking `#open` posts and event-lane reports would wait for the next waking delivery. Options:
-  - (a) Keep the Stop-hook drain as the mod's turn-end conduit, delivering only to a session the mod enrolled (`--host mod`).
-  - (b) Remove it. The mod attaches everything pending to each operator prompt, and its turn-end tick stays as it is.
-  - (c) Remove it once the mod can continue a turn itself. The 2.1.329 types show a `turn.step` hook, but whether a plugin can add a step to a turn is not verified.
-- **Dormant footer (probe *dormant-footer*).** Showing the notice in a dormant session means `ways show core` runs the check, a fetch bounded by a timeout, at every session start, and a listening session would then hear it twice unless the footer skips sessions that will listen. Options:
-  - (a) Version only. A dormant session learns of a release from `ways status` or `ways manage update --what-if` when asked.
-  - (b) The footer runs the check in sessions that start dormant.
+- **Turn-end delivery (probe *turn-end*).** The Stop-hook drain stays as the mod's turn-end conduit. It continues the operator's turn with whatever is pending, waking or not, and delivers only to a session the mod enrolled (`--host mod`). Without it, the mod would deliver at a turn's end only what would wake the session, and non-waking `#open` posts and event-lane reports would wait for the next waking delivery. Removing the drain once the mod can continue a turn itself (a `turn.step` hook exists in the 2.1.329 types, unverified for plugins) stays possible later and is not part of this decision.
+- **Dormant footer (probe *dormant footer*).** The footer shows the version only, in every session, and makes no network call. A dormant session learns of a release when asked, from `ways status` or `ways manage update --what-if`. Running the check in the footer would add a fetch to every session start and a second notice in sessions that go on to listen.
 
 ## Consequences
 
