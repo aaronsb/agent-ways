@@ -19,7 +19,7 @@ use crate::{frontmatter, session};
 use helpers::{extract_attend_signals, check_sections_text, run_macro, MacroRun};
 pub(crate) use helpers::{is_executable, is_project_trusted};
 use crate::frontmatter::body_text;
-use metrics::{compute_tree_metrics, count_siblings, git_version, dirty_status_text, update_status_text};
+use metrics::{compute_tree_metrics, count_siblings, update_status_text};
 
 // ── ways show way ───────────────────────────────────────────────
 
@@ -1064,6 +1064,16 @@ pub fn check_within(
 
 // ── ways show core ──────────────────────────────────────────────
 
+/// The footer of the session preamble: the version the running binary
+/// carries, as `ways --version` prints it. It reads no file and runs no
+/// command.
+///
+/// References:
+/// - ADR-416 item 7: the footer shows the binary's version and nothing else.
+fn version_footer() -> String {
+    format!("\n---\n_Ways version: {}_", crate::LONG_VERSION)
+}
+
 pub fn core(session_id: &str) -> Result<String> {
     let ways_dir = crate::paths::projected_ways_root();
     let mut output = String::new();
@@ -1098,15 +1108,10 @@ pub fn core(session_id: &str) -> Result<String> {
     }
 
     // Version info
-    let claude_dir = crate::paths::projection_root();
-    let version = git_version(&claude_dir);
-    output.push_str(&format!("\n---\n_Ways version: {version}_"));
+    output.push_str(&version_footer());
 
     // Update status from cache
     output.push_str(&update_status_text());
-
-    // Dirty file enumeration
-    output.push_str(&dirty_status_text(&claude_dir));
 
     // Stamp core marker
     session::stamp_core(session_id);
@@ -1180,6 +1185,16 @@ fn normalize_way_id(id: &str) -> String {
 mod tests {
     use super::*;
     use ways_core::context_window::WindowSource;
+
+    /// The footer names the version the binary was built with, exactly as
+    /// `ways --version` prints it, and never `unknown`.
+    #[test]
+    fn the_footer_carries_the_binary_version() {
+        let footer = version_footer();
+        assert_eq!(footer, format!("\n---\n_Ways version: {}_", crate::LONG_VERSION));
+        assert!(footer.contains(env!("CARGO_PKG_VERSION")));
+        assert!(!footer.contains("unknown"));
+    }
 
     fn ctx(tokens_total: u64, window_source: WindowSource) -> crate::cmd::context::ContextInfo {
         crate::cmd::context::ContextInfo {
