@@ -202,6 +202,14 @@ impl Store {
         Ok(None)
     }
 
+    /// Puts claimed job `id` back as pending, so the next take claims it:
+    /// for a taker stopped between its claim and handing the job over.
+    /// The rename keeps the file's age, so its staleness is unchanged.
+    pub fn release(&self, id: &str) -> io::Result<()> {
+        let dir = self.jobs();
+        std::fs::rename(dir.join(format!("{id}.taken")), dir.join(format!("{id}.json")))
+    }
+
     /// Stores the host's answer to job `id`, the id `take` printed.
     pub fn answer(&self, id: &str, answer: &JudgeAnswer) -> Result<(), AnswerError> {
         let dir = self.jobs();

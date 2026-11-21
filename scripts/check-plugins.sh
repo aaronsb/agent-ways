@@ -105,6 +105,27 @@ for copy in plugins/*/tests/passed-over.ts; do
 done
 echo "hooks: $mods mod(s) test their hooks against the events the policy plugin passes over"
 
+# The ways-judge mod hooks tool.call only for the tools whose settings hooks
+# run a judged lane (a script that calls `ways_hook` for one of those lanes),
+# since a hook on a tool turns off its move to the background. Its list is
+# held to settings.json's PreToolUse, PostToolUse and PostToolUseFailure
+# matchers; settings.json names the Agent tool by its former name, Task.
+command -v jq >/dev/null || fail "jq is not on PATH; it reads settings.json's tool hooks"
+judged_lanes='file|command|task|tool|post-tool'
+want=""
+while IFS=$'\t' read -r matcher cmd; do
+  script="hooks/ways/${cmd##*/}"
+  [[ -f "$script" ]] && grep -qE "^ways_hook ($judged_lanes)\$" "$script" || continue
+  want+="${matcher//|/$'\n'}"$'\n'
+done < <(jq -r '.hooks | to_entries[] | select(.key == "PreToolUse" or .key == "PostToolUse" or .key == "PostToolUseFailure")
+  | .value[] | .matcher as $m | .hooks[] | "\($m)\t\(.command)"' settings.json)
+want="$(printf '%s' "$want" | sed 's/^Task$/Agent/' | grep -v '^$' | sort -u | tr '\n' ' ')"
+[[ -n "$want" ]] || fail "settings.json has no tool hook that runs a judged lane; the check reads nothing"
+have="$(grep -oE "^export const JUDGED_TOOLS = \[[^]]*\]" plugins/ways-judge/hooks/lib.ts | grep -oE "'[^']+'" | tr -d "'" | sort -u | tr '\n' ' ')"
+[[ -n "$have" ]] || fail "plugins/ways-judge/hooks/lib.ts has no JUDGED_TOOLS on one line"
+[[ "$want" == "$have" ]] || fail "the ways-judge mod hooks tool.call for [ $have] but settings.json's judged tool hooks match [ $want]; change JUDGED_TOOLS in plugins/ways-judge/hooks/lib.ts"
+echo "tools: the ways-judge mod hooks the tools settings.json judges: $have"
+
 command -v claude >/dev/null || fail "claude is not on PATH"
 
 # 2. and 3.

@@ -200,6 +200,20 @@ impl Choice {
             Choice::Off => "No judge: gate off; every matched way is injected, quality drops",
         }
     }
+
+    /// What the choice costs beyond its label, shown under it: the mod's
+    /// hook on the judged tools turns off what Claude Code carries past a
+    /// tool hook, whichever engine judges, for as long as it is installed.
+    fn cost(self) -> &'static [&'static str] {
+        match self {
+            Choice::ClaudeCode => &[
+                "While it is installed, a running Bash or Agent call cannot move to",
+                "the background (Ctrl+B, or a Bash command at its timeout), and the",
+                "tools the gate judges show no live output while they run.",
+            ],
+            _ => &[],
+        }
+    }
 }
 
 /// The choices in the order ADR-708 §9 sets: Claude Code internal where the
@@ -222,6 +236,9 @@ fn menu(choices: &[Choice]) -> String {
     let mut text = String::from("Choose the relevance judge's engine:\n");
     for (i, c) in choices.iter().enumerate() {
         text.push_str(&format!("  [{}] {}\n", i + 1, c.label()));
+        for line in c.cost() {
+            text.push_str(&format!("      {line}\n"));
+        }
     }
     text.push_str(&format!("Choice [1-{}, s to skip]: ", choices.len()));
     text
@@ -495,6 +512,9 @@ mod tests {
         for line in menu(&all).lines() {
             assert!(line.chars().count() <= 80, "{line:?}");
         }
+        // Claude Code internal says what the mod's tool hook costs.
+        assert!(menu(&all).contains("cannot move to\n      the background"), "{}", menu(&all));
+        assert!(!menu(&no_mods).contains("background"));
     }
 
     #[test]

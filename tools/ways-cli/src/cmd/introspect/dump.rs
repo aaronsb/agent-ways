@@ -577,6 +577,22 @@ mod tests {
         assert!(gate["gate_ms_p50"].is_null(), "{gate}");
     }
 
+    /// Under claude-code a shadow tool lane starts no detached judge and logs
+    /// `judge_detach_skipped` once: the summary counts the fire and no
+    /// verdict, and the skip is no fallback.
+    #[test]
+    fn the_summary_counts_a_skipped_detached_judge_as_neither_verdict_nor_fallback() {
+        let log = concat!(
+            r#"{"event":"way_fired","session":"dump-skip","ts":"2026-01-01T00:00:00Z","way":"d/a","trigger":"command"}"#, "\n",
+            r#"{"event":"judge_detach_skipped","session":"dump-skip","ts":"2026-01-01T00:00:00Z","reason":"claude-code engine has no host outside a hook","candidates":"1","lane":"command","agent_id":"main"}"#, "\n",
+        );
+        let dump = serde_json::to_value(build_dump(log, "dump-skip", false).unwrap()).unwrap();
+        let gate = &dump["summary"]["gate"];
+        assert_eq!((gate["judged"].as_u64(), gate["would_block"].as_u64(), gate["blocked"].as_u64()), (Some(0), Some(0), Some(0)), "{gate}");
+        assert!(gate["fallbacks"].as_object().is_none_or(|f| f.is_empty()), "{gate}");
+        assert_eq!(dump["summary"]["total_fires"].as_u64(), Some(1), "{}", dump["summary"]);
+    }
+
     /// `replay --json` marks each way with its outcome and P(yes);
     /// `--matched` adds the ways the judge blocked.
     #[test]

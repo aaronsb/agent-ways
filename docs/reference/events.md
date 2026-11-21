@@ -162,6 +162,17 @@ The gate could not judge, so nothing was blocked. The gate fails open.
 | `gate_ms`, `candidates` | Gate latency and ways that went unjudged |
 | `hook`, `scope`, `project`, `session` | Common fields |
 
+### `judge_detach_skipped`
+
+Written once per session, the first time a lane would have started a detached judge (a tool lane in shadow mode, or the `gate.held_sample` share of held candidates) while the session judges on the Claude Code internal engine. That engine's host claims jobs only while a hook runs, so no detached judge starts and those verdicts are not recorded. A key engine starts the detached judge as usual. In `decisions.jsonl` a shadow tool lane's record then carries judge status `detach_skipped` in place of `detached`: no detached record with verdicts follows it.
+
+| Field | Meaning |
+|-------|---------|
+| `reason` | `claude-code engine has no host outside a hook` |
+| `candidates` | Ways the first skipped judge would have judged |
+| `lane`, `agent_id` | The lane and the calling agent |
+| `session` | Common field |
+
 ### `gate_capped`
 
 Written by older releases when more ways matched than the profile's `max_candidates` (default 8) and the rest went unjudged. The gate now judges every candidate in further requests, so a current log has none.

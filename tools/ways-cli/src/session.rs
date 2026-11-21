@@ -691,6 +691,14 @@ pub fn first_suppression_for(session_id: &str, agent: &str) -> bool {
     std::fs::OpenOptions::new().write(true).create_new(true).open(&marker).is_ok()
 }
 
+/// Whether this call is the session's first to set the marker `name`, so a
+/// line that would repeat on every hook is logged once per session.
+pub fn first_mark(session_id: &str, name: &str) -> bool {
+    let marker = session_dir(session_id).join("marks").join(name);
+    ensure_parent(&marker);
+    std::fs::OpenOptions::new().write(true).create_new(true).open(&marker).is_ok()
+}
+
 /// Check if a way's scope field matches the current scope.
 pub fn scope_matches(scope_field: &str, current_scope: &str) -> bool {
     if scope_field.is_empty() {

@@ -3,9 +3,11 @@
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
 // The ways-judge mod's plain parts: the ways CLI's argv, what `ways judge
-// take` prints, and the answer `ways judge answer` reads (ADR-708 §4, §5).
-// The shapes mirror JudgeJob and JudgeAnswer in
-// tools/ways-agent-core/src/protocol.rs.
+// take` prints, and the answer `ways judge answer` reads. The shapes mirror
+// JudgeJob and JudgeAnswer in tools/ways-agent-core/src/protocol.rs.
+//
+// References:
+// - ADR-708 §4, §5: the job and answer the verbs carry.
 
 import type { ModelCompleteRequest, ModelCompleteResult, ModelUsage } from 'claude-code'
 
@@ -16,8 +18,9 @@ export function hostArgv(id: string): string[] {
   return [WAYS, 'judge', 'host', '--session', id]
 }
 
-/** How long a take may wait: the prompt hook's own timeout, so a take whose
- *  stop was missed cannot outlive the prompt that started it. */
+/** How long one take may wait: the prompt hook's own timeout, so a take
+ *  whose stop was missed cannot outlive the event that started it by more.
+ *  The mod starts another while the event's `next(e)` still runs. */
 export const TAKE_WAIT_MS = 30_000
 
 /** Waits for the session's next job; prints it, or `standby`. */
@@ -32,10 +35,19 @@ export function answerArgv(id: string, job?: string): string[] {
   return job ? [...argv, '--job', job] : argv
 }
 
+/** The tools whose settings hooks run a judged lane, as settings.json's
+ *  PreToolUse, PostToolUse and PostToolUseFailure matchers name them for
+ *  the file, Bash, task, tool and post-tool lanes. settings.json says
+ *  `Task`, the Agent tool's former name, which its matchers still reach.
+ *  scripts/check-plugins.sh holds this list to settings.json. */
+export const JUDGED_TOOLS = ['Agent', 'Bash', 'Edit', 'EnterPlanMode', 'ExitPlanMode', 'WebFetch', 'Workflow', 'Write'] as const
+
 /** How long the host and answer verbs may run. Each is a file write. */
 export const VERB_TIMEOUT_MS = 5_000
 
-/** How long stopping `take` may hold the prompt once `next(e)` settled. */
+/** The longest the hook waits, once `next(e)` settled, for the take it
+ *  stopped to end. Past it the hook returns; a job the take still hands
+ *  over is judged apart from the hook. */
 export const STOP_GRACE_MS = 3_000
 
 /** A judge request, as `ways judge take` prints it. */
@@ -56,12 +68,20 @@ export type JudgeAnswer = {
   reason?: string
 }
 
-export type Take = { kind: 'job'; job: JudgeJob } | { kind: 'standby' } | { kind: 'none'; why: string }
+export type Take = { kind: 'job'; job: JudgeJob } | { kind: 'standby' } | { kind: 'idle' } | { kind: 'none'; why: string }
 
-/** What `take` printed and how it exited: a job, `standby`, or neither. */
+/** What `take` printed and how it exited: a job, `standby`, nothing (its
+ *  wait ran out with no job, or it was stopped), or a failure. A take
+ *  stopped or killed after it printed a whole job line claimed that job,
+ *  so the job is handed over whatever the exit. */
 export function parseTake(stdout: string, code: number | null): Take {
   const out = stdout.trim()
-  if (code !== 0) return { kind: 'none', why: `take exited ${code ?? 'on a signal'}` }
+  if (code !== 0) {
+    const line = stdout.includes('\n') ? stdout.slice(0, stdout.indexOf('\n')) : undefined
+    const job = line === undefined ? undefined : jobOf(line)
+    return job ? { kind: 'job', job } : { kind: 'none', why: `take exited ${code ?? 'on a signal'}` }
+  }
+  if (out === '') return { kind: 'idle' }
   if (out === 'standby') return { kind: 'standby' }
   let v: unknown
   try {
@@ -70,6 +90,16 @@ export function parseTake(stdout: string, code: number | null): Take {
     return { kind: 'none', why: `take printed neither a job nor standby: ${out.slice(0, 80)}` }
   }
   return isJob(v) ? { kind: 'job', job: v } : { kind: 'none', why: 'take printed a job without its fields' }
+}
+
+/** The job a line holds, if it parses as one. */
+function jobOf(line: string): JudgeJob | undefined {
+  try {
+    const v: unknown = JSON.parse(line)
+    return isJob(v) ? v : undefined
+  } catch {
+    return undefined
+  }
 }
 
 function isJob(v: unknown): v is JudgeJob {
@@ -98,6 +128,3 @@ export function answerOf(r: ModelCompleteResult): JudgeAnswer {
 /** The answer for a call the engine refused to send (a blocked model, a
  *  cap or a time limit it does not take). */
 export const REFUSED: JudgeAnswer = { reason: 'error' }
-
-/** The answer for a job claimed after the prompt went on. */
-export const ABORTED: JudgeAnswer = { reason: 'aborted' }

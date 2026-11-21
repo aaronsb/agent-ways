@@ -155,6 +155,10 @@ pub(super) struct Judged {
     detach_open: bool,
     /// The held candidates sampled for the detached judge.
     held: Vec<Candidate>,
+    /// The session judges on the claude-code engine, read once per scan
+    /// when anything would go to the detached judge: the record's judge
+    /// status and whether a detached judge starts both follow it.
+    unhosted: bool,
 }
 
 impl Judged {
@@ -171,7 +175,7 @@ pub(super) fn judge(lane: &Lane, scan: &Scan, candidates: &[Candidate], turns: V
     let sink = &crate::session::log_event;
     let log = lane.log(sink);
     let config = if turns.is_empty() || candidates.is_empty() { Config::Off } else { scan.config };
-    judge_with(config, candidates, turns, |pending, turns| gate::apply(pending, turns, wait, &log))
+    judge_with(config, candidates, turns, || gate::unhosted_engine(&lane.session_id), |pending, turns| gate::apply(pending, turns, wait, &log))
 }
 
 /// The three stages on one lane's `candidates`, in the lane's order: the
@@ -235,33 +239,49 @@ pub(crate) fn post_tool(session_id: &str, project_dir: &str, hook_event: &str, t
     run(&lane, &scan, &candidates, || tool_turns(session_id, &call), gate::TOOL_WAIT, |c| show(&c.key));
 }
 
-/// [`judge`] with the setting and the gate given, so a test can stand in a
-/// judge.
+/// [`judge`] with the setting, the engine check and the gate given, so a
+/// test can stand in a judge. `unhosted` is asked once, and only when
+/// something would go to the detached judge: an open candidate in shadow
+/// mode, or a sampled held one, read after the judge in enforce mode. Under
+/// claude-code no detached judge will start; the record says so, and
+/// [`detach`] follows the same reading.
 pub(super) fn judge_with(
     config: Config,
     candidates: &[Candidate],
     turns: Vec<Turn>,
+    unhosted: impl FnOnce() -> bool,
     apply: impl FnOnce(&[Pending<'_>], Vec<Turn>) -> Gate,
 ) -> Judged {
-    let (gate, detach_open, rate) = match config {
-        Config::Off => return Judged { gate: Gate::default(), turns, detach_open: false, held: Vec::new() },
-        Config::Shadow { held_sample } => {
+    let rate = match config {
+        Config::Off => return Judged { gate: Gate::default(), turns, detach_open: false, held: Vec::new(), unhosted: false },
+        Config::Shadow { held_sample } | Config::Enforce { held_sample } => held_sample,
+    };
+    let held: Vec<Candidate> = candidates.iter().filter(|c| !c.open && sampled(rate, &c.key)).cloned().collect();
+    let (gate, detach_open, unhosted) = match config {
+        Config::Off => unreachable!("returned above"),
+        Config::Shadow { .. } => {
             let any_open = candidates.iter().any(|c| c.open);
-            let status = if any_open { gate::Status::Detached } else { gate::Status::Idle };
-            (Gate { status, ..Gate::default() }, any_open, held_sample)
+            let unhosted = (any_open || !held.is_empty()) && unhosted();
+            let status = match any_open {
+                false => gate::Status::Idle,
+                true if unhosted => gate::Status::DetachSkipped,
+                true => gate::Status::Detached,
+            };
+            (Gate { status, ..Gate::default() }, any_open, unhosted)
         }
-        Config::Enforce { held_sample } => {
+        Config::Enforce { .. } => {
             let pending: Vec<Pending<'_>> = candidates
                 .iter()
                 .filter(|c| c.open)
                 .map(|c| Pending { id: &c.key, description: &c.description, trigger: c.trigger })
                 .collect();
             let gate = if pending.is_empty() { Gate { status: gate::Status::Idle, ..Gate::default() } } else { apply(&pending, turns.clone()) };
-            (gate, false, held_sample)
+            // Read once the judge ran, which resolves the session's engine.
+            let unhosted = !held.is_empty() && unhosted();
+            (gate, false, unhosted)
         }
     };
-    let held = candidates.iter().filter(|c| !c.open && sampled(rate, &c.key)).cloned().collect();
-    Judged { gate, turns, detach_open, held }
+    Judged { gate, turns, detach_open, held, unhosted }
 }
 
 /// Whether `key` falls in a sample at `rate`: drawn from the clock, so each
@@ -307,7 +327,31 @@ fn finish(lane: &Lane, judged: Judged, shown: &[Shown<'_>], tick: u64) {
 /// candidates and in either mode the sampled held ones, to a `ways judge
 /// detached` process under `scan_id`, which nothing waits on.
 pub(super) fn detach(lane: &Lane, judged: Judged, shown: &[Shown<'_>], scan_id: &str) {
-    let scan_id = scan_id.to_string();
+    let session = lane.session_id.clone();
+    detach_via(
+        lane,
+        judged,
+        shown,
+        scan_id,
+        || crate::session::first_mark(&session, "judge-detach-skipped"),
+        &crate::session::log_event,
+        start_detached,
+    );
+}
+
+/// [`detach`] with the once-per-session marker, the log and the start
+/// injected, so a test can see what would start. Whether one may start is
+/// the engine `judged` was read under.
+#[allow(clippy::too_many_arguments)]
+fn detach_via(
+    lane: &Lane,
+    judged: Judged,
+    shown: &[Shown<'_>],
+    scan_id: &str,
+    first_skip: impl FnOnce() -> bool,
+    sink: gate::EventSink<'_>,
+    start: impl FnOnce(&Lane, Job, gate::EventSink<'_>),
+) {
     let mut entries: Vec<Entry> = Vec::new();
     if judged.detach_open {
         entries.extend(shown.iter().filter(|s| s.candidate.open).map(|s| Entry { candidate: s.candidate.clone(), result: s.result.to_string() }));
@@ -316,21 +360,48 @@ pub(super) fn detach(lane: &Lane, judged: Judged, shown: &[Shown<'_>], scan_id: 
     if entries.is_empty() {
         return;
     }
-    let sink = &crate::session::log_event;
+    // Under claude-code a detached job could be claimed only by a later
+    // event's take, and a take claims the oldest job first, so it would
+    // queue ahead of a hot-path job and push that one past its claim window.
+    // Nothing starts, and the session's log says so once.
+    if judged.unhosted {
+        if first_skip() {
+            let log = lane.log(sink);
+            (log.sink)(&[
+                ("event", "judge_detach_skipped"),
+                ("reason", DETACH_UNHOSTED),
+                ("candidates", &entries.len().to_string()),
+                ("lane", log.lane),
+                ("session", log.session_id),
+                ("agent_id", &crate::session::current_agent()),
+            ]);
+        }
+        return;
+    }
+    let job = Job { lane: lane.clone(), scan_id: scan_id.to_string(), agent: crate::session::current_agent(), turns: judged.turns, entries, slot: Default::default() };
+    start(lane, job, sink);
+}
+
+/// Why no detached judge starts under the claude-code engine, as
+/// `judge_detach_skipped` logs it.
+const DETACH_UNHOSTED: &str = "claude-code engine has no host outside a hook";
+
+/// Claims a slot and starts `ways judge detached` on `job`.
+fn start_detached(lane: &Lane, mut job: Job, sink: gate::EventSink<'_>) {
     let log = lane.log(sink);
     let Some(slot) = claim_slot(&slots_dir(), DETACHED_MAX) else {
         (log.sink)(&[
             ("event", "judge_detach_dropped"),
             ("reason", "cap"),
             ("cap", &DETACHED_MAX.to_string()),
-            ("candidates", &entries.len().to_string()),
+            ("candidates", &job.entries.len().to_string()),
             ("lane", log.lane),
             ("session", log.session_id),
             ("agent_id", &crate::session::current_agent()),
         ]);
         return;
     };
-    let job = Job { lane: lane.clone(), scan_id, agent: crate::session::current_agent(), turns: judged.turns, entries, slot: slot.clone() };
+    job.slot = slot.clone();
     let Ok(text) = serde_json::to_string(&job) else { return };
     let exe = match running_binary() {
         Ok(exe) => exe,
@@ -581,7 +652,8 @@ pub(super) fn detach_held(lane: &Lane, held: Vec<Candidate>, turns: Vec<Turn>, s
         Config::Enforce { held_sample } | Config::Shadow { held_sample } => held_sample,
     };
     let held: Vec<Candidate> = held.into_iter().filter(|c| sampled(rate, &c.key)).collect();
-    let judged = Judged { gate: Gate::default(), turns, detach_open: false, held };
+    let unhosted = !held.is_empty() && gate::unhosted_engine(&lane.session_id);
+    let judged = Judged { gate: Gate::default(), turns, detach_open: false, held, unhosted };
     detach(lane, judged, &[], scan_id);
 }
 
@@ -668,7 +740,7 @@ mod tests {
         let mut sent = Vec::new();
         let s = sink();
         let lc = gate::LogContext { lane: "command", session_id: "s", project_dir: "/p", scope: "agent", hook_event: "PreToolUse", sink: &s };
-        let j = judge_with(Config::Enforce { held_sample: 0.0 }, &cands, vec![], |pending, _| {
+        let j = judge_with(Config::Enforce { held_sample: 0.0 }, &cands, vec![], || false, |pending, _| {
             sent = pending.iter().map(|p| p.id.to_string()).collect();
             gate::test_gate(&[("sem/way", 0.05), ("cmd/way", 0.9)], Mode::Enforce, &lc)
         });
@@ -681,16 +753,101 @@ mod tests {
     #[test]
     fn shadow_blocks_nothing_and_hands_the_open_candidates_on() {
         let cands = [candidate("a", Trigger::Semantic, true), candidate("b", Trigger::Declared, false)];
-        let j = judge_with(Config::Shadow { held_sample: 1.0 }, &cands, vec![], |_, _| panic!("no judge on the hot path"));
+        let j = judge_with(Config::Shadow { held_sample: 1.0 }, &cands, vec![], || false, |_, _| panic!("no judge on the hot path"));
         assert!(!j.blocked("a"));
         assert!(j.detach_open && j.gate.status == gate::Status::Detached);
         assert_eq!(j.held.iter().map(|c| c.key.as_str()).collect::<Vec<_>>(), ["b"], "every held one at rate 1");
     }
 
+    /// Under claude-code no host runs outside a hook, so a held sample and a
+    /// shadow call start no detached judge, and the skip is logged once per
+    /// session. A key engine still starts one.
+    #[test]
+    fn under_claude_code_no_detached_judge_starts_and_the_skip_is_logged_once() {
+        let lane = Lane {
+            surface: decision::Surface::Command,
+            hook_event: "PreToolUse".into(),
+            scope: "agent".into(),
+            project_dir: "/p".into(),
+            session_id: "s".into(),
+        };
+        let held = [candidate("held/way", Trigger::Semantic, false)];
+        let open = [candidate("open/way", Trigger::Declared, true)];
+        let run = |unhosted: bool| {
+            let started = std::cell::RefCell::new(Vec::<usize>::new());
+            let events = std::cell::RefCell::new(Vec::<Vec<(String, String)>>::new());
+            let first = std::cell::Cell::new(true);
+            let sink = |f: &[(&str, &str)]| events.borrow_mut().push(f.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect());
+            let held_call = judge_with(Config::Enforce { held_sample: 1.0 }, &held, vec![], || unhosted, |_, _| panic!("nothing open to judge"));
+            let shadow_call = judge_with(Config::Shadow { held_sample: 0.0 }, &open, vec![], || unhosted, |_, _| panic!("no judge on the hot path"));
+            let shown = [Shown { candidate: &open[0], result: "shown" }];
+            for (j, s) in [(held_call, &[][..]), (shadow_call, &shown[..])] {
+                detach_via(&lane, j, s, "scan", || first.replace(false), &sink, |_, job, _| {
+                    started.borrow_mut().push(job.entries.len())
+                });
+            }
+            let skips: Vec<String> = events
+                .borrow()
+                .iter()
+                .filter(|e| e.iter().any(|(k, v)| k == "event" && v == "judge_detach_skipped"))
+                .map(|e| e.iter().find(|(k, _)| k == "reason").map(|(_, v)| v.clone()).unwrap_or_default())
+                .collect();
+            (started.into_inner(), skips)
+        };
+        let (started, skips) = run(true);
+        assert!(started.is_empty(), "no detached judge starts under claude-code: {started:?}");
+        assert_eq!(skips, ["claude-code engine has no host outside a hook"], "logged once for the session");
+        // The control: a key engine starts both.
+        let (started, skips) = run(false);
+        assert_eq!(started, [1, 1]);
+        assert!(skips.is_empty());
+    }
+
+    /// Shadow mode under claude-code shows every candidate and starts no
+    /// detached judge, so the record's judge status says no verdicts follow:
+    /// not `detached`, not judged, not a fallback.
+    #[test]
+    fn shadow_under_claude_code_records_detach_skipped() {
+        let cands = [candidate("a", Trigger::Semantic, true)];
+        let j = judge_with(Config::Shadow { held_sample: 0.0 }, &cands, vec![], || true, |_, _| panic!("no judge on the hot path"));
+        assert!(!j.blocked("a"));
+        assert_eq!(j.gate.status, gate::Status::DetachSkipped);
+        // With nothing open there is nothing to skip, and the engine is not asked.
+        let held = [candidate("h", Trigger::Semantic, false)];
+        let j = judge_with(Config::Shadow { held_sample: 0.0 }, &held, vec![], || panic!("not asked"), |_, _| panic!("no judge"));
+        assert_eq!(j.gate.status, gate::Status::Idle);
+    }
+
+    /// The engine is read once per scan: a record that says no detached
+    /// judge follows starts none, even when a second reading would differ.
+    #[test]
+    fn the_detach_follows_the_engine_the_record_was_written_under() {
+        let lane = Lane {
+            surface: decision::Surface::Command,
+            hook_event: "PreToolUse".into(),
+            scope: "agent".into(),
+            project_dir: "/p".into(),
+            session_id: "s".into(),
+        };
+        let open = [candidate("open/way", Trigger::Declared, true)];
+        let shown = [Shown { candidate: &open[0], result: "shown" }];
+        let readings = std::cell::Cell::new(0);
+        let read = || {
+            readings.set(readings.get() + 1);
+            readings.get() == 1
+        };
+        let j = judge_with(Config::Shadow { held_sample: 0.0 }, &open, vec![], read, |_, _| panic!("no judge on the hot path"));
+        assert_eq!(j.gate.status, gate::Status::DetachSkipped);
+        let started = std::cell::Cell::new(0);
+        detach_via(&lane, j, &shown, "scan", || false, &|_| {}, |_, _, _| started.set(started.get() + 1));
+        assert_eq!(started.get(), 0, "the record says none starts");
+        assert_eq!(readings.get(), 1, "the engine was read once");
+    }
+
     #[test]
     fn off_judges_nothing() {
         let cands = [candidate("a", Trigger::Semantic, true)];
-        let j = judge_with(Config::Off, &cands, vec![], |_, _| panic!("off calls no judge"));
+        let j = judge_with(Config::Off, &cands, vec![], || false, |_, _| panic!("off calls no judge"));
         assert_eq!(j.gate.status, gate::Status::Off);
         assert!(!j.blocked("a") && j.held.is_empty() && !j.detach_open);
     }
