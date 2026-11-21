@@ -56,7 +56,7 @@ The agent re-reads `agent.yaml` and the key on every request, so a settings or k
 
 ## What it costs
 
-One provider call judges every candidate of a request, so cost belongs to the call. The hook logs each call once as a `judge_call` event with its tokens and cost. The cost is the provider's own figure where it reports one (OpenRouter), else tokens times a price, else unknown. A call of unknown cost is counted apart, never as zero. The [`ways agent cost` reference](../../reference/ways-cli.md#ways-agent-cost) gives the pricing rules and how to set prices for a model agent-ways does not price. The probe measured about $0.0007 per call at the prices of the time.
+One provider call judges every candidate of a request, so cost belongs to the call. The hook logs each call once as a `judge_call` event with its tokens and cost. The cost is the provider's own figure where it reports one (OpenRouter), else tokens times a price, else unknown. A call of unknown cost is counted apart, never as zero. A call on the Claude Code account, under the `claude-code` engine, has no price of its own: `ways agent cost` counts it apart, with its tokens and an estimate at Anthropic's API list price that it never adds to the cost. The [`ways agent cost` reference](../../reference/ways-cli.md#ways-agent-cost) gives the pricing rules and how to set prices for a model agent-ways does not price. The probe measured about $0.0007 per call at the prices of the time.
 
 Three views read these events:
 

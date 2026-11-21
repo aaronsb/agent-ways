@@ -149,7 +149,7 @@ One provider call made by the judge. `ways agent cost` sums these.
 | `engine`, `provider`, `model`, `candidates` | The call |
 | `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens` | Usage, when the provider reported it |
 | `cost_usd` | Cost, when known. Left out rather than written as zero when unknown. |
-| `cost_source` | `provider`, `price_table` or `unknown` |
+| `cost_source` | `provider`, `price_table`, `account` or `unknown`. `account` is a call on the Claude Code account under the `claude-code` engine whose usage reports tokens; it carries no `cost_usd`. A call that reports no tokens is `unknown`: one with no usage, such as one that hit its deadline, or one whose usage is all zeros, such as an aborted call, which still logs its zero token fields. |
 | `hook`, `scope`, `project`, `session` | Common fields |
 
 ### `gate_fallback`

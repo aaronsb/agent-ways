@@ -40,8 +40,15 @@ pub enum CostSource {
     Provider,
     /// Tokens times the profile's prices, or the model's list price.
     PriceTable,
-    /// No usage came back (deadline or transport failure), or there is no
-    /// price for the model. The call may still be billed.
+    /// A call on the Claude Code account whose usage reported tokens (input,
+    /// output or cache). No provider price is reported for it.
+    ///
+    /// References:
+    /// - ADR-708 §10: account calls carry tokens and no price.
+    Account,
+    /// No usage came back (deadline or transport failure), a usage block of
+    /// zeros (an aborted claude-code call), or an API call whose model has no
+    /// price. The call may still be billed.
     Unknown,
 }
 
@@ -50,6 +57,7 @@ impl CostSource {
         match self {
             CostSource::Provider => "provider",
             CostSource::PriceTable => "price_table",
+            CostSource::Account => "account",
             CostSource::Unknown => "unknown",
         }
     }
@@ -110,6 +118,20 @@ pub fn list_price(provider: Provider, model: &str) -> Option<(f64, f64)> {
     }
 }
 
+/// Tokens times prices, USD per million input and output tokens, with cache
+/// reads and writes at Anthropic's multipliers.
+fn at_prices(usage: &Usage, (p_in, p_out): (f64, f64)) -> f64 {
+    let input = usage.input_tokens as f64 + usage.cache_read_tokens as f64 * CACHE_READ_FACTOR + usage.cache_write_tokens as f64 * CACHE_WRITE_FACTOR;
+    (input * p_in + usage.output_tokens as f64 * p_out) / 1e6
+}
+
+/// What a call on the Claude Code account would cost at Anthropic's API
+/// list price, or `None` when the model has none. It is an estimate for the
+/// report, never a billed cost (#1301).
+pub fn account_estimate(model: &str, usage: &Usage) -> Option<f64> {
+    list_price(Provider::Anthropic, model).map(|prices| at_prices(usage, prices))
+}
+
 /// The provider's figure where it reported one, else tokens times the
 /// profile's prices (both set) or the model's list price, else unknown.
 pub fn price(usage: &Usage, profile: &Profile) -> (Option<f64>, CostSource) {
@@ -121,13 +143,7 @@ pub fn price(usage: &Usage, profile: &Profile) -> (Option<f64>, CostSource) {
         _ => list_price(profile.provider, &profile.model),
     };
     match prices {
-        Some((p_in, p_out)) => {
-            let input = usage.input_tokens as f64
-                + usage.cache_read_tokens as f64 * CACHE_READ_FACTOR
-                + usage.cache_write_tokens as f64 * CACHE_WRITE_FACTOR;
-            let cost = (input * p_in + usage.output_tokens as f64 * p_out) / 1e6;
-            (Some(cost), CostSource::PriceTable)
-        }
+        Some(prices) => (Some(at_prices(usage, prices)), CostSource::PriceTable),
         None => (None, CostSource::Unknown),
     }
 }
@@ -195,5 +211,19 @@ mod tests {
         assert_eq!(price(&Usage::default(), &openrouter), (None, CostSource::Unknown));
         let call = JudgeCall::priced("anthropic", &haiku(), 3, None);
         assert_eq!((call.cost_usd, call.cost_source), (None, CostSource::Unknown));
+    }
+
+    #[test]
+    fn account_serializes_as_account() {
+        assert_eq!(CostSource::Account.as_str(), "account");
+        assert_eq!(serde_json::to_string(&CostSource::Account).unwrap(), "\"account\"");
+        assert_eq!(serde_json::from_str::<CostSource>("\"account\"").unwrap(), CostSource::Account);
+    }
+
+    #[test]
+    fn an_account_estimate_uses_the_anthropic_list_price() {
+        let u = Usage { input_tokens: 1_000_000, output_tokens: 100_000, cache_read_tokens: 1_000_000, ..Default::default() };
+        assert!((account_estimate("claude-haiku-4-5", &u).unwrap() - 1.6).abs() < 1e-9);
+        assert_eq!(account_estimate("claude-sonnet-4-5", &u), None);
     }
 }
