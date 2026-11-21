@@ -655,7 +655,7 @@ With `--commit`, each stage under its own header: pull the app source, refresh e
 
 `--dry-run` is accepted for the what-if and `--yes` for `--commit`. `ways settings set install.manage_mode commit` makes the command apply without the flag; `--what-if` then reports.
 
-`--what-if --json` prints the check as one JSON document instead of the report, for a program to read. It runs the same fetch and resolves the same target as the report, and leaves the release notes out, so it makes no request to GitHub. `--json` is a what-if whatever `install.manage_mode` says, and it refuses `--commit`. It exits 0.
+`--what-if --json` prints the check as one JSON document instead of the report, for a program to read. It runs the same fetch and resolves the same target as the report, and leaves the release notes out, so it makes no request to GitHub. `--json` is a what-if whatever `install.manage_mode` says, and it refuses `--commit`. It exits 0 and prints the document, also when the fetch failed. With no app source it exits 1 and prints nothing on stdout.
 
 | Field | Meaning |
 |---|---|
@@ -663,10 +663,10 @@ With `--commit`, each stage under its own header: pull the app source, refresh e
 | `upstream` | The branch's upstream the release channel follows, such as `origin/main`; `null` on `--ref` or a detached checkout |
 | `ref` | The `--ref` value; `null` on the release channel |
 | `target` | The commit the update would land on, the last fetched one when the fetch failed; `null` when none resolved |
-| `fetch_error` | The last line git printed when the fetch failed; `null` when it succeeded |
-| `behind` | `true` when any component's installed version is older than its version at the target, and `false` when none is. When the fetch failed, the target is the last one fetched, so `behind` still answers and `fetch_error` says why. `null` only when no target resolved at all, such as an app that never fetched or an unresolvable `--ref` |
-| `summary` | The components that move, as `name installed → target`, joined by commas; empty when none does |
-| `components` | One object per component, mods included: `name`, `installed`, `target` (each `null` when unknown) and `moves` |
+| `fetch_error` | The line git printed that names the failure, the first starting `fatal:` or `error:`, when the fetch failed; `null` when it succeeded |
+| `behind` | `true` when a component the update converges is older than its version at the target, and `false` when none is. A component that is installed counts when it moves. One that is not installed counts only when it is new at the target, in the target's suite or marketplace and not in the checkout's, so a way-embed that is not installed, or a binary whose `--version` fails, does not make `behind` true. When the fetch failed, the target is the last one fetched, so `behind` still answers and `fetch_error` says why. `null` only when no target resolved at all, such as an app that never fetched or an unresolvable `--ref`; no component moves then |
+| `summary` | The components that move, joined by commas: `name installed → target`, or `name (new) → target` for a component that is not installed and is new at the target; empty when none moves |
+| `components` | One object per component, mods included: `name`, `installed`, `target` (each `null` when unknown) and `moves`, true for a component counted in `behind` |
 
 ```json
 {

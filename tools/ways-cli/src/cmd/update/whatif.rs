@@ -38,6 +38,9 @@ pub struct Component {
     /// The plugin's name when the row is a mod, which repair converges
     /// through Claude Code rather than the update building it.
     pub plugin: Option<String>,
+    /// The target ships this component and the checkout does not: it is in
+    /// the target's suite-bins or marketplace and not in the checkout's.
+    pub new_at_target: bool,
 }
 
 impl Component {
@@ -52,6 +55,15 @@ impl Component {
             (None, Some(_)) => true,
             _ => false,
         }
+    }
+
+    /// Whether the update brings this component to the target: an installed
+    /// one that moves, or one new at the target. A component that is not
+    /// installed and not new, such as way-embed on a machine without it or a
+    /// binary whose `--version` fails, is not installed by `--commit`, so it
+    /// stays out of the check.
+    pub fn converges(&self) -> bool {
+        self.moves() && (self.installed.is_some() || self.new_at_target)
     }
 }
 
@@ -122,19 +134,29 @@ pub fn gather(app: &Path, channel: Channel, verbose: bool, with_notes: bool) -> 
 
 /// The what-if as one JSON document: the channel, the target, the fetch
 /// error, whether the install is behind, and each component's versions.
-/// `behind` is true when any component moves and false when none does,
-/// compared against the target `gather` resolved. A failed fetch leaves the
-/// last fetched target in place, so `behind` still answers and
-/// `fetch_error` carries the error. `behind` is null only when no target
-/// resolved at all. Release notes are not part of it. The update-check sensor reads `behind`, `summary` and
-/// each component's `name`, `installed`, `target` and `moves`.
+/// `behind` is true when any component the update converges moves, and false
+/// when none does, compared against the target `gather` resolved. A
+/// component that is not installed counts only when it is new at the
+/// target. A failed fetch leaves the last fetched target in place, so
+/// `behind` still answers and `fetch_error` carries the error. `behind` is
+/// null, and no component moves, only when no target resolved at all.
+/// Release notes are not part of it. The update-check sensor reads
+/// `behind`, `summary` and each component's `name`, `installed`, `target`
+/// and `moves`.
+///
+/// References:
+/// - ADR-416 item 6: the update check the attend sensor reads, and its
+///   comparison against the last fetched target when a fetch fails.
 pub fn json(w: &WhatIf) -> serde_json::Value {
     let (channel, upstream, git_ref) = match &w.channel {
         Channel::Release { upstream } => ("release", upstream.clone(), None),
         Channel::Ref(r) => ("ref", None, Some(r.clone())),
     };
     let known = w.target.is_some();
-    let moving: Vec<&Component> = w.components.iter().filter(|c| c.moves()).collect();
+    // With no target, every target version is a fallback to the checkout's
+    // own, so nothing moves.
+    let moves = |c: &Component| known && c.converges();
+    let moving: Vec<&Component> = w.components.iter().filter(|c| moves(c)).collect();
     let summary = moving
         .iter()
         .map(|c| match (&c.installed, &c.target) {
@@ -156,7 +178,7 @@ pub fn json(w: &WhatIf) -> serde_json::Value {
             "name": c.name,
             "installed": c.installed,
             "target": c.target,
-            "moves": c.moves(),
+            "moves": moves(c),
         })).collect::<Vec<_>>(),
     })
 }
@@ -184,12 +206,13 @@ fn resolve_target(app: &Path, channel: &Channel) -> (Option<String>, Option<Stri
             None => (rev(app, "FETCH_HEAD"), None),
             Some(e) => {
                 // A bare sha the server will not serve by name: fetch
-                // everything and resolve it here. The first error matters
-                // only when the ref still does not resolve.
+                // everything and resolve it here. The remote-tracking ref
+                // comes before a local one, so a failed fetch compares
+                // against the last fetched target. The error stays whenever
+                // the fetch failed.
                 let err = fetch(app, &["fetch", "--quiet", "--tags", "origin"]);
-                let found = rev(app, r).or_else(|| rev(app, &format!("origin/{r}")));
-                let err = if found.is_some() { None } else { err.or(Some(e)) };
-                (found, err)
+                let found = rev(app, &format!("origin/{r}")).or_else(|| rev(app, r));
+                (found, err.or(Some(e)))
             }
         },
     }
@@ -199,9 +222,17 @@ fn resolve_target(app: &Path, channel: &Channel) -> (Option<String>, Option<Stri
 fn fetch(app: &Path, args: &[&str]) -> Option<String> {
     match Command::new("git").args(args).current_dir(app).env("GIT_TERMINAL_PROMPT", "0").output() {
         Ok(o) if o.status.success() => None,
-        Ok(o) => Some(String::from_utf8_lossy(&o.stderr).lines().last().unwrap_or("git fetch failed").trim().to_string()),
+        Ok(o) => Some(failure_line(&String::from_utf8_lossy(&o.stderr))),
         Err(e) => Some(format!("git fetch could not run ({e})")),
     }
+}
+
+/// The line of git's stderr that names the failure: the first starting
+/// `fatal:` or `error:`, else the last line. The last line alone can be a
+/// fragment such as "and the repository exists.".
+fn failure_line(stderr: &str) -> String {
+    let lines: Vec<&str> = stderr.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    lines.iter().find(|l| l.starts_with("fatal:") || l.starts_with("error:")).or(lines.last()).map_or("git fetch failed", |l| l).to_string()
 }
 
 /// The branch's upstream (`origin/main`), or None on a detached HEAD.
@@ -250,6 +281,7 @@ fn versions_at(app: &Path, rev: &str) -> Vec<(String, String)> {
 fn components(app: &Path, rev: Option<&str>) -> Vec<Component> {
     let target_versions = rev.map(|r| versions_at(app, r)).unwrap_or_default();
     let mut names = suite_bins(app);
+    let checkout_bins = names.clone();
     if let Some(list) = rev.and_then(|r| show(app, r, "tools/suite-bins")) {
         for n in list.lines().filter(|l| l.starts_with(|c: char| c.is_ascii_lowercase())).filter_map(|l| l.split_whitespace().next()) {
             if !names.iter().any(|x| x == n) {
@@ -262,7 +294,8 @@ fn components(app: &Path, rev: Option<&str>) -> Vec<Component> {
         .map(|name| {
             let installed = installed_version(&app.join("bin").join(exe(&name)));
             let target = target_versions.iter().find(|(n, _)| *n == name).map(|(_, v)| v.clone());
-            Component { name, installed, target, plugin: None }
+            let new_at_target = !checkout_bins.contains(&name);
+            Component { name, installed, target, plugin: None, new_at_target }
         })
         .collect();
     let embed_installed = crate::paths::way_embed_in(&crate::paths::corpus_dir()).and_then(|b| installed_version(&b));
@@ -270,14 +303,16 @@ fn components(app: &Path, rev: Option<&str>) -> Vec<Component> {
         Some(r) => show(app, r, "tools/way-embed/way-embed.cpp").and_then(|src| define_version(&src)),
         None => way_embed_source_version(app),
     };
-    out.push(Component { name: "way-embed".into(), installed: embed_installed, target: embed_target, plugin: None });
+    out.push(Component { name: "way-embed".into(), installed: embed_installed, target: embed_target, plugin: None, new_at_target: false });
     let mod_version = |text: Option<String>| -> Option<String> {
         let json: serde_json::Value = serde_json::from_str(&text?).ok()?;
         json.get("version")?.as_str().map(str::to_string)
     };
     const MARKETPLACE: &str = "plugins/.claude-plugin/marketplace.json";
     let mut plugins = marketplace_plugins(rev.and_then(|r| show(app, r, MARKETPLACE)).as_deref());
-    for name in marketplace_plugins(std::fs::read_to_string(app.join(MARKETPLACE)).ok().as_deref()) {
+    let target_plugins = plugins.clone();
+    let checkout_plugins = marketplace_plugins(std::fs::read_to_string(app.join(MARKETPLACE)).ok().as_deref());
+    for name in checkout_plugins.iter().cloned() {
         if !plugins.contains(&name) {
             plugins.push(name);
         }
@@ -292,6 +327,7 @@ fn components(app: &Path, rev: Option<&str>) -> Vec<Component> {
             name: known_mod(&name).map_or_else(|| format!("{name} mod"), |m| m.label.to_string()),
             installed: mod_version(std::fs::read_to_string(app.join(&manifest)).ok()),
             target: mod_version(rev.and_then(|r| show(app, r, &manifest))),
+            new_at_target: target_plugins.contains(&name) && !checkout_plugins.contains(&name),
             plugin: Some(name),
         });
     }
@@ -723,7 +759,7 @@ mod tests {
     const JUDGE_MOD: &str = attend_mod::JUDGE.label;
 
     fn comp(name: &str, i: Option<&str>, t: Option<&str>) -> Component {
-        Component { name: name.into(), installed: i.map(str::to_string), target: t.map(str::to_string), plugin: None }
+        Component { name: name.into(), installed: i.map(str::to_string), target: t.map(str::to_string), plugin: None, new_at_target: false }
     }
 
     fn modc(m: &attend_mod::Mod, i: Option<&str>, t: Option<&str>) -> Component {
@@ -898,7 +934,7 @@ mod tests {
     #[test]
     fn a_mod_new_in_the_release_is_named_for_install() {
         let dir = Path::new("/t/claude");
-        let new = Component { name: "sparkle mod".into(), installed: None, target: Some("1.0.0".into()), plugin: Some("sparkle".into()) };
+        let new = Component { name: "sparkle mod".into(), installed: None, target: Some("1.0.0".into()), plugin: Some("sparkle".into()), new_at_target: true };
         // A new ways binary is put in place: it converges the mod.
         assert_eq!(new_mod_line(dir, &new, true), Some((Mark::Act, "/t/claude: install the sparkle mod where it is wanted (new in this release)".into())));
         // The ways binary is not replaced: the old one knows nothing of the mod.
@@ -934,6 +970,62 @@ mod tests {
         let text = render(&w).render(&Painter::plain());
         assert!(text.contains("Up to date; the files above need `ways settings fix mods.attend`"), "{text}");
         assert!(!text.contains("--commit` to apply"), "{text}");
+    }
+
+    fn bare(components: Vec<Component>, target: Option<&str>) -> WhatIf {
+        WhatIf {
+            app: PathBuf::from("/app"),
+            channel: Channel::Release { upstream: Some("origin/main".into()) },
+            head: Some("a".into()),
+            target: target.map(str::to_string),
+            fetch_error: None,
+            relation: Relation::Behind,
+            components,
+            notes: Ok(notes::Fetched::default()),
+            delta: None,
+            dropped: None,
+            local: Vec::new(),
+            actions: Vec::new(),
+            dev: Vec::new(),
+            retired: Vec::new(),
+            verbose: false,
+        }
+    }
+
+    #[test]
+    fn json_leaves_out_a_component_the_update_does_not_install() {
+        let w = bare(vec![comp("ways", Some("1.0.0"), Some("1.0.0")), comp("way-embed", None, Some("1.2.0"))], Some("b"));
+        let doc = json(&w);
+        assert_eq!(doc["behind"], false, "way-embed is not installed by --commit: {doc}");
+        assert_eq!(doc["summary"], "");
+        assert_eq!(doc["components"][1], serde_json::json!({"name": "way-embed", "installed": null, "target": "1.2.0", "moves": false}));
+    }
+
+    #[test]
+    fn json_counts_a_component_that_is_new_at_the_target() {
+        let new = Component { new_at_target: true, ..comp("sparkle", None, Some("0.1.0")) };
+        let doc = json(&bare(vec![comp("ways", Some("1.0.0"), Some("1.0.0")), new], Some("b")));
+        assert_eq!(doc["behind"], true, "{doc}");
+        assert_eq!(doc["summary"], "sparkle (new) → 0.1.0");
+        assert_eq!(doc["components"][1]["moves"], true);
+    }
+
+    #[test]
+    fn json_moves_nothing_when_no_target_resolves() {
+        let w = bare(vec![comp("ways", Some("1.0.0"), Some("1.1.0"))], None);
+        let doc = json(&w);
+        assert_eq!(doc["behind"], serde_json::Value::Null);
+        assert_eq!(doc["summary"], "");
+        assert_eq!(doc["components"][0]["moves"], false, "a fallback target says nothing: {doc}");
+    }
+
+    #[test]
+    fn a_fetch_failure_names_the_fatal_line_not_a_trailing_fragment() {
+        let stderr = "fatal: '/x/no-such-origin' does not appear to be a git repository\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\n";
+        assert_eq!(failure_line(stderr), "fatal: '/x/no-such-origin' does not appear to be a git repository");
+        assert_eq!(failure_line("warning: x\nerror: cannot lock ref\nhint: later\n"), "error: cannot lock ref");
+        assert_eq!(failure_line("only a note\nlast line\n"), "last line");
+        assert_eq!(failure_line(""), "git fetch failed");
     }
 
     /// The JSON check over a real app dir: a git clone of a bare origin,
@@ -1023,15 +1115,62 @@ mod tests {
             assert_eq!(*ways(&doc), serde_json::json!({"name": "ways", "installed": "1.1.0", "target": "1.1.0", "moves": false}));
         }
 
+        /// An app that fetched 1.1.0, then lost its origin after 1.2.0 landed
+        /// there unfetched: the last fetched target is 1.1.0, and HEAD (at
+        /// 1.0.0) differs from it.
+        fn lost_origin(tag: &str) -> Fixture {
+            let f = fixture(tag, "1.0.0", "1.0.0");
+            release(&f.seed, "1.1.0");
+            git(&f.app, &["fetch", "-q", "origin"]);
+            release(&f.seed, "1.2.0");
+            git(&f.app, &["remote", "set-url", "origin", f.app.join("no-such-origin").to_str().unwrap()]);
+            f
+        }
+
+        fn rev_parse(dir: &Path, name: &str) -> String {
+            let out = Command::new("git").args(["rev-parse", name]).current_dir(dir).output().unwrap();
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        }
+
         #[test]
         fn json_compares_against_the_last_fetched_target_when_the_fetch_fails() {
-            let f = fixture("failed", "1.0.0", "1.1.0");
-            git(&f.app, &["remote", "set-url", "origin", f.app.join("no-such-origin").to_str().unwrap()]);
+            let f = lost_origin("failed");
             let doc = check(&f.app);
             assert_eq!(doc["behind"], true, "the last fetched target still answers: {doc}");
             assert!(doc["fetch_error"].as_str().is_some_and(|e| !e.is_empty()), "{doc}");
-            assert_eq!(ways(&doc)["target"], "1.1.0");
-            assert_eq!(ways(&doc)["moves"], true);
+            let fetched = rev_parse(&f.app, "origin/main");
+            assert_eq!(doc["target"], fetched.as_str(), "the target is origin/main as last fetched");
+            assert_ne!(fetched, rev_parse(&f.app, "HEAD"), "and not a fall back to HEAD");
+            assert_eq!(*ways(&doc), serde_json::json!({"name": "ways", "installed": "1.0.0", "target": "1.1.0", "moves": true}));
+        }
+
+        #[test]
+        fn a_ref_whose_fetch_fails_keeps_the_error_and_the_last_fetched_target() {
+            let f = lost_origin("ref-failed");
+            let w = gather(&f.app, Channel::Ref("main".into()), false, false);
+            assert_eq!(w.target, Some(rev_parse(&f.app, "origin/main")), "origin/main comes before the local main");
+            assert!(w.fetch_error.as_deref().is_some_and(|e| !e.is_empty()), "the error stays though the ref resolves: {:?}", w.fetch_error);
+            let doc = json(&w);
+            assert_eq!(doc["behind"], true, "{doc}");
+            assert_eq!(doc["channel"], "ref");
+            assert_eq!(doc["ref"], "main");
+        }
+
+        #[test]
+        fn notes_are_fetched_for_the_report_and_left_out_for_json() {
+            let f = fixture("notes", "1.0.0", "1.0.0");
+            release(&f.seed, "1.1.0");
+            let file = f.app.join("releases.json");
+            std::fs::write(&file, r###"[{"tag_name":"ways-v1.1.0","draft":false,"prerelease":false,"body":"## ways 1.1.0\n"}]"###).unwrap();
+            // No other unit test reads release notes, so the variable is
+            // this test's alone.
+            std::env::set_var("WAYS_RELEASES_JSON", &file);
+            let channel = || Channel::Release { upstream: upstream(&f.app) };
+            let report = gather(&f.app, channel(), false, true);
+            let checked = gather(&f.app, channel(), false, false);
+            std::env::remove_var("WAYS_RELEASES_JSON");
+            assert_eq!(report.notes.as_ref().unwrap().releases.len(), 1, "the report fetches the notes");
+            assert!(checked.notes.as_ref().unwrap().releases.is_empty(), "the JSON path fetches none");
         }
 
         #[test]
