@@ -234,6 +234,8 @@ _The ways engine, continued after the full 100-199 band: matching, disclosure an
 | [ADR-708](./engine/ADR-708-a-claude-code-internal-engine-for-the-relevance-gate-selectable-with-one-judge-engine-per-session.md) | A Claude Code internal engine for the relevance gate, selectable, with one judge engine per session | accepted |
 | [ADR-709](./engine/ADR-709-a-spike-of-the-prompt-lane-handoff-to-a-mod-judge-covering-the-prompt-submit-bracket-session-identity-and-model-latency.md) | A spike of the prompt-lane handoff to a mod judge, covering the prompt.submit bracket, session identity and model latency | proposed |
 | [ADR-710](./engine/ADR-710-toggle-patterns-over-way-ids-and-a-switched-off-way-discarded-at-the-last-step-with-a-logged-event.md) | Toggle patterns over way ids, and a switched-off way discarded at the last step with a logged event | accepted |
+| [ADR-711](./engine/ADR-711-refire-backs-off-geometrically-per-agent-thread-with-one-fire-granted-after-compaction.md) | Refire backs off geometrically per agent thread, with one fire granted after compaction | accepted |
+| [ADR-712](./engine/ADR-712-every-injection-candidate-in-every-lane-and-agent-thread-is-judged-after-the-refire-check-and-before-the-fire.md) | Every injection candidate in every lane and agent thread is judged, after the refire check and before the fire | accepted |
 
 ## Archived
 
