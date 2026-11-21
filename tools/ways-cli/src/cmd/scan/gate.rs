@@ -179,6 +179,10 @@ pub(super) enum Status {
     /// Shadow mode: the candidates were shown and handed to a detached judge,
     /// whose record carries the verdicts.
     Detached,
+    /// Shadow mode under the claude-code engine: the candidates were shown,
+    /// and no detached judge started, since no host claims a job once the
+    /// hook has returned. No verdicts follow.
+    DetachSkipped,
 }
 
 /// What the gate decided on one scan: the ways it blocks, every verdict and

@@ -536,6 +536,22 @@ mod tests {
         assert_eq!(r.by_way, vec![("d/a".to_string(), BTreeMap::from([("fired".to_string(), 1)]))]);
     }
 
+    /// Under claude-code a shadow tool lane's record reads `detach_skipped`:
+    /// it counts as a scan, and as neither a judged scan nor a fallback.
+    #[test]
+    fn a_skipped_detached_judge_is_neither_judged_nor_a_fallback() {
+        let r = run_live(
+            "detach-skipped",
+            &[
+                r#"{"ts":"2026-09-01T10:00:05Z","kind":"scan","scan_id":"c1","session":"s1","agent":"main","epoch":3,"surface":"command","project":"/p","outcomes":[{"way":"d/a","result":"fired"}],"judge":{"status":"detach_skipped"}}"#,
+            ],
+        );
+        assert_eq!(r.scans, 1);
+        assert_eq!((r.judge.judged_scans, r.judge.fallback_scans), (0, 0), "{:?}", r.judge);
+        assert_eq!((r.judge.would_block, r.judge.block, r.judge.pass), (0, 0, 0), "{:?}", r.judge);
+        assert_eq!(r.by_way, vec![("d/a".to_string(), BTreeMap::from([("fired".to_string(), 1)]))]);
+    }
+
     fn fixture(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("ways-stats-decisions-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);

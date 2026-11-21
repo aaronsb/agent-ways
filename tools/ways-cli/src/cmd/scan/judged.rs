@@ -171,7 +171,7 @@ pub(super) fn judge(lane: &Lane, scan: &Scan, candidates: &[Candidate], turns: V
     let sink = &crate::session::log_event;
     let log = lane.log(sink);
     let config = if turns.is_empty() || candidates.is_empty() { Config::Off } else { scan.config };
-    judge_with(config, candidates, turns, |pending, turns| gate::apply(pending, turns, wait, &log))
+    judge_with(config, candidates, turns, || gate::unhosted_engine(&lane.session_id), |pending, turns| gate::apply(pending, turns, wait, &log))
 }
 
 /// The three stages on one lane's `candidates`, in the lane's order: the
@@ -235,19 +235,26 @@ pub(crate) fn post_tool(session_id: &str, project_dir: &str, hook_event: &str, t
     run(&lane, &scan, &candidates, || tool_turns(session_id, &call), gate::TOOL_WAIT, |c| show(&c.key));
 }
 
-/// [`judge`] with the setting and the gate given, so a test can stand in a
-/// judge.
+/// [`judge`] with the setting, the engine check and the gate given, so a
+/// test can stand in a judge. `unhosted` is asked only in shadow mode with
+/// a candidate open: under claude-code no detached judge will start, and the
+/// record says so.
 pub(super) fn judge_with(
     config: Config,
     candidates: &[Candidate],
     turns: Vec<Turn>,
+    unhosted: impl FnOnce() -> bool,
     apply: impl FnOnce(&[Pending<'_>], Vec<Turn>) -> Gate,
 ) -> Judged {
     let (gate, detach_open, rate) = match config {
         Config::Off => return Judged { gate: Gate::default(), turns, detach_open: false, held: Vec::new() },
         Config::Shadow { held_sample } => {
             let any_open = candidates.iter().any(|c| c.open);
-            let status = if any_open { gate::Status::Detached } else { gate::Status::Idle };
+            let status = match any_open {
+                false => gate::Status::Idle,
+                true if unhosted() => gate::Status::DetachSkipped,
+                true => gate::Status::Detached,
+            };
             (Gate { status, ..Gate::default() }, any_open, held_sample)
         }
         Config::Enforce { held_sample } => {
@@ -720,7 +727,7 @@ mod tests {
         let mut sent = Vec::new();
         let s = sink();
         let lc = gate::LogContext { lane: "command", session_id: "s", project_dir: "/p", scope: "agent", hook_event: "PreToolUse", sink: &s };
-        let j = judge_with(Config::Enforce { held_sample: 0.0 }, &cands, vec![], |pending, _| {
+        let j = judge_with(Config::Enforce { held_sample: 0.0 }, &cands, vec![], || false, |pending, _| {
             sent = pending.iter().map(|p| p.id.to_string()).collect();
             gate::test_gate(&[("sem/way", 0.05), ("cmd/way", 0.9)], Mode::Enforce, &lc)
         });
@@ -733,7 +740,7 @@ mod tests {
     #[test]
     fn shadow_blocks_nothing_and_hands_the_open_candidates_on() {
         let cands = [candidate("a", Trigger::Semantic, true), candidate("b", Trigger::Declared, false)];
-        let j = judge_with(Config::Shadow { held_sample: 1.0 }, &cands, vec![], |_, _| panic!("no judge on the hot path"));
+        let j = judge_with(Config::Shadow { held_sample: 1.0 }, &cands, vec![], || false, |_, _| panic!("no judge on the hot path"));
         assert!(!j.blocked("a"));
         assert!(j.detach_open && j.gate.status == gate::Status::Detached);
         assert_eq!(j.held.iter().map(|c| c.key.as_str()).collect::<Vec<_>>(), ["b"], "every held one at rate 1");
@@ -758,8 +765,8 @@ mod tests {
             let events = std::cell::RefCell::new(Vec::<Vec<(String, String)>>::new());
             let first = std::cell::Cell::new(true);
             let sink = |f: &[(&str, &str)]| events.borrow_mut().push(f.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect());
-            let held_call = judge_with(Config::Enforce { held_sample: 1.0 }, &held, vec![], |_, _| panic!("nothing open to judge"));
-            let shadow_call = judge_with(Config::Shadow { held_sample: 0.0 }, &open, vec![], |_, _| panic!("no judge on the hot path"));
+            let held_call = judge_with(Config::Enforce { held_sample: 1.0 }, &held, vec![], || unhosted, |_, _| panic!("nothing open to judge"));
+            let shadow_call = judge_with(Config::Shadow { held_sample: 0.0 }, &open, vec![], || unhosted, |_, _| panic!("no judge on the hot path"));
             let shown = [Shown { candidate: &open[0], result: "shown" }];
             for (j, s) in [(held_call, &[][..]), (shadow_call, &shown[..])] {
                 detach_via(&lane, j, s, "scan", || unhosted, || first.replace(false), &sink, |_, job, _| {
@@ -783,10 +790,25 @@ mod tests {
         assert!(skips.is_empty());
     }
 
+    /// Shadow mode under claude-code shows every candidate and starts no
+    /// detached judge, so the record's judge status says no verdicts follow:
+    /// not `detached`, not judged, not a fallback.
+    #[test]
+    fn shadow_under_claude_code_records_detach_skipped() {
+        let cands = [candidate("a", Trigger::Semantic, true)];
+        let j = judge_with(Config::Shadow { held_sample: 0.0 }, &cands, vec![], || true, |_, _| panic!("no judge on the hot path"));
+        assert!(!j.blocked("a"));
+        assert_eq!(j.gate.status, gate::Status::DetachSkipped);
+        // With nothing open there is nothing to skip, and the engine is not asked.
+        let held = [candidate("h", Trigger::Semantic, false)];
+        let j = judge_with(Config::Shadow { held_sample: 0.0 }, &held, vec![], || panic!("not asked"), |_, _| panic!("no judge"));
+        assert_eq!(j.gate.status, gate::Status::Idle);
+    }
+
     #[test]
     fn off_judges_nothing() {
         let cands = [candidate("a", Trigger::Semantic, true)];
-        let j = judge_with(Config::Off, &cands, vec![], |_, _| panic!("off calls no judge"));
+        let j = judge_with(Config::Off, &cands, vec![], || false, |_, _| panic!("off calls no judge"));
         assert_eq!(j.gate.status, gate::Status::Off);
         assert!(!j.blocked("a") && j.held.is_empty() && !j.detach_open);
     }

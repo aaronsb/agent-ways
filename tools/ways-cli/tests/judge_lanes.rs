@@ -371,6 +371,8 @@ fn shadow_under_claude_code_injects_everything_and_starts_no_detached_judge() {
     let out = s.bash(Some("asub1"));
     assert!(out.contains("# Marker keep") && out.contains("# Marker drop"), "{out}");
     assert!(s.fired("judged/drop", Some("asub1")));
+    let r = s.wait_decision(|r| r["surface"] == "command");
+    assert_eq!(r["judge"]["status"], "detach_skipped", "no verdicts follow: {r:#}");
     s.raw_hook("file", serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": "Edit", "tool_input": {"file_path": "/p/src/lib.rs"}}));
     s.assert_no_detached_judge();
 }

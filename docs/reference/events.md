@@ -164,7 +164,7 @@ The gate could not judge, so nothing was blocked. The gate fails open.
 
 ### `judge_detach_skipped`
 
-Written once per session, the first time a lane would have started a detached judge (a tool lane in shadow mode, or the `gate.held_sample` share of held candidates) while the session judges on the Claude Code internal engine. That engine's host claims jobs only while a hook runs, so no detached judge starts and those verdicts are not recorded. A key engine starts the detached judge as usual.
+Written once per session, the first time a lane would have started a detached judge (a tool lane in shadow mode, or the `gate.held_sample` share of held candidates) while the session judges on the Claude Code internal engine. That engine's host claims jobs only while a hook runs, so no detached judge starts and those verdicts are not recorded. A key engine starts the detached judge as usual. In `decisions.jsonl` a shadow tool lane's record then carries judge status `detach_skipped` in place of `detached`: no detached record with verdicts follows it.
 
 | Field | Meaning |
 |-------|---------|

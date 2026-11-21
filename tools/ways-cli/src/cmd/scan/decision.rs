@@ -272,6 +272,9 @@ impl Record {
             gate::Status::Detached => {
                 j.insert("status".into(), "detached".into());
             }
+            gate::Status::DetachSkipped => {
+                j.insert("status".into(), "detach_skipped".into());
+            }
         }
         self.judge = Some(Value::Object(j));
     }
@@ -443,6 +446,8 @@ mod tests {
         assert_eq!(r.to_json()["judge"], json!({"status": "fallback", "reason": "deadline"}));
         r.judge(&gate::Gate { status: gate::Status::Detached, ..Default::default() });
         assert_eq!(r.to_json()["judge"], json!({"status": "detached"}));
+        r.judge(&gate::Gate { status: gate::Status::DetachSkipped, ..Default::default() });
+        assert_eq!(r.to_json()["judge"], json!({"status": "detach_skipped"}));
         r.judge(&gate::Gate::default());
         assert_eq!(r.to_json()["judge"], json!({"status": "off"}));
     }
