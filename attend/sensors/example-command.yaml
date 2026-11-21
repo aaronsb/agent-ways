@@ -106,6 +106,17 @@ triggers:
     # and {prev.<field>} read the declared state after and before the
     # poll's write; {trigger.count} is how many items changed.
     description: "systemd user unit {unit} failed ({state.failed} failed in all)"
+    # Where the trigger keeps what it last saw: store or session; unset is
+    # store. store keeps it in the sensor's store, one per session, across
+    # restarts; a fresh store's first poll sets a baseline and fires
+    # nothing. session keeps it in the process that polls for the session.
+    # It starts empty with no baseline, so the first poll whose result
+    # meets `where` fires, and the memory ends with the session.
+    memory: store
+    # How long the notice stays deliverable once written: a whole number of
+    # seconds from 1 to 2592000, or session to keep it until the session
+    # reads it. Unset is 3600, the event lane's decay window.
+    expires: 3600
   # A state trigger: declared fields mapped to changed, or for a number
   # rises or falls.
   - name: all-clear

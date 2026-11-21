@@ -52,6 +52,11 @@ pub mod bounds {
     pub const COMMAND_TIMEOUT_MAX: u64 = 600;
     /// A sensor's store is removed this many days after its last write.
     pub const RETENTION_DAYS: u64 = 30;
+    /// A trigger's signal lapses this many seconds after it is written when
+    /// the trigger sets no `expires`: the event lane's decay window.
+    pub const EXPIRES_DEFAULT: u64 = 3600;
+    /// The longest `expires` in seconds: the store's retention.
+    pub const EXPIRES_MAX: u64 = RETENTION_DAYS * 86_400;
 }
 
 /// The cadence and threshold a file that sets none takes.
@@ -195,9 +200,10 @@ pub struct SensorSpec {
     /// A crate sensor's author field: the field of its compiled items that
     /// holds who composed one.
     pub author: Option<String>,
-    /// Why a shipped file rides the message lane with no author (§3a). Only
-    /// a shipped layer may set it.
-    pub lane_exception: Option<String>,
+    /// Why the host runs this compiled sensor on its declared lane whatever
+    /// the author rule says: the reason the host's own table of compiled
+    /// sensors gives. No file field sets it; parsing leaves it empty.
+    pub fixed_lane: Option<String>,
     /// The tool permissions the sensor needs (ADR-116).
     pub requires: Vec<String>,
     pub triggers: Vec<Trigger>,
@@ -218,7 +224,7 @@ impl SensorSpec {
 
     /// Why a sensor that declares the message lane runs on the event lane.
     pub fn lane_refusal(&self) -> Option<String> {
-        if self.declared_lane != Lane::Message || self.lane_exception.is_some() {
+        if self.declared_lane != Lane::Message || self.fixed_lane.is_some() {
             return None;
         }
         match self.kind {
@@ -389,6 +395,41 @@ pub struct Trigger {
     pub author: Option<String>,
     pub magnitude: Option<f64>,
     pub description: Option<Template>,
+    /// Where the trigger keeps what it last saw.
+    pub memory: Memory,
+    /// How long the signal the trigger writes stays deliverable; none takes
+    /// the decay window ([`Trigger::expiry`]).
+    pub expires: Option<Expires>,
+}
+
+impl Trigger {
+    /// When the signal this trigger writes lapses: its `expires`, or the
+    /// event lane's decay window of [`bounds::EXPIRES_DEFAULT`] seconds.
+    pub fn expiry(&self) -> Expires {
+        self.expires.unwrap_or(Expires::Seconds(bounds::EXPIRES_DEFAULT))
+    }
+}
+
+/// Where a trigger keeps what it last saw between polls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Memory {
+    /// In the sensor's store, across the host's restarts. A fresh store's
+    /// first poll sets a baseline and fires nothing.
+    #[default]
+    Store,
+    /// In the host's process. It starts empty and takes no baseline, so the
+    /// first poll is compared against nothing seen: `enters` fires on the
+    /// first poll whose result meets `where`. It ends with the host.
+    Session,
+}
+
+/// How long a trigger's signal stays deliverable once written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Expires {
+    /// This many seconds after it is written.
+    Seconds(u64),
+    /// Until the session it is addressed to reads it.
+    Session,
 }
 
 /// What a trigger looks at.

@@ -16,7 +16,7 @@ use crate::*;
 /// The fields of the shared core and attend's block, which every attend
 /// kind takes.
 const CORE: &[&str] = &[
-    "spec", "name", "description", "kind", "enabled", "interval", "min_interval", "threshold", "decay_threshold", "lane", "author", "lane_exception",
+    "spec", "name", "description", "kind", "enabled", "interval", "min_interval", "threshold", "decay_threshold", "lane", "author",
     "requires", "triggers", "state",
 ];
 const CRATE: &[&str] = &["crate"];
@@ -121,6 +121,14 @@ impl Reader {
         let mut extra = Mapping::new();
         for (k, v) in m {
             let Some(k) = k.as_str() else { continue };
+            if k == "lane_exception" {
+                self.problems.push(Problem {
+                    at: k.into(),
+                    message: "lane_exception is removed from the sensor spec, and a message-lane sensor names its author instead; delete the field. It is ignored".into(),
+                    severity: Severity::Error,
+                });
+                continue;
+            }
             let known = match kind {
                 Kind::Ways => WAYS.contains(&k),
                 _ => CORE.contains(&k) || own.contains(&k),
@@ -146,7 +154,7 @@ impl Reader {
                 cadence: DEFAULTS,
                 declared_lane: Lane::Event,
                 author: None,
-                lane_exception: None,
+                fixed_lane: None,
                 requires: Vec::new(),
                 triggers: Vec::new(),
                 state: BTreeMap::new(),
@@ -167,7 +175,6 @@ impl Reader {
         if author.is_some() && kind != Kind::Crate {
             self.bad("author", "a command or mcp sensor names its author on each trigger");
         }
-        let lane_exception = self.text(m, "lane_exception");
         let requires = self.strings(m, "requires").unwrap_or_default();
         let state = self.state(kind, m);
         let triggers = self.triggers(m, &state);
@@ -191,7 +198,7 @@ impl Reader {
             Kind::Mcp => Block::Mcp(Box::new(self.mcp(m)?)),
             Kind::Ways => unreachable!("returned above"),
         };
-        Some(SensorSpec { spec, name: stem.to_string(), description, kind, enabled, cadence, declared_lane, author, lane_exception, requires, triggers, state, block })
+        Some(SensorSpec { spec, name: stem.to_string(), description, kind, enabled, cadence, declared_lane, author, fixed_lane: None, requires, triggers, state, block })
     }
 
     fn cadence(&mut self, m: &Mapping) -> Cadence {
@@ -387,7 +394,7 @@ impl Reader {
                 continue;
             }
             for f in t.keys().filter_map(Value::as_str) {
-                if !["name", "path", "key", "on", "where", "match", "state", "author", "magnitude", "description"].contains(&f) {
+                if !["name", "path", "key", "on", "where", "match", "state", "author", "magnitude", "description", "memory", "expires"].contains(&f) {
                     self.bad(format!("{at}.{f}"), "unknown field of a trigger");
                 }
             }
@@ -438,7 +445,26 @@ impl Reader {
                     None
                 }
             };
-            out.push(Trigger { name, test, match_, author, magnitude, description });
+            let memory = match t.get("memory").map(Value::as_str) {
+                None | Some(Some("store")) => Memory::Store,
+                Some(Some("session")) => Memory::Session,
+                Some(_) => {
+                    self.bad(format!("{at}.memory"), "memory is store or session");
+                    Memory::Store
+                }
+            };
+            let expires = match t.get("expires") {
+                None => None,
+                Some(Value::String(s)) if s == "session" => Some(Expires::Session),
+                Some(v) => match v.as_u64() {
+                    Some(n) if (1..=bounds::EXPIRES_MAX).contains(&n) => Some(Expires::Seconds(n)),
+                    _ => {
+                        self.bad(format!("{at}.expires"), format!("expires is a whole number of seconds from 1 to {}, or session", bounds::EXPIRES_MAX));
+                        None
+                    }
+                },
+            };
+            out.push(Trigger { name, test, match_, author, magnitude, description, memory, expires });
         }
         out
     }

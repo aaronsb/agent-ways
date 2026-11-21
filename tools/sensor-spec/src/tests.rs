@@ -59,8 +59,74 @@ fn a_message_lane_with_no_author_runs_on_the_event_lane_and_lints_an_error() {
     let p = parse("c", &y("kind: crate\ncrate: peers\nlane: message\nauthor: sender\n"));
     assert!(p.problems.is_empty(), "{:?}", p.problems);
     assert_eq!(p.spec.unwrap().lane(), Lane::Message);
+}
+
+#[test]
+fn a_file_carrying_lane_exception_fails_lint_with_a_message_naming_its_removal() {
     let p = parse("k", &y("kind: crate\ncrate: keepwarm\nlane: message\nlane_exception: ADR-182\n"));
-    assert_eq!(p.spec.unwrap().lane(), Lane::Message);
+    let e: Vec<&Problem> = p.problems.iter().filter(|p| p.at == "lane_exception").collect();
+    assert_eq!(e.len(), 1, "{:?}", p.problems);
+    assert_eq!(e[0].severity, Severity::Error);
+    assert_eq!(
+        e[0].to_string(),
+        "lane_exception: error: lane_exception is removed from the sensor spec, and a message-lane sensor names its author instead; delete the field. It is ignored"
+    );
+    let s = p.spec.expect("the sensor still loads, without the field");
+    assert_eq!(s.lane(), Lane::Event, "no file field keeps an authorless sensor on the message lane");
+    let p = parse("c", &y("kind: command\nargv: [x]\noutput: json\nlane_exception: mine\n"));
+    assert!(p.spec.is_some());
+    assert_eq!(p.problems.iter().map(|p| (p.at.as_str(), p.severity)).collect::<Vec<_>>(), [("lane_exception", Severity::Error)]);
+}
+
+#[test]
+fn memory_and_expires_are_read_on_any_trigger() {
+    let p = parse(
+        "u",
+        &y(r#"
+kind: command
+argv: [ways, manage, update, --what-if, --json]
+output: json
+state:
+  n: { type: number, from: "$.n" }
+triggers:
+  - { name: behind, path: "$", on: enters, where: { behind: true }, memory: session, expires: session }
+  - { name: count, state: { n: rises }, memory: store, expires: 900 }
+  - { name: plain, path: "$.items[*]", key: id, on: added }
+"#),
+    );
+    assert!(p.problems.is_empty(), "{:?}", p.problems);
+    let t = p.spec.unwrap().triggers;
+    let got: Vec<(&str, Memory, Option<Expires>)> = t.iter().map(|t| (t.name.as_str(), t.memory, t.expires)).collect();
+    assert_eq!(
+        got,
+        [("behind", Memory::Session, Some(Expires::Session)), ("count", Memory::Store, Some(Expires::Seconds(900))), ("plain", Memory::Store, None)]
+    );
+    assert_eq!(t[2].expiry(), Expires::Seconds(3600), "with no expires, a trigger's signal lapses after the hour of the decay window");
+    assert_eq!(t[0].expiry(), Expires::Session);
+}
+
+#[test]
+fn an_invalid_memory_or_expires_fails_with_a_message_saying_what_it_takes() {
+    let base = "kind: command\nargv: [x]\noutput: json\ntriggers: [{name: a, path: \"$\", on: added, ";
+    let expires = "triggers.a.expires: expires is a whole number of seconds from 1 to 2592000, or session";
+    let memory = "triggers.a.memory: memory is store or session";
+    for (field, want) in [
+        ("expires: 1h", expires),
+        ("expires: 0", expires),
+        ("expires: -5", expires),
+        ("expires: 2592001", expires),
+        ("expires: 1.5", expires),
+        ("expires: true", expires),
+        ("expires: Session", expires),
+        ("memory: forever", memory),
+        ("memory: 1", memory),
+    ] {
+        let p = parse("s", &y(&format!("{base}{field}}}]\n")));
+        assert!(p.spec.is_none(), "{field} should not load");
+        assert_eq!(invalid(&p), [want], "{field}");
+    }
+    let p = parse("s", &y(&format!("{base}expires: 2592000}}]\n")));
+    assert_eq!(p.spec.unwrap().triggers[0].expires, Some(Expires::Seconds(2_592_000)), "the bound itself is allowed");
 }
 
 #[test]

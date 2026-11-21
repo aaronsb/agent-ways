@@ -139,10 +139,13 @@ impl Hosted {
 }
 
 /// Every sensor the files declare for the project at `project`, with its
-/// state.
+/// state. The last poll is this session's own, or with no session id the
+/// newest of any session in the project.
 pub fn catalog(cfg: &Config, project: &str) -> Vec<Hosted> {
     let loaded = attend_config::sensors::load(std::path::Path::new(project), &cfg.project_sensors);
-    catalog_of(loaded, |name| hosted::read(name, project).and_then(|r| r.poll))
+    let ident = attend_presence::session::identity();
+    let polls = hosted::last_polls(project, ident.session_resolved.then_some(ident.session_id.as_str()));
+    catalog_of(loaded, |name| polls.get(name).cloned())
 }
 
 /// The sensors `loaded` declares, each with its last poll from `last`.
@@ -248,12 +251,15 @@ pub fn compiled(id: &str) -> Option<Compiled> {
     Some(Compiled { description: s.description().to_string(), source: s.source() })
 }
 
-/// What a running compiled sensor needs beyond its file: the peers sensor
-/// reads both.
+/// What a running sensor needs beyond its file: the peers sensor reads the
+/// config and the groups, and a recorded sensor keys its store by the
+/// session.
 #[cfg_attr(not(feature = "sensor-peers"), allow(dead_code))]
 pub struct Ctx<'a> {
     pub cfg: &'a Config,
     pub groups: Option<&'a Groups>,
+    /// The session its reports go to; none when the caller has no id.
+    pub session: Option<&'a str>,
 }
 
 /// The compiled sensor `h` configures, ready to poll, or why it cannot run
@@ -296,7 +302,7 @@ pub fn build(h: &Hosted, ctx: &Ctx, project: &str, record: bool) -> Result<Box<d
         }
         id => return Err(format!("crate {id} is not compiled into this attend")),
     };
-    Ok(Box::new(FileSensor::new(spec.name.clone(), spec.cadence, inner, project, record)))
+    Ok(Box::new(FileSensor::new(spec.name.clone(), spec.cadence, inner, project, ctx.session, record)))
 }
 
 /// A slot for `sensor`, on the lane `lane`, running the compiled sensor
@@ -314,7 +320,8 @@ pub fn slot(sensor: Box<dyn Sensor>, lane: Lane, crate_id: Option<&str>) -> Sens
 pub fn register_sensors(cfg: &Config, focus: &Focus, _catchup: bool, groups: &Groups) -> (Vec<SensorSlot>, Vec<String>) {
     let mut slots = Vec::new();
     let mut names = Vec::new();
-    let ctx = Ctx { cfg, groups: Some(groups) };
+    let ident = attend_presence::session::identity();
+    let ctx = Ctx { cfg, groups: Some(groups), session: ident.session_resolved.then_some(ident.session_id.as_str()) };
     for h in catalog(cfg, &focus.working_dir) {
         for n in &h.notes {
             crate::emit::log(&format!("sensor {}: {n}", h.name()));

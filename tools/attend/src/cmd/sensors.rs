@@ -203,7 +203,7 @@ pub(crate) fn poll(a: &PollArgs) {
     let (focus, cfg) = context();
     let h = find(sensors::catalog(&cfg, &focus.working_dir), &a.name, a.json);
     require_hosted(&h, "poll", a.json);
-    let mut sensor = sensors::build(&h, &Ctx { cfg: &cfg, groups: None }, &focus.working_dir, false).unwrap_or_else(|why| {
+    let mut sensor = sensors::build(&h, &Ctx { cfg: &cfg, groups: None, session: None }, &focus.working_dir, false).unwrap_or_else(|why| {
         eprintln!("attend sensor poll: {}: {why}", h.name());
         std::process::exit(agent_settings::exit::REJECTED);
     });
@@ -263,7 +263,7 @@ pub(crate) fn fire(a: &FireArgs) {
         None => vec![(spec.cadence.threshold, format!("test fire of {name}"))],
     };
     let input: Vec<(f64, String)> = input.into_iter().map(|(m, d)| (m, format!("[test] {}", sensors::deliverable(&d)))).collect();
-    let sensor = sensors::build(&h, &Ctx { cfg: &cfg, groups: None }, &focus.working_dir, false).unwrap_or_else(|why| {
+    let sensor = sensors::build(&h, &Ctx { cfg: &cfg, groups: None, session: None }, &focus.working_dir, false).unwrap_or_else(|why| {
         eprintln!("attend sensor fire: {}: {why}", h.name());
         std::process::exit(agent_settings::exit::REJECTED);
     });
