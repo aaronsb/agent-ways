@@ -168,7 +168,7 @@ pub fn task(
         .map(|h| Hit { id: h.id.clone(), score: h.score, specificity: h.specificity, payload: h.payload.clone() })
         .collect();
 
-    let stashed = if hits.is_empty() { Ok(()) } else { write_stash(&kept, record.scan_id(), session_id, is_teammate, team) };
+    let stashed = write_stash(&kept, record.scan_id(), session_id, is_teammate, team);
     let result = if stashed.is_ok() { "stashed" } else { "error" };
     let mut shown = Vec::new();
     for (i, hit) in hits.iter().enumerate() {
@@ -179,7 +179,7 @@ pub fn task(
         }
     }
     if scan.is_on() && !judge_candidates.is_empty() {
-        record.judge(&judged.gate);
+        judged::close_judge(&mut record, &judged.gate, &judged.turns);
     }
     let scan_id = record.scan_id().to_string();
     record.write();
@@ -189,11 +189,10 @@ pub fn task(
 
 /// Write the ways the judge kept for a dispatch to a stash file for
 /// SubagentStart to claim, with the `scan_id` of the task scan's decision
-/// record, which becomes the subagent's last scan. The caller writes one for
-/// every dispatch that matched, with `ways: []` when the judge blocked them
-/// all: SubagentStart claims the oldest stash, so a dispatch that left none
-/// would hand its subagent the next dispatch's ways. A dispatch that matched
-/// nothing writes none, as before the judge.
+/// record, which becomes the subagent's last scan. The caller writes one stash
+/// for every dispatch, with `ways: []` when nothing matched or the judge
+/// blocked every match. SubagentStart claims the oldest stash, so a dispatch
+/// that left none would hand its subagent the next dispatch's ways and scan id.
 fn write_stash(kept: &[Hit<String>], scan_id: &str, session_id: &str, is_teammate: bool, team: Option<&str>) -> Result<()> {
     let stash_dir = format!("{}/{session_id}/subagent-stash", session::sessions_root());
     std::fs::create_dir_all(&stash_dir)?;

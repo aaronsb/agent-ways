@@ -348,6 +348,7 @@ fn a_subagents_bash_candidates_reach_the_judge_and_a_blocked_one_stays_out() {
     assert_eq!(outcome(&r, "judged/keep")["verdict"], "pass");
     assert_eq!(r["judge"]["status"], "judged");
     assert!(r["judge"]["judge_ms"].is_u64(), "{r:#}");
+    assert_eq!(r["judge"]["request"], "found", "the record says the judge read the brief: {r:#}");
 }
 
 /// The main agent's Bash call is judged the same way, on its own context.
@@ -550,8 +551,9 @@ fn a_tool_lane_with_no_judge_host_fails_open_at_once() {
 }
 
 /// The dispatch lane judges a subagent's ways against its brief. A dispatch
-/// whose every way the judge blocks still leaves its (empty) stash, so the
-/// next SubagentStart claims that one and not a later dispatch's.
+/// whose every way the judge blocks still leaves its (empty) stash, as one
+/// that matched nothing does, so the next SubagentStart claims that one and
+/// not a later dispatch's.
 #[test]
 fn the_dispatch_lane_judges_and_keeps_each_stash_to_its_dispatch() {
     let s = Sim::new("task", Some(ENFORCE));
@@ -569,6 +571,25 @@ fn the_dispatch_lane_judges_and_keeps_each_stash_to_its_dispatch() {
     assert!(second.contains("# Marker taskkeep"), "the second gets its own: {second}");
     let r = s.wait_decision(|r| r["surface"] == "task" && r["outcomes"][0]["way"] == "judged/taskdrop");
     assert_eq!(outcome(&r, "judged/taskdrop")["result"], "judge_block", "{r:#}");
+    assert_eq!(r["judge"]["request"], "found", "a dispatch is judged against its brief: {r:#}");
+}
+
+/// A dispatch whose brief matches no way still leaves an (empty) stash.
+/// SubagentStart claims the oldest stash, so without it the first subagent
+/// would take the second dispatch's way and scan id, and the second would get
+/// nothing.
+#[test]
+fn a_dispatch_that_matches_nothing_still_keeps_its_stash() {
+    let s = Sim::new("task-empty", Some(ENFORCE));
+    s.way("taskonly", "pattern: onlytopic\nscope: subagent");
+    let host = s.host(1);
+    s.raw_hook("task", serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"prompt": "tidy the changelog"}}));
+    s.raw_hook("task", serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"prompt": "work on the onlytopic"}}));
+    host.join().unwrap();
+    let first = s.raw_hook("subagent-start", serde_json::json!({"hook_event_name": "SubagentStart", "agent_id": "afirst"}));
+    let second = s.raw_hook("subagent-start", serde_json::json!({"hook_event_name": "SubagentStart", "agent_id": "asecond"}));
+    assert!(!first.contains("# Marker taskonly"), "the first dispatch matched nothing: {first}");
+    assert!(second.contains("# Marker taskonly"), "the second gets its own way: {second}");
 }
 
 /// The tool lane judges a `tool_name:` way like any other candidate.
@@ -597,7 +618,8 @@ fn the_state_lane_judges_its_triggered_ways() {
     let prompts = host.join().unwrap();
     assert!(prompts[0].contains("tidy the release notes"), "{}", prompts[0]);
     assert!(out.contains("# Marker statekeep") && !out.contains("# Marker statedrop"), "{out}");
-    s.wait_decision(|r| r["surface"] == "state");
+    let r = s.wait_decision(|r| r["surface"] == "state");
+    assert_eq!(r["judge"]["request"], "found", "{r:#}");
 }
 
 /// The post-tool lane judges the ways their postchecks asked for.

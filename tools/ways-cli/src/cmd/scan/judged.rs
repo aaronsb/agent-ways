@@ -150,7 +150,7 @@ impl Scan {
 /// to the detached judge once the lane has shown its ways.
 pub(super) struct Judged {
     pub gate: Gate,
-    turns: Vec<Turn>,
+    pub turns: Vec<Turn>,
     /// Shadow mode: the open candidates go to the detached judge.
     detach_open: bool,
     /// The held candidates sampled for the detached judge.
@@ -326,7 +326,7 @@ fn finish(lane: &Lane, judged: Judged, shown: &[Shown<'_>], tick: u64) {
 /// Writes the judge's block on a lane's record, the hook's own or the
 /// detached judge's: its status, and whether its turns carried the calling
 /// agent's request.
-fn close_judge(record: &mut decision::Record, gate: &Gate, turns: &[Turn]) {
+pub(super) fn close_judge(record: &mut decision::Record, gate: &Gate, turns: &[Turn]) {
     record.judge(gate);
     record.request(turns.iter().any(|t| t.role == Role::User));
 }
