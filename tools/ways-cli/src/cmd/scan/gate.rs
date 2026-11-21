@@ -470,15 +470,21 @@ fn handoff(store: &Store, settings: &Settings, req: JudgeRequest, begun: Instant
     let waited = store.wait_answer(&id, written + CLAIM_WINDOW, begun + budget + READ_GRACE);
     store.finish(&id);
     let latency_ms = written.elapsed().as_millis() as u64;
-    // The spend is the account's usage: no price (ADR-708 §10).
+    // The spend is the account's usage: no price (ADR-708 §10). A call that
+    // reported tokens is an account call. One with no usage, or a usage block
+    // of zeros (an aborted call sends one), is of unknown cost.
     let call = |usage: Option<Usage>| JudgeCall {
         engine: settings.engine.clone(),
         provider: p.provider,
         model: p.model.clone(),
         candidates: n,
+        cost_source: if usage.as_ref().is_some_and(|u| u.input_tokens + u.output_tokens + u.cache_read_tokens + u.cache_write_tokens > 0) {
+            CostSource::Account
+        } else {
+            CostSource::Unknown
+        },
         usage,
         cost_usd: None,
-        cost_source: CostSource::Unknown,
     };
     let JudgeAnswer { text, usage, reason } = match waited {
         Waited::Answered(a) => a,
@@ -1316,6 +1322,7 @@ mod tests {
         let got: Vec<&str> = ["outcome", "engine", "provider", "model", "candidates", "input_tokens", "output_tokens"].iter().map(|k| field(c, k)).collect();
         assert_eq!(got, ["judged", "claude-code", "claude-code", "claude-haiku-4-5", "3", "1160", "117"]);
         assert!(c.iter().all(|(k, _)| k != "cost_usd"), "no provider cost: {c:?}");
+        assert_eq!(field(c, "cost_source"), "account", "a call that reported tokens is on the account (#1301)");
         let verdicts: Vec<_> = events.borrow().iter().filter(|e| field(e, "event") == "way_judged").map(|e| (field(e, "way").to_string(), field(e, "engine").to_string())).collect();
         assert_eq!(verdicts.len(), 3);
         assert!(verdicts.iter().all(|(_, e)| e == "claude-code"));
@@ -1529,6 +1536,7 @@ mod tests {
         assert!(g.ids().is_empty());
         let calls = calls(&events);
         assert_eq!((calls.len(), field(&calls[0], "input_tokens")), (1, "1160"), "the spent call is logged with its usage");
+        assert_eq!(field(&calls[0], "cost_source"), "account");
         // A host whose model call failed sends its reason and no text.
         let h = host(&s.store, |_| Some(JudgeAnswer { reason: Some("api-error".into()), ..Default::default() }));
         let g = s.gate(false, &Events::default(), &Default::default());
@@ -1539,6 +1547,19 @@ mod tests {
         let g = s.gate(false, &Events::default(), &Default::default());
         h.join().unwrap().unwrap();
         assert_eq!(g.status, Status::Fallback { reason: "model_error: aborted".into() });
+        // An aborted or failed call can still send a usage block of zeros:
+        // it logs its zero tokens and unknown cost, never an account call.
+        for reason in ["aborted", "api-error"] {
+            let events = Events::default();
+            let h = host(&s.store, move |_| Some(JudgeAnswer { reason: Some(reason.into()), usage: Some(Usage::default()), ..Default::default() }));
+            let g = s.gate(false, &events, &Default::default());
+            h.join().unwrap().unwrap();
+            assert_eq!(g.status, Status::Fallback { reason: format!("model_error: {reason}") });
+            let logged = self::calls(&events);
+            assert_eq!(logged.len(), 1, "{logged:?}");
+            assert_eq!((field(&logged[0], "input_tokens"), field(&logged[0], "output_tokens")), ("0", "0"));
+            assert_eq!(field(&logged[0], "cost_source"), "unknown", "{reason}: zero tokens are not an account call");
+        }
     }
 
     #[test]

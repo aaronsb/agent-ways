@@ -175,6 +175,8 @@ The judge came late to this project because it needed a separate API key to mana
 
 10. **Logging and cost.** Every judge call is logged as `judge_call` with the engine. Under `claude-code` it carries the reply's token usage and no provider price, since the spend is the account's usage. `way_judged`, `gate_fallback` and the decision record are written by the hook side as today, whichever engine judged.
 
+   **Note, 2026-11-21: account calls (#1301).** A `judge_call` under `claude-code` whose usage reports tokens logs `cost_source: account`, with its tokens and no `cost_usd`. A call that reports no tokens logs `unknown`: one with no usage, such as one that hit its deadline, and one whose usage block is all zeros, which the mod passes through when a call is aborted, for example when the session ends or the claiming call is interrupted. Before this, every claude-code call logged `unknown`, so `ways agent cost` counted working calls with timeouts and transport failures and printed "cost unknown". The report now counts account calls apart from unknown ones and shows them on their own clause, with their tokens and an estimate of their cost at Anthropic's API list price, labelled as an estimate. The estimate is never added to the billed dollar total, so this item's rule that no provider price is reported for an account call holds. Lines logged before the change keep `unknown`.
+
 ## Consequences
 
 ### Positive

@@ -204,42 +204,45 @@ impl Spend {
             f.render_widget(Paragraph::new(Line::styled("no judge calls recorded", theme::muted())).block(pane(title, body).title_bottom(agent_hint(&self.hint))), body);
             return;
         }
+        let total = spend::total(&self.calls);
+        let (show_tokens, cost_w) = cost_layout(body.width, Line::from(theme::selected_mark()).width(), groups.iter().chain([&total]).map(|g| g.cost_short().chars().count()).max().unwrap_or(0));
         let right = |t: String| Cell::from(Line::from(t).alignment(Alignment::Right));
         let row = |g: &Group, key: String| {
-            Row::new(vec![
+            let mut cells = vec![
                 Cell::from(key),
                 right(g.calls.to_string()),
                 right(g.input_tokens.to_string()),
                 right(g.output_tokens.to_string()),
                 right((g.cache_read_tokens + g.cache_write_tokens).to_string()),
-                right(g.tokens_short()),
-                right(g.cost_short()),
-            ])
+            ];
+            if show_tokens {
+                cells.push(right(g.tokens_short()));
+            }
+            cells.push(right(fit(g.cost_short(), cost_w)));
+            Row::new(cells)
         };
-        let header = Row::new(vec![
+        let mut head_cells = vec![
             Cell::from(if self.by == By::Day { "Day" } else { "Month" }),
             right("Calls".into()),
             right("Input".into()),
             right("Output".into()),
             // Cache reads and writes in one column, so the cost fits at 80.
             right("Cache".into()),
-            right("Tokens".into()),
-            right("Cost".into()),
-        ])
-        .style(Style::new().add_modifier(Modifier::BOLD));
-        let mut rows: Vec<Row> = groups.iter().map(|g| row(g, g.key.clone())).collect();
-        rows.push(row(&spend::total(&self.calls), "total".into()).style(Style::new().add_modifier(Modifier::BOLD)));
-        let widths = [
-            Constraint::Length(10),
-            Constraint::Length(5),
-            Constraint::Length(9),
-            Constraint::Length(8),
-            Constraint::Length(9),
-            Constraint::Length(6),
-            Constraint::Length(21),
-            // The slack, so the cost stays beside the tokens.
-            Constraint::Fill(1),
         ];
+        if show_tokens {
+            head_cells.push(right("Tokens".into()));
+        }
+        head_cells.push(right("Cost".into()));
+        let header = Row::new(head_cells).style(Style::new().add_modifier(Modifier::BOLD));
+        let mut rows: Vec<Row> = groups.iter().map(|g| row(g, g.key.clone())).collect();
+        rows.push(row(&total, "total".into()).style(Style::new().add_modifier(Modifier::BOLD)));
+        let mut widths: Vec<Constraint> = [10, 5, 9, 8, 9].map(Constraint::Length).to_vec();
+        if show_tokens {
+            widths.push(Constraint::Length(TOKENS_W as u16));
+        }
+        widths.push(Constraint::Length(cost_w as u16));
+        // The slack, so the cost stays beside the tokens.
+        widths.push(Constraint::Fill(1));
         self.sel = self.sel.min(groups.len() - 1);
         self.table.select(Some(self.sel));
         let t = Table::new(rows, widths)
@@ -250,6 +253,54 @@ impl Spend {
             .highlight_symbol(Line::styled(theme::selected_mark(), theme::accent()));
         f.render_stateful_widget(t, body, &mut self.table);
     }
+}
+
+/// The widths of the spend table's columns before Tokens and Cost, and of
+/// Tokens; a column apart from each next one.
+const FIXED_W: usize = 10 + 5 + 9 + 8 + 9;
+const TOKENS_W: usize = 6;
+/// The Cost column's least width.
+const COST_W: usize = 21;
+
+/// Whether the spend table shows its Tokens column, and the Cost column's
+/// width, in a pane `width` wide whose selection mark is `mark` wide, for a
+/// widest cost of `widest` characters. The Cost column takes its widest
+/// cell, at least [`COST_W`]. When that does not fit beside Tokens, the
+/// table drops Tokens, the sum of the three columns before it, and the
+/// cost takes what is left.
+fn cost_layout(width: u16, mark: usize, widest: usize) -> (bool, usize) {
+    let inner = (width as usize).saturating_sub(2 + mark);
+    // Seven gaps with Tokens and the slack column, six without Tokens.
+    let with_tokens = inner.saturating_sub(FIXED_W + TOKENS_W + 7);
+    let without = inner.saturating_sub(FIXED_W + 6);
+    let want = widest.max(COST_W);
+    if want <= with_tokens || without <= with_tokens {
+        (true, want.min(with_tokens))
+    } else {
+        (false, want.min(without))
+    }
+}
+
+/// `text` cut to `w` characters, so a cost too wide for its column loses
+/// its tail rather than its first digits. A cost is parts joined by ` + `
+/// (`$0.0123 + ~$0.0456 est + 2 unknown`): whole parts go from the end
+/// until the rest and ` …` fit, so no figure is left without its label.
+/// Only when the first part alone does not fit is it cut mid-part, its end
+/// marked `…`.
+pub(super) fn fit(text: String, w: usize) -> String {
+    if text.chars().count() <= w {
+        return text;
+    }
+    let parts: Vec<&str> = text.split(" + ").collect();
+    for keep in (1..parts.len()).rev() {
+        let cut = format!("{} …", parts[..keep].join(" + "));
+        if cut.chars().count() <= w {
+            return cut;
+        }
+    }
+    let mut cut: String = text.chars().take(w.saturating_sub(1)).collect();
+    cut.push('…');
+    cut
 }
 
 /// A trigger in at most 13 columns, its kind kept: `semantic:bash:en` is

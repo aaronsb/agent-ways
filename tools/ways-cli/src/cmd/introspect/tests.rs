@@ -678,6 +678,8 @@ fn spend_calls() -> Vec<ways_agent_core::spend::Call> {
         output_tokens: input / 10,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        account: false,
+        estimate_usd: None,
     };
     vec![
         call("2026-06-30T09:00:00Z", "/elsewhere", 9000, Some(0.9)),
@@ -856,6 +858,8 @@ fn a_heavy_spend_row_fits_at_80_columns() {
         output_tokens: 0,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        account: false,
+        estimate_usd: None,
     };
     let mut calls = vec![call(Some(12.3456))];
     calls.extend((0..12).map(|_| call(None)));
@@ -863,6 +867,46 @@ fn a_heavy_spend_row_fits_at_80_columns() {
     press(&mut s, &[KeyCode::Char('3')]);
     let t = text(&render(&mut s, 80, 25));
     assert!(t.contains("$12.3456 + 12 unknown"), "{t}");
+}
+
+/// Calls on the Claude Code account widen the Cost column: their figure is
+/// shown whole where it fits, Tokens gives way at 80 columns, and a figure
+/// still too wide loses its tail, never its first digits (#1301).
+#[test]
+fn an_account_spend_row_keeps_its_figure() {
+    let call = |cost: Option<f64>, account: bool| ways_agent_core::spend::Call {
+        ts: "2026-07-03T16:52:00Z".into(),
+        session: SESSION.into(),
+        project: PROJECT.into(),
+        cost_usd: cost,
+        input_tokens: 1,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        account,
+        estimate_usd: account.then_some(0.0061),
+    };
+    let tab = |calls: &[ways_agent_core::spend::Call], width: u16| {
+        let mut s = Introspect::showing(replay(false), with_spend(Spend::new(calls.to_vec(), None, "every project".into())), terminal(), Shape::PLAIN);
+        press(&mut s, &[KeyCode::Char('3')]);
+        text(&render(&mut s, width, 25))
+    };
+    // Account calls and deadlines, as on a claude-code host.
+    let mut calls: Vec<_> = (0..300).map(|_| call(None, true)).collect();
+    calls.extend((0..291).map(|_| call(None, false)));
+    let t = tab(&calls, 80);
+    assert!(t.contains("~$1.8300 est + 291 unknown"), "{t}");
+    assert!(!t.contains("Tokens"), "Tokens gives way at 80: {t}");
+    assert!(tab(&calls, 120).contains("Tokens"));
+    // Billed, account and unknown calls at once.
+    let mut mixed = vec![call(Some(12.3456), false)];
+    mixed.extend((0..12).map(|_| call(None, false)));
+    mixed.extend((0..300).map(|_| call(None, true)));
+    let t = tab(&mixed, 120);
+    assert!(t.contains("$12.3456 + ~$1.8300 est + 12 unknown") && t.contains("Tokens"), "{t}");
+    let t = tab(&mixed, 80);
+    assert!(t.contains("$12.3456 + ~$1.8300 est …"), "whole parts go, never a bare count: {t}");
+    assert!(!t.contains("12 …"), "{t}");
 }
 
 /// A small log for the usage and precision tabs: two sessions in this
@@ -957,6 +1001,22 @@ fn precision_drops_the_spread_below_100_columns() {
 }
 
 /// A short trigger keeps its kind: a semantic lane is told from a pattern.
+/// A cost too wide for its column drops whole parts from its end, and is
+/// cut mid-part only when its first part alone does not fit.
+#[test]
+fn a_cost_too_wide_drops_whole_parts() {
+    use super::report::fit;
+    let cost = "$12.3456 + ~$1.8300 est + 12 unknown".to_string();
+    assert_eq!(fit(cost.clone(), 40), cost, "a cost that fits is kept");
+    assert_eq!(fit(cost.clone(), 30), "$12.3456 + ~$1.8300 est …");
+    assert_eq!(fit(cost.clone(), 25), "$12.3456 + ~$1.8300 est …");
+    assert_eq!(fit(cost.clone(), 24), "$12.3456 …");
+    assert_eq!(fit(cost.clone(), 10), "$12.3456 …");
+    // The first part alone is too wide: it is cut by characters.
+    assert_eq!(fit(cost, 8), "$12.345…");
+    assert_eq!(fit("~$1234.5678 est".to_string(), 12), "~$1234.5678…");
+}
+
 #[test]
 fn a_short_trigger_keeps_semantic_apart_from_pattern() {
     use super::report::short_trigger;

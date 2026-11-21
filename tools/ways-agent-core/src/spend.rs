@@ -6,12 +6,17 @@
 //! aggregation `ways agent cost` prints and `ways session` reports.
 //!
 //! A call whose cost is unknown is counted apart and never summed as zero.
+//! A call on the Claude Code account (`cost_source: account`) is counted
+//! apart from both, with an estimate at Anthropic's API list price that is
+//! never added to the billed cost (#1301).
 
 use std::collections::BTreeMap;
 
 use anyhow::{bail, Result};
 use serde::Serialize;
 use serde_json::Value;
+
+use crate::cost::{account_estimate, Usage};
 
 /// One `judge_call` event, reduced to what the report needs.
 #[derive(Debug, Clone, PartialEq)]
@@ -24,6 +29,11 @@ pub struct Call {
     pub output_tokens: u64,
     pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,
+    /// Logged with `cost_source: account`: a call on the Claude Code account.
+    pub account: bool,
+    /// An account call's cost at Anthropic's API list price, when its model
+    /// has one: an estimate, never billed cost.
+    pub estimate_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +57,16 @@ pub struct Group {
     pub output_tokens: u64,
     pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,
+    /// Calls on the Claude Code account: neither known nor unknown, and
+    /// never in `cost_usd`. Their tokens are in the totals above as well.
+    pub account_calls: u64,
+    pub account_input_tokens: u64,
+    pub account_output_tokens: u64,
+    /// The account calls' cost at Anthropic's API list price, summed over
+    /// the `account_estimated_calls` whose model has one: an estimate, never
+    /// billed cost. `None` while no account call has one.
+    pub account_estimate_usd: Option<f64>,
+    pub account_estimated_calls: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -68,16 +88,27 @@ pub fn parse_line(line: &str) -> Option<Call> {
         return None;
     }
     let n = |k: &str| s(k).and_then(|x| x.trim().parse::<u64>().ok()).unwrap_or(0);
-    let cost = if s("cost_source") == Some("unknown") { None } else { s("cost_usd").and_then(|c| c.trim().parse::<f64>().ok()).filter(|c| c.is_finite()) };
+    let account = s("cost_source") == Some("account");
+    let cost = if account || s("cost_source") == Some("unknown") { None } else { s("cost_usd").and_then(|c| c.trim().parse::<f64>().ok()).filter(|c| c.is_finite()) };
+    let usage = Usage {
+        input_tokens: n("input_tokens"),
+        output_tokens: n("output_tokens"),
+        cache_read_tokens: n("cache_read_tokens"),
+        cache_write_tokens: n("cache_write_tokens"),
+        provider_cost_usd: None,
+    };
+    let estimate_usd = if account { s("model").and_then(|m| account_estimate(m, &usage)) } else { None };
     Some(Call {
         ts: s("ts")?.to_string(),
         session: s("session").unwrap_or("").to_string(),
         project: s("project").unwrap_or("").to_string(),
         cost_usd: cost,
-        input_tokens: n("input_tokens"),
-        output_tokens: n("output_tokens"),
-        cache_read_tokens: n("cache_read_tokens"),
-        cache_write_tokens: n("cache_write_tokens"),
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        cache_read_tokens: usage.cache_read_tokens,
+        cache_write_tokens: usage.cache_write_tokens,
+        account,
+        estimate_usd,
     })
 }
 
@@ -125,12 +156,22 @@ fn key_of(c: &Call, by: By) -> String {
 
 fn add(g: &mut Group, c: &Call) {
     g.calls += 1;
-    match c.cost_usd {
-        Some(x) => {
-            g.known_calls += 1;
-            g.cost_usd = Some(g.cost_usd.unwrap_or(0.0) + x);
+    if c.account {
+        g.account_calls += 1;
+        g.account_input_tokens += c.input_tokens;
+        g.account_output_tokens += c.output_tokens;
+        if let Some(e) = c.estimate_usd {
+            g.account_estimated_calls += 1;
+            g.account_estimate_usd = Some(g.account_estimate_usd.unwrap_or(0.0) + e);
         }
-        None => g.unknown_calls += 1,
+    } else {
+        match c.cost_usd {
+            Some(x) => {
+                g.known_calls += 1;
+                g.cost_usd = Some(g.cost_usd.unwrap_or(0.0) + x);
+            }
+            None => g.unknown_calls += 1,
+        }
     }
     g.input_tokens += c.input_tokens;
     g.output_tokens += c.output_tokens;
@@ -184,13 +225,24 @@ impl Group {
     }
 
     /// The group's cost, short: `$0.0123`, `$0.0123 + 2 unknown`, or
-    /// `cost unknown` when no call's cost is known.
+    /// `cost unknown` when no call's cost is known and none is on the
+    /// account. Account calls add their list-price estimate, `~$0.0456 est`,
+    /// or `on account` when their model has none, between the billed cost
+    /// and the unknown count: `$0.0123 + ~$0.0456 est + 2 unknown`.
     pub fn cost_short(&self) -> String {
-        match self.cost_usd {
-            None => "cost unknown".into(),
-            Some(c) if self.unknown_calls > 0 => format!("${c:.4} + {} unknown", self.unknown_calls),
-            Some(c) => format!("${c:.4}"),
+        if self.account_calls == 0 {
+            return match self.cost_usd {
+                None => "cost unknown".into(),
+                Some(c) if self.unknown_calls > 0 => format!("${c:.4} + {} unknown", self.unknown_calls),
+                Some(c) => format!("${c:.4}"),
+            };
         }
+        let mut parts: Vec<String> = self.cost_usd.map(|c| format!("${c:.4}")).into_iter().collect();
+        parts.push(self.account_estimate_usd.map_or_else(|| "on account".into(), |e| format!("~${e:.4} est")));
+        if self.unknown_calls > 0 {
+            parts.push(format!("{} unknown", self.unknown_calls));
+        }
+        parts.join(" + ")
     }
 }
 
@@ -212,12 +264,24 @@ pub fn report(calls: &[Call], covers_since: Option<String>) -> Report {
 
 fn describe(g: &Group) -> String {
     let n = |k: u64| format!("{k} {}", if k == 1 { "call" } else { "calls" });
+    // The billed cost covers the calls off the account. A group whose calls
+    // are all on the account has no billed cost to show.
     let cost = match g.cost_usd {
-        None => "cost unknown".to_string(),
-        Some(c) if g.unknown_calls > 0 => format!("${c:.4} + {} of unknown cost", n(g.unknown_calls)),
-        Some(c) => format!("${c:.4}"),
+        None if g.unknown_calls == 0 && g.account_calls > 0 => String::new(),
+        None if g.account_calls > 0 => format!("{} of unknown cost, ", n(g.unknown_calls)),
+        None => "cost unknown, ".to_string(),
+        Some(c) if g.unknown_calls > 0 => format!("${c:.4} + {} of unknown cost, ", n(g.unknown_calls)),
+        Some(c) => format!("${c:.4}, "),
     };
-    format!("{}, {cost}, tokens {} in / {} out", n(g.calls), g.input_tokens, g.output_tokens)
+    let mut out = format!("{}, {cost}tokens {} in / {} out", n(g.calls), g.input_tokens, g.output_tokens);
+    if g.account_calls > 0 {
+        out.push_str(&format!("; {} on the Claude Code account, tokens {} in / {} out", n(g.account_calls), g.account_input_tokens, g.account_output_tokens));
+        if let Some(e) = g.account_estimate_usd {
+            let of = if g.account_estimated_calls < g.account_calls { format!(" for {} of them", g.account_estimated_calls) } else { String::new() };
+            out.push_str(&format!(", ~${e:.4} at API list price{of} (estimate)"));
+        }
+    }
+    out
 }
 
 /// The report as text. `log_from` is the date of the earliest judge call the
@@ -375,6 +439,77 @@ not json
             assert!(v.get(k).is_some(), "{k}");
         }
         assert_eq!(v["total"]["unknown_calls"], 2);
+    }
+
+    /// Two account calls (one on a model with no list price), a deadline,
+    /// and one priced call, all on one day.
+    const ACCOUNT_LOG: &str = r#"{"event":"judge_call","ts":"2026-11-20T09:00:00Z","session":"s1","project":"/p/a","outcome":"judged","engine":"claude-code","provider":"claude-code","model":"claude-haiku-4-5","input_tokens":"1000000","output_tokens":"100000","cache_read_tokens":"0","cache_write_tokens":"0","cost_source":"account"}
+{"event":"judge_call","ts":"2026-11-20T09:01:00Z","session":"s1","project":"/p/a","outcome":"judged","engine":"claude-code","provider":"claude-code","model":"claude-sonnet-4-5","input_tokens":"10","output_tokens":"1","cost_source":"account"}
+{"event":"judge_call","ts":"2026-11-20T09:02:00Z","session":"s1","project":"/p/a","outcome":"fallback","reason":"deadline","engine":"claude-code","provider":"claude-code","model":"claude-haiku-4-5","cost_source":"unknown"}
+{"event":"judge_call","ts":"2026-11-20T09:03:00Z","session":"s2","project":"/p/b","outcome":"judged","input_tokens":"50","output_tokens":"5","cost_usd":"0.0300","cost_source":"price_table"}
+"#;
+
+    #[test]
+    fn account_calls_are_counted_apart_from_unknown_ones() {
+        let calls = parse_log(ACCOUNT_LOG);
+        let t = total(&calls);
+        assert_eq!((t.calls, t.known_calls, t.unknown_calls, t.account_calls), (4, 1, 1, 2));
+        assert_eq!((t.account_input_tokens, t.account_output_tokens), (1_000_010, 100_001));
+        assert_eq!((t.input_tokens, t.output_tokens), (1_000_060, 100_006), "account tokens are in the totals");
+        // The estimate covers the haiku call only and is not billed cost.
+        assert_eq!(t.account_estimated_calls, 1);
+        assert!((t.account_estimate_usd.unwrap() - 1.5).abs() < 1e-9);
+        assert!((t.cost_usd.unwrap() - 0.03).abs() < 1e-9, "the estimate is not in the billed total");
+        let v = serde_json::to_value(&t).unwrap();
+        assert_eq!((v["account_calls"].as_u64(), v["unknown_calls"].as_u64()), (Some(2), Some(1)));
+        assert!((v["cost_usd"].as_f64().unwrap() - 0.03).abs() < 1e-9);
+    }
+
+    #[test]
+    fn account_calls_print_on_their_own_clause_with_a_labelled_estimate() {
+        let calls = parse_log(ACCOUNT_LOG);
+        let text = render_text(&calls, By::Day, None);
+        let want = "total: 4 calls, $0.0300 + 1 call of unknown cost, tokens 1000060 in / 100006 out; \
+2 calls on the Claude Code account, tokens 1000010 in / 100001 out, ~$1.5000 at API list price for 1 of them (estimate)\n";
+        assert!(text.starts_with(want), "{text}");
+        // A day of haiku account calls only: no billed cost, no "unknown".
+        let haiku = render_text(&calls[..1], By::Day, None);
+        assert_eq!(
+            haiku.lines().next().unwrap(),
+            "total: 1 call, tokens 1000000 in / 100000 out; 1 call on the Claude Code account, tokens 1000000 in / 100000 out, ~$1.5000 at API list price (estimate)"
+        );
+        assert!(!haiku.contains("unknown"), "{haiku}");
+        // A model with no list price shows no estimate.
+        assert!(!render_text(&calls[1..2], By::Day, None).contains('$'));
+    }
+
+    #[test]
+    fn account_calls_beside_unknown_or_billed_ones_print_exactly() {
+        let calls = parse_log(ACCOUNT_LOG);
+        // Account and unknown calls, none of known cost.
+        let text = render_text(&calls[..3], By::Day, None);
+        let clause = "1 call of unknown cost, tokens 1000010 in / 100001 out; \
+2 calls on the Claude Code account, tokens 1000010 in / 100001 out, ~$1.5000 at API list price for 1 of them (estimate)\n";
+        assert_eq!(text, format!("total: 3 calls, {clause}\x20 2026-11-20: 3 calls, {clause}"));
+        // Account calls and a billed one, none unknown.
+        let billed = [calls[0].clone(), calls[3].clone()];
+        let clause = "$0.0300, tokens 1000050 in / 100005 out; \
+1 call on the Claude Code account, tokens 1000000 in / 100000 out, ~$1.5000 at API list price (estimate)\n";
+        assert_eq!(render_text(&billed, By::Day, None), format!("total: 2 calls, {clause}\x20 2026-11-20: 2 calls, {clause}"));
+    }
+
+    #[test]
+    fn the_short_cost_always_shows_account_calls() {
+        let calls = parse_log(ACCOUNT_LOG);
+        let short = |c: &[Call]| total(c).cost_short();
+        assert_eq!(short(&calls[..1]), "~$1.5000 est");
+        assert_eq!(short(&calls[1..2]), "on account");
+        assert_eq!(short(&calls[1..3]), "on account + 1 unknown");
+        assert_eq!(short(&calls[..3]), "~$1.5000 est + 1 unknown", "not \"cost unknown\" (#1301)");
+        assert_eq!(short(&[calls[0].clone(), calls[3].clone()]), "$0.0300 + ~$1.5000 est");
+        assert_eq!(short(&calls), "$0.0300 + ~$1.5000 est + 1 unknown");
+        assert_eq!(short(&calls[2..3]), "cost unknown");
+        assert_eq!(short(&calls[3..]), "$0.0300");
     }
 
     #[test]
