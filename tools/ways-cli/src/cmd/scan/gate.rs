@@ -281,8 +281,9 @@ pub(super) fn apply(pending: &[Pending<'_>], turns: Vec<Turn>, wait: Duration, l
 ///
 /// The session's engine is resolved at its first judge request and held
 /// (ADR-708 §2). A key engine goes to the ways agent, named in the request;
-/// `claude-code` goes to the session's judge host as a job ([`handoff`]);
-/// none fails open with the resolution's `engine_unavailable` reason. No
+/// `claude-code` goes to the session's judge host as a job ([`handoff`]),
+/// except at [`UNHOSTED_HOOK`], where it passes as with the gate off; none
+/// fails open with the resolution's `engine_unavailable` reason. No
 /// request reaches both. A store of `None`, a session id that names no
 /// directory, can have no host, so it never resolves to `claude-code`.
 #[allow(clippy::too_many_arguments)]
@@ -338,6 +339,10 @@ fn apply_from(
     settings.profile.timeout_ms = settings.profile.timeout_ms.min(budget_within(wait).as_millis() as u64);
     let settings = settings;
     match (settings.profile.provider, store) {
+        // No event a Claude Code mod can hook wraps the SessionStart hooks, so
+        // no host could claim a job written there: the lane passes its
+        // candidates as with the gate off, with no job and no wait.
+        (Provider::ClaudeCode, _) if log.hook_event == UNHOSTED_HOOK => Gate::default(),
         (Provider::ClaudeCode, Some(store)) => {
             run(pending, turns, &settings, log, JUDGED, |req, _| handoff(store, &settings, req, begun))
         }
@@ -350,6 +355,15 @@ fn apply_from(
         }),
     }
 }
+
+/// The hook event whose judge jobs no Claude Code host can claim: its
+/// settings hooks run at startup, after a compaction, on a resume and on a
+/// `/clear`, where no mod event wraps them and the policy plugin passes
+/// `classic.*` and `session.compact` over.
+///
+/// References:
+/// - ADR-712 §2: the state lane under the claude-code engine at SessionStart.
+const UNHOSTED_HOOK: &str = "SessionStart";
 
 /// The judge deadline that fits in `wait`: what is left once an agent start
 /// ([`ways_agent_core::client::START_WAIT`]) and the read grace are taken
@@ -1327,6 +1341,45 @@ mod tests {
         assert!(took >= CLAIM_WINDOW && took < CLAIM_WINDOW + Duration::from_millis(400), "{took:?}");
         assert!(calls(&events).is_empty(), "an unclaimed job made no call");
         assert_eq!(s.store.take().unwrap(), None, "the job was withdrawn");
+    }
+
+    /// SessionStart under claude-code: no mod event wraps those hooks, so no
+    /// host could claim a job there. The state lane writes none and passes
+    /// its candidates as with the gate off, at once, with no fallback line.
+    #[test]
+    fn session_start_under_claude_code_writes_no_job_and_returns_at_once() {
+        let s = Session::new("session-start", CLAUDE_CODE);
+        s.store.register_host().unwrap();
+        let events = Events::default();
+        let sink = recorder(&events);
+        let lc = LogContext { lane: "state", hook_event: "SessionStart", ..log(&sink) };
+        let begun = Instant::now();
+        let g = apply_from(&s.yaml, |_| false, Some(&s.store), &pending(), turns("store the api key", Some("ok")), PROMPT_WAIT, &lc, |_, _| {
+            panic!("a claude-code session never asks the agent")
+        });
+        let took = begun.elapsed();
+        assert_eq!(g.status, Status::Off);
+        assert!(g.ids().is_empty(), "nothing is blocked");
+        assert!(took < Duration::from_millis(200), "{took:?}");
+        assert_eq!(s.store.take().unwrap(), None, "no job was written");
+        assert!(events.borrow().iter().all(|e| field(e, "event") != "gate_fallback"), "{:?}", events.borrow());
+    }
+
+    /// A key engine still judges at SessionStart.
+    #[test]
+    fn session_start_on_a_key_engine_still_judges() {
+        let s = Session::new("session-start-key", "engine: anthropic\nmode: enforce\n");
+        let events = Events::default();
+        let sink = recorder(&events);
+        let lc = LogContext { lane: "state", hook_event: "SessionStart", ..log(&sink) };
+        let asked = std::cell::Cell::new(0);
+        let g = apply_from(&s.yaml, |_| true, Some(&s.store), &pending(), turns("store the api key", Some("ok")), PROMPT_WAIT, &lc, |_, _| {
+            asked.set(asked.get() + 1);
+            Ok(judged(Mode::Enforce, &[("softwaredev/code/security/secrets", 0.9), ("data/migrations", 0.05)]))
+        });
+        assert_eq!(asked.get(), 1);
+        assert!(matches!(g.status, Status::Judged { .. }), "{:?}", g.status);
+        assert_eq!(g.ids(), HashSet::from(["data/migrations".to_string()]));
     }
 
     /// No host and no key: no engine, and that is not held, so a key added

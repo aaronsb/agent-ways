@@ -26,7 +26,7 @@ A call that writes no job costs one take process, stopped when the call settles.
 
 The mod carries text and usage only. The hook side parses and validates the verdict, and it fails open at its deadline. The tool lanes give the judge at most 6 seconds inside their 9 second hook deadline, and the job's own `timeout_ms`, which the model call takes as its limit, is what remains of that budget when the job is written.
 
-It hooks no `classic.*` event, which an organization's policy plugin passes over. No event a mod can hook wraps the SessionStart hooks after a compaction, a resume or a `/clear`, so a state-lane job written there goes unclaimed.
+It hooks no `classic.*` event, which an organization's policy plugin passes over. No event a mod can hook wraps the SessionStart hooks, so under this engine the state lane at SessionStart writes no job and shows its candidates unjudged, as with the gate off.
 
 ## Versions
 
