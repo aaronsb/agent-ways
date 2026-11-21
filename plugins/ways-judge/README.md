@@ -24,7 +24,7 @@ At each prompt, whatever its origin, and at each call of a listed tool (the sett
 5. on `standby`, calls no model and starts no further take;
 6. when `next(e)` settles, stops the take that is still waiting and returns, waiting at most 3 seconds for the take to end.
 
-A take claims the session's oldest job, so a job one call's take claims may be another call's. Each claimed job is judged apart from the event that claimed it: the mod holds the model call itself, under its own signal, and answers the job by its id. The claiming call does not wait for that judge, and interrupting it does not cancel that judge. A take that is stopped just as it claims a job either puts the job back for the next take, or hands it over, and the mod judges it all the same. The mod cuts any judge call still running when the session ends.
+A take claims the session's oldest job, so a job one call's take claims may be another call's. Each claimed job is judged apart from the event that claimed it: the mod holds the model call itself and answers the job by its id, so the claiming call does not wait for that judge. The engine binds `$.model.complete` to the dispatch of the hook that made the call, which is the claiming call's. An interrupt of the claiming call, such as Esc on its turn, therefore cuts that judge call, and the other call's gate then passes its candidates unjudged for that job. A take that is stopped just as it claims a job either puts the job back for the next take, or hands it over, and the mod judges it all the same. The mod cuts any judge call still running when the session ends.
 
 ## What it costs
 

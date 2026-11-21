@@ -354,6 +354,8 @@ describe('one call and another call\'s job', () => {
 
   // The test's engine cannot abort an event's signal beneath the mod, so
   // this one calls the mod's hook with an engine and a `next` of its own.
+  // Its `complete` sees only the mod's signal; Claude Code also cuts the
+  // call when the claiming call's dispatch is aborted, as the README says.
   test('an event aborted while its claimed job is judged still answers the job', async () => {
     const answers: unknown[] = []
     let takes = 0

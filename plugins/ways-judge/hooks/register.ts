@@ -22,10 +22,12 @@
 // apart from the event that claimed it: the request goes through
 // `$.model.complete` unchanged, and the reply's text and usage, or the
 // failure reason, go to `ways judge answer`. A take claims the session's
-// oldest job, so the job may be another call's; its judge call is held by
-// the module, under the module's own signal, so the claiming call neither
-// waits for it nor cancels it. The hook side parses and validates the
-// reply; this module never reads it. On `standby` (the session resolved to
+// oldest job, so the job may be another call's; the module holds its
+// judge call, so the claiming call does not wait for it. The engine binds
+// `$.model.complete` to the dispatch of the hook that made the call, so an
+// interrupt of the claiming call cuts that judge call, and the other
+// call's gate then passes its candidates unjudged for that job. The hook
+// side parses and validates the reply; this module never reads it. On `standby` (the session resolved to
 // a key engine) it calls no model. When `next(e)` settles, the waiting take
 // is stopped with the stream's `return()`, since `$.process.run` has no
 // abort, and the hook returns within STOP_GRACE_MS.
@@ -52,8 +54,10 @@ type TakeStream = HookStream<ProcessSpawnChunk, ProcessSpawnResult>
 const debug = ($: EngineInterface, text: string) => $.ui.log(`ways-judge: ${text}`, { to: 'debug' })
 
 /** The judge calls in flight, held by the module. A call outlives the
- *  event whose take claimed its job, which may be another call's, and runs
- *  under the module's signal, which only the session's end aborts. */
+ *  event whose take claimed its job, which may be another call's. The
+ *  module's signal, which the session's end aborts, cuts it, and so does
+ *  an interrupt of the claiming call, whose dispatch the engine binds the
+ *  model call to. */
 type Judges = { inFlight: Set<Promise<void>>; stop: AbortController }
 
 /** Judges a claimed job apart from the event that claimed it. */
