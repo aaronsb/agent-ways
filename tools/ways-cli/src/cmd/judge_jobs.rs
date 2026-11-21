@@ -126,12 +126,20 @@ fn names_claude_code(path: &std::path::Path) -> bool {
 /// engine) is false. A session with no engine holds no resolution, so a
 /// session on claude-code with no resolution yet is waited on. Looks once
 /// with no `deadline`, else until it passes or `stop` says so.
+///
+/// A stop read just after a claim puts the job back and prints nothing:
+/// the host that stopped this take no longer reads its output, and the
+/// job's gate would otherwise wait for an answer to its deadline.
 fn take(store: &Store, configured: bool, deadline: Option<Instant>, stop: impl Fn() -> bool) -> Result<Option<String>> {
     loop {
         if stop() {
             return Ok(None);
         }
         if let Some(job) = store.take().context("taking a judge job")? {
+            if stop() {
+                store.release(&job.id).context("putting back a judge job")?;
+                return Ok(None);
+            }
             return Ok(Some(serde_json::to_string(&job)?));
         }
         let claude_code = match store.resolution() {
@@ -155,7 +163,8 @@ fn stopped() -> bool {
 }
 
 /// SIGTERM, how the host stops a `take` it no longer needs, ends the wait at
-/// its next look instead of killing the process mid-claim.
+/// its next look instead of killing the process mid-claim, and puts back a
+/// job claimed as the stop landed.
 #[cfg(unix)]
 fn stop_on_sigterm() {
     extern "C" fn on_term(_: libc::c_int) {
@@ -248,6 +257,27 @@ mod tests {
         assert_eq!(take(&s, true, Some(Instant::now() + Duration::from_millis(50)), || false).unwrap(), None);
         assert_eq!(take(&s, true, None, || false).unwrap(), None);
         assert_eq!(take(&s, true, Some(Instant::now() + Duration::from_secs(5)), || true).unwrap(), None);
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// A stop that lands while the take claims: the claim is put back, so
+    /// the next take claims the job instead of its gate waiting it out.
+    #[test]
+    fn take_stopped_while_claiming_puts_the_job_back() {
+        let (s, base) = store("unclaim");
+        resolved(&s, "claude-code", Provider::ClaudeCode, EXPLICIT);
+        let job = JudgeJob { model: "m".into(), system: "s".into(), prompt: "p".into(), max_tokens: 96, timeout_ms: 1900 };
+        let id = s.write_job(&job).unwrap();
+        // The first look finds no stop; the stop lands during the claim.
+        let looks = std::cell::Cell::new(0);
+        let stop = || {
+            looks.set(looks.get() + 1);
+            looks.get() > 1
+        };
+        assert_eq!(take(&s, false, Some(Instant::now() + Duration::from_secs(5)), stop).unwrap(), None, "prints nothing");
+        assert!(looks.get() > 1, "the stop was read after the claim");
+        let again = s.take().unwrap().expect("the job is pending again");
+        assert_eq!(again.id, id);
         std::fs::remove_dir_all(&base).ok();
     }
 }
