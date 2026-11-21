@@ -53,6 +53,8 @@ Attend also already reads the transcript. The context sensor (ADR-113) shells to
 
 2. **The floor.** With a window armed, context at or above 50k tokens, and 50 minutes since the last assistant line, the sensor emits one line at medium priority. Medium is the lowest priority `emit_batch` writes to stdout, so the line wakes Monitor. The sensor rides the message lane with the peers sensor: the wake is a timed floor, so it bypasses the action-potential refractory that throttles observation noise. One wake per idle stretch. If no assistant line follows within the remaining ten minutes, the sensor disarms and records why.
 
+   > Amended 2026-11-21 by ADR-416: no sensor loop emits the wake. The attend mod runs `attend keepwarm check` on its poll and submits the `keepwarm:` line itself (ADR-406 item 13, ADR-414), so the line wakes no Monitor and rides no lane. The shipped `keepwarm` sensor file and its message-lane exception are removed. The clock, the floor's conditions, the verdict, cold-write scoring and arming stay as the Decision states them.
+
 3. **The verdict comes from the next usage entry.** After a wake, the first new assistant response is checked: a cache read of at least half the previous context means the cache was warm and the wake did its job. A smaller read means the cache was already gone. What the response wrote does not enter the verdict, since a real turn landing beside the wake can append a large tool result to a warm prefix. On a cold verdict the sensor stops and records the reason, so an armed window never keeps paying for rewrites.
 
 4. **Cold writes are scored.** Any new assistant response whose cache write is at least half the previous context size and whose cache read is under half of it, with previous context over 20k, is a paid cold write. The sensor records it and, when the context is large enough for the floor to serve, arms three hours if no window covers them. That mirrors cache-tax: after one rewrite, the session is held warm so the second is not paid today.
@@ -62,6 +64,8 @@ Attend also already reads the transcript. The context sensor (ADR-113) shells to
 6. **`ways context --json` grows a `usage_tail`.** The last assistant responses' usage, one entry per message id, each with timestamp, model, input, cache read, cache write, output, and tier. Claude Code writes one transcript line per content block, and every line of a response repeats its usage, so the tail collapses them. It also gains `--session <id>` so a sensor pinned to one session never reads a peer's transcript in the same project. The transcript parser stays in one place.
 
 7. **The agent contract lives in the three synchronized guidance files.** The attend skill primer, the runtime disclosure, and the attend way each carry the same paragraph: a line beginning `keepwarm:` asks for one word and no tools, and it is not a prompt to investigate.
+
+   > Amended 2026-11-21 by ADR-416: the runtime disclosure is removed, so the paragraph lives in the attend skill primer and the attend way.
 
 8. **Prices are a dated table.** Cache read, 1-hour cache write, and output rates per model family, from the list prices on the decision date. The table is for the status card and the recorded cost of a cold write. A model not in the table prices as unknown.
 

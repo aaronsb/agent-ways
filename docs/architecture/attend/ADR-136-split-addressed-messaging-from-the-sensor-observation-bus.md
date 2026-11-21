@@ -237,6 +237,8 @@ The lane keeps only **dedup** (deliver once). The neuron-decay model
 (`sensor_trait` engagement/curve) stays fully intact for the *event*
 lane — git, process, and a future external-chat sensor (e.g. Slack).
 
+> Amended 2026-11-21 by ADR-416: the boundary between authored communication and environmental events is unchanged and has no exception. The event lane's reports now reach a session through the store, as signals from attend's `system` sender addressed to that session, and the attend mod's drain delivers them. An event-lane signal never starts a turn and is dropped unread once it expires, so the lane stays lossy. A sensor that reads authored chat, such as Slack, rides the message lane, as ADR-403 §3a states.
+
 **2. Each recipient owns its own seen-set; rooms stay shared.** A
 directed multi-`@` message fans out one durable write per recipient
 (all-or-nothing resolution + dedup — Bug 1, PR #137). Shared rooms

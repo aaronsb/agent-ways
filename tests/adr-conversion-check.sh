@@ -36,6 +36,8 @@ live = root / 'docs/architecture'
 
 # Bodies edited on purpose after conversion: number -> reason.
 BODY_EDITED = {
+    '136': 'a dated note on item 1 records that event-lane reports reach a session as system signals through the mod, per ADR-416',
+    '182': 'dated notes on items 2 and 7 record that the mod submits the keepwarm wake and that the runtime disclosure is removed, per ADR-416',
     '178': 'a dated note in the Decision records two sections that left core.md for the SessionStart hook cap (#634), per ADR-313',
     '188': 'rewritten in place while still proposed, on the operator\'s direction (its considered entries); the earlier draft is in git history',
     '302': 'stray tool-call text removed from the end of the body',
