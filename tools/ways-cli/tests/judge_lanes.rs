@@ -573,6 +573,24 @@ fn the_dispatch_lane_judges_and_keeps_each_stash_to_its_dispatch() {
     assert_eq!(r["judge"]["request"], "found", "a dispatch is judged against its brief: {r:#}");
 }
 
+/// A dispatch whose brief matches no way still leaves an (empty) stash.
+/// SubagentStart claims the oldest stash, so without it the first subagent
+/// would take the second dispatch's way and scan id, and the second would get
+/// nothing.
+#[test]
+fn a_dispatch_that_matches_nothing_still_keeps_its_stash() {
+    let s = Sim::new("task-empty", Some(ENFORCE));
+    s.way("taskonly", "pattern: onlytopic\nscope: subagent");
+    let host = s.host(1);
+    s.raw_hook("task", serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"prompt": "tidy the changelog"}}));
+    s.raw_hook("task", serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {"prompt": "work on the onlytopic"}}));
+    host.join().unwrap();
+    let first = s.raw_hook("subagent-start", serde_json::json!({"hook_event_name": "SubagentStart", "agent_id": "afirst"}));
+    let second = s.raw_hook("subagent-start", serde_json::json!({"hook_event_name": "SubagentStart", "agent_id": "asecond"}));
+    assert!(!first.contains("# Marker taskonly"), "the first dispatch matched nothing: {first}");
+    assert!(second.contains("# Marker taskonly"), "the second gets its own way: {second}");
+}
+
 /// The tool lane judges a `tool_name:` way like any other candidate.
 #[test]
 fn the_tool_lane_judges_its_candidates() {
