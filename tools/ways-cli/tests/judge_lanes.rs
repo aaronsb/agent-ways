@@ -551,8 +551,9 @@ fn a_tool_lane_with_no_judge_host_fails_open_at_once() {
 }
 
 /// The dispatch lane judges a subagent's ways against its brief. A dispatch
-/// whose every way the judge blocks still leaves its (empty) stash, so the
-/// next SubagentStart claims that one and not a later dispatch's.
+/// whose every way the judge blocks still leaves its (empty) stash, as one
+/// that matched nothing does, so the next SubagentStart claims that one and
+/// not a later dispatch's.
 #[test]
 fn the_dispatch_lane_judges_and_keeps_each_stash_to_its_dispatch() {
     let s = Sim::new("task", Some(ENFORCE));
