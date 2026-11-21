@@ -155,6 +155,10 @@ pub(super) struct Judged {
     detach_open: bool,
     /// The held candidates sampled for the detached judge.
     held: Vec<Candidate>,
+    /// The session judges on the claude-code engine, read once per scan
+    /// when anything would go to the detached judge: the record's judge
+    /// status and whether a detached judge starts both follow it.
+    unhosted: bool,
 }
 
 impl Judged {
@@ -236,9 +240,11 @@ pub(crate) fn post_tool(session_id: &str, project_dir: &str, hook_event: &str, t
 }
 
 /// [`judge`] with the setting, the engine check and the gate given, so a
-/// test can stand in a judge. `unhosted` is asked only in shadow mode with
-/// a candidate open: under claude-code no detached judge will start, and the
-/// record says so.
+/// test can stand in a judge. `unhosted` is asked once, and only when
+/// something would go to the detached judge: an open candidate in shadow
+/// mode, or a sampled held one, read after the judge in enforce mode. Under
+/// claude-code no detached judge will start; the record says so, and
+/// [`detach`] follows the same reading.
 pub(super) fn judge_with(
     config: Config,
     candidates: &[Candidate],
@@ -246,29 +252,36 @@ pub(super) fn judge_with(
     unhosted: impl FnOnce() -> bool,
     apply: impl FnOnce(&[Pending<'_>], Vec<Turn>) -> Gate,
 ) -> Judged {
-    let (gate, detach_open, rate) = match config {
-        Config::Off => return Judged { gate: Gate::default(), turns, detach_open: false, held: Vec::new() },
-        Config::Shadow { held_sample } => {
+    let rate = match config {
+        Config::Off => return Judged { gate: Gate::default(), turns, detach_open: false, held: Vec::new(), unhosted: false },
+        Config::Shadow { held_sample } | Config::Enforce { held_sample } => held_sample,
+    };
+    let held: Vec<Candidate> = candidates.iter().filter(|c| !c.open && sampled(rate, &c.key)).cloned().collect();
+    let (gate, detach_open, unhosted) = match config {
+        Config::Off => unreachable!("returned above"),
+        Config::Shadow { .. } => {
             let any_open = candidates.iter().any(|c| c.open);
+            let unhosted = (any_open || !held.is_empty()) && unhosted();
             let status = match any_open {
                 false => gate::Status::Idle,
-                true if unhosted() => gate::Status::DetachSkipped,
+                true if unhosted => gate::Status::DetachSkipped,
                 true => gate::Status::Detached,
             };
-            (Gate { status, ..Gate::default() }, any_open, held_sample)
+            (Gate { status, ..Gate::default() }, any_open, unhosted)
         }
-        Config::Enforce { held_sample } => {
+        Config::Enforce { .. } => {
             let pending: Vec<Pending<'_>> = candidates
                 .iter()
                 .filter(|c| c.open)
                 .map(|c| Pending { id: &c.key, description: &c.description, trigger: c.trigger })
                 .collect();
             let gate = if pending.is_empty() { Gate { status: gate::Status::Idle, ..Gate::default() } } else { apply(&pending, turns.clone()) };
-            (gate, false, held_sample)
+            // Read once the judge ran, which resolves the session's engine.
+            let unhosted = !held.is_empty() && unhosted();
+            (gate, false, unhosted)
         }
     };
-    let held = candidates.iter().filter(|c| !c.open && sampled(rate, &c.key)).cloned().collect();
-    Judged { gate, turns, detach_open, held }
+    Judged { gate, turns, detach_open, held, unhosted }
 }
 
 /// Whether `key` falls in a sample at `rate`: drawn from the clock, so each
@@ -320,22 +333,21 @@ pub(super) fn detach(lane: &Lane, judged: Judged, shown: &[Shown<'_>], scan_id: 
         judged,
         shown,
         scan_id,
-        || gate::unhosted_engine(&session),
         || crate::session::first_mark(&session, "judge-detach-skipped"),
         &crate::session::log_event,
         start_detached,
     );
 }
 
-/// [`detach`] with the engine check, the once-per-session marker, the log
-/// and the start injected, so a test can see what would start.
+/// [`detach`] with the once-per-session marker, the log and the start
+/// injected, so a test can see what would start. Whether one may start is
+/// the engine `judged` was read under.
 #[allow(clippy::too_many_arguments)]
 fn detach_via(
     lane: &Lane,
     judged: Judged,
     shown: &[Shown<'_>],
     scan_id: &str,
-    unhosted: impl FnOnce() -> bool,
     first_skip: impl FnOnce() -> bool,
     sink: gate::EventSink<'_>,
     start: impl FnOnce(&Lane, Job, gate::EventSink<'_>),
@@ -352,7 +364,7 @@ fn detach_via(
     // event's take, and a take claims the oldest job first, so it would
     // queue ahead of a hot-path job and push that one past its claim window.
     // Nothing starts, and the session's log says so once.
-    if unhosted() {
+    if judged.unhosted {
         if first_skip() {
             let log = lane.log(sink);
             (log.sink)(&[
@@ -640,7 +652,8 @@ pub(super) fn detach_held(lane: &Lane, held: Vec<Candidate>, turns: Vec<Turn>, s
         Config::Enforce { held_sample } | Config::Shadow { held_sample } => held_sample,
     };
     let held: Vec<Candidate> = held.into_iter().filter(|c| sampled(rate, &c.key)).collect();
-    let judged = Judged { gate: Gate::default(), turns, detach_open: false, held };
+    let unhosted = !held.is_empty() && gate::unhosted_engine(&lane.session_id);
+    let judged = Judged { gate: Gate::default(), turns, detach_open: false, held, unhosted };
     detach(lane, judged, &[], scan_id);
 }
 
@@ -769,7 +782,7 @@ mod tests {
             let shadow_call = judge_with(Config::Shadow { held_sample: 0.0 }, &open, vec![], || unhosted, |_, _| panic!("no judge on the hot path"));
             let shown = [Shown { candidate: &open[0], result: "shown" }];
             for (j, s) in [(held_call, &[][..]), (shadow_call, &shown[..])] {
-                detach_via(&lane, j, s, "scan", || unhosted, || first.replace(false), &sink, |_, job, _| {
+                detach_via(&lane, j, s, "scan", || first.replace(false), &sink, |_, job, _| {
                     started.borrow_mut().push(job.entries.len())
                 });
             }
@@ -803,6 +816,32 @@ mod tests {
         let held = [candidate("h", Trigger::Semantic, false)];
         let j = judge_with(Config::Shadow { held_sample: 0.0 }, &held, vec![], || panic!("not asked"), |_, _| panic!("no judge"));
         assert_eq!(j.gate.status, gate::Status::Idle);
+    }
+
+    /// The engine is read once per scan: a record that says no detached
+    /// judge follows starts none, even when a second reading would differ.
+    #[test]
+    fn the_detach_follows_the_engine_the_record_was_written_under() {
+        let lane = Lane {
+            surface: decision::Surface::Command,
+            hook_event: "PreToolUse".into(),
+            scope: "agent".into(),
+            project_dir: "/p".into(),
+            session_id: "s".into(),
+        };
+        let open = [candidate("open/way", Trigger::Declared, true)];
+        let shown = [Shown { candidate: &open[0], result: "shown" }];
+        let readings = std::cell::Cell::new(0);
+        let read = || {
+            readings.set(readings.get() + 1);
+            readings.get() == 1
+        };
+        let j = judge_with(Config::Shadow { held_sample: 0.0 }, &open, vec![], read, |_, _| panic!("no judge on the hot path"));
+        assert_eq!(j.gate.status, gate::Status::DetachSkipped);
+        let started = std::cell::Cell::new(0);
+        detach_via(&lane, j, &shown, "scan", || false, &|_| {}, |_, _, _| started.set(started.get() + 1));
+        assert_eq!(started.get(), 0, "the record says none starts");
+        assert_eq!(readings.get(), 1, "the engine was read once");
     }
 
     #[test]
