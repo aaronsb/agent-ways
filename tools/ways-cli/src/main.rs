@@ -14,6 +14,7 @@ use std::path::PathBuf;
 pub use ways_core::{agents, config, frontmatter, paths, scanner, util};
 
 mod cmd;
+mod hook_deadline;
 pub mod session;
 #[cfg(test)]
 mod test_dir;
@@ -399,10 +400,12 @@ enum SessionCommand {
     /// Clear session markers when ways stop firing or fire wrongly
     ///
     /// Reset session state when ways stop firing or fire incorrectly. Clears
-    /// markers, epoch counters, and check fire counts from /tmp. Use when: a way
-    /// should fire but doesn't (stale marker), checks fire too aggressively
-    /// (inflated epoch), or after debugging the way tree. Default is dry run —
-    /// add --confirm to actually delete.
+    /// markers, epoch counters, and check fire counts from the sessions root,
+    /// and each way's refire back-off count and the compaction count from the
+    /// state root. Use when: a way should fire but doesn't (stale marker or a
+    /// long back-off), checks fire too aggressively (inflated epoch), or after
+    /// debugging the way tree. Default is dry run — add --confirm to actually
+    /// delete.
     Reset {
         /// Target a specific session ID
         #[arg(long)]

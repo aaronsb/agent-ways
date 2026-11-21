@@ -49,7 +49,30 @@ fn log_switched_off(request: &Request, project: Option<&str>, transcript: Option
     }
 }
 
+/// The deadline a hook keeps, a little inside the bound settings.json gives
+/// its script, so it finishes before Claude Code kills it (#1287).
+pub(crate) fn deadline_for(event: HookEvent) -> std::time::Duration {
+    use std::time::Duration;
+    match event {
+        // check-prompt, check-state, check-queued and inject-subagent are
+        // bounded at 30 s.
+        HookEvent::Prompt | HookEvent::State | HookEvent::Queued | HookEvent::SubagentStart => Duration::from_secs(28),
+        // The PreToolUse and PostToolUse adapters, check-response and
+        // clear-markers are bounded at 10 s.
+        HookEvent::Stop
+        | HookEvent::Command
+        | HookEvent::File
+        | HookEvent::Task
+        | HookEvent::PostTool
+        | HookEvent::Pull
+        | HookEvent::Tool
+        | HookEvent::SessionStart
+        | HookEvent::TasksActive => Duration::from_secs(9),
+    }
+}
+
 pub fn run(event: HookEvent) -> Result<()> {
+    crate::hook_deadline::start(deadline_for(event));
     let mut raw = String::new();
     std::io::stdin().read_to_string(&mut raw)?;
     let input = HookInput::parse(&raw);
@@ -154,16 +177,33 @@ pub fn run(event: HookEvent) -> Result<()> {
             emit("SubagentStart", &subagent::inject(&session, &project_dir)?);
             Ok(())
         }
-        Request::SessionStart { session } => {
+        Request::SessionStart { session, source } => {
             if let Some(sid) = &session {
                 crate::cmd::reset::clear_session(sid);
+                // The clear ends this window's fire clocks; the fire counts
+                // stay, and a compaction moves the epoch to mark the new
+                // window. A resume clears the clocks the same way, keeps the
+                // counts, and leaves the epoch where it was.
+                //
+                // References:
+                // - ADR-711: the fire count survives compaction, and fire rows
+                //   carry the compaction epoch.
+                if source == "compact" {
+                    session::refire_count::bump_compaction_epoch(sid);
+                }
             }
             session::prune_subagent_switches(SUBAGENT_SWITCH_MAX_AGE);
+            session::refire_count::prune(SUBAGENT_SWITCH_MAX_AGE);
             session::judge_jobs::prune(SUBAGENT_SWITCH_MAX_AGE);
+            // The row names its source and the epoch it opens, so a reading
+            // of the log can tell a resume from a compaction.
+            let epoch = session.as_deref().map(session::refire_count::compaction_epoch).unwrap_or(0).to_string();
             session::log_event(&[
                 ("event", "session_start"),
                 ("project", common.project.as_deref().unwrap_or("unknown")),
                 ("session", session.as_deref().unwrap_or("unknown")),
+                ("source", if source.is_empty() { "unknown" } else { &source }),
+                ("compaction_epoch", &epoch),
             ]);
             Ok(())
         }
@@ -216,7 +256,7 @@ fn request_session(request: &Request) -> Option<&str> {
         | Request::Stop { session, .. }
         | Request::SubagentStart { session }
         | Request::TasksActive { session } => Some(session),
-        Request::SessionStart { session } => session.as_deref(),
+        Request::SessionStart { session, .. } => session.as_deref(),
         Request::Skip => None,
     }
 }
@@ -270,5 +310,50 @@ fn suppress(request: &Request, lane: &str, switch: &str, agent: Option<&str>, pr
 fn emit(hook_event: &str, context: &str) {
     if !context.trim().is_empty() {
         scan::emit_hook_context(hook_event, context);
+    }
+}
+
+#[cfg(test)]
+mod deadline_tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// Every hook keeps a deadline at least a second inside the bound
+    /// settings.json gives its script, so it finishes, output and all, before
+    /// Claude Code would kill it (#1287). The steps inside the deadline
+    /// (postchecks, the judge, each macro) take only what is left of it.
+    #[test]
+    fn each_hook_deadline_fits_inside_its_settings_bound() {
+        let repo_settings = std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").into()),
+        )
+        .join("../../settings.json");
+        let Ok(raw) = std::fs::read_to_string(&repo_settings) else { return }; // not a source checkout
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let scripts: [(&str, HookEvent); 11] = [
+            ("check-bash-pre.sh", HookEvent::Command),
+            ("check-file-pre.sh", HookEvent::File),
+            ("check-tool.sh", HookEvent::Tool),
+            ("check-task-pre.sh", HookEvent::Task),
+            ("check-post.sh", HookEvent::PostTool),
+            ("check-pull.sh", HookEvent::Pull),
+            ("check-prompt.sh", HookEvent::Prompt),
+            ("check-state.sh", HookEvent::State),
+            ("check-queued.sh", HookEvent::Queued),
+            ("inject-subagent.sh", HookEvent::SubagentStart),
+            ("check-response.sh", HookEvent::Stop),
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for entries in v["hooks"].as_object().unwrap().values() {
+            for cmd in entries.as_array().unwrap().iter().flat_map(|e| e["hooks"].as_array().unwrap()) {
+                let command = cmd["command"].as_str().unwrap_or("");
+                let Some((script, event)) = scripts.iter().find(|(s, _)| command.ends_with(s)) else { continue };
+                seen.insert(*script);
+                let bound = Duration::from_secs(cmd["timeout"].as_u64().unwrap_or(600));
+                let deadline = deadline_for(*event);
+                assert!(deadline + Duration::from_secs(1) <= bound, "{script}: a {deadline:?} deadline in a {bound:?} bound");
+            }
+        }
+        assert_eq!(seen.len(), scripts.len(), "found every hook: {seen:?}");
     }
 }

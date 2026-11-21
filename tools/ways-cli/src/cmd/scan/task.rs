@@ -16,7 +16,7 @@ use super::matching::{
 };
 use super::order::{order_hits, Hit};
 use super::{
-    body_map, decision, effective_thresholds, eligible, late_interaction, mask_nonlinguistic, reduce, Lane,
+    body_map, decision, effective_thresholds, eligible, gate, judged, late_interaction, mask_nonlinguistic, reduce, Lane,
     BUDGET_TASK,
 };
 
@@ -133,51 +133,86 @@ pub fn task(
     );
 
     order_hits(&mut hits);
-    let stashed = write_stash(&hits, record.scan_id(), session_id, is_teammate, team);
+
+    // The judge reads the dispatch against the brief the subagent will get,
+    // the subagent's request. The subagent starts with no fires, so nothing
+    // is held by refire; a blocked way is not stashed.
+    let by_id: std::collections::HashMap<&str, &super::WayCandidate> = candidates.iter().map(|w| (w.id.as_str(), w)).collect();
+    let judge_candidates: Vec<judged::Candidate> = hits
+        .iter()
+        .filter_map(|hit| {
+            let way = by_id.get(hit.id.as_str())?;
+            Some(judged::Candidate {
+                key: hit.id.clone(),
+                description: way.description.clone(),
+                trigger: judged::matched_trigger(&hit.payload, way.pattern_strict),
+                channel: hit.payload.clone(),
+                p: hit.score,
+                open: true,
+            })
+        })
+        .collect();
+    let lane = judged::Lane {
+        surface: decision::Surface::Task,
+        hook_event: "PreToolUse".into(),
+        scope: task_scope.to_string(),
+        project_dir: project_dir.clone(),
+        session_id: session_id.to_string(),
+    };
+    let scan = judged::Scan::begin(session_id);
+    let turns = vec![ways_agent_core::judge::Turn { role: ways_agent_core::judge::Role::User, text: query.to_string() }];
+    let judged = judged::judge(&lane, &scan, &judge_candidates, turns, gate::TOOL_WAIT);
+    let kept: Vec<Hit<String>> = hits
+        .iter()
+        .filter(|h| !judged.blocked(&h.id))
+        .map(|h| Hit { id: h.id.clone(), score: h.score, specificity: h.specificity, payload: h.payload.clone() })
+        .collect();
+
+    let stashed = if hits.is_empty() { Ok(()) } else { write_stash(&kept, record.scan_id(), session_id, is_teammate, team) };
     let result = if stashed.is_ok() { "stashed" } else { "error" };
+    let mut shown = Vec::new();
     for (i, hit) in hits.iter().enumerate() {
-        record.hit(&hit.id, i + 1, &hit.payload, hit.score, result, None);
+        let r = decision::block_result(&judged.gate.blocked, &hit.id).unwrap_or(result);
+        record.hit(&hit.id, i + 1, &hit.payload, hit.score, r, Some(&judged.gate));
+        if let Some(c) = judge_candidates.iter().find(|c| c.key == hit.id) {
+            shown.push(judged::Shown { candidate: c, result: r });
+        }
     }
+    if scan.is_on() && !judge_candidates.is_empty() {
+        record.judge(&judged.gate);
+    }
+    let scan_id = record.scan_id().to_string();
     record.write();
+    judged::detach(&lane, judged, &shown, &scan_id);
     stashed
 }
 
-/// Write the task lane's matched ways to a stash file for SubagentStart to
-/// claim, with the `scan_id` of the task scan's decision record, which
-/// becomes the subagent's last scan. Nothing is written when nothing matched:
-/// a stash nobody claims (a dispatch the operator denied) would be claimed by
-/// the next subagent instead of its own.
-fn write_stash(hits: &[Hit<String>], scan_id: &str, session_id: &str, is_teammate: bool, team: Option<&str>) -> Result<()> {
-    let matched: Vec<(&str, &str)> = hits.iter().map(|h| (h.id.as_str(), h.payload.as_str())).collect();
-
-    // Write stash file if any ways matched
-    if !matched.is_empty() {
-        let stash_dir = format!(
-            "{}/{session_id}/subagent-stash",
-            session::sessions_root()
-        );
-        std::fs::create_dir_all(&stash_dir)?;
-
-        let ways: Vec<&str> = matched.iter().map(|(id, _)| *id).collect();
-        let channels: Vec<&str> = matched.iter().map(|(_, ch)| *ch).collect();
-
-        let stash = serde_json::json!({
-            "ways": ways,
-            "channels": channels,
-            "is_teammate": is_teammate,
-            "team_name": team.unwrap_or(""),
-            "scan_id": scan_id,
-        });
-
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        // Published whole: SubagentStart may claim the stash the moment it
-        // appears, and the writer's temporary name does not end in `.json`.
-        let stash_file = format!("{stash_dir}/{timestamp}.json");
-        agent_settings::writer::write_atomic(std::path::Path::new(&stash_file), stash.to_string())?;
-    }
-
+/// Write the ways the judge kept for a dispatch to a stash file for
+/// SubagentStart to claim, with the `scan_id` of the task scan's decision
+/// record, which becomes the subagent's last scan. The caller writes one for
+/// every dispatch that matched, with `ways: []` when the judge blocked them
+/// all: SubagentStart claims the oldest stash, so a dispatch that left none
+/// would hand its subagent the next dispatch's ways. A dispatch that matched
+/// nothing writes none, as before the judge.
+fn write_stash(kept: &[Hit<String>], scan_id: &str, session_id: &str, is_teammate: bool, team: Option<&str>) -> Result<()> {
+    let stash_dir = format!("{}/{session_id}/subagent-stash", session::sessions_root());
+    std::fs::create_dir_all(&stash_dir)?;
+    let ways: Vec<&str> = kept.iter().map(|h| h.id.as_str()).collect();
+    let channels: Vec<&str> = kept.iter().map(|h| h.payload.as_str()).collect();
+    let stash = serde_json::json!({
+        "ways": ways,
+        "channels": channels,
+        "is_teammate": is_teammate,
+        "team_name": team.unwrap_or(""),
+        "scan_id": scan_id,
+    });
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    // Published whole: SubagentStart may claim the stash the moment it
+    // appears, and the writer's temporary name does not end in `.json`.
+    let stash_file = format!("{stash_dir}/{timestamp}.json");
+    agent_settings::writer::write_atomic(std::path::Path::new(&stash_file), stash.to_string())?;
     Ok(())
 }

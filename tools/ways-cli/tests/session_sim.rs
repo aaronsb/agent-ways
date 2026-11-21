@@ -825,6 +825,16 @@ fn events_of(state: &Path, session: &str, event: &str) -> Vec<(String, String)> 
         .collect()
 }
 
+/// The refire back-off count main's thread holds for `way` in the isolated
+/// state dir, 0 when none is stored.
+fn fire_count(state: &Path, session: &str, way: &str) -> u64 {
+    std::fs::read_to_string(state.join("agent-ways/refire-counts").join(session).join("main.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v[way].as_u64())
+        .unwrap_or(0)
+}
+
 fn fired_ways(state: &Path, session: &str, event: &str) -> Vec<String> {
     let mut ways: Vec<String> = events_of(state, session, event).into_iter().map(|(w, _)| w).collect();
     ways.sort();
@@ -890,6 +900,11 @@ fn scenario_12_pretooluse_cap_withholds_without_firing() {
         sessions_root()
     );
     assert!(!Path::new(&engagement).exists(), "withheld way started its refire curve");
+    // Nor does it count toward its back-off: only the shown ways have n = 1.
+    assert_eq!(fire_count(&state, &session, &full(withheld)), 0, "the withheld way counted a fire");
+    for id in &shown {
+        assert_eq!(fire_count(&state, &session, &full(id)), 1, "{id}");
+    }
     assert_eq!(fired_ways(&state, &session, "way_fired"), shown_full, "turn 1 fires only the shown ways");
     assert_eq!(
         events_of(&state, &session, "way_suppressed"),
@@ -907,6 +922,7 @@ fn scenario_12_pretooluse_cap_withholds_without_firing() {
         );
     }
     assert_marker_exists(&full(withheld), &session);
+    assert_eq!(fire_count(&state, &session, &full(withheld)), 1, "its first fire counts once");
     let mut all_fired = shown_full.clone();
     all_fired.push(full(withheld));
     all_fired.sort();
@@ -985,6 +1001,8 @@ fn scenario_13_concurrent_scans_fire_a_way_once() {
         vec![("racedomain/slow".to_string(), "refire".to_string())],
         "the losing hook logs a refire suppression"
     );
+    // The fire counts toward the way's back-off once, not once per hook.
+    assert_eq!(fire_count(&state, &session, "racedomain/slow"), 1, "the race counted the fire twice");
 
     clean_markers(&session);
     let _ = std::fs::remove_dir_all(&base);
@@ -2157,7 +2175,8 @@ fn scenario_decision_records_name_floor_vetoes_near_misses_and_the_gate() {
     let judge = &records[0]["judge"];
     assert_eq!(judge["status"], "fallback", "{judge}");
     assert!(judge["reason"].as_str().unwrap().starts_with("config:"), "{judge}");
-    assert!(records[1].get("judge").is_none(), "the task lane has no judge");
+    // The task lane judges its hits too (#1287); this dispatch matched none.
+    assert!(records[1].get("judge").is_none(), "the task lane judged nothing");
 
     clean_markers(&session);
     let _ = std::fs::remove_dir_all(&home);

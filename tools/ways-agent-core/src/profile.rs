@@ -307,8 +307,26 @@ pub struct UserLayer {
     pub engine: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<Mode>,
+    /// The share of candidates the refire curve holds back that are judged
+    /// off the hot path for the decision log (`gate.held_sample`). Unset:
+    /// [`DEFAULT_HELD_SAMPLE`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held_sample: Option<f64>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub profiles: BTreeMap<String, ProfilePatch>,
+}
+
+/// The share of held candidates judged for the record when
+/// `gate.held_sample` is unset.
+pub const DEFAULT_HELD_SAMPLE: f64 = 0.1;
+
+impl UserLayer {
+    /// `gate.held_sample`, clamped to 0..1; a value that is not a number
+    /// samples nothing.
+    pub fn held_sample(&self) -> f64 {
+        let v = self.held_sample.unwrap_or(DEFAULT_HELD_SAMPLE);
+        if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 }
+    }
 }
 
 pub fn user_layer_path() -> PathBuf {

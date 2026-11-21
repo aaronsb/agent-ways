@@ -14,7 +14,8 @@ use anyhow::Result;
 use crate::session;
 
 use super::candidates::collect_with_off;
-use super::{discard, emit_hook_context};
+use super::decision::Surface;
+use super::{discard, emit_hook_context, gate, judged};
 use super::scoring::capture_show_way;
 use crate::cmd::show::ContextBudget;
 
@@ -70,25 +71,36 @@ pub fn state(
 
     // State trigger evaluation
     let state = StateSurface { session_id, scope: &scope, project_dir: &project_dir, transcript, envelope_turn };
-    for way in &candidates {
-        if !state.triggers(way) {
-            continue;
-        }
-
-        // Marker-gated via show; refire cadence follows the way's own `refire:`
-        // curve (ADR-126). The former `repeat: true` bypass — which dumped the
-        // body every threshold crossing and consulted a `tasks-active` marker —
-        // is gone: no way uses `repeat` since todos moved to its refire curve, so
-        // the branch was dead. (The mark-tasks-active hook still writes the marker;
-        // it is dormant, kept as the hook-point should per-way tasks-active
-        // suppression be wanted again.)
-        let out = capture_show_way(&way.id, session_id, "state", None, None, None, Some(&mut budget)).body;
-        if !out.is_empty() {
-            context.push_str(&out);
+    // The triggered ways go through the judge before any fire is recorded
+    // (scan/judged.rs), judged against the agent's request: the prompt in
+    // hand, else its last human turn. Refire cadence follows each way's own
+    // `refire:` curve, read by the refire check and again by show.
+    //
+    // References:
+    // - ADR-126: each way's own refire curve.
+    let scan = judged::Scan::begin(session_id);
+    let judge_candidates: Vec<judged::Candidate> =
+        candidates.iter().filter(|w| state.triggers(w)).map(|w| judged::declared(w, "state", &scan)).collect();
+    let lane = judged::Lane {
+        surface: Surface::State,
+        hook_event: hook_event.to_string(),
+        scope: scope.clone(),
+        project_dir: project_dir.clone(),
+        session_id: session_id.to_string(),
+    };
+    let turns = || match query.map(str::trim).filter(|q| !q.is_empty() && !envelope_turn) {
+        Some(q) => vec![ways_agent_core::judge::Turn { role: ways_agent_core::judge::Role::User, text: q.to_string() }],
+        None => super::lookbehind::recent_turns(session_id),
+    };
+    judged::run(&lane, &scan, &judge_candidates, turns, gate::PROMPT_WAIT, |c| {
+        let shown = capture_show_way(&c.key, session_id, "state", None, None, None, Some(&mut budget));
+        if !shown.body.is_empty() {
+            context.push_str(&shown.body);
             context.push_str("\n\n");
             budget.charge("\n\n");
         }
-    }
+        shown.outcome.as_str()
+    });
 
     // A switched-off way's refire window is read before its trigger, which can
     // mean reading the transcript.

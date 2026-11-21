@@ -423,7 +423,7 @@ flowchart LR
     Hook["ways hook"]:::match
 
     Scan -->|"way_nearmiss · way_keyword_gated"| EV
-    Gate -->|"way_judged · judge_call<br/>gate_capped · gate_fallback"| EV
+    Gate -->|"way_judged · judge_call<br/>gate_fallback"| EV
     Show -->|"way_fired · way_redisclosed<br/>(+ fire_score on semantic fires)<br/>way_suppressed · check_fired"| EV
     Hook -->|"session_start · injection_suppressed"| EV
 

@@ -2,12 +2,21 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-//! Reset session state — clear markers, epochs, and check fire counts.
+//! Reset session state — clear markers, epochs, check fire counts, and the
+//! refire back-off counts.
 //!
-//! Unjams stale session state without restarting Claude Code. Every piece of
-//! a session's state lives under `sessions_root()/{session_id}/`, so clearing
-//! a session is removing that one directory. The SessionStart hook
-//! (`ways hook session-start`) clears through [`clear_session`] as well.
+//! Unjams stale session state without restarting Claude Code. A session's
+//! clocks and markers live under `sessions_root()/{session_id}/`, and its
+//! per-thread fire counts and compaction epoch under the state root's
+//! `refire-counts/{session_id}/`. A confirmed reset removes both, so every
+//! way's next match fires as the session's first. The SessionStart hook
+//! (`ways hook session-start`) clears through [`clear_session`], which
+//! removes the session directory only: the counts survive a compaction or
+//! a resume.
+//!
+//! References:
+//! - ADR-711 §1: the fire count lives outside the session directory so the
+//!   compaction reset does not erase it.
 
 use anyhow::Result;
 use std::path::Path;
@@ -88,9 +97,16 @@ pub fn run(session: Option<&str>, all: bool, confirm: bool) -> Result<()> {
             if epoch > 0 {
                 say!(out, "  epoch: {epoch}");
             }
-        } else if let Some(count) = clear_session(sid) {
-            say!(out, "Session {short_id}...: cleared ({count} state files)");
-            total += count;
+            let compactions = session::refire_count::compaction_epoch(sid);
+            if compactions > 0 {
+                say!(out, "  compactions: {compactions}");
+            }
+        } else {
+            let count = clear_session(sid).unwrap_or(0) + session::refire_count::clear(sid).unwrap_or(0);
+            if count > 0 {
+                say!(out, "Session {short_id}...: cleared ({count} state files)");
+                total += count;
+            }
         }
     }
 
@@ -105,9 +121,10 @@ pub fn run(session: Option<&str>, all: bool, confirm: bool) -> Result<()> {
         say!(out);
         for line in [
             "Note: resetting mid-session causes all ways to re-fire on the next",
-            "hook invocation. Core guidance, checks, and progressive disclosure",
-            "state will restart from scratch. This is safe but noisy — best used",
-            "when the session feels jammed or after significant context shifts.",
+            "hook invocation. Core guidance, checks, progressive disclosure state",
+            "and each way's refire back-off count restart from scratch. This is",
+            "safe but noisy — best used when the session feels jammed or after",
+            "significant context shifts.",
         ] {
             say!(out, "{}", paint(Role::Muted, line));
         }

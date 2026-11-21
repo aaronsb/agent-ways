@@ -13,7 +13,7 @@ use agent_fmt::{Align, Table};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
-use ways_core::decisions::{group, Grouped, Join, Joined, Records, Scan, Turn, Window};
+use ways_core::decisions::{group, Grouped, Join, Joined, Outcome, Records, Scan, Turn, Window};
 
 const DAY_SECS: u64 = 86_400;
 
@@ -141,16 +141,14 @@ impl Acc<'_> {
         if !self.in_project(&s.project) {
             return;
         }
+        if s.detached {
+            self.detached(s);
+            return;
+        }
         self.scans += 1;
         for o in &s.outcomes {
             *self.by_way.entry(o.way.clone()).or_default().entry(o.result.clone()).or_insert(0) += 1;
-            match o.verdict.as_deref() {
-                Some("pass") => self.judge.pass += 1,
-                Some("would_block") => self.judge.would_block += 1,
-                Some("block") => self.judge.block += 1,
-                _ if o.result == "judge_block" => self.judge.block += 1,
-                _ => {}
-            }
+            self.verdict(o);
             if o.result == "near_miss" {
                 let e = self.near.entry(o.way.clone()).or_default();
                 e.0 += 1;
@@ -170,6 +168,26 @@ impl Acc<'_> {
                 self.judge.capped_scans += 1;
                 self.judge.capped_ways += j.capped.len() as u32;
             }
+        }
+    }
+
+    /// A detached judge's record shares its scan's id, so it is no scan and
+    /// its outcomes are the scan's own. Its verdicts on the candidates the
+    /// lane showed count: in shadow mode they are a tool lane's only ones.
+    /// A held candidate was not shown, so its verdict is left out.
+    fn detached(&mut self, s: &Scan) {
+        for o in s.outcomes.iter().filter(|o| o.result != "held_refire") {
+            self.verdict(o);
+        }
+    }
+
+    fn verdict(&mut self, o: &Outcome) {
+        match o.verdict.as_deref() {
+            Some("pass") => self.judge.pass += 1,
+            Some("would_block") => self.judge.would_block += 1,
+            Some("block") => self.judge.block += 1,
+            _ if o.result == "judge_block" => self.judge.block += 1,
+            _ => {}
         }
     }
 
@@ -297,6 +315,7 @@ pub(crate) fn report(sources: Vec<PathBuf>, window: Window, project: Option<&str
                 }
                 acc.scan(&s);
             }
+            Grouped::Detached(s) => acc.scan(&s),
             Grouped::Pull(j) => acc.pull(&j),
         },
     );
@@ -481,6 +500,41 @@ mod tests {
         r#"{"ts":"2026-09-03T08:00:00Z","kind":"scan","scan_id":"b2","session":"s2","agent":"main","epoch":1,"turn_start":true,"surface":"prompt","project":"/q","outcomes":[]}"#,
         r#"{"ts":"2026-09-03T08:00:20Z","kind":"pull","session":"s2","agent":"main","epoch":2,"way":"d/bad","window":"none","out_of_band":false,"stamped":false,"reason":"not found","scan_id":"b2"}"#,
     ];
+
+    /// A detached judge's record shares its scan's id. Counting it would
+    /// count the scan twice and its held candidates as blocks (#1287).
+    #[test]
+    fn a_detached_judges_record_is_not_counted_as_a_scan() {
+        let scan = |line: &str| match ways_core::decisions::parse_line(line) {
+            Some(ways_core::decisions::Record::Scan(s)) => s,
+            other => panic!("{other:?}"),
+        };
+        let lane = scan(r#"{"ts":"2026-09-01T10:00:00Z","kind":"scan","scan_id":"c1","session":"s1","agent":"main","epoch":3,"surface":"command","project":"/p","outcomes":[{"way":"d/a","result":"fired","verdict":"pass"}],"judge":{"status":"judged"}}"#);
+        let detached = scan(r#"{"ts":"2026-09-01T10:00:01Z","kind":"scan","scan_id":"c1","session":"s1","agent":"main","epoch":3,"surface":"command","project":"/p","detached":true,"outcomes":[{"way":"d/h","result":"held_refire","verdict":"block"}],"judge":{"status":"judged"}}"#);
+        let mut acc = Acc::default();
+        acc.scan(&lane);
+        acc.scan(&detached);
+        assert_eq!((acc.scans, acc.judge.pass, acc.judge.block, acc.judge.judged_scans), (1, 1, 0, 1));
+        assert!(!acc.by_way.contains_key("d/h"), "a held candidate is no outcome of the scan");
+    }
+
+    /// In shadow mode a tool lane shows every candidate and its verdicts
+    /// are only in the detached judge's record. Those verdicts count; the
+    /// record is no scan, and its held candidates are no outcome or verdict.
+    #[test]
+    fn a_shadow_tool_lanes_detached_verdicts_are_counted() {
+        let r = run_live(
+            "shadow",
+            &[
+                r#"{"ts":"2026-09-01T10:00:00Z","kind":"scan","scan_id":"p1","session":"s1","agent":"main","epoch":3,"turn_start":true,"surface":"prompt","project":"/p","outcomes":[]}"#,
+                r#"{"ts":"2026-09-01T10:00:05Z","kind":"scan","scan_id":"c1","session":"s1","agent":"main","epoch":3,"surface":"command","project":"/p","outcomes":[{"way":"d/a","result":"fired"}],"judge":{"status":"detached"}}"#,
+                r#"{"ts":"2026-09-01T10:00:09Z","kind":"scan","scan_id":"c1","session":"s1","agent":"main","epoch":3,"surface":"command","project":"/p","detached":true,"outcomes":[{"way":"d/a","result":"fired","verdict":"would_block"},{"way":"d/h","result":"held_refire","verdict":"would_block"}],"judge":{"status":"judged"}}"#,
+            ],
+        );
+        assert_eq!((r.scans, r.orphan_scans), (2, 0));
+        assert_eq!((r.judge.would_block, r.judge.block, r.judge.pass), (1, 0, 0), "{:?}", r.judge);
+        assert_eq!(r.by_way, vec![("d/a".to_string(), BTreeMap::from([("fired".to_string(), 1)]))]);
+    }
 
     fn fixture(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("ways-stats-decisions-{tag}-{}", std::process::id()));

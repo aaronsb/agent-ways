@@ -37,7 +37,7 @@ Before any injecting lane runs, `ways hook` checks the switches described in [Sw
 
 ### Session lifecycle
 
-- **`clear-markers.sh`** (`ways hook session-start`) - Clears this session's state under `{SESSIONS_ROOT}/{session_id}/`, as `ways session reset --session <id> --confirm` does, prunes subagent switches older than 30 days, and logs `session_start`. An id that is not a plain session id clears nothing.
+- **`clear-markers.sh`** (`ways hook session-start`) - Clears this session's state under `{SESSIONS_ROOT}/{session_id}/`. On a compaction (`source: compact`) it adds one to the session's compaction epoch. It keeps the session's refire back-off counts under `$XDG_STATE_HOME/agent-ways/refire-counts/{session_id}/`, so a way's waits keep growing across compactions. It prunes subagent switches and back-off counts untouched for 30 days, and logs `session_start` with the payload's `source` and the compaction epoch. A resume clears the session directory the same way, keeps the counts and leaves the epoch where it was. An id that is not a plain session id clears nothing. `ways session reset --session <id> --confirm` clears the same session directory and also removes the session's back-off counts and compaction epoch.
 - **`check-setup.sh`** - Prints a setup notice when `~/.claude/bin/ways` is missing, since every other ways hook is inert without it.
 - **`ways init`** - If the project has a `.claude/` or `.git/` directory, writes `$PROJECT/.claude/.gitignore` and `$PROJECT/.claude/ways/_template.md` when they are missing, then seeds `MEMORY.md` (ADR-128). A fresh repo therefore gets these two files as untracked files. `.claude/.gitignore` keeps developer-local files (`settings.local.json`, `memory/`, `plans/` and similar) out of git, and `_template.md` is a starting point for writing a project way. Its empty frontmatter means it never fires. `ways init` does not overwrite either file.
 - **`ways corpus --if-stale --quiet`** - Regenerates the embedding corpus if way files have changed since the last build.
@@ -257,7 +257,7 @@ The model, `ways-corpus.jsonl`, `ways-corpus-en.jsonl`, `ways-corpus-multi.jsonl
 
 ## Relevance Gate and the Ways Agent
 
-On the prompt and queued lanes, the ways about to be shown are sent in one request to a hosted yes/no judge, together with the last turn (ADR-196). In `enforce` mode a blocked way is not shown, leaves no marker, and keeps its refire budget. In `shadow` mode every verdict is logged and nothing is blocked. Ways with `pattern_strict: true` are not judged, and a failure fails open.
+Every lane that injects ways, in the main agent and in every subagent, sends the ways about to be shown to a hosted yes/no judge before their fire is recorded. That covers the prompt, queued-message, command, file, tool, state, post-tool and task lanes, and every trigger kind, `pattern_strict` ways included. The prompt lane sends the last turn. A tool lane sends the agent's last human turn, or a subagent's brief, and the call in hand. In `enforce` mode a blocked way is not shown, leaves no marker, and keeps its refire budget. In `shadow` mode every verdict is logged and nothing is blocked; on the tool lanes the ways are shown at once and a detached process judges them. A failure fails open.
 
 The judge runs in the **ways agent**, one resident daemon per user on a Unix socket (ADR-502). Hooks start it on demand, and it exits when idle or when its binary is replaced. It holds the provider key and does judging and key custody only. Matching stays in the hook's `ways` process.
 
@@ -303,7 +303,7 @@ Fires once per marker reset: on the first state scan after the session's markers
 
 ## Disclosure Cadence
 
-A way that fires stamps a marker at `{SESSIONS_ROOT}/{session_id}/ways/{way_id}/.marker.{agent_id}` holding the agent's token position. A later match is withheld until the agent has consumed the way's `refire:` fraction of its context window since that stamp (ADR-126), and is then re-disclosed. A withheld match is logged as `way_suppressed` with reason `refire`. A way that does not fit in the hook's 10,000-character budget is logged with reason `context_cap` and is not recorded as fired. Markers are cleared on SessionStart startup, compact and clear.
+A way that fires stamps a marker at `{SESSIONS_ROOT}/{session_id}/ways/{way_id}/.marker.{agent_id}` holding the agent's token position. A later match is withheld until the agent has consumed the way's `refire:` fraction of its context window since that stamp, and is then re-disclosed. Each refire in the same agent thread waits `refire_backoff` times longer than the one before. A withheld match is logged as `way_suppressed` with reason `refire`, the token position, the thread's fire count `refire_n` and the wait in force `refire_threshold`. A way that does not fit in the hook's 10,000-character budget is logged with reason `context_cap` and is not recorded as fired. Markers are cleared on SessionStart startup, compact and clear. The fire counts are not: after a compaction the first match fires once, and later refires keep the longer wait. Fire rows carry `compaction_epoch`, the number of compactions the session has had.
 
 State is kept per agent. A subagent's fires, token position and window come from its own transcript, so its cadence does not move the main agent's. The state machine is drawn in [architecture.md](architecture.md#disclosure-cadence).
 
@@ -379,7 +379,7 @@ Firing activity is logged to `$XDG_STATE_HOME/agent-ways/events.jsonl`, one JSON
 | `way_suppressed` | a way or check matched but was held back (`refire` or `context_cap`) |
 | `way_nearmiss` | a way's single-vector probability landed within `near_miss_margin` below `τ_s` and it did not fire |
 | `way_keyword_gated` | a `pattern:` hit was vetoed by the keyword floor `τ_k` |
-| `way_judged`, `judge_call`, `gate_capped`, `gate_fallback` | the relevance gate's verdicts, provider calls, cap overflows and fallbacks |
+| `way_judged`, `judge_call`, `gate_fallback` | the relevance gate's verdicts, provider calls and fallbacks, each naming its `lane` and `agent_id` |
 | `injection_suppressed` | a lane was skipped because ways are switched off for subagents |
 | `check_fired` | a `*.check.md` check was shown |
 
@@ -469,3 +469,10 @@ The `/ways-tests` skill provides ad-hoc scoring for vocabulary tuning:
 ```
 /ways-tests "write some unit tests for this module"
 ```
+
+## References
+
+- ADR-126: a way's `refire:` value is a fraction of the context window, which sets the wait before it re-discloses.
+- ADR-196: the yes/no relevance gate on way injection, judged by a hosted model.
+- ADR-711: each refire in an agent thread waits `refire_backoff` times longer than the one before, the count survives compaction, and fire rows carry the compaction epoch.
+- ADR-712: the gate's reach to every lane, agent thread and trigger kind, and what a tool lane sends.

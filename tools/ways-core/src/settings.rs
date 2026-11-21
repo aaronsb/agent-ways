@@ -71,6 +71,7 @@ const SECTIONS: &[SectionSpec] = &[
             "admission",
             "body_rank",
             "refire_presets",
+            "refire_backoff",
         ],
         per_entry: false, entry: None, repair: None,
         columns: None,
@@ -321,6 +322,16 @@ const KEYS: &[KeySpec] = &[
         instances: &["once", "rare", "normal", "frequent"],
         doc: "A refire preset: the fraction of the context window before a way may fire again.",
         long: "A way's `refire: <name>` looks the preset up here and multiplies by the session's context window (ADR-126). New names may be added.",
+        ..BASE
+    },
+    KeySpec {
+        name: "matching.refire_backoff",
+        section: "matching",
+        path: &["refire_backoff"],
+        kind: Kind::Float { min: 1.0, max: 10.0 },
+        default: DefaultValue::Yaml("2"),
+        doc: "How much longer each refire waits than the one before it, in one agent thread.",
+        long: "After n fires of a way in an agent thread, its next refire waits H × g^(n-1) tokens, where H is the half-life its refire: value resolves to and g is this factor. Main and each subagent count apart, and the count survives compaction, which still grants one fire in the new window. 1 keeps every wait at H, the schedule before back-off.",
         ..BASE
     },
     KeySpec {

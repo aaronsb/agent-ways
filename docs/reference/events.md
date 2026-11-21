@@ -69,7 +69,7 @@ A way or check matched and was not shown.
 | Field | Meaning |
 |-------|---------|
 | `kind` | `way` or `check` |
-| `reason` | `refire`: the cadence is still holding it back (logged once per way per fire window). `context_cap`: the per-invocation context budget was full. |
+| `reason` | `refire`: the cadence is still holding it back (logged once per way per fire window). `context_cap`: the per-invocation context budget was full. `deadline`: the hook was too near its deadline to show the way, so no fire was recorded. |
 | `way`, `domain`, `trigger`, `scope`, `project`, `session`, `agent_id` | Common fields |
 
 ### `way_nearmiss`
@@ -164,7 +164,7 @@ The gate could not judge, so nothing was blocked. The gate fails open.
 
 ### `gate_capped`
 
-More ways matched than the profile's `max_candidates` (default 8). The rest went unjudged and fire unless an ancestor was blocked.
+Written by older releases when more ways matched than the profile's `max_candidates` (default 8) and the rest went unjudged. The gate now judges every candidate in further requests, so a current log has none.
 
 | Field | Meaning |
 |-------|---------|
@@ -205,3 +205,7 @@ jq -r 'select(.event=="way_fired" and .team) | .team' "$(ways events-log-path)" 
 ```
 
 See [stats.md](../hooks-and-ways/stats.md) for the summary reports built on this log.
+
+## References
+
+- ADR-712: every candidate in every lane and agent thread is judged, after the refire check and before the fire is recorded. It retired `gate_capped`.

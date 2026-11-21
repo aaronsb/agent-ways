@@ -40,6 +40,9 @@ pub enum ShowOutcome {
     HeldRefire,
     /// Held back by the hook's context budget.
     HeldContextCap,
+    /// Held back because the hook's deadline is too close to show it; no
+    /// fire is recorded for text that would not reach the agent.
+    HeldDeadline,
     /// Not shown: disabled, out of scope, or no way file.
     NotFireable,
     /// `way_scored` failed. Never returned by it; a caller that absorbs its
@@ -55,6 +58,7 @@ impl ShowOutcome {
             ShowOutcome::Redisclosed => "redisclosed",
             ShowOutcome::HeldRefire => "held_refire",
             ShowOutcome::HeldContextCap => "held_context_cap",
+            ShowOutcome::HeldDeadline => "held_deadline",
             ShowOutcome::NotFireable => "not_fireable",
             ShowOutcome::Error => "error",
         }
@@ -198,6 +202,8 @@ enum Suppression {
     Refire,
     /// The hook's context budget had no room for it.
     ContextCap,
+    /// The hook was too near its deadline to show it.
+    Deadline,
 }
 
 impl Suppression {
@@ -205,17 +211,23 @@ impl Suppression {
         match self {
             Self::Refire => "refire",
             Self::ContextCap => "context_cap",
+            Self::Deadline => "deadline",
         }
     }
 }
 
-/// Record a way or check that matched but was not shown, so the refire
-/// curve's work and the context cap's are countable in the event log. Cheap
-/// by design: no transcript read and no engagement reload.
+/// Record a way or check that matched but was not shown, so the work of the
+/// refire curve, the context cap and the hook's deadline is countable in the
+/// event log. Cheap by design: no transcript read and no engagement reload.
 ///
 /// `kind` is `way` or `check`. Refire rows are deduplicated by the caller to
-/// one per way per fire window; context-cap rows are rare and log as they
-/// happen.
+/// one per way per fire window; context-cap and deadline rows are rare and
+/// log as they happen. A way's row carries its [`RefireState`] at the call;
+/// a check has no refire curve of its own and carries none.
+///
+/// References:
+/// - ADR-711 §5: suppression rows carry the tick, the backed-off threshold
+///   and n; this change adds the compaction epoch to them as well.
 #[allow(clippy::too_many_arguments)]
 fn log_way_suppressed(
     kind: &str,
@@ -226,20 +238,60 @@ fn log_way_suppressed(
     scope: &str,
     project_dir: &str,
     session_id: &str,
+    refire: Option<&RefireState>,
 ) {
     let agent_id = session::current_agent();
-    session::log_event(&[
-        ("event", "way_suppressed"),
-        ("kind", kind),
-        ("way", id),
-        ("domain", domain),
-        ("trigger", trigger),
-        ("reason", why.reason()),
-        ("scope", scope),
-        ("project", project_dir),
-        ("session", session_id),
-        ("agent_id", &agent_id),
-    ]);
+    let mut fields: Vec<(&str, String)> = vec![
+        ("event", "way_suppressed".into()),
+        ("kind", kind.into()),
+        ("way", id.into()),
+        ("domain", domain.into()),
+        ("trigger", trigger.into()),
+        ("reason", why.reason().into()),
+        ("scope", scope.into()),
+        ("project", project_dir.into()),
+        ("session", session_id.into()),
+        ("agent_id", agent_id),
+    ];
+    if let Some(r) = refire {
+        fields.extend(r.fields());
+    }
+    let refs: Vec<(&str, &str)> = fields.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    session::log_event(&refs);
+}
+
+/// Where a way stands on its refire schedule in this agent thread, as its
+/// `way_fired`, `way_redisclosed` and `way_suppressed` rows record it.
+///
+/// References:
+/// - ADR-711 §5: the fields the event rows carry, the compaction epoch
+///   among them.
+struct RefireState {
+    /// The thread's token position at the call.
+    tick: u64,
+    /// The fires recorded for the way in the thread: after the fire on a
+    /// fire row, before the call on a suppressed row.
+    n: u64,
+    /// Tokens after the last fire at which the next refire opens, from the
+    /// curve backed off by `n`; `None` for a curve that never reopens.
+    threshold: Option<u64>,
+    /// The session's compaction epoch, so a measurement can split a
+    /// thread's rows by context window.
+    epoch: u64,
+}
+
+impl RefireState {
+    fn fields(&self) -> Vec<(&'static str, String)> {
+        let mut out = vec![
+            ("token_position", self.tick.to_string()),
+            ("refire_n", self.n.to_string()),
+            ("compaction_epoch", self.epoch.to_string()),
+        ];
+        if let Some(t) = self.threshold {
+            out.push(("refire_threshold", t.to_string()));
+        }
+        out
+    }
 }
 
 /// Whether a resolved context actually detected its window, rather than falling
@@ -390,7 +442,11 @@ struct Fireable {
     is_project_local: bool,
     content: String,
     firing: &'static FiringContext,
+    /// The way's refire curve for this agent thread: `refire:` resolved
+    /// against the window, then backed off by `fires`.
     curve: sensor_trait::Curve,
+    /// The fires the gate has recorded for the way in this thread, n.
+    fires: u64,
 }
 
 /// Resolves a way for firing: the disable switches, its file, its scope and
@@ -453,6 +509,15 @@ fn fireable_in_scope(id: &str, session_id: &str, enforce_scope: bool) -> Result<
     // comes first: the token position is read from it too, and the same read
     // yields the model id the event is stamped with. Resolved once per process
     // and shared by every way this invocation fires.
+    //
+    // The half-life backs off with each fire recorded for the way in this
+    // agent thread, so the n-th refire waits H × g^(n-1). The count lives
+    // outside the session directory and survives compaction; the fire clock
+    // does not, so the first match in a new window still fires.
+    //
+    // References:
+    // - ADR-711: geometric back-off per agent thread, with one fire granted
+    //   after compaction.
     let fm = frontmatter::parse(&way_file)?;
     let firing = firing_context(session_id, &project_dir);
     let curve = fm.resolved_curve(firing.window).ok_or_else(|| {
@@ -461,7 +526,9 @@ fn fireable_in_scope(id: &str, session_id: &str, enforce_scope: bool) -> Result<
             id
         )
     })?;
-    Ok(Some(Fireable { project_dir, domain, scope, way_file, is_project_local, content, firing, curve }))
+    let fires = session::refire_count::fire_count(session_id, id);
+    let curve = session::backed_off(&curve, fires, crate::config::global().refire_backoff());
+    Ok(Some(Fireable { project_dir, domain, scope, way_file, is_project_local, content, firing, curve, fires }))
 }
 
 /// A way's delivered text: its static `body` with the `macro:` output prepended
@@ -544,7 +611,12 @@ pub fn subagent_way(id: &str, session_id: &str, scope: &str) -> Result<String> {
 /// engagement, marker, token position and epoch, as [`way_scored`] records a
 /// fire. Without it the subagent's first match would deliver the way again.
 /// The tick is the subagent's token position, 0 before its transcript exists.
+/// The injection is the subagent's first fire of the way and counts toward
+/// its n, so its first refire waits H.
 /// Skipped when the payload named no agent: the fire is not main's.
+///
+/// References:
+/// - ADR-711 §4: a SubagentStart injection is the subagent's first fire.
 fn record_injected(id: &str, session_id: &str, way_file: &Path, project_dir: &str) {
     if session::current_agent() == session::MAIN_AGENT {
         return;
@@ -554,6 +626,7 @@ fn record_injected(id: &str, session_id: &str, way_file: &Path, project_dir: &st
     let tick = session::get_token_position(session_id);
     let lock = session::lock_engagement(id, session_id);
     session::record_way_fire(id, session_id, &curve, tick);
+    session::refire_count::bump_fire_count(session_id, id);
     drop(lock);
     stamp_disclosure(id, session_id, tick);
 }
@@ -570,15 +643,20 @@ fn stamp_disclosure(id: &str, session_id: &str, tick: u64) -> u64 {
     epoch
 }
 
+/// The least time before the hook's deadline in which a way is still shown:
+/// what writing its record and the envelope take.
+const SHOW_MARGIN: std::time::Duration = std::time::Duration::from_millis(250);
+
 /// Whether [`way_scored`] would show this way now, budget aside: not disabled,
-/// in scope, and allowed by its refire curve. Read-only. The relevance gate
-/// asks it so it judges only ways that would reach the agent (ADR-196 §1).
-pub(crate) fn would_fire(id: &str, session_id: &str) -> bool {
+/// in scope, and allowed by its refire curve at the token position `tick`,
+/// which a scan reads once for all its candidates. Read-only. The relevance
+/// gate asks it so it judges only ways that would reach the agent.
+///
+/// References:
+/// - ADR-196 §1: the gate judges only what would be shown.
+pub(crate) fn would_fire_at(id: &str, session_id: &str, tick: u64) -> bool {
     match fireable(id, session_id) {
-        Ok(Some(f)) => {
-            let tick = session::get_token_position(session_id);
-            session::way_fire_outcome(id, session_id, &f.curve, tick).outcome.is_allowed()
-        }
+        Ok(Some(f)) => session::way_fire_outcome(id, session_id, &f.curve, tick).outcome.is_allowed(),
         _ => false,
     }
 }
@@ -607,7 +685,7 @@ pub fn way_scored(
     surface: Option<&str>,
     mut budget: Option<&mut ContextBudget>,
 ) -> Result<Shown> {
-    let Some(Fireable { project_dir, domain, scope, way_file, is_project_local, content, firing, curve }) =
+    let Some(Fireable { project_dir, domain, scope, way_file, is_project_local, content, firing, curve, fires }) =
         fireable(id, session_id)?
     else {
         return Ok(Shown::held(ShowOutcome::NotFireable));
@@ -616,14 +694,21 @@ pub fn way_scored(
     // the re-check under the lock, the recorded fire, and the stamps below.
     let token_pos = session::get_token_position(session_id);
     // A refire suppression logs once per way per fire window; a context-cap
-    // withhold logs every time (it is rare, and each one is a missed delivery).
+    // or deadline withhold logs every time (it is rare, and each one is a
+    // missed delivery).
     let suppress = |why: Suppression, last_fire: Option<u64>| {
         if why == Suppression::Refire
             && !last_fire.is_some_and(|t| session::first_suppression_in_window(id, session_id, t))
         {
             return;
         }
-        log_way_suppressed("way", id, &domain, trigger, why, &scope, &project_dir, session_id);
+        let held = RefireState {
+            tick: token_pos,
+            n: fires,
+            threshold: curve.refire_delta(session::REFIRE_FLOOR),
+            epoch: session::refire_count::compaction_epoch(session_id),
+        };
+        log_way_suppressed("way", id, &domain, trigger, why, &scope, &project_dir, session_id, Some(&held));
     };
 
     // Fast path, unlocked: most suppressed ways stop here without the lock.
@@ -654,6 +739,13 @@ pub fn way_scored(
     // delivered at most once per refire window. The fire is recorded only once
     // the body is admitted: a way the budget withholds must not start its
     // refire curve, or the curve would hold back guidance the model never saw.
+    // A hook past its deadline is killed with its output, so a fire recorded
+    // now would stand for text the agent never sees. The hold is logged, so
+    // a session with the gate off still shows it.
+    if crate::hook_deadline::nearly_passed(SHOW_MARGIN) {
+        suppress(Suppression::Deadline, decision.last_fire);
+        return Ok(Shown::held(ShowOutcome::HeldDeadline));
+    }
     let lock = session::lock_engagement(id, session_id);
     let decision = session::way_fire_outcome(id, session_id, &curve, token_pos);
     if !decision.outcome.is_allowed() {
@@ -669,7 +761,16 @@ pub fn way_scored(
         }
     }
     session::record_way_fire(id, session_id, &curve, token_pos);
+    // The fire counts toward n under the way's lock, as the clock does, so
+    // two hooks that both pass the re-check cannot both count it.
+    let n = session::refire_count::bump_fire_count(session_id, id);
     drop(lock);
+    let shown = RefireState {
+        tick: token_pos,
+        n,
+        threshold: next_refire_threshold(&curve, fires, n),
+        epoch: session::refire_count::compaction_epoch(session_id),
+    };
     let is_redisclosure = decision.outcome.is_redisclosure();
 
     let epoch = stamp_disclosure(id, session_id, token_pos);
@@ -708,7 +809,6 @@ pub fn way_scored(
         ("scope", scope),
         ("project", project_dir),
         ("session", session_id.to_string()),
-        ("token_position", token_pos.to_string()),
         // The model id the invoking agent was running at fire time, read from
         // the transcript the hook named. Written on every fire so `ways tune stats`
         // can split fires and re-disclosures by model. The literal `unknown`
@@ -729,6 +829,13 @@ pub fn way_scored(
         // session on the read side; `ways tune stats` keys hook invocations on it.
         ("agent_id", agent_id),
     ];
+    // The tick, the fire's n, the threshold the next refire waits in this
+    // thread, and the session's compaction epoch.
+    //
+    // References:
+    // - ADR-711 §5: fire rows carry the tick, the threshold, n and the
+    //   compaction epoch.
+    log_fields.extend(shown.fields());
     // ADR-134 task D: the calibrated probability that fired this way, feeding the
     // fire-score telemetry that calibration (ADR-156) is fit from. Logged on every
     // semantic fire — first-fire *and* redisclosure — so precision is measurable
@@ -777,6 +884,16 @@ pub fn way_scored(
 
     let outcome = if is_redisclosure { ShowOutcome::Redisclosed } else { ShowOutcome::Fired };
     Ok(Shown { body: output, outcome })
+}
+
+/// The tokens the way's next refire waits after a fire that took the
+/// thread's count from `before` to `after`. `curve` was backed off for
+/// `before` fires, so it is stretched once more for each fire counted since,
+/// which is one unless a parallel hook counted a fire in between.
+fn next_refire_threshold(curve: &sensor_trait::Curve, before: u64, after: u64) -> Option<u64> {
+    let stretches = after.saturating_sub(before.max(1));
+    let next = session::backed_off(curve, stretches + 1, crate::config::global().refire_backoff());
+    next.refire_delta(session::REFIRE_FLOOR)
 }
 
 // ── ways show check ─────────────────────────────────────────────
@@ -875,7 +992,7 @@ pub fn check_within(
     // goes out together or not at all. A withheld check is logged and its fire
     // count is not bumped.
     let withhold = || {
-        log_way_suppressed("check", id, domain, trigger, Suppression::ContextCap, &scope, &project_dir, session_id);
+        log_way_suppressed("check", id, domain, trigger, Suppression::ContextCap, &scope, &project_dir, session_id, None);
         Ok(String::new())
     };
     let mut output = String::new();
@@ -1078,6 +1195,68 @@ mod tests {
             transcript: String::new(),
             usage_tail: Vec::new(),
         }
+    }
+
+    /// Every file under `dir`, for finding the state a fire leaves.
+    fn files_under(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+        entries.flatten().flat_map(|e| if e.path().is_dir() { files_under(&e.path()) } else { vec![e.path()] }).collect()
+    }
+
+    /// A hook too near its deadline to show a way holds it: no fire is
+    /// recorded, its back-off count stays at 0, and the hold is logged as a suppression with reason
+    /// `deadline`, so a gate-off session still shows it. The deadline is set
+    /// once per process, so the test reruns itself in a child with homes of
+    /// its own, and the child calls the same function a hook does.
+    #[test]
+    fn a_way_held_at_the_deadline_records_no_fire_and_logs_the_hold() {
+        const CHILD: &str = "WAYS_TEST_HELD_DEADLINE";
+        let name = "cmd::show::tests::a_way_held_at_the_deadline_records_no_fire_and_logs_the_hold";
+        if let Some(base) = std::env::var_os(CHILD).map(std::path::PathBuf::from) {
+            crate::hook_deadline::start(std::time::Duration::ZERO);
+            let shown = way_scored("tdl/held", "held-deadline", "keyword", None, None, None, None).unwrap();
+            assert!(matches!(shown.outcome, ShowOutcome::HeldDeadline), "{}", shown.outcome.as_str());
+            let events = std::fs::read_to_string(base.join("state/agent-ways/events.jsonl")).unwrap_or_default();
+            let held: Vec<serde_json::Value> = events
+                .lines()
+                .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+                .filter(|v| v["event"] == "way_suppressed" && v["way"] == "tdl/held")
+                .collect();
+            assert_eq!(held.len(), 1, "{events}");
+            assert_eq!(held[0]["reason"], "deadline");
+            assert!(!events.contains("\"way_fired\""), "{events}");
+            let state = files_under(&base.join("run"));
+            assert!(!state.iter().any(|p| p.to_string_lossy().contains("way-engagement")), "no fire recorded: {state:?}");
+            // Nor does the hold count toward the way's back-off.
+            assert_eq!(crate::session::refire_count::fire_count_for("held-deadline", "main", "tdl/held"), 0, "the hold counted a fire");
+            assert_eq!(held[0]["refire_n"], "0", "{held:?}");
+            return;
+        }
+        let base = std::env::temp_dir().join(format!("ways-held-deadline-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let way = base.join("proj/.claude/ways/tdl/held");
+        std::fs::create_dir_all(&way).unwrap();
+        std::fs::write(way.join("held.md"), "---\ndescription: a way the deadline holds\nrefire: 0.15\n---\nbody\n").unwrap();
+        for d in ["run", "state", "config", "data", "cache", "home"] {
+            std::fs::create_dir_all(base.join(d)).unwrap();
+        }
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", name, "--test-threads", "1"])
+            .env(CHILD, &base)
+            .env("XDG_RUNTIME_DIR", base.join("run"))
+            .env("XDG_STATE_HOME", base.join("state"))
+            .env("XDG_CONFIG_HOME", base.join("config"))
+            .env("XDG_DATA_HOME", base.join("data"))
+            .env("XDG_CACHE_HOME", base.join("cache"))
+            .env("HOME", base.join("home"))
+            .env("CLAUDE_PROJECT_DIR", base.join("proj"))
+            .env_remove("CLAUDE_AGENT_ID")
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&base);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success(), "{stdout}{}", String::from_utf8_lossy(&out.stderr));
+        assert!(stdout.contains("1 passed"), "the child ran the test: {stdout}");
     }
 
     fn attend_way(root: &std::path::Path, id: &str, trigger: bool) {

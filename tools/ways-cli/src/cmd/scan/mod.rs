@@ -16,6 +16,7 @@ mod decision;
 pub(crate) mod discard;
 mod file;
 mod gate;
+mod judged;
 mod late_interaction;
 mod matching;
 mod prompt;
@@ -50,6 +51,7 @@ pub use file::file;
 pub use prompt::{messages, prompt};
 pub use task::task;
 pub use tool::tool;
+pub(crate) use judged::{post_tool as judge_postchecks, run_detached};
 
 use anyhow::Result;
 use regex::Regex;

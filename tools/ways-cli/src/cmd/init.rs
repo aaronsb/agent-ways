@@ -64,10 +64,12 @@ Semantic matching (`description` + `vocabulary`) is additive with regex triggers
 
 | Intent | Numeric | Preset name |
 |---|---|---|
-| Static-heavy payload, 1–2 fires per session | `0.4` | `rare` |
-| Load-bearing guidance, ~3 fires per session | `0.15` | `normal` |
-| Event handler, fires often relative to session | `0.05` | `frequent` |
-| Disclose once per session | `1.0` | `once` |
+| Static-heavy payload | `0.4` | `rare` |
+| Load-bearing guidance | `0.15` | `normal` |
+| Event handler, fires often relative to the window | `0.05` | `frequent` |
+| Disclose once per context window | `1.0` | `once` |
+
+The value sets the wait before the first refire. In each agent thread every later refire waits `refire_backoff` times longer than the one before (default 2), and compaction grants one fire in the new window.
 
 Numeric values between presets are valid — e.g., `refire: 0.2` sits between `normal` and `rare` and is what the PR #70 1M-Opus-tuned ways migrated to (ADR-126).
 

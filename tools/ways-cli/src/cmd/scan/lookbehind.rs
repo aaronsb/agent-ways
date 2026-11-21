@@ -45,6 +45,58 @@ pub(crate) fn intent(session_id: &str) -> Option<String> {
     )
 }
 
+/// The calling agent's request for the relevance judge: its last human
+/// turn, a subagent's brief for a subagent that had no other. The agent's
+/// narration is left out, because it let off-topic ways pass when measured,
+/// and the operator chose the request and the call. Read from that agent's
+/// own transcript, as [`intent`] reads it; empty when there is none.
+///
+/// References:
+/// - ADR-707: the measurement of narration as judge input.
+/// - ADR-712 §4: the operator's choice of the request and the call.
+pub(crate) fn recent_turns(session_id: &str) -> Vec<ways_agent_core::judge::Turn> {
+    recent_turns_in(
+        &ways_core::paths::claude_dir(),
+        crate::cmd::show::firing_transcript(),
+        &crate::util::project_dir(),
+        session_id,
+        &crate::session::current_agent(),
+    )
+}
+
+fn recent_turns_in(
+    claude: &claude_sessions::ClaudeDir,
+    hook_transcript: Option<&str>,
+    project_dir: &str,
+    session_id: &str,
+    agent: &str,
+) -> Vec<ways_agent_core::judge::Turn> {
+    use ways_agent_core::judge::{Role, Turn};
+    let Some(tail) = crate::session::transcript_in(claude, hook_transcript, project_dir, session_id, agent)
+        .and_then(|t| read_tail(&t, TAIL_BYTES))
+    else {
+        return Vec::new();
+    };
+    last_human_text(&tail).map(|text| Turn { role: Role::User, text }).into_iter().collect()
+}
+
+/// The text of the last genuine human message in `transcript`, or `None`.
+fn last_human_text(transcript: &str) -> Option<String> {
+    transcript.lines().rev().find_map(|line| {
+        let v = serde_json::from_str::<Value>(line.trim()).ok()?;
+        let msg = v.get("message")?;
+        let content = msg.get("content");
+        if msg.get("role").and_then(|r| r.as_str()) != Some("user") || !is_human_message(content) {
+            return None;
+        }
+        let mut text = Vec::new();
+        collect_text_blocks(content, &mut text);
+        text.reverse();
+        let joined = text.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
+        (!joined.is_empty()).then_some(joined)
+    })
+}
+
 /// [`intent`] against an explicit config dir, hook transcript and agent. Read
 /// from that agent's own transcript ([`crate::session::transcript_in`]); a
 /// subagent with no transcript of its own gets no lookbehind.
@@ -216,6 +268,26 @@ mod tests {
             // A subagent with no transcript of its own gets no lookbehind, not the lead's.
             assert_eq!(intent_in(&claude, hook_transcript, project, "sess", "agone"), None);
         }
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// The judge reads the calling agent's own last human turn, a subagent's
+    /// brief, never the lead's, and none of the agent's narration.
+    #[test]
+    fn recent_turns_are_the_calling_agents_own() {
+        let root = std::env::temp_dir().join(format!("ways-lookbehind-turns-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let claude = claude_sessions::ClaudeDir::at(root.join(".claude"));
+        let dir = root.join(".claude/projects/-srv-p");
+        std::fs::create_dir_all(dir.join("sess/subagents")).unwrap();
+        let turn = |human: &str, prose: &str| format!("{}\n{}\n{}\n", user_text(human), assistant_text(prose), tool_result("ok"));
+        std::fs::write(dir.join("sess.jsonl"), turn("ship it", "lead narration")).unwrap();
+        std::fs::write(dir.join("sess/subagents/agent-atask.jsonl"), turn("the brief", "subagent reasoning")).unwrap();
+        let texts = |agent: &str| recent_turns_in(&claude, None, "/srv/p", "sess", agent).into_iter().map(|t| (t.role, t.text)).collect::<Vec<_>>();
+        use ways_agent_core::judge::Role;
+        assert_eq!(texts("atask"), [(Role::User, "the brief".to_string())]);
+        assert_eq!(texts(crate::session::MAIN_AGENT), [(Role::User, "ship it".to_string())]);
+        assert!(texts("agone").is_empty());
         std::fs::remove_dir_all(&root).ok();
     }
 

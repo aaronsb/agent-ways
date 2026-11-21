@@ -259,27 +259,52 @@ fn load_engagement_for_tick(path: &Path, curve: &Curve, current_tick: Tick) -> E
     }
 }
 
-/// Resolve a way's re-fire threshold in thousands of tokens by reading
-/// its frontmatter, resolving its refire spec against the session's
-/// context window (ADR-126), and asking `Curve::refire_delta(REFIRE_FLOOR)`.
-/// Used by `ways session ways` and `ways session` to render per-way bar positions.
+/// The longest half-life back-off produces. A count that keeps growing
+/// would otherwise overflow the tick arithmetic; at this length a way never
+/// refires in any session.
+const MAX_HALF_LIFE: u64 = 1 << 52;
+
+/// The curve a way's refire is checked against after `fires` fires in this
+/// agent thread: its `Curve::Exponential` half-life H stretched to
+/// H × g^(fires-1). No fire yet, or one, leaves H as it is, so the first
+/// refire waits H as it did before back-off. `g` is
+/// `Config::refire_backoff`, at least 1; other curve shapes are returned
+/// unchanged.
 ///
-/// Callers pass the session's current context window (typically from
-/// `cmd::context::get_context(...).tokens_total`) so the `refire:` fraction
-/// resolves to a concrete half-life. Hoisting the fetch to the caller keeps
-/// this function cheap enough to loop over every way in a tree render.
+/// References:
+/// - ADR-711 §2: the n-th refire waits H × g^(n-1).
+pub fn backed_off(curve: &Curve, fires: u64, g: f64) -> Curve {
+    let Curve::Exponential { half_life } = curve else { return curve.clone() };
+    let exponent = i32::try_from(fires.saturating_sub(1)).unwrap_or(i32::MAX);
+    let stretched = *half_life as f64 * g.max(1.0).powi(exponent);
+    let half_life = if stretched.is_finite() && stretched < MAX_HALF_LIFE as f64 {
+        stretched.round() as u64
+    } else {
+        MAX_HALF_LIFE
+    };
+    Curve::Exponential { half_life: half_life.max(1) }
+}
+
+/// Resolve a way's re-fire threshold in tokens for one agent thread: its
+/// frontmatter `refire:` resolved against that agent's context window,
+/// backed off by the thread's `fires` of the way, and asked
+/// `Curve::refire_delta(REFIRE_FLOOR)`. `ways session ways` and introspect
+/// render each (agent, way) row's bar from it.
+///
+/// Callers pass the agent's window (typically from its transcript through
+/// `cmd::context`) so the `refire:` fraction resolves to a concrete
+/// half-life. Hoisting the fetch to the caller keeps this function cheap
+/// enough to loop over every way in a tree render.
 ///
 /// Returns `None` when the way file cannot be resolved, its frontmatter
-/// cannot be parsed, neither `refire:` nor `curve:` is present, or its
-/// resolved curve never falls below the floor. Callers pick a sensible
-/// fallback — typically 25% of the context window to preserve the old
-/// visual baseline.
-pub fn way_refire_threshold_k(way_id: &str, project_dir: &str, window: u64) -> Option<u64> {
+/// cannot be parsed, `refire:` is absent, or its resolved curve never falls
+/// below the floor. Callers pick a sensible fallback, typically 25% of the
+/// context window to preserve the old visual baseline.
+pub fn way_refire_threshold(way_id: &str, project_dir: &str, window: u64, fires: u64) -> Option<u64> {
     let (way_file, _) = resolve_way_file(way_id, project_dir)?;
     let fm = crate::frontmatter::parse(&way_file).ok()?;
-    let curve = fm.resolved_curve(window)?;
-    let delta = curve.refire_delta(REFIRE_FLOOR)?;
-    Some(delta / 1000)
+    let curve = backed_off(&fm.resolved_curve(window)?, fires, crate::config::global().refire_backoff());
+    curve.refire_delta(REFIRE_FLOOR)
 }
 
 #[cfg(test)]
@@ -339,6 +364,39 @@ mod tests {
             classify_outcome(&state, 10_000),
             FireOutcome::ReFire
         ));
+    }
+
+    /// After n fires the half-life is H × g^(n-1); before the second fire
+    /// it is H, g = 1 keeps it at H, and a count large enough to overflow
+    /// stops at the cap.
+    ///
+    /// References:
+    /// - ADR-711 §2: the back-off schedule.
+    #[test]
+    fn backed_off_stretches_the_half_life_by_g_to_the_n_minus_one() {
+        let h = |fires: u64, g: f64| match backed_off(&Curve::Exponential { half_life: 1_000 }, fires, g) {
+            Curve::Exponential { half_life } => half_life,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!([h(0, 2.0), h(1, 2.0), h(2, 2.0), h(3, 2.0), h(4, 2.0)], [1_000, 1_000, 2_000, 4_000, 8_000]);
+        assert_eq!([h(1, 1.0), h(5, 1.0), h(40, 1.0)], [1_000, 1_000, 1_000]);
+        assert_eq!(h(3, 3.0), 9_000);
+        assert_eq!(h(u64::MAX, 2.0), MAX_HALF_LIFE);
+        assert_eq!(h(3, 0.5), 1_000, "a factor below 1 never shortens the wait");
+        let flat = Curve::Flat { suppression: 7 };
+        assert!(matches!(backed_off(&flat, 9, 2.0), Curve::Flat { suppression: 7 }));
+    }
+
+    /// A refire after n fires waits until salience on the backed-off curve
+    /// drops below the floor: H × g^(n-1) + 1 ticks after the last fire.
+    #[test]
+    fn a_backed_off_curve_holds_the_refire_for_the_longer_wait() {
+        let base = Curve::Exponential { half_life: 100 };
+        let mut state = EngagementState::new(base.clone());
+        state.record_fire(0, 1.0);
+        state.set_curve(backed_off(&base, 3, 2.0));
+        assert_eq!(classify_outcome(&state, 400), FireOutcome::Suppressed);
+        assert_eq!(classify_outcome(&state, 401), FireOutcome::ReFire);
     }
 
     /// The backward-tick guard: if the persisted state's last_fire is

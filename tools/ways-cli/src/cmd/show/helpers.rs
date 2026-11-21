@@ -167,12 +167,32 @@ pub(crate) fn is_executable(path: &Path) -> bool {
 /// orphan (see `output_within`).
 pub(crate) const MACRO_DEADLINE: std::time::Duration = std::time::Duration::from_secs(3);
 
+/// The time a macro leaves before the hook's deadline, for the ways after it.
+const MACRO_RESERVE: std::time::Duration = std::time::Duration::from_millis(750);
+
+/// The least run a macro is started for; under it the macro is skipped.
+const MACRO_LEAST: std::time::Duration = std::time::Duration::from_millis(100);
+
 /// Execute a macro shell script with [`macro_env`] and return its stdout:
 /// `None` when it fails, prints nothing, or outlives [`MACRO_DEADLINE`]. A
 /// timeout is logged as a `macro_timeout` event naming the way, so it is
 /// told apart from a macro that had nothing to say.
 pub(crate) fn run_macro(macro_file: &Path, run: &MacroRun) -> Option<String> {
-    match run_macro_within(macro_file, run, MACRO_DEADLINE) {
+    // Inside a hook a macro gets only what is left of the hook's deadline,
+    // less what showing the way and the rest take; past it, none runs.
+    let limit = crate::hook_deadline::within(MACRO_DEADLINE, MACRO_RESERVE);
+    if limit < MACRO_LEAST {
+        crate::session::log_event(&[
+            ("event", "macro_skipped"),
+            ("way", &macro_way_name(macro_file)),
+            ("reason", "hook_deadline"),
+            ("scope", run.scope),
+            ("project", run.project_dir),
+            ("session", run.session_id),
+        ]);
+        return None;
+    }
+    match run_macro_within(macro_file, run, limit) {
         Ok(out) => (!out.is_empty()).then_some(out),
         Err(crate::cmd::proc::ProcError::TimedOut(limit)) => {
             crate::session::log_event(&[

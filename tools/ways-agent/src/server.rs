@@ -368,7 +368,7 @@ impl State {
             // unknown cost: none was made.
             return Err("deadline: before call".to_string());
         }
-        let turns = judge::render_turns(&req.turns, p.turns, p.max_turn_chars);
+        let turns = judge::render_turns(&req.turns, judge::window(p.turns, req.min_turns), p.max_turn_chars);
         let prompt = judge::render_prompt(&turns, &req.candidates);
         Ok(Prepared { req, settings, key, prompt, remaining, _slot })
     }
@@ -572,7 +572,7 @@ mod tests {
     #[test]
     fn an_empty_candidate_list_falls_back_without_a_call() {
         let state = State::new();
-        let req = JudgeRequest { session: "s".into(), tool: "t".into(), turns: vec![], candidates: vec![], engine: None };
+        let req = JudgeRequest { session: "s".into(), tool: "t".into(), turns: vec![], candidates: vec![], engine: None, min_turns: None };
         assert!(matches!(state.judge(req), Reply::Fallback { reason, .. } if reason == "no_candidates"));
     }
 
@@ -594,6 +594,7 @@ mod tests {
             turns: vec![],
             candidates: vec![Candidate { id: "a/b".into(), text: "a › b\nd".into() }],
             engine: Some("anthropic".into()),
+            min_turns: None,
         };
         let held = State::settings_at(&path, req.engine.as_deref(), anthropic_key).unwrap().unwrap();
         // The key path from here on: prepare_with refuses only claude-code
@@ -615,6 +616,7 @@ mod tests {
             turns: vec![],
             candidates: vec![Candidate { id: "a/b".into(), text: "a › b\nd".into() }],
             engine: None,
+            min_turns: None,
         };
         for mode in ["enforce", "shadow"] {
             let user: profile::UserLayer = serde_yaml::from_str(&format!("engine: claude-code\nmode: {mode}\n")).unwrap();

@@ -83,8 +83,14 @@ pub const DEADLINE: Duration = Duration::from_secs(3);
 /// postcheck sees `CLAUDE_SESSION_ID` and `WAYS_SESSIONS_ROOT`; its output is
 /// discarded.
 pub fn requests(checks: &[Postcheck], payload: &str, session_id: &str) -> Vec<String> {
-    requests_within(checks, payload, session_id, DEADLINE)
+    // The judge and the ways come after the postchecks, inside the same hook
+    // deadline, so the postchecks leave them their share.
+    requests_within(checks, payload, session_id, crate::hook_deadline::within(DEADLINE, AFTER_POSTCHECKS))
 }
+
+/// What the postchecks leave of the hook's deadline for the judge and the
+/// ways they ask for.
+const AFTER_POSTCHECKS: Duration = Duration::from_secs(5);
 
 fn requests_within(checks: &[Postcheck], payload: &str, session_id: &str, deadline: Duration) -> Vec<String> {
     let root = session::sessions_root();
@@ -175,18 +181,23 @@ pub fn scan(payload: &str, session_id: &str, project_dir: &str) -> String {
     let checks = find(&roots(project_dir));
     let mut context = String::new();
     let mut budget = ContextBudget::hook();
-    for id in requests(&checks, payload, session_id) {
-        let Ok(show::Shown { body: out, .. }) =
-            show::way_scored(&id, session_id, "postcheck", None, None, None, Some(&mut budget))
-        else {
-            continue;
+    let ids = requests(&checks, payload, session_id);
+    let event: serde_json::Value = serde_json::from_str(payload).unwrap_or_default();
+    let hook_event = event["hook_event_name"].as_str().unwrap_or("PostToolUse");
+    let tool = event["tool_name"].as_str().unwrap_or("a");
+    // The requests pass the relevance judge before any fire is recorded, as
+    // every lane's candidates do (#1287).
+    crate::cmd::scan::judge_postchecks(session_id, project_dir, hook_event, tool, ids, |id| {
+        let Ok(shown) = show::way_scored(id, session_id, "postcheck", None, None, None, Some(&mut budget)) else {
+            return "error";
         };
-        if !out.is_empty() {
-            context.push_str(&out);
+        if !shown.body.is_empty() {
+            context.push_str(&shown.body);
             context.push_str("\n\n");
             budget.charge("\n\n");
         }
-    }
+        shown.outcome.as_str()
+    });
     context.trim_end().to_string()
 }
 

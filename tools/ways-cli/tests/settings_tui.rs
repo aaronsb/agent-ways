@@ -827,7 +827,7 @@ fn golden_frames() {
         ("matching-browse", "matching", "", "100x30"),
         ("matching-edit", "matching", "down down e ctrl-u text:0.2", "100x30"),
         ("matching-review", "matching", "down e ctrl-u text:0.4 enter down down down down e ctrl-u text:0.2 enter w", "100x30"),
-        ("gate-browse", "gate", "down down down right down right", "100x30"),
+        ("gate-browse", "gate", "down down down down right down right", "100x30"),
         ("gate-edit", "gate", "down e text:anthropic", "100x30"),
         ("install-browse", "install", "", "100x30"),
         ("install-edit", "install", "down down down e", "100x30"),
@@ -880,7 +880,7 @@ fn golden_frames() {
     let models = ["claude-sonnet-5-5", "claude-opus-4-5", "claude-haiku-4-5", "claude-haiku-4-5-20251001"];
     let list: Vec<String> = models.iter().map(|m| format!("{{\"id\":\"{m}\",\"name\":\"{m}\",\"input_per_mtok\":null,\"output_per_mtok\":null}}")).collect();
     cached.file(".cache/agent-ways/agent/models-anthropic.json", &format!("{{\"provider\":\"anthropic\",\"fetched_at\":1700000000,\"models\":[{}]}}\n", list.join(",")));
-    let pick = "down down down right down right down down enter down";
+    let pick = "down down down down right down right down down enter down";
     g.check_text("gate-pick-model", &cached.snap("gate", pick, "100x30", "16"));
     g.check_text("gate-pick-model-80x25", &cached.snap("gate", pick, "80x25", "16"));
     // The multi picker, over the domains the ways roots hold: one is

@@ -4,15 +4,15 @@ agent-tui frame 100x30
 |│ ▾ settings                    value                 ││session                                    │|
 |│     engine                    claude-code           ││cccccccc-0000-4000-8000-000000000003       │|
 |│     mode                      enforce               ││                                           │|
-|│ ▸ profiles · setting          value                 ││The engine this session resolved to at its │|
-|│ ▸ keys · provider             key                   ││first judge request, held for its life.    │|
-|│ ▾ judge · state               value                 ││                                           │|
-|│     readiness                 degraded !            ││finding  engine_unavailable: claude-code   │|
-|│     unset engine              none                  ││unavailable: no Claude Code host, and no   │|
-|│   ▾ sessions                                        ││key is configured; load the ways mod or    │|
-|│       3f6c2a91                claude-code           ││configure an Anthropic or OpenRouter key   │|
-|│▌      cccccccc                none !                ││(`ways agent key add --provider anthropic` │|
-|│                                                     ││or `--provider openrouter`)                │|
+|│     held_sample               0.1                   ││The engine this session resolved to at its │|
+|│ ▸ profiles · setting          value                 ││first judge request, held for its life.    │|
+|│ ▸ keys · provider             key                   ││                                           │|
+|│ ▾ judge · state               value                 ││finding  engine_unavailable: claude-code   │|
+|│     readiness                 degraded !            ││unavailable: no Claude Code host, and no   │|
+|│     unset engine              none                  ││key is configured; load the ways mod or    │|
+|│   ▾ sessions                                        ││configure an Anthropic or OpenRouter key   │|
+|│       3f6c2a91                claude-code           ││(`ways agent key add --provider anthropic` │|
+|│▌      cccccccc                none !                ││or `--provider openrouter`)                │|
 |│                                                     ││                                           │|
 |│                                                     ││value    none                              │|
 |│                                                     ││type     read-only here                    │|
@@ -57,54 +57,54 @@ styles
   4  54-55  - - DIM
   4  99-99  - - DIM
   5   0-0   - - DIM
-  5   2-11  - - BOLD
-  5  12-21  - - DIM
-  5  32-36  - - DIM
   5  54-55  - - DIM
   5  99-99  - - DIM
   6   0-0   - - DIM
-  6   2-7   - - BOLD
-  6   8-18  - - DIM
-  6  32-34  - - DIM
+  6   2-11  - - BOLD
+  6  12-21  - - DIM
+  6  32-36  - - DIM
   6  54-55  - - DIM
   6  99-99  - - DIM
   7   0-0   - - DIM
-  7   2-8   - - BOLD
-  7   9-16  - - DIM
-  7  32-36  - - DIM
+  7   2-7   - - BOLD
+  7   8-18  - - DIM
+  7  32-34  - - DIM
   7  54-55  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
-  8  32-39  - - DIM
-  8  40-41  Red - BOLD
+  8   2-8   - - BOLD
+  8   9-16  - - DIM
+  8  32-36  - - DIM
   8  54-64  - - DIM
   8  65-95  Red - BOLD
   8  99-99  - - DIM
   9   0-0   - - DIM
-  9  32-35  - - DIM
+  9  32-39  - - DIM
+  9  40-41  Red - BOLD
   9  54-55  - - DIM
   9  56-95  Red - BOLD
   9  99-99  - - DIM
  10   0-0   - - DIM
- 10   2-13  - - BOLD
+ 10  32-35  - - DIM
  10  54-55  - - DIM
  10  56-94  Red - BOLD
  10  99-99  - - DIM
  11   0-0   - - DIM
- 11  32-42  - - DIM
+ 11   2-13  - - BOLD
  11  54-55  - - DIM
  11  56-95  Red - BOLD
  11  99-99  - - DIM
  12   0-0   - - DIM
- 12   1-1   Cyan - BOLD|REVERSED
- 12   2-31  - - BOLD|REVERSED
- 12  32-35  - - BOLD|DIM|REVERSED
- 12  36-37  Red - BOLD|REVERSED
- 12  38-53  - - BOLD|REVERSED
+ 12  32-42  - - DIM
  12  54-55  - - DIM
  12  56-97  Red - BOLD
  12  99-99  - - DIM
  13   0-0   - - DIM
+ 13   1-1   Cyan - BOLD|REVERSED
+ 13   2-31  - - BOLD|REVERSED
+ 13  32-35  - - BOLD|DIM|REVERSED
+ 13  36-37  Red - BOLD|REVERSED
+ 13  38-53  - - BOLD|REVERSED
  13  54-55  - - DIM
  13  56-82  Red - BOLD
  13  99-99  - - DIM

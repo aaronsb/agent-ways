@@ -47,7 +47,7 @@ Every way that fires on something needs a `refire:` field. That covers any way w
 | A broad concept users describe in different words | `description:` + `vocabulary:` (semantic matching) |
 | A session condition, not content | `trigger:` with `context-threshold`, `file-exists`, or `session-start` |
 
-The lanes are independent, and a way can carry a `pattern:` and a `description:` + `vocabulary:` together. A keyword hit still has to clear a low semantic floor, so a bare word cannot pull in an unrelated prompt; `pattern_strict: true` skips that floor. When a relevance judge is configured (`gate.mode=enforce`), a matched way on the prompt lane can still be judged irrelevant and withheld. [matching.md](matching.md) and [engine-reference.md](engine-reference.md) give the exact rules.
+The lanes are independent, and a way can carry a `pattern:` and a `description:` + `vocabulary:` together. A keyword hit still has to clear a low semantic floor, so a bare word cannot pull in an unrelated prompt; `pattern_strict: true` skips that floor. When a relevance judge is configured (`gate.mode=enforce`), a matched way on any lane can still be judged irrelevant and withheld, whatever trigger matched it, `pattern_strict` and the regex triggers included. [matching.md](matching.md) and [engine-reference.md](engine-reference.md) give the exact rules.
 
 ### Writing effective guidance
 

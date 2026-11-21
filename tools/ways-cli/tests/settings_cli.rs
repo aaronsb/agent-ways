@@ -322,7 +322,7 @@ fn an_emitted_section_applies_unchanged() {
     assert_eq!(code, 0, "{out}{err}");
     let report: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert!(report["rejected"].as_array().unwrap().is_empty());
-    assert_eq!(report["accepted"].as_array().unwrap().len(), 11);
+    assert_eq!(report["accepted"].as_array().unwrap().len(), 12);
     let written = &report["written"]["<ROOT>/xdg/config/agent-ways/config.yaml"];
     assert_eq!(parsed(&serde_yaml::to_string(written).unwrap()), parsed(&frag), "the fragment written fits back into the file");
     // A multi-file emit applies too.
@@ -494,7 +494,7 @@ fn hook_commands_load_only_their_sections() {
     f.write(&f.root.join("xdg/config/attend/config.yaml"), "engagement: [\n");
     let ways_line =
         "settings-trace: load-sections ways:config [ways,ways.switch,ways.subagents,ways.domains,matching,install.targets,install.secret_path_deny,ways.project,ways.log]";
-    let agent_line = "settings-trace: load-sections ways-agent:agent [gate,gate.mode,gate.profiles]";
+    let agent_line = "settings-trace: load-sections ways-agent:agent [gate,gate.mode,gate.profiles,gate.held_sample]";
     for args in [
         vec!["scan", "prompt", "--query=write a unit test", "--session=s1"],
         vec!["scan", "command", "--command=git status", "--session=s1"],

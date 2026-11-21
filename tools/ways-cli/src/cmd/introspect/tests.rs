@@ -25,7 +25,7 @@ use agent_tui::timeline::Playback;
 use ways_core::introspection::{CriteriaMap, FiredWay, IntrospectionSummary, JoinConfidence, MatchCriteria, MatchDetail, SessionIntrospection, Turn, WayMeta};
 
 use super::agents::{Agents, Meta as AgentMeta};
-use super::frames::{build_frames, has_verdicts};
+use super::frames::{build_frames, has_verdicts, load_session_events};
 use super::live::{Follow, Probe, SAMPLE_TICK};
 use super::model::{Outcome, WayEvent};
 use super::report::{Reports, Spend};
@@ -36,6 +36,85 @@ use super::why::build_why_index;
 
 const SESSION: &str = "8f3a2c1d-5e6f-4a7b-9c8d-0e1f2a3b4c5d";
 const PROJECT: &str = "/home/dev/proj";
+
+/// A detached judge's verdict on a candidate the refire curve held does not
+/// mark the way in the frame (#1287).
+#[test]
+fn a_detached_verdict_marks_no_row() {
+    let held = WayEvent { verdict: "block".into(), held_refire: true, ..ev("2026-07-03T16:52:02Z", "way_judged", "itops/incident", "") };
+    let events = vec![ev("2026-07-03T16:52:01Z", "way_fired", "softwaredev/docs/adr", "file"), held];
+    let f = &build_frames(&events, &[], &HashMap::new(), 50)[0];
+    assert!(f.ways.iter().all(|w| w.id != "itops/incident"), "{:?}", f.ways.iter().map(|w| &w.id).collect::<Vec<_>>());
+}
+
+/// Each fire row shows the wait the hook gave it then, not the way's wait
+/// now: after fires 1, 2 and 3 of one way in main, H, 2H and 4H. A
+/// subagent's fire of the same way shows its own thread's wait. A row
+/// written before the field falls back to the current threshold.
+#[test]
+fn each_fire_row_shows_the_threshold_it_was_logged_with() {
+    let fire = |ts: &str, agent: &str, threshold: Option<u64>| WayEvent {
+        agent_id: agent.into(),
+        refire_threshold: threshold,
+        ..ev(ts, "way_fired", "softwaredev/docs/adr", "file")
+    };
+    let sub = "a1b2c3d4e5f6a7b8c";
+    let events = vec![
+        fire("2026-07-03T16:52:00Z", "main", Some(30_000)),
+        fire("2026-07-03T16:53:00Z", "main", Some(60_000)),
+        fire("2026-07-03T16:54:00Z", sub, Some(12_000)),
+        fire("2026-07-03T16:55:00Z", "main", Some(120_000)),
+        fire("2026-07-03T16:56:00Z", "main", None),
+    ];
+    // The threshold the way has now, at n = 4, in either thread.
+    let now = HashMap::from([("softwaredev/docs/adr".to_string(), 240)]);
+    let frames = build_frames(&events, &[], &now, 50);
+    let row = |f: usize, agent: &str| {
+        frames[f].ways.iter().find(|w| w.agent == agent).map(|w| w.refire_threshold_k).unwrap()
+    };
+    assert_eq!(row(0, "main"), 30, "after fire 1, H");
+    assert_eq!(row(1, "main"), 60, "after fire 2, 2H");
+    assert_eq!(row(2, sub), 12, "the subagent's own wait");
+    assert_eq!(row(2, "main"), 60, "main's row keeps its wait");
+    assert_eq!(row(3, "main"), 120, "after fire 3, 4H");
+    assert_eq!(row(4, "main"), 240, "a row without the field");
+}
+
+/// The fire row's threshold is read from the log.
+#[test]
+fn a_fire_row_threshold_is_read_from_the_log() {
+    let content = concat!(
+        r#"{"ts":"2026-01-01T00:00:00Z","event":"way_fired","session":"s","way":"d/a","refire_threshold":"30000"}"#,
+        "\n",
+        r#"{"ts":"2026-01-01T00:01:00Z","event":"way_fired","session":"s","way":"d/b"}"#,
+        "\n",
+    );
+    let evs = load_session_events(content, "s");
+    assert_eq!(evs[0].refire_threshold, Some(30_000));
+    assert_eq!(evs[1].refire_threshold, None);
+}
+
+/// In shadow mode a tool lane's only verdicts are the detached judge's, so
+/// its would-block on a way the lane showed marks that row.
+#[test]
+fn a_detached_shadow_verdict_on_a_shown_way_marks_its_row() {
+    let shadow = WayEvent { verdict: "would_block".into(), ..ev("2026-07-03T16:52:02Z", "way_judged", "softwaredev/docs/adr", "") };
+    let events = vec![ev("2026-07-03T16:52:01Z", "way_fired", "softwaredev/docs/adr", "file"), shadow];
+    let f = &build_frames(&events, &[], &HashMap::new(), 50)[0];
+    let row = f.ways.iter().find(|w| w.id == "softwaredev/docs/adr").expect("the fired row");
+    assert_eq!(row.outcome, Outcome::WouldBlock);
+}
+
+/// A way held because the hook was near its deadline is no refire hold: it
+/// is a note on its frame, not a held row.
+#[test]
+fn a_deadline_hold_is_a_note_not_a_refire_row() {
+    let held = WayEvent { kind: "way".into(), reason: "deadline".into(), ..ev("2026-07-03T16:52:02Z", "way_suppressed", "itops/incident", "keyword") };
+    let events = vec![ev("2026-07-03T16:52:01Z", "way_fired", "softwaredev/docs/adr", "file"), held];
+    let f = &build_frames(&events, &[], &HashMap::new(), 50)[0];
+    assert!(f.ways.iter().all(|w| w.id != "itops/incident"), "{:?}", f.ways.iter().map(|w| &w.id).collect::<Vec<_>>());
+    assert!(f.new_events.iter().any(|e| e.contains("itops/incident") && e.contains("deadline")), "{:?}", f.new_events);
+}
 
 /// The sizes every screen is checked at: the smallest a screen must work
 /// in, and the reference.
@@ -57,6 +136,8 @@ fn ev(ts: &str, event: &str, way: &str, trigger: &str) -> WayEvent {
         agent_id: String::new(),
         kind: String::new(),
         reason: String::new(),
+        held_refire: false,
+        refire_threshold: None,
     }
 }
 
