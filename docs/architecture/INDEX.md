@@ -133,6 +133,7 @@ _Session awareness: sensors, peers, messaging, keepwarm_
 | [ADR-413](./attend/ADR-413-attend-s-cli-groups-its-verbs-by-noun-the-mod-s-tools-are-the-principal-reply-path.md) | Attend's CLI groups its verbs by noun; the mod's tools are the principal reply path | accepted |
 | [ADR-414](./attend/ADR-414-the-attend-mod-keeps-an-idle-session-warm-for-a-bounded-stretch-after-the-operator-s-last-prompt-then-asks-for-a-wrap-and-lets-the-cache-lapse-while-autocompact-is-off.md) | The attend mod keeps an idle session warm for a bounded stretch after the operator's last prompt, then asks for a wrap and lets the cache lapse, while autocompact is off | accepted |
 | [ADR-415](./attend/ADR-415-a-session-event-record-written-by-the-ways-hooks-to-a-per-session-spool-and-read-by-attend-ways-sensors-and-sensor-conditions.md) | A session event record, written by the ways hooks to a per-session spool and read by attend, ways sensors and sensor conditions | proposed |
+| [ADR-416](./attend/ADR-416-awareness-reaches-claude-code-only-through-the-attend-mod-whose-sensor-host-writes-system-signals-to-the-store.md) | Awareness reaches Claude Code only through the attend mod, whose sensor host writes system signals to the store | accepted |
 
 ## Platform
 _Install, update, configuration, permissions, the CLI contract, testing_

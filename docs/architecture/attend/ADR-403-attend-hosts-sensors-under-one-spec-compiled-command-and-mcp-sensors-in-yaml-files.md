@@ -203,6 +203,8 @@ Wildcards apply to paths, to property names (`"wind_*"` tests every matching fie
 
 attend stores what each trigger last saw across polls and restarts: the value, the key set, or whether `where` held. That stored state is what lets a stateless command or a read-only MCP call report transitions. A sensor's trigger memory is deleted with its state store (§3b).
 
+> Amended 2026-11-21 by ADR-416: a trigger may set `memory: session`. Its memory is then held in the sensor host's process instead of the store. It starts empty, with no baseline, and ends with the host, which lives as long as one session. `on: enters` with that memory fires on the first poll whose result meets `where`, and at most once per session. The default, `memory: store`, keeps the behaviour above, with stores keyed by session (see the note in §3b). A trigger may also set `expires`, in seconds or `session`: how long its event-lane signal waits unread before the drain drops it.
+
 ### 3a. Lanes
 
 ADR-136 draws the lane boundary at authored communication: words a person or agent composed ride the message lane, and everything the environment generates rides the event lane. A sensor file states its lane, which replaces selection by name in `rides_message_lane`:
@@ -210,11 +212,15 @@ ADR-136 draws the lane boundary at authored communication: words a person or age
 - `lane: message` requires an `author` field in the trigger, naming the item field, or on a state trigger the state field (§3b), that holds who composed the item. A file that declares the message lane with no author is a lint error, and attend runs that sensor on the event lane and says why.
 - The shipped `keepwarm` file is the one exception, recorded in the file: its timed wake floor rides the message lane by ADR-182, and it has no author.
 
+  > Amended 2026-11-21 by ADR-416: the exception is removed. Keepwarm's wake is submitted by the attend mod and is not a sensor signal, so the shipped `keepwarm` file and the `lane_exception` field go, and the author rule has no exception. What attend itself writes, such as the update notice, is a signal from the `system` sender and rides the event lane, where a signal never starts a turn and is dropped unread once it expires.
+
 The author requirement is chosen over restricting who may set the lane. A lane granted by file origin says nothing about the items, while an author field is checkable and is what ADR-136's boundary means.
 
 An MCP sensor that reads chat messages people wrote, such as Slack through an MCP server, carries authored communication, so it may ride the message lane. This amends ADR-136's Decision in one clause only: the closing sentence of its item 1, which named "a future external-chat sensor (e.g. Slack)" among the event-lane sensors. That sensor now rides the message lane for authored chat messages. The rest of ADR-136's Decision stays in force. Chat metadata with no author, such as a channel created or a member joined, stays on the event lane.
 
 The lane is per sensor, which is a step toward #139 and not its fix. `peers` still emits both authored messages and presence events from one poll, and #139's per-observation lane selection, by splitting message scanning out of `peers`, stays open.
+
+> Amended 2026-11-21 by ADR-416: `peers` no longer scans messages, because the attend mod's drain carries them. It reports presence only, on the event lane, which settles #139's split for Claude Code.
 
 ### 3b. Sensor state: declared, typed, checked
 
@@ -223,6 +229,8 @@ An attend sensor may declare a `state` block: a map from field name to a type, `
 Only attend writes the store, and in a project only its poller does. It keeps one JSON file per sensor under its state directory, `$XDG_STATE_HOME/agent-ways/attend/sensor-state/`, named by a hash of the sensor's name and the project attend runs for, so no part of the path comes from a sensor file. Every attend sensor has a store, empty when it declares no state. Its trigger memory sits beside the store, outside the declared fields, and is deleted whenever the store is. Trigger memory is attend-internal: no template reads it, and the declaration check does not cover it. No template field, argument or environment variable gives the path to a command, a server or the agent.
 
 One attend per project polls. The first attend to start in a project takes a lock in its state directory and becomes the project's poller: it runs every sensor, holds the project's MCP sessions (§4) and is the only writer of the project's stores. Every other attend in the project reads the poller's results and delivers them to its own session. The poller holds the lock for the life of its process, so the lock is released when the poller exits for any reason, and another instance takes it at its next tick and polls on from the stores as they stand.
+
+> Amended 2026-11-21 by ADR-416: one sensor host runs for each listening session, as a child of that session's attend mod, so a project with several listening sessions has several pollers. The project lock and the single poller are replaced. Each host is the only writer of its own session's stores, which are named by a hash of the sensor's name, the project and the session, and each host holds its own MCP sessions. A session's stores move with it after `/clear`, as its membership does, and a new session starts from a baseline.
 
 A sensor fills its fields in two ways:
 - **Mappings.** A field's `from` is a JSONPath of the §8 subset over the poll result, and must select one scalar. A path that selects nothing leaves the field as it was. `mcp` and `command` sensors both map.

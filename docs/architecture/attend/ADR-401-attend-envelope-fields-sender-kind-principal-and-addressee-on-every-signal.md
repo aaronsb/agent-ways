@@ -2,11 +2,12 @@
 contract: adr/v1
 kind: spec
 capability: attend
+decided_by: ADR-416
 status: accepted
 date: 2026-09-19
 deciders:
   - aaronsb
-related: []
+related: [ADR-416]
 ---
 
 # ADR-401: Attend envelope fields: sender kind, principal, and addressee on every signal
@@ -34,10 +35,12 @@ Four fields, all written by the sending attend process from state it resolves it
 
 | Field | Type | Values | Written by | Source |
 |---|---|---|---|---|
-| `from_kind` | enum | `human`, `agent` | sender process | ADR-171 identity resolution (rule below) |
+| `from_kind` | enum | `human`, `agent`, `system` | sender process | ADR-171 identity resolution (rule below); `system` for what attend's sensor host writes |
 | `from_id` | string | canonical sender id | sender process | session id for `agent`; sanitized username (ADR-170) for `human`; key fingerprint once signing lands |
 | `on_behalf_of` | string, optional | canonical id of the principal whose request the message carries | sender process from `--on-behalf-of <id>` | asserted by the sender, unverified |
 | `to` | string | `*`, `#<channel>`, or a comma-separated set of canonical ids | sender process from routing flags or from the replied message | resolved at send time |
+
+> Amended 2026-11-21 by ADR-416: `from_kind` gains a third value, `system`, and the row above names it. The `from_kind` row read: "`human`, `agent` | sender process | ADR-171 identity resolution (rule below)". The rule for `system` is in "The system sender" below.
 
 `from_id` and `to` share one id space: session ids for agents, sanitized usernames for humans. Display names and Greek ordinals never appear in these fields (ADR-171: ordinals are presentation, never keys).
 
@@ -55,6 +58,14 @@ attend-chat is an exception by construction. Its `identify_sender` (`attend-chat
 The rule keys on `session_resolved` alone and ignores `origin_resolved`. A session record without a `cwd` is still a session, and the partial case must not turn an agent into a human.
 
 The rule sees process lineage and cannot see the keyboard. A command the operator runs through the harness's `!` shell escape is a child of the Claude process and resolves as `agent`. This limit belongs to any mechanical rule, and the note records it instead of adding a heuristic. The operator's channels for `human`-kind sends are attend-chat and a plain terminal.
+
+### The system sender
+
+Added 2026-11-21 by ADR-416. attend's sensor host, the child process the attend mod spawns for a listening session, writes what its sensors report as signals of its own. Each one carries `from_kind = system`, `from = system:<sensor>` and `from_id = <sensor>`, the sensor's name, and is addressed to the host's session in `to`. The identity rule above never yields `system`: only the host's signal writer sets it, and `attend message send` cannot. A reader renders a system signal as a line from attend, never as one from a person or an agent. attend-chat skips system signals on the event lane.
+
+A system signal carries two more tags:
+- `lane`: `event` or `message`. A system signal is on the event lane unless its sensor names an `author` for authored items (ADR-403 §3a). An event-lane signal never starts a turn.
+- `expires`: on the event lane, the epoch second after which the drain drops the signal unread. The value comes from the sensor's decay window, one hour unless the trigger sets `expires`. A trigger with `expires: session` writes no `expires` tag, and the signal waits until its session reads it.
 
 ### on_behalf_of
 
@@ -113,6 +124,8 @@ from|project|cwd|from_kind:agent|from_id:<sid>|on_behalf_of:aaron|to:<sid1>,<sid
 ```
 
 A reader consumes `key:value|` segments after `cwd` while the key is one of the five known tags (`from_kind`, `from_id`, `on_behalf_of`, `to`, `re`) and the value matches that tag's class (the signal-id class for `re`, the wider class for the other three). The first segment that fails either test, or repeats a tag already read, begins the message. Readers accept `from_kind`, `from_id`, `on_behalf_of` and `to` in any order, and `re` comes last: the segment after a `re:` tag begins the message, and an empty `re:|` ends the tags of an unthreaded message whose text starts with a known tag. Writers emit the fixed order above. The fence is the one `re:` already uses, extended to four more keys, and it keeps the message able to begin with any prose other than an exact known tag.
+
+> Amended 2026-11-21 by ADR-416: the known tags are seven. `lane` and `expires` join `from_kind`, `from_id`, `on_behalf_of` and `to`, each under the same fence, and `re` stays last. `lane` takes `event` or `message`, and `expires` takes an epoch second as digits. A writer emits them after `to` and before `re`, and only on a system signal: `system:git|project|cwd|from_kind:system|from_id:git|to:<sid>|lane:event|expires:<epoch>|message`. A `system:` prefix in `from` reads as `system` where a signal lacks the tags.
 
 The `from` field is kept unchanged. `identity_view.rs` renders the sender from its `claude:` and `external:` prefix, the instance registry lookup keys on the session id inside it, and the own-message skip compares against it. `from_kind` and `from_id` are derived from the same identity resolution in the same process, so the two cannot disagree except by hand edit. Readers prefer the tagged fields when present.
 
