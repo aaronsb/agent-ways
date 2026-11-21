@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-//! Session metrics, git operations, and side-effectful display functions.
+//! Session metrics and side-effectful display functions.
 
 use std::path::Path;
 

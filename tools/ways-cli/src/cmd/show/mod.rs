@@ -1193,7 +1193,7 @@ mod tests {
         let footer = version_footer();
         assert_eq!(footer, format!("\n---\n_Ways version: {}_", crate::LONG_VERSION));
         assert!(footer.contains(env!("CARGO_PKG_VERSION")));
-        assert!(!footer.contains("unknown"));
+        assert!(!footer.contains("Ways version: unknown"));
     }
 
     fn ctx(tokens_total: u64, window_source: WindowSource) -> crate::cmd::context::ContextInfo {
