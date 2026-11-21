@@ -40,7 +40,7 @@ The other tools keep all three, since the hook is not registered for them. The c
 
 ## Budgets
 
-The mod carries text and usage only. The hook side parses and validates the verdict, and it fails open at its deadline. The tool lanes give the judge at most 6 seconds inside their 9 second hook deadline, and the job's own `timeout_ms`, which the model call takes as its limit, is what remains of that budget when the job is written.
+The mod carries text and usage only. The hook side parses and validates the verdict, and it fails open at its deadline. The tool lanes' settings hooks are bounded at 10 seconds. The ways scan takes its own deadline of 9 seconds inside that bound, keeps 1.5 seconds of it for showing the ways, and gives the judge at most 3 seconds. The job's own `timeout_ms`, which the model call takes as its limit, is what remains of that budget when the job is written.
 
 It hooks no `classic.*` event, which an organization's policy plugin passes over. No event a mod can hook wraps the SessionStart hooks, so under this engine the state lane at SessionStart writes no job and shows its candidates unjudged, as with the gate off.
 
