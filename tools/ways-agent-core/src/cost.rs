@@ -40,14 +40,15 @@ pub enum CostSource {
     Provider,
     /// Tokens times the profile's prices, or the model's list price.
     PriceTable,
-    /// A call on the Claude Code account: its usage came back, and no
-    /// provider price is reported for it.
+    /// A call on the Claude Code account whose usage reported tokens (input,
+    /// output or cache). No provider price is reported for it.
     ///
     /// References:
     /// - ADR-708 §10: account calls carry tokens and no price.
     Account,
-    /// No usage came back (deadline or transport failure), or an API call
-    /// whose model has no price. The call may still be billed.
+    /// No usage came back (deadline or transport failure), a usage block of
+    /// zeros (an aborted claude-code call), or an API call whose model has no
+    /// price. The call may still be billed.
     Unknown,
 }
 

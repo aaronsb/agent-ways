@@ -1000,7 +1000,6 @@ fn precision_drops_the_spread_below_100_columns() {
     assert!(!narrow.contains("Spread") && narrow.contains("softwaredev/delivery/commits"), "{narrow}");
 }
 
-/// A short trigger keeps its kind: a semantic lane is told from a pattern.
 /// A cost too wide for its column drops whole parts from its end, and is
 /// cut mid-part only when its first part alone does not fit.
 #[test]
@@ -1017,6 +1016,7 @@ fn a_cost_too_wide_drops_whole_parts() {
     assert_eq!(fit("~$1234.5678 est".to_string(), 12), "~$1234.5678…");
 }
 
+/// A short trigger keeps its kind: a semantic lane is told from a pattern.
 #[test]
 fn a_short_trigger_keeps_semantic_apart_from_pattern() {
     use super::report::short_trigger;
