@@ -279,6 +279,18 @@ impl Record {
         self.judge = Some(Value::Object(j));
     }
 
+    /// Whether the judge's turns carried the calling agent's request
+    /// (`"found"`) or only the call (`"none"`), on a record whose judge ran.
+    /// A tool lane's judge reads the request from the transcript, and a
+    /// lookup that finds none leaves the judge with the call alone.
+    pub(super) fn request(&mut self, found: bool) {
+        if let Some(Value::Object(j)) = &mut self.judge {
+            if j.get("status").and_then(Value::as_str) == Some("judged") {
+                j.insert("request".into(), if found { "found" } else { "none" }.into());
+            }
+        }
+    }
+
     /// The record as one JSON object.
     pub(super) fn to_json(&self) -> Value {
         let mut r = self.head.clone();
@@ -390,6 +402,27 @@ mod tests {
         assert_eq!(o[1], json!({"way": "b", "result": "near_miss", "prob_en": 0.42, "prob_multi": 0.4, "tau_s": 0.5, "shortfall": 0.08}));
         assert_eq!(o[2], json!({"way": "c", "result": "fired", "rank": 1, "channel": "keyword"}));
         assert_eq!(o[3], json!({"way": "d", "result": "held_refire", "rank": 2, "channel": "semantic:embedding:en", "p": 0.6123}));
+    }
+
+    /// A judged record says whether the judge read the agent's request; a
+    /// record whose judge did not run says nothing about it.
+    #[test]
+    fn a_judged_record_says_whether_the_request_was_read() {
+        use ways_agent_core::profile::Mode;
+        let g = gate_of(&[("a/way", 0.9)], Mode::Enforce);
+        for (found, want) in [(true, "found"), (false, "none")] {
+            let mut r = record(Surface::Command);
+            r.judge(&g);
+            r.request(found);
+            assert_eq!(r.to_json()["judge"]["request"], want);
+        }
+        let mut idle = record(Surface::Command);
+        idle.judge(&gate::Gate { status: gate::Status::Idle, ..gate::Gate::default() });
+        idle.request(false);
+        assert_eq!(idle.to_json()["judge"].get("request"), None);
+        let mut unjudged = record(Surface::Command);
+        unjudged.request(false);
+        assert_eq!(unjudged.to_json().get("judge"), None);
     }
 
     #[test]

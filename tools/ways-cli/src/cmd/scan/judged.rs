@@ -318,6 +318,7 @@ fn finish(lane: &Lane, judged: Judged, shown: &[Shown<'_>], tick: u64) {
         record.hit(&s.candidate.key, i + 1, &s.candidate.channel, s.candidate.p, s.result, Some(&judged.gate));
     }
     record.judge(&judged.gate);
+    record.request(judged.turns.iter().any(|t| t.role == Role::User));
     let scan_id = record.scan_id().to_string();
     record.write();
     detach(lane, judged, shown, &scan_id);

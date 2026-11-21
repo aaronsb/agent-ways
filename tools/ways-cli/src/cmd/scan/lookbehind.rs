@@ -30,6 +30,13 @@ use serde_json::Value;
 /// simply return the prose we found (still useful) or None.
 const TAIL_BYTES: u64 = 64 * 1024;
 
+/// The page the request lookup reads back from the transcript's end.
+const REQUEST_PAGE_BYTES: u64 = 256 * 1024;
+
+/// How far back the request lookup reads before it gives up. A subagent's
+/// transcript, whose request is its first line, stays well inside it.
+const REQUEST_SCAN_CAP: u64 = 32 * 1024 * 1024;
+
 /// The calling agent's prose since its last human turn, or `None`.
 ///
 /// A subagent's hook carries the parent's session id, so a session-id lookup
@@ -49,7 +56,8 @@ pub(crate) fn intent(session_id: &str) -> Option<String> {
 /// turn, a subagent's brief for a subagent that had no other. The agent's
 /// narration is left out, because it let off-topic ways pass when measured,
 /// and the operator chose the request and the call. Read from that agent's
-/// own transcript, as [`intent`] reads it; empty when there is none.
+/// own transcript, as [`intent`] reads it, but back past its tail
+/// ([`last_human_in_file`]); empty when there is none.
 ///
 /// References:
 /// - ADR-707: the measurement of narration as judge input.
@@ -72,29 +80,81 @@ fn recent_turns_in(
     agent: &str,
 ) -> Vec<ways_agent_core::judge::Turn> {
     use ways_agent_core::judge::{Role, Turn};
-    let Some(tail) = crate::session::transcript_in(claude, hook_transcript, project_dir, session_id, agent)
-        .and_then(|t| read_tail(&t, TAIL_BYTES))
-    else {
-        return Vec::new();
-    };
-    last_human_text(&tail).map(|text| Turn { role: Role::User, text }).into_iter().collect()
+    crate::session::transcript_in(claude, hook_transcript, project_dir, session_id, agent)
+        .and_then(|t| last_human_in_file(&t, REQUEST_PAGE_BYTES, REQUEST_SCAN_CAP))
+        .map(|text| Turn { role: Role::User, text })
+        .into_iter()
+        .collect()
 }
 
-/// The text of the last genuine human message in `transcript`, or `None`.
-fn last_human_text(transcript: &str) -> Option<String> {
-    transcript.lines().rev().find_map(|line| {
-        let v = serde_json::from_str::<Value>(line.trim()).ok()?;
-        let msg = v.get("message")?;
-        let content = msg.get("content");
-        if msg.get("role").and_then(|r| r.as_str()) != Some("user") || !is_human_message(content) {
-            return None;
+/// The text of one transcript line when it is a genuine human message.
+fn human_text(line: &[u8]) -> Option<String> {
+    let v = serde_json::from_slice::<Value>(line.trim_ascii()).ok()?;
+    if !is_human_record(&v) {
+        return None;
+    }
+    let mut text = Vec::new();
+    collect_text_blocks(v.get("message").and_then(|m| m.get("content")), &mut text);
+    text.reverse();
+    let joined = text.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
+    (!joined.is_empty()).then_some(joined)
+}
+
+/// The last genuine human message in the transcript at `path`, read back
+/// from its end a page at a time, at most `cap` bytes.
+///
+/// The request is often far from the end. A subagent's brief is the first
+/// line of its transcript, and Claude Code writes some 300 KB of setup
+/// records (instructions, the skill listing, prompt snapshots) after it
+/// before the agent's first tool call. A fixed tail never reaches it. Only
+/// a line that names the `user` role is parsed, so the pages of assistant
+/// turns, attachments and tool output cost a byte search.
+fn last_human_in_file(path: &Path, page: u64, cap: u64) -> Option<String> {
+    let mut f = std::fs::File::open(path).ok()?;
+    let len = f.metadata().ok()?.len();
+    let floor = len.saturating_sub(cap);
+    let mut end = len;
+    // The start of a line that runs on into the page already read.
+    let mut carry: Vec<u8> = Vec::new();
+    while end > floor {
+        let start = end.saturating_sub(page).max(floor);
+        let mut buf = vec![0u8; (end - start) as usize];
+        f.seek(SeekFrom::Start(start)).ok()?;
+        f.read_exact(&mut buf).ok()?;
+        buf.extend_from_slice(&carry);
+        // Before the file's start, the page's first line may begin on an
+        // earlier page: keep it for the next read.
+        let body = if start == 0 {
+            carry = Vec::new();
+            &buf[..]
+        } else {
+            match buf.iter().position(|b| *b == b'\n') {
+                Some(nl) => {
+                    carry = buf[..nl].to_vec();
+                    &buf[nl + 1..]
+                }
+                None => {
+                    carry = buf;
+                    end = start;
+                    continue;
+                }
+            }
+        };
+        let found = body
+            .split(|b| *b == b'\n')
+            .rev()
+            .filter(|line| memmem(line, b"\"user\""))
+            .find_map(human_text);
+        if found.is_some() {
+            return found;
         }
-        let mut text = Vec::new();
-        collect_text_blocks(content, &mut text);
-        text.reverse();
-        let joined = text.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
-        (!joined.is_empty()).then_some(joined)
-    })
+        end = start;
+    }
+    None
+}
+
+fn memmem(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.windows(needle.len()).any(|w| w == needle)
 }
 
 /// [`intent`] against an explicit config dir, hook transcript and agent. Read
@@ -139,12 +199,10 @@ pub(crate) fn assistant_prose_since_last_human(transcript: &str) -> Option<Strin
         let Ok(v) = serde_json::from_str::<Value>(line) else {
             continue; // a partial first line (tail split) or non-JSON — skip
         };
-        let msg = v.get("message");
-        let role = msg.and_then(|m| m.get("role")).and_then(|r| r.as_str());
-        let content = msg.and_then(|m| m.get("content"));
-        match role {
+        let content = v.get("message").and_then(|m| m.get("content"));
+        match turn_role(&v) {
             Some("assistant") => collect_text_blocks(content, &mut prose),
-            Some("user") if is_human_message(content) => break,
+            Some("user") if is_human_record(&v) => break,
             _ => {} // tool_result user records, summaries, meta — skip
         }
     }
@@ -179,6 +237,26 @@ fn collect_text_blocks(content: Option<&Value>, out: &mut Vec<String>) {
         }
         _ => {}
     }
+}
+
+/// A user record a person or a lead agent wrote. Claude Code's own
+/// reminders are user records marked `isMeta` ("Other agents active in this
+/// session…"), and a subagent's transcript carries one just below its brief;
+/// they are not the request.
+fn is_human_record(v: &Value) -> bool {
+    turn_role(v) == Some("user")
+        && v.get("isMeta").and_then(|m| m.as_bool()) != Some(true)
+        && is_human_message(v.get("message").and_then(|m| m.get("content")))
+}
+
+/// The role of a conversation turn: a `user` or `assistant` record whose
+/// message has that role. Claude Code also writes `api-request-blob`
+/// records, copies of the composed request whose messages carry `user`,
+/// `assistant` and `system` roles (the CLAUDE.md context among them); they
+/// are not turns.
+fn turn_role(v: &Value) -> Option<&str> {
+    let role = v.get("message")?.get("role")?.as_str()?;
+    (v.get("type").and_then(|t| t.as_str()) == Some(role)).then_some(role)
 }
 
 /// A genuine human turn vs a `tool_result` carrier (both are role `user`). A real
@@ -289,6 +367,114 @@ mod tests {
         assert_eq!(texts(crate::session::MAIN_AGENT), [(Role::User, "ship it".to_string())]);
         assert!(texts("agone").is_empty());
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    fn meta_reminder(t: &str) -> String {
+        format!(r#"{{"type":"user","isMeta":true,"message":{{"role":"user","content":"{t}"}}}}"#)
+    }
+    fn setup_record(bytes: usize) -> String {
+        format!(r#"{{"type":"attachment","attachment":{{"type":"instructions","content":"{}"}}}}"#, "x".repeat(bytes))
+    }
+
+    /// A subagent transcript as Claude Code writes it: the brief, a meta
+    /// reminder, then setup records far past any fixed tail before the
+    /// agent's first tool call.
+    fn subagent_transcript(brief: &str, later: &[String]) -> String {
+        let mut lines = vec![user_text(brief), meta_reminder("Other agents active in this session")];
+        lines.extend((0..12).map(|_| setup_record(30 * 1024)));
+        lines.push(assistant_text("Reading the brief file."));
+        lines.push(tool_result("brief contents"));
+        lines.extend(later.iter().cloned());
+        lines.join("\n") + "\n"
+    }
+
+    /// The judge reads a subagent's brief though 360 KB of setup records
+    /// sit between the brief and the call.
+    #[test]
+    fn the_brief_is_found_past_the_setup_records() {
+        let root = std::env::temp_dir().join(format!("ways-lookbehind-deep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let claude = claude_sessions::ClaudeDir::at(root.join(".claude"));
+        let dir = root.join(".claude/projects/-srv-p/sess/subagents");
+        std::fs::create_dir_all(&dir).unwrap();
+        let t = subagent_transcript("review the parser change", &[]);
+        assert!(t.len() as u64 > 4 * TAIL_BYTES, "the fixture must reach past the old tail");
+        std::fs::write(dir.join("agent-atask.jsonl"), &t).unwrap();
+        std::fs::write(root.join(".claude/projects/-srv-p/sess.jsonl"), user_text("lead prompt") + "\n").unwrap();
+        let texts = recent_turns_in(&claude, None, "/srv/p", "sess", "atask").into_iter().map(|t| t.text).collect::<Vec<_>>();
+        assert_eq!(texts, ["review the parser change"]);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// A message the lead sends mid-run is the newer request.
+    #[test]
+    fn a_later_lead_message_is_the_request() {
+        let path = std::env::temp_dir().join(format!("ways-lookbehind-later-{}.jsonl", std::process::id()));
+        let t = subagent_transcript("the brief", &[user_text("now approve the fonts"), assistant_text("ok"), tool_result("done")]);
+        std::fs::write(&path, &t).unwrap();
+        assert_eq!(last_human_in_file(&path, REQUEST_PAGE_BYTES, REQUEST_SCAN_CAP).as_deref(), Some("now approve the fonts"));
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// Claude Code's reminders are not the request, in the lookup or in the
+    /// prose walk.
+    #[test]
+    fn a_meta_reminder_is_not_human() {
+        let t = [user_text("the brief"), meta_reminder("Other agents active"), assistant_text("working")].join("\n");
+        let path = std::env::temp_dir().join(format!("ways-lookbehind-meta-{}.jsonl", std::process::id()));
+        std::fs::write(&path, &t).unwrap();
+        assert_eq!(last_human_in_file(&path, 64, 1 << 20).as_deref(), Some("the brief"));
+        std::fs::remove_file(&path).ok();
+        let prose = assistant_prose_since_last_human(&[user_text("q"), assistant_text("before"), meta_reminder("r"), assistant_text("after")].join("\n")).unwrap();
+        assert!(prose.contains("before") && prose.contains("after"), "{prose}");
+    }
+
+    /// A copy of the composed request is not a turn, in the lookup or in the
+    /// prose walk.
+    #[test]
+    fn a_request_blob_is_not_a_turn() {
+        let blob = |role: &str, t: &str| format!(r#"{{"type":"api-request-blob","message":{{"role":"{role}","content":[{{"type":"text","text":"{t}"}}]}}}}"#);
+        let t = [user_text("the brief"), blob("user", "CLAUDE.md context"), blob("assistant", "copied narration"), assistant_text("own narration")].join("\n");
+        let path = std::env::temp_dir().join(format!("ways-lookbehind-blob-{}.jsonl", std::process::id()));
+        std::fs::write(&path, &t).unwrap();
+        assert_eq!(last_human_in_file(&path, 64, 1 << 20).as_deref(), Some("the brief"));
+        std::fs::remove_file(&path).ok();
+        let prose = assistant_prose_since_last_human(&t).unwrap();
+        assert_eq!(prose, "own narration");
+    }
+
+    /// Paging gives the same answer as reading the whole file, whatever the
+    /// page size, including pages shorter than a line.
+    #[test]
+    fn paging_matches_a_whole_file_read() {
+        let t = [
+            user_text("first"),
+            assistant_text(&"a".repeat(300)),
+            user_text("second request"),
+            tool_result(&"r".repeat(500)),
+            meta_reminder("reminder"),
+            assistant_text("end"),
+        ]
+        .join("\n");
+        let path = std::env::temp_dir().join(format!("ways-lookbehind-pages-{}.jsonl", std::process::id()));
+        for body in [t.clone(), t.clone() + "\n"] {
+            std::fs::write(&path, &body).unwrap();
+            for page in [1, 7, 64, 199, 1000, 1 << 20] {
+                assert_eq!(last_human_in_file(&path, page, 1 << 20).as_deref(), Some("second request"), "page {page}");
+            }
+        }
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// The lookup stops at its cap: a request further back is not found.
+    #[test]
+    fn the_cap_bounds_the_read() {
+        let t = [user_text("far back"), setup_record(4096), assistant_text("end")].join("\n");
+        let path = std::env::temp_dir().join(format!("ways-lookbehind-cap-{}.jsonl", std::process::id()));
+        std::fs::write(&path, &t).unwrap();
+        assert_eq!(last_human_in_file(&path, 512, 2048), None);
+        assert_eq!(last_human_in_file(&path, 512, 1 << 20).as_deref(), Some("far back"));
+        std::fs::remove_file(&path).ok();
     }
 
     #[test]
