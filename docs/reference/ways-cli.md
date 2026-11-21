@@ -662,9 +662,9 @@ With `--commit`, each stage under its own header: pull the app source, refresh e
 | `channel` | `release`, or `ref` under `--ref` |
 | `upstream` | The branch's upstream the release channel follows, such as `origin/main`; `null` on `--ref` or a detached checkout |
 | `ref` | The `--ref` value; `null` on the release channel |
-| `target` | The commit the update would land on; `null` when none resolved |
+| `target` | The commit the update would land on, the last fetched one when the fetch failed; `null` when none resolved |
 | `fetch_error` | The last line git printed when the fetch failed; `null` when it succeeded |
-| `behind` | `true` when any component's installed version is older than its version at the target, `false` when none is, and `null` when the fetch failed or no target resolved. A failed fetch is never `false` |
+| `behind` | `true` when any component's installed version is older than its version at the target, and `false` when none is. When the fetch failed, the target is the last one fetched, so `behind` still answers and `fetch_error` says why. `null` only when no target resolved at all, such as an app that never fetched or an unresolvable `--ref` |
 | `summary` | The components that move, as `name installed → target`, joined by commas; empty when none does |
 | `components` | One object per component, mods included: `name`, `installed`, `target` (each `null` when unknown) and `moves` |
 

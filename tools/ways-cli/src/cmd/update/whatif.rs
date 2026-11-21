@@ -122,17 +122,18 @@ pub fn gather(app: &Path, channel: Channel, verbose: bool, with_notes: bool) -> 
 
 /// The what-if as one JSON document: the channel, the target, the fetch
 /// error, whether the install is behind, and each component's versions.
-/// `behind` is true when any component moves, false when none does, and
-/// null when the fetch failed or no target resolved, since the versions
-/// compared then say nothing about the release channel. Release notes are
-/// not part of it. The update-check sensor reads `behind`, `summary` and
+/// `behind` is true when any component moves and false when none does,
+/// compared against the target `gather` resolved. A failed fetch leaves the
+/// last fetched target in place, so `behind` still answers and
+/// `fetch_error` carries the error. `behind` is null only when no target
+/// resolved at all. Release notes are not part of it. The update-check sensor reads `behind`, `summary` and
 /// each component's `name`, `installed`, `target` and `moves`.
 pub fn json(w: &WhatIf) -> serde_json::Value {
     let (channel, upstream, git_ref) = match &w.channel {
         Channel::Release { upstream } => ("release", upstream.clone(), None),
         Channel::Ref(r) => ("ref", None, Some(r.clone())),
     };
-    let known = w.fetch_error.is_none() && w.target.is_some();
+    let known = w.target.is_some();
     let moving: Vec<&Component> = w.components.iter().filter(|c| c.moves()).collect();
     let summary = moving
         .iter()
@@ -1023,15 +1024,25 @@ mod tests {
         }
 
         #[test]
-        fn json_reports_a_failed_fetch_as_unknown_with_the_error() {
+        fn json_compares_against_the_last_fetched_target_when_the_fetch_fails() {
             let f = fixture("failed", "1.0.0", "1.1.0");
             git(&f.app, &["remote", "set-url", "origin", f.app.join("no-such-origin").to_str().unwrap()]);
             let doc = check(&f.app);
-            assert_eq!(doc["behind"], serde_json::Value::Null, "a failed fetch is unknown, not false: {doc}");
+            assert_eq!(doc["behind"], true, "the last fetched target still answers: {doc}");
             assert!(doc["fetch_error"].as_str().is_some_and(|e| !e.is_empty()), "{doc}");
-            // The versions compared are the last fetched ones, and still show.
             assert_eq!(ways(&doc)["target"], "1.1.0");
             assert_eq!(ways(&doc)["moves"], true);
+        }
+
+        #[test]
+        fn json_reports_unknown_when_no_target_resolves() {
+            let f = fixture("untargeted", "1.0.0", "1.1.0");
+            git(&f.app, &["remote", "set-url", "origin", f.app.join("no-such-origin").to_str().unwrap()]);
+            git(&f.app, &["update-ref", "-d", "refs/remotes/origin/main"]);
+            let doc = check(&f.app);
+            assert_eq!(doc["behind"], serde_json::Value::Null, "no target is unknown, not false: {doc}");
+            assert_eq!(doc["target"], serde_json::Value::Null);
+            assert!(doc["fetch_error"].as_str().is_some_and(|e| !e.is_empty()), "{doc}");
         }
     }
 }
