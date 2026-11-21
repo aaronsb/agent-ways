@@ -111,7 +111,8 @@ triggers:
     # restarts; a fresh store's first poll sets a baseline and fires
     # nothing. session keeps it in the process that polls for the session.
     # It starts empty with no baseline, so the first poll whose result
-    # meets `where` fires, and the memory ends with the session.
+    # meets `where` fires. The trigger then fires at most once in the
+    # session, even when the condition leaves and enters again.
     memory: store
     # How long the notice stays deliverable once written: a whole number of
     # seconds from 1 to 2592000, or session to keep it until the session

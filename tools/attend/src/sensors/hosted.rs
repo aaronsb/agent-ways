@@ -23,8 +23,10 @@
 //! References:
 //! - ADR-403 §1 and §3b: the store, where it lives, and the baseline a
 //!   fresh store sets.
+//! - ADR-416 items 6 and 8: `memory: session` firing at most once per
+//!   session, and stores keyed by session and carried by a session's move.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -94,6 +96,9 @@ pub struct FileSensor {
     /// What each trigger with `memory: session` last saw. It lives as long
     /// as this process.
     held: BTreeMap<String, Seen>,
+    /// The triggers with `memory: session` that have fired. Each fires at
+    /// most once in this process's life.
+    spent: BTreeSet<String>,
     /// The last poll's failure, for a caller that reads it.
     failure: Option<String>,
 }
@@ -113,12 +118,15 @@ impl FileSensor {
     fn open(key: Key, cadence: Cadence, inner: Box<dyn Sensor>, store: Option<PathBuf>) -> Self {
         let rec = store.as_deref().and_then(|p| read_at(p, &key));
         let (last, stored) = rec.map(|r| (r.poll, r.memory)).unwrap_or_default();
-        FileSensor { name: key.sensor.clone(), cadence, inner, key, store, last, stored, held: BTreeMap::new(), failure: None }
+        FileSensor { name: key.sensor.clone(), cadence, inner, key, store, last, stored, held: BTreeMap::new(), spent: BTreeSet::new(), failure: None }
     }
 
     /// Record what the trigger `trigger`, comparing on `on`, sees on this
     /// poll, and return the keys whose change fires it. Store memory is
-    /// written to the store at once; session memory stays in this process.
+    /// written to the store at once. Session memory stays in this process,
+    /// and a trigger with it fires at most once in the process's life,
+    /// whatever it compares on: once it has fired, a later change, such as
+    /// a condition that leaves and enters again, fires nothing.
     // Nothing in attend runs triggers yet. The caller is the sensor host
     // that runs command and mcp triggers.
     #[allow(dead_code)]
@@ -127,10 +135,12 @@ impl FileSensor {
             Memory::Store => &mut self.stored,
             Memory::Session => &mut self.held,
         };
-        let out = fired(on, memory, mem.get(trigger), &now);
+        let mut out = fired(on, memory, mem.get(trigger), &now);
         mem.insert(trigger.to_string(), now);
-        if memory == Memory::Store {
-            self.save();
+        match memory {
+            Memory::Store => self.save(),
+            Memory::Session if !out.is_empty() && !self.spent.insert(trigger.to_string()) => out.clear(),
+            Memory::Session => {}
         }
         out
     }
@@ -426,6 +436,25 @@ mod tests {
         // A second host, as a second session or after a restart, starts empty and fires once of its own.
         let mut again = sensor(&d.0, Some("s1"));
         assert_eq!(again.observe("behind", On::Enters, Memory::Session, seen(true)), ["$"]);
+    }
+
+    /// Session memory fires a trigger at most once in the host's life,
+    /// whatever it compares on: a condition that leaves and enters again,
+    /// or a later item, fires nothing more.
+    #[test]
+    fn session_memory_fires_at_most_once_even_when_the_condition_leaves_and_enters_again() {
+        let d = Dir::new("once");
+        let mut s = sensor(&d.0, Some("s1"));
+        let fires: Vec<Vec<String>> = [true, false, true, false, true].into_iter().map(|h| s.observe("behind", On::Enters, Memory::Session, seen(h))).collect();
+        assert_eq!(fires, [vec!["$".to_string()], vec![], vec![], vec![], vec![]]);
+        let leaves: Vec<Vec<String>> = [true, false, true, false].into_iter().map(|h| s.observe("gone", On::Leaves, Memory::Session, seen(h))).collect();
+        assert_eq!(leaves, [vec![], vec!["$".to_string()], vec![], vec![]]);
+        let items = |keys: &[&str]| keys.iter().map(|k| (k.to_string(), json!(1))).collect::<Seen>();
+        let added: Vec<Vec<String>> = [items(&["a"]), items(&["a", "b"]), items(&[]), items(&["c"])].into_iter().map(|now| s.observe("new", On::Added, Memory::Session, now)).collect();
+        assert_eq!(added, [vec!["a".to_string()], vec![], vec![], vec![]]);
+        // Store memory is not limited: it fires on each entry after its baseline.
+        let stored: Vec<Vec<String>> = [false, true, false, true].into_iter().map(|h| s.observe("store", On::Enters, Memory::Store, seen(h))).collect();
+        assert_eq!(stored, [vec![], vec!["$".to_string()], vec![], vec!["$".to_string()]]);
     }
 
     #[test]

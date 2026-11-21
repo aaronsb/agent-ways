@@ -419,7 +419,9 @@ pub enum Memory {
     Store,
     /// In the host's process. It starts empty and takes no baseline, so the
     /// first poll is compared against nothing seen: `enters` fires on the
-    /// first poll whose result meets `where`. It ends with the host.
+    /// first poll whose result meets `where`. The trigger fires at most once
+    /// in the host's life, whatever it compares on. The memory ends with the
+    /// host.
     Session,
 }
 
