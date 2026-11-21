@@ -35,6 +35,13 @@ export function answerArgv(id: string, job?: string): string[] {
   return job ? [...argv, '--job', job] : argv
 }
 
+/** The tools whose settings hooks run a judged lane, as settings.json's
+ *  PreToolUse, PostToolUse and PostToolUseFailure matchers name them for
+ *  the file, Bash, task, tool and post-tool lanes. settings.json says
+ *  `Task`, the Agent tool's former name, which its matchers still reach.
+ *  scripts/check-plugins.sh holds this list to settings.json. */
+export const JUDGED_TOOLS = ['Agent', 'Bash', 'Edit', 'EnterPlanMode', 'ExitPlanMode', 'WebFetch', 'Workflow', 'Write'] as const
+
 /** How long the host and answer verbs may run. Each is a file write. */
 export const VERB_TIMEOUT_MS = 5_000
 

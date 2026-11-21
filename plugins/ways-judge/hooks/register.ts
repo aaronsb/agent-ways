@@ -13,8 +13,9 @@
 // as a job in the session's directory and waits for its answer, and fails
 // open when no host claims the job within half a second.
 //
-// This module carries the jobs. At each of the two events it starts
-// `next(e)` without awaiting it and, while that runs, keeps a
+// This module carries the jobs. At each prompt, and at each call of a tool
+// those settings hooks judge (JUDGED_TOOLS), it starts `next(e)` without
+// awaiting it and, while that runs, keeps a
 // `ways judge take` waiting beside it. On a job it starts the next take at
 // once, so a second job written meanwhile (a second batch, a second
 // settings hook, another loop's call) is claimed within the window, sends
@@ -41,7 +42,7 @@
 
 import type { EngineInterface, HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register } from 'claude-code'
 
-import { REFUSED, STOP_GRACE_MS, TAKE_WAIT_MS, VERB_TIMEOUT_MS, answerArgv, answerOf, hostArgv, parseTake, requestOf, takeArgv } from './lib.ts'
+import { JUDGED_TOOLS, REFUSED, STOP_GRACE_MS, TAKE_WAIT_MS, VERB_TIMEOUT_MS, answerArgv, answerOf, hostArgv, parseTake, requestOf, takeArgv } from './lib.ts'
 import type { JudgeAnswer, JudgeJob, Take } from './lib.ts'
 
 type TakeStream = HookStream<ProcessSpawnChunk, ProcessSpawnResult>
@@ -61,10 +62,11 @@ export const register: Register = on => {
     return id === undefined ? next(e) : bracket($, id, next(e), next.signal)
   })
 
-  // Every tool, in every loop: which calls write a job is settled by the
-  // settings hooks' matchers, which the mod cannot read. A call with no job
-  // costs one take, stopped when next(e) settles.
-  on('tool.call', async ($, e, next) => {
+  // Only the tools whose settings hooks judge, in every loop: a hook on a
+  // tool turns off its move to the background and its live output, so the
+  // other tools keep both. A call of these with no job costs one take,
+  // stopped when next(e) settles.
+  on('tool.call', { tool: [...JUDGED_TOOLS] }, async ($, e, next) => {
     const id = await served($, hosted)
     return id === undefined ? next(e) : bracket($, id, next(e), next.signal)
   })

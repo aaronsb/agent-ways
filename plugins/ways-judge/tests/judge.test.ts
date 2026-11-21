@@ -7,7 +7,7 @@ import type { Engine } from 'claude-code/testing'
 import type { ModelCompleteResult, On, ProcessRunResult } from 'claude-code'
 
 import { register } from '../hooks/register.ts'
-import { answerOf, hostArgv, parseTake, requestOf, takeArgv } from '../hooks/lib.ts'
+import { JUDGED_TOOLS, answerOf, hostArgv, parseTake, requestOf, takeArgv } from '../hooks/lib.ts'
 import type { JudgeJob } from '../hooks/lib.ts'
 import { passedOverHits, registrationsOf } from './passed-over.ts'
 
@@ -250,10 +250,19 @@ describe('the tool lanes: a job from a tool call is judged', () => {
 
   test('a call that writes no job stops its take once the call settles', async ($, on) => {
     const h = host(on, {})
-    await $.tool.call({ tool: 'Read', file_path: '/p/a.rs' } as never)
+    await $.tool.call({ tool: 'Bash', command: 'ls' })
     expect(h.take.started).toBe(1)
     expect(h.take.stopped).toBe(1)
     expect(h.models.length).toBe(0)
+  })
+
+  // Hooking a tool turns off its move to the background and its live
+  // output, so only the tools the settings hooks judge are hooked.
+  test('a tool the settings hooks do not judge is not hooked: no host, no take', async ($, on) => {
+    const h = host(on, { pre: [JOB], model: VERDICT })
+    await $.tool.call({ tool: 'Read', file_path: '/p/a.rs' } as never)
+    expect(h.argvs).toEqual([])
+    expect(h.take.started).toBe(0)
   })
 })
 
@@ -310,6 +319,7 @@ describe('what the mod hooks reaches it on every host', () => {
     const regs = registrationsOf(register as never)
     // The recording saw the module's hooks: the control for the empty lists below.
     expect(regs.map(r => r.pattern)).toEqual(['prompt.submit', 'tool.call'])
+    expect(regs.find(r => r.pattern === 'tool.call')?.matcher).toEqual({ tool: [...JUDGED_TOOLS] })
     expect(regs.filter(r => r.pattern.startsWith('classic.'))).toEqual([])
     expect(passedOverHits(regs)).toEqual([])
   })

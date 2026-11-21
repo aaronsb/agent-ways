@@ -2,7 +2,7 @@
 
 The relevance gate's Claude Code internal engine. It judges the gate's jobs through the session's own model, so the gate needs no Anthropic or OpenRouter key.
 
-`ways judge` setup installs and enables it when the operator chooses "Claude Code internal", and sets `gate.engine: claude-code`. Nothing else installs it. Under any other engine the mod stays loaded and calls no model.
+`ways judge` setup installs and enables it when the operator chooses "Claude Code internal", and sets `gate.engine: claude-code`. Nothing else installs it. When the operator picks another engine or no judge in `ways judge` setup, the setup removes the mod. Any other write of `gate.engine`, such as `ways settings set gate.engine anthropic`, marks the mod as not wanted, and the next `ways manage mod repair ways-judge --commit` or `ways manage update --commit` removes it. Until then the mod stays loaded and calls no model, but its hooks still run on every prompt and on every call of the tools listed below, and those tools keep the costs described under [What it costs](#what-it-costs).
 
 ## What it does
 
@@ -13,7 +13,9 @@ The mod wraps the two events whose chains run those hooks:
 - `prompt.submit`, whose `next(e)` runs the UserPromptSubmit hooks: the prompt lane and the state lane;
 - `tool.call`, whose `next(e)` runs the PreToolUse hooks, the tool itself and the PostToolUse or PostToolUseFailure hooks: the Bash, file, task, tool and post-tool lanes. It fires for the main loop and for every subagent's loop, and a subagent's call carries the session's id.
 
-At each of them, for every prompt and every tool call, whatever its origin (the settings hooks' matchers decide which calls write a job, and the mod cannot read them), the hook:
+The `tool.call` hook is registered only for the tools whose settings hooks run one of those lanes: Agent, Bash, Edit, EnterPlanMode, ExitPlanMode, WebFetch, Workflow and Write. The list is `JUDGED_TOOLS` in `hooks/lib.ts`, and `make test-plugins` fails when it no longer matches the matchers in `settings.json`, which name the Agent tool by its former name, Task. Claude Code does not run the hook for any other tool.
+
+At each prompt, whatever its origin, and at each call of a listed tool (the settings hooks decide which of those calls write a job), the hook:
 
 1. registers the mod as the session's judge host with `ways judge host --session <id>`, once per session id;
 2. starts the event's own chain, `next(e)`, without awaiting it;
@@ -22,7 +24,19 @@ At each of them, for every prompt and every tool call, whatever its origin (the 
 5. on `standby`, calls no model and starts no further take;
 6. when `next(e)` settles, stops the take that is still waiting, and finishes answering any job already claimed: a take claims the session's oldest job, so the gate waiting on it may be another call's.
 
-A call that writes no job costs one take process, stopped when the call settles. Hooking `tool.call` for every tool also turns off what Claude Code carries past a tool hook for those tools, such as moving a running call to the background.
+## What it costs
+
+A call of a listed tool that writes no job costs one take process, stopped when the call settles.
+
+A mod hook on a tool, even one that only passes the call on, turns off for that tool what Claude Code carries past a tool hook. For the listed tools that means:
+
+- a running Bash command or foreground Agent call cannot be moved to the background, neither by Ctrl+B nor when a Bash command reaches its timeout, so the turn waits for it to end;
+- a call's live output is not shown while it runs; its output appears when it ends;
+- in Code Mode, a stopped call's result is not waited for.
+
+The other tools keep all three, since the hook is not registered for them. The cost holds whenever the mod is loaded, whichever engine the session judges on, until the mod is removed.
+
+## Budgets
 
 The mod carries text and usage only. The hook side parses and validates the verdict, and it fails open at its deadline. The tool lanes give the judge at most 6 seconds inside their 9 second hook deadline, and the job's own `timeout_ms`, which the model call takes as its limit, is what remains of that budget when the job is written.
 
