@@ -179,7 +179,7 @@ pub fn task(
         }
     }
     if scan.is_on() && !judge_candidates.is_empty() {
-        record.judge(&judged.gate);
+        judged::close_judge(&mut record, &judged.gate, &judged.turns);
     }
     let scan_id = record.scan_id().to_string();
     record.write();
