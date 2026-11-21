@@ -7,7 +7,7 @@ import type { Engine } from 'claude-code/testing'
 import type { ModelCompleteResult, On, ProcessRunResult } from 'claude-code'
 
 import { register } from '../hooks/register.ts'
-import { JUDGED_TOOLS, REFUSED, TAKE_WAIT_MS, answerOf, hostArgv, parseTake, requestOf, takeArgv } from '../hooks/lib.ts'
+import { JUDGED_TOOLS, REFUSED, STOP_GRACE_MS, TAKE_WAIT_MS, answerOf, hostArgv, parseTake, requestOf, takeArgv } from '../hooks/lib.ts'
 import type { JudgeJob } from '../hooks/lib.ts'
 import { passedOverHits, registrationsOf } from './passed-over.ts'
 
@@ -214,17 +214,25 @@ function host(on: On, world: World) {
 
 type Hook = ($: unknown, e: unknown, next: unknown) => Promise<unknown>
 
-/** The hook `register` adds on `pattern`, to call with a `next` of the
- *  test's own, whose signal the test aborts. */
-function hookOf(pattern: string): Hook {
-  let found: Hook | undefined
+/** The hooks one `register` adds, by pattern, which share its state, to
+ *  call with a `next` of the test's own, whose signal the test aborts. */
+function hooksOf<const P extends string[]>(...patterns: P): { [K in keyof P]: Hook } {
+  const found = new Map<string, Hook>()
   const on = (p: string, ...rest: unknown[]) => {
-    if (p === pattern) found = rest[rest.length - 1] as Hook
+    found.set(p, rest[rest.length - 1] as Hook)
   }
   register(on as never, {})
-  if (!found) throw new Error(`register adds no ${pattern} hook`)
-  return found
+  return patterns.map(pattern => {
+    const hook = found.get(pattern)
+    if (!hook) throw new Error(`register adds no ${pattern} hook`)
+    return hook
+  }) as { [K in keyof P]: Hook }
 }
+
+const hookOf = (pattern: string): Hook => hooksOf(pattern)[0]
+
+/** Resolves to `p`'s value, or to 'hung' after `ms`. */
+const within = <T>(p: Promise<T>, ms: number) => Promise.race([p, sleep(ms).then(() => 'hung' as const)])
 
 async function typed($: Engine, kind = 'composer') {
   return $.prompt.submit({ text: 'review the release notes', wait: false, origin: { kind } } as never)
@@ -403,6 +411,94 @@ describe('one call and another call\'s job', () => {
     expect(h.take.claimed).toBe(1)
     expect(h.outcomes).toEqual(['answered'])
     expect(h.answers).toEqual([{ text: '{"judgements":[]}', usage: USAGE }])
+  })
+})
+
+describe('the session\'s end and the stop\'s grace', () => {
+  // A judge call outlives the event that claimed its job; the session's end
+  // is what cuts it, and the job is still answered.
+  test('the session ending cuts a judge call in flight, and its job is answered aborted at once', async () => {
+    const [toolCall, sessionEnd] = hooksOf('tool.call', 'session.end')
+    const answers: unknown[] = []
+    let takes = 0
+    let isJudging = false
+    const engine = {
+      session: { id: async () => ID },
+      ui: { log: async () => undefined },
+      clock: { now: async () => 0, sleep: (ms: number) => sleep(ms) },
+      process: {
+        run: async (argv: string[], init?: { stdin?: string }) => {
+          if (argv[2] === 'answer') answers.push(JSON.parse(init?.stdin ?? 'null'))
+          return ok()
+        },
+        spawn: () =>
+          (async function* () {
+            takes += 1
+            if (takes === 1) yield { stream: 'stdout' as const, text: JSON.stringify({ ...JOB, id: 'j-1' }) + '\n' }
+            else await sleep(20)
+            return { code: 0, signal: null }
+          })(),
+      },
+      // The reply comes only once the signal aborts, or long after the test
+      // looks, so only the session's end answers the job in time.
+      model: {
+        complete: (_: unknown, options?: { signal?: AbortSignal }) =>
+          new Promise(resolve => {
+            isJudging = true
+            options?.signal?.addEventListener('abort', () => resolve({ isAnswered: false, reason: 'aborted', usage: ZERO }))
+            void sleep(5000).then(() => resolve(VERDICT))
+          }),
+      },
+    }
+    const next = Object.assign(() => sleep(50).then(() => ({ result: 'ran' })), { signal: new AbortController().signal })
+    expect(await toolCall(engine, { tool: 'Bash', command: 'git status' }, next)).toEqual({ result: 'ran' })
+    for (let waited = 0; !isJudging && waited < 1000; waited += 10) await sleep(10)
+    expect(isJudging).toBe(true)
+    expect(answers).toEqual([])
+    await sessionEnd(engine, {}, () => ({}))
+    for (let waited = 0; answers.length === 0 && waited < 1000; waited += 10) await sleep(10)
+    expect(answers).toEqual([{ reason: 'aborted', usage: ZERO }])
+  })
+
+  // `return()` on a take whose process does not end may never settle; the
+  // hook still returns once STOP_GRACE_MS has passed on the engine's clock.
+  test('a take whose return() never settles holds the call at most STOP_GRACE_MS', async () => {
+    const sleeps: number[] = []
+    let isReturned = false
+    const never = () => new Promise<never>(() => undefined)
+    const engine = {
+      session: { id: async () => ID },
+      ui: { log: async () => undefined },
+      // The clock stands in for the engine's: its time passes at once.
+      clock: {
+        now: async () => 0,
+        sleep: async (ms: number) => {
+          sleeps.push(ms)
+          await sleep(10)
+        },
+      },
+      process: {
+        run: async () => ok(),
+        spawn: () => {
+          const take = {
+            next: never,
+            return: () => {
+              isReturned = true
+              return never()
+            },
+            throw: never,
+            [Symbol.asyncIterator]: () => take,
+          }
+          return take
+        },
+      },
+      model: { complete: async () => VERDICT },
+    }
+    const next = Object.assign(() => sleep(20).then(() => ({ result: 'ran' })), { signal: new AbortController().signal })
+    const r = await within(hookOf('tool.call')(engine, { tool: 'Bash', command: 'ls' }, next), 1000)
+    expect(r).toEqual({ result: 'ran' })
+    expect(isReturned).toBe(true)
+    expect(sleeps).toEqual([STOP_GRACE_MS])
   })
 })
 
