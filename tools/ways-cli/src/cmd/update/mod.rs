@@ -45,7 +45,7 @@ use anyhow::{bail, Context, Result};
 use std::path::Path;
 use std::process::Command;
 
-pub fn run(mode: Mode, git_ref: Option<String>, verbose: bool) -> Result<()> {
+pub fn run(mode: Mode, git_ref: Option<String>, verbose: bool, json: bool) -> Result<()> {
     let app = paths::data_root();
 
     // Guard: the app source must be an agent-ways git checkout.
@@ -63,7 +63,14 @@ pub fn run(mode: Mode, git_ref: Option<String>, verbose: bool) -> Result<()> {
             Some(r) => whatif::Channel::Ref(r),
             None => whatif::Channel::Release { upstream: whatif::upstream(&app) },
         };
-        whatif::render(&whatif::gather(&app, channel, verbose)).print();
+        if json {
+            // The check for a program to read: no release notes, so no
+            // request to GitHub.
+            let doc = whatif::json(&whatif::gather(&app, channel, verbose, false));
+            println!("{}", serde_json::to_string_pretty(&doc)?);
+            return Ok(());
+        }
+        whatif::render(&whatif::gather(&app, channel, verbose, true)).print();
         return Ok(());
     }
 

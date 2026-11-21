@@ -94,14 +94,15 @@ pub struct WhatIf {
 }
 
 /// Gather the what-if for `channel`. Runs a fetch and reads; writes nothing
-/// else.
-pub fn gather(app: &Path, channel: Channel, verbose: bool) -> WhatIf {
+/// else. With `with_notes` false no release notes are fetched, so the call
+/// makes no request to GitHub.
+pub fn gather(app: &Path, channel: Channel, verbose: bool, with_notes: bool) -> WhatIf {
     let head = git_head(app);
     let (target, fetch_error) = resolve_target(app, &channel);
     let target_rev = target.clone().or_else(|| head.clone());
     let components = components(app, target_rev.as_deref());
     let moving = components.iter().any(Component::moves);
-    let notes = if moving { notes::fetch() } else { Ok(notes::Fetched::default()) };
+    let notes = if moving && with_notes { notes::fetch() } else { Ok(notes::Fetched::default()) };
     let relation = relation(app, head.as_deref(), target.as_deref());
     let delta = match (&head, &target) {
         (Some(h), Some(t)) if matches!(relation, Relation::Behind | Relation::Diverged) => delta::read(app, h, t),
@@ -117,6 +118,46 @@ pub fn gather(app: &Path, channel: Channel, verbose: bool) -> WhatIf {
     let dev = lifecycle::update_dev_links(app);
     let retired = retired::files_holding(None);
     WhatIf { app: app.to_path_buf(), channel, head, target, fetch_error, relation, components, notes, delta, dropped, local, actions, dev, retired, verbose }
+}
+
+/// The what-if as one JSON document: the channel, the target, the fetch
+/// error, whether the install is behind, and each component's versions.
+/// `behind` is true when any component moves, false when none does, and
+/// null when the fetch failed or no target resolved, since the versions
+/// compared then say nothing about the release channel. Release notes are
+/// not part of it. The update-check sensor reads `behind`, `summary` and
+/// each component's `name`, `installed`, `target` and `moves`.
+pub fn json(w: &WhatIf) -> serde_json::Value {
+    let (channel, upstream, git_ref) = match &w.channel {
+        Channel::Release { upstream } => ("release", upstream.clone(), None),
+        Channel::Ref(r) => ("ref", None, Some(r.clone())),
+    };
+    let known = w.fetch_error.is_none() && w.target.is_some();
+    let moving: Vec<&Component> = w.components.iter().filter(|c| c.moves()).collect();
+    let summary = moving
+        .iter()
+        .map(|c| match (&c.installed, &c.target) {
+            (Some(i), Some(t)) => format!("{} {i} → {t}", c.name),
+            (None, Some(t)) => format!("{} (new) → {t}", c.name),
+            _ => c.name.clone(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    serde_json::json!({
+        "channel": channel,
+        "upstream": upstream,
+        "ref": git_ref,
+        "target": w.target,
+        "fetch_error": w.fetch_error,
+        "behind": known.then_some(!moving.is_empty()),
+        "summary": summary,
+        "components": w.components.iter().map(|c| serde_json::json!({
+            "name": c.name,
+            "installed": c.installed,
+            "target": c.target,
+            "moves": c.moves(),
+        })).collect::<Vec<_>>(),
+    })
 }
 
 /// Where HEAD stands against the target.
@@ -892,5 +933,105 @@ mod tests {
         let text = render(&w).render(&Painter::plain());
         assert!(text.contains("Up to date; the files above need `ways settings fix mods.attend`"), "{text}");
         assert!(!text.contains("--commit` to apply"), "{text}");
+    }
+
+    /// The JSON check over a real app dir: a git clone of a bare origin,
+    /// with a `ways` binary that reports the installed version.
+    #[cfg(unix)]
+    mod json_fixture {
+        use super::*;
+        use std::os::unix::fs::PermissionsExt;
+
+        fn git(dir: &Path, args: &[&str]) {
+            let out = Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main"])
+                .args(args)
+                .current_dir(dir)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        }
+
+        /// Commit the seed at `version` and push it to origin.
+        fn release(seed: &Path, version: &str) {
+            std::fs::create_dir_all(seed.join("tools/ways")).unwrap();
+            std::fs::write(seed.join("tools/suite-bins"), "ways\n").unwrap();
+            std::fs::write(seed.join("tools/ways/Cargo.toml"), format!("[package]\nname = \"ways\"\nversion = \"{version}\"\n")).unwrap();
+            git(seed, &["add", "."]);
+            git(seed, &["commit", "-q", "-m", version]);
+            git(seed, &["push", "-q", "origin", "main"]);
+        }
+
+        /// An app cloned from an origin at `released`, with `ways` installed
+        /// at `installed`. The app is cloned before a later release, so
+        /// that release is one it has not fetched.
+        struct Fixture {
+            _dir: crate::test_dir::TestDir,
+            seed: PathBuf,
+            app: PathBuf,
+        }
+
+        fn fixture(tag: &str, installed: &str, released: &str) -> Fixture {
+            let dir = crate::test_dir::TestDir::at(std::env::temp_dir().join(format!("ways-whatif-json-{tag}-{}", std::process::id())));
+            let (origin, seed, app) = (dir.join("origin.git"), dir.join("seed"), dir.join("app"));
+            std::fs::create_dir_all(&origin).unwrap();
+            std::fs::create_dir_all(&seed).unwrap();
+            git(&origin, &["init", "-q", "--bare"]);
+            git(&seed, &["init", "-q"]);
+            git(&seed, &["remote", "add", "origin", origin.to_str().unwrap()]);
+            release(&seed, released);
+            git(&dir, &["clone", "-q", origin.to_str().unwrap(), "app"]);
+            std::fs::create_dir_all(app.join("bin")).unwrap();
+            let bin = app.join("bin/ways");
+            std::fs::write(&bin, format!("#!/bin/sh\necho \"ways {installed}\"\n")).unwrap();
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+            Fixture { seed, app, _dir: dir }
+        }
+
+        fn check(app: &Path) -> serde_json::Value {
+            let channel = Channel::Release { upstream: upstream(app) };
+            json(&gather(app, channel, false, false))
+        }
+
+        fn ways(doc: &serde_json::Value) -> &serde_json::Value {
+            doc["components"].as_array().unwrap().iter().find(|c| c["name"] == "ways").expect("a ways component")
+        }
+
+        #[test]
+        fn json_reports_an_install_behind_its_channel() {
+            let f = fixture("behind", "1.0.0", "1.0.0");
+            release(&f.seed, "1.1.0");
+            let doc = check(&f.app);
+            assert_eq!(doc["behind"], true, "{doc}");
+            assert_eq!(doc["channel"], "release");
+            assert_eq!(doc["upstream"], "origin/main");
+            assert_eq!(doc["fetch_error"], serde_json::Value::Null);
+            assert_eq!(doc["target"].as_str().map(str::len), Some(40), "{doc}");
+            assert_eq!(doc["summary"], "ways 1.0.0 → 1.1.0");
+            assert_eq!(*ways(&doc), serde_json::json!({"name": "ways", "installed": "1.0.0", "target": "1.1.0", "moves": true}));
+        }
+
+        #[test]
+        fn json_reports_a_current_install_as_not_behind() {
+            let f = fixture("current", "1.1.0", "1.1.0");
+            let doc = check(&f.app);
+            assert_eq!(doc["behind"], false, "{doc}");
+            assert_eq!(doc["summary"], "");
+            assert_eq!(doc["fetch_error"], serde_json::Value::Null);
+            assert_eq!(*ways(&doc), serde_json::json!({"name": "ways", "installed": "1.1.0", "target": "1.1.0", "moves": false}));
+        }
+
+        #[test]
+        fn json_reports_a_failed_fetch_as_unknown_with_the_error() {
+            let f = fixture("failed", "1.0.0", "1.1.0");
+            git(&f.app, &["remote", "set-url", "origin", f.app.join("no-such-origin").to_str().unwrap()]);
+            let doc = check(&f.app);
+            assert_eq!(doc["behind"], serde_json::Value::Null, "a failed fetch is unknown, not false: {doc}");
+            assert!(doc["fetch_error"].as_str().is_some_and(|e| !e.is_empty()), "{doc}");
+            // The versions compared are the last fetched ones, and still show.
+            assert_eq!(ways(&doc)["target"], "1.1.0");
+            assert_eq!(ways(&doc)["moves"], true);
+        }
     }
 }

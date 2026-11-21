@@ -655,8 +655,37 @@ With `--commit`, each stage under its own header: pull the app source, refresh e
 
 `--dry-run` is accepted for the what-if and `--yes` for `--commit`. `ways settings set install.manage_mode commit` makes the command apply without the flag; `--what-if` then reports.
 
+`--what-if --json` prints the check as one JSON document instead of the report, for a program to read. It runs the same fetch and resolves the same target as the report, and leaves the release notes out, so it makes no request to GitHub. `--json` is a what-if whatever `install.manage_mode` says, and it refuses `--commit`. It exits 0.
+
+| Field | Meaning |
+|---|---|
+| `channel` | `release`, or `ref` under `--ref` |
+| `upstream` | The branch's upstream the release channel follows, such as `origin/main`; `null` on `--ref` or a detached checkout |
+| `ref` | The `--ref` value; `null` on the release channel |
+| `target` | The commit the update would land on; `null` when none resolved |
+| `fetch_error` | The last line git printed when the fetch failed; `null` when it succeeded |
+| `behind` | `true` when any component's installed version is older than its version at the target, `false` when none is, and `null` when the fetch failed or no target resolved. A failed fetch is never `false` |
+| `summary` | The components that move, as `name installed → target`, joined by commas; empty when none does |
+| `components` | One object per component, mods included: `name`, `installed`, `target` (each `null` when unknown) and `moves` |
+
+```json
+{
+  "channel": "release",
+  "upstream": "origin/main",
+  "ref": null,
+  "target": "3f1c0a9e6b7d5c2a8e4f1b0d9c6a7e5b4d3c2a1f",
+  "fetch_error": null,
+  "behind": true,
+  "summary": "ways 1.0.0 → 1.1.0",
+  "components": [
+    { "name": "ways", "installed": "1.0.0", "target": "1.1.0", "moves": true }
+  ]
+}
+```
+
 ```
 ways manage update                       # what it would do
+ways manage update --what-if --json      # the check as JSON
 ways manage update --commit
 ways manage update --ref ways-v1.32.0 --commit
 ```
