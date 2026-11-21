@@ -177,6 +177,13 @@ pub(crate) struct Drained {
     source_cwd: String,
     /// Whether it would start a turn in the idle session (ADR-406 item 2).
     pub(crate) wakes: bool,
+    /// The sender's kind: an agent, a person, or attend itself.
+    pub(crate) kind: Option<agent_identity::signal::Kind>,
+    /// The lane it rides.
+    pub(crate) lane: agent_identity::signal::Lane,
+    /// When it lapses, in Unix seconds, for a system signal that carries an
+    /// expiry.
+    pub(crate) expires: Option<u64>,
 }
 impl DrainedView for Drained {
     fn when(&self) -> &str { &self.when }
@@ -322,10 +329,16 @@ pub(crate) fn scan_pending(
         // so it is drawn plain whatever the environment says (#388).
         // The label is the same form the peers sensor shows under
         // Monitor (#534); the wire `from` rides along as the id.
+        // A system signal names attend and its sensor, not a person or an
+        // agent.
+        let sender = match sig.system_sensor() {
+            Some(sensor) => agent_identity::signal::system_label(&sensor),
+            None => render_sender_label(&sig.from, sig.cwd, &agent_theme::Painter::plain(), &instances),
+        };
         delivered.push(Drained {
             when: agent_fmt::compact_time(f.mtime, std::time::SystemTime::now()),
             mtime: f.mtime,
-            sender: render_sender_label(&sig.from, sig.cwd, &agent_theme::Painter::plain(), &instances),
+            sender,
             sender_id: sig.from.to_string(),
             scope: room_label(&scan_dirs[f.room].room),
             room: scan_dirs[f.room].room.clone(),
@@ -338,6 +351,9 @@ pub(crate) fn scan_pending(
                 let room = &scan_dirs[f.room].room;
                 sig.wakes(room.is_tray(), room.is_channel(), ids)
             },
+            kind: sig.sender_kind(),
+            lane: sig.on_lane(),
+            expires: sig.expires,
         });
     }
     let held_back = plan.as_ref().map_or(0, |p| p.not_shown);
@@ -598,6 +614,12 @@ struct DrainedJson<'a> {
     when: &'a str,
     cwd: &'a str,
     message: &'a str,
+    /// `agent`, `human` or `system`; `null` for a sender no attend writes.
+    from_kind: Option<&'static str>,
+    /// `message` or `event`.
+    lane: &'static str,
+    /// Unix seconds, or `null` for a message that does not lapse.
+    expires: Option<u64>,
 }
 
 /// The `--drain --json` document, `schema` 1. `status` is `drained` when
@@ -608,6 +630,11 @@ struct DrainedJson<'a> {
 /// `cache_lapsed` is true when a wake drain held a message that would wake
 /// the session because its prompt cache has lapsed (ADR-406 item 2).
 fn print_drain_json(status: &str, delivered: &[Drained], held_back: usize, note: Option<&str>, me: Option<&str>, cache_lapsed: bool) {
+    crate::cmd::print_json(&drain_json(status, delivered, held_back, note, me, cache_lapsed));
+}
+
+/// The document [`print_drain_json`] prints.
+fn drain_json(status: &str, delivered: &[Drained], held_back: usize, note: Option<&str>, me: Option<&str>, cache_lapsed: bool) -> serde_json::Value {
     let messages: Vec<DrainedJson> = delivered
         .iter()
         .map(|d| DrainedJson {
@@ -619,9 +646,12 @@ fn print_drain_json(status: &str, delivered: &[Drained], held_back: usize, note:
             when: &d.when,
             cwd: &d.source_cwd,
             message: &d.body,
+            from_kind: d.kind.map(agent_identity::signal::Kind::as_str),
+            lane: d.lane.as_str(),
+            expires: d.expires,
         })
         .collect();
-    crate::cmd::print_json(&serde_json::json!({
+    serde_json::json!({
         "schema": DRAIN_JSON_SCHEMA,
         "status": status,
         "messages": messages,
@@ -629,7 +659,7 @@ fn print_drain_json(status: &str, delivered: &[Drained], held_back: usize, note:
         "note": note,
         "you_are": me,
         "cache_lapsed": cache_lapsed,
-    }));
+    })
 }
 
 /// The Stop-hook JSON for one drain, or `None` to print nothing and let the
@@ -1460,6 +1490,72 @@ mod drain_tests {
         let scan = scan_pending(&dirs(&dir, Room::Project), &Default::default(), &["my-session"], true, &Default::default());
         assert!(scan.delivered.is_empty());
         assert_eq!(scan.note.as_deref(), Some("1 older message held back; reading it is optional: attend message inbox"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    const SYS_SID: &str = "11111111-2222-3333-4444-555555555555";
+
+    /// A system signal on each lane, and a line from before the system
+    /// sender, written literally into the session's tray.
+    fn write_system_fixture(dir: &std::path::Path) {
+        let lines = [
+            ("git-1-0", format!("system:git|proj|/src/cwd|from_kind:system|from_id:git|to:{SYS_SID}|lane:event|expires:1790003600|branch switched to main\n")),
+            ("ways-update-1-0", format!("system:ways-update|proj|/src/cwd|from_kind:system|from_id:ways-update|to:{SYS_SID}|lane:message|agent-ways has a newer release\n")),
+            ("peer-1-0", format!("claude:peer|proj|/src/cwd|from_kind:agent|from_id:peer|to:{SYS_SID}|lane:event|a peer's words\n")),
+        ];
+        for (name, line) in lines {
+            std::fs::write(dir.join(format!("{name}.signal")), line).unwrap();
+        }
+    }
+
+    /// The drain parses a system signal's lane, expiry and sender and
+    /// carries them on the delivered row, and a line from before the system
+    /// sender reads as it did. The wake rule is not changed here: a system
+    /// signal addressed to the session wakes it as a direct message does.
+    #[test]
+    fn scan_carries_a_system_signals_lane_expiry_and_sender() {
+        use agent_identity::signal::{Kind, Lane};
+        let dir = scan_fixture("system");
+        write_system_fixture(&dir);
+        let Scan { delivered, .. } = scan_pending(&dirs(&dir, Room::Project), &Default::default(), &[SYS_SID], false, &Default::default());
+        let row = |id: &str| delivered.iter().find(|d| d.id == id).unwrap_or_else(|| panic!("{id} not delivered"));
+        let git = row("git-1-0");
+        assert_eq!((git.kind, git.lane, git.expires), (Some(Kind::System), Lane::Event, Some(1_790_003_600)));
+        assert_eq!((git.sender.as_str(), git.sender_id.as_str(), git.body.as_str()), ("attend (git)", "system:git", "branch switched to main"));
+        assert!(git.wakes);
+        let update = row("ways-update-1-0");
+        assert_eq!((update.kind, update.lane, update.expires), (Some(Kind::System), Lane::Message, None));
+        assert_eq!((update.sender.as_str(), update.body.as_str()), ("attend (ways-update)", "agent-ways has a newer release"));
+        let peer = row("peer-1-0");
+        assert_eq!((peer.kind, peer.lane, peer.expires), (Some(Kind::Agent), Lane::Message, None));
+        assert_eq!(peer.body, "lane:event|a peer's words", "a lane tag after an agent sender is text");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `--drain --json` carries each message's sender kind, lane and expiry.
+    #[test]
+    fn drain_json_carries_the_system_fields() {
+        let dir = scan_fixture("system-json");
+        write_system_fixture(&dir);
+        let Scan { mut delivered, .. } = scan_pending(&dirs(&dir, Room::Project), &Default::default(), &[SYS_SID], false, &Default::default());
+        delivered.sort_by(|a, b| a.id.cmp(&b.id));
+        let doc = drain_json("drained", &delivered, 0, None, None, false);
+        let fields: Vec<(String, String, String, String)> = doc["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| (m["id"].to_string(), m["from_kind"].to_string(), m["lane"].to_string(), m["expires"].to_string()))
+            .collect();
+        let row = |id: &str, kind: &str, lane: &str, expires: &str| (format!("\"{id}\""), kind.to_string(), format!("\"{lane}\""), expires.to_string());
+        assert_eq!(
+            fields,
+            vec![
+                row("git-1-0", "\"system\"", "event", "1790003600"),
+                row("peer-1-0", "\"agent\"", "message", "null"),
+                row("ways-update-1-0", "\"system\"", "message", "null"),
+            ]
+        );
+        assert_eq!(doc["schema"], DRAIN_JSON_SCHEMA);
         std::fs::remove_dir_all(&dir).ok();
     }
 

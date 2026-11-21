@@ -173,13 +173,20 @@ impl Own {
 /// (`agent_identity::parse_signal`), so a `re:` prefix that is not a signal
 /// id reads as legacy prose here exactly as it does in the attend CLI, and
 /// classify it by the tray it sits in against `own` ([`Channel`]).
-/// Returns `None` for anything that doesn't look like a signal we can render.
+/// Returns `None` for anything that doesn't look like a signal we can render,
+/// and for a system signal on the event lane: that is a report attend wrote
+/// for one session's model, and no view of the chat shows it. A system signal
+/// on the message lane is shown.
 pub fn parse_file(path: &Path, own: &Own) -> Option<Signal> {
+    use agent_identity::signal::{Kind, Lane};
     if path.extension().and_then(|s| s.to_str()) != Some("signal") {
         return None;
     }
     let raw = agent_identity::signal::read_signal_file(path).ok()?;
     let parsed = agent_identity::parse_signal(agent_identity::wire_line(&raw))?;
+    if parsed.sender_kind() == Some(Kind::System) && parsed.on_lane() == Lane::Event {
+        return None;
+    }
 
     let id = path
         .file_stem()
@@ -533,6 +540,29 @@ mod tests {
         let sig = parse_file(&tmp_signal(&d, "forged", &line), &own()).unwrap();
         assert_eq!(sig.channel, Channel::Elsewhere("s1".into()));
         assert_eq!(sig.tray, "-work-alpha", "the tray it was read from");
+    }
+
+    /// The chat leaves a system signal on the event lane out of every view,
+    /// shows one on the message lane without its tags, and reads a line
+    /// from before the system sender as it did.
+    #[test]
+    fn an_event_lane_system_signal_is_left_out_of_the_chat() {
+        let root = tempdir_like();
+        let d = root.join("-home-me-proj");
+        fs::create_dir_all(&d).unwrap();
+        let event = "system:git|proj|/home/me/proj|from_kind:system|from_id:git|to:s1|lane:event|expires:1790003600|branch switched to main";
+        assert!(parse_file(&tmp_signal(&d, "git-1-0", event), &own()).is_none());
+        let untagged = "system:git|proj|/home/me/proj|from_kind:system|from_id:git|to:s1|a report with no lane tag";
+        assert!(parse_file(&tmp_signal(&d, "git-2-0", untagged), &own()).is_none(), "a system signal with no lane rides the event lane");
+
+        let notice = "system:ways-update|proj|/home/me/proj|from_kind:system|from_id:ways-update|to:s1|lane:message|agent-ways has a newer release";
+        let sig = parse_file(&tmp_signal(&d, "ways-update-1-0", notice), &own()).expect("a message-lane system signal is shown");
+        assert_eq!((sig.from.as_str(), sig.message.as_str()), ("system:ways-update", "agent-ways has a newer release"));
+        assert_eq!(sig.channel, Channel::Direct("s1".into()));
+
+        let older = "claude:abc|proj|/home/x|from_kind:agent|from_id:abc|to:s1|lane:event|still a peer's words";
+        let sig = parse_file(&tmp_signal(&d, "abc-1-0", older), &own()).expect("an agent's line is shown");
+        assert_eq!((sig.from.as_str(), sig.message.as_str()), ("claude:abc", "lane:event|still a peer's words"));
     }
 
     #[test]

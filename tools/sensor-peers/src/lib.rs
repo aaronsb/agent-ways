@@ -136,6 +136,8 @@ struct PendingMsg {
     /// in the per-message emit branch, since a digest never shows it.
     from: String,
     cwd: String,
+    /// The sensor that wrote it, when attend itself wrote it.
+    sensor: Option<String>,
     /// The signal's id, whose short handle the Monitor line carries.
     signal_id: String,
     body: String,
@@ -434,11 +436,11 @@ impl PeerSensor {
             if !shown {
                 continue;
             }
-            let Some(agent_identity::ParsedSignal { from, cwd: source_cwd, message, .. }) =
-                agent_identity::parse_signal(agent_identity::wire_line(&f.content))
-            else {
+            let Some(sig) = agent_identity::parse_signal(agent_identity::wire_line(&f.content)) else {
                 continue;
             };
+            let sensor = sig.system_sensor();
+            let agent_identity::ParsedSignal { from, cwd: source_cwd, message, .. } = sig;
 
             // The message lane bypasses the event-lane noise stack
             // (ADR-136 Decision 1): no salience gate, no refractory, no
@@ -472,6 +474,7 @@ impl PeerSensor {
                 magnitude,
                 from: from.to_string(),
                 cwd: source_cwd.to_string(),
+                sensor,
                 signal_id: f.signal_id.clone(),
                 body: message.to_string(),
                 kind,
@@ -512,8 +515,12 @@ impl PeerSensor {
             // ruled out, because a digest never shows a sender.
             let instances = attend_instances::view::SnapshotCache::new();
             for m in &pending {
-                let sender =
-                    attend_instances::view::render_sender_label(&m.from, &m.cwd, &attend_instances::view::Painter::plain(), &instances);
+                // A system signal names attend and its sensor, as the drain
+                // does, not a person or an agent.
+                let sender = match &m.sensor {
+                    Some(sensor) => agent_identity::signal::system_label(sensor),
+                    None => attend_instances::view::render_sender_label(&m.from, &m.cwd, &attend_instances::view::Painter::plain(), &instances),
+                };
                 let include_reply_hint = !self.reply_hint_shown;
                 // One message is one line, whatever its length (ADR-412).
                 observations.push((m.magnitude, monitor_line(&sender, &m.signal_id, &m.body, include_reply_hint)));
@@ -994,6 +1001,7 @@ mod tests {
             magnitude,
             from: "claude:x".to_string(),
             cwd: "/x".to_string(),
+            sensor: None,
             signal_id: "x-1-0".to_string(),
             body: "hi".to_string(),
             kind,
@@ -1027,6 +1035,35 @@ mod tests {
         let shown: String = line.chars().take(500).collect();
         assert!(shown.contains("~73nki"), "{shown}");
         assert!(shown.contains(REPLY_HINT), "{shown}");
+    }
+
+    /// The Monitor conduit reads a system signal through the shared parser:
+    /// the line names attend and the sensor, and its text carries no tag.
+    /// A line from before the system sender reads as it did. Both lines
+    /// carry no `to`, so they reach whatever session this test runs under,
+    /// which a test cannot choose.
+    #[test]
+    fn the_monitor_line_reads_a_system_signal_from_attend() {
+        use sensor_trait::{Focus, Sensor};
+        let dir = temp_claude("system");
+        fs::write(dir.join("git-1-0.signal"), "system:git|proj|/src/cwd|from_kind:system|from_id:git|lane:event|expires:1790003600|branch switched to main\n").unwrap();
+        fs::write(dir.join("peer-2-0.signal"), "claude:peer|proj|/src/cwd|from_kind:agent|from_id:peer|lane:event|a peer's words\n").unwrap();
+        let mut sensor = PeerSensor::new();
+        let fixture = dir.clone();
+        sensor.set_receive_dirs_provider(std::sync::Arc::new(move |_: &str| {
+            vec![attend_groups::ReceiveDir { path: fixture.clone(), room: Room::Project }]
+        }));
+        sensor.import_state(&[("reply_hint_shown".to_string(), "true".to_string())]);
+        sensor.set_cache_lapsed_provider(std::sync::Arc::new(|_: &str| false));
+        let focus = Focus { description: String::new(), working_dir: "/src/cwd".to_string(), keywords: Vec::new() };
+        let _ = sensor.poll(&focus);
+        let lines: Vec<String> = sensor.poll(&focus).into_iter().map(|(_, line)| line).collect();
+        let system = format!("message from attend (git) ~{}: branch switched to main", agent_identity::signal::short_id("git-1-0"));
+        assert!(lines.contains(&system), "{lines:#?}");
+        let peer = lines.iter().find(|l| l.contains("a peer's words")).expect("the peer's line");
+        assert!(peer.ends_with(": lane:event|a peer's words"), "{peer}");
+        assert!(!peer.starts_with("message from attend"), "{peer}");
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
