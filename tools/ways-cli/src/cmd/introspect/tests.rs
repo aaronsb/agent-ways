@@ -905,7 +905,8 @@ fn an_account_spend_row_keeps_its_figure() {
     let t = tab(&mixed, 120);
     assert!(t.contains("$12.3456 + ~$1.8300 est + 12 unknown") && t.contains("Tokens"), "{t}");
     let t = tab(&mixed, 80);
-    assert!(t.contains("$12.3456 + ~$1.8300 est + 12 …"), "{t}");
+    assert!(t.contains("$12.3456 + ~$1.8300 est …"), "whole parts go, never a bare count: {t}");
+    assert!(!t.contains("12 …"), "{t}");
 }
 
 /// A small log for the usage and precision tabs: two sessions in this
@@ -1000,6 +1001,22 @@ fn precision_drops_the_spread_below_100_columns() {
 }
 
 /// A short trigger keeps its kind: a semantic lane is told from a pattern.
+/// A cost too wide for its column drops whole parts from its end, and is
+/// cut mid-part only when its first part alone does not fit.
+#[test]
+fn a_cost_too_wide_drops_whole_parts() {
+    use super::report::fit;
+    let cost = "$12.3456 + ~$1.8300 est + 12 unknown".to_string();
+    assert_eq!(fit(cost.clone(), 40), cost, "a cost that fits is kept");
+    assert_eq!(fit(cost.clone(), 30), "$12.3456 + ~$1.8300 est …");
+    assert_eq!(fit(cost.clone(), 25), "$12.3456 + ~$1.8300 est …");
+    assert_eq!(fit(cost.clone(), 24), "$12.3456 …");
+    assert_eq!(fit(cost.clone(), 10), "$12.3456 …");
+    // The first part alone is too wide: it is cut by characters.
+    assert_eq!(fit(cost, 8), "$12.345…");
+    assert_eq!(fit("~$1234.5678 est".to_string(), 12), "~$1234.5678…");
+}
+
 #[test]
 fn a_short_trigger_keeps_semantic_apart_from_pattern() {
     use super::report::short_trigger;

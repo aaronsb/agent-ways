@@ -375,7 +375,7 @@ Each semantic fire of the session as score, way and the surface it matched, lowe
 
 ![the spend tab by day, with one call of unknown cost](../images/ways/session-spend.png)
 
-The judge's calls over the scope as calls, input, output and cache tokens, and cost, one row per day. The cost takes the forms listed for the `$` key under the [timeline tab](#timeline-tab). When the widest cost does not fit beside the Tokens column, as for account calls at 80 columns, the table leaves Tokens out, since it is the sum of the three token columns before it. A cost still too wide loses its end, marked `…`. `d` switches between days and months. The line above the table gives the date of the earliest judge call the event log still holds. ↑↓ selects a row.
+The judge's calls over the scope as calls, input, output and cache tokens, and cost, one row per day. The cost takes the forms listed for the `$` key under the [timeline tab](#timeline-tab). When the widest cost does not fit beside the Tokens column, as for account calls at 80 columns, the table leaves Tokens out, since it is the sum of the three token columns before it. A cost still too wide drops whole parts from its end, marked ` …`, so `$12.3456 + ~$1.8300 est + 12 unknown` reads `$12.3456 + ~$1.8300 est …`. Only a first part too wide on its own is cut mid-figure. `d` switches between days and months. The line above the table gives the date of the earliest judge call the event log still holds. ↑↓ selects a row.
 
 #### Stats and precision tabs
 

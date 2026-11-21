@@ -281,11 +281,22 @@ fn cost_layout(width: u16, mark: usize, widest: usize) -> (bool, usize) {
     }
 }
 
-/// `text` cut to `w` characters, its end marked with `…`, so a figure too
-/// wide for its column loses its tail rather than its first digits.
-fn fit(text: String, w: usize) -> String {
+/// `text` cut to `w` characters, so a cost too wide for its column loses
+/// its tail rather than its first digits. A cost is parts joined by ` + `
+/// (`$0.0123 + ~$0.0456 est + 2 unknown`): whole parts go from the end
+/// until the rest and ` …` fit, so no figure is left without its label.
+/// Only when the first part alone does not fit is it cut mid-part, its end
+/// marked `…`.
+pub(super) fn fit(text: String, w: usize) -> String {
     if text.chars().count() <= w {
         return text;
+    }
+    let parts: Vec<&str> = text.split(" + ").collect();
+    for keep in (1..parts.len()).rev() {
+        let cut = format!("{} …", parts[..keep].join(" + "));
+        if cut.chars().count() <= w {
+            return cut;
+        }
     }
     let mut cut: String = text.chars().take(w.saturating_sub(1)).collect();
     cut.push('…');
