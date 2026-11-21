@@ -362,21 +362,37 @@ fn the_file_lanes_candidates_reach_the_judge() {
     assert_eq!(outcome(&r, "judged/dropfile")["result"], "judge_block");
 }
 
-/// Shadow mode injects every candidate at once and judges them off the hot
-/// path; the verdicts reach the decision log.
+/// Shadow mode injects every candidate at once. Under claude-code no host
+/// is open once the hook returns, so no detached judge starts, no job is
+/// written, and the session logs the skip once.
 #[test]
-fn shadow_injects_everything_and_logs_the_verdicts() {
+fn shadow_under_claude_code_injects_everything_and_starts_no_detached_judge() {
     let s = Sim::new("shadow", Some("engine: claude-code\nmode: shadow\nheld_sample: 0\n"));
-    let host = s.host(1);
     let out = s.bash(Some("asub1"));
     assert!(out.contains("# Marker keep") && out.contains("# Marker drop"), "{out}");
     assert!(s.fired("judged/drop", Some("asub1")));
-    let r = s.wait_decision(|r| r["surface"] == "command" && r["judge"]["status"] == "judged");
-    assert_eq!(r["agent"], "asub1");
-    assert_eq!(outcome(&r, "judged/drop")["verdict"], "would_block");
-    assert_eq!(outcome(&r, "judged/drop")["result"], "fired");
-    assert!(r["judge"]["judge_ms"].is_u64(), "{r:#}");
-    assert_eq!(host.join().unwrap().len(), 1, "one detached request");
+    s.raw_hook("file", serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": "Edit", "tool_input": {"file_path": "/p/src/lib.rs"}}));
+    s.assert_no_detached_judge();
+}
+
+/// Waits long enough for a detached judge to have written its job, then
+/// checks that none did: no job to take, no detached record, and one
+/// `judge_detach_skipped` line for the session.
+impl Sim {
+    fn assert_no_detached_judge(&self) {
+        std::thread::sleep(Duration::from_millis(1500));
+        let out = self.ways().args(["judge", "take", "--session", &self.session]).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "", "no job was written");
+        assert!(self.decisions().iter().all(|r| r.get("detached").is_none()), "{:#?}", self.decisions());
+        let events = std::fs::read_to_string(self.state.join("agent-ways/events.jsonl")).unwrap_or_default();
+        let skips: Vec<serde_json::Value> = events
+            .lines()
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .filter(|v: &serde_json::Value| v["event"] == "judge_detach_skipped" && v["session"] == self.session.as_str())
+            .collect();
+        assert_eq!(skips.len(), 1, "logged once per session: {skips:#?}");
+        assert_eq!(skips[0]["reason"], "claude-code engine has no host outside a hook");
+    }
 }
 
 /// The files under a session's directory, relative to it: the fire markers,
@@ -604,39 +620,25 @@ fn a_blocked_parent_keeps_its_place_before_its_child() {
 }
 
 /// A candidate the refire curve holds is never injected and never holds the
-/// call; with `held_sample: 1` it is judged off the hot path and logged as
-/// `held_refire` with its verdict. The way the judge blocked on the first
-/// call kept its refire budget, so the second call judges it again on the
-/// hot path.
+/// call. Under claude-code `held_sample: 1` starts no detached judge for it:
+/// the way the judge blocked on the first call is judged again on the hot
+/// path, and the held one is only logged as skipped, once.
 #[test]
-fn a_held_candidate_is_judged_off_the_hot_path_for_the_record() {
-    let s = Sim::new("held", Some("engine: claude-code
-mode: enforce
-held_sample: 1
-"));
+fn a_held_candidate_under_claude_code_starts_no_detached_judge() {
+    let s = Sim::new("held", Some("engine: claude-code\nmode: enforce\nheld_sample: 1\n"));
     let first = s.host(1);
     s.bash(None);
     assert_eq!(first.join().unwrap().len(), 1);
     // A host waits for the next job before it comes, as the mod does.
-    let host = s.host(2);
+    let host = s.host(1);
     std::thread::sleep(Duration::from_millis(200));
     let again = s.bash(None);
     assert!(!again.contains("# Marker keep"), "held by refire: {again}");
-    let r = s.wait_decision(|r| r["surface"] == "command" && r.get("detached").is_some());
     let prompts = host.join().unwrap();
-    assert_eq!(prompts.len(), 2, "the blocked way again on the hot path, the held one detached");
+    assert_eq!(prompts.len(), 1, "the blocked way again on the hot path");
     assert!(prompts[0].contains("judged › drop") && !prompts[0].contains("judged › keep"), "{}", prompts[0]);
-    assert!(prompts[1].contains("judged › keep"), "{}", prompts[1]);
-    assert_eq!(outcome(&r, "judged/keep")["result"], "held_refire", "{r:#}");
-    assert_eq!(outcome(&r, "judged/keep")["verdict"], "pass", "{r:#}");
-    assert!(r["judge"]["judge_ms"].is_u64(), "{r:#}");
     assert!(!s.fired("judged/drop", None), "blocked twice, never fired");
-    // The detached judge's event lines say so, the held one's twice over.
-    let events = std::fs::read_to_string(s.state.join("agent-ways/events.jsonl")).unwrap();
-    let judged: Vec<serde_json::Value> = events.lines().filter_map(|l| serde_json::from_str(l).ok()).filter(|v: &serde_json::Value| v["event"] == "way_judged" && v["way"] == "judged/keep").collect();
-    let held = judged.iter().find(|v| v["detached"] == "true").expect("a detached verdict");
-    assert_eq!(held["held_refire"], "true", "{held}");
-    assert!(judged.iter().any(|v| v.get("detached").is_none()), "the first call's own verdict is unmarked");
+    s.assert_no_detached_judge();
 }
 
 /// The fires `agent`'s thread has counted for `way` for the refire

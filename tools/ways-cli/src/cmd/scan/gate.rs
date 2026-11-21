@@ -365,6 +365,22 @@ fn apply_from(
 /// - ADR-712 §2: the state lane under the claude-code engine at SessionStart.
 const UNHOSTED_HOOK: &str = "SessionStart";
 
+/// Whether the session judges on the claude-code engine, whose host claims
+/// jobs only while a hook's event runs: the held resolution when there is
+/// one, else what the session would resolve to now. A process started after
+/// the hook returned, such as the detached judge, has no host to claim its
+/// job.
+pub(super) fn unhosted_engine(session_id: &str) -> bool {
+    use ways_agent_core::keys;
+    let Some(store) = Store::for_session(session_id) else { return false };
+    if let Some(held) = store.resolution() {
+        return held.is_claude_code();
+    }
+    let has_key = |p: Provider| keys::locate_file(p).is_some();
+    let reading = engine::read_gate(&profile::user_layer_path(), has_key, false);
+    engine::resolve_reading(&reading, store.host_registered(), has_key).is_claude_code()
+}
+
 /// The judge deadline that fits in `wait`: what is left once an agent start
 /// ([`ways_agent_core::client::START_WAIT`]) and the read grace are taken
 /// out, and at least 1 ms.

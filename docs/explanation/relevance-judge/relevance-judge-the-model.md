@@ -77,7 +77,7 @@ Step by step:
 
 1. On each prompt, Claude Code runs `check-prompt.sh`, which calls `ways hook prompt`. The hook reads the reply that the Stop hook recorded for the previous turn and passes it to the matcher with the prompt.
 2. The matcher's keyword and embedding lanes produce hits, and they are ordered: explicit triggers first, parents before children, siblings by score.
-3. Hits that the refire curve would hold back are set aside before the gate, because they would not be shown either way. A share of them, `gate.held_sample` (0.1 by default), goes to a detached judge for the record. That judge runs in a process of its own that nothing waits on, and it logs each sampled way as `held_refire` with its verdict. Nothing from the sample is shown.
+3. Hits that the refire curve would hold back are set aside before the gate, because they would not be shown either way. A share of them, `gate.held_sample` (0.1 by default), goes to a detached judge for the record. That judge runs in a process of its own that nothing waits on, and it logs each sampled way as `held_refire` with its verdict. Nothing from the sample is shown. The sample needs a key engine: under the Claude Code internal engine no detached judge starts, since its host claims jobs only while a hook runs, and the session logs `judge_detach_skipped` once.
 4. The gate reads `agent.yaml`. With no engine named and no key file for any provider, or with `gate.mode: off`, it stops here and logs nothing.
 5. Every candidate is judged, whatever trigger fired it, `pattern_strict` ways included. They are taken in matcher order, the profile's `max_candidates` to a request, and every request runs within the one deadline.
 6. The hook sends each request to the ways agent over a Unix socket, starting the agent if none is listening. A request carries the conversation turns and, for each candidate, the way's path and description.
@@ -104,7 +104,7 @@ When the judge blocks every way a dispatch matched, the task lane still leaves t
 
 The judge does not cover the session-start core or a `ways_read` lookup, which the agent asks for itself. A Monitor notification that arrives as a prompt is skipped before matching, so it is never judged.
 
-On the tool lanes, shadow mode shows every candidate at once and hands them to the detached judge, so no tool call waits on a verdict that cannot change what is shown. The prompt lane judges shadow mode inside its own hook.
+On the tool lanes, shadow mode shows every candidate at once and hands them to the detached judge, so no tool call waits on a verdict that cannot change what is shown. Those verdicts need a key engine too: under the Claude Code internal engine the tool lanes in shadow mode show every candidate and record no verdict. The prompt lane judges shadow mode inside its own hook, on either engine.
 
 `ways scan prompt` runs the same path as the hook. With a key configured, each run calls the judge, may be billed, and logs its events under the session it names.
 
