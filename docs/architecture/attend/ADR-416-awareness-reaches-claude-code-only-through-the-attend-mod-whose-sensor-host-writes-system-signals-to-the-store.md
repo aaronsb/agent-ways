@@ -73,7 +73,10 @@ considered:
     said: "Version only (Recommended)"
     via: session 2026-11-21, question tool, option (a) of the dormant-footer probe
     covers: [dormant footer]
-status: proposed
+  - operator: aaronsb
+    said: "let's accept it and implement"
+    via: session 2026-11-21, after the turn-end and dormant-footer answers
+status: accepted
 date: 2026-11-21
 deciders:
   - aaronsb
