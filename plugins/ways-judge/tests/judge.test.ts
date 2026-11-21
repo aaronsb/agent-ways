@@ -7,7 +7,7 @@ import type { Engine } from 'claude-code/testing'
 import type { ModelCompleteResult, On, ProcessRunResult } from 'claude-code'
 
 import { register } from '../hooks/register.ts'
-import { JUDGED_TOOLS, answerOf, hostArgv, parseTake, requestOf, takeArgv } from '../hooks/lib.ts'
+import { JUDGED_TOOLS, REFUSED, TAKE_WAIT_MS, answerOf, hostArgv, parseTake, requestOf, takeArgv } from '../hooks/lib.ts'
 import type { JudgeJob } from '../hooks/lib.ts'
 import { passedOverHits, registrationsOf } from './passed-over.ts'
 
@@ -51,6 +51,8 @@ type World = {
   /** What `$.model.complete` resolves to, after `modelMs`. */
   model?: ModelCompleteResult
   modelMs?: number
+  /** `$.model.complete` rejects: the engine refused to send the call. */
+  modelThrows?: boolean
   /** `ways judge host` fails. */
   hostFails?: boolean
   /** How long the prompt's settings hooks run after their jobs. */
@@ -63,6 +65,12 @@ type World = {
   /** A take claims only once it is stopped, and prints the job as it is
    *  killed: the stop lands during the claim. */
   claimOnStop?: boolean
+  /** A take with no job runs out its wait, which the clock shows as
+   *  TAKE_WAIT_MS gone, and exits 0 with nothing printed. */
+  idleTakes?: boolean
+  /** A take with no job exits 0 with nothing printed at once, the clock
+   *  unmoved. */
+  fastEmpty?: boolean
 }
 
 type Entry = { job: JudgeJob & { id: string }; claim: () => void; answer: (a: unknown) => void; claimed: Promise<void>; answered: Promise<unknown> }
@@ -86,6 +94,7 @@ function host(on: On, world: World) {
   /** What happened, in order: each answer by job id, and what the test
    *  marks. */
   const order: string[] = []
+  const clock = { t: 0 }
   let wake: (() => void)[] = []
 
   async function scan(job: JudgeJob): Promise<void> {
@@ -109,9 +118,11 @@ function host(on: On, world: World) {
 
   on('session.id', () => ({ value: ID }) as never)
   on('ui.log', () => ({ value: undefined }) as never)
-  on('clock.now', () => ({ value: 0 }) as never)
+  on('clock.now', () => ({ value: clock.t }) as never)
   on('clock.sleep', async ($, e) => {
-    await sleep((e as unknown as { ms: number }).ms)
+    const ms = (e as unknown as { ms: number }).ms
+    await sleep(ms)
+    clock.t += ms
     return { value: undefined } as never
   })
   on('process.run', ($, e) => {
@@ -160,6 +171,12 @@ function host(on: On, world: World) {
         take.stopped += 1
         return { value: { code: null, signal: 'SIGTERM' } } as never
       }
+      if (world.fastEmpty) return { value: { code: 0, signal: null } } as never
+      if (world.idleTakes) {
+        await sleep(10)
+        clock.t += TAKE_WAIT_MS
+        return { value: { code: 0, signal: null } } as never
+      }
       await new Promise<void>(resolve => {
         wake.push(resolve)
         next.signal.addEventListener('abort', () => resolve())
@@ -169,6 +186,7 @@ function host(on: On, world: World) {
   on('model.complete', async ($, e, next) => {
     models.push({ ...e })
     if (world.modelMs) await sleep(world.modelMs)
+    if (world.modelThrows) throw new Error('the model is blocked')
     if (next.signal.aborted) return { value: { isAnswered: false, reason: 'aborted', usage: ZERO } } as never
     return { value: world.model } as never
   })
@@ -224,6 +242,13 @@ describe('the prompt lane: a job, one model call, one answer', () => {
     expect(h.argvs).toContainEqual(hostArgv(ID))
     expect(h.argvs).toContainEqual(takeArgv(ID))
     expect(h.argvs).toContainEqual(['ways', 'judge', 'answer', '--session', ID, '--job', 'j-1'])
+  })
+
+  test('a model call the engine refuses to send answers the refusal', async ($, on) => {
+    const h = host(on, { prompt: [JOB], modelThrows: true })
+    await typed($)
+    expect(h.outcomes).toEqual(['answered'])
+    expect(h.answers).toEqual([REFUSED])
   })
 
   test('a model call past its time limit answers the reason and no text', async ($, on) => {
@@ -376,6 +401,20 @@ describe('one call and another call\'s job', () => {
     expect(h.take.claimed).toBe(1)
     expect(h.outcomes).toEqual(['answered'])
     expect(h.answers).toEqual([{ text: '{"judgements":[]}', usage: USAGE }])
+  })
+})
+
+describe('a take that ends with no job', () => {
+  test('a take that waited out its time is started again while the call runs', async ($, on) => {
+    const h = host(on, { idleTakes: true, toolMs: 200 })
+    await $.tool.call({ tool: 'Bash', command: 'make' })
+    expect(h.take.started).toBeGreaterThan(2)
+  })
+
+  test('a take that came back empty at once is not started again', async ($, on) => {
+    const h = host(on, { fastEmpty: true, toolMs: 200 })
+    await $.tool.call({ tool: 'Bash', command: 'make' })
+    expect(h.take.started).toBe(1)
   })
 })
 
