@@ -53,7 +53,7 @@ considered:
     said: "I think once per context window don't you? a new window would mean it's lost"
     via: the operator in the head session, 2026-11-20, answering whether the once preset means once per context window or once for the whole session
     covers: [once]
-status: proposed
+status: accepted
 date: 2026-11-20
 deciders:
   - aaronsb
