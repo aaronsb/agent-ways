@@ -31,13 +31,13 @@
 //! - ADR-712: every candidate in every lane and agent thread is judged.
 //! - ADR-701 §2: every lane writes a decision record.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::{Duration, Instant};
 
 use ways_agent_core::cost::{CostSource, JudgeCall, Usage};
 use ways_agent_core::engine;
 use ways_agent_core::judge::{self, way_text, Candidate, Role, Turn};
-use ways_agent_core::profile::{self, Mode, Provider, Settings, UserLayer};
+use ways_agent_core::profile::{self, Mode, Profile, Provider, Settings, UserLayer};
 use ways_agent_core::protocol::{JudgeAnswer, JudgeJob, JudgeRequest, Judged, Reply, Request, Verdict};
 
 use crate::session::judge_jobs::{Store, Waited};
@@ -286,8 +286,9 @@ pub(super) fn apply(pending: &[Pending<'_>], turns: Vec<Turn>, wait: Duration, l
 /// The session's engine is resolved at its first judge request and held
 /// (ADR-708 §2). A key engine goes to the ways agent, named in the request;
 /// `claude-code` goes to the session's judge host as a job ([`handoff`]),
-/// except at [`UNHOSTED_HOOK`], where it passes as with the gate off; none
-/// fails open with the resolution's `engine_unavailable` reason. No
+/// except at [`UNHOSTED_HOOK`], where a session held on it, or configured
+/// for it with nothing held, passes as with the gate off before it
+/// resolves ([`unhosted_at_session_start`]); none fails open with the resolution's `engine_unavailable` reason. No
 /// request reaches both. A store of `None`, a session id that names no
 /// directory, can have no host, so it never resolves to `claude-code`.
 #[allow(clippy::too_many_arguments)]
@@ -312,6 +313,9 @@ fn apply_from(
         return Gate { status: Status::Idle, ..Gate::default() };
     }
     let profiles = profile::profiles(&user);
+    if log.hook_event == UNHOSTED_HOOK && unhosted_at_session_start(&user, &profiles, store) {
+        return Gate::default();
+    }
     // The one resolver `ways status` and the settings screen read too.
     let resolve = |host: bool| engine::session_engine(&user, host, &has_key);
     // `resolve` borrows only, so it is Copy and still here for the fallback.
@@ -343,10 +347,6 @@ fn apply_from(
     settings.profile.timeout_ms = settings.profile.timeout_ms.min(budget_within(wait).as_millis() as u64);
     let settings = settings;
     match (settings.profile.provider, store) {
-        // No event a Claude Code mod can hook wraps the SessionStart hooks, so
-        // no host could claim a job written there: the lane passes its
-        // candidates as with the gate off, with no job and no wait.
-        (Provider::ClaudeCode, _) if log.hook_event == UNHOSTED_HOOK => Gate::default(),
         (Provider::ClaudeCode, Some(store)) => {
             run(pending, turns, &settings, log, JUDGED, |req, _| handoff(store, &settings, req, begun))
         }
@@ -368,6 +368,23 @@ fn apply_from(
 /// References:
 /// - ADR-712 §2: the state lane under the claude-code engine at SessionStart.
 const UNHOSTED_HOOK: &str = "SessionStart";
+
+/// Whether the lane at [`UNHOSTED_HOOK`] passes as with the gate off, read
+/// before the session resolves: no host could claim a job written there,
+/// and the mod registers as host only at its first event, after
+/// SessionStart. A resolution made there would see no host and hold the
+/// session on a key engine, or log `engine_unavailable`, for a session
+/// whose host is about to register.
+///
+/// A held claude-code resolution passes. A held key engine judges, as it
+/// does at any hook. With nothing held, the lane passes when `gate.engine`
+/// names a claude-code profile, and nothing is resolved or held.
+fn unhosted_at_session_start(user: &UserLayer, profiles: &BTreeMap<String, Profile>, store: Option<&Store>) -> bool {
+    match store.and_then(Store::resolution) {
+        Some(held) => held.is_claude_code(),
+        None => user.engine.as_deref().and_then(|name| profiles.get(name)).is_some_and(|p| p.provider == Provider::ClaudeCode),
+    }
+}
 
 /// Whether the session judges on the claude-code engine, whose host claims
 /// jobs only while a hook's event runs: the held resolution when there is
@@ -1400,6 +1417,61 @@ mod tests {
         assert_eq!(asked.get(), 1);
         assert!(matches!(g.status, Status::Judged { .. }), "{:?}", g.status);
         assert_eq!(g.ids(), HashSet::from(["data/migrations".to_string()]));
+    }
+
+    /// The gate at SessionStart under claude-code with `has_key`, the host
+    /// unregistered (the mod registers at its first event, after
+    /// SessionStart), counting each agent call.
+    fn session_start_unhosted(s: &Session, has_key: bool, events: &Events, asked: &std::cell::Cell<usize>) -> Gate {
+        let sink = recorder(events);
+        let lc = LogContext { lane: "state", hook_event: "SessionStart", ..log(&sink) };
+        apply_from(&s.yaml, |_| has_key, Some(&s.store), &pending(), turns("store the api key", Some("ok")), PROMPT_WAIT, &lc, |_, _| {
+            asked.set(asked.get() + 1);
+            Ok(judged(Mode::Enforce, &[("softwaredev/code/security/secrets", 0.9), ("data/migrations", 0.05)]))
+        })
+    }
+
+    /// A resume with turns under claude-code, before the mod registered and
+    /// with no key: the lane passes as with the gate off, and logs no
+    /// fallback, since no host was due yet.
+    #[test]
+    fn session_start_before_the_host_with_no_key_logs_no_fallback() {
+        let s = Session::new("session-start-unhosted", CLAUDE_CODE);
+        let events = Events::default();
+        let asked = std::cell::Cell::new(0);
+        let g = session_start_unhosted(&s, false, &events, &asked);
+        assert_eq!(g.status, Status::Off);
+        assert_eq!(asked.get(), 0);
+        assert!(events.borrow().iter().all(|e| field(e, "event") != "gate_fallback"), "{:?}", events.borrow());
+        assert!(s.store.resolution().is_none());
+    }
+
+    /// The same with a key: the session is not resolved to the key engine
+    /// and held there, so the mod's later registration still takes it.
+    #[test]
+    fn session_start_before_the_host_with_a_key_holds_nothing() {
+        let s = Session::new("session-start-unhosted-key", CLAUDE_CODE);
+        let events = Events::default();
+        let asked = std::cell::Cell::new(0);
+        let g = session_start_unhosted(&s, true, &events, &asked);
+        assert_eq!(g.status, Status::Off);
+        assert_eq!(asked.get(), 0, "no key engine judges in the mod's place");
+        assert!(s.store.resolution().is_none(), "nothing is held");
+        assert_eq!(s.store.take().unwrap(), None, "no job was written");
+    }
+
+    /// A session already held on a key engine (claude-code configured, no
+    /// host at its first request) judges at SessionStart on that engine.
+    #[test]
+    fn session_start_on_a_held_key_engine_still_judges() {
+        let s = Session::new("session-start-held-key", CLAUDE_CODE);
+        let agent = Default::default();
+        assert!(matches!(s.gate(true, &Events::default(), &agent).status, Status::Judged { .. }));
+        assert!(!s.store.resolution().unwrap().is_claude_code(), "held on the key engine");
+        let asked = std::cell::Cell::new(0);
+        let g = session_start_unhosted(&s, true, &Events::default(), &asked);
+        assert_eq!(asked.get(), 1);
+        assert!(matches!(g.status, Status::Judged { .. }), "{:?}", g.status);
     }
 
     /// No host and no key: no engine, and that is not held, so a key added
