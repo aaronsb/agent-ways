@@ -9,14 +9,18 @@
 //! start, times out, exits non-zero or prints what does not parse is a
 //! failed poll, and the failure says which.
 //!
-//! The command never inherits the session's identity or credentials. From
-//! a shipped or user file it inherits attend's environment less every
-//! variable whose name starts `CLAUDE`, `ANTHROPIC_` or `ATTEND_`: Claude
-//! Code's session id, project dir, config dir and OAuth token, the API key
-//! and base URL, and attend's own re-exec and hand-over markers. From a
-//! project file, code a repository's author chose, it starts from an empty
-//! environment with only [`PROJECT_ENV`] carried over. The file's `env`
-//! adds to either.
+//! The session's variables and tokens are kept out of the command's
+//! environment. From a shipped or user file it inherits attend's
+//! environment less every variable whose name starts with one of
+//! [`STRIPPED`] (Claude Code's session id, project dir, config dir and
+//! OAuth token, the API key and base URL, attend's own re-exec and
+//! hand-over markers) or is one of [`STRIPPED_NAMES`]. From a project file,
+//! code a repository's author chose, it starts from an empty environment
+//! with only [`PROJECT_ENV`] carried over. The file's `env` adds to either.
+//!
+//! This is not a sandbox. The command runs as the operator, and an
+//! `attend` it runs resolves the session through its parent processes, not
+//! its environment, so it can act as the session.
 //!
 //! References:
 //! - ADR-403 §1: the command kind's block and its recorded failures.
@@ -38,6 +42,11 @@ const MAX_OUTPUT: u64 = 1024 * 1024;
 /// The prefixes of the variables a shipped or user file's command does
 /// not inherit.
 pub const STRIPPED: &[&str] = &["CLAUDE", "ANTHROPIC_", "ATTEND_"];
+
+/// The variables, by exact name, a shipped or user file's command does not
+/// inherit: the marker Claude Code sets for tools it runs, and the Bedrock
+/// token it may run under.
+pub const STRIPPED_NAMES: &[&str] = &["AI_AGENT", "AWS_BEARER_TOKEN_BEDROCK"];
 
 /// The variables a project file's command inherits; `LC_*` stands for
 /// every locale variable.
@@ -69,7 +78,7 @@ impl Inherit {
             .filter(|(k, _)| {
                 let k = k.to_string_lossy();
                 match self {
-                    Inherit::Stripped => !STRIPPED.iter().any(|p| k.starts_with(p)),
+                    Inherit::Stripped => !STRIPPED.iter().any(|p| k.starts_with(p)) && !STRIPPED_NAMES.contains(&k.as_ref()),
                     Inherit::Project => PROJECT_ENV.iter().any(|p| match p.strip_suffix('*') {
                         Some(prefix) => k.starts_with(prefix),
                         None => k == *p,
@@ -135,14 +144,16 @@ fn run(block: &CommandBlock, project: &Path, inherit: Inherit) -> Result<String,
         child.wait().ok();
         Err(format!("{program} timed out after {}s", block.timeout))
     };
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() >= deadline => return timed_out(&mut child),
-            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+    // The leader is left unreaped until the end, so its group id stays
+    // reserved through any group kill.
+    loop {
+        match leader_exited(&mut child) {
+            Ok(true) => break,
+            Ok(false) if Instant::now() >= deadline => return timed_out(&mut child),
+            Ok(false) => std::thread::sleep(Duration::from_millis(20)),
             Err(e) => return Err(format!("cannot wait for {program}: {e}")),
         }
-    };
+    }
     let (mut out, mut err) = (None, None);
     while out.is_none() || err.is_none() {
         match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
@@ -151,6 +162,7 @@ fn run(block: &CommandBlock, project: &Path, inherit: Inherit) -> Result<String,
             Err(_) => return timed_out(&mut child),
         }
     }
+    let status = child.wait().map_err(|e| format!("cannot wait for {program}: {e}"))?;
     let (out, err) = (out.unwrap_or_default(), err.unwrap_or_default());
     if out.len() as u64 > MAX_OUTPUT {
         return Err(format!("{program} printed more than {} KiB", MAX_OUTPUT / 1024));
@@ -164,6 +176,27 @@ fn run(block: &CommandBlock, project: &Path, inherit: Inherit) -> Result<String,
         });
     }
     String::from_utf8(out).map_err(|_| format!("{program} printed text that is not UTF-8"))
+}
+
+/// Whether `child` has exited. On Unix the exit is seen without reaping
+/// it (`waitid` with `WNOWAIT`), so it stays a zombie and no new process
+/// can take its process group id before the group is killed.
+fn leader_exited(child: &mut std::process::Child) -> std::io::Result<bool> {
+    #[cfg(unix)]
+    {
+        // SAFETY: `info` is a zeroed siginfo_t that waitid fills; with
+        // WNOHANG and no exit it leaves si_signo at 0.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        let rc = unsafe { libc::waitid(libc::P_PID, child.id() as libc::id_t, &mut info, libc::WEXITED | libc::WNOWAIT | libc::WNOHANG) };
+        if rc != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(info.si_signo == libc::SIGCHLD)
+    }
+    #[cfg(not(unix))]
+    {
+        Ok(child.try_wait()?.is_some())
+    }
 }
 
 /// End `child` and every process in its group.
@@ -253,13 +286,16 @@ mod tests {
             ("CLAUDECODE", "1"),
             ("ANTHROPIC_API_KEY", "fake"),
             ("ATTEND_RUN_SINCE", "1"),
+            ("AI_AGENT", "claude-code"),
+            ("AWS_BEARER_TOKEN_BEDROCK", "fake"),
+            ("AI_AGENTS_DIR", "/a"),
             ("KEEP_ME", "1"),
             ("PATH", "/bin"),
             ("HOME", "/h"),
             ("LC_ALL", "C"),
             ("TZ", "UTC"),
         ]);
-        assert_eq!(names(Inherit::Stripped.filter(all.clone())), ["KEEP_ME", "PATH", "HOME", "LC_ALL", "TZ"]);
+        assert_eq!(names(Inherit::Stripped.filter(all.clone())), ["AI_AGENTS_DIR", "KEEP_ME", "PATH", "HOME", "LC_ALL", "TZ"], "exact names strip only themselves");
         assert_eq!(names(Inherit::Project.filter(all)), ["PATH", "HOME", "LC_ALL", "TZ"]);
         assert_eq!(Inherit::of(Some(sensor_spec::Origin::Project)), Inherit::Project);
         assert_eq!(Inherit::of(Some(sensor_spec::Origin::User)), Inherit::Stripped);
