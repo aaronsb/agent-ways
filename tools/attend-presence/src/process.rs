@@ -36,6 +36,10 @@ fn parse_stat_ppid(stat: &str) -> Option<u32> {
 
 #[cfg(not(windows))]
 fn parent_pid_by_command(pid: u32) -> Option<u32> {
+    #[cfg(target_os = "macos")]
+    if let Some(info) = bsd_info(pid) {
+        return Some(info.pbi_ppid).filter(|&p| p > 0);
+    }
     let output = Command::new("ps").args(["-p", &pid.to_string(), "-o", "ppid="]).output().ok()?;
     if !output.status.success() {
         return None;
@@ -48,6 +52,47 @@ fn parent_pid_by_command(pid: u32) -> Option<u32> {
     let script = format!("(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').ParentProcessId");
     let output = powershell(&script)?;
     output.trim().parse::<u32>().ok().filter(|&p| p > 0)
+}
+
+/// The `proc_bsdinfo` of `pid`, read with `proc_pidinfo`, which needs no
+/// child process.
+#[cfg(target_os = "macos")]
+fn bsd_info(pid: u32) -> Option<libc::proc_bsdinfo> {
+    // SAFETY: `info` is a zeroed proc_bsdinfo, and its size is passed, so
+    // the call writes within it.
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    let n = unsafe { libc::proc_pidinfo(pid as libc::c_int, libc::PROC_PIDTBSDINFO, 0, std::ptr::from_mut(&mut info).cast(), size) };
+    (n == size).then_some(info)
+}
+
+/// The file name of the executable `pid` runs, or `None` when it cannot be
+/// read: `/proc/<pid>/exe` on Linux, `proc_pidpath` on macOS. A binary
+/// replaced since it started still names its old file.
+pub fn exe_name(pid: u32) -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        let path = std::fs::read_link(format!("/proc/{pid}/exe")).ok()?;
+        let name = path.file_name()?.to_string_lossy().into_owned();
+        Some(name.strip_suffix(" (deleted)").unwrap_or(&name).to_string())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let mut buf = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+        // SAFETY: `buf` is writable for the length passed.
+        let n = unsafe { libc::proc_pidpath(pid as libc::c_int, buf.as_mut_ptr().cast(), buf.len() as u32) };
+        if n <= 0 {
+            return None;
+        }
+        buf.truncate(n as usize);
+        let path = std::path::PathBuf::from(String::from_utf8_lossy(&buf).into_owned());
+        Some(path.file_name()?.to_string_lossy().into_owned())
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = pid;
+        None
+    }
 }
 
 /// The command line of `pid` as arguments, or `None` when the process is

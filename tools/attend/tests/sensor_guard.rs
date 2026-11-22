@@ -91,3 +91,46 @@ fn allowed_attend_run_resolves_its_own_session() {
     run.wait_for("the startup line", Duration::from_secs(20), |r| r.output().contains("you are"));
     assert!(!std::fs::read_to_string(f.home.join("run.err")).unwrap_or_default().contains(REFUSAL));
 }
+
+/// Two ways a command might hide the host: a session record forged under a
+/// scratch config dir and named by a shell sixteen levels below the host,
+/// and a shell that calls itself `claude` (`exec -a claude`). Neither
+/// resolves the forged session.
+#[test]
+fn refused_a_forged_record_deep_or_behind_a_fake_claude() {
+    let f = Fixture::new("guard-forged");
+    let out = f.home.join("forged");
+    let cfg = f.home.join("scratch-config");
+    std::fs::create_dir_all(cfg.join("sessions")).unwrap();
+    std::fs::create_dir_all(&out).unwrap();
+    let bin = env!("CARGO_BIN_EXE_attend");
+    // Write a record naming this shell as session sess-forged, then ask who
+    // the session is, saving the answer under the probe's name.
+    let inner = format!(
+        "printf '{{\"pid\":%s,\"sessionId\":\"sess-forged\",\"cwd\":\"{origin}\"}}' $$ > '{cfg}/sessions/'$$.json\n\
+         CLAUDE_CONFIG_DIR='{cfg}' '{bin}' peer whoami --machine > '{out}/'$1.out 2> '{out}/'$1.err; echo $? > '{out}/'$1.code\n",
+        origin = f.origin,
+        cfg = cfg.display(),
+        out = out.display(),
+    );
+    std::fs::write(f.home.join("inner.sh"), inner).unwrap();
+    // Sixteen nested shells; the trailing `:` keeps each from exec'ing the
+    // next in place.
+    let nest = format!("if [ \"$1\" -gt 0 ]; then sh \"$0\" $(($1 - 1)); :; else sh '{}' depth; :; fi\n", f.home.join("inner.sh").display());
+    std::fs::write(f.home.join("nest.sh"), nest).unwrap();
+    let script = format!(
+        "sh '{nest}' 16; bash -c \"exec -a claude bash '{inner}' fake-claude\"; echo '{{}}'",
+        nest = f.home.join("nest.sh").display(),
+        inner = f.home.join("inner.sh").display()
+    );
+    f.sensor("forger", &format!("kind: command\ninterval: 1\nmin_interval: 1\nargv: [sh, -c, {}]\noutput: json\n", serde_json::to_string(&script).unwrap()));
+    let run = f.run();
+    run.wait_for("both probes", Duration::from_secs(30), |_| out.join("fake-claude.code").exists());
+    drop(run);
+    let read = |n: &str| std::fs::read_to_string(out.join(n)).unwrap_or_default();
+    for probe in ["depth", "fake-claude"] {
+        assert!(!read(&format!("{probe}.out")).contains("sess-forged"), "{probe}: the forged session resolved");
+        assert_eq!(read(&format!("{probe}.code")).trim(), "3", "{probe}: {}", read(&format!("{probe}.err")));
+        assert!(read(&format!("{probe}.err")).contains(REFUSAL), "{probe}: {}", read(&format!("{probe}.err")));
+    }
+}
