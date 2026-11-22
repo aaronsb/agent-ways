@@ -68,7 +68,7 @@ pub fn peers() -> Peers {
         .into_iter()
         .map(|(sid, peer_cwd, _project, status, ctx)| {
             let instance = registry.lookup(&peer_cwd, &sid);
-            let here = peer_cwd == cwd;
+            let here = attend_presence::session::same_dir(&peer_cwd, &cwd);
             agent(Some(sid), &peer_cwd, instance, status, Some(ctx), here)
         })
         .collect();

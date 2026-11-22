@@ -448,7 +448,7 @@ impl Reader {
             let memory = match t.get("memory").map(Value::as_str) {
                 None | Some(Some("store")) => Memory::Store,
                 Some(Some("session")) if matches!(test, Test::State(_)) => {
-                    self.bad(format!("{at}.memory"), "memory: session is not yet supported on a state trigger; use store, or leave memory unset");
+                    self.bad(format!("{at}.memory"), "memory: session does not apply to a state trigger, which compares against the last state its store kept; use store, or leave memory unset");
                     Memory::Store
                 }
                 Some(Some("session")) => Memory::Session,
@@ -571,7 +571,15 @@ impl Reader {
                             "contains" => Some(Op::Contains(arg.clone())),
                             "in" => arg.as_sequence().map(|s| Op::In(s.clone())),
                             "like" => arg.as_str().map(|s| Op::Like(s.to_string())),
-                            "matches" => arg.as_str().map(|s| Op::Matches(s.to_string())),
+                            "matches" => match arg.as_str().map(regex::Regex::new) {
+                                Some(Ok(re)) => Some(Op::Matches(crate::Pattern(re))),
+                                Some(Err(e)) => {
+                                    let why = e.to_string().lines().last().unwrap_or_default().trim().to_string();
+                                    self.bad(format!("{at}.{op}"), format!("not a regular expression: {why}"));
+                                    continue;
+                                }
+                                None => None,
+                            },
                             "above" => num(arg).map(Op::Above),
                             "below" => num(arg).map(Op::Below),
                             _ => {

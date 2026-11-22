@@ -506,7 +506,8 @@ pub enum Memory {
     /// first poll whose result meets `where`. The trigger fires at most once
     /// in the session, whatever it compares on. The host carries the memory
     /// across its own restarts within the session. An item trigger only:
-    /// a state trigger refuses it until state triggers are evaluated.
+    /// a state trigger refuses it, since it compares against the last state its
+    /// store kept.
     Session,
 }
 
@@ -550,10 +551,20 @@ pub enum Op {
     Contains(Value),
     /// A glob.
     Like(String),
-    /// A regular expression.
-    Matches(String),
+    /// A regular expression, compiled when the file loads.
+    Matches(Pattern),
     Above(f64),
     Below(f64),
+}
+
+/// A compiled regular expression. Two are equal when their source text is.
+#[derive(Debug, Clone)]
+pub struct Pattern(pub regex::Regex);
+
+impl PartialEq for Pattern {
+    fn eq(&self, other: &Pattern) -> bool {
+        self.0.as_str() == other.0.as_str()
+    }
 }
 
 /// A declared state field's type.

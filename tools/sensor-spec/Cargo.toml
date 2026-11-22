@@ -7,3 +7,5 @@ license = "AGPL-3.0-or-later"
 
 [dependencies]
 serde_yaml = "0.9"
+# A `matches` condition is compiled when its file loads.
+regex = "1"

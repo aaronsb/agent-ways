@@ -182,6 +182,8 @@ dependencies = [
  "clap",
  "clap-markdown",
  "claude-sessions",
+ "libc",
+ "regex",
  "sensor-keepwarm",
  "sensor-peers",
  "sensor-processes",
@@ -1663,6 +1665,7 @@ dependencies = [
 name = "sensor-spec"
 version = "0.1.0"
 dependencies = [
+ "regex",
  "serde_yaml",
 ]
 

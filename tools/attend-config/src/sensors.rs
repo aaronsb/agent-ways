@@ -116,6 +116,10 @@ pub struct Loaded {
     pub findings: Vec<Finding>,
     /// Why a project file was refused.
     pub refused: Option<String>,
+    /// The layer of the highest merged file that sets what a command runs:
+    /// its `argv`, `env` or `cwd`. A project file there puts the command
+    /// under the project's environment rule, whatever lower files set.
+    pub command_from: Option<Origin>,
 }
 
 impl Loaded {
@@ -268,7 +272,7 @@ fn layer(name: String, reads: Vec<Read>, trust: bool, project: &Path) -> Loaded 
             .collect::<Vec<_>>()
     };
     if findings.iter().any(|f| f.problem.severity == Severity::Invalid) {
-        return Loaded { files: files_of(false, &docs), name, spec: None, findings, refused: None };
+        return Loaded { files: files_of(false, &docs), name, spec: None, findings, refused: None, command_from: None };
     }
     let merged = |docs: &[(Origin, Option<PathBuf>, Value)]| {
         let mut out = Value::Mapping(Default::default());
@@ -322,7 +326,8 @@ fn check(name: String, files: Vec<SensorFile>, docs: &[(Origin, Option<PathBuf>,
         };
         findings.push(Finding { file, line, problem });
     }
-    Loaded { name, files, spec: if invalid { None } else { spec }, findings, refused: None }
+    let command_from = docs.iter().rev().find(|(_, _, v)| ["argv", "env", "cwd"].iter().any(|k| v.get(*k).is_some())).map(|(o, _, _)| *o);
+    Loaded { name, files, spec: if invalid { None } else { spec }, findings, refused: None, command_from }
 }
 
 /// Put a compiled sensor with a fixed lane ([`Crate::lane`]) on that lane,
@@ -649,6 +654,23 @@ mod tests {
         let Block::Command(c) = l.spec.as_ref().unwrap().block.clone() else { panic!() };
         assert_eq!(c.argv, vec!["/bin/true".to_string()]);
         assert!(l.refused.is_some() && !l.is_refused());
+    }
+
+    /// The layer of the highest file that sets what a command runs, so a
+    /// trusted project file that changes a user command's argv, env or cwd
+    /// puts it under the project's rule, and one that tunes its cadence
+    /// does not.
+    #[test]
+    fn the_layer_that_sets_the_command_is_carried() {
+        let cmd = "kind: command\nargv: [/bin/true]\noutput: lines\n";
+        let from = |over: &str, trust: bool| layer("chk".into(), vec![read(Origin::User, cmd), read(Origin::Project, over)], trust, Path::new("/p")).command_from;
+        assert_eq!(from("argv: [/bin/false]\n", true), Some(Origin::Project));
+        assert_eq!(from("env: {A: b}\n", true), Some(Origin::Project));
+        assert_eq!(from("cwd: sub\n", true), Some(Origin::Project));
+        assert_eq!(from("interval: 90\n", true), Some(Origin::User));
+        assert_eq!(from("argv: [/bin/false]\n", false), Some(Origin::User), "a refused project file is not merged");
+        let shipped = layer("chk".into(), vec![read(Origin::Builtin, cmd)], false, Path::new("/p"));
+        assert_eq!(shipped.command_from, Some(Origin::Builtin));
     }
 
     #[test]

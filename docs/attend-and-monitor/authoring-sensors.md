@@ -21,11 +21,11 @@ When you build a sensor, emit measurable transitions. If a description is about 
 | Kind | Host | The poll | In this release |
 |---|---|---|---|
 | `crate` | attend | compiled code | hosted: polled under the file's name, cadence, threshold and lane |
-| `command` | attend | an argv run directly, with no shell | parsed, checked, listed and linted; `degraded` until ADR-403 slice 2 |
+| `command` | attend | an argv run directly, with no shell | runs: attend runs the argv each poll and evaluates its output |
 | `mcp` | attend | one read-only tool call on a stdio MCP server | parsed, checked, listed and linted; `degraded` until slice 3 |
 | `ways` | ways (ADR-199) | the session's hook stream | attend lists it as `degraded` and never runs it |
 
-Triggers, declared state, `where` conditions, JSONPath and templates parse and are checked when a file loads. attend evaluates them, and writes declared state to the store, from slice 2. `attend sensor probe` arrives with slice 3. `ways settings` reaches the shared fields of every sensor file ([Settings keys](#settings-keys)); write the other fields in the files directly, and `ways settings lint` checks them.
+Triggers, declared state, `where` conditions, JSONPath and templates parse and are checked when a file loads. attend evaluates them over each command sensor's output and writes declared state to the store. `attend sensor probe` arrives with mcp sensors. `ways settings` reaches the shared fields of every sensor file ([Settings keys](#settings-keys)); write the other fields in the files directly, and `ways settings lint` checks them.
 
 ## What sensor authors are designing around
 
@@ -160,10 +160,28 @@ A `command` sensor runs one program each poll. [`example-command.yaml`](../../at
 | Field | Value | Unset |
 |---|---|---|
 | `argv` | the program and its arguments, run directly with no shell; name a shell when the command needs a pipe | required |
-| `env` | extra environment, as `name: value` | none |
+| `env` | extra environment, as `name: value`, added to what the command inherits | none |
 | `cwd` | the directory it runs in | the project attend runs for |
 | `timeout` | seconds before the run is killed, 1 to 600 | 10 |
 | `output` | `json`: one JSON document, the poll result, with an optional top-level `state` object of emitted fields; `lines`: `magnitude\|description` lines | required |
+
+The session's variables and tokens are kept out of the command's environment. What it inherits depends on the layer of the highest file that sets its `argv`, `env` or `cwd`:
+
+- **A shipped or user file:** attend's environment, less every variable whose name starts with `CLAUDE` (Claude Code's session id, project directory, config directory and OAuth token), `ANTHROPIC_` (the API key and base URL) or `ATTEND_` (attend's own markers for its restarts and session moves), and the variables `AI_AGENT` and `AWS_BEARER_TOKEN_BEDROCK`. General-purpose credentials and terminal variables, such as `AWS_*`, `GOOGLE_*`, `TMUX*` and `SSH_AUTH_SOCK`, still reach it.
+- **A project file:** an empty environment with only `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, every `LC_*`, `TZ`, `TMPDIR`, `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS` carried over. A project file that sets `argv`, `env` or `cwd` over a user file puts the command under this rule; one that only tunes its cadence does not.
+
+In both cases the file's `env` adds on top, and a name it sets replaces the inherited value.
+
+This is not a sandbox: the command runs as the operator, with the operator's files and network. attend finds the session through parent processes, not the environment, and it refuses to act as the session for any process with a sensor host (`attend run`, and later `attend sensor host`) anywhere among its ancestors, up to pid 1. A host is a process whose command line is `attend run` or `attend sensor host`, directly or through an interpreter such as `sh /path/attend run`, or whose executable file is named `attend` with those arguments. So an `attend` a sensor command runs refuses every verb that sends, replies, joins, listens, drains or reads the session's messages, store or enrollment, with "this attend was started by a sensor command, so it does not act as the session". It keeps the verbs that need no session: `message cleanup`, `peer list`, `channel list`, `sensor list`, `sensor permissions` and `config`. A sensor of your own that ran `attend message send` to notify you is refused now; write the notice as the sensor's output instead.
+
+The guard stops a sensor command from acting as the session by accident or through `attend`. It is not a defence against a hostile command running as you. Because the command runs as the same user, it does not cover:
+
+- writing a Claude Code session record, which takes effect only for a process that has also orphaned itself away from the host;
+- writing attend's store or signal files directly;
+- reading Claude Code's environment from `/proc/<pid>/environ` or `ps eww`;
+- typing into the session's terminal, for example with `tmux send-keys`;
+- starting `claude` after orphaning itself;
+- running verbs as an unresolved caller, as any shell outside Claude Code does.
 
 A `lines` sensor's lines are its observations, read as the retired script sensor's were; a `state` block needs `output: json`. A timeout, a non-zero exit, a failed exec or output that does not parse is the sensor's recorded state, shown by `attend sensor list`.
 
@@ -216,9 +234,9 @@ A trigger fires on a change between two polls, never while a condition merely ho
   description: "systemd user unit {unit} failed"
 ```
 
-- `path` selects the items, and `key` names the field that identifies one across polls.
-- `on` is `added`, `removed` or `changed` against the previous poll, or `enters` or `leaves` the `where` condition. `enters` and `leaves` need a `where`.
-- `where` maps each property to a value or to operators. A bare value tests equality; a bare string with `*`, `?` or `[…]` is a glob, and a property name may be a glob too (`"wind_*"` tests every matching field). The operators are `equals`, `not`, `in` (a list), `contains`, `like` (a glob), `matches` (a regular expression), `above` and `below` (numbers). Conditions do not nest, and a bare list is written `in: [...]`.
+- `path` selects the items, and `key` names the field that identifies one across polls. An item that lacks the key field is skipped. A trigger with a wildcard path and no `key` identifies each item by its JSON text, so a changed item reads as one removed and one added, and `changed` never fires.
+- `on` is `added`, `removed` or `changed` against the previous poll, or `enters` or `leaves` the `where` condition. `enters` and `leaves` need a `where`. For `added`, `removed` and `changed`, only the items that meet `where` count, so `removed` also fires when an item stops meeting `where`.
+- `where` maps each property to a value or to operators. A bare value tests equality; a bare string with `*`, `?` or `[…]` is a glob, and a property name may be a glob too: `"wind_*"` tests every matching field, and holds when at least one field matches and every matching field meets the condition. A glob property name matches the item's top-level fields only. A dotted property such as `user.name` reads a nested field. A property the item lacks fails its condition, so `not: x` on a missing property does not hold either. `equals` and `not` compare exactly, with no glob, and numbers compare by value, so `1` equals `1.0`. The operators are `equals`, `not`, `in` (a list), `contains`, `like` (a glob), `matches` (a regular expression), `above` and `below` (numbers). Conditions do not nest, and a bare list is written `in: [...]`.
 - `match` combines the properties: `all` (unset) or `any`.
 
 **A state trigger** looks at declared state fields, each mapped to `changed`, or for a number `rises` or `falls`, combined by `match`:
@@ -230,7 +248,7 @@ A trigger fires on a change between two polls, never while a condition merely ho
   description: "{state.failed} units still failed, down from {prev.failed}"
 ```
 
-A trigger tests `state` or `path` with `on`, never both.
+A trigger tests `state` or `path` with `on`, never both. A state trigger compares the fields after the poll's write with the values its store kept, so the first poll of a fresh store sets a baseline and fires nothing. A write the checks refuse leaves the state as it was, so the state triggers see no change on that poll.
 
 ### Memory and expiry
 
@@ -249,11 +267,11 @@ Two fields set where a trigger keeps what it last saw and how long what it repor
 
 - `memory` is `store` or `session`, and unset is `store`. With `store`, the trigger's memory lives in the sensor's store for the session ([The store](#the-store)) and survives a restart. A fresh store's first poll sets a baseline and fires nothing, and after that the trigger fires on each change. The memory is kept with a fingerprint of what the trigger tests: a hash of its `path`, `key`, `on`, `where`, `match` and `state` fields as the file writes them, with keys in sorted order. A trigger whose fingerprint changes starts from a fresh baseline even when it keeps its name, and so does a renamed trigger, because the memory is kept under the name. The fingerprint depends on the file alone, so an upgrade of attend keeps every trigger's memory.
 - With `memory: session`, the memory belongs to the session and is not written to the store. It starts empty and takes no baseline, so the first poll is compared against nothing seen: `on: enters` fires on the first poll whose result meets `where`, even when the condition already held when the session started. The trigger then fires at most once in the session, whatever `on` it uses: a condition that leaves and enters again, a later item or a later change fires nothing more. The once-per-session mark belongs to the fingerprint, not the name. Renaming a trigger that has fired keeps it silent, and editing what it tests makes a new definition, which may fire once more in the session. The memory travels in the session's checkpoint, so it survives `attend run` restarting itself after a sensor file or the binary changes. Use it for a notice each session should get once, such as an update check.
-- `memory: session` on a state trigger is not yet supported, and the sensor is invalid until the trigger uses `store` or leaves `memory` unset. State triggers gain it once attend evaluates them.
+- `memory: session` does not apply to a state trigger, which compares against the last state its store kept, and the sensor is invalid until the trigger uses `store` or leaves `memory` unset.
 - `expires` is a whole number of seconds from 1 to 2592000 (30 days), or `session`. A report lapses that many seconds after it is written, or with `session` stays until the session reads it. Unset is 3600, the event lane's decay window.
 - Any other value of either field makes the sensor invalid, and the lint message says what the field takes.
 
-Both fields parse and lint today. They take effect once attend runs triggers, with slice 2.
+Both fields parse and lint. attend records each report's `expires` with the report, and it takes effect once the sensor host writes reports as signals to the session (#1311).
 
 ### Templates
 
@@ -284,17 +302,17 @@ ADR-136 draws the lane boundary at authored communication: words a person or age
 | Command | What it does |
 |---|---|
 | `attend sensor list [--json]` | every sensor the files declare: kind, origin, file, source and version, state, lane, interval, and each reason and note; `--json` prints each sensor as an item, with an `overrides` list of the higher layers' files, then its fields and the last poll: this session's own, or from a shell the newest of any session in the project |
-| `attend sensor poll <name> [--dry-run] [--json]` | one real poll of a crate sensor, passed through its threshold and lane, delivered as `attend run` would unless `--dry-run` |
+| `attend sensor poll <name> [--dry-run] [--json]` | one real poll of a crate or command sensor, with each trigger's verdict, passed through its threshold and lane, delivered as `attend run` would unless `--dry-run` |
 | `attend sensor fire <name>[/<trigger>] [--input FILE\|-] [--dry-run] [--commit] [--json]` | a synthetic result through the sensor's threshold, lane and delivery, each line marked `[test]` |
 | `attend sensor permissions` | each sensor's `requires` against `~/.claude/settings.json` |
 
-A crate sensor's `--input` is a JSON list of `{magnitude, description}` objects or `magnitude|description` lines, from a file or `-` for stdin; with none, `fire` sends one observation at the sensor's threshold. Each verdict says whether the result was delivered, and at which priority, or held, with the accumulated magnitude against the threshold. A low-priority delivery is logged and wakes no one. A compiled sensor's first poll sets its baseline, so `poll` on a fresh process often reports no observations.
+A command sensor with `output: json` takes a poll result as `--input`, one JSON document, and runs it through its declared state and triggers. A crate sensor's, or an `output: lines` sensor's, `--input` is a JSON list of `{magnitude, description}` objects or `magnitude|description` lines, from a file or `-` for stdin; with none, `fire` sends one observation at the sensor's threshold. Each verdict says whether the result was delivered, and at which priority, or held, with the accumulated magnitude against the threshold. A low-priority delivery is logged and wakes no one. A compiled sensor's first poll sets its baseline, so `poll` on a fresh process often reports no observations.
 
-`<name>/<trigger>` addresses one trigger, and `--commit` keeps the trigger state and store a fire leaves. Both take effect once attend hosts `command` and `mcp` sensors; a crate sensor has no triggers, and `--commit` changes nothing on it. `poll` and `fire` record nothing in the sensor's store. A name with no sensor exits 2; a sensor attend cannot poll here, such as a `command` file or one that is `invalid`, exits 3.
+`<name>/<trigger>` addresses one trigger, and `--commit` keeps the trigger memory and declared state a fire leaves. `--commit` with one trigger named is refused, because a commit advances the whole sensor and advancing one trigger alone would leave the others' memory behind. A crate sensor has no triggers, and `--commit` changes nothing on it. `poll` and `fire` compare against this session's store and write nothing to it, except a fire with `--commit`. A name with no sensor exits 2; a sensor attend cannot poll here, such as an `mcp` file or one that is `invalid`, exits 3.
 
 ## The store
 
-Each poll `attend run` makes is recorded in the sensor's store, one JSON file per sensor, project and session under `$XDG_STATE_HOME/agent-ways/attend/sensor-state/`, named by a hash of the three. Each report goes to one session, so two sessions in one project keep separate stores, and each starts from its own baseline. A sensor keeps a store only when attend knows the session's id, so each store has one writer: an `attend run` whose session did not resolve keeps none, and neither do `attend sensor poll` and `fire`. The store holds the last poll's time, whether it succeeded, why it failed, and how many observations it returned, and the memory of each trigger with `memory: store`. `attend sensor list` reads it for the `failing` state and `last_poll`: the session's own store, or from a shell the newest poll of any session in the project. The declared state joins it once attend hosts `command` and `mcp` sensors.
+Each poll `attend run` makes is recorded in the sensor's store, one JSON file per sensor, project and session under `$XDG_STATE_HOME/agent-ways/attend/sensor-state/`, named by a hash of the three. Each report goes to one session, so two sessions in one project keep separate stores, and each starts from its own baseline. A sensor keeps a store only when attend knows the session's id: an `attend run` whose session did not resolve keeps none. `attend sensor poll` and `fire` read the session's store and write nothing to it, except a fire with `--commit`. A running sensor reads its store again before a poll when another writer, such as a committed fire, changed it, so the commit is kept. The store holds the last poll's time, whether it succeeded, why it failed, and how many observations it returned, the memory of each trigger with `memory: store`, and the declared state with a fingerprint of the declaration that wrote it. A store whose state another declaration wrote, or that fails the checks, loses its state and its state triggers' memory, and the next poll records why. `attend sensor list` reads it for the `failing` state and `last_poll`: the session's own store, or from a shell the newest poll of any session in the project.
 
 Each store file records its format and its sensor, project and session. A file of an older format, such as one keyed by sensor and project alone, or one whose key does not match, reads as no store, so the sensor starts from a baseline. When `attend run` starts its sensors, it removes every file of the directory not written for 30 days, and every `.json` file that is not valid JSON or whose `store` format is missing or older than the current one. It leaves a store of a newer format alone, so a newer attend on the same machine keeps its stores, and it skips a file it cannot read. After `/clear`, `attend run` moves the session's stores to its new id.
 

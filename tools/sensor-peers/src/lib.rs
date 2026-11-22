@@ -697,7 +697,7 @@ impl Sensor for PeerSensor {
         // First poll: establish baseline
         if !self.baseline_established {
             let same_dir: Vec<&PeerSummary> = current.values()
-                .filter(|p| p.cwd == focus.working_dir)
+                .filter(|p| attend_presence::session::same_dir(&p.cwd, &focus.working_dir))
                 .collect();
             eprintln!(
                 "[attend] peers: baseline — {} sessions ({} in this project)",
@@ -713,12 +713,12 @@ impl Sensor for PeerSensor {
         // New peers
         for (sid, peer) in &current {
             if !self.prior.contains_key(sid) {
-                let relevance = if peer.cwd == focus.working_dir {
+                let relevance = if attend_presence::session::same_dir(&peer.cwd, &focus.working_dir) {
                     "same project"
                 } else {
                     "other project"
                 };
-                let magnitude = if peer.cwd == focus.working_dir { 3.0 } else { 1.0 };
+                let magnitude = if attend_presence::session::same_dir(&peer.cwd, &focus.working_dir) { 3.0 } else { 1.0 };
                 observations.push((magnitude, format!(
                     "peer session started: {} [{}] ({}, {}, ctx {:.0}%)",
                     peer.project_name, peer.cwd, relevance, peer.status, peer.context_percent
@@ -729,7 +729,7 @@ impl Sensor for PeerSensor {
         // Exited peers
         for (sid, peer) in &self.prior {
             if !current.contains_key(sid) {
-                let magnitude = if peer.cwd == focus.working_dir { 2.0 } else { 0.5 };
+                let magnitude = if attend_presence::session::same_dir(&peer.cwd, &focus.working_dir) { 2.0 } else { 0.5 };
                 observations.push((magnitude, format!(
                     "peer session exited: {} [{}]", peer.project_name, peer.cwd
                 )));
@@ -740,7 +740,7 @@ impl Sensor for PeerSensor {
         for (sid, peer) in &current {
             if let Some(prior) = self.prior.get(sid) {
                 // Only track peers in same project
-                if peer.cwd != focus.working_dir {
+                if !attend_presence::session::same_dir(&peer.cwd, &focus.working_dir) {
                     continue;
                 }
 

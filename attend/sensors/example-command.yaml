@@ -10,17 +10,14 @@
 #      it prints.
 #   3. Run `attend sensor poll <name>` to see one real poll and each
 #      trigger's verdict, and `attend sensor fire <name>/<trigger> --input
-#      FILE` to send a sample result through the triggers.
+#      FILE` to send a sample result through the triggers. Neither writes
+#      the sensor's store; `fire --commit` does.
 #   4. Set `enabled: true`. `attend sensor list` shows its state.
 #
 # A command file in a project's .claude/attend/sensors/ runs code the
 # repository's author chose, so it loads only when that project is listed in
 # attend.project_sensors in $XDG_CONFIG_HOME/attend/config.yaml. Until then
 # `attend sensor list` shows it as refused.
-#
-# attend hosts command sensors from slice 2 of ADR-403; before that, an
-# enabled copy loads and lints, and `attend sensor list` shows it as
-# degraded.
 
 # The spec version the file is written to.
 spec: 1
@@ -54,7 +51,15 @@ argv:
   - sh
   - -c
   - "systemctl --user list-units --failed --output=json | jq '{units: ., state: {failed: length}}'"
-# Extra environment, as name: value.
+# Extra environment, as name: value, added to what the command inherits.
+# From a shipped or user file the command inherits attend's environment
+# less every variable starting CLAUDE, ANTHROPIC_ or ATTEND_ and the
+# variables AI_AGENT and AWS_BEARER_TOKEN_BEDROCK, so the session's
+# variables and tokens stay out of it; other credentials such as AWS_* and
+# GOOGLE_* still reach it. From a project file it inherits only PATH,
+# HOME, USER, LOGNAME, SHELL, LANG, LC_*, TZ, TMPDIR, XDG_RUNTIME_DIR and
+# DBUS_SESSION_BUS_ADDRESS. This is not a sandbox: the command runs as
+# you. An attend it runs refuses to act as the session.
 env: {}
 # The directory it runs in; unset is the project attend runs for.
 # cwd: .
@@ -113,7 +118,8 @@ triggers:
     # starts empty with no baseline, so the first poll whose result meets
     # `where` fires. The trigger then fires at most once in the session,
     # even when the condition leaves and enters again. An item trigger
-    # takes either; a state trigger takes store only, for now.
+    # takes either; a state trigger takes store only, since it compares
+    # against the last state its store kept.
     # Both kinds of memory are kept under a fingerprint of what the trigger
     # tests: its path, key, on, where, match and state as written here.
     # Editing those starts it from a fresh baseline, and under session

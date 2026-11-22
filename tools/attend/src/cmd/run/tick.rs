@@ -701,7 +701,7 @@ mod tests {
         let t = sensor_spec::parse("ways-update", &serde_yaml::from_str(doc).unwrap()).spec.unwrap().triggers.remove(0);
         let mut s = sensors::hosted::FileSensor::new("ways-update".into(), sensor_spec::DEFAULTS, Box::new(Marked("inner")), "/p", None, false);
         let behind = sensors::hosted::Seen::from([("$".to_string(), serde_json::json!(true))]);
-        assert_eq!(s.observe(&t, behind), Some(vec!["$".to_string()]));
+        assert_eq!(s.observe(&t, behind), vec!["$".to_string()]);
         (s, t)
     }
 
@@ -730,9 +730,9 @@ mod tests {
         let mut restarted = sensors::hosted::FileSensor::new("ways-update".into(), sensor_spec::DEFAULTS, Box::new(Marked("inner")), "/p", None, false);
         restarted.import_state(&state);
         let behind = || sensors::hosted::Seen::from([("$".to_string(), serde_json::json!(true))]);
-        assert_eq!(restarted.observe(&t, behind()), Some(vec![]));
+        assert_eq!(restarted.observe(&t, behind()), Vec::<String>::new());
         let mut fresh = sensors::hosted::FileSensor::new("ways-update".into(), sensor_spec::DEFAULTS, Box::new(Marked("inner")), "/p", None, false);
-        assert_eq!(fresh.observe(&t, behind()), Some(vec!["$".to_string()]), "without the restore it would fire again");
+        assert_eq!(fresh.observe(&t, behind()), vec!["$".to_string()], "without the restore it would fire again");
     }
 
     #[test]
