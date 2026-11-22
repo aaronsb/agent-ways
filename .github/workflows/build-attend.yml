@@ -67,7 +67,7 @@ jobs:
       component: attend
       test-os: '["ubuntu-latest", "macos-latest"]'
       test: |
-        cargo test --manifest-path tools/Cargo.toml -p attend -p attend-presence
+        cargo test --manifest-path tools/Cargo.toml -p attend -p attend-presence --no-fail-fast
       release-notes: |-
         Pre-built attend binaries for 4 platforms.
 
