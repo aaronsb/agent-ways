@@ -15,6 +15,7 @@
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command as Process, Stdio};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use sensor_spec::{CommandBlock, Output};
@@ -46,45 +47,58 @@ impl Source for Command {
     }
 }
 
-/// Run `block` from `project` and return its stdout.
+/// Run `block` from `project` and return its stdout. The command runs in
+/// a process group of its own, so the timeout ends it and everything it
+/// started, and the timeout covers its pipes too: a process left behind
+/// that holds stdout open ends with the group at the deadline.
 fn run(block: &CommandBlock, project: &Path) -> Result<String, String> {
     let Some((program, args)) = block.argv.split_first() else { return Err("its argv is empty".into()) };
     let cwd = block.cwd.as_ref().map_or(project.to_path_buf(), |c| project.join(c));
-    let mut child = Process::new(program)
-        .args(args)
-        .envs(&block.env)
-        .current_dir(&cwd)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("cannot run {program}: {e}"))?;
-    let reader = |pipe: Option<Box<dyn Read + Send>>| {
+    if !cwd.is_dir() {
+        return Err(format!("its cwd {} is not a directory", cwd.display()));
+    }
+    let mut cmd = Process::new(program);
+    cmd.args(args).envs(&block.env).current_dir(&cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+    let mut child = cmd.spawn().map_err(|e| format!("cannot run {program}: {e}"))?;
+    let (tx, rx) = mpsc::channel::<(bool, Vec<u8>)>();
+    for (is_out, pipe) in [(true, child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>)), (false, child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>))] {
+        let tx = tx.clone();
         std::thread::spawn(move || {
             let mut buf = Vec::new();
             if let Some(p) = pipe {
                 p.take(MAX_OUTPUT + 1).read_to_end(&mut buf).ok();
             }
-            buf
-        })
-    };
-    let stdout = reader(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
-    let stderr = reader(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+            tx.send((is_out, buf)).ok();
+        });
+    }
     let deadline = Instant::now() + Duration::from_secs(block.timeout);
+    let timed_out = |child: &mut std::process::Child| {
+        kill_group(child);
+        child.wait().ok();
+        Err(format!("{program} timed out after {}s", block.timeout))
+    };
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() >= deadline => {
-                child.kill().ok();
-                child.wait().ok();
-                return Err(format!("{program} timed out after {}s", block.timeout));
-            }
+            Ok(None) if Instant::now() >= deadline => return timed_out(&mut child),
             Ok(None) => std::thread::sleep(Duration::from_millis(20)),
             Err(e) => return Err(format!("cannot wait for {program}: {e}")),
         }
     };
-    let out = stdout.join().unwrap_or_default();
-    let err = stderr.join().unwrap_or_default();
+    let (mut out, mut err) = (None, None);
+    while out.is_none() || err.is_none() {
+        match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            Ok((true, buf)) => out = Some(buf),
+            Ok((false, buf)) => err = Some(buf),
+            Err(_) => return timed_out(&mut child),
+        }
+    }
+    let (out, err) = (out.unwrap_or_default(), err.unwrap_or_default());
+    if out.len() as u64 > MAX_OUTPUT {
+        return Err(format!("{program} printed more than {} KiB", MAX_OUTPUT / 1024));
+    }
     if !status.success() {
         let first = String::from_utf8_lossy(&err).lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default().to_string();
         let code = status.code().map_or("a signal".to_string(), |c| format!("status {c}"));
@@ -93,10 +107,18 @@ fn run(block: &CommandBlock, project: &Path) -> Result<String, String> {
             false => format!("{program} exited with {code}: {first}"),
         });
     }
-    if out.len() as u64 > MAX_OUTPUT {
-        return Err(format!("{program} printed more than {} KiB", MAX_OUTPUT / 1024));
-    }
     String::from_utf8(out).map_err(|_| format!("{program} printed text that is not UTF-8"))
+}
+
+/// End `child` and every process in its group.
+fn kill_group(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    // SAFETY: kill(2) takes no pointers; a negative pid names the process
+    // group the child leads, which process_group(0) made.
+    unsafe {
+        libc::kill(-(child.id() as i32), libc::SIGKILL);
+    }
+    child.kill().ok();
 }
 
 /// `magnitude|description` lines, blank lines skipped.
@@ -151,5 +173,32 @@ mod tests {
         assert!(fetch("echo '{not json'", Output::Json, 10).unwrap_err().starts_with("its output is not one JSON document: "));
         let missing = CommandBlock { argv: vec!["/nonexistent/sensor-cmd".into()], env: BTreeMap::new(), cwd: None, timeout: 10, output: Output::Json };
         assert!(Command::new(missing, "/").fetch().unwrap_err().starts_with("cannot run /nonexistent/sensor-cmd: "));
+        let gone = CommandBlock { argv: vec!["sh".into()], env: BTreeMap::new(), cwd: Some("nonexistent-dir".into()), timeout: 10, output: Output::Json };
+        assert_eq!(Command::new(gone, "/").fetch().unwrap_err(), "its cwd /nonexistent-dir is not a directory");
+        assert_eq!(fetch("head -c 2000000 /dev/zero | tr '\\0' a", Output::Json, 10).unwrap_err(), "sh printed more than 1024 KiB");
+    }
+
+    /// A process the command leaves behind holding stdout open does not
+    /// hold the poll past its timeout.
+    #[test]
+    fn the_timeout_covers_a_background_process_holding_the_pipe() {
+        let started = Instant::now();
+        assert_eq!(fetch("sleep 30 & echo {}", Output::Json, 1).unwrap_err(), "sh timed out after 1s");
+        assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
+    }
+
+    /// The timeout ends the whole process group, not only the shell.
+    #[test]
+    fn the_timeout_ends_what_the_command_started() {
+        let dir = std::env::temp_dir().join(format!("attend-cmd-group-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pidfile = dir.join("pid");
+        let script = format!("sleep 30 & echo $! > {}; wait", pidfile.display());
+        assert_eq!(fetch(&script, Output::Json, 1).unwrap_err(), "sh timed out after 1s");
+        let pid = std::fs::read_to_string(&pidfile).unwrap().trim().to_string();
+        std::thread::sleep(Duration::from_millis(100));
+        let alive = std::process::Command::new("kill").args(["-0", &pid]).stderr(Stdio::null()).status().unwrap().success();
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(!alive, "the background sleep {pid} outlived the timeout");
     }
 }
