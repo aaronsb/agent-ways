@@ -408,6 +408,22 @@ impl Trigger {
     pub fn expiry(&self) -> Expires {
         self.expires.unwrap_or(Expires::Seconds(bounds::EXPIRES_DEFAULT))
     }
+
+    /// A short hash of what the trigger tests: its test and how the
+    /// test's conditions combine. The name, magnitude, description, memory
+    /// and expiry leave it alone. Memory kept under another fingerprint
+    /// belongs to a different definition, so the host starts that trigger
+    /// from a fresh baseline. A change to attend's own types can also change
+    /// it, which gives the same fresh baseline.
+    pub fn fingerprint(&self) -> String {
+        let text = format!("{:?}|{:?}", self.test, self.match_);
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in text.bytes() {
+            h ^= b as u64;
+            h = h.wrapping_mul(0x0100_0000_01b3);
+        }
+        format!("{h:016x}")
+    }
 }
 
 /// Where a trigger keeps what it last saw between polls.
@@ -420,8 +436,9 @@ pub enum Memory {
     /// In the host's process. It starts empty and takes no baseline, so the
     /// first poll is compared against nothing seen: `enters` fires on the
     /// first poll whose result meets `where`. The trigger fires at most once
-    /// in the host's life, whatever it compares on. The memory ends with the
-    /// host.
+    /// in the session, whatever it compares on. The host carries the memory
+    /// across its own restarts within the session. An item trigger only:
+    /// a state trigger refuses it until state triggers are evaluated.
     Session,
 }
 

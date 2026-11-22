@@ -124,7 +124,7 @@ impl Reader {
             if k == "lane_exception" {
                 self.problems.push(Problem {
                     at: k.into(),
-                    message: "lane_exception is removed from the sensor spec, and a message-lane sensor names its author instead; delete the field. It is ignored".into(),
+                    message: "lane_exception is removed from the sensor spec and is ignored; delete it. peers and keepwarm keep the message lane without it".into(),
                     severity: Severity::Error,
                 });
                 continue;
@@ -447,6 +447,10 @@ impl Reader {
             };
             let memory = match t.get("memory").map(Value::as_str) {
                 None | Some(Some("store")) => Memory::Store,
+                Some(Some("session")) if matches!(test, Test::State(_)) => {
+                    self.bad(format!("{at}.memory"), "memory: session is not yet supported on a state trigger; use store, or leave memory unset");
+                    Memory::Store
+                }
                 Some(Some("session")) => Memory::Session,
                 Some(_) => {
                     self.bad(format!("{at}.memory"), "memory is store or session");

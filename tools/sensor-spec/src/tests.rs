@@ -69,7 +69,7 @@ fn a_file_carrying_lane_exception_fails_lint_with_a_message_naming_its_removal()
     assert_eq!(e[0].severity, Severity::Error);
     assert_eq!(
         e[0].to_string(),
-        "lane_exception: error: lane_exception is removed from the sensor spec, and a message-lane sensor names its author instead; delete the field. It is ignored"
+        "lane_exception: error: lane_exception is removed from the sensor spec and is ignored; delete it. peers and keepwarm keep the message lane without it"
     );
     let s = p.spec.expect("the sensor still loads, without the field");
     assert_eq!(s.lane(), Lane::Event, "no file field keeps an authorless sensor on the message lane");
@@ -103,6 +103,40 @@ triggers:
     );
     assert_eq!(t[2].expiry(), Expires::Seconds(3600), "with no expires, a trigger's signal lapses after the hour of the decay window");
     assert_eq!(t[0].expiry(), Expires::Session);
+}
+
+#[test]
+fn session_memory_on_a_state_trigger_is_not_yet_supported() {
+    let p = parse("s", &y("kind: command\nargv: [x]\noutput: json\nstate: {n: {type: number}}\ntriggers: [{name: a, state: {n: rises}, memory: session}]\n"));
+    assert!(p.spec.is_none());
+    assert_eq!(invalid(&p), ["triggers.a.memory: memory: session is not yet supported on a state trigger; use store, or leave memory unset"]);
+}
+
+/// The fingerprint follows what a trigger tests, not its name, magnitude
+/// or wording.
+#[test]
+fn a_trigger_s_fingerprint_changes_with_what_it_tests() {
+    let fp = |t: &str| {
+        let doc = format!("kind: command\nargv: [x]\noutput: json\nstate: {{n: {{type: number}}}}\ntriggers: [{t}]\n");
+        let p = parse("s", &y(&doc));
+        assert!(p.problems.is_empty(), "{t}: {:?}", p.problems);
+        p.spec.unwrap().triggers[0].fingerprint()
+    };
+    let base = fp("{name: a, path: \"$\", on: enters, where: {behind: true}}");
+    assert_eq!(base.len(), 16, "{base}");
+    assert!(base.chars().all(|c| c.is_ascii_hexdigit()), "{base}");
+    assert_eq!(base, fp("{name: a, path: \"$\", on: enters, where: {behind: true}}"), "stable for the same definition");
+    assert_eq!(base, fp("{name: b, path: \"$\", on: enters, where: {behind: true}, magnitude: 3, description: other, memory: session, expires: 60}"));
+    for changed in [
+        "{name: a, path: \"$\", on: enters, where: {behind: false}}",
+        "{name: a, path: \"$.x\", on: enters, where: {behind: true}}",
+        "{name: a, path: \"$\", on: leaves, where: {behind: true}}",
+        "{name: a, path: \"$\", key: id, on: enters, where: {behind: true}}",
+        "{name: a, path: \"$\", on: enters, where: {behind: true}, match: any}",
+        "{name: a, state: {n: rises}}",
+    ] {
+        assert_ne!(base, fp(changed), "{changed}");
+    }
 }
 
 #[test]

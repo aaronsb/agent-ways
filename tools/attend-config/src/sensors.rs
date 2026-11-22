@@ -623,7 +623,7 @@ mod tests {
         assert_eq!(s.lane(), sensor_spec::Lane::Event);
         let lines = lint_lines(&l);
         let want = format!(
-            "{}:3: [attend.sensors.git] lane_exception: error: lane_exception is removed from the sensor spec, and a message-lane sensor names its author instead; delete the field. It is ignored",
+            "{}:3: [attend.sensors.git] lane_exception: error: lane_exception is removed from the sensor spec and is ignored; delete it. peers and keepwarm keep the message lane without it",
             path.display()
         );
         assert!(lines.contains(&want), "{lines:#?}");
