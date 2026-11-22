@@ -662,9 +662,10 @@ With `--commit`, each stage under its own header: pull the app source, refresh e
 | `channel` | `release`, or `ref` under `--ref` |
 | `upstream` | The branch's upstream the release channel follows, such as `origin/main`; `null` on `--ref` or a detached checkout |
 | `ref` | The `--ref` value; `null` on the release channel |
-| `target` | The commit the update would land on, the last fetched one when the fetch failed; `null` when none resolved |
+| `target` | The commit the release channel's upstream, or the `--ref`, resolves to after the fetch; the last fetched one when the fetch failed; `null` when none resolved. The update lands on it only when `blocked` is `null` |
 | `fetch_error` | The line git printed that names the failure, the first starting `fatal:` or `error:`, when the fetch failed; `null` when it succeeded |
-| `behind` | `true` when a component the update converges is older than its version at the target, and `false` when none is. A component that is installed counts when it moves. One that is not installed counts only when it is new at the target, in the target's suite or marketplace and not in the checkout's, so a way-embed that is not installed, or a binary whose `--version` fails, does not make `behind` true. When the fetch failed, the target is the last one fetched, so `behind` still answers and `fetch_error` says why. `null` only when no target resolved at all, such as an app that never fetched or an unresolvable `--ref`; no component moves then |
+| `behind` | `true` when a component the update converges is older than its version at the target, and `false` when none is. The rule depends on the kind of component. An installed suite binary on the release channel counts once its release tag, `<name>-v<version>`, is fetched, because the update downloads a release; a version bump on main without its tag does not count. A suite binary that is not installed counts only when it is new at the target, in the target's suite or marketplace and not in the checkout's, so a way-embed that is not installed, or a binary whose `--version` fails, does not make `behind` true. A mod counts by version alone. Under `--ref`, where the update builds from source, a binary counts by version alone. When the fetch failed, the target is the last one fetched, so `behind` still answers and `fetch_error` says why. `null` when `blocked` is set, and when no target resolved at all, such as an app that never fetched or an unresolvable `--ref`; no component moves in the second case |
+| `blocked` | Why the update's `git pull --ff-only` would stop: `detached` when the app checkout is on a detached HEAD, `diverged` when it has commits the upstream lacks and the upstream has commits it lacks. `null` when nothing blocks, and always `null` under `--ref`. The components still report their versions |
 | `summary` | The components that move, joined by commas: `name installed → target`, or `name (new) → target` for a component that is not installed and is new at the target; empty when none moves |
 | `components` | One object per component, mods included: `name`, `installed`, `target` (each `null` when unknown) and `moves`, true for a component counted in `behind` |
 
@@ -676,6 +677,7 @@ With `--commit`, each stage under its own header: pull the app source, refresh e
   "target": "3f1c0a9e6b7d5c2a8e4f1b0d9c6a7e5b4d3c2a1f",
   "fetch_error": null,
   "behind": true,
+  "blocked": null,
   "summary": "ways 1.0.0 → 1.1.0",
   "components": [
     { "name": "ways", "installed": "1.0.0", "target": "1.1.0", "moves": true }

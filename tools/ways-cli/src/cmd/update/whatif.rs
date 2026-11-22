@@ -41,6 +41,10 @@ pub struct Component {
     /// The target ships this component and the checkout does not: it is in
     /// the target's suite-bins or marketplace and not in the checkout's.
     pub new_at_target: bool,
+    /// A suite binary the release channel would download, whose release tag
+    /// is not in the checkout yet: the version bump is on the branch and
+    /// the release is not cut.
+    pub awaiting_tag: bool,
 }
 
 impl Component {
@@ -57,13 +61,16 @@ impl Component {
         }
     }
 
-    /// Whether the update brings this component to the target: an installed
-    /// one that moves, or one new at the target. A component that is not
-    /// installed and not new, such as way-embed on a machine without it or a
-    /// binary whose `--version` fails, is not installed by `--commit`, so it
-    /// stays out of the check.
+    /// Whether the update brings this component to the target. An installed
+    /// one that moves counts, and so does one new at the target. A component
+    /// that is not installed and not new, such as way-embed on a machine
+    /// without it or a binary whose `--version` fails, is not installed by
+    /// `--commit`, so it stays out. A suite binary the release channel
+    /// downloads counts only once its release tag is fetched. Mods, which
+    /// come with the checkout, and anything built from source under `--ref`
+    /// follow the first rule alone.
     pub fn converges(&self) -> bool {
-        self.moves() && (self.installed.is_some() || self.new_at_target)
+        self.moves() && (self.installed.is_some() || self.new_at_target) && !self.awaiting_tag
     }
 }
 
@@ -112,7 +119,12 @@ pub fn gather(app: &Path, channel: Channel, verbose: bool, with_notes: bool) -> 
     let head = git_head(app);
     let (target, fetch_error) = resolve_target(app, &channel);
     let target_rev = target.clone().or_else(|| head.clone());
-    let components = components(app, target_rev.as_deref());
+    let mut components = components(app, target_rev.as_deref());
+    if matches!(channel, Channel::Release { .. }) {
+        for c in components.iter_mut().filter(|c| !c.is_mod() && c.name != "way-embed" && c.moves()) {
+            c.awaiting_tag = !c.target.as_deref().is_some_and(|t| has_tag(app, &format!("{}-v{t}", c.name)));
+        }
+    }
     let moving = components.iter().any(Component::moves);
     let notes = if moving && with_notes { notes::fetch() } else { Ok(notes::Fetched::default()) };
     let relation = relation(app, head.as_deref(), target.as_deref());
@@ -137,9 +149,11 @@ pub fn gather(app: &Path, channel: Channel, verbose: bool, with_notes: bool) -> 
 /// `behind` is true when any component the update converges moves, and false
 /// when none does, compared against the target `gather` resolved. A
 /// component that is not installed counts only when it is new at the
-/// target. A failed fetch leaves the last fetched target in place, so
+/// target, and a suite binary only once its release tag is fetched. When
+/// the pull would stop, on a detached or diverged checkout, `behind` is null
+/// and `blocked` says which. A failed fetch leaves the last fetched target in place, so
 /// `behind` still answers and `fetch_error` carries the error. `behind` is
-/// null, and no component moves, only when no target resolved at all.
+/// null, and no component moves, also when no target resolved at all.
 /// Release notes are not part of it. The update-check sensor reads
 /// `behind`, `summary` and each component's `name`, `installed`, `target`
 /// and `moves`.
@@ -152,6 +166,7 @@ pub fn json(w: &WhatIf) -> serde_json::Value {
         Channel::Release { upstream } => ("release", upstream.clone(), None),
         Channel::Ref(r) => ("ref", None, Some(r.clone())),
     };
+    let blocked = blocked(w);
     let known = w.target.is_some();
     // With no target, every target version is a fallback to the checkout's
     // own, so nothing moves.
@@ -172,7 +187,8 @@ pub fn json(w: &WhatIf) -> serde_json::Value {
         "ref": git_ref,
         "target": w.target,
         "fetch_error": w.fetch_error,
-        "behind": known.then_some(!moving.is_empty()),
+        "behind": (known && blocked.is_none()).then_some(!moving.is_empty()),
+        "blocked": blocked,
         "summary": summary,
         "components": w.components.iter().map(|c| serde_json::json!({
             "name": c.name,
@@ -224,6 +240,23 @@ fn fetch(app: &Path, args: &[&str]) -> Option<String> {
         Ok(o) if o.status.success() => None,
         Ok(o) => Some(failure_line(&String::from_utf8_lossy(&o.stderr))),
         Err(e) => Some(format!("git fetch could not run ({e})")),
+    }
+}
+
+/// Whether the checkout has the tag `name`.
+fn has_tag(app: &Path, name: &str) -> bool {
+    !git_lines(app, &["tag", "--list", name]).is_empty()
+}
+
+/// Why the update's `git pull --ff-only` would stop: on a detached HEAD, or
+/// with history that has diverged from the upstream. None on the release
+/// channel when it would go through, and always None under `--ref`, which
+/// checks the ref out itself.
+fn blocked(w: &WhatIf) -> Option<&'static str> {
+    match (&w.channel, w.relation) {
+        (Channel::Release { upstream: None }, _) => Some("detached"),
+        (Channel::Release { .. }, Relation::Diverged) => Some("diverged"),
+        _ => None,
     }
 }
 
@@ -295,7 +328,7 @@ fn components(app: &Path, rev: Option<&str>) -> Vec<Component> {
             let installed = installed_version(&app.join("bin").join(exe(&name)));
             let target = target_versions.iter().find(|(n, _)| *n == name).map(|(_, v)| v.clone());
             let new_at_target = !checkout_bins.contains(&name);
-            Component { name, installed, target, plugin: None, new_at_target }
+            Component { name, installed, target, plugin: None, new_at_target, awaiting_tag: false }
         })
         .collect();
     let embed_installed = crate::paths::way_embed_in(&crate::paths::corpus_dir()).and_then(|b| installed_version(&b));
@@ -303,7 +336,7 @@ fn components(app: &Path, rev: Option<&str>) -> Vec<Component> {
         Some(r) => show(app, r, "tools/way-embed/way-embed.cpp").and_then(|src| define_version(&src)),
         None => way_embed_source_version(app),
     };
-    out.push(Component { name: "way-embed".into(), installed: embed_installed, target: embed_target, plugin: None, new_at_target: false });
+    out.push(Component { name: "way-embed".into(), installed: embed_installed, target: embed_target, plugin: None, new_at_target: false, awaiting_tag: false });
     let mod_version = |text: Option<String>| -> Option<String> {
         let json: serde_json::Value = serde_json::from_str(&text?).ok()?;
         json.get("version")?.as_str().map(str::to_string)
@@ -328,6 +361,7 @@ fn components(app: &Path, rev: Option<&str>) -> Vec<Component> {
             installed: mod_version(std::fs::read_to_string(app.join(&manifest)).ok()),
             target: mod_version(rev.and_then(|r| show(app, r, &manifest))),
             new_at_target: target_plugins.contains(&name) && !checkout_plugins.contains(&name),
+            awaiting_tag: false,
             plugin: Some(name),
         });
     }
@@ -759,7 +793,7 @@ mod tests {
     const JUDGE_MOD: &str = attend_mod::JUDGE.label;
 
     fn comp(name: &str, i: Option<&str>, t: Option<&str>) -> Component {
-        Component { name: name.into(), installed: i.map(str::to_string), target: t.map(str::to_string), plugin: None, new_at_target: false }
+        Component { name: name.into(), installed: i.map(str::to_string), target: t.map(str::to_string), plugin: None, new_at_target: false, awaiting_tag: false }
     }
 
     fn modc(m: &attend_mod::Mod, i: Option<&str>, t: Option<&str>) -> Component {
@@ -934,7 +968,7 @@ mod tests {
     #[test]
     fn a_mod_new_in_the_release_is_named_for_install() {
         let dir = Path::new("/t/claude");
-        let new = Component { name: "sparkle mod".into(), installed: None, target: Some("1.0.0".into()), plugin: Some("sparkle".into()), new_at_target: true };
+        let new = Component { name: "sparkle mod".into(), installed: None, target: Some("1.0.0".into()), plugin: Some("sparkle".into()), new_at_target: true, awaiting_tag: false };
         // A new ways binary is put in place: it converges the mod.
         assert_eq!(new_mod_line(dir, &new, true), Some((Mark::Act, "/t/claude: install the sparkle mod where it is wanted (new in this release)".into())));
         // The ways binary is not replaced: the old one knows nothing of the mod.
@@ -1046,8 +1080,17 @@ mod tests {
             assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
         }
 
-        /// Commit the seed at `version` and push it to origin.
+        /// Commit the seed at `version`, tag it `ways-v<version>` and push
+        /// both to origin: a cut release.
         fn release(seed: &Path, version: &str) {
+            bump(seed, version);
+            git(seed, &["tag", &format!("ways-v{version}")]);
+            git(seed, &["push", "-q", "origin", &format!("ways-v{version}")]);
+        }
+
+        /// Commit the seed at `version` and push the branch alone: a version
+        /// bump on main whose release is not cut.
+        fn bump(seed: &Path, version: &str) {
             std::fs::create_dir_all(seed.join("tools/ways")).unwrap();
             std::fs::write(seed.join("tools/suite-bins"), "ways\n").unwrap();
             std::fs::write(seed.join("tools/ways/Cargo.toml"), format!("[package]\nname = \"ways\"\nversion = \"{version}\"\n")).unwrap();
@@ -1098,6 +1141,7 @@ mod tests {
             let doc = check(&f.app);
             assert_eq!(doc["behind"], true, "{doc}");
             assert_eq!(doc["channel"], "release");
+            assert_eq!(doc["blocked"], serde_json::Value::Null, "{doc}");
             assert_eq!(doc["upstream"], "origin/main");
             assert_eq!(doc["fetch_error"], serde_json::Value::Null);
             assert_eq!(doc["target"].as_str().map(str::len), Some(40), "{doc}");
@@ -1171,6 +1215,55 @@ mod tests {
             std::env::remove_var("WAYS_RELEASES_JSON");
             assert_eq!(report.notes.as_ref().unwrap().releases.len(), 1, "the report fetches the notes");
             assert!(checked.notes.as_ref().unwrap().releases.is_empty(), "the JSON path fetches none");
+        }
+
+        #[test]
+        fn a_version_bump_waits_for_its_release_tag() {
+            let f = fixture("tag", "1.0.0", "1.0.0");
+            bump(&f.seed, "1.1.0");
+            let doc = check(&f.app);
+            assert_eq!(doc["behind"], false, "the bump is on main and its release is not cut: {doc}");
+            assert_eq!(doc["summary"], "");
+            assert_eq!(*ways(&doc), serde_json::json!({"name": "ways", "installed": "1.0.0", "target": "1.1.0", "moves": false}));
+            git(&f.seed, &["tag", "ways-v1.1.0"]);
+            git(&f.seed, &["push", "-q", "origin", "ways-v1.1.0"]);
+            let doc = check(&f.app);
+            assert_eq!(doc["behind"], true, "the tag is pushed: {doc}");
+            assert_eq!(doc["summary"], "ways 1.0.0 → 1.1.0");
+            assert_eq!(ways(&doc)["moves"], true);
+        }
+
+        #[test]
+        fn a_ref_build_needs_no_release_tag() {
+            let f = fixture("ref-untagged", "1.0.0", "1.0.0");
+            bump(&f.seed, "1.1.0");
+            let doc = json(&gather(&f.app, Channel::Ref("main".into()), false, false));
+            assert_eq!(doc["behind"], true, "a --ref update builds from source: {doc}");
+            assert_eq!(doc["blocked"], serde_json::Value::Null);
+        }
+
+        #[test]
+        fn a_detached_checkout_is_blocked_and_behind_is_unknown() {
+            let f = fixture("detached", "1.0.0", "1.0.0");
+            release(&f.seed, "1.1.0");
+            git(&f.app, &["checkout", "-q", "--detach"]);
+            let doc = check(&f.app);
+            assert_eq!(doc["blocked"], "detached", "{doc}");
+            assert_eq!(doc["behind"], serde_json::Value::Null, "{doc}");
+            assert_eq!(doc["upstream"], serde_json::Value::Null);
+            assert_eq!(ways(&doc)["installed"], "1.0.0");
+            assert_eq!(ways(&doc)["target"], "1.1.0");
+        }
+
+        #[test]
+        fn a_diverged_checkout_is_blocked_and_behind_is_unknown() {
+            let f = fixture("diverged", "1.0.0", "1.0.0");
+            git(&f.app, &["commit", "-q", "--allow-empty", "-m", "local"]);
+            release(&f.seed, "1.1.0");
+            let doc = check(&f.app);
+            assert_eq!(doc["blocked"], "diverged", "{doc}");
+            assert_eq!(doc["behind"], serde_json::Value::Null, "{doc}");
+            assert_eq!(ways(&doc)["target"], "1.1.0");
         }
 
         #[test]
