@@ -113,8 +113,13 @@ triggers:
     # starts empty with no baseline, so the first poll whose result meets
     # `where` fires. The trigger then fires at most once in the session,
     # even when the condition leaves and enters again. An item trigger
-    # takes either; a state trigger takes store only, for now. Editing
-    # what a trigger tests starts it from a fresh baseline.
+    # takes either; a state trigger takes store only, for now.
+    # Both kinds of memory are kept under a fingerprint of what the trigger
+    # tests: its path, key, on, where, match and state as written here.
+    # Editing those starts it from a fresh baseline, and under session
+    # memory the edited trigger may fire once more. The memory is kept
+    # under the trigger's name, so a rename also starts a fresh baseline,
+    # but a session trigger that has fired stays silent under its new name.
     memory: store
     # How long the notice stays deliverable once written: a whole number of
     # seconds from 1 to 2592000, or session to keep it until the session

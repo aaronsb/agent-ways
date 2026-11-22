@@ -468,7 +468,9 @@ impl Reader {
                     }
                 },
             };
-            out.push(Trigger { name, test, match_, author, magnitude, description, memory, expires });
+            let tested: Mapping = t.iter().filter(|(k, _)| matches!(k.as_str(), Some("path" | "key" | "on" | "where" | "match" | "state"))).map(|(k, v)| (k.clone(), v.clone())).collect();
+            let definition = crate::canonical(&Value::Mapping(tested));
+            out.push(Trigger { name, test, match_, author, magnitude, description, memory, expires, definition });
         }
         out
     }

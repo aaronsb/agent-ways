@@ -400,6 +400,8 @@ pub struct Trigger {
     /// How long the signal the trigger writes stays deliverable; none takes
     /// the decay window ([`Trigger::expiry`]).
     pub expires: Option<Expires>,
+    /// The source fields of what it tests ([`Trigger::definition`]).
+    definition: String,
 }
 
 impl Trigger {
@@ -409,21 +411,87 @@ impl Trigger {
         self.expires.unwrap_or(Expires::Seconds(bounds::EXPIRES_DEFAULT))
     }
 
-    /// A short hash of what the trigger tests: its test and how the
-    /// test's conditions combine. The name, magnitude, description, memory
-    /// and expiry leave it alone. Memory kept under another fingerprint
-    /// belongs to a different definition, so the host starts that trigger
-    /// from a fresh baseline. A change to attend's own types can also change
-    /// it, which gives the same fresh baseline.
+    /// What the trigger tests, as the file states it: its `path`, `key`,
+    /// `on`, `where`, `match` and `state` fields, written as JSON with every
+    /// mapping's keys sorted. The name, magnitude, description, author,
+    /// memory and expiry are left out.
+    pub fn definition(&self) -> &str {
+        &self.definition
+    }
+
+    /// The FNV-1a hash of [`Trigger::definition`], as 16 hex digits. It
+    /// depends on the file's text alone, so a new attend that reads the same
+    /// file gives the same fingerprint. Memory kept under another
+    /// fingerprint belongs to another definition: the host starts that
+    /// trigger from a fresh baseline, and a trigger with `memory: session`
+    /// may fire once more for it.
     pub fn fingerprint(&self) -> String {
-        let text = format!("{:?}|{:?}", self.test, self.match_);
         let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-        for b in text.bytes() {
+        for b in self.definition.bytes() {
             h ^= b as u64;
             h = h.wrapping_mul(0x0100_0000_01b3);
         }
         format!("{h:016x}")
     }
+}
+
+/// `v` as JSON on one line, with every mapping's keys sorted, so the text
+/// depends on the values alone and not on the order a file wrote them in.
+pub(crate) fn canonical(v: &Value) -> String {
+    let mut out = String::new();
+    write_canonical(v, &mut out);
+    out
+}
+
+fn write_canonical(v: &Value, out: &mut String) {
+    match v {
+        Value::Null => out.push_str("null"),
+        Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        Value::Number(n) => out.push_str(&n.to_string()),
+        Value::String(s) => write_string(s, out),
+        Value::Sequence(items) => {
+            out.push('[');
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                write_canonical(item, out);
+            }
+            out.push(']');
+        }
+        Value::Mapping(m) => {
+            let mut entries: Vec<(String, &Value)> = m.iter().map(|(k, v)| (canonical(k), v)).collect();
+            entries.sort_by(|a, b| a.0.cmp(&b.0));
+            out.push('{');
+            for (i, (k, v)) in entries.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                out.push_str(k);
+                out.push(':');
+                write_canonical(v, out);
+            }
+            out.push('}');
+        }
+        Value::Tagged(t) => {
+            write_string(&t.tag.to_string(), out);
+            out.push(':');
+            write_canonical(&t.value, out);
+        }
+    }
+}
+
+fn write_string(s: &str, out: &mut String) {
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
 }
 
 /// Where a trigger keeps what it last saw between polls.

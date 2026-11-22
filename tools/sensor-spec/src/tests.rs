@@ -137,6 +137,23 @@ fn a_trigger_s_fingerprint_changes_with_what_it_tests() {
     ] {
         assert_ne!(base, fp(changed), "{changed}");
     }
+    assert_eq!(
+        fp("{name: a, path: \"$\", on: enters, where: {b: 2, a: {above: 1.5, below: 9}}}"),
+        fp("{where: {a: {below: 9, above: 1.5}, b: 2}, on: enters, path: \"$\", name: a}"),
+        "the order the file writes its keys in does not matter"
+    );
+}
+
+/// The fingerprint hashes the trigger's source fields as the file states
+/// them, as JSON with sorted keys, so no change to the crate's own types
+/// moves it. Both literals were computed outside the crate; a change here
+/// re-baselines every stored trigger memory.
+#[test]
+fn a_trigger_s_fingerprint_is_pinned_to_its_source_fields() {
+    let doc = "kind: command\nargv: [x]\noutput: json\ntriggers:\n  - {name: behind, path: \"$\", on: enters, where: {behind: true, \"wind_*\": {above: 2.5, in: [a, \"b\\\"c\"]}}, match: any, magnitude: 1}\n";
+    let t = parse("s", &y(doc)).spec.unwrap().triggers.remove(0);
+    assert_eq!(t.definition(), r#"{"match":"any","on":"enters","path":"$","where":{"behind":true,"wind_*":{"above":2.5,"in":["a","b\"c"]}}}"#);
+    assert_eq!(t.fingerprint(), "e6c80f2ecd8d3c48");
 }
 
 #[test]

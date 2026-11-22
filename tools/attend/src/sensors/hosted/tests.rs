@@ -144,6 +144,21 @@ fn session_memory_fires_at_most_once_even_when_the_condition_leaves_and_enters_a
     assert_eq!(run(&mut s, &enters("store", "store"), polls(&[false, true, false, true])), fires(&[&[], &["$"], &[], &["$"]]));
 }
 
+/// The once-per-session mark belongs to what the trigger tests. Editing
+/// the condition after a fire gives a new definition, which fires once of
+/// its own; renaming the trigger keeps the definition, which stays spent.
+#[test]
+fn after_a_fire_an_edit_fires_once_and_a_rename_does_not() {
+    let d = Dir::new("spent-key");
+    let mut s = sensor(&d.0, Some("s1"));
+    assert_eq!(s.observe(&enters("behind", "session"), seen(true)), Some(vec!["$".to_string()]));
+    let renamed = enters("outdated", "session");
+    assert_eq!(run(&mut s, &renamed, vec![seen(true), seen(false), seen(true)]), fires(&[&[], &[], &[]]), "a rename is the same definition");
+    let edited = trig("{name: behind, path: \"$\", on: enters, where: {behind: true, channel: release}, memory: session}");
+    let polls = vec![Seen::from([("$".into(), json!(true))]), Seen::from([("$".into(), json!(false))]), Seen::from([("$".into(), json!(true))])];
+    assert_eq!(run(&mut s, &edited, polls), fires(&[&["$"], &[], &[]]), "the edited condition fires once");
+}
+
 #[test]
 fn session_memory_on_changed_fires_nothing_on_the_first_poll_then_once() {
     let d = Dir::new("changed");
@@ -169,7 +184,7 @@ fn session_memory_on_removed_fires_once() {
 fn session_memory_survives_an_export_and_import_so_the_trigger_does_not_fire_twice() {
     let d = Dir::new("export");
     let behind = enters("behind", "session");
-    let later = enters("later", "session");
+    let later = trig("{name: later, path: \"$\", on: enters, where: {ahead: true}, memory: session}");
     let mut s = sensor(&d.0, Some("s1"));
     assert_eq!(s.observe(&behind, seen(true)), Some(vec!["$".to_string()]));
     assert_eq!(s.observe(&later, seen(false)), Some(vec![]));
@@ -300,13 +315,27 @@ fn the_sweep_removes_expired_and_foreign_stores() {
     std::fs::write(&garbage, "not json").unwrap();
     let in_flight = d.0.join("0000000000000001.json.4242");
     std::fs::write(&in_flight, "partial").unwrap();
-    assert_eq!(sweep_in(&d.0, SystemTime::now()), 3);
+    let older = d.0.join("0000000000000002.json");
+    std::fs::write(&older, r#"{"store":1,"sensor":"git","project":"/p"}"#).unwrap();
+    // A newer attend's store, as a dev build beside the release writes.
+    let newer = d.0.join("0000000000000003.json");
+    std::fs::write(&newer, r#"{"store":3,"sensor":"git","project":"/p","shape":"unknown here"}"#).unwrap();
+    // A file the sweep cannot read is skipped, not judged.
+    let unreadable = d.0.join("0000000000000004.json");
+    std::fs::write(&unreadable, "not json either").unwrap();
+    std::fs::set_permissions(&unreadable, std::os::unix::fs::PermissionsExt::from_mode(0o000)).unwrap();
+    let readable_anyway = std::fs::read(&unreadable).is_ok();
+    assert_eq!(sweep_in(&d.0, SystemTime::now()), if readable_anyway { 5 } else { 4 });
     let mut left: Vec<PathBuf> = std::fs::read_dir(&d.0).unwrap().flatten().map(|e| e.path()).collect();
     left.sort();
-    let mut want = vec![fresh, in_flight];
+    let mut want = vec![fresh, in_flight, newer];
+    if !readable_anyway {
+        want.push(unreadable.clone());
+    }
     want.sort();
-    assert_eq!(left, want);
+    assert_eq!(left, want, "expired, per-project, garbage and format-1 files go; format 2 and 3, in-flight and unreadable files stay");
     assert_eq!(sweep_in(&d.0, SystemTime::now()), 0, "a second sweep finds nothing");
+    std::fs::set_permissions(&unreadable, std::os::unix::fs::PermissionsExt::from_mode(0o600)).ok();
 }
 
 #[test]

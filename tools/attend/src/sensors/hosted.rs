@@ -17,16 +17,18 @@
 //! The file carries its format. A file of another format, such as one
 //! written before stores were keyed by session, or one whose sensor,
 //! project and session are not the key asked for, reads as no store, and
-//! the sensor starts from a baseline. [`sweep`] removes such files, and
-//! every store past the retention limit, when `attend run` registers its
-//! sensors.
+//! the sensor starts from a baseline. When `attend run` registers its
+//! sensors, [`sweep`] removes the files of an older format and every store
+//! past the retention limit. It leaves a newer format alone, so a newer
+//! attend on the same machine keeps its stores.
 //!
-//! A trigger's memory is kept with a fingerprint of what the trigger tests.
-//! Memory under another fingerprint belongs to an earlier definition and
-//! reads as none. Memory a trigger keeps for the session (`memory:
-//! session`) lives in the process and travels in the session's checkpoint
-//! through [`Sensor::export_state`], so a re-executed run keeps it and a
-//! trigger fires at most once in the session.
+//! A trigger's memory is kept with a fingerprint of what the trigger tests,
+//! taken from the trigger's fields as the file states them. Memory under
+//! another fingerprint belongs to an earlier definition and reads as none.
+//! Memory a trigger keeps for the session (`memory: session`) lives in the
+//! process and travels in the session's checkpoint through
+//! [`Sensor::export_state`], so a re-executed run keeps it and a trigger
+//! definition fires at most once in the session.
 //!
 //! References:
 //! - ADR-403 §1 and §3b: the store, where it lives, its retention, and the
@@ -69,7 +71,8 @@ struct SessionMemory {
     /// What each trigger last saw, by trigger name.
     #[serde(default)]
     held: BTreeMap<String, Memo>,
-    /// The triggers that have fired. Each fires at most once in the session.
+    /// The fingerprints of the trigger definitions that have fired. Each
+    /// fires at most once in the session, under whatever name it carries.
     #[serde(default)]
     spent: BTreeSet<String>,
 }
@@ -147,9 +150,11 @@ impl FileSensor {
     ///
     /// Store memory is written to the store at once, and a fresh store's
     /// first poll sets a baseline. Session memory starts from nothing seen,
-    /// and a trigger with it fires at most once in the session, whatever it
-    /// compares on: once it has fired, a later change, such as a condition
-    /// that leaves and enters again, fires nothing.
+    /// and a trigger definition with it fires at most once in the session,
+    /// whatever it compares on: once it has fired, a later change, such as
+    /// a condition that leaves and enters again, fires nothing. The mark is
+    /// kept by fingerprint, so a renamed trigger stays spent and an edited
+    /// one fires once more.
     // Nothing in attend runs triggers yet. The caller is the sensor host
     // that runs command and mcp triggers.
     #[allow(dead_code)]
@@ -162,10 +167,10 @@ impl FileSensor {
         };
         let prev = mem.get(&trigger.name).filter(|m| m.test == test).map(|m| &m.seen);
         let mut out = fired(*on, trigger.memory, prev, &now);
-        mem.insert(trigger.name.clone(), Memo { test, seen: now });
+        mem.insert(trigger.name.clone(), Memo { test: test.clone(), seen: now });
         match trigger.memory {
             Memory::Store => self.save(),
-            Memory::Session if !out.is_empty() && !self.session.spent.insert(trigger.name.clone()) => out.clear(),
+            Memory::Session if !out.is_empty() && !self.session.spent.insert(test) => out.clear(),
             Memory::Session => {}
         }
         Some(out)
@@ -330,8 +335,9 @@ fn records_in(dir: &Path) -> impl Iterator<Item = (PathBuf, Record)> {
 }
 
 /// Remove every file of the store directory not written within the
-/// retention limit, and every `.json` file that is not a store of this
-/// format, such as one written before stores were keyed by session.
+/// retention limit, and every `.json` file of an older format ([`outdated`]),
+/// such as one written before stores were keyed by session. A store of a
+/// newer format, which a newer attend on this machine writes, stays.
 /// Returns how many it removed.
 pub fn sweep() -> usize {
     sweep_in(&store_dir(), SystemTime::now())
@@ -347,12 +353,25 @@ fn sweep_in(dir: &Path, now: SystemTime) -> usize {
             continue;
         }
         let expired = meta.modified().ok().and_then(|m| now.duration_since(m).ok()).is_some_and(|age| age > limit);
-        let foreign = path.extension().is_some_and(|x| x == "json") && parse(&path).is_none();
-        if (expired || foreign) && std::fs::remove_file(&path).is_ok() {
+        let older = path.extension().is_some_and(|x| x == "json") && outdated(&path);
+        if (expired || older) && std::fs::remove_file(&path).is_ok() {
             removed += 1;
         }
     }
     removed
+}
+
+/// Whether the file at `path` is a store of an older format: it is not
+/// valid JSON, or it is an object whose `store` is missing or below
+/// [`STORE_FORMAT`]. A file that cannot be read, a newer format and any
+/// other JSON value count as not outdated.
+fn outdated(path: &Path) -> bool {
+    let Ok(bytes) = std::fs::read(path) else { return false };
+    match serde_json::from_slice::<Value>(&bytes) {
+        Err(_) => true,
+        Ok(Value::Object(m)) => m.get("store").and_then(Value::as_u64).is_none_or(|n| n < u64::from(STORE_FORMAT)),
+        Ok(_) => false,
+    }
 }
 
 /// The last poll of each sensor in `project`, by sensor name: the
