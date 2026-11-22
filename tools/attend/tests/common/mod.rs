@@ -440,7 +440,13 @@ impl Peer {
         let cwd = f.home.join(project);
         assert_origin_kept(&cwd);
         std::fs::create_dir_all(&cwd).unwrap();
-        let cwd = cwd.to_string_lossy().into_owned();
+        Peer::start_at(f, sid, &cwd.to_string_lossy())
+    }
+
+    /// [`Peer::start`] with its session record naming `cwd` exactly, which
+    /// must already exist.
+    pub fn start_at(f: &Fixture, sid: &str, cwd: &str) -> Peer {
+        let cwd = cwd.to_string();
         let child = Command::new(claude_program(f)).args(["-c", "sleep 60; :"]).stdout(Stdio::null()).spawn().unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         while !attend_presence::process::is_claude(child.id()) {

@@ -275,6 +275,20 @@ pub fn host_above(own_pid: u32, parent: impl Fn(u32) -> Option<u32>, is_host: im
     false
 }
 
+/// `path` with every symlink resolved, or `path` as given when it cannot
+/// be resolved, such as a directory that is gone.
+pub fn canonical_dir(path: &str) -> String {
+    std::fs::canonicalize(path).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| path.to_string())
+}
+
+/// Whether two paths name one directory: equal as written, or equal once
+/// symlinks are resolved. A session's recorded cwd and a path a caller
+/// names can reach one directory by different routes, such as `/var` and
+/// `/private/var` on macOS.
+pub fn same_dir(a: &str, b: &str) -> bool {
+    a == b || canonical_dir(a) == canonical_dir(b)
+}
+
 /// Whether a sensor command started `pid`: an attend sensor host is among
 /// its ancestors. No legitimate caller has a host above it, since the
 /// session's own processes sit beside a host, not under one. Such a

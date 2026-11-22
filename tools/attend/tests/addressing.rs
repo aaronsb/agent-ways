@@ -133,6 +133,28 @@ fn a_send_naming_a_project_is_for_every_live_session_there() {
     assert_eq!(ids, ["peer-a", "peer-b"]);
 }
 
+/// A project reached through a symlinked directory is one project: a send
+/// naming the real path reaches sessions recorded under the link, and the
+/// reverse, and the message lands in the tray they read.
+#[cfg(all(feature = "sensor-peers", unix))]
+#[test]
+fn a_send_naming_a_project_by_another_route_reaches_its_sessions() {
+    let f = Fixture::new("addr-symlink");
+    let _env = enter(&f);
+    let real = f.home.join("real-proj");
+    let link = f.home.join("link-proj");
+    std::fs::create_dir_all(&real).unwrap();
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let (real, link) = (real.to_string_lossy().into_owned(), link.to_string_lossy().into_owned());
+    for (recorded, named) in [(&link, &real), (&real, &link)] {
+        let peer = Peer::start_at(&f, "peer-l", recorded);
+        let sent = send(Some(named), None, "by another route").unwrap_or_else(|e| panic!("recorded {recorded}, named {named}: {e:?}"));
+        let (to, body) = read(&peer.tray(&f), &sent.id);
+        assert_eq!((to.as_deref(), body.as_str()), (Some("peer-l"), "by another route"), "recorded {recorded}, named {named}");
+        drop(peer);
+    }
+}
+
 /// A name two live sessions answer to is refused, with both listed.
 // Live sessions are found by the peers sensor's process scan.
 #[cfg(feature = "sensor-peers")]

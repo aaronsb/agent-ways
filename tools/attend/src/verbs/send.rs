@@ -376,18 +376,19 @@ fn resolve_recipient(me: &Session, to: &str) -> Result<Dest, SendError> {
 /// A project path: every live session working there. A path no live peer
 /// works at is refused, with the live ones listed.
 fn resolve_project(me: &Session, path: &str) -> Result<Dest, SendError> {
-    let resolved = std::fs::canonicalize(path).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| path.to_string());
+    let resolved = attend_presence::session::canonical_dir(path);
     let peers = list_peers();
-    let ids: Vec<String> = peers.iter().filter(|(_, cwd, ..)| *cwd == resolved).map(|(id, ..)| id.clone()).collect();
-    if !ids.is_empty() {
-        return Ok(Dest::Sessions { cwd: resolved, ids });
+    let here: Vec<&(String, String, String, String, f64)> = peers.iter().filter(|(_, cwd, ..)| attend_presence::session::same_dir(cwd, &resolved)).collect();
+    // The tray is named by the path the sessions recorded, which is where
+    // they read; the caller may have named the directory by another route.
+    if let Some((_, recorded, ..)) = here.first() {
+        return Ok(Dest::Sessions { cwd: recorded.clone(), ids: here.iter().map(|(id, ..)| id.clone()).collect() });
     }
     // The peer list leaves this session out, so its own project reads as
     // empty when no other session works there. Say that, rather than "no
     // active peer" at a path the sender is using.
     let cwd = &me.origin_path;
-    let own = std::fs::canonicalize(cwd).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| cwd.clone());
-    if resolved == own || resolved == *cwd {
+    if attend_presence::session::same_dir(cwd, &resolved) {
         return Err(SendError::OwnProject { path: resolved });
     }
     let peer_paths: Vec<&str> = peers.iter().map(|(_, cwd, ..)| cwd.as_str()).collect();
