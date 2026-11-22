@@ -76,6 +76,12 @@ considered:
   - operator: aaronsb
     said: "let's accept it and implement"
     via: session 2026-11-21, after the turn-end and dormant-footer answers
+  - operator: aaronsb
+    said: "Wait for the tag (Recommended)"
+    via: "session 2026-11-22, question tool, review of #1319 finding 2"
+  - operator: aaronsb
+    said: "Silent, state exposed (Recommended)"
+    via: "session 2026-11-22, question tool, review of #1319 finding 3"
 status: accepted
 date: 2026-11-21
 deciders:
@@ -163,6 +169,8 @@ The operator set the direction: awareness is furnished through the mod, and a se
      ```
 
      `behind` is true when any component moves (`Component::moves`), that is, when an installed version is older than the version at the channel's target. `summary` lists the components that move. A failed fetch sets `fetch_error` and compares against the last fetched target.
+
+     > Amended 2026-11-22: a suite binary counts as behind only once its release tag, `<name>-v<version>`, is fetched, since the update downloads a release and a bump on main without its tag cannot be installed. A mod counts under the tag of the release it ships with, `attend-v<version>` for the attend mod and `ways-v<version>` for the other known mods, because a release bumps each with its binary; an unknown mod counts by version alone. The tag is pushed before the release's binaries are built, so the notice can come a little before a download gets the new version. A checkout where `git pull --ff-only` would stop reports `behind: null` and a `blocked` field, `detached` when HEAD is on no branch, `no-upstream` when the branch has no upstream set, and `diverged` when history has split, and the sensor stays silent. An upstream that is set but not fetched yet is not blocked, and `behind` is null until a target resolves. Nothing moves while `blocked` is set. Anything built from source under `--ref` keeps the version rule.
    - **The sensor file**, shipped as `attend/sensors/ways-update.yaml`:
 
      ```yaml

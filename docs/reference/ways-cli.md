@@ -655,8 +655,39 @@ With `--commit`, each stage under its own header: pull the app source, refresh e
 
 `--dry-run` is accepted for the what-if and `--yes` for `--commit`. `ways settings set install.manage_mode commit` makes the command apply without the flag; `--what-if` then reports.
 
+`--what-if --json` prints the check as one JSON document instead of the report, for a program to read. It runs the same fetch and resolves the same target as the report, and leaves the release notes out, so it makes no request to GitHub. `--json` is a what-if whatever `install.manage_mode` says, and it refuses `--commit`. It exits 0 and prints the document, also when the fetch failed. With no app source it exits 1 and prints nothing on stdout.
+
+| Field | Meaning |
+|---|---|
+| `channel` | `release`, or `ref` under `--ref` |
+| `upstream` | The branch's upstream the release channel follows, such as `origin/main`; `null` on `--ref`, and when the checkout has no upstream to read: a detached HEAD, a branch with no upstream set, or one whose upstream is not fetched yet |
+| `ref` | The `--ref` value; `null` on the release channel |
+| `target` | The commit the release channel's upstream, or the `--ref`, resolves to after the fetch; the last fetched one when the fetch failed; `null` when none resolved. The update lands on it only when `blocked` is `null` |
+| `fetch_error` | The line git printed that names the failure, the first starting `fatal:` or `error:`, when the fetch failed; `null` when it succeeded |
+| `behind` | `true` when a component the update converges is older than its version at the target, and `false` when none is. The rule depends on the kind of component. A suite binary on the release channel counts by version once its release tag, `<name>-v<version>`, is fetched, because the update downloads a release; a version bump on main without its tag does not count. A known mod counts only once the tag of the release it ships with is fetched: `attend-v<version>` for the attend mod, and `ways-v<version>` for the ways-judge, ways-theme and images mods, since a release bumps each mod with its binary. A mod this binary does not know counts by version alone. A suite binary that is not installed counts only when it is new at the target, in the target's suite or marketplace and not in the checkout's, so a way-embed that is not installed, or a binary whose `--version` fails, does not make `behind` true. Under `--ref`, where the update builds from source, a binary counts by version alone. The tag is pushed before the release's binaries are built, so `behind` is true for a short while when a download would still get the previous release. When the fetch failed, the target is the last one fetched, so `behind` still answers and `fetch_error` says why. `null` when `blocked` is set, and when no target resolved at all, such as an app that never fetched or an unresolvable `--ref`; no component moves in either case |
+| `blocked` | Why the update's `git pull --ff-only` would stop: `detached` when HEAD is not on a branch, `no-upstream` when the branch has no upstream set, `diverged` when the checkout has commits the upstream lacks and the upstream has commits it lacks. `null` when nothing blocks, when the upstream is set but not fetched yet, and always under `--ref`. The components still report their versions, and none moves while `blocked` is set |
+| `summary` | The components that move, joined by commas: `name installed → target`, or `name (new) → target` for a component that is not installed and is new at the target; empty when none moves |
+| `components` | One object per component, mods included: `name`, `installed`, `target` (each `null` when unknown) and `moves`, true for a component counted in `behind`, so false for all of them while `blocked` is set |
+
+```json
+{
+  "channel": "release",
+  "upstream": "origin/main",
+  "ref": null,
+  "target": "3f1c0a9e6b7d5c2a8e4f1b0d9c6a7e5b4d3c2a1f",
+  "fetch_error": null,
+  "behind": true,
+  "blocked": null,
+  "summary": "ways 1.0.0 → 1.1.0",
+  "components": [
+    { "name": "ways", "installed": "1.0.0", "target": "1.1.0", "moves": true }
+  ]
+}
+```
+
 ```
 ways manage update                       # what it would do
+ways manage update --what-if --json      # the check as JSON
 ways manage update --commit
 ways manage update --ref ways-v1.32.0 --commit
 ```

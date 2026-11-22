@@ -1199,6 +1199,12 @@ struct UpdateArgs {
     /// step of a --commit run
     #[arg(long, short)]
     verbose: bool,
+    /// Print the what-if as one JSON document: the channel, whether the
+    /// install is behind it, and each component's installed and target
+    /// version. Leaves out the release notes, so it makes no request to
+    /// GitHub
+    #[arg(long, conflicts_with = "commit")]
+    json: bool,
 }
 
 #[derive(clap::Args)]
@@ -1339,7 +1345,9 @@ fn settings_screen(tab: &str) -> Result<()> {
 }
 
 fn update(args: UpdateArgs) -> Result<()> {
-    cmd::update::run(args.apply.mode(true), args.git_ref, args.verbose)
+    // `--json` is a what-if whatever `install.manage_mode` says.
+    let mode = if args.json { cmd::lifecycle::Mode::WhatIf } else { args.apply.mode(true) };
+    cmd::update::run(mode, args.git_ref, args.verbose, args.json)
 }
 
 /// `ways manage repair` and the hidden fixed name `reconcile`: one function,
