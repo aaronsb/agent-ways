@@ -193,7 +193,7 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     if let Some(snapshot) = state_store.restore() {
         // Distribute state to matching sensors
         for slot in &mut slots {
-            let sensor_state: Vec<(String, String)> = match slot.crate_id.as_deref().unwrap_or_default() {
+            let mut sensor_state: Vec<(String, String)> = match slot.crate_id.as_deref().unwrap_or_default() {
                 "peers" => snapshot
                     .seen_signals
                     .iter()
@@ -211,6 +211,11 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
                     .collect(),
                 _ => Vec::new(),
             };
+            // A file sensor's session memory, so a trigger that fired before
+            // a re-exec stays spent for the rest of the session.
+            if let Some(memo) = snapshot.sensor_memory.get(slot.name()) {
+                sensor_state.push((sensors::hosted::SESSION_MEMORY.to_string(), memo.clone()));
+            }
             if !sensor_state.is_empty() {
                 slot.import_state(&sensor_state);
             }

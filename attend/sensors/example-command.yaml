@@ -109,10 +109,12 @@ triggers:
     # Where the trigger keeps what it last saw: store or session; unset is
     # store. store keeps it in the sensor's store, one per session, across
     # restarts; a fresh store's first poll sets a baseline and fires
-    # nothing. session keeps it in the process that polls for the session.
-    # It starts empty with no baseline, so the first poll whose result
-    # meets `where` fires. The trigger then fires at most once in the
-    # session, even when the condition leaves and enters again.
+    # nothing. session keeps it with the session and out of the store. It
+    # starts empty with no baseline, so the first poll whose result meets
+    # `where` fires. The trigger then fires at most once in the session,
+    # even when the condition leaves and enters again. An item trigger
+    # takes either; a state trigger takes store only, for now. Editing
+    # what a trigger tests starts it from a fresh baseline.
     memory: store
     # How long the notice stays deliverable once written: a whole number of
     # seconds from 1 to 2592000, or session to keep it until the session

@@ -316,10 +316,15 @@ pub fn slot(sensor: Box<dyn Sensor>, lane: Lane, crate_id: Option<&str>) -> Sens
 }
 
 /// The slots `attend run` polls, and their names. A sensor that does not
-/// run is logged once with its state.
+/// run is logged once with its state. First it sweeps the store directory
+/// of stores past retention and files of an older format.
 pub fn register_sensors(cfg: &Config, focus: &Focus, _catchup: bool, groups: &Groups) -> (Vec<SensorSlot>, Vec<String>) {
     let mut slots = Vec::new();
     let mut names = Vec::new();
+    let swept = hosted::sweep();
+    if swept > 0 {
+        crate::emit::log(&format!("removed {swept} sensor store(s) past retention or of an older format"));
+    }
     let ident = attend_presence::session::identity();
     let ctx = Ctx { cfg, groups: Some(groups), session: ident.session_resolved.then_some(ident.session_id.as_str()) };
     for h in catalog(cfg, &focus.working_dir) {

@@ -588,6 +588,9 @@ pub(super) fn collect_snapshot(slots: &[sensors::SensorSlot]) -> state::StateSna
                 "context_pct" => {
                     snapshot.context_pct = value.parse().ok();
                 }
+                crate::sensors::hosted::SESSION_MEMORY => {
+                    snapshot.sensor_memory.insert(slot.name().to_string(), value);
+                }
                 // The message lane's cold-start mark: only the peers sensor
                 // applies the rule.
                 "baselined" if peers => {
