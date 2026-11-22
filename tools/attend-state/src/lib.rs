@@ -29,7 +29,7 @@
 
 pub mod cold_start;
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -45,6 +45,7 @@ use std::time::Duration;
 ///   git_branch: main
 ///   git_head: abc1234
 ///   baselined: true
+///   sensor_memory: <sensor name> <its session memory, on one line>
 ///   version: 0.1.0
 #[derive(Debug, Default)]
 pub struct StateSnapshot {
@@ -67,6 +68,10 @@ pub struct StateSnapshot {
     /// session. The notice goes again when a different version is installed
     /// and this session's mod is still older than it.
     pub mod_stale_noted: Option<String>,
+    /// Each file sensor's trigger memory for this session, by sensor name,
+    /// as the sensor exports it on one line. The sensor loop is its only
+    /// writer, so a re-executed run picks up where the last one stopped.
+    pub sensor_memory: BTreeMap<String, String>,
 }
 
 impl StateSnapshot {
@@ -114,6 +119,9 @@ impl StateSnapshot {
         if let Some(ref v) = self.mod_stale_noted {
             lines.push(format!("mod_stale_noted: {}", v));
         }
+        for (name, memo) in &self.sensor_memory {
+            lines.push(format!("sensor_memory: {name} {memo}"));
+        }
 
         lines.push(format!("version: {}", env!("CARGO_PKG_VERSION")));
 
@@ -158,6 +166,11 @@ impl StateSnapshot {
                     }
                     "mod_stale_noted" => {
                         state.mod_stale_noted = Some(value.to_string());
+                    }
+                    "sensor_memory" => {
+                        if let Some((name, memo)) = value.split_once(' ') {
+                            state.sensor_memory.insert(name.to_string(), memo.to_string());
+                        }
                     }
                     _ => {} // ignore unknown keys for forward compat
                 }
@@ -362,6 +375,7 @@ impl StateStore {
                     reply_hint_shown: disk.reply_hint_shown,
                     git_branch: disk.git_branch.clone(),
                     git_head: disk.git_head.clone(),
+                    sensor_memory: disk.sensor_memory.clone(),
                     ..Default::default()
                 }
             } else {
@@ -371,6 +385,7 @@ impl StateStore {
                     reply_hint_shown: mem.reply_hint_shown,
                     git_branch: mem.git_branch.clone(),
                     git_head: mem.git_head.clone(),
+                    sensor_memory: mem.sensor_memory.clone(),
                     ..Default::default()
                 }
             }
@@ -483,6 +498,24 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    /// Each sensor's session memory round-trips through the file, comes
+    /// from the sensor loop's checkpoint, and survives the drain's writes.
+    #[test]
+    fn sensor_memory_round_trips_and_survives_the_drain() {
+        let dir = temp_dir("sensor-memory");
+        let store = StateStore::new_in(dir.join("state"), Some("s1".into()));
+        let memo = r#"{"held":{"behind":{"test":"ab","seen":{"$":true}}},"spent":["behind"]}"#;
+        let snap = StateSnapshot { sensor_memory: [("ways-update".to_string(), memo.to_string())].into(), ..Default::default() };
+        store.checkpoint(&snap);
+        assert_eq!(store.load().unwrap().sensor_memory, [("ways-update".to_string(), memo.to_string())].into());
+        store.mark_seen(["a.signal"]);
+        assert!(store.baseline(["b.signal"]));
+        assert_eq!(store.load().unwrap().sensor_memory, [("ways-update".to_string(), memo.to_string())].into(), "the drain's writes keep it");
+        store.checkpoint(&StateSnapshot::default());
+        assert!(store.load().unwrap().sensor_memory.is_empty(), "the sensor loop is its writer, so its checkpoint replaces it");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// The mod's version and the stale-note flag survive every other write

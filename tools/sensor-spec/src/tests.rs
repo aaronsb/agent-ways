@@ -59,8 +59,125 @@ fn a_message_lane_with_no_author_runs_on_the_event_lane_and_lints_an_error() {
     let p = parse("c", &y("kind: crate\ncrate: peers\nlane: message\nauthor: sender\n"));
     assert!(p.problems.is_empty(), "{:?}", p.problems);
     assert_eq!(p.spec.unwrap().lane(), Lane::Message);
+}
+
+#[test]
+fn a_file_carrying_lane_exception_fails_lint_with_a_message_naming_its_removal() {
     let p = parse("k", &y("kind: crate\ncrate: keepwarm\nlane: message\nlane_exception: ADR-182\n"));
-    assert_eq!(p.spec.unwrap().lane(), Lane::Message);
+    let e: Vec<&Problem> = p.problems.iter().filter(|p| p.at == "lane_exception").collect();
+    assert_eq!(e.len(), 1, "{:?}", p.problems);
+    assert_eq!(e[0].severity, Severity::Error);
+    assert_eq!(
+        e[0].to_string(),
+        "lane_exception: error: lane_exception is removed from the sensor spec and is ignored; delete it. peers and keepwarm keep the message lane without it"
+    );
+    let s = p.spec.expect("the sensor still loads, without the field");
+    assert_eq!(s.lane(), Lane::Event, "no file field keeps an authorless sensor on the message lane");
+    let p = parse("c", &y("kind: command\nargv: [x]\noutput: json\nlane_exception: mine\n"));
+    assert!(p.spec.is_some());
+    assert_eq!(p.problems.iter().map(|p| (p.at.as_str(), p.severity)).collect::<Vec<_>>(), [("lane_exception", Severity::Error)]);
+}
+
+#[test]
+fn memory_and_expires_are_read_on_any_trigger() {
+    let p = parse(
+        "u",
+        &y(r#"
+kind: command
+argv: [ways, manage, update, --what-if, --json]
+output: json
+state:
+  n: { type: number, from: "$.n" }
+triggers:
+  - { name: behind, path: "$", on: enters, where: { behind: true }, memory: session, expires: session }
+  - { name: count, state: { n: rises }, memory: store, expires: 900 }
+  - { name: plain, path: "$.items[*]", key: id, on: added }
+"#),
+    );
+    assert!(p.problems.is_empty(), "{:?}", p.problems);
+    let t = p.spec.unwrap().triggers;
+    let got: Vec<(&str, Memory, Option<Expires>)> = t.iter().map(|t| (t.name.as_str(), t.memory, t.expires)).collect();
+    assert_eq!(
+        got,
+        [("behind", Memory::Session, Some(Expires::Session)), ("count", Memory::Store, Some(Expires::Seconds(900))), ("plain", Memory::Store, None)]
+    );
+    assert_eq!(t[2].expiry(), Expires::Seconds(3600), "with no expires, a trigger's signal lapses after the hour of the decay window");
+    assert_eq!(t[0].expiry(), Expires::Session);
+}
+
+#[test]
+fn session_memory_on_a_state_trigger_is_not_yet_supported() {
+    let p = parse("s", &y("kind: command\nargv: [x]\noutput: json\nstate: {n: {type: number}}\ntriggers: [{name: a, state: {n: rises}, memory: session}]\n"));
+    assert!(p.spec.is_none());
+    assert_eq!(invalid(&p), ["triggers.a.memory: memory: session is not yet supported on a state trigger; use store, or leave memory unset"]);
+}
+
+/// The fingerprint follows what a trigger tests, not its name, magnitude
+/// or wording.
+#[test]
+fn a_trigger_s_fingerprint_changes_with_what_it_tests() {
+    let fp = |t: &str| {
+        let doc = format!("kind: command\nargv: [x]\noutput: json\nstate: {{n: {{type: number}}}}\ntriggers: [{t}]\n");
+        let p = parse("s", &y(&doc));
+        assert!(p.problems.is_empty(), "{t}: {:?}", p.problems);
+        p.spec.unwrap().triggers[0].fingerprint()
+    };
+    let base = fp("{name: a, path: \"$\", on: enters, where: {behind: true}}");
+    assert_eq!(base.len(), 16, "{base}");
+    assert!(base.chars().all(|c| c.is_ascii_hexdigit()), "{base}");
+    assert_eq!(base, fp("{name: a, path: \"$\", on: enters, where: {behind: true}}"), "stable for the same definition");
+    assert_eq!(base, fp("{name: b, path: \"$\", on: enters, where: {behind: true}, magnitude: 3, description: other, memory: session, expires: 60}"));
+    for changed in [
+        "{name: a, path: \"$\", on: enters, where: {behind: false}}",
+        "{name: a, path: \"$.x\", on: enters, where: {behind: true}}",
+        "{name: a, path: \"$\", on: leaves, where: {behind: true}}",
+        "{name: a, path: \"$\", key: id, on: enters, where: {behind: true}}",
+        "{name: a, path: \"$\", on: enters, where: {behind: true}, match: any}",
+        "{name: a, state: {n: rises}}",
+    ] {
+        assert_ne!(base, fp(changed), "{changed}");
+    }
+    assert_eq!(
+        fp("{name: a, path: \"$\", on: enters, where: {b: 2, a: {above: 1.5, below: 9}}}"),
+        fp("{where: {a: {below: 9, above: 1.5}, b: 2}, on: enters, path: \"$\", name: a}"),
+        "the order the file writes its keys in does not matter"
+    );
+}
+
+/// The fingerprint hashes the trigger's source fields as the file states
+/// them, as JSON with sorted keys, so no change to the crate's own types
+/// moves it. Both literals were computed outside the crate; a change here
+/// re-baselines every stored trigger memory.
+#[test]
+fn a_trigger_s_fingerprint_is_pinned_to_its_source_fields() {
+    let doc = "kind: command\nargv: [x]\noutput: json\ntriggers:\n  - {name: behind, path: \"$\", on: enters, where: {behind: true, \"wind_*\": {above: 2.5, in: [a, \"b\\\"c\"]}}, match: any, magnitude: 1}\n";
+    let t = parse("s", &y(doc)).spec.unwrap().triggers.remove(0);
+    assert_eq!(t.definition(), r#"{"match":"any","on":"enters","path":"$","where":{"behind":true,"wind_*":{"above":2.5,"in":["a","b\"c"]}}}"#);
+    assert_eq!(t.fingerprint(), "e6c80f2ecd8d3c48");
+}
+
+#[test]
+fn an_invalid_memory_or_expires_fails_with_a_message_saying_what_it_takes() {
+    let base = "kind: command\nargv: [x]\noutput: json\ntriggers: [{name: a, path: \"$\", on: added, ";
+    let expires = "triggers.a.expires: expires is a whole number of seconds from 1 to 2592000, or session";
+    let memory = "triggers.a.memory: memory is store or session";
+    for (field, want) in [
+        ("expires: 1h", expires),
+        ("expires: 0", expires),
+        ("expires: -5", expires),
+        ("expires: 2592001", expires),
+        ("expires: 1.5", expires),
+        ("expires: true", expires),
+        ("expires: Session", expires),
+        ("memory: forever", memory),
+        ("memory: 1", memory),
+    ] {
+        let p = parse("s", &y(&format!("{base}{field}}}]\n")));
+        assert!(p.spec.is_none(), "{field} should not load");
+        assert_eq!(invalid(&p), [want], "{field}");
+    }
+    let p = parse("s", &y(&format!("{base}expires: 2592000}}]\n")));
+    assert_eq!(p.spec.unwrap().triggers[0].expires, Some(Expires::Seconds(2_592_000)), "the bound itself is allowed");
 }
 
 #[test]

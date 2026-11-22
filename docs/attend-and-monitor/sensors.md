@@ -169,7 +169,7 @@ The body is `tools/attend/src/sensors/disclosures/messaging.md`, compiled into t
 
 ## `keepwarm`
 
-While armed, wakes an idle session once at 50 idle minutes so the prompt cache is read before its hour lapses (ADR-182). It emits at 3.0 on the message lane and needs a resolved session id; without one it does not start. Its wake has no author, so its shipped file records the lane as an exception (`lane_exception`, ADR-182), a field only a shipped file may set. Arming, the status card, the cost model and the agent's one-word contract are in [`keepwarm.md`](keepwarm.md).
+While armed, wakes an idle session once at 50 idle minutes so the prompt cache is read before its hour lapses. It emits at 3.0 on the message lane and needs a resolved session id; without one it does not start. Its wake has no author, and attend runs the compiled `keepwarm` sensor on the message lane whatever its files declare. Arming, the status card, the cost model and the agent's one-word contract are in [`keepwarm.md`](keepwarm.md).
 
 ## Choosing where a new observation goes
 
@@ -185,9 +185,12 @@ While armed, wakes an idle session once at 50 idle minutes so the prompt cache i
 - [`engagement.md`](engagement.md) — the event lane's refractory
 - [`delivery.md`](delivery.md) — the message lane and its two conduits
 - [`keepwarm.md`](keepwarm.md) — the keepwarm sensor in full
+
+## References
+
 - **ADR-113** — attend and the first context sensor
 - **ADR-117** — sensor crate extraction and feature flags
 - **ADR-122** — the disclosure sensor
 - **ADR-136** — the event and message lanes
-- **ADR-182** — keepwarm
+- **ADR-182** — keepwarm, and its wake on the message lane before the cache's hour lapses
 - **ADR-403** — sensors as files under one spec

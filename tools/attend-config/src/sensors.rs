@@ -254,20 +254,7 @@ fn layer(name: String, reads: Vec<Read>, trust: bool, project: &Path) -> Loaded 
     for r in reads {
         match serde_yaml::from_str::<Value>(&r.text) {
             Ok(Value::Null) => docs.push((r.origin, r.path, Value::Mapping(Default::default()))),
-            Ok(mut v) => {
-                if r.origin != Origin::Builtin {
-                    if let Some(m) = v.as_mapping_mut().filter(|m| m.contains_key("lane_exception")) {
-                        m.remove("lane_exception");
-                        let text = r.path.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_else(|| r.text.clone());
-                        findings.push(Finding {
-                            file: r.path.clone(),
-                            line: line_of(&text, "lane_exception"),
-                            problem: Problem { at: "lane_exception".into(), message: "only a shipped file sets lane_exception; it is ignored".into(), severity: Severity::Error },
-                        });
-                    }
-                }
-                docs.push((r.origin, r.path, v));
-            }
+            Ok(v) => docs.push((r.origin, r.path, v)),
             Err(e) => findings.push(Finding {
                 file: r.path.clone(),
                 line: e.location().map(|l| l.line()),
@@ -350,7 +337,7 @@ fn fix_lane(s: &mut SensorSpec, declared: bool, problems: &mut Vec<Problem>) {
     }
     s.declared_lane = lane;
     if s.lane() != lane {
-        s.lane_exception = Some(why.to_string());
+        s.fixed_lane = Some(why.to_string());
     }
 }
 
@@ -610,14 +597,40 @@ mod tests {
     }
 
     #[test]
-    fn a_user_file_overrides_a_field_and_a_lane_exception_is_the_shipped_file_s_alone() {
+    fn a_user_file_overrides_a_field() {
         let shipped = SHIPPED.iter().find(|(n, _)| *n == "git").unwrap().1;
-        let l = layer("git".into(), vec![read(Origin::Builtin, shipped), read(Origin::User, "interval: 90\nlane: message\nlane_exception: mine\n")], false, Path::new("/p"));
+        let l = layer("git".into(), vec![read(Origin::Builtin, shipped), read(Origin::User, "interval: 90\n")], false, Path::new("/p"));
+        assert!(l.findings.is_empty(), "{:?}", l.findings);
         let s = l.spec.unwrap();
         assert_eq!((s.cadence.interval, s.cadence.min_interval), (90, 10));
+    }
+
+    /// `lane_exception` is gone from the spec in every layer, the shipped
+    /// one included. A file that still carries it lints an error naming the
+    /// removal, at the file and line that set it, and the field changes no
+    /// lane.
+    #[test]
+    fn a_file_carrying_lane_exception_lints_an_error_naming_its_removal_in_any_layer() {
+        let dir = std::env::temp_dir().join(format!("attend-sensors-lane-exception-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("git.yaml");
+        let text = "interval: 90\nlane: message\nlane_exception: mine\n";
+        std::fs::write(&path, text).unwrap();
+        let shipped = SHIPPED.iter().find(|(n, _)| *n == "git").unwrap().1;
+        let l = layer("git".into(), vec![read(Origin::Builtin, shipped), Read { origin: Origin::User, path: Some(path.clone()), text: text.into() }], false, Path::new("/p"));
+        let s = l.spec.as_ref().unwrap();
         assert_eq!(s.lane(), sensor_spec::Lane::Event);
-        assert!(l.findings.iter().any(|f| f.problem.at == "lane_exception"), "{:?}", l.findings);
-        assert!(l.findings.iter().any(|f| f.problem.at == "lane" && f.problem.severity == Severity::Error), "{:?}", l.findings);
+        let lines = lint_lines(&l);
+        let want = format!(
+            "{}:3: [attend.sensors.git] lane_exception: error: lane_exception is removed from the sensor spec and is ignored; delete it. peers and keepwarm keep the message lane without it",
+            path.display()
+        );
+        assert!(lines.contains(&want), "{lines:#?}");
+        assert!(l.findings.iter().any(|f| f.problem.at == "lane" && f.problem.severity == Severity::Error), "the author rule still holds: {:?}", l.findings);
+        let l = layer("wake".into(), vec![read(Origin::Builtin, "kind: crate\ncrate: keepwarm\nlane: message\nlane_exception: ADR-182\n")], false, Path::new("/p"));
+        assert_eq!(l.findings.iter().map(|f| (f.problem.at.as_str(), f.problem.severity)).collect::<Vec<_>>(), [("lane_exception", Severity::Error)]);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

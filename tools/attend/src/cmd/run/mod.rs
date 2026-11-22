@@ -193,24 +193,7 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     if let Some(snapshot) = state_store.restore() {
         // Distribute state to matching sensors
         for slot in &mut slots {
-            let sensor_state: Vec<(String, String)> = match slot.crate_id.as_deref().unwrap_or_default() {
-                "peers" => snapshot
-                    .seen_signals
-                    .iter()
-                    .map(|s| ("seen_signal".to_string(), s.clone()))
-                    .chain(std::iter::once((
-                        "reply_hint_shown".to_string(),
-                        snapshot.reply_hint_shown.to_string(),
-                    )))
-                    .chain(snapshot.baselined.then(|| ("baselined".to_string(), "true".to_string())))
-                    .collect(),
-                "context" => snapshot
-                    .disclosed_thresholds
-                    .iter()
-                    .map(|t| ("disclosed_threshold".to_string(), t.to_string()))
-                    .collect(),
-                _ => Vec::new(),
-            };
+            let sensor_state = tick::restored_state(slot.name(), slot.crate_id.as_deref(), &snapshot);
             if !sensor_state.is_empty() {
                 slot.import_state(&sensor_state);
             }

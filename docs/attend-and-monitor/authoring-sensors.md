@@ -232,6 +232,29 @@ A trigger fires on a change between two polls, never while a condition merely ho
 
 A trigger tests `state` or `path` with `on`, never both.
 
+### Memory and expiry
+
+Two fields set where a trigger keeps what it last saw and how long what it reports stays deliverable. `expires` is allowed on any trigger, and `memory: session` on an item trigger only:
+
+```yaml
+- name: behind
+  path: "$"
+  on: enters
+  where: { behind: true }
+  memory: session
+  expires: session
+  magnitude: 1
+  description: "agent-ways has a newer release: {summary}"
+```
+
+- `memory` is `store` or `session`, and unset is `store`. With `store`, the trigger's memory lives in the sensor's store for the session ([The store](#the-store)) and survives a restart. A fresh store's first poll sets a baseline and fires nothing, and after that the trigger fires on each change. The memory is kept with a fingerprint of what the trigger tests: a hash of its `path`, `key`, `on`, `where`, `match` and `state` fields as the file writes them, with keys in sorted order. A trigger whose fingerprint changes starts from a fresh baseline even when it keeps its name, and so does a renamed trigger, because the memory is kept under the name. The fingerprint depends on the file alone, so an upgrade of attend keeps every trigger's memory.
+- With `memory: session`, the memory belongs to the session and is not written to the store. It starts empty and takes no baseline, so the first poll is compared against nothing seen: `on: enters` fires on the first poll whose result meets `where`, even when the condition already held when the session started. The trigger then fires at most once in the session, whatever `on` it uses: a condition that leaves and enters again, a later item or a later change fires nothing more. The once-per-session mark belongs to the fingerprint, not the name. Renaming a trigger that has fired keeps it silent, and editing what it tests makes a new definition, which may fire once more in the session. The memory travels in the session's checkpoint, so it survives `attend run` restarting itself after a sensor file or the binary changes. Use it for a notice each session should get once, such as an update check.
+- `memory: session` on a state trigger is not yet supported, and the sensor is invalid until the trigger uses `store` or leaves `memory` unset. State triggers gain it once attend evaluates them.
+- `expires` is a whole number of seconds from 1 to 2592000 (30 days), or `session`. A report lapses that many seconds after it is written, or with `session` stays until the session reads it. Unset is 3600, the event lane's decay window.
+- Any other value of either field makes the sensor invalid, and the lint message says what the field takes.
+
+Both fields parse and lint today. They take effect once attend runs triggers, with slice 2.
+
 ### Templates
 
 A `description` is text with `{…}` holes:
@@ -253,14 +276,14 @@ ADR-136 draws the lane boundary at authored communication: words a person or age
 - `lane` defaults to `event`.
 - `lane: message` needs an author. A `command` or `mcp` file names it with `author` on each trigger: the item field, or for a state trigger the declared state field, that holds who composed the item. A `crate` file names it with a sensor-level `author`, a field the compiled sensor's items have; `peers` has `sender`.
 - A message-lane file without its author is a lint error, and attend runs that sensor on the event lane and says why in `attend sensor list`.
-- `lane_exception` records why a shipped file rides the message lane with no author. `keepwarm`'s shipped file carries the one exception (ADR-182). Only a shipped file may set it; in a user or project file it is an error and is ignored.
+- `lane_exception` is removed from the spec. A file in any layer that still carries it is a lint error that names the removal, and the field changes no lane.
 - The `peers` and `keepwarm` compiled sensors always ride the message lane, under any file name: a lapsed cache drops what the event lane holds, and peers carries messages while keepwarm is the wake that keeps the cache warm. A file that declares `lane: event` for either is a lint error, and the lane is ignored.
 
 ## Testing from the CLI
 
 | Command | What it does |
 |---|---|
-| `attend sensor list [--json]` | every sensor the files declare: kind, origin, file, source and version, state, lane, interval, and each reason and note; `--json` prints each sensor as an item, with an `overrides` list of the higher layers' files, then its fields and the last poll |
+| `attend sensor list [--json]` | every sensor the files declare: kind, origin, file, source and version, state, lane, interval, and each reason and note; `--json` prints each sensor as an item, with an `overrides` list of the higher layers' files, then its fields and the last poll: this session's own, or from a shell the newest of any session in the project |
 | `attend sensor poll <name> [--dry-run] [--json]` | one real poll of a crate sensor, passed through its threshold and lane, delivered as `attend run` would unless `--dry-run` |
 | `attend sensor fire <name>[/<trigger>] [--input FILE\|-] [--dry-run] [--commit] [--json]` | a synthetic result through the sensor's threshold, lane and delivery, each line marked `[test]` |
 | `attend sensor permissions` | each sensor's `requires` against `~/.claude/settings.json` |
@@ -271,7 +294,9 @@ A crate sensor's `--input` is a JSON list of `{magnitude, description}` objects 
 
 ## The store
 
-Each poll `attend run` makes is recorded in the sensor's store, one JSON file per sensor and project under `$XDG_STATE_HOME/agent-ways/attend/sensor-state/`, named by a hash of the two. It holds the last poll's time, whether it succeeded, why it failed, and how many observations it returned. `attend sensor list` reads it for the `failing` state and `last_poll`. The declared state and each trigger's memory join it once attend hosts `command` and `mcp` sensors.
+Each poll `attend run` makes is recorded in the sensor's store, one JSON file per sensor, project and session under `$XDG_STATE_HOME/agent-ways/attend/sensor-state/`, named by a hash of the three. Each report goes to one session, so two sessions in one project keep separate stores, and each starts from its own baseline. A sensor keeps a store only when attend knows the session's id, so each store has one writer: an `attend run` whose session did not resolve keeps none, and neither do `attend sensor poll` and `fire`. The store holds the last poll's time, whether it succeeded, why it failed, and how many observations it returned, and the memory of each trigger with `memory: store`. `attend sensor list` reads it for the `failing` state and `last_poll`: the session's own store, or from a shell the newest poll of any session in the project. The declared state joins it once attend hosts `command` and `mcp` sensors.
+
+Each store file records its format and its sensor, project and session. A file of an older format, such as one keyed by sensor and project alone, or one whose key does not match, reads as no store, so the sensor starts from a baseline. When `attend run` starts its sensors, it removes every file of the directory not written for 30 days, and every `.json` file that is not valid JSON or whose `store` format is missing or older than the current one. It leaves a store of a newer format alone, so a newer attend on the same machine keeps its stores, and it skips a file it cannot read. After `/clear`, `attend run` moves the session's stores to its new id.
 
 ## The retired forms
 
@@ -306,7 +331,11 @@ Written as heuristics:
 - [`loop.md`](loop.md) — the substrate a sensor plugs into
 - [`engagement.md`](engagement.md) — the action potential model in detail
 - [`delivery.md`](delivery.md) — the message lane and its conduits
+
+## References
+
 - **ADR-403** — sensors as files under one spec
+- **ADR-416** — `memory`, `expires`, stores keyed by session, and the removal of `lane_exception`
 - **ADR-117** — sensor crate extraction and feature flags
 - **ADR-123** — firing dynamics; the action potential engagement model in force
 - **ADR-116** — permission requirements for sensors

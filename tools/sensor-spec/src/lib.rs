@@ -52,6 +52,11 @@ pub mod bounds {
     pub const COMMAND_TIMEOUT_MAX: u64 = 600;
     /// A sensor's store is removed this many days after its last write.
     pub const RETENTION_DAYS: u64 = 30;
+    /// A trigger's signal lapses this many seconds after it is written when
+    /// the trigger sets no `expires`: the event lane's decay window.
+    pub const EXPIRES_DEFAULT: u64 = 3600;
+    /// The longest `expires` in seconds: the store's retention.
+    pub const EXPIRES_MAX: u64 = RETENTION_DAYS * 86_400;
 }
 
 /// The cadence and threshold a file that sets none takes.
@@ -195,9 +200,10 @@ pub struct SensorSpec {
     /// A crate sensor's author field: the field of its compiled items that
     /// holds who composed one.
     pub author: Option<String>,
-    /// Why a shipped file rides the message lane with no author (§3a). Only
-    /// a shipped layer may set it.
-    pub lane_exception: Option<String>,
+    /// Why the host runs this compiled sensor on its declared lane whatever
+    /// the author rule says: the reason the host's own table of compiled
+    /// sensors gives. No file field sets it; parsing leaves it empty.
+    pub fixed_lane: Option<String>,
     /// The tool permissions the sensor needs (ADR-116).
     pub requires: Vec<String>,
     pub triggers: Vec<Trigger>,
@@ -218,7 +224,7 @@ impl SensorSpec {
 
     /// Why a sensor that declares the message lane runs on the event lane.
     pub fn lane_refusal(&self) -> Option<String> {
-        if self.declared_lane != Lane::Message || self.lane_exception.is_some() {
+        if self.declared_lane != Lane::Message || self.fixed_lane.is_some() {
             return None;
         }
         match self.kind {
@@ -389,6 +395,128 @@ pub struct Trigger {
     pub author: Option<String>,
     pub magnitude: Option<f64>,
     pub description: Option<Template>,
+    /// Where the trigger keeps what it last saw.
+    pub memory: Memory,
+    /// How long the signal the trigger writes stays deliverable; none takes
+    /// the decay window ([`Trigger::expiry`]).
+    pub expires: Option<Expires>,
+    /// The source fields of what it tests ([`Trigger::definition`]).
+    definition: String,
+}
+
+impl Trigger {
+    /// When the signal this trigger writes lapses: its `expires`, or the
+    /// event lane's decay window of [`bounds::EXPIRES_DEFAULT`] seconds.
+    pub fn expiry(&self) -> Expires {
+        self.expires.unwrap_or(Expires::Seconds(bounds::EXPIRES_DEFAULT))
+    }
+
+    /// What the trigger tests, as the file states it: its `path`, `key`,
+    /// `on`, `where`, `match` and `state` fields, written as JSON with every
+    /// mapping's keys sorted. The name, magnitude, description, author,
+    /// memory and expiry are left out.
+    pub fn definition(&self) -> &str {
+        &self.definition
+    }
+
+    /// The FNV-1a hash of [`Trigger::definition`], as 16 hex digits. It
+    /// depends on the file's text alone, so a new attend that reads the same
+    /// file gives the same fingerprint. Memory kept under another
+    /// fingerprint belongs to another definition: the host starts that
+    /// trigger from a fresh baseline, and a trigger with `memory: session`
+    /// may fire once more for it.
+    pub fn fingerprint(&self) -> String {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in self.definition.bytes() {
+            h ^= b as u64;
+            h = h.wrapping_mul(0x0100_0000_01b3);
+        }
+        format!("{h:016x}")
+    }
+}
+
+/// `v` as JSON on one line, with every mapping's keys sorted, so the text
+/// depends on the values alone and not on the order a file wrote them in.
+pub(crate) fn canonical(v: &Value) -> String {
+    let mut out = String::new();
+    write_canonical(v, &mut out);
+    out
+}
+
+fn write_canonical(v: &Value, out: &mut String) {
+    match v {
+        Value::Null => out.push_str("null"),
+        Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        Value::Number(n) => out.push_str(&n.to_string()),
+        Value::String(s) => write_string(s, out),
+        Value::Sequence(items) => {
+            out.push('[');
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                write_canonical(item, out);
+            }
+            out.push(']');
+        }
+        Value::Mapping(m) => {
+            let mut entries: Vec<(String, &Value)> = m.iter().map(|(k, v)| (canonical(k), v)).collect();
+            entries.sort_by(|a, b| a.0.cmp(&b.0));
+            out.push('{');
+            for (i, (k, v)) in entries.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                out.push_str(k);
+                out.push(':');
+                write_canonical(v, out);
+            }
+            out.push('}');
+        }
+        Value::Tagged(t) => {
+            write_string(&t.tag.to_string(), out);
+            out.push(':');
+            write_canonical(&t.value, out);
+        }
+    }
+}
+
+fn write_string(s: &str, out: &mut String) {
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+}
+
+/// Where a trigger keeps what it last saw between polls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Memory {
+    /// In the sensor's store, across the host's restarts. A fresh store's
+    /// first poll sets a baseline and fires nothing.
+    #[default]
+    Store,
+    /// In the host's process. It starts empty and takes no baseline, so the
+    /// first poll is compared against nothing seen: `enters` fires on the
+    /// first poll whose result meets `where`. The trigger fires at most once
+    /// in the session, whatever it compares on. The host carries the memory
+    /// across its own restarts within the session. An item trigger only:
+    /// a state trigger refuses it until state triggers are evaluated.
+    Session,
+}
+
+/// How long a trigger's signal stays deliverable once written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Expires {
+    /// This many seconds after it is written.
+    Seconds(u64),
+    /// Until the session it is addressed to reads it.
+    Session,
 }
 
 /// What a trigger looks at.
