@@ -2,19 +2,31 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-//! The ADR-120 signal wire format: one line, `from|project|cwd|message`, or
-//! `from|project|cwd|re:<signal-id>|message` for a threaded reply. ADR-401
-//! adds tagged fields between `cwd` and the message, in a fixed order:
-//! `from_kind:`, `from_id:`, `on_behalf_of:`, `to:`, then `re:` last. An
-//! unthreaded message whose text itself starts with a known tag is written
-//! with an empty thread field, `re:|`, which ends the tags, so the text after
-//! it is read as written, whatever it looks like.
+//! The signal wire format: one line, `from|project|cwd|message`, or
+//! `from|project|cwd|re:<signal-id>|message` for a threaded reply. Tagged
+//! fields sit between `cwd` and the message, in a fixed order:
+//! `from_kind:`, `from_id:`, `on_behalf_of:`, `to:`, `lane:`, `expires:`,
+//! then `re:` last. An unthreaded message whose text itself starts with a
+//! known tag is written with an empty thread field, `re:|`, which ends the
+//! tags, so the text after it is read as written, whatever it looks like.
+//!
+//! A signal attend itself writes has `from_kind:system`, `from` set to
+//! `system:<sensor>` and `from_id` set to the sensor's name. It carries its
+//! lane in `lane:` (`message` or `event`) and may carry an expiry in
+//! `expires:`, in Unix seconds. A reader takes `lane:` and `expires:` as
+//! tags only after a `from_kind:system` tag, so a line from any other
+//! sender reads as it always has.
 //!
 //! Lives beside [`crate::signal_filename`], which mints the ids a reply
 //! references, so every reader (the attend CLI, the attend-chat TUI, the
 //! peers sensor) applies one rule for what counts as threaded, and both
 //! writers (`attend message send`, attend-chat) produce the same line, the same
 //! sender identity and the same atomic file.
+//!
+//! References:
+//! - ADR-120: the line and the `re:` thread field.
+//! - ADR-401: the tagged envelope fields and their fence.
+//! - ADR-416 §4: the system sender, and the `lane:` and `expires:` tags.
 
 use std::io::{self, Read};
 use std::path::Path;
@@ -29,7 +41,7 @@ pub struct ParsedSignal<'a> {
     pub project: &'a str,
     pub cwd: &'a str,
     pub reply_to: Option<&'a str>,
-    /// `human` or `agent`, as the sender's process resolved it (ADR-401).
+    /// `human`, `agent` or `system`, as the sender's process resolved it.
     pub from_kind: Option<&'a str>,
     /// The canonical sender id: a session id, or a person's member id.
     pub from_id: Option<&'a str>,
@@ -38,15 +50,74 @@ pub struct ParsedSignal<'a> {
     /// Who the message is for: `*`, `#<channel>`, or a comma-separated set
     /// of session and member ids. `None` on a record written before the tag.
     pub to: Option<&'a str>,
+    /// The lane a system signal rides. `None` on any other signal, and on a
+    /// system signal written without the tag; [`ParsedSignal::on_lane`]
+    /// gives the lane either way.
+    pub lane: Option<Lane>,
+    /// When a system signal lapses, in Unix seconds. `None` when it has no
+    /// expiry and stays until its session reads it.
+    pub expires: Option<u64>,
     pub message: &'a str,
 }
 
-/// The sender's kind (ADR-401, `from_kind`).
+/// The sender's kind, from the `from_kind` tag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Human,
     Agent,
+    /// attend itself, writing what one of its sensors reported.
+    System,
 }
+
+impl Kind {
+    /// The value the `from_kind` tag carries.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Kind::Human => "human",
+            Kind::Agent => "agent",
+            Kind::System => SYSTEM_KIND,
+        }
+    }
+}
+
+/// The lane a signal rides. Words a person or an agent composed ride the
+/// message lane. Reports from the environment, or from attend itself, ride
+/// the event lane.
+///
+/// References:
+/// - ADR-136: the message lane is split from the sensor bus.
+/// - ADR-416 §4: the lane rule has no exception, and a system signal carries
+///   its lane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lane {
+    Message,
+    Event,
+}
+
+impl Lane {
+    /// The value the `lane:` tag carries.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Lane::Message => "message",
+            Lane::Event => "event",
+        }
+    }
+
+    /// The lane a `lane:` value names, or `None` for any other value.
+    pub fn parse(value: &str) -> Option<Lane> {
+        match value {
+            "message" => Some(Lane::Message),
+            "event" => Some(Lane::Event),
+            _ => None,
+        }
+    }
+}
+
+/// The prefix of the `from` field on a signal attend itself writes.
+pub const SYSTEM_PREFIX: &str = "system:";
+
+/// The `from_kind` value of a signal attend itself writes.
+pub const SYSTEM_KIND: &str = "system";
 
 impl ParsedSignal<'_> {
     /// The canonical sender id: the `from_id` tag, or for a record without
@@ -60,15 +131,36 @@ impl ParsedSignal<'_> {
     }
 
     /// The sender's kind: the `from_kind` tag, or from `from`'s prefix.
-    /// `None` for a prefix no attend writes.
+    /// `None` for a prefix no attend writes. A `from_kind:system` tag counts
+    /// only when `from` starts `system:` too, since one writer sets both; on
+    /// any other line the kind comes from `from`'s prefix.
     pub fn sender_kind(&self) -> Option<Kind> {
         match self.from_kind {
             Some("human") => Some(Kind::Human),
             Some("agent") => Some(Kind::Agent),
+            Some(SYSTEM_KIND) if self.from.starts_with(SYSTEM_PREFIX) => Some(Kind::System),
             _ if self.from.starts_with("claude:") => Some(Kind::Agent),
             _ if self.from.starts_with("external:") => Some(Kind::Human),
+            _ if self.from.starts_with(SYSTEM_PREFIX) => Some(Kind::System),
             _ => None,
         }
+    }
+
+    /// The lane this signal rides: its `lane:` tag, else the event lane for
+    /// a system signal and the message lane for anything a person or an
+    /// agent sent.
+    pub fn on_lane(&self) -> Lane {
+        match self.lane {
+            Some(lane) => lane,
+            None if self.sender_kind() == Some(Kind::System) => Lane::Event,
+            None => Lane::Message,
+        }
+    }
+
+    /// The name of the sensor that wrote this signal, when attend itself
+    /// wrote it.
+    pub fn system_sensor(&self) -> Option<String> {
+        (self.sender_kind() == Some(Kind::System)).then(|| self.sender_id())
     }
 
     /// Whether `to` names `id`.
@@ -114,7 +206,32 @@ pub fn derived_sender_id(from: &str) -> String {
     if let Some(rest) = from.strip_prefix("external:") {
         return crate::sanitize_id_component(rest.split('@').next().unwrap_or(rest));
     }
+    if let Some(sensor) = from.strip_prefix(SYSTEM_PREFIX) {
+        return sensor.to_string();
+    }
     from.to_string()
+}
+
+/// How a reader names the sender of a system signal from `sensor`: as
+/// attend, with the sensor beside it, never as a person or an agent.
+pub fn system_label(sensor: &str) -> String {
+    format!("attend ({sensor})")
+}
+
+/// What attend itself writes to one session: a report from `sensor`,
+/// addressed to the session id `to`, on `lane`, lapsing at `expires` (Unix
+/// seconds), or kept until the session reads it when `expires` is `None`.
+///
+/// References:
+/// - ADR-401, The system sender: `from`, `from_id` and `to` of a system
+///   signal, and no `expires` tag for a trigger that keeps until read.
+/// - ADR-416 §4: the sensor host writes these, addressed to its session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SystemSignal<'a> {
+    pub sensor: &'a str,
+    pub to: &'a str,
+    pub lane: Lane,
+    pub expires: Option<u64>,
 }
 
 /// The tagged fields a writer puts on a signal (ADR-401). A field left
@@ -134,8 +251,19 @@ pub fn is_tag_value(v: &str) -> bool {
     !v.is_empty() && v.chars().all(|c| c.is_ascii_alphanumeric() || "_@.,:/#*-".contains(c))
 }
 
-/// The tags a reader consumes, in the order a writer emits them.
+/// The tags a reader consumes from any sender. A writer emits them in this
+/// order, with [`SYSTEM_TAGS`] between `to` and `re`.
 const TAGS: [&str; 5] = ["from_kind", "from_id", "on_behalf_of", "to", "re"];
+
+/// The tags a reader consumes only after `from_kind:system`. A writer puts
+/// them after `to`, so a reader built before them still reads the sender
+/// and the addressee, and shows these at the start of the text.
+///
+/// References:
+/// - ADR-401, On-disk form: the seven tags, their order, and the note that
+///   a reader takes these two only after `from_kind:system`.
+/// - ADR-416 §4: `lane:` and `expires:` join the fenced set.
+const SYSTEM_TAGS: [&str; 2] = ["lane", "expires"];
 
 /// Signal ids are filename stems in the form `<sender-id>-<timestamp>`,
 /// which is always `[A-Za-z0-9_-]+`. This char class is the discriminator
@@ -155,6 +283,10 @@ pub fn is_valid_signal_id(id: &str) -> bool {
 /// `re:` ([`format_signal`] writes it), and is dropped. Any other malformed
 /// `re:` prefix degrades to the legacy reading, so prose written before the
 /// marker existed round-trips intact. Pipes in the message are kept.
+///
+/// References:
+/// - ADR-401, On-disk form: the tag fence this parse applies.
+/// - ADR-416 §4: the system sender's tags.
 pub fn parse_signal(content: &str) -> Option<ParsedSignal<'_>> {
     let parts: Vec<&str> = content.splitn(4, '|').collect();
     if parts.len() < 4 {
@@ -181,38 +313,64 @@ pub fn parse_signal(content: &str) -> Option<ParsedSignal<'_>> {
         from_id: None,
         on_behalf_of: None,
         to: None,
+        lane: None,
+        expires: None,
         message: parts[3],
     };
     // The tags: `key:value|` segments while the key is a known one not yet
-    // seen and the value is in its class. `re:` is last; it ends the run,
-    // and an empty one, `re:|`, marks an unthreaded message.
+    // seen and the value is in its class. `lane:` and `expires:` are known
+    // only on a line from `system:` once a `from_kind:system` tag has been
+    // read. `re:` is last; it
+    // ends the run, and an empty one, `re:|`, marks an unthreaded message.
     while let Some((seg, rest)) = sig.message.split_once('|') {
         let Some((key, value)) = seg.split_once(':') else { break };
-        let slot = match key {
+        let word = || Some(value).filter(|v| is_tag_value(v));
+        let system = sig.from_kind == Some(SYSTEM_KIND) && sig.from.starts_with(SYSTEM_PREFIX);
+        let taken = match key {
             "re" if value.is_empty() || is_valid_signal_id(value) => {
                 sig.reply_to = (!value.is_empty()).then_some(value);
                 sig.message = rest;
                 break;
             }
-            "from_kind" => &mut sig.from_kind,
-            "from_id" => &mut sig.from_id,
-            "on_behalf_of" => &mut sig.on_behalf_of,
-            "to" => &mut sig.to,
-            _ => break,
+            "from_kind" => take(&mut sig.from_kind, word()),
+            "from_id" => take(&mut sig.from_id, word()),
+            "on_behalf_of" => take(&mut sig.on_behalf_of, word()),
+            "to" => take(&mut sig.to, word()),
+            "lane" if system => take(&mut sig.lane, Lane::parse(value)),
+            "expires" if system => take(&mut sig.expires, parse_expiry(value)),
+            _ => false,
         };
-        if slot.is_some() || !is_tag_value(value) {
+        if !taken {
             break;
         }
-        *slot = Some(value);
         sig.message = rest;
     }
     Some(sig)
 }
 
-/// Whether `message` begins with a known tag, so a writer must end the tags
-/// before it with `re:|`.
-fn starts_with_tag(message: &str) -> bool {
-    TAGS.iter().any(|t| message.strip_prefix(t).is_some_and(|r| r.starts_with(':')))
+/// Put `value` in `slot` when the slot is empty and the value was read.
+/// Returns whether it did; a repeated tag, or a value outside its class,
+/// ends the tags.
+fn take<T>(slot: &mut Option<T>, value: Option<T>) -> bool {
+    if slot.is_some() || value.is_none() {
+        return false;
+    }
+    *slot = value;
+    true
+}
+
+/// The value class of `expires`: a count of Unix seconds, ASCII digits only.
+fn parse_expiry(value: &str) -> Option<u64> {
+    (!value.is_empty() && value.bytes().all(|b| b.is_ascii_digit())).then(|| value.parse().ok()).flatten()
+}
+
+/// Whether `message` begins with a tag a reader would take after the tags
+/// already written, so a writer must end the tags before it with `re:|`.
+/// `system` is whether those tags include `from_kind:system`, after which
+/// `lane:` and `expires:` are tags too.
+fn starts_with_tag(message: &str, system: bool) -> bool {
+    let extra: &[&str] = if system { &SYSTEM_TAGS } else { &[] };
+    TAGS.iter().chain(extra).any(|t| message.strip_prefix(t).is_some_and(|r| r.starts_with(':')))
 }
 
 /// A signal file's record without the one newline [`format_signal`] ends it
@@ -237,20 +395,80 @@ pub fn format_signal(from: &str, project: &str, cwd: &str, reply_to: Option<&str
 /// left out. An unthreaded message that starts with a known tag gets the
 /// empty thread field, `re:|`, so no reader takes its text for a tag.
 pub fn format_tagged(from: &str, project: &str, cwd: &str, env: &Envelope, reply_to: Option<&str>, message: &str) -> String {
+    let tags: Vec<(&str, String)> = [("from_kind", env.from_kind), ("from_id", env.from_id), ("on_behalf_of", env.on_behalf_of), ("to", env.to)]
+        .into_iter()
+        .filter_map(|(key, value)| value.filter(|v| is_tag_value(v)).map(|v| (key, v.to_string())))
+        .collect();
+    format_line(from, project, cwd, &tags, reply_to, message)
+}
+
+/// One wire line for a signal attend itself writes: `from` is
+/// `system:<sensor>`, followed by the tags `from_kind:system`,
+/// `from_id:<sensor>`, `to:<session>`, `lane:` and, when the signal lapses,
+/// `expires:`. A sensor name or session id outside [`is_tag_value`] is
+/// refused: a line without `to` would reach and wake every session at the
+/// project, and one without `from_id` would name a sender its `from` does
+/// not.
+///
+/// References:
+/// - ADR-401, The system sender: the line this writes.
+/// - ADR-416 §4: what the sensor host writes for each report.
+pub fn format_system(project: &str, cwd: &str, sys: &SystemSignal, message: &str) -> Result<String, BadSystemSignal> {
+    if !is_tag_value(sys.sensor) {
+        return Err(BadSystemSignal::Sensor(sys.sensor.to_string()));
+    }
+    if !is_tag_value(sys.to) {
+        return Err(BadSystemSignal::Addressee(sys.to.to_string()));
+    }
+    let from = format!("{SYSTEM_PREFIX}{}", sys.sensor);
+    let mut tags = vec![
+        ("from_kind", SYSTEM_KIND.to_string()),
+        ("from_id", sys.sensor.to_string()),
+        ("to", sys.to.to_string()),
+        ("lane", sys.lane.as_str().to_string()),
+    ];
+    if let Some(at) = sys.expires {
+        tags.push(("expires", at.to_string()));
+    }
+    Ok(format_line(&from, project, cwd, &tags, None, message))
+}
+
+/// Why [`format_system`] refused to write a line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BadSystemSignal {
+    /// The sensor name falls outside [`is_tag_value`].
+    Sensor(String),
+    /// The addressee falls outside [`is_tag_value`].
+    Addressee(String),
+}
+
+impl std::fmt::Display for BadSystemSignal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BadSystemSignal::Sensor(s) => write!(f, "a system signal needs a sensor name usable as `from_id`, and {s:?} is not one"),
+            BadSystemSignal::Addressee(to) => write!(f, "a system signal needs one session id in `to`, and {to:?} is not one"),
+        }
+    }
+}
+
+impl std::error::Error for BadSystemSignal {}
+
+/// The line both writers build: the header, the `key:value|` tags in the
+/// order given, the thread field, then the message and one newline.
+fn format_line(from: &str, project: &str, cwd: &str, tags: &[(&str, String)], reply_to: Option<&str>, message: &str) -> String {
     // A header field never carries the field separator or a control
     // character, and `from` no whitespace, whatever the environment held.
     let from = header_field(from, true);
     let project = header_field(project, false);
     let cwd = header_field(cwd, false);
     let mut line = format!("{from}|{project}|{cwd}|");
-    for (key, value) in [("from_kind", env.from_kind), ("from_id", env.from_id), ("on_behalf_of", env.on_behalf_of), ("to", env.to)] {
-        if let Some(v) = value.filter(|v| is_tag_value(v)) {
-            line += &format!("{key}:{v}|");
-        }
+    for (key, value) in tags {
+        line += &format!("{key}:{value}|");
     }
+    let system = from.starts_with(SYSTEM_PREFIX) && tags.iter().any(|(key, value)| *key == "from_kind" && value == SYSTEM_KIND);
     match reply_to {
         Some(id) => line += &format!("re:{id}|"),
-        None if starts_with_tag(message) => line += "re:|",
+        None if starts_with_tag(message, system) => line += "re:|",
         None => {}
     }
     line += message;
@@ -484,6 +702,180 @@ mod tests {
         assert_eq!((any_order.to, any_order.from_kind, any_order.message), (Some("*"), Some("agent"), "body"));
     }
 
+    const SID: &str = "11111111-2222-3333-4444-555555555555";
+
+    /// What a line reads as: `from_kind`, `from_id`, `to`, `re` and the
+    /// message.
+    type Fields<'a> = (Option<&'a str>, Option<&'a str>, Option<&'a str>, Option<&'a str>, &'a str);
+
+    /// A system signal on the event lane with an expiry, as this build
+    /// writes it, byte for byte.
+    const SYSTEM_EVENT_LINE: &str = "system:git|proj|/work/proj|from_kind:system|from_id:git|to:11111111-2222-3333-4444-555555555555|lane:event|expires:1790003600|branch switched to main";
+
+    /// A system signal round-trips on each lane, with and without an
+    /// expiry, through the writer and the parser.
+    #[test]
+    fn a_system_signal_round_trips_on_each_lane() {
+        let event = SystemSignal { sensor: "git", to: SID, lane: Lane::Event, expires: Some(1_790_003_600) };
+        assert_eq!(format_system("proj", "/work/proj", &event, "branch switched to main").unwrap(), format!("{SYSTEM_EVENT_LINE}\n"));
+        for (lane, expires) in [(Lane::Event, Some(1_790_003_600)), (Lane::Event, None), (Lane::Message, Some(42)), (Lane::Message, None)] {
+            let sys = SystemSignal { sensor: "ways-update", to: SID, lane, expires };
+            let line = format_system("proj", "/work/proj", &sys, "agent-ways has a newer release").unwrap();
+            let s = parse_signal(wire_line(&line)).unwrap();
+            assert_eq!(s.from, "system:ways-update", "{line}");
+            assert_eq!((s.from_kind, s.from_id, s.to), (Some("system"), Some("ways-update"), Some(SID)), "{line}");
+            assert_eq!((s.lane, s.expires), (Some(lane), expires), "{line}");
+            assert_eq!((s.reply_to, s.message), (None, "agent-ways has a newer release"), "{line}");
+            assert_eq!(s.sender_kind(), Some(Kind::System), "{line}");
+            assert_eq!(s.on_lane(), lane, "{line}");
+            assert_eq!(s.system_sensor().as_deref(), Some("ways-update"), "{line}");
+            assert!(s.tray_reads(&[SID]) && !s.tray_reads(&["another-session"]), "{line}");
+        }
+    }
+
+    /// A line is a system signal only when its `from` starts `system:` as
+    /// well as carrying `from_kind:system`. An agent's line that claims the
+    /// system kind reads as the agent's, and its `lane:` and `expires:` are
+    /// text.
+    #[test]
+    fn a_system_kind_needs_a_system_from() {
+        let line = format!("claude:a|p|/x|from_kind:system|from_id:git|to:{SID}|lane:event|text");
+        let s = parse_signal(&line).unwrap();
+        assert_eq!(s.sender_kind(), Some(Kind::Agent));
+        assert_eq!((s.from_kind, s.from_id, s.to), (Some("system"), Some("git"), Some(SID)));
+        assert_eq!((s.lane, s.expires, s.message), (None, None, "lane:event|text"));
+        assert_eq!((s.on_lane(), s.system_sensor()), (Lane::Message, None));
+        let odd = parse_signal("odd|p|/x|from_kind:system|expires:5|text").unwrap();
+        assert_eq!((odd.sender_kind(), odd.expires, odd.message), (None, None, "expires:5|text"));
+    }
+
+    /// The writer refuses a system signal it cannot address to one session,
+    /// or whose sensor name cannot be its `from_id`, and writes nothing.
+    #[test]
+    fn a_system_signal_with_a_bad_addressee_or_sensor_is_refused() {
+        for to in ["", "a session", "a|b", "line\nbreak"] {
+            let sys = SystemSignal { sensor: "git", to, lane: Lane::Event, expires: None };
+            assert_eq!(format_system("p", "/x", &sys, "m"), Err(BadSystemSignal::Addressee(to.to_string())), "{to:?}");
+        }
+        for sensor in ["", "my sensor", "a|b"] {
+            let sys = SystemSignal { sensor, to: SID, lane: Lane::Event, expires: None };
+            assert_eq!(format_system("p", "/x", &sys, "m"), Err(BadSystemSignal::Sensor(sensor.to_string())), "{sensor:?}");
+        }
+        let e = BadSystemSignal::Addressee("a|b".into());
+        assert_eq!(e.to_string(), "a system signal needs one session id in `to`, and \"a|b\" is not one");
+    }
+
+    /// A system signal whose text starts with a tag reads back as written.
+    #[test]
+    fn a_system_message_starting_with_a_tag_round_trips() {
+        let sys = SystemSignal { sensor: "git", to: SID, lane: Lane::Message, expires: None };
+        for text in ["expires:9|soon", "lane:event|x", "to:x|y", "re:abc-1|z", "plain"] {
+            let line = format_system("p", "/x", &sys, text).unwrap();
+            let s = parse_signal(wire_line(&line)).unwrap();
+            assert_eq!((s.lane, s.expires, s.reply_to, s.message), (Some(Lane::Message), None, None, text), "{line}");
+        }
+    }
+
+    /// Lines from before this build, literal, each with every field it
+    /// reads as. `lane:` and `expires:` after a sender that is not a system
+    /// sender are message text, as they were.
+    #[test]
+    fn lines_from_before_the_system_sender_parse_unchanged() {
+        let cases: [(&str, Fields); 7] = [
+            ("claude:sid-9|p|/x|hello", (None, None, None, None, "hello")),
+            ("claude:a|p|/x|re:sender-123-0|reply body", (None, None, None, Some("sender-123-0"), "reply body")),
+            ("claude:a|p|/x|from_kind:agent|from_id:a|to:b|lane:event|hello", (Some("agent"), Some("a"), Some("b"), None, "lane:event|hello")),
+            ("external:aaron@kitty|p|/x|from_kind:human|from_id:aaron|to:*|expires:5|hi", (Some("human"), Some("aaron"), Some("*"), None, "expires:5|hi")),
+            ("claude:a|p|/x|to:*|lane:message|expires:1|body", (None, None, Some("*"), None, "lane:message|expires:1|body")),
+            ("claude:a|p|/x|from_kind:agent|re:|lane:event|x", (Some("agent"), None, None, None, "lane:event|x")),
+            ("odd|p|/x|lane:event|hello", (None, None, None, None, "lane:event|hello")),
+        ];
+        for (line, (kind, id, to, re, message)) in cases {
+            let s = parse_signal(line).unwrap();
+            assert_eq!((s.from_kind, s.from_id, s.to, s.reply_to, s.message), (kind, id, to, re, message), "{line}");
+            assert_eq!((s.lane, s.expires), (None, None), "{line}");
+            assert_eq!(s.on_lane(), Lane::Message, "{line}");
+        }
+    }
+
+    /// A tag value outside its class begins the message: a lane other than
+    /// `message` or `event`, an expiry that is not a count of seconds.
+    #[test]
+    fn the_system_tags_keep_the_fence() {
+        let head = format!("system:git|p|/x|from_kind:system|from_id:git|to:{SID}|");
+        for rest in ["lane:urgent|body", "lane:|body", "expires:soon|body", "expires:-1|body", "expires:|body", "expires:99999999999999999999999|body"] {
+            let line = format!("{head}{rest}");
+            let s = parse_signal(&line).unwrap();
+            assert_eq!((s.lane, s.expires, s.message), (None, None, rest), "{line}");
+        }
+        // A repeated system tag ends the tag run.
+        let repeated = format!("{head}lane:event|lane:message|body");
+        let s = parse_signal(&repeated).unwrap();
+        assert_eq!((s.lane, s.message), (Some(Lane::Event), "lane:message|body"));
+        // A system signal without a lane tag rides the event lane.
+        let untagged = format!("{head}body");
+        let s = parse_signal(&untagged).unwrap();
+        assert_eq!((s.lane, s.on_lane()), (None, Lane::Event));
+    }
+
+    /// A message an agent sends whose text starts `lane:` is written as
+    /// before, with no thread marker, and reads back as written.
+    #[test]
+    fn an_agent_message_starting_lane_is_written_as_before() {
+        let env = Envelope { from_kind: Some("agent"), from_id: Some("a"), on_behalf_of: None, to: Some("*") };
+        let line = format_tagged("claude:a", "p", "/x", &env, None, "lane:event|x");
+        assert_eq!(line, "claude:a|p|/x|from_kind:agent|from_id:a|to:*|lane:event|x\n");
+        assert_eq!(parse_signal(wire_line(&line)).unwrap().message, "lane:event|x");
+    }
+
+    /// The parser as attend released it before the system sender, kept
+    /// verbatim so the tests can say what an older reader makes of a line
+    /// this build writes.
+    fn released_reader(content: &str) -> Option<Fields<'_>> {
+        let parts: Vec<&str> = content.splitn(4, '|').collect();
+        if parts.len() < 4 || parts[..3].iter().any(|f| f.chars().any(char::is_control)) {
+            return None;
+        }
+        let (mut from_kind, mut from_id, mut on_behalf_of, mut to, mut reply_to, mut message) = (None, None, None, None, None, parts[3]);
+        while let Some((seg, rest)) = message.split_once('|') {
+            let Some((key, value)) = seg.split_once(':') else { break };
+            let slot = match key {
+                "re" if value.is_empty() || is_valid_signal_id(value) => {
+                    reply_to = (!value.is_empty()).then_some(value);
+                    message = rest;
+                    break;
+                }
+                "from_kind" => &mut from_kind,
+                "from_id" => &mut from_id,
+                "on_behalf_of" => &mut on_behalf_of,
+                "to" => &mut to,
+                _ => break,
+            };
+            if slot.is_some() || !is_tag_value(value) {
+                break;
+            }
+            *slot = Some(value);
+            message = rest;
+        }
+        let _ = on_behalf_of;
+        Some((from_kind, from_id, to, reply_to, message))
+    }
+
+    /// An older reader still parses a system line: it reads the sender,
+    /// its kind as written and the addressee, so only the session the line
+    /// is for reads it, and it shows the lane and expiry tags at the start
+    /// of the text.
+    #[test]
+    fn an_older_reader_parses_a_system_line() {
+        let (kind, id, to, re, message) = released_reader(SYSTEM_EVENT_LINE).unwrap();
+        assert_eq!((kind, id, to, re), (Some("system"), Some("git"), Some(SID), None));
+        assert_eq!(message, "lane:event|expires:1790003600|branch switched to main");
+        // The released reader reads an older line as this build does.
+        let old = "claude:a|p|/x|from_kind:agent|from_id:a|to:b|re:a-1-0|hi | there";
+        let new = parse_signal(old).unwrap();
+        assert_eq!(released_reader(old).unwrap(), (new.from_kind, new.from_id, new.to, new.reply_to, new.message));
+    }
+
     /// A legacy record carries no tags; the sender id and kind derive from
     /// `from`.
     #[test]
@@ -494,6 +886,9 @@ mod tests {
         let h = parse_signal("external:aaron@kitty|p|/x|hello").unwrap();
         assert_eq!((h.sender_id(), h.sender_kind()), ("aaron".to_string(), Some(Kind::Human)));
         assert_eq!(parse_signal("odd|p|/x|hello").unwrap().sender_kind(), None);
+        let sys = parse_signal("system:git|p|/x|hello").unwrap();
+        assert_eq!((sys.sender_id(), sys.sender_kind(), sys.on_lane()), ("git".to_string(), Some(Kind::System), Lane::Event));
+        assert_eq!(system_label("git"), "attend (git)");
         let tagged = parse_signal("external:aaron@kitty|p|/x|from_kind:human|from_id:aaron2|hi").unwrap();
         assert_eq!(tagged.sender_id(), "aaron2", "the tag wins over the derivation");
     }
