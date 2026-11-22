@@ -69,4 +69,12 @@ fn a_test_fire_compares_against_the_store_and_writes_only_with_commit() {
         assert_eq!(next["input"], json!([{"magnitude": 1.0, "description": "[test] unit b failed"}]));
     }
     assert_eq!(stores(), before, "a fire without --commit writes nothing");
+    let one_trigger = f.attend(&["sensor", "fire", "units/added", "--input", &two, "--commit", "--dry-run"]);
+    assert!(!one_trigger.status.success());
+    assert!(
+        String::from_utf8_lossy(&one_trigger.stderr).contains("--commit fires the whole sensor, since advancing added alone would leave the other triggers' memory behind; fire units --commit"),
+        "{}",
+        String::from_utf8_lossy(&one_trigger.stderr)
+    );
+    assert_eq!(stores(), before, "the refused commit wrote nothing");
 }

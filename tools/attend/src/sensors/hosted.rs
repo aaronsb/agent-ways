@@ -2,18 +2,23 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-//! A sensor as its file configures it: the compiled poll under the file's
-//! name, cadence and threshold, with each poll's outcome and each trigger's
-//! memory recorded in the sensor's store.
+//! A sensor as its file configures it: a compiled poll, or a poll result
+//! run through the file's declared state and triggers, under the file's
+//! name, cadence and threshold, with each poll's outcome, each trigger's
+//! memory and the declared state recorded in the sensor's store.
 //!
 //! A store is one file under `$XDG_STATE_HOME/agent-ways/attend/sensor-state/`
 //! for each sensor, project and session. Its name is an FNV-1a hash of the
 //! three, so no part of the path comes from a sensor file. Each report goes
 //! to one session, so what a sensor last saw is what that session was told,
-//! and two sessions in one project keep separate stores. A sensor reads a
-//! store only for a resolved session id. Reading is separate from writing:
-//! a test poll reads the session's store and compares against it, and only
-//! a recording sensor writes, so each store has one writer.
+//! and two sessions in one project keep separate stores.
+//!
+//! A sensor reads a store only for a resolved session id. Reading is
+//! separate from writing: a test poll reads the session's store and writes
+//! nothing. Two writers can change one store: the recording sensor of the
+//! session's host, and a test fire with `--commit`. A recording sensor
+//! reads its store again before a poll when the file changed since it last
+//! wrote it, so a commit is not overwritten.
 //!
 //! The file carries its format. A file of another format, such as one
 //! written before stores were keyed by session, or one whose sensor,
@@ -191,6 +196,9 @@ pub struct FileSensor {
     /// How long each observation of the last poll stays deliverable, by
     /// description.
     lapses: Vec<(String, Expires)>,
+    /// When this sensor last wrote its store, or read it, as the file's
+    /// modification time.
+    written: Option<SystemTime>,
 }
 
 impl FileSensor {
@@ -214,14 +222,39 @@ impl FileSensor {
     }
 
     /// The sensor under `key`, its store at `store`, starting from what the
-    /// store holds for that key. A stored state that another declaration
-    /// wrote, or that fails the check, is discarded with the memory of the
-    /// state triggers, so they start from a fresh baseline.
+    /// store holds for that key.
     fn open(key: Key, cadence: Cadence, poller: Poller, store: Option<PathBuf>, record: bool) -> Self {
-        let rec = store.as_deref().and_then(|p| read_at(p, &key));
+        let mut s = FileSensor {
+            name: key.sensor.clone(),
+            cadence,
+            poller,
+            key,
+            store,
+            record,
+            last: None,
+            stored: BTreeMap::new(),
+            state: None,
+            session: SessionMemory::default(),
+            failure: None,
+            discarded: None,
+            verdicts: Vec::new(),
+            lapses: Vec::new(),
+            written: None,
+        };
+        s.load();
+        s
+    }
+
+    /// Read what the store holds for this sensor's key: the last poll, the
+    /// store memory and the declared state. A stored state that another
+    /// declaration wrote, or that fails the check, is discarded with the
+    /// memory of the state triggers, so they start from a fresh baseline.
+    fn load(&mut self) {
+        let Some(path) = self.store.clone() else { return };
+        self.written = modified(&path);
+        let rec = read_at(&path, &self.key);
         let (last, mut stored, mut kept) = rec.map(|r| (r.poll, r.memory, r.state)).unwrap_or_default();
-        let mut discarded = None;
-        if let (Poller::Spec(d), Some(s)) = (&poller, &kept) {
+        if let (Poller::Spec(d), Some(s)) = (&self.poller, &kept) {
             let why = match state::check(&d.state, &s.fields) {
                 _ if s.decl != state::fingerprint(&d.state) => Some("the state declaration changed".to_string()),
                 Err(e) => Some(e),
@@ -229,25 +262,21 @@ impl FileSensor {
             };
             if let Some(why) = why {
                 stored.retain(|name, _| !d.triggers.iter().any(|t| &t.name == name && matches!(t.test, Test::State(_))));
-                discarded = Some(format!("its stored state was discarded, so it starts from a baseline: {why}"));
+                self.discarded = Some(format!("its stored state was discarded, so it starts from a baseline: {why}"));
                 kept = None;
             }
         }
-        FileSensor {
-            name: key.sensor.clone(),
-            cadence,
-            poller,
-            key,
-            store,
-            record,
-            last,
-            stored,
-            state: kept,
-            session: SessionMemory::default(),
-            failure: None,
-            discarded,
-            verdicts: Vec::new(),
-            lapses: Vec::new(),
+        (self.last, self.stored, self.state) = (last, stored, kept);
+    }
+
+    /// Read the store again when another writer changed it since this
+    /// sensor last wrote it, such as a test fire with `--commit`, so what
+    /// that writer kept is not overwritten.
+    fn refresh(&mut self) {
+        if let (Some(path), true) = (&self.store, self.record) {
+            if modified(path) != self.written {
+                self.load();
+            }
         }
     }
 
@@ -277,8 +306,9 @@ impl FileSensor {
     /// state trigger sees its fields' values under their names, and fires
     /// once, under the key `$`, when they change as it says.
     ///
-    /// Store memory is written to the store when the sensor records, and a
-    /// fresh store's first poll sets a baseline. Session memory starts from
+    /// Store memory reaches the store when the sensor next saves: after a
+    /// poll, or on [`FileSensor::commit`]. A fresh store's first poll sets a
+    /// baseline. Session memory starts from
     /// nothing seen, and a trigger definition with it fires at most once in
     /// the session, whatever it compares on: once it has fired, a later
     /// change, such as a condition that leaves and enters again, fires
@@ -299,10 +329,8 @@ impl FileSensor {
             },
         };
         mem.insert(trigger.name.clone(), Memo { test: test.clone(), seen: now });
-        match trigger.memory {
-            Memory::Store => self.save(),
-            Memory::Session if !out.is_empty() && !self.session.spent.insert(test) => out.clear(),
-            Memory::Session => {}
+        if trigger.memory == Memory::Session && !out.is_empty() && !self.session.spent.insert(test) {
+            out.clear();
         }
         out
     }
@@ -317,33 +345,42 @@ impl FileSensor {
     }
 
     /// Run `result` through the declared state and every trigger, and
-    /// return the observations the fired triggers make. A state write that
-    /// fails a check is refused whole and becomes the poll's failure; the
-    /// item triggers still run, and the state triggers see no change.
+    /// return the observations the fired triggers make. Nothing is written
+    /// here: a poll saves once after it, and a test fire only through
+    /// [`FileSensor::commit`].
+    ///
+    /// A state write that fails a check is refused whole and becomes the
+    /// poll's failure. The item triggers still run, and the state triggers
+    /// are skipped, so their memory is neither created nor advanced.
     pub fn evaluate(&mut self, result: &Value) -> Vec<(f64, String)> {
         let Poller::Spec(d) = &self.poller else { return Vec::new() };
         let (triggers, decl, emits, only) = (d.triggers.clone(), d.state.clone(), d.emits, d.only.clone());
         let prev = self.state.as_ref().map_or_else(|| state::fresh(&decl), |s| s.fields.clone());
         let emitted = emits.then(|| result.get("state").and_then(Value::as_object)).flatten();
-        let next = match state::write(&decl, &prev, result, emitted) {
-            Ok(next) => next,
+        let (next, refused) = match state::write(&decl, &prev, result, emitted) {
+            Ok(next) => (next, false),
             Err(why) => {
                 self.failure = Some(format!("the state write was refused: {why}"));
-                prev.clone()
+                (prev.clone(), true)
             }
         };
-        if !decl.is_empty() {
+        if !decl.is_empty() && !refused {
             self.state = Some(StoredState { decl: state::fingerprint(&decl), fields: next.clone() });
         }
         self.verdicts.clear();
         self.lapses.clear();
         let mut out = Vec::new();
         for t in triggers.iter().filter(|t| only.as_ref().is_none_or(|o| *o == t.name)) {
+            if refused && matches!(t.test, Test::State(_)) {
+                self.verdicts.push(Verdict { trigger: t.name.clone(), fired: Vec::new() });
+                continue;
+            }
             let (now, items) = seen_by(t, result, &next);
             let before = self.prior(t).unwrap_or_default();
             let keys = self.observe(t, now);
             for k in &keys {
-                let item = items.get(k).or_else(|| before.get(k).filter(|v| !v.is_boolean()));
+                let gone = keyed_item(t, k);
+                let item = items.get(k).or_else(|| before.get(k).filter(|v| !v.is_boolean())).or(gone.as_ref());
                 let fill = eval::Fill { item, state: &next, prev: &prev, count: keys.len() };
                 let text = match &t.description {
                     Some(tpl) => eval::fill(tpl, &fill),
@@ -359,11 +396,32 @@ impl FileSensor {
         out
     }
 
-    fn save(&self) {
+    /// Write the trigger memory and declared state the last evaluation
+    /// left, as a test fire with `--commit` keeps them. Writes nothing for
+    /// a sensor that does not record.
+    pub fn commit(&mut self) {
+        self.save();
+    }
+
+    fn save(&mut self) {
         if let (Some(path), true) = (&self.store, self.record) {
             write(path, &Record { state: self.state.clone(), ..Record::new(&self.key, self.last.clone(), self.stored.clone()) });
+            self.written = modified(path);
         }
     }
+}
+
+/// When the file at `path` was last written, or none when it cannot be read.
+fn modified(path: &Path) -> Option<SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
+/// The item a trigger with a `key` saw under `k`, as far as the key tells:
+/// `{<key>: k}`, nested for a dotted key. A `leaves` trigger whose item is
+/// gone from the result fills its description from this.
+fn keyed_item(t: &Trigger, k: &str) -> Option<Value> {
+    let Test::Items { key: Some(field), .. } = &t.test else { return None };
+    Some(field.rsplit('.').fold(Value::String(k.to_string()), |inner, part| serde_json::json!({ part: inner })))
 }
 
 /// What the trigger `t` sees in `result`, with the state `fields` after the
@@ -415,7 +473,10 @@ fn state_fired(changes: &BTreeMap<String, Change>, how: Match, prev: &Seen, now:
         let (a, b) = (prev.get(field), now.get(field));
         let num = |v: Option<&Value>| v.and_then(Value::as_f64);
         match change {
-            Change::Changed => a != b,
+            Change::Changed => match (a, b) {
+                (Some(x), Some(y)) => !eval::same(x, y),
+                (x, y) => x != y,
+            },
             Change::Rises => matches!((num(a), num(b)), (Some(x), Some(y)) if y > x),
             Change::Falls => matches!((num(a), num(b)), (Some(x), Some(y)) if y < x),
         }
@@ -470,6 +531,7 @@ impl Sensor for FileSensor {
 
     fn poll(&mut self, focus: &Focus) -> Vec<(f64, String)> {
         self.failure = None;
+        self.refresh();
         let out = match &mut self.poller {
             Poller::Crate(inner) => {
                 let out = inner.poll(focus);

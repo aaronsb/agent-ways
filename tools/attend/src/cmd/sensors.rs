@@ -302,6 +302,9 @@ pub(crate) fn fire(a: &FireArgs) {
     require_hosted(&h, "fire", a.json);
     let spec = h.loaded.spec.as_ref().expect("a hosted sensor loads");
     let refuse = |why: String| -> ! { crate::cmd::refuse_usage(&format!("attend sensor fire: {why}"), &why, a.json) };
+    if let (Some(t), true) = (trigger, a.commit) {
+        refuse(format!("--commit fires the whole sensor, since advancing {t} alone would leave the other triggers' memory behind; fire {name} --commit"));
+    }
     // A test fire leaves the store as it was unless --commit keeps it.
     let mut sensor = open(&h, &cfg, &focus.working_dir, a.commit, "fire");
     let input: Vec<(f64, String)> = if declares_triggers(&h) {
@@ -312,6 +315,9 @@ pub(crate) fn fire(a: &FireArgs) {
             sensor.only(t);
         }
         let out = sensor.evaluate(&result);
+        if a.commit {
+            sensor.commit();
+        }
         if let Some(f) = sensor.take_failure() {
             eprintln!("attend sensor fire: {name}: {f}");
         }
