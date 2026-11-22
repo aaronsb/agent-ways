@@ -18,9 +18,10 @@
 //! code a repository's author chose, it starts from an empty environment
 //! with only [`PROJECT_ENV`] carried over. The file's `env` adds to either.
 //!
-//! This is not a sandbox. The command runs as the operator, and an
-//! `attend` it runs resolves the session through its parent processes, not
-//! its environment, so it can act as the session.
+//! This is not a sandbox: the command runs as the operator. attend finds
+//! the session through parent processes, not the environment, and an
+//! `attend` the command runs sees a sensor host among its ancestors, so it
+//! refuses every verb that acts as the session.
 //!
 //! References:
 //! - ADR-403 §1: the command kind's block and its recorded failures.

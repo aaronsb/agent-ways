@@ -59,7 +59,7 @@ argv:
 # GOOGLE_* still reach it. From a project file it inherits only PATH,
 # HOME, USER, LOGNAME, SHELL, LANG, LC_*, TZ, TMPDIR, XDG_RUNTIME_DIR and
 # DBUS_SESSION_BUS_ADDRESS. This is not a sandbox: the command runs as
-# you.
+# you. An attend it runs refuses to act as the session.
 env: {}
 # The directory it runs in; unset is the project attend runs for.
 # cwd: .

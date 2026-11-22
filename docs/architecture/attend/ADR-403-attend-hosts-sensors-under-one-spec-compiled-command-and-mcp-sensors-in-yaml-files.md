@@ -98,6 +98,9 @@ considered:
   - operator: aaronsb
     said: "Strip Claude vars (Recommended)"
     via: "session 2026-11-22, question tool, review of #1325 finding 2"
+  - operator: aaronsb
+    said: "Guard in this PR"
+    via: "session 2026-11-22, question tool, re-review of #1325 N1"
 observable:
   - 'see: attend sensor list shows a shipped git.yaml, a user weather.yaml (kind: command, Open-Meteo) and a user slack-unread.yaml (kind: mcp), each with its source file and last poll state'
   - 'run: attend sensor fire weather/high-wind --input sample.json produces a [test] notification on the event lane and leaves the trigger''s stored state unchanged'
@@ -169,6 +172,8 @@ Each kind adds its own block, and its host owns it:
 | `ways` | ways | the session's own hook stream | `rules` and `dispatch`, defined by ADR-199 |
 
 > Amended 2026-11-22: the session's variables and tokens are kept out of a `command` sensor's environment, by the operator's choice ("Strip Claude vars"). When the highest file that sets its `argv`, `env` or `cwd` is a shipped or user file, the child inherits attend's environment less every variable named `CLAUDE*`, `ANTHROPIC_*` or `ATTEND_*`, `AI_AGENT` and `AWS_BEARER_TOKEN_BEDROCK`; other general-purpose credentials still reach it. When it is a project file, the child starts from an empty environment with only `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_*`, `TZ`, `TMPDIR`, `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS`. The file's `env` adds on top in both cases. This is not a sandbox: the command runs as the operator, and an `attend` it runs finds the session through its parent processes.
+
+> Amended 2026-11-22: attend refuses to act as the session for a process a sensor command started, by the operator's choice ("Guard in this PR"). Identity resolution walks parent processes; when the walk passes through an attend sensor host (`attend run`, or `attend sensor host`) above the caller before it reaches Claude Code, no session resolves, and every verb that sends, replies, joins, listens, drains or reads the session's messages, store or enrollment refuses. A host resolving its own session, its re-exec, the mod's calls, the Stop-hook drain and a shell in Claude Code's Bash tool have no host above them and resolve as before. The guard needs no record: the host's argv names it, read from `/proc` on Linux and `KERN_PROCARGS2` on macOS. A command that orphans itself loses Claude Code from its ancestry and resolves no session either.
 
 The three attend kinds also share attend's block:
 - **cadence:** `interval`, `min_interval`, `decay_threshold`;

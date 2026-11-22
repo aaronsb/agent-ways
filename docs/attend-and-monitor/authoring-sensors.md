@@ -172,7 +172,7 @@ The session's variables and tokens are kept out of the command's environment. Wh
 
 In both cases the file's `env` adds on top, and a name it sets replaces the inherited value.
 
-This is not a sandbox. The command runs as the operator, and an `attend` it runs finds the session through its parent processes, not its environment.
+This is not a sandbox: the command runs as the operator, with the operator's files and network. attend finds the session through parent processes, not the environment, and it refuses to act as the session for any process whose ancestry passes through a sensor host (`attend run`, and later `attend sensor host`) before Claude Code. So an `attend` a sensor command runs refuses every verb that sends, replies, joins, listens, drains or reads the session's messages, store or enrollment, with "this attend was started by a sensor command, so it does not act as the session". It keeps the verbs that need no session: `message cleanup`, `peer list`, `channel list`, `sensor list`, `sensor permissions` and `config`.
 
 A `lines` sensor's lines are its observations, read as the retired script sensor's were; a `state` block needs `output: json`. A timeout, a non-zero exit, a failed exec or output that does not parse is the sensor's recorded state, shown by `attend sensor list`.
 
