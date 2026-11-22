@@ -568,6 +568,30 @@ pub(super) fn flush_message_lane(slots: &mut [SensorSlot]) {
     }
 }
 
+/// The state a restarted run hands the sensor named `name`, running the
+/// compiled sensor `crate_id` when it is one, from the session's
+/// checkpoint: the reverse of [`collect_snapshot`]. The peers sensor gets
+/// its seen-set and cold-start mark, the context sensor its disclosed
+/// thresholds, and a file sensor its session memory, so a trigger that
+/// fired before a re-exec stays spent for the rest of the session.
+pub(super) fn restored_state(name: &str, crate_id: Option<&str>, snapshot: &state::StateSnapshot) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = match crate_id.unwrap_or_default() {
+        "peers" => snapshot
+            .seen_signals
+            .iter()
+            .map(|s| ("seen_signal".to_string(), s.clone()))
+            .chain(std::iter::once(("reply_hint_shown".to_string(), snapshot.reply_hint_shown.to_string())))
+            .chain(snapshot.baselined.then(|| ("baselined".to_string(), "true".to_string())))
+            .collect(),
+        "context" => snapshot.disclosed_thresholds.iter().map(|t| ("disclosed_threshold".to_string(), t.to_string())).collect(),
+        _ => Vec::new(),
+    };
+    if let Some(memo) = snapshot.sensor_memory.get(name) {
+        out.push((sensors::hosted::SESSION_MEMORY.to_string(), memo.clone()));
+    }
+    out
+}
+
 pub(super) fn collect_snapshot(slots: &[sensors::SensorSlot]) -> state::StateSnapshot {
     let mut snapshot = state::StateSnapshot::default();
     for slot in slots {
@@ -606,6 +630,7 @@ pub(super) fn collect_snapshot(slots: &[sensors::SensorSlot]) -> state::StateSna
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sensors::Sensor as _;
 
     #[test]
     fn build_engagement_returns_action_potential_curve() {
@@ -667,6 +692,47 @@ mod tests {
         assert!(collect_snapshot(&[peers_as_chat]).baselined);
         let git_as_peers = sensors::slot(Box::new(Marked("peers")), sensor_spec::Lane::Event, Some("git"));
         assert!(!collect_snapshot(&[git_as_peers]).baselined);
+    }
+
+    /// A file sensor named `ways-update` whose session trigger has fired,
+    /// and the trigger.
+    fn fired_update_sensor() -> (sensors::hosted::FileSensor, sensor_spec::Trigger) {
+        let doc = "kind: command\nargv: [x]\noutput: json\ntriggers: [{name: behind, path: \"$\", on: enters, where: {behind: true}, memory: session}]\n";
+        let t = sensor_spec::parse("ways-update", &serde_yaml::from_str(doc).unwrap()).spec.unwrap().triggers.remove(0);
+        let mut s = sensors::hosted::FileSensor::new("ways-update".into(), sensor_spec::DEFAULTS, Box::new(Marked("inner")), "/p", None, false);
+        let behind = sensors::hosted::Seen::from([("$".to_string(), serde_json::json!(true))]);
+        assert_eq!(s.observe(&t, behind), Some(vec!["$".to_string()]));
+        (s, t)
+    }
+
+    /// The checkpoint carries a file sensor's session memory under the
+    /// slot's name, as the sensor exports it.
+    #[test]
+    fn the_snapshot_carries_a_file_sensor_s_session_memory_under_its_name() {
+        let (s, _) = fired_update_sensor();
+        let exported: Vec<String> = s.export_state().into_iter().filter(|(k, _)| k == sensors::hosted::SESSION_MEMORY).map(|(_, v)| v).collect();
+        assert_eq!(exported.len(), 1);
+        let snapshot = collect_snapshot(&[sensors::slot(Box::new(s), sensor_spec::Lane::Event, None)]);
+        assert_eq!(snapshot.sensor_memory.keys().collect::<Vec<_>>(), ["ways-update"]);
+        assert_eq!(snapshot.sensor_memory["ways-update"], exported[0]);
+        assert!(snapshot.sensor_memory["ways-update"].contains("\"spent\":[\""), "{}", snapshot.sensor_memory["ways-update"]);
+    }
+
+    /// Export through the checkpoint, restore by name as a restarted run
+    /// does, and the trigger that fired stays spent.
+    #[test]
+    fn a_restored_file_sensor_does_not_fire_its_session_trigger_again() {
+        let (s, t) = fired_update_sensor();
+        let snapshot = collect_snapshot(&[sensors::slot(Box::new(s), sensor_spec::Lane::Event, None)]);
+        let state = restored_state("ways-update", None, &snapshot);
+        assert_eq!(state.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), [sensors::hosted::SESSION_MEMORY]);
+        assert!(restored_state("git", Some("git"), &snapshot).is_empty(), "another sensor gets none of it");
+        let mut restarted = sensors::hosted::FileSensor::new("ways-update".into(), sensor_spec::DEFAULTS, Box::new(Marked("inner")), "/p", None, false);
+        restarted.import_state(&state);
+        let behind = || sensors::hosted::Seen::from([("$".to_string(), serde_json::json!(true))]);
+        assert_eq!(restarted.observe(&t, behind()), Some(vec![]));
+        let mut fresh = sensors::hosted::FileSensor::new("ways-update".into(), sensor_spec::DEFAULTS, Box::new(Marked("inner")), "/p", None, false);
+        assert_eq!(fresh.observe(&t, behind()), Some(vec!["$".to_string()]), "without the restore it would fire again");
     }
 
     #[test]
