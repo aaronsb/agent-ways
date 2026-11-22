@@ -182,6 +182,7 @@ dependencies = [
  "clap",
  "clap-markdown",
  "claude-sessions",
+ "regex",
  "sensor-keepwarm",
  "sensor-peers",
  "sensor-processes",

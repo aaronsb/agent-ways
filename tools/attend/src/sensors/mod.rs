@@ -18,6 +18,8 @@
 mod context;
 mod disclosure;
 mod git;
+pub mod eval;
+pub mod state;
 pub mod hosted;
 
 pub use context::ContextSensor;
