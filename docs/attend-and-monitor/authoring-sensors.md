@@ -165,12 +165,14 @@ A `command` sensor runs one program each poll. [`example-command.yaml`](../../at
 | `timeout` | seconds before the run is killed, 1 to 600 | 10 |
 | `output` | `json`: one JSON document, the poll result, with an optional top-level `state` object of emitted fields; `lines`: `magnitude\|description` lines | required |
 
-The command never inherits the session's identity or credentials. What it inherits depends on the layer of the highest file that sets its `argv`, `env` or `cwd`:
+The session's variables and tokens are kept out of the command's environment. What it inherits depends on the layer of the highest file that sets its `argv`, `env` or `cwd`:
 
-- **A shipped or user file:** attend's environment, less every variable whose name starts with `CLAUDE` (Claude Code's session id, project directory, config directory and OAuth token), `ANTHROPIC_` (the API key and base URL) or `ATTEND_` (attend's own markers for its restarts and session moves).
+- **A shipped or user file:** attend's environment, less every variable whose name starts with `CLAUDE` (Claude Code's session id, project directory, config directory and OAuth token), `ANTHROPIC_` (the API key and base URL) or `ATTEND_` (attend's own markers for its restarts and session moves), and the variables `AI_AGENT` and `AWS_BEARER_TOKEN_BEDROCK`. General-purpose credentials and terminal variables, such as `AWS_*`, `GOOGLE_*`, `TMUX*` and `SSH_AUTH_SOCK`, still reach it.
 - **A project file:** an empty environment with only `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, every `LC_*`, `TZ`, `TMPDIR`, `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS` carried over. A project file that sets `argv`, `env` or `cwd` over a user file puts the command under this rule; one that only tunes its cadence does not.
 
 In both cases the file's `env` adds on top, and a name it sets replaces the inherited value.
+
+This is not a sandbox. The command runs as the operator, and an `attend` it runs finds the session through its parent processes, not its environment.
 
 A `lines` sensor's lines are its observations, read as the retired script sensor's were; a `state` block needs `output: json`. A timeout, a non-zero exit, a failed exec or output that does not parse is the sensor's recorded state, shown by `attend sensor list`.
 

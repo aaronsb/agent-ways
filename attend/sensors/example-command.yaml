@@ -53,10 +53,13 @@ argv:
   - "systemctl --user list-units --failed --output=json | jq '{units: ., state: {failed: length}}'"
 # Extra environment, as name: value, added to what the command inherits.
 # From a shipped or user file the command inherits attend's environment
-# less every variable starting CLAUDE, ANTHROPIC_ or ATTEND_, so the
-# session's id and credentials never reach it. From a project file it
-# inherits only PATH, HOME, USER, LOGNAME, SHELL, LANG, LC_*, TZ, TMPDIR,
-# XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS.
+# less every variable starting CLAUDE, ANTHROPIC_ or ATTEND_ and the
+# variables AI_AGENT and AWS_BEARER_TOKEN_BEDROCK, so the session's
+# variables and tokens stay out of it; other credentials such as AWS_* and
+# GOOGLE_* still reach it. From a project file it inherits only PATH,
+# HOME, USER, LOGNAME, SHELL, LANG, LC_*, TZ, TMPDIR, XDG_RUNTIME_DIR and
+# DBUS_SESSION_BUS_ADDRESS. This is not a sandbox: the command runs as
+# you.
 env: {}
 # The directory it runs in; unset is the project attend runs for.
 # cwd: .
