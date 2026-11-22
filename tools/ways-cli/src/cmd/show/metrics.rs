@@ -3,10 +3,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-//! Session metrics, git operations, and side-effectful display functions.
+//! Session metrics and side-effectful display functions.
 
 use std::path::Path;
-use std::process::Command;
 
 use crate::session;
 
@@ -74,70 +73,6 @@ fn sibling_ids(roots: &[std::path::PathBuf], parent_path: &str) -> std::collecti
     ids
 }
 
-/// Get a human-readable version string from git describe.
-pub(crate) fn git_version(repo: &Path) -> String {
-    let output = Command::new("git")
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .args(["-C", &repo.display().to_string(), "describe", "--tags", "--match", "v*", "--always", "--dirty"])
-        .output();
-
-    let raw = match output {
-        Ok(o) if o.status.success() => {
-            String::from_utf8_lossy(&o.stdout).trim().to_string()
-        }
-        _ => return "unknown".to_string(),
-    };
-
-    let (describe, is_dirty) = if raw.ends_with("-dirty") {
-        (raw.trim_end_matches("-dirty"), true)
-    } else {
-        (raw.as_str(), false)
-    };
-
-    // Parse: "v0.1.0-29-ge0841be" or "v0.1.0" or "e0841be"
-    let version = if let Some(caps) = parse_git_describe(describe) {
-        if caps.distance > 0 {
-            format!("{} + {} commits ({})", caps.tag, caps.distance, caps.hash)
-        } else {
-            format!("{} (release)", caps.tag)
-        }
-    } else if describe.starts_with('v') {
-        format!("{describe} (release)")
-    } else {
-        describe.to_string()
-    };
-
-    if is_dirty {
-        format!("{version} · dirty")
-    } else {
-        version
-    }
-}
-
-pub(crate) struct GitDescribe {
-    pub tag: String,
-    pub distance: u32,
-    pub hash: String,
-}
-
-pub(crate) fn parse_git_describe(s: &str) -> Option<GitDescribe> {
-    // "v0.1.0-29-ge0841be"
-    let last_dash = s.rfind('-')?;
-    let hash = &s[last_dash + 1..];
-    if !hash.starts_with('g') {
-        return None;
-    }
-    let rest = &s[..last_dash];
-    let second_dash = rest.rfind('-')?;
-    let distance: u32 = rest[second_dash + 1..].parse().ok()?;
-    let tag = &rest[..second_dash];
-    Some(GitDescribe {
-        tag: tag.to_string(),
-        distance,
-        hash: hash[1..].to_string(), // strip 'g' prefix
-    })
-}
-
 /// Print update availability status from the cached state file.
 pub(crate) fn update_status_text() -> String {
     // Path MUST match check-config-updates.sh (the writer). Unix keys by uid
@@ -187,51 +122,6 @@ pub(crate) fn render_update_status(content: &str) -> String {
     out.push_str(&format!("**⚠ agent-ways is {behind} commit(s) behind upstream.** Update the app source and reproject:\n"));
     out.push_str("`ways manage update`, then `ways manage update --commit`\n");
     out.push_str(&format!("`ways manage update` reports what would change; with `--commit` it pulls `{repo_disp}`, refreshes the binaries, and reprojects `~/.claude`. A bare pull plus `make setup` skips existing binaries and leaves them stale.\n"));
-    out
-}
-
-/// Return dirty file status from git.
-pub(crate) fn dirty_status_text(claude_dir: &Path) -> String {
-    let output = Command::new("git")
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .args(["-C", &claude_dir.display().to_string(), "status", "--short"])
-        .output();
-
-    let files: Vec<String> = match output {
-        Ok(o) if o.status.success() => {
-            String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .filter(|l| !l.is_empty())
-                .map(|l| l.split_whitespace().last().unwrap_or("").to_string())
-                .collect()
-        }
-        _ => return String::new(),
-    };
-
-    if files.is_empty() {
-        return String::new();
-    }
-
-    let count = files.len();
-    let mut out = String::from("\n");
-    if count >= 4 {
-        out.push_str(&format!("**Uncommitted local changes ({count} files)** — not tracked by git.\n"));
-        out.push_str("Other sessions won't see these. Commit to keep, or discard to match remote.\n");
-    } else {
-        let s = if count != 1 { "s" } else { "" };
-        out.push_str(&format!("**Uncommitted local changes ({count} file{s}):**\n"));
-    }
-
-    let max_show = 5;
-    for f in files.iter().take(max_show) {
-        out.push_str(&format!("- `{f}`\n"));
-    }
-    if count > max_show {
-        out.push_str(&format!("- ... and {} more\n", count - max_show));
-    }
-    if count < 4 {
-        out.push_str("\n_Run `git -C ~/.claude status` to review._\n");
-    }
     out
 }
 
