@@ -199,6 +199,10 @@ pub struct FileSensor {
     /// When this sensor last wrote its store, or read it, as the file's
     /// modification time.
     written: Option<SystemTime>,
+    /// The nonce of the record this sensor last read or wrote; none when
+    /// there was no record. A filesystem with coarse timestamps can leave
+    /// two writes with one mtime, and the nonce still tells them apart.
+    nonce: Option<u64>,
 }
 
 impl FileSensor {
@@ -240,6 +244,7 @@ impl FileSensor {
             verdicts: Vec::new(),
             lapses: Vec::new(),
             written: None,
+            nonce: None,
         };
         s.load();
         s
@@ -253,6 +258,7 @@ impl FileSensor {
         let Some(path) = self.store.clone() else { return };
         self.written = modified(&path);
         let rec = read_at(&path, &self.key);
+        self.nonce = rec.as_ref().map(|r| r.nonce);
         let (last, mut stored, mut kept) = rec.map(|r| (r.poll, r.memory, r.state)).unwrap_or_default();
         if let (Poller::Spec(d), Some(s)) = (&self.poller, &kept) {
             let why = match state::check(&d.state, &s.fields) {
@@ -274,7 +280,7 @@ impl FileSensor {
     /// that writer kept is not overwritten.
     fn refresh(&mut self) {
         if let (Some(path), true) = (&self.store, self.record) {
-            if modified(path) != self.written {
+            if modified(path) != self.written || stored_nonce(path, &self.key) != self.nonce {
                 self.load();
             }
         }
@@ -398,17 +404,42 @@ impl FileSensor {
 
     /// Write the trigger memory and declared state the last evaluation
     /// left, as a test fire with `--commit` keeps them. Writes nothing for
-    /// a sensor that does not record.
-    pub fn commit(&mut self) {
+    /// a sensor that does not record. Refused when another writer, such as
+    /// the session's own poll, changed the store since this sensor read it,
+    /// since the commit would overwrite what that writer kept.
+    pub fn commit(&mut self) -> Result<(), String> {
+        if let (Some(path), true) = (&self.store, self.record) {
+            if stored_nonce(path, &self.key) != self.nonce {
+                return Err("the store changed during the fire; fire again".into());
+            }
+        }
         self.save();
+        Ok(())
     }
 
     fn save(&mut self) {
         if let (Some(path), true) = (&self.store, self.record) {
-            write(path, &Record { state: self.state.clone(), ..Record::new(&self.key, self.last.clone(), self.stored.clone()) });
+            let rec = Record { state: self.state.clone(), ..Record::new(&self.key, self.last.clone(), self.stored.clone()) };
+            if write(path, &rec) {
+                self.nonce = Some(rec.nonce);
+            }
             self.written = modified(path);
         }
     }
+}
+
+/// The nonce of the record at `path` under `key`; none when there is none.
+fn stored_nonce(path: &Path, key: &Key) -> Option<u64> {
+    read_at(path, key).map(|r| r.nonce)
+}
+
+/// A value that differs for each record written: the time in
+/// nanoseconds, the process and a count within it, hashed.
+fn fresh_nonce() -> u64 {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nanos = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    agent_identity::identity::fnv1a_64(format!("{nanos}:{}:{seq}", std::process::id()).as_bytes())
 }
 
 /// When the file at `path` was last written, or none when it cannot be read.
@@ -636,11 +667,15 @@ pub struct Record {
     /// The declared state, for a sensor that declares one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<StoredState>,
+    /// A value new with each write, so a reader can tell two writes apart
+    /// when the file's mtime cannot.
+    #[serde(default)]
+    pub nonce: u64,
 }
 
 impl Record {
     pub fn new(key: &Key, poll: Option<Poll>, memory: BTreeMap<String, Memo>) -> Record {
-        Record { store: STORE_FORMAT, sensor: key.sensor.clone(), project: key.project.clone(), session: key.session.clone(), poll, memory, state: None }
+        Record { store: STORE_FORMAT, sensor: key.sensor.clone(), project: key.project.clone(), session: key.session.clone(), poll, memory, state: None, nonce: fresh_nonce() }
     }
 
     fn key(&self) -> Key {

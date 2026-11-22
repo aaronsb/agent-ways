@@ -77,6 +77,10 @@ fn a_test_fire_compares_against_the_store_and_writes_only_with_commit() {
         String::from_utf8_lossy(&one_trigger.stderr)
     );
     assert_eq!(stores(), before, "the refused commit wrote nothing");
+    let sessionless = f.without_session(|| f.attend(&["sensor", "fire", "units", "--input", &two, "--commit", "--dry-run"]));
+    assert!(!sessionless.status.success());
+    assert!(String::from_utf8_lossy(&sessionless.stderr).contains("no session here, so --commit keeps nothing; run it from the session's shell"), "{}", String::from_utf8_lossy(&sessionless.stderr));
+    assert_eq!(stores(), before, "a commit with no session wrote nothing");
 }
 
 /// What a command sensor's child sees, by variable name, from `attend

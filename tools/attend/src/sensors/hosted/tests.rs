@@ -80,7 +80,7 @@ fn run(s: &mut FileSensor, t: &Trigger, polls: Vec<Seen>) -> Vec<Vec<String>> {
         .map(|now| {
             let out = s.observe(t, now);
             if t.memory == Memory::Store {
-                s.commit();
+                s.commit().unwrap();
             }
             out
         })
@@ -401,7 +401,7 @@ fn a_commit_writes_the_state_of_a_sensor_with_no_triggers() {
     s.evaluate(&json!({"n": 4}));
     let key = Key::new("units", "/p", Some("s1"));
     assert_eq!(read_at(&key.path_in(&d.0), &key), None, "evaluate writes nothing");
-    s.commit();
+    s.commit().unwrap();
     let reopened = declared(&d.0, yaml, vec![], true);
     assert_eq!(serde_json::to_string(reopened.state().unwrap()).unwrap(), r#"{"n":4}"#);
 }
@@ -415,12 +415,45 @@ fn a_recording_sensor_keeps_what_a_commit_wrote() {
     polls(&mut host, 1);
     let mut fire = declared(&d.0, UNITS, vec![], true);
     assert_eq!(fire.evaluate(&units(&["a.service", "b.service"])), vec![(2.0, "unit b.service failed (2 in all, was 1; 1 new)".to_string())]);
-    fire.commit();
+    fire.commit().unwrap();
     assert_eq!(polls(&mut host, 1)[0], vec![], "b.service is in the committed memory");
     let key = Key::new("units", "/p", Some("s1"));
     let rec = read_at(&key.path_in(&d.0), &key).unwrap();
     assert_eq!(rec.memory["unit-failed"].seen.keys().collect::<Vec<_>>(), ["a.service", "b.service"]);
     assert_eq!(rec.state.unwrap().fields["failed"], json!(2));
+}
+
+/// A commit that leaves the store's mtime where the host last saw it, as
+/// a filesystem with coarse timestamps can, is still read: the record's
+/// nonce tells the writes apart.
+#[test]
+fn a_commit_with_the_host_s_mtime_is_still_read() {
+    let d = Dir::new("commit-mtime");
+    let mut host = declared(&d.0, UNITS, vec![units(&["a.service"]), units(&["a.service", "b.service"])], true);
+    polls(&mut host, 1);
+    let mut fire = declared(&d.0, UNITS, vec![], true);
+    fire.evaluate(&units(&["a.service", "b.service"]));
+    fire.commit().unwrap();
+    let path = Key::new("units", "/p", Some("s1")).path_in(&d.0);
+    std::fs::File::options().write(true).open(&path).unwrap().set_modified(host.written.unwrap()).unwrap();
+    assert_eq!(modified(&path), host.written);
+    assert_eq!(polls(&mut host, 1)[0], vec![], "b.service is in the committed memory");
+}
+
+/// A poll that saves between a fire's evaluation and its commit makes the
+/// commit refuse, so the poll's write stands.
+#[test]
+fn a_commit_refuses_when_the_store_changed_during_the_fire() {
+    let d = Dir::new("commit-raced");
+    let mut host = declared(&d.0, UNITS, vec![units(&["a.service"]), units(&["a.service", "c.service"])], true);
+    polls(&mut host, 1);
+    let mut fire = declared(&d.0, UNITS, vec![], true);
+    fire.evaluate(&units(&["a.service", "b.service"]));
+    polls(&mut host, 1);
+    let key = Key::new("units", "/p", Some("s1"));
+    let before = std::fs::read(key.path_in(&d.0)).unwrap();
+    assert_eq!(fire.commit(), Err("the store changed during the fire; fire again".to_string()));
+    assert_eq!(std::fs::read(key.path_in(&d.0)).unwrap(), before);
 }
 
 /// A refused first write sets no baseline for the state triggers, so the
@@ -497,7 +530,7 @@ fn a_store_of_the_old_format_or_of_another_key_reads_as_no_store() {
     assert_eq!(read_at(&path, &key), None);
     let mut s = sensor(&d.0, Some("s1"));
     assert_eq!(s.observe(&enters("behind", "store"), seen(true)), Vec::<String>::new(), "it starts from a baseline");
-    s.commit();
+    s.commit().unwrap();
     // A current file whose key is not the one asked for is not taken as its store.
     let other = Key::new("ways-update", "/p", Some("s2"));
     assert_eq!(read_at(&path, &other), None);
@@ -554,7 +587,7 @@ fn a_session_s_stores_move_with_it_and_its_memory_comes_too() {
     let t = enters("behind", "store");
     let mut s = sensor(&d.0, Some("old"));
     s.observe(&t, seen(false));
-    s.commit();
+    s.commit().unwrap();
     assert_eq!(move_stores_in(&d.0, "old", "old"), 0, "a move to the same id does nothing");
     assert!(read_at(&Key::new("ways-update", "/p", Some("old")).path_in(&d.0), &Key::new("ways-update", "/p", Some("old"))).is_some(), "and keeps the store");
     assert_eq!(move_stores_in(&d.0, "old", "new"), 1);
@@ -571,7 +604,7 @@ fn a_move_that_cannot_write_keeps_the_source() {
     let from = Key::new("ways-update", "/p", Some("old"));
     let mut s = sensor(&d.0, Some("old"));
     s.observe(&enters("behind", "store"), seen(false));
-    s.commit();
+    s.commit().unwrap();
     // A directory at the target's path makes the rename fail.
     std::fs::create_dir_all(Key::new("ways-update", "/p", Some("new")).path_in(&d.0)).unwrap();
     assert_eq!(move_stores_in(&d.0, "old", "new"), 0);

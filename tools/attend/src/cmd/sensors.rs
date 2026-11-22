@@ -302,6 +302,9 @@ pub(crate) fn fire(a: &FireArgs) {
     require_hosted(&h, "fire", a.json);
     let spec = h.loaded.spec.as_ref().expect("a hosted sensor loads");
     let refuse = |why: String| -> ! { crate::cmd::refuse_usage(&format!("attend sensor fire: {why}"), &why, a.json) };
+    if a.commit && !attend_presence::session::identity().session_resolved {
+        refuse("no session here, so --commit keeps nothing; run it from the session's shell".into());
+    }
     if let (Some(t), true) = (trigger, a.commit) {
         refuse(format!("--commit fires the whole sensor, since advancing {t} alone would leave the other triggers' memory behind; fire {name} --commit"));
     }
@@ -316,7 +319,14 @@ pub(crate) fn fire(a: &FireArgs) {
         }
         let out = sensor.evaluate(&result);
         if a.commit {
-            sensor.commit();
+            if let Err(why) = sensor.commit() {
+                if a.json {
+                    crate::cmd::print_json(&json!({ "sensor": h.name(), "error": why }));
+                } else {
+                    eprintln!("attend sensor fire: {why}");
+                }
+                std::process::exit(agent_settings::exit::REJECTED);
+            }
         }
         if let Some(f) = sensor.take_failure() {
             eprintln!("attend sensor fire: {name}: {f}");
