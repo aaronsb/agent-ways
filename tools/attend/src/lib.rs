@@ -86,6 +86,11 @@ pub fn cli_main() {
         None => return,
     };
 
+    if acts_as_session(&command) && attend_presence::session::started_by_sensor_command(std::process::id()) {
+        eprintln!("attend: this attend was started by a sensor command, so it does not act as the session");
+        std::process::exit(agent_settings::exit::REJECTED);
+    }
+
     match command {
         Commands::Run { catchup } => cmd::run::cmd_run_with_catchup(catchup),
         Commands::Listen { sub, json } => cmd::listen::cmd_listen(sub.unwrap_or(ListenCmd::Status), json),
@@ -129,6 +134,23 @@ pub fn cli_main() {
         },
         Commands::Config { sub } => dispatch_config(sub.unwrap_or(ConfigCmd::Show)),
     }
+}
+
+/// Whether `command` acts as the session or reads what is the session's:
+/// it sends, replies, joins, listens, drains or reads the session's
+/// messages, store or enrollment. A process a sensor command started is
+/// refused these. The rest need no session and run for it as for any
+/// outside caller: help and version, `message cleanup`, `peer list`,
+/// `channel list`, `sensor list`, `sensor permissions` and `config`.
+fn acts_as_session(command: &Commands) -> bool {
+    !matches!(
+        command,
+        Commands::Message { sub: Some(MessageCmd::Cleanup(_)), .. }
+            | Commands::Peer { sub: None | Some(PeerCmd::List(_)), .. }
+            | Commands::Channel(ChannelGroup { sub: None | Some(ChannelCmd::List(_)), .. })
+            | Commands::Sensor { sub: None | Some(SensorCmd::List(_) | SensorCmd::Permissions) }
+            | Commands::Config { .. }
+    )
 }
 
 fn send(a: SendArgs) {

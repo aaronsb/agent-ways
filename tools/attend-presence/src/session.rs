@@ -212,6 +212,11 @@ pub fn find_session_in(dir: &Path, own_pid: u32) -> Option<(String, u32)> {
 /// when no record names it (its config directory is one this process cannot
 /// see), the session is unresolved rather than taken for an outer session
 /// further up, which would send as that session and read its messages.
+///
+/// A process that a sensor command started never resolves: the walk stops
+/// with no session when it passes through an attend sensor host above
+/// `own_pid` ([`is_sensor_host`]), since every process below a host is one
+/// of its sensor commands or what they started.
 pub fn find_session_in_dirs(dirs: &[PathBuf], own_pid: u32, is_claude: impl Fn(u32) -> bool) -> Option<(String, u32)> {
     let mut pid_to_session: HashMap<u32, String> = HashMap::new();
     for dir in dirs {
@@ -222,21 +227,67 @@ pub fn find_session_in_dirs(dirs: &[PathBuf], own_pid: u32, is_claude: impl Fn(u
     if pid_to_session.is_empty() {
         return None;
     }
+    match walk(own_pid, &pid_to_session, crate::process::parent_pid, is_claude, is_sensor_host) {
+        Walk::Session(sid, pid) => Some((sid, pid)),
+        Walk::SensorCommand | Walk::None => None,
+    }
+}
 
+/// Where a walk up a process's ancestry ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Walk {
+    /// A session record named this ancestor.
+    Session(String, u32),
+    /// The ancestry passed through an attend sensor host first.
+    SensorCommand,
+    /// Neither, within the walk's bound.
+    None,
+}
+
+/// Climb from `own_pid` by `parent`, at most 15 steps, and stop at the
+/// first of: an ancestor above `own_pid` that `is_host` names, a pid
+/// `records` names, a Claude Code process, or pid 1. `own_pid` itself is
+/// never taken for a host, so a host resolves its own session.
+pub fn walk(own_pid: u32, records: &HashMap<u32, String>, parent: impl Fn(u32) -> Option<u32>, is_claude: impl Fn(u32) -> bool, is_host: impl Fn(u32) -> bool) -> Walk {
     let mut pid = own_pid;
     for _ in 0..15 {
-        if let Some(sid) = pid_to_session.get(&pid) {
-            return Some((sid.clone(), pid));
+        if pid != own_pid && is_host(pid) {
+            return Walk::SensorCommand;
+        }
+        if let Some(sid) = records.get(&pid) {
+            return Walk::Session(sid.clone(), pid);
         }
         if is_claude(pid) || pid <= 1 {
             break;
         }
-        match crate::process::parent_pid(pid) {
+        match parent(pid) {
             Some(ppid) if ppid != pid => pid = ppid,
             _ => break,
         }
     }
-    None
+    Walk::None
+}
+
+/// Whether a sensor command started `pid`: its ancestry passes through an
+/// attend sensor host before it reaches Claude Code. Such a process does
+/// not act as the session.
+pub fn started_by_sensor_command(pid: u32) -> bool {
+    walk(pid, &HashMap::new(), crate::process::parent_pid, crate::process::is_claude, is_sensor_host) == Walk::SensorCommand
+}
+
+/// Whether `pid` runs an attend sensor host: `attend run`, or `attend
+/// sensor host`.
+pub fn is_sensor_host(pid: u32) -> bool {
+    crate::process::argv(pid).is_some_and(|a| is_sensor_host_argv(&a))
+}
+
+/// Whether `args` start an attend sensor host: a program named `attend`
+/// followed by `run`, or by `sensor host`.
+pub fn is_sensor_host_argv(args: &[String]) -> bool {
+    let Some((program, rest)) = args.split_first() else { return false };
+    let name = program.rsplit(['/', '\\']).next().unwrap_or_default();
+    let name = name.strip_suffix(".exe").unwrap_or(name);
+    name == "attend" && (rest.first().map(String::as_str) == Some("run") || rest.get(..2).is_some_and(|r| r == ["sensor", "host"]))
 }
 
 /// The origin path recorded for `session_id`, from its session record.
@@ -379,6 +430,41 @@ mod tests {
         let _ = fs::remove_dir_all(&p);
         fs::create_dir_all(&p).unwrap();
         TestDir(p)
+    }
+
+    /// A process tree: each pid's parent, and the pids that run an attend
+    /// sensor host. Pid 10 is Claude Code, with its session record.
+    fn tree_walk(own: u32, parents: &[(u32, u32)], hosts: &[u32]) -> Walk {
+        let parents: HashMap<u32, u32> = parents.iter().copied().collect();
+        let records = HashMap::from([(10, "sess".to_string())]);
+        walk(own, &records, |p| parents.get(&p).copied(), |p| p == 10, |p| hosts.contains(&p))
+    }
+
+    /// A process below a sensor host resolves no session, however deep;
+    /// the host itself, the mod's own calls, a Bash tool shell and a
+    /// process with no host above it all resolve.
+    #[test]
+    fn a_process_under_a_sensor_host_resolves_no_session() {
+        let tree = [(20, 10), (21, 20), (22, 21), (23, 22), (30, 10), (31, 30)];
+        let session = Walk::Session("sess".into(), 10);
+        assert_eq!(tree_walk(21, &tree, &[20]), Walk::SensorCommand, "the sensor command");
+        assert_eq!(tree_walk(23, &tree, &[20]), Walk::SensorCommand, "what the command started");
+        assert_eq!(tree_walk(20, &tree, &[20]), session, "the host resolves its own session, before and after a re-exec");
+        assert_eq!(tree_walk(31, &tree, &[20]), session, "a Bash tool shell beside the host");
+        assert_eq!(tree_walk(30, &tree, &[20]), session, "the mod's own call");
+        assert_eq!(tree_walk(22, &tree, &[]), session, "no host above it");
+    }
+
+    #[test]
+    fn a_sensor_host_is_named_by_its_argv() {
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(is_sensor_host_argv(&args(&["attend", "run"])));
+        assert!(is_sensor_host_argv(&args(&["/home/u/.local/bin/attend", "run", "--catchup"])));
+        assert!(is_sensor_host_argv(&args(&["attend", "sensor", "host", "--session", "s"])));
+        assert!(!is_sensor_host_argv(&args(&["attend", "sensor", "poll", "git"])));
+        assert!(!is_sensor_host_argv(&args(&["attend", "message", "send", "run"])));
+        assert!(!is_sensor_host_argv(&args(&["attend-chat", "run"])));
+        assert!(!is_sensor_host_argv(&args(&["sh", "-c", "attend run"])));
     }
 
     #[test]
