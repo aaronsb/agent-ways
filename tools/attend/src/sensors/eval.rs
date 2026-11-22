@@ -109,7 +109,7 @@ fn op_holds(op: &Op, v: &Value) -> bool {
             _ => false,
         },
         Op::Like(p) => v.as_str().is_some_and(|s| glob(p, s)),
-        Op::Matches(re) => v.as_str().is_some_and(|s| regex::Regex::new(re).is_ok_and(|r| r.is_match(s))),
+        Op::Matches(re) => v.as_str().is_some_and(|s| re.0.is_match(s)),
         Op::Above(n) => v.as_f64().is_some_and(|x| x > *n),
         Op::Below(n) => v.as_f64().is_some_and(|x| x < *n),
     }
@@ -121,7 +121,7 @@ fn to_json(v: &serde_yaml::Value) -> Value {
 }
 
 /// Equality, with numbers compared by value.
-fn same(a: &Value, b: &Value) -> bool {
+pub fn same(a: &Value, b: &Value) -> bool {
     match (a.as_f64(), b.as_f64()) {
         (Some(x), Some(y)) => x == y,
         _ => a == b,
@@ -135,43 +135,101 @@ pub fn has_glob(s: &str) -> bool {
 
 /// Whether `text` matches the glob `pattern`: `*` is any run of
 /// characters, `?` one character, and `[...]` one character of a set, with
-/// ranges such as `a-z` and a leading `!` or `^` to negate it.
+/// ranges such as `a-z` and a leading `!` or `^` to negate it. A `[` with
+/// no closing `]` is itself. The match walks both strings once, going back
+/// only to the last `*`, so its time is linear in practice.
 pub fn glob(pattern: &str, text: &str) -> bool {
-    let p: Vec<char> = pattern.chars().collect();
+    let p = tokens(pattern);
     let t: Vec<char> = text.chars().collect();
-    glob_at(&p, &t)
+    let (mut pi, mut ti) = (0, 0);
+    let mut star: Option<(usize, usize)> = None;
+    while ti < t.len() {
+        match p.get(pi) {
+            Some(Token::Star) => {
+                star = Some((pi, ti));
+                pi += 1;
+            }
+            Some(tok) if tok.matches(t[ti]) => {
+                pi += 1;
+                ti += 1;
+            }
+            _ => match star {
+                Some((sp, st)) => {
+                    pi = sp + 1;
+                    ti = st + 1;
+                    star = Some((sp, st + 1));
+                }
+                None => return false,
+            },
+        }
+    }
+    p[pi..].iter().all(|tok| *tok == Token::Star)
 }
 
-fn glob_at(p: &[char], t: &[char]) -> bool {
-    match p.first() {
-        None => t.is_empty(),
-        Some('*') => (0..=t.len()).any(|i| glob_at(&p[1..], &t[i..])),
-        Some('?') => !t.is_empty() && glob_at(&p[1..], &t[1..]),
-        Some('[') => match (p.iter().position(|c| *c == ']'), t.first()) {
-            (Some(close), Some(c)) if close > 1 => in_set(&p[1..close], *c) && glob_at(&p[close + 1..], &t[1..]),
-            _ => t.first() == Some(&'[') && glob_at(&p[1..], &t[1..]),
-        },
-        Some(c) => t.first() == Some(c) && glob_at(&p[1..], &t[1..]),
+/// One piece of a glob.
+#[derive(Debug, PartialEq)]
+enum Token {
+    Star,
+    Any,
+    Char(char),
+    /// The set's characters, and whether it is negated.
+    Set(Vec<char>, bool),
+}
+
+impl Token {
+    fn matches(&self, c: char) -> bool {
+        match self {
+            Token::Star => false,
+            Token::Any => true,
+            Token::Char(x) => *x == c,
+            Token::Set(set, negate) => in_set(set, c) != *negate,
+        }
     }
+}
+
+fn tokens(pattern: &str) -> Vec<Token> {
+    let p: Vec<char> = pattern.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < p.len() {
+        match p[i] {
+            '*' => out.push(Token::Star),
+            '?' => out.push(Token::Any),
+            '[' => match p[i + 1..].iter().position(|c| *c == ']').map(|n| n + i + 1) {
+                Some(close) if close > i + 1 => {
+                    let set = &p[i + 1..close];
+                    let (negate, set) = match set.first() {
+                        Some('!' | '^') => (true, &set[1..]),
+                        _ => (false, set),
+                    };
+                    out.push(Token::Set(set.to_vec(), negate));
+                    i = close;
+                }
+                _ => out.push(Token::Char('[')),
+            },
+            c => out.push(Token::Char(c)),
+        }
+        i += 1;
+    }
+    out
 }
 
 fn in_set(set: &[char], c: char) -> bool {
-    let (negate, set) = match set.first() {
-        Some('!' | '^') => (true, &set[1..]),
-        _ => (false, set),
-    };
     let mut i = 0;
-    let mut found = false;
     while i < set.len() {
         if i + 2 < set.len() && set[i + 1] == '-' {
-            found |= set[i] <= c && c <= set[i + 2];
+            if set[i] <= c && c <= set[i + 2] {
+                return true;
+            }
             i += 3;
         } else {
-            found |= set[i] == c;
+            if set[i] == c {
+                return true;
+            }
             i += 1;
         }
     }
-    found != negate
+    false
 }
 
 /// What a template reads: the item a trigger saw, the declared state after
@@ -321,6 +379,18 @@ mod tests {
         assert!(glob("[^x]", "y") && !glob("[^x]", "x"));
         assert!(glob("[", "[") && !glob("[", "a"));
         assert!(glob("", "") && !glob("", "a"));
+        assert!(glob("*", "") && glob("a*", "a") && !glob("a?", "a"));
+    }
+
+    /// The match does not go back further than the last `*`, so a pattern
+    /// of many stars fails fast on a long text it cannot match.
+    #[test]
+    fn glob_time_stays_linear_on_many_stars() {
+        let long = "a".repeat(10_000);
+        let started = std::time::Instant::now();
+        assert!(!glob("*a*a*a*a*b", &long));
+        assert!(glob("*a*a*a*a*", &long));
+        assert!(started.elapsed() < std::time::Duration::from_millis(500), "{:?}", started.elapsed());
     }
 
     #[test]

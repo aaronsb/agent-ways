@@ -106,10 +106,25 @@ triggers:
 }
 
 #[test]
-fn session_memory_on_a_state_trigger_is_not_yet_supported() {
+fn session_memory_on_a_state_trigger_is_refused() {
     let p = parse("s", &y("kind: command\nargv: [x]\noutput: json\nstate: {n: {type: number}}\ntriggers: [{name: a, state: {n: rises}, memory: session}]\n"));
     assert!(p.spec.is_none());
     assert_eq!(invalid(&p), ["triggers.a.memory: memory: session does not apply to a state trigger, which compares against the last state its store kept; use store, or leave memory unset"]);
+}
+
+/// A `matches` pattern compiles when the file loads; one that does not
+/// compile makes the sensor invalid, at its path.
+#[test]
+fn a_matches_pattern_compiles_when_the_file_loads() {
+    let doc = |re: &str| y(&format!("kind: command\nargv: [x]\noutput: json\ntriggers: [{{name: t, path: \"$\", on: added, where: {{s: {{matches: \"{re}\"}}}}}}]\n"));
+    let p = parse("s", &doc("^a+$"));
+    let Test::Items { where_, .. } = &p.spec.unwrap().triggers[0].test else { panic!() };
+    let Condition::Ops(ops) = &where_["s"] else { panic!() };
+    let [Op::Matches(re)] = ops.as_slice() else { panic!("{ops:?}") };
+    assert_eq!((re.0.as_str(), re.0.is_match("aaa"), re.0.is_match("ab")), ("^a+$", true, false));
+    let bad = parse("s", &doc("(unclosed"));
+    assert!(bad.spec.is_none());
+    assert_eq!(invalid(&bad), ["triggers.t.where.s.matches: not a regular expression: error: unclosed group"]);
 }
 
 /// The fingerprint follows what a trigger tests, not its name, magnitude

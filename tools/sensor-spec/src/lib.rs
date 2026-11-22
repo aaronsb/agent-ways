@@ -551,10 +551,20 @@ pub enum Op {
     Contains(Value),
     /// A glob.
     Like(String),
-    /// A regular expression.
-    Matches(String),
+    /// A regular expression, compiled when the file loads.
+    Matches(Pattern),
     Above(f64),
     Below(f64),
+}
+
+/// A compiled regular expression. Two are equal when their source text is.
+#[derive(Debug, Clone)]
+pub struct Pattern(pub regex::Regex);
+
+impl PartialEq for Pattern {
+    fn eq(&self, other: &Pattern) -> bool {
+        self.0.as_str() == other.0.as_str()
+    }
 }
 
 /// A declared state field's type.
