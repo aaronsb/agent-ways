@@ -172,7 +172,16 @@ The session's variables and tokens are kept out of the command's environment. Wh
 
 In both cases the file's `env` adds on top, and a name it sets replaces the inherited value.
 
-This is not a sandbox: the command runs as the operator, with the operator's files and network. attend finds the session through parent processes, not the environment, and it refuses to act as the session for any process whose ancestry passes through a sensor host (`attend run`, and later `attend sensor host`) before Claude Code. So an `attend` a sensor command runs refuses every verb that sends, replies, joins, listens, drains or reads the session's messages, store or enrollment, with "this attend was started by a sensor command, so it does not act as the session". It keeps the verbs that need no session: `message cleanup`, `peer list`, `channel list`, `sensor list`, `sensor permissions` and `config`.
+This is not a sandbox: the command runs as the operator, with the operator's files and network. attend finds the session through parent processes, not the environment, and it refuses to act as the session for any process with a sensor host (`attend run`, and later `attend sensor host`) anywhere among its ancestors, up to pid 1. A host is a process whose command line is `attend run` or `attend sensor host`, directly or through an interpreter such as `sh /path/attend run`, or whose executable file is named `attend` with those arguments. So an `attend` a sensor command runs refuses every verb that sends, replies, joins, listens, drains or reads the session's messages, store or enrollment, with "this attend was started by a sensor command, so it does not act as the session". It keeps the verbs that need no session: `message cleanup`, `peer list`, `channel list`, `sensor list`, `sensor permissions` and `config`. A sensor of your own that ran `attend message send` to notify you is refused now; write the notice as the sensor's output instead.
+
+The guard stops a sensor command from acting as the session by accident or through `attend`. It is not a defence against a hostile command running as you. Because the command runs as the same user, it does not cover:
+
+- writing a Claude Code session record, which takes effect only for a process that has also orphaned itself away from the host;
+- writing attend's store or signal files directly;
+- reading Claude Code's environment from `/proc/<pid>/environ` or `ps eww`;
+- typing into the session's terminal, for example with `tmux send-keys`;
+- starting `claude` after orphaning itself;
+- running verbs as an unresolved caller, as any shell outside Claude Code does.
 
 A `lines` sensor's lines are its observations, read as the retired script sensor's were; a `state` block needs `output: json`. A timeout, a non-zero exit, a failed exec or output that does not parse is the sensor's recorded state, shown by `attend sensor list`.
 
