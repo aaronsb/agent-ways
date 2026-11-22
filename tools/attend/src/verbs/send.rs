@@ -114,6 +114,9 @@ pub enum SendError {
     ParentRoomUnknown,
     /// The parent is a notice attend itself wrote, which no one can answer.
     SystemNotice,
+    /// A reply with no `re` found a notice from attend as the newest
+    /// delivery, in a record a build that still noted notices left.
+    BareReplyToNotice,
     /// No tray took the signal, so nothing went out.
     NotWritten { error: String },
 }
@@ -168,6 +171,10 @@ impl std::fmt::Display for SendError {
                 write!(f, "can't tell where the parent was said; pass --channel or --to, or use attend message send")
             }
             Self::SystemNotice => write!(f, "attend's own notices take no reply; to start a new topic, use attend message send"),
+            Self::BareReplyToNotice => write!(
+                f,
+                "the newest delivery was a notice from attend, which takes no reply; pass --re with the ~id of the message you are answering, or use attend message send"
+            ),
             Self::NotWritten { error } => write!(f, "the message could not be written: {error}"),
         }
     }
@@ -694,7 +701,7 @@ fn sender_dest(sender: Sender) -> Result<Dest, SendError> {
     match sender.kind {
         Some(Kind::Human) if is_member_id(&sender.id) => Ok(Dest::Person(sender.id)),
         // A record from a build that still noted attend's notices.
-        Some(Kind::System) => Err(SendError::SystemNotice),
+        Some(Kind::System) => Err(SendError::BareReplyToNotice),
         Some(Kind::Agent) => {
             let registry = attend_instances::Registry::new();
             let successor = sender.cwd.as_deref().and_then(|cwd| registry.successor(cwd, &sender.id));
@@ -794,5 +801,23 @@ mod tests {
         let peers = ["/a/b/proj", "/x/proj", "/q/other"];
         assert_eq!(find_closest_peer("/z/b/proj", &peers), Some("/a/b/proj"));
         assert_eq!(find_closest_peer("/z/none", &peers), None);
+    }
+}
+
+#[cfg(all(test, feature = "sensor-peers"))]
+mod bare_reply_tests {
+    use super::*;
+
+    /// A bare reply whose recorded target is a notice says how to reach
+    /// the peer, not that the caller named a notice.
+    #[test]
+    fn a_bare_reply_to_a_recorded_notice_says_how_to_answer_the_peer() {
+        let sender = Sender { id: "git".into(), kind: Some(agent_identity::signal::Kind::System), cwd: None };
+        let err = sender_dest(sender).unwrap_err();
+        assert!(matches!(err, SendError::BareReplyToNotice));
+        assert_eq!(
+            err.to_string(),
+            "the newest delivery was a notice from attend, which takes no reply; pass --re with the ~id of the message you are answering, or use attend message send"
+        );
     }
 }
