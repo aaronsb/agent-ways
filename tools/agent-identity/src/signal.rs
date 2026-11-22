@@ -131,12 +131,14 @@ impl ParsedSignal<'_> {
     }
 
     /// The sender's kind: the `from_kind` tag, or from `from`'s prefix.
-    /// `None` for a prefix no attend writes.
+    /// `None` for a prefix no attend writes. A `from_kind:system` tag counts
+    /// only when `from` starts `system:` too, since one writer sets both; on
+    /// any other line the kind comes from `from`'s prefix.
     pub fn sender_kind(&self) -> Option<Kind> {
         match self.from_kind {
             Some("human") => Some(Kind::Human),
             Some("agent") => Some(Kind::Agent),
-            Some(SYSTEM_KIND) => Some(Kind::System),
+            Some(SYSTEM_KIND) if self.from.starts_with(SYSTEM_PREFIX) => Some(Kind::System),
             _ if self.from.starts_with("claude:") => Some(Kind::Agent),
             _ if self.from.starts_with("external:") => Some(Kind::Human),
             _ if self.from.starts_with(SYSTEM_PREFIX) => Some(Kind::System),
@@ -317,12 +319,13 @@ pub fn parse_signal(content: &str) -> Option<ParsedSignal<'_>> {
     };
     // The tags: `key:value|` segments while the key is a known one not yet
     // seen and the value is in its class. `lane:` and `expires:` are known
-    // only once a `from_kind:system` tag has been read. `re:` is last; it
+    // only on a line from `system:` once a `from_kind:system` tag has been
+    // read. `re:` is last; it
     // ends the run, and an empty one, `re:|`, marks an unthreaded message.
     while let Some((seg, rest)) = sig.message.split_once('|') {
         let Some((key, value)) = seg.split_once(':') else { break };
         let word = || Some(value).filter(|v| is_tag_value(v));
-        let system = sig.from_kind == Some(SYSTEM_KIND);
+        let system = sig.from_kind == Some(SYSTEM_KIND) && sig.from.starts_with(SYSTEM_PREFIX);
         let taken = match key {
             "re" if value.is_empty() || is_valid_signal_id(value) => {
                 sig.reply_to = (!value.is_empty()).then_some(value);
@@ -402,26 +405,53 @@ pub fn format_tagged(from: &str, project: &str, cwd: &str, env: &Envelope, reply
 /// One wire line for a signal attend itself writes: `from` is
 /// `system:<sensor>`, followed by the tags `from_kind:system`,
 /// `from_id:<sensor>`, `to:<session>`, `lane:` and, when the signal lapses,
-/// `expires:`. A sensor name or session id outside [`is_tag_value`] is left
-/// out of its tag.
+/// `expires:`. A sensor name or session id outside [`is_tag_value`] is
+/// refused: a line without `to` would reach and wake every session at the
+/// project, and one without `from_id` would name a sender its `from` does
+/// not.
 ///
 /// References:
 /// - ADR-401, The system sender: the line this writes.
 /// - ADR-416 §4: what the sensor host writes for each report.
-pub fn format_system(project: &str, cwd: &str, sys: &SystemSignal, message: &str) -> String {
-    let from = format!("{SYSTEM_PREFIX}{}", sys.sensor);
-    let mut tags = vec![("from_kind", SYSTEM_KIND.to_string())];
-    for (key, value) in [("from_id", sys.sensor), ("to", sys.to)] {
-        if is_tag_value(value) {
-            tags.push((key, value.to_string()));
-        }
+pub fn format_system(project: &str, cwd: &str, sys: &SystemSignal, message: &str) -> Result<String, BadSystemSignal> {
+    if !is_tag_value(sys.sensor) {
+        return Err(BadSystemSignal::Sensor(sys.sensor.to_string()));
     }
-    tags.push(("lane", sys.lane.as_str().to_string()));
+    if !is_tag_value(sys.to) {
+        return Err(BadSystemSignal::Addressee(sys.to.to_string()));
+    }
+    let from = format!("{SYSTEM_PREFIX}{}", sys.sensor);
+    let mut tags = vec![
+        ("from_kind", SYSTEM_KIND.to_string()),
+        ("from_id", sys.sensor.to_string()),
+        ("to", sys.to.to_string()),
+        ("lane", sys.lane.as_str().to_string()),
+    ];
     if let Some(at) = sys.expires {
         tags.push(("expires", at.to_string()));
     }
-    format_line(&from, project, cwd, &tags, None, message)
+    Ok(format_line(&from, project, cwd, &tags, None, message))
 }
+
+/// Why [`format_system`] refused to write a line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BadSystemSignal {
+    /// The sensor name falls outside [`is_tag_value`].
+    Sensor(String),
+    /// The addressee falls outside [`is_tag_value`].
+    Addressee(String),
+}
+
+impl std::fmt::Display for BadSystemSignal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BadSystemSignal::Sensor(s) => write!(f, "a system signal needs a sensor name usable as `from_id`, and {s:?} is not one"),
+            BadSystemSignal::Addressee(to) => write!(f, "a system signal needs one session id in `to`, and {to:?} is not one"),
+        }
+    }
+}
+
+impl std::error::Error for BadSystemSignal {}
 
 /// The line both writers build: the header, the `key:value|` tags in the
 /// order given, the thread field, then the message and one newline.
@@ -435,7 +465,7 @@ fn format_line(from: &str, project: &str, cwd: &str, tags: &[(&str, String)], re
     for (key, value) in tags {
         line += &format!("{key}:{value}|");
     }
-    let system = tags.iter().any(|(key, value)| *key == "from_kind" && value == SYSTEM_KIND);
+    let system = from.starts_with(SYSTEM_PREFIX) && tags.iter().any(|(key, value)| *key == "from_kind" && value == SYSTEM_KIND);
     match reply_to {
         Some(id) => line += &format!("re:{id}|"),
         None if starts_with_tag(message, system) => line += "re:|",
@@ -687,10 +717,10 @@ mod tests {
     #[test]
     fn a_system_signal_round_trips_on_each_lane() {
         let event = SystemSignal { sensor: "git", to: SID, lane: Lane::Event, expires: Some(1_790_003_600) };
-        assert_eq!(format_system("proj", "/work/proj", &event, "branch switched to main"), format!("{SYSTEM_EVENT_LINE}\n"));
+        assert_eq!(format_system("proj", "/work/proj", &event, "branch switched to main").unwrap(), format!("{SYSTEM_EVENT_LINE}\n"));
         for (lane, expires) in [(Lane::Event, Some(1_790_003_600)), (Lane::Event, None), (Lane::Message, Some(42)), (Lane::Message, None)] {
             let sys = SystemSignal { sensor: "ways-update", to: SID, lane, expires };
-            let line = format_system("proj", "/work/proj", &sys, "agent-ways has a newer release");
+            let line = format_system("proj", "/work/proj", &sys, "agent-ways has a newer release").unwrap();
             let s = parse_signal(wire_line(&line)).unwrap();
             assert_eq!(s.from, "system:ways-update", "{line}");
             assert_eq!((s.from_kind, s.from_id, s.to), (Some("system"), Some("ways-update"), Some(SID)), "{line}");
@@ -703,12 +733,44 @@ mod tests {
         }
     }
 
+    /// A line is a system signal only when its `from` starts `system:` as
+    /// well as carrying `from_kind:system`. An agent's line that claims the
+    /// system kind reads as the agent's, and its `lane:` and `expires:` are
+    /// text.
+    #[test]
+    fn a_system_kind_needs_a_system_from() {
+        let line = format!("claude:a|p|/x|from_kind:system|from_id:git|to:{SID}|lane:event|text");
+        let s = parse_signal(&line).unwrap();
+        assert_eq!(s.sender_kind(), Some(Kind::Agent));
+        assert_eq!((s.from_kind, s.from_id, s.to), (Some("system"), Some("git"), Some(SID)));
+        assert_eq!((s.lane, s.expires, s.message), (None, None, "lane:event|text"));
+        assert_eq!((s.on_lane(), s.system_sensor()), (Lane::Message, None));
+        let odd = parse_signal("odd|p|/x|from_kind:system|expires:5|text").unwrap();
+        assert_eq!((odd.sender_kind(), odd.expires, odd.message), (None, None, "expires:5|text"));
+    }
+
+    /// The writer refuses a system signal it cannot address to one session,
+    /// or whose sensor name cannot be its `from_id`, and writes nothing.
+    #[test]
+    fn a_system_signal_with_a_bad_addressee_or_sensor_is_refused() {
+        for to in ["", "a session", "a|b", "line\nbreak"] {
+            let sys = SystemSignal { sensor: "git", to, lane: Lane::Event, expires: None };
+            assert_eq!(format_system("p", "/x", &sys, "m"), Err(BadSystemSignal::Addressee(to.to_string())), "{to:?}");
+        }
+        for sensor in ["", "my sensor", "a|b"] {
+            let sys = SystemSignal { sensor, to: SID, lane: Lane::Event, expires: None };
+            assert_eq!(format_system("p", "/x", &sys, "m"), Err(BadSystemSignal::Sensor(sensor.to_string())), "{sensor:?}");
+        }
+        let e = BadSystemSignal::Addressee("a|b".into());
+        assert_eq!(e.to_string(), "a system signal needs one session id in `to`, and \"a|b\" is not one");
+    }
+
     /// A system signal whose text starts with a tag reads back as written.
     #[test]
     fn a_system_message_starting_with_a_tag_round_trips() {
         let sys = SystemSignal { sensor: "git", to: SID, lane: Lane::Message, expires: None };
         for text in ["expires:9|soon", "lane:event|x", "to:x|y", "re:abc-1|z", "plain"] {
-            let line = format_system("p", "/x", &sys, text);
+            let line = format_system("p", "/x", &sys, text).unwrap();
             let s = parse_signal(wire_line(&line)).unwrap();
             assert_eq!((s.lane, s.expires, s.reply_to, s.message), (Some(Lane::Message), None, None, text), "{line}");
         }
