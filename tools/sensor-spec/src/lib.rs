@@ -506,7 +506,8 @@ pub enum Memory {
     /// first poll whose result meets `where`. The trigger fires at most once
     /// in the session, whatever it compares on. The host carries the memory
     /// across its own restarts within the session. An item trigger only:
-    /// a state trigger refuses it until state triggers are evaluated.
+    /// a state trigger refuses it, since it compares against the last state its
+    /// store kept.
     Session,
 }
 

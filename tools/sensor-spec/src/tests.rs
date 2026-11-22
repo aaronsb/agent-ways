@@ -109,7 +109,7 @@ triggers:
 fn session_memory_on_a_state_trigger_is_not_yet_supported() {
     let p = parse("s", &y("kind: command\nargv: [x]\noutput: json\nstate: {n: {type: number}}\ntriggers: [{name: a, state: {n: rises}, memory: session}]\n"));
     assert!(p.spec.is_none());
-    assert_eq!(invalid(&p), ["triggers.a.memory: memory: session is not yet supported on a state trigger; use store, or leave memory unset"]);
+    assert_eq!(invalid(&p), ["triggers.a.memory: memory: session does not apply to a state trigger, which compares against the last state its store kept; use store, or leave memory unset"]);
 }
 
 /// The fingerprint follows what a trigger tests, not its name, magnitude

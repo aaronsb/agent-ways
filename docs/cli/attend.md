@@ -734,9 +734,9 @@ Send a synthetic result through a sensor's threshold, lane and delivery, marked 
 
 ###### **Options:**
 
-* `--input <FILE|->` — The synthetic result: a file, or `-` for stdin. A crate sensor takes a JSON list of `{magnitude, description}` or `magnitude|description` lines; with none, one observation at the sensor's threshold
+* `--input <FILE|->` — The synthetic result: a file, or `-` for stdin. A command sensor with `output: json` takes one JSON poll result, which its state and triggers evaluate. Any other sensor takes a JSON list of `{magnitude, description}` or `magnitude|description` lines; with none, one observation at the sensor's threshold
 * `--dry-run` — Stop before delivery
-* `--commit` — Keep the trigger state and state store the fire leaves; a test fire changes neither without it
+* `--commit` — Keep the trigger memory and declared state the fire leaves; a test fire writes neither without it
 * `--json` — Print the result as one JSON document
 
 

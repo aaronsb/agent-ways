@@ -122,6 +122,22 @@ pub trait Sensor: Send {
     fn take_failure(&mut self) -> Option<String> {
         None
     }
+
+    /// How long the observation `description` of the last poll stays
+    /// deliverable once written. `None` takes the event lane's decay
+    /// window; a sensor whose triggers set `expires` says otherwise.
+    fn lapse(&self, _description: &str) -> Option<Lapse> {
+        None
+    }
+}
+
+/// How long a sensor's report stays deliverable once written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lapse {
+    /// This many seconds after it is written.
+    After(u64),
+    /// Until the session it is addressed to reads it.
+    UntilRead,
 }
 
 // ── Focus ───────────────────────────────────────────────────────

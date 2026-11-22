@@ -7,8 +7,10 @@
 //! `list` reports every sensor the files declare as an item (ADR-516): its
 //! kind, origin and file, source and version, recorded state, and lane. `poll` runs one real poll
 //! and `fire` sends a synthetic result; both go through the sensor's real
-//! threshold and lane, deliver as `attend run` would unless `--dry-run`, and
-//! record nothing in the sensor's store. A fire's lines are marked `[test]`.
+//! threshold and lane, and deliver as `attend run` would unless `--dry-run`.
+//! A command sensor's poll and fire run its triggers against the session's
+//! store and print each verdict. Neither writes the store, except a fire
+//! with `--commit`. A fire's lines are marked `[test]`.
 
 use std::io::Read;
 
@@ -186,8 +188,8 @@ fn find(all: Vec<Hosted>, name: &str, json: bool) -> Hosted {
 /// Exit 3 when `h` is not a sensor attend can poll here.
 fn require_hosted(h: &Hosted, verb: &str, json: bool) {
     let runnable = h.state.runs() || h.state == State::Off;
-    let crate_kind = matches!(h.loaded.spec.as_ref().map(|s| s.kind), Some(Kind::Crate));
-    if runnable && crate_kind {
+    let kind_runs = matches!(h.loaded.spec.as_ref().map(|s| s.kind), Some(Kind::Crate | Kind::Command));
+    if runnable && kind_runs {
         return;
     }
     let why = format!("{} is {}{}", h.name(), h.state.label(), h.state.detail().map(|d| format!(": {d}")).unwrap_or_default());
@@ -199,17 +201,58 @@ fn require_hosted(h: &Hosted, verb: &str, json: bool) {
     std::process::exit(agent_settings::exit::REJECTED);
 }
 
+/// The sensor `h`, keyed by this session so it reads the session's store,
+/// writing it only with `record`; or exit 3 saying why it cannot run.
+fn open(h: &Hosted, cfg: &Config, project: &str, record: bool, verb: &str) -> sensors::hosted::FileSensor {
+    let ident = attend_presence::session::identity();
+    let session = ident.session_resolved.then_some(ident.session_id.as_str());
+    sensors::file_sensor(h, &Ctx { cfg, groups: None, session }, project, record).unwrap_or_else(|why| {
+        eprintln!("attend sensor {verb}: {}: {why}", h.name());
+        std::process::exit(agent_settings::exit::REJECTED);
+    })
+}
+
+/// Whether `h` is a sensor whose triggers read a JSON poll result.
+fn declares_triggers(h: &Hosted) -> bool {
+    matches!(h.loaded.spec.as_ref().map(|s| &s.block), Some(Block::Command(c)) if c.output == sensor_spec::Output::Json)
+}
+
+/// Each trigger's verdict as `--json` prints it.
+fn verdicts_json(s: &sensors::hosted::FileSensor) -> Value {
+    Value::Array(s.verdicts().iter().map(|v| json!({ "trigger": v.trigger, "fired": !v.fired.is_empty(), "keys": v.fired })).collect())
+}
+
+/// Print each trigger's verdict, one line each.
+fn print_verdicts(h: &Hosted, s: &sensors::hosted::FileSensor) {
+    if !declares_triggers(h) {
+        println!("triggers: none; {}", if matches!(h.loaded.spec.as_ref().map(|s| s.kind), Some(Kind::Crate)) { "a crate sensor's poll is compiled" } else { "output: lines takes none" });
+        return;
+    }
+    if s.verdicts().is_empty() {
+        println!("triggers: none declared");
+    }
+    for v in s.verdicts() {
+        match v.fired.as_slice() {
+            [] => println!("  trigger {}: quiet", v.trigger),
+            keys => println!("  trigger {}: fired for {}", v.trigger, keys.join(", ")),
+        }
+    }
+}
+
 pub(crate) fn poll(a: &PollArgs) {
     let (focus, cfg) = context();
     let h = find(sensors::catalog(&cfg, &focus.working_dir), &a.name, a.json);
     require_hosted(&h, "poll", a.json);
-    let mut sensor = sensors::build(&h, &Ctx { cfg: &cfg, groups: None, session: None }, &focus.working_dir, false).unwrap_or_else(|why| {
-        eprintln!("attend sensor poll: {}: {why}", h.name());
-        std::process::exit(agent_settings::exit::REJECTED);
-    });
+    // A test poll compares against the session's store and writes nothing.
+    let mut sensor = open(&h, &cfg, &focus.working_dir, false, "poll");
     let result = sensor.poll(&focus);
     let failure = sensor.take_failure();
-    let out = run_through(sensor, h.lane().unwrap_or(Lane::Event), result.clone(), &focus);
+    let triggers = verdicts_json(&sensor);
+    let state = sensor.state().cloned();
+    if !a.json {
+        print_verdicts(&h, &sensor);
+    }
+    let out = run_through(Box::new(sensor), h.lane().unwrap_or(Lane::Event), result.clone(), &focus);
     let delivered = deliver(&h, &out, a.dry_run);
     if a.json {
         crate::cmd::print_json(&json!({
@@ -217,7 +260,8 @@ pub(crate) fn poll(a: &PollArgs) {
             "state": h.state.label(),
             "failure": failure,
             "result": result.iter().map(|(m, d)| json!({ "magnitude": m, "description": d })).collect::<Vec<_>>(),
-            "triggers": [],
+            "triggers": triggers,
+            "fields": state,
             "lane": out.lane.as_str(),
             "accumulated": out.accumulated,
             "threshold": out.threshold,
@@ -230,12 +274,11 @@ pub(crate) fn poll(a: &PollArgs) {
         println!("{}: poll failed: {f}", h.name());
     }
     if result.is_empty() {
-        println!("{}: no observations; a compiled sensor's first poll sets its baseline", h.name());
+        println!("{}: no observations; a fresh store's first poll sets its baseline", h.name());
     }
     for (m, d) in &result {
         println!("  {m:>4.1}  {d}");
     }
-    println!("triggers: none; a crate sensor's poll is compiled");
     verdict(&h, &out, a.dry_run);
 }
 
@@ -258,24 +301,42 @@ pub(crate) fn fire(a: &FireArgs) {
     }
     require_hosted(&h, "fire", a.json);
     let spec = h.loaded.spec.as_ref().expect("a hosted sensor loads");
-    let input = match &a.input {
-        Some(src) => read_input(src).unwrap_or_else(|why| crate::cmd::refuse_usage(&format!("attend sensor fire: {why}"), &why, a.json)),
-        None => vec![(spec.cadence.threshold, format!("test fire of {name}"))],
+    let refuse = |why: String| -> ! { crate::cmd::refuse_usage(&format!("attend sensor fire: {why}"), &why, a.json) };
+    // A test fire leaves the store as it was unless --commit keeps it.
+    let mut sensor = open(&h, &cfg, &focus.working_dir, a.commit, "fire");
+    let input: Vec<(f64, String)> = if declares_triggers(&h) {
+        let Some(src) = &a.input else { refuse(format!("{name} reads a JSON poll result; give one with --input FILE or --input -")) };
+        let doc = read_text(src).unwrap_or_else(|why| refuse(why));
+        let result: Value = serde_json::from_str(&doc).unwrap_or_else(|e| refuse(format!("the input is not one JSON document: {e}")));
+        if let Some(t) = trigger {
+            sensor.only(t);
+        }
+        let out = sensor.evaluate(&result);
+        if let Some(f) = sensor.take_failure() {
+            eprintln!("attend sensor fire: {name}: {f}");
+        }
+        out
+    } else {
+        match &a.input {
+            Some(src) => read_text(src).and_then(|t| parse_input(&t)).unwrap_or_else(|why| refuse(why)),
+            None => vec![(spec.cadence.threshold, format!("test fire of {name}"))],
+        }
     };
+    let triggers = verdicts_json(&sensor);
+    if !a.json && declares_triggers(&h) {
+        print_verdicts(&h, &sensor);
+    }
     let input: Vec<(f64, String)> = input.into_iter().map(|(m, d)| (m, format!("[test] {}", sensors::deliverable(&d)))).collect();
-    let sensor = sensors::build(&h, &Ctx { cfg: &cfg, groups: None, session: None }, &focus.working_dir, false).unwrap_or_else(|why| {
-        eprintln!("attend sensor fire: {}: {why}", h.name());
-        std::process::exit(agent_settings::exit::REJECTED);
-    });
-    let out = run_through(sensor, h.lane().unwrap_or(Lane::Event), input.clone(), &focus);
+    let out = run_through(Box::new(sensor), h.lane().unwrap_or(Lane::Event), input.clone(), &focus);
     let delivered = deliver(&h, &out, a.dry_run);
-    let commit_note = a.commit.then_some("a crate sensor keeps no trigger state or state store, so --commit changes nothing");
+    let commit_note = (a.commit && !declares_triggers(&h)).then_some("this sensor keeps no trigger memory or declared state, so --commit changes nothing");
     if a.json {
         crate::cmd::print_json(&json!({
             "sensor": h.name(),
             "trigger": trigger,
             "test": true,
             "input": input.iter().map(|(m, d)| json!({ "magnitude": m, "description": d })).collect::<Vec<_>>(),
+            "triggers": triggers,
             "lane": out.lane.as_str(),
             "accumulated": out.accumulated,
             "threshold": out.threshold,
@@ -314,17 +375,18 @@ fn verdict(h: &Hosted, out: &Outcome, dry_run: bool) {
     }
 }
 
-/// A crate sensor's synthetic result: a JSON list of `{magnitude,
-/// description}`, or `magnitude|description` lines.
-fn read_input(src: &str) -> Result<Vec<(f64, String)>, String> {
+/// The text of a file, or of stdin for `-`.
+fn read_text(src: &str) -> Result<String, String> {
     let mut text = String::new();
     match src {
         "-" => std::io::stdin().read_to_string(&mut text).map(|_| ()).map_err(|e| format!("cannot read stdin: {e}"))?,
         p => text = std::fs::read_to_string(p).map_err(|e| format!("cannot read {p}: {e}"))?,
     }
-    parse_input(&text)
+    Ok(text)
 }
 
+/// A synthetic result for a sensor without triggers: a JSON list of
+/// `{magnitude, description}`, or `magnitude|description` lines.
 fn parse_input(text: &str) -> Result<Vec<(f64, String)>, String> {
     let check = |m: f64, d: &str| -> Result<(f64, String), String> {
         if !(0.0..=100.0).contains(&m) {
@@ -366,6 +428,7 @@ mod tests {
         let mut layers: Vec<_> = SHIPPED.iter().map(|(n, t)| file_layer(n, Origin::Builtin, None, t)).collect();
         let user = std::path::Path::new("/c/attend/sensors");
         layers.push(file_layer("weather", Origin::User, Some(&user.join("weather.yaml")), "kind: command\nargv: [curl, -s, x]\noutput: json\n"));
+        layers.push(file_layer("chat", Origin::User, Some(&user.join("chat.yaml")), "kind: mcp\nserver: slack\ntool: list\n"));
         layers.push(file_layer("git", Origin::User, Some(&user.join("git.yaml")), "interval: 90\n"));
         let loaded = from_layers(&layers, std::path::Path::new("/nonexistent/p"), &[]);
         sensors::catalog_of(loaded, |_| None).iter().map(entry).collect()
@@ -383,11 +446,14 @@ mod tests {
         assert!(git["version"].as_str().is_some_and(|v| !v.contains('@')));
         assert_eq!(git["overrides"], json!([{ "origin": "user", "how": "extends", "path": "/c/attend/sensors/git.yaml" }]));
         assert_eq!(git["interval"], json!(90));
-        // A kind attend does not run yet reads degraded, with the reason.
+        // A command sensor runs, and an mcp sensor attend does not run yet
+        // reads degraded, with the reason.
         let weather = find("weather");
-        assert_eq!((weather["kind"].as_str(), weather["origin"].as_str(), weather["state"].as_str()), (Some("command"), Some("user"), Some("degraded")));
-        assert_eq!((weather["path"].as_str(), weather["source"].as_str()), (Some("/c/attend/sensors/weather.yaml"), Some("curl")));
-        assert!(weather["detail"].as_str().is_some_and(|d| d.contains("not yet hosted")), "{weather}");
+        assert_eq!((weather["kind"].as_str(), weather["origin"].as_str(), weather["state"].as_str()), (Some("command"), Some("user"), Some("active")));
+        assert_eq!((weather["path"].as_str(), weather["source"].as_str(), weather["detail"].as_str()), (Some("/c/attend/sensors/weather.yaml"), Some("curl"), None));
+        let chat = find("chat");
+        assert_eq!((chat["kind"].as_str(), chat["state"].as_str()), (Some("mcp"), Some("degraded")));
+        assert!(chat["detail"].as_str().is_some_and(|d| d.contains("not yet hosted")), "{chat}");
     }
 
     #[test]

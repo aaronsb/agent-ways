@@ -7,20 +7,22 @@
 //!
 //! Every sensor is a file (`attend_config::sensors` finds and layers them).
 //! A `crate` file names a compiled sensor, which runs here under the
-//! file's name, cadence, threshold and lane. `command` and `mcp` files load,
-//! list and lint, and read `degraded` until attend runs them.
+//! file's name, cadence, threshold and lane. A `command` file runs its argv
+//! each poll, and its triggers and declared state evaluate the output. `mcp`
+//! files load, list and lint, and read `degraded` until attend runs them.
 //!
 //! `context`, `git` and `disclosure` are modules here and always compiled;
 //! the other compiled sensors are crates behind feature flags (default:
 //! all). A file switches a compiled sensor on or off; a feature flag
 //! decides whether the build has it.
 
+mod command;
 mod context;
 mod disclosure;
-mod git;
 pub mod eval;
-pub mod state;
+mod git;
 pub mod hosted;
+pub mod state;
 
 pub use context::ContextSensor;
 pub use disclosure::DisclosureSensor;
@@ -196,9 +198,8 @@ fn state_of(l: &Loaded, compiled: bool, last: Option<&Poll>) -> State {
         return State::Off;
     }
     match spec.kind {
-        Kind::Command => State::NotHosted("kind command not yet hosted; attend runs command sensors from ADR-403 slice 2".into()),
         Kind::Mcp => State::NotHosted("kind mcp not yet hosted; attend runs mcp sensors from ADR-403 slice 3".into()),
-        _ if !compiled => State::NotCompiled,
+        Kind::Crate if !compiled => State::NotCompiled,
         _ => match last {
             Some(p) if !p.ok => State::Failed(p.detail.clone().unwrap_or_default()),
             _ => State::Active,
@@ -264,12 +265,22 @@ pub struct Ctx<'a> {
     pub session: Option<&'a str>,
 }
 
-/// The compiled sensor `h` configures, ready to poll, or why it cannot run
-/// here.
-#[cfg_attr(not(feature = "sensor-peers"), allow(unused_variables))]
+/// The sensor `h` configures, ready to poll, or why it cannot run here.
 pub fn build(h: &Hosted, ctx: &Ctx, project: &str, record: bool) -> Result<Box<dyn Sensor>, String> {
+    file_sensor(h, ctx, project, record).map(|s| Box::new(s) as Box<dyn Sensor>)
+}
+
+/// The sensor `h` configures as a [`FileSensor`], so a caller can read its
+/// trigger verdicts. With a session id in `ctx` it reads its store, and
+/// with `record` as well it writes it.
+#[cfg_attr(not(feature = "sensor-peers"), allow(unused_variables))]
+pub fn file_sensor(h: &Hosted, ctx: &Ctx, project: &str, record: bool) -> Result<FileSensor, String> {
     let Some(spec) = &h.loaded.spec else { return Err(h.state.detail().unwrap_or("it does not load").to_string()) };
-    let Block::Crate(c) = &spec.block else { return Err(h.state.detail().unwrap_or("its kind is not hosted").to_string()) };
+    let c = match &spec.block {
+        Block::Crate(c) => c,
+        Block::Command(cmd) => return Ok(FileSensor::declared(spec, Box::new(command::Command::new(cmd.clone(), project)), project, ctx.session, record)),
+        _ => return Err(h.state.detail().unwrap_or("its kind is not hosted").to_string()),
+    };
     let inner: Box<dyn Sensor> = match c.id.as_str() {
         "context" => Box::new(ContextSensor::new()),
         "git" => Box::new(GitSensor::new()),
@@ -304,7 +315,7 @@ pub fn build(h: &Hosted, ctx: &Ctx, project: &str, record: bool) -> Result<Box<d
         }
         id => return Err(format!("crate {id} is not compiled into this attend")),
     };
-    Ok(Box::new(FileSensor::new(spec.name.clone(), spec.cadence, inner, project, ctx.session, record)))
+    Ok(FileSensor::new(spec.name.clone(), spec.cadence, inner, project, ctx.session, record))
 }
 
 /// A slot for `sensor`, on the lane `lane`, running the compiled sensor

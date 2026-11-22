@@ -448,7 +448,7 @@ impl Reader {
             let memory = match t.get("memory").map(Value::as_str) {
                 None | Some(Some("store")) => Memory::Store,
                 Some(Some("session")) if matches!(test, Test::State(_)) => {
-                    self.bad(format!("{at}.memory"), "memory: session is not yet supported on a state trigger; use store, or leave memory unset");
+                    self.bad(format!("{at}.memory"), "memory: session does not apply to a state trigger, which compares against the last state its store kept; use store, or leave memory unset");
                     Memory::Store
                 }
                 Some(Some("session")) => Memory::Session,

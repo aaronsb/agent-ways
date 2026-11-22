@@ -279,16 +279,18 @@ pub(crate) struct PollArgs {
 pub(crate) struct FireArgs {
     /// The sensor, or `<sensor>/<trigger>` for one trigger
     pub(crate) target: String,
-    /// The synthetic result: a file, or `-` for stdin. A crate sensor takes
-    /// a JSON list of `{magnitude, description}` or `magnitude|description`
-    /// lines; with none, one observation at the sensor's threshold
+    /// The synthetic result: a file, or `-` for stdin. A command sensor with
+    /// `output: json` takes one JSON poll result, which its state and
+    /// triggers evaluate. Any other sensor takes a JSON list of `{magnitude,
+    /// description}` or `magnitude|description` lines; with none, one
+    /// observation at the sensor's threshold
     #[arg(long, value_name = "FILE|-")]
     pub(crate) input: Option<String>,
     /// Stop before delivery
     #[arg(long)]
     pub(crate) dry_run: bool,
-    /// Keep the trigger state and state store the fire leaves; a test fire
-    /// changes neither without it
+    /// Keep the trigger memory and declared state the fire leaves; a test
+    /// fire writes neither without it
     #[arg(long)]
     pub(crate) commit: bool,
     /// Print the result as one JSON document
