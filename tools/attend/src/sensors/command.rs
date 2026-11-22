@@ -9,9 +9,19 @@
 //! start, times out, exits non-zero or prints what does not parse is a
 //! failed poll, and the failure says which.
 //!
+//! The command never inherits the session's identity or credentials. From
+//! a shipped or user file it inherits attend's environment less every
+//! variable whose name starts `CLAUDE`, `ANTHROPIC_` or `ATTEND_`: Claude
+//! Code's session id, project dir, config dir and OAuth token, the API key
+//! and base URL, and attend's own re-exec and hand-over markers. From a
+//! project file, code a repository's author chose, it starts from an empty
+//! environment with only [`PROJECT_ENV`] carried over. The file's `env`
+//! adds to either.
+//!
 //! References:
 //! - ADR-403 §1: the command kind's block and its recorded failures.
 
+use std::ffi::OsString;
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command as Process, Stdio};
@@ -25,21 +35,67 @@ use super::hosted::{Fetched, Source};
 /// The most stdout a run may print, in bytes.
 const MAX_OUTPUT: u64 = 1024 * 1024;
 
+/// The prefixes of the variables a shipped or user file's command does
+/// not inherit.
+pub const STRIPPED: &[&str] = &["CLAUDE", "ANTHROPIC_", "ATTEND_"];
+
+/// The variables a project file's command inherits; `LC_*` stands for
+/// every locale variable.
+pub const PROJECT_ENV: &[&str] = &["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_*", "TZ", "TMPDIR", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"];
+
+/// Which environment a command starts from, by the layer of the file that
+/// set what it runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Inherit {
+    /// A shipped or user file: attend's environment less [`STRIPPED`].
+    Stripped,
+    /// A project file: only [`PROJECT_ENV`].
+    Project,
+}
+
+impl Inherit {
+    /// The rule for a command whose `argv`, `env` or `cwd` the layer
+    /// `origin` set last.
+    pub fn of(origin: Option<sensor_spec::Origin>) -> Inherit {
+        match origin {
+            Some(sensor_spec::Origin::Project) => Inherit::Project,
+            _ => Inherit::Stripped,
+        }
+    }
+
+    /// The variables of `vars` a command under this rule inherits.
+    pub fn filter<I: IntoIterator<Item = (OsString, OsString)>>(self, vars: I) -> Vec<(OsString, OsString)> {
+        vars.into_iter()
+            .filter(|(k, _)| {
+                let k = k.to_string_lossy();
+                match self {
+                    Inherit::Stripped => !STRIPPED.iter().any(|p| k.starts_with(p)),
+                    Inherit::Project => PROJECT_ENV.iter().any(|p| match p.strip_suffix('*') {
+                        Some(prefix) => k.starts_with(prefix),
+                        None => k == *p,
+                    }),
+                }
+            })
+            .collect()
+    }
+}
+
 /// A command sensor's poll, for the project at `project`.
 pub struct Command {
     block: CommandBlock,
     project: String,
+    inherit: Inherit,
 }
 
 impl Command {
-    pub fn new(block: CommandBlock, project: &str) -> Command {
-        Command { block, project: project.to_string() }
+    pub fn new(block: CommandBlock, project: &str, inherit: Inherit) -> Command {
+        Command { block, project: project.to_string(), inherit }
     }
 }
 
 impl Source for Command {
     fn fetch(&mut self) -> Result<Fetched, String> {
-        let out = run(&self.block, Path::new(&self.project))?;
+        let out = run(&self.block, Path::new(&self.project), self.inherit)?;
         match self.block.output {
             Output::Json => serde_json::from_str(&out).map(Fetched::Json).map_err(|e| format!("its output is not one JSON document: {e}")),
             Output::Lines => lines(&out).map(Fetched::Lines),
@@ -51,14 +107,14 @@ impl Source for Command {
 /// a process group of its own, so the timeout ends it and everything it
 /// started, and the timeout covers its pipes too: a process left behind
 /// that holds stdout open ends with the group at the deadline.
-fn run(block: &CommandBlock, project: &Path) -> Result<String, String> {
+fn run(block: &CommandBlock, project: &Path, inherit: Inherit) -> Result<String, String> {
     let Some((program, args)) = block.argv.split_first() else { return Err("its argv is empty".into()) };
     let cwd = block.cwd.as_ref().map_or(project.to_path_buf(), |c| project.join(c));
     if !cwd.is_dir() {
         return Err(format!("its cwd {} is not a directory", cwd.display()));
     }
     let mut cmd = Process::new(program);
-    cmd.args(args).envs(&block.env).current_dir(&cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.args(args).env_clear().envs(inherit.filter(std::env::vars_os())).envs(&block.env).current_dir(&cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
     let mut child = cmd.spawn().map_err(|e| format!("cannot run {program}: {e}"))?;
@@ -146,7 +202,7 @@ mod tests {
     }
 
     fn fetch(script: &str, output: Output, timeout: u64) -> Result<Fetched, String> {
-        Command::new(block(script, output, timeout), "/").fetch()
+        Command::new(block(script, output, timeout), "/", Inherit::Stripped).fetch()
     }
 
     #[test]
@@ -172,10 +228,42 @@ mod tests {
         assert_eq!(fetch("exit 4", Output::Json, 10).unwrap_err(), "sh exited with status 4");
         assert!(fetch("echo '{not json'", Output::Json, 10).unwrap_err().starts_with("its output is not one JSON document: "));
         let missing = CommandBlock { argv: vec!["/nonexistent/sensor-cmd".into()], env: BTreeMap::new(), cwd: None, timeout: 10, output: Output::Json };
-        assert!(Command::new(missing, "/").fetch().unwrap_err().starts_with("cannot run /nonexistent/sensor-cmd: "));
+        assert!(Command::new(missing, "/", Inherit::Stripped).fetch().unwrap_err().starts_with("cannot run /nonexistent/sensor-cmd: "));
         let gone = CommandBlock { argv: vec!["sh".into()], env: BTreeMap::new(), cwd: Some("nonexistent-dir".into()), timeout: 10, output: Output::Json };
-        assert_eq!(Command::new(gone, "/").fetch().unwrap_err(), "its cwd /nonexistent-dir is not a directory");
+        assert_eq!(Command::new(gone, "/", Inherit::Stripped).fetch().unwrap_err(), "its cwd /nonexistent-dir is not a directory");
         assert_eq!(fetch("head -c 2000000 /dev/zero | tr '\\0' a", Output::Json, 10).unwrap_err(), "sh printed more than 1024 KiB");
+    }
+
+    fn vars(pairs: &[(&str, &str)]) -> Vec<(OsString, OsString)> {
+        pairs.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))).collect()
+    }
+
+    fn names(v: Vec<(OsString, OsString)>) -> Vec<String> {
+        v.into_iter().map(|(k, _)| k.to_string_lossy().into_owned()).collect()
+    }
+
+    /// A user or shipped file's command loses Claude Code's, Anthropic's and
+    /// attend's variables and keeps the rest; a project file's keeps only
+    /// the fixed set.
+    #[test]
+    fn each_layer_inherits_its_own_environment() {
+        let all = vars(&[
+            ("CLAUDE_CODE_SESSION_ID", "fake"),
+            ("CLAUDE_PROJECT_DIR", "/p"),
+            ("CLAUDECODE", "1"),
+            ("ANTHROPIC_API_KEY", "fake"),
+            ("ATTEND_RUN_SINCE", "1"),
+            ("KEEP_ME", "1"),
+            ("PATH", "/bin"),
+            ("HOME", "/h"),
+            ("LC_ALL", "C"),
+            ("TZ", "UTC"),
+        ]);
+        assert_eq!(names(Inherit::Stripped.filter(all.clone())), ["KEEP_ME", "PATH", "HOME", "LC_ALL", "TZ"]);
+        assert_eq!(names(Inherit::Project.filter(all)), ["PATH", "HOME", "LC_ALL", "TZ"]);
+        assert_eq!(Inherit::of(Some(sensor_spec::Origin::Project)), Inherit::Project);
+        assert_eq!(Inherit::of(Some(sensor_spec::Origin::User)), Inherit::Stripped);
+        assert_eq!(Inherit::of(Some(sensor_spec::Origin::Builtin)), Inherit::Stripped);
     }
 
     /// A process the command leaves behind holding stdout open does not

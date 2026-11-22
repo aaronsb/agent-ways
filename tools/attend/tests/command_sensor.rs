@@ -78,3 +78,50 @@ fn a_test_fire_compares_against_the_store_and_writes_only_with_commit() {
     );
     assert_eq!(stores(), before, "the refused commit wrote nothing");
 }
+
+/// What a command sensor's child sees, by variable name, from `attend
+/// sensor poll` run with two fake secrets and a harmless variable set.
+fn child_env(f: &Fixture, sensor: &str) -> std::collections::BTreeMap<String, String> {
+    let fake = [("CLAUDE_CODE_SESSION_ID", "fake-session"), ("ANTHROPIC_API_KEY", "fake-key"), ("KEEP_ME", "kept")];
+    let env: Vec<(&str, &std::ffi::OsStr)> = fake.iter().map(|(k, v)| (*k, std::ffi::OsStr::new(*v))).collect();
+    let out = f.attend_with(&["sensor", "poll", sensor, "--dry-run", "--json"], &env);
+    assert!(out.status.success(), "attend sensor poll {sensor} failed");
+    let doc = doc(&String::from_utf8_lossy(&out.stdout));
+    assert_eq!(doc["failure"], Value::Null, "the command ran");
+    doc["result"].as_array().unwrap().iter().filter_map(|o| o["description"].as_str()?.split_once('=').map(|(k, v)| (k.to_string(), v.to_string()))).collect()
+}
+
+/// `env -0` with each variable on one line, as `output: lines`.
+const ENV_SENSOR: &str = "kind: command\nargv: [sh, -c, \"env -0 | tr '\\\\n\\\\000' ' \\\\n' | sed 's/^/1|/'\"]\noutput: lines\nenv: {ADDED: by-file}\n";
+
+/// A user file's command inherits attend's environment less Claude
+/// Code's, Anthropic's and attend's variables; its `env` adds on top.
+#[test]
+fn a_user_command_inherits_the_environment_without_the_session_s_secrets() {
+    let f = Fixture::new("cmd-env-user");
+    f.sensor("envu", ENV_SENSOR);
+    let seen = child_env(&f, "envu");
+    assert_eq!(seen.get("KEEP_ME").map(String::as_str), Some("kept"));
+    assert_eq!(seen.get("ADDED").map(String::as_str), Some("by-file"));
+    assert!(!seen.contains_key("CLAUDE_CODE_SESSION_ID"), "the session id reached the command");
+    assert!(!seen.contains_key("ANTHROPIC_API_KEY"), "the API key reached the command");
+    assert!(seen.keys().all(|k| !k.starts_with("CLAUDE") && !k.starts_with("ANTHROPIC_") && !k.starts_with("ATTEND_")), "{:?}", seen.keys().collect::<Vec<_>>());
+}
+
+/// A project file's command starts from the fixed set alone, plus its
+/// `env`.
+#[test]
+fn a_project_command_inherits_only_the_fixed_set() {
+    let f = Fixture::new("cmd-env-project");
+    std::fs::write(f.home.join("config").join("attend").join("config.yaml"), format!("cleanup:\n  enabled: false\nproject_sensors:\n  - {}\n", f.origin)).unwrap();
+    let dir = std::path::Path::new(&f.origin).join(".claude").join("attend").join("sensors");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("envp.yaml"), ENV_SENSOR).unwrap();
+    let seen = child_env(&f, "envp");
+    assert_eq!(seen.get("ADDED").map(String::as_str), Some("by-file"));
+    assert_eq!(seen.get("HOME").map(String::as_str), Some(f.home.to_str().unwrap()));
+    assert!(seen.contains_key("PATH"));
+    for gone in ["KEEP_ME", "CLAUDE_CODE_SESSION_ID", "ANTHROPIC_API_KEY", "XDG_CONFIG_HOME"] {
+        assert!(!seen.contains_key(gone), "{gone} reached a project command");
+    }
+}

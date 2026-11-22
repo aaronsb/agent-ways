@@ -278,7 +278,10 @@ pub fn file_sensor(h: &Hosted, ctx: &Ctx, project: &str, record: bool) -> Result
     let Some(spec) = &h.loaded.spec else { return Err(h.state.detail().unwrap_or("it does not load").to_string()) };
     let c = match &spec.block {
         Block::Crate(c) => c,
-        Block::Command(cmd) => return Ok(FileSensor::declared(spec, Box::new(command::Command::new(cmd.clone(), project)), project, ctx.session, record)),
+        Block::Command(cmd) => {
+            let run = command::Command::new(cmd.clone(), project, command::Inherit::of(h.loaded.command_from));
+            return Ok(FileSensor::declared(spec, Box::new(run), project, ctx.session, record));
+        }
         _ => return Err(h.state.detail().unwrap_or("its kind is not hosted").to_string()),
     };
     let inner: Box<dyn Sensor> = match c.id.as_str() {
