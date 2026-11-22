@@ -66,11 +66,11 @@ pub fn run(mode: Mode, git_ref: Option<String>, verbose: bool, json: bool) -> Re
         if json {
             // The check for a program to read: no release notes, so no
             // request to GitHub.
-            let doc = whatif::json(&whatif::gather(&app, channel, verbose, false));
+            let doc = whatif::json(&whatif::gather(&app, channel, verbose, None));
             println!("{}", serde_json::to_string_pretty(&doc)?);
             return Ok(());
         }
-        whatif::render(&whatif::gather(&app, channel, verbose, true)).print();
+        whatif::render(&whatif::gather(&app, channel, verbose, Some(&notes::fetch))).print();
         return Ok(());
     }
 
