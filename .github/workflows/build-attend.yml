@@ -65,8 +65,9 @@ jobs:
       contents: write  # the release job publishes; the others drop to read
     with:
       component: attend
+      test-os: '["ubuntu-latest", "macos-latest"]'
       test: |
-        cargo test --manifest-path tools/Cargo.toml -p attend
+        cargo test --manifest-path tools/Cargo.toml -p attend -p attend-presence
       release-notes: |-
         Pre-built attend binaries for 4 platforms.
 
