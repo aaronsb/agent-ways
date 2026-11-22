@@ -57,7 +57,7 @@ $ printf '1.5|cargo finished\n1.5|make finished\n' | attend sensor fire processe
 processes: delivered on the event lane at priority medium
 ```
 
-Without `--dry-run` the lines print as `attend run` prints them, each marked `[test]`. Magnitude is the lever: at 3.0 or more a batch is medium priority and wakes the agent, below it attend logs it and wakes no one. A fire records nothing in the sensor's store.
+Without `--dry-run` the lines print as `attend run` prints them, each marked `[test]`. Magnitude is the lever: at 3.0 or more a batch is medium priority and wakes the agent, below it attend logs it and wakes no one. A fire writes nothing to the sensor's store unless given `--commit`.
 
 ## Step 4 — Switch a sensor off for one project
 
@@ -100,12 +100,11 @@ A sensor's name is its file's stem, so set `name: failed-units` in the copy, and
 ```
 $ attend sensor list
   ...
-  failed-units    command user    degraded event   300s / 60s sh  ~/.config/attend/sensors/failed-units.yaml
+  failed-units    command user    active   event   300s / 60s sh  ~/.config/attend/sensors/failed-units.yaml
   ...
-  failed-units: degraded: kind command not yet hosted; attend runs command sensors from ADR-403 slice 2
 ```
 
-attend loads, checks and lists command sensors now, and runs them from ADR-403 slice 2. `ways settings lint` checks the file today: change a trigger's `on: added` to `on: appeared` and lint names the line.
+`attend sensor poll failed-units` runs the command once and prints each trigger's verdict, `quiet` or `fired`, against this session's store, and writes nothing to it. `ways settings lint` checks the file: change a trigger's `on: added` to `on: appeared` and lint names the line.
 
 ## Clean up
 
