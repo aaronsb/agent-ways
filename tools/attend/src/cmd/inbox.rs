@@ -329,16 +329,10 @@ pub(crate) fn scan_pending(
         // so it is drawn plain whatever the environment says (#388).
         // The label is the same form the peers sensor shows under
         // Monitor (#534); the wire `from` rides along as the id.
-        // A system signal names attend and its sensor, not a person or an
-        // agent.
-        let sender = match sig.system_sensor() {
-            Some(sensor) => agent_identity::signal::system_label(&sensor),
-            None => render_sender_label(&sig.from, sig.cwd, &agent_theme::Painter::plain(), &instances),
-        };
         delivered.push(Drained {
             when: agent_fmt::compact_time(f.mtime, std::time::SystemTime::now()),
             mtime: f.mtime,
-            sender,
+            sender: render_sender_label(&sig.from, sig.cwd, &agent_theme::Painter::plain(), &instances),
             sender_id: sig.from.to_string(),
             scope: room_label(&scan_dirs[f.room].room),
             room: scan_dirs[f.room].room.clone(),
@@ -579,9 +573,10 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     // it targets what the sensor surfaced, and stay in the room it was
     // said in. Nothing this session sent, under its id or an earlier one,
     // is delivered, so the newest delivered is another sender's, a sibling
-    // session's at this project included.
+    // session's at this project included. attend's own notices take no
+    // reply, so the target is the newest that is not a system signal.
     #[cfg(feature = "sensor-peers")]
-    if let Some(newest) = delivered.last() {
+    if let Some(newest) = delivered.iter().rev().find(|d| d.kind != Some(agent_identity::signal::Kind::System)) {
         let said = sensor_peers::last_inbound::Said::of(&newest.room, &newest.sender_id, &newest.source_cwd);
         sensor_peers::last_inbound::record(&session_id, &newest.id, &said, &newest.sender_id);
     }

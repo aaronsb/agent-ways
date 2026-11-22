@@ -31,6 +31,10 @@ pub struct ChipInfo {
     pub session_id: Option<String>,
 }
 
+/// The colour of every chip for a signal attend itself wrote: the first
+/// categorical colour, the same for every sensor and scope.
+pub const ATTEND_PALETTE: PaletteEntry = agent_identity::RICH_PALETTE[agent_identity::CATEGORICAL[0]];
+
 /// Derive the chip from the wire `from`/`project`/`cwd` triple.
 ///
 /// Claudes get a stable nickname keyed on their full cwd path (see
@@ -38,7 +42,8 @@ pub struct ChipInfo {
 /// resolved through `instances` (ADR-129). Humans keep their
 /// username but still pick up a color + style from the identity
 /// table so the avatar is visually consistent everywhere the same
-/// user shows up.
+/// user shows up. A `system:` sender is attend itself, named
+/// `attend (<sensor>)` in [`ATTEND_PALETTE`].
 ///
 /// `instances` is a per-render cache that collapses repeat lookups
 /// for the same cwd into a single registry read. Build it once at
@@ -75,6 +80,16 @@ pub fn chip_for(
             palette: id.palette,
             style: id.style,
             session_id: Some(uuid.to_string()),
+        }
+    } else if let Some(sensor) = from.strip_prefix(agent_identity::signal::SYSTEM_PREFIX) {
+        // attend itself: named as attend with its sensor, in one colour,
+        // never as a person or an agent.
+        ChipInfo {
+            primary: agent_identity::signal::system_label(sensor),
+            secondary: scope.clone(),
+            palette: ATTEND_PALETTE,
+            style: Style::default(),
+            session_id: None,
         }
     } else if let Some(rest) = from.strip_prefix("external:") {
         // Strip the terminal suffix ("aaron@kitty" → "aaron") so the
@@ -180,6 +195,18 @@ mod tests {
     fn scope_is_kept_whole() {
         let chip = chip_for("external:aaron", "x", "/tmp/some-very-long-directory-name", ColorDepth::TrueColor, &empty_cache());
         assert_eq!(chip.secondary, "some-very-long-directory-name");
+    }
+
+    /// A system sender's chip names attend and the sensor, in attend's one
+    /// colour whatever the sensor or the scope, with no session.
+    #[test]
+    fn a_system_sender_is_named_as_attend() {
+        let a = chip_for("system:ways-update", "proj", "/home/me/proj", ColorDepth::TrueColor, &empty_cache());
+        assert_eq!((a.primary.as_str(), a.secondary.as_str(), a.session_id.as_deref()), ("attend (ways-update)", "proj", None));
+        let b = chip_for("system:git", "other", "/srv/other", ColorDepth::TrueColor, &empty_cache());
+        assert_eq!(b.primary, "attend (git)");
+        assert_eq!((a.palette, a.style), (ATTEND_PALETTE, Style::default()));
+        assert_eq!((b.palette, b.style), (ATTEND_PALETTE, Style::default()));
     }
 
     #[test]

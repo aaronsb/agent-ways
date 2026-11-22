@@ -441,6 +441,85 @@ fn a_reply_to_a_siblings_direct_message_goes_to_the_sibling() {
     assert!(f.signals().join(f.project_tray()).join(format!("{}.signal", sent["id"].as_str().unwrap())).is_file());
 }
 
+/// The drain delivers beta's direct message, then a notice from attend
+/// that is newer. A reply with no `re` skips the notice and goes to beta.
+/// A reply whose `re` names the notice is refused: attend's own notices take
+/// no reply, even when the reply names someone with `--to`.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn a_bare_reply_skips_attends_notice_and_one_naming_it_is_refused() {
+    let f = Fixture::new("addr-system-reply");
+    let _beta = Peer::start(&f, "beta-sess", "proj");
+    f.ok(&["listen", "on"]);
+    f.drain("plain");
+    let tray = f.project_tray();
+    signal(&f, &tray, "beta-sess-1-1", &format!("claude:beta-sess|proj|{}|to:{}|alpha, a question", f.origin, f.sid));
+    common::age_file(&f.signals().join(&tray).join("beta-sess-1-1.signal"), Duration::from_secs(5));
+    signal(&f, &tray, "git-1-2", &format!("system:git|proj|{}|from_kind:system|from_id:git|to:{}|lane:event|expires:4102444800|branch switched to main", f.origin, f.sid));
+    let drained = f.drain("plain");
+    assert!(drained.contains("alpha, a question") && drained.contains("branch switched to main"), "{drained}");
+
+    let out = f.attend(&["message", "reply", "--json", "--", "an answer"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let sent: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!((sent["re"].as_str(), sent["to"].as_str()), (Some("beta-sess-1-1"), Some("beta-sess")));
+
+    for extra in [&[][..], &["--to", "beta-sess"][..]] {
+        let mut args = vec!["message", "reply", "--re", "git-1-2"];
+        args.extend_from_slice(extra);
+        args.extend(["--", "thanks, attend"]);
+        let out = f.attend(&args);
+        assert_eq!(out.status.code(), Some(1), "{extra:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&out.stderr).trim(),
+            "attend message reply: attend's own notices take no reply; to start a new topic, use attend message send",
+            "{extra:?}"
+        );
+    }
+}
+
+/// `attend message inbox` names a notice from attend `attend (<sensor>)`, in
+/// its listing and in a single read, JSON and text alike.
+#[test]
+fn the_inbox_names_attends_notice_as_attend() {
+    let f = Fixture::new("addr-system-inbox");
+    f.ok(&["listen", "on"]);
+    let tray = f.project_tray();
+    signal(&f, &tray, "ways-update-1-1", &format!("system:ways-update|proj|{}|from_kind:system|from_id:ways-update|to:{}|lane:message|agent-ways has a newer release", f.origin, f.sid));
+
+    let listed: serde_json::Value = serde_json::from_str(&f.ok(&["message", "inbox", "--json"])).unwrap();
+    let row = listed["messages"].as_array().unwrap().iter().find(|m| m["id"] == "ways-update-1-1").unwrap_or_else(|| panic!("{listed}"));
+    assert_eq!((row["sender"].as_str(), row["message"].as_str()), (Some("attend (ways-update)"), Some("agent-ways has a newer release")));
+
+    let read: serde_json::Value = serde_json::from_str(&f.ok(&["message", "inbox", "ways-update-1-1", "--json"])).unwrap();
+    assert_eq!((read["sender"].as_str(), read["from"].as_str()), (Some("attend (ways-update)"), Some("system:ways-update")));
+    let text = f.ok(&["message", "inbox", "ways-update-1-1"]);
+    assert_eq!(text.lines().next(), Some("From: attend (ways-update)"), "{text}");
+    let table = f.ok(&["message", "inbox"]);
+    assert!(table.contains("[project] attend (ways-update)\n"), "{table}");
+}
+
+/// Under `attend run` the peers sensor delivers beta's direct message and a
+/// newer notice from attend; a reply with no `re` goes to beta.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn the_monitor_poller_leaves_attends_notice_out_of_the_reply_target() {
+    let f = Fixture::new("addr-system-monitor");
+    let _beta = Peer::start(&f, "beta-sess", "proj");
+    let run = f.run();
+    run.wait_for("the startup line", Duration::from_secs(30), |r| r.output().contains("you are"));
+    let tray = f.project_tray();
+    signal(&f, &tray, "beta-sess-1-1", &format!("claude:beta-sess|proj|{}|to:{}|alpha, a question", f.origin, f.sid));
+    run.wait_for("beta's message", Duration::from_secs(30), |r| r.output().contains("alpha, a question"));
+    signal(&f, &tray, "git-1-2", &format!("system:git|proj|{}|from_kind:system|from_id:git|to:{}|lane:event|branch switched to main", f.origin, f.sid));
+    run.wait_for("attend's notice", Duration::from_secs(30), |r| r.output().contains("message from attend (git)"));
+
+    let out = f.attend(&["message", "reply", "--json", "--", "an answer"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let sent: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!((sent["re"].as_str(), sent["to"].as_str()), (Some("beta-sess-1-1"), Some("beta-sess")));
+}
+
 /// Under `attend run`, beta's direct message in the shared tray stays off
 /// alpha's Monitor line, even in the poll where alpha's own wakes it.
 #[cfg(feature = "sensor-peers")]

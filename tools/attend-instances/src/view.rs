@@ -39,8 +39,9 @@ pub use crate::SnapshotCache;
 /// Claudes get `Nickname-instance (cwd_basename)` with the nickname in
 /// their identity color. Humans get `user (cwd_basename)` styled the
 /// same way — keyed on username, not cwd, so the same human shows up
-/// consistently across projects. Unknown prefixes fall through
-/// showing the raw `from` value, colored off its own hash.
+/// consistently across projects. A `system:` sender is attend itself,
+/// shown as `attend (<sensor>)` with no colour. Unknown prefixes fall
+/// through showing the raw `from` value, colored off its own hash.
 ///
 /// A terminal caller passes `agent_theme::painter()`, which is plain when
 /// stdout is not a terminal. Machine-carried text (the Monitor event line,
@@ -69,6 +70,10 @@ pub fn render_sender_label(from: &str, cwd: &str, painter: &Painter, instances: 
         let scope = agent_identity::cwd_basename(cwd);
         let id = Identity::for_user(username, &scope, depth);
         compose(username, &id.cwd_basename, &id, painter)
+    } else if let Some(sensor) = from.strip_prefix(agent_identity::signal::SYSTEM_PREFIX) {
+        // attend itself: one name on every conduit, never a person's or an
+        // agent's, and no identity colour.
+        agent_identity::signal::system_label(sensor)
     } else {
         let scope = agent_identity::cwd_basename(cwd);
         let id = Identity::for_user(from, &scope, depth);
@@ -132,6 +137,16 @@ mod tests {
         let label = render_sender_label("external:aaron@kitty", "/home/aaron/Projects", &Painter::terminal(ColorDepth::TrueColor), &empty_cache());
         assert!(label.contains("aaron"));
         assert!(label.contains("(Projects)"));
+    }
+
+    /// A system sender is attend with its sensor, on every painter, with
+    /// no project and no colour.
+    #[test]
+    fn a_system_sender_is_named_as_attend() {
+        let cache = empty_cache();
+        for painter in [Painter::plain(), Painter::terminal(ColorDepth::TrueColor)] {
+            assert_eq!(render_sender_label("system:ways-update", "/home/me/repo", &painter, &cache), "attend (ways-update)");
+        }
     }
 
     #[test]

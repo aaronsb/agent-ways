@@ -136,8 +136,6 @@ struct PendingMsg {
     /// in the per-message emit branch, since a digest never shows it.
     from: String,
     cwd: String,
-    /// The sensor that wrote it, when attend itself wrote it.
-    sensor: Option<String>,
     /// The signal's id, whose short handle the Monitor line carries.
     signal_id: String,
     body: String,
@@ -439,7 +437,7 @@ impl PeerSensor {
             let Some(sig) = agent_identity::parse_signal(agent_identity::wire_line(&f.content)) else {
                 continue;
             };
-            let sensor = sig.system_sensor();
+            let system = sig.sender_kind() == Some(agent_identity::signal::Kind::System);
             let agent_identity::ParsedSignal { from, cwd: source_cwd, message, .. } = sig;
 
             // The message lane bypasses the event-lane noise stack
@@ -474,7 +472,6 @@ impl PeerSensor {
                 magnitude,
                 from: from.to_string(),
                 cwd: source_cwd.to_string(),
-                sensor,
                 signal_id: f.signal_id.clone(),
                 body: message.to_string(),
                 kind,
@@ -488,7 +485,9 @@ impl PeerSensor {
             // attend processes don't collide. Messages from this session,
             // under its id or an earlier one, were skipped above, so a
             // sibling session at this project is recorded like any sender.
-            if let Some(ref sid) = self.own_session_id {
+            // attend's own notices take no reply, so a system signal is
+            // never recorded and a bare reply goes to the newest peer.
+            if let (false, Some(sid)) = (system, &self.own_session_id) {
                 let said = last_inbound::Said::of(&scan_dirs[f.room].room, &from, source_cwd);
                 last_inbound::record(sid, &f.signal_id, &said, &from);
             }
@@ -515,12 +514,8 @@ impl PeerSensor {
             // ruled out, because a digest never shows a sender.
             let instances = attend_instances::view::SnapshotCache::new();
             for m in &pending {
-                // A system signal names attend and its sensor, as the drain
-                // does, not a person or an agent.
-                let sender = match &m.sensor {
-                    Some(sensor) => agent_identity::signal::system_label(sensor),
-                    None => attend_instances::view::render_sender_label(&m.from, &m.cwd, &attend_instances::view::Painter::plain(), &instances),
-                };
+                let sender =
+                    attend_instances::view::render_sender_label(&m.from, &m.cwd, &attend_instances::view::Painter::plain(), &instances);
                 let include_reply_hint = !self.reply_hint_shown;
                 // One message is one line, whatever its length (ADR-412).
                 observations.push((m.magnitude, monitor_line(&sender, &m.signal_id, &m.body, include_reply_hint)));
@@ -1001,7 +996,6 @@ mod tests {
             magnitude,
             from: "claude:x".to_string(),
             cwd: "/x".to_string(),
-            sensor: None,
             signal_id: "x-1-0".to_string(),
             body: "hi".to_string(),
             kind,

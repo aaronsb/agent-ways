@@ -112,6 +112,8 @@ pub enum SendError {
     /// tray and channel, and the record names no room. Guessing `#open`
     /// could carry a private answer into public.
     ParentRoomUnknown,
+    /// The parent is a notice attend itself wrote, which no one can answer.
+    SystemNotice,
     /// No tray took the signal, so nothing went out.
     NotWritten { error: String },
 }
@@ -165,6 +167,7 @@ impl std::fmt::Display for SendError {
             Self::ParentRoomUnknown => {
                 write!(f, "can't tell where the parent was said; pass --channel or --to, or use attend message send")
             }
+            Self::SystemNotice => write!(f, "attend's own notices take no reply; to start a new topic, use attend message send"),
             Self::NotWritten { error } => write!(f, "the message could not be written: {error}"),
         }
     }
@@ -524,7 +527,9 @@ fn classify_reply_target(last_inbound: Option<String>) -> ReplyTarget {
 /// is gone, the reply is refused. A sender session that has exited is
 /// refused by name; a person is always written to. A parent whose room or
 /// sender cannot be told is refused, never guessed to be `#open`. A `to` or
-/// `channel` in `req` overrides all of this.
+/// `channel` in `req` overrides all of this. A notice attend itself wrote
+/// takes no reply: no conduit records one as the newest, and `re` naming
+/// one is refused with [`SendError::SystemNotice`].
 #[cfg(feature = "sensor-peers")]
 pub fn reply(req: &SendRequest) -> Result<Replied, SendError> {
     // An empty message is refused before anything is looked up, as `send`
@@ -535,7 +540,13 @@ pub fn reply(req: &SendRequest) -> Result<Replied, SendError> {
     let me = current_session();
     let last = sensor_peers::last_inbound::read(&me.session_id);
     let (re, threading, recorded) = match &req.re {
-        Some(id) => (Some(resolve_re(&me, id)?), Threading::Threaded, None),
+        Some(id) => {
+            let id = resolve_re(&me, id)?;
+            if is_system_notice(&me, &id) {
+                return Err(SendError::SystemNotice);
+            }
+            (Some(id), Threading::Threaded, None)
+        }
         None => match classify_reply_target(last.as_ref().map(|l| l.id.clone())) {
             ReplyTarget::NoInbound => return Err(SendError::NoInbound),
             ReplyTarget::Unthreaded => (None, Threading::Unthreaded, last.as_ref()),
@@ -551,6 +562,24 @@ pub fn reply(req: &SendRequest) -> Result<Replied, SendError> {
     };
     let sent = write(&me, &dest, &req)?;
     Ok(Replied { sent, threading })
+}
+
+/// Whether the signal `id` in this session's receive set is a notice attend
+/// itself wrote. Such a notice takes no reply, so `re` naming one is
+/// refused, whatever `to` or `channel` says.
+#[cfg(feature = "sensor-peers")]
+fn is_system_notice(me: &Session, id: &str) -> bool {
+    let file = format!("{id}.signal");
+    groups_for(me)
+        .receive_dirs(&me.origin_path)
+        .into_iter()
+        .map(|d| d.path.join(&file))
+        .find(|p| p.is_file())
+        .and_then(|p| agent_identity::signal::read_signal_file(&p).ok())
+        .is_some_and(|c| {
+            agent_identity::parse_signal(agent_identity::wire_line(&c))
+                .is_some_and(|s| s.sender_kind() == Some(agent_identity::signal::Kind::System))
+        })
 }
 
 /// The full id `re` names: a full signal id as given, or the short `~id`
@@ -664,6 +693,8 @@ fn sender_dest(sender: Sender) -> Result<Dest, SendError> {
     use agent_identity::signal::Kind;
     match sender.kind {
         Some(Kind::Human) if is_member_id(&sender.id) => Ok(Dest::Person(sender.id)),
+        // A record from a build that still noted attend's notices.
+        Some(Kind::System) => Err(SendError::SystemNotice),
         Some(Kind::Agent) => {
             let registry = attend_instances::Registry::new();
             let successor = sender.cwd.as_deref().and_then(|cwd| registry.successor(cwd, &sender.id));

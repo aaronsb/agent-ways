@@ -227,7 +227,8 @@ fn fail(e: &SendError, json: bool, usage: &str) -> ! {
         | SendError::UnknownHandle { .. }
         | SendError::ParentChannelLeft { .. }
         | SendError::ParentChannelGone { .. }
-        | SendError::ParentRoomUnknown => eprintln!("attend message reply: {e}"),
+        | SendError::ParentRoomUnknown
+        | SendError::SystemNotice => eprintln!("attend message reply: {e}"),
         SendError::OwnProject { .. } | SendError::ProjectPath { .. } | SendError::NotWritten { .. } | SendError::TooLong { .. } => {
             eprintln!("error: {e}")
         }
