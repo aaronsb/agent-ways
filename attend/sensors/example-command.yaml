@@ -51,7 +51,12 @@ argv:
   - sh
   - -c
   - "systemctl --user list-units --failed --output=json | jq '{units: ., state: {failed: length}}'"
-# Extra environment, as name: value.
+# Extra environment, as name: value, added to what the command inherits.
+# From a shipped or user file the command inherits attend's environment
+# less every variable starting CLAUDE, ANTHROPIC_ or ATTEND_, so the
+# session's id and credentials never reach it. From a project file it
+# inherits only PATH, HOME, USER, LOGNAME, SHELL, LANG, LC_*, TZ, TMPDIR,
+# XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS.
 env: {}
 # The directory it runs in; unset is the project attend runs for.
 # cwd: .

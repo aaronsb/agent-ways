@@ -95,6 +95,9 @@ considered:
   - operator: aaronsb
     said: "other than that I like the adr and can accept. perhaps we could implement using worktrees"
     via: "session 2026-10-29, after the PR #1204 amendment"
+  - operator: aaronsb
+    said: "Strip Claude vars (Recommended)"
+    via: "session 2026-11-22, question tool, review of #1325 finding 2"
 observable:
   - 'see: attend sensor list shows a shipped git.yaml, a user weather.yaml (kind: command, Open-Meteo) and a user slack-unread.yaml (kind: mcp), each with its source file and last poll state'
   - 'run: attend sensor fire weather/high-wind --input sample.json produces a [test] notification on the event lane and leaves the trigger''s stored state unchanged'
@@ -164,6 +167,8 @@ Each kind adds its own block, and its host owns it:
 | `command` | attend | an argv run directly (no shell), with optional `env`, `cwd` and `timeout` | `output: json` or `output: lines` (the `magnitude|description` form) |
 | `mcp` | attend | one tool call on a stdio MCP server, with fixed `args` | `server`, `tool`, `args`, the probe record (§4) |
 | `ways` | ways | the session's own hook stream | `rules` and `dispatch`, defined by ADR-199 |
+
+> Amended 2026-11-22: a `command` sensor's child never inherits the session's identity or credentials, by the operator's choice ("Strip Claude vars"). When the highest file that sets its `argv`, `env` or `cwd` is a shipped or user file, the child inherits attend's environment less every variable named `CLAUDE*`, `ANTHROPIC_*` or `ATTEND_*`. When it is a project file, the child starts from an empty environment with only `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_*`, `TZ`, `TMPDIR`, `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS`. The file's `env` adds on top in both cases.
 
 The three attend kinds also share attend's block:
 - **cadence:** `interval`, `min_interval`, `decay_threshold`;
