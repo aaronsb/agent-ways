@@ -323,10 +323,17 @@ pub struct McpBlock {
     pub probe: Option<ProbeRecord>,
 }
 
-/// A probe's record (§4). It holds for the server, tool and args it names.
+/// A probe's record (§4). It holds for the server, tool and args it names,
+/// and for the server's definition its `binding` names.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProbeRecord {
     pub server: String,
+    /// Where the server's definition came from and a hash of it, as the
+    /// host computes it, so a changed command, args or env voids the
+    /// record and the record holds no secret value.
+    pub binding: Option<String>,
+    /// The project a project sensor's record applies to.
+    pub project: Option<String>,
     pub tool: String,
     pub args: Mapping,
     /// Whether the second call returned every item of the first.
@@ -338,10 +345,12 @@ pub struct ProbeRecord {
 }
 
 impl McpBlock {
-    /// Whether the probe record holds for the sensor as configured: taken
-    /// with its server, tool and args, with both checks passed.
+    /// Whether the probe record holds for the sensor as its file states
+    /// it: taken with its server, tool and args, bound to a server
+    /// definition, with both checks passed. The host checks the binding
+    /// against the definition it resolves.
     pub fn probe_holds(&self) -> bool {
-        self.probe.as_ref().is_some_and(|p| p.calls_match && p.confirmed && p.server == self.server.label() && p.tool == self.tool && p.args == self.args)
+        self.probe.as_ref().is_some_and(|p| p.calls_match && p.confirmed && p.binding.is_some() && p.server == self.server.label() && p.tool == self.tool && p.args == self.args)
     }
 }
 

@@ -260,9 +260,13 @@ fn a_ways_file_carries_its_rules_as_written() {
 
 #[test]
 fn a_probe_record_holds_only_for_what_it_was_taken_with() {
-    let base = "kind: mcp\nserver: slack\ntool: list\nargs: {c: g}\nprobe: {server: slack, tool: list, args: {c: g}, calls_match: true, confirmed: true}\n";
+    let base = "kind: mcp\nserver: slack\ntool: list\nargs: {c: g}\nprobe: {server: slack, binding: user:0123, project: /p, tool: list, args: {c: g}, calls_match: true, confirmed: true}\n";
     let Block::Mcp(m) = parse("s", &y(base)).spec.unwrap().block else { panic!() };
     assert!(m.probe_holds());
+    let p = m.probe.as_ref().unwrap();
+    assert_eq!((p.binding.as_deref(), p.project.as_deref()), (Some("user:0123"), Some("/p")));
+    let Block::Mcp(m) = parse("s", &y(&base.replace("binding: user:0123, ", ""))).spec.unwrap().block else { panic!() };
+    assert!(!m.probe_holds(), "a record bound to no server definition does not hold");
     let Block::Mcp(m) = parse("s", &y(&base.replace("args: {c: g}\nprobe", "args: {c: h}\nprobe"))).spec.unwrap().block else { panic!() };
     assert!(!m.probe_holds(), "a change to args voids the record");
 }

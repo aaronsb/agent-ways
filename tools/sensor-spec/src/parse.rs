@@ -270,6 +270,8 @@ impl Reader {
             None | Some(Value::Null) => None,
             Some(Value::Mapping(p)) => Some(ProbeRecord {
                 server: self.text(p, "server").unwrap_or_default(),
+                binding: self.text(p, "binding"),
+                project: self.text(p, "project"),
                 tool: self.text(p, "tool").unwrap_or_default(),
                 args: self.mapping(p, "args").unwrap_or_default(),
                 calls_match: self.boolean(p, "calls_match").unwrap_or(false),
