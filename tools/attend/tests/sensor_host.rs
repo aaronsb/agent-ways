@@ -405,6 +405,53 @@ fn a_command_the_host_runs_does_not_act_as_the_session() {
     assert!(signals(&open).is_empty(), "the refused send wrote a signal");
 }
 
+/// A command that detaches from the host is still refused as the session:
+/// a send backgrounded from a subshell that exits, `( … & )`, and one
+/// started by `setsid -f`. Each waits a second first, so by the time it
+/// runs its parent has exited and the host is no longer among its
+/// ancestors; the marker the host set in its environment is what refuses
+/// it, and the refusal names that marker. Neither writes a signal. Where
+/// no `setsid` is on PATH, as on stock macOS, the `setsid -f` form is
+/// skipped and the subshell form still runs.
+#[test]
+fn a_command_that_detaches_from_the_host_is_still_refused() {
+    let f = quiet("host-detached");
+    let probe = f.home.join("probe");
+    std::fs::create_dir_all(&probe).unwrap();
+    // Each form runs `sh -c '<send>' <attend> <probe dir> <form>`.
+    let send = "sleep 1; \"$0\" message send \"detached-$2\" > /dev/null 2> \"$1/$2.err\"; echo $? > \"$1/$2.code\"";
+    let script = format!(
+        "a='{bin}'; o='{out}'; s='{send}'; mkdir \"$o/once\" 2> /dev/null || {{ echo '{{}}'; exit 0; }}; \
+         ( sh -c \"$s\" \"$a\" \"$o\" bg < /dev/null > /dev/null 2>&1 & ); \
+         if command -v setsid > /dev/null; then setsid -f sh -c \"$s\" \"$a\" \"$o\" setsid < /dev/null > /dev/null 2>&1; else echo skip > \"$o/setsid.code\"; fi; \
+         echo '{{}}'",
+        bin = env!("CARGO_BIN_EXE_attend"),
+        out = probe.display(),
+    );
+    f.sensor("probe", &format!("kind: command\ninterval: 1\nmin_interval: 1\nargv: [sh, -c, {}]\noutput: json\n", serde_json::to_string(&script).unwrap()));
+    let host = Host::start(&f, &f.sid, &[]);
+    let read = |n: &str| std::fs::read_to_string(probe.join(n)).unwrap_or_default();
+    host.wait_for("both detached sends", Duration::from_secs(20), || ["bg", "setsid"].iter().all(|form| !read(&format!("{form}.code")).is_empty()));
+    let pid = host.child.id();
+    let refusal = format!(
+        "this attend does not act as the session: its environment carries ATTEND_SENSOR_HOST={}, the marker attend {pid} sets",
+        attend_presence::session::marker_value(pid)
+    );
+    for form in ["bg", "setsid"] {
+        if read(&format!("{form}.code")).trim() == "skip" {
+            assert_eq!(form, "setsid", "only setsid may be skipped");
+            eprintln!("setsid: not on this host, so the setsid -f form is skipped");
+            continue;
+        }
+        assert_eq!(read(&format!("{form}.code")).trim(), "3", "{form}: {}", read(&format!("{form}.err")));
+        assert!(read(&format!("{form}.err")).contains(&refusal), "{form}: {}", read(&format!("{form}.err")));
+    }
+    let open = f.signals().join(attend_groups::BROADCAST_DIR);
+    assert!(signals(&open).is_empty(), "a refused send wrote a signal to #open");
+    let tray = signals(&f.signals().join(f.project_tray()));
+    assert!(tray.iter().all(|(_, t)| !t.contains("detached-")), "a refused send wrote a signal to the project: {tray:?}");
+}
+
 /// The `timeout` program on PATH, as `timeout` or as coreutils' `gtimeout`,
 /// or none: stock macOS ships neither.
 fn timeout_program() -> Option<&'static str> {

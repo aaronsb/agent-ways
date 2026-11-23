@@ -3,10 +3,12 @@
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
 //! A process a sensor command started does not act as the session: its
-//! ancestry passes through an attend sensor host, so every verb that sends,
+//! ancestry passes through an attend sensor host, or its environment
+//! carries the sensor marker of a live attend, so every verb that sends,
 //! joins, listens, drains or reads as the session refuses. The session's
 //! own callers still resolve: the mod's calls, a Bash tool shell, the
-//! Stop-hook drain and `attend run` itself.
+//! Stop-hook drain and `attend run` itself, and so does a shell whose
+//! marker is stale.
 
 #![cfg(unix)]
 
@@ -133,4 +135,87 @@ fn refused_a_forged_record_deep_or_behind_a_fake_claude() {
         assert_eq!(read(&format!("{probe}.code")).trim(), "3", "{probe}: {}", read(&format!("{probe}.err")));
         assert!(read(&format!("{probe}.err")).contains(REFUSAL), "{probe}: {}", read(&format!("{probe}.err")));
     }
+}
+
+/// `peer whoami --machine` from a plain shell, with the sensor marker set
+/// to `marker`, or without it for `None`.
+fn whoami_marked(f: &Fixture, marker: Option<&str>) -> std::process::Output {
+    let mut cmd = f.command_from(Path::new("sh"));
+    if let Some(m) = marker {
+        cmd.env(attend_presence::session::SENSOR_HOST_VAR, m);
+    }
+    cmd.args(["-c", "\"$0\" peer whoami --machine", env!("CARGO_BIN_EXE_attend")]).output().unwrap()
+}
+
+/// The refusal a process gets for carrying the marker of attend `pid`:
+/// it names the variable and its value, and says how to clear it.
+fn marker_refusal(marker: &str, pid: u32) -> String {
+    format!(
+        "this attend does not act as the session: its environment carries ATTEND_SENSOR_HOST={marker}, the marker attend {pid} sets for the commands its sensors run; if no sensor started this shell, unset ATTEND_SENSOR_HOST"
+    )
+}
+
+/// A process whose environment carries the marker of a live sensor host is
+/// refused, though no host is among its ancestors: what a command that
+/// detached from its host looks like. The refusal names the marker. The
+/// same marker with another start time names a later process that took
+/// the pid, and refuses nothing.
+#[test]
+fn refused_a_marker_naming_a_live_host() {
+    let f = Fixture::new("guard-marker-live");
+    let run = f.run();
+    run.wait_for("the startup line", Duration::from_secs(20), |r| r.output().contains("you are"));
+    let marker = attend_presence::session::marker_value(run.pid());
+    let out = whoami_marked(&f, Some(&marker));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(3), "{err}");
+    assert!(err.contains(&marker_refusal(&marker, run.pid())), "{err}");
+    assert!(!String::from_utf8_lossy(&out.stdout).contains(&f.sid), "the session id reached the marked process");
+    let reused = format!("{}:1", run.pid());
+    let out = whoami_marked(&f, Some(&reused));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains(&f.sid), "{reused}: {err}");
+}
+
+/// A stale marker refuses nothing: one naming a process that has exited,
+/// one naming a live process that runs no attend (this test), and one that
+/// is not a marker. A shell with no marker resolves the session too.
+#[test]
+fn allowed_a_stale_marker_or_none() {
+    let f = Fixture::new("guard-marker-stale");
+    let mut child = std::process::Command::new("true").spawn().unwrap();
+    let gone = attend_presence::session::marker_value(child.id());
+    child.wait().unwrap();
+    let live = attend_presence::session::marker_value(std::process::id());
+    for marker in [Some(gone.as_str()), Some(live.as_str()), Some("not-a-pid"), None] {
+        let out = whoami_marked(&f, marker);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains(&f.sid), "{marker:?}: {err}");
+        assert!(!err.contains(REFUSAL) && !err.contains("does not act as the session"), "{marker:?}: {err}");
+    }
+}
+
+/// `attend sensor poll`, run from the session's own shell, is no sensor
+/// host, so the marker alone stops the command it runs from acting as the
+/// session. The command's attached `attend message send` is refused and
+/// writes no signal.
+#[test]
+fn refused_an_attend_a_polled_sensor_command_runs() {
+    let f = Fixture::new("guard-poll");
+    let out = f.home.join("probe");
+    std::fs::create_dir_all(&out).unwrap();
+    let script = "\"$0\" message send from-a-poll > /dev/null 2> \"$1/send.err\"; echo $? > \"$1/send.code\"; echo '{}'";
+    let argv = [Some("sh"), Some("-c"), Some(script), Some(env!("CARGO_BIN_EXE_attend")), out.to_str()];
+    f.sensor("probe", &format!("kind: command\nargv: {}\noutput: json\n", serde_json::to_string(&argv).unwrap()));
+    let poll = f.command_from(Path::new("sh")).args(["-c", "\"$0\" sensor poll probe", env!("CARGO_BIN_EXE_attend")]).output().unwrap();
+    assert!(poll.status.success(), "the poll: {}", String::from_utf8_lossy(&poll.stderr));
+    let read = |n: &str| std::fs::read_to_string(out.join(n)).unwrap_or_default();
+    assert_eq!(read("send.code").trim(), "3", "{}", read("send.err"));
+    assert!(read("send.err").contains("does not act as the session: its environment carries ATTEND_SENSOR_HOST="), "{}", read("send.err"));
+    assert!(read("send.err").contains("unset ATTEND_SENSOR_HOST"), "{}", read("send.err"));
+    let open = f.signals().join(attend_groups::BROADCAST_DIR);
+    assert!(std::fs::read_dir(&open).map(|d| d.count() == 0).unwrap_or(true), "the refused send wrote a signal to #open");
+    let tray = f.signals().join(f.project_tray());
+    let sent = std::fs::read_dir(&tray).into_iter().flatten().flatten().any(|e| std::fs::read_to_string(e.path()).is_ok_and(|t| t.contains("from-a-poll")));
+    assert!(!sent, "the refused send wrote a signal to the project");
 }

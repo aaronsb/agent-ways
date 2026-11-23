@@ -86,9 +86,8 @@ pub fn cli_main() {
         None => return,
     };
 
-    if acts_as_session(&command) && attend_presence::session::started_by_sensor_command(std::process::id()) {
-        eprintln!("attend: this attend was started by a sensor command, so it does not act as the session");
-        std::process::exit(agent_settings::exit::REJECTED);
+    if acts_as_session(&command) {
+        refuse_a_sensor_command();
     }
 
     match command {
@@ -135,6 +134,22 @@ pub fn cli_main() {
         },
         Commands::Config { sub } => dispatch_config(sub.unwrap_or(ConfigCmd::Show)),
     }
+}
+
+/// Exit with status 3 when a sensor command started this process, saying
+/// how attend knows. A refusal by the marker names the variable and the
+/// attend it points at, since a marker can leak into a shell no sensor
+/// started, and says how to clear it.
+fn refuse_a_sensor_command() {
+    use attend_presence::session::{SensorStart, SENSOR_HOST_VAR};
+    match attend_presence::session::sensor_start(std::process::id()) {
+        None => return,
+        Some(SensorStart::Host) => eprintln!("attend: this attend was started by a sensor command, so it does not act as the session"),
+        Some(SensorStart::Marker { pid, value }) => eprintln!(
+            "attend: this attend does not act as the session: its environment carries {SENSOR_HOST_VAR}={value}, the marker attend {pid} sets for the commands its sensors run; if no sensor started this shell, unset {SENSOR_HOST_VAR}"
+        ),
+    }
+    std::process::exit(agent_settings::exit::REJECTED);
 }
 
 /// Whether `command` acts as the session or reads what is the session's:

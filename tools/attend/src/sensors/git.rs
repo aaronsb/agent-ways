@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
+use attend_presence::session::mark_sensor_child;
 use sensor_trait::{Focus, Sensor};
 use std::collections::HashSet;
 use std::process::Command;
@@ -112,7 +113,7 @@ impl Sensor for GitSensor {
             Some(s) => s,
             None => {
                 // Not a repository, unless git itself cannot run.
-                if let Err(e) = Command::new("git").arg("--version").output() {
+                if let Err(e) = mark_sensor_child(&mut Command::new("git")).arg("--version").output() {
                     self.failure = Some(format!("cannot run git: {e}"));
                 }
                 return Vec::new();
@@ -242,7 +243,7 @@ fn dirty_paths(porcelain: &str) -> HashSet<String> {
 /// or None on failure or empty output. The start is kept as printed:
 /// porcelain status opens with a space for a change only in the work tree.
 fn git_cmd(dir: &str, args: &[&str]) -> Option<String> {
-    let output = Command::new("git")
+    let output = mark_sensor_child(&mut Command::new("git"))
         .env("GIT_OPTIONAL_LOCKS", "0")
         .arg("-C")
         .arg(dir)

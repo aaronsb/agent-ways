@@ -16,6 +16,7 @@
 //! State is `HashMap<Component, u64>` on the sensor struct — in-process memory
 //! only, clean-restart semantics by construction.
 
+use attend_presence::session::mark_sensor_child;
 use sensor_trait::{extract_json_u64, Focus, Sensor};
 use std::collections::HashMap;
 use std::process::Command;
@@ -87,7 +88,7 @@ impl DisclosureSensor {
     /// Shell out to `ways context --json` and return the `tokens_used` field.
     /// Matches the context sensor's integration pattern.
     fn read_tokens_used(&self, focus: &Focus) -> Option<(u64, u64)> {
-        let output = Command::new("ways")
+        let output = mark_sensor_child(&mut Command::new("ways"))
             .args(["context", "--json"])
             .current_dir(&focus.working_dir)
             .output()

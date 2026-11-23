@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
+use attend_presence::session::mark_sensor_child;
 use sensor_trait::{extract_json_u64, Focus, Sensor};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -43,7 +44,7 @@ impl ContextSensor {
 
     fn read_context(&self, focus: &Focus) -> Option<ContextReading> {
         // Run ways context --json from the working directory
-        let output = Command::new("ways")
+        let output = mark_sensor_child(&mut Command::new("ways"))
             .args(["context", "--json"])
             .current_dir(&focus.working_dir)
             .output()
