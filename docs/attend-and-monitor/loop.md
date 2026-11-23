@@ -8,7 +8,7 @@ The loop serves one Claude session: `attend run` prints its lines to stdout, and
 
 ## The sensor host
 
-The same loop runs as `attend sensor host --session <id> --cwd <dir>`, which the attend mod starts for a listening session. The scheduling, intervals, engagement, governors, checkpoint and re-exec described here are the same. What differs is where a disclosed line goes and what is left out:
+The same loop runs as `attend sensor host --session <id> --cwd <dir>`, which the attend mod starts for a listening session. When the mod ends it, starts it again and gives up on it is described under [the attend mod](mod.md). The scheduling, intervals, engagement, governors, checkpoint and re-exec described here are the same. What differs is where a disclosed line goes and what is left out:
 
 - Each line becomes a signal in the session's project tray, from `system:<sensor>`, addressed to the session, on the sensor's lane, with the expiry its trigger sets (`expires`; an unset one on the event lane is the hour of the decay window, and `session` keeps it until read). The mod's drain delivers it as it delivers a message. An event-lane batch must also reach the magnitude 3.0 at which `attend run` printed a batch: one under it is logged on stderr and not written, as `attend run` logged it and did not print it. A message-lane batch has no such cut.
 - Each write prints one line on stdout, `signal <id>`, which the mod takes as a cue to poll. Nothing else goes to stdout; logs go to stderr.
