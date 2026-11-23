@@ -50,24 +50,30 @@ struct Signals {
 }
 
 impl Sink for Signals {
-    fn deliver(&mut self, batch: &[Disclosure]) -> bool {
-        let mut wrote = false;
+    fn deliver(&mut self, batch: &[Disclosure]) -> Vec<Vec<bool>> {
         let mut out = std::io::stdout().lock();
-        for d in batch {
-            let lane = if d.message_lane { sensor_spec::Lane::Message } else { sensor_spec::Lane::Event };
-            for (line, lapse) in &d.lines {
-                match self.writer.write(&d.sensor, lane, *lapse, line) {
-                    Ok(id) => {
-                        emit::log(&format!("{}: wrote {id}: {line}", d.sensor));
-                        writeln!(out, "signal {id}").ok();
-                        wrote = true;
-                    }
-                    Err(why) => emit::log(&format!("{}: not written: {why}", d.sensor)),
-                }
-            }
-        }
+        let written = batch
+            .iter()
+            .map(|d| {
+                let lane = if d.message_lane { sensor_spec::Lane::Message } else { sensor_spec::Lane::Event };
+                d.lines
+                    .iter()
+                    .map(|(line, lapse)| match self.writer.write(&d.sensor, lane, *lapse, line) {
+                        Ok(id) => {
+                            emit::log(&format!("{}: wrote {id}: {line}", d.sensor));
+                            writeln!(out, "signal {id}").ok();
+                            true
+                        }
+                        Err(why) => {
+                            emit::log(&format!("{}: not written: {why}", d.sensor));
+                            false
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
         out.flush().ok();
-        wrote
+        written
     }
 }
 

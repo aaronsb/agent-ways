@@ -11,7 +11,6 @@
 //!   helper, and the `TickState` bundle that ties them to a single
 //!   iteration. Reachable from tests without standing up the full
 //!   `cmd_run_with_catchup` shell.
-//!
 //! - `sink` — where disclosed lines go: Monitor lines for `attend run`.
 //! - `host` — `attend sensor host`, the same loop writing system signals.
 //!

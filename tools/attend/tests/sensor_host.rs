@@ -168,15 +168,19 @@ fn the_host_writes_a_trigger_as_a_system_signal_and_cues_each_write() {
     assert!(row["expires"].is_null(), "{row}");
 }
 
-/// A trigger kept for the session reaches the checkpoint when it fires, so
-/// a host killed the moment its signal lands, and started again, does not
-/// fire it a second time.
+/// What the host logs once a delivered session trigger reached the
+/// checkpoint.
+const CHECKPOINTED: &str = "a session trigger is spent; checkpointed";
+
+/// A trigger kept for the session is spent when its line is written, and
+/// the checkpoint follows at once, so a host killed after the write and
+/// that checkpoint, and started again, does not fire it a second time.
 #[test]
-fn a_session_trigger_fires_once_across_a_kill_right_after_the_fire() {
+fn a_session_trigger_fires_once_across_a_kill_after_its_write_and_checkpoint() {
     let f = quiet("host-kill");
     beacon(&f, "beacon", "memory: session");
     let host = Host::start(&f, &f.sid, &[]);
-    host.wait_for("the signal", Duration::from_secs(20), || !from(&f, "beacon").is_empty());
+    host.wait_for("the signal and its checkpoint", Duration::from_secs(20), || !from(&f, "beacon").is_empty() && host.stderr().contains(CHECKPOINTED));
     host.kill();
     let before = polls(&f, "beacon");
     let again = Host::start(&f, &f.sid, &[]);
@@ -204,8 +208,8 @@ fn moved_from_carries_the_stores_and_the_spent_triggers() {
             .collect()
     };
     let old = Host::start(&f, "sess-old", &[]);
-    old.wait_for("the old id's signal and stores", Duration::from_secs(20), || {
-        !from(&f, "beacon").is_empty() && sessions().iter().any(|s| s == "stored:sess-old")
+    old.wait_for("the old id's signal, its checkpoint and stores", Duration::from_secs(20), || {
+        !from(&f, "beacon").is_empty() && old.stderr().contains(CHECKPOINTED) && sessions().iter().any(|s| s == "stored:sess-old")
     });
     old.kill();
     let before = polls(&f, "beacon");
@@ -216,6 +220,26 @@ fn moved_from_carries_the_stores_and_the_spent_triggers() {
     let stores = sessions();
     assert!(stores.iter().any(|s| s == "stored:sess-new"), "{stores:?}");
     assert!(!stores.iter().any(|s| s.ends_with(":sess-old")), "the old id kept a store: {stores:?}");
+}
+
+/// A signal the host cannot write spends nothing: the trigger fires again,
+/// and once the tray can be written its line goes out, once.
+#[test]
+fn a_failed_write_leaves_the_session_trigger_to_fire_again() {
+    let f = quiet("host-unwritable");
+    beacon(&f, "beacon", "memory: session");
+    let tray = f.signals().join(f.project_tray());
+    std::fs::create_dir_all(f.signals()).unwrap();
+    std::fs::write(&tray, "a file where the tray's directory goes").unwrap();
+    let host = Host::start(&f, &f.sid, &[]);
+    host.wait_for("two failed writes", Duration::from_secs(20), || host.stderr().matches("beacon: not written").count() >= 2);
+    assert!(!host.stderr().contains(CHECKPOINTED), "a failed write spent the trigger:\n{}", host.stderr());
+    assert!(host.stdout().is_empty(), "a cue for a signal not written: {}", host.stdout());
+    std::fs::remove_file(&tray).unwrap();
+    host.wait_for("the signal once the tray is writable", Duration::from_secs(20), || !from(&f, "beacon").is_empty() && host.stderr().contains(CHECKPOINTED));
+    let after = polls(&f, "beacon");
+    host.wait_for("three more polls", Duration::from_secs(20), || polls(&f, "beacon") >= after + 3);
+    assert_eq!(from(&f, "beacon").len(), 1, "{:?}", from(&f, "beacon"));
 }
 
 /// The control for the test above: without `--moved-from`, a new id starts

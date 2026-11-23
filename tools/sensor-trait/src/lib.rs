@@ -130,10 +130,16 @@ pub trait Sensor: Send {
         None
     }
 
+    /// The line `description` of an earlier poll went out. A trigger the
+    /// sensor keeps for the session becomes spent only here, so a line
+    /// dropped on its way, by the refractory, the governor or a failed
+    /// write, leaves the trigger to fire again. Default: nothing.
+    fn delivered(&mut self, _description: &str) {}
+
     /// Whether a trigger this sensor keeps for the session became spent
-    /// since the last call. Taken once after each poll, so the host saves
-    /// its checkpoint at once and a kill cannot let the trigger fire again.
-    /// Default: never.
+    /// since the last call, because its line was [`Sensor::delivered`].
+    /// The loop checkpoints at once when it did, so a restart does not
+    /// fire the trigger again. Default: never.
     fn take_spent(&mut self) -> bool {
         false
     }

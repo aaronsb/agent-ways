@@ -342,15 +342,6 @@ pub(super) fn tick_iteration(s: &mut TickState) {
 
         let changed = s.slots[i].poll(s.focus);
 
-        // A trigger kept for the session that just became spent reaches
-        // the checkpoint now, before its line goes out, so a kill after
-        // the write cannot let it fire again in this session.
-        if s.slots[i].sensor.take_spent() {
-            emit::log(&format!("{}: a session trigger is spent; checkpointing", s.slots[i].name()));
-            s.state_store.checkpoint(&collect_snapshot(s.slots));
-            *s.last_checkpoint = Instant::now();
-        }
-
         // Only log when something changed — quiet polls are silent.
         if changed {
             s.governor.record_event();
@@ -456,10 +447,20 @@ pub(super) fn tick_iteration(s: &mut TickState) {
         evt_ready.clear();
         msg_ready.retain(|i| s.slots[*i].is_crate("keepwarm"));
     }
-    try_disclose(s.slots, &evt_ready, s.governor, true, s.sink);
+    let mut spent = try_disclose(s.slots, &evt_ready, s.governor, true, s.sink);
     // Message lane: do not record engagement, so it never builds the
     // action-potential refractory that would later hold conversation.
-    try_disclose(s.slots, &msg_ready, s.msg_governor, false, s.sink);
+    spent |= try_disclose(s.slots, &msg_ready, s.msg_governor, false, s.sink);
+
+    // A trigger kept for the session is spent once its line went out. The
+    // checkpoint follows at once, so a restart does not fire it again; a
+    // kill between the write and this checkpoint can, and a duplicate
+    // notice is the lesser loss.
+    if spent {
+        s.state_store.checkpoint(&collect_snapshot(s.slots));
+        *s.last_checkpoint = Instant::now();
+        emit::log("a session trigger is spent; checkpointed");
+    }
 
     // Periodic checkpoint
     if s.last_checkpoint.elapsed() >= CHECKPOINT_INTERVAL {
@@ -507,7 +508,9 @@ pub(super) fn tick_iteration(s: &mut TickState) {
 }
 
 /// Disclose a batch of ready sensors through `governor`, or log a hold if
-/// the governor is closed. Shared by the event lane and the (permissive)
+/// the governor is closed. Each line that went out is reported to its
+/// sensor ([`sensor_trait::Sensor::delivered`]); returns whether that spent
+/// a trigger kept for the session. Shared by the event lane and the (permissive)
 /// message lane so both get identical batching, priority, and engagement
 /// bookkeeping — only the governing policy differs.
 fn try_disclose(
@@ -516,9 +519,9 @@ fn try_disclose(
     governor: &mut DisclosureGovernor,
     record_engagement: bool,
     sink: &mut dyn Sink,
-) {
+) -> bool {
     if ready.is_empty() {
-        return;
+        return false;
     }
     if !governor.can_disclose() {
         emit::log(&format!(
@@ -527,7 +530,7 @@ fn try_disclose(
             governor.window_disclosures,
             governor.max_disclosures_per_window,
         ));
-        return;
+        return false;
     }
 
     let mut batch = Vec::new();
@@ -552,7 +555,15 @@ fn try_disclose(
         batch.len(),
         governor.cooldown().as_secs_f64(),
     ));
-    if sink.deliver(&batch) {
+    let delivered = sink.deliver(&batch);
+    let mut spent = false;
+    for ((&i, d), went) in ready.iter().zip(&batch).zip(&delivered) {
+        for ((line, _), _) in d.lines.iter().zip(went).filter(|(_, went)| **went) {
+            slots[i].sensor.delivered(line);
+        }
+        spent |= slots[i].sensor.take_spent();
+    }
+    if delivered.iter().flatten().any(|went| *went) {
         governor.record_disclosure();
         // Record engagement only for the event lane (refractory is its
         // noise-control). The message lane skips it so conversation never
@@ -570,6 +581,7 @@ fn try_disclose(
     for &i in ready {
         slots[i].accumulator.reset();
     }
+    spent
 }
 
 /// Emit every message-lane line the disclosure governor is holding, before
@@ -589,7 +601,13 @@ pub(super) fn flush_message_lane(slots: &mut [SensorSlot]) {
         .collect();
     emit::log(&format!("flushing {} held message-lane batch(es) before exec", batch.len()));
     emit::emit_batch(&batch);
-    for &i in &held {
+    // Printed at high priority, every line went out, so a session trigger
+    // among them is spent before the checkpoint that follows.
+    for (&i, (_, _, lines)) in held.iter().zip(&batch) {
+        for line in lines {
+            slots[i].sensor.delivered(line);
+        }
+        slots[i].sensor.take_spent();
         slots[i].accumulator.reset();
     }
 }
@@ -720,14 +738,15 @@ mod tests {
         assert!(!collect_snapshot(&[git_as_peers]).baselined);
     }
 
-    /// A file sensor named `ways-update` whose session trigger has fired,
-    /// and the trigger.
+    /// A file sensor named `ways-update` whose session trigger has fired and
+    /// had its line delivered, and the trigger.
     fn fired_update_sensor() -> (sensors::hosted::FileSensor, sensor_spec::Trigger) {
         let doc = "kind: command\nargv: [x]\noutput: json\ntriggers: [{name: behind, path: \"$\", on: enters, where: {behind: true}, memory: session}]\n";
         let t = sensor_spec::parse("ways-update", &serde_yaml::from_str(doc).unwrap()).spec.unwrap().triggers.remove(0);
         let mut s = sensors::hosted::FileSensor::new("ways-update".into(), sensor_spec::DEFAULTS, Box::new(Marked("inner")), "/p", None, false);
         let behind = sensors::hosted::Seen::from([("$".to_string(), serde_json::json!(true))]);
         assert_eq!(s.observe(&t, behind), vec!["$".to_string()]);
+        s.spend(&t);
         (s, t)
     }
 
@@ -759,6 +778,39 @@ mod tests {
         assert_eq!(restarted.observe(&t, behind()), Vec::<String>::new());
         let mut fresh = sensors::hosted::FileSensor::new("ways-update".into(), sensor_spec::DEFAULTS, Box::new(Marked("inner")), "/p", None, false);
         assert_eq!(fresh.observe(&t, behind()), vec!["$".to_string()], "without the restore it would fire again");
+    }
+
+    /// A source that reports the update behind on every poll.
+    struct Behind;
+    impl sensors::hosted::Source for Behind {
+        fn fetch(&mut self) -> Result<sensors::hosted::Fetched, String> {
+            Ok(sensors::hosted::Fetched::Json(serde_json::json!({"behind": true})))
+        }
+    }
+
+    /// A line the slot's refractory drops leaves its session trigger
+    /// unspent, so the next poll past the refractory fires it again, and
+    /// only the line's delivery spends it.
+    #[test]
+    fn a_line_the_refractory_drops_leaves_its_session_trigger_to_fire_again() {
+        let doc = "kind: command\nargv: [x]\noutput: json\nthreshold: 1\ntriggers: [{name: behind, path: \"$\", on: enters, where: {behind: true}, memory: session, magnitude: 3, description: behind}]\n";
+        let spec = sensor_spec::parse("ways-update", &serde_yaml::from_str(doc).unwrap()).spec.unwrap();
+        let sensor = sensors::hosted::FileSensor::declared(&spec, Box::new(Behind), "/p", None, false);
+        let mut slot = sensors::slot(Box::new(sensor), sensor_spec::Lane::Event, None);
+        let focus = Focus { description: String::new(), working_dir: "/p".into(), keywords: Vec::new() };
+        slot.engagement.record_fire(sensor_trait::epoch_secs(), 1.0);
+        assert!(slot.engagement.in_absolute_refractory(sensor_trait::epoch_secs()), "the slot starts in its absolute refractory");
+        slot.poll(&focus);
+        assert!(slot.accumulator.events.is_empty(), "the refractory dropped the line");
+        assert!(!slot.sensor.take_spent());
+        slot.engagement = sensor_trait::EngagementState::new(build_engagement(&config::Config::default()));
+        slot.poll(&focus);
+        assert_eq!(slot.accumulator.events, ["behind"], "past the refractory the trigger fires again");
+        slot.sensor.delivered("behind");
+        assert!(slot.sensor.take_spent(), "its delivery spends it");
+        slot.accumulator.reset();
+        slot.poll(&focus);
+        assert!(slot.accumulator.events.is_empty(), "spent, it fires no more");
     }
 
     #[test]

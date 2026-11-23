@@ -187,6 +187,9 @@ pub struct FileSensor {
     /// The declared state, as the store holds it.
     state: Option<StoredState>,
     session: SessionMemory,
+    /// The lines of session triggers that fired and have not been
+    /// delivered yet: each description with its trigger's fingerprint.
+    undelivered: Vec<(String, String)>,
     /// Whether a session trigger became spent since [`Sensor::take_spent`]
     /// last read it.
     newly_spent: bool,
@@ -242,6 +245,7 @@ impl FileSensor {
             stored: BTreeMap::new(),
             state: None,
             session: SessionMemory::default(),
+            undelivered: Vec::new(),
             newly_spent: false,
             failure: None,
             discarded: None,
@@ -318,12 +322,15 @@ impl FileSensor {
     ///
     /// Store memory reaches the store when the sensor next saves: after a
     /// poll, or on [`FileSensor::commit`]. A fresh store's first poll sets a
-    /// baseline. Session memory starts from
-    /// nothing seen, and a trigger definition with it fires at most once in
-    /// the session, whatever it compares on: once it has fired, a later
-    /// change, such as a condition that leaves and enters again, fires
-    /// nothing. The mark is kept by fingerprint, so a renamed trigger stays
-    /// spent and an edited one fires once more.
+    /// baseline. Session memory starts from nothing seen, and a trigger
+    /// definition with it is delivered at most once in the session, whatever
+    /// it compares on. It is spent when its line is delivered
+    /// ([`FileSensor::spend`]); until then the keys that fired keep what the
+    /// trigger saw before, so it fires again on the next poll whose result
+    /// still meets it. Once spent, a later change, such as a condition that
+    /// leaves and enters again, fires nothing. The mark is kept by
+    /// fingerprint, so a renamed trigger stays spent and an edited one fires
+    /// once more.
     pub fn observe(&mut self, trigger: &Trigger, now: Seen) -> Vec<String> {
         let test = trigger.fingerprint();
         let mem = match trigger.memory {
@@ -338,15 +345,37 @@ impl FileSensor {
                 _ => Vec::new(),
             },
         };
-        mem.insert(trigger.name.clone(), Memo { test: test.clone(), seen: now });
-        if trigger.memory == Memory::Session && !out.is_empty() {
-            match self.session.spent.insert(test) {
-                true => self.newly_spent = true,
-                false => out.clear(),
+        let mut seen = now;
+        if trigger.memory == Memory::Session {
+            if self.session.spent.contains(&test) {
+                out.clear();
+            }
+            for k in &out {
+                match prev.and_then(|p| p.get(k)) {
+                    Some(v) => seen.insert(k.clone(), v.clone()),
+                    None => seen.remove(k),
+                };
             }
         }
+        mem.insert(trigger.name.clone(), Memo { test, seen });
         out
     }
+
+    /// Mark the session trigger `trigger` spent, as the delivery of its line
+    /// does: it fires no more in this session.
+    #[cfg(test)]
+    pub(crate) fn spend(&mut self, trigger: &Trigger) {
+        self.spend_test(trigger.fingerprint());
+    }
+
+    fn spend_test(&mut self, test: String) {
+        if self.session.spent.insert(test) {
+            self.newly_spent = true;
+        }
+    }
+
+    /// The most undelivered session-trigger lines kept; the oldest go first.
+    const UNDELIVERED_MAX: usize = 64;
 
     /// What a trigger last saw, under its current definition.
     fn prior(&self, trigger: &Trigger) -> Option<Seen> {
@@ -401,6 +430,12 @@ impl FileSensor {
                     None => format!("{} {}: {k}", self.name, t.name),
                 };
                 let text = super::deliverable(&text);
+                if t.memory == Memory::Session && !self.undelivered.iter().any(|(d, f)| *d == text && *f == t.fingerprint()) {
+                    self.undelivered.push((text.clone(), t.fingerprint()));
+                    if self.undelivered.len() > Self::UNDELIVERED_MAX {
+                        self.undelivered.remove(0);
+                    }
+                }
                 if let Some(e) = t.expires {
                     self.lapses.push((text.clone(), e));
                 }
@@ -638,6 +673,15 @@ impl Sensor for FileSensor {
 
     fn take_failure(&mut self) -> Option<String> {
         self.failure.take()
+    }
+
+    /// Spend each session trigger whose line `description` is.
+    fn delivered(&mut self, description: &str) {
+        let (hit, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut self.undelivered).into_iter().partition(|(d, _)| d == description);
+        self.undelivered = rest;
+        for (_, test) in hit {
+            self.spend_test(test);
+        }
     }
 
     fn take_spent(&mut self) -> bool {

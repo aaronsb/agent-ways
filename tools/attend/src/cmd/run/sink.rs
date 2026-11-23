@@ -19,18 +19,22 @@ pub(super) struct Disclosure {
 
 /// Where the loop puts what the governor lets through.
 pub(super) trait Sink {
-    /// Deliver `batch`. Returns whether anything went out, which the
-    /// governor counts as a disclosure.
-    fn deliver(&mut self, batch: &[Disclosure]) -> bool;
+    /// Deliver `batch`. Returns, for each disclosure, whether each of its
+    /// lines went out. The governor counts a batch with any line out as a
+    /// disclosure, and a session trigger is spent only by a line that went
+    /// out.
+    fn deliver(&mut self, batch: &[Disclosure]) -> Vec<Vec<bool>>;
 }
 
-/// `attend run`'s sink: Monitor lines on stdout.
+/// `attend run`'s sink: Monitor lines on stdout. A low-priority batch is
+/// logged, not printed, so its lines do not go out.
 pub(super) struct Monitor;
 
 impl Sink for Monitor {
-    fn deliver(&mut self, batch: &[Disclosure]) -> bool {
+    fn deliver(&mut self, batch: &[Disclosure]) -> Vec<Vec<bool>> {
         let lines: Vec<(String, String, Vec<String>)> =
             batch.iter().map(|d| (d.sensor.clone(), d.priority.to_string(), d.lines.iter().map(|(l, _)| l.clone()).collect())).collect();
-        emit::emit_batch(&lines)
+        emit::emit_batch(&lines);
+        batch.iter().map(|d| vec![d.priority != "low"; d.lines.len()]).collect()
     }
 }
