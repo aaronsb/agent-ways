@@ -658,6 +658,10 @@ impl Sensor for FileSensor {
         self.release(description);
     }
 
+    fn waits_on(&self, description: &str) -> bool {
+        self.awaits(description)
+    }
+
     fn take_spent(&mut self) -> bool {
         std::mem::take(&mut self.newly_spent)
     }

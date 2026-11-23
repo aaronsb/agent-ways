@@ -73,24 +73,34 @@ pub(super) struct TickState<'a> {
 #[derive(Default)]
 pub(super) struct CacheGate {
     checked: Option<(Instant, bool)>,
-    /// Event lines dropped while the cache had lapsed, by slot. Their
-    /// sensors hear of the drop once the cache is warm again, so a session
-    /// trigger fires again then, and not on every poll of a lapsed cache.
+    /// Event lines dropped while the cache had lapsed that a session
+    /// trigger waits on, by slot. Their sensors hear of the drop once the
+    /// cache is warm again, so the trigger fires again then, and not on
+    /// every poll of a lapsed cache. A waiting trigger offers nothing more,
+    /// so the list holds no more lines than the sensors keep outstanding.
     dropped: Vec<(usize, String)>,
 }
 
 impl CacheGate {
     const RECHECK: Duration = Duration::from_secs(10);
 
-    /// The most dropped lines kept for a warm cache; the oldest go first.
-    const DROPPED_MAX: usize = 256;
-
-    fn hold_drop(&mut self, slot: usize, line: String) {
-        if !self.dropped.iter().any(|(i, l)| *i == slot && *l == line) {
-            self.dropped.push((slot, line));
-            if self.dropped.len() > Self::DROPPED_MAX {
-                self.dropped.remove(0);
+    /// Drop slot `i`'s accumulated events, keeping each line a session
+    /// trigger waits on ([`sensors::Sensor::waits_on`]) for a warm cache.
+    /// Every other line is gone: no trigger fires on its drop.
+    fn drop_events(&mut self, slots: &mut [SensorSlot], i: usize) {
+        for line in slots[i].accumulator.drain_events() {
+            if slots[i].sensor.waits_on(&line) && !self.dropped.iter().any(|(j, l)| *j == i && *l == line) {
+                self.dropped.push((i, line));
             }
+        }
+        slots[i].accumulator.reset();
+    }
+
+    /// Tell each sensor of the lines it lost to the lapsed cache, so their
+    /// triggers fire again.
+    fn release_drops(&mut self, slots: &mut [SensorSlot]) {
+        for (i, line) in std::mem::take(&mut self.dropped) {
+            slots[i].sensor.dropped(&line);
         }
     }
 
@@ -452,9 +462,7 @@ pub(super) fn tick_iteration(s: &mut TickState) {
     // unseen in the sensor itself.
     if let Some(gate) = s.cache_gate.as_deref_mut() {
         if !gate.dropped.is_empty() && !gate.lapsed(s.heartbeat_id, &s.focus.working_dir) {
-            for (i, line) in std::mem::take(&mut gate.dropped) {
-                s.slots[i].sensor.dropped(&line);
-            }
+            gate.release_drops(s.slots);
         }
     }
     let gated = |i: &usize| !s.slots[*i].is_crate("keepwarm");
@@ -466,11 +474,8 @@ pub(super) fn tick_iteration(s: &mut TickState) {
         for &i in &evt_ready {
             emit::log(&format!("{}: dropped {} event(s), the prompt cache has lapsed", s.slots[i].name(), s.slots[i].accumulator.event_count));
             if let Some(gate) = s.cache_gate.as_deref_mut() {
-                for line in s.slots[i].accumulator.drain_events() {
-                    gate.hold_drop(i, line);
-                }
+                gate.drop_events(s.slots, i);
             }
-            s.slots[i].accumulator.reset();
         }
         evt_ready.clear();
         msg_ready.retain(|i| s.slots[*i].is_crate("keepwarm"));

@@ -143,6 +143,14 @@ pub trait Sensor: Send {
     /// that meets it. Default: nothing.
     fn dropped(&mut self, _description: &str) {}
 
+    /// Whether a trigger the sensor keeps for the session waits on the line
+    /// `description` of an earlier poll, so that [`Sensor::dropped`] for it
+    /// would let the trigger fire again. A loop that holds a dropped line
+    /// back keeps only the lines this names. Default: none.
+    fn waits_on(&self, _description: &str) -> bool {
+        false
+    }
+
     /// Whether a trigger this sensor keeps for the session became spent
     /// since the last call, because its lines were [`Sensor::delivered`].
     /// The loop checkpoints at once when it did, so a restart does not

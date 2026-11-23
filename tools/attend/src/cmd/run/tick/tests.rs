@@ -143,6 +143,32 @@ fn a_line_the_refractory_drops_leaves_its_session_trigger_to_fire_again() {
     assert!(slot.accumulator.events.is_empty(), "spent, it fires no more");
 }
 
+/// A session trigger's line dropped on a lapsed cache is released once
+/// the cache is warm, however many lines of other sensors the cold spell
+/// dropped after it: a compiled sensor's lines release nothing, so the
+/// gate keeps none of them.
+#[test]
+fn a_cold_spell_of_other_lines_does_not_strand_a_session_trigger() {
+    let doc = "kind: command\nargv: [x]\noutput: json\nthreshold: 1\ntriggers: [{name: behind, path: \"$\", on: enters, where: {behind: true}, memory: session, magnitude: 3, description: behind}]\n";
+    let spec = sensor_spec::parse("ways-update", &serde_yaml::from_str(doc).unwrap()).spec.unwrap();
+    let sensor = sensors::hosted::FileSensor::declared(&spec, Box::new(Behind), "/p", None, false);
+    let mut slots = vec![sensors::slot(Box::new(sensor), sensor_spec::Lane::Event, None), sensors::slot(Box::new(Marked("git")), sensor_spec::Lane::Event, Some("git"))];
+    let focus = Focus { description: String::new(), working_dir: "/p".into(), keywords: Vec::new() };
+    let mut gate = CacheGate::default();
+    slots[0].poll(&focus);
+    assert_eq!(slots[0].accumulator.events, ["behind"]);
+    gate.drop_events(&mut slots, 0);
+    for n in 0..300 {
+        slots[1].accumulator.events.push(format!("dirty: file-{n}.rs"));
+        gate.drop_events(&mut slots, 1);
+    }
+    slots[0].poll(&focus);
+    assert!(slots[0].accumulator.events.is_empty(), "held for a warm cache, the trigger waits");
+    gate.release_drops(&mut slots);
+    slots[0].poll(&focus);
+    assert_eq!(slots[0].accumulator.events, ["behind"], "released on a warm cache, the trigger fires again");
+}
+
 #[test]
 fn hash_file_is_stable_and_content_sensitive() {
     // The same-hash skip on the reload path (issue #140) depends on
