@@ -29,14 +29,26 @@ use sensor_trait::Lapse;
 
 /// The project the sensors resolve for: the session's, as `attend run` uses.
 fn context() -> (Focus, Config) {
-    context_of(None)
+    context_of(None, "list", false)
 }
 
-/// The project of `session` when its record names one, else this shell's
-/// session's.
-fn context_of(session: Option<&str>) -> (Focus, Config) {
+/// The project of the named `session`, from its record; with none named,
+/// this shell's session's. Exit 3 for a named session with no record,
+/// whose tray is unknown.
+fn context_of(session: Option<&str>, verb: &str, json: bool) -> (Focus, Config) {
     let mut focus = Focus::default_focus();
-    focus.working_dir = session.and_then(attend_presence::session::origin_path).unwrap_or_else(crate::util::own_origin_cwd);
+    focus.working_dir = match session {
+        None => crate::util::own_origin_cwd(),
+        Some(id) => attend_presence::session::origin_path(id).unwrap_or_else(|| {
+            let why = format!("no record of session {id}; its tray is unknown");
+            if json {
+                crate::cmd::print_json(&json!({ "error": why }));
+            } else {
+                eprintln!("attend sensor {verb}: {why}");
+            }
+            std::process::exit(agent_settings::exit::REJECTED);
+        }),
+    };
     let cfg = Config::load(&focus.working_dir);
     (focus, cfg)
 }
@@ -292,7 +304,7 @@ fn print_verdicts(h: &Hosted, s: &sensors::hosted::FileSensor) {
 
 pub(crate) fn poll(a: &PollArgs) {
     let session = target(a.session.as_deref(), "poll", a.json);
-    let (focus, cfg) = context_of(a.session.as_deref());
+    let (focus, cfg) = context_of(a.session.as_deref(), "poll", a.json);
     let h = find(sensors::catalog_for(&cfg, &focus.working_dir, session.as_deref()), &a.name, a.json);
     require_hosted(&h, "poll", a.json);
     let writer = writer(session.as_deref(), &focus.working_dir, a.dry_run, "poll", a.json);
@@ -340,7 +352,7 @@ pub(crate) fn poll(a: &PollArgs) {
 
 pub(crate) fn fire(a: &FireArgs) {
     let session = target(a.session.as_deref(), "fire", a.json);
-    let (focus, cfg) = context_of(a.session.as_deref());
+    let (focus, cfg) = context_of(a.session.as_deref(), "fire", a.json);
     let (name, trigger) = match a.target.split_once('/') {
         Some((n, t)) => (n, Some(t)),
         None => (a.target.as_str(), None),

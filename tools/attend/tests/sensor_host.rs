@@ -430,6 +430,17 @@ fn poll_and_fire_deliver_to_the_session_through_the_same_writer() {
     let inbox: Value = serde_json::from_str(&f.ok(&["message", "inbox", "--json"])).unwrap();
     assert!(inbox["messages"].as_array().unwrap().iter().any(|m| m["message"] == "[test] beacon is up" && m["from_kind"] == "system"), "{inbox}");
 
+    let before = from(&f, "beacon").len();
+    for dry in [false, true] {
+        let mut args = vec!["sensor", "fire", "beacon", "--input", &input, "--session", "sess-other"];
+        args.extend(dry.then_some("--dry-run"));
+        let refused = f.attend(&args);
+        assert_eq!(refused.status.code(), Some(3), "{}", String::from_utf8_lossy(&refused.stderr));
+        assert!(String::from_utf8_lossy(&refused.stderr).contains("no record of session sess-other; its tray is unknown"), "{}", String::from_utf8_lossy(&refused.stderr));
+    }
+    assert_eq!(from(&f, "beacon").len(), before, "a session with no record gets nothing, and no other tray does");
+    // Another live session of the project, with a record of its own.
+    std::fs::write(f.home.join(".claude").join("sessions").join("4000000.json"), f.record("4000000", "sess-other", None)).unwrap();
     let text = f.ok(&["sensor", "fire", "beacon", "--input", &input, "--session", "sess-other"]);
     assert!(text.contains("delivered on the event lane to session sess-other: beacon-"), "{text}");
     assert!(from(&f, "beacon").iter().any(|(_, t)| t.contains("|to:sess-other|")));
