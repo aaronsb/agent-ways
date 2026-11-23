@@ -51,14 +51,6 @@ import {
   UNREAD_ARGV,
   WAKE_DRAIN_ARGV,
   configArgv,
-  claudePid,
-  cuesIn,
-  hostArgv,
-  hostEndText,
-  isHostRefused,
-  respawnAfterExit,
-  HOST_RESPAWN_MS,
-  HOST_RESPAWNS,
   formatMessage,
   frameInbound,
   compactFocus,
@@ -102,7 +94,9 @@ import {
   sendArgv,
   shortId,
 } from './lib.ts'
-import type { Decision, Gate, HostChild, HostEnd, HostSpec, Keepalive, Listed, Mod, ModConfig, WrapOutcome, WrapRoute } from './lib.ts'
+import type { Decision, Gate, Keepalive, Listed, Mod, ModConfig, WrapOutcome, WrapRoute } from './lib.ts'
+import { claudePid, cuesIn, hostArgv, hostEndText, isHostRefused, respawnAfterExit, HOST_RESPAWN_MS, HOST_RESPAWNS } from './host.ts'
+import type { HostChild, HostEnd, HostSpec } from './host.ts'
 
 
 type $ = EngineInterface

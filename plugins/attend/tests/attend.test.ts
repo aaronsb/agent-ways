@@ -32,12 +32,6 @@ import {
   rowText,
   serialize,
   wrapPlan,
-  claudePid,
-  cuesIn,
-  hostArgv,
-  hostEndText,
-  isHostRefused,
-  respawnAfterExit,
   HEADER,
   PREAMBLE,
   SILENCE_FIRST,
@@ -69,6 +63,7 @@ import {
   UNREAD_ROOM,
 } from './attend-output.ts'
 import { MOVE_FIRST_MS } from '../hooks/move.ts'
+import { claudePid, cuesIn, hostArgv, hostEndText, isHostRefused, respawnAfterExit } from '../hooks/host.ts'
 
 const T0 = 1_800_000_000_000
 const BAND = {
