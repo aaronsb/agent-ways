@@ -48,6 +48,15 @@ pub struct Message {
     pub message: String,
     /// The id this message threads under, if any.
     pub re: Option<String>,
+    /// `agent`, `human` or `system`; `null` for a sender no attend writes.
+    pub from_kind: Option<&'static str>,
+    /// Who it is for, as its `to` tag says: `*`, `#<channel>`, or session
+    /// and member ids; `null` on a record written before the tag.
+    pub to: Option<String>,
+    /// `message` or `event`.
+    pub lane: &'static str,
+    /// When it lapses, in Unix seconds; `null` when it does not.
+    pub expires: Option<u64>,
     /// File mtime, seconds since the epoch.
     pub ts: u64,
     #[serde(skip)]
@@ -130,6 +139,10 @@ pub fn list_with(query: InboxQuery, instances: &SnapshotCache) -> InboxPage {
                 source: sig.cwd.to_string(),
                 message: sig.message.to_string(),
                 re: sig.reply_to.map(str::to_string),
+                from_kind: sig.sender_kind().map(agent_identity::signal::Kind::as_str),
+                to: sig.to.map(str::to_string),
+                lane: sig.on_lane().as_str(),
+                expires: sig.expires,
                 ts: mtime_secs(mtime),
                 mtime,
             });
@@ -243,6 +256,10 @@ pub fn read(id: &str) -> Result<Message, ReadError> {
             source: sig.cwd.to_string(),
             message: sig.message.to_string(),
             re: sig.reply_to.map(str::to_string),
+            from_kind: sig.sender_kind().map(agent_identity::signal::Kind::as_str),
+            to: sig.to.map(str::to_string),
+            lane: sig.on_lane().as_str(),
+            expires: sig.expires,
             ts: mtime_secs(mtime),
             mtime,
         });

@@ -59,6 +59,33 @@ fn a_send_round_trips_through_the_inbox_with_its_text_intact() {
     }
 }
 
+/// Each inbox row, listed and read, carries the sender's kind, the
+/// addressee, the lane and the expiry, as `--drain --json` does: a system
+/// signal its own, and a person's message its kind, its `to`, the message
+/// lane and no expiry.
+#[test]
+fn an_inbox_row_carries_the_sender_kind_the_addressee_the_lane_and_the_expiry() {
+    let f = Fixture::new("verbs-json-envelope");
+    let tray = f.signals().join(f.project_tray());
+    std::fs::create_dir_all(&tray).unwrap();
+    let line = format!("system:git|proj|{}|from_kind:system|from_id:git|to:{}|lane:event|expires:1790003600|branch switched to main\n", f.origin, f.sid);
+    std::fs::write(tray.join("git-1-0.signal"), line).unwrap();
+    let sent = f.without_session(|| ok_json(&f, &["message", "send", "--json", "hello"]));
+    let person = sent["id"].as_str().unwrap();
+
+    let listing = ok_json(&f, &["message", "inbox", "--json"]);
+    let row = |id: &str| listing["messages"].as_array().unwrap().iter().find(|m| m["id"] == id).unwrap_or_else(|| panic!("{id}: {listing}")).clone();
+    for (row, how) in [(row("git-1-0"), "listed"), (ok_json(&f, &["message", "inbox", "git-1-0", "--json"]), "read")] {
+        assert_eq!(row["from_kind"], "system", "{how}: {row}");
+        assert_eq!(row["to"], f.sid.as_str(), "{how}: {row}");
+        assert_eq!(row["lane"], "event", "{how}: {row}");
+        assert_eq!(row["expires"], 1_790_003_600u64, "{how}: {row}");
+    }
+    let row = row(person);
+    assert_eq!((row["from_kind"].as_str(), row["to"].as_str(), row["lane"].as_str()), (Some("human"), Some("*"), Some("message")), "{row}");
+    assert_eq!(row["expires"], Value::Null, "{row}");
+}
+
 /// An unthreaded message that starts `re:`, even one shaped like a thread
 /// id, goes out and reads back as written, unthreaded: the wire marks it
 /// with an empty thread field.
