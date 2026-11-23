@@ -114,7 +114,7 @@ To turn it off, write `$XDG_CONFIG_HOME/attend/sensors/ways-update.yaml` with on
 enabled: false
 ```
 
-The file survives `ways manage repair` and `ways manage update`, which rewrite only the shipped copy. `attend sensor list` then shows `ways-update` as `off`.
+The file survives a repair or an update of the install, which rewrites only the shipped copy. `attend sensor list` then shows `ways-update` as `off`.
 
 ## `processes`
 
