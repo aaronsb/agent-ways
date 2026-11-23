@@ -187,6 +187,9 @@ pub struct FileSensor {
     /// The declared state, as the store holds it.
     state: Option<StoredState>,
     session: SessionMemory,
+    /// Whether a session trigger became spent since [`Sensor::take_spent`]
+    /// last read it.
+    newly_spent: bool,
     /// The last poll's failure, for a caller that reads it.
     failure: Option<String>,
     /// Why the stored state was discarded when the store was read.
@@ -239,6 +242,7 @@ impl FileSensor {
             stored: BTreeMap::new(),
             state: None,
             session: SessionMemory::default(),
+            newly_spent: false,
             failure: None,
             discarded: None,
             verdicts: Vec::new(),
@@ -335,8 +339,11 @@ impl FileSensor {
             },
         };
         mem.insert(trigger.name.clone(), Memo { test: test.clone(), seen: now });
-        if trigger.memory == Memory::Session && !out.is_empty() && !self.session.spent.insert(test) {
-            out.clear();
+        if trigger.memory == Memory::Session && !out.is_empty() {
+            match self.session.spent.insert(test) {
+                true => self.newly_spent = true,
+                false => out.clear(),
+            }
         }
         out
     }
@@ -629,6 +636,10 @@ impl Sensor for FileSensor {
 
     fn take_failure(&mut self) -> Option<String> {
         self.failure.take()
+    }
+
+    fn take_spent(&mut self) -> bool {
+        std::mem::take(&mut self.newly_spent)
     }
 
     /// How long the observation `description` of the last poll stays

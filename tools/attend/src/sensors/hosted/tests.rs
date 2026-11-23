@@ -169,6 +169,23 @@ fn after_a_fire_an_edit_fires_once_and_a_rename_does_not() {
     assert_eq!(run(&mut s, &edited, polls), fires(&[&["$"], &[], &[]]), "the edited condition fires once");
 }
 
+/// The host checkpoints the moment a session trigger is spent: the sensor
+/// says so once, after the fire that spent it, and not for a store
+/// trigger's fire or a spent trigger's quiet polls.
+#[test]
+fn a_sensor_says_once_that_a_session_trigger_became_spent() {
+    let d = Dir::new("take-spent");
+    let mut s = sensor(&d.0, Some("s1"));
+    assert!(!s.take_spent(), "nothing fired yet");
+    assert_eq!(run(&mut s, &enters("store", "store"), vec![seen(false), seen(true)]), fires(&[&[], &["$"]]));
+    assert!(!s.take_spent(), "a store trigger's fire spends nothing");
+    assert_eq!(s.observe(&enters("behind", "session"), seen(true)), vec!["$".to_string()]);
+    assert!(s.take_spent());
+    assert!(!s.take_spent(), "taken once");
+    assert_eq!(s.observe(&enters("behind", "session"), seen(true)), Vec::<String>::new());
+    assert!(!s.take_spent(), "a spent trigger's later polls spend nothing new");
+}
+
 #[test]
 fn session_memory_on_changed_fires_nothing_on_the_first_poll_then_once() {
     let d = Dir::new("changed");
