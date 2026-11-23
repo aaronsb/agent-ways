@@ -290,6 +290,11 @@ pub(crate) struct HostArgs {
     /// memory of triggers kept for the session move to --session
     #[arg(long, value_name = "OLD_ID")]
     pub(crate) moved_from: Option<String>,
+    /// The process that started the host, Claude Code: the host exits once
+    /// it is gone, even when it went before the host could look at its
+    /// own parent
+    #[arg(long, value_name = "PID")]
+    pub(crate) parent: Option<u32>,
 }
 
 #[derive(Args)]
