@@ -1,0 +1,37 @@
+# Shipped with attend. Tells the session once when agent-ways has
+# a newer release on its channel. It runs the update's own dry run, which
+# decides what counts as behind: a release tag that is fetched, and no
+# blocked checkout. attend holds no update logic.
+#
+# To turn it off, write `enabled: false` in
+# $XDG_CONFIG_HOME/attend/sensors/ways-update.yaml. That file survives
+# `ways manage repair` and `ways manage update`.
+#
+# References:
+# - ADR-416 item 6: the update check and this file.
+spec: 1
+name: ways-update
+description: tells the session once when agent-ways has a newer release on its channel
+kind: command
+# The most the spec allows. The first poll is the one that counts.
+interval: 604800
+min_interval: 604800
+threshold: 1.0
+decay_threshold: 1
+requires: ["Bash(ways:*)"]
+lane: event
+argv: [ways, manage, update, --what-if, --json]
+timeout: 60
+output: json
+triggers:
+  - name: behind
+    path: "$"
+    on: enters
+    where: { behind: true }
+    # Held in the host, so each session hears it once. expires: session
+    # keeps the notice until the session reads it. The magnitude meets the
+    # event lane's cut of 3.
+    memory: session
+    expires: session
+    magnitude: 3
+    description: "agent-ways has a newer release: {summary}. `ways manage update --what-if` shows it."

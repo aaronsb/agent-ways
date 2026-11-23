@@ -1,6 +1,6 @@
 # Sensors — the shipped set
 
-Every sensor is one YAML file (ADR-403). attend embeds eight shipped files, kept in the repository under `attend/sensors/` and projected with the app to `$XDG_DATA_HOME/agent-ways/attend/sensors/`. Six are `crate` sensors, each configuring a compiled sensor: `context`, `git` and `disclosure` are modules of attend under `tools/attend/src/sensors/` and always compiled; `peers`, `processes` and `keepwarm` are the crates `sensor-peers`, `sensor-processes` and `sensor-keepwarm`, linked behind feature flags. The other two, `example-command` and `example-mcp`, ship with `enabled: false` as patterns to copy. A file of the same name in your user or project layer changes any field of a shipped one; [`authoring-sensors.md`](authoring-sensors.md) has the spec.
+Every sensor is one YAML file. attend embeds nine shipped files, kept in the repository under `attend/sensors/` and projected with the app to `$XDG_DATA_HOME/agent-ways/attend/sensors/`. Six are `crate` sensors, each configuring a compiled sensor: `context`, `git` and `disclosure` are modules of attend under `tools/attend/src/sensors/` and always compiled; `peers`, `processes` and `keepwarm` are the crates `sensor-peers`, `sensor-processes` and `sensor-keepwarm`, linked behind feature flags. `example-command` and `example-mcp` ship with `enabled: false` as patterns to copy. The ninth, `ways-update`, is a `command` sensor that tells the session when agent-ways has a newer release ([`ways-update`](#ways-update)). A file of the same name in your user or project layer changes any field of a shipped one; [`authoring-sensors.md`](authoring-sensors.md) has the spec.
 
 `attend sensor list` shows every sensor the files declare:
 
@@ -15,6 +15,7 @@ Every sensor is one YAML file (ADR-403). attend embeds eight shipped files, kept
   keepwarm        crate   builtin active message 60s / 60s  sensor-keepwarm@0.1.0  -
   peers           crate   builtin active message 30s / 10s  sensor-peers@0.6.0     -
   processes       crate   builtin active event   30s / 5s   sensor-processes@0.6.0 -
+  ways-update     command builtin active event   604800s / 604800s ways               -
 ```
 
 `Origin` is the lowest layer that defines the sensor: `builtin`, `user` or `project`. Each higher layer with a file for it follows, as `· user extends` or `· project extends`. `File` is the highest of those files; a shipped file shows its copy in the app dir, or `-` when the app dir has none. `Source` is the compiled sensor and its version for a crate sensor, the program for a command sensor, and the server and tool for an mcp sensor. Below the table, one line per sensor gives the reason behind a state and any note, such as a lane the author rule refused or a project file the allow-list refused. `--json` prints each sensor as an item: its origin and file, an `overrides` list with each higher layer's file, its state and reason, then its fields and the last poll's outcome.
@@ -42,6 +43,7 @@ These are the shipped files' values.
 | **processes** | build and dev-tool processes | 30s / 5s | 2.0 | 5 | event | `Bash(ps:*)` |
 | **disclosure** | tokens since attend last taught the messaging contract | 60s / 20s | 1.5 | 3 | event | `Bash(ways:*)` |
 | **keepwarm** | idle time against the prompt-cache hour | 60s / 60s | 3.0 | 3 | message | `Bash(ways:*)` |
+| **ways-update** | a newer agent-ways release on the install's channel | 7d / 7d | 1.0 | 1 | event | `Bash(ways:*)` |
 
 Every sensor polls faster (toward its minimum interval) while it sees change and slower (toward its base interval) when quiet. Event-lane sensors pass through the action-potential refractory and the strict governor ([`engagement.md`](engagement.md)). Message-lane sensors skip the refractory and use the message lane's permissive governor ([`delivery.md`](delivery.md#the-monitor-line)).
 
@@ -99,6 +101,20 @@ Discovers other Claude Code sessions from `~/.claude/sessions/*.json` and reads 
 Its file declares `lane: message` with `author: sender`, the field of each message that names who wrote it. The lane is per sensor, so under `attend run` session events from the same poll ride the message lane and skip the refractory too. The sensor host ([`loop.md`](loop.md#the-sensor-host)) runs it presence-only: it reads no messages, which the mod's drain delivers, and its presence reports ride the event lane.
 
 The sensor re-reads `_groups.yaml` on every poll, so `attend channel join` and `attend channel leave` take effect on the next scan.
+
+## `ways-update`
+
+A `command` sensor that runs `ways manage update --what-if --json` and tells the session once when `behind` is true. The notice reads `agent-ways has a newer release: <summary>. ` followed by a pointer to `ways manage update --what-if`. The update's own dry run decides what counts as behind: a release counts once its tag is fetched, and a checkout where a fast-forward pull would stop (`blocked`) or a result with no target (`behind: null`) stays silent. attend holds no update logic.
+
+The trigger uses `memory: session` and `expires: session`. The host keeps its memory, so each listening session hears the notice at most once, on the first poll that finds the install behind, and the notice stays until the session reads it. Its magnitude is 3, the event lane's cut, so the host writes it. The notice reaches an idle session at its next turn and does not wake it.
+
+To turn it off, write `$XDG_CONFIG_HOME/attend/sensors/ways-update.yaml` with one line:
+
+```yaml
+enabled: false
+```
+
+The file survives a repair or an update of the install, which rewrites only the shipped copy. `attend sensor list` then shows `ways-update` as `off`.
 
 ## `processes`
 
@@ -194,3 +210,4 @@ While armed, wakes an idle session once at 50 idle minutes so the prompt cache i
 - **ADR-136** — the event and message lanes
 - **ADR-182** — keepwarm, and its wake on the message lane before the cache's hour lapses
 - **ADR-403** — sensors as files under one spec
+- **ADR-416** — the update check, and the `ways-update` sensor

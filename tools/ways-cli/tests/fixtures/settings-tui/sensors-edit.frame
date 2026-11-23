@@ -16,7 +16,7 @@ agent-tui frame 100x30
 |│ ▸ keepwarm · setting          value                 ││                                           │|
 |│ ▸ peers · setting             value                 ││                                           │|
 |│ ▸ processes · setting         value                 ││                                           │|
-|│                                                     ││                                           │|
+|│ ▸ ways-update · setting       value                 ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -120,6 +120,9 @@ styles
  16  54-55  - - DIM
  16  99-99  - - DIM
  17   0-0   - - DIM
+ 17   2-14  - - BOLD
+ 17  15-24  - - DIM
+ 17  32-36  - - DIM
  17  54-55  - - DIM
  17  99-99  - - DIM
  18   0-0   - - DIM
