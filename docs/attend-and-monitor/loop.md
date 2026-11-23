@@ -6,6 +6,16 @@ This page covers the rhythm of one iteration, the phases a sensor passes through
 
 The loop serves one Claude session: `attend run` prints its lines to stdout, and Monitor delivers each line as a notification. A human reads the same message bus through attend-chat ([`tui.md`](tui.md)), which watches the signal files directly and does not run this loop.
 
+## The sensor host
+
+The same loop runs as `attend sensor host --session <id> --cwd <dir>`, which the attend mod starts for a listening session (ADR-416). The scheduling, intervals, engagement, governors, checkpoint and re-exec described here are the same. What differs is where a disclosed line goes and what is left out:
+
+- Each line becomes a signal in the session's project tray, from `system:<sensor>`, addressed to the session, on the sensor's lane, with the expiry its trigger sets (`expires`; an unset one on the event lane is the hour of the decay window, and `session` keeps it until read). The mod's drain delivers it as it delivers a message. Every line the governor lets through is written; the Monitor priority filter does not apply, since an event-lane signal never wakes a session.
+- Each write prints one line on stdout, `signal <id>`, which the mod takes as a cue to poll. Nothing else goes to stdout; logs go to stderr.
+- There is no banner, no message poller, no cache gate and no rekey. The keepwarm and disclosure sensors do not run, and the peers sensor reports presence alone, on the event lane.
+- A trigger kept for the session (`memory: session`) is checkpointed the moment it fires, so a host killed right after the fire does not fire it again. `--moved-from <old id>` carries the stores and that memory across a `/clear`.
+- The host exits when its parent process is gone.
+
 ## The rhythm
 
 Attend's loop is **pull-based, not push-based**. Nothing wakes it up — it wakes itself up at timestamps it already knows about, does one unit of work, and goes back to sleep. The only external input is the filesystem: signal files other agents write, git state, process list, transcript changes. Sensors read these during their own scheduled polls.

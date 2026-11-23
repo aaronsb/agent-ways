@@ -96,7 +96,7 @@ Discovers other Claude Code sessions from `~/.claude/sessions/*.json` and reads 
 
 **Messages.** Each poll scans the project tray, `_broadcast/` and every joined channel, and emits every unseen message. Base magnitudes are 7.0 for a message sent to the project, 5.0 for a channel and 4.0 for `#open`, raised by the per-peer boost ([`engagement.md`](engagement.md#per-peer-boost)). More than 8 messages in one poll become one count line. [`delivery.md`](delivery.md) covers the line format, the cold start and the Stop-hook drain.
 
-Its file declares `lane: message` with `author: sender`, the field of each message that names who wrote it. The lane is per sensor, so session events from the same poll ride the message lane and skip the refractory too, until message scanning becomes a sensor of its own (#139).
+Its file declares `lane: message` with `author: sender`, the field of each message that names who wrote it. The lane is per sensor, so under `attend run` session events from the same poll ride the message lane and skip the refractory too. The sensor host ([`loop.md`](loop.md#the-sensor-host)) runs it presence-only: it reads no messages, which the mod's drain delivers, and its presence reports ride the event lane.
 
 The sensor re-reads `_groups.yaml` on every poll, so `attend channel join` and `attend channel leave` take effect on the next scan.
 
