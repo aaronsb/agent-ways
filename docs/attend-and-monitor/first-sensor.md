@@ -55,7 +55,7 @@ $ printf '1.5|cargo finished\n1.5|make finished\n' | attend sensor fire processe
 processes: delivered on the event lane to session 3f2a…: processes-1795443401432392982-0, processes-1795443401432392983-1
 ```
 
-Without `--dry-run` each line becomes a signal from `system:processes`, marked `[test]` and addressed to the session, as the sensor host writes a real report. The session reads it as it reads a message, and `attend message inbox` lists it with `from_kind` `system`. The session is the one the shell runs in; from anywhere else, name it with `--session <id>`, and with no session at all the fire refuses to deliver. Magnitude is the lever: what reaches the threshold goes out together, and what does not waits. A fire writes nothing to the sensor's store unless given `--commit`.
+Without `--dry-run` each line becomes a signal from `system:processes`, marked `[test]` and addressed to the session, as the sensor host writes a real report. The session reads it as it reads a message, and `attend message inbox` lists it with `from_kind` `system`. The session is the one the shell runs in; from anywhere else, name it with `--session <id>`, and with no session at all the fire refuses to deliver. Magnitude is the lever: what reaches the threshold goes out together, and what does not waits. On the event lane a batch that reaches the threshold also needs 3.0 to be written; under that, attend logs it and writes nothing, as the host does. A fire writes nothing to the sensor's store unless given `--commit`.
 
 ## Step 4 — Switch a sensor off for one project
 

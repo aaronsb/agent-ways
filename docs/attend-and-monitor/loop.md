@@ -8,12 +8,12 @@ The loop serves one Claude session: `attend run` prints its lines to stdout, and
 
 ## The sensor host
 
-The same loop runs as `attend sensor host --session <id> --cwd <dir>`, which the attend mod starts for a listening session (ADR-416). The scheduling, intervals, engagement, governors, checkpoint and re-exec described here are the same. What differs is where a disclosed line goes and what is left out:
+The same loop runs as `attend sensor host --session <id> --cwd <dir>`, which the attend mod starts for a listening session. The scheduling, intervals, engagement, governors, checkpoint and re-exec described here are the same. What differs is where a disclosed line goes and what is left out:
 
-- Each line becomes a signal in the session's project tray, from `system:<sensor>`, addressed to the session, on the sensor's lane, with the expiry its trigger sets (`expires`; an unset one on the event lane is the hour of the decay window, and `session` keeps it until read). The mod's drain delivers it as it delivers a message. Every line the governor lets through is written; the Monitor priority filter does not apply, since an event-lane signal never wakes a session.
+- Each line becomes a signal in the session's project tray, from `system:<sensor>`, addressed to the session, on the sensor's lane, with the expiry its trigger sets (`expires`; an unset one on the event lane is the hour of the decay window, and `session` keeps it until read). The mod's drain delivers it as it delivers a message. An event-lane batch must also reach the magnitude 3.0 at which `attend run` printed a batch: one under it is logged on stderr and not written, as `attend run` logged it and did not print it. A message-lane batch has no such cut.
 - Each write prints one line on stdout, `signal <id>`, which the mod takes as a cue to poll. Nothing else goes to stdout; logs go to stderr.
 - There is no banner, no message poller, no cache gate and no rekey. The keepwarm and disclosure sensors do not run, and the peers sensor reports presence alone, on the event lane.
-- A trigger kept for the session (`memory: session`) is checkpointed the moment it fires, so a host killed right after the fire does not fire it again. `--moved-from <old id>` carries the stores and that memory across a `/clear`.
+- A trigger kept for the session (`memory: session`) is spent when its line is written, and the checkpoint follows at once, so a restart after that does not fire it again. A line dropped on its way, by the refractory, the cut, a governor hold that a restart ends, or a write that fails, leaves the trigger to fire again on the next poll that meets it. A kill between the write and the checkpoint can repeat the notice. `--moved-from <old id>` carries the stores and that memory across a `/clear`.
 - The host exits when its parent process is gone.
 
 ## The rhythm
@@ -275,3 +275,7 @@ There's no graceful shutdown hook. The `attend run` process is meant to be start
 - **Message delivery**: [`delivery.md`](delivery.md) covers the Monitor line and the Stop-hook drain.
 - **Signal format**: [`signals.md`](signals.md) covers the wire format, on-disk layout, and lifecycle.
 - **Configuration**: [`configuration.md`](configuration.md) covers the YAML overlay and how to reshape any of the timers above.
+
+## References
+
+- ADR-416: the sensor host, its stdout cue, the system signals it writes and what it keeps of this loop.
