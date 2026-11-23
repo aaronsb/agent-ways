@@ -253,10 +253,10 @@ pub(crate) enum SensorCmd {
     /// List every sensor the files declare, with its kind, origin, file, source and state
     List(JsonArgs),
 
-    /// Run one real poll of a sensor and print its result and what attend would deliver
+    /// Run one real poll of a sensor and deliver what its threshold lets through to the session
     Poll(PollArgs),
 
-    /// Send a synthetic result through a sensor's threshold, lane and delivery, marked [test]
+    /// Send a synthetic result through a sensor's threshold and lane to the session, marked [test]
     Fire(FireArgs),
 
     /// Compare each sensor's `requires:` against settings.json
@@ -296,6 +296,10 @@ pub(crate) struct HostArgs {
 pub(crate) struct PollArgs {
     /// The sensor's name
     pub(crate) name: String,
+    /// The session whose store the poll reads and to which it delivers;
+    /// unset, the session this shell runs in
+    #[arg(long, value_name = "ID")]
+    pub(crate) session: Option<String>,
     /// Stop before delivery
     #[arg(long)]
     pub(crate) dry_run: bool,
@@ -315,6 +319,10 @@ pub(crate) struct FireArgs {
     /// observation at the sensor's threshold
     #[arg(long, value_name = "FILE|-")]
     pub(crate) input: Option<String>,
+    /// The session whose store the fire reads and to which it delivers;
+    /// unset, the session this shell runs in
+    #[arg(long, value_name = "ID")]
+    pub(crate) session: Option<String>,
     /// Stop before delivery
     #[arg(long)]
     pub(crate) dry_run: bool,

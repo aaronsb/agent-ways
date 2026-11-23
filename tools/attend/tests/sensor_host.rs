@@ -296,3 +296,50 @@ fn a_host_whose_parent_is_gone_exits() {
     }
     assert!(polls(&f, "beacon") >= 1 || read().contains("running 1 sensor(s): beacon"), "the host ran before its parent left:\n{}", read());
 }
+
+/// `attend sensor poll` and `fire` deliver through the host's writer: a
+/// poll's line and a fire's `[test]` line reach the session's tray as
+/// system signals with the trigger's expiry, `--session` names another
+/// session, and with no session at all they deliver nothing and say so.
+#[test]
+fn poll_and_fire_deliver_to_the_session_through_the_same_writer() {
+    let f = quiet("poll-fire");
+    beacon(&f, "beacon", "memory: session, expires: 60");
+    let input = f.home.join("up.json");
+    std::fs::write(&input, r#"{"up": true}"#).unwrap();
+    let input = input.to_string_lossy().into_owned();
+    let parse = |text: &str| -> (String, Option<String>, Option<u64>) {
+        let s = agent_identity::parse_signal(agent_identity::signal::wire_line(text)).unwrap();
+        (s.message.to_string(), s.to.map(str::to_string), s.expires)
+    };
+
+    let poll: Value = serde_json::from_str(&f.ok(&["sensor", "poll", "beacon", "--json"])).unwrap();
+    assert_eq!(poll["signals"].as_array().map(Vec::len), Some(1), "{poll}");
+    let written = from(&f, "beacon");
+    let (message, to, expires) = parse(&written[0].1);
+    assert_eq!((message.as_str(), to.as_deref()), ("beacon is up", Some(f.sid.as_str())));
+    assert!(expires.is_some_and(|e| e.abs_diff(now() + 60) <= 10), "{expires:?}");
+
+    let fire: Value = serde_json::from_str(&f.ok(&["sensor", "fire", "beacon", "--input", &input, "--json"])).unwrap();
+    let id = fire["signals"][0].as_str().unwrap_or_else(|| panic!("{fire}"));
+    let text = std::fs::read_to_string(f.signals().join(f.project_tray()).join(format!("{id}.signal"))).unwrap();
+    let (message, to, expires) = parse(&text);
+    assert_eq!((message.as_str(), to.as_deref()), ("[test] beacon is up", Some(f.sid.as_str())));
+    assert!(expires.is_some_and(|e| e.abs_diff(now() + 60) <= 10), "the trigger's expiry, through the [test] mark: {expires:?}");
+    let inbox: Value = serde_json::from_str(&f.ok(&["message", "inbox", "--json"])).unwrap();
+    assert!(inbox["messages"].as_array().unwrap().iter().any(|m| m["message"] == "[test] beacon is up" && m["from_kind"] == "system"), "{inbox}");
+
+    let text = f.ok(&["sensor", "fire", "beacon", "--input", &input, "--session", "sess-other"]);
+    assert!(text.contains("delivered on the event lane to session sess-other: beacon-"), "{text}");
+    assert!(from(&f, "beacon").iter().any(|(_, t)| t.contains("|to:sess-other|")));
+
+    let before = from(&f, "beacon").len();
+    for args in [&["sensor", "fire", "beacon", "--input", &input][..], &["sensor", "poll", "beacon"][..]] {
+        let out = f.without_session(|| f.attend(args));
+        assert_eq!(out.status.code(), Some(3), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        assert!(String::from_utf8_lossy(&out.stderr).contains("no session to deliver to"), "{}", String::from_utf8_lossy(&out.stderr));
+    }
+    let dry = f.without_session(|| f.attend(&["sensor", "fire", "beacon", "--input", &input, "--dry-run"]));
+    assert!(dry.status.success() && String::from_utf8_lossy(&dry.stdout).contains("would deliver on the event lane (dry run)"), "{}", String::from_utf8_lossy(&dry.stdout));
+    assert_eq!(from(&f, "beacon").len(), before, "nothing was written without a session");
+}
