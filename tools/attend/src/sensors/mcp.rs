@@ -119,6 +119,8 @@ pub struct Mcp {
     /// The sensor's name.
     name: String,
     block: McpBlock,
+    /// The probe record that applies here, which binds the server.
+    record: Option<sensor_spec::ProbeRecord>,
     project: PathBuf,
     inherit: Inherit,
     lookup: Lookup,
@@ -130,8 +132,8 @@ pub struct Mcp {
 }
 
 impl Mcp {
-    pub fn new(name: &str, block: McpBlock, project: &str, inherit: Inherit, lookup: Lookup) -> Mcp {
-        Mcp { name: name.to_string(), block, project: PathBuf::from(project), inherit, lookup, limits: Limits::default(), ledger: ledger::dir(), held: None }
+    pub fn new(name: &str, block: McpBlock, record: Option<sensor_spec::ProbeRecord>, project: &str, inherit: Inherit, lookup: Lookup) -> Mcp {
+        Mcp { name: name.to_string(), block, record, project: PathBuf::from(project), inherit, lookup, limits: Limits::default(), ledger: ledger::dir(), held: None }
     }
 
     /// The same, with each step's limit set.
@@ -172,7 +174,7 @@ impl Mcp {
     /// record is bound to the server's definition as it resolves now.
     pub fn call(&mut self) -> Result<Value, String> {
         let launch = resolve(&self.block.server, &self.project, self.inherit, &self.lookup)?;
-        if self.block.probe.as_ref().and_then(|p| p.binding.as_deref()) != Some(launch.binding.as_str()) {
+        if self.record.as_ref().and_then(|p| p.binding.as_deref()) != Some(launch.binding.as_str()) {
             return Err(format!(
                 "the probe record was not taken with server {} as it is defined now; run `attend sensor probe {}`",
                 launch.label, self.name

@@ -319,8 +319,13 @@ pub struct McpBlock {
     pub args: Mapping,
     /// Run a tool that does not declare `readOnlyHint: true`.
     pub allow_unannotated: bool,
-    /// What `attend sensor probe` recorded (§4).
+    /// What `attend sensor probe` recorded (§4) for a sensor no project
+    /// file defines.
     pub probe: Option<ProbeRecord>,
+    /// What it recorded for a sensor a project file defines, by the
+    /// project's canonical path, so same-named sensors of two projects
+    /// keep a record each.
+    pub probes: BTreeMap<String, ProbeRecord>,
 }
 
 /// A probe's record (§4). It holds for the server, tool and args it names,
@@ -332,8 +337,6 @@ pub struct ProbeRecord {
     /// host computes it, so a changed command, args or env voids the
     /// record and the record holds no secret value.
     pub binding: Option<String>,
-    /// The project a project sensor's record applies to.
-    pub project: Option<String>,
     pub tool: String,
     pub args: Mapping,
     /// Whether the second call returned every item of the first.
@@ -345,12 +348,12 @@ pub struct ProbeRecord {
 }
 
 impl McpBlock {
-    /// Whether the probe record holds for the sensor as its file states
-    /// it: taken with its server, tool and args, bound to a server
-    /// definition, with both checks passed. The host checks the binding
-    /// against the definition it resolves.
-    pub fn probe_holds(&self) -> bool {
-        self.probe.as_ref().is_some_and(|p| p.calls_match && p.confirmed && p.binding.is_some() && p.server == self.server.label() && p.tool == self.tool && p.args == self.args)
+    /// Whether the record `p` holds for the sensor as its file states it:
+    /// taken with its server, tool and args, bound to a server definition,
+    /// with both checks passed. The host checks the binding against the
+    /// definition it resolves.
+    pub fn holds(&self, p: &ProbeRecord) -> bool {
+        p.calls_match && p.confirmed && p.binding.is_some() && p.server == self.server.label() && p.tool == self.tool && p.args == self.args
     }
 }
 

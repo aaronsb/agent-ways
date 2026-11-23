@@ -154,7 +154,17 @@ impl Hosted {
 
     /// Whether a file of the project's own layer defines part of it.
     pub fn in_project(&self) -> bool {
-        self.loaded.files.iter().any(|f| f.origin == sensor_spec::Origin::Project && !f.refused)
+        in_project(&self.loaded)
+    }
+
+    /// The probe record that applies to an mcp sensor here: for a sensor a
+    /// project file defines, the one kept for this project; else its
+    /// `probe`.
+    pub fn probe_record(&self) -> Option<&sensor_spec::ProbeRecord> {
+        match self.loaded.spec.as_ref().map(|s| &s.block) {
+            Some(Block::Mcp(m)) => record_for(&self.loaded, m, &self.project),
+            _ => None,
+        }
     }
 
     /// The compiled sensor its file names, when it is a crate sensor.
@@ -258,17 +268,43 @@ fn state_of(l: &Loaded, project: &str, compiled: bool, last: Option<&Poll>) -> S
 ///   confirmation stays disabled, and a change voids the record.
 fn unprobed(l: &Loaded, m: &sensor_spec::McpBlock, project: &str) -> Option<String> {
     let again = format!("run `attend sensor probe {}` at a terminal", l.name);
-    let Some(p) = &m.probe else { return Some(format!("no probe record; {again}")) };
-    let canon = |s: &str| std::fs::canonicalize(s).unwrap_or_else(|_| std::path::PathBuf::from(s));
-    let in_project = l.files.iter().any(|f| f.origin == sensor_spec::Origin::Project && !f.refused);
-    let stale = p.server != m.server.label() || p.tool != m.tool || p.args != m.args || p.binding.is_none() || mcp::inline_binding(&m.server).is_some_and(|b| p.binding.as_deref() != Some(b.as_str()));
+    let Some(p) = record_for(l, m, project) else {
+        return Some(match in_project(l) {
+            true => format!("no probe record for this project; {again}"),
+            false => format!("no probe record; {again}"),
+        });
+    };
+    let stale = !m.holds(&sensor_spec::ProbeRecord { calls_match: true, confirmed: true, ..p.clone() }) || mcp::inline_binding(&m.server).is_some_and(|b| p.binding.as_deref() != Some(b.as_str()));
     Some(match () {
         _ if stale => format!("the probe record was taken with another server, tool or args; {again}"),
-        _ if in_project && p.project.as_deref().map(canon) != Some(canon(project)) => format!("the probe record is for another project; {again}"),
         _ if !p.calls_match => format!("the probe's second call did not return what the first did, so reading may change the tool's result; {again} once that is fixed"),
         _ if !p.confirmed => format!("the probe record has no confirmation that the items were left untouched; check in another client, then {again}"),
         _ => return None,
     })
+}
+
+/// Whether a file of the project's own layer defines part of `l`.
+fn in_project(l: &Loaded) -> bool {
+    l.files.iter().any(|f| f.origin == sensor_spec::Origin::Project && !f.refused)
+}
+
+/// The path a project is known by in a probe record: canonical, so a
+/// project reached through a symlink keeps its record.
+pub fn project_key(project: &str) -> String {
+    std::fs::canonicalize(project).map(|p| p.display().to_string()).unwrap_or_else(|_| project.to_string())
+}
+
+/// The record of `m` that applies in the project at `project`: for a
+/// sensor a project file defines, the one its `probes` keep for the
+/// project, compared as canonical paths; else its `probe`.
+fn record_for<'a>(l: &Loaded, m: &'a sensor_spec::McpBlock, project: &str) -> Option<&'a sensor_spec::ProbeRecord> {
+    match in_project(l) {
+        true => {
+            let here = project_key(project);
+            m.probes.iter().find(|(k, _)| project_key(k) == here).map(|(_, r)| r)
+        }
+        false => m.probe.as_ref(),
+    }
 }
 
 /// One running sensor per compiled sensor: when two enabled files name the
@@ -405,7 +441,7 @@ pub fn file_sensor(h: &Hosted, ctx: &Ctx, project: &str, record: bool) -> Result
 pub fn mcp_source(h: &Hosted, cfg: &Config, project: &str) -> Result<mcp::Mcp, String> {
     let Some(Block::Mcp(m)) = h.loaded.spec.as_ref().map(|s| &s.block) else { return Err(format!("{} is not an mcp sensor", h.name())) };
     let lookup = mcp::Lookup::new(attend_config::sensors::is_trusted(std::path::Path::new(project), &cfg.project_sensors));
-    Ok(mcp::Mcp::new(h.name(), (**m).clone(), project, command::Inherit::of(h.loaded.command_from), lookup))
+    Ok(mcp::Mcp::new(h.name(), (**m).clone(), h.probe_record().cloned(), project, command::Inherit::of(h.loaded.command_from), lookup))
 }
 
 /// End every MCP server this process started, before a re-exec replaces
@@ -627,6 +663,37 @@ mod tests {
         let with = stamp_of(&dirs, Vec::new());
         assert_ne!(with, before, "a sensor file added changes it");
         assert_ne!(stamp_of(&dirs, vec!["/p".into()]), with, "a project trusted changes it");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A project's sensor runs under the record its project keeps, found by
+    /// canonical path, so a symlinked path finds it and another project's
+    /// record does not count.
+    #[cfg(unix)]
+    #[test]
+    fn a_project_sensor_s_record_is_the_one_kept_for_its_project() {
+        use attend_config::sensors::{file_layer, from_layers};
+        use sensor_spec::Origin;
+        let dir = fixture("probes");
+        let (real, link, other) = (dir.join("real"), dir.join("link"), dir.join("other"));
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let server = sensor_spec::Server::Inline { command: "sh".into(), args: Vec::new(), env: Default::default() };
+        let binding = mcp::inline_binding(&server).unwrap();
+        let overlay = format!("probes:\n  '{}': {{server: sh, binding: '{binding}', tool: t, calls_match: true, confirmed: true}}\n", project_key(real.to_str().unwrap()));
+        let gap = |project: &std::path::Path| {
+            let p = project.to_str().unwrap();
+            let layers = [
+                file_layer("chat", Origin::User, None, &overlay),
+                file_layer("chat", Origin::Project, Some(&project.join(".claude/attend/sensors/chat.yaml")), "kind: mcp\nserver: {command: sh}\ntool: t\n"),
+            ];
+            let all = catalog_of(from_layers(&layers, project, &[p.to_string()]), p, |_| None);
+            all.iter().find(|h| h.name() == "chat").unwrap().probe_gap()
+        };
+        assert_eq!(gap(&real), None);
+        assert_eq!(gap(&link), None, "a project reached through a symlink keeps its record");
+        assert_eq!(gap(&other).as_deref(), Some("no probe record for this project; run `attend sensor probe chat` at a terminal"), "another project's record does not count");
         std::fs::remove_dir_all(&dir).ok();
     }
 

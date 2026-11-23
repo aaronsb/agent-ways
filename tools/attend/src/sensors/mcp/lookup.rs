@@ -19,9 +19,11 @@
 //! with a reference fails the lookup naming it.
 //!
 //! Each launch carries a binding: where its definition came from and a
-//! hash of the definition as written, before expansion. A probe record
-//! names the binding it was taken with, so a changed command, args or env
-//! voids the record, and the record holds no value of the definition.
+//! hash of the definition as written, before expansion, with the program
+//! and args after it. A probe record names the binding it was taken with,
+//! so a changed command, args or env voids the record, and so does a
+//! variable that makes the program or args run something else; a rotated
+//! token in env keeps it. The record holds no value of the definition.
 //!
 //! References:
 //! - ADR-403 §4: server lookup, stdio only, and the probe record.
@@ -135,7 +137,8 @@ pub fn resolve(server: &Server, project: &Path, inherit: Inherit, lookup: &Looku
     let program = text(command)?;
     let args = def.get("args").and_then(Value::as_array).into_iter().flatten().filter(|v| v.is_string()).map(&text).collect::<Result<Vec<_>, _>>()?;
     let env = def.get("env").and_then(Value::as_object).into_iter().flatten().filter(|(_, v)| v.is_string()).map(|(k, v)| Ok((k.clone(), text(v)?))).collect::<Result<_, String>>()?;
-    Ok(Launch { label: label.clone(), program, args, env, cwd: project.to_path_buf(), inherit, binding: binding(scope.word(), &def) })
+    let binding = binding(scope.word(), &json!({ "definition": def, "runs": [&program, &args] }));
+    Ok(Launch { label: label.clone(), program, args, env, cwd: project.to_path_buf(), inherit, binding })
 }
 
 /// The definition of the server `name` and where it was found.

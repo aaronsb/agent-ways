@@ -257,15 +257,56 @@ fn a_project_sensor_s_record_lives_in_the_user_overlay() {
 
     probe_and_confirm(&f, "repo");
     let overlay = user_file(&f, "repo");
-    assert!(overlay.starts_with("probe:") && overlay.contains(&format!("project: {}", f.origin)), "an overlay holds the record alone: {overlay}");
+    let key = std::fs::canonicalize(&f.origin).unwrap().display().to_string();
+    assert!(overlay.starts_with("probes:") && overlay.contains(&key), "an overlay holds the records alone, by project: {overlay}");
     assert!(!overlay.contains("kind:"), "{overlay}");
     assert_eq!(listed(&f, "repo")["state"].as_str(), Some("active"));
 
     std::fs::write(dir.join("repo.yaml"), format!("{text}{overlay}")).unwrap();
     std::fs::remove_file(user_path(&f, "repo")).unwrap();
     let row = listed(&f, "repo");
-    assert_eq!((row["state"].as_str(), row["detail"].as_str()), (Some("degraded"), Some("no probe record; run `attend sensor probe repo` at a terminal")), "{row}");
+    assert_eq!((row["state"].as_str(), row["detail"].as_str()), (Some("degraded"), Some("no probe record for this project; run `attend sensor probe repo` at a terminal")), "{row}");
     assert!(row["notes"].to_string().contains("a probe record is read only from your user sensor file; this one in a project file is ignored"), "{row}");
+}
+
+/// Two projects with a sensor of the same name each keep their record: a
+/// probe writes only its own project's entry.
+#[test]
+fn same_named_sensors_of_two_projects_keep_a_record_each() {
+    let f = quiet("mcp-two");
+    let second = f.home.join("second");
+    std::fs::create_dir_all(&second).unwrap();
+    std::fs::write(f.home.join("config").join("attend").join("config.yaml"), format!("cleanup:\n  enabled: false\nproject_sensors:\n  - {}\n  - {}\n", f.origin, second.display())).unwrap();
+    let (items, pids) = files(&f, "repo");
+    let text = sensor_text("repo", "serve", "list_items", &items, &pids);
+    for project in [Path::new(&f.origin), second.as_path()] {
+        let dir = project.join(".claude").join("attend").join("sensors");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("repo.yaml"), &text).unwrap();
+    }
+    // The second project is reached by working directory, with no session.
+    let in_second = |args: &[&str]| f.without_session(|| f.command().current_dir(&second).args(args).output().unwrap());
+    let state_in_second = || {
+        let all = doc(&in_second(&["sensor", "list", "--json"]).stdout);
+        all.as_array().unwrap().iter().find(|e| e["name"] == "repo").unwrap()["state"].as_str().unwrap().to_string()
+    };
+
+    probe_and_confirm(&f, "repo");
+    assert_eq!(listed(&f, "repo")["state"].as_str(), Some("active"));
+    assert_eq!(state_in_second(), "degraded", "the first project's record is not the second's");
+
+    let out = in_second(&["sensor", "probe", "repo", "--json"]);
+    assert_eq!(out.status.code(), Some(3), "{}", String::from_utf8_lossy(&out.stderr));
+    let path = user_path(&f, "repo");
+    std::fs::write(&path, std::fs::read_to_string(&path).unwrap().replace("confirmed: false", "confirmed: true")).unwrap();
+    let overlay = user_file(&f, "repo");
+    for project in [Path::new(&f.origin), second.as_path()] {
+        let key = std::fs::canonicalize(project).unwrap().display().to_string();
+        assert!(overlay.contains(&key), "{key} has no record: {overlay}");
+    }
+    assert_eq!(listed(&f, "repo")["state"].as_str(), Some("active"), "the second probe kept the first project's record");
+    assert_eq!(state_in_second(), "active");
+    assert_eq!(left_behind(&pids), Vec::<String>::new());
 }
 
 /// Under the host, a trigger on the tool's result is a system signal to

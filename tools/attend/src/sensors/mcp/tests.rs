@@ -25,7 +25,7 @@ fn scratch(tag: &str) -> PathBuf {
 /// The probe record a sensor on `server` calling `tool` holds.
 fn record(server: &Server, tool: &str, args: &serde_yaml::Mapping) -> ProbeRecord {
     let binding = inline_binding(server);
-    ProbeRecord { server: server.label().into(), binding, project: None, tool: tool.into(), args: args.clone(), calls_match: true, confirmed: true, at: None }
+    ProbeRecord { server: server.label().into(), binding, tool: tool.into(), args: args.clone(), calls_match: true, confirmed: true, at: None }
 }
 
 /// A lookup that reads no user file and no environment.
@@ -49,8 +49,8 @@ fn sensor(dir: &Path, mode: &str, tool: &str, allow_unannotated: bool) -> Mcp {
     let mut args = serde_yaml::Mapping::new();
     args.insert("file".into(), items.display().to_string().into());
     let probe = Some(record(&server, tool, &args));
-    let block = McpBlock { server, tool: tool.into(), args, allow_unannotated, probe };
-    Mcp::new("t", block, dir.to_str().unwrap(), Inherit::Stripped, no_lookup(dir)).with_ledger(&dir.join("ledger"))
+    let block = McpBlock { server, tool: tool.into(), args, allow_unannotated, probe: probe.clone(), probes: BTreeMap::new() };
+    Mcp::new("t", block, probe, dir.to_str().unwrap(), Inherit::Stripped, no_lookup(dir)).with_ledger(&dir.join("ledger"))
 }
 
 fn quick(m: Mcp) -> Mcp {
@@ -179,7 +179,7 @@ fn a_missing_program_cannot_start() {
     let dir = scratch("missing");
     let mut m = sensor(&dir, "serve", "list_items", false);
     m.block.server = Server::Inline { command: "/nonexistent/mcp-server".into(), args: vec![], env: BTreeMap::new() };
-    m.block.probe = Some(record(&m.block.server, "list_items", &m.block.args));
+    m.record = Some(record(&m.block.server, "list_items", &m.block.args));
     assert!(m.call().unwrap_err().starts_with("cannot start server /nonexistent/mcp-server: "));
 }
 
@@ -244,8 +244,68 @@ fn an_ending_server_gets_term_before_kill() {
     assert_eq!(entries, 0, "the ended server's entry is removed");
 }
 
+/// A process group a test started, KILLed when dropped so a failed
+/// assertion leaves nothing running.
+struct Group {
+    child: std::process::Child,
+    id: u32,
+}
+
+impl Group {
+    /// `sh -c script` leading a group of its own, its output read by
+    /// `read`.
+    fn start(script: &str) -> Group {
+        let mut c = Process::new("sh");
+        c.args(["-c", script]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+        std::os::unix::process::CommandExt::process_group(&mut c, 0);
+        let child = c.spawn().unwrap();
+        let id = child.id();
+        Group { child, id }
+    }
+
+    /// Whether a process of the group runs.
+    fn lives(&self) -> bool {
+        // SAFETY: kill(2) with signal 0 sends nothing.
+        unsafe { libc::kill(-(self.id as libc::pid_t), 0) == 0 }
+    }
+}
+
+impl Drop for Group {
+    fn drop(&mut self) {
+        // SAFETY: kill(2) on the group this test made.
+        unsafe { libc::kill(-(self.id as libc::pid_t), libc::SIGKILL) };
+        self.child.wait().ok();
+    }
+}
+
+/// A pid no process has.
+fn free_pid() -> u32 {
+    let mut done = Process::new("true").spawn().unwrap();
+    let pid = done.id();
+    done.wait().unwrap();
+    pid
+}
+
+/// Write a ledger entry for the project `dir` and return its path.
+fn forge(dir: &Path, group: u32, leader_start: Option<u64>, owner: u32, owner_start: Option<u64>) -> PathBuf {
+    let at = ledger::project_dir(&dir.join("ledger"), dir);
+    std::fs::create_dir_all(&at).unwrap();
+    let path = at.join(format!("{group}.json"));
+    std::fs::write(&path, json!({ "group": group, "leader_start": leader_start, "owner": owner, "owner_start": owner_start }).to_string()).unwrap();
+    path
+}
+
+/// Wait up to three seconds for the leader of `g` to end; whether it did.
+fn ends(g: &mut Group) -> bool {
+    let until = Instant::now() + Duration::from_secs(3);
+    while g.child.try_wait().unwrap().is_none() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    g.child.try_wait().unwrap().is_some()
+}
+
 /// The sweep leaves a server whose owner runs, such as another host's,
-/// and ends one whose owner is gone.
+/// and ends one whose owner is gone while its leader runs as recorded.
 #[test]
 fn the_sweep_ends_only_servers_whose_owner_is_gone() {
     let dir = scratch("sweep");
@@ -254,33 +314,59 @@ fn the_sweep_ends_only_servers_whose_owner_is_gone() {
     assert_eq!(ledger::sweep(&dir.join("ledger"), &dir), 0, "this process owns it and runs");
     assert_eq!(left_behind_now(&dir), pids(&dir), "the sweep left a live owner's server running");
 
-    let mut orphan = Process::new("sh");
-    orphan.args(["-c", "sleep 600"]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-    std::os::unix::process::CommandExt::process_group(&mut orphan, 0);
-    let mut orphan = orphan.spawn().unwrap();
-    let group = orphan.id();
-    let mut done = Process::new("true").spawn().unwrap();
-    let gone = done.id();
-    done.wait().unwrap();
-    let entry = json!({ "group": group, "leader_start": attend_presence::process::start_time(group), "owner": gone, "owner_start": "a process that ended" });
-    let at = std::fs::read_dir(dir.join("ledger")).unwrap().flatten().next().unwrap().path();
-    std::fs::write(at.join(format!("{group}.json")), entry.to_string()).unwrap();
-    let swept = ledger::sweep(&dir.join("ledger"), &dir);
-    let until = Instant::now() + Duration::from_secs(3);
-    while orphan.try_wait().unwrap().is_none() && Instant::now() < until {
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    let ended = orphan.try_wait().unwrap().is_some();
-    if !ended {
-        // SAFETY: kill(2) on the group the unreaped child leads, so a
-        // failed sweep leaves nothing running.
-        unsafe { libc::kill(-(group as libc::pid_t), libc::SIGKILL) };
-        orphan.wait().ok();
-    }
-    assert_eq!((swept, ended), (1, true), "the orphaned group was not ended");
-    assert!(!at.join(format!("{group}.json")).exists(), "its entry is removed");
+    let mut orphan = Group::start("exec sleep 600");
+    let entry = forge(&dir, orphan.id, attend_presence::process::start_stamp(orphan.id), free_pid(), Some(1));
+    assert_eq!(ledger::sweep(&dir.join("ledger"), &dir), 1);
+    assert!(ends(&mut orphan), "the orphaned group was not ended");
+    assert!(!entry.exists(), "its entry is removed");
     drop(m);
     assert_eq!(left_behind(&dir), Vec::<String>::new());
+}
+
+/// A group whose leader runs with another start time than the recorded
+/// one belongs to a process that reused the pid: nothing is sent, and the
+/// entry is dropped.
+#[test]
+fn the_sweep_leaves_a_group_whose_leader_started_at_another_time() {
+    let dir = scratch("sweep-reused");
+    let other = Group::start("exec sleep 600");
+    let started = attend_presence::process::start_stamp(other.id).unwrap();
+    let entry = forge(&dir, other.id, Some(started + 1), free_pid(), Some(1));
+    assert_eq!(ledger::sweep(&dir.join("ledger"), &dir), 0);
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(other.lives(), "the sweep ended a group that is not the server's");
+    assert!(!entry.exists(), "the entry names no running server and is dropped");
+}
+
+/// When the leader is gone the group id may be free and claimed by
+/// another program, so nothing is sent, even to a group that still has a
+/// member, and the entry is dropped.
+#[test]
+fn the_sweep_sends_nothing_once_the_leader_is_gone() {
+    let dir = scratch("sweep-leaderless");
+    let mut g = Group::start("sleep 600 >/dev/null 2>&1 & echo $!");
+    let mut line = String::new();
+    std::io::BufRead::read_line(&mut std::io::BufReader::new(g.child.stdout.take().unwrap()), &mut line).unwrap();
+    g.child.wait().unwrap();
+    assert!(g.lives(), "the group keeps its sleeping member");
+    let entry = forge(&dir, g.id, Some(1), free_pid(), Some(1));
+    assert_eq!(ledger::sweep(&dir.join("ledger"), &dir), 0);
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(g.lives(), "the sweep signalled a group whose leader is gone");
+    assert!(!entry.exists());
+}
+
+/// An entry with a start time that was not read is unknown, and is left
+/// as it is with nothing sent.
+#[test]
+fn the_sweep_leaves_an_entry_with_an_unknown_start_time() {
+    let dir = scratch("sweep-unknown");
+    let g = Group::start("exec sleep 600");
+    let entry = forge(&dir, g.id, attend_presence::process::start_stamp(g.id), free_pid(), None);
+    assert_eq!(ledger::sweep(&dir.join("ledger"), &dir), 0);
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(g.lives(), "the sweep ended a group whose owner it could not judge");
+    assert!(entry.exists(), "the entry is kept");
 }
 
 /// The pids of `dir` running now.
@@ -354,6 +440,15 @@ fn a_binding_changes_with_the_definition() {
     assert_eq!(one, at(json!({ "command": "srv", "env": { "T": "${X}" } })));
     assert_ne!(one, at(json!({ "command": "srv", "env": { "T": "${Y}" } })));
     assert!(!one.contains("srv"), "the binding holds no value of the definition: {one}");
+    let expanded = |vars: Vars| {
+        std::fs::write(&user_json, json!({ "mcpServers": { "s": { "command": "${MCP_BIN}", "env": { "TOKEN": "${MCP_TOKEN}" } } } }).to_string()).unwrap();
+        resolve(&Server::Named("s".into()), &dir, Inherit::Stripped, &Lookup { user_json: user_json.clone(), trusted: false, vars }).unwrap().binding
+    };
+    let here: Vars = |k| Some(if k == "MCP_BIN" { "/bin/a".into() } else { "t1".into() });
+    let rotated: Vars = |k| Some(if k == "MCP_BIN" { "/bin/a".into() } else { "t2".into() });
+    let elsewhere: Vars = |k| Some(if k == "MCP_BIN" { "/bin/b".into() } else { "t1".into() });
+    assert_eq!(expanded(here), expanded(rotated), "a rotated token in env keeps the record");
+    assert_ne!(expanded(here), expanded(elsewhere), "a variable that moves the program voids it");
     let inline = |args: &[&str]| inline_binding(&Server::Inline { command: "srv".into(), args: args.iter().map(|a| a.to_string()).collect(), env: BTreeMap::new() });
     assert_ne!(inline(&["a"]), inline(&["b"]));
 }

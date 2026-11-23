@@ -92,8 +92,8 @@ pub struct SensorFile {
     pub path: Option<PathBuf>,
     /// A project file the allow-list refused: it is not merged.
     pub refused: bool,
-    /// The file sets nothing but `enabled` or `probe`, so it defines no
-    /// sensor of its own ([`only_switches`]).
+    /// The file sets nothing but `enabled`, `probe` or `probes`, so it
+    /// defines no sensor of its own ([`only_switches`]).
     pub switch: bool,
 }
 
@@ -219,21 +219,21 @@ pub fn from_layers(layers: &[Layer], project: &Path, trusted: &[String]) -> Vec<
     by_name.into_iter().filter(|(_, reads)| !only_switches(reads)).map(|(name, reads)| layer(name, reads, trust, project)).collect()
 }
 
-/// Whether every file of a name sets nothing but `enabled` or `probe`: the
-/// switch the settings screens keep in the user's file for a project's
-/// sensor, or the probe record `attend sensor probe` keeps there, read in a
-/// project that has no such sensor. It defines none.
+/// Whether every file of a name sets nothing but `enabled`, `probe` or
+/// `probes`: the switch the settings screens keep in the user's file for a
+/// project's sensor, or the probe records `attend sensor probe` keeps
+/// there, read in a project that has no such sensor. It defines none.
 fn only_switches(reads: &[Read]) -> bool {
     reads.iter().all(|r| serde_yaml::from_str::<Value>(&r.text).is_ok_and(|v| is_switch(&v)))
 }
 
-/// Whether a sensor file sets nothing but `enabled` or `probe`.
+/// Whether a sensor file sets nothing but `enabled`, `probe` or `probes`.
 fn is_switch(doc: &Value) -> bool {
-    doc.as_mapping().is_some_and(|m| m.keys().all(|k| matches!(k.as_str(), Some("enabled" | "probe"))))
+    doc.as_mapping().is_some_and(|m| m.keys().all(|k| matches!(k.as_str(), Some("enabled" | "probe" | "probes"))))
 }
 
-/// Drop the `probe` record of every file but a user file, with a finding
-/// for each. A probe record says the operator checked a tool, so only the
+/// Drop the `probe` and `probes` records of every file but a user file,
+/// with a finding for each. A probe record says the operator checked a tool, so only the
 /// operator's own file carries one; a repository's or a shipped file's is
 /// ignored.
 ///
@@ -242,19 +242,21 @@ fn is_switch(doc: &Value) -> bool {
 fn user_probes_only(docs: &mut [(Origin, Option<PathBuf>, Value)], findings: &mut Vec<Finding>) {
     for (origin, path, doc) in docs.iter_mut().filter(|(o, _, _)| *o != Origin::User) {
         let Some(m) = doc.as_mapping_mut() else { continue };
-        if m.remove("probe").is_none() {
-            continue;
+        for key in ["probe", "probes"] {
+            if m.remove(key).is_none() {
+                continue;
+            }
+            let file = match origin {
+                Origin::Project => "a project file",
+                _ => "a shipped file",
+            };
+            let line = path.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| line_of(&t, key));
+            findings.push(Finding {
+                file: path.clone(),
+                line,
+                problem: Problem { at: key.into(), message: format!("a probe record is read only from your user sensor file; this one in {file} is ignored"), severity: Severity::Warning },
+            });
         }
-        let file = match origin {
-            Origin::Project => "a project file",
-            _ => "a shipped file",
-        };
-        let line = path.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| line_of(&t, "probe"));
-        findings.push(Finding {
-            file: path.clone(),
-            line,
-            problem: Problem { at: "probe".into(), message: format!("a probe record is read only from your user sensor file; this one in {file} is ignored"), severity: Severity::Warning },
-        });
     }
 }
 
@@ -712,9 +714,10 @@ mod tests {
         let shipped = SHIPPED.iter().find(|(n, _)| *n == "git").unwrap().1;
         assert!(!only_switches(&[read(Origin::Builtin, shipped), read(Origin::User, "enabled: false\n")]));
         assert!(!only_switches(&[read(Origin::User, "enabled: false\ninterval: 9\n")]));
-        assert!(only_switches(&[read(Origin::User, "probe: {server: s, tool: t, project: /p}\n")]), "a probe overlay defines no sensor");
+        let overlay_text = "probes:\n  /p: {server: s, tool: t}\n";
+        assert!(only_switches(&[read(Origin::User, overlay_text)]), "a probe overlay defines no sensor");
         let overlay = Path::new("/nonexistent/user/sensors");
-        assert_eq!(check_edit_under(overlay, &overlay.join("chat.yaml"), "probe: {server: s, tool: t, project: /p}\n"), Ok(()), "the probe writes an overlay check_edit takes");
+        assert_eq!(check_edit_under(overlay, &overlay.join("chat.yaml"), overlay_text), Ok(()), "the probe writes an overlay check_edit takes");
     }
 
     /// A probe record is read from a user file only: one in a project or a
@@ -735,6 +738,16 @@ mod tests {
         assert_eq!(found, [(Severity::Warning, "a probe record is read only from your user sensor file; this one in a project file is ignored")]);
         let over_project = layer("chat".into(), vec![read(Origin::User, record), read(Origin::Project, mcp)], true, Path::new("/p"));
         assert!(probe_of(&over_project).is_some(), "a user overlay's record reaches a project's sensor");
+        let keyed = "probes:\n  /p: {server: sh, binding: inline:00, tool: t, calls_match: true, confirmed: true}\n";
+        let probes_of = |l: &Loaded| match &l.spec.as_ref().unwrap().block {
+            sensor_spec::Block::Mcp(m) => m.probes.len(),
+            _ => panic!(),
+        };
+        let keyed_in_project = layer("chat".into(), vec![read(Origin::User, mcp), read(Origin::Project, keyed)], true, Path::new("/p"));
+        assert_eq!(probes_of(&keyed_in_project), 0, "a project file's probes are dropped too");
+        assert_eq!(keyed_in_project.findings.len(), 1, "{:?}", keyed_in_project.findings);
+        let keyed_in_user = layer("chat".into(), vec![read(Origin::User, keyed), read(Origin::Project, mcp)], true, Path::new("/p"));
+        assert_eq!(probes_of(&keyed_in_user), 1);
     }
 
     #[test]
