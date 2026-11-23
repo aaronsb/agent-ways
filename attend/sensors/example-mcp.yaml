@@ -11,12 +11,14 @@
 #   3. Map each state field's `from` onto that tool's result.
 #   4. Run `attend sensor probe <name>`. It calls the tool twice, checks the
 #      second call returned every item of the first, asks you to confirm in
-#      another client that the items are still unread, and writes the
-#      `probe` record into the file. A sensor with no record stays off.
+#      another client that the items are still unread (`--confirm` answers
+#      yes), and writes the `probe` record into your user file for the
+#      sensor. A sensor with no record that holds reads degraded and stays
+#      off.
 #   5. Set `enabled: true`. `attend sensor list` shows its state.
 #
-# attend hosts mcp sensors from slice 3 of ADR-403; before that, an enabled
-# copy loads and lints, and `attend sensor list` shows it as degraded.
+# The sensor host starts the server at the first poll and keeps it across
+# polls; a server that exits or times out is restarted on the next poll.
 
 # The spec version the file is written to.
 spec: 1
