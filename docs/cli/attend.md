@@ -766,6 +766,7 @@ The attend mod starts one host for each listening session and stops it when the 
 * `--session <SESSION>` — The session the signals are addressed to
 * `--cwd <CWD>` — The session's directory: the project the sensors watch, whose tray the signals go to
 * `--moved-from <OLD_ID>` — The id the session had before /clear: its sensor stores and the memory of triggers kept for the session move to --session
+* `--parent <PID>` — The process that started the host, Claude Code: the host exits once it is gone, even when it went before the host could look at its own parent
 
 
 

@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-//! `attend sensor host --session <id> --cwd <dir> [--moved-from <old id>]`:
-//! one session's sensors, run for as long as the attend mod keeps it.
+//! `attend sensor host --session <id> --cwd <dir> [--moved-from <old id>]
+//! [--parent <pid>]`: one session's sensors, run for as long as the attend
+//! mod keeps it.
 //!
 //! The host polls the sensors the files declare for the session's
 //! directory through the same tick loop as `attend run`: scheduling,
@@ -92,8 +93,14 @@ impl Sink for Signals {
 
 pub(crate) fn cmd_host(a: &HostArgs) {
     // The parent is read first, so a parent that leaves during startup is
-    // still seen to leave.
+    // still seen to leave. One that left before this line, between the
+    // spawn and attend's main, is seen only through --parent: the host was
+    // adopted already, and its parent reads as the adopter's.
     let parent = parent_id();
+    if is_gone(a.parent) {
+        emit::log("the process that started the sensor host is gone; it exits");
+        return;
+    }
     // attend's main restores SIGPIPE's default (agent_fmt::
     // exit_quietly_on_closed_pipe), under which a cue written to a closed
     // pipe kills the host before the tick that wrote it checkpoints. The
@@ -167,7 +174,7 @@ pub(crate) fn cmd_host(a: &HostArgs) {
     let mut last_reload_check = Instant::now();
 
     loop {
-        if parent_id() != parent {
+        if parent_id() != parent || is_gone(a.parent) {
             emit::log("the process that started the sensor host is gone; it exits");
             return;
         }
@@ -220,6 +227,12 @@ fn parent_id() -> u32 {
     return std::os::unix::process::parent_id();
     #[cfg(not(unix))]
     return attend_presence::process::parent_pid(std::process::id()).unwrap_or(0);
+}
+
+/// Whether the process `--parent` names has exited. Without the flag the
+/// parent's id alone answers.
+fn is_gone(parent: Option<u32>) -> bool {
+    parent.is_some_and(|pid| !attend_presence::process::is_running(pid))
 }
 
 /// The session's checkpoint, with the session memory of the id it had

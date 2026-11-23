@@ -5,8 +5,8 @@
 //! Every attend argv the mod and the hook scripts build parses against this
 //! binary (ADR-413 item 6.2). The argv is read from its source: the
 //! `[ATTEND, ...]` literals and `argv.push('--flag', ...)` calls in
-//! plugins/attend/hooks/lib.ts, and the `$(attend ...)` and `sl__run attend
-//! ...` calls in the scripts. A renamed verb or flag fails here before a
+//! plugins/attend/hooks/lib.ts and host.ts, and the `$(attend ...)` and
+//! `sl__run attend ...` calls in the scripts. A renamed verb or flag fails here before a
 //! session's tools or hooks meet it.
 
 use std::path::PathBuf;
@@ -43,12 +43,12 @@ struct Call {
     flags: Vec<String>,
 }
 
-/// lib.ts's calls. Each `export` block is one builder: its `[ATTEND, ...]`
+/// lib.ts's and host.ts's calls. Each `export` block is one builder: its `[ATTEND, ...]`
 /// literals name the path, and every `--flag` in the block, in a literal or a
 /// push, is a flag of that path. A literal's leading words are the path;
 /// words after the first flag are values.
 fn mod_calls() -> Vec<Call> {
-    let src = read("plugins/attend/hooks/lib.ts");
+    let src = read("plugins/attend/hooks/lib.ts") + &read("plugins/attend/hooks/host.ts");
     let mut calls = Vec::new();
     for block in src.split("\nexport ") {
         // Comments may hold apostrophes, which would shift the quoting.

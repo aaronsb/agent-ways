@@ -624,6 +624,47 @@ fn a_host_whose_parent_is_gone_exits() {
     assert!(polls(&f, "beacon") >= 1 || read().contains("running 1 sensor(s): beacon"), "the host ran before its parent left:\n{}", read());
 }
 
+/// The host's status once it exits, or a panic with its log after `limit`.
+fn exited(host: &mut Host, limit: Duration) -> std::process::ExitStatus {
+    let start = Instant::now();
+    loop {
+        if let Some(status) = host.child.try_wait().unwrap() {
+            return status;
+        }
+        assert!(start.elapsed() < limit, "the host kept running:\n{}", host.stderr());
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// `--parent` names the process the host belongs to, the mod's Claude
+/// Code. One already gone when the host starts, as when Claude Code exits
+/// between the spawn and attend's main and the host's own parent already
+/// reads as the adopter, ends the host before a sensor runs. One that goes
+/// later ends it too, though the host's own parent stays.
+#[test]
+fn a_host_whose_named_parent_is_gone_exits() {
+    const GONE: &str = "the process that started the sensor host is gone; it exits";
+    let f = quiet("host-named-parent");
+    beacon(&f, "beacon", "memory: store");
+
+    let mut early = std::process::Command::new("true").spawn().unwrap();
+    early.wait().unwrap();
+    let mut host = Host::start(&f, &f.sid, &["--parent", &early.id().to_string()]);
+    let status = exited(&mut host, Duration::from_secs(10));
+    let log = host.stderr();
+    assert!(status.success() && log.contains(GONE), "{status:?}: {log}");
+    assert!(!log.contains("running 1 sensor(s)") && polls(&f, "beacon") == 0, "a sensor ran for a parent that was gone:\n{log}");
+
+    let mut parent = std::process::Command::new("sleep").arg("60").spawn().unwrap();
+    let mut host = Host::start(&f, &f.sid, &["--parent", &parent.id().to_string()]);
+    host.wait_for("the sensors to start", Duration::from_secs(20), || host.stderr().contains("running 1 sensor(s)"));
+    assert!(host.child.try_wait().unwrap().is_none(), "the host left while its parent ran:\n{}", host.stderr());
+    parent.kill().unwrap();
+    parent.wait().unwrap();
+    let status = exited(&mut host, Duration::from_secs(10));
+    assert!(status.success() && host.stderr().contains(GONE), "{status:?}: {}", host.stderr());
+}
+
 /// A host whose stdout is closed, as when the mod stopped reading, writes
 /// the signal, checkpoints, and exits on the failed cue.
 #[test]

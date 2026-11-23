@@ -9,6 +9,7 @@
 import type { Timer } from 'claude-code'
 
 import type { AttendStatus, KeepaliveRow, MoveRecord } from '../types/index.d.ts'
+import type { HostChild, HostSpec } from './host.ts'
 import type { Move } from './move.ts'
 
 export const ATTEND = 'attend'
@@ -197,6 +198,27 @@ export type Mod = {
    *  prompt as context. The module's copy serves a /clear, which empties
    *  $.state; the copy in $.state (`heldNote`) serves a reload. */
   heldNote: string | undefined
+  /** The sensor host this module spawned, while it runs. */
+  host: HostChild | undefined
+  /** The host the session should have: set on activation and when a
+   *  /clear or a /resume settles; undefined while the session is dormant. */
+  hostFor: HostSpec | undefined
+  /** attend's drain said the session is not listening (`attend listen off`
+   *  elsewhere): the host is ended until a drain says it listens again. */
+  isListeningOff: boolean
+  /** When each respawn after an exit of the host's own ran, within
+   *  HOST_WINDOW_MS. */
+  hostRespawns: number[]
+  /** The host exited past the respawn cap, or attend refused it: no host
+   *  until the module reloads. */
+  isHostStopped: boolean
+  /** A respawn waits out HOST_RESPAWN_MS: no poll starts one sooner. */
+  isHostWaiting: boolean
+  /** Starts a host on session.start's `$`, whose spawn outlives the hook
+   *  that asks for it. */
+  spawnHost: ((h: HostSpec) => void) | undefined
+  /** A host's cue came while a tick ran: one more forced tick follows. */
+  isCueWaiting: boolean
   /** The keepalive policy's state (ADR-414). */
   ka: Keepalive
 }
@@ -804,8 +826,8 @@ export function rowRefused(k: KeepaliveRow | null): KeepaliveRow | null {
   return k && { ...k, isRefused: true }
 }
 
-/** The row's text: an active session's peers, mail, channels and keepalive
- *  segment; a dormant session's keepalive segment alone, from its first
+/** The row's text: an active session's peers, mail, channels, a sensor host
+ *  that stopped, and the keepalive segment; a dormant session's keepalive segment alone, from its first
  *  keepalive until the operator's next prompt; otherwise none. */
 export function rowText(s: AttendStatus, nowMs: number): string | undefined {
   const keepalive = s.keepalive ? keepaliveSegment(s.keepalive, nowMs) : undefined
@@ -814,7 +836,8 @@ export function rowText(s: AttendStatus, nowMs: number): string | undefined {
   const mail = s.cacheLapsed && s.unread > 0 ? `${s.unread} waiting · cold` : `${s.unread} unread`
   const state = s.listening === false ? '○ attend not listening' : `● ${s.peers} peers ✉ ${mail}`
   const channels = s.channels.length > 0 ? ` ${s.channels.join(' ')}` : ''
-  return `${state}${channels}${keepalive ? ` ${keepalive}` : ''}`
+  const sensors = s.hostStopped ? ' · sensors stopped' : ''
+  return `${state}${channels}${sensors}${keepalive ? ` ${keepalive}` : ''}`
 }
 
 // ── parsing ──────────────────────────────────────────────────────────────

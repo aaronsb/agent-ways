@@ -73,10 +73,11 @@ jobs:
   plugins:
     # The Claude Code mods in plugins/ (ADR-406): version lockstep with
     # attend, `claude plugin validate`, and `claude plugin test`. The build is
-    # pinned to the one the mod's early-access API was written against; move
-    # it when the mod is checked against a newer Claude Code. Type checking
-    # needs the declarations Claude Code lays beside a mod it loads in a
-    # session, which a runner has none of, so the script reports it skipped.
+    # pinned to the one the mod's early-access API was written against, the
+    # oldest the mods support; plugins-current below checks a current one.
+    # Type checking needs the declarations Claude Code lays beside a mod it
+    # loads in a session, which a runner has none of, so the script reports
+    # it skipped.
     name: plugins
     runs-on: ubuntu-latest
     steps:
@@ -84,4 +85,21 @@ jobs:
       - name: install Claude Code
         run: npm install -g @anthropic-ai/claude-code@2.1.312
       - name: validate and test
+        run: make test-plugins
+
+  plugins-current:
+    # The same checks on a current Claude Code, beside the oldest supported
+    # build above. It runs what 2.1.312 cannot, such as the attend mod's
+    # process.hookEnv test (scripts/check-plugins.sh, step 3b). The build is
+    # pinned, as above, so a Claude Code release does not turn a pull request
+    # red on its own; move it to the build the mods are checked against.
+    name: plugins (current Claude Code)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: install Claude Code
+        run: npm install -g @anthropic-ai/claude-code@2.1.330
+      - name: validate and test
+        env:
+          HOOKENV_REQUIRED: "1"
         run: make test-plugins

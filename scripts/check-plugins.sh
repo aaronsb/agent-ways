@@ -14,7 +14,8 @@
 #      ADR-517); and the images mod and ways-theme each test the frame
 #      contract between them with one copy of its fixture (ADR-517 item 6);
 #   2. `claude plugin validate` on the marketplace and on each plugin;
-#   3. `claude plugin test` on each plugin;
+#   3. `claude plugin test` on each plugin, and the attend mod's
+#      process.hookEnv test where the Claude Code on PATH has that event;
 #   4. a TypeScript check against Claude Code's declarations, where they can
 #      be found, in this order: $CLAUDE_CODE_TYPES (the API's
 #      claude-code.d.ts); the copy the plugin-authoring skill writes for the
@@ -142,6 +143,32 @@ for dir in plugins/*/; do
     fail "$dir has no tests"
   fi
 done
+
+# 3b. The attend mod passes Claude Code's pid to its sensor host as --parent,
+# from $.process.hookEnv(). A Claude Code without that event, such as 2.1.312,
+# refuses to load a test module that hooks it, so the test is not named
+# *.test.ts: it runs here as one, alone, from a copy of the plugin. Only the
+# refusal of that event reports it skipped; any other failure fails.
+hookenv="$(mktemp -d)"
+cp -R plugins/attend "$hookenv/attend"
+rm -f "$hookenv"/attend/tests/*.test.ts "$hookenv"/attend/tests/*.test.tsx
+mv "$hookenv/attend/tests/hook-env.check.ts" "$hookenv/attend/tests/hook-env.test.ts"
+if out="$(claude plugin test "$hookenv/attend" 2>&1)"; then
+  rm -rf "$hookenv"
+  printf '%s\n' "$out"
+  echo "hookenv: the attend mod passes CLAUDE_PID to its sensor host as --parent"
+elif grep -qF '"process.hookEnv" is not an event' <<<"$out"; then
+  rm -rf "$hookenv"
+  version="$(claude --version 2>/dev/null | awk '{print $1}')"
+  # A run that exists to check this test, such as CI's plugins-current job,
+  # sets HOOKENV_REQUIRED so a build without the event fails it.
+  [[ -z "${HOOKENV_REQUIRED:-}" ]] || fail "Claude Code $version has no process.hookEnv, and HOOKENV_REQUIRED is set"
+  echo "hookenv: skipped, Claude Code $version has no process.hookEnv"
+else
+  rm -rf "$hookenv"
+  printf '%s\n' "$out"
+  fail "the attend mod's process.hookEnv test (plugins/attend/tests/hook-env.check.ts) failed"
+fi
 
 # 4. Type check. One scratch directory holds each plugin's tsconfig in turn.
 tmp="$(mktemp -d)"

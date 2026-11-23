@@ -48,11 +48,13 @@ export type Outcome =
   | { kind: 'gone' }
 
 export function recordOf(m: Move): MoveRecord {
-  return { ended: [...m.ended], reason: m.reason, wasOn: m.wasOn }
+  return { ended: [...m.ended], reason: m.reason, wasOn: m.wasOn, resumed: m.resumed }
 }
 
+/** A record kept before `resumed` existed reads as no /resume, as it then
+ *  carried none it could have told apart. */
 function fresh(record: MoveRecord): Move {
-  return { ...record, ended: [...record.ended], waitedMs: 0, delayMs: MOVE_FIRST_MS, timer: undefined, failures: 0 }
+  return { ...record, ended: [...record.ended], resumed: record.resumed === true, waitedMs: 0, delayMs: MOVE_FIRST_MS, timer: undefined, failures: 0 }
 }
 
 /** Records a /clear or a /resume of `endedId`: plain data, so session.end
@@ -65,13 +67,14 @@ export function recordMove(slot: MoveSlot, endedId: string, reason: MoveReason, 
     const g = slot.gaveUp
     slot.gaveUp = undefined
     const ended = (g?.ended ?? []).filter(id => id !== endedId)
-    slot.move = fresh({ ended: [...ended, endedId], reason, wasOn: wasOn || (g?.wasOn ?? false) })
+    slot.move = fresh({ ended: [...ended, endedId], reason, wasOn: wasOn || (g?.wasOn ?? false), resumed: reason === 'resume' || (g?.resumed ?? false) })
     return
   }
   m.timer?.cancel()
   m.timer = undefined
   if (!m.ended.includes(endedId)) m.ended.push(endedId)
   m.reason = reason
+  m.resumed = m.resumed || reason === 'resume'
   m.wasOn = m.wasOn || wasOn
   m.waitedMs = 0
   m.delayMs = MOVE_FIRST_MS

@@ -10,7 +10,7 @@
 // config, or from the agent's attend_listen call; it stays active until
 // Claude Code exits. While active the mod polls attend, delivers peer
 // messages as framed turns, serves the send/reply/join/peers tools, draws one
-// status row and drives keepwarm.
+// status row, drives keepwarm, and keeps the session's sensor host running.
 //
 // The keepalive policy (ADR-414) runs in every interactive session with the
 // mod, dormant ones included, while autocompact is off: attend judges, and
@@ -22,6 +22,9 @@
 //
 // Every message travels through attend's signal store by the attend CLI, as
 // an argv array with no shell. The mod never uses $.session.send.
+//
+// References:
+// - ADR-416 item 2: the sensor host the mod spawns for a listening session.
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ProcessRunResult, PromptSubmitInput, PromptSubmitResult, Register, Timer } from 'claude-code'
@@ -92,6 +95,8 @@ import {
   shortId,
 } from './lib.ts'
 import type { Decision, Gate, Keepalive, Listed, Mod, ModConfig, WrapOutcome, WrapRoute } from './lib.ts'
+import { claudePid, cuesIn, hostArgv, hostEndText, hostOfRecord, hostRecord, hostSpecFor, isHostRefused, respawnAfterExit, HOST_RESPAWN_MS, HOST_RESPAWNS } from './host.ts'
+import type { HostChild, HostEnd, HostSpec } from './host.ts'
 
 
 type $ = EngineInterface
@@ -109,6 +114,8 @@ const DEFAULTS = {
   cacheLapsed: false,
   keepalive: null,
   move: null,
+  hostStopped: false,
+  hostFor: null,
 } satisfies AttendStatus
 
 const status = atom({ plugin: 'attend', key: 'status' } as const, DEFAULTS)
@@ -236,9 +243,11 @@ async function rememberListening($: $, mod: Mod, id: string) {
 }
 
 /** Makes session `id` active for the rest of the process: listening, the
- *  poll, and the record a resume reads; the caller has registered the
- *  tools. Idempotent. Returns attend's answer to `listen on`. */
-async function activate($: $, mod: Mod, id: string): Promise<ProcessRunResult> {
+ *  poll, the sensor host, and the record a resume reads; the caller has
+ *  registered the tools. Idempotent. `isAsked` is the agent's attend_listen
+ *  call, which also starts a host that stopped. Returns attend's answer to
+ *  `listen on`. */
+async function activate($: $, mod: Mod, id: string, isAsked = false): Promise<ProcessRunResult> {
   mod.active = true
   let r: ProcessRunResult
   try {
@@ -256,6 +265,16 @@ async function activate($: $, mod: Mod, id: string): Promise<ProcessRunResult> {
   } finally {
     mod.isRelistening = false
   }
+  // The host for this id, once attend has the session listening. A reload
+  // takes up the host $.state kept, and a /clear's move gives a new id the
+  // old one to move the stores from. A host that stopped starts again when
+  // the agent asks; its respawns keep their window, so one that keeps dying
+  // stops again.
+  const kept = hostOfRecord((await readStatus($)).hostFor)
+  await setHostFor($, mod, hostSpecFor(id, mod.hostFor, kept, mod.move ?? mod.gaveUp))
+  if (isAsked) mod.isHostStopped = false
+  mod.isListeningOff = r.exitCode !== 0
+  syncHost(mod)
   await rememberListening($, mod, id)
   if (mod.canPoll) {
     startTicker($, mod)
@@ -364,6 +383,8 @@ async function holdMove($: $, mod: Mod, m: MoveRecord) {
   await updateStatus($, t => ({
     ...t,
     move: m,
+    hostFor: hostRecord(mod.hostFor),
+    hostStopped: mod.isHostStopped,
     ...(m.wasOn ? { mode: 'active' as const, afterCompaction: true, turnsSinceFull: 0, heldNote: mod.heldNote ?? null } : {}),
   }))
   if (m.wasOn && !mod.isMoveListened) {
@@ -381,10 +402,28 @@ async function settleMove($: $, mod: Mod, id: string, m: MoveRecord) {
     const goesOn = m.wasOn || mod.active || (m.reason === 'resume' && (await readListened($)).includes(id))
     if (!goesOn) return
     mod.isRelistening = true
-    await updateStatus($, s => ({ ...s, mode: 'active' as const, afterCompaction: true, turnsSinceFull: 0, heldNote: mod.heldNote ?? null }))
+    // The host for the new id is known now, and $.state holds it, written
+    // before the move is released, so a reload before the host starts still
+    // passes --moved-from. An inactive session's activation picks it.
+    if (mod.active) mod.hostFor = hostSpecFor(id, mod.hostFor, undefined, m)
+    await updateStatus($, s => ({
+      ...s,
+      mode: 'active' as const,
+      afterCompaction: true,
+      turnsSinceFull: 0,
+      heldNote: mod.heldNote ?? null,
+      hostFor: hostRecord(mod.hostFor),
+      hostStopped: mod.isHostStopped,
+    }))
     await rememberListening($, mod, id)
     if (mod.active) {
-      $.clock.after(RELISTEN_MS, () => void listenOn($).finally(() => (mod.isRelistening = false)))
+      // A stopped host is not started; the spec waits in $.state.
+      $.clock.after(RELISTEN_MS, () =>
+        void listenOn($).finally(() => {
+          mod.isRelistening = false
+          syncHost(mod)
+        }),
+      )
     } else {
       mod.active = true
       await registerActiveTools($)
@@ -414,6 +453,133 @@ async function markCompacted($: $) {
   await updateStatus($, s => ({ ...s, afterCompaction: true }))
 }
 
+// ── the sensor host ────────────────────────────────────────────────────
+//
+// One `attend sensor host` per listening session, a child of this module:
+// spawned on activation, ended while attend says the session is not
+// listening, spawned again for the new id once a /clear or a /resume
+// settles (a /clear's with --moved-from), and after an exit of its own,
+// HOST_RESPAWNS times in ten minutes at most. Each line on its stdout is a
+// signal it wrote to the store, and forces a tick so the poll delivers it.
+// Nothing here locks: the module keeps one host, ended before another
+// starts, and a reload's unload ends the old module's.
+//
+// References:
+// - ADR-416 item 2: the host's life under the mod, its cue and its cap.
+
+/** Starts or ends the host to match the session: one for `mod.hostFor`
+ *  while attend has it listening, the session may poll, the respawns have
+ *  not run out and none is waiting out its delay. A host for another id is
+ *  ended first. */
+function syncHost(mod: Mod) {
+  const isHeld = mod.isListeningOff || !mod.canPoll || mod.isHostStopped || mod.isHostWaiting
+  const want = isHeld ? undefined : mod.hostFor
+  const h = mod.host
+  if (h && want && h.session === want.session) return
+  if (h) endHost(mod, h)
+  if (want) mod.spawnHost?.(want)
+}
+
+function endHost(mod: Mod, h: HostChild) {
+  if (mod.host === h) mod.host = undefined
+  h.isEnding = true
+  h.stop()
+}
+
+/** The host the session wants, in the module and in $.state, which a
+ *  /clear empties and a reload reads. */
+async function setHostFor($: $, mod: Mod, want: HostSpec) {
+  mod.hostFor = want
+  await updateStatus($, s => ({ ...s, hostFor: hostRecord(want) }))
+}
+
+/** One host's life, on session.start's `$`: spawn it directly (argv[0] is
+ *  attend), read it until it ends or the module ends it, then decide what
+ *  its end leads to. stderr goes to the debug log. */
+async function runHost($: $, mod: Mod, want: HostSpec) {
+  let stopRead = () => {}
+  const stopped = new Promise<'stop'>(resolve => (stopRead = () => resolve('stop')))
+  let end: (() => void) | undefined
+  const h: HostChild = {
+    ...want,
+    isEnding: false,
+    stop: () => {
+      stopRead()
+      end?.()
+    },
+  }
+  mod.host = h
+  let parent: string | undefined
+  try {
+    parent = claudePid(await $.process.hookEnv())
+  } catch {
+    // An engine without it: the host watches its own parent alone.
+  }
+  if (h.isEnding) return
+  let result: HostEnd
+  let failed: string | undefined
+  try {
+    const child = $.process.spawn({ argv: hostArgv(want, mod.cwd, parent) })
+    // Ending the read kills the child.
+    end = () => void child.return({ code: null, signal: 'SIGTERM' }).catch(() => undefined)
+    if ((await readStatus($)).hostStopped) await updateStatus($, s => ({ ...s, hostStopped: false }))
+    let held = ''
+    for (;;) {
+      const r = await Promise.race([child.next(), stopped])
+      if (r === 'stop') return
+      if (r.done) {
+        result = r.value as HostEnd
+        break
+      }
+      if (r.value.stream === 'stderr') {
+        $.ui.log(`attend sensor host: ${r.value.text.trimEnd()}`, { to: 'debug' })
+        continue
+      }
+      const read = cuesIn(held, r.value.text)
+      held = read.held
+      if (read.cues > 0) cue($, mod)
+    }
+  } catch (err) {
+    failed = String(err)
+  }
+  if (h.isEnding) return
+  await hostEnded($, mod, h, result, failed)
+}
+
+/** A cue from the host: a tick now, or once the one running ends. */
+function cue($: $, mod: Mod) {
+  if (mod.isTicking) {
+    mod.isCueWaiting = true
+    return
+  }
+  void tick($, mod, true, true)
+}
+
+/** The host ended on its own: spawned again after HOST_RESPAWN_MS within
+ *  the cap; past it, or refused, stopped until the module reloads, with the
+ *  row saying so. Messages go on arriving either way. */
+async function hostEnded($: $, mod: Mod, h: HostChild, result: HostEnd, failed: string | undefined) {
+  // Before the first await: a poll meanwhile starts no host.
+  mod.isHostWaiting = true
+  if (mod.host === h) mod.host = undefined
+  const why = hostEndText(result, failed)
+  const plan = isHostRefused(result) ? undefined : respawnAfterExit(mod.hostRespawns, await $.clock.now())
+  if (plan?.respawn) {
+    mod.hostRespawns = plan.respawns
+    $.ui.log(`attend: the sensor host ended (${why}); it starts again in ${HOST_RESPAWN_MS / 1000} s`, { to: 'debug' })
+    $.clock.after(HOST_RESPAWN_MS, () => {
+      mod.isHostWaiting = false
+      syncHost(mod)
+    })
+    return
+  }
+  mod.isHostStopped = true
+  mod.isHostWaiting = false
+  await updateStatus($, s => ({ ...s, hostStopped: true }))
+  const reason = plan ? `it ended ${HOST_RESPAWNS + 1} times in ten minutes, last ${why}` : why
+  $.ui.log(`attend: the sensor host stopped (${reason}); sensor reports stop until attend_listen is called again or the mod reloads, and messages still arrive`)
+}
+
 function startTicker($: $, mod: Mod) {
   mod.ticker?.cancel()
   const every = Math.max(1, Math.min(mod.config.pollSeconds, 5)) * 1000
@@ -422,14 +588,16 @@ function startTicker($: $, mod: Mod) {
 
 /** One beat of the poll: touch the heartbeat, drain while idle, refresh the
  *  row, run the keepwarm check. `force` skips the poll's interval
- *  (activation, a turn's end). The heartbeat keeps its own interval, so a
+ *  (activation, a turn's end, a host's cue); `isCue` leaves the peer list
+ *  to its own interval. The heartbeat keeps its own interval, so a
  *  turn or a slow poll longer than attend's grace does not leave the session
  *  looking gone. */
-async function tick($: $, mod: Mod, force: boolean) {
+async function tick($: $, mod: Mod, force: boolean, isCue = false) {
+  // Set before the first await, so two ticks never run at once.
   if (mod.isTicking) return
-  if (!(await isOn($, mod))) return
   mod.isTicking = true
   try {
+    if (!(await isOn($, mod))) return
     const now = await $.clock.now()
     if (now - mod.lastBeatMs >= BEAT_EVERY_MS) {
       mod.lastBeatMs = now
@@ -447,7 +615,8 @@ async function tick($: $, mod: Mod, force: boolean) {
     mod.lastPollMs = now
     if (!isTurnRunning && !mod.isRelistening) await poll($, mod)
     await refreshUnread($, mod)
-    if (force || now - mod.lastPeersMs >= PEERS_EVERY_MS) await refreshPeers($, mod)
+    // A cue forces the poll alone: a burst of signals lists no more peers.
+    if ((force && !isCue) || now - mod.lastPeersMs >= PEERS_EVERY_MS) await refreshPeers($, mod)
     // Where the keepalive policy applies, its own timer drives every wake.
     const isPlain = !mod.ka.applies
     if (isPlain && mod.config.keepwarm === 'on' && mod.running.size === 0 && now - mod.lastKeepwarmMs >= KEEPWARM_EVERY_MS) {
@@ -456,6 +625,10 @@ async function tick($: $, mod: Mod, force: boolean) {
     }
   } finally {
     mod.isTicking = false
+    if (mod.isCueWaiting) {
+      mod.isCueWaiting = false
+      $.clock.after(0, () => void tick($, mod, true, true))
+    }
   }
 }
 
@@ -490,6 +663,11 @@ async function poll($: $, mod: Mod) {
       // Listening turned off elsewhere (attend listen off, a private scene),
       // or an identity attend cannot resolve: the row says so.
       const listening = first.status === 'drained'
+      // The host runs while attend has the session listening.
+      if (listening || first.status === 'not_listening') {
+        mod.isListeningOff = !listening
+        syncHost(mod)
+      }
       const was = await readStatus($)
       if (was.listening !== listening || was.cacheLapsed !== first.cacheLapsed) {
         await updateStatus($, s => ({ ...s, listening, cacheLapsed: first.cacheLapsed }))
@@ -916,6 +1094,14 @@ export const register: Register = on => {
     startWatch: undefined,
     contextTokens: undefined,
     heldNote: undefined,
+    host: undefined,
+    hostFor: undefined,
+    isListeningOff: false,
+    hostRespawns: [],
+    isHostStopped: false,
+    isHostWaiting: false,
+    spawnHost: undefined,
+    isCueWaiting: false,
     ka: {
       applies: false,
       gate: 'unknown',
@@ -947,6 +1133,9 @@ export const register: Register = on => {
     // The move's watch runs on this hook's `$`: session.end's bound aborts
     // the waits of its own.
     mod.startWatch = () => watchMove($, mod)
+    // The host's spawn, likewise: a tool call's `$` ends with its hook.
+    // A host whose module unloaded has no one left to tell how it ended.
+    mod.spawnHost = want => void runHost($, mod, want).catch(() => undefined)
     // A reload finds the mode in $.state; a new process (`claude --resume`)
     // finds the session id in the record of sessions that listened, or the
     // project's config starts it, as it does every session there.
@@ -1079,7 +1268,7 @@ export const register: Register = on => {
   on('tool.call', { tool: 'mcp__attend__attend_listen' }, async $ => {
     const was = isActive(await readStatus($))
     await registerActiveTools($)
-    return listenResult(await activate($, mod, await $.session.id()), was, mod.canPoll)
+    return listenResult(await activate($, mod, await $.session.id(), true), was, mod.canPoll)
   })
 
   on('tool.call', { tool: 'mcp__attend__attend_send' }, async ($, e) => {
