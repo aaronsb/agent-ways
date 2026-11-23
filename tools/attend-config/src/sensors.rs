@@ -92,8 +92,8 @@ pub struct SensorFile {
     pub path: Option<PathBuf>,
     /// A project file the allow-list refused: it is not merged.
     pub refused: bool,
-    /// The file sets nothing but `enabled`, so it defines no sensor of its
-    /// own ([`only_switches`]).
+    /// The file sets nothing but `enabled`, `probe` or `probes`, so it
+    /// defines no sensor of its own ([`only_switches`]).
     pub switch: bool,
 }
 
@@ -116,9 +116,10 @@ pub struct Loaded {
     pub findings: Vec<Finding>,
     /// Why a project file was refused.
     pub refused: Option<String>,
-    /// The layer of the highest merged file that sets what a command runs:
-    /// its `argv`, `env` or `cwd`. A project file there puts the command
-    /// under the project's environment rule, whatever lower files set.
+    /// The layer of the highest merged file that sets what a sensor runs:
+    /// a command's `argv`, `env` or `cwd`, or an mcp sensor's `server`. A
+    /// project file there puts the command or server under the project's
+    /// environment rule, whatever lower files set.
     pub command_from: Option<Origin>,
 }
 
@@ -218,16 +219,45 @@ pub fn from_layers(layers: &[Layer], project: &Path, trusted: &[String]) -> Vec<
     by_name.into_iter().filter(|(_, reads)| !only_switches(reads)).map(|(name, reads)| layer(name, reads, trust, project)).collect()
 }
 
-/// Whether every file of a name sets nothing but `enabled`: the switch the
-/// settings screens keep in the user's file for a project's sensor, read in
-/// a project that has no such sensor. It defines none.
+/// Whether every file of a name sets nothing but `enabled`, `probe` or
+/// `probes`: the switch the settings screens keep in the user's file for a
+/// project's sensor, or the probe records `attend sensor probe` keeps
+/// there, read in a project that has no such sensor. It defines none.
 fn only_switches(reads: &[Read]) -> bool {
     reads.iter().all(|r| serde_yaml::from_str::<Value>(&r.text).is_ok_and(|v| is_switch(&v)))
 }
 
-/// Whether a sensor file sets nothing but `enabled`.
+/// Whether a sensor file sets nothing but `enabled`, `probe` or `probes`.
 fn is_switch(doc: &Value) -> bool {
-    doc.as_mapping().is_some_and(|m| m.keys().all(|k| k.as_str() == Some("enabled")))
+    doc.as_mapping().is_some_and(|m| m.keys().all(|k| matches!(k.as_str(), Some("enabled" | "probe" | "probes"))))
+}
+
+/// Drop the `probe` and `probes` records of every file but a user file,
+/// with a finding for each. A probe record says the operator checked a tool, so only the
+/// operator's own file carries one; a repository's or a shipped file's is
+/// ignored.
+///
+/// References:
+/// - ADR-403 §4: where a probe record lives.
+fn user_probes_only(docs: &mut [(Origin, Option<PathBuf>, Value)], findings: &mut Vec<Finding>) {
+    for (origin, path, doc) in docs.iter_mut().filter(|(o, _, _)| *o != Origin::User) {
+        let Some(m) = doc.as_mapping_mut() else { continue };
+        for key in ["probe", "probes"] {
+            if m.remove(key).is_none() {
+                continue;
+            }
+            let file = match origin {
+                Origin::Project => "a project file",
+                _ => "a shipped file",
+            };
+            let line = path.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| line_of(&t, key));
+            findings.push(Finding {
+                file: path.clone(),
+                line,
+                problem: Problem { at: key.into(), message: format!("a probe record is read only from your user sensor file; this one in {file} is ignored"), severity: Severity::Warning },
+            });
+        }
+    }
 }
 
 /// The `.yaml` files in `dir`, by stem, sorted: the files a sensor layer
@@ -274,6 +304,7 @@ fn layer(name: String, reads: Vec<Read>, trust: bool, project: &Path) -> Loaded 
     if findings.iter().any(|f| f.problem.severity == Severity::Invalid) {
         return Loaded { files: files_of(false, &docs), name, spec: None, findings, refused: None, command_from: None };
     }
+    user_probes_only(&mut docs, &mut findings);
     let merged = |docs: &[(Origin, Option<PathBuf>, Value)]| {
         let mut out = Value::Mapping(Default::default());
         for (_, _, v) in docs {
@@ -326,7 +357,7 @@ fn check(name: String, files: Vec<SensorFile>, docs: &[(Origin, Option<PathBuf>,
         };
         findings.push(Finding { file, line, problem });
     }
-    let command_from = docs.iter().rev().find(|(_, _, v)| ["argv", "env", "cwd"].iter().any(|k| v.get(*k).is_some())).map(|(o, _, _)| *o);
+    let command_from = docs.iter().rev().find(|(_, _, v)| ["argv", "env", "cwd", "server"].iter().any(|k| v.get(*k).is_some())).map(|(o, _, _)| *o);
     Loaded { name, files, spec: if invalid { None } else { spec }, findings, refused: None, command_from }
 }
 
@@ -668,6 +699,10 @@ mod tests {
         assert_eq!(from("env: {A: b}\n", true), Some(Origin::Project));
         assert_eq!(from("cwd: sub\n", true), Some(Origin::Project));
         assert_eq!(from("interval: 90\n", true), Some(Origin::User));
+        let mcp = "kind: mcp\nserver: {command: /bin/true}\ntool: t\n";
+        let server = |over: &str| layer("srv".into(), vec![read(Origin::User, mcp), read(Origin::Project, over)], true, Path::new("/p")).command_from;
+        assert_eq!(server("server: {command: /bin/false}\n"), Some(Origin::Project), "an mcp sensor's server is what it runs");
+        assert_eq!(server("interval: 90\n"), Some(Origin::User));
         assert_eq!(from("argv: [/bin/false]\n", false), Some(Origin::User), "a refused project file is not merged");
         let shipped = layer("chk".into(), vec![read(Origin::Builtin, cmd)], false, Path::new("/p"));
         assert_eq!(shipped.command_from, Some(Origin::Builtin));
@@ -679,6 +714,40 @@ mod tests {
         let shipped = SHIPPED.iter().find(|(n, _)| *n == "git").unwrap().1;
         assert!(!only_switches(&[read(Origin::Builtin, shipped), read(Origin::User, "enabled: false\n")]));
         assert!(!only_switches(&[read(Origin::User, "enabled: false\ninterval: 9\n")]));
+        let overlay_text = "probes:\n  /p: {server: s, tool: t}\n";
+        assert!(only_switches(&[read(Origin::User, overlay_text)]), "a probe overlay defines no sensor");
+        let overlay = Path::new("/nonexistent/user/sensors");
+        assert_eq!(check_edit_under(overlay, &overlay.join("chat.yaml"), overlay_text), Ok(()), "the probe writes an overlay check_edit takes");
+    }
+
+    /// A probe record is read from a user file only: one in a project or a
+    /// shipped file is dropped with a finding naming it.
+    #[test]
+    fn a_probe_record_is_read_only_from_a_user_file() {
+        let mcp = "kind: mcp\nserver: {command: sh}\ntool: t\n";
+        let record = "probe: {server: sh, binding: inline:00, tool: t, calls_match: true, confirmed: true}\n";
+        let probe_of = |l: &Loaded| match &l.spec.as_ref().unwrap().block {
+            sensor_spec::Block::Mcp(m) => m.probe.clone(),
+            _ => panic!(),
+        };
+        let from_user = layer("chat".into(), vec![read(Origin::User, &format!("{mcp}{record}"))], true, Path::new("/p"));
+        assert!(probe_of(&from_user).is_some());
+        let from_project = layer("chat".into(), vec![read(Origin::User, mcp), read(Origin::Project, record)], true, Path::new("/p"));
+        assert_eq!(probe_of(&from_project), None);
+        let found: Vec<_> = from_project.findings.iter().map(|f| (f.problem.severity, f.problem.message.as_str())).collect();
+        assert_eq!(found, [(Severity::Warning, "a probe record is read only from your user sensor file; this one in a project file is ignored")]);
+        let over_project = layer("chat".into(), vec![read(Origin::User, record), read(Origin::Project, mcp)], true, Path::new("/p"));
+        assert!(probe_of(&over_project).is_some(), "a user overlay's record reaches a project's sensor");
+        let keyed = "probes:\n  /p: {server: sh, binding: inline:00, tool: t, calls_match: true, confirmed: true}\n";
+        let probes_of = |l: &Loaded| match &l.spec.as_ref().unwrap().block {
+            sensor_spec::Block::Mcp(m) => m.probes.len(),
+            _ => panic!(),
+        };
+        let keyed_in_project = layer("chat".into(), vec![read(Origin::User, mcp), read(Origin::Project, keyed)], true, Path::new("/p"));
+        assert_eq!(probes_of(&keyed_in_project), 0, "a project file's probes are dropped too");
+        assert_eq!(keyed_in_project.findings.len(), 1, "{:?}", keyed_in_project.findings);
+        let keyed_in_user = layer("chat".into(), vec![read(Origin::User, keyed), read(Origin::Project, mcp)], true, Path::new("/p"));
+        assert_eq!(probes_of(&keyed_in_user), 1);
     }
 
     #[test]

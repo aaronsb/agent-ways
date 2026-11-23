@@ -23,6 +23,11 @@
 //! over, so a trigger kept for the session that fired under the old id
 //! stays spent.
 //!
+//! TERM, HUP or INT ends the host at its next look, within a second: it
+//! returns, and the sensors it drops end their MCP servers. A host killed
+//! with SIGKILL ends nothing, so a starting host first ends the servers a
+//! killed process left running for its project.
+//!
 //! References:
 //! - ADR-416 items 2 to 5: the host, its stdout, the store as transport,
 //!   the system sender and what the host keeps of `attend run`.
@@ -30,6 +35,7 @@
 
 use std::collections::BinaryHeap;
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use super::governor::{DisclosureGovernor, ScheduledSensor};
@@ -44,6 +50,27 @@ const RELOAD_CHECK_INTERVAL: Duration = Duration::from_secs(10);
 /// The longest the loop sleeps between looks at its parent, so a sensor
 /// polled once a week does not hold it asleep for a week.
 const WAKE_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Set by TERM, HUP or INT: the host ends at its next look.
+static STOP: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn on_stop(_: libc::c_int) {
+    STOP.store(true, Ordering::Relaxed);
+}
+
+/// Take TERM, HUP and INT as a request to end, so the host returns and
+/// drops its sensors, which ends their servers, instead of dying with
+/// them running.
+fn end_on_signals() {
+    #[cfg(unix)]
+    for sig in [libc::SIGTERM, libc::SIGHUP, libc::SIGINT] {
+        // SAFETY: the handler only stores to an atomic, which is
+        // async-signal-safe; it is set before any thread starts.
+        unsafe {
+            libc::signal(sig, on_stop as *const () as libc::sighandler_t);
+        }
+    }
+}
 
 /// The host's sink: each line a system signal, and a cue on stdout. An
 /// event-lane batch under the cut ([`crate::sensors::writer::EVENT_CUT`]) is
@@ -111,6 +138,7 @@ pub(crate) fn cmd_host(a: &HostArgs) {
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
     }
+    end_on_signals();
     std::env::remove_var("ATTEND_RELOADED_FROM");
     let refuse = |why: String| -> ! { crate::cmd::refuse_usage(&format!("attend sensor host: {why}"), &why, false) };
     if !std::path::Path::new(&a.cwd).is_dir() {
@@ -126,6 +154,11 @@ pub(crate) fn cmd_host(a: &HostArgs) {
     if let Some(old) = moved_from {
         let moved = sensors::hosted::move_stores(old, &session);
         emit::log(&format!("moved {moved} sensor store(s) from {old}"));
+    }
+
+    let swept = sensors::sweep_mcp_servers(&focus.working_dir);
+    if swept > 0 {
+        emit::log(&format!("ended {swept} MCP server(s) a killed process left running"));
     }
 
     let cfg = config::Config::load(&focus.working_dir);
@@ -176,6 +209,10 @@ pub(crate) fn cmd_host(a: &HostArgs) {
     loop {
         if parent_id() != parent || is_gone(a.parent) {
             emit::log("the process that started the sensor host is gone; it exits");
+            return;
+        }
+        if STOP.load(Ordering::Relaxed) {
+            emit::log("asked to end by a signal; the sensor host exits");
             return;
         }
         if last_reload_check.elapsed() >= RELOAD_CHECK_INTERVAL {

@@ -87,7 +87,7 @@ pub(crate) enum Commands {
         passthrough: Vec<String>,
     },
 
-    /// List, poll and test-fire sensors, and audit their permissions (default: list)
+    /// List, poll, probe and test-fire sensors, and audit their permissions (default: list)
     Sensor {
         #[command(subcommand)]
         sub: Option<SensorCmd>,
@@ -259,6 +259,21 @@ pub(crate) enum SensorCmd {
     /// Send a synthetic result through a sensor's threshold and lane to the session, marked [test]
     Fire(FireArgs),
 
+    /// Call an mcp sensor's tool twice and record whether reading it changed it
+    ///
+    /// The probe calls the tool twice in a row and checks that the second
+    /// call returned every item of the first, by each trigger's key, or for
+    /// state triggers the same state. It cannot see read state the service
+    /// keeps, such as a message marked read, so it asks you at the terminal
+    /// to confirm in another client that the items are untouched; with no
+    /// terminal the record says they were not confirmed. From Claude Code,
+    /// run it as `! attend sensor probe <name>`. It writes the record as
+    /// `probe` in the sensor's user file, created with that field alone
+    /// when the sensor has none. An mcp sensor runs only once its record
+    /// holds: taken with its server's definition, tool and args, with the
+    /// calls matching and confirmed.
+    Probe(ProbeArgs),
+
     /// Compare each sensor's `requires:` against settings.json
     Permissions,
 
@@ -309,6 +324,15 @@ pub(crate) struct PollArgs {
     #[arg(long)]
     pub(crate) dry_run: bool,
     /// Print the result as one JSON document
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Args)]
+pub(crate) struct ProbeArgs {
+    /// The mcp sensor's name
+    pub(crate) name: String,
+    /// Print the record as one JSON document
     #[arg(long)]
     pub(crate) json: bool,
 }

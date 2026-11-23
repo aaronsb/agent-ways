@@ -129,6 +129,7 @@ pub fn cli_main() {
             SensorCmd::List(a) => cmd::sensors::list(a.json),
             SensorCmd::Poll(a) => cmd::sensors::poll(&a),
             SensorCmd::Fire(a) => cmd::sensors::fire(&a),
+            SensorCmd::Probe(a) => cmd::sensors::probe(&a),
             SensorCmd::Permissions => cmd::permissions::cmd_permissions_audit(),
             SensorCmd::Host(a) => cmd::run::host::cmd_host(&a),
         },
@@ -154,7 +155,8 @@ fn refuse_a_sensor_command() {
 
 /// Whether `command` acts as the session or reads what is the session's:
 /// it sends, replies, joins, listens, drains or reads the session's
-/// messages, store or enrollment. A process a sensor command started is
+/// messages, store or enrollment, or records the operator's word, as a
+/// probe's confirmation does. A process a sensor command started is
 /// refused these. The rest need no session and run for it as for any
 /// outside caller: help and version, `message cleanup`, `peer list`,
 /// `channel list`, `sensor list`, `sensor permissions` and `config`.

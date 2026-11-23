@@ -710,3 +710,42 @@ fn the_last_poll_is_the_session_s_own_or_with_no_session_the_newest_in_the_proje
     assert_eq!(at(Some("s2")), [("git".to_string(), 20)]);
     assert_eq!(at(None), [("git".to_string(), 20), ("processes".to_string(), 5)], "the old-format store at 99 is not read");
 }
+
+/// The probe's comparison: an item trigger needs every item of the first
+/// result again, by its key; a state trigger the same value in each field
+/// it watches; a sensor with no triggers the same result.
+#[test]
+fn a_second_result_keeps_the_first_when_each_trigger_sees_what_it_saw() {
+    let spec = |yaml: &str| {
+        let doc = format!("kind: mcp\nserver: s\ntool: t\n{yaml}");
+        let p = sensor_spec::parse("probe", &serde_yaml::from_str(&doc).unwrap());
+        assert!(p.problems.is_empty(), "{yaml}: {:?}", p.problems);
+        p.spec.unwrap()
+    };
+    let items = spec("triggers:\n  - {name: new, path: \"$.items[*]\", key: id, on: added}\n");
+    let r = |ids: &[&str]| json!({ "items": ids.iter().map(|i| json!({ "id": i })).collect::<Vec<_>>() });
+    assert_eq!(kept(&items, &r(&["a", "b"]), &r(&["a", "b", "c"])), Ok(()), "a new item is not a loss");
+    assert_eq!(kept(&items, &r(&["a", "b"]), &r(&["b"])), Err("trigger new: the second call did not return the item a".into()));
+    let state = spec("state:\n  unread: {type: number, from: \"$.unread\"}\ntriggers:\n  - {name: more, state: {unread: rises}}\n");
+    let n = |u: u32| json!({ "unread": u, "noise": u * 7 });
+    assert_eq!(kept(&state, &n(3), &n(3)), Ok(()));
+    assert_eq!(kept(&state, &n(3), &n(0)), Err("trigger more: the second call left unread at another value".into()));
+    let none = spec("");
+    assert_eq!(kept(&none, &n(1), &n(1)), Ok(()));
+    assert_eq!(kept(&none, &n(1), &n(2)), Err("the second call returned another result".into()));
+}
+
+/// A first result with nothing in it proves nothing, and an `enters`
+/// trigger needs each item to meet `where` as it did.
+#[test]
+fn a_probe_refuses_an_empty_first_result_and_a_changed_where() {
+    let spec = |yaml: &str| sensor_spec::parse("probe", &serde_yaml::from_str(&format!("kind: mcp\nserver: s\ntool: t\n{yaml}")).unwrap()).spec.unwrap();
+    let nothing = Err("nothing to compare; probe while the tool returns items".to_string());
+    let items = spec("triggers:\n  - {name: new, path: \"$.items[*]\", key: id, on: added}\n");
+    assert_eq!(kept(&items, &json!({"items": []}), &json!({"items": []})), nothing);
+    assert_eq!(kept(&spec(""), &json!({}), &json!({})), nothing);
+    let unread = spec("triggers:\n  - {name: unread, path: \"$.items[*]\", key: id, on: enters, where: {unread: true}}\n");
+    let r = |u: bool| json!({"items": [{"id": "a", "unread": u}]});
+    assert_eq!(kept(&unread, &r(true), &r(true)), Ok(()));
+    assert_eq!(kept(&unread, &r(true), &r(false)), Err("trigger unread: the item a meets where differently in the second call".into()), "a read that marks the item read");
+}

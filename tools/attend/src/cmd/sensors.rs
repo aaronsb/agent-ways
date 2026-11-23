@@ -2,18 +2,26 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-//! `attend sensor list`, `poll` and `fire` (ADR-403 §6).
+//! `attend sensor list`, `poll`, `probe` and `fire`.
 //!
-//! `list` reports every sensor the files declare as an item (ADR-516): its
-//! kind, origin and file, source and version, recorded state, and lane. `poll` runs one real poll
-//! and `fire` sends a synthetic result; both go through the sensor's real
-//! threshold and lane, and unless `--dry-run` write what it lets through
-//! to the session as system signals, through the writer the sensor host
-//! uses. The session is `--session`, else the one the shell runs in; with
-//! neither, they deliver nothing and say so. A command sensor's poll and
-//! fire run its triggers against the session's store and print each
-//! verdict. Neither writes the store, except a fire with `--commit`. A
-//! fire's lines are marked `[test]`.
+//! `list` reports every sensor the files declare as an item: its kind,
+//! origin and file, source and version, recorded state, and lane. `poll`
+//! runs one real poll and `fire` sends a synthetic result; both go through
+//! the sensor's real threshold and lane, and unless `--dry-run` write what
+//! it lets through to the session as system signals, through the writer
+//! the sensor host uses. The session is `--session`, else the one the
+//! shell runs in; with neither, they deliver nothing and say so. A command
+//! or mcp sensor's poll and fire run its triggers against the session's
+//! store and print each verdict. Neither writes the store, except a fire
+//! with `--commit`. A fire's lines are marked `[test]`.
+//!
+//! `probe` calls an mcp sensor's tool twice, compares the calls, takes the
+//! operator's confirmation and writes the record into the sensor's user
+//! file. It delivers nothing.
+//!
+//! References:
+//! - ADR-403 §4 and §6: the probe, and testing a sensor from the CLI.
+//! - ADR-516: a sensor listed as an item.
 
 use std::io::Read;
 
@@ -26,6 +34,9 @@ use crate::config::Config;
 use crate::sensors::{self, writer::Writer, Ctx, Focus, Hosted, Sensor, State};
 use sensor_spec::{Block, Kind, Lane};
 use sensor_trait::Lapse;
+
+mod probe;
+pub(crate) use probe::probe;
 
 /// The project the sensors resolve for: the session's, as `attend run` uses.
 fn context() -> (Focus, Config) {
@@ -250,14 +261,21 @@ fn find(all: Vec<Hosted>, name: &str, json: bool) -> Hosted {
     })
 }
 
-/// Exit 3 when `h` is not a sensor attend can poll here.
+/// Exit 3 when `h` is not a sensor attend can poll here. A poll of an mcp
+/// sensor calls its tool, so it needs a probe record that holds whether
+/// or not the sensor is enabled; a fire calls no server, so it takes one
+/// with no record yet.
 fn require_hosted(h: &Hosted, verb: &str, json: bool) {
-    let runnable = h.state.runs() || h.state == State::Off;
-    let kind_runs = matches!(h.loaded.spec.as_ref().map(|s| s.kind), Some(Kind::Crate | Kind::Command));
-    if runnable && kind_runs {
+    let runnable = h.state.runs() || h.state == State::Off || (verb == "fire" && matches!(h.state, State::Unprobed(_)));
+    let kind_runs = matches!(h.loaded.spec.as_ref().map(|s| s.kind), Some(Kind::Crate | Kind::Command | Kind::Mcp));
+    let gap = (verb == "poll").then(|| h.probe_gap()).flatten();
+    if runnable && kind_runs && gap.is_none() {
         return;
     }
-    let why = format!("{} is {}{}", h.name(), h.state.label(), h.state.detail().map(|d| format!(": {d}")).unwrap_or_default());
+    let why = match &gap {
+        Some(g) => format!("{} has no probe record that holds: {g}", h.name()),
+        None => format!("{} is {}{}", h.name(), h.state.label(), h.state.detail().map(|d| format!(": {d}")).unwrap_or_default()),
+    };
     if json {
         crate::cmd::print_json(&json!({ "sensor": h.name(), "state": h.state.label(), "detail": h.state.detail(), "error": why }));
     } else {
@@ -275,9 +293,14 @@ fn open(h: &Hosted, cfg: &Config, project: &str, session: Option<&str>, record: 
     })
 }
 
-/// Whether `h` is a sensor whose triggers read a JSON poll result.
+/// Whether `h` is a sensor whose triggers read a JSON poll result: a
+/// command sensor with `output: json`, or an mcp sensor.
 fn declares_triggers(h: &Hosted) -> bool {
-    matches!(h.loaded.spec.as_ref().map(|s| &s.block), Some(Block::Command(c)) if c.output == sensor_spec::Output::Json)
+    match h.loaded.spec.as_ref().map(|s| &s.block) {
+        Some(Block::Command(c)) => c.output == sensor_spec::Output::Json,
+        Some(Block::Mcp(_)) => true,
+        _ => false,
+    }
 }
 
 /// Each trigger's verdict as `--json` prints it.
@@ -530,9 +553,11 @@ mod tests {
         let user = std::path::Path::new("/c/attend/sensors");
         layers.push(file_layer("weather", Origin::User, Some(&user.join("weather.yaml")), "kind: command\nargv: [curl, -s, x]\noutput: json\n"));
         layers.push(file_layer("chat", Origin::User, Some(&user.join("chat.yaml")), "kind: mcp\nserver: slack\ntool: list\n"));
+        let probed = "kind: mcp\nserver: slack\ntool: list\nallow_unannotated: true\nprobe: {server: slack, binding: user:0, tool: list, args: {}, calls_match: true, confirmed: true}\n";
+        layers.push(file_layer("probed", Origin::User, Some(&user.join("probed.yaml")), probed));
         layers.push(file_layer("git", Origin::User, Some(&user.join("git.yaml")), "interval: 90\n"));
         let loaded = from_layers(&layers, std::path::Path::new("/nonexistent/p"), &[]);
-        sensors::catalog_of(loaded, |_| None).iter().map(entry).collect()
+        sensors::catalog_of(loaded, "/nonexistent/p", |_| None).iter().map(entry).collect()
     }
 
     #[test]
@@ -547,14 +572,18 @@ mod tests {
         assert!(git["version"].as_str().is_some_and(|v| !v.contains('@')));
         assert_eq!(git["overrides"], json!([{ "origin": "user", "how": "extends", "path": "/c/attend/sensors/git.yaml" }]));
         assert_eq!(git["interval"], json!(90));
-        // A command sensor runs, and an mcp sensor attend does not run yet
+        // A command sensor runs, and an mcp sensor with no probe record
         // reads degraded, with the reason.
         let weather = find("weather");
         assert_eq!((weather["kind"].as_str(), weather["origin"].as_str(), weather["state"].as_str()), (Some("command"), Some("user"), Some("active")));
         assert_eq!((weather["path"].as_str(), weather["source"].as_str(), weather["detail"].as_str()), (Some("/c/attend/sensors/weather.yaml"), Some("curl"), None));
         let chat = find("chat");
         assert_eq!((chat["kind"].as_str(), chat["state"].as_str()), (Some("mcp"), Some("degraded")));
-        assert!(chat["detail"].as_str().is_some_and(|d| d.contains("not yet hosted")), "{chat}");
+        assert_eq!(chat["detail"].as_str(), Some("no probe record; run `attend sensor probe chat` at a terminal"), "{chat}");
+        // One whose record holds runs, and its override is noted.
+        let probed = find("probed");
+        assert_eq!((probed["state"].as_str(), probed["detail"].as_str()), (Some("active"), None), "{probed}");
+        assert_eq!(probed["notes"], json!(["overridden: allow_unannotated: true calls list even though it declares no readOnlyHint"]));
     }
 
     #[test]

@@ -26,7 +26,7 @@ Every sensor is one YAML file (ADR-403). attend embeds eight shipped files, kept
 | `off` | its file sets `enabled: false` |
 | `invalid` | a problem in its merged files keeps it from running |
 | `refused` | a project command or mcp file, from a project not in `attend.project_sensors`, with no lower layer |
-| `degraded` | an `mcp` sensor, which attend does not run yet, or a `ways` sensor, which ways runs |
+| `degraded` | an `mcp` sensor with no probe record that holds for its server, tool and args, or a `ways` sensor, which ways runs |
 | `not-compiled` | its file names a compiled sensor this build leaves out |
 | `unknown` | `ways settings items` could not ask attend for the sensor's state; the detail says why |
 
@@ -175,7 +175,7 @@ While armed, wakes an idle session once at 50 idle minutes so the prompt cache i
 
 1. **Does a shipped sensor cover it?** The `git` sensor already watches git state. A file of the same name in your user or project layer tunes it.
 2. **Can a program print it?** Then write a `command` sensor from `example-command.yaml`: an argv and its output, with no Rust and no rebuild.
-3. **Does a read-only MCP tool return it?** Then write an `mcp` sensor from `example-mcp.yaml`. attend does not run the kind yet.
+3. **Does a read-only MCP tool return it?** Then write an `mcp` sensor from `example-mcp.yaml`, and run `attend sensor probe <name>` before it runs.
 4. **Does it need native speed, state no file can declare, or complex logic?** Then write a compiled sensor: a `sensor-*` crate in `tools/` that implements `Sensor`, an optional dependency of attend with a feature, and a shipped `crate` file that names it. See [`authoring-sensors.md`](authoring-sensors.md#compiled-sensors).
 
 ## Related

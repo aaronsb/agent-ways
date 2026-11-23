@@ -517,6 +517,68 @@ fn seen_by(t: &Trigger, result: &Value, fields: &state::Fields) -> (Seen, BTreeM
     (seen, items)
 }
 
+/// Whether `second`, a poll result taken right after `first`, kept what
+/// `first` returned, as `attend sensor probe` checks a tool that should
+/// change nothing by being read: every item an item trigger selects from
+/// `first`, by its key, is selected from `second`, and for `enters` and
+/// `leaves` still meets `where` as it did; every field a state trigger
+/// watches holds the same value after each result's write. With no
+/// triggers the two results are compared whole. The error names the first
+/// trigger that saw a difference, and what it was.
+///
+/// A first result in which no item trigger selects anything, or an empty
+/// one for a sensor with no triggers, shows nothing that a read could have
+/// changed, and is refused: the probe has nothing to compare.
+///
+/// References:
+/// - ADR-403 §4: the probe's call comparison.
+pub fn kept(spec: &SensorSpec, first: &Value, second: &Value) -> Result<(), String> {
+    const NOTHING: &str = "nothing to compare; probe while the tool returns items";
+    let empty = |v: &Value| match v {
+        Value::Null => true,
+        Value::Array(a) => a.is_empty(),
+        Value::Object(o) => o.is_empty(),
+        _ => false,
+    };
+    if spec.triggers.is_empty() {
+        return match () {
+            _ if empty(first) => Err(NOTHING.into()),
+            _ if eval::same(first, second) => Ok(()),
+            _ => Err("the second call returned another result".into()),
+        };
+    }
+    let write = |r: &Value| state::write(&spec.state, &state::fresh(&spec.state), r, None);
+    let mut selected = false;
+    for t in &spec.triggers {
+        match &t.test {
+            Test::State(changes) => {
+                let (a, b) = (write(first)?, write(second)?);
+                if let Some(f) = changes.keys().find(|f| a.get(*f) != b.get(*f)) {
+                    return Err(format!("trigger {}: the second call left {f} at another value", t.name));
+                }
+            }
+            Test::Items { on, .. } => {
+                let (seen_a, a) = seen_by(t, first, &state::Fields::new());
+                let (seen_b, b) = seen_by(t, second, &state::Fields::new());
+                selected |= !a.is_empty();
+                if let Some(k) = a.keys().find(|k| !b.contains_key(*k)) {
+                    return Err(format!("trigger {}: the second call did not return the item {k}", t.name));
+                }
+                if matches!(on, On::Enters | On::Leaves) {
+                    if let Some(k) = seen_a.keys().find(|k| seen_a.get(*k) != seen_b.get(*k)) {
+                        return Err(format!("trigger {}: the item {k} meets where differently in the second call", t.name));
+                    }
+                }
+            }
+        }
+    }
+    let items = spec.triggers.iter().any(|t| matches!(t.test, Test::Items { .. }));
+    match items && !selected {
+        true => Err(NOTHING.into()),
+        false => Ok(()),
+    }
+}
+
 /// Whether a state trigger's fields changed as `changes` says between
 /// `prev` and `now`, combined by `how`. A number rises or falls by value.
 fn state_fired(changes: &BTreeMap<String, Change>, how: Match, prev: &Seen, now: &Seen) -> bool {

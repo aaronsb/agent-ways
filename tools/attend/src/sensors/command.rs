@@ -58,7 +58,7 @@ pub const PROJECT_ENV: &[&str] = &["PATH", "HOME", "USER", "LOGNAME", "SHELL", "
 
 /// Which environment a command starts from, by the layer of the file that
 /// set what it runs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Inherit {
     /// A shipped or user file: attend's environment less [`STRIPPED`].
     Stripped,
@@ -199,7 +199,7 @@ fn run(block: &CommandBlock, project: &Path, inherit: Inherit) -> Result<String,
 /// Whether `child` has exited. On Unix the exit is seen without reaping
 /// it (`waitid` with `WNOWAIT`), so it stays a zombie and no new process
 /// can take its process group id before the group is killed.
-fn leader_exited(child: &mut std::process::Child) -> std::io::Result<bool> {
+pub(super) fn leader_exited(child: &mut std::process::Child) -> std::io::Result<bool> {
     #[cfg(unix)]
     {
         // SAFETY: `info` is a zeroed siginfo_t that waitid fills; with
@@ -218,7 +218,7 @@ fn leader_exited(child: &mut std::process::Child) -> std::io::Result<bool> {
 }
 
 /// End `child` and every process in its group.
-fn kill_group(child: &mut std::process::Child) {
+pub(super) fn kill_group(child: &mut std::process::Child) {
     #[cfg(unix)]
     // SAFETY: kill(2) takes no pointers; a negative pid names the process
     // group the child leads, which process_group(0) made.

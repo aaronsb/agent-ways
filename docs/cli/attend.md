@@ -48,6 +48,7 @@ This document contains the help content for the `attend` command-line program.
 * [`attend sensor list`↴](#attend-sensor-list)
 * [`attend sensor poll`↴](#attend-sensor-poll)
 * [`attend sensor fire`↴](#attend-sensor-fire)
+* [`attend sensor probe`↴](#attend-sensor-probe)
 * [`attend sensor permissions`↴](#attend-sensor-permissions)
 * [`attend sensor host`↴](#attend-sensor-host)
 * [`attend config`↴](#attend-config)
@@ -74,7 +75,7 @@ In a session with the attend mod, the attend_* tools send, reply, join and list 
 * `peer` — List sessions, show this session's identity and the running loops (default: list)
 * `keepwarm` — Keep the prompt cache warm across idle stretches (ADR-182; default: status)
 * `chat` — Launch the interactive chat TUI (ADR-120)
-* `sensor` — List, poll and test-fire sensors, and audit their permissions (default: list)
+* `sensor` — List, poll, probe and test-fire sensors, and audit their permissions (default: list)
 * `config` — Manage configuration (default: show)
 
 
@@ -681,7 +682,7 @@ Launch the interactive chat TUI (ADR-120)
 
 ## `attend sensor`
 
-List, poll and test-fire sensors, and audit their permissions (default: list)
+List, poll, probe and test-fire sensors, and audit their permissions (default: list)
 
 **Usage:** `attend sensor [COMMAND]`
 
@@ -690,6 +691,7 @@ List, poll and test-fire sensors, and audit their permissions (default: list)
 * `list` — List every sensor the files declare, with its kind, origin, file, source and state
 * `poll` — Run one real poll of a sensor and deliver what its threshold lets through to the session
 * `fire` — Send a synthetic result through a sensor's threshold and lane to the session, marked [test]
+* `probe` — Call an mcp sensor's tool twice and record whether reading it changed it
 * `permissions` — Compare each sensor's `requires:` against settings.json
 * `host` — Run one session's sensors and write what they report to it as system signals
 
@@ -742,6 +744,24 @@ Send a synthetic result through a sensor's threshold and lane to the session, ma
 * `--dry-run` — Stop before delivery
 * `--commit` — Keep the trigger memory and declared state the fire leaves; a test fire writes neither without it
 * `--json` — Print the result as one JSON document
+
+
+
+## `attend sensor probe`
+
+Call an mcp sensor's tool twice and record whether reading it changed it
+
+The probe calls the tool twice in a row and checks that the second call returned every item of the first, by each trigger's key, or for state triggers the same state. It cannot see read state the service keeps, such as a message marked read, so it asks you at the terminal to confirm in another client that the items are untouched; with no terminal the record says they were not confirmed. From Claude Code, run it as `! attend sensor probe <name>`. It writes the record as `probe` in the sensor's user file, created with that field alone when the sensor has none. An mcp sensor runs only once its record holds: taken with its server's definition, tool and args, with the calls matching and confirmed.
+
+**Usage:** `attend sensor probe [OPTIONS] <NAME>`
+
+###### **Arguments:**
+
+* `<NAME>` — The mcp sensor's name
+
+###### **Options:**
+
+* `--json` — Print the record as one JSON document
 
 
 

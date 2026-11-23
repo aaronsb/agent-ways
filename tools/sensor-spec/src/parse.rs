@@ -21,7 +21,7 @@ const CORE: &[&str] = &[
 ];
 const CRATE: &[&str] = &["crate"];
 const COMMAND: &[&str] = &["argv", "env", "cwd", "timeout", "output"];
-const MCP: &[&str] = &["server", "tool", "args", "allow_unannotated", "probe"];
+const MCP: &[&str] = &["server", "tool", "args", "allow_unannotated", "probe", "probes"];
 const WAYS: &[&str] = &["spec", "name", "description", "kind", "enabled", "rules", "dispatch"];
 
 /// The outcome of [`parse`]: the sensor when nothing makes it invalid, and
@@ -268,20 +268,42 @@ impl Reader {
         let allow_unannotated = self.boolean(m, "allow_unannotated").unwrap_or(false);
         let probe = match m.get("probe") {
             None | Some(Value::Null) => None,
-            Some(Value::Mapping(p)) => Some(ProbeRecord {
-                server: self.text(p, "server").unwrap_or_default(),
-                tool: self.text(p, "tool").unwrap_or_default(),
-                args: self.mapping(p, "args").unwrap_or_default(),
-                calls_match: self.boolean(p, "calls_match").unwrap_or(false),
-                confirmed: self.boolean(p, "confirmed").unwrap_or(false),
-                at: self.text(p, "at"),
-            }),
+            Some(Value::Mapping(p)) => Some(self.record(p)),
             Some(_) => {
                 self.bad("probe", "probe is the record `attend sensor probe` writes");
                 None
             }
         };
-        Some(McpBlock { server, tool, args, allow_unannotated, probe })
+        let mut probes = BTreeMap::new();
+        match m.get("probes") {
+            None | Some(Value::Null) => {}
+            Some(Value::Mapping(by)) => {
+                for (project, p) in by {
+                    match (project.as_str(), p.as_mapping()) {
+                        (Some(project), Some(p)) => {
+                            let r = self.record(p);
+                            probes.insert(project.to_string(), r);
+                        }
+                        _ => self.bad("probes", "probes maps a project's path to the record `attend sensor probe` writes for it"),
+                    }
+                }
+            }
+            Some(_) => self.bad("probes", "probes maps a project's path to the record `attend sensor probe` writes for it"),
+        }
+        Some(McpBlock { server, tool, args, allow_unannotated, probe, probes })
+    }
+
+    /// A probe record as `attend sensor probe` writes it.
+    fn record(&mut self, p: &Mapping) -> ProbeRecord {
+        ProbeRecord {
+            server: self.text(p, "server").unwrap_or_default(),
+            binding: self.text(p, "binding"),
+            tool: self.text(p, "tool").unwrap_or_default(),
+            args: self.mapping(p, "args").unwrap_or_default(),
+            calls_match: self.boolean(p, "calls_match").unwrap_or(false),
+            confirmed: self.boolean(p, "confirmed").unwrap_or(false),
+            at: self.text(p, "at"),
+        }
     }
 
     fn state(&mut self, kind: Kind, m: &Mapping) -> BTreeMap<String, StateField> {
