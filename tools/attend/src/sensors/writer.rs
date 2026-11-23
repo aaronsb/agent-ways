@@ -6,11 +6,11 @@
 //! addressed to one session, in its project's tray.
 //!
 //! A line becomes a signal from `system:<sensor>` with `to` set to the
-//! session, the lane the sensor runs on, and an expiry. On the event lane a
-//! line lapses when its trigger's `expires` says, after the decay window
-//! when the sensor gave no lapse, and never when the trigger keeps it until
-//! the session reads it. A message-lane line lapses only when its trigger
-//! says so. The sensor host and `attend sensor poll` and `fire` write
+//! session, the lane the sensor runs on, and an expiry. A line whose
+//! trigger sets `expires` lapses when it says, or never for `session`. A
+//! line with no `expires`, a compiled sensor's line among them, takes its
+//! lane's default: the decay window on the event lane, and no expiry on the
+//! message lane. The sensor host and `attend sensor poll` and `fire` write
 //! through it; the drain delivers what it writes like any message.
 //!
 //! References:
@@ -121,6 +121,37 @@ mod tests {
         assert!(!kept.contains("expires:"), "{kept}");
         let message = writer().line("chat", sensor_spec::Lane::Message, None, "hello", 1).unwrap();
         assert_eq!(signal::parse_signal(signal::wire_line(&message)).unwrap().lane, Some(Lane::Message));
+    }
+
+    /// The lane and expiry of the line the file sensor `yaml` makes of
+    /// `result`, with the lapse its trigger gave it, as the writer writes it
+    /// at `now`.
+    fn written(yaml: &str, result: serde_json::Value, now: u64) -> (Option<Lane>, Option<u64>) {
+        struct Never;
+        impl crate::sensors::hosted::Source for Never {
+            fn fetch(&mut self) -> Result<crate::sensors::hosted::Fetched, String> {
+                Err("unused".into())
+            }
+        }
+        let spec = sensor_spec::parse("probe", &serde_yaml::from_str(yaml).unwrap()).spec.unwrap();
+        let mut s = crate::sensors::hosted::FileSensor::declared(&spec, Box::new(Never), "/work/proj", None, false);
+        let (_, text) = s.evaluate(&result).pop().expect("the trigger fires");
+        let line = writer().line("probe", spec.lane(), sensor_trait::Sensor::lapse(&s, &text), &text, now).unwrap();
+        let s = signal::parse_signal(signal::wire_line(&line)).unwrap();
+        (s.lane, s.expires)
+    }
+
+    /// A trigger with no `expires` takes its lane's default: a message-lane
+    /// line does not lapse, and an event-lane line lapses with the decay
+    /// window. One that sets it lapses when it says.
+    #[test]
+    fn a_trigger_without_expires_takes_its_lane_s_default() {
+        let trigger = |extra: &str| format!("triggers: [{{name: up, path: \"$\", on: enters, where: {{up: true}}, memory: session, author: who{extra}}}]\n");
+        let command = "kind: command\nargv: [x]\noutput: json\n";
+        let result = serde_json::json!({"up": true, "who": "ann"});
+        assert_eq!(written(&format!("{command}lane: message\n{}", trigger("")), result.clone(), 1000), (Some(Lane::Message), None));
+        assert_eq!(written(&format!("{command}{}", trigger("")), result.clone(), 1000), (Some(Lane::Event), Some(1000 + EXPIRES_DEFAULT)));
+        assert_eq!(written(&format!("{command}lane: message\n{}", trigger(", expires: 60")), result, 1000), (Some(Lane::Message), Some(1060)));
     }
 
     #[test]

@@ -197,7 +197,7 @@ pub struct FileSensor {
     /// What each trigger made of the last poll.
     verdicts: Vec<Verdict>,
     /// How long each observation of the last poll stays deliverable, by
-    /// description.
+    /// description, for the triggers that set `expires`.
     lapses: Vec<(String, Expires)>,
     /// When this sensor last wrote its store, or read it, as the file's
     /// modification time.
@@ -401,7 +401,9 @@ impl FileSensor {
                     None => format!("{} {}: {k}", self.name, t.name),
                 };
                 let text = super::deliverable(&text);
-                self.lapses.push((text.clone(), t.expiry()));
+                if let Some(e) = t.expires {
+                    self.lapses.push((text.clone(), e));
+                }
                 out.push((t.magnitude.unwrap_or(1.0), text));
             }
             self.verdicts.push(Verdict { trigger: t.name.clone(), fired: keys });
@@ -643,8 +645,9 @@ impl Sensor for FileSensor {
     }
 
     /// How long the observation `description` of the last poll stays
-    /// deliverable: its trigger's `expires`. None for an observation no
-    /// trigger made, which takes the decay window.
+    /// deliverable: its trigger's `expires`. None when the trigger sets no
+    /// `expires`, or no trigger made it; the writer then applies its
+    /// lane's default.
     fn lapse(&self, description: &str) -> Option<sensor_trait::Lapse> {
         self.lapses.iter().find(|(d, _)| d == description).map(|(_, e)| match e {
             Expires::Seconds(n) => sensor_trait::Lapse::After(*n),
