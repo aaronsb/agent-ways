@@ -33,14 +33,16 @@
 //! another fingerprint belongs to an earlier definition and reads as none.
 //! Memory a trigger keeps for the session (`memory: session`) lives in the
 //! process and travels in the session's checkpoint through
-//! [`Sensor::export_state`], so a re-executed run keeps it and a trigger
-//! definition fires at most once in the session.
+//! [`Sensor::export_state`], so a re-executed run keeps it. A trigger
+//! definition's line is delivered at most once in the session, and one the
+//! loop dropped is offered again ([`session`]).
 //!
 //! References:
 //! - ADR-403 §1 and §3b: the store, where it lives, its retention, and the
 //!   fresh baseline a discarded store or changed declaration gives.
-//! - ADR-416 items 6 and 8: `memory: session` firing at most once per
-//!   session, and stores keyed by session and carried by a session's move.
+//! - ADR-416 items 6 and 8: `memory: session` delivering its line at most
+//!   once per session, and stores keyed by session and carried by a
+//!   session's move.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

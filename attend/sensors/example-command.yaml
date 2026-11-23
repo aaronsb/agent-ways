@@ -116,8 +116,9 @@ triggers:
     # restarts; a fresh store's first poll sets a baseline and fires
     # nothing. session keeps it with the session and out of the store. It
     # starts empty with no baseline, so the first poll whose result meets
-    # `where` fires. The trigger then fires at most once in the session,
-    # even when the condition leaves and enters again. An item trigger
+    # `where` fires. Its notice then reaches the session at most once,
+    # even when the condition leaves and enters again; a notice attend
+    # could not deliver is offered again on a later poll. An item trigger
     # takes either; a state trigger takes store only, since it compares
     # against the last state its store kept.
     # Both kinds of memory are kept under a fingerprint of what the trigger

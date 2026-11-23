@@ -215,6 +215,8 @@ attend stores what each trigger last saw across polls and restarts: the value, t
 
 > Amended 2026-11-21 by ADR-416: a trigger may set `memory: session`. Its memory is then held in the sensor host's process instead of the store. It starts empty, with no baseline, and ends with the host, which lives as long as one session. `on: enters` with that memory fires on the first poll whose result meets `where`, and at most once per session. The default, `memory: store`, keeps the behaviour above, with stores keyed by session (see the note in §3b). A trigger may also set `expires`, in seconds or `session`: how long its event-lane signal waits unread before the drain drops it.
 
+> Amended 2026-11-23: a session trigger's line is delivered at most once in the session. A line the loop holds, such as one the governor holds, is not offered again while it waits; a line the loop drops, by the refractory, the cache gate, a failed write or a restart before it went out, is offered again on the next poll that meets the trigger. A line under the event lane's cut counts as handled, and spends the trigger as a written line does. The checkpoint follows the write, so a kill between the write and the checkpoint can repeat the notice.
+
 ### 3a. Lanes
 
 ADR-136 draws the lane boundary at authored communication: words a person or agent composed ride the message lane, and everything the environment generates rides the event lane. A sensor file states its lane, which replaces selection by name in `rides_message_lane`:
