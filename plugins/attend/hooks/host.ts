@@ -33,17 +33,22 @@ export function hostOfRecord(r: unknown): HostSpec | undefined {
 
 /** The host the session wants under `id`: the one the module already wants
  *  for it, else the one $.state kept for it (a reload), else a new one. A
- *  new one after a /clear from the id the last host ran for carries that id
- *  as `movedFrom`, so the first host under the new id moves the stores:
- *  attend keeps a store the new id already has, so a later move would not
- *  replace what that host wrote. `move` is the /clear or /resume being
- *  followed or settled. */
+ *  new one after a /clear carries the cleared id as `movedFrom`, so the
+ *  first host under the new id moves the stores: attend keeps a store the
+ *  new id already has, so a later move would not replace what that host
+ *  wrote. `move` is the /clear or /resume being followed or settled.
+ *
+ *  After /clear steps alone the cleared id is the one the last host ran
+ *  for, the first that ended. A move with a /resume among its steps ended
+ *  ids of other conversations: it hands on the id its last /clear ended,
+ *  where its last step was a /clear, and none after a /resume. */
 export function hostSpecFor(id: string, current: HostSpec | undefined, kept: HostSpec | undefined, move: MoveRecord | undefined): HostSpec {
   if (current?.session === id) return current
   if (kept?.session === id) return kept
+  if (move === undefined || move.reason !== 'clear' || move.ended.includes(id)) return { session: id, movedFrom: undefined }
+  if (move.resumed) return { session: id, movedFrom: move.ended[move.ended.length - 1] }
   const from = current?.session ?? kept?.session
-  const isClearedFrom = move?.reason === 'clear' && from !== undefined && move.ended.includes(from) && !move.ended.includes(id)
-  return { session: id, movedFrom: isClearedFrom ? from : undefined }
+  return { session: id, movedFrom: from !== undefined && move.ended.includes(from) ? from : undefined }
 }
 
 /** A running host: what it was spawned for, and how to end it. `isEnding`

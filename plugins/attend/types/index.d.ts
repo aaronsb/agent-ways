@@ -45,6 +45,10 @@ export type MoveRecord = {
   reason: MoveReason
   /** The session was listening when it ended. */
   wasOn: boolean
+  /** A /resume was among the steps: the ids that ended are then not one
+   *  conversation, and only the id the last /clear ended hands its sensor
+   *  stores on. */
+  resumed: boolean
 }
 
 export type AttendStatus = {

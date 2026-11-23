@@ -62,7 +62,7 @@ import {
   DRAIN_UNRESOLVED,
   UNREAD_ROOM,
 } from './attend-output.ts'
-import { MOVE_FIRST_MS } from '../hooks/move.ts'
+import { MOVE_FIRST_MS, recordMove, recordOf } from '../hooks/move.ts'
 import { claudePid, cuesIn, hostArgv, hostEndText, hostOfRecord, hostRecord, hostSpecFor, isHostRefused, respawnAfterExit } from '../hooks/host.ts'
 
 const T0 = 1_800_000_000_000
@@ -293,8 +293,9 @@ function host(on: On, world: World) {
   })
   // No process.hookEnv: Claude Code 2.1.312, which CI runs, has no such
   // event and refuses a test module that hooks it, and a later one answers
-  // nothing here. The mod then spawns the host without --parent; hostArgv
-  // and claudePid are tested on their own.
+  // nothing here. The mod then spawns the host without --parent. The
+  // --parent wiring is tests/hook-env.check.ts, which
+  // scripts/check-plugins.sh runs where the event exists.
   // The sensor host: runs until the mod ends its stream (next.signal
   // aborts) or the test ends it, writing what the test has it say.
   const spawns: Spawned[] = []
@@ -1725,7 +1726,7 @@ describe('session changes through engine events alone', () => {
     const reads = h.reads()
     await clock.advance(0)
     expect(h.reads()).toBe(reads)
-    expect(h.status()?.move).toEqual({ ended: ['s1'], reason: 'clear', wasOn: true })
+    expect(h.status()?.move).toEqual({ ended: ['s1'], reason: 'clear', wasOn: true, resumed: false })
     const reload = since(h)
     await $.session.start(INTERACTIVE)
     await clock.advance(0)
@@ -1761,7 +1762,7 @@ describe('session changes through engine events alone', () => {
     await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
     await clear($, h, 's2', 'clear', { clock, ms: 12_000 })
     await clock.advance(1_000)
-    expect(h.status()?.move).toEqual({ ended: ['s1'], reason: 'clear', wasOn: true })
+    expect(h.status()?.move).toEqual({ ended: ['s1'], reason: 'clear', wasOn: true, resumed: false })
     const reload = since(h)
     await $.session.start(INTERACTIVE)
     await clock.advance(1_000)
@@ -2866,6 +2867,41 @@ describe('the sensor host (ADR-416 item 2)', () => {
     expect(h.hostLogs).toEqual([])
   })
 
+  // A reload in the second between the settle and the host's start reads
+  // $.state: it holds the new id's host, --moved-from included, from the
+  // write that drops the move (the seeded reload below spawns it).
+  test('once a /clear settles, $.state holds the new host before it starts', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, host: true })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await clear($, h, 's2')
+    await clock.advance(500)
+    expect(h.status()?.move).toBeNull()
+    expect(h.status()?.hostFor).toEqual({ session: 's2', movedFrom: 's1' })
+    expect(h.live().map(sp => sp.argv)).toEqual([HOST('s1')])
+    await clock.advance(1_000)
+    expect(h.live().map(sp => sp.argv)).toEqual([HOST('s2', '--moved-from', 's1')])
+  })
+
+  test('a /resume and then a /clear in one move hand on the stores of the session the /clear ended', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, host: true, sessionId: 's2' })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    expect(h.live().map(sp => sp.argv)).toEqual([HOST('s2')])
+    // /resume to r, and a /clear of r before r shows as the session's id.
+    await $.session.end({ reason: 'resume', sessionId: 's2' } as never)
+    h.clearState()
+    await $.session.end({ reason: 'clear', sessionId: 'r' } as never)
+    h.clearState()
+    h.world.nextId = { id: 's3', atMs: clock.now() + 3_000 }
+    h.world.now = clock.now
+    await clock.advance(10_000)
+    expect(h.spawns.map(sp => sp.argv)).toEqual([HOST('s2'), HOST('s3', '--moved-from', 'r')])
+    expect(h.live().length).toBe(1)
+  })
+
   test('a /clear ends the old host once the new id shows and spawns one with --moved-from; a /resume spawns one without it', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, host: true })
@@ -2878,7 +2914,7 @@ describe('the sensor host (ADR-416 item 2)', () => {
     await clock.advance(6_000)
     expect(h.live().map(sp => sp.argv)).toEqual([HOST('s1')])
     expect(h.status()?.hostFor).toEqual({ session: 's1', movedFrom: null })
-    expect(h.status()?.move).toEqual({ ended: ['s1'], reason: 'clear', wasOn: true })
+    expect(h.status()?.move).toEqual({ ended: ['s1'], reason: 'clear', wasOn: true, resumed: false })
     await clock.advance(12_000)
     expect(h.spawns[0]?.killed).toBe(true)
     expect(h.spawns.map(sp => sp.argv)).toEqual([HOST('s1'), HOST('s2', '--moved-from', 's1')])
@@ -3136,7 +3172,7 @@ describe('the sensor host (ADR-416 item 2)', () => {
     expect(hostEndText({ code: null, signal: 'SIGKILL' })).toBe('SIGKILL')
     expect(hostEndText({ deny: 'blocked' })).toBe('refused: blocked')
     expect(hostEndText(undefined, 'Error: spawn attend ENOENT')).toBe('could not start: Error: spawn attend ENOENT')
-    const clearOf = (...ended: string[]) => ({ ended, reason: 'clear' as const, wasOn: true })
+    const clearOf = (...ended: string[]) => ({ ended, reason: 'clear' as const, wasOn: true, resumed: false })
     const s1 = { session: 's1', movedFrom: undefined }
     expect(hostSpecFor('s1', s1, undefined, undefined)).toBe(s1)
     expect(hostSpecFor('s2', s1, undefined, clearOf('s1'))).toEqual({ session: 's2', movedFrom: 's1' })
@@ -3145,6 +3181,24 @@ describe('the sensor host (ADR-416 item 2)', () => {
     expect(hostSpecFor('s2', s1, undefined, { ...clearOf('s1'), reason: 'resume' })).toEqual({ session: 's2', movedFrom: undefined })
     expect(hostSpecFor('s2', s1, undefined, undefined)).toEqual({ session: 's2', movedFrom: undefined })
     expect(hostSpecFor('s1', undefined, undefined, clearOf('s1'))).toEqual({ session: 's1', movedFrom: undefined })
+    // A /resume among the steps: the id the last /clear ended hands its
+    // stores on, never the host's own, which belongs to another conversation.
+    const s2 = { session: 's2', movedFrom: undefined }
+    expect(hostSpecFor('s3', s2, undefined, { ...clearOf('s2', 'r'), resumed: true })).toEqual({ session: 's3', movedFrom: 'r' })
+    expect(hostSpecFor('s3', s1, undefined, { ...clearOf('s1', 's2', 'r'), resumed: true })).toEqual({ session: 's3', movedFrom: 'r' })
+    expect(hostSpecFor('r', s1, undefined, { ended: ['s1', 's2'], reason: 'resume', wasOn: true, resumed: true })).toEqual({ session: 'r', movedFrom: undefined })
+    // recordMove keeps the /resume when a /clear follows it in one move.
+    const slot = { move: undefined, gaveUp: undefined }
+    recordMove(slot, 's2', 'resume', true)
+    recordMove(slot, 'r', 'clear', true)
+    const kept = recordOf(slot.move!)
+    expect(kept).toEqual({ ended: ['s2', 'r'], reason: 'clear', wasOn: true, resumed: true })
+    expect(hostSpecFor('s3', s2, undefined, kept)).toEqual({ session: 's3', movedFrom: 'r' })
+    const clears = { move: undefined, gaveUp: undefined }
+    recordMove(clears, 's1', 'clear', true)
+    recordMove(clears, 's2', 'clear', true)
+    expect(recordOf(clears.move!).resumed).toBe(false)
+    expect(hostSpecFor('s3', s1, undefined, recordOf(clears.move!))).toEqual({ session: 's3', movedFrom: 's1' })
     expect(hostOfRecord({ session: 's2', movedFrom: null })).toEqual({ session: 's2', movedFrom: undefined })
     expect(hostOfRecord({ session: '' })).toBeUndefined()
     expect(hostOfRecord(null)).toBeUndefined()

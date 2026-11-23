@@ -402,6 +402,10 @@ async function settleMove($: $, mod: Mod, id: string, m: MoveRecord) {
     const goesOn = m.wasOn || mod.active || (m.reason === 'resume' && (await readListened($)).includes(id))
     if (!goesOn) return
     mod.isRelistening = true
+    // The host for the new id is known now, and $.state holds it from the
+    // same write that drops the move, so a reload before the host starts
+    // still passes --moved-from. An inactive session's activation picks it.
+    if (mod.active) mod.hostFor = hostSpecFor(id, mod.hostFor, undefined, m)
     await updateStatus($, s => ({
       ...s,
       mode: 'active' as const,
@@ -413,10 +417,11 @@ async function settleMove($: $, mod: Mod, id: string, m: MoveRecord) {
     }))
     await rememberListening($, mod, id)
     if (mod.active) {
+      // A stopped host is not started; the spec waits in $.state.
       $.clock.after(RELISTEN_MS, () =>
         void listenOn($).finally(() => {
           mod.isRelistening = false
-          void moveHost($, mod, id, m)
+          syncHost(mod)
         }),
       )
     } else {
@@ -479,15 +484,6 @@ function endHost(mod: Mod, h: HostChild) {
   if (mod.host === h) mod.host = undefined
   h.isEnding = true
   h.stop()
-}
-
-/** A settled /clear or /resume: the host goes on under `id`. A /clear's
- *  host moves the old id's sensor stores; a /resume's goes on with the
- *  stores of the session it resumed. A stopped host is not started, and
- *  the spec waits in $.state for a reload. */
-async function moveHost($: $, mod: Mod, id: string, m: MoveRecord) {
-  await setHostFor($, mod, hostSpecFor(id, mod.hostFor, undefined, m))
-  syncHost(mod)
 }
 
 /** The host the session wants, in the module and in $.state, which a
