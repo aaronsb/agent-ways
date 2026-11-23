@@ -320,21 +320,32 @@ pub fn is_sensor_host(pid: u32) -> bool {
 }
 
 /// Whether `pid` launched the process whose argv is `own` through an argv
-/// wrapper: `pid` does not run attend itself, and its arguments end with
-/// `own`'s ([`launches_argv`]). A host runs attend, so a command a host
-/// runs never takes the host for its launcher.
+/// wrapper ([`launcher`]).
 fn launches(pid: u32, own: Option<&[String]>) -> bool {
-    let (Some(own), Some(args)) = (own, crate::process::argv(pid)) else { return false };
-    !crate::process::exe_name(pid).is_some_and(|n| is_attend(&n)) && launches_argv(&args, own)
+    launcher(crate::process::exe_name(pid).as_deref(), crate::process::argv(pid).as_deref(), own)
+}
+
+/// Whether a process whose executable file is named `exe` and whose argv
+/// is `args` launched the process whose argv is `own` through an argv
+/// wrapper: it is known not to run attend, and its arguments end with
+/// `own`'s ([`launches_argv`]). A host runs attend, so a command a host
+/// runs never takes the host for its launcher. An executable that cannot
+/// be named, as when the process exited or the platform has no reader,
+/// counts as attend, so an unreadable host is still a host.
+fn launcher(exe: Option<&str>, args: Option<&[String]>, own: Option<&[String]>) -> bool {
+    let (Some(exe), Some(args), Some(own)) = (exe, args, own) else { return false };
+    !is_attend(exe) && launches_argv(args, own)
 }
 
 /// Whether the argv `args` runs the attend whose argv is `own`: it ends with
 /// `own`'s arguments after its program, and the argument just before them
-/// names a program `attend`, as `timeout 75 /bin/attend sensor host …`
-/// does.
+/// names a program `attend` and is not the first, as `timeout 75
+/// /bin/attend sensor host …` has it. A launcher's own program comes before
+/// the attend it runs, so an argv that starts with attend, as `own` itself
+/// does, launches nothing.
 pub fn launches_argv(args: &[String], own: &[String]) -> bool {
     let Some(tail) = own.get(1..).filter(|t| !t.is_empty()) else { return false };
-    args.len() > tail.len()
+    args.len() > tail.len() + 1
         && args.ends_with(tail)
         && is_attend(args[args.len() - tail.len() - 1].rsplit(['/', '\\']).next().unwrap_or_default())
 }
@@ -552,6 +563,13 @@ mod tests {
         assert!(!launches_argv(&args(&["timeout", "75", "fake", "sensor", "host", "--session", "s", "--cwd", "/p"]), &own), "not attend");
         assert!(!launches_argv(&args(&["sensor", "host", "--session", "s", "--cwd", "/p"]), &own), "nothing before the arguments");
         assert!(!launches_argv(&own, &args(&["/bin/attend"])), "no arguments of its own");
+        assert!(!launches_argv(&own, &own), "a host's own argv launches no child with its arguments");
+        assert!(!launches_argv(&args(&["attend", "sensor", "host", "--session", "s", "--cwd", "/p"]), &own), "attend first is no wrapper");
+        let w = args(&["timeout", "75", "attend", "sensor", "host", "--session", "s", "--cwd", "/p"]);
+        assert!(launcher(Some("timeout"), Some(&w), Some(&own)), "a wrapper whose executable is named");
+        assert!(!launcher(None, Some(&w), Some(&own)), "an executable that cannot be named counts as attend");
+        assert!(!launcher(None, Some(&own), Some(&own)), "a host whose executable cannot be named stays a host");
+        assert!(!launcher(Some("attend"), Some(&w), Some(&own)), "attend under another argv[0] is no wrapper");
     }
 
     #[test]
