@@ -402,10 +402,37 @@ fn a_command_the_host_runs_does_not_act_as_the_session() {
     assert!(signals(&open).is_empty(), "the refused send wrote a signal");
 }
 
+/// The last poll `attend sensor list --json` reports for `sensor`, once it
+/// has one.
+fn last_poll(f: &Fixture, sensor: &str) -> Option<Value> {
+    let out = f.attend(&["sensor", "list", "--json"]);
+    let all: Value = serde_json::from_slice(&out.stdout).ok()?;
+    all.as_array()?.iter().find(|e| e["name"] == sensor).map(|e| e["last_poll"].clone()).filter(|p| !p.is_null())
+}
+
+/// The pids whose command line carries `sensor host` for `f`'s session and
+/// directory and still does a moment later. A refused attend exits at once,
+/// so what stays is a host or the wrapper that runs one. The directory is
+/// the fixture's own, so another run's processes do not count.
+fn lasting_hosts(f: &Fixture) -> Vec<String> {
+    let pattern = format!("sensor host --session {} --cwd {}", f.sid, f.origin);
+    let look = || {
+        let out = std::process::Command::new("pgrep").args(["-f", &pattern]).output().unwrap();
+        String::from_utf8_lossy(&out.stdout).split_whitespace().map(str::to_string).collect::<Vec<_>>()
+    };
+    let first = look();
+    std::thread::sleep(Duration::from_millis(300));
+    let second = look();
+    first.into_iter().filter(|p| second.contains(p)).collect()
+}
+
 /// A host started through an argv wrapper that stays its parent, as
-/// `timeout` does, runs: the wrapper names a host without being one. A command
-/// that host runs is still refused as the session, whether it runs a verb
-/// or another host with the very same arguments, under a wrapper of its own.
+/// `timeout` does, runs: the wrapper names a host without being one. A
+/// command that host runs is still refused as the session: a verb behind
+/// `env`, `timeout`, `nohup`, `setsid -w`, a shell's `exec`, `exec -a
+/// timeout`, or a shell whose own argv ends with the verb's; another host
+/// with the very same arguments under a wrapper of its own; and a sensor
+/// whose argv is exactly the host's, whose parent is the host itself.
 #[test]
 fn a_host_under_a_wrapper_runs_and_its_commands_are_still_refused() {
     let f = quiet("host-wrapped");
@@ -415,12 +442,20 @@ fn a_host_under_a_wrapper_runs_and_its_commands_are_still_refused() {
     let bin = env!("CARGO_BIN_EXE_attend");
     let script = format!(
         "a='{bin}'; o='{out}'; env A=1 \"$a\" message send from-a-sensor 2> \"$o/send.err\"; echo $? > \"$o/send.code\"; \
+         timeout 5 \"$a\" message send x 2> \"$o/timeout.err\"; echo $? > \"$o/timeout.code\"; \
+         sh -c 'exec \"$0\" message send x' \"$a\" 2> \"$o/exec.err\"; echo $? > \"$o/exec.code\"; \
+         bash -c 'exec -a timeout \"$0\" message send x' \"$a\" 2> \"$o/exec-a.err\"; echo $? > \"$o/exec-a.code\"; \
+         nohup \"$a\" message send x > /dev/null 2> \"$o/nohup.err\"; echo $? > \"$o/nohup.code\"; \
+         if command -v setsid > /dev/null; then setsid -w \"$a\" message send x 2> \"$o/setsid.err\"; echo $? > \"$o/setsid.code\"; else echo skip > \"$o/setsid.code\"; fi; \
+         sh -c '\"$0\" message send x' \"$a\" message send x 2> \"$o/crafted.err\"; echo $? > \"$o/crafted.code\"; \
          mkdir \"$o/once\" 2> /dev/null || {{ echo '{{}}'; exit 0; }}; timeout 20 \"$a\" sensor host --session '{sid}' --cwd '{cwd}' > /dev/null 2> \"$o/host.err\"; echo $? > \"$o/host.code\"; echo '{{}}'",
         out = probe.display(),
         sid = f.sid,
         cwd = f.origin,
     );
     f.sensor("probe", &format!("kind: command\ninterval: 1\nmin_interval: 1\nargv: [sh, -c, {}]\noutput: json\ntimeout: 30\n", serde_json::to_string(&script).unwrap()));
+    let own = [bin, "sensor", "host", "--session", &f.sid, "--cwd", &f.origin];
+    f.sensor("nested", &format!("kind: command\ninterval: 1\nmin_interval: 1\nargv: {}\noutput: json\ntimeout: 5\n", serde_json::to_string(&own).unwrap()));
     let err = f.home.join("wrapped.err");
     let child = f
         .command_from(Path::new("timeout"))
@@ -433,10 +468,26 @@ fn a_host_under_a_wrapper_runs_and_its_commands_are_still_refused() {
     host.wait_for("the beacon's signal", Duration::from_secs(20), || !from(&f, "beacon").is_empty());
     host.wait_for("the probe", Duration::from_secs(30), || std::fs::read_to_string(probe.join("host.code")).is_ok_and(|c| !c.is_empty()));
     let read = |n: &str| std::fs::read_to_string(probe.join(n)).unwrap_or_default();
-    for verb in ["send", "host"] {
-        assert_eq!(read(&format!("{verb}.code")).trim(), "3", "{verb}: {}", read(&format!("{verb}.err")));
-        assert!(read(&format!("{verb}.err")).contains("this attend was started by a sensor command, so it does not act as the session"), "{verb}: {}", read(&format!("{verb}.err")));
+    let refusal = "this attend was started by a sensor command, so it does not act as the session";
+    for form in ["send", "timeout", "exec", "exec-a", "nohup", "setsid", "crafted", "host"] {
+        if form == "setsid" && read("setsid.code").trim() == "skip" {
+            eprintln!("setsid: not on this host, skipped");
+            continue;
+        }
+        assert_eq!(read(&format!("{form}.code")).trim(), "3", "{form}: {}", read(&format!("{form}.err")));
+        assert!(read(&format!("{form}.err")).contains(refusal), "{form}: {}", read(&format!("{form}.err")));
     }
+    host.wait_for("the nested sensor's poll", Duration::from_secs(20), || last_poll(&f, "nested").is_some());
+    let poll = last_poll(&f, "nested").unwrap();
+    let detail = poll["detail"].as_str().unwrap_or_default();
+    assert_eq!(poll["ok"], false, "{poll}");
+    assert!(detail.contains("exited with status 3") && detail.contains(refusal), "{poll}");
+    let wrapper = host.child.id().to_string();
+    let out = std::process::Command::new("pgrep").args(["-P", &wrapper]).output().unwrap();
+    let inner = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let hosts = lasting_hosts(&f);
+    assert!(!inner.is_empty() && hosts.contains(&inner), "the look finds the host itself: {hosts:?}, the host is {inner:?} under {wrapper}");
+    assert!(hosts.iter().all(|p| *p == wrapper || *p == inner), "a nested host runs: {hosts:?}, the host is {inner} under {wrapper}");
 }
 
 /// A session id no `to` tag can carry, or a directory that is not one, is
