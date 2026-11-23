@@ -20,8 +20,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use common::Fixture;
 use serde_json::Value;
 
-/// A running `attend sensor host`, its stdout and stderr in files. Killed
-/// (SIGKILL) on drop.
+/// A running `attend sensor host`, or the wrapper that runs one, its
+/// stdout and stderr in files. Ended on drop.
 struct Host {
     child: Child,
     out: PathBuf,
@@ -70,7 +70,25 @@ impl Host {
 }
 
 impl Drop for Host {
+    /// SIGTERM first, so a wrapper that holds the host as its child, as
+    /// `timeout` does, forwards it to the host and exits once the host has.
+    /// A SIGKILL would end the wrapper alone and leave the host running
+    /// until it noticed its parent gone. SIGKILL follows when the child
+    /// has not exited within five seconds.
     fn drop(&mut self) {
+        if !matches!(self.child.try_wait(), Ok(None)) {
+            return;
+        }
+        // SAFETY: kill(2) on the pid of a child not yet reaped, so the pid
+        // is still this child's.
+        unsafe { libc::kill(self.child.id() as libc::pid_t, libc::SIGTERM) };
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(5) {
+            if !matches!(self.child.try_wait(), Ok(None)) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
         self.child.kill().ok();
         self.child.wait().ok();
     }
