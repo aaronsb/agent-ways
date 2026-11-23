@@ -486,7 +486,7 @@ impl SensorSlot {
 /// and parses the leading digit run as a u64. Returns `None` if the key is
 /// absent, the value is non-numeric, or the run is empty.
 ///
-/// Lives here so attend's context and disclosure sensors and `sensor-peers`
+/// Lives here so attend's context sensor and the other sensor crates
 /// don't each carry their own copy. Good enough for the `ways context --json`
 /// and signal-file formats the sensors consume.
 pub fn extract_json_u64(text: &str, key: &str) -> Option<u64> {

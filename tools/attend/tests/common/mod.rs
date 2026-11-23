@@ -16,7 +16,7 @@ use std::time::{Duration, Instant, SystemTime};
 const QUIET_CONFIG: &str = "cleanup:\n  enabled: false\n";
 
 /// The shipped sensors a test fixture switches off, leaving peers.
-const QUIET_SENSORS: &[&str] = &["context", "git", "processes", "disclosure", "keepwarm", "ways-update"];
+const QUIET_SENSORS: &[&str] = &["context", "git", "processes", "keepwarm", "ways-update"];
 
 pub struct Fixture {
     pub home: PathBuf,

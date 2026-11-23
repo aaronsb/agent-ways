@@ -364,8 +364,8 @@ pub fn marker_value(pid: u32) -> String {
 /// `command` sensor's child, an `mcp` sensor's server, and the `git` the
 /// git sensor runs, which a repository's configuration, such as
 /// `core.fsmonitor`, can make run other programs. The `ways` the context
-/// and disclosure sensors run is marked too, for uniformity with the git
-/// sensor beside them, though `ways context` runs nothing a repository
+/// sensor runs is marked too, for uniformity with the git sensor beside
+/// it, though `ways context` runs nothing a repository
 /// chooses. The processes sensor's `ps` and keepwarm's `ways` are fixed
 /// programs and are not marked. Call it after the environment is cleared or
 /// filtered and after the sensor file's own variables are added, so

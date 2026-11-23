@@ -265,12 +265,12 @@ fn an_attend_change_applied_in_the_screens_writes_the_bytes_set_writes() {
         assert_eq!(code, 0, "set {key}: {err}");
     }
     // The same three on attend's two tabs, each reviewed and applied:
-    // processes is the eighth sensor, in name order.
+    // processes is the seventh sensor, in name order.
     let left = tui.drive(
         "attend",
         "/ text:base_cool enter down down enter e ctrl-u text:30 enter \
          / text:decay_per enter down down enter e ctrl-u text:0.07 enter w a \
-         6 down down down down down down down right down enter w a",
+         6 down down down down down down right down enter w a",
     );
     assert_eq!(left, "nothing pending\n", "every change applied");
     let rel = ".config/attend/config.yaml";
@@ -288,9 +288,9 @@ fn an_attend_change_applied_in_the_screens_writes_the_bytes_set_writes() {
 #[test]
 fn an_unset_watch_list_shows_the_built_in_one_is_in_effect() {
     let fx = Fx::new();
-    // processes, the eighth sensor, opened: its watch list is unset, so the
+    // processes, the seventh sensor, opened: its watch list is unset, so the
     // sensor's own applies.
-    let open = "down down down down down down down right";
+    let open = "down down down down down down right";
     let f = glyphs(&fx.snap("sensors", open, "100x30", "16"));
     let row = f.lines().find(|l| l.contains(" watch ")).unwrap_or_default();
     assert!(row.contains("(built-in)") && !row.contains("[]"), "{f}");
@@ -839,10 +839,10 @@ fn golden_frames() {
         ("attend-browse", "attend", "down down right", "100x30"),
         ("attend-edit", "attend", "down down right down down e ctrl-u text:900", "100x30"),
         ("attend-review", "attend", "right down e ctrl-u text:30 enter w", "100x30"),
-        // The sensors in name order: git the fifth, processes the eighth.
-        ("sensors-browse", "sensors", "down down down down down down down right", "100x30"),
-        ("sensors-edit", "sensors", "down down down down right down down e ctrl-u text:45", "100x30"),
-        ("sensors-review", "sensors", "down down down down down down down right down enter w", "100x30"),
+        // The sensors in name order: git the fourth, processes the seventh.
+        ("sensors-browse", "sensors", "down down down down down down right", "100x30"),
+        ("sensors-edit", "sensors", "down down down right down down e ctrl-u text:45", "100x30"),
+        ("sensors-review", "sensors", "down down down down down down right down enter w", "100x30"),
     ];
     for (name, tab, keys, size) in shots {
         g.check_text(name, &fx.snap(tab, keys, size, "16"));

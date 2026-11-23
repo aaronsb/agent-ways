@@ -21,7 +21,6 @@
 
 mod command;
 mod context;
-mod disclosure;
 pub mod eval;
 mod git;
 pub mod hosted;
@@ -30,7 +29,6 @@ pub mod state;
 pub mod writer;
 
 pub use context::ContextSensor;
-pub use disclosure::DisclosureSensor;
 pub use git::GitSensor;
 
 pub use sensor_trait::{Focus, Sensor, SensorSlot};
@@ -341,7 +339,6 @@ pub fn compiled(id: &str) -> Option<Compiled> {
     let s: Box<dyn Sensor> = match id {
         "context" => Box::new(ContextSensor::new()),
         "git" => Box::new(GitSensor::new()),
-        "disclosure" => Box::new(DisclosureSensor::new()),
         #[cfg(feature = "sensor-peers")]
         "peers" => Box::new(PeerSensor::new()),
         #[cfg(feature = "sensor-processes")]
@@ -362,13 +359,11 @@ pub struct Ctx<'a> {
 }
 
 /// The compiled sensors the sensor host does not run. The mod takes
-/// keepwarm's wake from `attend keepwarm check`, and its preamble covers
-/// what the disclosure sensor re-printed.
+/// keepwarm's wake from `attend keepwarm check`.
 ///
 /// References:
-/// - ADR-416 items 4 and 5: keepwarm's wake is not a signal, and the
-///   disclosure sensor leaves the host.
-const NOT_HOSTED: &[&str] = &["keepwarm", "disclosure"];
+/// - ADR-416 item 4: keepwarm's wake is not a signal.
+const NOT_HOSTED: &[&str] = &["keepwarm"];
 
 /// The sensor `h` configures, ready to poll, or why it cannot run here.
 pub fn build(h: &Hosted, ctx: &Ctx, project: &str, record: bool) -> Result<Box<dyn Sensor>, String> {
@@ -393,7 +388,6 @@ pub fn file_sensor(h: &Hosted, ctx: &Ctx, project: &str, record: bool) -> Result
     let inner: Box<dyn Sensor> = match c.id.as_str() {
         "context" => Box::new(ContextSensor::new()),
         "git" => Box::new(GitSensor::new()),
-        "disclosure" => Box::new(DisclosureSensor::new()),
         #[cfg(feature = "sensor-processes")]
         "processes" => Box::new(match c.fields.get("watch").and_then(|w| w.as_sequence()) {
             // A list, even empty, replaces the sensor's own.
@@ -448,7 +442,7 @@ pub fn slot(sensor: Box<dyn Sensor>, lane: Lane, crate_id: Option<&str>) -> Sens
 }
 
 /// The slots the sensor host of `session` polls, and their names: every
-/// sensor that runs but keepwarm and disclosure, with the peers sensor on
+/// sensor that runs but keepwarm, with the peers sensor on
 /// the event lane, since presence is no one's words.
 ///
 /// References:
@@ -584,7 +578,7 @@ mod tests {
             let (krate, version) = c.source.split_once('@').unwrap_or_else(|| panic!("{}: {}", h.name(), c.source));
             assert!(!krate.is_empty() && version.matches('.').count() >= 2, "{}: {}", h.name(), c.source);
         }
-        assert!(compiled_n >= 3, "context, git and disclosure are always compiled");
+        assert!(compiled_n >= 2, "context and git are always compiled");
         let ex = all.iter().find(|h| h.name() == "example-mcp").unwrap();
         assert_eq!(ex.state, State::Off);
     }

@@ -17,7 +17,7 @@
 //!
 //! It has no message poller, no wake gate, no banner and no rekey: the
 //! mod's drain delivers what it writes, the mod spawns a new host after a
-//! `/clear`, and it does not run the keepwarm or disclosure sensors. The
+//! `/clear`, and it does not run the keepwarm sensor. The
 //! peers sensor reports presence alone. With `--moved-from` the stores and
 //! the session memory of the id the session had before `/clear` carry
 //! over, so a trigger kept for the session that fired under the old id

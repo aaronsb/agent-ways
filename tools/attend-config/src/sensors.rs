@@ -24,7 +24,6 @@ use serde_yaml::Value;
 /// The shipped sensor files, by name.
 pub const SHIPPED: &[(&str, &str)] = &[
     ("context", include_str!("../../../attend/sensors/context.yaml")),
-    ("disclosure", include_str!("../../../attend/sensors/disclosure.yaml")),
     ("example-command", include_str!("../../../attend/sensors/example-command.yaml")),
     ("example-mcp", include_str!("../../../attend/sensors/example-mcp.yaml")),
     ("git", include_str!("../../../attend/sensors/git.yaml")),
@@ -48,7 +47,6 @@ pub struct Crate {
 /// The compiled sensors attend has, whether or not this build includes them.
 pub const CRATES: &[Crate] = &[
     Crate { id: "context", fields: &[], authors: &[], lane: None },
-    Crate { id: "disclosure", fields: &[], authors: &[], lane: None },
     Crate { id: "git", fields: &[], authors: &[], lane: None },
     Crate {
         id: "keepwarm",
