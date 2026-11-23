@@ -4,6 +4,7 @@ domain: attend
 mode: explanation
 related:
   - "[[ADR-136]]"
+  - "[[ADR-172]]"
 aliases: []
 ---
 
@@ -95,9 +96,10 @@ session never sees it twice:
   runs `attend message inbox --drain`, and the turn continues with whatever arrived
   while it worked.
 
-Both conduits mark what they delivered in one seen-set (ADR-172). A session
-only receives through the drain once it has enrolled — by running attend or
-joining a channel — and `attend channel scene private` opts it out.
+Both conduits mark what they delivered in one seen-set. The Stop
+hook delivers only to a session the attend mod turned listening on, or
+one whose `attend run` is live, and `attend channel scene private` opts a
+session out.
 
 ## The scenarios
 

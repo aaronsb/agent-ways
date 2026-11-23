@@ -73,7 +73,7 @@ All lanes respect the `scope:` field and the `when:` preconditions.
 ### Other hooks in the block
 
 - **`strip-session-link-pre.sh`** - Denies a `git commit` or `gh pr|issue` command that would publish a Claude Code session link as a trailer or footer line (ADR-167).
-- **`attend-drain-stop.sh`** - Runs `attend message inbox --drain --format hook` at the end of each turn, delivering pending peer messages (ADR-172). Does nothing when `attend` is not installed.
+- **`attend-drain-stop.sh`** - Runs `attend message inbox --drain --format hook` at the end of each turn, delivering pending peer messages to a session the attend mod enrolled, or one whose `attend run` is live. Does nothing when `attend` is not installed.
 - **`issues-pull.sh`** / **`issues-task-created.sh`** - Mirror GitHub issues into the session's task list and reject unprefixed duplicates of mirrored issues (ADR-180).
 - **`pr-merge-checks.sh`** - After a `gh pr merge`, names any CI check that was not green when the PR merged or was queued for auto-merge, so the model tells the operator. It reports and never blocks (#1168).
 
@@ -472,6 +472,7 @@ The `/ways-tests` skill provides ad-hoc scoring for vocabulary tuning:
 
 ## References
 
+- ADR-172: `attend-drain-stop.sh` delivers pending peer messages at the end of a turn.
 - ADR-126: a way's `refire:` value is a fraction of the context window, which sets the wait before it re-discloses.
 - ADR-196: the yes/no relevance gate on way injection, judged by a hosted model.
 - ADR-711: each refire in an agent thread waits `refire_backoff` times longer than the one before, the count survives compaction, and fire rows carry the compaction epoch.

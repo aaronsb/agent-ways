@@ -515,11 +515,14 @@ pub(crate) struct InboxFlags {
     pub(crate) before: Option<u64>,
 
     /// Atomically deliver pending messages and record their
-    /// consumption (ADR-172). The Stop-hook fast path: a silent no-op
-    /// under an unresolved identity or for a session not enrolled by
-    /// attend run or a channel join (#720). On a cold start (no
+    /// consumption. The Stop-hook fast path: a silent no-op
+    /// under an unresolved identity or for a session not listening
+    /// (#720), and in hook format for a session that neither the attend
+    /// mod enrolled (`attend listen on --host mod`) nor a live `attend run`
+    /// holds. On a cold start (no
     /// seen-set) it delivers addressed mail and fresh messages and
-    /// counts the older backlog it does not show.
+    /// counts the older backlog it does not show. A system signal past
+    /// its expiry is recorded read and never delivered.
     #[arg(long)]
     pub(crate) drain: bool,
 
@@ -527,7 +530,8 @@ pub(crate) struct InboxFlags {
     /// would wake this session, one addressed to it, sent to its
     /// project, a reply to a message it sent, or any post in one of its
     /// named channels; then deliver all that is pending. Other `#open`
-    /// posts alone wait for the next turn (ADR-406 item 2). Once the session's prompt cache has
+    /// posts and attend's own event-lane notices alone wait for the next
+    /// turn. Once the session's prompt cache has
     /// lapsed (its tier's TTL less two minutes after its last turn, or
     /// a transcript not readable in five seconds), nothing wakes it: the
     /// drain delivers nothing and reports `cache_lapsed`. A session with
@@ -748,13 +752,15 @@ pub struct KeepwarmCheckArgs {
 /// Subcommands for `attend listen`. With no subcommand, defaults to `status`.
 #[derive(Subcommand, Clone)]
 pub enum ListenCmd {
-    /// Listen: the Stop-hook drain delivers to this session. Messages
-    /// addressed to its project while it was not listening are delivered by
-    /// the next drain; older #open and channel backlog is held back
+    /// Listen: the drain delivers to this session. Messages addressed to
+    /// its project while it was not listening are delivered by the next
+    /// drain; older #open and channel backlog is held back. The Stop hook
+    /// delivers only with `--host mod`, or while an `attend run` is live
     On {
         /// What hosts delivery, when not Monitor or a shell: `mod`, the
         /// attend mod, whose agent answers with attend_reply and attend_send.
-        /// The drain then delivers in the mod's format and names those tools
+        /// The Stop-hook drain then delivers to the session, in the mod's
+        /// format and naming those tools
         #[arg(long, value_enum)]
         host: Option<ListenHost>,
     },

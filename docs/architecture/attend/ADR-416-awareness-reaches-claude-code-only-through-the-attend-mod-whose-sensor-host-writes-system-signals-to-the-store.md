@@ -82,6 +82,9 @@ considered:
   - operator: aaronsb
     said: "Silent, state exposed (Recommended)"
     via: "session 2026-11-22, question tool, review of #1319 finding 3"
+  - operator: aaronsb
+    said: "Keep it until #1316"
+    via: "session 2026-11-23, question tool, #1313 review"
 status: accepted
 date: 2026-11-21
 deciders:
@@ -230,6 +233,8 @@ The operator set the direction: awareness is furnished through the mod, and a se
 ### Settled questions
 
 - **Turn-end delivery (probe *turn-end*).** The Stop-hook drain stays as the mod's turn-end conduit. It continues the operator's turn with whatever is pending, waking or not, and delivers only to a session the mod enrolled (`--host mod`). Without it, the mod would deliver at a turn's end only what would wake the session, and non-waking `#open` posts and event-lane reports would wait for the next waking delivery. Removing the drain once the mod can continue a turn itself (a `turn.step` hook exists in the 2.1.329 types, unverified for plugins) stays possible later and is not part of this decision.
+
+  > Amended 2026-11-23: until #1316 removes `attend run`, the Stop hook also delivers to a session whose `attend run` is live, so Monitor sessions keep turn-end delivery across the release.
 - **Dormant footer (probe *dormant footer*).** The footer shows the version only, in every session, and makes no network call. A dormant session learns of a release when asked, from `ways status` or `ways manage update --what-if`. Running the check in the footer would add a fetch to every session start and a second notice in sessions that go on to listen.
 
 ## Consequences
