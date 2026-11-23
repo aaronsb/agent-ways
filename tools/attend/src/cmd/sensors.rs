@@ -211,6 +211,9 @@ struct Outcome {
     /// The lines that go out, each with its lapse, or none when the
     /// threshold holds them.
     delivered: Option<Vec<(String, Option<Lapse>)>>,
+    /// The threshold let the lines through and the event lane's cut held
+    /// them, so they are logged and not written.
+    cut: bool,
     accumulated: f64,
     threshold: f64,
 }
@@ -221,8 +224,9 @@ fn run_through(of: Box<dyn Sensor>, lane: Lane, result: Vec<(f64, String)>, focu
     slot.poll(focus);
     let accumulated = slot.accumulator.magnitude;
     let ready = (slot.message_lane && accumulated > 0.0) || slot.ready_to_disclose();
-    let delivered = ready.then(|| slot.accumulator.drain_events().into_iter().map(|l| (l.clone(), slot.accumulator.lapse_of(&l))).collect());
-    Outcome { lane, delivered, accumulated, threshold }
+    let cut = ready && crate::sensors::writer::below_cut(lane, accumulated);
+    let delivered = (ready && !cut).then(|| slot.accumulator.drain_events().into_iter().map(|l| (l.clone(), slot.accumulator.lapse_of(&l))).collect());
+    Outcome { lane, delivered, cut, accumulated, threshold }
 }
 
 /// Find `name`, or exit 2 naming the ones there are.
@@ -316,6 +320,7 @@ pub(crate) fn poll(a: &PollArgs) {
             "accumulated": out.accumulated,
             "threshold": out.threshold,
             "delivered": delivered,
+            "cut": out.cut,
             "signals": ids,
             "dry_run": a.dry_run,
         }));
@@ -411,6 +416,7 @@ pub(crate) fn fire(a: &FireArgs) {
             "accumulated": out.accumulated,
             "threshold": out.threshold,
             "delivered": delivered,
+            "cut": out.cut,
             "signals": ids,
             "dry_run": a.dry_run,
             "note": commit_note,
@@ -445,6 +451,12 @@ fn verdict(h: &Hosted, out: &Outcome, writer: Option<&Writer>, ids: Option<&[Str
     match (&out.delivered, writer, ids) {
         (Some(_), Some(w), Some(ids)) => println!("{}: delivered on the {lane} to session {}: {}", h.name(), w.session(), ids.join(", ")),
         (Some(_), _, _) => println!("{}: would deliver on the {lane} (dry run)", h.name()),
+        (None, _, _) if out.cut => println!(
+            "{}: {:.1} accumulated is under the {lane}'s cut of {:.1}, so attend logs it and writes no signal",
+            h.name(),
+            out.accumulated,
+            crate::sensors::writer::EVENT_CUT
+        ),
         (None, _, _) => println!("{}: held on the {lane}: {:.1} accumulated of a {:.1} threshold", h.name(), out.accumulated, out.threshold),
     }
     if h.state == State::Off {

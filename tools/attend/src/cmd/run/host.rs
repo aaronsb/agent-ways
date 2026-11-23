@@ -44,7 +44,9 @@ const RELOAD_CHECK_INTERVAL: Duration = Duration::from_secs(10);
 /// polled once a week does not hold it asleep for a week.
 const WAKE_INTERVAL: Duration = Duration::from_secs(1);
 
-/// The host's sink: each line a system signal, and a cue on stdout.
+/// The host's sink: each line a system signal, and a cue on stdout. An
+/// event-lane batch under the cut ([`crate::sensors::writer::EVENT_CUT`]) is
+/// logged and not written, as `attend run` logged it and did not print it.
 struct Signals {
     writer: Writer,
 }
@@ -56,6 +58,12 @@ impl Sink for Signals {
             .iter()
             .map(|d| {
                 let lane = if d.message_lane { sensor_spec::Lane::Message } else { sensor_spec::Lane::Event };
+                if crate::sensors::writer::below_cut(lane, d.magnitude) {
+                    for (line, _) in &d.lines {
+                        emit::log(&format!("{}: under the event lane's cut ({:.1} of {:.1}), not written: {line}", d.sensor, d.magnitude, crate::sensors::writer::EVENT_CUT));
+                    }
+                    return vec![false; d.lines.len()];
+                }
                 d.lines
                     .iter()
                     .map(|(line, lapse)| match self.writer.write(&d.sensor, lane, *lapse, line) {

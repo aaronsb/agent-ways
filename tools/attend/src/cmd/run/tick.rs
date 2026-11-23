@@ -547,7 +547,13 @@ fn try_disclose(
             let lapse = slot.accumulator.lapse_of(&l);
             (l, lapse)
         });
-        batch.push(Disclosure { sensor: slot.name().to_string(), priority, message_lane: slot.message_lane, lines: lines.collect() });
+        batch.push(Disclosure {
+            sensor: slot.name().to_string(),
+            priority,
+            magnitude: slot.accumulator.magnitude,
+            message_lane: slot.message_lane,
+            lines: lines.collect(),
+        });
     }
 
     emit::log(&format!(

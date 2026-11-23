@@ -77,6 +77,21 @@ impl Writer {
     }
 }
 
+/// The magnitude an event-lane batch needs to be written: the cut at which
+/// `attend run` printed a batch instead of only logging it. A message-lane
+/// batch has no cut.
+pub const EVENT_CUT: f64 = 3.0;
+
+/// Whether a batch that accumulated `magnitude` on `lane` falls under the
+/// cut, so attend logs it and writes no signal.
+///
+/// References:
+/// - ADR-416 item 4: the host applies the event lane's salience before it
+///   writes, as `attend run` did before it printed.
+pub fn below_cut(lane: sensor_spec::Lane, magnitude: f64) -> bool {
+    lane == sensor_spec::Lane::Event && magnitude < EVENT_CUT
+}
+
 /// When a line written at `now` on `lane` lapses, in Unix seconds, or none
 /// when it stays until its session reads it.
 pub fn expires_at(lane: Lane, lapse: Option<Lapse>, now: u64) -> Option<u64> {
@@ -152,6 +167,13 @@ mod tests {
         assert_eq!(written(&format!("{command}lane: message\n{}", trigger("")), result.clone(), 1000), (Some(Lane::Message), None));
         assert_eq!(written(&format!("{command}{}", trigger("")), result.clone(), 1000), (Some(Lane::Event), Some(1000 + EXPIRES_DEFAULT)));
         assert_eq!(written(&format!("{command}lane: message\n{}", trigger(", expires: 60")), result, 1000), (Some(Lane::Message), Some(1060)));
+    }
+
+    #[test]
+    fn only_an_event_batch_under_the_cut_is_held() {
+        assert!(below_cut(sensor_spec::Lane::Event, 2.9));
+        assert!(!below_cut(sensor_spec::Lane::Event, 3.0));
+        assert!(!below_cut(sensor_spec::Lane::Message, 0.5), "a message-lane batch has no cut");
     }
 
     #[test]

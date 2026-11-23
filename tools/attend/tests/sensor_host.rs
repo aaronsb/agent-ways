@@ -100,14 +100,20 @@ fn from(f: &Fixture, sensor: &str) -> Vec<(String, String)> {
 
 /// A command sensor polled every second whose output says `{"up": true}`,
 /// appending a line to `<home>/<name>.polls` on each poll, with one
-/// trigger that fires when `up` enters true.
+/// trigger that fires at magnitude 3, the event lane's cut, when `up`
+/// enters true.
 fn beacon(f: &Fixture, name: &str, trigger: &str) {
+    beacon_at(f, name, 3, trigger);
+}
+
+/// [`beacon`] whose trigger fires at `magnitude`.
+fn beacon_at(f: &Fixture, name: &str, magnitude: u32, trigger: &str) {
     let polls = f.home.join(format!("{name}.polls"));
     let script = format!("echo x >> '{}'; printf '{{\"up\": true}}'", polls.display());
     f.sensor(
         name,
         &format!(
-            "kind: command\ninterval: 1\nmin_interval: 1\nthreshold: 1\nargv: [sh, -c, {}]\noutput: json\ntriggers:\n  - {{name: up, path: \"$\", on: enters, where: {{up: true}}, magnitude: 1, description: \"{name} is up\", {trigger}}}\n",
+            "kind: command\ninterval: 1\nmin_interval: 1\nthreshold: 1\nargv: [sh, -c, {}]\noutput: json\ntriggers:\n  - {{name: up, path: \"$\", on: enters, where: {{up: true}}, magnitude: {magnitude}, description: \"{name} is up\", {trigger}}}\n",
             serde_json::to_string(&script).unwrap()
         ),
     );
@@ -171,6 +177,34 @@ fn the_host_writes_a_trigger_as_a_system_signal_and_cues_each_write() {
 /// What the host logs once a delivered session trigger reached the
 /// checkpoint.
 const CHECKPOINTED: &str = "a session trigger is spent; checkpointed";
+
+/// An event-lane batch under the cut of 3.0 is logged and not written, as
+/// `attend run` logged it and did not print it; one at the cut is written,
+/// and a message-lane line, which has no cut, is written whatever its
+/// magnitude. A test fire under the cut writes nothing either.
+#[test]
+fn an_event_batch_under_the_cut_writes_no_signal() {
+    let f = quiet("host-cut");
+    beacon_at(&f, "low", 1, "memory: session");
+    beacon(&f, "high", "memory: session");
+    f.sensor(
+        "chat",
+        "kind: command\ninterval: 1\nmin_interval: 1\nthreshold: 1\nlane: message\nargv: [sh, -c, \"printf '{\\\"up\\\": true, \\\"who\\\": \\\"ann\\\"}'\"]\noutput: json\n\
+         triggers:\n  - {name: said, path: \"$\", on: enters, where: {up: true}, memory: session, author: who, magnitude: 1, description: \"ann said hi\"}\n",
+    );
+    let host = Host::start(&f, &f.sid, &[]);
+    host.wait_for("the high and message-lane signals", Duration::from_secs(20), || !from(&f, "high").is_empty() && !from(&f, "chat").is_empty());
+    let after = polls(&f, "low");
+    host.wait_for("three more polls of low", Duration::from_secs(20), || polls(&f, "low") >= after + 3);
+    assert!(from(&f, "low").is_empty(), "a line under the cut was written: {:?}", from(&f, "low"));
+    assert!(host.stderr().contains("low: under the event lane's cut (1.0 of 3.0), not written: low is up"), "{}", host.stderr());
+    assert!(from(&f, "chat")[0].1.contains("|lane:message|"), "{:?}", from(&f, "chat"));
+    let input = f.home.join("up.json");
+    std::fs::write(&input, r#"{"up": true}"#).unwrap();
+    let fire: Value = serde_json::from_str(&f.ok(&["sensor", "fire", "low", "--input", &input.to_string_lossy(), "--json"])).unwrap();
+    assert_eq!((fire["cut"].as_bool(), fire["signals"].is_null()), (Some(true), true), "{fire}");
+    assert!(from(&f, "low").is_empty());
+}
 
 /// A trigger kept for the session is spent when its line is written, and
 /// the checkpoint follows at once, so a host killed after the write and

@@ -12,6 +12,8 @@ use crate::emit;
 pub(super) struct Disclosure {
     pub(super) sensor: String,
     pub(super) priority: &'static str,
+    /// The magnitude the sensor accumulated.
+    pub(super) magnitude: f64,
     pub(super) message_lane: bool,
     /// Each line, with how long it stays deliverable when its sensor said.
     pub(super) lines: Vec<(String, Option<sensor_trait::Lapse>)>,
