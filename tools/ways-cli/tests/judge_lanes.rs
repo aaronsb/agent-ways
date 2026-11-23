@@ -53,7 +53,22 @@ struct Sim {
     state: PathBuf,
     project: PathBuf,
     session: String,
+    /// Runs the hook on the shipped judge timing, without the seam.
+    shipped_timing: bool,
 }
+
+/// The hook's test seam for judge timing (`WAYS_TEST_JUDGE_*` in gate.rs).
+/// The product waits 500 ms for a host to claim a job and about 2 s for its
+/// answer, and a runner under load can pause the host's `take` past either,
+/// so the scenario fails on the runner and not on the code. These scenarios
+/// run with both set to a minute, so neither the claim window nor the
+/// judge's own budget ends a wait. The hook's own deadline still does: the
+/// tool lanes allow the hook about 9 s, and the gate and `show` hold the
+/// ways back as that deadline nears. A host stalled for roughly 9 s can
+/// still fail a scenario. The shipped values are tested in the gate's unit
+/// tests, on a clock the test advances and on the real clock, and by the
+/// two scenarios that mark their `Sim` `shipped_timing`.
+const SEAM: [(&str, &str); 2] = [("WAYS_TEST_JUDGE_CLAIM_WINDOW_MS", "60000"), ("WAYS_TEST_JUDGE_BUDGET_MS", "60000")];
 
 const MAIN_PROSE: &str = "lead narration about the release notes";
 const SUB_BRIEF: &str = "subagent brief to fix the failing parser test";
@@ -88,7 +103,7 @@ impl Sim {
         }
         let session = format!("judge-{name}-{}", std::process::id());
         let _ = std::fs::remove_dir_all(format!("{}/{session}", sessions_root()));
-        let sim = Sim { base, home, state, project, session };
+        let sim = Sim { base, home, state, project, session, shipped_timing: false };
         sim.write_transcripts();
         if let Some(yaml) = agent_yaml {
             let dir = sim.home.join(".config/agent-ways");
@@ -133,6 +148,13 @@ impl Sim {
             .env("XDG_CONFIG_HOME", self.home.join(".config"))
             .env("XDG_DATA_HOME", self.home.join(".local/share"))
             .env("XDG_BIN_HOME", self.home.join(".local/bin"));
+        for (var, ms) in SEAM {
+            if self.shipped_timing {
+                cmd.env_remove(var);
+            } else {
+                cmd.env(var, ms);
+            }
+        }
         for var in ["CLAUDE_PROJECT_DIR", "CLAUDE_AGENT_ID", "CLAUDE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "WAYS_AGENT_SOCK", "WAYS_CLAUDE_BIN"] {
             cmd.env_remove(var);
         }
@@ -494,7 +516,8 @@ fn with_the_gate_off_nothing_changes() {
 /// fails open within it, and each macro gets only what is left.
 #[test]
 fn a_hung_judge_and_slow_macros_fail_open_inside_the_hook_bound() {
-    let s = Sim::new("hung", Some(ENFORCE));
+    let mut s = Sim::new("hung", Some(ENFORCE));
+    s.shipped_timing = true;
     for id in ["keep", "drop"] {
         std::fs::write(s.home.join(format!(".claude/hooks/ways/judged/{id}/macro.sh")), "sleep 5\necho late\n").unwrap();
         let md = s.home.join(format!(".claude/hooks/ways/judged/{id}/{id}.md"));
@@ -516,7 +539,8 @@ fn a_hung_judge_and_slow_macros_fail_open_inside_the_hook_bound() {
 /// fallback.
 #[test]
 fn a_tool_lane_judge_that_times_out_fails_open_inside_the_bound() {
-    let s = Sim::new("tool-hung", Some(ENFORCE));
+    let mut s = Sim::new("tool-hung", Some(ENFORCE));
+    s.shipped_timing = true;
     s.way("toolkeep", "tool_name: ^ExitPlanMode$\nscope: agent");
     s.way("tooldrop", "tool_name: ^ExitPlanMode$\nscope: agent");
     let env = s.ways_args();

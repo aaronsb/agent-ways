@@ -30,6 +30,8 @@ use serde::{Deserialize, Serialize};
 pub use ways_agent_core::engine::SessionEngine;
 use ways_agent_core::protocol::{JudgeAnswer, JudgeJob};
 
+use crate::clock::Clock;
+
 /// How often a waiter looks for a file. The model call takes about a second,
 /// so 10 ms is noise on the round trip.
 pub const POLL: Duration = Duration::from_millis(10);
@@ -223,11 +225,12 @@ impl Store {
         place(&dir, &format!("{id}.answer"), &body).map_err(AnswerError::Io)
     }
 
-    /// Waits for job `id`'s answer until `deadline`. A job no host has
-    /// claimed by `claim_by` is withdrawn and the wait ends as
+    /// Waits for job `id`'s answer until `deadline`, reading time and
+    /// sleeping on `clock`; `claim_by` and `deadline` are instants of it. A
+    /// job no host has claimed by `claim_by` is withdrawn and the wait ends as
     /// [`Waited::Unclaimed`]: the host is gone. An answer that does not
     /// parse counts as none.
-    pub fn wait_answer(&self, id: &str, claim_by: Instant, deadline: Instant) -> Waited {
+    pub fn wait_answer_on(&self, clock: &dyn Clock, id: &str, claim_by: Instant, deadline: Instant) -> Waited {
         let dir = self.jobs();
         let path = dir.join(format!("{id}.answer"));
         let mut claimed = false;
@@ -237,7 +240,7 @@ impl Store {
                     return Waited::Answered(a);
                 }
             }
-            if !claimed && Instant::now() >= claim_by {
+            if !claimed && clock.now() >= claim_by {
                 // Removing the pending file races the host's claiming rename:
                 // one of them wins. Gone already means the host claimed it.
                 match std::fs::remove_file(dir.join(format!("{id}.json"))) {
@@ -245,11 +248,11 @@ impl Store {
                     Err(_) => claimed = true,
                 }
             }
-            if Instant::now() >= deadline {
+            if clock.now() >= deadline {
                 let taken = dir.join(format!("{id}.taken")).exists() || path.exists();
                 return Waited::Silent { taken };
             }
-            std::thread::sleep(POLL);
+            clock.sleep(POLL);
         }
     }
 
@@ -329,6 +332,7 @@ fn private_dir(dir: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clock::{ManualClock, SystemClock};
     use ways_agent_core::engine::{Resolution, EXPLICIT, NO_HOST};
     use ways_agent_core::profile::Provider;
 
@@ -397,7 +401,7 @@ mod tests {
         assert_eq!(s.take().unwrap(), None, "claimed once");
         let a = JudgeAnswer { text: Some("{}".into()), ..Default::default() };
         s.answer(&id, &a).unwrap();
-        assert_eq!(s.wait_answer(&id, Instant::now(), Instant::now()), Waited::Answered(a));
+        assert_eq!(s.wait_answer_on(&SystemClock, &id, Instant::now(), Instant::now()), Waited::Answered(a));
         s.finish(&id);
         assert_eq!(std::fs::read_dir(base.join("run/jobs")).unwrap().count(), 0);
         std::fs::remove_dir_all(&base).ok();
@@ -440,18 +444,20 @@ mod tests {
     fn a_job_no_host_claims_in_its_window_is_withdrawn() {
         let (s, base) = store("unclaimed");
         let id = s.write_job(&job(2000)).unwrap();
-        let begun = Instant::now();
-        let w = s.wait_answer(&id, begun + Duration::from_millis(100), begun + Duration::from_secs(5));
+        let clock = ManualClock::new();
+        let window = Duration::from_millis(100);
+        let w = s.wait_answer_on(&clock, &id, clock.now() + window, clock.now() + Duration::from_secs(5));
         assert_eq!(w, Waited::Unclaimed);
-        assert!(begun.elapsed() < Duration::from_secs(1), "{:?}", begun.elapsed());
+        assert!(clock.elapsed() >= window && clock.elapsed() < window + POLL * 2, "{:?}", clock.elapsed());
         assert_eq!(s.take().unwrap(), None, "withdrawn: no host can claim it now");
         // A job claimed inside the window is waited on to the deadline.
         let id = s.write_job(&job(2000)).unwrap();
         s.take().unwrap().unwrap();
-        let begun = Instant::now();
-        let w = s.wait_answer(&id, begun, begun + Duration::from_millis(200));
+        let clock = ManualClock::new();
+        let wait = Duration::from_millis(200);
+        let w = s.wait_answer_on(&clock, &id, clock.now(), clock.now() + wait);
         assert_eq!(w, Waited::Silent { taken: true });
-        assert!(begun.elapsed() >= Duration::from_millis(200));
+        assert!(clock.elapsed() >= wait && clock.elapsed() < wait + POLL * 2, "{:?}", clock.elapsed());
         std::fs::remove_dir_all(&base).ok();
     }
 
@@ -483,9 +489,9 @@ mod tests {
         let (s, base) = store("silent");
         let id = s.write_job(&job(2000)).unwrap();
         let later = Instant::now() + Duration::from_secs(5);
-        assert_eq!(s.wait_answer(&id, later, Instant::now()), Waited::Silent { taken: false });
+        assert_eq!(s.wait_answer_on(&SystemClock, &id, later, Instant::now()), Waited::Silent { taken: false });
         s.take().unwrap().unwrap();
-        assert_eq!(s.wait_answer(&id, later, Instant::now() + POLL * 2), Waited::Silent { taken: true });
+        assert_eq!(s.wait_answer_on(&SystemClock, &id, later, Instant::now() + POLL * 2), Waited::Silent { taken: true });
         std::fs::remove_dir_all(&base).ok();
     }
 

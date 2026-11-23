@@ -40,6 +40,7 @@ use ways_agent_core::judge::{self, way_text, Candidate, Role, Turn};
 use ways_agent_core::profile::{self, Mode, Profile, Provider, Settings, UserLayer};
 use ways_agent_core::protocol::{JudgeAnswer, JudgeJob, JudgeRequest, Judged, Reply, Request, Verdict};
 
+use crate::clock::{Clock, SystemClock};
 use crate::session::judge_jobs::{Store, Waited};
 
 
@@ -59,6 +60,19 @@ const MIN_JOB: Duration = Duration::from_millis(50);
 /// end to end); past this the host is taken to be gone, and the prompt
 /// fails open now instead of waiting out the whole budget.
 const CLAIM_WINDOW: Duration = Duration::from_millis(500);
+
+/// Test seam: when these are set, a handoff waits as they say and not as the
+/// constants above say. A test that runs the hook as a process sets both well
+/// past any pause a loaded runner can inflict on its judge host, so the
+/// scenario does not race the claim window or the answer deadline. The
+/// scenarios that test those timings do not set them. A real session sets
+/// neither (matches `WAYS_TEST_HELD_DEADLINE`).
+const TEST_CLAIM_WINDOW_MS: &str = "WAYS_TEST_JUDGE_CLAIM_WINDOW_MS";
+const TEST_BUDGET_MS: &str = "WAYS_TEST_JUDGE_BUDGET_MS";
+
+fn test_ms(var: &str) -> Option<Duration> {
+    std::env::var(var).ok().and_then(|v| v.parse().ok()).map(Duration::from_millis)
+}
 
 /// The longest a PreToolUse lane waits on the judge, starting the agent
 /// included. Those hooks are bounded at 10 s (settings.json); the rest of a
@@ -446,13 +460,20 @@ fn settings(
 /// what remains of the budget when it is written. Every failure comes back
 /// as a fallback reply, carrying a call when the host took the job and so
 /// may have spent one: `deadline: unclaimed` when no host claims the job
-/// within [`CLAIM_WINDOW`], `deadline` on silence after a claim,
+/// within the claim window ([`CLAIM_WINDOW`]), `deadline` on silence after a claim,
 /// `invalid_reply: …` on a reply that does not parse, `model_error: …` when
 /// the model call failed.
 fn handoff(store: &Store, settings: &Settings, req: JudgeRequest, begun: Instant) -> Result<Reply, String> {
+    let claim_window = test_ms(TEST_CLAIM_WINDOW_MS).unwrap_or(CLAIM_WINDOW);
+    let budget = test_ms(TEST_BUDGET_MS).unwrap_or(Duration::from_millis(settings.profile.timeout_ms));
+    handoff_on(&SystemClock, claim_window, budget, store, settings, req, begun)
+}
+
+/// [`handoff`] with its clock, claim window and answer budget given; `begun`
+/// is an instant of `clock`.
+fn handoff_on(clock: &dyn Clock, claim_window: Duration, budget: Duration, store: &Store, settings: &Settings, req: JudgeRequest, begun: Instant) -> Result<Reply, String> {
     let p = &settings.profile;
-    let budget = Duration::from_millis(p.timeout_ms);
-    let remaining = budget.saturating_sub(begun.elapsed());
+    let remaining = budget.saturating_sub(clock.now().saturating_duration_since(begun));
     if remaining < MIN_JOB {
         return Ok(Reply::Fallback { reason: "deadline: before call".into(), latency_ms: 0, call: None });
     }
@@ -466,10 +487,10 @@ fn handoff(store: &Store, settings: &Settings, req: JudgeRequest, begun: Instant
         timeout_ms: remaining.as_millis() as u64,
     };
     let id = store.write_job(&job).map_err(|e| format!("job: {e}"))?;
-    let written = Instant::now();
-    let waited = store.wait_answer(&id, written + CLAIM_WINDOW, begun + budget + READ_GRACE);
+    let written = clock.now();
+    let waited = store.wait_answer_on(clock, &id, written + claim_window, begun + budget + READ_GRACE);
     store.finish(&id);
-    let latency_ms = written.elapsed().as_millis() as u64;
+    let latency_ms = clock.now().saturating_duration_since(written).as_millis() as u64;
     // The spend is the account's usage, with no price. A call that reported
     // tokens is an account call. One with no usage, or a usage block of zeros
     // (an aborted call sends one), is of unknown cost.
@@ -1352,22 +1373,36 @@ mod tests {
         assert_eq!(s.store.take().unwrap(), None);
     }
 
+    /// The gate over the claim-window handoff on a clock the test advances,
+    /// with the profile's budget set to `timeout_ms`. `at_first_sleep` runs
+    /// once the job is written and the waiter first sleeps. Returns the
+    /// gate and what elapsed on the clock.
+    fn gate_on_manual_clock(s: &Session, events: &Events, timeout_ms: u64, at_first_sleep: impl FnOnce() + 'static) -> (Gate, Duration) {
+        use crate::clock::ManualClock;
+        let sink = recorder(events);
+        let mut settings = Settings { engine: "claude-code".into(), engine_set: true, profile: profile::shipped()["claude-code"].clone(), mode: Mode::Enforce };
+        settings.profile.timeout_ms = timeout_ms;
+        let clock = ManualClock::new().at_first_sleep(at_first_sleep);
+        let begun = clock.now();
+        let g = run(&pending(), turns("q", None), &settings, &log(&sink), Judges::Matched, |req, _| handoff_on(&clock, CLAIM_WINDOW, Duration::from_millis(timeout_ms), &s.store, &settings, req, begun));
+        (g, clock.elapsed())
+    }
+
     #[test]
     fn silence_fails_open_as_deadline() {
-        let s = Session::new("silence", "engine: claude-code\nmode: enforce\nprofiles:\n  claude-code:\n    timeout_ms: 200\n");
+        let s = Session::new("silence", CLAUDE_CODE);
         s.store.register_host().unwrap();
-        // A host takes the job and never answers: the gate stops within its
+        // A host takes the job and never answers: the gate stops at its
         // budget plus the read grace, and logs a call of unknown cost.
         let events = Events::default();
-        let h = host(&s.store, |_| None);
-        let begun = Instant::now();
-        let g = s.gate(false, &events, &Default::default());
-        let took = begun.elapsed();
-        h.join().unwrap().expect("taken");
+        let store = s.store.clone();
+        let (g, took) = gate_on_manual_clock(&s, &events, 200, move || {
+            store.take().unwrap().expect("the job is waiting for a host");
+        });
+        let wait = Duration::from_millis(200) + READ_GRACE;
         assert_eq!(g.status, Status::Fallback { reason: "deadline".into() });
         assert!(g.ids().is_empty());
-        assert!(took < Duration::from_millis(200) + READ_GRACE + Duration::from_millis(500), "{took:?}");
-        assert!(took >= Duration::from_millis(200) + READ_GRACE, "it waited out the grace: {took:?}");
+        assert!(took >= wait && took < wait + crate::session::judge_jobs::POLL * 2, "it waited out the grace: {took:?}");
         assert_eq!(field(events.borrow().iter().find(|e| field(e, "event") == "gate_fallback").unwrap(), "reason"), "deadline");
         let calls = calls(&events);
         assert_eq!(calls.len(), 1);
@@ -1381,12 +1416,28 @@ mod tests {
         let s = Session::new("unclaimed", CLAUDE_CODE);
         s.store.register_host().unwrap();
         let events = Events::default();
+        let (g, took) = gate_on_manual_clock(&s, &events, 2000, || {});
+        assert_eq!(g.status, Status::Fallback { reason: "deadline: unclaimed".into() });
+        assert!(took >= CLAIM_WINDOW && took < CLAIM_WINDOW + crate::session::judge_jobs::POLL * 2, "{took:?}");
+        assert!(calls(&events).is_empty(), "an unclaimed job made no call");
+        assert_eq!(s.store.take().unwrap(), None, "the job was withdrawn");
+    }
+
+    /// The shipped claim window, on the real clock: a host that is registered
+    /// and never claims leaves the job unclaimed, and the prompt fails open
+    /// as `deadline: unclaimed`, after the window and well inside the 2 s
+    /// budget. The reason proves the order: a gate that waited out the budget
+    /// would say `deadline`.
+    #[test]
+    fn the_shipped_claim_window_withdraws_a_job_no_host_claims() {
+        let s = Session::new("unclaimed-real", CLAUDE_CODE);
+        s.store.register_host().unwrap();
+        let events = Events::default();
         let begun = Instant::now();
         let g = s.gate(false, &events, &Default::default());
         let took = begun.elapsed();
         assert_eq!(g.status, Status::Fallback { reason: "deadline: unclaimed".into() });
-        assert!(took >= CLAIM_WINDOW && took < CLAIM_WINDOW + Duration::from_millis(400), "{took:?}");
-        assert!(calls(&events).is_empty(), "an unclaimed job made no call");
+        assert!(took >= CLAIM_WINDOW && took < Duration::from_millis(2000), "{took:?}");
         assert_eq!(s.store.take().unwrap(), None, "the job was withdrawn");
     }
 

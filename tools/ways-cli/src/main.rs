@@ -13,6 +13,7 @@ use std::path::PathBuf;
 // etc. paths across the command modules keep resolving unchanged.
 pub use ways_core::{agents, config, frontmatter, paths, scanner, util};
 
+mod clock;
 mod cmd;
 mod hook_deadline;
 pub mod session;
