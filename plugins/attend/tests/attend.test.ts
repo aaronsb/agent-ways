@@ -2867,6 +2867,29 @@ describe('the sensor host (ADR-416 item 2)', () => {
     expect(h.hostLogs).toEqual([])
   })
 
+  // `attend listen off` drops the host the mod recorded, and a join that
+  // turns listening back on records none, so the Stop hook would deliver
+  // nothing at the end of a turn. The first drain that finds the session
+  // listening again records the mod once more, and only that drain.
+  test('listening again after it was off records the mod as the host again', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(6_000)
+    const before = h.count('listen on --host mod')
+    expect(before).toBeGreaterThan(0)
+    drains.push(DRAIN_NOT_LISTENING, DRAIN_NOT_LISTENING, DRAIN_NOT_LISTENING)
+    await clock.advance(6_000)
+    await clock.advance(10_000)
+    expect(h.count('listen on --host mod')).toBe(before)
+    // The drain says the session listens again.
+    await clock.advance(10_000)
+    expect(h.count('listen on --host mod')).toBe(before + 1)
+    await clock.advance(30_000)
+    expect(h.count('listen on --host mod')).toBe(before + 1)
+  })
+
   // A reload in the second between the settle and the host's start reads
   // $.state: it holds the new id's host, --moved-from included, written
   // before the move is released (the seeded reload below spawns it).
