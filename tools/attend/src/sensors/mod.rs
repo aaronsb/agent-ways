@@ -371,6 +371,20 @@ pub fn register_host_sensors(cfg: &Config, focus: &Focus, session: &str) -> (Vec
     register(&ctx, focus)
 }
 
+/// The lane the sensor host runs `h` on, and so the lane `attend sensor
+/// poll` and `fire` deliver it on: its file's, but the event lane for the
+/// peers sensor, which the host runs presence-only, since presence is no
+/// one's words.
+///
+/// References:
+/// - ADR-416 item 4: the lane rule.
+pub fn host_lane(h: &Hosted) -> Lane {
+    match h.crate_id() {
+        Some("peers") => Lane::Event,
+        _ => h.lane().unwrap_or(Lane::Event),
+    }
+}
+
 /// The slots `ctx` runs for `focus`, and their names. A sensor that does
 /// not run is logged once with its state. First it sweeps the store
 /// directory of stores past retention and files of an older format.
@@ -395,10 +409,7 @@ fn register(ctx: &Ctx, focus: &Focus) -> (Vec<SensorSlot>, Vec<String>) {
             crate::emit::log(&format!("sensor {}: the sensor host does not run it", h.name()));
             continue;
         }
-        let lane = match h.crate_id() {
-            Some("peers") if ctx.host => Lane::Event,
-            _ => h.lane().unwrap_or(Lane::Event),
-        };
+        let lane = if ctx.host { host_lane(&h) } else { h.lane().unwrap_or(Lane::Event) };
         match build(&h, ctx, &focus.working_dir, true) {
             Ok(sensor) => {
                 slots.push(slot(sensor, lane, h.crate_id()));
@@ -501,6 +512,17 @@ mod tests {
         assert_eq!(lane("chat"), Some(Lane::Message), "the peers crate's lane, under any name");
         let chat = all.iter().find(|h| h.name() == "chat").unwrap();
         assert_eq!(chat.crate_id(), Some("peers"));
+    }
+
+    /// The host, and so poll and fire, run the peers sensor on the event
+    /// lane whatever its file says, and every other sensor on its file's.
+    #[test]
+    fn the_host_runs_peers_on_the_event_lane_and_the_rest_on_their_file_s() {
+        let all = catalog_of(loaded(&[("chat", "kind: crate\ncrate: peers\n"), ("peers", "enabled: false\n")]), |_| None);
+        let lane = |n: &str| all.iter().find(|h| h.name() == n).map(host_lane);
+        assert_eq!(lane("chat"), Some(Lane::Event), "the peers crate, under any name and whatever its file says");
+        assert_eq!(lane("keepwarm"), Some(Lane::Message));
+        assert_eq!(lane("git"), Some(Lane::Event));
     }
 
     #[test]

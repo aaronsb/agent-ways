@@ -317,7 +317,7 @@ pub(crate) fn poll(a: &PollArgs) {
     if !a.json {
         print_verdicts(&h, &sensor);
     }
-    let out = run_through(Box::new(sensor), h.lane().unwrap_or(Lane::Event), result.clone(), &focus);
+    let out = run_through(Box::new(sensor), sensors::host_lane(&h), result.clone(), &focus);
     let (delivered, ids) = deliver(&h, &out, writer.as_ref());
     if a.json {
         crate::cmd::print_json(&json!({
@@ -413,7 +413,7 @@ pub(crate) fn fire(a: &FireArgs) {
         print_verdicts(&h, &sensor);
     }
     let input: Vec<(f64, String)> = input.into_iter().map(|(m, d)| (m, format!("{TEST_MARK}{}", sensors::deliverable(&d)))).collect();
-    let out = run_through(Box::new(sensor), h.lane().unwrap_or(Lane::Event), input.clone(), &focus);
+    let out = run_through(Box::new(sensor), sensors::host_lane(&h), input.clone(), &focus);
     let (delivered, ids) = deliver(&h, &out, writer.as_ref());
     let commit_note = (a.commit && !declares_triggers(&h)).then_some("this sensor keeps no trigger memory or declared state, so --commit changes nothing");
     if a.json {
