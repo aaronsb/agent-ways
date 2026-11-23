@@ -9,12 +9,13 @@
 #      and set `tool` and `args` to a call that lists items without marking
 #      them read.
 #   3. Map each state field's `from` onto that tool's result.
-#   4. Run `attend sensor probe <name>`. It calls the tool twice, checks the
+#   4. Run `attend sensor probe <name>` at a terminal (from Claude Code,
+#      `! attend sensor probe <name>`). It calls the tool twice, checks the
 #      second call returned every item of the first, asks you to confirm in
-#      another client that the items are still unread (`--confirm` answers
-#      yes), and writes the `probe` record into your user file for the
-#      sensor. A sensor with no record that holds reads degraded and stays
-#      off.
+#      another client that the items are still unread, and writes the
+#      `probe` record into your user file for the sensor. A sensor with no
+#      record that holds reads degraded and stays off; a change to the
+#      server's definition, the tool or the args voids the record.
 #   5. Set `enabled: true`. `attend sensor list` shows its state.
 #
 # The sensor host starts the server at the first poll and keeps it across

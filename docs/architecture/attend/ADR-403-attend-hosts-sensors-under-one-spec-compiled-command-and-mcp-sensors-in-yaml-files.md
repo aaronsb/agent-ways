@@ -107,6 +107,18 @@ considered:
   - operator: aaronsb
     said: "Refuse everywhere"
     via: "session 2026-11-23, question tool, #1329 review F1"
+  - operator: aaronsb
+    said: "User overlay file"
+    via: "session 2026-11-23, question tool, #1324 review"
+  - operator: aaronsb
+    said: "Refuse and name it"
+    via: "session 2026-11-23, question tool, #1324 review"
+  - operator: aaronsb
+    said: "Require a terminal"
+    via: "session 2026-11-23, question tool, #1324 review"
+  - operator: aaronsb
+    said: "Sweep at next start"
+    via: "session 2026-11-23, question tool, #1324 review"
 observable:
   - 'see: attend sensor list shows a shipped git.yaml, a user weather.yaml (kind: command, Open-Meteo) and a user slack-unread.yaml (kind: mcp), each with its source file and last poll state'
   - 'run: attend sensor fire weather/high-wind --input sample.json produces a [test] notification on the event lane and leaves the trigger''s stored state unchanged'
@@ -313,6 +325,14 @@ An `mcp` sensor's `server` names a server from Claude Code's MCP configuration (
 - **Diff on attend's side:** attend computes the delta itself, through triggers keyed on an item field. It never relies on a server cursor that advances when read.
 - **Auth:** attend never stores credentials or starts an auth flow. Its instance reads the server's own token store, and a missing or expired credential is a sensor failure, never a prompt.
 - **Delivery:** events ride the same lanes and conduits as every other sensor (Monitor and the Stop-hook drain, ADR-172). A notification names the server and the item handle, so the agent can fetch it with its own MCP tools. The MCP channel route (ADR-501) is a later choice.
+
+> Amended 2026-11-23, by the operator's choices in the review of #1324:
+> - **Where the record lives** ("User overlay file"): attend reads `probe` only from a user file. A `probe` key in a project or shipped file is ignored, and lint names it. A project's sensor keeps its record in a user file that holds the record alone and names the project it applies to, and the record holds only in that project.
+> - **Variables** ("Refuse and name it"): `${NAME}` and `${NAME:-default}` in a `~/.claude.json` entry's command, args and env expand from attend's environment, as Claude Code expands them, and a reference that cannot be expanded fails the poll, naming it. attend expands nothing in a repository's `.mcp.json` entry, and an entry with a reference fails the poll, naming it.
+> - **Confirmation** ("Require a terminal"): only a y/N answer at a terminal confirms. With no terminal the record says `confirmed: false`, and the probe says to run it at a terminal, such as `! attend sensor probe <name>` from Claude Code.
+> - **A killed host** ("Sweep at next start"): each running server is noted with its process group, its leader's start time and the process that started it. The next host for the project ends every noted server whose starter is gone, while the group is still that server's.
+>
+> The record also binds the server: it names where the server's definition came from and a hash of the definition as written, so a changed command, args or env voids it and the record holds no value of the definition. A host ends its servers in the order the MCP stdio transport gives (input closed, then TERM, then KILL), and ends on TERM, HUP or INT by dropping them.
 
 ### 5. Two surfaces, one model
 
