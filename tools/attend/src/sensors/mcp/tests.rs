@@ -3,6 +3,8 @@
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
 use super::*;
+use sensor_spec::Server;
+use std::path::Path;
 
 fn fixture() -> String {
     format!("{}/tests/fixtures/mcp-server.sh", env!("CARGO_MANIFEST_DIR"))
