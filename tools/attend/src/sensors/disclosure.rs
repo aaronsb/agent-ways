@@ -216,48 +216,6 @@ mod tests {
         assert!(!body.is_empty());
     }
 
-    /// The three synchronized messaging sources say alike that the operator
-    /// sets `mods.attend.listening: active`, since auto mode refuses an
-    /// agent's write to its own project config (the clean-slate test's
-    /// finding 7).
-    #[test]
-    fn the_synced_sources_say_the_operator_sets_listening_active() {
-        const MARK: &str = "**Starting active is the operator's setting.**";
-        // Read at test time, not embedded: the two other sources are no
-        // part of attend's binary.
-        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let read = |rel: &str| std::fs::read_to_string(repo.join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"));
-        let skill = read("skills/attend/SKILL.md");
-        let way = read("hooks/ways/softwaredev/environment/attend/attend.md");
-        let sources = [("messaging.md", Component::Messaging.body()), ("SKILL.md", skill.as_str()), ("attend.md", way.as_str())];
-        let paragraphs: Vec<(&str, &str)> = sources
-            .iter()
-            .map(|(name, text)| {
-                let para = text.lines().find(|l| l.starts_with(MARK)).unwrap_or_else(|| panic!("{name} lacks the paragraph"));
-                (*name, para)
-            })
-            .collect();
-        for (name, para) in &paragraphs {
-            assert!(para.contains("mods.attend.listening: active") && para.contains("auto mode"), "{name}: {para}");
-            assert_eq!(*para, paragraphs[0].1, "{name} differs from messaging.md");
-        }
-    }
-
-    /// The three synchronized messaging sources say alike that `#open`
-    /// reaches every listening session, other projects included, and send
-    /// project chatter to a named channel or a direct message.
-    #[test]
-    fn the_synced_sources_say_open_reaches_every_project() {
-        const LINE: &str = "`#open` reaches every listening session, in other projects too, so keep chatter about this project to a named channel or a direct message.";
-        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let read = |rel: &str| std::fs::read_to_string(repo.join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"));
-        let skill = read("skills/attend/SKILL.md");
-        let way = read("hooks/ways/softwaredev/environment/attend/attend.md");
-        for (name, text) in [("messaging.md", Component::Messaging.body()), ("SKILL.md", skill.as_str()), ("attend.md", way.as_str())] {
-            assert_eq!(text.matches(LINE).count(), 1, "{name} lacks the #open line");
-        }
-    }
-
     #[test]
     fn format_observation_contains_tag_and_body() {
         let sensor = DisclosureSensor::new();

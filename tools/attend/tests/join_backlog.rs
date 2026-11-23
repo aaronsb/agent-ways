@@ -65,30 +65,6 @@ fn rejoining_a_channel_already_joined_keeps_what_is_owed() {
     assert!(f.drain("plain").contains(OLD), "a member's unconsumed message is still delivered");
 }
 
-// `attend run` has no sensor to scan the room without the peers sensor.
-#[cfg(feature = "sensor-peers")]
-#[test]
-fn a_late_join_under_attend_run_holds_back_the_history_too() {
-    let f = Fixture::new("join-backlog-run");
-    testing(&f);
-    // An old #open message: the sensor's cold start announces it, which
-    // marks its first message scan done.
-    f.put("_broadcast", "other-open", "old open", 60 * MINUTE);
-    let run = f.run();
-    run.wait_for("the cold start", Duration::from_secs(30), |r| r.output().contains("1 older message held back"));
-    for i in 0..12 {
-        f.put("@testing", &format!("other-old-{i:02}"), &format!("{OLD} {i}"), 24 * 60 * MINUTE);
-    }
-    f.ok(&["channel", "join", "testing"]);
-    // A post in the session's channel, addressed to it as well, so it
-    // wakes it (ADR-406 item 2).
-    let dir = f.signals().join("@testing");
-    std::fs::write(dir.join("other-live.signal"), format!("claude:other-session|elsewhere|/tmp/elsewhere|to:{}|{LIVE}\n", f.sid)).unwrap();
-    // The live message is the positive control: the sensor scanned the room.
-    run.wait_for("the live message", Duration::from_secs(30), |r| r.output().contains(LIVE));
-    assert!(!run.output().contains(OLD), "the room's history is not delivered: {}", run.output());
-}
-
 /// Record a pending invitation for the fixture's session, as attend-chat's
 /// `/invite` does.
 fn invite(f: &Fixture, channel: &str) {

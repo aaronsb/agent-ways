@@ -231,22 +231,6 @@ fn the_drain_skips_a_marked_message_until_it_is_undone() {
     assert!(drained.contains("marked before the join"), "undo restores delivery: {drained}");
 }
 
-/// The Monitor conduit skips a marked message too.
-#[cfg(feature = "sensor-peers")]
-#[test]
-fn the_peers_sensor_skips_a_marked_message() {
-    let f = Fixture::new("del-sensor");
-    let tray = f.project_tray();
-    post(&f, &tray, "gone-1", "marked before the run", Duration::from_secs(100));
-    f.without_session(|| delete(&f, &["--everywhere"]));
-    post(&f, &tray, "kept-1", "posted after the delete", Duration::from_secs(100));
-    let run = f.run();
-    run.wait_for("the unmarked message", Duration::from_secs(20), |r| r.output().contains("posted after the delete"));
-    assert!(!run.output().contains("marked before the run"), "{}", run.output());
-    f.ok(&["message", "delete", "--undo"]);
-    run.wait_for("the message the undo restored", Duration::from_secs(20), |r| r.output().contains("marked before the run"));
-}
-
 /// `--dm` takes both halves of the thread between the caller and a session
 /// and nothing else that session said.
 #[test]
@@ -416,21 +400,6 @@ fn a_tombstoned_sessions_messages_are_read_and_not_shown_until_undone() {
     let drained = f.drain("plain");
     assert!(drained.contains("after the undo"), "{drained}");
     assert!(!drained.contains("from the tombstoned session"), "what was read stays read: {drained}");
-}
-
-/// The Monitor conduit skips a tombstoned session too.
-#[cfg(feature = "sensor-peers")]
-#[test]
-fn the_peers_sensor_skips_a_tombstoned_session() {
-    let f = Fixture::new("tomb-sensor");
-    let tray = f.project_tray();
-    exited(&f, R2);
-    f.ok(&["message", "tombstone", R2]);
-    signal(&f, &tray, "dead-1", &format!("claude:{R2}|p|/srv/p|from the tombstoned session"), Duration::from_secs(100));
-    post(&f, &tray, "live-1", "from someone else", Duration::from_secs(100));
-    let run = f.run();
-    run.wait_for("the other message", Duration::from_secs(20), |r| r.output().contains("from someone else"));
-    assert!(!run.output().contains("from the tombstoned session"), "{}", run.output());
 }
 
 /// A sleeping child process that stands in for a running Claude Code

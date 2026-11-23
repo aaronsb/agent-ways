@@ -14,88 +14,12 @@
 mod common;
 
 use std::os::unix::process::CommandExt;
-use std::path::{Path, PathBuf};
-use std::process::{Child, Stdio};
+use std::path::Path;
+use std::process::Stdio;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use common::Fixture;
+use common::{Fixture, Host};
 use serde_json::Value;
-
-/// A running `attend sensor host`, or the wrapper that runs one, its
-/// stdout and stderr in files. It leads its own process group, which drop
-/// ends.
-struct Host {
-    child: Child,
-    out: PathBuf,
-    err: PathBuf,
-}
-
-impl Host {
-    fn start(f: &Fixture, session: &str, extra: &[&str]) -> Host {
-        let n = std::fs::read_dir(&f.home).map(|d| d.count()).unwrap_or(0);
-        let (out, err) = (f.home.join(format!("host-{n}.out")), f.home.join(format!("host-{n}.err")));
-        let child = f
-            .command()
-            .args(["sensor", "host", "--session", session, "--cwd", &f.origin])
-            .args(extra)
-            .process_group(0)
-            .stdout(Stdio::from(std::fs::File::create(&out).unwrap()))
-            .stderr(Stdio::from(std::fs::File::create(&err).unwrap()))
-            .spawn()
-            .unwrap();
-        Host { child, out, err }
-    }
-
-    fn stdout(&self) -> String {
-        std::fs::read_to_string(&self.out).unwrap_or_default()
-    }
-
-    fn stderr(&self) -> String {
-        std::fs::read_to_string(&self.err).unwrap_or_default()
-    }
-
-    fn wait_for(&self, what: &str, limit: Duration, done: impl Fn() -> bool) {
-        let start = Instant::now();
-        while start.elapsed() < limit {
-            if done() {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        panic!("timed out waiting for {what}; the host logged:\n{}", self.stderr());
-    }
-
-    /// End it at once, as a crash or `kill -9` would.
-    fn kill(mut self) {
-        self.child.kill().ok();
-        self.child.wait().ok();
-    }
-}
-
-impl Drop for Host {
-    /// SIGTERM to the child's process group, so a host under a wrapper
-    /// ends with it: `timeout` would forward a TERM, but a shell that waits
-    /// on the host does not. A SIGKILL to the wrapper alone would leave the
-    /// host running until it noticed its parent gone. SIGKILL follows when
-    /// the child has not exited within five seconds.
-    fn drop(&mut self) {
-        if !matches!(self.child.try_wait(), Ok(None)) {
-            return;
-        }
-        // SAFETY: kill(2) on the process group the child leads. The child
-        // is not reaped yet, so its pid still names that group.
-        unsafe { libc::kill(-(self.child.id() as libc::pid_t), libc::SIGTERM) };
-        let start = Instant::now();
-        while start.elapsed() < Duration::from_secs(5) {
-            if !matches!(self.child.try_wait(), Ok(None)) {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        self.child.kill().ok();
-        self.child.wait().ok();
-    }
-}
 
 fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
@@ -259,44 +183,6 @@ fn a_line_the_governor_holds_is_cut_once_and_not_offered_again() {
     assert_eq!(log.matches("low: under the event lane's cut (1.0 of 3.0), not written: low is up").count(), 1, "{log}");
     let low_after = polls(&f, "low") - low_before;
     assert!(low_after <= 6, "low polled {low_after} times while high polled ten: its interval did not back off");
-}
-
-/// `attend run`'s stderr, which holds its log and its quiet events.
-fn run_err(f: &Fixture) -> String {
-    std::fs::read_to_string(f.home.join("run.err")).unwrap_or_default()
-}
-
-/// Under `attend run` a session line under the cut is logged once as a
-/// quiet event and spent, as on main: Monitor never prints it, and later
-/// polls offer nothing.
-#[test]
-fn attend_run_logs_a_low_session_line_once() {
-    let f = quiet("run-low");
-    beacon_at(&f, "low", 1, "memory: session");
-    let run = f.run();
-    run.wait_for("six polls of low", Duration::from_secs(30), |_| polls(&f, "low") >= 6);
-    drop(run);
-    assert_eq!(run_err(&f).matches("quiet (low): low is up").count(), 1, "{}", run_err(&f));
-    assert!(!std::fs::read_to_string(f.home.join(format!("run-{}.out", f.sid))).unwrap_or_default().contains("low is up"));
-}
-
-/// Under `attend run` a session line the cache gate drops is not offered
-/// again while the cache stays lapsed, so nothing churns; once the cache is
-/// warm the trigger fires again and its line goes out, once.
-#[test]
-fn attend_run_offers_a_gated_session_line_again_once_the_cache_is_warm() {
-    let f = quiet("run-gated");
-    f.last_turn(Some(Duration::from_secs(61 * 60)));
-    beacon(&f, "beacon", "memory: session");
-    let run = f.run();
-    run.wait_for("eight polls on a lapsed cache", Duration::from_secs(30), |_| polls(&f, "beacon") >= 8);
-    assert_eq!(run_err(&f).matches("beacon: dropped 1 event(s), the prompt cache has lapsed").count(), 1, "{}", run_err(&f));
-    assert!(!run.output().contains("beacon is up"), "{}", run.output());
-    f.last_turn(Some(Duration::ZERO));
-    run.wait_for("the line once the cache is warm", Duration::from_secs(30), |r| r.output().contains("beacon is up"));
-    let after = polls(&f, "beacon");
-    run.wait_for("four more polls", Duration::from_secs(30), |_| polls(&f, "beacon") >= after + 4);
-    assert_eq!(run.output().matches("beacon is up").count(), 1, "{}", run.output());
 }
 
 /// A trigger kept for the session is spent when its line is written, and

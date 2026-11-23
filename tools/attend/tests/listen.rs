@@ -230,25 +230,6 @@ fn unread_after_listen_off_counts_what_listen_on_delivers() {
     assert!(f.drain("plain").contains("2 message(s) drained"));
 }
 
-/// `listen off` while an `attend run` holds the session: it keeps listening
-/// until the run exits, and says so on stderr.
-#[test]
-fn listen_off_under_a_live_run_keeps_listening() {
-    let f = Fixture::new("listen-off-run");
-    let run = f.run();
-    run.wait_for("the run's lock", Duration::from_secs(20), |_| {
-        doc(&f, &["listen", "--json"])["run_live"] == true
-    });
-    let out = f.attend(&["listen", "off", "--json"]);
-    assert!(out.status.success());
-    let state: Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(state["listening"], true);
-    assert_eq!(state["run_live"], true);
-    assert!(String::from_utf8_lossy(&out.stderr).contains("listens until that run exits"));
-    drop(run);
-    assert_eq!(f.ok(&["listen"]), "not listening\n", "the opt-out applies once the run is gone");
-}
-
 /// `listen beat`: the attend mod's timer keeps a listening session's
 /// heartbeat inside the grace through a turn longer than it, which no drain
 /// touches (the mod-session liveness defect of 2026-10-13). A session that

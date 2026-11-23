@@ -312,41 +312,6 @@ impl Fixture {
         assert!(out.status.success());
         String::from_utf8_lossy(&out.stdout).into_owned()
     }
-
-    /// Start `attend run`; its stdout (the Monitor lines) goes to a file.
-    pub fn run(&self) -> Run {
-        self.run_with(&[])
-    }
-
-    /// [`Fixture::run`] with extra environment.
-    pub fn run_with(&self, env: &[(&str, &str)]) -> Run {
-        self.run_from(Path::new(env!("CARGO_BIN_EXE_attend")), env)
-    }
-
-    /// `attend run` from the binary at `bin`. A spawn that meets the file
-    /// still held open for writing (`ExecutableFileBusy`: a binary just
-    /// copied, while another test's fork inherited the writer) is tried
-    /// again shortly.
-    pub fn run_from(&self, bin: &Path, env: &[(&str, &str)]) -> Run {
-        let log = self.home.join(format!("run-{}.out", self.sid));
-        for _ in 0..50 {
-            let mut cmd = self.command_from(bin);
-            for (k, v) in env {
-                cmd.env(k, v);
-            }
-            let spawned = cmd
-                .arg("run")
-                .stdout(Stdio::from(std::fs::File::create(&log).unwrap()))
-                .stderr(Stdio::from(std::fs::File::create(self.home.join("run.err")).unwrap()))
-                .spawn();
-            match spawned {
-                Ok(child) => return Run { child, log },
-                Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy => std::thread::sleep(Duration::from_millis(20)),
-                Err(e) => panic!("spawn attend run: {e}"),
-            }
-        }
-        panic!("spawn attend run: the binary stayed busy");
-    }
 }
 
 impl Drop for Fixture {
@@ -373,43 +338,90 @@ pub fn age_file(path: &Path, age: Duration) {
     f.set_modified(SystemTime::now() - age).unwrap();
 }
 
-pub struct Run {
-    child: Child,
-    log: PathBuf,
+/// A running `attend sensor host`, or the wrapper that runs one, its
+/// stdout and stderr in files. It leads its own process group, which drop
+/// ends.
+#[cfg(unix)]
+pub struct Host {
+    pub child: Child,
+    pub out: PathBuf,
+    pub err: PathBuf,
 }
 
-impl Run {
-    /// The pid of `attend run`.
+#[cfg(unix)]
+impl Host {
+    /// `attend sensor host --session <session> --cwd <origin>`, with
+    /// `extra` arguments.
+    pub fn start(f: &Fixture, session: &str, extra: &[&str]) -> Host {
+        use std::os::unix::process::CommandExt;
+        let n = std::fs::read_dir(&f.home).map(|d| d.count()).unwrap_or(0);
+        let (out, err) = (f.home.join(format!("host-{n}.out")), f.home.join(format!("host-{n}.err")));
+        let child = f
+            .command()
+            .args(["sensor", "host", "--session", session, "--cwd", &f.origin])
+            .args(extra)
+            .process_group(0)
+            .stdout(Stdio::from(std::fs::File::create(&out).unwrap()))
+            .stderr(Stdio::from(std::fs::File::create(&err).unwrap()))
+            .spawn()
+            .unwrap();
+        Host { child, out, err }
+    }
+
+    /// The host's pid.
     pub fn pid(&self) -> u32 {
         self.child.id()
     }
 
-    /// Whether the process has exited.
-    pub fn exited(&mut self) -> bool {
-        self.child.try_wait().ok().flatten().is_some()
+    pub fn stdout(&self) -> String {
+        std::fs::read_to_string(&self.out).unwrap_or_default()
     }
 
-    pub fn output(&self) -> String {
-        std::fs::read_to_string(&self.log).unwrap_or_default()
+    pub fn stderr(&self) -> String {
+        std::fs::read_to_string(&self.err).unwrap_or_default()
     }
 
-    /// Wait until `done` holds, or panic after `limit` naming what was seen.
-    pub fn wait_for(&self, what: &str, limit: Duration, done: impl Fn(&Run) -> bool) {
+    pub fn wait_for(&self, what: &str, limit: Duration, done: impl Fn() -> bool) {
         let start = Instant::now();
         while start.elapsed() < limit {
-            if done(self) {
+            if done() {
                 return;
             }
-            std::thread::sleep(Duration::from_millis(200));
+            std::thread::sleep(Duration::from_millis(50));
         }
-        panic!("timed out waiting for {what}; attend run printed:\n{}", self.output());
+        panic!("timed out waiting for {what}; the host logged:\n{}", self.stderr());
+    }
+
+    /// End it at once, as a crash or `kill -9` would.
+    pub fn kill(mut self) {
+        self.child.kill().ok();
+        self.child.wait().ok();
     }
 }
 
-impl Drop for Run {
+#[cfg(unix)]
+impl Drop for Host {
+    /// SIGTERM to the child's process group, so a host under a wrapper
+    /// ends with it: `timeout` would forward a TERM, but a shell that waits
+    /// on the host does not. A SIGKILL to the wrapper alone would leave the
+    /// host running until it noticed its parent gone. SIGKILL follows when
+    /// the child has not exited within five seconds.
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if !matches!(self.child.try_wait(), Ok(None)) {
+            return;
+        }
+        // SAFETY: kill(2) on the process group the child leads. The child
+        // is not reaped yet, so its pid still names that group.
+        unsafe { libc::kill(-(self.child.id() as libc::pid_t), libc::SIGTERM) };
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(5) {
+            if !matches!(self.child.try_wait(), Ok(None)) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        self.child.kill().ok();
+        self.child.wait().ok();
     }
 }
 

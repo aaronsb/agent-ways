@@ -224,22 +224,6 @@ fn the_check_without_a_session_prints_nothing() {
     assert!(out.stdout.is_empty());
 }
 
-/// While an `attend run` holds the session, its sensor owns keepwarm: the
-/// check prints nothing, so the session is not woken twice.
-#[test]
-fn the_check_stands_down_under_a_live_run() {
-    let w = Warm::new("kw-live-run");
-    w.reading(&[(51 * MIN, 200_000, 500)]);
-    assert!(w.run(&["keepwarm", "on"]).status.success());
-    w.check();
-    let run = w.f.run();
-    run.wait_for("the run's lock", std::time::Duration::from_secs(20), |_| {
-        let out = w.run(&["keepwarm", "check"]);
-        String::from_utf8_lossy(&out.stderr).contains("an attend run holds this session")
-    });
-    assert_eq!(w.check(), "");
-}
-
 /// A cold write paid while no check ran (the host was dormant) arms the
 /// window from the time of the write, as the sensor's loop would have. One
 /// whose window has already run out arms nothing.

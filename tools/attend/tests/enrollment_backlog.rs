@@ -13,8 +13,6 @@
 
 mod common;
 use common::{Fixture, MINUTE};
-#[cfg(feature = "sensor-peers")]
-use std::time::Duration;
 
 const ADDRESSED: &str = "addressed ten minutes ago";
 const OLD_OPEN: &str = "open ten minutes ago";
@@ -181,54 +179,4 @@ fn without_a_start_time_old_project_mail_is_held_back() {
     let d = drain_doc(&f.attend_in_process(sid, None, &["message", "inbox", "--drain", "--json"]));
     assert_eq!(bodies(&d), vec!["live project mail".to_string()], "{d}");
     assert_eq!(d["held_back"], 1, "{d}");
-}
-
-// `attend run` has no sensor to scan the room without the peers sensor.
-#[cfg(feature = "sensor-peers")]
-#[test]
-fn attend_run_delivers_addressed_and_announces_the_rest() {
-    let f = with_backlog("backlog-run");
-    {
-        let run = f.run();
-        run.wait_for("the addressed message and the note", Duration::from_secs(30), |r| {
-            let out = r.output();
-            out.contains(ADDRESSED) && out.contains(NOTE)
-        });
-        assert!(!run.output().contains(OLD_OPEN), "old #open backlog is not shown: {}", run.output());
-        // The sensor applied the rule, and its checkpoint says so.
-        run.wait_for("the checkpoint", Duration::from_secs(10), |_| {
-            std::fs::read_to_string(f.state_file(&f.sid))
-                .is_ok_and(|s| s.contains("other-1-addressed") && s.contains("baselined: true"))
-        });
-    }
-    let drained = f.drain("plain");
-    assert!(!drained.contains(ADDRESSED) && !drained.contains(OLD_OPEN), "{drained}");
-}
-
-/// #725 re-review, finding 2: under `/attend` the turn usually ends a few
-/// seconds after `attend run` starts, before the peers sensor's first
-/// message scan (its first poll only baselines peer presence, yet
-/// checkpoints). A drain in that window must still apply the rule: the
-/// 50 cap on addressed mail, old `#open` held back, and the note. The JSON
-/// drain runs here: the Stop hook delivers only to a session the attend
-/// mod enrolled, and this one listens through `attend run`.
-// `attend run` has no sensor to scan the room without the peers sensor.
-#[cfg(feature = "sensor-peers")]
-#[test]
-fn a_drain_before_the_sensor_scans_applies_the_rule() {
-    let f = Fixture::with_peers_interval("backlog-window", 30);
-    let tray = f.project_tray();
-    for i in 0..55 {
-        f.put(&tray, &format!("other-1-to-{i:02}"), &format!("addressed {i:02}"), 10 * MINUTE + Duration::from_secs(i));
-    }
-    for i in 0..3 {
-        f.put("_broadcast", &format!("other-1-open-{i}"), &format!("old open {i}"), 60 * MINUTE);
-    }
-    let run = f.run();
-    run.wait_for("the sensor's first checkpoint", Duration::from_secs(10), |_| f.state_file(&f.sid).exists());
-    let doc = drain_doc(&f.ok(&["message", "inbox", "--drain", "--json"]));
-    assert_eq!(doc["messages"].as_array().map(Vec::len), Some(50), "the 50 cap: {doc}");
-    assert_eq!(doc["held_back"], 8, "{doc}");
-    assert_eq!(doc["note"], "8 older messages held back; reading them is optional: attend message inbox", "the note: {doc}");
-    assert!(!doc.to_string().contains("old open"), "old #open is held back: {doc}");
 }

@@ -7,7 +7,7 @@
 //! carries the sensor marker of a live attend, so every verb that sends,
 //! joins, listens, drains or reads as the session refuses. The session's
 //! own callers still resolve: the mod's calls, a Bash tool shell, the
-//! Stop-hook drain and `attend run` itself, and so does a shell whose
+//! Stop-hook drain and the sensor host itself, and so does a shell whose
 //! marker is stale.
 
 #![cfg(unix)]
@@ -17,11 +17,11 @@ mod common;
 use std::path::Path;
 use std::time::Duration;
 
-use common::Fixture;
+use common::{Fixture, Host};
 
 const REFUSAL: &str = "this attend was started by a sensor command, so it does not act as the session";
 
-/// A command sensor run by `attend run` whose command runs attend verbs
+/// A command sensor run by the sensor host whose command runs attend verbs
 /// and records each one's stderr and exit status.
 #[test]
 fn refused_an_attend_a_sensor_command_runs_does_not_act_as_the_session() {
@@ -37,9 +37,9 @@ fn refused_an_attend_a_sensor_command_runs_does_not_act_as_the_session() {
         out = out.display()
     );
     f.sensor("probe", &format!("kind: command\ninterval: 1\nmin_interval: 1\nargv: [sh, -c, {}]\noutput: json\n", serde_json::to_string(&script).unwrap()));
-    let run = f.run();
-    run.wait_for("the sensor command to finish", Duration::from_secs(30), |_| out.join("list.code").exists());
-    drop(run);
+    let host = Host::start(&f, &f.sid, &[]);
+    host.wait_for("the sensor command to finish", Duration::from_secs(30), || out.join("list.code").exists());
+    drop(host);
     let read = |n: &str| std::fs::read_to_string(out.join(n)).unwrap_or_default();
     assert_eq!(read("whoami.code").trim(), "3", "peer whoami: {}", read("whoami.err"));
     assert!(read("whoami.err").contains(REFUSAL), "{}", read("whoami.err"));
@@ -85,13 +85,14 @@ fn allowed_the_stop_hook_drain_runs() {
     assert!(out.status.success() && !err.contains(REFUSAL), "{err}");
 }
 
-/// `attend run` resolves its own session: its startup line names it.
+/// The sensor host the mod starts is no sensor command: it starts its
+/// sensors and refuses nothing.
 #[test]
-fn allowed_attend_run_resolves_its_own_session() {
-    let f = Fixture::new("guard-run");
-    let run = f.run();
-    run.wait_for("the startup line", Duration::from_secs(20), |r| r.output().contains("you are"));
-    assert!(!std::fs::read_to_string(f.home.join("run.err")).unwrap_or_default().contains(REFUSAL));
+fn allowed_the_sensor_host_runs() {
+    let f = Fixture::new("guard-host");
+    let host = Host::start(&f, &f.sid, &[]);
+    host.wait_for("the host's sensors", Duration::from_secs(20), || host.stderr().contains("running "));
+    assert!(!host.stderr().contains(REFUSAL), "{}", host.stderr());
 }
 
 /// Two ways a command might hide the host: a session record forged under a
@@ -126,9 +127,9 @@ fn refused_a_forged_record_deep_or_behind_a_fake_claude() {
         inner = f.home.join("inner.sh").display()
     );
     f.sensor("forger", &format!("kind: command\ninterval: 1\nmin_interval: 1\nargv: [sh, -c, {}]\noutput: json\n", serde_json::to_string(&script).unwrap()));
-    let run = f.run();
-    run.wait_for("both probes", Duration::from_secs(30), |_| out.join("fake-claude.code").exists());
-    drop(run);
+    let host = Host::start(&f, &f.sid, &[]);
+    host.wait_for("both probes", Duration::from_secs(30), || out.join("fake-claude.code").exists());
+    drop(host);
     let read = |n: &str| std::fs::read_to_string(out.join(n)).unwrap_or_default();
     for probe in ["depth", "fake-claude"] {
         assert!(!read(&format!("{probe}.out")).contains("sess-forged"), "{probe}: the forged session resolved");
@@ -163,15 +164,15 @@ fn marker_refusal(marker: &str, pid: u32) -> String {
 #[test]
 fn refused_a_marker_naming_a_live_host() {
     let f = Fixture::new("guard-marker-live");
-    let run = f.run();
-    run.wait_for("the startup line", Duration::from_secs(20), |r| r.output().contains("you are"));
-    let marker = attend_presence::session::marker_value(run.pid());
+    let host = Host::start(&f, &f.sid, &[]);
+    host.wait_for("the host's sensors", Duration::from_secs(20), || host.stderr().contains("running "));
+    let marker = attend_presence::session::marker_value(host.pid());
     let out = whoami_marked(&f, Some(&marker));
     let err = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(3), "{err}");
-    assert!(err.contains(&marker_refusal(&marker, run.pid())), "{err}");
+    assert!(err.contains(&marker_refusal(&marker, host.pid())), "{err}");
     assert!(!String::from_utf8_lossy(&out.stdout).contains(&f.sid), "the session id reached the marked process");
-    let reused = format!("{}:1", run.pid());
+    let reused = format!("{}:1", host.pid());
     let out = whoami_marked(&f, Some(&reused));
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains(&f.sid), "{reused}: {err}");

@@ -2,101 +2,21 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-//! A session id that changes under a running `attend run` (#725 review,
+//! A session id that changes under a listening session (#725 review,
 //! finding 4).
 //!
 //! Claude Code's `/clear` gives the running process a new session id and
-//! rewrites its session record. `attend run` must follow: move the old id's
-//! instance slot to the new id, leaving the old id as an alias of it, and
-//! carry the enrollment record and the seen-set across, so the drain under
-//! the new id keeps delivering and does not deliver again what the old id
-//! saw.
+//! rewrites its session record. The enrollment record and the seen-set
+//! follow the new id, so the drain under it keeps delivering and does not
+//! deliver again what the old id saw.
 
 mod common;
 use common::Fixture;
 use std::time::Duration;
 
-/// The registry rows for `old` and `new` in the fixture's project: each
-/// one's instance, and the id `old` is an alias of.
-#[cfg(feature = "sensor-peers")]
-fn moved_rows(f: &Fixture, old: &str, new: &str) -> (Option<String>, Option<String>, Option<String>) {
-    let snap = attend_instances::Registry::with_base(f.cache().join("instances")).snapshot(&f.origin);
-    let instance = |id: &str| snap.get(id).map(|e| e.instance.clone());
-    (instance(old), instance(new), snap.get(old).and_then(|e| e.alias_of.clone()))
-}
-
-#[cfg(feature = "sensor-peers")]
-const NEW: &str = "sess-after-clear";
-
-// `attend run` scans no room without the peers sensor.
-#[cfg(feature = "sensor-peers")]
-#[test]
-fn attend_run_follows_a_session_id_change() {
-    let f = Fixture::new("idchange");
-    let registry = f.cache().join("instances").join(format!("{}.yaml", f.project_tray()));
-    let old = f.sid.clone();
-    let run = f.run();
-    run.wait_for("registration", Duration::from_secs(20), |_| {
-        std::fs::read_to_string(&registry).is_ok_and(|r| r.contains(&old))
-    });
-
-    // A message the old id sees: in the project tray, so it wakes the
-    // session and the sensor marks it (ADR-406 item 2).
-    f.put(&f.project_tray(), "other-1-before", "seen before the clear", Duration::ZERO);
-    run.wait_for("the old id's checkpoint", Duration::from_secs(20), |_| {
-        std::fs::read_to_string(f.state_file(&old)).is_ok_and(|s| s.contains("other-1-before"))
-    });
-    let (instance, _, _) = moved_rows(&f, &old, NEW);
-    assert!(instance.is_some(), "the old id holds a slot");
-
-    f.set_session_id(NEW);
-    run.wait_for("the move to the new id", Duration::from_secs(20), |_| {
-        std::fs::read_to_string(&registry).is_ok_and(|r| r.contains(NEW))
-    });
-    assert_eq!(
-        moved_rows(&f, &old, NEW),
-        (instance.clone(), instance, Some(NEW.to_string())),
-        "the new id keeps the instance name, and the old id is its alias"
-    );
-    assert!(f.marker(NEW).exists(), "enrollment carried to the new id");
-    assert!(!f.marker(&old).exists(), "and dropped from the old one");
-    let state = std::fs::read_to_string(f.state_file(NEW)).expect("seen-set carried");
-    assert!(state.contains("other-1-before"), "{state}");
-    drop(run);
-
-    // The drain resolves the new id: still enrolled, nothing redelivered.
-    assert!(f.drain("plain").contains("no pending messages"));
-    f.put("_broadcast", "other-1-after", "after the clear", Duration::ZERO);
-    assert!(f.drain("plain").contains("after the clear"));
-}
-
-/// #725 re-review, finding 1: a message the sensor has scanned but the
-/// disclosure cooldown still holds must not be lost when the id changes.
-// `attend run` scans no room without the peers sensor.
-#[cfg(feature = "sensor-peers")]
-#[test]
-fn a_message_held_in_the_cooldown_survives_an_id_change() {
-    let f = Fixture::new("idcooldown");
-    let old = f.sid.clone();
-    let run = f.run();
-    // In the project tray, so each wakes the session (ADR-406 item 2).
-    f.put(&f.project_tray(), "other-1-a", "first message", Duration::ZERO);
-    run.wait_for("the first message", Duration::from_secs(20), |r| r.output().contains("first message"));
-    // The message cooldown is 3 s from that disclosure.
-    f.put(&f.project_tray(), "other-1-b", "held in the cooldown", Duration::ZERO);
-    run.wait_for("the sensor to scan the second", Duration::from_secs(5), |_| {
-        std::fs::read_to_string(f.state_file(&old)).is_ok_and(|s| s.contains("other-1-b"))
-    });
-    f.set_session_id("sess-cooldown-new");
-    run.wait_for("the second message, on the Monitor or the drain", Duration::from_secs(20), |r| {
-        r.output().contains("held in the cooldown")
-            || (f.marker("sess-cooldown-new").exists() && f.drain("plain").contains("held in the cooldown"))
-    });
-}
-
 /// #725 re-review, finding 5: a session enrolled only by a join keeps its
 /// enrollment, seen-set and channels when `/clear` changes its id, with no
-/// `attend run` to move them.
+/// process of its own to move them.
 #[test]
 fn a_join_only_session_follows_an_id_change() {
     let f = Fixture::new("idjoin");
@@ -116,98 +36,4 @@ fn a_join_only_session_follows_an_id_change() {
     assert!(f.marker("sess-join-new").exists());
     assert!(!f.marker("sess-idjoin").exists());
     assert!(f.ok(&["channel", "--joined"]).contains("#side"));
-}
-
-/// #725 re-review, finding 9: the moves happen in the re-executed run, so
-/// a crash before the exec leaves everything on the old id. A run started
-/// with `ATTEND_SESSION_MOVED_FROM` performs them.
-#[test]
-fn a_run_started_after_a_move_performs_it() {
-    let f = Fixture::new("idmoved");
-    let old = "sess-before-move";
-    // The old id's state, as the previous process left it.
-    let marker_dir = f.cache().join("enrolled");
-    std::fs::create_dir_all(&marker_dir).unwrap();
-    std::fs::write(marker_dir.join(old), "run\n").unwrap();
-    f.put("_broadcast", "other-1-seen", "seen by the old id", Duration::ZERO);
-    let state_dir = f.cache().join("state");
-    std::fs::create_dir_all(&state_dir).unwrap();
-    std::fs::write(
-        state_dir.join(format!("{old}.state")),
-        "seen_signal: other-1-seen.signal\nbaselined: true\nreply_hint_shown: true\n",
-    )
-    .unwrap();
-
-    let run = f.run_with(&[("ATTEND_SESSION_MOVED_FROM", old)]);
-    run.wait_for("the move", Duration::from_secs(20), |_| !f.marker(old).exists());
-    let state = std::fs::read_to_string(f.state_file(&f.sid)).unwrap_or_default();
-    assert!(state.contains("other-1-seen"), "seen-set moved: {state}");
-    assert!(!f.state_file(old).exists());
-}
-
-/// #725 third review, finding 1: a run killed before it could hand over,
-/// then started fresh under the new id (no ATTEND_SESSION_MOVED_FROM),
-/// adopts the old id's state through the Claude process key.
-// `attend run` scans no room without the peers sensor.
-#[cfg(feature = "sensor-peers")]
-#[test]
-fn a_fresh_run_after_an_id_change_adopts_the_old_id() {
-    let f = Fixture::new("idrestart");
-    let old = f.sid.clone();
-    let registry = f.cache().join("instances").join(format!("{}.yaml", f.project_tray()));
-    f.ok(&["channel", "join", "side"]);
-    {
-        let run = f.run();
-        // In the project tray, so it wakes the session (ADR-406 item 2).
-        f.put(&f.project_tray(), "other-1-early", "EARLY-OPEN", Duration::ZERO);
-        run.wait_for("the early message", Duration::from_secs(20), |r| r.output().contains("EARLY-OPEN"));
-        run.wait_for("its checkpoint", Duration::from_secs(10), |_| {
-            std::fs::read_to_string(f.state_file(&old)).is_ok_and(|s| s.contains("other-1-early"))
-        });
-    } // killed with SIGKILL: no hand-over
-
-    f.set_session_id("sess-restart-new");
-    // The new id has had a turn, so its cache is warm (ADR-406 item 2).
-    f.last_turn_of("sess-restart-new", Some(Duration::ZERO));
-    let run = f.run();
-    run.wait_for("the adoption", Duration::from_secs(20), |_| {
-        f.marker("sess-restart-new").exists()
-            && !f.marker(&old).exists()
-            && std::fs::read_to_string(&registry).is_ok_and(|r| r.contains("sess-restart-new"))
-    });
-    let alpha = Some("alpha".to_string());
-    assert_eq!(
-        moved_rows(&f, &old, "sess-restart-new"),
-        (alpha.clone(), alpha, Some("sess-restart-new".to_string())),
-        "the slot name carries over, and the old id is its alias"
-    );
-    // The marker moves before the channel membership does, so wait for it.
-    run.wait_for("the channel membership", Duration::from_secs(20), |_| {
-        f.ok(&["channel", "--joined"]).contains("#side")
-    });
-    // Addressed to the session, so the channel post wakes it.
-    std::fs::write(f.signals().join("@side").join("other-1-side.signal"), "claude:other-session|elsewhere|/tmp/elsewhere|to:sess-restart-new|SIDE-AFTER\n").unwrap();
-    run.wait_for("the channel message", Duration::from_secs(20), |r| r.output().contains("SIDE-AFTER"));
-    assert!(!run.output().contains("EARLY-OPEN"), "nothing seen is shown again: {}", run.output());
-}
-
-/// #725 third review, finding 2: when the hand-over exec fails, the run
-/// says so on the Monitor and exits, instead of staying on the old id.
-// `attend run` scans no room without the peers sensor.
-#[cfg(feature = "sensor-peers")]
-#[test]
-fn a_failed_hand_over_exits_with_a_restart_line() {
-    let f = Fixture::new("idexecfail");
-    let bin = f.home.join("attend-copy");
-    std::fs::copy(env!("CARGO_BIN_EXE_attend"), &bin).unwrap();
-    let mut run = f.run_from(&bin, &[]);
-    run.wait_for("registration", Duration::from_secs(20), |_| f.marker(&f.sid).exists());
-    std::fs::remove_file(&bin).unwrap();
-    f.set_session_id("sess-execfail-new");
-    let start = std::time::Instant::now();
-    while !run.exited() && start.elapsed() < Duration::from_secs(20) {
-        std::thread::sleep(Duration::from_millis(200));
-    }
-    assert!(run.exited(), "the run must stop: {}", run.output());
-    assert!(run.output().contains("restart attend"), "{}", run.output());
 }
